@@ -10,7 +10,13 @@
 
   {{loginLaneBaseUrl}}   — слушатель формы (посадка `own`; под `external` не поднят)
   {{loginLaneEmail}}     — почта человека с подтверждённым адресом (посев)
-  {{standMailboxUrl}}    — чтение приёмника писем стенда (`stand-mailbox.py`; посев)
+  {{standMailboxUrl}}    — чтение приёмника писем стенда (`stand-mailbox.py`; посев) и
+                           задержка его приёма (`POST /hold`, `POST /release`; Ф5-14)
+  {{standMetricsUrl}}    — слушатель метрик процесса: клетки исходов запроса кода и
+                           возраст головы почтовой очереди (посев `seed_mail_pace.py`)
+  {{recoveryLettersPerRecipient}} · {{recoveryLetterWindow}} · {{recoverySourceAttempts}}
+  · {{recoverySourceWindow}} — величины окон из карты настроек процесса (тот же посев)
+  {{paceInviteFullEmail}} — адресат с окном писем приглашения, заполненным до N (тот же посев)
   {{ownRestBaseUrl}}     — собственный публичный фронт: блокировка и опрос операций
   {{iamRegistryTokenBaseUrl}} — поверхность выдачи: код авторизации и обмен на токен
   {{oauthClientId}} · {{oauthClientSecret}} · {{oauthRedirectUri}} — клиент церемонии
@@ -40,13 +46,11 @@
 копят счёт по адресу и по источнику, и человек посева, которого читают соседние
 наборы (церемония, второй фактор), не должен ни того, ни другого получить.
 
-ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ. Доставку письма за пределы кластера и наблюдаемость
-недоставленного (вторая половина Ф1-31, производитель `kacho#1773`); ответ при
-недоступном почтовом узле (стенд держит узел поднятым весь прогон); время ответа
-двух полос запроса; окна частоты запроса кода (клетки счётчика исходов набор
-не читает); состав ответа службы краю о
-сессии (глагол внутреннего слушателя без HTTP-привязки). Почему и кто держит
-каждое — ведомость долга позиций `.github/scripts/newman-suite-debt.py`.
+ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ. Ответ и предел времени попытки при МОЛЧАЩЕМ почтовом
+узле (Ф5-12: задержка приёма у приёмника стенда отвечает временным отказом сразу
+и предела времени не испытывает); время ответа двух полос запроса; состав ответа
+службы краю о сессии (глагол внутреннего слушателя без HTTP-привязки). Почему и
+кто держит каждое — ведомость долга позиций `.github/scripts/newman-suite-debt.py`.
 
 Coverage:
   IAM-RECOVERY-OK-REQUEST-SAME-ANSWER   — запрос кода для существующего и для
@@ -82,6 +86,18 @@ Coverage:
                                           (401, затем 429), у близнеца без фактора (б) — обнуляет
                                           (401, 401), у заблокированной (в) — отказ завершения
                                           сосчитан, следующая попытка — 429
+  IAM-RECOVERY-OK-UNDELIVERED-AGE-VISIBLE — Ф5-14: приём приёмника задержан (временный отказ) —
+                                          возраст головы почтовой очереди с нуля растёт, служба
+                                          пыталась сдать письмо, письма у приёмника нет; задержка
+                                          снята — письмо дошло, возраст вернулся к нулю, код годен
+  IAM-RECOVERY-NEG-PACED-PER-RECIPIENT  — Ф5-26: N + 1 запросов для P — писем ровно N, ответ
+                                          (N + 1)-го побайтово равен ответу о Z, recipient-paced
+                                          +1, queued +N, код N-го письма проходит; (б) Q в том же
+                                          окне — письмо; (в) P′ с окном приглашения, заполненным
+                                          до N, — N писем восстановления
+  IAM-RECOVERY-NEG-PACED-PER-SOURCE     — Ф5-27: M запросов о Z с источника S — запрос для P с
+                                          S тот же ответ, письма нет, source-paced +1, no-row +M;
+                                          (б) с S′ — письмо поставлено
 
 Техники: классы эквивалентности (годный / негодный пароль; свой / чужой /
 применённый код), граница счёта по адресу (N−1 · N · N+1), угадывание ошибок
@@ -1305,5 +1321,405 @@ CASES.append(Case(
         # но заблокированная строка не остаётся на стенде.
         _admin_verb(_S25, _P25C, "rl-c-unblock", "unblock"),
         _admin_op(_S25, _P25C, "rl-c-unblock-op", "unblock", "ACTIVE"),
+    ],
+))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# НАБЛЮДАЕМОСТЬ И ЧАСТОТА: Ф5-14, Ф5-26, Ф5-27.
+#
+# Кейсы читают СЛУШАТЕЛЬ МЕТРИК процесса (`{{standMetricsUrl}}`): клетки счётчика
+# исходов запроса кода и возраст головы почтовой очереди. Адрес и величины окон
+# (`recoveryLettersPerRecipient` · `recoveryLetterWindow` — N и T окна писем
+# адресату; `recoverySourceAttempts` · `recoverySourceWindow` — M и окно
+# обращений источника) пишет посев `tests/authz-fixtures/seed_mail_pace.py` из
+# карты настроек, которую ЧИТАЕТ процесс: числа не выписаны в кейсе и печатаются
+# утверждением. Клетки счётчика процессные и общие на прогон — кейсы набора идут
+# по одному, поэтому дельта между двумя чтениями принадлежит запросам кейса; ждёт
+# кейс УСЛОВИЯ (дельта достигла), а не времени, и только после этого сравнивает
+# дельту с ожидаемым РАВЕНСТВОМ.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_METRICS_WHY = ("слушатель метрик процесса службы; адрес пишет посев частоты запроса кода "
+                "(`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` "
+                "его нет, и это условие, которого стенд не создал")
+_METRICS = "/metrics"
+_SERIES_REQ = "kaname_recovery_request_outcomes_total"
+_SERIES_AGE = 'kaname_outbox_oldest_pending_age_seconds{table="kaname.invite_mail_outbox"}'
+_PACE_KEYS = ("recoveryLettersPerRecipient", "recoveryLetterWindow", "recoverySourceAttempts",
+              "recoverySourceWindow")
+# Предел ожидания условия на метриках: собиратель возраста очереди сканирует раз в
+# 15 с (`cmd/kaname/invite_mail_wiring.go`), повтор отправки — с паузой до 30 с;
+# 120 попыток по 1 с покрывают оба с запасом на загруженный раннер.
+_METRIC_WAIT_CAP = 120
+_METRIC_WAIT_MS = 1000
+
+_METRIC_JS = [
+    "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+    "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+    "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+    f"const __out = (o) => __m({js_str(_SERIES_REQ)} + '{{outcome=\"' + o + '\"}}');",
+    "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+]
+
+
+def _pace_given():
+    """Величины окон посева — иначе третий исход; печатаются числом."""
+    cond = " || ".join(f"!pm.environment.get({js_str(k)})" for k in _PACE_KEYS)
+    return [
+        f"if ({cond}) {{",
+        *precondition_not_met("величины окон посадки записаны посевом: " + ", ".join(_PACE_KEYS),
+                              "ключи пусты — посев частоты запроса кода (`seed_mail_pace.py`) не "
+                              "исполнялся на этом стенде", indent="  "),
+        "}",
+    ]
+
+
+def _metrics_step(name, *, until=None, tests=(), pre=()):
+    """Чтение слушателя метрик. `until` — JS-условие на `__m`/`__out`: пока ложно,
+    шаг повторяется с настоящей паузой до предела; затем исполняются `tests`."""
+    counter, started = f"_mt_{name}".replace("-", "_"), f"_mts_{name}".replace("-", "_")
+    loop = []
+    if until is not None:
+        loop = [
+            f"const __n = parseInt(pm.environment.get({js_str(counter)}) || '0', 10);",
+            f"if (!({until}) && __n < {_METRIC_WAIT_CAP}) {{",
+            f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
+            f"  const _mtd = Date.now(); while (Date.now() - _mtd < {_METRIC_WAIT_MS}) {{ /* inter-poll delay: condition on the metrics not reached yet */ }}",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(counter)});",
+            f"pm.environment.unset({js_str(started)});",
+        ]
+    return Step(
+        name=name, method="GET", path=_METRICS, auth="anonymous", cookie_jar=False, insecure_tls=True,
+        pre_script=[
+            *pre,
+            *require_env_url("standMetricsUrl", _METRICS, _METRICS_WHY),
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(counter)}, '0');",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            "}",
+        ],
+        test_script=[*_METRIC_JS, *loop, *_status_is(200, name.upper()), *tests],
+    )
+
+
+def _keep_outcomes(prefix, outcomes):
+    """Запомнить клетки исходов как базу дельты; клетка обязана существовать."""
+    out = []
+    for o in outcomes:
+        out += [
+            f"pm.test({js_str(prefix.upper() + ': клетка ' + o + ' публикуется до события кейса')}, () => "
+            f"pm.expect(__out({js_str(o)})).to.be.a('number'));",
+            f"pm.environment.set({js_str(prefix + '_' + o)}, String(__out({js_str(o)})));",
+        ]
+    return out
+
+
+def _delta(prefix, o):
+    return f"(__out({js_str(o)}) - __num({js_str(prefix + '_' + o)}))"
+
+
+def _mailbox_count(p, name, heading, *, at_least=None, exactly=None, email_var=None):
+    """Число писем вида `heading` адресату: ждать «не меньше», затем утверждать «ровно»."""
+    email = email_var or _v(p, "Email")
+    path = f"/codes?to={{{{{email}}}}}&after={_urlparse.quote(heading)}"
+    counter, started = f"_mc_{p}_{name}".replace("-", "_"), f"_mcs_{p}_{name}".replace("-", "_")
+    label = name.upper()
+    lines = [
+        "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+        "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+        "const __got = Array.isArray(__codes) ? __codes.filter((c) => typeof c === 'string' && c.length > 0) : [];",
+    ]
+    if at_least is not None:
+        lines += [
+            f"const __n = parseInt(pm.environment.get({js_str(counter)}) || '0', 10);",
+            f"const __want = {at_least};",
+            f"if (pm.response.code === 200 && __got.length < __want && __n < {_MAIL_WAIT_CAP}) {{",
+            f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
+            f"  const _mcd = Date.now(); while (Date.now() - _mcd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letters not yet at the stand mailbox */ }}",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(counter)});",
+            f"pm.environment.unset({js_str(started)});",
+            f"pm.test({js_str(label + ': писем дошло не меньше ожидаемого в пределе ожидания')}, () => "
+            "pm.expect(__got.length >= __want).to.eql(true));",
+            "if (__got.length > 0) {",
+            f"  pm.environment.set({js_str(_v(p, 'MailCode'))}, __got[__got.length - 1]);",
+            f"  pm.environment.set({js_str(_v(p, 'MailSeenMailCode'))}, String(__got.length));",
+            "}",
+        ]
+    if exactly is not None:
+        lines.append(f"pm.test({js_str(label + ': писем ровно столько, сколько окно пропустило')}, () => "
+                     f"pm.expect(__got.length).to.eql({exactly}));")
+    return Step(
+        name=name, method="GET", path=path, auth="anonymous", cookie_jar=False,
+        pre_script=[
+            *require_env_url("standMailboxUrl", path, _MAILBOX_WHY),
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(counter)}, '0');",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            "}",
+        ],
+        test_script=[*_status_is(200, label), *lines],
+    )
+
+
+def _mailbox_hold(name, verb, tests=()):
+    """Задержка приёма приёмника писем стенда: `hold`, `release` либо `state`."""
+    path = "/release" if verb == "release" else "/hold"
+    return Step(
+        name=name, method="GET" if verb == "state" else "POST", path=path, auth="anonymous", cookie_jar=False,
+        pre_script=[*require_env_url("standMailboxUrl", path, _MAILBOX_WHY)],
+        test_script=[
+            *_status_is(200, name.upper()),
+            "let __h = {}; try { __h = pm.response.json(); } catch (e) { __h = {}; }",
+            *tests,
+        ],
+    )
+
+
+def _request_for(p, name, email_expr, src_var, *, times_var=None, keep=None, same_as=None):
+    """Запрос кода восстановления для адреса `email_expr` с источника `src_var`.
+
+    `times_var` — повторить столько раз, сколько велит переменная (каждый —
+    `200 {}`); `keep` — запомнить тело последнего; `same_as` — тело побайтово
+    равно запомненному."""
+    counter, started = f"_rq_{p}_{name}".replace("-", "_"), f"_rqs_{p}_{name}".replace("-", "_")
+    label = name.upper()
+    test = [
+        f"pm.test({js_str(label + ': ответ 200 и тело — пустой объект')}, () => "
+        "pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{}']));",
+    ]
+    if times_var is not None:
+        test = [
+            f"const __i = parseInt(pm.environment.get({js_str(counter)}) || '0', 10) + 1;",
+            f"const __bad = parseInt(pm.environment.get({js_str(counter + '_bad')}) || '0', 10) + "
+            "((pm.response.code === 200 && pm.response.text() === '{}') ? 0 : 1);",
+            f"pm.environment.set({js_str(counter + '_bad')}, String(__bad));",
+            f"if (__i < parseInt(pm.environment.get({js_str(times_var)}) || '0', 10)) {{",
+            f"  pm.environment.set({js_str(counter)}, String(__i));",
+            "  const _rqd = Date.now(); while (Date.now() - _rqd < 50) { /* pace between requests of the series */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(counter)});",
+            f"pm.environment.unset({js_str(started)});",
+            f"pm.environment.unset({js_str(counter + '_bad')});",
+            f"pm.test({js_str(label + ': серия исполнена полностью')}, () => "
+            f"pm.expect(__i).to.eql(parseInt(pm.environment.get({js_str(times_var)}) || '0', 10)));",
+            f"pm.test({js_str(label + ': каждый запрос серии — 200 и пустой объект')}, () => pm.expect(__bad).to.eql(0));",
+        ]
+    if keep:
+        test.append(f"pm.environment.set({js_str(keep)}, pm.response.text());")
+    if same_as:
+        test.append(f"pm.test({js_str(label + ': тело побайтово равно запомненному ответу')}, () => "
+                    f"pm.expect(pm.response.text() === pm.environment.get({js_str(same_as)})).to.eql(true));")
+    step = Step(
+        name=name, method="POST", path=_RECOVERY,
+        body={"email": email_expr, "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+        pre_script=[
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(counter)}, '0');",
+            f"  pm.environment.set({js_str(counter + '_bad')}, '0');",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            "}",
+            *require_env_url("loginLaneBaseUrl", _RECOVERY, _LANE_WHY),
+            f"pm.request.headers.upsert({{key: 'X-Forwarded-For', value: pm.environment.get({js_str(src_var)}) || ''}});",
+            *_with_cookies(("kaname_form", _v(p, "FormCookie"))),
+        ],
+        insecure_tls=True, auth="anonymous", cookie_jar=False, test_script=test,
+    )
+    return step
+
+
+def _fresh_src(var):
+    return [f"pm.environment.set({js_str(var)}, '198.19.' + Math.floor(Math.random() * 256) + '.' "
+            "+ (1 + Math.floor(Math.random() * 254)));"]
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-14: недоставленное ВИДНО. Приёмник писем стенда задерживает приём (временный
+# отказ 4xx — письма кластер не покидают); возраст самого старого неотправленного
+# растёт, а после снятия задержки письмо доходит и возраст возвращается к нулю.
+# Положительный контроль — ноль ДО задержки и счёт отказов приёмника: служба
+# пыталась сдать письмо, а не молчала. Техники: переход состояния очереди
+# (пусто → неотправленное → доставлено), граница «ноль / больше нуля», близнец
+# по одному факту — задержка.
+# ───────────────────────────────────────────────────────────────────────────
+_P14 = "rcvU"
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-UNDELIVERED-AGE-VISIBLE",
+    title="Ф5-14: письмо восстановления не покидает кластер — возраст неотправленного растёт; доставка вернулась — письмо дошло, возраст к нулю",
+    classes=["SEC", "STATE"],
+    priority="P1",
+    steps=[
+        *_person(_P14, "undelivered"),
+        _metrics_step("undelivered-age-zero-before", until=f"__m({js_str(_SERIES_AGE)}) === 0", tests=[
+            "pm.test('UNDELIVERED-AGE-ZERO-BEFORE: возраст головы почтовой очереди публикуется и равен нулю до задержки', () => "
+            f"pm.expect(__m({js_str(_SERIES_AGE)})).to.eql(0));",
+        ]),
+        _mailbox_hold("undelivered-hold", "hold", tests=[
+            "pm.test('UNDELIVERED-HOLD: приём задержан', () => pm.expect(__h.hold).to.eql(true));",
+            "pm.environment.set('rcvURefusedBefore', String(__h.refusedWhileHeld));",
+        ]),
+        _csrf_step(_P14, "undelivered-csrf-recovery", "recovery"),
+        _post(_P14, "undelivered-request-code", _RECOVERY,
+              {"email": f"{{{{{_v(_P14, 'Email')}}}}}", "csrfToken": f"{{{{{_v(_P14, 'Csrf')}}}}}"},
+              test_script=[*_status_is(200, "UNDELIVERED-REQUEST")]),
+        _metrics_step("undelivered-age-grows", until=f"__m({js_str(_SERIES_AGE)}) > 0", tests=[
+            "pm.test('UNDELIVERED-AGE: возраст неотправленного стал больше нуля', () => "
+            f"pm.expect(__m({js_str(_SERIES_AGE)}) > 0).to.eql(true));",
+            f"pm.environment.set('rcvUAgeFirst', String(__m({js_str(_SERIES_AGE)})));",
+        ]),
+        _metrics_step("undelivered-age-grows-again",
+                      until=f"__m({js_str(_SERIES_AGE)}) > Number(pm.environment.get('rcvUAgeFirst'))", tests=[
+            "pm.test('UNDELIVERED-AGE-AGAIN: возраст продолжает расти, пока доставки нет', () => "
+            f"pm.expect(__m({js_str(_SERIES_AGE)}) > Number(pm.environment.get('rcvUAgeFirst'))).to.eql(true));",
+        ]),
+        _mailbox_hold("undelivered-hold-state", "state", tests=[
+            "pm.test('UNDELIVERED-STATE: служба пыталась сдать письмо и получила временный отказ', () => "
+            "pm.expect(__h.refusedWhileHeld > Number(pm.environment.get('rcvURefusedBefore'))).to.eql(true));",
+        ]),
+        _mailbox_count(_P14, "undelivered-not-delivered", _HEAD_RECOVERY, exactly=0),
+        _mailbox_hold("undelivered-release", "release", tests=[
+            "pm.test('UNDELIVERED-RELEASE: задержка снята', () => pm.expect(__h.hold).to.eql(false));",
+        ]),
+        _await_code(_P14, "undelivered-letter-arrives", _HEAD_RECOVERY, "MailCode"),
+        _metrics_step("undelivered-age-back-to-zero", until=f"__m({js_str(_SERIES_AGE)}) === 0", tests=[
+            "pm.test('UNDELIVERED-AGE-ZERO-AFTER: после доставки возраст вернулся к нулю', () => "
+            f"pm.expect(__m({js_str(_SERIES_AGE)})).to.eql(0));",
+        ]),
+        _csrf_step(_P14, "undelivered-csrf-complete", "recovery-complete"),
+        _complete(_P14, "undelivered-complete", test_script=_issued(_P14, "UNDELIVERED-COMPLETE")),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-26: окно писем адресата. N + 1 запросов для P в одном окне — писем ровно N,
+# ответ сверхнормативного побайтово равен ответу о Z, клетки recipient-paced +1 и
+# queued +N, код N-го письма проходит. Близнецы: (б) Q — письмо поставлено (факт —
+# адрес); (в) P′ с окном ПРИГЛАШЕНИЯ, заполненным посевом до N, — N писем
+# восстановления (факт — вид заполненного окна). Техники: граница N · N + 1,
+# классы эквивалентности адреса и вида окна, угадывание ошибок (вытеснение
+# прежнего кода сверхнормативным запросом).
+# ───────────────────────────────────────────────────────────────────────────
+_P26, _Q26, _PP26 = "rcvPace", "rcvPaceQ", "rcvPaceP2"
+CASES.append(Case(
+    id="IAM-RECOVERY-NEG-PACED-PER-RECIPIENT",
+    title="Ф5-26: N + 1 запросов кода для адреса — писем ровно N, ответ тот же, прежний код жив; окно — у пары «вид письма · адрес»",
+    classes=["SEC", "BVA", "NEG"],
+    priority="P0",
+    steps=[
+        *_person(_P26, "pace-p"),
+        *_person(_Q26, "pace-q"),
+        _metrics_step("pace-baseline", pre=_pace_given(), tests=[
+            "const __N = __num('recoveryLettersPerRecipient'), __M = __num('recoverySourceAttempts');",
+            "pm.test('PACE-GIVEN: окно писем адресату N=' + __N + ' за ' + pm.environment.get('recoveryLetterWindow') "
+            "+ ', окно источника M=' + __M + ' за ' + pm.environment.get('recoverySourceWindow') "
+            "+ '; окно источника больше обращений пробы (N + 2)', () => pm.expect([__N >= 1, __M > __N + 2]).to.eql([true, true]));",
+            "pm.environment.set('rcvPaceTimes', String(__N + 1));",
+            *_keep_outcomes("rcvPace0", ("queued", "recipient-paced")),
+        ]),
+        _csrf_step(_P26, "pace-csrf-recovery", "recovery", init=_fresh_src("rcvPaceSrc")),
+        _request_for(_P26, "pace-p-n-plus-one", f"{{{{{_v(_P26, 'Email')}}}}}", "rcvPaceSrc",
+                     times_var="rcvPaceTimes", keep="rcvPaceOverBody"),
+        _request_for(_P26, "pace-z-nobody", "nobody-pace-{{runId}}@example.invalid", "rcvPaceSrc",
+                     same_as="rcvPaceOverBody"),
+        _metrics_step("pace-cells", until=f"{_delta('rcvPace0', 'recipient-paced')} >= 1 && "
+                                          f"{_delta('rcvPace0', 'queued')} >= __num('recoveryLettersPerRecipient')",
+                      tests=[
+            "pm.test('PACE-CELLS: клетка recipient-paced выросла ровно на 1', () => "
+            f"pm.expect({_delta('rcvPace0', 'recipient-paced')}).to.eql(1));",
+            "pm.test('PACE-CELLS: клетка queued выросла ровно на N', () => "
+            f"pm.expect({_delta('rcvPace0', 'queued')}).to.eql(__num('recoveryLettersPerRecipient')));",
+        ]),
+        _mailbox_count(_P26, "pace-p-letters", _HEAD_RECOVERY, at_least="__num('recoveryLettersPerRecipient')"),
+        # (б) Q — тот же источник, та же форма, другой адрес: письмо поставлено.
+        _request_for(_P26, "pace-q-same-window", f"{{{{{_v(_Q26, 'Email')}}}}}", "rcvPaceSrc"),
+        _await_code(_Q26, "pace-q-letter", _HEAD_RECOVERY, "MailCode"),
+        # Письмо Q дошло — поставленное до него письмо P дошло бы тоже: писем P ровно N.
+        _mailbox_count(_P26, "pace-p-letters-exactly", _HEAD_RECOVERY,
+                       exactly="__num('recoveryLettersPerRecipient')"),
+        _metrics_step("pace-cells-after-q", until=f"{_delta('rcvPace0', 'queued')} >= "
+                                                 "__num('recoveryLettersPerRecipient') + 1", tests=[
+            "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла ещё на 1, recipient-paced не выросла', () => "
+            f"pm.expect([{_delta('rcvPace0', 'queued')}, {_delta('rcvPace0', 'recipient-paced')}])"
+            ".to.eql([__num('recoveryLettersPerRecipient') + 1, 1]));",
+        ]),
+        # Код N-го письма проходит: сверхнормативный запрос прежнего кода не вытеснил.
+        _csrf_step(_P26, "pace-csrf-complete", "recovery-complete"),
+        _complete(_P26, "pace-complete-nth-code", test_script=_issued(_P26, "PACE-NTH-CODE")),
+        # (в) P′ — окно писем ПРИГЛАШЕНИЯ заполнено посевом до N: N запросов кода —
+        # N писем восстановления, recipient-paced не растёт.
+        _metrics_step("pace-invite-full-baseline", tests=[
+            "pm.test('PACE-INVITE-FULL-GIVEN: адресат P′ с заполненным окном приглашения положен посевом', () => "
+            "pm.expect(!!pm.environment.get('paceInviteFullEmail')).to.eql(true));",
+            "pm.environment.set('rcvPaceTimesN', String(__num('recoveryLettersPerRecipient')));",
+            *_keep_outcomes("rcvPace1", ("queued", "recipient-paced")),
+        ]),
+        _csrf_step(_PP26, "pace-invite-full-csrf", "recovery", init=_fresh_src(_v(_PP26, "Src"))),
+        _request_for(_PP26, "pace-invite-full-n", "{{paceInviteFullEmail}}", _v(_PP26, "Src"),
+                     times_var="rcvPaceTimesN"),
+        _metrics_step("pace-invite-full-cells", until=f"{_delta('rcvPace1', 'queued')} >= "
+                                                     "__num('recoveryLettersPerRecipient')", tests=[
+            "pm.test('PACE-INVITE-FULL: N писем восстановления поставлено, recipient-paced не выросла — окно у пары вид · адрес', () => "
+            f"pm.expect([{_delta('rcvPace1', 'queued')}, {_delta('rcvPace1', 'recipient-paced')}])"
+            ".to.eql([__num('recoveryLettersPerRecipient'), 0]));",
+        ]),
+        _mailbox_count(_PP26, "pace-invite-full-letters", _HEAD_RECOVERY,
+                       at_least="__num('recoveryLettersPerRecipient')", exactly="__num('recoveryLettersPerRecipient')",
+                       email_var="paceInviteFullEmail"),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-27: окно обращений источника. M запросов о НЕСУЩЕСТВУЮЩЕМ адресе с источника
+# S исчерпывают окно; запрос для P с того же S — тот же ответ, письма нет,
+# source-paced +1. Близнец (б): тот же запрос с S′ — письмо поставлено (факт —
+# источник). Техники: граница M · M + 1, класс «адреса нет» как исчерпывающий окно
+# (окно списывается до чтения адреса), близнец по источнику.
+# ───────────────────────────────────────────────────────────────────────────
+_P27 = "rcvSrc"
+CASES.append(Case(
+    id="IAM-RECOVERY-NEG-PACED-PER-SOURCE",
+    title="Ф5-27: M запросов о несуществующем адресе с источника — запрос для существующего тот же ответ, письма нет; другой источник — письмо",
+    classes=["SEC", "BVA", "NEG"],
+    priority="P0",
+    steps=[
+        *_person(_P27, "src-p"),
+        _metrics_step("src-baseline", pre=_pace_given(), tests=[
+            "const __N = __num('recoveryLettersPerRecipient'), __M = __num('recoverySourceAttempts');",
+            "pm.test('SRC-GIVEN: окно источника M=' + __M + ' за ' + pm.environment.get('recoverySourceWindow') "
+            "+ ', окно писем адресату N=' + __N + ' за ' + pm.environment.get('recoveryLetterWindow') "
+            "+ ' больше писем пробы одному адресату (1)', () => pm.expect([__M >= 1, __N > 1]).to.eql([true, true]));",
+            "pm.environment.set('rcvSrcTimes', String(__M));",
+            *_keep_outcomes("rcvSrc0", ("queued", "source-paced", "no-row")),
+        ]),
+        _csrf_step(_P27, "src-csrf-recovery", "recovery", init=[*_fresh_src("rcvSrcS"), *_fresh_src("rcvSrcS2")]),
+        _request_for(_P27, "src-z-m-times", "nobody-src-{{runId}}@example.invalid", "rcvSrcS",
+                     times_var="rcvSrcTimes", keep="rcvSrcZBody"),
+        _request_for(_P27, "src-p-same-source", f"{{{{{_v(_P27, 'Email')}}}}}", "rcvSrcS", same_as="rcvSrcZBody"),
+        _metrics_step("src-cells", until=f"{_delta('rcvSrc0', 'source-paced')} >= 1 && "
+                                         f"{_delta('rcvSrc0', 'no-row')} >= __num('recoverySourceAttempts')", tests=[
+            "pm.test('SRC-CELLS: source-paced выросла ровно на 1, queued не выросла', () => "
+            f"pm.expect([{_delta('rcvSrc0', 'source-paced')}, {_delta('rcvSrc0', 'queued')}]).to.eql([1, 0]));",
+            "pm.test('SRC-CELLS: окно исчерпали запросы о несуществующем адресе — no-row выросла ровно на M', () => "
+            f"pm.expect({_delta('rcvSrc0', 'no-row')}).to.eql(__num('recoverySourceAttempts')));",
+        ]),
+        # (б) S′ — другой источник, тот же адрес: письмо поставлено (исход Ф5-01).
+        _request_for(_P27, "src-p-other-source", f"{{{{{_v(_P27, 'Email')}}}}}", "rcvSrcS2"),
+        _await_code(_P27, "src-p-letter-other-source", _HEAD_RECOVERY, "MailCode"),
+        # Письмо с S′ дошло; письма с S не было — писем восстановления у P ровно одно.
+        _mailbox_count(_P27, "src-p-letters-exactly", _HEAD_RECOVERY, exactly=1),
+        _metrics_step("src-cells-after-other-source", until=f"{_delta('rcvSrc0', 'queued')} >= 1", tests=[
+            "pm.test('SRC-CELLS-S2: queued выросла на 1, source-paced осталась +1', () => "
+            f"pm.expect([{_delta('rcvSrc0', 'queued')}, {_delta('rcvSrc0', 'source-paced')}]).to.eql([1, 1]));",
+        ]),
     ],
 ))
