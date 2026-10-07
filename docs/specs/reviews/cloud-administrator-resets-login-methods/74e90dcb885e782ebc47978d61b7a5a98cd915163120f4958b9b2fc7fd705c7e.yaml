@@ -75,7 +75,8 @@ important:
       чем привязку к личности.
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-07T22:25:46Z"
   ban1_lifted: false
   pending_external_event: true
   why: >-
@@ -120,3 +121,22 @@ role_sweep:
   dod: измеримо; предикат newman-suite-debt.py → 0 исполнен на 28b7acb11
   open_questions: 0
   route_flags: proto да · схема нет · публичный RPC да · UI нет · новый домен нет · поверхность безопасности да
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kacho#2702
+  status: performed
+  published: true
+  database_id: 6048115439
+  node_id: "IC_kwDOTZqgWM8AAAABaH7q7w"
+  url: "https://github.com/PRO-Robotech/kacho/issues/2702#issuecomment-6048115439"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/6048115439"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T22:25:46Z"
+  body_sha256: "da90441575a6b9ed8a56220f0dfedb80b2ebac636aec0914ab8d307cae166f36"
+  subject_sha256: "74e90dcb885e782ebc47978d61b7a5a98cd915163120f4958b9b2fc7fd705c7e"
+  subject_revision_commit: "1650de905843d41acffc1eef0e15e87d8e5a70df"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
