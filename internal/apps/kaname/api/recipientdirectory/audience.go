@@ -30,6 +30,12 @@ import (
 // reasonGenerationNotApplied — машинный признак барьера поколения (Р7, Р30).
 const reasonGenerationNotApplied = "OBJECT_GENERATION_NOT_APPLIED"
 
+// generationNotAppliedText — текст отказа барьера поколения. ФИКСИРОВАН, как на
+// всякой полосе UNAVAILABLE: предмет отказа (объект и поколение) едет машинно в
+// ErrorInfo.metadata, а вычисляемая строка сообщения выводила бы полосу из-под
+// гейта словаря клиента (TestClientRefusalTextNamesNoInternalLayer).
+const generationNotAppliedText = "object generation is not applied yet"
+
 // readAudience — страница аудитории либо отказ кодом. field — путь поля токена
 // в сообщении запроса.
 func readAudience(ctx context.Context, reader eventAudienceReader, logger *slog.Logger,
@@ -56,8 +62,7 @@ func readAudience(ctx context.Context, reader eventAudienceReader, logger *slog.
 
 // generationNotApplied — барьер поколения: служба доступа ждёт, а не угадывает.
 func generationNotApplied(object string, generation int64) error {
-	st := status.New(codes.Unavailable,
-		fmt.Sprintf("generation %d of %s is not applied yet", generation, object))
+	st := status.New(codes.Unavailable, generationNotAppliedText)
 	enriched, err := st.WithDetails(&errdetails.ErrorInfo{
 		Reason:   reasonGenerationNotApplied,
 		Domain:   refusaldomain.For(refusaldomain.ServiceIAM),

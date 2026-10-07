@@ -203,6 +203,12 @@ func TestResolve_UnappliedGenerationIsARefusalNotAnOutcome(t *testing.T) {
 	if st.Code() != codes.Unavailable || reasonOf(st) != reasonGenerationNotApplied {
 		t.Fatalf("ждали UNAVAILABLE %s, получено %s %q", reasonGenerationNotApplied, st.Code(), st.Message())
 	}
+	// Текст полосы UNAVAILABLE фиксирован: предмет отказа (объект и поколение)
+	// едет машинно в ErrorInfo.metadata, а не вычисляемой строкой сообщения.
+	requireUnavailableFixed(t, err, generationNotAppliedText)
+	if md := metadataOf(st); md["object"] == "" || md["generation"] == "" {
+		t.Fatalf("ErrorInfo.metadata обязано назвать объект и поколение, получено %v", md)
+	}
 	store.verdict = domain.EventAudienceAnswered
 	store.audience = []string{"user:usr-B"}
 	res, err := uc.Execute(notifyCtx(), base())
@@ -260,6 +266,15 @@ func reasonOf(st *status.Status) string {
 		}
 	}
 	return ""
+}
+
+func metadataOf(st *status.Status) map[string]string {
+	for _, d := range st.Details() {
+		if info, ok := d.(*errdetails.ErrorInfo); ok {
+			return info.GetMetadata()
+		}
+	}
+	return nil
 }
 
 func requireFieldRefusal(t *testing.T, err error, field string) {
