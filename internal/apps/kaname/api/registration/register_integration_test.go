@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // goodPassword — годный по правилу пароль (длина ≥ 12, не похож на адрес).
@@ -178,7 +179,8 @@ func (h *harness) useCase(t *testing.T, store registration.Store) *registration.
 	lane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	uc, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: store, Rule: h.rule, Hasher: h.hasher, Lane: lane, TTL: 24 * time.Hour,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       store, Rule: h.rule, Hasher: h.hasher, Lane: lane, TTL: 24 * time.Hour,
 		Observer: h.obs, Letter: harnessLetterPace, Sources: h.sessions,
 		SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},
 		Now:        time.Now, Logger: slog.New(slog.DiscardHandler),

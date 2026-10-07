@@ -10,10 +10,12 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // TestIssue_NameLabels_MapThrough — name + labels из IssueInput попадают в
@@ -21,7 +23,7 @@ import (
 func TestIssue_NameLabels_MapThrough(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -65,7 +67,7 @@ func TestIssue_NameLabels_MapThrough(t *testing.T) {
 func TestIssue_AccountIDStampedOnMetadata(t *testing.T) {
 	repo := &stubUserClientRepo{accountID: "acc00000000000000042"}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",

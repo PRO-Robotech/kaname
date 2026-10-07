@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -150,6 +151,8 @@ func TestOAuthClientNameLabels_User_PersistOnInsert_RoundTrip(t *testing.T) {
 	txb := kanamepg.NewPoolTxBeginner(pool)
 
 	row := domain.UserOAuthClient{
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt: time.Now().UTC(),
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
@@ -204,6 +207,8 @@ func TestOAuthClientNameLabels_User_InvalidLabels_CheckViolation(t *testing.T) {
 		tooMany[domain.LabelKey(fmt.Sprintf("k%d", i))] = domain.LabelVal("v")
 	}
 	row := domain.UserOAuthClient{
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt: time.Now().UTC(),
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,

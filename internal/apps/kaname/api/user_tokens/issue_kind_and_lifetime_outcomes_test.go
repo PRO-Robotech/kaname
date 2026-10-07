@@ -24,6 +24,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // federatedRefusalText — отказ, который называет страница токенов и контракт.
@@ -32,7 +33,7 @@ const federatedRefusalText = "credential_kind: FEDERATED is not available for th
 func TestIssue_FederatedForAPersonIsRefusedSynchronouslyByFieldName(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID: "usr00000000000000001", CreatedByUserID: "usr00000000000000001",
@@ -48,7 +49,7 @@ func TestIssue_FederatedForAPersonIsRefusedSynchronouslyByFieldName(t *testing.T
 	// Близнец: тот же запрос с видом KEYPAIR выдаётся.
 	twinRepo := &stubUserClientRepo{}
 	twinOps := &stubOpsRepo{}
-	twin := NewIssueUserTokenUseCase(twinRepo, &stubTx{}, twinOps).WithOwnIssuance()
+	twin := NewIssueUserTokenUseCase(twinRepo, &stubTx{}, twinOps).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 	twinOp, err := twin.Execute(context.Background(), IssueInput{
 		UserID: "usr00000000000000001", CreatedByUserID: "usr00000000000000001",
 		CredentialKind: domain.CredentialKindKeypair,
@@ -66,8 +67,7 @@ func TestIssue_KeypairWithZeroTTLIsIssuedWithoutExpiry(t *testing.T) {
 		t.Helper()
 		repo := &stubUserClientRepo{}
 		ops := &stubOpsRepo{}
-		uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithOwnIssuance()
-		uc.now = func() time.Time { return at }
+		uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.At(at)).WithOwnIssuance()
 		_, err := uc.Execute(context.Background(), IssueInput{
 			UserID: "usr00000000000000001", CreatedByUserID: "usr00000000000000001",
 			CredentialKind: domain.CredentialKindKeypair, TTLSeconds: ttl,

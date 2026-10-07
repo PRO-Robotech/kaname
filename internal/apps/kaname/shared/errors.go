@@ -42,6 +42,13 @@ import (
 // случаях из трёх. Вызывающему довольно кода и того, что повтор осмыслен.
 const UnavailableMessage = "service unavailable"
 
+// MomentUnavailableMessage — фиксированный текст отказа, когда момент записи,
+// сравниваемый с отсечкой отзыва-всех, не установлен: общий источник моментов
+// не ответил (kaname#589). Называет ШАГ, на котором глагол не выполнен, и не
+// называет ни источника, ни класса причины — по той же причине, что
+// [UnavailableMessage]: вызывающему довольно кода и того, что повтор осмыслен.
+const MomentUnavailableMessage = "moment of record not established; try again later"
+
 // MapRepoErr — sentinel → gRPC status. Возвращает nil на nil-input.
 //
 // Полное покрытие 8 sentinel'ов (включая ErrPermissionDenied /

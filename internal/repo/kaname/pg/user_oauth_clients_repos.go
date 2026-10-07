@@ -58,10 +58,23 @@ func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClient
 	return out, nil
 }
 
+// ErrIssuanceMomentRequired — строка удостоверения без момента выдачи. Отказ
+// записи, а не подстановка часов базы (kaname#589).
+var ErrIssuanceMomentRequired = errors.New("user oauth client: issuance moment is required")
+
 // Insert персистит новую строку токена в writer-tx вызывающего. Принимает
 // непрозрачный service.Tx (порт use-case), восстанавливает конкретный pgx.Tx
 // через txAsPgx, чтобы pgx оставался внутри repo/kaname/pg.
+//
+// Момент выдачи — ОБЯЗАТЕЛЬНЫЙ вход ([ErrIssuanceMomentRequired]), а не
+// подстановка часов базы: момент сравнивается с отсечкой отзыва-всех, и его
+// ставит один общий источник (kaname#589). Прежний запасной путь к `now()`
+// оставлял второй источник достижимым — строка без момента молча получала
+// чужие часы.
 func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error) {
+	if c.CreatedAt.IsZero() {
+		return domain.UserOAuthClient{}, fmt.Errorf("%w: credential %s", ErrIssuanceMomentRequired, c.ID)
+	}
 	tx := txAsPgx(txh)
 	const q = `
 		INSERT INTO user_oauth_clients (
@@ -69,7 +82,7 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 		    created_at, expires_at, last_used_at,
 		    public_key_pem, key_algorithm, name, labels,
 		    credential_kind, secret_hash
-		) VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11::jsonb,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
 		          $12, COALESCE($13, ''::bytea))
 		RETURNING ` + uocCols
 	labelsJSON, err := marshalLabels(c.Labels)
@@ -79,7 +92,7 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 	row := tx.QueryRow(ctx, q,
 		string(c.ID), string(c.UserID),
 		string(c.Description), string(c.CreatedByUserID),
-		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
+		c.CreatedAt.UTC(), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, string(c.Name), labelsJSON,
 		// Вид ЗАПИСЫВАЕТСЯ. Пустой вид сюда доехать не может — глагол выдачи
 		// разрешает его синхронно, до вставки, — но ограничение таблицы всё

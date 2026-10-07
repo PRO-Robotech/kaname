@@ -45,12 +45,13 @@ func buildTokenSigning(
 	return buildTokenSigningAt(ctx, pool, cfg, time.Now, logger)
 }
 
-// buildTokenSigningAt — то же построение с часами на ВХОДЕ.
+// buildTokenSigningAt — то же построение с часами КЛЮЧНИЦЫ на ВХОДЕ.
 //
 // Часы вынесены в вызов, а не подставлены в теле: момент ротации есть функция
 // времени, и проба, поднимающая ключницу ТЕМ ЖЕ построением, что `serve`, без
 // управляемых часов не различила бы «рано» и «пора». Производственный вызов
-// один — buildTokenSigning, и он подаёт системные часы.
+// один — buildTokenSigning, и он подаёт системные часы. Момент выпуска
+// подписанта (`iat`) — не эти часы, а общий источник ([buildSharedClock]).
 func buildTokenSigningAt(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -79,12 +80,16 @@ func buildTokenSigningAt(
 		return nil, nil, signingKeyStartupRefusal(cfg.AuthN, err)
 	}
 
+	// `iat` сравнивается с отсечкой отзыва, поэтому его ставит тот же общий
+	// для всех реплик источник, что и отсечку (kaname#589), а не часы ключницы:
+	// они — часы процесса для срока ротации ключа, с отсечкой не сравниваемого.
+	issueClock, err := buildSharedClock(pool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("подписант: %w", err)
+	}
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: ts.Issuer,
-		// Часы — ВХОД, а не окружение: без этого сценарии расхождения часов
-		// недетерминированы, а детерминизм входа есть условие того, чтобы
-		// проба вообще могла упасть предсказуемо.
-		Clock:       tokensigner.Clock(clock),
+		Issuer:      ts.Issuer,
+		Clock:       issueClock,
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, keystore)
 	if err != nil {

@@ -17,7 +17,7 @@ package user
 // # Одна транзакция — писателя сессии, а не зеркала
 //
 // Строки `totp` (`active`) и `lookup_secret` сняты; ВСЕ сессии человека покрыты
-// отсечкой `now` с причиной `second-factor-reset` и актором — администратором облака
+// отсечкой (момент общего источника, kaname#589) с причиной `second-factor-reset` и актором — администратором облака
 // (держатель украденного устройства мог держать и сессию); событие
 // `iam.user.second_factor_reset` с обоими акторами — одним коммитом писателя
 // хранилища сессий: у него есть и оператор снятия, и отсечка, и очередь аудита.
@@ -41,7 +41,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
+	"log/slog"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -59,6 +59,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // LoginMethodReader — чтение строки способа входа (узкий порт над хранилищем
@@ -94,12 +95,24 @@ type ResetSecondFactorUseCase struct {
 	opsRepo  operations.Repo
 	methods  LoginMethodReader
 	sessions SecondFactorResetStore
-	now      func() time.Time
+	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки (kaname#589).
+	cutoffClock revocationpolicy.Clock
 }
 
-// NewResetSecondFactorUseCase — построение; часы — системные.
+// NewResetSecondFactorUseCase — построение. Источник момента отсечки подаёт
+// корень ([ResetSecondFactorUseCase.WithCutoffClock]); без него снятие
+// отказывает, а не берёт часы процесса.
 func NewResetSecondFactorUseCase(r Repo, opsRepo operations.Repo, methods LoginMethodReader, sessions SecondFactorResetStore) *ResetSecondFactorUseCase {
-	return &ResetSecondFactorUseCase{repo: r, opsRepo: opsRepo, methods: methods, sessions: sessions, now: time.Now}
+	return &ResetSecondFactorUseCase{repo: r, opsRepo: opsRepo, methods: methods, sessions: sessions}
+}
+
+// WithCutoffClock провязывает источник момента отсечки. Composition-root only.
+//
+// Отсечка сравнивается с моментами, которые ставят другие реплики (вход,
+// выдача удостоверения, `iat`), — источник у них обязан быть один (kaname#589).
+func (u *ResetSecondFactorUseCase) WithCutoffClock(c revocationpolicy.Clock) *ResetSecondFactorUseCase {
+	u.cutoffClock = c
+	return u
 }
 
 // Execute — порядок: личность вызывающего → форма id → строка человека (промах
@@ -164,6 +177,15 @@ func (u *ResetSecondFactorUseCase) enrolled(ctx context.Context, id domain.UserI
 
 // doReset — снятие, отсечка и событие одним коммитом писателя сессии.
 func (u *ResetSecondFactorUseCase) doReset(ctx context.Context, subject domain.User, actor string) (*anypb.Any, error) {
+	// Момент отсечки — из общего источника и ДО открытия транзакции писателя:
+	// источник читается своим соединением, и чтение изнутри открытой
+	// транзакции брало бы второе соединение на запрос (kaname#589).
+	now, err := revocationpolicy.Moment(ctx, u.cutoffClock)
+	if err != nil {
+		slog.ErrorContext(ctx, "ResetSecondFactor: cutoff moment unavailable",
+			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
 	w, err := u.sessions.ResetWriter(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
@@ -182,7 +204,6 @@ func (u *ResetSecondFactorUseCase) doReset(ctx context.Context, subject domain.U
 		// Строка `active` исчезла между проверкой и записью: человек снял сам.
 		return nil, notEnrolledRefusal()
 	}
-	now := u.now().UTC()
 	revokedBy := domain.UserID(actor)
 	if err := w.UpsertCutoff(ctx, domain.UserTokenRevocation{
 		UserID: subject.ID, RevokeBefore: now, Reason: domain.RevokeReasonSecondFactorReset, RevokedBy: revokedBy,

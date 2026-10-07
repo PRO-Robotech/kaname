@@ -22,6 +22,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -30,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // utStoreOutageCause — подробность, которую вызывающему знать не положено.
@@ -42,7 +44,7 @@ func TestIssue_StoreUnavailable_CauseReachesTheLogAndNotTheCaller(t *testing.T) 
 	repo := &stubUserClientRepo{
 		accountErr: iamerr.Wrapf(iamerr.ErrUnavailable, "account lookup: %s", utStoreOutageCause),
 	}
-	u := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance().WithLogger(logger)
+	u := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance().WithLogger(logger)
 
 	_, err := u.Execute(context.Background(), IssueInput{
 		UserID:          domain.UserID("usr_owner00000000000"),
@@ -69,7 +71,7 @@ func TestIssue_AddressedRefusal_IsNotRepeatedIntoTheLog(t *testing.T) {
 
 	const addressed = "User usr_owner00000000000 not found"
 	repo := &stubUserClientRepo{accountErr: iamerr.Wrapf(iamerr.ErrNotFound, "%s", addressed)}
-	u := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithOwnIssuance().WithLogger(logger)
+	u := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubOpsRepo{}).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance().WithLogger(logger)
 
 	_, err := u.Execute(context.Background(), IssueInput{
 		UserID:          domain.UserID("usr_owner00000000000"),

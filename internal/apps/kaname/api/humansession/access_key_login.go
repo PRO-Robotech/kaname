@@ -54,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
@@ -80,7 +81,11 @@ type AccessKeyLoginDeps struct {
 	TTL      time.Duration
 	Observer Observer
 	Now      func() time.Time
-	Logger   *slog.Logger
+	// CutoffClock — источник момента аутентификации выдаваемой сессии: тот же,
+	// что ставит отсечку отзыва-всех (kaname#589). Обязателен глаголу входа;
+	// глагол начала сессии не выдаёт и его не читает.
+	CutoffClock revocationpolicy.Clock
+	Logger      *slog.Logger
 }
 
 func (d AccessKeyLoginDeps) validate(verb string) (AccessKeyLoginDeps, error) {
@@ -252,6 +257,9 @@ func NewAccessKeyLoginUseCase(d AccessKeyLoginDeps) (*AccessKeyLoginUseCase, err
 	if err != nil {
 		return nil, err
 	}
+	if d.CutoffClock == nil {
+		return nil, fmt.Errorf("access key login: %w", errNoCutoffClock)
+	}
 	decoy, err := webauthnverify.NewDecoyKey(d.Binding.Algorithms[0])
 	if err != nil {
 		return nil, fmt.Errorf("access key login: %w", err)
@@ -372,7 +380,7 @@ func (uc *AccessKeyLoginUseCase) Execute(ctx context.Context, in AccessKeyLoginI
 	}
 
 	// (8) Выдача — одним исходом.
-	out, outcome := uc.issue(ctx, user, key.ID, res.Flags, now)
+	out, outcome := uc.issue(ctx, user, key.ID, res.Flags)
 	switch outcome {
 	case issueDone:
 		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginIssued)
@@ -439,9 +447,13 @@ func (uc *AccessKeyLoginUseCase) refuse(ctx context.Context, outcome AccessKeyLo
 // иначе выдача шла бы навстречу удалению личности. Уровень вычисляет правило
 // Ф11 по флагам ЭТОГО утверждения (Р4): полоса приносит предъявленное.
 func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, keyID domain.AccessKeyID,
-	flags webauthnverify.Flags, now time.Time,
+	flags webauthnverify.Flags,
 ) (LoginOutput, issueOutcome) {
-	m := now.Truncate(time.Microsecond)
+	// Момент сессии — из общего источника (kaname#589), до транзакции выдачи.
+	m, err := sharedMoment(ctx, uc.deps.CutoffClock, uc.deps.Logger, "access key login")
+	if err != nil {
+		return LoginOutput{}, issueFailed
+	}
 	// Ось «заведено» — ДО транзакции записи (шапка `completed_login.go`).
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	w, err := uc.deps.Store.Writer(ctx)

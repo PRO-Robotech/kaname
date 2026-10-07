@@ -237,11 +237,20 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 		subject = in.Client.OwnerID
 	}
 
+	// Граница срока клиента — ВХОД подписанта, а не только пересчёт в срок:
+	// момент выпуска ставит общий источник (kaname#589), а остаток выше считан
+	// часами этой реплики. Без границы токен пережил бы клиента ровно на
+	// расхождение этих двух часов.
+	var notAfter time.Time
+	if in.Client.ExpiresAt != 0 {
+		notAfter = time.Unix(in.Client.ExpiresAt, 0).UTC()
+	}
 	tok, err := u.signer.Sign(ctx, tokensigner.Request{
 		Subject:      subject,
 		Audience:     audience,
 		TokenType:    tokenpolicy.TokenTypeAccess,
 		TTL:          ttl,
+		NotAfter:     notAfter,
 		Confirmation: in.Confirmation,
 		Claims:       claims,
 	})

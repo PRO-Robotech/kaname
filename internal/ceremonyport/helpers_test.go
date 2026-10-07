@@ -23,6 +23,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -80,7 +81,7 @@ func (k *keyRing) PublishedSet(context.Context) ([]domain.PublishedKey, error) {
 func newSigner(t *testing.T, ring tokensigner.KeyProvider, clock func() time.Time) *tokensigner.Signer {
 	t.Helper()
 	s, err := tokensigner.New(tokensigner.Config{
-		Issuer: testIssuer, Clock: clock, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: testIssuer, Clock: momentclock.Func(clock), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ring)
 	require.NoError(t, err)
 	return s
