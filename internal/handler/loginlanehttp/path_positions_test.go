@@ -6,8 +6,9 @@ package loginlanehttp
 // path_positions_test.go — гейт перечня Р2 приёмки
 // `access-beyond-login-needs-a-verified-address.md` (kaname#456, §9 п. 3):
 // каждый путь полосы объявлен одной из двух строк — «доступно в положении
-// подтверждения» либо «отказ Р3», — путей 15, и путь, объявленный отказом,
-// судится ступенью положения в своём обработчике. Разбор — синтаксическим
+// подтверждения» либо «отказ Р3», — путей столько, сколько в `Paths()`
+// (перепись — в пробе), и путь, объявленный отказом, судится ступенью
+// положения в своём обработчике. Разбор — синтаксическим
 // деревом `handler.go`: путь — первый довод `h.mux.HandleFunc`, обработчик —
 // метод, переданный через `h.method`, ступень — вызов `h.admitted(w, r, <путь>, …)`.
 
@@ -155,9 +156,11 @@ func TestEveryLanePathIsDeclaredInTheR2List(t *testing.T) {
 	}
 	// Перепись популяции, а не предел: её двигает заведение глагола — Ф13
 	// добавила два (`access-key/begin`, `access-key/login`, kaname#613), A7 —
-	// один (`password/enroll`, kaname#213).
-	if len(Paths()) != 18 || len(positions) != 18 {
-		t.Errorf("путей полосы не 18: перечень %d, строк Р2 %d", len(Paths()), len(positions))
+	// один (`password/enroll`, kaname#213), смена адреса — два
+	// (`email-change`, `email-change/confirm`, kaname#635), свои сессии — три
+	// (`sessions`, `sessions/end`, `sessions/end-others`, kaname#634).
+	if len(Paths()) != 23 || len(positions) != 23 {
+		t.Errorf("путей полосы не 23: перечень %d, строк Р2 %d", len(Paths()), len(positions))
 	}
 	for _, p := range Paths() {
 		if _, ok := positions[p]; !ok {

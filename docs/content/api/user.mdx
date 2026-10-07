@@ -44,7 +44,7 @@ import dedent from 'ts-dedent'
   <tbody>
     <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Внутренний идентификатор (префикс <code>usr</code>)</td></tr>
     <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Субъект входа человека. Чеканит его полоса входа: регистрация без приглашения либо подтверждение адреса живого приглашения; внутренний <code>InternalUserService.UpsertFromIdentity</code> пишет значение своего вызывающего. Пусто для <code>PENDING</code> (адрес приглашённого не подтверждён)</td></tr>
-    <tr><td><code>email</code></td><td>string</td><td>output-only</td><td>Email (case-insensitive lookup)</td></tr>
+    <tr><td><code>email</code></td><td>string</td><td>output-only</td><td>Email (case-insensitive lookup). <code>Update</code> его не меняет; меняет его сам человек на <a href="/api/auth-lane#email-change">полосе входа</a> кодом, пришедшим на новый адрес, — до предъявления кода здесь прежний адрес</td></tr>
     <tr><td><code>displayName</code></td><td>string</td><td>output-only</td><td>Отображаемое имя</td></tr>
     <tr><td><code>inviteStatus</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>BLOCKED</code></td></tr>
     <tr><td><code>invitedBy</code></td><td>string</td><td>output-only</td><td>User.id пригласившего (пусто для self-signup bootstrap)</td></tr>
