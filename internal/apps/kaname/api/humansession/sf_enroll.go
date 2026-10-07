@@ -81,7 +81,7 @@ func resolveLiveSession(ctx context.Context, d SecondFactorDeps, bearer domain.S
 // requireFresh — окно свежести правки своих данных от момента последнего
 // предъявления (Ф11 Р6, Р8).
 func requireFresh(d SecondFactorDeps, s domain.HumanSession, now time.Time) error {
-	if now.Sub(s.LastPresentedAt) > d.Freshness {
+	if !sessionIsFresh(s, now, d.Freshness) {
 		d.Observer.SecondFactorRefusalObserved(RefusalSessionNotFresh)
 		return ErrSessionNotFresh
 	}

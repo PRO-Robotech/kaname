@@ -134,8 +134,9 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	for _, s := range retention.WithHumanSessions(nil, reapers) {
 		names[s.Name] = s.Grace
 	}
-	require.Len(t, names, 8, "пятый — испытания ключей доступа (Ф7); шестой–восьмой — коды подтверждения адреса, окна источника, письма с открытым кодом (kaname#456)")
+	require.Len(t, names, 9, "пятый — испытания ключей доступа (Ф7); шестой–восьмой — коды подтверждения адреса, окна источника, письма с открытым кодом (kaname#456); девятый — отложенные смены адреса (kaname#635)")
 	require.Equal(t, 24*time.Hour, names[retention.SubjectVerificationCodes])
+	require.Equal(t, 24*time.Hour, names[retention.SubjectEmailChangeCodes], "отложенные смены адреса — порог окна темпа (kaname#635)")
 	require.Equal(t, time.Hour, names[retention.SubjectSourceRequestWindows])
 	require.Contains(t, names, retention.SubjectBearerLetters)
 	require.Equal(t, 15*time.Minute, names[retention.SubjectSecondFactorEnrollments])
@@ -152,7 +153,7 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 // способов, и правило выводит из него «1», «2», «3»; близнец — та же полоса
 // без полосы ключа — «1», «2» (Ф12-34, проба выше). Различие пары — ровно
 // одно: собраны ли испытания полосы входа ключом. Реестр уборки получает
-// шестым… девятым предметом испытания полосы входа.
+// десятым предметом испытания полосы входа.
 func TestLoginLane_F13_14_KeyLaneAddsWebAuthnAndTheThirdLevel(t *testing.T) {
 	keys := kanamepg.NewAccessKeyRepo(nil)
 	lane := &loginLane{
@@ -170,7 +171,7 @@ func TestLoginLane_F13_14_KeyLaneAddsWebAuthnAndTheThirdLevel(t *testing.T) {
 	for _, s := range retention.WithHumanSessions(nil, lane.retentionReapers()) {
 		names[s.Name] = s.Grace
 	}
-	require.Len(t, names, 9, "девятый предмет уборки — испытания полосы входа ключом (Ф13)")
+	require.Len(t, names, 10, "десятый предмет уборки — испытания полосы входа ключом (Ф13), девятый — отложенные смены адреса (kaname#635)")
 	require.Contains(t, names, retention.SubjectAccessKeyLoginChallenges)
 	require.Zero(t, names[retention.SubjectAccessKeyLoginChallenges])
 }

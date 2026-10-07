@@ -14,7 +14,9 @@
 // (операция выдачи, зовомая ИЗНУТРИ транзакции выдающего глагола — Д10),
 // `login.go`, `logout.go`, `change_password.go`, `form_token.go`, `resolve.go`,
 // `recovery_request.go` (запрос кода), `recovery_complete.go` (предъявление
-// кода с новым паролем), `dispatch.go` (работа вне пути ответа — Ф5 Р2).
+// кода с новым паролем), `dispatch.go` (работа вне пути ответа — Ф5 Р2),
+// `own_sessions.go` (свои сессии: перечень, выход из выбранной и из всех, кроме
+// текущей — kaname#634).
 // Транспорт (HTTP-обработчик полосы формы и gRPC-обработчик `Resolve`) живёт в
 // `internal/handler/loginlanehttp` и в `handler.go`; сюда транспорт не течёт.
 //
@@ -121,6 +123,13 @@ type Store interface {
 	// наличием строки пароля ОДНИМ чтением (Ф5 Р9 п. 2): обе полосы запроса восстановления (адрес есть · адреса
 	// нет) стоят одинаково (Ф5 Р2, Р7). found=false — адреса нет ни у кого.
 	RecoveryTarget(ctx context.Context, email domain.Email) (RecoveryTarget, bool, error)
+	// SessionsOf — ЖИВЫЕ записи личности на now (без отметки снятия, срок не
+	// вышел) страницей курсора `(created_at, id)` по возрастанию (kaname#634,
+	// Р4): size в [0..1000], 0 — умолчание; token — непрозрачный курсор кодека
+	// списков службы, пустой — первая страница. Ответ — записи и курсор
+	// следующей страницы; пустой ⇔ страница последняя. Негодный курсор либо
+	// величина — отказ аргументом (INVALID_ARGUMENT).
+	SessionsOf(ctx context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error)
 	// Writer открывает транзакцию записи. Вызывающий обязан Commit либо Rollback.
 	Writer(ctx context.Context) (Writer, error)
 	// SessionSetWriter открывает транзакцию записи, ПЕРВЫМ оператором которой
@@ -195,6 +204,21 @@ type Writer interface {
 	// EndOtherSessions снимает ВСЕ прочие живые записи личности, кроме keep
 	// (Ф1-15, Ф1-65); отвечает числом снятых.
 	EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error)
+	// EndOwnSession снимает ОДНУ запись target, если она — живая (не снята, срок
+	// на now не вышел) запись личности userID (kaname#634, Р5): владение,
+	// живость и срок решает ТОТ ЖЕ оператор, что снимает (ban #10), и выданное
+	// в записи отзывается той же транзакцией (kaname#313). ended=false — такой
+	// живой записи у личности нет (чужая, неизвестная, снятая, истёкшая).
+	EndOwnSession(ctx context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (ended bool, err error)
+	// EndOtherLiveSessions снимает все прочие ЖИВЫЕ записи личности, кроме keep
+	// (kaname#634, Р7), и отзывает выданное в них (kaname#313); истёкшие не
+	// снятые записи не трогает — они не «сессии», которые человек видит в
+	// перечне. Отвечает идентификаторами снятых.
+	EndOtherLiveSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error)
+	// SessionLive — жива ли запись id личности userID на now. Читается ПОСЛЕ
+	// замка писателя нескольких сессий (`SessionSetWriter`): запись, снятая
+	// встречным писателем за ожидание замка, видна снятой (Р7).
+	SessionLive(ctx context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error)
 	// RotateBearer перевыпускает носитель записи (Ф11 Р5): прежний дайджест
 	// перестаёт находить запись, момент аутентификации и срок прежние, момент
 	// последнего предъявления сдвигается на presentedAt.

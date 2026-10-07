@@ -186,6 +186,12 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "отказы глаголов подтверждения и отказы положения не различимы снаружи; «ноль отказов» обязан быть отличим от «полоса не исполнялась»",
 	},
+	// ── СМЕНА АДРЕСА (kaname#635) — тот же конструктор ────────────────────
+	EmailChangeOutcomesMetric: {
+		Cells: len(humansession.EmailChangeOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "запрос на занятый адрес вызывающему неотличим от свободного (приёмка Р4): различие видно только клеткой, и «ноль смен» обязан быть отличим от «глагол не провязан»",
+	},
 	AccessKeyLoginOutcomesMetric: {
 		Cells: len(humansession.AccessKeyLoginOutcomes()),
 		Build: func(r *Registry) { r.LoginLaneRecorder() },

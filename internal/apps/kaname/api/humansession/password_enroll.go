@@ -114,7 +114,7 @@ func (uc *EnrollPasswordUseCase) Execute(ctx context.Context, in EnrollPasswordI
 		return EnrollPasswordOutput{}, ErrAuthenticationFailed
 	}
 	// Свежесть — граница включена: ровно окно — свежая (Р2).
-	if now.Sub(resolved.Session.LastPresentedAt) > uc.deps.Freshness {
+	if !sessionIsFresh(resolved.Session, now, uc.deps.Freshness) {
 		return EnrollPasswordOutput{}, ErrSessionNotFresh
 	}
 	user := resolved.User

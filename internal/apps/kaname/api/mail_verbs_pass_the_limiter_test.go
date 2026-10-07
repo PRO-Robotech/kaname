@@ -36,7 +36,10 @@
 //     законных форм: (а) писатель очереди порта списывает окно адресата
 //     (`chargeInviteMailWindowTx`) раньше постановки, и намерение письма
 //     (`…MailIntent`) несёт поле `Limit`; (б) предел писем решён вставкой
-//     строки кода (`InsertVerificationCodePaced`, kaname#456 Р9) в той же
+//     строки кода (`InsertVerificationCodePaced`, kaname#456 Р9; у смены
+//     адреса — `InsertEmailChangeCodePaced`, kaname#635 Р6) либо применением
+//     такой строки (`PresentEmailChangeCode`: уведомление о смене — одно на
+//     применённый код, а коды выдаются под темпом, kaname#635 Р7) в той же
 //     функции РАНЬШЕ вызова порта — писатель такого порта окна не списывает,
 //     предел решает его вызывающий. Вызов порта, не ограниченный ни одной
 //     формой, — находка с координатой вызова;
@@ -76,6 +79,16 @@ const (
 	mailContractPkg   = "kaname.cloud.iam.v1"
 	laneRecoveryRoute = "POST /iam/v1/auth/recovery"
 )
+
+// mailCallerPacedBy — вызовы, которыми вызывающий решает предел писем раньше
+// порта (форма (б) утверждения 2): вставка строки кода под темпом человека и
+// применение такой строки. Перечень закрыт; пополняется приёмкой, назвавшей
+// темп своего письма.
+var mailCallerPacedBy = map[string]bool{
+	mailCallerPaced:              true,
+	"InsertEmailChangeCodePaced": true,
+	"PresentEmailChangeCode":     true,
+}
 
 // parsedPackage — разобранные не-тестовые файлы одного каталога.
 type parsedPackage struct {
@@ -388,7 +401,7 @@ func mailSitesOf(ix apiIndex, pkgBase, ucType string, ports map[string]mailPort)
 		var pacedAt []token.Pos
 		ast.Inspect(fd.Body, func(n ast.Node) bool {
 			if call, ok := n.(*ast.CallExpr); ok {
-				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == mailCallerPaced {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && mailCallerPacedBy[sel.Sel.Name] {
 					pacedAt = append(pacedAt, call.Pos())
 				}
 			}
@@ -924,7 +937,7 @@ func verbFindings(v mailVerb) []string {
 	for _, s := range v.unlimitedSites() {
 		out = append(out, fmt.Sprintf("%s: глагол %s (%s) ставит письмо портом %s без списания: писатель порта окна "+
 			"адресата не списывает, и предел писем (%s) раньше вызова не решён", s.where, v.fqn, v.useCase, s.port,
-			mailCallerPaced))
+			strings.Join(sortedPacedBy(), " · ")))
 	}
 	return out
 }
@@ -992,4 +1005,13 @@ func TestEveryMailSendingVerbPassesTheRateLimiter(t *testing.T) {
 	for _, f := range findings {
 		t.Error(f)
 	}
+}
+
+func sortedPacedBy() []string {
+	out := make([]string, 0, len(mailCallerPacedBy))
+	for k := range mailCallerPacedBy {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

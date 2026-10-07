@@ -134,6 +134,7 @@ func (h *Handler) accessKeyLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	in.FormContext = h.formContext(r)
 	in.Source = h.source(r)
+	in.Client = h.client(r)
 	out, err := h.lane.AccessKeyLogin(r.Context(), in)
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)

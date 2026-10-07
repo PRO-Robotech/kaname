@@ -408,6 +408,15 @@ func parityCases() []parityCase {
 			return said(err, "найден %v подтверждён %v пароль %v", found, target.EmailVerified, target.HasPassword)
 		})
 	}
+	// Свои сессии (kaname#634): живые записи личности страницей.
+	st("SessionsOf", "её личность, первая страница", func(ctx context.Context, s humansession.Store, p parityPerson) string {
+		rows, next, err := s.SessionsOf(ctx, p.user.ID, parityNow, 0, "")
+		return said(err, "записей %d, дальше %v", len(rows), next != "")
+	})
+	st("SessionsOf", "её личность, курсор полосы", func(ctx context.Context, s humansession.Store, p parityPerson) string {
+		rows, next, err := s.SessionsOf(ctx, p.user.ID, parityNow, 1, "not-a-cursor")
+		return said(err, "записей %d, дальше %v", len(rows), next != "")
+	})
 	cs = append(cs, parityCase{method: "Store.Writer", form: "—",
 		store: func(ctx context.Context, s humansession.Store, _ parityPerson, later func(func())) string {
 			w, err := s.Writer(ctx)
@@ -468,6 +477,20 @@ func parityCases() []parityCase {
 	wr("EndOtherSessions", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		n, err := w.EndOtherSessions(ctx, p.user.ID, "", parityNow, domain.RevokeReasonPasswordChange)
 		return said(err, "снято %d", n)
+	})
+	// Свои сессии (kaname#634): снятие одной своей живой записи, прочих живых и
+	// живость действующей.
+	wr("EndOwnSession", "её сессия", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		ended, err := w.EndOwnSession(ctx, p.user.ID, p.session, parityNow, domain.RevokeReasonEndedFromAnotherSession)
+		return said(err, "снята %v", ended)
+	})
+	wr("EndOtherLiveSessions", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		ended, err := w.EndOtherLiveSessions(ctx, p.user.ID, "", parityNow, domain.RevokeReasonEndedFromAnotherSession)
+		return said(err, "снято %d", len(ended))
+	})
+	wr("SessionLive", "её сессия", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		live, err := w.SessionLive(ctx, p.user.ID, p.session, parityNow)
+		return said(err, "жива %v", live)
 	})
 	wr("RotateBearer", "её сессия", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		return said(w.RotateBearer(ctx, p.session, domain.BearerDigest(hexOf("rotated-"+p.tag)), parityNow), "сменён")

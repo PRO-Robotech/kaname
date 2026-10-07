@@ -1,0 +1,96 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
+  sha256: cad0d55bb5db27ce95c1d35a64eb3f6667a6a5a9bb6a7de31c358ce7a5edc6b2
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке — описание, а не вердикт; шапка не правлена намеренно (change-graph.md §2).
+    Действующий вердикт о редакции 1 — эта запись.
+  base_commit: d9e233f4205ca7683bb4d1cd3e392c2ad4913f11
+  content_commit: none (файл не закоммичен в ветке 635-email-change-acceptance)
+  task: https://github.com/PRO-Robotech/kaname/issues/635
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
+  lines: 736
+verdict: CHANGES_REQUESTED
+round: 1
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-06T22:48:25Z'
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body: 'acceptance-reviewer · CHANGES_REQUESTED · cad0d55bb5db27ce95c1d35a64eb3f6667a6a5a9bb6a7de31c358ce7a5edc6b2'
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    note: записей ревью этого документа до этой нет (каталог создан этой записью)
+
+premise_section_1:
+  result: все команды §1.1–§1.5 исполнены вербатим на kaname@d9e233f42 — выводы совпали с текстом
+  outputs: '0 · UpdateUserRequest {user_id, labels, update_mask} · 18 путей · 13 видов · гейт 1 · finding 1 · ключ 1 · триггер 1 · markEmailVerifiedSQL 1 · A197-триггер 1 · OurMailKinds 3 · event_type 3 · окна 2 · ended_reason 5 · requireFresh 1 · EnqueueVerificationLetter 1 · chargeInviteMailWindowTx 1 · EmitSubjectChangeEvent 3 · RevokeReasonEmailVerified 1 · newAVLaneWith 1 · A197 файл 1'
+  task_premise: >-
+    «глагола смены нет» — подтверждена (0). «мутация — Operation» — опровержение автора принято:
+    глаголы своих удостоверений живут на полосе формы синхронно (verify-email/confirm, password).
+
+blocking:
+  - id: B1
+    genus: PRODUCER
+    where: Р8 п.8, Р9 строка «сброс кеша», §0.2 «Разрешает», EC-24 вторая половина
+    claim: >-
+      Событие очереди смены субъекта «о человеке» не имеет допустимого производителя.
+      kaname.subject_change_outbox несёт закрытый словарь subject_change_op_check
+      = {binding_upsert, binding_delete, group_member_change, binding_grant, binding_revoke}
+      (0001_initial.sql:2957; более поздних миграций, меняющих его, нет). Документ не называет
+      значение op/event_type и не разрешает расширения этого словаря новой миграцией, а шапка
+      утверждает, что меняются только словари Р7 и Р8 (писем и причин конца).
+    predicate: git grep -n 'subject_change_op_check' -- internal/migrations → только 0001_initial.sql:2957
+    fix: назвать op/event_type события, внести расширение subject_change_op_check в «Разрешает» и в Р8.
+  - id: B2
+    genus: COVERAGE
+    where: Р8 п.8; EC-02; EC-15; EC-10 (а)
+    claim: >-
+      Ни один I-сценарий не утверждает строку очереди смены субъекта: EC-02 перечисляет адрес,
+      отметку, носитель, снятие сессий, письмо, аудит — без п.8; отказы (EC-10 а, EC-15) не
+      утверждают её отсутствие. Пункт исхода без держателя.
+    fix: в EC-02 — ровно одна строка subject_change_outbox по U с названным op; в EC-15 — ноль.
+  - id: B3
+    genus: PRODUCER
+    where: Р6 против Р4 и EC-09 третьей строки
+    claim: >-
+      Р6 считает «письма смены этого человека» («Считаются только письма смены»), а Р4 на
+      занятом адресе письма не ставит. По Р6 повтор на занятый адрес не расходует темп, EC-09
+      требует 429 у обоих. Контракт противоречит своему сценарию; при буквальной реализации Р6
+      расхождение темпа становится оракулом занятости, который Р4 закрывает.
+    fix: Р6 — считать принятые запросы смены (прошедшие проверки формы), а не письма; назвать, что хранится на занятом адресе.
+  - id: B4
+    genus: CONSTRUCTIBILITY
+    where: EC-18 (б)
+    claim: >-
+      Сессия харнесса живёт laneSessionTTL = 24 h (session_lane_integration_harness_test.go:83),
+      окно = avWindowProfile = 24 h. После 6 запросов и Advance(окно) сессия S истекла: (б)
+      «тот же запрос» отвечает 401, а не 200. Соседний EV-24 по той же причине берёт новую
+      сессию (address_verification_lane_integration_test.go: «Сессия регистрации своё отжила»).
+    fix: (б) — после нового входа (свежая сессия того же человека), с пометкой, что предел — по человеку.
+
+important:
+  - EC-19 — L по умолчанию в харнессе 10000 (avDefaultPerRecipient); назвать ручку avOptions.recoveryLettersPerRecipient и что все L+1 людей — в одном стенде.
+  - Р8 «Отсечка не пишется» — назвать границу, что уже выданные короткие токены снятых сессий живут до своего срока (семейства отзываются endSessionsAndRevokeWhatTheyHold, отсечки нет; смена пароля её пишет).
+  - Р4 «живым приглашением» — ключ users_identity_email_uniq покрывает и истёкшее приглашение (expired-invitation-keeps-the-address); сказать «любой строкой человека».
+  - EC-21 — «заводит аккаунт» назвать тем же путём, что A197-04 (вставка, считаемая триггером), либо глаголом.
+
+constructibility:
+  seeded: 0
+  by_named_fixture: 22 из 24 I/U (avLane.register/mark/login/invite/inviter/letters/markedAt/endReason/auditEvents, avClock.Advance, сцена A197-04, гейты в internal/check)
+  refuted_by_fixture_constants: 1 (EC-18)
+  not_executed: 'EC-19 (размер L не назван), EC-25…EC-27 (стенд с доставкой, kacho#1773) — посев не ставился: стенда и разрешения на посев в задании нет'
+twins: у всех отрицаний близнец назван (внутри сценария либо ссылкой)
+producers: 27 из 27 строк таблицы §5, но п.8 Р8 без производителя (B1)

@@ -52,6 +52,9 @@ type Input struct {
 	Password string
 	// Source — адрес источника, как его прислал допущенный вызывающий.
 	Source string
+	// Client — описание клиента запроса регистрации (kaname#634, Р3): идёт в
+	// запись выдаваемой сессии и больше никуда.
+	Client domain.ClientDescription
 }
 
 // Output — исход успешной регистрации: состав ответа, носитель, лёг ли способ
@@ -250,6 +253,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 				TTL:       uc.ttl,
 				// Своё событие — ниже; выдача его не дублирует (Ф3-47).
 				EmitAudit: false,
+				Client:    in.Client,
 			})
 			if err == nil {
 				err = w.EmitAudit(ctx, outboxtypes.AuditEvent{

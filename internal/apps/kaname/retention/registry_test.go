@@ -279,6 +279,10 @@ func (stubReaper) SweepExpiredBearerLetters(context.Context, time.Duration, int)
 	return 0, false, nil
 }
 
+func (stubReaper) SweepUnservableEmailChangeCodes(context.Context, time.Duration, int) (int64, bool, error) {
+	return 0, false, nil
+}
+
 // TestWithHumanSessionsCarriesTheAddressVerificationSweepers — kaname#456:
 // коды подтверждения с порогом окна писем, окна источника с порогом окна
 // источника, письма с истёкшим кодом с порогом ноль; полоса без любого из
@@ -309,5 +313,32 @@ func TestWithHumanSessionsCarriesTheAddressVerificationSweepers(t *testing.T) {
 	without.BearerLetters = nil
 	if got := WithHumanSessions(nil, without); len(got) != 0 {
 		t.Errorf("без уборщика писем с истёкшим кодом полоса даёт %d записей, ждали 0", len(got))
+	}
+}
+
+// TestWithHumanSessionsCarriesTheEmailChangeSweeper — kaname#635: отложенные
+// смены адреса с порогом окна темпа; без уборщика смены предмета нет, прочие
+// записи полосы те же.
+func TestWithHumanSessionsCarriesTheEmailChangeSweeper(t *testing.T) {
+	full := HumanSessionReapers{
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute,
+		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
+		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute, EmailChangeCodes: stubReaper{},
+	}
+	with := WithHumanSessions(nil, full)
+	var found *Subject
+	for i := range with {
+		if with[i].Name == SubjectEmailChangeCodes {
+			found = &with[i]
+		}
+	}
+	if found == nil || found.Grace != 24*time.Hour || found.Sweep == nil {
+		t.Fatalf("предмет %q: %+v — ждали порог окна темпа 24h и уборщик", SubjectEmailChangeCodes, found)
+	}
+	without := full
+	without.EmailChangeCodes = nil
+	if got := WithHumanSessions(nil, without); len(got) != len(with)-1 {
+		t.Errorf("без уборщика смены записей %d, ждали %d", len(got), len(with)-1)
 	}
 }
