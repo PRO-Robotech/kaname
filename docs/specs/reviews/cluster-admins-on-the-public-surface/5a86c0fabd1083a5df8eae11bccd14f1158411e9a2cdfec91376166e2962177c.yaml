@@ -65,3 +65,22 @@ semantic_carryover: >-
   проверив, что дельта — только форма предикатов и координат.
 
 event_body: acceptance-reviewer · APPROVED · 5a86c0fabd1083a5df8eae11bccd14f1158411e9a2cdfec91376166e2962177c
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#661
+  status: performed
+  published: true
+  database_id: 6046095620
+  node_id: "IC_kwDOUO26pM8AAAABaGAZBA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/661#issuecomment-6046095620"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6046095620"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T20:19:56Z"
+  body_sha256: "c8e735ce1f3bb2fcea2225be65f4da59e9e64631d1da715a041e4ce22824f2e2"
+  subject_sha256: "5a86c0fabd1083a5df8eae11bccd14f1158411e9a2cdfec91376166e2962177c"
+  subject_revision_commit: "f8f53e63a7bbea068cc3b69649fd59b78457bd50"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
