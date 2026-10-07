@@ -77,4 +77,14 @@ counts:
     Сценарии целиком на ещё не существующих глаголах до кода исполнить нечем (не ставилось 16);
     фикстуры названы, посевы I/I-V/U подтверждены кругом 1.
 
+effective_approval:
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт ACCEPT выдаёт санкцию только вместе с внешним событием на этот отпечаток. Учётка названа, потому что гейт
+      записей ревью (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в
+      subject.task этой учёткой: без неё запись не судима, и его исход — «не выполнилось».
+
 event_body: "acceptance-reviewer · ACCEPT · sha256 ee608e2e445edef3ff7dd29d0b1bacd29aee5f627bb66a63d136822718ba4439"
