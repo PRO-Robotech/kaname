@@ -16,6 +16,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `docs/specs/reviews/cluster-admins-on-the-public-surface/<sha256>.yaml`
   - 2026-10-07 · круг 1 · CHANGES_REQUESTED · `f957e4511b261df71338db98105dd7b5ad553e9c3bba54eaa41b75cf17367ac0` ·
     `docs/specs/reviews/cluster-admins-on-the-public-surface/f957e4511b261df71338db98105dd7b5ad553e9c3bba54eaa41b75cf17367ac0.yaml`
+  - 2026-10-07 · круг 2 · APPROVED · `a2efb0ac56a306da31d487693e679ce7debb314edb163a9c22d92d1753baf75a` ·
+    `docs/specs/reviews/cluster-admins-on-the-public-surface/a2efb0ac56a306da31d487693e679ce7debb314edb163a9c22d92d1753baf75a.yaml`
+  - 2026-10-07 · правка после вердикта круга 2 · без вердикта · только координаты: трём путям
+    платформы в предикатах (§«Что НЕ входит», DoD S3 п.1) и имени пробы края (сценарий края)
+    назван дом `PRO-Robotech/kacho:`; сценарии, коды, payload и DoD по существу не менялись.
+    Отпечаток этой редакции — новый, одобрение круга 2 к нему не переносится само
+  - 2026-10-07 · круг 3 (подтверждение координат) · CHANGES_REQUESTED · `d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b` ·
+    `docs/specs/reviews/cluster-admins-on-the-public-surface/d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b.yaml`
+  - 2026-10-07 · правка по возврату круга 3 · без вердикта · только форма двух предикатов и
+    одной координаты: дом `PRO-Robotech/kacho`, вставленный в аргумент `git grep` после `--`,
+    git читает буквальным несуществующим путём, и предикат молчал при любом содержимом. Теперь
+    аргумент голый, дерево названо в самой команде (`git -C <копия PRO-Robotech/kacho>`), дом —
+    текстом рядом (§«Что НЕ входит», DoD S3 п.1); в сценарии CAP-26 дом стоит у пути файла
+    пробы. Сценарии, коды, payload и DoD по существу не менялись
 - **Дата:** 2026-10-07
 - **Задачи:** `PRO-Robotech/kaname#661` (стадия S1 — служба); `PRO-Robotech/kacho#3093`
   (стадия S2 — край и пин); `PRO-Robotech/kacho#3094` и `PRO-Robotech/kacho#3091` (стадия
@@ -49,8 +63,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 - **Снятие `InternalClusterService`** (стадия contract в терминах ADM-1 Р11). Внутренний путь
   сегодня зовут посевы стендов и проба края (§0, П7). Снимается отдельным предметом, когда
-  `git grep -n 'internal/cluster' -- tests ui-future gateway/tests` в платформе и
-  `git grep -n 'InternalClusterService' -- tests` в службе дают ноль прод- и посевных
+  в платформе (`PRO-Robotech/kacho`)
+  `git -C <копия PRO-Robotech/kacho> grep -n 'internal/cluster' -- tests ui-future gateway/tests`
+  и в службе
+  `git grep -n 'InternalClusterService' -- tests` дают ноль прод- и посевных
   попаданий.
 - **Выдачи с истечением** (`granted_until`, путь break-glass `ClusterAdminGrantRepo`). Близнец
   выдаёт и снимает только бессрочные выдачи, как внутренний.
@@ -644,8 +660,8 @@ CAP-05)
 **Then** `404`, `Content-Type: application/json`, тело `code = 5`, `message = "Not Found"`
 — промах публичного маршрутизатора края (`runtime.DefaultRoutingErrorHandler`, у края своего
 обработчика нет); заголовка `X-Content-Type-Options` нет — второго производителя отказа нет
-(`gateway/internal/restmux/external_isolation_test.go`,
-`TestExternalListener_RejectsInternalPaths`)
+(`PRO-Robotech/kacho:gateway/internal/restmux/external_isolation_test.go`,
+`PRO-Robotech/kacho:TestExternalListener_RejectsInternalPaths`)
 **And** (близнец) тот же путь на внутреннем слушателе края — `200`; публичный
 `GET /iam/v1/cluster/admins` на внешнем — `200`
 
@@ -824,8 +840,9 @@ CAP-05)
 
 ### S3 — консоль (`kacho#3094`, `kacho#3091`)
 
-1. `ui-future/shared/src/api/cluster.ts` и экран зовут публичные пути; счётный предикат
-   `git grep -c '"/iam/v1/internal/cluster' -- ui-future/shared/src/api/cluster.ts` → 0
+1. `PRO-Robotech/kacho:ui-future/shared/src/api/cluster.ts` и экран зовут публичные пути;
+   счётный предикат в дереве `PRO-Robotech/kacho`
+   `git -C <копия PRO-Robotech/kacho> grep -c '"/iam/v1/internal/cluster' -- ui-future/shared/src/api/cluster.ts` → 0
    (литерал пути в строке, а не слово в комментарии; комментарии файла `/internal/` несут
    законно).
 2. Проба посадки судит по пути экрана (CAP-30), юнит-проба на обе стороны.
