@@ -17,7 +17,10 @@
 сессии не будет (Ф13, §0.2). Приёмка FP поэтому строит «Дано» уровня I вставкой
 пробы мимо продукта (§4.0, «единственный шаг посева мимо продукта, и он
 вынужден»), и здесь тот же единственный шаг: строка способа «пароль» снимается
-ОДНИМ оператором с возвратом. Всё остальное — глаголами продукта на тех же
+одной транзакцией вместе с отметкой открытого пути восстановления — в той же
+форме, которую кладёт миграция переноса для личностей без пароля
+(`users_active_has_a_way_in_fk`: `ACTIVE` без строки пароля законна только с
+отметкой). Утверждаются обе записи оператором с возвратом. Всё остальное — глаголами продукта на тех же
 дверях, что судит набор:
 
   1. человек заводится регистрацией и подтверждает адрес кодом письма
@@ -275,18 +278,29 @@ def register_key(doors, token: str, user: str, key: dict, rp_id: str, origin: st
 
 
 def drop_password_sql(email: str) -> str:
+    """Форма «после переноса» одной транзакцией: отметка открытого пути и снятие строки.
+
+    `ACTIVE` без строки пароля законна в продукте ровно в одной форме — с отметкой
+    `recovery_path_opened_at` (миграция `20261005030000_active_identity_has_a_way_in`,
+    ключ `users_active_has_a_way_in_fk` отложен до конца транзакции). Посев кладёт
+    ту же форму, что кладёт перенос, а не обходит ключ."""
     if not EMAIL_RE.match(email):
         raise Unmet("почта вне безопасного алфавита оператора — посев не пишет")
-    return ("DELETE FROM kaname.user_login_methods m USING kaname.users u\n"
+    return ("BEGIN;\n"
+            "UPDATE kaname.users SET recovery_path_opened_at = now()\n"
+            f" WHERE email = '{email}' AND recovery_path_opened_at IS NULL\n"
+            "RETURNING 'opened';\n"
+            "DELETE FROM kaname.user_login_methods m USING kaname.users u\n"
             f" WHERE u.id = m.user_id AND u.email = '{email}' AND m.kind = 'password'\n"
-            "RETURNING m.kind;\n")
+            "RETURNING m.kind;\n"
+            "COMMIT;\n")
 
 
 def drop_password(store, email: str) -> None:
     rows = store.run(drop_password_sql(email))
-    if rows != ["password"]:
-        raise Finding(f"снятие строки способа «пароль»: оператор вернул {len(rows)} строк, ждали одну — "
-                      f"у человека, заведённого регистрацией, строки пароля не было")
+    if rows != ["opened", "password"]:
+        raise Finding(f"форма «после переноса» не положена: операторы вернули {rows!r:.80}, ждали отметку "
+                      f"открытого пути и одну снятую строку пароля")
 
 
 # ─────────────────────────── посев ───────────────────────────────────────────
@@ -374,7 +388,7 @@ class _FakeDoors:
 
 
 class _FakeStore:
-    def __init__(self, rows=("password",)):
+    def __init__(self, rows=("opened", "password")):
         self.rows = list(rows)
         self.sql: list[str] = []
 
@@ -458,7 +472,8 @@ def self_test() -> int:
             ("доверяющая сторона чужая — находка", {"doors": _FakeDoors(rp="elsewhere")}, "finding"),
             ("операция регистрации с ошибкой — находка",
              {"doors": _FakeDoors(rp=rp, op_error={"code": 9, "message": "x"})}, "finding"),
-            ("строки пароля не было — находка", {"store": _FakeStore(rows=())}, "finding"),
+            ("строки пароля не было — находка", {"store": _FakeStore(rows=("opened",))}, "finding"),
+            ("отметка открытого пути не легла — находка", {"store": _FakeStore(rows=("password",))}, "finding"),
             ("вход прежним паролем после снятия проходит — находка",
              {"after_login": {"bearer": "b", "verified": True}}, "finding"),
         ]:
