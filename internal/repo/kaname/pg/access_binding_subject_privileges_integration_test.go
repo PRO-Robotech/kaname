@@ -17,7 +17,9 @@ package pg_test
 //   - enriched rows carry resolved role_name via the JOIN.
 //   - keyset pagination (page_size=1 → token → remainder).
 //   - existing subject with 0 bindings → empty list, no token.
-//   - dangling role (role deleted) → role_name="" (LEFT JOIN), no panic.
+//   - present role → role_name resolved (схема не допускает висячей роли у выдачи роли).
+//   - relation-form grant (role_id NULL) for group / service_account → listed
+//     with role_id="" and role_name="" (промах LEFT JOIN), перечень не падает.
 //   - REVOKED excluded: a REVOKED binding is NOT returned by default.
 //   - account isolation: only the requested subject's rows are returned.
 
@@ -195,43 +197,20 @@ func TestAB_SP13_DanglingRole_EmptyRoleName(t *testing.T) {
 	member := seedUserInAccount(t, ctx, pool, acc.ID, "sp13m")
 	role := seedCustomRole(t, ctx, repo, acc.ID, "soon_gone")
 
-	ab := insertAB(t, ctx, repo, domain.AccessBinding{
+	_ = insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: role.ID, ResourceType: "account", ResourceID: string(acc.ID), GrantedByUserID: owner,
 	})
 
-	// Revoke the binding (so the FK RESTRICT on roles no longer protects it for
-	// an ACTIVE row), then DELETE the role row → dangling role_id on a revoked
-	// row. We then re-grant a NEW active binding on the same (now-deleted) role
-	// is impossible (FK), so instead we directly null the role linkage by
-	// deleting the role after revoking; the LEFT JOIN must still return the
-	// row with an empty role_name.
+	// Роль, на которую ссылается ЖИВАЯ выдача роли, снять нельзя:
+	// access_bindings_role_fk — ON DELETE RESTRICT, и ссылку держит любая строка,
+	// отозванная тоже. Висячей роли у выдачи роли схема не допускает, поэтому
+	// здесь утверждается положительная половина: JOIN находит роль и возвращает её
+	// имя без ошибки.
 	//
-	// Simpler deterministic path: delete the role directly is blocked by FK
-	// RESTRICT while an ACTIVE binding references it. So we exercise the LEFT
-	// JOIN graceful-miss by pointing at a binding whose role row we remove only
-	// after detaching via revoke. Use a raw UPDATE to clear role_id is not
-	// allowed (NOT NULL). Therefore we assert the LEFT JOIN by deleting the
-	// role after first deleting the binding's FK guard through revoke+role
-	// delete is not feasible; instead, we verify the JOIN tolerates a role
-	// row that exists (positive) here and rely on the unit test for the pure
-	// dangling case. To still exercise a real miss at SQL level, insert a
-	// binding referencing a role, then forcibly remove the role via cascade is
-	// blocked — so we test the empty-name fallback through a row whose role was
-	// removed using ON DELETE behaviour below.
-	_ = ab
-
-	// Force a dangling row: revoke the active binding (clears the partial
-	// UNIQUE + relaxes nothing on FK), then delete the role. FK
-	// access_bindings_role_fk is ON DELETE RESTRICT, so deleting the role while
-	// ANY binding (revoked or not) references it fails. We therefore delete the
-	// binding row entirely and re-insert a historical REVOKED row with the same
-	// role removed — but REVOKED rows are excluded from the default output.
-	//
-	// Net: the deterministic SQL-level dangling-role scenario requires removing
-	// the FK guard, which the schema forbids. The LEFT JOIN graceful-miss is
-	// asserted by the unit test (1.3-13). Here we assert the JOIN returns a
-	// PRESENT role_name and does not error — the positive half of the contract.
+	// Промах LEFT JOIN на уровне SQL исполняется не здесь, а выдачей ФОРМЫ
+	// ОТНОШЕНИЯ: у неё role_id IS NULL, роли JOIN не находит, и role_name обязан
+	// прийти пустым — TestAB_SP_RelationFormGrant_IsListed.
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
@@ -350,4 +329,89 @@ func TestAB_SP_GroupSubject_DirectBindingsEnriched(t *testing.T) {
 	assert.Equal(t, domain.RoleName("editor"), out[0].RoleName, "group role_name resolved via JOIN")
 	assert.Equal(t, "project", string(out[0].ResourceType))
 	assert.Equal(t, string(proj.ID), out[0].ResourceID)
+}
+
+// TestAB_SP_RelationFormGrant_IsListed — выдача ФОРМЫ ОТНОШЕНИЯ (роли нет:
+// role_id IS NULL, указано granted_relation; так её допускает
+// access_bindings_grant_form_ck) перечисляется наравне с выдачей роли и не
+// роняет чтение целиком. Субъект — группа и сервисный аккаунт: оба вида
+// получателя законно держат системную выдачу отношением.
+//
+// Законный близнец в том же перечне — выдача РОЛИ тому же субъекту: она обязана
+// вернуться со своей ролью, а отношение — с пустой ролью и пустым именем роли.
+// Против близнеца выдача-отношение отличается ровно одним фактом — формой выдачи.
+func TestAB_SP_RelationFormGrant_IsListed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	repo := kanamepg.New(pool, nil)
+
+	owner := mustSeedUser(t, ctx, pool, "sprf")
+	acc := seedAccount(t, ctx, repo, "acc-sprf", owner)
+	proj := seedProject(t, ctx, repo, acc.ID, "proj-sprf")
+	role := seedCustomRole(t, ctx, repo, acc.ID, "sprf_role")
+	grp := seedGroup(t, ctx, repo, acc.ID, "sprf-team")
+	sa := seedSA(t, ctx, repo, acc.ID, "sprf-sa")
+
+	for _, tc := range []struct {
+		name        string
+		subjectType domain.SubjectType
+		subjectID   domain.SubjectID
+	}{
+		{"group", domain.SubjectTypeGroup, domain.SubjectID(grp.ID)},
+		{"service_account", domain.SubjectTypeServiceAccount, domain.SubjectID(sa.ID)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			roleGrant := insertAB(t, ctx, repo, domain.AccessBinding{
+				SubjectType: tc.subjectType, SubjectID: tc.subjectID,
+				RoleID: role.ID, ResourceType: "project", ResourceID: string(proj.ID),
+				GrantedByUserID: owner,
+			})
+			relationGrant := insertAB(t, ctx, repo, domain.AccessBinding{
+				SubjectType: tc.subjectType, SubjectID: tc.subjectID,
+				GrantedRelation: "viewer", System: true,
+				ResourceType: "project", ResourceID: string(proj.ID),
+				GrantedByUserID: owner,
+			})
+
+			// Предпосылка: строка действительно в форме отношения — роли в БД нет.
+			var roleIsNull bool
+			require.NoError(t, pool.QueryRow(ctx,
+				`SELECT role_id IS NULL FROM kaname.access_bindings WHERE id = $1`,
+				string(relationGrant.ID)).Scan(&roleIsNull))
+			require.True(t, roleIsNull, "предпосылка: у выдачи-отношения role_id обязан быть NULL")
+
+			rd, err := repo.Reader(ctx)
+			require.NoError(t, err)
+			defer func() { _ = rd.Rollback(ctx) }()
+
+			out, next, err := rd.AccessBindings().ListSubjectPrivileges(ctx,
+				tc.subjectType, tc.subjectID, repoab.PageFilter{})
+			require.NoError(t, err, "выдача без роли обязана перечисляться, а не ронять перечень целиком")
+			assert.Empty(t, next)
+			require.Len(t, out, 2, "перечень обязан нести обе выдачи: роли и отношения")
+
+			byID := map[domain.AccessBindingID]domain.SubjectPrivilege{}
+			for _, p := range out {
+				byID[p.BindingID] = p
+			}
+			rg, ok := byID[roleGrant.ID]
+			require.True(t, ok, "выдача роли (законный близнец) обязана быть в перечне")
+			assert.Equal(t, role.ID, rg.RoleID)
+			assert.Equal(t, domain.RoleName("sprf_role"), rg.RoleName)
+
+			relg, ok := byID[relationGrant.ID]
+			require.True(t, ok, "выдача отношения обязана быть в перечне")
+			assert.Equal(t, domain.RoleID(""), relg.RoleID, "у формы отношения роли нет")
+			assert.Equal(t, domain.RoleName(""), relg.RoleName, "у формы отношения нет и имени роли")
+			assert.Equal(t, "project", string(relg.ResourceType))
+			assert.Equal(t, string(proj.ID), relg.ResourceID)
+			assert.Equal(t, domain.AccessBindingStatusActive, relg.Status)
+		})
+	}
 }
