@@ -19,8 +19,12 @@
 // несущее, и его вызов на месте, РЕЗУЛЬТАТ ПРЕОБРАЗУЮЩЕГО ПОТРЕБИТЕЛЯ (ниже) и
 // результат функции своего файла, чей возврат нёс предмет. Хранилище, куда
 // несущее положено, несёт его дальше; обход `range` по несущему делает
-// несущими ключ и значение. Многозначный вызов (`a, b, ok := f()`) судится по
-// позициям.
+// несущими ключ и значение. Многозначный вызов судится по ПОЗИЦИЯМ во всех
+// пяти местах, где грамматика Go его допускает: присваивание (`a, b, ok :=
+// f()`), объявление (`var a, b = f()`), возврат функции и возврат замыкания
+// (`return f()`), единственный аргумент (`g(f())` — позиция i результата f есть
+// аргумент i функции g). Где число позиций синтаксис не называет (оба вызова —
+// непрозрачные), вызов несёт предмет, если несёт ЛЮБАЯ его позиция, — строже.
 //
 // Вынос — любое место, откуда предмет уходит из файла мимо гейта:
 //
@@ -95,7 +99,10 @@
 //     возврата функции своего файла одна на все места вызова (контекст не
 //     различается); структура, в поле которой лёг предмет, несёт его вся —
 //     число в соседнем поле тоже; признак `ok` у `v, ok := m[k]` и подобных
-//     некомпонентных форм несёт предмет вместе со значением.
+//     некомпонентных форм несёт предмет вместе со значением; многозначный
+//     вызов, чьё число позиций синтаксис не называет (непрозрачный вызов
+//     аргументом непрозрачного либо вариадического), несёт предмет, если несёт
+//     любая позиция, и отдаёт его всем параметрам получателя.
 package check
 
 import (
@@ -177,6 +184,9 @@ type lvFlow struct {
 	subj      lvSubject
 	consumers map[string]LoginVerifierConsumer
 	used      map[string]int
+	// arity — потребитель → число позиций результата там, где синтаксис его
+	// называет: чистая позиция за ним разрешает то, чего нет, и истекает.
+	arity map[string]int
 	// cur — где идёт разбор сейчас: ключ потребителя называет функцию, а
 	// значение вызова судится и вне оператора, где он стоит.
 	cur lvCtx
@@ -201,10 +211,11 @@ type lvFlow struct {
 }
 
 // lvRunFlow — разбор предмета subj по файлам files; находки, перепись,
-// использования объявленных потребителей.
-func lvRunFlow(ix *lvIndex, files []*lvFile, subj lvSubject, consumers map[string]LoginVerifierConsumer) ([]string, LoginVerifierFlowCensus, map[string]int) {
+// использования объявленных потребителей и число позиций их результата там,
+// где синтаксис его называет.
+func lvRunFlow(ix *lvIndex, files []*lvFile, subj lvSubject, consumers map[string]LoginVerifierConsumer) ([]string, LoginVerifierFlowCensus, map[string]int, map[string]int) {
 	fl := &lvFlow{
-		ix: ix, subj: subj, consumers: consumers, used: map[string]int{},
+		ix: ix, subj: subj, consumers: consumers, used: map[string]int{}, arity: map[string]int{},
 		roles: map[*ast.Field]lvFieldRole{}, tainted: map[lvVar]bool{}, aliases: map[lvVar][]*ast.Ident{},
 		litReturns: map[*ast.FuncLit]bool{}, seeds: map[*ast.FuncDecl]map[int]bool{},
 		retCarry: map[*ast.FuncDecl]map[int]bool{}, internal: map[*ast.FuncDecl]bool{},
@@ -241,7 +252,7 @@ func lvRunFlow(ix *lvIndex, files []*lvFile, subj lvSubject, consumers map[strin
 		out = append(out, m)
 	}
 	sort.Strings(out)
-	return out, fl.census, fl.used
+	return out, fl.census, fl.used, fl.arity
 }
 
 func (fl *lvFlow) pass(files []*lvFile) {
@@ -369,6 +380,7 @@ func (fl *lvFlow) walk(root ast.Node, ctx lvCtx) {
 		case *ast.ValueSpec:
 			if len(s.Values) == 1 && len(s.Names) > 1 {
 				// `var a, b = f()` — кортеж: позиция судится по позиции.
+				fl.noteArity(s.Values[0], len(s.Names))
 				for i, name := range s.Names {
 					if fl.tupleCarries(s.Values[0], i) {
 						fl.store(name, ctx, s.Pos(), false)
@@ -421,6 +433,7 @@ func (fl *lvFlow) assign(s *ast.AssignStmt, ctx lvCtx) {
 		return
 	}
 	if len(s.Rhs) == 1 {
+		fl.noteArity(s.Rhs[0], len(s.Lhs))
 		for i, lhs := range s.Lhs {
 			if fl.tupleCarries(s.Rhs[0], i) {
 				fl.store(lhs, ctx, s.Pos(), false)
@@ -560,8 +573,10 @@ func (fl *lvFlow) role(id *ast.Ident) (lvRole, ast.Node) {
 func (fl *lvFlow) ret(s *ast.ReturnStmt, ctx lvCtx) {
 	carried := false
 	var positions []int
-	if n := lvResultCount(ctx); ctx.lit == nil && len(s.Results) == 1 && n > 1 {
-		// `return f()` многозначного f: позиция результата — позиция f.
+	if n := lvResultCount(ctx); len(s.Results) == 1 && n > 1 {
+		// `return f()` многозначного f — у функции и у замыкания: позиция
+		// результата — позиция f.
+		fl.noteArity(s.Results[0], n)
 		for i := 0; i < n; i++ {
 			if fl.tupleCarries(s.Results[0], i) {
 				carried = true
@@ -613,14 +628,25 @@ func (fl *lvFlow) ret(s *ast.ReturnStmt, ctx lvCtx) {
 	fl.find(s.Pos(), ctx, "выносится возвратом из разрешённого файла — вызывающий получает его мимо гейта")
 }
 
-// lvResultCount — число позиций результата функции разбора; у замыкания — 0
-// (замыкание судится по тому, куда уходит оно само).
+// lvResultCount — число позиций результата функции разбора: замыкания, если
+// разбор внутри него, иначе объявления.
 func lvResultCount(ctx lvCtx) int {
-	if ctx.lit != nil || ctx.decl == nil || ctx.decl.Type.Results == nil {
+	switch {
+	case ctx.lit != nil:
+		return lvFieldCount(ctx.lit.Type.Results)
+	case ctx.decl != nil:
+		return lvFieldCount(ctx.decl.Type.Results)
+	}
+	return 0
+}
+
+// lvFieldCount — число позиций перечня полей (параметров либо результатов).
+func lvFieldCount(l *ast.FieldList) int {
+	if l == nil {
 		return 0
 	}
 	n := 0
-	for _, fld := range ctx.decl.Type.Results.List {
+	for _, fld := range l.List {
 		if len(fld.Names) == 0 {
 			n++
 			continue
@@ -648,12 +674,7 @@ func (fl *lvFlow) isBuiltin(id *ast.Ident) bool {
 
 func (fl *lvFlow) call(c *ast.CallExpr, ctx lvCtx) {
 	fun := lvCallee(c.Fun)
-	var carried []int
-	for i, a := range c.Args {
-		if fl.carries(a) {
-			carried = append(carried, i)
-		}
-	}
+	carried := fl.argCarried(c)
 	recv := false
 	if sel, ok := fun.(*ast.SelectorExpr); ok && fl.ix.importDir(fl.f, sel.X) == "" && fl.carries(sel.X) {
 		recv = true
@@ -820,6 +841,8 @@ func (fl *lvFlow) carries(e ast.Expr) bool {
 			}
 			return false
 		}
+		// Вызов в позиции одного значения однозначен: Go не собрал бы иное.
+		fl.noteArity(n, 1)
 		return fl.resultCarries(n, 0)
 	}
 	return false
@@ -855,13 +878,136 @@ func (fl *lvFlow) resultCarries(c *ast.CallExpr, pos int) bool {
 
 // receives — вызов получает предмет аргументом либо получателем.
 func (fl *lvFlow) receives(c *ast.CallExpr) bool {
-	for _, a := range c.Args {
-		if fl.carries(a) {
-			return true
-		}
+	if len(fl.argCarried(c)) > 0 {
+		return true
 	}
 	sel, ok := lvCallee(c.Fun).(*ast.SelectorExpr)
 	return ok && fl.ix.importDir(fl.f, sel.X) == "" && fl.carries(sel.X)
+}
+
+// argCarried — номера аргументов вызова c, получающих предмет. Многозначный
+// вызов единственным аргументом (`g(f())`) раскладывается по позициям: позиция
+// i результата f — аргумент i функции g. Число позиций берётся у того, чью
+// сигнатуру синтаксис называет: у f (функция корпуса), иначе у g (функция
+// корпуса либо замыкание без вариадического хвоста). Не называет ни одна — f
+// несёт предмет, если несёт любая позиция, и получают его все параметры g
+// (у непрозрачной g — аргумент 0): строже, а не слабее.
+func (fl *lvFlow) argCarried(c *ast.CallExpr) []int {
+	if len(c.Args) == 1 && c.Ellipsis == token.NoPos {
+		if inner, ok := fl.multiValued(c.Args[0]); ok {
+			params, variadic, known := fl.signature(lvCallee(c.Fun))
+			n, sized := fl.resultArity(inner)
+			if !sized && known && !variadic {
+				n, sized = params, true
+			}
+			if sized {
+				fl.noteArity(inner, n)
+				var out []int
+				for i := 0; i < n; i++ {
+					if fl.resultCarries(inner, i) {
+						out = append(out, i)
+					}
+				}
+				return out
+			}
+			if !fl.resultCarriesAny(inner) {
+				return nil
+			}
+			if !known || params == 0 {
+				return []int{0}
+			}
+			out := make([]int, params)
+			for i := range out {
+				out[i] = i
+			}
+			return out
+		}
+	}
+	var out []int
+	for i, a := range c.Args {
+		if fl.carries(a) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// multiValued — e есть вызов, который МОЖЕТ быть многозначным: не замыкание на
+// месте (оно судится целиком), не источник, не приведение и не встроенная
+// функция (они однозначны).
+func (fl *lvFlow) multiValued(e ast.Expr) (*ast.CallExpr, bool) {
+	c, ok := lvUnparen(e).(*ast.CallExpr)
+	if !ok || fl.subj.isSource(fl.f, c) {
+		return nil, false
+	}
+	fun := lvCallee(c.Fun)
+	if _, lit := fun.(*ast.FuncLit); lit || fl.ix.isConversion(fl.f, fun) {
+		return nil, false
+	}
+	if id, ok := fun.(*ast.Ident); ok && fl.isBuiltin(id) {
+		return nil, false
+	}
+	return c, true
+}
+
+// signature — число параметров вызываемого и вариадичность, если синтаксис
+// называет его сигнатуру: замыкание либо функция корпуса.
+func (fl *lvFlow) signature(fun ast.Expr) (params int, variadic, known bool) {
+	var ft *ast.FuncType
+	if lit, ok := fun.(*ast.FuncLit); ok {
+		ft = lit.Type
+	} else if target, ok := fl.resolveCall(fun, fl.cur); ok {
+		ft = target.decl.Type
+	}
+	if ft == nil {
+		return 0, false, false
+	}
+	if l := ft.Params; l != nil && len(l.List) > 0 {
+		_, variadic = l.List[len(l.List)-1].Type.(*ast.Ellipsis)
+	}
+	return lvFieldCount(ft.Params), variadic, true
+}
+
+// resultArity — число позиций результата вызова c, если вызывается функция
+// корпуса.
+func (fl *lvFlow) resultArity(c *ast.CallExpr) (int, bool) {
+	if target, ok := fl.resolveCall(lvCallee(c.Fun), fl.cur); ok {
+		return lvFieldCount(target.decl.Type.Results), true
+	}
+	return 0, false
+}
+
+// resultCarriesAny — хоть одна позиция результата вызова c несёт предмет, когда
+// их число синтаксис не называет. У преобразующего потребителя, получившего
+// предмет, позиция за последней объявленной чистой не объявлена чистой — несёт.
+func (fl *lvFlow) resultCarriesAny(c *ast.CallExpr) bool {
+	fun := lvCallee(c.Fun)
+	if target, ok := fl.resolveCall(fun, fl.cur); ok {
+		if !fl.subj.keep[target.file.rel] {
+			return false
+		}
+		for _, carried := range fl.retCarry[target.decl] {
+			if carried {
+				return true
+			}
+		}
+		return false
+	}
+	cons, ok := fl.consumers[lvFuncLabel(fl.cur.decl)+" → "+lvRender(fun)]
+	return ok && cons.Kind == ConsumerTransforming && fl.receives(c)
+}
+
+// noteArity — e, если это вызов объявленного потребителя, стоит там, где его
+// результат занимает n позиций.
+func (fl *lvFlow) noteArity(e ast.Expr, n int) {
+	c, ok := lvUnparen(e).(*ast.CallExpr)
+	if !ok {
+		return
+	}
+	key := lvFuncLabel(fl.cur.decl) + " → " + lvRender(lvCallee(c.Fun))
+	if _, declared := fl.consumers[key]; declared && n > fl.arity[key] {
+		fl.arity[key] = n
+	}
 }
 
 // lvInternal — функции файла f, которые зовёт ТОЛЬКО он сам: без получателя

@@ -82,7 +82,9 @@
 //     получает предмет: разрешение без предмета — место, куда вызов вносят
 //     незамеченным (послабление обязано истекать само);
 //   - каждый потребитель объявлен с ВИДОМ и причиной, чистая позиция
-//     преобразующего — с причиной: иначе отказ прогона, а не «находок ноль».
+//     преобразующего — с причиной и не отрицательна: иначе отказ прогона, а
+//     не «находок ноль». Чистая позиция за последней позицией результата —
+//     находка (ей нечего разрешать), где число позиций синтаксис называет.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ
@@ -190,9 +192,15 @@ func lvValidateConsumers(consumers map[string]LoginVerifierConsumer) error {
 			return fmt.Errorf("потребитель «%s»: у поглощающего чисты все позиции результата — перечень "+
 				"чистых позиций у него второе утверждение того же и обязан отсутствовать", k)
 		}
-		for pos, why := range c.Clean {
-			if pos < 0 || strings.TrimSpace(why) == "" {
-				return fmt.Errorf("потребитель «%s»: чистая позиция %d без причины либо вне результата", k, pos)
+		// Позиции обходятся по возрастанию: при двух негодных отказ называет одну
+		// и ту же, а не ту, что выпала первой при обходе карты.
+		for _, pos := range lvSortedInts(c.Clean) {
+			switch {
+			case pos < 0:
+				return fmt.Errorf("потребитель «%s»: чистая позиция %d отрицательна — позиции результата "+
+					"считаются с нуля", k, pos)
+			case strings.TrimSpace(c.Clean[pos]) == "":
+				return fmt.Errorf("потребитель «%s»: чистая позиция %d без причины", k, pos)
 			}
 		}
 	}
@@ -854,10 +862,10 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 			}
 			return false
 		}}
-	var mUsed, nUsed map[string]int
+	var mUsed, nUsed, mArity, nArity map[string]int
 	var mFind, nFind []string
-	mFind, c.Material, mUsed = lvRunFlow(ix, files, material, spec.OpaqueConsumers)
-	nFind, c.Name, nUsed = lvRunFlow(ix, files, name, spec.OpaqueConsumers)
+	mFind, c.Material, mUsed, mArity = lvRunFlow(ix, files, material, spec.OpaqueConsumers)
+	nFind, c.Name, nUsed, nArity = lvRunFlow(ix, files, name, spec.OpaqueConsumers)
 	findings = append(append(findings, mFind...), nFind...)
 	for k := range spec.OpaqueConsumers {
 		c.ConsumerUses[k] = mUsed[k] + nUsed[k]
@@ -892,6 +900,19 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 		}
 	}
 	for _, k := range lvSortedKeys(spec.OpaqueConsumers) {
+		// Чистая позиция за последней позицией результата разрешает то, чего нет:
+		// послабление без предмета, как и потребитель без вызова. Число позиций
+		// известно там, где синтаксис его называет (кортеж, возврат, аргумент
+		// функции корпуса, позиция одного значения); не назвал ни разу — не судится.
+		n := max(mArity[k], nArity[k])
+		for _, pos := range lvSortedInts(spec.OpaqueConsumers[k].Clean) {
+			if n > 0 && pos >= n {
+				findings = append(findings, fmt.Sprintf(
+					"потребитель «%s»: чистая позиция %d вне результата вызова (позиций %d) — ей нечего "+
+						"разрешать, и объявление снимается вместе с предметом",
+					k, pos, n))
+			}
+		}
 		if c.ConsumerUses[k] == 0 {
 			findings = append(findings, fmt.Sprintf(
 				"потребитель «%s» («%s») объявлен без предмета: ни материал, ни имя таблицы этому вызову "+
@@ -919,6 +940,16 @@ func lvConstructs(fn lvFunc, declRel, declType string) bool {
 		}
 	}
 	return false
+}
+
+// lvSortedInts — ключи карты позиций по возрастанию.
+func lvSortedInts(m map[int]string) []int {
+	out := make([]int, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Ints(out)
+	return out
 }
 
 func lvSortedKeys[V any](m map[string]V) []string {

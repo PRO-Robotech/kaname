@@ -975,6 +975,84 @@ const loginMethodsTable = "user_login_methods"
 			wantFinding: "материал выносится возвратом",
 			at:          "return rest",
 		},
+		// Многозначный вызов вне присваивания (возврат ревью go-style #139): позиции
+		// результата судятся и там, где вызов стоит аргументом (`g(f())`) либо
+		// возвратом замыкания. Чистая позиция 0 у разборщика — ровно форма живой
+		// ведомости; несущая — позиция 1 (ошибка несёт вход).
+		{
+			name: "возврат замыкания: многозначный разборщик отдаёт несущую позицию замыканию, оно уходит возвратом",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) CostFn(v interface{ Reveal() string }) func() (uint64, error) {\n\treturn func() (uint64, error) { return strconv.ParseUint(v.Reveal(), 10, 32) }\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.CostFn → strconv.ParseUint", 0),
+			wantFinding: "материал выносится возвратом",
+			at:          "return func() (uint64, error)",
+		},
+		{
+			name: "аргументом: многозначный разборщик отдаёт несущую позицию помощнику своего файла, тот — вызывающему",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc pick(_ uint64, err error) error { return err }\n\nfunc (r *LoginMethodRepo) Check(v interface{ Reveal() string }) error {\n\treturn pick(strconv.ParseUint(v.Reveal(), 10, 32))\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Check → strconv.ParseUint", 0),
+			wantFinding: "материал выносится возвратом",
+			at:          "return pick(strconv.ParseUint",
+		},
+		{
+			name: "аргументом: многозначный разборщик отдаёт несущую позицию функции соседнего файла",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strconv")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Send(v interface{ Reveal() string }) {\n\tsink(strconv.ParseUint(v.Reveal(), 10, 32))\n}\n"
+				c["internal/repo/kaname/pg/costclass.go"] = lvGo("pg", "func sink(_ uint64, err error) { _ = err }")
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Send → strconv.ParseUint", 0),
+			wantFinding: "передан `sink`, объявленной в internal/repo/kaname/pg/costclass.go",
+			at:          "sink(strconv.ParseUint",
+		},
+		{
+			name: "аргументом: позиция i результата — параметр i, и наружу уходит параметр чистой позиции",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc found(head, rest string, ok bool) bool { return ok }\n\nfunc (r *LoginMethodRepo) Has(v interface{ Reveal() string }) bool {\n\treturn found(strings.Cut(v.Reveal(), \"$\"))\n}\n"
+			},
+			spec: lvDeclareTransforming("LoginMethodRepo.Has → strings.Cut", 2),
+		},
+		{
+			name: "аргументом: позиция i результата — параметр i, и наружу уходит параметр несущей позиции",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc second(head, rest string, ok bool) string { return rest }\n\nfunc (r *LoginMethodRepo) Rest(v interface{ Reveal() string }) string {\n\treturn second(strings.Cut(v.Reveal(), \"$\"))\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Rest → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return second(strings.Cut",
+		},
+		{
+			name: "аргументом: число позиций не названо (непрозрачный вызов в вариадический помощник) — несущее получают все параметры",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc tail(head string, rest ...any) any { return rest[0] }\n\nfunc (r *LoginMethodRepo) Tail(v interface{ Reveal() string }) any {\n\treturn tail(strings.Cut(v.Reveal(), \"$\"))\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Tail → strings.Cut", 2),
+			wantFinding: "материал выносится возвратом",
+			at:          "return tail(strings.Cut",
+		},
+		{
+			name: "законный близнец: возврат замыкания — многозначный помощник своего файла, ни одна позиция не несёт",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc lens(m string) (int, int) { return len(m), 1 }\n\nfunc (r *LoginMethodRepo) SizeFn(v interface{ Reveal() string }) func() (int, int) {\n\treturn func() (int, int) { return lens(v.Reveal()) }\n}\n"
+			},
+		},
+		{
+			name: "чистая позиция вне результата вызова истекает: ей нечего разрешать",
+			edit: func(c check.TreeCorpus) {
+				lvImporting(c, "strings")
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Head(v interface{ Reveal() string }) int {\n\thead, _, _ := strings.Cut(v.Reveal(), \"$\")\n\treturn len(head)\n}\n"
+			},
+			spec:        lvDeclareTransforming("LoginMethodRepo.Head → strings.Cut", 2, 7),
+			wantFinding: "«LoginMethodRepo.Head → strings.Cut»: чистая позиция 7 вне результата вызова (позиций 3)",
+		},
 		{
 			name: "приведение части к числу не очищает её: байт материала выносится возвратом",
 			edit: func(c check.TreeCorpus) {
@@ -1234,4 +1312,20 @@ func TestLoginVerifierGate_TracedResultsAreCountedApart(t *testing.T) {
 	require.Equal(t, 1, census.Material.ReturnsInFile, "возврат помощника своему файлу прослежен у вызывающего")
 	require.Contains(t, census.String(), "преобразующих 1")
 	require.Contains(t, census.String(), "возвратов своему файлу прослежено 1")
+}
+
+// TestLoginVerifierGate_PremiseTextIsDeterministic — при двух негодных чистых
+// позициях отказ называет одну и ту же — наименьшую: текст отказа, зависящий от
+// порядка обхода карты, меняется от прогона к прогону и не сверяется ни с чем.
+func TestLoginVerifierGate_PremiseTextIsDeterministic(t *testing.T) {
+	for range 64 {
+		spec := lawfulLoginVerifierSpec()
+		spec.OpaqueConsumers["LoginMethodRepo.Get → r.pool.QueryRow"] = check.LoginVerifierConsumer{
+			Kind: check.ConsumerTransforming, Reason: "оператор чтения",
+			Clean: map[int]string{0: "", 1: "", 2: "", 3: ""},
+		}
+		_, _, err := check.AuditLoginVerifierContainment(lawfulLoginVerifierCorpus(), spec)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "чистая позиция 0 без причины")
+	}
 }
