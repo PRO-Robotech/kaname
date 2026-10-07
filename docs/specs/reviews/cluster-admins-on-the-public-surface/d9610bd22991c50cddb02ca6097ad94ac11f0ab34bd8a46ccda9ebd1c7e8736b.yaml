@@ -73,3 +73,40 @@ semantic_carryover: >-
   Следующая редакция, исправляющая лишь два предиката, судится тем же кругом подтверждения.
 
 event_body: acceptance-reviewer · CHANGES_REQUESTED · d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_external_event: false
+  why: >-
+    Отказ санкции не выдаёт и не отзывает; одобрение по предмету несёт запись
+    круга 4 (5a86c0fa…) и её событие.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Блок дописан кругом 5 (без изменения subject и вердикта): гейт записей ревью
+      (`.github/scripts/review-event-silence.py`, kaname#402) ищет событие в subject.task
+      этой учёткой; без неё запись не судима, и его исход — «не выполнилось».
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#661
+  status: not_performed
+  published: false
+  required_for_sanction: false
+  publication_expected_from_orchestrator: false
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b'
+  note: >-
+    На kaname#661 событий с subject_sha256 d9610bd2… нет (gh api …/issues/661/comments
+    @ 2026-10-07: одно событие полномочия, APPROVED на 5a86c0fa…). Отказу внешнее полномочие
+    не нужно; публикация после одобрения следующей редакции не требуется.

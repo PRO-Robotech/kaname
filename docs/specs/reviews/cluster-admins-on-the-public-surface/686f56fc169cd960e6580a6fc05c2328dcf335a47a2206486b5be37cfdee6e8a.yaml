@@ -1,0 +1,108 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+  sha256: 686f56fc169cd960e6580a6fc05c2328dcf335a47a2206486b5be37cfdee6e8a
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8aa3faa12
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена (рабочее дерево копии kaname-661-accept, один файл, +14/−6);
+    запись судит содержимое по отпечатку.
+  branch: '661'
+  task: PRO-Robotech/kaname#661
+  round: 5 (подтверждение домов координат после APPROVED круга 4)
+  predecessor_record: docs/specs/reviews/cluster-admins-on-the-public-surface/5a86c0fabd1083a5df8eae11bccd14f1158411e9a2cdfec91376166e2962177c.yaml
+  fingerprint_predicate: >-
+    sha256sum документа @ 8aa3faa12 рабочее дерево → 686f56fc…cdfee6e8a (совпал с заданием);
+    git show HEAD:<док> | sha256sum → 5a86c0fa…2962177c (одобренная кругом 4 редакция).
+  publication_mode: запись в дереве; внешнее событие публикует курьер
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_external_event: true
+  why: >-
+    Вердикт рецензента вынесен; санкция наступает внешним событием полномочия на
+    отпечаток 686f56fc…, а не этой записью. Одобрение круга 4 (5a86c0fa…) к этой
+    редакции само не переносится.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    target: PRO-Robotech/kaname#661
+
+scope_of_diff:
+  predicate: git diff -U0 -- <док> @ 8aa3faa12 (HEAD несёт 5a86c0fa)
+  observed: >-
+    Семь ханков: журнал правок в шапке (+8 строк: строка круга 4 и запись о правке без
+    вердикта) и шесть путей, получивших дом `PRO-Robotech/kacho:` — §2 слот sva-nogrant
+    (стр. 234), врезка о повышенном входе (658), таблица производителей CAP-24 (771),
+    CAP-27 (774), CAP-30 (776), §4 «Стенд платформы» (801). Сценарии, коды, payload, Given
+    и DoD не тронуты.
+  premise: >-
+    Посылка «дельта — только названный дом в строке 793» ОПРОВЕРГНУТА в части объёма:
+    дом добавлен в шести местах, а не в одном (плюс журнал). По роду дельта та же —
+    только координаты дома; автор в сообщении сам назвал «и ещё 5 путей».
+
+checks:
+  paths_resolve_in_platform: >-
+    `git -C project/kacho cat-file -e origin/main:<путь>` @ ffbe930db — есть все:
+    tests/authz-fixtures/prodseed_matrix.py, ui-future/shared/src/api/cluster.ts,
+    ui-future/shared/src/lib/admin-plane-posture.ts; `prodseed_*.py` — 6 файлов;
+    слот ps-nogrant в prodseed_matrix.py — 1 строка.
+  absence_in_own_tree: >-
+    В kaname каталог tests/authz-fixtures/ есть (ceremony_credentials*.py), prodseed_* в нём
+    нет — голый путь читался как путь службы и был ложен; дом это снимает.
+  doc_gates: >-
+    go test ./internal/check -run 'TestAcceptancePathCoordinateResolves|TestAcceptanceProbeCoordinateResolves|TestAcceptanceEditedAfterItsVerdictSaysSo|TestNoDeferredWorkInTheTree'
+    -count=1 -v → 4 PASS, ok; приёмок 64, координат-путей 1024, в чужом доме 82, находок 0
+    (гейт читает рабочее дерево, os.ReadFile).
+
+non_blocking:
+  - >-
+    CAP-24 (`gateway/internal/restmux/mux.go`, `embed/permission_catalog.json`) и CAP-28
+    (`ui-future/shared/src/pages/system/ClusterAdminsPage.tsx`) дом называют словом
+    «платформа», а не формой `PRO-Robotech/kacho:` — в одном документе две формы одной
+    координаты. Гейт координат зелен; унификация — при следующей правке.
+  - >-
+    Статическая строка статуса в шапке («DRAFT, редакция 2 ко второму кругу») отстала от
+    журнала правок; вердикт она не несёт, правится автором, не рецензентом.
+
+constructibility: >-
+  Посев не требовался: Given и сценарии не менялись (дельта сверена). Посевы и фикстуры
+  круга 2 — в его записи (a2efb0ac…).
+
+semantic_carryover: >-
+  Смысл одобрен кругом 2 (a2efb0ac), форма предикатов — кругом 4 (5a86c0fa); этот круг
+  одобряет содержимое 686f56fc целиком, проверив, что дельта — только дома координат и журнал.
+
+event_body: acceptance-reviewer · APPROVED · 686f56fc169cd960e6580a6fc05c2328dcf335a47a2206486b5be37cfdee6e8a
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#661
+  status: not_performed
+  published: false
+  required_for_sanction: true
+  publication_expected_from_orchestrator: true
+  body_for_publication: 'acceptance-reviewer · APPROVED · 686f56fc169cd960e6580a6fc05c2328dcf335a47a2206486b5be37cfdee6e8a'
+  note: >-
+    Событие публикует курьер (scripts/rituals/approval-event.sh воркспейса) после коммита
+    редакции; блок приводится к факту события тем же заходом.
