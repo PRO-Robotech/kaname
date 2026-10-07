@@ -397,8 +397,6 @@ func (ix *lvIndex) localConst(id *ast.Ident) ast.Expr {
 	return nil
 }
 
-// isConversion — вызываемое есть тип строки либо среза байтов: `string`,
-// `[]byte`, `[]rune`, тип корпуса (своего пакета, локальный, другого пакета).
 // lvPredeclaredTypes — предобъявленные типы Go, приведение к которым — поток
 // значения, а не вызов: `uint8(части[0])` несёт часть материала так же, как
 // `string(части)`. Приведение к числу не «очищает» значение — оно судится у
@@ -411,6 +409,9 @@ var lvPredeclaredTypes = map[string]bool{
 	"float32": true, "float64": true, "complex64": true, "complex128": true,
 }
 
+// isConversion — вызываемое есть тип: предобъявленный (`string`, число,
+// `bool` — lvPredeclaredTypes), `[]byte`, `[]rune`, тип корпуса (своего
+// пакета, локальный, другого пакета).
 func (ix *lvIndex) isConversion(f *lvFile, fun ast.Expr) bool {
 	switch t := fun.(type) {
 	case *ast.ParenExpr:
