@@ -35,7 +35,8 @@ func (s *stubLane) CompleteRecovery(_ context.Context, in humansession.CompleteR
 }
 
 // TestLane_F5_Paths_AreInTheOneDeclarationOnce — оба глагола восстановления
-// стоят в ЕДИНСТВЕННОМ перечне путей, который край читает для ретрансляции,
+// стоят в перечне путей полосы `Paths()` (край держит своё объявление и
+// переносит пути правкой, kaname#280),
 // ровно по одному разу, и перечень целиком дублей не несёт. Полный состав
 // перечня здесь НЕ закрепляется: он складывается из Ф3, Ф4 и Ф5, и точный
 // список зеленел бы только у той фазы, что пришла последней.
@@ -46,8 +47,8 @@ func TestLane_F5_Paths_AreInTheOneDeclarationOnce(t *testing.T) {
 		seen[p]++
 	}
 	require.Len(t, seen, len(paths), "перечень путей полосы несёт дубль: %v", paths)
-	require.Equal(t, 1, seen[loginlanehttp.PathRecovery], "край читает тот же перечень для ретрансляции")
-	require.Equal(t, 1, seen[loginlanehttp.PathRecoveryComplete], "край читает тот же перечень для ретрансляции")
+	require.Equal(t, 1, seen[loginlanehttp.PathRecovery], "путь восстановления в перечне полосы ровно один раз")
+	require.Equal(t, 1, seen[loginlanehttp.PathRecoveryComplete], "путь восстановления в перечне полосы ровно один раз")
 	require.Equal(t, "/iam/v1/auth/recovery", loginlanehttp.PathRecovery)
 	require.Equal(t, "/iam/v1/auth/recovery/complete", loginlanehttp.PathRecoveryComplete)
 }

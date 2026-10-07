@@ -25,6 +25,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
 )
@@ -39,7 +40,8 @@ func TestIntegration_SessionWriterAccessKeyLoginAndIdentityDeletionDoNotDeadlock
 	ctx := context.Background()
 	keys := kanamepg.NewAccessKeyRepo(l.s.pool)
 	deps := humansession.AccessKeyLoginDeps{
-		Store: l.s.sessions, Keys: kanamepg.NewAccessKeyLoginRepo(l.s.pool, keys), Methods: kanamepg.NewLoginMethodRepo(l.s.pool),
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       l.s.sessions, Keys: kanamepg.NewAccessKeyLoginRepo(l.s.pool, keys), Methods: kanamepg.NewLoginMethodRepo(l.s.pool),
 		Binding: webauthnverify.Binding{RPID: akSceneRPID, Origins: []string{akSceneOrigin},
 			Algorithms: []webauthnverify.Algorithm{webauthnverify.AlgES256}},
 		ChallengeTTL: access_keys.ChallengeTTL, UserVerification: access_keys.UserVerificationAssertion,

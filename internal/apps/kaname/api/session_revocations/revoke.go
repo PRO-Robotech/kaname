@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // DefaultRevocationTTL — fallback retention when the caller omits ttl_expires_at.
@@ -140,7 +141,12 @@ type RevokeInput struct {
 type RevokeUseCase struct {
 	writer  sessionRevocationWriter
 	opsRepo operationRepo
-	now     func() time.Time
+	// now — часы процесса для записи отзыва ОДНОГО носителя (момент записи и
+	// её срок): с отсечкой отзыва-всех эта запись не сравнивается.
+	now func() time.Time
+	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки отзыва-всех
+	// (kaname#589). Не подан — отзыв-всех отказывает, а не берёт часы процесса.
+	cutoffClock revocationpolicy.Clock
 }
 
 // NewRevokeUseCase — constructor. writer may be nil; the handler guards against
@@ -151,14 +157,19 @@ type RevokeUseCase struct {
 // fixed for, so a wiring omission must not be able to reintroduce it silently.
 // A nil repo still fails closed at Execute (Unavailable) — the caller is told
 // the mutation did not happen instead of receiving an unqueryable id.
-func NewRevokeUseCase(writer sessionRevocationWriter, opsRepo operationRepo) *RevokeUseCase {
-	return &RevokeUseCase{writer: writer, opsRepo: opsRepo, now: time.Now}
+//
+// cutoffClock is REQUIRED for the same reason (kaname#589): the revoke-all
+// cutoff is compared with moments other replicas stamp, so it must come from
+// the one source they share. A nil clock fails the revoke-all branch closed at
+// Execute with a fixed text, BEFORE the operation row exists.
+func NewRevokeUseCase(writer sessionRevocationWriter, opsRepo operationRepo, cutoffClock revocationpolicy.Clock) *RevokeUseCase {
+	return &RevokeUseCase{writer: writer, opsRepo: opsRepo, now: time.Now, cutoffClock: cutoffClock}
 }
 
 // Execute validates, writes the revocation(s), and returns a done Operation.
 //
 //   - revoke_all_user_tokens=true → write a per-user revoke-all cutoff
-//     (revoke_before = now). This denies ALL the user's currently-live tokens at
+//     (revoke_before = the shared clock's moment, kaname#589). This denies ALL the user's currently-live tokens at
 //     refresh (the refresh-hook compares the token's session auth_time against
 //     the cutoff). Previously the flag was silently ignored and one empty-jti
 //     row was written (revoked_count=0) → a no-op reported as success.
@@ -192,9 +203,17 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// no trace, exactly as every other mutation in this service does.
 	var marker *domain.UserTokenRevocation
 	if in.RevokeAllUserTokens {
+		// Момент отсечки — из общего источника, до записи операции: глагол,
+		// которому не поставить момент, не оставляет следа (kaname#589).
+		cutoff, err := revocationpolicy.Moment(ctx, uc.cutoffClock)
+		if err != nil {
+			slog.ErrorContext(ctx, "session Revoke: revoke-all cutoff moment unavailable",
+				"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
+			return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+		}
 		m := domain.UserTokenRevocation{
 			UserID:       domain.UserID(in.UserID),
-			RevokeBefore: now,
+			RevokeBefore: cutoff,
 			Reason:       reason,
 		}
 		if err := m.Validate(); err != nil {

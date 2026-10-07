@@ -68,6 +68,8 @@ func insertLiveToken(ctx context.Context, t *testing.T, pool *pgxpool.Pool, owne
 	tx, err := txb.Begin(ctx)
 	require.NoError(t, err)
 	row, err := repo.Insert(ctx, tx, domain.UserOAuthClient{
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt:       time.Now().UTC(),
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(ids.NewID(domain.PrefixUserOAuthClient)),
 		UserID:          owner,

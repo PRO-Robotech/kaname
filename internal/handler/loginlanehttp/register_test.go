@@ -59,7 +59,7 @@ func TestLane_F4_01_RegisterIssuesTheSessionCookieAndANewFormContext(t *testing.
 	require.Equal(t, "a@example.invalid", stub.registerIn[0].Email)
 	require.Equal(t, "correct-horse-battery-staple-9", stub.registerIn[0].Password)
 	require.Equal(t, "203.0.113.7", stub.registerIn[0].Source)
-	require.Contains(t, loginlanehttp.Paths(), loginlanehttp.PathRegister, "край читает тот же перечень")
+	require.Contains(t, loginlanehttp.Paths(), loginlanehttp.PathRegister, "путь регистрации в перечне полосы")
 }
 
 // TestLane_F4_11_12_RefusalIsOneFixedBodyWithoutACause — единый отказ

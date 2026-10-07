@@ -61,6 +61,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 const (
@@ -223,7 +224,8 @@ func TestRegisterTiming_F4_14_15_Live(t *testing.T) {
 	require.True(t, ok)
 	build := func(store registration.Store) *registration.RegisterUseCase {
 		uc, err := registration.NewRegisterUseCase(registration.Deps{
-			Store: store, Rule: rule, Hasher: hasher, Lane: lane, TTL: time.Hour, Logger: slog.New(slog.DiscardHandler),
+			CutoffClock: momentclock.Func(time.Now),
+			Store:       store, Rule: rule, Hasher: hasher, Lane: lane, TTL: time.Hour, Logger: slog.New(slog.DiscardHandler),
 			Letter: unitLetterPace, Sources: admitEverySource{}, SourcePace: unitSourcePace,
 		})
 		require.NoError(t, err)

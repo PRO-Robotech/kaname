@@ -83,6 +83,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // AuditRecoveryCompleted — событие завершения восстановления. Источник у
@@ -112,8 +113,12 @@ type CompleteRecoveryUseCase struct {
 	ttl      time.Duration
 	observer Observer
 	now      func() time.Time
-	logger   *slog.Logger
-	gate     attemptGate
+	// clock — ОБЩИЙ для всех реплик источник момента отсечки и момента
+	// выдаваемой сессии (kaname#589); now — часы процесса для срока кода и
+	// счёта попыток.
+	clock  revocationpolicy.Clock
+	logger *slog.Logger
+	gate   attemptGate
 }
 
 // CompleteRecoveryDeps — зависимости. Хранилища способов входа среди них нет:
@@ -127,7 +132,10 @@ type CompleteRecoveryDeps struct {
 	TTL      time.Duration
 	Observer Observer
 	Now      func() time.Time
-	Logger   *slog.Logger
+	// CutoffClock — источник момента отсечки и момента сессии: тот же, что у
+	// всех писателей моментов, сравниваемых с отсечкой (kaname#589). Обязателен.
+	CutoffClock revocationpolicy.Clock
+	Logger      *slog.Logger
 }
 
 // NewCompleteRecoveryUseCase — построение с проверкой зависимостей.
@@ -141,6 +149,8 @@ func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCas
 		return nil, fmt.Errorf("recovery completion: password rule required")
 	case d.TTL <= 0:
 		return nil, fmt.Errorf("recovery completion: session ttl must be positive")
+	case d.CutoffClock == nil:
+		return nil, fmt.Errorf("recovery completion: %w", errNoCutoffClock)
 	}
 	if err := d.Limits.Validate(); err != nil {
 		return nil, err
@@ -155,7 +165,8 @@ func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCas
 		d.Logger = slog.Default()
 	}
 	return &CompleteRecoveryUseCase{
-		store: d.Store, hasher: d.Hasher, rule: d.Rule, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
+		store: d.Store, hasher: d.Hasher, rule: d.Rule, ttl: d.TTL, observer: d.Observer, now: d.Now,
+		clock: d.CutoffClock, logger: d.Logger,
 		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer},
 	}, nil
 }
@@ -198,6 +209,14 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
 	}
 	now := uc.now().UTC()
+	// Момент отсечки и сессии — из общего источника (kaname#589), до
+	// транзакции и на обеих полосах одинаково: до точки решения обе делают
+	// одну и ту же работу (шапка).
+	at, err := sharedMoment(ctx, uc.clock, uc.logger, "recovery completion")
+	if err != nil {
+		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
+		return CompleteRecoveryOutput{}, ErrStoreUnavailable
+	}
 
 	// (3) Адрес — одно чтение на обеих полосах. До точки решения (4) обе
 	// полосы делают одну и ту же работу хранилища (шапка).
@@ -237,7 +256,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	// Код применён: учётные данные сменяются у ЛЮБОЙ личности, включая
 	// заблокированную (Ф5-17); сессия выдаётся только действующей (Ф1-59).
 	blocked := user.InviteStatus != domain.InviteStatusActive
-	out, err := uc.complete(ctx, w, user, code, fresh, now, blocked, target.EmailVerified)
+	out, err := uc.complete(ctx, w, user, code, fresh, now, at, blocked, target.EmailVerified)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
@@ -255,9 +274,13 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 // решения: материал · снятие записей всех прежних сессий · отсечка · журнал ·
 // у незаблокированной — выдача, чтение заведённых способов этой транзакцией и
 // решение о счёте по адресу местом решения входа · событие · фиксация.
+//
+// at — момент общего источника (kaname#589): им ставятся отсечка и момент
+// выдаваемой сессии, то есть всё, что сравнивается с отсечкой. now — часы
+// процесса для отметок, которые с ней не сравниваются.
 func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
-	now time.Time, blocked, emailVerified bool,
+	now, at time.Time, blocked, emailVerified bool,
 ) (CompleteRecoveryOutput, error) {
 	// Материал — «заменить либо завести» одним оператором (Р5 ветвь «строки
 	// нет», Ф5-34): у личности без строки пароля завершение заводит первый
@@ -294,7 +317,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		return CompleteRecoveryOutput{}, err
 	}
 	if err := w.UpsertCutoff(ctx, domain.UserTokenRevocation{
-		UserID: user.ID, RevokeBefore: now, Reason: domain.RevokeReasonPasswordChange,
+		UserID: user.ID, RevokeBefore: at, Reason: domain.RevokeReasonPasswordChange,
 	}, user.ID); err != nil {
 		return CompleteRecoveryOutput{}, err
 	}
@@ -326,7 +349,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		s, bearer, err := IssueSession(ctx, w, IssueInput{
 			User:      user,
 			Presented: presentationsOf(methods),
-			At:        now.Add(time.Microsecond),
+			At:        at.Add(time.Microsecond),
 			TTL:       uc.ttl,
 		})
 		if err != nil {

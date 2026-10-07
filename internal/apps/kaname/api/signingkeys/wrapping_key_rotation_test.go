@@ -31,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -68,7 +69,7 @@ func signerOver(t *testing.T, ks *signingkeys.Keystore, at time.Time) *tokensign
 	t.Helper()
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      "https://iam.kacho.test",
-		Clock:       func() time.Time { return at },
+		Clock:       momentclock.Func(func() time.Time { return at }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ks)
 	require.NoError(t, err)
