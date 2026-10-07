@@ -18,6 +18,7 @@ package loginlanehttp_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -660,6 +661,61 @@ func TestEC16_TwoPeopleOneFreeAddressOnlyOneWins(t *testing.T) {
 		dist[strconv.Itoa(ok)+"/"+strconv.Itoa(conflict)]++
 	}
 	t.Logf("EC-16: повторов %d · распределение (200/409): %v", repeats, dist)
+}
+
+// TestEC_DB02_ConcurrentRequestsOfOnePersonAdmitOne — два одновременных
+// запроса смены ОДНОГО человека (Р5, Р6; ревью схемы волны 6, критическое 2):
+// живая строка у человека одна (частичный уникальный ключ) и темп человека
+// судит одним условным оператором, а держит их вместе замок строки человека,
+// взятый первым оператором транзакции запроса. Без замка обе транзакции видят
+// «живой строки нет, окно пусто» — и либо обе принимаются, либо вторая ловит
+// отказ частичного ключа вместо отказа темпа. Исход: ровно один 200 и один 429
+// TOO_MANY_ATTEMPTS, живая строка одна, письмо с кодом одно. 16 повторов с
+// новыми посевами; адреса двух запросов разные, чтобы окно адресата их не
+// сводило.
+func TestEC_DB02_ConcurrentRequestsOfOnePersonAdmitOne(t *testing.T) {
+	h := newAVLane(t)
+	h.requireEmailChangeVerbs(t, "EC-DB-02")
+	const repeats = 16
+	dist := map[string]int{}
+	for i := 0; i < repeats; i++ {
+		s := h.ecSeed(t, "ecdb2")
+		addrs := []string{freshAddress("ecdb2a"), freshAddress("ecdb2b")}
+		replies := make([]reply, 2)
+		var wg sync.WaitGroup
+		for j := range replies {
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				replies[j] = h.requestChange(t, s, addrs[j])
+			}(j)
+		}
+		wg.Wait()
+		ok, paced := 0, 0
+		for _, r := range replies {
+			switch r.status {
+			case http.StatusOK:
+				ok++
+			case http.StatusTooManyRequests:
+				requireRefusal(t, r, http.StatusTooManyRequests, 8, "TOO_MANY_ATTEMPTS", "too many attempts; try again later",
+					fmt.Sprintf("EC-DB-02 повтор %d", i))
+				paced++
+			default:
+				t.Fatalf("EC-DB-02 повтор %d: исход, которого у запроса нет: %d: %s", i, r.status, r.body)
+			}
+		}
+		require.Equal(t, 1, ok, "EC-DB-02 повтор %d: ровно один 200", i)
+		require.Equal(t, 1, paced, "EC-DB-02 повтор %d: ровно один 429", i)
+		var live, all int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `
+			SELECT count(*) FILTER (WHERE consumed_at IS NULL AND superseded_at IS NULL), count(*)
+			  FROM kaname.email_change_codes WHERE user_id = $1`, string(s.user)).Scan(&live, &all))
+		require.Equal(t, 1, live, "EC-DB-02 повтор %d: живая строка одна", i)
+		require.Equal(t, 1, all, "EC-DB-02 повтор %d: принятый запрос один — отказ темпа ничего не пишет", i)
+		require.Len(t, h.mailOf(t, ecMailCode, s.user), 1, "EC-DB-02 повтор %d: письмо с кодом одно", i)
+		dist[strconv.Itoa(ok)+"/"+strconv.Itoa(paced)]++
+	}
+	t.Logf("EC-DB-02: повторов %d · распределение (200/429): %v", repeats, dist)
 }
 
 // TestEC17_TheIntervalBetweenLetters — EC-17.

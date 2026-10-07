@@ -31,7 +31,12 @@
 -- ПРИЧИНА КОНЦА СЕССИИ `email-changed` (Р8 п. 4)
 -- =============================================================================
 -- Исход смены снимает все ПРОЧИЕ сессии человека; текущая получает новый
--- носитель. Лежащих строк накат не трогает.
+-- носитель. Лежащих строк накат не трогает. Словарь переобъявляется ЦЕЛИКОМ,
+-- поэтому список — последнее объявление (`20261007104910`, kaname#634, слово
+-- `ended-from-another-session`) плюс своё слово; откат возвращает ровно то
+-- последнее объявление. Список без соседа снял бы его слово: накат упал бы на
+-- лежащих строках соседа, а откат отверг бы его законное снятие (держит
+-- `TestEmailChangeMigration_EC_DB_01_NeighbourReasonSurvivesUpAndDown`).
 --
 -- =============================================================================
 -- ОКНО ПИСЕМ АДРЕСАТА `email-change` (Р6)
@@ -62,8 +67,10 @@
 -- у человека одна (частичный уникальный ключ): новый принятый запрос вытесняет
 -- прежнюю отметкой `superseded_at` — и на свободный, и на занятый адрес.
 -- Предъявление — один оператор: счёт попытки и сверка свёртки не разнесены
--- чтением и записью. Уникальность нового адреса решает НЕ эта таблица, а ключ
--- `users_identity_email_uniq` в операторе исхода смены.
+-- чтением и записью. Строка ищется по человеку (частичный ключ), свёртка
+-- сравнивается в найденной строке, поэтому ключа по свёртке у таблицы нет:
+-- его не читал бы ни один запрос. Уникальность нового адреса решает НЕ эта
+-- таблица, а ключ `users_identity_email_uniq` в операторе исхода смены.
 
 -- +goose Up
 
@@ -80,7 +87,7 @@ ALTER TABLE kaname.human_sessions
     DROP CONSTRAINT human_sessions_ended_reason_check;
 ALTER TABLE kaname.human_sessions
     ADD CONSTRAINT human_sessions_ended_reason_check
-        CHECK (((ended_reason IS NULL) OR (ended_reason = ANY (ARRAY['logout'::text, 'password-change'::text, 'second-factor-removed'::text, 'admin-force-logout'::text, 'email-verified'::text, 'email-changed'::text]))));
+        CHECK (((ended_reason IS NULL) OR (ended_reason = ANY (ARRAY['logout'::text, 'password-change'::text, 'second-factor-removed'::text, 'admin-force-logout'::text, 'email-verified'::text, 'ended-from-another-session'::text, 'email-changed'::text]))));
 
 ALTER TABLE kaname.invite_mail_windows DROP CONSTRAINT invite_mail_windows_kind_check;
 ALTER TABLE kaname.invite_mail_windows
@@ -110,7 +117,6 @@ CREATE TABLE kaname.email_change_codes (
     CONSTRAINT email_change_codes_id_check CHECK ((length(id) >= 1) AND (length(id) <= 128)),
     CONSTRAINT email_change_codes_new_email_check
         CHECK (((length(new_email) >= 3) AND (length(new_email) <= 254) AND (new_email = lower(new_email)))),
-    CONSTRAINT email_change_codes_digest_uniq UNIQUE (code_digest),
     CONSTRAINT email_change_codes_digest_check CHECK (((code_digest IS NULL) OR (code_digest ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT email_change_codes_expiry_after_issue_check CHECK ((expires_at > issued_at)),
     CONSTRAINT email_change_codes_attempts_check CHECK ((attempts >= 0)),
@@ -168,7 +174,7 @@ ALTER TABLE kaname.human_sessions
     DROP CONSTRAINT human_sessions_ended_reason_check;
 ALTER TABLE kaname.human_sessions
     ADD CONSTRAINT human_sessions_ended_reason_check
-        CHECK (((ended_reason IS NULL) OR (ended_reason = ANY (ARRAY['logout'::text, 'password-change'::text, 'second-factor-removed'::text, 'admin-force-logout'::text, 'email-verified'::text]))));
+        CHECK (((ended_reason IS NULL) OR (ended_reason = ANY (ARRAY['logout'::text, 'password-change'::text, 'second-factor-removed'::text, 'admin-force-logout'::text, 'email-verified'::text, 'ended-from-another-session'::text]))));
 
 DELETE FROM kaname.invite_mail_outbox WHERE event_type IN ('mail.email-change.send', 'mail.email-changed.send');
 ALTER TABLE kaname.invite_mail_outbox DROP CONSTRAINT invite_mail_outbox_event_type_check;
