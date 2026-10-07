@@ -310,7 +310,9 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	// закрытом перечне.
 	require.Contains(t, domain.FormKinds(), domain.FormSessionEnd)
 	require.Equal(t, domain.FormKind("session-end"), domain.FormSessionEnd)
-	require.Len(t, domain.FormKinds(), 14, "видов признака — 14 (приёмка kaname#634, Р1)")
+	// Видов признака 16: тринадцать базы, два смены адреса (kaname#635, Р1) и
+	// один своих сессий (kaname#634, Р1).
+	require.Len(t, domain.FormKinds(), 16, "видов признака — 16 (приёмки kaname#635 и kaname#634, Р1)")
 
 	stub := &stubLane{}
 	l := newLane(t, stub, "")
