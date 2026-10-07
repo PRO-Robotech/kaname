@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 775
+Всего кейсов: 778
 
 ## Перепись по модулям
 
@@ -70,6 +70,7 @@
 | `cases/kaname-recovery-lane.py` | 10 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 7 |
+| `cases/kaname-email-change.py` | 3 |
 | `cases/kaname-access-keys.py` | 10 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1081,6 +1082,23 @@
 - `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
 - `IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS`
+
+## `cases/kaname-email-change.py` — 3 кейса
+
+> Смена адреса почты с подтверждением с нового адреса (kaname#635, приёмка
+> `email-change-is-confirmed-from-the-new-address.md`, позиции уровня E EC-25…EC-27):
+> запрос смены и предъявление кода на том же слушателе формы, что вход. Адресуется
+> `loginLaneBaseUrl`, коды писем читает у приёмника писем стенда (`standMailboxUrl`,
+> `GET /codes`); людей набор заводит сам регистрацией и подтверждением адреса.
+> Отсутствие письма на занятый адрес судит барьер — письмо, законно запрошенное тем
+> же человеком позже; интервал ждёт по `Retry-After` ответа службы, несвежесть сессии —
+> по окну свежести профиля. Без посадки `own` либо приёмника писем — «условие не
+> создано». Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
+> прогонщика.
+
+- `IAM-EMAILCHANGE-OK-CHANGE-END-TO-END`
+- `IAM-EMAILCHANGE-NEG-TAKEN-ADDRESS-INDISTINGUISHABLE`
+- `IAM-EMAILCHANGE-NEG-STALE-SESSION-STEP-UP`
 
 ## `cases/kaname-second-factor.py` — 18 кейсов
 

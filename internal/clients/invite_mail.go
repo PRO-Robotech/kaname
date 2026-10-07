@@ -85,7 +85,20 @@ const (
 	// (kaname#456, Р8); заведён миграцией
 	// `20260927190000_address_verification_is_our_verb`.
 	EventVerificationMailSend = "mail.verification.send"
+	// EventEmailChangeMailSend — вид события письма с кодом смены адреса на
+	// НОВЫЙ адрес (kaname#635, Р7); заведён миграцией
+	// `20261007150000_email_change_is_confirmed_from_the_new_address`.
+	EventEmailChangeMailSend = "mail.email-change.send"
+	// EventEmailChangedMailSend — вид события уведомления о смене адреса на
+	// ПРЕЖНИЙ адрес (kaname#635, Р7); заведён той же миграцией.
+	EventEmailChangedMailSend = "mail.email-changed.send"
 )
+
+// SettingsScreenPath — путь экрана параметров учётной записи в консоли:
+// письмо с кодом смены адреса называет его (kaname#635, Р7). Адрес экрана —
+// происхождение консоли, объявленное той же настройкой, что адрес входа, и этот
+// путь, без параметров и фрагмента.
+const SettingsScreenPath = "/settings"
 
 // VerificationScreenPath — путь экрана подтверждения адреса в консоли. Адрес
 // экрана — происхождение консоли, объявленное той же настройкой, что адрес
@@ -231,6 +244,9 @@ type MailEvent struct {
 	// CodeValidMinutes — срок кода в минутах, как его называет письмо (Ф1-25:
 	// «код с объявленным сроком»). У видов восстановления и подтверждения.
 	CodeValidMinutes int `json:"code_valid_minutes,omitempty"`
+	// ChangedAt — момент смены адреса (RFC 3339, до секунды); у уведомления о
+	// смене адреса. Нового адреса уведомление не несёт.
+	ChangedAt string `json:"changed_at,omitempty"`
 	// Kind — вид события строки; проставляется применителем, в нагрузке не
 	// хранится.
 	Kind string `json:"-"`
@@ -590,9 +606,80 @@ func RenderMail(relay MailRelay, ev MailEvent) []byte {
 		return RenderRecoveryMail(relay, ev)
 	case EventVerificationMailSend:
 		return RenderVerificationMail(relay, ev)
+	case EventEmailChangeMailSend:
+		return RenderEmailChangeMail(relay, ev)
+	case EventEmailChangedMailSend:
+		return RenderEmailChangedMail(relay, ev)
 	default:
 		return RenderInviteMail(relay, ev)
 	}
+}
+
+// settingsScreenAddress — адрес экрана параметров: происхождение адреса входа,
+// объявленного настройкой установки, и путь экрана, — без параметров и
+// фрагмента. Не объявлен либо не разбирается — пусто.
+func settingsScreenAddress(loginURL string) string {
+	u, err := url.Parse(strings.TrimSpace(loginURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: SettingsScreenPath}).String()
+}
+
+// RenderEmailChangeMail собирает тело письма с кодом смены адреса на НОВЫЙ
+// адрес (kaname#635, Р7).
+//
+// Письмо несёт КОД, его срок в минутах и адрес экрана параметров — и ничего
+// сверх. Кода в адресе нет: код вводится руками на экране, где смена начата.
+func RenderEmailChangeMail(relay MailRelay, ev MailEvent) []byte {
+	subject := "Код смены адреса почты"
+	if relay.FromName != "" {
+		subject = "Код смены адреса почты — " + relay.FromName
+	}
+	b := mailHeaders(relay, ev, subject)
+	b.WriteString("Для учётной записи запрошена смена адреса почты на этот адрес.\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("Код подтверждения смены:\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("    " + ev.Code + "\r\n")
+	b.WriteString("\r\n")
+	if ev.CodeValidMinutes > 0 {
+		fmt.Fprintf(b, "Код действует %d мин. с момента отправки и применяется один раз.\r\n", ev.CodeValidMinutes)
+	} else {
+		b.WriteString("Код применяется один раз.\r\n")
+	}
+	if screen := settingsScreenAddress(relay.LoginURL); screen != "" {
+		b.WriteString("Введите его на экране параметров учётной записи: " + screen + "\r\n")
+	} else {
+		b.WriteString("Введите его на экране параметров учётной записи.\r\n")
+	}
+	b.WriteString("\r\n")
+	b.WriteString("Никому не сообщайте этот код. Если смену запрашивали не вы — не вводите его нигде:\r\n")
+	b.WriteString("без кода адрес учётной записи не изменится.\r\n")
+	return []byte(b.String())
+}
+
+// RenderEmailChangedMail собирает тело уведомления о смене адреса на ПРЕЖНИЙ
+// адрес (kaname#635, Р7).
+//
+// Уведомление несёт момент смены и строку «если это были не вы — обратитесь к
+// администратору аккаунта» — и ничего сверх: нового адреса нет (прежний ящик
+// мог оказаться в чужих руках), кода и ссылки нет.
+func RenderEmailChangedMail(relay MailRelay, ev MailEvent) []byte {
+	subject := "Адрес почты учётной записи изменён"
+	if relay.FromName != "" {
+		subject = "Адрес почты учётной записи изменён — " + relay.FromName
+	}
+	b := mailHeaders(relay, ev, subject)
+	if ev.ChangedAt != "" {
+		b.WriteString("Адрес почты учётной записи изменён " + ev.ChangedAt + " (UTC).\r\n")
+	} else {
+		b.WriteString("Адрес почты учётной записи изменён.\r\n")
+	}
+	b.WriteString("Этот адрес больше не используется для входа и восстановления доступа.\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("Если это были не вы — обратитесь к администратору аккаунта.\r\n")
+	return []byte(b.String())
 }
 
 // letterAddress — адрес, который несёт письмо любого вида: происхождение и
@@ -828,6 +915,18 @@ func NewInviteMailApplier(
 				// Письмо подтверждения без кода не подтверждает ничего: постоянный
 				// отказ, транспорт не зовётся.
 				return fmt.Errorf("%w: verification mail row carries no code", drainer.ErrPermanent)
+			}
+		case EventEmailChangeMailSend:
+			if strings.TrimSpace(ev.Code) == "" {
+				// Письмо смены адреса без кода не подтверждает ничего:
+				// постоянный отказ, транспорт не зовётся.
+				return fmt.Errorf("%w: email change mail row carries no code", drainer.ErrPermanent)
+			}
+		case EventEmailChangedMailSend:
+			if strings.TrimSpace(ev.Code) != "" {
+				// Уведомление на прежний адрес кода не несёт по построению (Р7):
+				// строка с кодом — дефект производителя, транспорт не зовётся.
+				return fmt.Errorf("%w: email changed notice row carries a code", drainer.ErrPermanent)
 			}
 		default:
 			return fmt.Errorf("%w: unknown mail event type %q", drainer.ErrPermanent, eventType)

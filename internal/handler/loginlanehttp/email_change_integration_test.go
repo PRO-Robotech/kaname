@@ -211,7 +211,7 @@ func TestEC01_RequestQueuesACodeToTheNewAddressAndChangesNothingElse(t *testing.
 	letters := h.mailOf(t, ecMailCode, s.user)
 	require.Len(t, letters, 1, "EC-01: одна строка %s", ecMailCode)
 	require.Equal(t, n, letters[0].to, "EC-01: адресат — новый адрес в приведённом виде")
-	require.Len(t, letters[0].code, 10, "EC-01: 10-значный код")
+	require.Len(t, strings.ReplaceAll(letters[0].code, "-", ""), 10, "EC-01: 10-значный код (форма письма делит его дефисом)")
 	require.Equal(t, int(avCodeTTLProfile/time.Minute), letters[0].minutes, "EC-01: срок в минутах")
 	for _, p := range h.mailPayloads(t, ecMailCode, s.user) {
 		var payload map[string]any

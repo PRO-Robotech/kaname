@@ -259,6 +259,12 @@ const (
 	// сессия, в которой код предъявлен. Причина снятия записи сессии; отсечки
 	// подтверждение не пишет.
 	RevokeReasonEmailVerified = "email-verified"
+	// RevokeReasonEmailChanged — исход смены адреса снимает ПРОЧИЕ сессии
+	// человека (kaname#635, Р8 п. 4): адрес — канал восстановления, и после
+	// смены канала прежние устройства за учётную запись не держатся; текущая
+	// сессия получает новый носитель. Причина снятия записи сессии; отсечки
+	// смена адреса не пишет.
+	RevokeReasonEmailChanged = "email-changed"
 )
 
 // HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
@@ -278,6 +284,7 @@ func HumanSessionEndReasons() []string {
 		RevokeReasonSecondFactorRemoved,
 		RevokeReasonAdminForceLogout,
 		RevokeReasonEmailVerified,
+		RevokeReasonEmailChanged,
 	}
 }
 
@@ -321,11 +328,16 @@ const (
 	// приёмка A7 Р1): свой вид, не вид смены — заведение и смена суть разные
 	// действия с разными основаниями.
 	FormPasswordEnroll FormKind = "password-enroll"
+	// Смена адреса почты (kaname#635, приёмка email-change Р1): запрос смены и
+	// предъявление кода с нового адреса — две формы, два вида; признак одного
+	// другому не годится.
+	FormEmailChange        FormKind = "email-change"
+	FormEmailChangeConfirm FormKind = "email-change-confirm"
 )
 
 var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete,
 	FormSecondFactor, FormStepUp, FormVerifyEmail, FormVerifyEmailConfirm, FormAccessKeyBegin, FormAccessKeyLogin,
-	FormPasswordEnroll}
+	FormPasswordEnroll, FormEmailChange, FormEmailChangeConfirm}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

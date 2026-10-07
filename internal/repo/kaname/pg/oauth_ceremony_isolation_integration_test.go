@@ -1049,6 +1049,18 @@ var sessionEnderDoors = []sessionEnderDoor{
 			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailVerified)
 		},
 	},
+	{
+		// Смена своего адреса (kaname#635): транзакция, открытая замком строки
+		// личности, исходом смены снимает прочие сессии человека.
+		name: "RegistrationStore.EmailChangeWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewRegistrationStore(pool).EmailChangeWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailChanged)
+		},
+	},
 }
 
 // TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily — ОБРАТНАЯ сцена пары

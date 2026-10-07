@@ -6,15 +6,19 @@
 //
 // # Предмет
 //
-// Видов письма в продукте три (подтверждение адреса, восстановление доступа,
-// приглашение), и все три с этого изменения отправляем МЫ. Приглашение — наше по
+// Видов письма в продукте пять (подтверждение адреса, восстановление доступа,
+// приглашение, код смены адреса и уведомление о смене адреса), и все пять
+// отправляем МЫ. Приглашение — наше по
 // решению Р23 приёмки ID-MAIL-1: его предмет — строка в НАШЕЙ базе.
 // Восстановление доступа — наше с фазы Ф5 (одобренная
 // `docs/engineering/acceptance/recovery-of-access.md`, Р3 и Д5): код чеканим мы,
 // поток поставщика истёк вместе с поставщиком. Подтверждение адреса — наше по
 // одобренной `docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md`
 // (kaname#456, Р8): приёмка назвала переезд, код подтверждения чеканим мы, и
-// без него человеку не открывается ничего дальше экрана подтверждения.
+// без него человеку не открывается ничего дальше экрана подтверждения. Код
+// смены адреса и уведомление о смене — наши по одобренной
+// `docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md`
+// (kaname#635, Р7): глагол смены — наш с первого дня.
 //
 // Перечень НАШИХ видов — `OurMailKinds` — закрыт и объявлен один раз; вид
 // входит в него ТОЛЬКО одобренной приёмкой, назвавшей переезд, а не правкой
@@ -110,12 +114,19 @@ const (
 	// MailKindVerification — подтверждение адреса (kaname#456, Р8 — переезд
 	// назван одобренной приёмкой).
 	MailKindVerification = "verification"
+	// MailKindEmailChange — код смены адреса на новый адрес (kaname#635, Р7 —
+	// вид назван одобренной приёмкой
+	// `email-change-is-confirmed-from-the-new-address.md`).
+	MailKindEmailChange = "email-change"
+	// MailKindEmailChanged — уведомление о смене адреса на прежний адрес
+	// (kaname#635, Р7 — та же приёмка).
+	MailKindEmailChanged = "email-changed"
 )
 
 // OurMailKinds — ЗАКРЫТЫЙ перечень видов, которые отправляет наш код. Каждый
 // обязан иметь путь отправки (иначе вид без производителя), и ни один чужой вид
 // пути иметь не вправе.
-var OurMailKinds = []string{MailKindInvite, MailKindRecovery, MailKindVerification}
+var OurMailKinds = []string{MailKindInvite, MailKindRecovery, MailKindVerification, MailKindEmailChange, MailKindEmailChanged}
 
 // mailKindIsOurs — предикат перечня.
 func mailKindIsOurs(kind string) bool {

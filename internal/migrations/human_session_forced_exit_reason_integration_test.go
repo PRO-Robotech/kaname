@@ -460,10 +460,11 @@ func TestHumanSessionSchema_KN_SER_07_DomainListAndTheBaseAgreeBothWays(t *testi
 	assert.Empty(t, onlyBase, "значения %s, которых нет в перечне домена: %v", serEndedReasonCheck, onlyBase)
 	assert.NotContains(t, list.values, serCutoffOnlyReason,
 		"%q — причина отсечки, а не снятия сессии (§0.2): в перечне словаря снятия её быть не должно", serCutoffOnlyReason)
-	// На голове значений пять: к четырём этой миграции kaname#456 добавила
-	// `email-verified` (подтверждение адреса снимает прочие сессии).
-	assert.Len(t, list.values, 5, "на голове N = 5")
-	assert.Len(t, base, 5, "на голове M = 5")
+	// На голове значений шесть: к четырём этой миграции kaname#456 добавила
+	// `email-verified` (подтверждение адреса снимает прочие сессии), kaname#635 —
+	// `email-changed` (исход смены адреса снимает прочие сессии).
+	assert.Len(t, list.values, 6, "на голове N = 6")
+	assert.Len(t, base, 6, "на голове M = 6")
 }
 
 // TestHumanSessionMigration_KN_SER_08_UpDoesNotRewriteLyingRows — накат не

@@ -100,16 +100,20 @@ const (
 	// (kaname#213, приёмка A7 Р1): подпуть семейства пароля.
 	// #nosec G101 -- это ПУТЬ глагола, а не значение пароля.
 	PathPasswordEnroll = "/iam/v1/auth/password/enroll"
+	// Смена адреса почты (kaname#635, приёмка email-change Р1): запрос смены
+	// и предъявление кода с нового адреса — два глагола под сессией человека.
+	PathEmailChange        = "/iam/v1/auth/email-change"
+	PathEmailChangeConfirm = "/iam/v1/auth/email-change/confirm"
 )
 
-// Paths — восемнадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
+// Paths — двадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
 // для ретрансляции (§8 инв. 7).
 func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
 		PathSecondFactorBackupCodes, PathStepUp, PathVerifyEmail, PathVerifyEmailConfirm,
-		PathAccessKeyBegin, PathAccessKeyLogin, PathPasswordEnroll,
+		PathAccessKeyBegin, PathAccessKeyLogin, PathPasswordEnroll, PathEmailChange, PathEmailChangeConfirm,
 	}
 }
 
@@ -150,6 +154,10 @@ var pathPositions = map[string]PathPosition{
 	// Заведение пароля — правка своих данных: в положении подтверждения адреса
 	// отказ (A7 Р2, F6b Р2).
 	PathPasswordEnroll: PathRefusedInVerification,
+	// Смена адреса — правка своих данных: в положении подтверждения отказ
+	// (приёмка email-change Р2); опечатку при регистрации путь не правит.
+	PathEmailChange:        PathRefusedInVerification,
+	PathEmailChangeConfirm: PathRefusedInVerification,
 }
 
 // PathPositions — объявление Р2 копией.
@@ -212,6 +220,9 @@ type Lane interface {
 	AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error)
 	// EnrollPassword — заведение первого пароля из живой сессии (kaname#213).
 	EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error)
+	// Смена адреса почты (kaname#635, Р1): запрос смены и предъявление кода.
+	RequestEmailChange(ctx context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error)
+	ConfirmEmailChange(ctx context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -275,6 +286,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathAccessKeyBegin, h.method(http.MethodPost, h.accessKeyBegin))
 	h.mux.HandleFunc(PathAccessKeyLogin, h.method(http.MethodPost, h.accessKeyLogin))
 	h.mux.HandleFunc(PathPasswordEnroll, h.method(http.MethodPost, h.enrollPassword))
+	h.mux.HandleFunc(PathEmailChange, h.method(http.MethodPost, h.requestEmailChange))
+	h.mux.HandleFunc(PathEmailChangeConfirm, h.method(http.MethodPost, h.confirmEmailChange))
 	return h, nil
 }
 
@@ -385,6 +398,19 @@ type verifyEmailForm struct {
 
 // verifyEmailConfirmForm — предъявление кода подтверждения.
 type verifyEmailConfirmForm struct {
+	Code      string `json:"code"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// emailChangeForm — запрос смены адреса (приёмка email-change Р1): новый адрес
+// и признак. Набор закрыт: поле `email` — отказ разбора с его именем.
+type emailChangeForm struct {
+	NewEmail  string `json:"newEmail"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// emailChangeConfirmForm — предъявление кода смены.
+type emailChangeConfirmForm struct {
 	Code      string `json:"code"`
 	CSRFToken string `json:"csrfToken"`
 }
@@ -1001,6 +1027,61 @@ func (h *Handler) confirmEmailVerification(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
 }
 
+// --- смена адреса почты (kaname#635, приёмка email-change Р1, Р2) ---
+
+// requestEmailChange — запрос смены: форма → признак своего вида → положение
+// подтверждения → глагол. Успех — `200 {}` без печений; `Retry-After` называет
+// промежуток до следующего разрешённого запроса. Ответ на занятый адрес
+// побайтово тот же, что на свободный (Р4).
+func (h *Handler) requestEmailChange(w http.ResponseWriter, r *http.Request) {
+	var form emailChangeForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormEmailChange, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathEmailChange, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.RequestEmailChange(r.Context(), humansession.RequestEmailChangeInput{
+		Bearer: h.bearer(r), NewEmail: form.NewEmail,
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(out.NextAllowedIn))))
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// confirmEmailChange — предъявление кода смены: успех — тело `session` той же
+// формы, что у `verify-email/confirm`, и НОВЫЙ носитель той же сессии;
+// контекст формы прежний.
+func (h *Handler) confirmEmailChange(w http.ResponseWriter, r *http.Request) {
+	var form emailChangeConfirmForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormEmailChangeConfirm, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathEmailChangeConfirm, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.ConfirmEmailChange(r.Context(), humansession.ConfirmEmailChangeInput{
+		Bearer: h.bearer(r), Code: form.Code,
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
+}
+
 // source — адрес источника: значение заголовка допущенного вызывающего как
 // есть, цепочка не разбирается (Р10).
 func (h *Handler) source(r *http.Request) string {
@@ -1129,6 +1210,11 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	case errors.Is(err, humansession.ErrInviteNotValid):
 		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextInviteNotValid,
 			&errorInfo{Reason: humansession.ReasonInviteNotValid, Domain: h.cfg.RefusalDomain})
+	// Смена адреса (kaname#635, Р4): новый адрес заняли между запросом и
+	// предъявлением — 409 с признаком; видит его только владелец кода.
+	case errors.Is(err, humansession.ErrEmailInUse):
+		writeRefusal(w, http.StatusConflict, codeAlreadyExists, humansession.TextEmailInUse,
+			&errorInfo{Reason: humansession.ReasonEmailInUse, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrEmailNotVerified):
 		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextEmailNotVerified,
 			&errorInfo{Reason: humansession.ReasonEmailNotVerified, Domain: h.cfg.RefusalDomain})
