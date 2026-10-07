@@ -271,7 +271,8 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	// Завершение восстановления — НАСТОЯЩИЙ глагол (EC-23 предъявляет код
 	// восстановления после смены адреса).
 	completeR, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
+		CutoffClock: momentclock.Func(clock.Now),
+		Store:       sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
 		Observer: nop, Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
