@@ -163,6 +163,33 @@ required`, и запроса не будет вовсе. Так сделано �
   `}
 </CodeBlock>
 
+### Уровня удостоверения недостаточно — указание, а не отказ {#step-up}
+
+Годное удостоверение человека, уровень которого ниже порога глагола (каталог
+прав объявляет его как `required_acr_min`; например удостоверение уровня `1`
+на глаголе с порогом `2`), получает **указание повысить уровень** — ту же
+форму, что у края платформы:
+
+<CodeBlock language="text">
+  {dedent`
+    HTTP/1.1 401 Unauthorized
+    WWW-Authenticate: Bearer error="insufficient_user_authentication", error_description="Required ACR 2 for this resource; presented ACR 1", acr_values="2"
+
+    {"code":16,"message":"authentication level is insufficient: step up with a second factor, or present a credential of another kind","details":[]}
+  `}
+</CodeBlock>
+
+Текст `authentication level is insufficient: step up with a second factor, or present a credential of another kind`
+один на все поверхности — REST-фронт, нативный gRPC (`UNAUTHENTICATED` с тем же
+текстом) и край — и называет **шаг**: пройти повышение вторым фактором либо
+предъявить удостоверение другого вида. Какой уровень нужен, несёт параметр
+`acr_values` вызова; разбирайте параметры, а не строку целиком. Повторный вход
+паролем уровня не поднимает и ответа не изменит. Отличить указание от отказа
+удостоверению можно по тексту и по `error="insufficient_user_authentication"`:
+держатель годного удостоверения свой уровень знает сам — он лежит в
+предъявленном, — и указание не сообщает ему ничего, кроме шага. Машинный
+принципал от порога освобождён и указания не получает.
+
 ## Какие ответы бывают
 
 Отображение кода отказа в HTTP-статус одинаково у REST-фронта и у
@@ -173,7 +200,7 @@ required`, и запроса не будет вовсе. Так сделано �
   <tbody>
     <tr><td><code>200</code></td><td>успех</td></tr>
     <tr><td><code>400</code></td><td>форма запроса негодна, значение вне диапазона либо состояние ресурса не позволяет глагол</td></tr>
-    <tr><td><code>401</code></td><td>удостоверение не принято</td></tr>
+    <tr><td><code>401</code></td><td>удостоверение не принято — либо годно, но его уровня глаголу недостаточно: тогда это <a href="#step-up">указание повысить уровень</a> с вызовом <code>insufficient_user_authentication</code></td></tr>
     <tr><td><code>403</code></td><td>доступ к объекту не выдан</td></tr>
     <tr><td><code>404</code></td><td>объекта нет — либо он есть и не ваш: эти два случая неразличимы намеренно</td></tr>
     <tr><td><code>405</code></td><td>у этого пути нет такого метода. Тело — <code>{"code": 12, "message": "method not allowed", "details": []}</code>, заголовок <code>Allow</code> перечисляет методы, которые путь обслуживает. Та же форма у полосы входа: клиент, ключующийся на <code>code</code>, читает этот отказ одинаково по любому адресу службы</td></tr>

@@ -76,6 +76,15 @@ func (chainRevocations) FamilyRevoked(context.Context, string) (bool, error) { r
 // chainReader строит читателя и годный токен к нему.
 func chainReader(t *testing.T) (*presentedcred.Reader, string) {
 	t.Helper()
+	r, mint := chainMint(t)
+	return r, mint(nil)
+}
+
+// chainMint строит читателя и чеканщик годных токенов к нему: extra
+// дописывается к утверждениям (уровень `acr`, вид принципала) — так близнецы
+// пробы отличаются ровно одним фактом и предъявляются одному читателю.
+func chainMint(t *testing.T) (*presentedcred.Reader, func(extra jwt.MapClaims) string) {
+	t.Helper()
 	mat, err := signingkeygen.Generate(domain.SigningAlgES256)
 	if err != nil {
 		t.Fatalf("порождение ключа: %v", err)
@@ -84,20 +93,28 @@ func chainReader(t *testing.T) (*presentedcred.Reader, string) {
 	if err != nil {
 		t.Fatalf("разбор ключа: %v", err)
 	}
-	now := time.Now().UTC()
-	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss": chainIssuer, "sub": chainSubject, "aud": []string{chainAudience},
-		"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(10 * time.Minute).Unix(),
-		"jti":                        "tok-chain",
-		domain.ClaimPrincipalType:    "user",
-		domain.ClaimPrincipalID:      chainSubject,
-		domain.ClaimPrincipalDisplay: "alice@chain.test",
-	})
-	tok.Header["kid"] = chainKID
-	tok.Header["typ"] = tokenpolicy.TokenTypeAccess
-	raw, err := tok.SignedString(key)
-	if err != nil {
-		t.Fatalf("подпись: %v", err)
+	mint := func(extra jwt.MapClaims) string {
+		t.Helper()
+		now := time.Now().UTC()
+		claims := jwt.MapClaims{
+			"iss": chainIssuer, "sub": chainSubject, "aud": []string{chainAudience},
+			"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(10 * time.Minute).Unix(),
+			"jti":                        "tok-chain",
+			domain.ClaimPrincipalType:    "user",
+			domain.ClaimPrincipalID:      chainSubject,
+			domain.ClaimPrincipalDisplay: "alice@chain.test",
+		}
+		for k, v := range extra {
+			claims[k] = v
+		}
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+		tok.Header["kid"] = chainKID
+		tok.Header["typ"] = tokenpolicy.TokenTypeAccess
+		raw, err := tok.SignedString(key)
+		if err != nil {
+			t.Fatalf("подпись: %v", err)
+		}
+		return raw
 	}
 	r, err := presentedcred.New(presentedcred.Config{
 		Issuer:            chainIssuer,
@@ -112,7 +129,7 @@ func chainReader(t *testing.T) (*presentedcred.Reader, string) {
 	if err != nil {
 		t.Fatalf("построение читателя: %v", err)
 	}
-	return r, raw
+	return r, mint
 }
 
 // publicChainWithReader / internalChainNoReader — ТЕ ЖЕ сборщики, что уезжают в
@@ -312,10 +329,14 @@ func TestKAN_VER_01_PresentedLaneDoesNotBypassTheAssuranceFloor(t *testing.T) {
 		t.Fatal("глагол с объявленным порогом доверия пропущен по предъявленному " +
 			"удостоверению — порог объявлен каталогом и не проверяется никем")
 	}
-	if st := status.Convert(err); st.Code() != codes.PermissionDenied {
-		t.Errorf("код отказа %s, ожидается %s — отказ обязан быть тем же, что у соседних "+
-			"ветвей политики: «сертификата нет» и «доверия недостаточно» суть один ответ",
-			st.Code(), codes.PermissionDenied)
+	// Форма отказа — указание повысить уровень (Р11 приёмки уровня уверенности,
+	// kaname#511), а не отказ прав: держатель годного удостоверения нашей
+	// чеканки читает свой уровень из него самого, и указание сообщает ему лишь
+	// шаг. Прежде здесь утверждался `PermissionDenied` «как у соседних ветвей»;
+	// цена того ответа — повышение, которого клиент не узнавал.
+	if st := status.Convert(err); st.Code() != codes.Unauthenticated || st.Message() != stepUpText {
+		t.Errorf("отказ по полу: %s %q, ожидается %s %q (Р11)",
+			st.Code(), st.Message(), codes.Unauthenticated, stepUpText)
 	}
 }
 
