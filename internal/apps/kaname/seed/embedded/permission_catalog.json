@@ -2679,6 +2679,46 @@
     "exempt_reason": "SELF_SERVICE"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/Get",
+    "permission": "iam.cluster_admins.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/GrantAdmin",
+    "permission": "iam.cluster_admins.grant",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/ListAdmins",
+    "permission": "iam.cluster_admins.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/RevokeAdmin",
+    "permission": "iam.cluster_admins.revoke",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.GroupService/AddMember",
     "permission": "iam.group_members.addMember",
     "required_relation": "v_update",

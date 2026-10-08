@@ -1,0 +1,123 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// ClusterService — the PUBLIC twin of `InternalClusterService`.
+//
+// Registered on the service's public listener and its public REST front, under
+// the canonical `/iam/v1/cluster…` paths. The internal twin stays on the
+// internal listener unchanged; both twins execute the SAME use-case instances,
+// so the grant table has exactly one write path.
+//
+// Request and response messages are the internal twin's own (imported from
+// `internal_cluster_service.proto`): there is no second form of the same
+// subject. Every RPC carries the internal twin's annotations verbatim — the
+// permission key, the relation `system_admin` on the singleton
+// `cluster:cluster_root` (`scope_extractor.from_request_field = "*"`), and the
+// assurance floor: `1` for the reads, `2` for the mutations. `system_admin` is
+// declared `[user, service_account]` and is not satisfiable by a wildcard
+// tuple, so none of these RPCs is a directory read.
+//
+// Mutations return an `Operation` that is persisted before the mutation and
+// completed by the same request: the caller receives `done = true`, and
+// `GET /operations/{operationId}` answers the same envelope.
+//
+// The "last active admin cannot be revoked" invariant is held by the database
+// (one conditional UPDATE under a transaction-scoped lock); the public path
+// does not bypass it.
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/cluster.proto";
+import "kaname/cloud/iam/v1/internal_cluster_service.proto";
+import "corelib/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// ClusterService — administrators of the singleton cluster on the public
+// surface. See the file-level comment for the gate and the twin relation.
+service ClusterService {
+  // Returns the singleton Cluster resource (`id = "cluster_root"`).
+  // Sync read; no Operation envelope.
+  rpc Get (GetClusterRequest) returns (Cluster) {
+    option (google.api.http) = {
+      get: "/iam/v1/cluster"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.get";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Grants permanent cluster-admin (relation `system_admin` on
+  // `cluster:cluster_root`) to the requested subject — a user or a service
+  // account (`subject_type`; UNSPECIFIED is treated as USER). Idempotent:
+  // re-granting an active subject answers the existing grant id; re-granting a
+  // revoked one reactivates the same row.
+  rpc GrantAdmin (GrantClusterAdminRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/cluster/admins"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "GrantClusterAdminMetadata"
+      response: "ClusterAdminGrant"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.grant";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Revokes cluster-admin from the requested subject (soft revoke: the active
+  // row gets `granted_until = now()`). The path carries only the id; the
+  // subject kind is the `subjectType` query parameter, and UNSPECIFIED is
+  // treated as USER — revoking a service account over REST therefore needs
+  // `?subjectType=SERVICE_ACCOUNT`.
+  //
+  // Refusals: own grant — FailedPrecondition
+  // `"cannot revoke own cluster admin grant"`; the last active grant —
+  // FailedPrecondition `"cannot revoke last active cluster admin"`; a subject
+  // without an active grant — NotFound
+  // `"<User|ServiceAccount> <id> is not an active cluster admin"`.
+  rpc RevokeAdmin (RevokeClusterAdminRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/cluster/admins/{subject_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeClusterAdminMetadata"
+      response: "ClusterAdminGrant"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.revoke";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Lists currently-active cluster admins, ordered by `granted_at`, then by
+  // `cluster_admin_grant_id`, both ascending. Sync read; no pagination.
+  rpc ListAdmins (ListClusterAdminsRequest) returns (ListClusterAdminsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/cluster/admins"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.list";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}

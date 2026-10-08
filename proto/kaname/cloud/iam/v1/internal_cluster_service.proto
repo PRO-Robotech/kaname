@@ -8,12 +8,13 @@ syntax = "proto3";
 // under `/iam/v1/internal/cluster/...`; never on the external TLS endpoint.
 //
 // Manages cluster-RBAC admin grants on the singleton `cluster:cluster_root`
-// FGA object. Replaces the prior `kubectl exec`-into-openfga workflow for
-// granting / revoking `system_admin` to humans. All mutations follow the
-// `Operation` async envelope: the handler
-// inserts `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a
-// single transaction, then the existing `FGAOutboxDrainer` worker pushes the
-// tuple as a journal intent and flips the Operation to `done=true` within ≤2s.
+// FGA object, for users and service accounts. All mutations return an
+// `Operation`: it is persisted before the mutation, the handler inserts
+// `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a single
+// transaction, and the same request completes the Operation (`done=true`). The
+// relation tuple itself reaches the model asynchronously, through the
+// `fga_outbox` drainer. The public twin `ClusterService`
+// (`cluster_service.proto`) executes the same use-cases.
 //
 // Read RPCs (`Get`, `ListAdmins`) are synchronous; they hit the local
 // `kaname` schema only.
@@ -64,11 +65,12 @@ service InternalClusterService {
   // re-granting an already-active subject returns success with the existing
   // grant id.
   //
-  // The handler validates user existence (`kaname.users` SELECT in the
-  // same TX) and then atomically inserts a `cluster_admin_grants` row
-  // (`INSERT … ON CONFLICT (subject_type, subject_id) WHERE granted_until IS
-  // NULL DO NOTHING`), an `fga_outbox` write-tuple row, and an
-  // `audit_outbox` row in one transaction.
+  // The handler first checks the subject's state by kind (`kaname.users` for
+  // `USER`, `kaname.service_accounts` for `SERVICE_ACCOUNT`), and then
+  // atomically inserts a `cluster_admin_grants` row (`INSERT … ON CONFLICT ON
+  // CONSTRAINT cluster_admin_grants_cluster_subject_uniq DO NOTHING`, then an
+  // in-place reactivate of a revoked row), an `fga_outbox` write-tuple row, and
+  // an `audit_outbox` row in one transaction.
   //
   // REST exposed ONLY on the cluster-internal listener.
   rpc GrantAdmin (GrantClusterAdminRequest) returns (corelib.operation.Operation) {
@@ -142,14 +144,22 @@ service InternalClusterService {
 // (`cluster_root`).
 message GetClusterRequest {}
 
-// GrantClusterAdminRequest — payload for `GrantAdmin`.
+// GrantClusterAdminRequest — payload for `GrantAdmin` (both twins:
+// `InternalClusterService` and `ClusterService`).
 message GrantClusterAdminRequest {
-  // Subject type. Only `USER` is accepted in this version; other values
-  // return InvalidArgument `"Illegal argument subject_type: only 'user' supported in this version"`.
+  // Subject kind: `USER` or `SERVICE_ACCOUNT`. UNSPECIFIED is treated as
+  // `USER` by the transport (REST callers usually omit the field). Any other
+  // value returns InvalidArgument on `subject_type` with
+  // `"must be 'user' or 'service_account'"`.
   ClusterGrantSubjectType subject_type = 1;
 
-  // User id of the new admin. Must match `^usr[0-9a-hjkmnp-tv-z]{17}$` and
-  // exist in `kaname.users` (missing user returns InvalidArgument).
+  // Id of the new admin; its form follows the kind: `^usr[0-9a-hjkmnp-tv-z]{17}$`
+  // for `USER`, `^sva[0-9a-hjkmnp-tv-z]{17}$` for `SERVICE_ACCOUNT`. Empty →
+  // InvalidArgument `"required"`; a form mismatch → InvalidArgument on
+  // `subject_id`. A well-formed id with no row → InvalidArgument
+  // `"<User|ServiceAccount> <id> not found"`; a subject barred from signing in →
+  // FailedPrecondition `"User <id> is blocked"`, `"User <id> is not active"`
+  // or `"ServiceAccount <id> is disabled"`.
   string subject_id = 2;
 }
 
@@ -165,16 +175,18 @@ message GrantClusterAdminMetadata {
   string subject_id = 2;
 }
 
-// RevokeClusterAdminRequest — payload for `RevokeAdmin`.
+// RevokeClusterAdminRequest — payload for `RevokeAdmin` (both twins).
 message RevokeClusterAdminRequest {
-  // Subject type. Only `USER` is accepted in this version.
+  // Subject kind: `USER` or `SERVICE_ACCOUNT`; UNSPECIFIED is treated as
+  // `USER` (the REST path carries only the id — the kind is the `subjectType`
+  // query parameter). Other values → InvalidArgument on `subject_type`.
   ClusterGrantSubjectType subject_type = 1;
 
-  // User id of the admin being revoked. Must match
-  // `^usr[0-9a-hjkmnp-tv-z]{17}$`. Self-revoke is rejected
-  // (FailedPrecondition); last-admin revoke is rejected
-  // (FailedPrecondition); non-existent / already-revoked admin returns
-  // NotFound.
+  // Id of the admin being revoked; its form follows the kind, as in
+  // `GrantClusterAdminRequest.subject_id`. Self-revoke → FailedPrecondition
+  // `"cannot revoke own cluster admin grant"`; the last active grant →
+  // FailedPrecondition `"cannot revoke last active cluster admin"`; no active
+  // grant → NotFound `"<User|ServiceAccount> <id> is not an active cluster admin"`.
   string subject_id = 2;
 }
 
@@ -189,13 +201,15 @@ message RevokeClusterAdminMetadata {
 }
 
 // ListClusterAdminsRequest — no fields. The list is filtered server-side to
-// active grants (`granted_until IS NULL`) and ordered by `granted_at ASC`.
+// active grants (`granted_until IS NULL`) and ordered by `granted_at`, then by
+// `cluster_admin_grant_id`, both ascending.
 message ListClusterAdminsRequest {}
 
 // ListClusterAdminsResponse — denormalized snapshot of currently-active
 // admins, ready for direct UI rendering.
 message ListClusterAdminsResponse {
-  // Active admins, ordered by `granted_at ASC`.
+  // Active admins. Ordered: by `granted_at`, then by `cluster_admin_grant_id`,
+  // both ascending — equal timestamps never yield an unspecified order.
   repeated ClusterAdminEntry admins = 1;
 }
 
@@ -206,23 +220,26 @@ message ListClusterAdminsResponse {
 //
 // `subject_email` / `subject_display_name` / `granted_by_email` are mirror
 // fields kept in sync via the join at read time; they are output-only
-// (clients must not echo them back as inputs).
+// (clients must not echo them back as inputs). The subject mirrors are read
+// from `kaname.users`, so they are filled for a `USER` subject and stay empty
+// for a `SERVICE_ACCOUNT` subject.
 message ClusterAdminEntry {
   // ID of the underlying `cluster_admin_grants` row (`cag_<17>`).
   string cluster_admin_grant_id = 1;
 
-  // Subject type (`USER` only in this version).
+  // Subject kind as stored: `USER` or `SERVICE_ACCOUNT`.
   ClusterGrantSubjectType subject_type = 2;
 
-  // User id of the admin (`usr<17>`).
+  // Id of the admin: `usr<17>` for `USER`, `sva<17>` for `SERVICE_ACCOUNT`.
   string subject_id = 3;
 
-  // Subject email enriched from `kaname.users`. Empty string when the
-  // user row is absent (dangling reference; should not happen, surfaced as
-  // empty for graceful UI degradation).
+  // Subject email enriched from `kaname.users`. Filled for `USER`; empty for
+  // `SERVICE_ACCOUNT` (no users row) and when the user row is absent
+  // (dangling reference, surfaced as empty for graceful UI degradation).
   string subject_email = 4;
 
-  // Subject display name enriched from `kaname.users`. Empty string when
+  // Subject display name enriched from `kaname.users`. Filled for `USER`
+  // (empty when that user has none); empty for `SERVICE_ACCOUNT` and when
   // the user row is absent.
   string subject_display_name = 5;
 
