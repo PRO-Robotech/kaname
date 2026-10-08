@@ -8341,7 +8341,7 @@
       ]
     },
     {
-      "name": "CAP-21-FRONT-SEPARATION — Внутренний путь на публичном фронте и публичный на внутреннем — промах маршрутизатора; на своих фронтах — обслужены",
+      "name": "CAP-21-FRONT-SEPARATION — Внутренний путь на публичном фронте и публичный на внутреннем — промах маршрутизатора; публичный на публичном — обслужен, внутренний на внутреннем — отказ владельца",
       "description": "class:SEC | class:NEG | priority:P0",
       "item": [
         {
@@ -8684,9 +8684,35 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('CAP-21 близнец: внутренний путь на внутреннем фронте обслужен, не промах маршрутизатора', () => {",
-                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(pm.response.code === 404 && j.message === 'Not Found', pm.response.text()).to.eql(false);",
+                  "pm.test('403 PermissionDenied (code 7)', () => {",
+                  "  pm.expect(pm.response.code).to.eql(403);",
+                  "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
+                  "});",
+                  "pm.test('deny is the scoped authz deny on iam.cluster_admins.list, not a permission-catalog miss', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                  "  const md = info.metadata || {};",
+                  "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.cluster_admins.list');",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('cluster');",
+                  "});",
+                  "pm.test('CAP-21 близнец, внутренний путь на внутреннем фронте: сообщение дословно', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('permission denied');",
+                  "});",
+                  "pm.test('CAP-21 близнец: отказ назван внутренним глаголом', () => {",
+                  "  const j = pm.response.json();",
+                  "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                  "  pm.expect(info, JSON.stringify(j)).to.be.an('object');",
+                  "  pm.expect((info.metadata || {}).fqn, JSON.stringify(j)).to.eql('kaname.cloud.iam.v1.InternalClusterService/ListAdmins');",
+                  "});",
+                  "pm.test('CAP-21 близнец: отказ круга края, а не порога уверенности', () => {",
+                  "  const j = pm.response.json();",
+                  "  const types = (j.details || [])",
+                  "    .filter(d => (d['@type'] || '').includes('PreconditionFailure'))",
+                  "    .flatMap(d => (d.violations || []).map(v => v.type));",
+                  "  pm.expect(types, JSON.stringify(j)).to.eql(['authz.grant_required']);",
                   "});"
                 ]
               }
