@@ -110,8 +110,18 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#661
-  status: pending
-  published: false
+  status: performed
+  published: true
+  database_id: 6051607213
+  node_id: "IC_kwDOUO26pM8AAAABaLQyrQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/661#issuecomment-6051607213"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051607213"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T03:32:24Z"
+  body_sha256: "7e8a2d1aa1df0f0e68079efb8989582266fc05cfdddb92afdab35942a2132527"
   subject_sha256: "37e25926b890f82abff9f567cfd7a9a5a87950bcad7ad8262d5c623088d0549b"
+  subject_revision_commit: "b49e14f5a1241365147ca493a5d3b04b814a2b8b"
   verdict: "APPROVED"
   publication_mode: scripts/rituals/approval-event.sh
