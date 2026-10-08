@@ -55,6 +55,7 @@ func TestLaneIntegration_F5_34_RecoveryCreatesTheMissingPasswordRow(t *testing.T
 
 	again := h.completeRecovery(t, code, "another-password-f5-34", fwd(), ctxCk)
 	require.Equal(t, http.StatusUnauthorized, again.status, "повтор — отказ Ф5-05")
+	require.Equal(t, refusalWire(16, stepRecoveryRefused), again.body, "Ф5-05: текст Р10 п. 2 (редакция 10)")
 
 	tok, ck := h.lane.csrf(t, h.c, string(domain.FormLogin), nil)
 	in := h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathLogin,

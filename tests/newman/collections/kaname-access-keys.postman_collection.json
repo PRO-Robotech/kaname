@@ -55446,7 +55446,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('F13-25-RECOVERY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('F13-25-RECOVERY: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('F13-25-RECOVERY: тело называет шаг (Ф5 Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }

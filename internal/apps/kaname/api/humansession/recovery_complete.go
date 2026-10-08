@@ -71,8 +71,9 @@ package humansession
 // годным, учётные данные и счёт по адресу прежние.
 //
 // Отказ — ОДИН на все причины предъявления (Ф1 Р3, Ф1-59): «адреса нет», «код
-// не тот», «истёк», «применён», «заблокирована» — наружу уходит тот же
-// ErrAuthenticationFailed, что на входе; причина различима только клеткой.
+// не тот», «истёк», «применён», «заблокирована» — наружу уходит
+// ErrAccessNotRestored, свой у глагола и называющий шаг (Ф5 Р10 п. 2, Д22);
+// причина различима только клеткой.
 
 import (
 	"context"
@@ -397,15 +398,15 @@ func (uc *CompleteRecoveryUseCase) refuse(ctx context.Context, outcome RecoveryC
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return ErrAuthenticationFailed
+		return ErrAccessNotRestored
 	}
 	defer func() { _ = w.Rollback(ctx) }()
 	if err := recordFailure(ctx, w, addressKey, source, now); err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return ErrAuthenticationFailed
+		return ErrAccessNotRestored
 	}
 	if err := w.Commit(ctx); err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 	}
-	return ErrAuthenticationFailed
+	return ErrAccessNotRestored
 }

@@ -54,7 +54,7 @@ func TestLane_F5_Paths_AreInTheOneDeclarationOnce(t *testing.T) {
 }
 
 // TestLane_F5_01_02_RequestAnswersTheSameBodyWhateverTheOutcome — ответ на
-// запрос кода один: 200 с пустым объектом, без Set-Cookie, — и для адреса,
+// запрос кода один: 200 с телом `{"nextStep"}` (Ф5 Р10 п. 1), без Set-Cookie, — и для адреса,
 // который есть, и для адреса, которого нет: исход глагол не сообщает вовсе.
 func TestLane_F5_01_02_RequestAnswersTheSameBodyWhateverTheOutcome(t *testing.T) {
 	stub := &stubLane{}
@@ -66,7 +66,7 @@ func TestLane_F5_01_02_RequestAnswersTheSameBodyWhateverTheOutcome(t *testing.T)
 		map[string]string{"email": "a@example.invalid", "csrfToken": tok},
 		map[string]string{"X-Forwarded-For": "203.0.113.7"}, ctxCk)
 	require.Equal(t, http.StatusOK, r.status, r.body)
-	require.JSONEq(t, `{}`, r.body)
+	require.JSONEq(t, `{"nextStep":"`+stepRecoveryRequest+`"}`, r.body, "Ф5-01 (редакция 10): тело называет шаг")
 	require.Empty(t, r.cookies, "запрос кода печений не пишет: сессии нет, контекст формы прежний")
 	require.Len(t, stub.requestIn, 1)
 	require.Equal(t, "a@example.invalid", stub.requestIn[0].Email)

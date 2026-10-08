@@ -776,8 +776,10 @@ func (h *Handler) enrollPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 // requestRecovery — запрос кода восстановления (Ф5-01, Ф5-02). Ответ ОДИН при
-// любом исходе — `200 {}` без печений: сессии нет, контекст формы прежний;
-// исход глагол не сообщает и постановки письма не ждёт (Р2).
+// любом исходе — `200 {"nextStep": …}` без печений: сессии нет, контекст формы
+// прежний; исход глагол не сообщает и постановки письма не ждёт (Р2). Поле
+// стоит ВСЕГДА и с одним текстом (Р10 п. 1): поле, появляющееся на части
+// исходов, само было бы признаком.
 func (h *Handler) requestRecovery(w http.ResponseWriter, r *http.Request) {
 	var form recoveryRequestForm
 	if err := decodeForm(r, &form); err != nil {
@@ -797,12 +799,12 @@ func (h *Handler) requestRecovery(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{})
+	writeJSON(w, http.StatusOK, map[string]string{"nextStep": humansession.TextRecoveryNextStep})
 }
 
 // completeRecovery — предъявление кода с новым паролем (Ф5-03…08, Ф5-17):
 // успех отвечает как вход — тело Ф3-01, носитель сессии и НОВЫЙ контекст формы
-// (Р12); отказ — фиксированным текстом без Set-Cookie.
+// (Р12); отказ — фиксированным текстом без Set-Cookie (Ф5 Р10 п. 2).
 func (h *Handler) completeRecovery(w http.ResponseWriter, r *http.Request) {
 	var form recoveryCompleteForm
 	if err := decodeForm(r, &form); err != nil {
@@ -1369,6 +1371,10 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 			&errorInfo{Reason: humansession.ReasonTooManyAttempts, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrAuthenticationFailed):
 		writeRefusal(w, http.StatusUnauthorized, codeUnauthenticated, humansession.TextAuthenticationFailed, nil)
+	case errors.Is(err, humansession.ErrAccessNotRestored):
+		// Отказ завершения восстановления — тот же класс (401 / 16), свой текст
+		// с шагом (Ф5 Р10 п. 2, Д22).
+		writeRefusal(w, http.StatusUnauthorized, codeUnauthenticated, humansession.TextAccessNotRestored, nil)
 	case errors.Is(err, registration.ErrRefused):
 		// ОДИН отказ на занятость адреса и потолок темпа (Ф4 Р3): состояние не
 		// позволяет, а какое — не говорится. Ни Retry-After, ни 409: и то и

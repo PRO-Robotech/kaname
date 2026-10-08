@@ -220,7 +220,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('REQUEST-EXISTING: тело — пустой объект, исход не сообщается', () => pm.expect(pm.response.json(), pm.response.text()).to.eql({}));",
+                  "pm.test('REQUEST-EXISTING: тело называет шаг (Р10 п. 1), исход не сообщается', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));",
                   "pm.environment.set('recoveryRequestBodyExisting', pm.response.text());",
                   "pm.test('REQUEST-EXISTING: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
                   "pm.test('REQUEST-EXISTING: контекст формы не переставлен', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
@@ -508,9 +508,10 @@
                   "});",
                   "pm.test('WRONG-CODE: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication failed');",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator');",
                   "});",
-                  "pm.test('WRONG-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));"
+                  "pm.test('WRONG-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+                  "pm.environment.set('rcvCompletionRefusal', pm.response.text());"
                 ]
               }
             }
@@ -1372,7 +1373,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('IN-TIME-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IN-TIME-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('IN-TIME-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -2599,7 +2600,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('TWICE-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('TWICE-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('TWICE-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -3071,7 +3072,7 @@
                   "pm.test('TWICE-AGAIN: ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
                   "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
                   "pm.test('TWICE-AGAIN: код отказа 16', () => pm.expect(__r.code).to.eql(16));",
-                  "pm.test('TWICE-AGAIN: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('TWICE-AGAIN: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator'));",
                   "pm.test('TWICE-AGAIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));"
                 ]
               }
@@ -3253,7 +3254,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('TWICE-FRESH-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('TWICE-FRESH-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('TWICE-FRESH-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -3437,7 +3438,7 @@
                   "const __got = [];",
                   "const __done = () => { if (__got.length !== 3) { return; }",
                   "  const ok = __got.filter(r => r.code === 200).length;",
-                  "  const refused = __got.filter(r => r.code === 401 && r.message === 'authentication failed').length;",
+                  "  const refused = __got.filter(r => r.code === 401 && r.message === 'access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator').length;",
                   "  pm.test('TWICE-PARALLEL: ровно одно из 3 одновременных предъявлений проходит', () => pm.expect(ok).to.eql(1));",
                   "  pm.test('TWICE-PARALLEL: остальные получают единый отказ 401', () => pm.expect(refused).to.eql(2));",
                   "};",
@@ -4342,7 +4343,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('LIMIT-OVER-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('LIMIT-OVER-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('LIMIT-OVER-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -5404,7 +5405,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('LIMIT-UNDER-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('LIMIT-UNDER-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('LIMIT-UNDER-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -6476,7 +6477,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('SIGNS-IN-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('SIGNS-IN-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('SIGNS-IN-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -8360,7 +8361,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('EVERY-SESSION-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('EVERY-SESSION-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('EVERY-SESSION-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -10644,7 +10645,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('BLOCKED-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('BLOCKED-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('BLOCKED-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -10924,9 +10925,9 @@
                   "pm.test('BLOCKED-COMPLETE: ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
                   "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
                   "pm.test('BLOCKED-COMPLETE: код отказа 16', () => pm.expect(__r.code).to.eql(16));",
-                  "pm.test('BLOCKED-COMPLETE: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('BLOCKED-COMPLETE: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator'));",
                   "pm.test('BLOCKED-COMPLETE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));",
-                  "pm.test('BLOCKED-COMPLETE: отказ побайтово равен отказу входа заблокированной', () => pm.expect(pm.response.text() === pm.environment.get('rcvBlockedRefusal')).to.eql(true));"
+                  "pm.test('BLOCKED-COMPLETE: отказ побайтово равен отказу завершения на неверном коде', () => pm.expect(pm.response.text() === pm.environment.get('rcvCompletionRefusal')).to.eql(true));"
                 ]
               }
             }
@@ -12789,7 +12790,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('RL-A-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('RL-A-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('RL-A-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -14223,7 +14224,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('RL-B-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('RL-B-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('RL-B-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -16536,7 +16537,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('RL-C-REQUEST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('RL-C-REQUEST: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"
+                  "pm.test('RL-C-REQUEST: тело называет шаг (Р10 п. 1)', () => pm.expect(pm.response.text()).to.eql('{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}'));"
                 ]
               }
             }
@@ -17014,7 +17015,7 @@
                   "pm.test('RL-C-COMPLETE: ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
                   "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
                   "pm.test('RL-C-COMPLETE: код отказа 16', () => pm.expect(__r.code).to.eql(16));",
-                  "pm.test('RL-C-COMPLETE: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('RL-C-COMPLETE: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator'));",
                   "pm.test('RL-C-COMPLETE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));"
                 ]
               }
@@ -20368,7 +20369,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const __i = parseInt(pm.environment.get('_rq_rcvPace_pace_p_n_plus_one') || '0', 10) + 1;",
-                  "const __bad = parseInt(pm.environment.get('_rq_rcvPace_pace_p_n_plus_one_bad') || '0', 10) + ((pm.response.code === 200 && pm.response.text() === '{}') ? 0 : 1);",
+                  "const __bad = parseInt(pm.environment.get('_rq_rcvPace_pace_p_n_plus_one_bad') || '0', 10) + ((pm.response.code === 200 && pm.response.text() === '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}') ? 0 : 1);",
                   "pm.environment.set('_rq_rcvPace_pace_p_n_plus_one_bad', String(__bad));",
                   "if (__i < parseInt(pm.environment.get('rcvPaceTimes') || '0', 10)) {",
                   "  pm.environment.set('_rq_rcvPace_pace_p_n_plus_one', String(__i));",
@@ -20380,7 +20381,7 @@
                   "pm.environment.unset('_rqs_rcvPace_pace_p_n_plus_one');",
                   "pm.environment.unset('_rq_rcvPace_pace_p_n_plus_one_bad');",
                   "pm.test('PACE-P-N-PLUS-ONE: серия исполнена полностью', () => pm.expect(__i).to.eql(parseInt(pm.environment.get('rcvPaceTimes') || '0', 10)));",
-                  "pm.test('PACE-P-N-PLUS-ONE: каждый запрос серии — 200 и пустой объект', () => pm.expect(__bad).to.eql(0));",
+                  "pm.test('PACE-P-N-PLUS-ONE: каждый запрос серии — 200 и тело с шагом', () => pm.expect(__bad).to.eql(0));",
                   "pm.environment.set('rcvPaceOverBody', pm.response.text());"
                 ]
               }
@@ -20477,7 +20478,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('PACE-Z-NOBODY: ответ 200 и тело — пустой объект', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{}']));",
+                  "pm.test('PACE-Z-NOBODY: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
                   "pm.test('PACE-Z-NOBODY: тело побайтово равно запомненному ответу', () => pm.expect(pm.response.text() === pm.environment.get('rcvPaceOverBody')).to.eql(true));"
                 ]
               }
@@ -20767,7 +20768,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('PACE-Q-SAME-WINDOW: ответ 200 и тело — пустой объект', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{}']));"
+                  "pm.test('PACE-Q-SAME-WINDOW: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));"
                 ]
               }
             }
@@ -21511,7 +21512,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const __i = parseInt(pm.environment.get('_rq_rcvPaceP2_pace_invite_full_n') || '0', 10) + 1;",
-                  "const __bad = parseInt(pm.environment.get('_rq_rcvPaceP2_pace_invite_full_n_bad') || '0', 10) + ((pm.response.code === 200 && pm.response.text() === '{}') ? 0 : 1);",
+                  "const __bad = parseInt(pm.environment.get('_rq_rcvPaceP2_pace_invite_full_n_bad') || '0', 10) + ((pm.response.code === 200 && pm.response.text() === '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}') ? 0 : 1);",
                   "pm.environment.set('_rq_rcvPaceP2_pace_invite_full_n_bad', String(__bad));",
                   "if (__i < parseInt(pm.environment.get('rcvPaceTimesN') || '0', 10)) {",
                   "  pm.environment.set('_rq_rcvPaceP2_pace_invite_full_n', String(__i));",
@@ -21523,7 +21524,7 @@
                   "pm.environment.unset('_rqs_rcvPaceP2_pace_invite_full_n');",
                   "pm.environment.unset('_rq_rcvPaceP2_pace_invite_full_n_bad');",
                   "pm.test('PACE-INVITE-FULL-N: серия исполнена полностью', () => pm.expect(__i).to.eql(parseInt(pm.environment.get('rcvPaceTimesN') || '0', 10)));",
-                  "pm.test('PACE-INVITE-FULL-N: каждый запрос серии — 200 и пустой объект', () => pm.expect(__bad).to.eql(0));"
+                  "pm.test('PACE-INVITE-FULL-N: каждый запрос серии — 200 и тело с шагом', () => pm.expect(__bad).to.eql(0));"
                 ]
               }
             }
@@ -22496,7 +22497,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const __i = parseInt(pm.environment.get('_rq_rcvSrc_src_z_m_times') || '0', 10) + 1;",
-                  "const __bad = parseInt(pm.environment.get('_rq_rcvSrc_src_z_m_times_bad') || '0', 10) + ((pm.response.code === 200 && pm.response.text() === '{}') ? 0 : 1);",
+                  "const __bad = parseInt(pm.environment.get('_rq_rcvSrc_src_z_m_times_bad') || '0', 10) + ((pm.response.code === 200 && pm.response.text() === '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}') ? 0 : 1);",
                   "pm.environment.set('_rq_rcvSrc_src_z_m_times_bad', String(__bad));",
                   "if (__i < parseInt(pm.environment.get('rcvSrcTimes') || '0', 10)) {",
                   "  pm.environment.set('_rq_rcvSrc_src_z_m_times', String(__i));",
@@ -22508,7 +22509,7 @@
                   "pm.environment.unset('_rqs_rcvSrc_src_z_m_times');",
                   "pm.environment.unset('_rq_rcvSrc_src_z_m_times_bad');",
                   "pm.test('SRC-Z-M-TIMES: серия исполнена полностью', () => pm.expect(__i).to.eql(parseInt(pm.environment.get('rcvSrcTimes') || '0', 10)));",
-                  "pm.test('SRC-Z-M-TIMES: каждый запрос серии — 200 и пустой объект', () => pm.expect(__bad).to.eql(0));",
+                  "pm.test('SRC-Z-M-TIMES: каждый запрос серии — 200 и тело с шагом', () => pm.expect(__bad).to.eql(0));",
                   "pm.environment.set('rcvSrcZBody', pm.response.text());"
                 ]
               }
@@ -22605,7 +22606,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('SRC-P-SAME-SOURCE: ответ 200 и тело — пустой объект', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{}']));",
+                  "pm.test('SRC-P-SAME-SOURCE: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
                   "pm.test('SRC-P-SAME-SOURCE: тело побайтово равно запомненному ответу', () => pm.expect(pm.response.text() === pm.environment.get('rcvSrcZBody')).to.eql(true));"
                 ]
               }
@@ -22798,7 +22799,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('SRC-P-OTHER-SOURCE: ответ 200 и тело — пустой объект', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{}']));"
+                  "pm.test('SRC-P-OTHER-SOURCE: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));"
                 ]
               }
             }

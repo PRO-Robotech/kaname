@@ -1644,6 +1644,11 @@ _SESSIONS = "/iam/v1/auth/sessions"
 _STEP_UP = "/iam/v1/auth/step-up"
 _LOGOUT = "/iam/v1/auth/logout"
 _RECOVERY = "/iam/v1/auth/recovery"
+# Ответ запроса кода — один на все исходы и называет шаг (Ф5 Р10 п. 1,
+# kaname#211); тело в форме слушателя, без пробелов.
+_RECOVERY_NEXT_STEP_BODY = ('{"nextStep":"a letter with a recovery code is sent if this address can recover access; '
+                            'if no letter arrives, request again later, sign in and confirm the address, '
+                            'or ask an administrator to reset your sign-in methods"}')
 _RECOVERY_COMPLETE = "/iam/v1/auth/recovery/complete"
 _HEAD_RECOVERY = "Код восстановления:"
 _AUTH_FAILED_BODY = {"code": 16, "message": "authentication failed", "details": []}
@@ -2677,7 +2682,9 @@ CASES.append(Case(
         _tok(_F, "f13-25-recovery-tok", "recovery", "f13Rec", fresh=True, init=[*_f13_person_present(), *_fresh_src(_F)]),
         _lane(_F, "f13-25-recovery", "POST", _RECOVERY, body={"email": "{{f13Email}}", "csrfToken": "{{f13Rec}}"},
               tests=[*_status_is(200, "F13-25-RECOVERY"),
-                     "pm.test('F13-25-RECOVERY: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"]),
+                     # Тело — шаг Ф5 Р10 п. 1 (kaname#211), одно на все исходы.
+                     "pm.test('F13-25-RECOVERY: тело называет шаг (Ф5 Р10 п. 1)', () => "
+                     f"pm.expect(pm.response.text()).to.eql({js_str(_RECOVERY_NEXT_STEP_BODY)}));"]),
         _await_letter(_F, "f13-25-letter", head=_HEAD_RECOVERY, seen="RecoverySeen", code="RecoveryCode",
                       kind="восстановления"),
         _tok(_F, "f13-25-complete-tok", "recovery-complete", "f13RecDone"),

@@ -97,6 +97,8 @@ func liveAuthLaneContract() authLaneContract {
 		Texts: []string{
 			humansession.TextAuthenticationFailed,
 			humansession.TextLoginWithSecondFactorFailed,
+			humansession.TextAccessNotRestored,
+			humansession.TextRecoveryNextStep,
 			humansession.TextTooManyAttempts,
 			humansession.TextFormTokenRejected,
 			humansession.TextLogoutNotPerformed,

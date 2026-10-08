@@ -305,18 +305,33 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 ### Восстановление доступа — два обращения
 
-`POST /iam/v1/auth/recovery` с `{ "email", "csrfToken" }` отвечает **`200 {}` при любом
-исходе**, без печений и не дожидаясь постановки письма: адреса нет · адрес не подтверждён у
-личности со способом входа (код не выдаётся) · код выдан и письмо в очереди — снаружи неразличимы, исход виден только счётчиком
-`kaname_recovery_request_outcomes_total`. Заблокированная личность код получает и встречает
-отказ на предъявлении. Срок кода — `authn.login.recovery-code-ttl`; новый запрос вытесняет
-прежние коды.
+`POST /iam/v1/auth/recovery` с `{ "email", "csrfToken" }` отвечает **`200` одним телом при
+любом исходе**, без печений и не дожидаясь постановки письма:
+
+<CodeBlock language="json">
+  {dedent`
+    { "nextStep": "a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods" }
+  `}
+</CodeBlock>
+
+Адреса нет · адрес не подтверждён у личности со способом входа (код не выдаётся) · код выдан и
+письмо в очереди — снаружи неразличимы, исход виден только счётчиком
+`kaname_recovery_request_outcomes_total`. Текст `a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods`
+называет шаг условием, которое знает сам человек: письмо пришло — завершение; не пришло —
+повторить позже, войти и подтвердить адрес либо обратиться к администратору. Что письмо
+**отправлено**, он не утверждает. Поле `nextStep` стоит всегда; клиент на его значение не
+ключуется — оно для человека. Заблокированная личность код получает и встречает отказ на
+предъявлении. Срок кода — `authn.login.recovery-code-ttl`; новый запрос вытесняет прежние коды.
 
 `POST /iam/v1/auth/recovery/complete` с `{ "email", "code", "newPassword", "csrfToken" }` —
 текущего пароля здесь нет by construction, код и есть доказательство. Правило нового пароля
 судится **до** применения кода (негодный пароль код не тратит). Успех отвечает как вход: тело
 Ф3, `kaname_session`, новый `kaname_form`; все прежние сессии человека завершены. У
-заблокированной личности код применяется и пароль записывается, но сессия не выдаётся.
+заблокированной личности код применяется и пароль записывается, но сессия не выдаётся. Отказ
+завершения — `401` / `16` без печений, **один** текст на все причины (код не тот, истёк,
+применён; адреса нет; личность заблокирована): `access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator`.
+Он свой у глагола, а не текст отказа входа, и называет шаг для каждой причины: новый код лечит
+неверный, истёкший и применённый, а если и новый не помог — нужен администратор.
 Если пароля у человека не было вовсе (он входил только ключом доступа), завершение его
 **заводит** — исход тот же, что у человека с паролем: так возвращается доступ при утрате
 единственного ключа.
@@ -610,13 +625,14 @@ with the current password`: пароль меняют через `POST /iam/v1/a
   <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
   <tbody>
     <tr><td>400</td><td>3</td><td><code>Illegal argument &lt;поле&gt;: required</code> · <code>… unknown field</code> · <code>Illegal argument body: malformed JSON</code> · <code>… trailing content</code> · правило пароля · форма кода</td><td>—</td><td>форма негодна; состояние не изменено, в счёт частоты не идёт</td></tr>
-    <tr><td>400</td><td>9</td><td><code>registration refused</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · способ входа на строку приглашения уже записан · приглашение истекло · потолок темпа заведения исчерпан · окно регистраций источника полно — <strong>один</strong> отказ на все, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration refused; if this address is already yours, sign in or recover access; if you were invited, ask an account administrator to invite again; otherwise try again later</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · способ входа на строку приглашения уже записан · приглашение истекло · потолок темпа заведения исчерпан · окно регистраций источника полно — <strong>один</strong> отказ на все, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса. Текст называет шаг условием, которое знает сам вызывающий, и ни одной причины, числа или срока</td></tr>
     <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>церемония повышения, снятие или перечеканка без заведённого фактора — глаголы под живой сессией; <strong>на входе не производится</strong>: код при незаведённом факторе — тот же <code>401</code>, что неверный пароль с тем же полем <code>secondFactor</code></td></tr>
     <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
     <tr><td>400</td><td>9</td><td><code>email address is already verified</code></td><td><code>EMAIL_ALREADY_VERIFIED</code></td><td>запрос письма либо предъявление кода подтверждённым: письмо не ставится, отметка не переписывается</td></tr>
     <tr><td>400</td><td>9</td><td><code>the current session ends by logout</code></td><td><code>SESSION_IS_CURRENT</code></td><td>выход из выбранной сессии назвал текущую: из неё выходят выходом, ничего не снято</td></tr>
     <tr><td>400</td><td>9</td><td><code>invite is no longer valid; ask an account administrator to invite again</code></td><td><code>INVITE_NOT_VALID</code></td><td>код подошёл, а приглашение приглашённого истекло либо снято: отметки нет, попытка кода не истрачена; выход — повторное приглашение</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована · способа входа нет (приглашённый не зарегистрировался) · код не тот · код истёк или применён · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
+    <tr><td>401</td><td>16</td><td><code>access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator</code></td><td>—</td><td>завершение восстановления (<code>POST /iam/v1/auth/recovery/complete</code>): <strong>один</strong> отказ на все причины глагола — адреса нет · код не тот, истёк, применён · личность заблокирована; шаг верен для каждой и не называет ни одной</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled</code></td><td>—</td><td>вход <strong>с полем</strong> <code>secondFactor</code>: <strong>один</strong> отказ на все причины этой формы — адреса нет · пароль не тот · личность заблокирована · код не тот, повторён или потреблён · фактор не заведён; называет шаг, не называя причины</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
     <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора, заведение пароля, запрос смены адреса, регистрация (выдача испытания и приём результата), снятие ключа доступа, выход из выбранной сессии либо из всех, кроме текущей, — при предъявлении старше окна свежести; ответ у всех одинаков</td></tr>
@@ -632,8 +648,9 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 </table>
 
 Неразличимость отказов входа, регистрации и восстановления — **решение**, а не пробел
-(анти-оракул); что отказ не называет следующего шага клиента — отдельная ось, предмет
-kaname#211.
+(анти-оракул). Следующий шаг клиенту при этом назван: тексты регистрации, восстановления и входа
+с кодом несут шаг, верный для каждой причины, условием, которое знает сам вызывающий, — и ни
+одной причины.
 
 ## Что видит оператор
 

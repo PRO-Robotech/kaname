@@ -43,6 +43,26 @@ const (
 // подтверждение смены пароля (Ф3-02, Ф3-20 б/в).
 var ErrAuthenticationFailed = errors.New(TextAuthenticationFailed)
 
+// TextAccessNotRestored — отказ ЗАВЕРШЕНИЯ восстановления (Ф5 Р10 п. 2,
+// kaname#211): ОДИН на все причины глагола — код не тот, истёк, применён,
+// прочитан из хранилища, адреса нет, личность заблокирована, — и для каждой
+// шаг в нём верен: новый код лечит неверный, истёкший и применённый, а
+// заблокированной текст называет, что делать тогда. Свой у глагола, а не
+// текст отказа входа: вызывающий знает, какой глагол звал, и различие текстов
+// между глаголами не различает ни одной причины (Д22).
+const TextAccessNotRestored = "access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator"
+
+// ErrAccessNotRestored — сентинел отказа завершения восстановления; транспорт
+// отвечает на него `401` / `16` текстом [TextAccessNotRestored].
+var ErrAccessNotRestored = errors.New(TextAccessNotRestored)
+
+// TextRecoveryNextStep — тело ответа на ЗАПРОС кода восстановления (Ф5 Р10
+// п. 1, kaname#211), одно на все исходы: шаги стоят условием, которое знает сам
+// человек (письмо пришло — завершение; не пришло — повтор позже, вход и
+// подтверждение адреса, администратор). Текст не утверждает, что письмо
+// ОТПРАВЛЕНО: на половине исходов это была бы ложь, а различие — оракулом.
+const TextRecoveryNextStep = "a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods"
+
 // ErrStoreUnavailable — хранилище не ответило; глагол не выполнен, состояние
 // не изменено. Текст выбирает транспорт по глаголу (Ф3-17).
 var ErrStoreUnavailable = errors.New("store unavailable")
