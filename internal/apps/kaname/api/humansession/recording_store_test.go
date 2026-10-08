@@ -176,6 +176,11 @@ func (w recordingWriter) LockPersonForLogin(ctx context.Context, userID domain.U
 	return w.inner.LockPersonForLogin(ctx, userID)
 }
 
+func (w recordingWriter) HoldAccessKeyForLogin(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	defer w.rec("HoldAccessKeyForLogin")()
+	return w.inner.HoldAccessKeyForLogin(ctx, userID, keyID)
+}
+
 func (w recordingWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
 	defer w.rec("InsertSession")()
 	return w.inner.InsertSession(ctx, s, digest)
