@@ -1,0 +1,133 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md
+  sha256: 6d5b9ef672c041d613ebbad511b1b391f18a3542dfae9c478c74c6fa4d7ce754
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8b0379e2a
+  content_commit: null
+  content_commit_note: >-
+    Редакция 3 не закоммичена (git status: ?? в копии tmp/kaname-664-acc, HEAD 8b0379e2a).
+    Отпечаток снят с рабочего дерева. origin/296 на момент круга — 5301ce291; дельта
+    8b0379e2a..origin/296 по internal, proto, cmd — 0 путей, измерения §0 не задеты.
+  branch: '664'
+  task: PRO-Robotech/kaname#664
+  related_tasks: [PRO-Robotech/kaname#540, PRO-Robotech/kacho#1266]
+  round: 3
+  round_kind: confirmation_delta
+  round_note: >-
+    Круг подтверждения по арбитражу диспетчера после двух кругов: судится только дельта к
+    редакции 9233e200 — снято ли блокирующее круга 2 и не внесено ли нового противоречия.
+    Копии редакции 9233e200 в дереве нет; дельта восстановлена по §7 «Журнал правок» (строки
+    редакции 3) и сплошным чтением затронутых мест (шапка, §1, Р5, Р11, общие предусловия §4,
+    S3, S4, §5, §6).
+  previous_record: docs/specs/reviews/own-account-and-identity-are-removed-in-order/9233e200d82f5bed0ecfbfe38274e9d47c61b8ae30d41a0ff1845a29feb0bd11.yaml
+  fingerprint_predicate: sha256sum <док> → 6d5b9ef6…d754 (префикс 6d5b совпал с заданием)
+publication_mode: courier_of_agent_verdict
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+
+previous_blocking_disposition:
+  - kind: PRODUCER
+    scenarios: [KN664-30, KN664-35, KN664-40, KN664-50]
+    decisions: [Р5]
+    outcome: closed
+    note: >-
+      Р5 теперь обещает отказ «не позже окна отзыва после фиксации» и называет два исхода:
+      принятый до снятия — после окна; впервые предъявленный после фиксации — сразу. Оба
+      производятся читателем: presentedcred/reader.go revoked кеширует только «не отозван» по
+      ключу самого токена (verdictKey(raw)) на RevocationCacheTTL, отрицательный не кеширует,
+      промах идёт в tokenrevocation.Revoked, где отсечка включающая (rule.go: !issued.After(cutoff)).
+      KN664-30 (два токена: принятый — после окна; не предъявлявшийся — сразу), KN664-35 и KN664-50
+      предъявляют после окна; общие предусловия §4 определяют «после окна» и прямо не утверждают
+      исход внутри окна. KN664-40 (б)/(в) названы по исходу предъявления, (в) явно включает «после
+      фиксации внутри окна», набор замкнут, проба различает по исходу, а не по моменту. §5: строки
+      KN664-40 (в) в окне и KN664-30/32/35/50 (токен) несут окно и координаты; DoD п.4 — управляемые
+      часы плюс «не предъявлявшийся — сразу».
+  - kind: CONSTRUCTIBILITY
+    scenarios: [KN664-30, KN664-35]
+    outcome: closed
+    note: >-
+      Управляемые часы существуют: presentedcred.Config.Clock (reader.go:191), образец
+      TestKAN_REV_01_RevokedIsRefusedAfterTheCacheWindow (reader_test.go:332). Сквозная проба
+      ждёт окно стенда: deploy/values.prod.yaml revocationCacheTtl "30s" — ожидание конечно.
+
+important_disposition:
+  - kind: COVERAGE
+    item: Р11 источники обратного заполнения
+    outcome: closed
+    note: >-
+      Выбран вариант «сказать, почему живых строк достаточно». Довод проверен: операторов вставки
+      строки человека два (user_repo.go:615 InsertPending, :739 InsertActive); идентификатор —
+      ids.NewID(PrefixUser) либо id строки, прочитанной живой (internal_upsert.go resolveUserID:
+      FindPendingByEmail / существующая строка / NewID; resolveBootstrapTarget возвращает только
+      кандидата либо id существующей строки). Клиентского идентификатора человека нет.
+  - kind: FORMAT
+    item: 23505 issued_user_ids_pkey → код 9
+    outcome: closed
+    note: >-
+      DoD 5б: поимённая ветвь в internal/repo/kaname/pg/pgmaperr.go (файл существует; соседняя
+      issued_account_ids_pkey там же, :374) → FAILED_PRECONDITION «User <id> not found», предикат
+      git grep — ровно одно попадание, проба KN664-41 (в) утверждает код и текст.
+
+new_contradictions: none
+
+blocking: []
+
+minor:
+  - kind: FORMAT
+    note: >-
+      Р11 печатает исход предиката `git grep -n 'INSERT INTO users' -- 'internal/**/*.go'
+      ':!*_test.go'` как две строки user_repo.go; на дереве он даёт пять — ещё три в комментариях
+      internal/check/people_address_writers*.go. Вывод (писателей два) верен; стоит сузить предикат
+      до internal/repo либо назвать комментарии исключёнными.
+  - kind: FORMAT
+    note: >-
+      §1 п.3 «всё выданное личности до момента снятия становится недействительным» — без ссылки на
+      окно Р5. Недействительность записана сразу, принятие в окне — эффект кеша; противоречием не
+      считается, но ссылка «(Р5)» убрала бы чтение «отказ мгновенно».
+  - kind: FORMAT
+    note: >-
+      Шапка: «голова 296 = dd11462a2» — на круге origin/296 = 5301ce291 (dd11462a2 — предок); дельта
+      по internal, proto, cmd по-прежнему 0, измерения не устарели.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 6d5b9ef672c041d613ebbad511b1b391f18a3542dfae9c478c74c6fa4d7ce754
+    - git rev-parse origin/296 → 5301ce2910c0; git merge-base --is-ancestor dd11462a2 origin/296 → да
+    - git diff --name-only 8b0379e2a origin/296 -- internal proto cmd | wc -l → 0
+    - sed -n 616,652p internal/presentedcred/reader.go → кеш только положительного вердикта по ключу токена
+    - grep -n Clock internal/presentedcred/reader.go → :188-191 Config.Clock
+    - git grep -n 'INSERT INTO users' -- 'internal/**/*.go' ':!*_test.go' → user_repo.go:615, :739 (+3 комментария internal/check)
+    - grep -n revocationCacheTtl deploy/values.prod.yaml → "30s"
+
+constructibility:
+  method: >-
+    Круг дельты: новых Given, требующих состояния базы, редакция 3 не вводит. Посев круга 2 (9 из 9)
+    относится к неизменённым сценариям. Новое предусловие — управляемые часы читателя —
+    показано названной фикстурой (Config.Clock, образец TestKAN_REV_01).
+  seeded: 0
+  of: 0
+  named_fixture: 1
+  not_executed: 0
+
+consistency_with_approved:
+  - subject-cutoff-writes-both-records-under-one-lock.md — оговорка окна теперь та же (KN-SCL-18); расхождения нет
+
+effective_approval:
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Действующее одобрение возникает после публикации внешнего события в subject.task этой
+      учёткой; до него запись — объявление вердикта рецензента.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 6d5b9ef672c041d613ebbad511b1b391f18a3542dfae9c478c74c6fa4d7ce754"
