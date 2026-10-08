@@ -1063,8 +1063,10 @@ var sessionEnderDoors = []sessionEnderDoor{
 	},
 	{
 		// Снятие ключа доступа (kaname#669, Ф13 Р8): транзакция, открытая
-		// замком строки личности, снимает записи сессии человека.
-		name: "AccessKeyRepo.RevokeWriter",
+		// замком строки личности, снимает записи сессии человека. Дверь —
+		// `openRevokeWriter`: её же открывает сброс ключей (kaname#638), который
+		// записей сессии не снимает, а отсекает, — сцена идёт через снятие ключа.
+		name: "AccessKeyRepo.openRevokeWriter",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewAccessKeyRepo(pool).RevokeWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {

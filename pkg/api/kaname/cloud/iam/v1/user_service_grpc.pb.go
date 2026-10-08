@@ -33,6 +33,7 @@ const (
 	UserService_Block_FullMethodName             = "/kaname.cloud.iam.v1.UserService/Block"
 	UserService_Unblock_FullMethodName           = "/kaname.cloud.iam.v1.UserService/Unblock"
 	UserService_ResetSecondFactor_FullMethodName = "/kaname.cloud.iam.v1.UserService/ResetSecondFactor"
+	UserService_ResetAccessKeys_FullMethodName   = "/kaname.cloud.iam.v1.UserService/ResetAccessKeys"
 	UserService_ListOperations_FullMethodName    = "/kaname.cloud.iam.v1.UserService/ListOperations"
 )
 
@@ -347,6 +348,41 @@ type UserServiceClient interface {
 	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
 	// factor on the person's behalf, and does not lift a block.
 	ResetSecondFactor(ctx context.Context, in *ResetSecondFactorRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// Resets the access keys of the specified User: the cloud administrator's
+	// path for a person whose authenticator was lost or taken.
+	//
+	// WHO MAY: the cloud administrator only — `identity_suspender`, the same
+	// relation and the same step-up floor as ResetSecondFactor and Block. An
+	// administrator or owner of an Account the person belongs to may not: the
+	// person is one identity across all his Accounts, and the reset ends every
+	// session of his. Anyone who is not a cloud administrator — the person
+	// himself included — gets PERMISSION_DENIED, the same on an existing and on
+	// a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+	// administrator only. The person removes a single key of his own with
+	// `AccessKeyService.Revoke`.
+	//
+	// ONE TRANSACTION: EVERY access key row of the person is removed (the
+	// ceiling slots return with them); registration challenges issued before
+	// the reset stop being usable, so a registration finished from a session the
+	// reset ended leaves no key behind; EVERY session of the person is covered
+	// by a cutoff at `now` with reason `access-keys-reset` and the administrator
+	// as the actor — whoever holds the lost device may hold a session too; the
+	// audit event `iam.user.access_keys_reset` names both actors.
+	//
+	// A person WITHOUT an access key is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = ACCESS_KEYS_NOT_ENROLLED` and
+	// the text `user has no access key to reset`; nothing is ended. Whether the
+	// person has a password does not change that answer. Of two resets racing on
+	// one person exactly one is applied; the other finishes its Operation with
+	// the same refusal and ends nothing.
+	//
+	// WHAT IT DOES NOT DO: it does not remove, replace or devalue the password
+	// and does not open the recovery path — a person resets the password by
+	// recovering access with a code sent to the address; it does not reset the
+	// second factor (ResetSecondFactor), does not change the state of the person
+	// and does not lift or set a block. To stop sign-in with the password at
+	// once the administrator blocks the person (Block).
+	ResetAccessKeys(ctx context.Context, in *ResetAccessKeysRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(ctx context.Context, in *ListUserOperationsRequest, opts ...grpc.CallOption) (*ListUserOperationsResponse, error)
 }
@@ -453,6 +489,16 @@ func (c *userServiceClient) ResetSecondFactor(ctx context.Context, in *ResetSeco
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(operation.Operation)
 	err := c.cc.Invoke(ctx, UserService_ResetSecondFactor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResetAccessKeys(ctx context.Context, in *ResetAccessKeysRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, UserService_ResetAccessKeys_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -780,6 +826,41 @@ type UserServiceServer interface {
 	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
 	// factor on the person's behalf, and does not lift a block.
 	ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error)
+	// Resets the access keys of the specified User: the cloud administrator's
+	// path for a person whose authenticator was lost or taken.
+	//
+	// WHO MAY: the cloud administrator only — `identity_suspender`, the same
+	// relation and the same step-up floor as ResetSecondFactor and Block. An
+	// administrator or owner of an Account the person belongs to may not: the
+	// person is one identity across all his Accounts, and the reset ends every
+	// session of his. Anyone who is not a cloud administrator — the person
+	// himself included — gets PERMISSION_DENIED, the same on an existing and on
+	// a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+	// administrator only. The person removes a single key of his own with
+	// `AccessKeyService.Revoke`.
+	//
+	// ONE TRANSACTION: EVERY access key row of the person is removed (the
+	// ceiling slots return with them); registration challenges issued before
+	// the reset stop being usable, so a registration finished from a session the
+	// reset ended leaves no key behind; EVERY session of the person is covered
+	// by a cutoff at `now` with reason `access-keys-reset` and the administrator
+	// as the actor — whoever holds the lost device may hold a session too; the
+	// audit event `iam.user.access_keys_reset` names both actors.
+	//
+	// A person WITHOUT an access key is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = ACCESS_KEYS_NOT_ENROLLED` and
+	// the text `user has no access key to reset`; nothing is ended. Whether the
+	// person has a password does not change that answer. Of two resets racing on
+	// one person exactly one is applied; the other finishes its Operation with
+	// the same refusal and ends nothing.
+	//
+	// WHAT IT DOES NOT DO: it does not remove, replace or devalue the password
+	// and does not open the recovery path — a person resets the password by
+	// recovering access with a code sent to the address; it does not reset the
+	// second factor (ResetSecondFactor), does not change the state of the person
+	// and does not lift or set a block. To stop sign-in with the password at
+	// once the administrator blocks the person (Block).
+	ResetAccessKeys(context.Context, *ResetAccessKeysRequest) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
@@ -821,6 +902,9 @@ func (UnimplementedUserServiceServer) Unblock(context.Context, *UnblockUserReque
 }
 func (UnimplementedUserServiceServer) ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetSecondFactor not implemented")
+}
+func (UnimplementedUserServiceServer) ResetAccessKeys(context.Context, *ResetAccessKeysRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetAccessKeys not implemented")
 }
 func (UnimplementedUserServiceServer) ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOperations not implemented")
@@ -1026,6 +1110,24 @@ func _UserService_ResetSecondFactor_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ResetAccessKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetAccessKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetAccessKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetAccessKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetAccessKeys(ctx, req.(*ResetAccessKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _UserService_ListOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListUserOperationsRequest)
 	if err := dec(in); err != nil {
@@ -1090,6 +1192,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetSecondFactor",
 			Handler:    _UserService_ResetSecondFactor_Handler,
+		},
+		{
+			MethodName: "ResetAccessKeys",
+			Handler:    _UserService_ResetAccessKeys_Handler,
 		},
 		{
 			MethodName: "ListOperations",

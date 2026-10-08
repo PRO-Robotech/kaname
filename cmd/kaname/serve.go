@@ -536,6 +536,11 @@ func runServe(cfg config.Config) error {
 	if reset := lane.resetSecondFactorUseCase(kanameRepo, opsRepo); reset != nil {
 		svcs.userHandler.WithResetSecondFactor(reset)
 	}
+	// `UserService/ResetAccessKeys` (kaname#638) — теми же хранилищами, что
+	// полоса: ключи и их испытания, отсечка личности.
+	if reset := lane.resetAccessKeysUseCase(kanameRepo, opsRepo); reset != nil {
+		svcs.userHandler.WithResetAccessKeys(reset)
+	}
 	// `AccessKeyService` (Ф7, kacho#1273) — шесть глаголов ключа доступа теми
 	// же хранилищами, что полоса.
 	svcs.accessKeyHandler, err = lane.accessKeyHandler(cfg, opsRepo, metricsReg, logger)

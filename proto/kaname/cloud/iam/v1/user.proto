@@ -150,9 +150,10 @@ message User {
 }
 
 // МЕТАДАННЫЕ ДЕЙСТВИЙ НАД ЛИЧНОСТЬЮ — Delete, Update, Block, Unblock,
-// ResetSecondFactor — ОДНОЙ ФОРМЫ, и `account_id` в них не аккаунт действия.
+// ResetSecondFactor, ResetAccessKeys — ОДНОЙ ФОРМЫ, и `account_id` в них не
+// аккаунт действия.
 //
-// Предмет каждого из пяти — строка `iam_user`, одна на всю платформу: гейт
+// Предмет каждого из шести — строка `iam_user`, одна на всю платформу: гейт
 // задаёт вопрос объекту `iam_user` (`identity_remover`, `record_writer`,
 // `identity_suspender`), а не аккаунту, и следствие действует во всех
 // аккаунтах человека разом — блокировка закрывает вход на платформу, а не в
@@ -169,7 +170,7 @@ message User {
 // над личностью видна в ленте РОВНО ОДНОГО аккаунта — названного колонкой — и не
 // видна в лентах остальных аккаунтов того же человека. Это не утверждение, что
 // действие совершил тот аккаунт или что оно касается только его. Колонка
-// `NOT NULL`, поэтому у этих пяти операций поле не пусто.
+// `NOT NULL`, поэтому у этих шести операций поле не пусто.
 //
 // Поле стоит вторым намеренно: извлекатель `resource_id` фундамента берёт
 // первое поле с суффиксом `_id`, и это должен быть `user_id`; `account_id`
@@ -220,6 +221,15 @@ message UnblockUserMetadata {
 
 message ResetSecondFactorMetadata {
   // ID of the User whose second factor is being reset.
+  string user_id = 1;
+
+  // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
+  // `DeleteUserMetadata`.
+  string account_id = 2;
+}
+
+message ResetAccessKeysMetadata {
+  // ID of the User whose access keys are being reset.
   string user_id = 1;
 
   // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
