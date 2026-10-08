@@ -29,4 +29,9 @@ const (
 	// акторами — кто сбросил и у кого; рядом с событиями самого человека
 	// (`iam.user.second_factor_enrolled` / `_removed`, полоса входа).
 	auditEventUserSecondFactorReset = "iam.user.second_factor_reset"
+
+	// Сброс ключей доступа администратором облака (kaname#638; приёмка
+	// `cloud-administrator-resets-login-methods.md`, Р4): событие с обоими
+	// акторами — кто сбросил и у кого; без адреса, имени и числа ключей.
+	auditEventUserAccessKeysReset = "iam.user.access_keys_reset"
 )

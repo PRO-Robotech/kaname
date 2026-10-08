@@ -195,6 +195,30 @@ func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.Second
 	return s.sessions.Writer(ctx)
 }
 
+// resetAccessKeysUseCase — сброс ключей доступа администратором облака
+// (kaname#638) теми же хранилищами, что полоса: есть ли ключи — хранилище
+// способов, снятие испытаний и ключей, отсечка и событие — писатель хранилища
+// ключей под замком строки личности; nil — полосы нет.
+func (l *loginLane) resetAccessKeysUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetAccessKeysUseCase {
+	if !l.wired() {
+		return nil
+	}
+	return userapp.NewResetAccessKeysUseCase(repo, opsRepo, l.methods, accessKeysResetStore{keys: l.keys}).
+		WithCutoffClock(l.clock)
+}
+
+// accessKeysResetStore — адаптер хранилища ключей к порту сброса: соответствие
+// писателя порту закрепляется здесь.
+type accessKeysResetStore struct{ keys *kanamepg.AccessKeyRepo }
+
+func (s accessKeysResetStore) ResetWriter(ctx context.Context, userID domain.UserID) (userapp.AccessKeysResetWriter, error) {
+	w, err := s.keys.AccessKeysResetWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 // resolveHandler — `Resolve` для внутреннего слушателя; nil — полосы нет.
 func (l *loginLane) resolveHandler() *humansession.Handler {
 	if l == nil {

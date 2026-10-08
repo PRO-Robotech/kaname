@@ -283,6 +283,12 @@ const (
 	// отсечкой `now` существующим писателем принудительного выхода. В словарь
 	// снятия сессии НЕ входит: ни одному снимающему методу она не передаётся.
 	RevokeReasonSecondFactorReset = "second-factor-reset"
+	// RevokeReasonAccessKeysReset — причина отсечки, которую пишет сброс ключей
+	// доступа администратором облака (kaname#638; приёмка
+	// `cloud-administrator-resets-login-methods.md`, Р4): все сессии человека
+	// покрыты отсечкой `now`. Как и у сброса второго фактора, в словарь снятия
+	// сессии НЕ входит: записи сессии она не снимает, а отсекает.
+	RevokeReasonAccessKeysReset = "access-keys-reset"
 	// RevokeReasonAdminForceLogout — выход, произведённый распорядителем
 	// (`InternalIAMService.ForceLogout`; kaname#334, приёмка
 	// `forced-exit-has-its-own-session-end-reason.md`, Р1, Р3). Роли у слова
@@ -330,8 +336,8 @@ func CutoffBelowFirstAuthentication(first time.Time) time.Time {
 
 // HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
 // сессии: ровно те значения, что принимает `human_sessions_ended_reason_check`.
-// Причина отсечки RevokeReasonSecondFactorReset в него не входит — она не
-// снимает ни одной записи.
+// Причины отсечки RevokeReasonSecondFactorReset и RevokeReasonAccessKeysReset в
+// него не входят — они не снимают ни одной записи.
 //
 // Функция, а не переменная: каждый вызов отдаёт СВЕЖИЙ срез, и вызывающий,
 // дописавший в него, словаря не меняет. Элементы — константы по имени, а не

@@ -232,15 +232,79 @@ func (r *AccessKeyRepo) Writer(ctx context.Context) (access_keys.Writer, error) 
 // (`holdPersonForSessionSet`) — раньше строк ключей, которые затем берёт
 // `LockKeysOf`. Писатель ключа и писатель сессии — над ОДНОЙ `pgx.Tx`.
 func (r *AccessKeyRepo) RevokeWriter(ctx context.Context, userID domain.UserID) (access_keys.RevokeWriter, error) {
+	return r.openRevokeWriter(ctx, userID, "AccessKey.RevokeWriter")
+}
+
+// openRevokeWriter — открытие транзакции под замком строки личности, общее у
+// снятия ключа и сброса ключей: одна дверь, один порядок «личность → дети».
+func (r *AccessKeyRepo) openRevokeWriter(ctx context.Context, userID domain.UserID, site string) (*accessKeyRevokeWriter, error) {
 	sessions, err := beginHumanSessionWriter(ctx, r.pool)
 	if err != nil {
-		return nil, mapErr(err, "AccessKey.RevokeWriter", "")
+		return nil, mapErr(err, site, "")
 	}
 	if err := sessions.holdPersonForSessionSet(ctx, userID); err != nil {
 		_ = sessions.tx.Rollback(ctx)
 		return nil, err
 	}
 	return &accessKeyRevokeWriter{accessKeyWriter: accessKeyWriter{tx: sessions.tx}, sessions: sessions}, nil
+}
+
+// AccessKeysResetTx — транзакция СБРОСА ключей человека администратором облака
+// (kaname#638; приёмка `cloud-administrator-resets-login-methods.md`, Р3, Р5,
+// Р7): та же дверь, что у снятия ключа, — открытие писателем сессии и строка
+// личности под замком ПЕРВЫМ оператором, — и два своих оператора. Исполняет
+// порт `user.AccessKeysResetWriter` (соответствие закрепляет корень композиции).
+//
+// # Порядок операторов — несущий (Р7)
+//
+// Испытания регистрации снимаются РАНЬШЕ строк ключей. Регистрация потребляет
+// испытание условным оператором (`ConsumeChallenge`) и вставляет строку ключа
+// той же транзакцией. Если её потребление стоит раньше снятия испытаний,
+// снятие ждёт её фиксации и строку, уже потреблённую, не трогает
+// (`consumed_at IS NULL` перепроверяется после ожидания); следующий оператор —
+// снятие ключей — исполняется новым снимком (`read committed` писателя сессии)
+// и видит зафиксированную строку ключа. Если раньше стоит снятие испытаний, то
+// потребление ждёт фиксации сброса и находит ноль строк — регистрация
+// отказывает. В обоих порядках строки ключа после обоих исходов нет; проверки
+// «прочитать — решить» нет ни на одной стороне (ban #10).
+type AccessKeysResetTx struct{ *accessKeyRevokeWriter }
+
+// AccessKeysResetWriter — см. [AccessKeysResetTx].
+func (r *AccessKeyRepo) AccessKeysResetWriter(ctx context.Context, userID domain.UserID) (*AccessKeysResetTx, error) {
+	w, err := r.openRevokeWriter(ctx, userID, "AccessKey.ResetWriter")
+	if err != nil {
+		return nil, err
+	}
+	return &AccessKeysResetTx{accessKeyRevokeWriter: w}, nil
+}
+
+// RetireRegistrationChallenges — выданные и не предъявленные испытания
+// регистрации человека сняты одним оператором; строки, потреблённые
+// регистрацией, остаются — их предмет уже исполнен, и уборка снимет их сроком.
+func (w *AccessKeysResetTx) RetireRegistrationChallenges(ctx context.Context, userID domain.UserID) (int64, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tag, err := w.tx.Exec(ctx, `
+		DELETE FROM access_key_challenges
+		 WHERE user_id = $1 AND purpose = $2 AND consumed_at IS NULL`, string(userID), string(domain.ChallengeForRegistration))
+	if err != nil {
+		return 0, mapErr(err, "AccessKey.RetireRegistrationChallenges", "")
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteAccessKeysOf — все строки ключей человека одним оператором; слоты
+// потолка возвращает триггер на удалении в той же транзакции.
+func (w *AccessKeysResetTx) DeleteAccessKeysOf(ctx context.Context, userID domain.UserID) (int64, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tag, err := w.tx.Exec(ctx, `DELETE FROM user_access_keys WHERE user_id = $1`, string(userID))
+	if err != nil {
+		return 0, mapErr(err, "AccessKey.DeleteAllOf", "")
+	}
+	return tag.RowsAffected(), nil
 }
 
 type accessKeyWriter struct{ tx pgx.Tx }
