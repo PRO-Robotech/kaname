@@ -396,13 +396,16 @@ func TestA198_06_ReInvitingNeverShortensTheDeadline(t *testing.T) {
 	require.False(t, s.inviteRow(t, twinRow.ID).deadline.Before(at.Add(a198InviteTTL)), "A198-06 близнец: срок продлён")
 }
 
-// redeemed — выкупленное приглашение глаголами хранилища, которыми его выкупает
-// продукт: отметка подтверждения адреса единственным её оператором и активация
-// приглашения (`ActivateInvite`). Регистрация сама приглашение не выкупает — его
-// выкупает подтверждение адреса.
+// redeemed — выкупленное приглашение тем путём, которым его выкупает продукт:
+// регистрация адресом живого приглашения кладёт способ входа на строку
+// приглашения (строка остаётся PENDING), затем подтверждение адреса — отметка
+// единственным её оператором и активация приглашения (`ActivateInvite`).
 func (s *a198Scene) redeemed(t *testing.T, email string) domain.User {
 	t.Helper()
 	row := s.pending(t, email, a198InviteTTL)
+	out, err := s.register(t, s.useCase(t, s.store), email)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): регистрация адресом живого приглашения")
+	require.True(t, out.Invited, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): регистрация легла на строку приглашения")
 	require.NoError(t, kanamepg.NewLoginMethodRepo(s.pool).MarkEmailVerified(s.ctx, row.ID, domain.Email(email), time.Now().UTC()),
 		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): отметка подтверждения адреса")
 	w, err := s.repo.Writer(s.ctx)

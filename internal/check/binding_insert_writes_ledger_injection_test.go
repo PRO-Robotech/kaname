@@ -99,12 +99,14 @@ func TestBindingInsertLedgerInjection_RealInsertWithoutLedgerIsFound(t *testing.
 	injected := 0
 	for _, rel := range corpus.Rels() {
 		src := corpus[rel]
-		if !strings.Contains(src, "AccessBindingsW().Insert(") {
-			continue
-		}
+		// Отбор — тем же разбором, что судит гейт, а не подстрокой: слово в
+		// комментарии (шапка самого гейта) вставкой не является.
 		control, _, err := check.ScanBindingInsertLedger(rel, []byte(src))
 		if err != nil {
 			t.Fatalf("разбор %s: %v", rel, err)
+		}
+		if len(control) == 0 {
+			continue
 		}
 		for _, s := range control {
 			if !s.WritesLedger {
