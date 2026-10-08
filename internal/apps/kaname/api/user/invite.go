@@ -645,12 +645,24 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 				// журнала проекция `relation_fact` не увидит никогда, и форма E
 				// ответит «нет» там, где движок отвечает «да», — молча, потому что
 				// пустая проекция неотличима от честного отказа.
-				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+				//
+				// ВЕДОМОСТЬ — ТЕМ ЖЕ НАБОРОМ И В ТОЙ ЖЕ ТРАНЗАКЦИИ (kaname#670, класс
+				// #665). Снятие выдачи — штатное (`AccessBinding.Delete`) и дренажом
+				// области при удалении проекта (`shared.RevokeBindingsInScope`) —
+				// снимает РОВНО записанное в ведомости выпущенных кортежей. Без неё
+				// строка выдачи уходила, а указатель оставался фактом модели прав на
+				// проект, которого больше нет. Эмитируемое и записанное выпущенным —
+				// одно значение, а не два списка.
+				bindingTuples := []service.RelationTuple{{
 					User:     fmt.Sprintf("project:%s", ins.ResourceID),
 					Relation: "project",
 					Object:   fmt.Sprintf("iam_access_binding:%s", ins.ID),
-				}}); ferr != nil {
+				}}
+				if ferr := w.EmitFGARelationWrite(ctx, bindingTuples); ferr != nil {
 					return inviteTxResult{}, ferr
+				}
+				if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, ins.ID, ledgerTuples(bindingTuples)); lerr != nil {
+					return inviteTxResult{}, lerr
 				}
 			}
 			// A freshly-inserted invitee user row must forward-materialize under the
