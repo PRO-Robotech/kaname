@@ -107,15 +107,18 @@ func TestRevokeWithoutActingCredentialEndsEverySession(t *testing.T) {
 	}
 }
 
-// TestRevokeWithoutFirstAuthenticationCutsOffAtTheMoment — памяти первой
-// аутентификации нет: отсечка ставится моментом снятия.
-func TestRevokeWithoutFirstAuthenticationCutsOffAtTheMoment(t *testing.T) {
+// TestRevokeWithoutFirstAuthenticationWritesNoCutoff — памяти первой
+// аутентификации нет: момента отсечки не из чего вывести, отсечка не пишется,
+// записи сессии сняты.
+func TestRevokeWithoutFirstAuthenticationWritesNoCutoff(t *testing.T) {
 	t.Parallel()
 	h, k := givenTwoSessions(t)
 	op, err := h.revokeActing(alice, string(k.ID), tokS2)
 	require.NoError(t, err)
 	require.Nil(t, op.Error)
-	require.Equal(t, h.now, h.store.cutoffs[alice].RevokeBefore)
+	_, cut := h.store.cutoffs[alice]
+	require.False(t, cut)
+	require.Equal(t, domain.RevokeReasonAccessKeyRevoked, h.store.endedOf(s1))
 }
 
 // TestRevokeWriteFaultRollsBackEveryRecord — форма Ф3-16: подставной отказ

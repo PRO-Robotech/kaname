@@ -224,8 +224,11 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 // пароля: на единицу разрешения раньше первой аутентификации личности нашей
 // посадкой (`domain.CutoffBelowFirstAuthentication`), — им снимаются носители
 // прежней посадки, а записи нашей снимает дверь снятия, и текущую отсечка не
-// задевает. Памяти первой аутентификации нет — сессий нашей посадки у личности
-// не было, и отсечка ставится моментом снятия.
+// задевает. Памяти первой аутентификации нет — отсечка не ставится: её момент
+// выводится только из сохранённого момента (часы процесса отсечку не датируют —
+// перепись `revocationpolicy`), а память пишет каждая выдача, и без неё у
+// личности нет ни одной выданной нами сессии; расхождение — находка о посеве,
+// и оно пишется в журнал.
 func (uc *RevokeUseCase) endSessionsOf(ctx context.Context, w RevokeWriter, userID domain.UserID, actor, acting string) error {
 	now := uc.deps.Now().UTC()
 	var keep domain.HumanSessionID
@@ -245,12 +248,14 @@ func (uc *RevokeUseCase) endSessionsOf(ctx context.Context, w RevokeWriter, user
 	if err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.first_authentication", err)
 	}
-	cutoff := now
-	if found {
-		cutoff = domain.CutoffBelowFirstAuthentication(first)
+	if !found {
+		uc.deps.Logger.WarnContext(ctx, "access key revoke: no first-authentication memory for the subject; cutoff not written",
+			"user_id", string(userID))
+		return nil
 	}
 	if err := w.UpsertCutoff(ctx, domain.UserTokenRevocation{
-		UserID: userID, RevokeBefore: cutoff, Reason: domain.RevokeReasonAccessKeyRevoked, RevokedBy: domain.UserID(actor),
+		UserID: userID, RevokeBefore: domain.CutoffBelowFirstAuthentication(first),
+		Reason: domain.RevokeReasonAccessKeyRevoked, RevokedBy: domain.UserID(actor),
 	}, domain.UserID(actor)); err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.cutoff", err)
 	}
