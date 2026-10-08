@@ -68,6 +68,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/outbox/drainer"
+
+	"github.com/PRO-Robotech/kaname/internal/mailaddr"
 )
 
 const (
@@ -440,10 +442,10 @@ func (s *InviteMailSender) Send(ctx context.Context, ev MailEvent) error {
 		}
 	}
 
-	if merr := client.Mail(addressOnly(relay.From)); merr != nil {
+	if merr := client.Mail(mailaddr.AddressOnly(relay.From)); merr != nil {
 		return classifySMTPErr(addr, "MAIL FROM", merr)
 	}
-	if rerr := client.Rcpt(addressOnly(ev.To)); rerr != nil {
+	if rerr := client.Rcpt(mailaddr.AddressOnly(ev.To)); rerr != nil {
 		return classifySMTPErr(addr, "RCPT TO", rerr)
 	}
 	w, err := client.Data()
@@ -602,45 +604,6 @@ func ClassifyInviteMailOutcome(err error) string {
 	}
 }
 
-// senderDomain — домен адреса отправителя: им представляемся узлу (EHLO) и в
-// нём чеканим `Message-ID`. ОДИН предикат на оба места: адрес, который уходит
-// в MAIL FROM, и домен штампа письма берутся из одного значения.
-//
-// Домена нет либо он не годится в правую часть msg-id (RFC 5322 §3.6.4:
-// dot-atom без пробелов, скобок и пустых меток) — ok=false. Молчаливого
-// `localhost` нет: узел вправе отвергнуть такое приветствие, а `Message-ID` в
-// чужом домене отличать письма не обязан, — это настройка, и решает её оператор.
-func senderDomain(from string) (string, bool) {
-	addr := addressOnly(from)
-	at := strings.LastIndex(addr, "@")
-	if at < 0 {
-		return "", false
-	}
-	domain := addr[at+1:]
-	if domain == "" || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") ||
-		strings.Contains(domain, "..") {
-		return "", false
-	}
-	for i := 0; i < len(domain); i++ {
-		if !isDomainByte(domain[i]) {
-			return "", false
-		}
-	}
-	return domain, true
-}
-
-// isDomainByte — байт, допустимый в dot-atom правой части msg-id: atext
-// RFC 5322 §3.2.3, точка и восьмибитные байты UTF-8 (RFC 6532). Управляющих,
-// пробелов и `<>@[]` в нём нет — значит, и CRLF в заголовок через домен не
-// попадает.
-func isDomainByte(c byte) bool {
-	switch {
-	case c >= 0x80, c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		return true
-	}
-	return strings.IndexByte(".!#$%&'*+-/=?^_`{|}~", c) >= 0
-}
-
 // letterStamp — штамп отправки письма (kaname#630): момент и идентификатор.
 // RFC 5322 требует `Date` у каждого письма; `Message-ID` — то, по чему адресат и
 // промежуточные узлы отличают одно письмо от другого. Ставит его ТОЛЬКО
@@ -663,7 +626,7 @@ type letterStamp struct {
 // очереди. Повтор попытки чеканит новый штамп: принятое узлом письмо повторно
 // не сдаётся (MAIL-53), так что два письма с одним идентификатором не уходят.
 func (s *InviteMailSender) stamp() (letterStamp, error) {
-	domain, ok := senderDomain(s.relay.From)
+	domain, ok := mailaddr.SenderDomain(s.relay.From)
 	if !ok {
 		return letterStamp{}, fmt.Errorf("%w: mail headers: sender address has no domain "+
 			"(invite-mail.from) — Message-ID is minted in the sender domain, "+
@@ -674,17 +637,6 @@ func (s *InviteMailSender) stamp() (letterStamp, error) {
 		messageID: "<" + rand.Text() + "@" + domain + ">",
 		domain:    domain,
 	}, nil
-}
-
-// addressOnly снимает отображаемое имя: `Kachō <a@b>` → `a@b`.
-func addressOnly(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.LastIndex(s, "<"); i >= 0 {
-		if j := strings.Index(s[i:], ">"); j > 0 {
-			return strings.TrimSpace(s[i+1 : i+j])
-		}
-	}
-	return s
 }
 
 // RenderMail — письмо целиком по виду события, со штампом отправки, который
@@ -879,7 +831,7 @@ func renderVerificationMail(relay MailRelay, ev MailEvent, stamp letterStamp) []
 // `Date` — в форме RFC 5322 §3.3 (`time.RFC1123Z`) и в UTC: момент письма не
 // сообщает часового пояса узла, на котором служба работает.
 func mailHeaders(relay MailRelay, ev MailEvent, subject string, stamp letterStamp) *strings.Builder {
-	from := addressOnly(relay.From)
+	from := mailaddr.AddressOnly(relay.From)
 	displayFrom := from
 	if relay.FromName != "" {
 		displayFrom = fmt.Sprintf("%s <%s>", relay.FromName, from)
@@ -888,7 +840,7 @@ func mailHeaders(relay MailRelay, ev MailEvent, subject string, stamp letterStam
 	b.WriteString("Date: " + stamp.date.UTC().Format(time.RFC1123Z) + "\r\n")
 	b.WriteString("Message-ID: " + stamp.messageID + "\r\n")
 	b.WriteString("From: " + displayFrom + "\r\n")
-	b.WriteString("To: " + addressOnly(ev.To) + "\r\n")
+	b.WriteString("To: " + mailaddr.AddressOnly(ev.To) + "\r\n")
 	b.WriteString("Subject: " + mimeEncodedHeader(subject) + "\r\n")
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")

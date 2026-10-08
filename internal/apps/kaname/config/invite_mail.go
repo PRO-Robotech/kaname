@@ -61,6 +61,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/mailaddr"
 )
 
 // Умолчания ДВУХ величин отправителя. У остальных умолчаний нет (Р3).
@@ -200,6 +202,17 @@ func (c InviteMailConfig) Validate() error {
 		return fmt.Errorf(
 			"invite-mail: relay %q is declared without a sender address "+
 				"(invite-mail.from) — there is no built-in default for it", redactRelay(c.Relay))
+	}
+	// ДОМЕН ОТПРАВИТЕЛЯ — тем же предикатом, что у отправителя (kaname#642).
+	// Им отправитель представляется узлу и в нём чеканит Message-ID; адрес без
+	// годного домена отправитель отвергает на КАЖДОЙ отправке, и без этой строки
+	// процесс стартовал бы здоровым, не доставляя ни одного письма. Значение в
+	// текст отказа не подставляется: отказ называет ручку и причину.
+	if _, ok := mailaddr.SenderDomain(c.From); !ok {
+		return fmt.Errorf(
+			"invite-mail: the sender address (invite-mail.from) has no usable domain part — " +
+				"the sender greets the relay and mints Message-ID in that domain, so every " +
+				"letter would be refused; declare an address of the form name@domain")
 	}
 	// ИМЯ ПОЛЬЗОВАТЕЛЯ — ОДИН ИСТОЧНИК. Адрес формы URI несёт его частью до
 	// «@», окружение — по имени переменной; оба сразу — два источника одной

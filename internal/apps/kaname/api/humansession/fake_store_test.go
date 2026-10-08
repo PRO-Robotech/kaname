@@ -967,7 +967,7 @@ func (d fakeUsers) UserByEmail(_ context.Context, email domain.Email) (domain.Us
 			return u, nil
 		}
 	}
-	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with email %s not found", email)
+	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with this email not found")
 }
 
 type fakeMethods struct{ store *fakeStore }

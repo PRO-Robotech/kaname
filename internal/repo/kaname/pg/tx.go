@@ -244,7 +244,7 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, kind mailWindowKin
 		           THEN 1 ELSE w.sent + 1 END <= $2`,
 		recipient, limit.MaxPerWindow, windowSeconds, string(kind))
 	if err != nil {
-		return false, mapErr(err, "", recipient)
+		return false, mapErr(err, "", "")
 	}
 	return tag.RowsAffected() > 0, nil
 }
