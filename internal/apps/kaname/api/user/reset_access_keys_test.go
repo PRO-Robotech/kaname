@@ -29,10 +29,10 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // rakKeys — дублёр хранилища ключей: число строк ключей человека.
@@ -109,6 +109,16 @@ func (w *rakWriter) DeleteAccessKeysOf(_ context.Context, userID domain.UserID) 
 	return w.removed, nil
 }
 
+// Now — момент писателя: читается ВНУТРИ транзакции, после захвата строки
+// личности (шаг "moment" — первый оператор писателя).
+func (w *rakWriter) Now(context.Context) (time.Time, error) {
+	w.steps = append(w.steps, "moment")
+	if w.s.failOn == "moment" {
+		return time.Time{}, iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+	}
+	return time.Now().UTC(), nil
+}
+
 func (w *rakWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	w.steps = append(w.steps, "cutoff")
 	if err := u.Validate(); err != nil {
@@ -166,7 +176,7 @@ func newRAK(keys int) (*rakKeys, *rakStore) {
 }
 
 func rakUseCase(repo Repo, ops operations.Repo, k *rakKeys, s *rakStore) *ResetAccessKeysUseCase {
-	return NewResetAccessKeysUseCase(repo, ops, k, s).WithCutoffClock(momentclock.Func(time.Now))
+	return NewResetAccessKeysUseCase(repo, ops, k, s)
 }
 
 // TestResetAccessKeys_LMR03_SyncRefusalsBeforeTheStore — анонимный, кривой id,
@@ -263,8 +273,8 @@ func TestResetAccessKeys_LMR01_ResetIsOneTransaction(t *testing.T) {
 	assert.Zero(t, k.n, "все строки ключей сняты")
 	require.Equal(t, 1, s.commits)
 	require.Len(t, s.steps, 1)
-	assert.Equal(t, []string{"challenges:" + updUserID, "keys:" + updUserID, "cutoff", "audit"}, s.steps[0],
-		"порядок операторов: испытания регистрации, затем ключи (Р7), затем отсечка и событие")
+	assert.Equal(t, []string{"moment", "challenges:" + updUserID, "keys:" + updUserID, "cutoff", "audit"}, s.steps[0],
+		"порядок операторов: момент отсечки писателем после захвата личности (LMR-07 (в)), испытания регистрации, затем ключи (Р7), затем отсечка и событие")
 
 	require.Len(t, s.cutoffs, 1)
 	cut := s.cutoffs[0]
@@ -291,7 +301,7 @@ func TestResetAccessKeys_LMR01_ResetIsOneTransaction(t *testing.T) {
 // откатывает всё: ни одна строка не снята, отсечки и события нет, Operation
 // несёт ошибку, текст хранилища наружу не течёт (§7 инв. 2, 5).
 func TestResetAccessKeys_LMR01_AnyFailedWriteChangesNothing(t *testing.T) {
-	for _, step := range []string{"writer", "challenges", "delete", "audit", "commit"} {
+	for _, step := range []string{"writer", "moment", "challenges", "delete", "audit", "commit"} {
 		t.Run(step, func(t *testing.T) {
 			k, s := newRAK(2)
 			s.failOn = step
@@ -350,4 +360,28 @@ func TestResetAccessKeys_LMR07_SecondResetFindsNothing(t *testing.T) {
 	assert.Zero(t, s2.commits, "транзакция второго не зафиксирована")
 	assert.Empty(t, s2.cutoffs, "второй сброс отсечки не пишет")
 	assert.Empty(t, s2.audits, "второй сброс события не пишет")
+}
+
+// TestResetAccessKeys_LMR07c_MomentIsReadInsideTheWriter — момент отсечки
+// читает писатель, уже открытый под замком строки личности; источник не
+// ответил — Operation несёт UNAVAILABLE фиксированным текстом, транзакция
+// откатана, ничего не снято, отсечки и события нет.
+func TestResetAccessKeys_LMR07c_MomentIsReadInsideTheWriter(t *testing.T) {
+	k, s := newRAK(2)
+	s.failOn = "moment"
+	ops := newUpdOpsRepo()
+	op, err := rakUseCase(newUpdUserRepo(), ops, k, s).Execute(ownerCtx(), domain.UserID(updUserID))
+	require.NoError(t, err)
+	require.NoError(t, operations.Wait(context.Background()))
+	got, err := ops.Get(context.Background(), op.ID)
+	require.NoError(t, err)
+	require.True(t, got.Done)
+	require.NotNil(t, got.Error)
+	assert.EqualValues(t, codes.Unavailable, got.Error.Code)
+	assert.Equal(t, shared.MomentUnavailableMessage, got.Error.Message, "текст фиксированный, источник наружу не течёт")
+	assert.Equal(t, 1, s.writers, "момент читается после открытия писателя, а не до")
+	assert.Equal(t, 1, s.rollbacks, "транзакция откатана")
+	assert.Equal(t, 2, k.n)
+	assert.Empty(t, s.cutoffs)
+	assert.Empty(t, s.audits)
 }

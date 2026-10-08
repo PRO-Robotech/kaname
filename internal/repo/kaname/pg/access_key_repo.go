@@ -294,6 +294,21 @@ func (w *AccessKeysResetTx) RetireRegistrationChallenges(ctx context.Context, us
 	return tag.RowsAffected(), nil
 }
 
+// Now — момент отсечки сброса: часы первичной базы (источник kaname#589,
+// `SharedClock`), прочитанные соединением ЭТОЙ транзакции после захвата строки
+// личности. `clock_timestamp()`, а не `now()`: `now()` в транзакции — момент её
+// начала, то есть до ожидания замка, и выдача, зафиксированная за это ожидание,
+// его опередила бы. Своё соединение, а не пул: чтение из пула изнутри открытой
+// транзакции брало бы второе соединение на запрос (довод `SharedClock`).
+// Ошибка — как есть: класс для журнала выделяет вызывающий.
+func (w *AccessKeysResetTx) Now(ctx context.Context) (time.Time, error) {
+	var at time.Time
+	if err := w.tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		return time.Time{}, err
+	}
+	return at.UTC(), nil
+}
+
 // DeleteAccessKeysOf — все строки ключей человека одним оператором; слоты
 // потолка возвращает триггер на удалении в той же транзакции.
 func (w *AccessKeysResetTx) DeleteAccessKeysOf(ctx context.Context, userID domain.UserID) (int64, error) {

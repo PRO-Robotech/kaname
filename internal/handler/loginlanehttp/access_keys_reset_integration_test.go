@@ -54,7 +54,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
 )
 
@@ -71,14 +70,22 @@ const (
 // здесь, как в корне композиции. gate — точка, в которой писатель ждёт, пока
 // названное число сбросов не дойдёт до открытия транзакции (гонка LMR-07 (а)):
 // оба исполнителя прошли синхронную сверку раньше, чем любой из них снял ключи.
+//
+// window — окно между началом исполнения сброса и захватом строки личности
+// (гонка LMR-07 (в)): писатель сообщает о приходе и ждёт, пока проба не
+// исполнит в этом окне вход ключом до фиксации.
 type lmrStore struct {
-	keys *kanamepg.AccessKeyRepo
-	gate *lmrBarrier
+	keys   *kanamepg.AccessKeyRepo
+	gate   *lmrBarrier
+	window *lmrWindow
 }
 
 func (s lmrStore) ResetWriter(ctx context.Context, userID domain.UserID) (userapp.AccessKeysResetWriter, error) {
 	if s.gate != nil {
 		s.gate.arrive()
+	}
+	if s.window != nil {
+		s.window.hold()
 	}
 	w, err := s.keys.AccessKeysResetWriter(ctx, userID)
 	if err != nil {
@@ -111,6 +118,27 @@ func (b *lmrBarrier) arrive() {
 	}
 }
 
+// lmrWindow — окно до захвата строки личности сбросом: arrived закрывается,
+// когда исполнитель сброса дошёл до открытия транзакции, release — когда проба
+// исполнила встречное действие (со сроком: зависание — отказ пробы).
+type lmrWindow struct {
+	once    sync.Once
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func newLMRWindow() *lmrWindow {
+	return &lmrWindow{arrived: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (w *lmrWindow) hold() {
+	w.once.Do(func() { close(w.arrived) })
+	select {
+	case <-w.release:
+	case <-time.After(20 * time.Second):
+	}
+}
+
 // adminCtx — личность администратора облака, как её передаёт край (право
 // судит край по записи каталога — LMR-03, пакет `internal/service`).
 func adminCtx(ctx context.Context, admin domain.UserID) context.Context {
@@ -119,9 +147,13 @@ func adminCtx(ctx context.Context, admin domain.UserID) context.Context {
 
 // resetUC — глагол сброса над адаптерами базы.
 func (h *sessionLane) resetUC(gate *lmrBarrier) *userapp.ResetAccessKeysUseCase {
+	return h.resetUCOver(lmrStore{keys: kanamepg.NewAccessKeyRepo(h.pool), gate: gate})
+}
+
+// resetUCOver — глагол сброса над названным швом писателя.
+func (h *sessionLane) resetUCOver(s lmrStore) *userapp.ResetAccessKeysUseCase {
 	return userapp.NewResetAccessKeysUseCase(h.users, operations.NewRepo(h.pool, "kaname"),
-		kanamepg.NewLoginMethodRepo(h.pool), lmrStore{keys: kanamepg.NewAccessKeyRepo(h.pool), gate: gate}).
-		WithCutoffClock(momentclock.Func(time.Now))
+		kanamepg.NewLoginMethodRepo(h.pool), s)
 }
 
 // awaitOp — принятая операция дожидается исполнителя (событием очереди, не
@@ -756,6 +788,109 @@ func TestResetAccessKeys_LMR07b_ResetRacesARegistrationFromACutSession(t *testin
 	require.NoError(t, err, "близнец: регистрация из сессии-после принята")
 	require.Nil(t, op.Error, "близнец: регистрация из сессии-после исполнена: %v", op.Error)
 	require.Equal(t, 1, h.keysOf(t, u), "близнец: строк ключей одна")
+}
+
+// TestResetAccessKeys_LMR07c_KeyLoginCommittedBeforeTheResetTakesThePersonIsCut
+// — LMR-07 (в), Р4 «ВСЕ сессии гаснут»: вход ключом зафиксирован ПОСЛЕ начала
+// исполнения сброса, но РАНЬШЕ, чем сброс взял строку личности (тот же порядок
+// фиксаций, что у входа, первым взявшего личность, пока сброс ждёт). Сессия,
+// выданная только что снятым ключом, после исхода сброса краю не годна.
+// Близнец по одному факту — сессия, выданная ПОСЛЕ фиксации сброса (вход
+// паролем, который сброс не трогает), годна: суждение «отсечена» не пустое.
+func TestResetAccessKeys_LMR07c_KeyLoginCommittedBeforeTheResetTakesThePersonIsCut(t *testing.T) {
+	h := newSessionLane(t)
+	admin := registerPerson(t, h, "lmr07c-admin")
+	u := h.user.ID
+	k := givenAcceptedKey(t, h, u)
+
+	win := newLMRWindow()
+	op, err := h.resetUCOver(lmrStore{keys: kanamepg.NewAccessKeyRepo(h.pool), window: win}).Execute(adminCtx(h.ctx, admin), u)
+	require.NoError(t, err, "LMR-07 (в): сброс прошёл синхронную сверку (у человека ключ)")
+	select {
+	case <-win.arrived:
+	case <-time.After(20 * time.Second):
+		close(win.release)
+		require.FailNow(t, "условие не создано", "исполнитель сброса не дошёл до открытия транзакции")
+	}
+	bearer := keySession(t, h, k)
+	require.True(t, h.alive(t, u, bearer), "условие не создано: сессия, выданная ключом в окне, годна до исхода сброса")
+	close(win.release)
+
+	got := h.awaitOp(t, op.ID)
+	require.Nilf(t, got.Error, "LMR-07 (в): сброс исполнен: %v", got.Error)
+	require.Zero(t, h.keysOf(t, u), "LMR-07 (в): строк ключей ноль")
+	require.Equal(t, lmrReason, h.cutoffOf(t, u).reason, "LMR-07 (в): отсечка причиной сброса")
+	require.False(t, h.alive(t, u, bearer),
+		"LMR-07 (в)/Р4: сессия, выданная ключом до захвата личности сбросом, пережила сброс")
+
+	after := h.sessionAfter(t, u)
+	require.True(t, h.alive(t, u, after.bearer.Value), "близнец: сессия, выданная после сброса, годна")
+}
+
+// TestResetAccessKeys_LMR07c_ResetRacesAKeyLogin — LMR-07 (в) без шва: сброс и
+// вход ключом того же человека параллельно, N раундов; после обоих исходов
+// сессия, которую вход выдал, краю не годна при любом порядке фиксации. Число
+// раундов ограничено окном обращений источника стенда (`SourceAttempts` 50 за
+// 10 минут; раунд — испытание и вход): упор в окно — «условие не создано».
+func TestResetAccessKeys_LMR07c_ResetRacesAKeyLogin(t *testing.T) {
+	h := newSessionLane(t)
+	admin := registerPerson(t, h, "lmr07c-race-admin")
+	const rounds = 20
+	outcomes := map[string]int{}
+	ops := operations.NewRepo(h.pool, "kaname")
+	for i := 0; i < rounds; i++ {
+		w := registerPerson(t, h, fmt.Sprintf("lmr07c-w%02d", i))
+		k := givenAcceptedKey(t, h, w)
+		f := givenAKForm(t, h)
+		c := givenChallenge(t, h, f)
+		as := assertOver(t, k, c, webauthntest.AssertionOptions{})
+
+		start := make(chan struct{})
+		done := make(chan error, 1)
+		// Сдвиг старта сброса по раунду разводит порядок фиксаций: без него
+		// сброс всякий раз опережает вход, и выданной сессии проба не видит.
+		lag := time.Duration(i%10) * 3 * time.Millisecond
+		go func() {
+			<-start
+			<-time.After(lag)
+			op, err := h.resetUC(nil).Execute(adminCtx(h.ctx, admin), w)
+			if err != nil {
+				done <- fmt.Errorf("сброс отвергнут синхронно: %w", err)
+				return
+			}
+			waitCtx, cancel := context.WithTimeout(h.ctx, 20*time.Second)
+			defer cancel()
+			if err := operations.Wait(waitCtx); err != nil {
+				done <- fmt.Errorf("исполнитель операций не завершил очередь: %w", err)
+				return
+			}
+			got, err := ops.Get(h.ctx, op.ID)
+			switch {
+			case err != nil:
+				done <- fmt.Errorf("операция %s не прочитана: %w", op.ID, err)
+			case !got.Done:
+				done <- fmt.Errorf("операция %s не терминальна", op.ID)
+			case got.Error != nil:
+				done <- fmt.Errorf("операция %s отказала: %v", op.ID, got.Error)
+			default:
+				done <- nil
+			}
+		}()
+		close(start)
+		r := akLogin(t, h, f, map[string]any{"csrfToken": f.login, "credential": credentialBody(as, k.handle)})
+		require.NoErrorf(t, <-done, "раунд %d: сброс исполнен", i)
+		require.Zerof(t, h.keysOf(t, w), "раунд %d: строк ключей ноль", i)
+		outcome := "login-refused"
+		if r.status == http.StatusOK {
+			outcome = "login-issued"
+			ck := cookieNamed(r.cookies, loginlanehttp.CookieSession)
+			require.NotNilf(t, ck, "раунд %d: вход выдал ответ без носителя", i)
+			require.Falsef(t, h.alive(t, w, ck.Value),
+				"раунд %d: сессия, выданная ключом параллельно сбросу, пережила сброс (Р4)", i)
+		}
+		outcomes[outcome]++
+	}
+	t.Logf("LMR-07 (в): раундов %d · исходы входа %v", rounds, outcomes)
 }
 
 // TestResetAccessKeys_LMR09_NoFormIsLeftWithoutAWayIn — LMR-09: сброс не

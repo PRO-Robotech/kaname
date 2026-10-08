@@ -203,8 +203,7 @@ func (l *loginLane) resetAccessKeysUseCase(repo kanamerepo.Repository, opsRepo o
 	if !l.wired() {
 		return nil
 	}
-	return userapp.NewResetAccessKeysUseCase(repo, opsRepo, l.methods, accessKeysResetStore{keys: l.keys}).
-		WithCutoffClock(l.clock)
+	return userapp.NewResetAccessKeysUseCase(repo, opsRepo, l.methods, accessKeysResetStore{keys: l.keys})
 }
 
 // accessKeysResetStore — адаптер хранилища ключей к порту сброса: соответствие

@@ -33,9 +33,23 @@ package user
 //     триггер той же транзакции (Р3). Ноль снятых — человек сбросом уже лишён
 //     ключей (гонка двух сбросов, Р5): исход операции — тот же отказ, без
 //     отсечки и события;
-//  3. ВСЕ сессии человека покрыты отсечкой моментом общего источника (kaname#589)
-//     с причиной `access-keys-reset` и актором — администратором (Р4);
+//  3. ВСЕ сессии человека покрыты отсечкой с причиной `access-keys-reset` и
+//     актором — администратором (Р4);
 //  4. событие `iam.user.access_keys_reset` с обоими акторами (Р4).
+//
+// # Момент отсечки — ПОСЛЕ захвата строки личности
+//
+// Записи сессии сброс не снимает — отсекает (Р4: причина в словарь снятия не
+// входит), поэтому «гаснут ВСЕ» держится только моментом отсечки, и момент
+// читается писателем — соединением его транзакции, ПОСЛЕ захвата строки
+// личности (`AccessKeysResetWriter.Now`), а не до открытия транзакции. Выдача
+// входа ключом держит строку личности до своей фиксации; сброс, ждавший её,
+// читает момент позже фиксации, и сессия, выданная только что снятым ключом,
+// отсечкой покрыта (сравнение у края включающее). Выдача, начатая после
+// захвата, ждёт фиксации сброса и находит ключ снятым. Момент прежнего порядка
+// (прочитанный до транзакции) опережала выдача, взявшая личность раньше, и её
+// сессия переживала сброс — проба LMR-07 (в). Источник тот же — часы первичной
+// базы (kaname#589), — а второго соединения изнутри открытой транзакции нет.
 //
 // # Что синхронно, а что в Operation
 //
@@ -55,6 +69,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -103,6 +118,11 @@ type AccessKeysResetWriter interface {
 	// DeleteAccessKeysOf снимает все строки ключей человека одним оператором;
 	// возвращает число снятых.
 	DeleteAccessKeysOf(ctx context.Context, userID domain.UserID) (int64, error)
+	// Now — момент первичной базы, прочитанный соединением этой транзакции
+	// ПОСЛЕ захвата строки личности (шапка файла, «Момент отсечки»): выдача,
+	// зафиксированная до захвата, его не опережает. Делает писателя
+	// источником [revocationpolicy.Clock].
+	Now(ctx context.Context) (time.Time, error)
 	// UpsertCutoff — отсечка «все сессии человека до момента» (Ф-л).
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
 	// EmitAudit — событие в очередь аудита той же транзакцией.
@@ -117,21 +137,12 @@ type ResetAccessKeysUseCase struct {
 	opsRepo operations.Repo
 	keys    AccessKeyEnrollment
 	store   AccessKeysResetStore
-	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки (kaname#589).
-	cutoffClock revocationpolicy.Clock
 }
 
-// NewResetAccessKeysUseCase — построение. Источник момента отсечки подаёт
-// корень ([ResetAccessKeysUseCase.WithCutoffClock]); без него сброс
-// отказывает, а не берёт часы процесса.
+// NewResetAccessKeysUseCase — построение. Момент отсечки даёт писатель сброса
+// (шапка файла, «Момент отсечки»): своего источника у глагола нет.
 func NewResetAccessKeysUseCase(r Repo, opsRepo operations.Repo, keys AccessKeyEnrollment, store AccessKeysResetStore) *ResetAccessKeysUseCase {
 	return &ResetAccessKeysUseCase{repo: r, opsRepo: opsRepo, keys: keys, store: store}
-}
-
-// WithCutoffClock провязывает источник момента отсечки. Composition-root only.
-func (u *ResetAccessKeysUseCase) WithCutoffClock(c revocationpolicy.Clock) *ResetAccessKeysUseCase {
-	u.cutoffClock = c
-	return u
 }
 
 // Execute — порядок: личность вызывающего → форма id → строка человека (промах
@@ -182,14 +193,6 @@ func (u *ResetAccessKeysUseCase) Execute(ctx context.Context, id domain.UserID) 
 
 // doReset — снятие испытаний и ключей, отсечка и событие одним коммитом.
 func (u *ResetAccessKeysUseCase) doReset(ctx context.Context, subject domain.User, actor string) (*anypb.Any, error) {
-	// Момент отсечки — из общего источника и ДО открытия транзакции писателя:
-	// источник читается своим соединением (kaname#589).
-	now, err := revocationpolicy.Moment(ctx, u.cutoffClock)
-	if err != nil {
-		slog.ErrorContext(ctx, "ResetAccessKeys: cutoff moment unavailable",
-			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
-		return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
-	}
 	if u.store == nil {
 		return nil, status.Error(codes.Internal, "access keys reset is not wired")
 	}
@@ -203,6 +206,13 @@ func (u *ResetAccessKeysUseCase) doReset(ctx context.Context, subject domain.Use
 			_ = w.Rollback(ctx)
 		}
 	}()
+	// Момент отсечки — писателем, после захвата строки личности (шапка файла).
+	now, err := revocationpolicy.Moment(ctx, w)
+	if err != nil {
+		slog.ErrorContext(ctx, "ResetAccessKeys: cutoff moment unavailable",
+			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
 	if _, err := w.RetireRegistrationChallenges(ctx, subject.ID); err != nil {
 		return nil, u.storeErr(ctx, "challenges", err)
 	}

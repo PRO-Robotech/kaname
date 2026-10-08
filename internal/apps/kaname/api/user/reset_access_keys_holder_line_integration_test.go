@@ -17,7 +17,6 @@ package user
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -29,7 +28,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // TestResetAccessKeysHolderLineOnBadIdsFromRealDB — LMR-03, линия держателя.
@@ -42,7 +40,7 @@ func TestResetAccessKeysHolderLineOnBadIdsFromRealDB(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
-	uc := NewResetAccessKeysUseCase(repo, nil, kanamepg.NewLoginMethodRepo(pool), nil).WithCutoffClock(momentclock.Func(time.Now))
+	uc := NewResetAccessKeysUseCase(repo, nil, kanamepg.NewLoginMethodRepo(pool), nil)
 
 	const badForm = "not-a-user-id"
 	_, err = uc.Execute(ownerCtx(), domain.UserID(badForm))
