@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 )
 
 // untrustedTargetRefusal — отказ, наступивший ДО того, как цель доверена:
@@ -94,8 +95,10 @@ func (a *Authorize) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if r.Method != http.MethodGet {
 		a.cfg.Census.count(OutcomeAuthorizeMethodNotAllowed)
-		w.Header().Set("Allow", http.MethodGet)
-		writeJSON(w, http.StatusMethodNotAllowed, errorBody("invalid_request"))
+		// Форма решения R36 п. 3 — та же, что у полосы входа (Р12 приёмки темпа
+		// церемонии, kaname#524): отказ метода решается до протокола, и словарь
+		// ошибок OAuth к нему не применим.
+		methodrefusal.Write(w, http.MethodGet)
 		return
 	}
 	ctx := r.Context()

@@ -204,7 +204,16 @@ const (
 	TextSecondFactorAlreadyEnrolled = "second factor is already enrolled"
 	TextEnrollmentNotPending        = "no pending enrollment: begin with enroll"
 	TextSessionNotFresh             = "re-authentication required: present a credential again"
-	TextSecondFactorUnavailable     = "second factor temporarily unavailable"
+	// TextSecondFactorUnavailable — материал фактора не открывается (Р2,
+	// редакции 16–17; kaname#258 п. 2). Причина сама не проходит — у `totp`
+	// перечень ключей обёртки сменили, не сохранив прежний, у `lookup_secret`
+	// строки набора нет, — и повтор ничего не восстановит: восстанавливает
+	// оператор. Поэтому текст называет шаг человека, а не «позже»: ни
+	// «temporarily», ни «try again», ни «later», и у ответа нет `Retry-After`.
+	// Текст один на все глаголы сверки кода и на оба способа и класс причины не
+	// называет; шаг оператора живёт в описании правила тревоги и на странице
+	// смены ключа.
+	TextSecondFactorUnavailable = "second factor cannot be verified; ask the administrator of this installation"
 )
 
 const (

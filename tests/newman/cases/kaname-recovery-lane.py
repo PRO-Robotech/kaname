@@ -54,7 +54,7 @@
 
 Coverage:
   IAM-RECOVERY-OK-REQUEST-SAME-ANSWER   — запрос кода для существующего и для
-                                          несуществующего адреса отвечает 200 {} побайтово
+                                          несуществующего адреса отвечает 200 {nextStep} побайтово
                                           одинаково и не ставит печений (Ф5-01, Ф5-02)
   IAM-RECOVERY-NEG-WRONG-CODE           — неверный код с новым паролем → 401 code 16
                                           одним текстом, носителя нет (Ф5-04/05/07 по форме
@@ -78,8 +78,8 @@ Coverage:
                                           из первой) после завершения негодны обе; выданная
                                           завершением — годна
   IAM-RECOVERY-NEG-BLOCKED-STAYS-BLOCKED — Ф5-17: заблокированная надзором облака проходит
-                                          восстановление — отказ завершения равен отказу входа
-                                          заблокированной, новым паролем войти нельзя; после
+                                          восстановление — отказ завершения равен отказу завершения
+                                          на неверном коде (Р10 п. 2), новым паролем войти нельзя; после
                                           снятия блокировки надзором входит новым, а не прежним
   IAM-RECOVERY-OK-COMPLETION-RESETS-AS-FULL-LOGIN — Ф5-25: после N_адрес − 1 неверных
                                           завершение у личности с фактором (а) счёт не обнуляет
@@ -118,6 +118,17 @@ _LANE_WHY = ("слушатель полосы формы службы; подн�
 _CSRF = "/iam/v1/auth/csrf"
 _RECOVERY = "/iam/v1/auth/recovery"
 _COMPLETE = "/iam/v1/auth/recovery/complete"
+
+# Ответ запроса кода — ОДИН на все исходы и называет шаг (Ф5 Р10 п. 1,
+# kaname#211); тело ровно `{"nextStep": …}` в той форме, что печатает
+# слушатель (без пробелов).
+_NEXT_STEP = ("a letter with a recovery code is sent if this address can recover access; "
+              "if no letter arrives, request again later, sign in and confirm the address, "
+              "or ask an administrator to reset your sign-in methods")
+_NEXT_STEP_BODY = '{"nextStep":"' + _NEXT_STEP + '"}'
+# Отказ завершения — ОДИН на все причины глагола, свой у глагола (Ф5 Р10 п. 2, Д22).
+_NOT_RESTORED = ("access not restored; request a new recovery code, and if a new code "
+                 "does not restore access, ask an administrator")
 
 # Адрес источника, который на живом проводе ставит край (Р10).
 _SOURCE = "203.0.113.11"
@@ -206,8 +217,8 @@ CASES.append(Case(
             auth="anonymous",
             test_script=[
                 *assert_status(200),
-                "pm.test('REQUEST-EXISTING: тело — пустой объект, исход не сообщается', () => "
-                "pm.expect(pm.response.json(), pm.response.text()).to.eql({}));",
+                "pm.test('REQUEST-EXISTING: тело называет шаг (Р10 п. 1), исход не сообщается', () => "
+                f"pm.expect(pm.response.text()).to.eql({js_str(_NEXT_STEP_BODY)}));",
                 "pm.environment.set('recoveryRequestBodyExisting', pm.response.text());",
                 *_no_session_cookie("REQUEST-EXISTING"),
                 "pm.test('REQUEST-EXISTING: контекст формы не переставлен', () => "
@@ -274,7 +285,10 @@ CASES.append(Case(
             pre_script=[*_lane(_COMPLETE), *_with_cookies(("kaname_form", "recoveryFormCookie"))],
             insecure_tls=True,
             auth="anonymous",
-            test_script=_refusal(401, 16, "authentication failed", "WRONG-CODE"),
+            test_script=[*_refusal(401, 16, _NOT_RESTORED, "WRONG-CODE"),
+                         # Эталон отказа завершения для BLOCKED-COMPLETE (Ф1-59 по
+                         # свойству: блокировка неотличима от прочих причин глагола).
+                         "pm.environment.set('rcvCompletionRefusal', pm.response.text());"],
         ),
     ],
 ))
@@ -520,8 +534,8 @@ def _recovery_code(p, tag, *, from_session=None):
               with_session=from_session,
               test_script=[
                   *_status_is(200, f"{tag.upper()}-REQUEST"),
-                  f"pm.test({js_str(tag.upper() + '-REQUEST: тело — пустой объект')}, () => "
-                  "pm.expect(pm.response.text()).to.eql('{}'));",
+                  f"pm.test({js_str(tag.upper() + '-REQUEST: тело называет шаг (Р10 п. 1)')}, () => "
+                  f"pm.expect(pm.response.text()).to.eql({js_str(_NEXT_STEP_BODY)}));",
               ]),
         _await_code(p, f"{tag}-recovery-letter", _HEAD_RECOVERY, "MailCode"),
     ]
@@ -637,7 +651,7 @@ CASES.append(Case(
         _complete(_P05, "twice-complete-first", test_script=_issued(_P05, "TWICE-FIRST")),
         _csrf_step(_P05, "twice-csrf-complete-again", "recovery-complete"),
         _complete(_P05, "twice-complete-again", password_var="Password",
-                  test_script=_refused(401, 16, "authentication failed", "TWICE-AGAIN")),
+                  test_script=_refused(401, 16, _NOT_RESTORED, "TWICE-AGAIN")),
         *_recovery_code(_P05, "twice-fresh"),
         # Предмет шага — не его собственный запрос (признак формы), а три
         # одновременных предъявления свежего кода из его тест-скрипта: решение
@@ -654,7 +668,7 @@ CASES.append(Case(
                 "const __got = [];",
                 f"const __done = () => {{ if (__got.length !== {_PARALLEL}) {{ return; }}",
                 "  const ok = __got.filter(r => r.code === 200).length;",
-                "  const refused = __got.filter(r => r.code === 401 && r.message === 'authentication failed').length;",
+                f"  const refused = __got.filter(r => r.code === 401 && r.message === {js_str(_NOT_RESTORED)}).length;",
                 f"  pm.test({js_str(f'TWICE-PARALLEL: ровно одно из {_PARALLEL} одновременных предъявлений проходит')}, () => pm.expect(ok).to.eql(1));",
                 f"  pm.test('TWICE-PARALLEL: остальные получают единый отказ 401', () => pm.expect(refused).to.eql({_PARALLEL - 1}));",
                 "};",
@@ -1113,12 +1127,14 @@ CASES.append(Case(
         *_login(_P17, "blocked-login-old-refused", "Password", ok=False, keep="rcvBlockedRefusal"),
         *_recovery_code(_P17, "blocked"),
         _csrf_step(_P17, "blocked-csrf-complete", "recovery-complete"),
-        # Ф1-59: учётные данные сменяются, сессии нет; ответ — тот же отказ, что на
-        # входе заблокированной.
+        # Ф1-59 по свойству (Ф5 Р10 п. 2, Д22): учётные данные сменяются, сессии
+        # нет; ответ — отказ ЗАВЕРШЕНИЯ, побайтово равный отказу завершения на
+        # неверном коде: блокировка неотличима от прочих причин этого глагола.
+        # Отказ входа до и после — прежний (`rcvBlockedRefusal` ниже).
         _complete(_P17, "blocked-complete", test_script=[
-            *_refused(401, 16, "authentication failed", "BLOCKED-COMPLETE"),
-            "pm.test('BLOCKED-COMPLETE: отказ побайтово равен отказу входа заблокированной', () => "
-            "pm.expect(pm.response.text() === pm.environment.get('rcvBlockedRefusal')).to.eql(true));",
+            *_refused(401, 16, _NOT_RESTORED, "BLOCKED-COMPLETE"),
+            "pm.test('BLOCKED-COMPLETE: отказ побайтово равен отказу завершения на неверном коде', () => "
+            "pm.expect(pm.response.text() === pm.environment.get('rcvCompletionRefusal')).to.eql(true));",
         ]),
         # Главное «Тогда»: войти по-прежнему нельзя — и новым паролем тоже.
         *_login(_P17, "blocked-login-new-refused", "NewPassword", ok=False, same_as="rcvBlockedRefusal"),
@@ -1314,7 +1330,7 @@ CASES.append(Case(
         *_recovery_code(_P25C, "rl-c"),
         *_f5_25_series(_P25C, "rl-c"),
         _csrf_step(_P25C, "rl-c-csrf-complete", "recovery-complete"),
-        _complete(_P25C, "rl-c-complete", test_script=_refused(401, 16, "authentication failed", "RL-C-COMPLETE")),
+        _complete(_P25C, "rl-c-complete", test_script=_refused(401, 16, _NOT_RESTORED, "RL-C-COMPLETE")),
         _csrf_step(_P25C, "rl-c-csrf-login-after", "login"),
         _wrong_login(_P25C, "rl-c-wrong-after-first", limited=True),
         # Уборка: личность C снова действующая — следующий прогон заводит своих,
@@ -1486,19 +1502,19 @@ def _request_for(p, name, email_expr, src_var, *, times_var=None, keep=None, sam
     """Запрос кода восстановления для адреса `email_expr` с источника `src_var`.
 
     `times_var` — повторить столько раз, сколько велит переменная (каждый —
-    `200 {}`); `keep` — запомнить тело последнего; `same_as` — тело побайтово
+    `200 {nextStep}`, Р10 п. 1); `keep` — запомнить тело последнего; `same_as` — тело побайтово
     равно запомненному."""
     counter, started = f"_rq_{p}_{name}".replace("-", "_"), f"_rqs_{p}_{name}".replace("-", "_")
     label = name.upper()
     test = [
-        f"pm.test({js_str(label + ': ответ 200 и тело — пустой объект')}, () => "
-        "pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{}']));",
+        f"pm.test({js_str(label + ': ответ 200 и тело называет шаг (Р10 п. 1)')}, () => "
+        f"pm.expect([pm.response.code, pm.response.text()]).to.eql([200, {js_str(_NEXT_STEP_BODY)}]));",
     ]
     if times_var is not None:
         test = [
             f"const __i = parseInt(pm.environment.get({js_str(counter)}) || '0', 10) + 1;",
             f"const __bad = parseInt(pm.environment.get({js_str(counter + '_bad')}) || '0', 10) + "
-            "((pm.response.code === 200 && pm.response.text() === '{}') ? 0 : 1);",
+            f"((pm.response.code === 200 && pm.response.text() === {js_str(_NEXT_STEP_BODY)}) ? 0 : 1);",
             f"pm.environment.set({js_str(counter + '_bad')}, String(__bad));",
             f"if (__i < parseInt(pm.environment.get({js_str(times_var)}) || '0', 10)) {{",
             f"  pm.environment.set({js_str(counter)}, String(__i));",
@@ -1511,7 +1527,7 @@ def _request_for(p, name, email_expr, src_var, *, times_var=None, keep=None, sam
             f"pm.environment.unset({js_str(counter + '_bad')});",
             f"pm.test({js_str(label + ': серия исполнена полностью')}, () => "
             f"pm.expect(__i).to.eql(parseInt(pm.environment.get({js_str(times_var)}) || '0', 10)));",
-            f"pm.test({js_str(label + ': каждый запрос серии — 200 и пустой объект')}, () => pm.expect(__bad).to.eql(0));",
+            f"pm.test({js_str(label + ': каждый запрос серии — 200 и тело с шагом')}, () => pm.expect(__bad).to.eql(0));",
         ]
     if keep:
         test.append(f"pm.environment.set({js_str(keep)}, pm.response.text());")

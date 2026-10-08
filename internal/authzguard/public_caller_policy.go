@@ -60,17 +60,21 @@ package authzguard
 
 import (
 	"context"
+	"errors"
+	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"strings"
-
+	"github.com/PRO-Robotech/corelib/acrlevel"
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // Public RPC full-methods that a non-gateway module legitimately calls. Named
@@ -212,7 +216,10 @@ func NewPublicCallerPolicy(
 // allow returns nil iff the call may proceed past the policy for fullMethod:
 //   - the caller was named by a credential it PRESENTED and we verified in full
 //     → nil (a tenant of a foreign cloud has no module certificate by
-//     construction; see the branch itself for why this is not a widening).
+//     construction; see the branch itself for why this is not a widening) —
+//     unless the catalog declares an assurance floor the credential does not
+//     meet: then the STEP-UP INDICATION (`Unauthenticated` with
+//     [iamerr.TextStepUpRequired], Р11, kaname#511), not a permission refusal.
 //   - no verified module cert: dev → nil (insecure back-compat); prod →
 //     fail-closed, и КОД ЗДЕСЬ РАЗНЫЙ. Вызывающий, не назвавшийся ничем —
 //     ни сертификатом, ни предъявленным удостоверением, ни переданной
@@ -261,13 +268,18 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		// объявлять. Пустить такой вызов значило бы снять требование, которого
 		// никто не отменял.
 		//
-		// Отказ здесь — ТОТ ЖЕ, что у соседних ветвей, и это не небрежность:
-		// «сертификата нет» и «доверия недостаточно» суть один ответ «сюда
-		// нельзя», и различать их наружу — оракул.
+		// Ответ здесь — УКАЗАНИЕ повысить уровень, а не отказ прав (Р11 приёмки
+		// уровня уверенности, kaname#511): та же форма, что у края (KA1-15).
+		// Прежде здесь стоял отказ «как у соседних ветвей» с доводом «различать —
+		// оракул»; для этой полосы довод неверен — удостоверение проверено
+		// целиком, и свой уровень держатель читает из него самого, так что
+		// указание не сообщает ему ничего, кроме шага. Цена прежнего ответа —
+		// повышение, которого клиент не узнавал: он шёл искать выдачи прав.
 		//
 		// Полоса не теряет ничего, что имела: машинный принципал освобождён
 		// общим правилом (у машины нет интерактивной церемонии), а человеку
-		// решает тот же порог, что решал бы на крае.
+		// решает тот же порог, что решал бы на крае. Меняется РЕНДЕРИНГ вердикта,
+		// а не вердикт.
 		required := p.requiredACRMin(fullMethod)
 		if required == "" || !p.prodMode {
 			return nil
@@ -290,7 +302,8 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 			PresentedACR:  acr,
 			RequiredACR:   required,
 		}) != grpcsrv.StepUpAllow {
-			return status.Error(codes.PermissionDenied, "permission denied")
+			return &stepUpRequired{challenge: iamerr.StepUpChallenge(
+				strconv.Itoa(acrlevel.Rank(required)), strconv.Itoa(acrlevel.Rank(acr)))}
 		}
 		return nil
 	}
@@ -396,10 +409,41 @@ func (p *PublicCallerPolicy) requiredACRMin(fullMethod string) string {
 	return p.acrCatalog.RequiredACRMin(strings.TrimPrefix(fullMethod, "/"))
 }
 
+// stepUpRequired — вердикт «пол не пройден» на полосе предъявленного,
+// отрендеренный указанием (Р11): статус `UNAUTHENTICATED` с текстом, называющим
+// шаг, и готовый вызов RFC 9470, который перехватчик кладёт в хвост ответа —
+// статус `google.rpc.Status` параметров вызова не несёт, а REST-фронт обязан
+// поставить их на провод (Ф11-49).
+type stepUpRequired struct{ challenge string }
+
+func (e *stepUpRequired) Error() string { return iamerr.TextStepUpRequired }
+
+// GRPCStatus — код и текст указания; `details` пусты, как у края (KA1-15).
+func (e *stepUpRequired) GRPCStatus() *status.Status {
+	return status.New(codes.Unauthenticated, iamerr.TextStepUpRequired)
+}
+
+// stepUpTrailer — хвост ответа с вызовом указания, если err — указание.
+func stepUpTrailer(err error) (metadata.MD, bool) {
+	var su *stepUpRequired
+	if !errors.As(err, &su) {
+		return nil, false
+	}
+	return metadata.Pairs(iamerr.StepUpChallengeTrailer, su.challenge), true
+}
+
 // Unary returns the unary interceptor enforcing the public caller policy.
+//
+// Хвост с вызовом ставится ДО возврата отказа. Отказ его установки (контекст
+// без потока — так бывает лишь вне настоящего слушателя) вердикта не меняет:
+// указание уходит тем же статусом, а REST-фронт без вызова поставит голую
+// подсказку — ответ беднее, но не ложен и не шире.
 func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if err := p.allow(ctx, info.FullMethod); err != nil {
+			if md, ok := stepUpTrailer(err); ok {
+				_ = grpc.SetTrailer(ctx, md) // исход отказа от хвоста не зависит — см. выше
+			}
 			return nil, err
 		}
 		return handler(ctx, req)
@@ -410,6 +454,9 @@ func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 func (p *PublicCallerPolicy) Stream() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if err := p.allow(ss.Context(), info.FullMethod); err != nil {
+			if md, ok := stepUpTrailer(err); ok {
+				ss.SetTrailer(md)
+			}
 			return err
 		}
 		return handler(srv, ss)

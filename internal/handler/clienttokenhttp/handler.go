@@ -80,6 +80,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/failurewindow"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -276,8 +277,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// именно он ошибся, и будет считать эндпоинт сломанным.
 	if r.Method != http.MethodPost {
 		h.count(clientassertion.OutcomeMethodNotAllowed)
-		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, http.StatusMethodNotAllowed, errorBody("invalid_request"))
+		// Форма решения R36 п. 3 — та же, что у полосы входа (Р12 приёмки темпа
+		// церемонии, kaname#524): запрос не дошёл до разбора формы, и
+		// `invalid_request` («исправь тело») назвал бы неверным не то.
+		methodrefusal.Write(w, http.MethodPost)
 		return
 	}
 

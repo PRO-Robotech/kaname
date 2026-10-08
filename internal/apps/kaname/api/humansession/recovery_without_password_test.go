@@ -48,7 +48,7 @@ func TestRecovery_F5_34_CompletionCreatesTheMissingPasswordRow(t *testing.T) {
 			h.clock = ucBase.Add(2 * time.Minute)
 			h.mustLogin(t, "r34@example.invalid", "brand-new-password-34")
 			_, err = h.complete("r34@example.invalid", letter, "another-new-password-34")
-			require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "повтор — отказ Ф5-05: код применён этим завершением")
+			require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "повтор — отказ Ф5-05: код применён этим завершением")
 		})
 	}
 }
@@ -63,11 +63,11 @@ func TestRecovery_F5_34_BlockedPersonWithoutARowGetsTheBlockedRefusal(t *testing
 
 	h.clock = ucBase.Add(time.Minute)
 	_, err := h.complete("r34b@example.invalid", letter, "brand-new-password-34b")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "Ф5-34 (в): отказ Ф5-17, не UNAVAILABLE")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "Ф5-34 (в): отказ Ф5-17, не UNAVAILABLE")
 	require.Equal(t, 1, h.obs.recoveryCompletion[humansession.RecoveryCompletionBlocked])
 	require.Zero(t, h.obs.recoveryCompletion[humansession.RecoveryCompletionStoreFailed])
 	_, err = h.complete("r34b@example.invalid", letter, "another-new-password-34b")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "повтор — отказ Ф5-05: учётные данные заведены, код применён")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "повтор — отказ Ф5-05: учётные данные заведены, код применён")
 	require.NotNil(t, h.store.codesOf(u.ID)[0].ConsumedAt, "код применён")
 	_, has := h.store.verifiers[u.ID]
 	require.True(t, has, "Ф5-34 (г): строка «пароль» у NB заведена")

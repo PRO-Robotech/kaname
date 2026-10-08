@@ -3,7 +3,10 @@
 
 package restfront
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 // challenge.go — подсказка аутентификации на публичной HTTP-поверхности
 // (задача продукта #2103, находка Н1 приёмки KAN-REST-1).
@@ -18,11 +21,13 @@ import "net/http"
 //
 // # Почему обёртка ОТВЕТА, а не свой обработчик ошибок
 //
-// Свой обработчик ошибок сменил бы множество производимых статусов, и таблица
-// статусов приёмки перестала бы описывать поведение — шапка пакета говорит это
-// прямо. Обёртка ставит ОДИН заголовок и не трогает ни кода, ни тела: множество
-// статусов остаётся тем, что задаёт библиотека, и обеим HTTP-поверхностям
-// платформы по-прежнему нечем разойтись.
+// Обработчик ошибок, ЗАМЕНЯЮЩИЙ умолчание, сменил бы множество производимых
+// статусов, и таблица статусов приёмки перестала бы описывать поведение — шапка
+// пакета говорит это прямо. Обработчик фронта (stepup.go) умолчания не
+// заменяет: он рендерит одно указание повысить уровень и кладёт его вызов в
+// место запроса, а всё прочее отдаёт библиотеке. Подсказку на всяком `401`
+// ставит эта обёртка — ОДИН заголовок, ни кода, ни тела: множество статусов
+// остаётся тем, что задаёт библиотека.
 //
 // # Почему только на ПУБЛИЧНОМ фронте
 //
@@ -49,13 +54,30 @@ const AuthenticationChallenge = "Bearer"
 // challengeHandler — обработчик, прикладывающий подсказку к ответу `401`.
 type challengeHandler struct{ next http.Handler }
 
+// stepUpSlot — место, куда обработчик ошибок фронта кладёт вызов УКАЗАНИЯ
+// повысить уровень (Р11, kaname#511) для этого запроса. Подсказка `Bearer`
+// ставится в момент выбора статуса и иначе перекрыла бы вызов с параметрами
+// уровня; место заводит обёртка, и только она его читает.
+type stepUpSlot struct{ challenge string }
+
+// stepUpSlotKey — ключ места в контексте запроса. Тип не экспортирован:
+// завести место может только этот пакет, снаружи запрос его не несёт.
+type stepUpSlotKey struct{}
+
+func stepUpSlotFrom(ctx context.Context) (*stepUpSlot, bool) {
+	slot, ok := ctx.Value(stepUpSlotKey{}).(*stepUpSlot)
+	return slot, ok
+}
+
 // withAuthenticationChallenge оборачивает обработчик фронта.
 func withAuthenticationChallenge(next http.Handler) http.Handler {
 	return &challengeHandler{next: next}
 }
 
 func (h *challengeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.next.ServeHTTP(&challengeWriter{ResponseWriter: w}, r)
+	slot := &stepUpSlot{}
+	h.next.ServeHTTP(&challengeWriter{ResponseWriter: w, slot: slot},
+		r.WithContext(context.WithValue(r.Context(), stepUpSlotKey{}, slot)))
 }
 
 // challengeWriter ставит заголовок В МОМЕНТ выбора статуса, а не после.
@@ -66,13 +88,22 @@ func (h *challengeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type challengeWriter struct {
 	http.ResponseWriter
 	wroteHeader bool
+	slot        *stepUpSlot
 }
 
+// WriteHeader — на `401` ставит вызов указания, если обработчик ошибок его
+// положил, иначе — голую подсказку. Указание отказом аутентификации не является
+// (Р11), поэтому решение KAN-REST-1 — подсказка одна на обе полосы ОТКАЗА — им
+// не задето: на всяком ином `401` подсказка прежняя.
 func (w *challengeWriter) WriteHeader(status int) {
 	if !w.wroteHeader {
 		w.wroteHeader = true
 		if status == http.StatusUnauthorized {
-			w.Header().Set(challengeHeader, AuthenticationChallenge)
+			challenge := AuthenticationChallenge
+			if w.slot != nil && w.slot.challenge != "" {
+				challenge = w.slot.challenge
+			}
+			w.Header().Set(challengeHeader, challenge)
 		}
 	}
 	w.ResponseWriter.WriteHeader(status)

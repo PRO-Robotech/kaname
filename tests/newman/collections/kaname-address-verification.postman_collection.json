@@ -933,7 +933,7 @@
                   "pm.test('EV01-TWIN: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
                   "pm.test('EV01-TWIN: код отказа 9', () => pm.expect(__r.code).to.eql(9));",
-                  "pm.test('EV01-TWIN: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('registration refused'));",
+                  "pm.test('EV01-TWIN: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('registration refused; if this address is already yours, sign in or recover access; if you were invited, ask an account administrator to invite again; otherwise try again later'));",
                   "pm.test('EV01-TWIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));",
                   "const __info = (Array.isArray(__r.details) ? __r.details : []).filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
                   "pm.test('EV01-TWIN: признак отказа REGISTRATION_REFUSED', () => pm.expect(__info.reason).to.eql('REGISTRATION_REFUSED'));"
