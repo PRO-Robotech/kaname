@@ -28,7 +28,8 @@ package humansession
 //
 //	форма → частота по источнику → СГОРАНИЕ ИСПЫТАНИЯ → строка удостоверения
 //	(нет — приманка) → СВЕРКА ПРОВЕРЯЮЩИМ (всегда) → приговор → сдвиг
-//	счётчика → выдача сессии одним исходом
+//	счётчика → выдача сессии одним исходом (личность → строка ключа под
+//	замком → запись: снятый с тех пор ключ не выдаёт — kaname#669)
 //
 // Испытание сгорает ДО приговора и независимо от него (Ф13-08): предъявленное
 // не оживает ни отказом подписи, ни отказом рукоятки. Сверка идёт ВСЕГДА — над
@@ -389,8 +390,9 @@ func (uc *AccessKeyLoginUseCase) Execute(ctx context.Context, in AccessKeyLoginI
 		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginIssued)
 		return out, nil
 	case issueNoRow:
-		// Личность удалена после чтения строки ключа: строки ключа больше нет
-		// тоже (каскад) — то же состояние, что «удостоверения нет» (Р15).
+		// Личность удалена после чтения строки ключа (строки ключа нет тоже —
+		// каскад) либо ключ снят после чтения: то же состояние, что
+		// «удостоверения нет» (Р15).
 		return LoginOutput{}, uc.refuse(ctx, AccessKeyLoginCredentialUnknown, in.Source, now)
 	case issueBeforeCutoff:
 		// Момент входа не позже отсечки личности: доступ снят распорядителем
@@ -443,8 +445,8 @@ func (uc *AccessKeyLoginUseCase) refuse(ctx context.Context, outcome AccessKeyLo
 	return ErrAuthenticationFailed
 }
 
-// issue — выдача одним исходом: захват строки личности с её отсечкой,
-// запись, память первой аутентификации, событие с `id` ключа и решение о счёте
+// issue — выдача одним исходом: захват строки личности с её отсечкой, строка
+// ключа под замком (kaname#669), запись, память первой аутентификации, событие с `id` ключа и решение о счёте
 // по адресу — одной транзакцией, в том же порядке замков, что у входа паролем
 // (`LoginUseCase.issue`, kaname#382): строка личности — первым оператором,
 // иначе выдача шла бы навстречу удалению личности. Уровень вычисляет правило
@@ -470,7 +472,18 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 		return LoginOutput{}, issueNoRow
 	case err != nil:
 		return LoginOutput{}, issueFailed
-	case hasCutoff && !m.After(cutoff):
+	}
+	// Ключ — ПОСЛЕ личности и механизмом базы (kaname#669, Р8): строка ключа
+	// прочитана и счётчик сдвинут раньше, своими транзакциями, а снятие ключа,
+	// зафиксированное с тех пор, записи, выдаваемой здесь, уже не снимет.
+	// Строки нет — то же состояние, что «удостоверения нет» (Р15).
+	switch err := w.HoldAccessKeyForLogin(ctx, user.ID, keyID); {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return LoginOutput{}, issueNoRow
+	case err != nil:
+		return LoginOutput{}, issueFailed
+	}
+	if hasCutoff && !m.After(cutoff) {
 		return LoginOutput{}, issueBeforeCutoff
 	}
 	s, bearer, err := IssueSession(ctx, w, IssueInput{

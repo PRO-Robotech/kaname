@@ -34,6 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -206,7 +207,11 @@ func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeAccessKeyRequest)
 	if err != nil {
 		return nil, err
 	}
-	op, err := h.revoke.Execute(ctx, RevokeInput{UserID: domain.UserID(req.GetUserId()), Actor: actor, AccessKeyID: req.GetAccessKeyId()})
+	// Выпуск предъявленного удостоверения — из носителя читателя предъявленного:
+	// по нему снятие находит текущую сессию и оставляет её (Ф13 Р8).
+	acting, _ := callerorigin.CredentialIDFrom(ctx)
+	op, err := h.revoke.Execute(ctx, RevokeInput{UserID: domain.UserID(req.GetUserId()), Actor: actor,
+		AccessKeyID: req.GetAccessKeyId(), ActingCredential: acting})
 	if err != nil {
 		return nil, err
 	}

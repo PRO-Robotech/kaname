@@ -549,6 +549,45 @@ func (w *humanSessionWriter) LockPersonForLogin(ctx context.Context, userID doma
 	return revokedBeforeQ(ctx, w.tx, string(userID))
 }
 
+// holdAccessKeyForLoginSQL — строка ключа личности ключевым замком. Сила —
+// ровно та, что конфликтует с удалением строки (`DELETE` берёт `FOR UPDATE`) и
+// с замком строк снятия (`LockKeysOf`, `FOR UPDATE`), и совместима со сдвигом
+// счётчика (`UPDATE` неключевых колонок берёт `FOR NO KEY UPDATE`): вход не ждёт
+// чужого входа тем же ключом. Сужение владельцем — в самом операторе: ключ
+// другой личности даёт ноль строк так же, как снятый.
+const holdAccessKeyForLoginSQL = `
+SELECT 1 FROM kaname.user_access_keys WHERE id = $1 AND user_id = $2 FOR KEY SHARE`
+
+// HoldAccessKeyForLogin — см. порт: строка ключа под замком транзакцией выдачи
+// входа, ПОСЛЕ захвата личности.
+//
+// Порядок «личность → ключ» здесь не совет, а условие оператора: строка
+// личности этой транзакции уже взята (`person`), иначе отказ без обхода базы.
+// Тот же порядок у снятия ключа (`AccessKeyRepo.RevokeWriter`: личность
+// `FOR NO KEY UPDATE` первым оператором, затем ключи) и у удаления личности
+// (личность, затем каскадом ключи) — встречного нет. Уровень `read committed`
+// писателя сессии: оператор, исполненный после ожидания захвата личности,
+// видит удаление строки ключа, зафиксированное за это ожидание.
+func (w *humanSessionWriter) HoldAccessKeyForLogin(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	switch {
+	case userID == "":
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	case keyID == "":
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument access_key_id: required")
+	case w.person != userID:
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the access key is held only after the person row of the same transaction")
+	}
+	tag, err := w.tx.Exec(ctx, holdAccessKeyForLoginSQL, string(keyID), string(userID))
+	if err != nil {
+		return mapErr(err, "AccessKey.HoldForLogin", string(keyID))
+	}
+	if tag.RowsAffected() == 0 {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "AccessKey %s not found", keyID)
+	}
+	return nil
+}
+
 func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
 	if err := s.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())

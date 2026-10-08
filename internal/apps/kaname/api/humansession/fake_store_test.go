@@ -93,6 +93,10 @@ type fakeStore struct {
 	openPath map[domain.UserID]bool
 	// keys — у кого заведена строка ключа доступа (ось «заведено», Ф13).
 	keys map[domain.UserID]bool
+	// accessKeyRows — строки ключей доступа: чья строка (kaname#669). Держит их
+	// замок выдачи входа ключом `HoldAccessKeyForLogin` — той же семантикой,
+	// что адаптер: строка чужой личности и снятая неразличимы.
+	accessKeyRows map[domain.AccessKeyID]domain.UserID
 	// inserted — счётчик вставок записей сессии (`fakeRow.seq`).
 	inserted int64
 }
@@ -116,8 +120,9 @@ func newFakeStore() *fakeStore {
 		cutoffs: map[domain.UserID]fakeCutoff{}, verifiers: map[domain.UserID]domain.LoginVerifier{},
 		factors: map[domain.UserID]map[domain.LoginMethodKind]*domain.LoginMethod{},
 		codes:   map[domain.RecoveryCodeID]*domain.RecoveryCode{}, completions: map[string]domain.RecoveryCompletion{},
-		openPath: map[domain.UserID]bool{},
-		keys:     map[domain.UserID]bool{},
+		openPath:      map[domain.UserID]bool{},
+		keys:          map[domain.UserID]bool{},
+		accessKeyRows: map[domain.AccessKeyID]domain.UserID{},
 	}
 }
 
@@ -606,12 +611,40 @@ func (w *fakeWriter) LockPersonForLogin(_ context.Context, userID domain.UserID)
 	if _, ok := w.store.users[userID]; !ok {
 		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
 	}
+	// У адаптера захват отмечает личность транзакции (`person`): строку
+	// ключа после него берёт `HoldAccessKeyForLogin`, без него — отказ.
+	w.holds = userID
 	w.store.trip()
 	c, ok := w.store.cutoffs[userID]
 	if !ok {
 		return time.Time{}, false, nil
 	}
 	return c.at, true, nil
+}
+
+// HoldAccessKeyForLogin — строка ключа под замком выдачи входа (kaname#669):
+// без захвата этой личности в той же транзакции — отказ без обхода базы, как у
+// адаптера; строки нет либо она чужая — NOT_FOUND.
+func (w *fakeWriter) HoldAccessKeyForLogin(_ context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	switch {
+	case userID == "":
+		return errFakeArg("Illegal argument user_id: required")
+	case keyID == "":
+		return errFakeArg("Illegal argument access_key_id: required")
+	case w.holds != userID:
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the access key is held only after the person row of the same transaction")
+	}
+	w.store.trip()
+	if err := w.fail("hold-access-key"); err != nil {
+		return err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	if owner, ok := w.store.accessKeyRows[keyID]; !ok || owner != userID {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "AccessKey %s not found", keyID)
+	}
+	return nil
 }
 
 func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {

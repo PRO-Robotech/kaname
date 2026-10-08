@@ -23,7 +23,11 @@
 // номера. Поэтому «сессия» приёмки здесь — ВЫЗЫВАЮЩИЙ: испытание выдаётся ему
 // и находится только у него (Ф7-55), утверждение принимается только его
 // ключа (Ф7-51), а свежесть — момент последнего предъявления человека — читает
-// порт `Freshness` из хранилища сессий. Граница названа в порте.
+// порт `Freshness` из хранилища сессий. Граница названа в порте. Единственный
+// глагол, которому нужна ЗАПИСЬ сессии вызывающего, — снятие ключа (Ф13 Р8,
+// текущая сессия остаётся): он выводит её из выпуска предъявленного
+// удостоверения (`RevokeInput.ActingCredential`), а у личности, переданной
+// краем, выпуска нет (kaname#677).
 package access_keys
 
 import (
@@ -54,6 +58,16 @@ type Store interface {
 	UserOf(ctx context.Context, id domain.UserID) (domain.User, error)
 	// Writer открывает транзакцию записи. Вызывающий обязан Commit либо Rollback.
 	Writer(ctx context.Context) (Writer, error)
+	// RevokeWriter открывает транзакцию СНЯТИЯ ключа человека userID: ПЕРВЫМ
+	// оператором взята строка личности замком писателя нескольких сессий —
+	// раньше строк ключей и строк сессии (порядок «личность → дети», тот же у
+	// удаления личности и у выдачи сессии входом). Выдача входа ключом после
+	// захвата личности берёт и строку ключа (`humansession.Writer.
+	// HoldAccessKeyForLogin`, kaname#669): вход, чья выдача пришла после этого
+	// снятия, ключа не находит и отказывает; выдача, пришедшая раньше, держит
+	// личность, и снятие её ждёт и снимает выданную запись. Вызывающий обязан
+	// Commit либо Rollback.
+	RevokeWriter(ctx context.Context, userID domain.UserID) (RevokeWriter, error)
 }
 
 // Writer — одна транзакция записи. Строка ключа, потребление испытания и
@@ -91,6 +105,29 @@ type Writer interface {
 
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
+}
+
+// RevokeWriter — транзакция снятия ключа (Ф7-25 с дописью Ф13 Р8): строка
+// ключа, событие снятия, снятие записей сессии человека и его отсечка ложатся
+// ОДНИМ исходом — отказ любой записи откатывает всё (форма Ф3-16).
+type RevokeWriter interface {
+	Writer
+	// SessionOfCredential — запись сессии, в которой выпущено предъявленное
+	// удостоверение credentialID (выпуск → семейство → сессия церемонии), если
+	// выпуск принадлежит личности userID; found=false — такого выпуска у
+	// личности нет.
+	SessionOfCredential(ctx context.Context, userID domain.UserID, credentialID string) (domain.HumanSessionID, bool, error)
+	// EndOtherSessions снимает не снятые записи сессии личности, КРОМЕ keep
+	// (пустой — все), моментом at причиной reason той же дверью, что у полосы
+	// входа: с записью снимается и выданное ею (семейства обновления).
+	// Возвращает число снятых.
+	EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error)
+	// FirstAuthentication — момент первой аутентификации личности нашей
+	// посадкой тем же соединением транзакции; found=false — памяти нет.
+	FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error)
+	// UpsertCutoff — отсечка личности той же дверью, что у прочих писателей
+	// отсечки (обе записи одним исходом).
+	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
 }
 
 // Freshness — момент последнего предъявления человека (Р5, Ф7-04, Ф7-36).

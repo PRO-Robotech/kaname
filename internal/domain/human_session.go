@@ -310,7 +310,23 @@ const (
 	// приёмка `own-sessions-are-listed-and-ended-by-their-owner.md`, Р6). Причина
 	// снятия записи сессии; отсечки эти глаголы не пишут.
 	RevokeReasonEndedFromAnotherSession = "ended-from-another-session"
+	// RevokeReasonAccessKeyRevoked — снятие ключа доступа гасит сессии
+	// человека (Ф13 Р8, kaname#669): ключ снимают чаще всего потому, что
+	// устройства лишились, и живая сессия на нём — сессия держателя устройства.
+	// Причина снятия записи сессии и причина отсечки.
+	RevokeReasonAccessKeyRevoked = "access-key-revoked"
 )
+
+// CutoffBelowFirstAuthentication — момент отсечки, которой глагол снимает
+// носители, выданные ДО первой аутентификации личности нашей посадкой, и не
+// задевает ни одной сессии нашей посадки: на единицу разрешения хранилища
+// (микросекунда) раньше первой аутентификации (Ф3 Р4, Р5, Ф1 §4.2). Край
+// сравнивает отсечку с моментом сессии включающе, поэтому равенство с первой
+// аутентификацией сняло бы самую раннюю сессию. Правило одно для выхода, смены
+// пароля и снятия ключа доступа (Ф13 Р8): второе написание разошлось бы молча.
+func CutoffBelowFirstAuthentication(first time.Time) time.Time {
+	return first.Add(-time.Microsecond)
+}
 
 // HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
 // сессии: ровно те значения, что принимает `human_sessions_ended_reason_check`.
@@ -331,6 +347,7 @@ func HumanSessionEndReasons() []string {
 		RevokeReasonEmailVerified,
 		RevokeReasonEmailChanged,
 		RevokeReasonEndedFromAnotherSession,
+		RevokeReasonAccessKeyRevoked,
 	}
 }
 

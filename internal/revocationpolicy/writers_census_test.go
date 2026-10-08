@@ -33,7 +33,10 @@ package revocationpolicy_test
 //     `tokensigner.Clock`) и его обёртки `revocationpolicy.Moment`,
 //     `sharedMoment`;
 //   - `revocationMoment` — момент, выведенный из СОХРАНЁННОГО момента первой
-//     аутентификации (он поставлен общим источником при выдаче).
+//     аутентификации (он поставлен общим источником при выдаче);
+//   - чтение памяти первой аутентификации (`….FirstAuthentication(…)`) — тот
+//     же сохранённый момент; правило `domain.CutoffBelowFirstAuthentication`
+//     производное своего довода, как `.Add`, и судится по нему (kaname#669).
 //
 // Всё прочее — находка с координатой: `time.Now()`, поле часов процесса без
 // доводов (`uc.now()`, `d.Now()`), непрослеживаемое выражение.
@@ -264,6 +267,8 @@ func lawfulCall(call *ast.CallExpr) (string, string, bool) {
 			return "shared", "revocationpolicy.Moment", true
 		case fun.Sel.Name == "Now" && len(call.Args) == 0:
 			return "finding", "часы процесса: вызов Now без довода", true
+		case fun.Sel.Name == "FirstAuthentication":
+			return "stored", "сохранённый момент первой аутентификации (чтение памяти)", true
 		}
 	case *ast.Ident:
 		switch fun.Name {
@@ -287,6 +292,12 @@ func judge(pf *pkgFiles, fn *ast.FuncDecl, e ast.Expr, depth int) (string, strin
 	r := rootOf(e)
 	switch x := r.(type) {
 	case *ast.CallExpr:
+		// Правило момента отсечки ниже первой аутентификации — производное
+		// своего довода: судится довод, а не вызов.
+		if sel, ok := x.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "CutoffBelowFirstAuthentication" &&
+			isIdent(sel.X, "domain") && len(x.Args) == 1 {
+			return judge(pf, fn, x.Args[0], depth)
+		}
 		if v, why, ok := lawfulCall(x); ok {
 			return v, why
 		}
@@ -591,9 +602,12 @@ func TestWritersCensusInjection(t *testing.T) {
 		body    string
 		verdict string
 	}{
-		"дефект: time.Now()":                  {header + "func (u uc) w(ctx context.Context) UserTokenRevocation {\n\tat := time.Now().UTC()\n\treturn UserTokenRevocation{RevokeBefore: at}\n}\n", "finding"},
-		"дефект: поле часов процесса":         {header + "func (u uc) w(ctx context.Context) UserTokenRevocation {\n\treturn UserTokenRevocation{RevokeBefore: u.now().UTC()}\n}\n", "finding"},
-		"дефект: параметр от часов процесса":  {header + "func (u uc) w(ctx context.Context, at time.Time) UserTokenRevocation {\n\treturn UserTokenRevocation{RevokeBefore: at}\n}\nfunc (u uc) c(ctx context.Context) { _ = u.w(ctx, time.Now()) }\n", "finding"},
+		"дефект: time.Now()":                        {header + "func (u uc) w(ctx context.Context) UserTokenRevocation {\n\tat := time.Now().UTC()\n\treturn UserTokenRevocation{RevokeBefore: at}\n}\n", "finding"},
+		"дефект: поле часов процесса":               {header + "func (u uc) w(ctx context.Context) UserTokenRevocation {\n\treturn UserTokenRevocation{RevokeBefore: u.now().UTC()}\n}\n", "finding"},
+		"дефект: параметр от часов процесса":        {header + "func (u uc) w(ctx context.Context, at time.Time) UserTokenRevocation {\n\treturn UserTokenRevocation{RevokeBefore: at}\n}\nfunc (u uc) c(ctx context.Context) { _ = u.w(ctx, time.Now()) }\n", "finding"},
+		"дефект: правило отсечки от часов процесса": {header + "func (u uc) w(ctx context.Context) UserTokenRevocation {\n\treturn UserTokenRevocation{RevokeBefore: domain.CutoffBelowFirstAuthentication(time.Now())}\n}\n", "finding"},
+		"законный близнец: правило отсечки от памяти": {header + "type mem interface {\n\tFirstAuthentication(context.Context, string) (time.Time, bool, error)\n}\n" +
+			"func (u uc) w(ctx context.Context, m mem) UserTokenRevocation {\n\tfirst, _, _ := m.FirstAuthentication(ctx, \"u\")\n\treturn UserTokenRevocation{RevokeBefore: domain.CutoffBelowFirstAuthentication(first)}\n}\n", "stored"},
 		"законный близнец: порт источника":    {header + "func (u uc) w(ctx context.Context) UserTokenRevocation {\n\tat, _ := u.clock.Now(ctx)\n\tat = at.Truncate(time.Microsecond)\n\treturn UserTokenRevocation{RevokeBefore: at}\n}\n", "shared"},
 		"законный близнец: параметр от порта": {header + "func (u uc) w(ctx context.Context, at time.Time) UserTokenRevocation {\n\treturn UserTokenRevocation{RevokeBefore: at.Add(time.Microsecond)}\n}\nfunc (u uc) c(ctx context.Context) {\n\tm, _ := u.clock.Now(ctx)\n\t_ = u.w(ctx, m)\n}\n", "shared"},
 	} {
