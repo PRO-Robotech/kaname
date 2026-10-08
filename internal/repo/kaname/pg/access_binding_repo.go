@@ -1219,14 +1219,22 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 		}
 		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
 	}
+	var err error
 	switch eventType {
 	case fga_outbox.EventTypeWrite:
-		return fga_outbox.EmitWriteTx(ctx, w.tx, out)
+		err = fga_outbox.EmitWriteTx(ctx, w.tx, out)
 	case fga_outbox.EventTypeDelete:
-		return fga_outbox.EmitDeleteTx(ctx, w.tx, out)
+		err = fga_outbox.EmitDeleteTx(ctx, w.tx, out)
 	default:
 		return fmt.Errorf("emit fga_outbox: unknown event type %q", eventType)
 	}
+	// Отказ базы на записи журнала переводится ТЕМ ЖЕ переводчиком, что у каждого
+	// другого стейтмента этой транзакции. Запись журнала — стейтмент, на котором
+	// триггер берёт строки прямого факта, то есть именно тот, где транзакция
+	// встречает взаимную блокировку; без перевода 40P01 уезжал наружу как
+	// `internal error`, а не как признак конфликта, по которому снятие выдачи
+	// повторяет свою транзакцию (kaname#679).
+	return mapErr(err, "", "")
 }
 
 // EmitAuditEvent atomically appends one durable compliance row into
