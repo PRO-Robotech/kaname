@@ -337,6 +337,9 @@ type ntfDB struct {
 	pool    *pgxpool.Pool
 	fixture *pgxpool.Pool
 	wire    *ntfWire
+	// dsn — адрес клона: удерживаемая транзакция гонки берёт по нему СВОЁ
+	// соединение, а не соединение пула фикстуры (см. afBegin).
+	dsn string
 }
 
 func newNTFDB(t *testing.T) *ntfDB {
@@ -353,7 +356,7 @@ func newNTFDB(t *testing.T) *ntfDB {
 	fixture, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, fixture)
-	return &ntfDB{pool: pool, fixture: fixture, wire: wire}
+	return &ntfDB{pool: pool, fixture: fixture, wire: wire, dsn: dsn}
 }
 
 // ntfDoor — дверь решения той же формы, что строит корень (`wiring.go`,
