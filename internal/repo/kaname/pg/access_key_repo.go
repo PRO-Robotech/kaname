@@ -225,7 +225,73 @@ func (r *AccessKeyRepo) Writer(ctx context.Context) (access_keys.Writer, error) 
 	return &accessKeyWriter{tx: tx}, nil
 }
 
+// RevokeWriter — транзакция снятия ключа (см. порт): открыта ОТКРЫТИЕМ
+// писателя сессии (`beginHumanSessionWriter` — уровень изоляции писателей
+// церемонии, перепись `ceremony_writer_openers_test.go`), и ПЕРВЫМ оператором
+// взята строка личности замком писателя нескольких сессий
+// (`holdPersonForSessionSet`) — раньше строк ключей, которые затем берёт
+// `LockKeysOf`. Писатель ключа и писатель сессии — над ОДНОЙ `pgx.Tx`.
+func (r *AccessKeyRepo) RevokeWriter(ctx context.Context, userID domain.UserID) (access_keys.RevokeWriter, error) {
+	sessions, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "AccessKey.RevokeWriter", "")
+	}
+	if err := sessions.holdPersonForSessionSet(ctx, userID); err != nil {
+		_ = sessions.tx.Rollback(ctx)
+		return nil, err
+	}
+	return &accessKeyRevokeWriter{accessKeyWriter: accessKeyWriter{tx: sessions.tx}, sessions: sessions}, nil
+}
+
 type accessKeyWriter struct{ tx pgx.Tx }
+
+// accessKeyRevokeWriter — писатель ключа и писатель сессии над одной
+// транзакцией: записи сессии снимает ДВЕРЬ писателя сессии
+// (`EndOtherSessions` → `endSessionsAndRevokeWhatTheyHold`), а не свой
+// оператор — снятие без отзыва выданного было бы половиной действия.
+type accessKeyRevokeWriter struct {
+	accessKeyWriter
+	sessions *humanSessionWriter
+}
+
+// EndOtherSessions — см. порт; пустой `keep` не равен ни одному
+// идентификатору, исключать ему нечего.
+func (w *accessKeyRevokeWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
+	return w.sessions.EndOtherSessions(ctx, userID, keep, at, reason)
+}
+
+// sessionOfFamilySQL — сессия церемонии семейства $1, если семейство
+// принадлежит личности $2: выпуск ЧУЖОЙ личности не отвечает ничем.
+const sessionOfFamilySQL = `SELECT session_id FROM kaname.token_families WHERE id = $1 AND user_id = $2`
+
+// SessionOfCredential — см. порт.
+func (w *accessKeyRevokeWriter) SessionOfCredential(ctx context.Context, userID domain.UserID, credentialID string) (domain.HumanSessionID, bool, error) {
+	// Выпуск → семейство — единственным читателем записи выпуска
+	// (`issuanceOf`); семейство → сессия — строкой семейства.
+	iss, found, err := issuanceOf(ctx, w.tx, credentialID)
+	if err != nil || !found {
+		return "", false, err
+	}
+	var id string
+	err = w.tx.QueryRow(ctx, sessionOfFamilySQL, iss.familyID, string(userID)).Scan(&id)
+	if stderrors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, mapErr(err, "AccessKey.SessionOfCredential", "")
+	}
+	return domain.HumanSessionID(id), true, nil
+}
+
+// FirstAuthentication — см. порт.
+func (w *accessKeyRevokeWriter) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
+	return w.sessions.FirstAuthentication(ctx, userID)
+}
+
+// UpsertCutoff — см. порт.
+func (w *accessKeyRevokeWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+	return w.sessions.UpsertCutoff(ctx, u, revokedBy)
+}
 
 func (w *accessKeyWriter) InsertChallenge(ctx context.Context, c domain.AccessKeyChallenge) error {
 	if err := c.Validate(); err != nil {

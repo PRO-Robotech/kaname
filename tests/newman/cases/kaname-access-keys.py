@@ -1630,7 +1630,6 @@ CASES.append(Case(
 #   · Ф13-10, Ф13-11, Ф13-12, Ф13-15 — пол «2» судит край, ответ краю о сессии —
 #     глагол внутреннего слушателя; копия уровня в ответе входа утверждается здесь
 #     на каждом входе;
-#   · Ф13-21 — снятие ключа сессий человека не гасит (производителя нет);
 #   · Ф13-28 — ретрансляция краем, дом пробы — платформа.
 
 import ast as _ast_f13
@@ -2701,6 +2700,59 @@ CASES.append(Case(
         _key_login(_F, "f13-25-lost-key-refused", slot="F1", ch="akLf1325", tok="f1325K", handle=_F + "Handle",
                    tests=_signin_refused("F13-25-LOST-KEY-REFUSED")),
         *_f13_sign_in("f13-25-new-key-login", "F3", "f13AfterRecovery"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф13-21: снятие ключа гасит ПРОЧИЕ сессии человека причиной
+# `access-key-revoked`; текущая — сессия, в которой выпущен токен снимающего
+# (выпуск → семейство → сессия церемонии), — остаётся (Р8, kaname#669). S2 —
+# вход паролем и токен собственного фронта; S1 — вход ключом A во втором
+# «браузере». Вторая ветвь оси: снят НЕ ключ сессии, а другой — сессия гаснет
+# тоже. Причина конца записи наружу полосы не выходит — её держат пробы службы
+# (`access_key_revoke_ends_sessions_integration_test.go`).
+# ───────────────────────────────────────────────────────────────────────────
+def _key_session_of(p, tag, slot, session_var):
+    up = tag.upper()
+    t = tag.replace("-", "")
+    return [
+        _tok(p, f"{tag}-begin-tok", "access-key-begin", f"{p}{t}B", fresh=True, init=_fresh_src(p)),
+        _begin(p, f"{tag}-begin", f"akLc{t}", f"{p}{t}B"),
+        _tok(p, f"{tag}-key-tok", "access-key-login", f"{p}{t}K"),
+        _key_login(p, f"{tag}-key-login", slot=slot, ch=f"akLc{t}", tok=f"{p}{t}K", handle=_C + "Handle",
+                   tests=_signed_in(p, f"{up}-KEY-LOGIN", slot, session_var, "3", user_var=_C + "UserId")),
+    ]
+
+
+CASES.append(Case(
+    id="IAM-AKLOGIN-SEC-REVOKE-ENDS-OTHER-SESSIONS",
+    title="Ф13-21: снятие ключа гасит прочие сессии человека, текущая жива; снятый ключ не входит, другой входит",
+    classes=["SEC", "CRUD"],
+    priority="P0",
+    steps=[
+        *_login(_C, "f13-21"),
+        *_register_key(_C, "f13-21-a", "C21"),
+        *_key_session_of(_CB, "f13-21-s1", "C21", "akC21S1"),
+        # Положительный контроль: до снятия оба носителя годны.
+        _probe(_CB, "f13-21-s1-alive-before", "akC21S1", alive=True),
+        _probe(_C, "f13-21-s2-alive-before", _C + "SessionCookie", alive=True),
+        _revoke(_C, "f13-21-revoke-a", "C21", tests=_registration_accepted("C21R", "F13-21-REVOKE-A")),
+        _await_op(_C, "f13-21-revoke-a-op", "C21R"),
+        _probe(_CB, "f13-21-s1-ended", "akC21S1", alive=False),
+        _probe(_C, "f13-21-s2-current-alive", _C + "SessionCookie", alive=True),
+        # Ключ A — единый отказ входа; ключ C1 входит.
+        _tok(_CB, "f13-21-revoked-begin-tok", "access-key-begin", "akCb21RB", fresh=True, init=_fresh_src(_CB)),
+        _begin(_CB, "f13-21-revoked-begin", "akLc21R", "akCb21RB"),
+        _tok(_CB, "f13-21-revoked-key-tok", "access-key-login", "akCb21RK"),
+        _key_login(_CB, "f13-21-revoked-key", slot="C21", ch="akLc21R", tok="akCb21RK", handle=_C + "Handle",
+                   tests=_signin_refused("F13-21-REVOKED-KEY")),
+        *_key_session_of(_CB, "f13-21-s3", "C1", "akC21S3"),
+        # Вторая ветвь оси: снят другой ключ — сессия, выданная C1, гаснет тоже.
+        *_register_key(_C, "f13-21-b", "C21b"),
+        _revoke(_C, "f13-21-revoke-b", "C21b", tests=_registration_accepted("C21bR", "F13-21-REVOKE-B")),
+        _await_op(_C, "f13-21-revoke-b-op", "C21bR"),
+        _probe(_CB, "f13-21-s3-ended", "akC21S3", alive=False),
+        _probe(_C, "f13-21-s2-still-alive", _C + "SessionCookie", alive=True),
     ],
 ))
 

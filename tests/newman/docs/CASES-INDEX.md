@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 816
+Всего кейсов: 817
 
 ## Перепись по модулям
 
@@ -71,7 +71,7 @@
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
-| `cases/kaname-access-keys.py` | 26 |
+| `cases/kaname-access-keys.py` | 27 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1045,7 +1045,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 26 кейсов
+## `cases/kaname-access-keys.py` — 27 кейсов
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1093,6 +1093,7 @@
 - `IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS`
 - `IAM-AKLOGIN-OK-PASSWORDLESS-PERSON`
 - `IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON`
+- `IAM-AKLOGIN-SEC-REVOKE-ENDS-OTHER-SESSIONS`
 - `IAM-AKLOGIN-OK-CLEANUP-KEYS`
 
 ## `cases/kaname-address-verification.py` — 8 кейсов

@@ -42,6 +42,18 @@ type fakeStore struct {
 	// ошибкой хранилища; 0 — никогда. keysOfCalls — сколько чтений было.
 	keysOfFailFrom int
 	keysOfCalls    int
+	// sessions — записи сессии человека; endedReason — причина, которой запись
+	// снята транзакцией снятия ключа; credentials — выпуск удостоверения → его
+	// личность и сессия церемонии.
+	sessions    map[domain.UserID][]domain.HumanSessionID
+	endedReason map[domain.HumanSessionID]string
+	credentials map[string]fakeCredential
+	// firstAuth — память первой аутентификации; cutoffs — поставленные отсечки.
+	firstAuth map[domain.UserID]time.Time
+	cutoffs   map[domain.UserID]domain.UserTokenRevocation
+	// revokeFault — имя записи транзакции снятия, которая отказывает
+	// («sessions» · «first» · «cutoff» · «audit»); пусто — ни одна.
+	revokeFault string
 }
 
 // keysOfStoreFault — сырой текст хранилища: в ответ он попасть не вправе.
@@ -50,7 +62,102 @@ const keysOfStoreFault = "pg: read access_keys: connection reset by peer at db-i
 func newFakeStore() *fakeStore {
 	ten := int64(10)
 	return &fakeStore{users: map[domain.UserID]domain.User{}, keys: map[domain.AccessKeyID]domain.AccessKey{},
-		challenges: map[string]domain.AccessKeyChallenge{}, handles: map[domain.UserID][]byte{}, ceiling: &ten}
+		challenges: map[string]domain.AccessKeyChallenge{}, handles: map[domain.UserID][]byte{}, ceiling: &ten,
+		sessions: map[domain.UserID][]domain.HumanSessionID{}, endedReason: map[domain.HumanSessionID]string{},
+		credentials: map[string]fakeCredential{},
+		firstAuth:   map[domain.UserID]time.Time{}, cutoffs: map[domain.UserID]domain.UserTokenRevocation{}}
+}
+
+// fakeCredential — выпуск удостоверения: чей и в какой сессии.
+type fakeCredential struct {
+	user    domain.UserID
+	session domain.HumanSessionID
+}
+
+// addSession — запись сессии человека.
+func (s *fakeStore) addSession(user domain.UserID, id domain.HumanSessionID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[user] = append(s.sessions[user], id)
+}
+
+// endedOf — причина конца записи; "" — жива.
+func (s *fakeStore) endedOf(id domain.HumanSessionID) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.endedReason[id]
+}
+
+// revokeStoreFault — сырой текст подставного отказа записи снятия.
+const revokeStoreFault = "pg: revoke write refused at db-internal-7"
+
+func (s *fakeStore) RevokeWriter(ctx context.Context, _ domain.UserID) (access_keys.RevokeWriter, error) {
+	w, err := s.Writer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return w.(*fakeWriter), nil
+}
+
+func (w *fakeWriter) fault(name string) error {
+	if w.s.revokeFault == name {
+		return errors.New(revokeStoreFault)
+	}
+	return nil
+}
+
+func (w *fakeWriter) SessionOfCredential(_ context.Context, userID domain.UserID, credentialID string) (domain.HumanSessionID, bool, error) {
+	if err := w.fault("current"); err != nil {
+		return "", false, err
+	}
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	c, ok := w.s.credentials[credentialID]
+	if !ok || c.user != userID {
+		return "", false, nil
+	}
+	return c.session, true, nil
+}
+
+func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, keep domain.HumanSessionID, _ time.Time, reason string) (int, error) {
+	if err := w.fault("sessions"); err != nil {
+		return 0, err
+	}
+	w.s.mu.Lock()
+	var ended []domain.HumanSessionID
+	for _, id := range w.s.sessions[userID] {
+		if id != keep && w.s.endedReason[id] == "" {
+			ended = append(ended, id)
+		}
+	}
+	w.s.mu.Unlock()
+	w.ops = append(w.ops, func() {
+		for _, id := range ended {
+			w.s.endedReason[id] = reason
+		}
+	})
+	return len(ended), nil
+}
+
+func (w *fakeWriter) FirstAuthentication(_ context.Context, userID domain.UserID) (time.Time, bool, error) {
+	if err := w.fault("first"); err != nil {
+		return time.Time{}, false, err
+	}
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	at, ok := w.s.firstAuth[userID]
+	return at, ok, nil
+}
+
+func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, _ domain.UserID) error {
+	if err := w.fault("cutoff"); err != nil {
+		return err
+	}
+	if err := u.Validate(); err != nil {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	w.ops = append(w.ops, func() { w.s.cutoffs[u.UserID] = u })
+	return nil
 }
 
 func (s *fakeStore) addUser(id domain.UserID, status domain.InviteStatus) domain.User {
@@ -251,6 +358,9 @@ func (w *fakeWriter) AdvanceSignCount(_ context.Context, id domain.AccessKeyID, 
 }
 
 func (w *fakeWriter) EmitAudit(_ context.Context, ev outboxtypes.AuditEvent) error {
+	if err := w.fault("audit"); err != nil {
+		return err
+	}
 	w.ops = append(w.ops, func() { w.s.audit = append(w.s.audit, ev) })
 	return nil
 }

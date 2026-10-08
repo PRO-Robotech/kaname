@@ -140,5 +140,5 @@ func revocationMoment(ctx context.Context, w Writer, s domain.HumanSession, logg
 			"first_authenticated_at", first, "session_authenticated_at", s.AuthenticatedAt)
 		first = s.AuthenticatedAt
 	}
-	return first.Add(-time.Microsecond), nil
+	return domain.CutoffBelowFirstAuthentication(first), nil
 }

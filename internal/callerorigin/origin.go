@@ -78,3 +78,23 @@ func AssuranceFrom(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(assuranceKey{}).(string)
 	return v, ok
 }
+
+type credentialIDKey struct{}
+
+// WithCredentialID кладёт ИДЕНТИФИКАТОР ВЫПУСКА предъявленного удостоверения
+// (`jti` токена доступа).
+//
+// Кладётся ТОЛЬКО после того, как удостоверение проверено целиком, — по той же
+// причине, что уровень доверия. Читатель — звено, которому нужна запись сессии
+// вызывающего: выпуск называет своё семейство, семейство — сессию, в которой
+// шла церемония (снятие ключа доступа, Ф13 Р8, kaname#669). Личность, переданная
+// краем, его не несёт: край номера выпуска службе не передаёт.
+func WithCredentialID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, credentialIDKey{}, id)
+}
+
+// CredentialIDFrom возвращает идентификатор выпуска и признак его присутствия.
+func CredentialIDFrom(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(credentialIDKey{}).(string)
+	return v, ok && v != ""
+}
