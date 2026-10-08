@@ -58,7 +58,8 @@ func TestF13_21_RevokeWriterKeepsTheSessionOfThePresentedCredential(t *testing.T
 	current := ceremonyScene(t, ctx, pool, "akr")
 	a := f.exchangeIn(t, current, 0x6690)
 	other := seedSecondSession(t, ctx, f, current, "akr1")
-	stranger := ceremonyScene(t, ctx, pool, "akx")
+	// Тег другой длины: отпечаток носителя посева выводится из длины тега.
+	stranger := ceremonyScene(t, ctx, pool, "akxs")
 	b := f.exchangeIn(t, stranger, 0x6698)
 
 	// Положительный контроль: до снятия выпуски обоих людей принимаются.
