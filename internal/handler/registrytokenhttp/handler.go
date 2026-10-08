@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/corelib/credsecret"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 )
 
 // unauthorizedBody — ЕДИНСТВЕННОЕ тело отказа этой полосы, одно на ВСЯКУЮ
@@ -148,8 +149,9 @@ type tokenResponse struct {
 
 func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
+		// Форма решения R36 п. 3 (Р12 приёмки темпа церемонии, kaname#524):
+		// та же, что у полосы входа; прежде — `text/plain` со своим телом.
+		methodrefusal.Write(w, http.MethodGet, http.MethodPost)
 		return
 	}
 	// Два РАЗНЫХ значения, и смешивать их нельзя.

@@ -68,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 )
 
 // Пути семейства — точное совпадение (Р2). «Кто я» — маршрут КРАЯ, здесь его
@@ -214,7 +215,7 @@ const TextPermissionDenied = "permission denied"
 
 // TextMethodNotAllowed — текст отказа на неверный метод: дословно тот, которым
 // отвечает REST-фронт службы (решение R36 п. 3).
-const TextMethodNotAllowed = "method not allowed"
+const TextMethodNotAllowed = methodrefusal.Text
 
 // Lane — глаголы полосы (порт над вариантами использования).
 type Lane interface {
