@@ -943,6 +943,7 @@ jobs:
             --service iam-access-binding-include-revoked \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
+            --service kaname-cluster-admins \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt

@@ -24,6 +24,7 @@ import (
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
+	clusterpublicapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/clusterpublic"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	identityquotaapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/identityquota"
@@ -103,6 +104,12 @@ type services struct {
 	// internalClusterHandler — InternalClusterService: cluster admin
 	// RBAC management. Internal-only (запрет #6), registered on port 9091.
 	internalClusterHandler *clusterapp.Handler
+
+	// publicClusterHandler — ClusterService: the PUBLIC twin of
+	// InternalClusterService (acceptance ADM-CA, Р1/Р3/Р8). It is built over the
+	// internal handler, i.e. over the SAME four use-case instances — one write
+	// path to the grant table. Registered on the public listener only.
+	publicClusterHandler *clusterpublicapp.Handler
 
 	// interactiveClientHandler — InternalInteractiveClientService: lifecycle of
 	// the OAuth2 client a HUMAN signs in through (IAM-INT-1). Internal-only.
@@ -863,6 +870,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithAuditEmitter(clusterAuditEmitter)
 	clusterListUC := clusterapp.NewListAdminsUseCase(clusterGrantReader)
 	internalClusterHandler := clusterapp.NewHandler(clusterGetUC, clusterGrantUC, clusterRevokeUC, clusterListUC)
+	// Публичный близнец — над ТЕМ ЖЕ обработчиком, а не над второй сборкой
+	// сценариев (Р3): второй экземпляр сценариев был бы второй копией проверок.
+	publicClusterHandler := clusterpublicapp.NewHandler(internalClusterHandler)
 
 	// ── InternalInteractiveClientService — interactive-login client (IAM-INT-1) ──
 	// The audience stamped on every client this service registers is the EDGE's
@@ -972,6 +982,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accessBindingHandler:   abHandler,
 		internalIAMHandler:     internalIAMHandler,
 		internalClusterHandler: internalClusterHandler,
+		publicClusterHandler:   publicClusterHandler,
 
 		// interactive-login client lifecycle.
 		interactiveClientHandler: interactiveClientHandler,

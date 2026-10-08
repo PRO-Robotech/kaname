@@ -135,6 +135,36 @@ func TestUser_16b_GetByEmail_CaseInsensitive(t *testing.T) {
 	assert.Equal(t, u.ID, got.ID, "lookup case-insensitive")
 }
 
+// ── 16c: отказ «не найдено» не несёт адреса (kaname#641) ──────────────────────
+// Текст отказа хранилища уезжает через use-case вызывающему и в журналы по
+// пути: адрес, которого нет, не возвращается ни в одном из двух чтений.
+func TestUser_16c_NotFoundTextCarriesNoAddress(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	repo := kanamepg.New(pool, nil)
+
+	rd, err := repo.Reader(ctx)
+	require.NoError(t, err)
+	defer func() { _ = rd.Rollback(ctx) }()
+
+	const addr = "nobody-16c@example.com"
+	_, err = rd.Users().GetByEmail(ctx, addr)
+	require.ErrorIs(t, err, iamerr.ErrNotFound)
+	assert.NotContains(t, err.Error(), addr)
+	assert.NotContains(t, err.Error(), "nobody-16c")
+
+	_, err = rd.Users().GetByAccountEmail(ctx, "acc-16c-none", addr)
+	require.ErrorIs(t, err, iamerr.ErrNotFound)
+	assert.NotContains(t, err.Error(), addr)
+	assert.NotContains(t, err.Error(), "nobody-16c")
+}
+
 // ── 41a: Delete без refs → OK ───────────────────────────────────────────────
 func TestUser_41a_Delete_Happy(t *testing.T) {
 	if testing.Short() {

@@ -289,6 +289,15 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 		[]domain.Subject{{Type: projectAB.SubjectType, ID: projectAB.SubjectID}}); serr != nil {
 		return BootstrapResult{}, serr
 	}
+	// Ведомость выпущенных кортежей проектной самовыдачи — тем же источником,
+	// что их эмиссия ниже (projectBindingTuples), и в той же транзакции. Без неё
+	// снятие выдачи (штатное и дренажом области при удалении проекта) снимало
+	// строку, а оба кортежа оставались фактами модели прав на снятый проект
+	// (kaname#665): снятие симметрично ВЕДОМОСТИ, а ведомость была пуста.
+	if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, createdProjectAB.ID,
+		ledgerTuples(projectBindingTuples(userID, prjID, createdProjectAB.ID))); lerr != nil {
+		return BootstrapResult{}, lerr
+	}
 
 	// 5. Durable audit_outbox iam.user.created in the SAME bootstrap tx
 	// (запрет #10) — atomic with the user INSERT. ТОЛЬКО для genuinely-new
@@ -334,6 +343,15 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 	}
 
 	return BootstrapResult{User: user, AccountID: accID, ProjectID: prjID, OwnerBindingID: ownerBindingID}, nil
+}
+
+// ledgerTuples — те же кортежи в форме строки ведомости выдачи.
+func ledgerTuples(in []service.RelationTuple) []abrepo.RelationTuple {
+	out := make([]abrepo.RelationTuple, 0, len(in))
+	for _, tp := range in {
+		out = append(out, abrepo.RelationTuple{User: tp.User, Relation: tp.Relation, Object: tp.Object})
+	}
+	return out
 }
 
 // personalAccountNameAttempts — сколько имён личного аккаунта перебрать против

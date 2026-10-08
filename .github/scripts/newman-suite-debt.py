@@ -1083,6 +1083,10 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     # собственном фронте; людей набор заводит сам регистрацией, токен человека
     # выковывает нашей церемонией с клиентом посева церемонии, аутентификатор —
     # подставной, в песочнице прогонщика.
+    # Публичный близнец администраторов кластера (kaname#661, приёмка ADM-CA):
+    # четыре глагола `ClusterService` на собственном публичном фронте; людей
+    # обоих уровней куёт волна церемонии автономного стенда.
+    "kaname-cluster-admins": ("B", "публичный близнец `ClusterService` на собственном фронте службы (CAP-01…CAP-14, CAP-17, CAP-20, CAP-21 приёмки `cluster-admins-on-the-public-surface.md`): отказы двери и порога, тексты отказов мутаций, операции и промах маршрутизатора производит служба; `jwtHumanCapAdmin`/`…StepUp` и `jwtHumanCapPlainStepUp` — люди, их куёт волна церемонии автономного стенда (`seed_ceremony.py --wave`), цель назначения с непустым именем и служебную учётку-цель заводит тот же посев; гоняет задание `stand-ceremony` (kaname#661)", ""),
     "kaname-access-keys": ("A", "церемония регистрации ключа, перечень, снятие и утверждение на собственном фронте службы (Ф7-01…Ф7-55, приёмка `access-keys-are-ours.md` ред. 15): отказы, операции и единый отказ утверждения производит служба, ключей `jwt…` не читает, людей и ключи заводит и снимает сам набор", ""),
     # Церемония `authorization_code` (LINE-A-1, kaname#423): три поверхности службы
     # — слушатель формы (вход), поверхность выдачи (точка авторизации и
@@ -1225,24 +1229,29 @@ SCENARIO_DEBT.update({
 })
 
 
-# ПОЗИЦИИ Ф13 И Ф5, НЕИСПОЛНИМЫЕ НА ДЕРЕВЕ (kaname#468): у каждой названо, ЧЕМ
-# неисполнима, и держатель — задача, которая создаёт условие. Позиции Ф5,
-# исполнимые на стенде `chart-own`, несёт `kaname-recovery-lane`, и их записей
-# здесь нет.
+# ПОЗИЦИИ Ф13 И Ф5, НЕИСПОЛНИМЫЕ НА ДЕРЕВЕ (kaname#468, kaname#643): у каждой
+# названо, ЧЕМ неисполнима, и держатель — задача, которая создаёт условие. Позиции
+# Ф5, исполнимые на стенде `chart-own`, несёт `kaname-recovery-lane`, позиции Ф13 —
+# `kaname-access-keys` (блок «Ф13 — вход без пароля»), и их записей здесь нет.
 #
-# Ф13 — полосы входа ключом в дереве НЕТ: путей `/iam/v1/auth/access-key/begin`,
-# `/iam/v1/auth/access-key/login` и вида формы `access-key-login` не называет ни
-# один файл продукта (`git grep -c -E 'access-key/(begin|login)|access-key-login'
-# -- internal cmd proto deploy` → 0 при положительном контроле: пути полосы входа
-# паролем `auth/(login|recovery)` те же каталоги называют). Кейс набора заводится
-# той же правкой, что полоса (test-first), и снимает запись.
-_F13_LANE_ABSENT = (
-    "полосы входа ключом в дереве нет: путей `/iam/v1/auth/access-key/begin` и "
-    "`/iam/v1/auth/access-key/login` и вида формы `access-key-login` не называет ни один "
-    "файл продукта (`internal`, `cmd`, `proto`, `deploy` → 0) — слать кейсу некуда")
+# Ф13 — полоса входа ключом в дереве ЕСТЬ (`internal/handler/loginlanehttp/
+# handler.go`, `PathAccessKeyBegin`/`PathAccessKeyLogin`, kaname#613). Прежний довод
+# «полосы в дереве нет» пережил свой предмет на двадцать семь записей и опровергнут
+# предикатом по дереву (kaname#643): девятнадцать позиций несёт набор, у восьми
+# ниже — свой довод, и он не об отсутствии полосы, а о том, чего стенд службы не
+# производит. Пол «2» на публичном пути производит край (`internal/authzguard/
+# public_caller_policy.go`), ответ службы краю о сессии — глагол внутреннего
+# слушателя без HTTP-привязки, а кейс newman ходит только HTTP по слушателю формы.
 _HOLDER_F13 = (
-    "PRO-Robotech/kacho#1282 — реализация Ф13 заводит полосу входа ключом и её кейсы "
-    "набора той же правкой (test-first); запись снимается тем же изменением")
+    "PRO-Robotech/kacho#1282 — фаза Ф13 закрывается сквозной пробой на стенде, где "
+    "условие строится: край с полом сессии и отсечкой, распорядитель уровня «2», "
+    "измерительный прогон; позиция утверждается там")
+_F13_FLOOR_AT_EDGE = (
+    "уровень наблюдается краем: пол «2» на публичном пути производит край "
+    "(`internal/authzguard/public_caller_policy.go`), а ответ службы краю о сессии — "
+    "`InternalHumanSessionService/Resolve`, глагол внутреннего слушателя без HTTP-привязки; "
+    + _NO_EDGE + "; копию уровня в ответе входа ключом утверждает каждый кейс входа набора "
+    "`kaname-access-keys`")
 # Ф5-12, Ф5-20…22, Ф5-24: условия и форма пробы, которых не создаёт ни стенд, ни
 # набор; у каждой держатель — существующая задача, чей предмет это условие строит
 # (kaname#460 передал записи, kaname#468 назвал условия). Ф5-17 и Ф5-25 записей
@@ -1283,14 +1292,26 @@ _HOLDER_F5_TIMING = (
 # заполненным записью (`tests/authz-fixtures/seed_mail_pace.py`), и задержка
 # приёма у приёмника писем (`.github/scripts/stand-mailbox.py`, `POST /hold`).
 SCENARIO_DEBT.update({
-    **{sid: (_F13_LANE_ABSENT, _HOLDER_F13) for sid in (
-        "Ф13-01 Ф13-02 Ф13-03 Ф13-04 Ф13-05 Ф13-06 Ф13-07 Ф13-08 Ф13-09 Ф13-10 Ф13-11 "
-        "Ф13-12 Ф13-13 Ф13-15 Ф13-16 Ф13-17 Ф13-18 Ф13-19 Ф13-20 Ф13-21 Ф13-22 Ф13-23 "
-        "Ф13-26 Ф13-27 Ф13-32").split()},
-    "Ф13-25": (_F13_LANE_ABSENT + "; сверх того восстановление у личности без пароля "
-               "отвечает 503 — производитель шага (2) `kacho#2698` не посажен", _HOLDER_F13),
-    "Ф13-28": (_F13_LANE_ABSENT + "; половина через край — связка службы с платформой, "
-               "её проба живёт в доме платформы (`e2e-flow.md` §7а)", _HOLDER_F13),
+    "Ф13-06": ("ветвь «и» — владелец ключа заблокирован: блокировку зовёт распорядитель уровня "
+               "«2» (`UserService.Block`, `required_acr_min` 2), такого предъявителя стенд "
+               "`chart-own` не куёт; ветвь «л» — измерительная (форма Ф1-48): на kind общего "
+               "ранера размах полосы выше потолка годности by construction (Ф1-50); прочие "
+               "ветви единого отказа несут кейсы входа набора `kaname-access-keys`", _HOLDER_F13),
+    "Ф13-09": ("вторая половина — отсечка принудительного выхода на крае (F4d-22): выход "
+               "зовёт глагол внутреннего gRPC-слушателя без REST-проекции "
+               "(`InternalIAMService.ForceLogout`), и " + _NO_EDGE, _HOLDER_F13),
+    **{sid: (_F13_FLOOR_AT_EDGE, _HOLDER_F13) for sid in ("Ф13-10", "Ф13-11", "Ф13-12")},
+    "Ф13-15": (_F13_FLOOR_AT_EDGE + "; «заведён» фактора при сессии ключа и отказ поля "
+               "`secondFactor` несёт кейс второго фактора и сессий ключа", _HOLDER_F13),
+    "Ф13-21": ("производитель не посажен: снятие ключа (`internal/apps/kaname/api/access_keys/"
+               "revoke.go`, `commit`) прочих сессий человека не снимает, и причины конца сессии "
+               "`access-key-revoked` в дереве нет — сквозной кейс был бы красным по существу",
+               "PRO-Robotech/kacho#1282 — Р8 фазы Ф13: снятие ключа гасит прочие сессии "
+               "человека одним исходом с событием снятия, и сквозной кейс набора ключей "
+               "доступа заводится той же правкой (test-first); запись снимается тем же изменением"),
+    "Ф13-28": ("ретрансляция двух глаголов полосы краем и отсечка на крае — связка службы с "
+               "платформой, дом её пробы — платформа (`e2e-flow.md` §7а); " + _NO_EDGE,
+               _HOLDER_F13),
     "Ф5-24": ("состав ответа службы краю о сессии — `InternalHumanSessionService/Resolve`, "
               "глагол внутреннего слушателя без HTTP-привязки (`human_session_service.proto`), "
               "а набор ходит только HTTP; «кто я» и глагол платформы под сессией восстановления "
@@ -1479,17 +1500,103 @@ SCENARIO_DEBT.update({
 # kaname#526 вместе с приёмкой, а сквозного кейса в модуле набора адреса нет. На
 # уровне E отказ EV-14 произносит край своей копией текста, и второе «Когда» идёт
 # путём подтверждения кодом через край (§7, абзац уровня E): условие — выкачен край,
-# ретранслирующий оба пути и несущий копию текста Р3. Сторона края у kaname#526
-# уходит в следующую волну; уровень I позиции несёт проба службы. Запись снимается
+# ретранслирующий оба пути и несущий копию текста Р3. Сторона службы у kaname#526
+# сделана (текст отказа и проба уровня I), сторона края и переутверждение F6b
+# переданы задаче платформы kacho#3069 — она и держит позицию. Запись снимается
 # тем же изменением, что заводит кейс.
 SCENARIO_DEBT.update({
     "EV-14": ("уровень E судит текст отказа смены пароля, который произносит край своей "
               "копией, и снятие отказа шагом подтверждения кодом, идущим через край; "
               + _NO_EDGE + ", а сторона края по позиции у задачи ещё не сделана",
-              "PRO-Robotech/kaname#526 — сторона края позиции EV-14 и её сквозной кейс в "
-              "наборе адреса (текст отказа на трёх поверхностях, близнец после шага); "
-              "запись снимается тем же изменением, что заводит кейс"),
+              "PRO-Robotech/kacho#3069 — сторона края позиции EV-14 (текст отказа края по "
+              "kaname#526 и переутверждение F6b) и её сквозной кейс через край; запись "
+              "снимается тем же изменением, что заводит кейс"),
 })
+
+# ДОВОД ОБ ОТСУТСТВИИ В ДЕРЕВЕ — УТВЕРЖДЕНИЕ О ДЕРЕВЕ, И СУДИТСЯ ОНО ДЕРЕВОМ
+# (kaname#643). Двадцать семь записей Ф13 несли довод «полосы входа ключом в
+# дереве нет» и после того, как полосу посадили (`internal/handler/loginlanehttp/
+# handler.go`, пути `access-key/begin` и `access-key/login`): перепись читала
+# довод как прозу, и он пережил свой предмет молча. Поэтому довод, утверждающий
+# отсутствие (`ABSENCE_PHRASE_RE`), либо несёт ПРЕДИКАТ — запись `ABSENCE_CLAIMS`:
+# метка в доводе, выражение предмета и каталоги, где его не должно быть, — и
+# предикат исполняется на каждом прогоне, либо отвергается как непроверяемый.
+# Совпадение предиката — находка «опровергнут деревом» с координатой первого
+# совпадения. Каталоги, где не прочитано ни одного файла, — находка о слепоте:
+# «ноль совпадений» на пустом обходе значил бы «ничего не прочитано». Запись
+# предиката, которую не называет ни один довод, пережила свой довод и роняет
+# перепись живого дерева. Сегодня отсутствие утверждает один довод — у Ф13-21:
+# посадка причины конца сессии при снятии ключа уронит перепись, и запись долга
+# уйдёт вместе с кейсом, а не переживёт свой предмет так же, как пережил прежний.
+ABSENCE_PHRASE_RE = re.compile(
+    r"(?:в|на) дереве нет|нет (?:в|на) дереве|не называет ни один файл")
+AbsenceClaims = dict[str, tuple[re.Pattern, re.Pattern, tuple[str, ...]]]
+ABSENCE_CLAIMS: AbsenceClaims = {
+    "причина конца сессии при снятии ключа": (
+        re.compile(r"причины конца сессии `access-key-revoked` в дереве нет"),
+        re.compile(r"access-key-revoked"),
+        ("internal", "cmd", "proto", "deploy")),
+}
+
+
+def _tree_hits(root: pathlib.Path, pattern: re.Pattern, dirs: tuple[str, ...]
+               ) -> tuple[list[str], int]:
+    """Совпадения предиката в каталогах дерева: координаты `путь:строка` и число
+    прочитанных файлов."""
+    hits: list[str] = []
+    files = 0
+    for d in dirs:
+        base = root / d
+        if not base.is_dir():
+            continue
+        for f in sorted(p for p in base.rglob("*") if p.is_file()):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            files += 1
+            for n, line in enumerate(text.splitlines(), 1):
+                if pattern.search(line):
+                    hits.append(f"{f.relative_to(root).as_posix()}:{n}")
+    return hits, files
+
+
+def reconcile_absence_claims(root: pathlib.Path, reasons: dict[str, str],
+                             claims: AbsenceClaims) -> tuple[list[str], dict[str, int]]:
+    """Доводы ведомостей, утверждающие отсутствие в дереве, против самого дерева.
+
+    `reasons` — «чья запись» → довод. Возвращает находки и перепись: доводов об
+    отсутствии прочитано, из них с предикатом, файлов осмотрено, и какие
+    предикаты названы доводами (`used`)."""
+    out: list[str] = []
+    census = {"claims": 0, "judged": 0, "files": 0}
+    used: set[str] = set()
+    for who, why in sorted(reasons.items()):
+        matched = [name for name, (marker, _p, _d) in sorted(claims.items()) if marker.search(why)]
+        if not matched and not ABSENCE_PHRASE_RE.search(why):
+            continue
+        census["claims"] += 1
+        if not matched:
+            out.append(f"довод {who} утверждает отсутствие в дереве, а предиката у него нет "
+                       f"(`ABSENCE_CLAIMS`): проза об отсутствии не судится и переживает свой "
+                       f"предмет молча — довод: {why[:160]!r}")
+            continue
+        census["judged"] += 1
+        for name in matched:
+            used.add(name)
+            _marker, pattern, dirs = claims[name]
+            hits, files = _tree_hits(root, pattern, dirs)
+            census["files"] += files
+            if files == 0:
+                out.append(f"предикат довода {who} «{name}» беспредметен: осмотрено файлов 0 в "
+                           f"{', '.join(dirs)} — «ноль совпадений» значил бы «ничего не прочитано»")
+            elif hits:
+                out.append(f"довод {who} опровергнут деревом: «{name}» — совпадений "
+                           f"{len(hits)} в {', '.join(dirs)}, первое {hits[0]}")
+    census["used"] = len(used)
+    census["used_names"] = sorted(used)  # type: ignore[assignment]
+    return out, census
+
 
 def _surface_of_stem(stem, runnable, blocked) -> str:
     """Адресация позиции по её стеблю — для сверки двух величин между собой."""
@@ -1830,7 +1937,8 @@ def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt,
 
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
         ledger: Ledger | None = None, scenario_debt: ScenarioDebt | None = None,
-        scenario_home: ScenarioHome | None = None) -> int:
+        scenario_home: ScenarioHome | None = None,
+        absence_claims: AbsenceClaims | None = None) -> int:
     # Ведомости позиций, как и ведомость производителя, — ПАРАМЕТРЫ. Объявленные
     # берутся только для объявленного дерева: синтетическая ведомость коллекций
     # значит синтетическое дерево, и объявленных позиций у него нет.
@@ -1882,6 +1990,20 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
         pos_drift.append(f"приёмок в {ACCEPTANCE_REL} прочитано 0 — перепись позиций "
                          f"беспредметна: «долга позиций нет» значило бы «ничего не прочитано»")
     drift += pos_drift
+    # ДОВОД ОБ ОТСУТСТВИИ судится деревом (kaname#643): по записям долга позиций и
+    # по записям ведомости производителя.
+    claims = ABSENCE_CLAIMS if absence_claims is None else absence_claims
+    reasons = {f"позиции {sid}": why for sid, (why, _h) in scenario_debt.items()}
+    reasons.update({f"коллекции {stem}": row[1] for stem, row in
+                    (PRODUCER_LEDGER if ledger is None else ledger).items()})
+    abs_drift, abs_census = reconcile_absence_claims(newman.parents[1], reasons, claims)
+    # Запись предиката без довода истекает сама: на объявленном дереве и всякий
+    # раз, когда ведомость предикатов передана явно (синтетика самопроверки).
+    if declared_tree or absence_claims is not None:
+        for name in sorted(set(claims) - set(abs_census["used_names"])):
+            abs_drift.append(f"предикат довода «{name}» (`ABSENCE_CLAIMS`) не называет ни один довод "
+                             f"ведомостей — запись пережила свой довод")
+    drift += abs_drift
     if drift:
         print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
         for d in drift:
@@ -1918,6 +2040,8 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
         print(f"  · {ref}: {len(stems)} ({', '.join(stems)})")
     # Объём осмотренного сверкой полос — рядом со сводом держателей: «ноль
     # находок» без него не отличает «названа живая полоса» от «не судилось ничего».
+    print(f"доводы об отсутствии: прочитано {abs_census['claims']} · с предикатом "
+          f"{abs_census['judged']} · осмотрено файлов {abs_census['files']}")
     print(f"полосы, названные держателями: держателей прочитано {lane_census['holders']} · "
           f"полос названо {lane_census['named']} · из них судимо модулем кейсов "
           f"{lane_census['judged']}")
@@ -3138,6 +3262,78 @@ def self_test() -> int:
            "не сверялся",
            f"SYN-03 [synthetic.md] — в доме PRO-Robotech/kacho: кейс {hcase}, шаг {hstep}" in hout
            and "сверка с деревом дома здесь НЕ выполняется" in hout, hout[-900:])
+
+        # Ось 21: ДОВОД ОБ ОТСУТСТВИИ ОПРОВЕРЖИМ ДЕРЕВОМ (kaname#643). Двадцать семь
+        # записей Ф13 несли довод «полосы входа ключом в дереве нет» после того,
+        # как полосу посадили (`internal/handler/loginlanehttp/handler.go`), и
+        # перепись зеленела: довод она читала как прозу. Утверждение об отсутствии
+        # в дереве — утверждение о дереве, и судится оно предикатом по дереву.
+        # Пара по каждой стороне, различие в одном факте против близнеца.
+        root21 = pn.parents[1]
+        (root21 / "internal").mkdir(parents=True, exist_ok=True)
+        (root21 / "internal" / "lane.go").write_text("package lane\n", encoding="utf-8")
+        claim = {"синтетика": (re.compile(r"синтетической полосы в дереве нет"),
+                               re.compile(r"/syn/v1/lane"), ("internal",))}
+        absent = ("синтетической полосы в дереве нет: путь `/syn/v1/lane` не называет ни один "
+                  "файл продукта", hold)
+        for label, write, debt, claims, want_rc, want_texts in (
+                ("довод об отсутствии, а предмет в дереве есть — опровергнут, находка",
+                 'const p = "/syn/v1/lane"\n', {"SYN-03": absent}, claim, 1,
+                 ("позиции SYN-03", "опровергнут деревом", "internal/lane.go:2")),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: тот же довод, предмета в дереве нет — молчание",
+                 "", {"SYN-03": absent}, claim, 0, ()),
+                ("довод об отсутствии без предиката — находка: проза не судится",
+                 "", {"SYN-03": absent}, {}, 1, ("позиции SYN-03", "предиката у него нет")),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: довод без утверждения об отсутствии — молчание",
+                 'const p = "/syn/v1/lane"\n', {"SYN-03": ("довод", hold)}, {}, 0, ()),
+                ("каталога предиката нет — находка о слепоте, а не молчание",
+                 "", {"SYN-03": absent},
+                 {"синтетика": (claim["синтетика"][0], claim["синтетика"][1], ("nowhere",))}, 1,
+                 ("осмотрено файлов 0",)),
+                ("запись предиката, которую не называет ни один довод, — пережила довод",
+                 "", {"SYN-03": ("довод", hold)}, claim, 1,
+                 ("«синтетика»", "пережила свой довод"))):
+            (root21 / "internal" / "lane.go").write_text("package lane\n" + write, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt=debt,
+                         absence_claims=claims)
+            _c(f"довод об отсутствии: {label} (код {want_rc})",
+               rc == want_rc and all(w in err.getvalue() for w in want_texts),
+               f"код {rc}; {err.getvalue()[:500]}")
+        (root21 / "internal" / "lane.go").write_text("package lane\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(pn, workflows=pwf_runs, ledger=pled, scenario_debt={"SYN-03": absent},
+                     absence_claims=claim)
+        _c("довод об отсутствии: перепись осмотренного напечатана числом",
+           rc == 0 and "доводы об отсутствии: прочитано 1 · с предикатом 1 · осмотрено файлов 1"
+           in buf.getvalue(), f"код {rc}; {buf.getvalue()[-600:]}")
+
+    # Ось 21, живое дерево: ИСТОРИЧЕСКИЙ ДОВОД Ф13 возвращается в ведомость и
+    # обязан ей ронять перепись — на настоящем дереве, а не на синтетике. Обе
+    # стороны предиката: зарегистрированный предикат даёт «опровергнут» с
+    # координатой полосы; без регистрации довод отвергается как непроверяемый.
+    # Сверка зовётся напрямую: позиция Ф13 записью долга в дереве больше не стоит,
+    # и полная перепись покраснела бы ещё и «пережила предмет» — инъекция роняет
+    # только своё.
+    old_f13 = ("полосы входа ключом в дереве нет: путей `/iam/v1/auth/access-key/begin` и "
+               "`/iam/v1/auth/access-key/login` и вида формы `access-key-login` не называет ни один "
+               "файл продукта (`internal`, `cmd`, `proto`, `deploy` → 0) — слать кейсу некуда")
+    f13_claim = {"полоса входа ключом": (re.compile(r"полосы входа ключом в дереве нет"),
+                                         re.compile(r"access-key/(begin|login)|access-key-login"),
+                                         ("internal", "cmd", "proto", "deploy"))}
+    live, census = reconcile_absence_claims(ROOT, {"позиции Ф13-01": old_f13}, f13_claim)
+    _c("живое дерево: исторический довод Ф13 опровергнут предикатом и назван координатой",
+       len(live) == 1 and "опровергнут деревом" in live[0]
+       and re.search(r"первое internal/\S+\.go:\d+", live[0]) is not None and census["files"] > 0,
+       f"{live} {census}")
+    live, _ = reconcile_absence_claims(ROOT, {"позиции Ф13-01": old_f13}, {})
+    _c("живое дерево: тот же довод без предиката — отвергнут как непроверяемый",
+       len(live) == 1 and "предиката у него нет" in live[0], f"{live}")
+    live, census = reconcile_absence_claims(ROOT, {"позиции Ф13-01": "довод без отсутствия"}, f13_claim)
+    _c("живое дерево: ЗАКОННЫЙ БЛИЗНЕЦ — довод без утверждения об отсутствии не судится",
+       live == [] and census["claims"] == 0, f"{live} {census}")
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)

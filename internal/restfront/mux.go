@@ -6,6 +6,7 @@ package restfront
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc/codes"
@@ -23,52 +24,136 @@ import (
 // Обработчик ошибок МАРШРУТИЗАЦИИ — другой предмет и заводится отдельно
 // (см. routingErrorHandler): он судит промах глагола, а не исход вызова, и
 // отображение кодов отказа в статусы не трогает ни одним значением.
+//
+// Промежуточный слой routeProbeMiddleware обязан стоять на каждом маршруте:
+// без него выяснение перечня допустимых методов исполняло бы обработчики.
+// Библиотека навешивает слой при регистрации маршрута, поэтому он объявлен
+// здесь, до первой регистрации, а не снаружи.
 func newMux() *runtime.ServeMux {
 	return runtime.NewServeMux(
 		narrowingHeaderMatcherOption(),
 		runtime.WithRoutingErrorHandler(routingErrorHandler),
+		runtime.WithMiddlewares(routeProbeMiddleware),
 	)
 }
 
-// routingErrorHandler отвечает на промах ГЛАГОЛА так же, как вторая внешне
-// досягаемая поверхность службы, — 405 (задача #2493).
+// TextMethodNotAllowed — текст отказа на неверный метод: дословно тот, которым
+// отвечает полоса входа службы (задача #261, решение R36 п. 3).
+const TextMethodNotAllowed = "method not allowed"
+
+// routingErrorHandler отвечает на промах ГЛАГОЛА формой, одной у обеих
+// HTTP-поверхностей службы (задачи #2493, #261; решение R36 п. 3): `405`,
+// `{"code":12,"message":"method not allowed","details":[]}` и заголовок
+// `Allow` с методами, которые маршрутизатор на этом пути обслуживает.
 //
-// # Что здесь чинится
+// # Почему статус 405, а не умолчание
 //
 // Умолчание библиотеки переводит промах глагола в `Unimplemented`, а тот
-// отображается в 501. Статус выбирала библиотека, а не продукт, и выбирала
-// неверно: «не реализовано» означает для клиента отсутствующую возможность, и
-// он идёт заводить задачу вместо того, чтобы сменить глагол. Эндпоинт выдачи
-// токена на тот же промах отвечал 405 — две внешние поверхности одной службы
-// давали разный ответ на одну ошибку, и разницу видел клиент.
+// отображается в 501. «Не реализовано» означает для клиента отсутствующую
+// возможность, и он идёт заводить задачу вместо того, чтобы сменить глагол.
 //
-// # Почему подменяется ТОЛЬКО статус
+// # Почему код 12 и этот текст
 //
-// Тело остаётся документом статуса библиотеки с прежним кодом: предмет находки
-// — число, которое читает клиент, а переписанное заодно тело завело бы вторую
-// форму ответа на той же поверхности. `HTTPStatusError` для того и объявлен
-// библиотекой — провести иной статус через обработчик, не трогая тела.
+// Код — тот, что производит маршрутизатор (`Unimplemented`), и тот же отдаёт
+// полоса входа: клиент, ключующийся на `code`, читает один класс отказа
+// одинаково по любому адресу службы. Текст — дословно текст полосы.
 //
-// # Чего здесь НЕТ и почему
+// # Откуда перечень методов
 //
-// Заголовка допустимых глаголов. Множество глаголов пути знает маршрутизатор и
-// наружу не выставляет ни одним экспортированным способом; выписанный перечень
-// был бы ложью — пути этой службы обслуживаются под разными наборами.
-// Эндпоинт токена заголовок несёт, потому что глагол у него один и перечень
-// известен. Предикат снятия расхождения — порождённая таблица маршрутов
-// службы; до неё разница записана решением, а не оставлена молча.
+// Его отвечает сам маршрутизатор: allowedMethods спрашивает мультиплексор о
+// каждом методе HTTP, не исполняя обработчиков. Выписанный перечень был бы
+// ложью — пути службы обслуживаются под разными наборами методов, — а
+// выведенный из маршрутизатора совпадает с тем, что он обслужит, по построению.
 func routingErrorHandler(ctx context.Context, mux *runtime.ServeMux, m runtime.Marshaler,
 	w http.ResponseWriter, r *http.Request, httpStatus int,
 ) {
+	if isRouteProbe(ctx) {
+		// Выяснение перечня методов: промах здесь — ответ «метод не обслужен»,
+		// и писать в ответ выяснения нечего.
+		return
+	}
 	if httpStatus != http.StatusMethodNotAllowed {
 		runtime.DefaultRoutingErrorHandler(ctx, mux, m, w, r, httpStatus)
 		return
 	}
+	if allow := allowedMethods(mux, r); allow != "" {
+		w.Header().Set("Allow", allow)
+	}
 	runtime.HTTPError(ctx, mux, m, w, r, &runtime.HTTPStatusError{
 		HTTPStatus: http.StatusMethodNotAllowed,
-		Err:        status.Error(codes.Unimplemented, http.StatusText(http.StatusMethodNotAllowed)),
+		Err:        status.Error(codes.Unimplemented, TextMethodNotAllowed),
 	})
 }
+
+// candidateMethods — методы HTTP, о которых спрашивается маршрутизатор, в
+// порядке, в котором они перечисляются в `Allow`. Это стандартные методы
+// `net/http`: правило `google.api.http` объявляет маршрут одним из них.
+var candidateMethods = []string{
+	http.MethodGet,
+	http.MethodHead,
+	http.MethodPost,
+	http.MethodPut,
+	http.MethodPatch,
+	http.MethodDelete,
+	http.MethodConnect,
+	http.MethodOptions,
+	http.MethodTrace,
+}
+
+// routeProbeKey — ключ контекста выяснения. Тип не экспортирован: пометить
+// запрос выяснением может только этот пакет, снаружи запрос пометки не несёт.
+type routeProbeKey struct{}
+
+// routeProbe — исход выяснения одного метода: маршрут найден или нет.
+type routeProbe struct{ matched bool }
+
+func isRouteProbe(ctx context.Context) bool {
+	_, ok := ctx.Value(routeProbeKey{}).(*routeProbe)
+	return ok
+}
+
+// routeProbeMiddleware отмечает, что маршрут найден, и НЕ зовёт обработчик,
+// если запрос — выяснение перечня методов. Прочие запросы проходят как были.
+func routeProbeMiddleware(next runtime.HandlerFunc) runtime.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, pathParams map[string]string) {
+		if p, ok := r.Context().Value(routeProbeKey{}).(*routeProbe); ok {
+			p.matched = true
+			return
+		}
+		next(w, r, pathParams)
+	}
+}
+
+// allowedMethods спрашивает мультиплексор, какие методы он обслужил бы на пути
+// запроса r, и возвращает их через запятую.
+//
+// Каждый вопрос — копия запроса без заголовков и тела: заголовки снимаются,
+// чтобы ни подмена метода заголовком, ни запасной путь формы (POST как GET)
+// не переписали метод вопроса, тело — чтобы его не прочли. Ответ вопроса идёт
+// в discardWriter и клиенту не достаётся.
+func allowedMethods(mux *runtime.ServeMux, r *http.Request) string {
+	var allowed []string
+	for _, m := range candidateMethods {
+		p := &routeProbe{}
+		q := r.Clone(context.WithValue(r.Context(), routeProbeKey{}, p))
+		q.Method = m
+		q.Header = http.Header{}
+		q.Body = http.NoBody
+		q.ContentLength = 0
+		mux.ServeHTTP(discardWriter{}, q)
+		if p.matched {
+			allowed = append(allowed, m)
+		}
+	}
+	return strings.Join(allowed, ", ")
+}
+
+// discardWriter — ответ выяснения: всё написанное отбрасывается.
+type discardWriter struct{}
+
+func (discardWriter) Header() http.Header         { return http.Header{} }
+func (discardWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (discardWriter) WriteHeader(int)             {}
 
 // narrowingHeaderMatcherOption отдаёт мультиплексору сужающий сопоставитель
 // входящих заголовков.

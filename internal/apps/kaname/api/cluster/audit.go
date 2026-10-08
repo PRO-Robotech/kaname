@@ -12,6 +12,8 @@ package cluster
 // (actor / subject / resource id); cluster-admin grants carry no secret
 // material, so there is nothing to redact here.
 
+import "github.com/PRO-Robotech/kaname/internal/domain"
+
 const (
 	// auditEventClusterAdminGranted — GrantAdmin (fresh or reactivate). The
 	// reactivate path emits the SAME type as a fresh grant (compliance:
@@ -26,13 +28,15 @@ const (
 //
 //   - actor      — the VERIFIED caller principal (grantor/revoker), sourced from
 //     PrincipalFromContext upstream, never from the request body (anti-spoofing).
-//   - subjectId  — the target user the admin authority is granted to / revoked
-//     from. subjectType is fixed USER (the only supported cluster-grant subject).
+//   - subjectType / subjectId — the subject the admin authority is granted to /
+//     revoked from, named by its OWN kind (`user` / `service_account`).
+//     It used to be the literal `user` for every kind, so a machine grant was
+//     recorded as a human one (finding Н2, acceptance ADM-CA).
 //   - resourceType / resourceId — the cluster_admin_grant row affected.
-func clusterAdminAuditPayload(actor, subjectID, grantID string) map[string]any {
+func clusterAdminAuditPayload(actor string, subjectType domain.GrantSubjectType, subjectID, grantID string) map[string]any {
 	return map[string]any{
 		"actor":         actor,
-		"subject_type":  "user",
+		"subject_type":  string(subjectType),
 		"subject_id":    subjectID,
 		"resource_type": "cluster_admin_grant",
 		"resource_id":   grantID,

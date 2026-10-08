@@ -173,7 +173,38 @@ ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop", "AccRsv",
 # окружение: «выдано» не должно быть неотличимо от «выдано и не видно модели».
 # Правило слотов то же — один заводящий сценарий, один человек.
 ADMIN_SLOTS = ("AidAdm03", "AidAdm04", "AidAdm12", "AidAdm13", "AidAdm16",
-               "AidAdm19", "AidAdm22", "AidAdmShared")
+               "AidAdm19", "AidAdm22", "AidAdmShared",
+               # Администратор облака публичного набора администраторов кластера
+               # (`cases/kaname-cluster-admins.py`, kaname#661, приёмка ADM-CA §4):
+               # `h-admin/1` и `h-admin/2` — один человек двумя уровнями.
+               "CapAdmin")
+
+# ─── ПУБЛИЧНЫЙ НАБОР АДМИНИСТРАТОРОВ КЛАСТЕРА (kaname#661, приёмка ADM-CA §4) ───
+#
+# Сверх слота администратора набору нужны свои люди и своя учётка, каждый — на
+# прогон, а не общий с соседями: набор назначает и снимает, и общая цель делала
+# бы вердикт функцией порядка прогонов.
+#
+#   * `h-plain` (`CAP_PLAIN_SLOT`) — человек обоих уровней БЕЗ выдач на кластере;
+#     отсутствие выдачи утверждается ТЕМ ЖЕ вопросом, которым слоты
+#     администраторов утверждают её наличие, — и вопрос обязан ответить отказом;
+#   * `target` — человек-цель назначения с НЕПУСТЫМ отображаемым именем. Своей
+#     регистрацией имя не задать (полоса отвергает поле как лишнее), правкой
+#     человека тоже, поэтому он заводится ПРИГЛАШЕНИЕМ администратора набора в
+#     его личный аккаунт с `displayName`, а затем регистрируется тем же адресом и
+#     подтверждает его кодом письма. Имя утверждается непустым и равным заданному
+#     ДО записи ключа: на пустом имени проба транспорта (Н1) зелена без правки;
+#   * `blocked` — активный человек, которого блокирует и разблокирует сам набор
+#     (CAP-12): у приглашения без подтверждения внешней личности нет, и
+#     блокировать его продукт не даёт;
+#   * `sva-target` — включённая служебная учётка-цель в личном аккаунте
+#     администратора набора.
+CAP_PLAIN_SLOT = "CapPlain"
+CAP_TARGET_NAME = "CAP target {}"
+MINTED_CAP = ("ceremonyCapAdminEmail", "ceremonyCapAdminAccountId",
+              "ceremonyCapBlockedUserId", "ceremonyCapTargetUserId",
+              "ceremonyCapTargetEmail", "ceremonyCapTargetDisplayName",
+              "ceremonyCapSvaTargetId")
 
 # Посеянный служебный аккаунт: есть в каждой установке (миграция), и чужой ему
 # читает только администратор облака — это и есть вопрос-доказательство выдачи.
@@ -199,7 +230,8 @@ MINTED_WAVE = (
     # права не держит by construction. Предъявитель ему не нужен — доступ судит
     # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
     "ceremonyInviteeEmail", "ceremonyInviteeUserId",
-) + tuple(k for s in ADMISSION_SLOTS + ADMIN_SLOTS for k in slot_keys(s))
+) + tuple(k for s in ADMISSION_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT,)
+          for k in slot_keys(s)) + MINTED_CAP
 # Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
 # ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
 # опрашивают под другим), а машине уровень не поднимается и не нужен — его пишет
@@ -448,6 +480,115 @@ def prove_cluster_admin(stand, http, token: str, user: str, sleep=time.sleep) ->
     raise Finding(f"выдача system_admin человеку {user} не видна модели: чтение посеянного "
                   f"служебного аккаунта под его предъявителем — код {code} за "
                   f"{ADMIN_PROOF_BUDGET_S:.0f} с")
+
+
+def prove_not_cluster_admin(stand, http, token: str, user: str) -> None:
+    """Выдачи НЕТ: тот же вопрос, что у `prove_cluster_admin`, обязан ответить
+    отказом. Ожидания нет — отсутствию нечего материализоваться, а `200` здесь
+    означает, что человек без выдач читает чужое как администратор облака."""
+    code, body = http.json_ask(f"{stand.own}/iam/v1/accounts/{SEEDED_SYSTEM_ACCOUNT}", token=token)
+    if code == 200:
+        raise Finding(f"человек {user} без выдач читает посеянный служебный аккаунт — "
+                      f"отрицанию набора нечем служить")
+    if code not in (403, 404):
+        raise Finding(f"вопрос-доказательство об отсутствии выдачи у {user} ответил кодом "
+                      f"{code} ({json.dumps(body, ensure_ascii=False)[:200]}) — ни отказа, "
+                      f"ни сокрытия")
+
+
+def _await_verification_code(mailbox, email: str, sleep) -> str | None:
+    """Код ПЕРВОГО письма с кодом подтверждения по адресу.
+
+    У приглашённого в приёмнике лежит ещё и письмо приглашения — оно кода не
+    несёт и может прийти раньше либо позже письма регистрации (обе очереди
+    асинхронны). Поэтому ждётся письмо С КОДОМ, а не «письмо сверх прочитанных»:
+    иначе письмо приглашения читалось бы письмом регистрации, кода в нём не
+    находилось, и посев просил бы второе письмо раньше интервала Р9 (`429`)."""
+    for _ in range(max(1, own_seed.LETTER_BUDGET_S // own_seed.LETTER_POLL_S)):
+        for letter in mailbox.letters(email):
+            code = own_seed.code_of(letter)
+            if code:
+                return code
+        sleep(own_seed.LETTER_POLL_S)
+    return None
+
+
+def _activate_invited(lane, mailbox, email: str, sleep) -> str:
+    """Приглашённый регистрируется тем же адресом и подтверждает его кодом
+    письма регистрации; возвращает id человека, названный входом."""
+    password = secrets.token_urlsafe(24)
+    lane_seed.register(lane, email, password)
+    code = _await_verification_code(mailbox, email, sleep)
+    if code is None:
+        raise Finding(f"письмо подтверждения адреса приглашённой цели не дошло до "
+                      f"приёмника писем стенда за {own_seed.LETTER_BUDGET_S} с")
+    first = lane_seed.login(lane, email, password)
+    if first is None:
+        raise Finding("вход приглашённой цели сразу после регистрации отвергнут (401)")
+    if not first["verified"]:
+        lane_seed.confirm(lane, first["bearer"], code)
+    return human_session(lane, email, password)[1]
+
+
+def seed_cap(stand, lane, http, mailbox, person, ceremony, boot: str,
+             admin: tuple[str, str, str], domain: str, suffix: str,
+             people_ids=(), sleep=time.sleep) -> dict:
+    """Условие публичного набора администраторов кластера (приёмка ADM-CA §4).
+
+    `admin` — (адрес, предъявитель уровня «2», id) человека слота `CapAdmin`.
+    `person`/`ceremony` — заводящие помощники волны; `people_ids` — уже
+    заведённые люди волны (цель обязана быть другим человеком)."""
+    email, step_up, admin_id = admin
+    out: dict[str, str] = {"ceremonyCapAdminEmail": email}
+    tenant = own_seed.resolve_tenant(http, stand.own, boot, email)
+    if tenant["userId"] != admin_id:
+        raise Finding("личный аккаунт администратора набора найден у другого человека")
+    out["ceremonyCapAdminAccountId"] = tenant["accountId"]
+
+    _, sp, plain = person(slot_slug(CAP_PLAIN_SLOT))
+    k1, k2, kid = slot_keys(CAP_PLAIN_SLOT)
+    out[k1] = ceremony(sp, plain, "1")
+    out[k2] = ceremony(level2_session(lane, sp), plain, "2")
+    out[kid] = plain
+    prove_not_cluster_admin(stand, http, out[k2], plain)
+    say("  ok   h-plain набора администраторов: уровни «1» и «2», выдачи на кластере нет")
+
+    _, _, blocked = person("cap-blocked")
+    out["ceremonyCapBlockedUserId"] = blocked
+
+    name = CAP_TARGET_NAME.format(suffix)
+    target_email = f"ceremony-cap-target-{suffix}@{domain}"
+    invited = own_seed.post_operation(http, stand.own, step_up, "/iam/v1/users:invite",
+                                      {"accountId": tenant["accountId"], "email": target_email,
+                                       "displayName": name},
+                                      "приглашение цели набора администраторов")
+    target = invited.get("id") or ""
+    if not target:
+        raise Finding("приглашение цели завершилось без идентификатора человека")
+    registered = _activate_invited(lane, mailbox, target_email, sleep)
+    if registered in people_ids:
+        raise Finding("приглашённая цель получила идентификатор уже заведённого человека")
+    if registered != target:
+        raise Finding(f"регистрация приглашённой цели дала другого человека ({registered}), "
+                      f"чем нашло приглашение ({target})")
+    code, row = http.json_ask(f"{stand.own}/iam/v1/users/{target}", token=boot)
+    shown = (row or {}).get("displayName") or ""
+    if code != 200 or not shown or shown != name:
+        raise Finding(f"отображаемое имя цели после активации {shown!r} (код {code}), ждали "
+                      f"{name!r} — на пустом имени утверждение о нём не различает правку")
+    out.update({"ceremonyCapTargetUserId": target, "ceremonyCapTargetEmail": target_email,
+                "ceremonyCapTargetDisplayName": name})
+    say("  ok   цель набора: приглашена с именем, зарегистрирована, имя сохранено активацией")
+
+    sva = own_seed.post_operation(http, stand.own, step_up, "/iam/v1/serviceAccounts",
+                                  {"accountId": tenant["accountId"],
+                                   "name": f"cap-sva-target-{suffix}"},
+                                  "служебная учётка-цель набора администраторов")
+    if not (sva.get("id") or "").startswith("sva") or sva.get("enabled") is False:
+        raise Finding(f"служебная учётка-цель заведена не включённой либо без id: {sva}")
+    out["ceremonyCapSvaTargetId"] = sva["id"]
+    say("  ok   служебная учётка-цель набора: заведена и включена")
+    return out
 
 
 def human_session(lane, email: str, password: str) -> tuple[str, str]:
@@ -724,8 +865,8 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
               "oauthOtherClientId": oid, "oauthOtherClientSecret": osec}
     people: dict[str, str] = {}
 
-    def person(tag: str) -> tuple[str, str, str]:
-        email = f"ceremony-{tag}-{suffix}@{domain}"
+    def person(tag: str, email: str = "") -> tuple[str, str, str]:
+        email = email or f"ceremony-{tag}-{suffix}@{domain}"
         session, user = new_human(lane, mailbox, email, secrets.token_urlsafe(24), sleep)
         if user in people.values():
             raise Finding(f"человек «{tag}» получил идентификатор уже заведённого — "
@@ -760,16 +901,23 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
         values[kid] = su
     say(f"  ok   слоты заведения аккаунта: {len(ADMISSION_SLOTS)} людей, у каждого "
         f"предъявители уровней «1» и «2»")
+    cap_admin = None
     for slot in ADMIN_SLOTS:
-        _, ss, su = person(slot_slug(slot))
+        se, ss, su = person(slot_slug(slot))
         grant_cluster_admin(stand, principal, su)
         k1, k2, kid = slot_keys(slot)
         values[k1], _ = ceremony_bearer(stand, client, ss, su, "1")
         values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
         values[kid] = su
         prove_cluster_admin(stand, http, values[k1], su, sleep)
+        if slot == "CapAdmin":
+            cap_admin = (se, values[k2], su)
     say(f"  ok   слоты администраторов облака: {len(ADMIN_SLOTS)} людей, выдача "
         f"system_admin утверждена чтением посеянного служебного аккаунта")
+    values.update(seed_cap(
+        stand, lane, http, mailbox, person,
+        lambda sess, who, level: ceremony_bearer(stand, client, sess, who, level)[0],
+        boot, cap_admin, domain, suffix, people_ids=tuple(people.values()), sleep=sleep))
     say(f"  ok   людей заведено {len(people)}, все разные")
     return values
 
@@ -951,6 +1099,7 @@ class _WaveWorld:
         self.requests = 0
         self.codes: dict[str, tuple[str, str]] = {}
         self.admins: set[str] = set()
+        self.ops: dict[str, dict] = {}
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
 
@@ -974,8 +1123,12 @@ class _WaveWorld:
         if path.startswith("/iam/v1/auth/csrf"):
             return 200, ["kaname_form=ctx; Path=/"], '{"csrfToken":"t"}'
         if path == "/iam/v1/auth/register":
-            uid = self._uid(len(self.people) + 1)
-            self.people[body["email"]] = {"id": uid, "pw": body["password"], "verified": False}
+            # Приглашённый адрес регистрация АКТИВИРУЕТ: строка та же, имя
+            # приглашения сохраняется (пустое имя активации прежнего не трогает).
+            prior = self.people.get(body["email"])
+            uid = prior["id"] if prior else self._uid(len(self.people) + 1)
+            self.people[body["email"]] = {"id": uid, "pw": body["password"], "verified": False,
+                                          "name": (prior or {}).get("name", "")}
             self._send(body["email"])
             return 200, [f"kaname_session=s1-{uid}; Path=/"], "{}"
         if path == "/iam/v1/auth/login":
@@ -1052,6 +1205,26 @@ class _WaveWorld:
 
     # фронт под бутстрапом (перечни для разрешения арендатора)
     def json_ask(self, url, **kw):
+        if kw.get("method") == "POST" and url.endswith("/iam/v1/users:invite"):
+            body = kw["body"]
+            uid = self._uid(len(self.people) + 1)
+            name = "" if self.inj.get("target_name_lost") else body.get("displayName", "")
+            self.people[body["email"]] = {"id": uid, "pw": None, "verified": False, "name": name}
+            # Письмо приглашения — БЕЗ кода и ПЕРВЫМ в приёмнике: посев, читающий
+            # «первое письмо» как письмо регистрации, спотыкался бы на нём.
+            self.letters.setdefault(body["email"], []).append(
+                (self.now, "Вас пригласили в аккаунт.\n"))
+            self.ops[f"iop{len(self.ops)}"] = {"id": uid, "displayName": name}
+            return 200, {"id": f"iop{len(self.ops) - 1}"}
+        if kw.get("method") == "POST" and url.endswith("/iam/v1/serviceAccounts"):
+            self.ops[f"iop{len(self.ops)}"] = {"id": f"sva{len(self.ops):017d}", "enabled": True}
+            return 200, {"id": f"iop{len(self.ops) - 1}"}
+        if "/operations/" in url:
+            return 200, {"done": True, "response": self.ops[url.rsplit("/", 1)[1]]}
+        if "/iam/v1/users/" in url:
+            uid = url.rsplit("/", 1)[1]
+            who = next((w for w in self.people.values() if w["id"] == uid), None)
+            return (200, {"id": uid, "displayName": who.get("name", "")}) if who else (404, {})
         # Инъекция `foreign_owner`: строка человека по адресу и её личный аккаунт —
         # у ДРУГОГО идентификатора, чем назвал вход.
         row = (lambda w: "usrforeign" if self.inj.get("foreign_owner") else w["id"])
@@ -1067,7 +1240,7 @@ class _WaveWorld:
         if url.endswith("/iam/v1/accounts/" + SEEDED_SYSTEM_ACCOUNT):
             # Чужой посеянный аккаунт читает только администратор облака.
             sub = token_claims(kw.get("token", "")).get("sub")
-            if sub in self.admins:
+            if sub in self.admins or self.inj.get("plain_is_admin"):
                 return 200, {"id": SEEDED_SYSTEM_ACCOUNT}
             return 404, {"code": 5, "message": f"Account {SEEDED_SYSTEM_ACCOUNT} not found"}
         return 404, {}
@@ -1234,6 +1407,10 @@ def self_test() -> int:
         ("GrantAdmin отказал", {"grant_refused": True}, "GrantAdmin"),
         ("выдача system_admin принята, но модели не видна", {"grant_invisible": True},
          "не видна модели"),
+        ("человек без выдач читает чужое как администратор облака", {"plain_is_admin": True},
+         "отрицанию набора нечем служить"),
+        ("имя цели набора администраторов потеряно активацией", {"target_name_lost": True},
+         "утверждение о нём не различает правку"),
     ):
         got, _ = wave(**inj)
         _c(f"(+) {label} — находка, причина названа",

@@ -212,6 +212,10 @@ const maxBody = 16 << 10
 // которым отказывает ярус gateway-only.
 const TextPermissionDenied = "permission denied"
 
+// TextMethodNotAllowed — текст отказа на неверный метод: дословно тот, которым
+// отвечает REST-фронт службы (решение R36 п. 3).
+const TextMethodNotAllowed = "method not allowed"
+
 // Lane — глаголы полосы (порт над вариантами использования).
 type Lane interface {
 	Login(ctx context.Context, in humansession.LoginInput) (humansession.LoginOutput, error)
@@ -338,11 +342,18 @@ func (h *Handler) callerIsGateway(r *http.Request) bool {
 	return authzguard.PeerIsGateway(h.cfg.TrustDomain, r.TLS)
 }
 
+// method — отказ на неверный метод в форме, ОДНОЙ у обеих HTTP-поверхностей
+// службы (задача #261, решение R36 п. 3): `405`, код `12` (UNIMPLEMENTED) и
+// заголовок `Allow` с методом пути. Тот же код производит REST-фронт службы —
+// у маршрутизатора grpc-gateway промах метода переводится в UNIMPLEMENTED, — и
+// клиент, ключующийся на `code`, читает один класс отказа одинаково по любому
+// адресу. Прежний код `3` (INVALID_ARGUMENT) уводил клиента править тело, хотя
+// неверен метод.
 func (h *Handler) method(want string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != want {
 			w.Header().Set("Allow", want)
-			writeRefusal(w, http.StatusMethodNotAllowed, codeInvalidArgument, "method not allowed", nil)
+			writeRefusal(w, http.StatusMethodNotAllowed, codeUnimplemented, TextMethodNotAllowed, nil)
 			return
 		}
 		next(w, r)
@@ -1430,6 +1441,7 @@ const (
 	codePermissionDenied   = 7
 	codeResourceExhausted  = 8
 	codeFailedPrecondition = 9
+	codeUnimplemented      = 12
 	codeUnavailable        = 14
 	codeUnauthenticated    = 16
 )

@@ -124,5 +124,34 @@ func TestLookupSubject_ByEmail_BlockedUser(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	require.Equal(t, "identity blocked@example.com is blocked", status.Convert(err).Message())
+	// Строку называет неизменяемый идентификатор, а не адрес (kaname#641).
+	require.Equal(t, "User usr-blocked-1 is blocked", status.Convert(err).Message())
+	require.NotContains(t, status.Convert(err).Message(), "blocked@example.com")
+}
+
+// TestLookupSubject_ByEmail_TextNeverCarriesTheAddress — ни один исход ветки
+// по адресу не возвращает адрес в тексте отказа (kaname#641): текст уезжает
+// вызывающему и во все журналы по пути. Пара исходов — «строки нет» и
+// «строка есть, но не действует» — судится на одном и том же адресе.
+func TestLookupSubject_ByEmail_TextNeverCarriesTheAddress(t *testing.T) {
+	const addr = "someone@example.com"
+	for _, tc := range []struct {
+		name string
+		repo *fakeRepo
+		code codes.Code
+	}{
+		{"строки нет", &fakeRepo{}, codes.NotFound},
+		{"строка не действует", &fakeRepo{user: &domain.User{
+			ID: "usr-pending-1", Email: addr, InviteStatus: domain.InviteStatusPending,
+		}}, codes.FailedPrecondition},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewLookupSubjectUseCase(tc.repo).Execute(context.Background(),
+				&iamv1.LookupSubjectRequest{Key: &iamv1.LookupSubjectRequest_Email{Email: addr}})
+			require.Error(t, err)
+			require.Equal(t, tc.code, status.Code(err))
+			require.NotContains(t, status.Convert(err).Message(), addr)
+			require.NotContains(t, status.Convert(err).Message(), "someone")
+		})
+	}
 }
