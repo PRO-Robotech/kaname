@@ -1,0 +1,117 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: 90933dc8058988c8b2a714b5cf7b8101d804f4288a1530868d99aa52383e833a
+  revision: 17
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 17 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (там редакция 15,
+    c5e535f0); отпечаток снят с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a (голова эпика 296)
+  task: PRO-Robotech/kaname#520 (и kaname#258 — сведённая правка редакции 16)
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  fingerprint_reproduced: true
+  lines: 2875
+  round: 14
+  predecessor_record: docs/specs/reviews/second-factor-totp-and-recovery-codes/fe13cd85ee439653a17e505efcc4be676643095f93b0a46e2f0c165edc96c171.yaml (CHANGES_REQUESTED, редакция 16)
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 17 к c5e535f0 (редакция 16 дословно + исход круга 13 §13 + kaname#520 §14: Р2, Р4,
+  Р6, Р7, Ф12-01/13/35, Д30, §6, §7 инв.2, §8); прочее одобрено кругом 12
+blocking_count: 1
+blocking_kinds_distinct: [DoD]
+
+premise_check:
+  premise: >-
+    (а) Б1 круга 13 закрыт своим «Дано» (г); (б) kaname#520 — все отказы входа с кодом одним
+    TextAuthenticationFailed
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    (а) sf_present.go @8b0379e2a, ветвь MethodLookupSecret: строка набора не найдена → холостой
+    кандидат → verdictUnavailable/PresentationMaterialUnreadable; settle: LockLookupSet found=false →
+    то же; ограничения схемы между totp и набором нет. (б) git grep -n TextAuthenticationFailed
+    8b0379e2a -- 'internal/**/*.go' ':!*_test.go' → 3; приёмок с литералом — 9 файлов (перемерено).
+
+blocking:
+  - id: B14-1
+    kind: DoD
+    summary: >-
+      §14 DoD п.4 утверждает «прочие глаголы… держатели зелёные с прежним текстом», но сквозные
+      держатели newman сравнивают тела прочих глаголов с телом входа С кодом и краснеют на посадке.
+      tests/newman/cases/kaname-second-factor.py @8b0379e2a: эталон sfWrongPasswordRefusalBody
+      снимается со входа с secondFactor (:769, :1240, keep=); с ним побайтово сравниваются отказы
+      step-up (:626 _backup_step_up_refused, :1019 SU-REPLAY, :1041 SU-S2-WRONG) и входы с кодом
+      (:770, :962, :1241); все _refused_login утверждают _AUTH_FAILED (:511). После правки вход с
+      кодом — текст Р4, step-up — прежний: равенство ложно по замыслу Д30. Переписи и DoD это не
+      называют; сквозного пункта DoD нет (чек-лист 3.7).
+    fix: >-
+      Строка переписи §14 «кейсы newman kaname-second-factor» с исходом: входы с кодом — текст Р4;
+      эталон тела для step-up/confirm/remove — снять с отказа без поля либо своего глагола, а не со
+      входа с кодом; пункт DoD — набор kaname-second-factor зелен на сведённом тексте, коллекция
+      пересобрана.
+
+non_blocking:
+  - id: N14-1
+    summary: >-
+      §7 инв. 3 (:2431-2432) по-прежнему говорит «семь отказов входа Ф12-13 (а…ж) побайтово равны
+      отказу на неверный пароль» — без оговорки «той же формы запроса» (Д30) читается против близнеца
+      формы. Дописать оговорку.
+
+accepted_parts: >-
+  Б1 круга 13 закрыт: (г) — своё «Дано» с производителем и положительным близнецом, равенство тел (в)
+  и (г). Н1, Н2 закрыты. Отрицательный контроль 503 прогнан: temporarily / try again / later / key /
+  wrap / secret / material / decrypt / encrypt — 0 попаданий. Текст 401 формы с кодом не называет
+  причину, один на (а)…(ж); близнец формы отличается одним фактом; отвергнутый исход (б) kaname#520
+  с доводом Р7. Д30 сводка 29→30 сходится.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 1
+  not_performed: 0
+  detail: >-
+    (г) Ф12-35 — посевом пробы, снимающим строку набора; производитель ветви на 8b0379e2a прочитан
+    (sf_present.go MethodLookupSecret, settle). Стенда в задании нет — посев не исполнялся; строимость
+    подтверждена отсутствием ограничения схемы (git grep lookup_secret -- internal/migrations → только CHECK вида).
+
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 90933dc8058988c8b2a714b5cf7b8101d804f4288a1530868d99aa52383e833a
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт — возврат; одобрение круга 12 (c5e535f0) и вердикт круга 13 на редакцию 17 не переносятся.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#520
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#520
+  status: pending
+  published: false
+  verdict: CHANGES_REQUESTED
+  subject_sha256: 90933dc8058988c8b2a714b5cf7b8101d804f4288a1530868d99aa52383e833a
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · 90933dc8058988c8b2a714b5cf7b8101d804f4288a1530868d99aa52383e833a'
