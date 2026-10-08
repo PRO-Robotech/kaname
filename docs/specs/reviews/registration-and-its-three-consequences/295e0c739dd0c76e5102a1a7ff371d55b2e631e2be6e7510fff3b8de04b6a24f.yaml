@@ -70,7 +70,8 @@ constructibility:
 
 event_body: acceptance-reviewer · APPROVED · 295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-08T04:07:07Z"
   ban1_lifted: false
   why: >-
     Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
@@ -90,9 +91,18 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#211
-  status: pending
-  published: false
-  verdict: APPROVED
-  subject_sha256: 295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f
-  publication_mode: courier_of_agent_verdict
-  body_for_publication: 'acceptance-reviewer · APPROVED · 295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f'
+  status: performed
+  published: true
+  database_id: 6051984920
+  node_id: "IC_kwDOUO26pM8AAAABaLn2GA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/211#issuecomment-6051984920"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051984920"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T04:07:07Z"
+  body_sha256: "db604775f75787caa0f32d6191be585472a73c144bca36fc58607eb534e30eaf"
+  subject_sha256: "295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f"
+  subject_revision_commit: "f69dc922abc659c111e6dbbd66c8fbf8050e823f"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
