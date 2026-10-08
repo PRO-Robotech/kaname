@@ -1,0 +1,108 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/registration-and-its-three-consequences.md
+  sha256: 295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f
+  revision: 9
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 9 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (origin/296, перемерено
+    git rev-parse origin/296 → 8b0379e2a); отпечаток снят с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a; PRO-Robotech/kacho@8725b886e1 (дом консоли)
+  task: PRO-Robotech/kaname#211
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md
+  fingerprint_reproduced: true
+  lines: 2295
+  round: 4
+  predecessor_record: docs/specs/reviews/registration-and-its-three-consequences/ed16317127edf8da4ca2906c7e6c6b136796d5bd490c1db01db47474ce5fe74a.yaml (CHANGES_REQUESTED, редакция 8)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 9 к редакции 8 (строка состава, §10б перепись по всему дереву и дому консоли,
+  DoD пп. 4–5); прочее одобрено кругами 2–3
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: >-
+    прежний литерал отказа регистрации живёт в десяти файлах вне приёмок, включая сквозной слой;
+    консоль утверждает лишь вхождение
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git grep -c 'registration refused' 8b0379e2a -- . ':!docs/engineering/acceptance' ':!docs/specs/reviews'
+    → 10 файлов (3 страницы, 2 кода, 1 Go-тест, 2 файла кейсов 1+2, 2 коллекции 1+2) — совпадает с
+    §10б построчно; положительный контроль DoD п.4 git grep -nE "[\"']registration refused[\"']" -- tests/newman
+    → 6; DoD п.5 предикат на базе → 4 (после правки 1). Консоль @8725b886e1:
+    identity-ceremony.spec.ts:1127 — toContain; registration-refusal-named.spec.ts и
+    RegistrationPage.test.tsx — page.route-заглушки с телом из кейса; текст Р3 начинается с
+    "registration refused;" — вхождение истинно.
+
+blocking: []
+
+non_blocking: []
+
+accepted_parts: >-
+  B3-1 закрыт: предикат переписи расширен на всё дерево и дом консоли, каждое попадание с исходом,
+  коллекции — генератором, сквозной пункт DoD с предикатом и положительным контролем. N3-1
+  (observability.mdx, Help метрики, плюс найденная configuration.mdx — признаком, не текстом) и
+  N3-2 (register_test.go:78 литералом) закрыты. Гейт internal/check — 0 FAIL.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 2
+  not_performed: 0
+  detail: >-
+    «Дано» Ф4-11/12/13 не менялось; фикстуры — register_integration_test.go (занятый адрес) и наборы
+    kaname-registration / kaname-address-verification (OCCUPIED, OCCUPIED-CASE, EV01-TWIN) @8b0379e2a.
+
+event_body: acceptance-reviewer · APPROVED · 295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f
+effective_approval:
+  issued: true
+  issued_at: "2026-10-08T04:07:07Z"
+  ban1_lifted: false
+  why: >-
+    Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
+    после публикации ревизии содержимого. До события запрет #1 по дельте редакций 8–9 в силе.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#211
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#211
+  status: performed
+  published: true
+  database_id: 6051984920
+  node_id: "IC_kwDOUO26pM8AAAABaLn2GA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/211#issuecomment-6051984920"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051984920"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T04:07:07Z"
+  body_sha256: "db604775f75787caa0f32d6191be585472a73c144bca36fc58607eb534e30eaf"
+  subject_sha256: "295e0c739dd0c76e5102a1a7ff371d55b2e631e2be6e7510fff3b8de04b6a24f"
+  subject_revision_commit: "f69dc922abc659c111e6dbbd66c8fbf8050e823f"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
