@@ -48,6 +48,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // runIntegrationRel — координата сценария в дереве модуля.
@@ -111,10 +113,15 @@ var runIntegrationPaths = []runIntegrationPath{
 	{name: "прерывание SIGHUP во время go test", signal: syscall.SIGHUP, wantRC: 128 + int(syscall.SIGHUP)},
 }
 
-// runIntegrationSource — сценарий из дерева.
+// runIntegrationSource — сценарий из дерева этого модуля. База — корень
+// модуля, выведенный подъёмом к его `go.mod`, а не рабочий каталог пробы.
 func runIntegrationSource(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(runIntegrationRel))) // #nosec G304 -- координата объявлена постоянной
+	wd, err := os.Getwd()
+	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен")
+	root, err := platformtree.ModuleRootFrom(wd)
+	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не найден")
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(runIntegrationRel))) // #nosec G304 -- координата объявлена постоянной
 	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: %s не прочитан", runIntegrationRel)
 	return string(raw)
 }
