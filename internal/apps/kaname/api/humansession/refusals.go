@@ -17,7 +17,13 @@ import (
 // (Ф1 Р3, F4d-16), фиксированные тексты недоступности (форма Ф-п).
 const (
 	TextAuthenticationFailed = "authentication failed"
-	TextTooManyAttempts      = "too many attempts; try again later"
+	// TextLoginWithSecondFactorFailed — отказ входа С полем `secondFactor`
+	// (Ф12 Р4, редакция 17; kaname#520): один на все причины этой формы
+	// запроса и называет шаг, не называя причины. Форму запроса знает сам
+	// вызывающий, поэтому отличие от TextAuthenticationFailed (вход без поля,
+	// Ф3-02) различает присланное, а не найденное (Д30).
+	TextLoginWithSecondFactorFailed = "authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled"
+	TextTooManyAttempts             = "too many attempts; try again later"
 	// #nosec G101 -- ТЕКСТ ОТКАЗА, уезжающий клиенту, а не значение удостоверения.
 	TextFormTokenRejected   = "form token rejected"
 	TextLogoutNotPerformed  = "logout not performed; try again later"

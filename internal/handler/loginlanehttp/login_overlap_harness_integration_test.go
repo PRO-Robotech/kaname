@@ -738,6 +738,9 @@ type overlapLoginReply struct {
 	bearer string
 	err    error
 	seq    int64
+	// withCode — запрос нёс поле `secondFactor`: форма запроса выбирает текст
+	// отказа (Ф12 Р4, редакция 17; Д30).
+	withCode bool
 }
 
 type overlapLoginCall struct {
@@ -756,7 +759,7 @@ func (h *overlapLane) startLogin(t *testing.T, p overlapPerson, password, code s
 	}
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
-	call := &overlapLoginCall{done: make(chan struct{})}
+	call := &overlapLoginCall{done: make(chan struct{}), res: overlapLoginReply{withCode: code != ""}}
 	go func() {
 		defer close(call.done)
 		req, rerr := http.NewRequest(http.MethodPost, h.lane.srv.URL+loginlanehttp.PathLogin, bytes.NewReader(raw))
@@ -1190,13 +1193,19 @@ func refusalOf(body string) (overlapRefusal, bool) {
 }
 
 // oneRefusal — «тот же один отказ» (§4): 401, `UNAUTHENTICATED` (16), текст
-// `authentication failed` — статус, код и текст вместе. "" — он.
+// отказа входа ЭТОЙ формы запроса — `authentication failed` без поля
+// `secondFactor` и текст с шагом при поле (Ф12 Р4, редакция 17) — статус, код и
+// текст вместе. "" — он.
 func oneRefusal(r overlapLoginReply) string {
+	want := humansession.TextAuthenticationFailed
+	if r.withCode {
+		want = humansession.TextLoginWithSecondFactorFailed
+	}
 	ref, ok := refusalOf(r.body)
-	if r.status == http.StatusUnauthorized && ok && ref.Code == 16 && ref.Message == humansession.TextAuthenticationFailed {
+	if r.status == http.StatusUnauthorized && ok && ref.Code == 16 && ref.Message == want {
 		return ""
 	}
-	return fmt.Sprintf("вход ответил %d %s, а не 401 UNAUTHENTICATED `authentication failed`", r.status, r.body)
+	return fmt.Sprintf("вход ответил %d %s, а не 401 UNAUTHENTICATED `%s`", r.status, r.body, want)
 }
 
 // notPerformed — ответ «не выполнено» (Р4 исход 4): 503, `UNAVAILABLE` (14),

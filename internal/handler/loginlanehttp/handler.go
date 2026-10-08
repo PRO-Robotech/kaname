@@ -632,6 +632,14 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.lane.Login(r.Context(), in)
 	if err != nil {
+		// Отказ входа С полем `secondFactor` называет шаг своим текстом (Ф12 Р4,
+		// редакция 17): форма запроса — то, что прислал вызывающий, и текст,
+		// различающий форму, не различает ни одной причины (Д30). Код, пустые
+		// `details`, отсутствие печений и счёт попытки — те же, что без поля.
+		if in.SecondFactor != nil && errors.Is(err, humansession.ErrAuthenticationFailed) {
+			writeRefusal(w, http.StatusUnauthorized, codeUnauthenticated, humansession.TextLoginWithSecondFactorFailed, nil)
+			return
+		}
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
 	}
