@@ -165,3 +165,22 @@ role_sweep:
   dod: измеримо; предикаты исполнимы, newman-suite-debt.py → 0 на рабочем дереве
   open_questions: 0
   route_flags: proto да · схема нет · публичный RPC да · UI нет · новый домен нет · поверхность безопасности да
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kacho#2702
+  status: performed
+  published: true
+  database_id: 6051494360
+  node_id: "IC_kwDOTZqgWM8AAAABaLJ52A"
+  url: "https://github.com/PRO-Robotech/kacho/issues/2702#issuecomment-6051494360"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/6051494360"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T03:21:22Z"
+  body_sha256: "c794c3fca6a18c75bfbde1b0ed44127fd588ad6380df4eeb8f61c30ba38a9e7e"
+  subject_sha256: "120ae199f04ae745f3c63f9db1f9cfd27cf9c64aa986289e69c62baedf509691"
+  subject_revision_commit: "395f1e7ba4808e471b906a7017fb3f39ec62451e"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
