@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 783
+Всего кейсов: 800
 
 ## Перепись по модулям
 
@@ -72,6 +72,7 @@
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
 | `cases/kaname-access-keys.py` | 10 |
+| `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
@@ -1152,6 +1153,31 @@
 - `IAM-2FA-NEG-CODE-GUESSING-RATE`
 - `IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS`
 - `IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED`
+
+## `cases/kaname-cluster-admins.py` — 17 кейсов
+
+> Публичный близнец `ClusterService` — администраторы кластера на публичной
+> поверхности (kaname#661, приёмка ADM-CA): те же сценарии, то же право
+> `system_admin` на синглтоне кластера и тот же порог, что у внутренней службы;
+> каждый отказ — в паре с близнецом, отличающимся одним фактом.
+
+- `CAP-01-LIST-ADMINS`
+- `CAP-02-GET-CLUSTER`
+- `CAP-03-GRANT-HUMAN`
+- `CAP-04-REGRANT-IDEMPOTENT`
+- `CAP-05-REVOKE`
+- `CAP-06-REGRANT-AFTER-REVOKE`
+- `CAP-07-NO-GRANT-NO-ACCESS`
+- `CAP-08-ASSURANCE-FLOOR`
+- `CAP-09-ANONYMOUS`
+- `CAP-10-MALFORMED-INPUT`
+- `CAP-11-ABSENT-HUMAN`
+- `CAP-12-SUBJECT-BARRED`
+- `CAP-13-REVOKE-NON-ADMIN`
+- `CAP-14-NO-SELF-REVOKE`
+- `CAP-17-MACHINE-SUBJECT`
+- `CAP-20-ONE-WRITE-PATH`
+- `CAP-21-FRONT-SEPARATION`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 
