@@ -2058,7 +2058,7 @@
       ]
     },
     {
-      "name": "CAP-08-ASSURANCE-FLOOR — Порог назначения и снятия «2», чтения «1»: h-admin/1 — 403 на мутациях, 200 на чтениях; h-admin/2 — проходит",
+      "name": "CAP-08-ASSURANCE-FLOOR — Порог назначения и снятия «2», чтения «1»: h-admin/1 — указание повысить уровень на мутациях, 200 на чтениях; h-admin/2 — проходит",
       "description": "class:AUTHZ | class:NEG | priority:P0",
       "item": [
         {
@@ -2147,14 +2147,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(403));",
-                  "pm.test('CAP-08 h-admin/1 GrantAdmin: grpc code 7', () => {",
+                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
+                  "pm.test('CAP-08 h-admin/1 GrantAdmin: grpc code 16', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "  pm.expect(j && j.code, pm.response.text()).to.eql(7);",
+                  "  pm.expect(j && j.code, pm.response.text()).to.eql(16);",
                   "});",
                   "pm.test('CAP-08 h-admin/1 GrantAdmin: сообщение дословно', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('permission denied');",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication level is insufficient: step up with a second factor, or present a credential of another kind');",
+                  "});",
+                  "pm.test('CAP-08 h-admin/1 GrantAdmin: вызов Bearer называет шаг и уровни', () => {",
+                  "  const h = pm.response.headers.get('WWW-Authenticate') || '';",
+                  "  pm.expect(h, 'WWW-Authenticate').to.match(/^Bearer\\s/);",
+                  "  const params = {};",
+                  "  h.replace(/^Bearer\\s+/, '').replace(/([a-z_]+)=\"([^\"]*)\"/g, (m, k, v) => { params[k] = v; return m; });",
+                  "  pm.expect(params.error, h).to.eql('insufficient_user_authentication');",
+                  "  pm.expect(params.acr_values, h).to.eql('2');",
+                  "  pm.expect(params.error_description, h).to.include('Required ACR 2');",
+                  "  pm.expect(params.error_description, h).to.include('presented ACR 1');",
                   "});"
                 ]
               }
@@ -2509,14 +2519,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(403));",
-                  "pm.test('CAP-08 h-admin/1 RevokeAdmin: grpc code 7', () => {",
+                  "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(401));",
+                  "pm.test('CAP-08 h-admin/1 RevokeAdmin: grpc code 16', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "  pm.expect(j && j.code, pm.response.text()).to.eql(7);",
+                  "  pm.expect(j && j.code, pm.response.text()).to.eql(16);",
                   "});",
                   "pm.test('CAP-08 h-admin/1 RevokeAdmin: сообщение дословно', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('permission denied');",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('authentication level is insufficient: step up with a second factor, or present a credential of another kind');",
+                  "});",
+                  "pm.test('CAP-08 h-admin/1 RevokeAdmin: вызов Bearer называет шаг и уровни', () => {",
+                  "  const h = pm.response.headers.get('WWW-Authenticate') || '';",
+                  "  pm.expect(h, 'WWW-Authenticate').to.match(/^Bearer\\s/);",
+                  "  const params = {};",
+                  "  h.replace(/^Bearer\\s+/, '').replace(/([a-z_]+)=\"([^\"]*)\"/g, (m, k, v) => { params[k] = v; return m; });",
+                  "  pm.expect(params.error, h).to.eql('insufficient_user_authentication');",
+                  "  pm.expect(params.acr_values, h).to.eql('2');",
+                  "  pm.expect(params.error_description, h).to.include('Required ACR 2');",
+                  "  pm.expect(params.error_description, h).to.include('presented ACR 1');",
                   "});"
                 ]
               }

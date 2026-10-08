@@ -21,10 +21,16 @@ Covered RPCs (публичный фронт службы):
 
 ПРОИЗВОДИТЕЛЬ УТВЕРЖДЕНИЙ — СЛУЖБА. Все шаги идут на собственный публичный
 фронт (`ownRestBaseUrl`), CAP-21 — ещё и на собственный внутренний
-(`ownInternalRestBaseUrl`). Края платформы здесь нет: порог на крае и его отказ
-`401` с `WWW-Authenticate` — предмет набора края (CAP-25, `kacho#3093`); на
-публичном слушателе службы порог предъявленного удостоверения судит её
-политика вызывающего по своей копии каталога и отвечает `403`.
+(`ownInternalRestBaseUrl`). Края платформы здесь нет: порог на крае — предмет
+набора края (CAP-25, `kacho#3093`); на публичном слушателе службы порог
+предъявленного удостоверения судит её политика вызывающего по своей копии
+каталога. Недостаток уровня там — УКАЗАНИЕ повысить уровень той же формой, что
+край (решение Р11 одобренной приёмки уровня уверенности, редакция 9,
+`kaname#511`): `401`, тело `{"code":16,"message":"<текст Р11>","details":[]}`,
+вызов `Bearer` с `error="insufficient_user_authentication"`, `acr_values` и
+`error_description`, называющим требуемый и предъявленный уровни. Прежний
+ответ `403` / `7` `permission denied` Р11 отвергла (п. «б»), и CAP-08
+утверждает новую форму, а не прежнюю.
 
 Аудит с публичной поверхности не наблюдаем: утверждения о строках аудита
 (CAP-04, 05, 06, 17, 19) — в интеграционных пробах службы
@@ -378,25 +384,44 @@ CASES.append(Case(
     ],
 ))
 
+# Текст указания Р11 — дословно, как его объявляет служба
+# (`internal/errors/step_up.go`, `TextStepUpRequired`).
+STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                "or present a credential of another kind")
+
+
+def _step_up(label, required, presented):
+    """Указание повысить уровень (Р11): пара `401`/`16`, текст дословно и вызов
+    `WWW-Authenticate`, разобранный ПО ПАРАМЕТРАМ, а не сравнением строки."""
+    return [
+        *_pair(401, CODE_UNAUTHENTICATED, label),
+        *_message(_q(STEP_UP_TEXT), label),
+        f"pm.test({_q(label + ': вызов Bearer называет шаг и уровни')}, () => {{",
+        "  const h = pm.response.headers.get('WWW-Authenticate') || '';",
+        r"  pm.expect(h, 'WWW-Authenticate').to.match(/^Bearer\s/);",
+        "  const params = {};",
+        r"""  h.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { params[k] = v; return m; });""",
+        "  pm.expect(params.error, h).to.eql('insufficient_user_authentication');",
+        f"  pm.expect(params.acr_values, h).to.eql({_q(required)});",
+        f"  pm.expect(params.error_description, h).to.include({_q('Required ACR ' + required)});",
+        f"  pm.expect(params.error_description, h).to.include({_q('presented ACR ' + presented)});",
+        "});",
+    ]
+
+
 _DENY_L1 = "CAP-08 h-admin/1"
 CASES.append(Case(
     id="CAP-08-ASSURANCE-FLOOR",
-    title="Порог назначения и снятия «2», чтения «1»: h-admin/1 — 403 на мутациях, 200 на чтениях; h-admin/2 — проходит",
+    title="Порог назначения и снятия «2», чтения «1»: h-admin/1 — указание повысить уровень на мутациях, 200 на чтениях; h-admin/2 — проходит",
     classes=["AUTHZ", "NEG"], priority="P0",
     steps=[
-        _grant("cap08-l1-grant", HA1, TARGET, tests=[
-            *_pair(403, CODE_PERMISSION_DENIED, _DENY_L1 + " GrantAdmin"),
-            *_message(_q("permission denied"), _DENY_L1 + " GrantAdmin"),
-        ]),
+        _grant("cap08-l1-grant", HA1, TARGET, tests=_step_up(_DENY_L1 + " GrantAdmin", "2", "1")),
         _list("cap08-l1-list", HA1,
               _entries_for(_env("ceremonyCapTargetUserId"), "назначение уровнем «1» выдачи не создало; чтение уровнем «1» — 200", 0)),
         Step(name="cap08-l1-get", method="GET", path="/iam/v1/cluster", auth=HA1,
              test_script=[*assert_status(200)]),
         _grant("cap08-l2-grant", HA2, TARGET, tests=_op_ok("CAP-08 близнец GrantAdmin")),
-        _revoke("cap08-l1-revoke", HA1, TARGET, tests=[
-            *_pair(403, CODE_PERMISSION_DENIED, _DENY_L1 + " RevokeAdmin"),
-            *_message(_q("permission denied"), _DENY_L1 + " RevokeAdmin"),
-        ]),
+        _revoke("cap08-l1-revoke", HA1, TARGET, tests=_step_up(_DENY_L1 + " RevokeAdmin", "2", "1")),
         _list("cap08-list-after-denied-revoke", HA1,
               _entries_for(_env("ceremonyCapTargetUserId"), "снятие уровнем «1» выдачу не тронуло", 1)),
         _revoke("cap08-l2-revoke", HA2, TARGET, tests=_op_ok("CAP-08 близнец RevokeAdmin")),
