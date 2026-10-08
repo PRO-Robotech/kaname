@@ -131,3 +131,22 @@ effective_approval:
       учёткой; до него запись — объявление вердикта рецензента.
 
 event_body: "acceptance-reviewer · APPROVED · sha256 6d5b9ef672c041d613ebbad511b1b391f18a3542dfae9c478c74c6fa4d7ce754"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#664
+  status: performed
+  published: true
+  database_id: 6065791544
+  node_id: "IC_kwDOUO26pM8AAAABaYyiOA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/664#issuecomment-6065791544"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6065791544"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T17:49:55Z"
+  body_sha256: "9e60dc76573dc0eca93505b318fbfd50760eec5f6e13db5454a943a422977a0e"
+  subject_sha256: "6d5b9ef672c041d613ebbad511b1b391f18a3542dfae9c478c74c6fa4d7ce754"
+  subject_revision_commit: "0816d1560cb39795815cd5e9d32585003b0c84db"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
