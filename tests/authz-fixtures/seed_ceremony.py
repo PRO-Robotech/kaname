@@ -496,12 +496,48 @@ def prove_not_cluster_admin(stand, http, token: str, user: str) -> None:
                       f"ни сокрытия")
 
 
+def _await_verification_code(mailbox, email: str, sleep) -> str | None:
+    """Код ПЕРВОГО письма с кодом подтверждения по адресу.
+
+    У приглашённого в приёмнике лежит ещё и письмо приглашения — оно кода не
+    несёт и может прийти раньше либо позже письма регистрации (обе очереди
+    асинхронны). Поэтому ждётся письмо С КОДОМ, а не «письмо сверх прочитанных»:
+    иначе письмо приглашения читалось бы письмом регистрации, кода в нём не
+    находилось, и посев просил бы второе письмо раньше интервала Р9 (`429`)."""
+    for _ in range(max(1, own_seed.LETTER_BUDGET_S // own_seed.LETTER_POLL_S)):
+        for letter in mailbox.letters(email):
+            code = own_seed.code_of(letter)
+            if code:
+                return code
+        sleep(own_seed.LETTER_POLL_S)
+    return None
+
+
+def _activate_invited(lane, mailbox, email: str, sleep) -> str:
+    """Приглашённый регистрируется тем же адресом и подтверждает его кодом
+    письма регистрации; возвращает id человека, названный входом."""
+    password = secrets.token_urlsafe(24)
+    lane_seed.register(lane, email, password)
+    code = _await_verification_code(mailbox, email, sleep)
+    if code is None:
+        raise Finding(f"письмо подтверждения адреса приглашённой цели не дошло до "
+                      f"приёмника писем стенда за {own_seed.LETTER_BUDGET_S} с")
+    first = lane_seed.login(lane, email, password)
+    if first is None:
+        raise Finding("вход приглашённой цели сразу после регистрации отвергнут (401)")
+    if not first["verified"]:
+        lane_seed.confirm(lane, first["bearer"], code)
+    return human_session(lane, email, password)[1]
+
+
 def seed_cap(stand, lane, http, mailbox, person, ceremony, boot: str,
-             admin: tuple[str, str, str], domain: str, suffix: str) -> dict:
+             admin: tuple[str, str, str], domain: str, suffix: str,
+             people_ids=(), sleep=time.sleep) -> dict:
     """Условие публичного набора администраторов кластера (приёмка ADM-CA §4).
 
     `admin` — (адрес, предъявитель уровня «2», id) человека слота `CapAdmin`.
-    `person`/`ceremony` — заводящие помощники волны."""
+    `person`/`ceremony` — заводящие помощники волны; `people_ids` — уже
+    заведённые люди волны (цель обязана быть другим человеком)."""
     email, step_up, admin_id = admin
     out: dict[str, str] = {"ceremonyCapAdminEmail": email}
     tenant = own_seed.resolve_tenant(http, stand.own, boot, email)
@@ -529,7 +565,9 @@ def seed_cap(stand, lane, http, mailbox, person, ceremony, boot: str,
     target = invited.get("id") or ""
     if not target:
         raise Finding("приглашение цели завершилось без идентификатора человека")
-    _, _, registered = person("cap-target", email=target_email)
+    registered = _activate_invited(lane, mailbox, target_email, sleep)
+    if registered in people_ids:
+        raise Finding("приглашённая цель получила идентификатор уже заведённого человека")
     if registered != target:
         raise Finding(f"регистрация приглашённой цели дала другого человека ({registered}), "
                       f"чем нашло приглашение ({target})")
@@ -879,7 +917,7 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     values.update(seed_cap(
         stand, lane, http, mailbox, person,
         lambda sess, who, level: ceremony_bearer(stand, client, sess, who, level)[0],
-        boot, cap_admin, domain, suffix))
+        boot, cap_admin, domain, suffix, people_ids=tuple(people.values()), sleep=sleep))
     say(f"  ok   людей заведено {len(people)}, все разные")
     return values
 
@@ -1172,6 +1210,10 @@ class _WaveWorld:
             uid = self._uid(len(self.people) + 1)
             name = "" if self.inj.get("target_name_lost") else body.get("displayName", "")
             self.people[body["email"]] = {"id": uid, "pw": None, "verified": False, "name": name}
+            # Письмо приглашения — БЕЗ кода и ПЕРВЫМ в приёмнике: посев, читающий
+            # «первое письмо» как письмо регистрации, спотыкался бы на нём.
+            self.letters.setdefault(body["email"], []).append(
+                (self.now, "Вас пригласили в аккаунт.\n"))
             self.ops[f"iop{len(self.ops)}"] = {"id": uid, "displayName": name}
             return 200, {"id": f"iop{len(self.ops) - 1}"}
         if kw.get("method") == "POST" and url.endswith("/iam/v1/serviceAccounts"):
