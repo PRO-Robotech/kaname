@@ -36,7 +36,8 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-08'
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-08T03:41:46Z"
   ban1_lifted: false
   publication_pending:
     required_for_sanction: true
@@ -74,10 +75,21 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#198
-  status: pending
-  published: false
-  body: "role: acceptance-reviewer · verdict: APPROVED · subject: docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md · subject_revision: <коммит, несущий отпечаток> · subject_sha256: 34f7a09e77cc763fcae803950e690c6f5e46588bcfa49e8cc7560e2fffd4a284"
-
+  status: performed
+  published: true
+  database_id: 6051703817
+  node_id: "IC_kwDOUO26pM8AAAABaLWsCQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/198#issuecomment-6051703817"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051703817"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T03:41:46Z"
+  body_sha256: "2e3600f48c1eb0e4a8e5382b067b857f4fb893e5b14d1d6cfc86006d021d1210"
+  subject_sha256: "34f7a09e77cc763fcae803950e690c6f5e46588bcfa49e8cc7560e2fffd4a284"
+  subject_revision_commit: "b7d6ccd22fc2245e02a853e4bf76ee4942eca763"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   publishing_actor: pointpu
