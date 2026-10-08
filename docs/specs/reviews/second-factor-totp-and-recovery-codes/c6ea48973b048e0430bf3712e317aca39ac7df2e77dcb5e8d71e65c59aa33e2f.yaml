@@ -1,0 +1,109 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f
+  revision: 18
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 18 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (там редакция 15,
+    c5e535f0); отпечаток снят с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a; PRO-Robotech/kacho@8725b886e1 (дом консоли)
+  task: PRO-Robotech/kaname#520 (и kaname#258 — сведённая правка редакции 16)
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  fingerprint_reproduced: true
+  lines: 2936
+  round: 15
+  predecessor_record: docs/specs/reviews/second-factor-totp-and-recovery-codes/90933dc8058988c8b2a714b5cf7b8101d804f4288a1530868d99aa52383e833a.yaml (CHANGES_REQUESTED, редакция 17)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 18 к редакции 17 (строка состава, §7 инв. 3 оговорка формы, §14 DoD п.4 уточнён,
+  пп. 5–6, перепись сквозного слоя и потребителей); прочее одобрено кругом 14 (Б1 круга 13,
+  kaname#520 Р4/Д30) и кругом 12
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: >-
+    эталон sfWrongPasswordRefusalBody снимается со входа с кодом, с ним сравниваются три отказа
+    step-up; все шесть вызовов _refused_login несут second_factor
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git show 8b0379e2a:tests/newman/cases/kaname-second-factor.py: keep= на :769 и :1240 (оба с
+    second_factor), _body_equals("sfWrongPasswordRefusalBody" на :626, :1019, :1041 → 3 (предикат DoD
+    п.5); _refused_login вызывается на :768, :770, :904, :962, :1239, :1241 — все с second_factor;
+    ключ secondFactor в теле ставят только _login_step (:483) и _refused_login (:510), серии _fp_*
+    входа поля не несут. Консоль @8725b886e1: ceremony-budget.ts:96 считает по message, путь
+    /iam/v1/auth/login в SOURCE_AXIS_VERBS — молчаливый недосчёт назван строкой.
+
+blocking: []
+
+non_blocking:
+  - id: N15-1
+    summary: >-
+      Исход строки :626/:1019/:1041 допускает два эталона step-up: отказ входа без поля (текст
+      Ф3-02) «либо» первый отказ самого step-up. Второй вариант держит только равенство отказов
+      step-up между собой, а не названное в той же строке свойство «равен общему отказу» (Ф12-16,
+      инв. 3). Реализации брать первый вариант; при следующей правке документа «либо» снять.
+  - id: N15-2
+    summary: >-
+      DoD п.6 ждёт задачи в доме консоли; правка ceremony-budget.ts та же, что у Ф5 §21 редакции 11 —
+      заказывать одной задачей вместе с F8-34 и session-lane-edge.
+
+accepted_parts: >-
+  B14-1 закрыт: перепись по всему дереву службы и дому консоли, у каждого попадания исход; эталон
+  входа с кодом остаётся (равенство одной формы запроса, Д30), эталон step-up — свой; сквозной пункт
+  DoD с предикатом и положительным контролем 3; коллекция — генератором. N14-1 закрыт (§7 инв. 3 —
+  «той же формы запроса»). Сценарии, их число (46) и ID не тронуты. Гейт internal/check — 0 FAIL.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 1
+  not_performed: 0
+  detail: >-
+    «Дано» не менялось; эталон «без поля» строится в том же наборе шагом входа на неверный пароль без
+    secondFactor (форма _refused_login с second_factor=None, ветвь есть на :509-511) — новых состояний
+    не требует.
+
+event_body: acceptance-reviewer · APPROVED · c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
+    после публикации ревизии содержимого. До события запрет #1 по дельте редакций 16–18 в силе.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#520
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#520
+  status: pending
+  published: false
+  verdict: APPROVED
+  subject_sha256: c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · APPROVED · c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f'

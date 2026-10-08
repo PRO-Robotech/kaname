@@ -1,0 +1,105 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: fa1f12bdce426b33a5a336e1cba3053a12da1b1510148760ffb726a430c7b113
+  revision: 11
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 11 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (origin/296, перемерено
+    git rev-parse origin/296 → 8b0379e2a); отпечаток снят с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a; PRO-Robotech/kacho@8725b886e1 (дом консоли)
+  task: PRO-Robotech/kaname#211
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/recovery-of-access.md
+  fingerprint_reproduced: true
+  lines: 2596
+  round: 10
+  predecessor_record: docs/specs/reviews/recovery-of-access/7829ef01d3939246a893493c7564eb31d1d0d9a64ec2b04a2448d1bf3a567112.yaml (CHANGES_REQUESTED, редакция 10)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 11 к редакции 10 (строка состава, «Тогда» Ф5-07 And, §7 строка Ф5-07, §21 перепись
+  сквозного слоя и потребителей, DoD пп. 5–6); прочее одобрено кругами 8–9
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: >-
+    сквозные кейсы newman и пробы консоли утверждают прежние ответы запроса ('{}') и завершения
+    ("authentication failed"); перепись §21 называет каждое место
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git grep -c "'{}'" 8b0379e2a -- tests/newman/cases/kaname-recovery-lane.py kaname-access-keys.py → 3 и 1;
+    git grep -nE '_refus(al|ed)\(401, 16, "authentication failed", "(WRONG-CODE|TWICE-AGAIN|BLOCKED-COMPLETE|RL-C-COMPLETE)"'
+    → 4; "message === 'authentication failed'" → 1 (:657); :1120-1121 BLOCKED-COMPLETE сравнивает с
+    rcvBlockedRefusal (отказ входа); :562/:576/:1219 — вход и чтение сессии. Все вызовы _complete
+    (:614…:1656) перебраны: прочие утверждают успех либо только код (429/401 счётом). Консоль
+    @8725b886e1: session-lane-edge.spec.ts:155 ждёт body {}; ceremony-budget.ts:96 считает по
+    message === "authentication failed", путь recovery/complete в SOURCE_AXIS_VERBS; продуктовый код
+    консоли текстом не ветвится (login-lane.ts:421,433 — перечни путей носителя).
+
+blocking: []
+
+non_blocking:
+  - id: N10-1
+    summary: >-
+      DoD п.6 зависит от задачи в доме консоли, которой пока нет; правка ceremony-budget.ts
+      (countsTowardSourceAxis по коду, глаголу и признаку края) заказана и этим документом, и Ф12 §14
+      редакции 18 — это одна правка, заказывать её одной задачей.
+
+accepted_parts: >-
+  B9-1 закрыт сменой способа переписи (дерево службы без исключения тестов + дом консоли), каждое
+  попадание с исходом; положительные контроли предикатов DoD п.5 воспроизведены. N9-1 (Ф5-05 в
+  составе) и N9-2 (And в Ф5-07 с текстом Р10 п.2, строка §7) закрыты. Перенос эталона
+  BLOCKED-COMPLETE на отказ завершения согласован с Д22 и Ф5-17. Гейт internal/check
+  (Acceptance|CommentCoordinate|SeedIdentityCensus|ForeignProduct|NoDeferred) — 0 FAIL.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 2
+  not_performed: 0
+  detail: >-
+    «Дано» и «Когда» редакция 11 не меняет; фикстуры — наборы kaname-recovery-lane и
+    kaname-access-keys @8b0379e2a (кейсы и помощники _recovery_code, _complete прочитаны).
+
+event_body: acceptance-reviewer · APPROVED · fa1f12bdce426b33a5a336e1cba3053a12da1b1510148760ffb726a430c7b113
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
+    после публикации ревизии содержимого. До события запрет #1 по дельте редакций 10–11 в силе.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#211
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#211
+  status: pending
+  published: false
+  verdict: APPROVED
+  subject_sha256: fa1f12bdce426b33a5a336e1cba3053a12da1b1510148760ffb726a430c7b113
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · APPROVED · fa1f12bdce426b33a5a336e1cba3053a12da1b1510148760ffb726a430c7b113'
