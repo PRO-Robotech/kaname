@@ -2577,13 +2577,20 @@ _F13_PERSON_WHY = ("посев личностей с ключом (`stand-chart.
                    "этом стенде — личности без пароля нет")
 
 
-def _f13_person_given():
+def _f13_person_present():
     return [
         "if (!pm.environment.get('f13PersonEmail') || !pm.environment.get('f13PersonCredentialId') "
         "|| !pm.environment.get('f13PersonUserHandle')) {",
         *precondition_not_met("«Дано» полосы «личность без пароля»: f13PersonEmail, f13PersonCredentialId, "
                               "f13PersonUserHandle заданы", "ключи пусты — " + _F13_PERSON_WHY, indent="  "),
         "}",
+    ]
+
+
+def _f13_person_given():
+    """«Дано» и стартовые величины строки посева: счётчик ключа — ноль регистрации."""
+    return [
+        *_f13_person_present(),
         _set(_F + "Email", "pm.environment.get('f13PersonEmail') || ''"),
         _set(_F + "Handle", "pm.environment.get('f13PersonUserHandle') || ''"),
         _set("akF1CredId", "pm.environment.get('f13PersonCredentialId') || ''"),
@@ -2667,7 +2674,7 @@ CASES.append(Case(
     classes=["CRUD", "SEC"],
     priority="P1",
     steps=[
-        _tok(_F, "f13-25-recovery-tok", "recovery", "f13Rec", fresh=True, init=[*_f13_person_given(), *_fresh_src(_F)]),
+        _tok(_F, "f13-25-recovery-tok", "recovery", "f13Rec", fresh=True, init=[*_f13_person_present(), *_fresh_src(_F)]),
         _lane(_F, "f13-25-recovery", "POST", _RECOVERY, body={"email": "{{f13Email}}", "csrfToken": "{{f13Rec}}"},
               tests=[*_status_is(200, "F13-25-RECOVERY"),
                      "pm.test('F13-25-RECOVERY: тело — пустой объект', () => pm.expect(pm.response.text()).to.eql('{}'));"]),
