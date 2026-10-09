@@ -21,6 +21,9 @@ type fakeOps struct {
 	mu   sync.Mutex
 	ops  map[string]*operations.Operation
 	done chan string
+	// afterCreate — исполняется после заведения операции и до её тела: у
+	// глаголов это окно между синхронными сверками и транзакцией операции.
+	afterCreate func()
 }
 
 func newFakeOps() *fakeOps {
@@ -32,6 +35,9 @@ func (f *fakeOps) Create(_ context.Context, op operations.Operation) error {
 	defer f.mu.Unlock()
 	c := op
 	f.ops[op.ID] = &c
+	if f.afterCreate != nil {
+		f.afterCreate()
+	}
 	return nil
 }
 

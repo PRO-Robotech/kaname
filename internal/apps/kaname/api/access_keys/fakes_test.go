@@ -54,6 +54,13 @@ type fakeStore struct {
 	// revokeFault — имя записи транзакции снятия, которая отказывает
 	// («sessions» · «first» · «cutoff» · «audit»); пусто — ни одна.
 	revokeFault string
+	// methods — способы входа человека: их читают и порт пулом
+	// (`fakeMethods`), и транзакция снятия (`fakeWriter.HasPassword`).
+	methods *fakeMethods
+	// openWriters — открытые и не завершённые транзакции дублёра;
+	// writerPasswordReads — чтения пароля соединением транзакции.
+	openWriters         int
+	writerPasswordReads int
 }
 
 // keysOfStoreFault — сырой текст хранилища: в ответ он попасть не вправе.
@@ -230,7 +237,17 @@ func (s *fakeStore) Writer(_ context.Context) (access_keys.Writer, error) {
 	if s.failWriter {
 		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
 	}
+	s.mu.Lock()
+	s.openWriters++
+	s.mu.Unlock()
 	return &fakeWriter{s: s, pendingKeys: map[domain.AccessKeyID]domain.AccessKey{}}, nil
+}
+
+// writerOpen — открыта ли транзакция дублёра сейчас.
+func (s *fakeStore) writerOpen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.openWriters > 0
 }
 
 // fakeWriter — транзакция дублёра: изменения копятся и ложатся Commit-ом.
@@ -372,6 +389,7 @@ func (w *fakeWriter) Commit(_ context.Context) error {
 		return nil
 	}
 	w.done = true
+	w.s.openWriters--
 	for _, op := range w.ops {
 		op()
 	}
@@ -379,8 +397,25 @@ func (w *fakeWriter) Commit(_ context.Context) error {
 }
 
 func (w *fakeWriter) Rollback(_ context.Context) error {
-	w.done = true
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	if !w.done {
+		w.done = true
+		w.s.openWriters--
+	}
 	return nil
+}
+
+// HasPassword — строка пароля соединением транзакции снятия: тот же словарь,
+// что у порта пулом.
+func (w *fakeWriter) HasPassword(_ context.Context, userID domain.UserID) (bool, error) {
+	if err := w.fault("password"); err != nil {
+		return false, err
+	}
+	w.s.mu.Lock()
+	w.s.writerPasswordReads++
+	w.s.mu.Unlock()
+	return w.s.methods.has(userID), nil
 }
 
 func (s *fakeStore) auditOf(kind string) []outboxtypes.AuditEvent {
@@ -434,11 +469,37 @@ func (f *fakeFreshness) set(id domain.UserID, t time.Time) {
 	f.at[id] = t
 }
 
-// fakeMethods — есть ли пароль.
-type fakeMethods struct{ password map[domain.UserID]bool }
+// fakeMethods — есть ли пароль. Порт читает ПУЛОМ, то есть вторым
+// соединением: чтение, пришедшее при открытой транзакции дублёра, считается
+// (`insideWriter`) — у настоящего пула оно ждёт свободного соединения, пока
+// транзакция держит своё и замки.
+type fakeMethods struct {
+	mu           sync.Mutex
+	password     map[domain.UserID]bool
+	store        *fakeStore
+	insideWriter int
+}
 
 func (m *fakeMethods) HasPassword(_ context.Context, id domain.UserID) (bool, error) {
-	return m.password[id], nil
+	if m.store != nil && m.store.writerOpen() {
+		m.mu.Lock()
+		m.insideWriter++
+		m.mu.Unlock()
+	}
+	return m.has(id), nil
+}
+
+func (m *fakeMethods) has(id domain.UserID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.password[id]
+}
+
+// readsInsideWriter — чтения порта пулом при открытой транзакции.
+func (m *fakeMethods) readsInsideWriter() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.insideWriter
 }
 
 // recordingObserver — клетки как счётчики.

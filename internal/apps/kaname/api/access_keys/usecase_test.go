@@ -54,6 +54,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{t: t, store: newFakeStore(), fresh: &fakeFreshness{}, meth: &fakeMethods{password: map[domain.UserID]bool{}},
 		obs: newObserver(), ops: newFakeOps(), now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)}
+	h.meth.store, h.store.methods = h.store, h.meth
 	algs, err := webauthnverify.ParseAlgorithms([]int64{-7, -257, -8})
 	require.NoError(t, err)
 	h.deps = access_keys.Deps{

@@ -42,6 +42,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/operations"
@@ -86,11 +88,18 @@ func laneWithAdvanceSeam(t *testing.T) (*sessionLane, *afterAdvanceKeys) {
 // `t`: синхронный отказ и отказ операции возвращаются ошибкой.
 func revokeVerb(t *testing.T, h *sessionLane) func(user domain.UserID, keyID domain.AccessKeyID) error {
 	t.Helper()
+	return revokeVerbOver(t, h, h.pool)
+}
+
+// revokeVerbOver — тот же глагол, чьи адаптеры хранилища стоят на пуле pool;
+// операции — на пуле стенда.
+func revokeVerbOver(t *testing.T, h *sessionLane, pool *pgxpool.Pool) func(user domain.UserID, keyID domain.AccessKeyID) error {
+	t.Helper()
 	ops := operations.NewRepo(h.pool, "kaname")
 	uc, err := access_keys.NewRevokeUseCase(access_keys.Deps{
-		Store:           kanamepg.NewAccessKeyRepo(h.pool),
-		Freshness:       kanamepg.NewHumanSessionFreshness(h.pool),
-		Methods:         kanamepg.NewLoginMethodRepo(h.pool),
+		Store:           kanamepg.NewAccessKeyRepo(pool),
+		Freshness:       kanamepg.NewHumanSessionFreshness(pool),
+		Methods:         kanamepg.NewLoginMethodRepo(pool),
 		Binding:         laneKeyBinding(),
 		FreshnessWindow: laneFreshness,
 		Now:             time.Now,
@@ -302,4 +311,59 @@ func TestF13_21_ConcurrentLoginsAndRevokeLeaveNoLiveSession(t *testing.T) {
 	require.False(t, h.keyExists(t, k.id), "условие не создано: строка ключа после снятия лежит")
 	require.Zero(t, h.liveSessions(t, h.user.ID),
 		"Ф13-21/Р8: после снятия ключа и ответа всех входов у человека осталась живая сессия")
+}
+
+// connectionCountingPool — пул над базой стенда, считающий соединения, взятые
+// ОДНОВРЕМЕННО: взятие — `PrepareConn`, возврат — `AfterRelease`.
+type connectionCountingPool struct {
+	*pgxpool.Pool
+	held, peak atomic.Int64
+}
+
+func newConnectionCountingPool(t *testing.T, h *sessionLane) *connectionCountingPool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(h.dsn)
+	require.NoError(t, err)
+	p := &connectionCountingPool{}
+	cfg.PrepareConn = func(context.Context, *pgx.Conn) (bool, error) {
+		n := p.held.Add(1)
+		for {
+			old := p.peak.Load()
+			if n <= old || p.peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		return true, nil
+	}
+	cfg.AfterRelease = func(*pgx.Conn) bool {
+		p.held.Add(-1)
+		return true
+	}
+	p.Pool, err = pgxpool.NewWithConfig(h.ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(p.Close)
+	return p
+}
+
+// TestF13_21_RevokeTakesOneConnectionAtATime — красная до фикса (kaname#669):
+// снятие ключа держит соединение транзакции и замки строки личности и строк
+// ключей и не берёт изнутри неё второго соединения своего пула. Второе
+// соединение изнутри транзакции — взаимная блокировка, которой база не видит:
+// при занятом пуле снятие ждёт свободного соединения, а соединения держат
+// входы ключом, ждущие замка личности, который держит снятие (конкурентная
+// проба выше на сборке волны: восемь входов стояли до срока клиента).
+// Измеряется ПИК одновременно взятых соединений пула глагола за всё снятие —
+// синхронные сверки и транзакцию операции.
+func TestF13_21_RevokeTakesOneConnectionAtATime(t *testing.T) {
+	h := newSessionLane(t)
+	k := givenAcceptedKey(t, h, h.user.ID)
+	pool := newConnectionCountingPool(t, h)
+	revoke := revokeVerbOver(t, h, pool.Pool)
+
+	require.NoError(t, revoke(h.user.ID, k.id), "условие не создано: снятие ключа не исполнено")
+	require.False(t, h.keyExists(t, k.id), "условие не создано: строка ключа после снятия лежит")
+	require.Positive(t, pool.peak.Load(), "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: снятие ходило в базу пулом глагола")
+
+	require.EqualValuesf(t, 1, pool.peak.Load(),
+		"kaname#669: снятие ключа брало %d соединения своего пула разом — второе изнутри открытой транзакции", pool.peak.Load())
 }
