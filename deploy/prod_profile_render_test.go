@@ -147,7 +147,12 @@ var renderedSecretStandIns = func() map[string]string {
 // режим, а не посадка (kaname#363): базовые значения стоят на боевом режиме, и
 // выключенный эндпоинт шаблон отвергает на них так же, как на профиле. Он
 // берётся накладкой оператора (`operatorOverlay`), а не выписывается второй раз.
+// Почтовый узел вошёл сюда тем же путём (kaname#475): в боевом режиме шаблон
+// отвергает пустые `inviteMail.relay` и `inviteMail.from`, а базовые значения
+// их не объявляют. Величины — те же нерезолвимые заглушки, что у профиля.
 var minimalOperatorCoordinates = append([]string{
+	"inviteMail.relay=relay.example.invalid:587",
+	"inviteMail.from=kaname@access.example.invalid",
 	"image=registry.example.invalid/pro-robotech/kaname:0.1.0",
 	"db.host=postgres.example.invalid",
 	"db.passwordSecretName=kaname-db",
