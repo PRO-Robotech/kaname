@@ -68,11 +68,11 @@
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | `v2.30.0` | `LICENSE` |
 | `github.com/munnerz/goautoneg` | `v0.0.0-20191010083416-a7dc8b61c822` | `LICENSE` |
 | `github.com/spf13/pflag` | `v1.0.10` | `LICENSE` |
-| `golang.org/x/crypto` | `v0.56.0` | `LICENSE` |
-| `golang.org/x/net` | `v0.58.0` | `LICENSE` |
-| `golang.org/x/sync` | `v0.22.0` | `LICENSE` |
-| `golang.org/x/sys` | `v0.47.0` | `LICENSE` |
-| `golang.org/x/text` | `v0.41.0` | `LICENSE` |
+| `golang.org/x/crypto` | `v0.57.0` | `LICENSE` |
+| `golang.org/x/net` | `v0.60.0` | `LICENSE` |
+| `golang.org/x/sync` | `v0.23.0` | `LICENSE` |
+| `golang.org/x/sys` | `v0.48.0` | `LICENSE` |
+| `golang.org/x/text` | `v0.42.0` | `LICENSE` |
 | `google.golang.org/protobuf` | `v1.36.11` | `LICENSE` |
 
 ## MIT
