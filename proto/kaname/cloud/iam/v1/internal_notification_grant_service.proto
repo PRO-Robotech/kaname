@@ -7,10 +7,13 @@ syntax = "proto3";
 // mTLS). Право модуля слать письма от имени своего пространства уведомлений
 // (приёмка NTF-1 Р5, замысел issue-2915 З18).
 //
-// НИ ОДНОЙ REST-привязки — намеренно и как инвариант (NTF1-C01, C02):
-// служба не маршрутизируется ни на внешний край, ни на REST внутреннего края.
-// Достижима только прямым gRPC по mTLS на внутренний слушатель kaname; имя
-// `Internal…Service` не публикуется на внешнем слушателе (ban #6).
+// Маршруты — только у рычага оператора и только под сегментом `/internal/`
+// (решение владельца 2026-10-08, п. 1): `Revoke` и `Restore` зовёт
+// администратор кластера своей личностью через ВНУТРЕННИЙ край, новой
+// машинной учётки нет. На внешнем крае служба не маршрутизируется, имя
+// `Internal…Service` на внешнем слушателе не публикуется (ban #6).
+// `ResolveSend` привязки не имеет: его зовёт служба notify прямым gRPC по
+// mTLS, право решает обработчик, и REST-двери у этого вопроса нет.
 //
 // Записи выдачи две, обе у kaname:
 //   - запись пространства `{namespace, выдано, отозвано, отсечка}`; кортеж
@@ -29,6 +32,7 @@ syntax = "proto3";
 // здесь они названы у полей, к которым относятся.
 package kaname.cloud.iam.v1;
 
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "corelib/api/v1/operation.proto";
 import "corelib/operation/operation.proto";
@@ -73,8 +77,14 @@ service InternalNotificationGrantService {
   // (с шаблоном: `… template <name> is already revoked`).
   //
   // Право — администратор кластера (`system_admin` на `cluster:cluster_root`),
-  // образец `InternalClusterService/RevokeAdmin`.
+  // образец `InternalClusterService/RevokeAdmin`: метод в круге края — звать
+  // его вправе только край, право судится по пересланной им личности, ступень
+  // подтверждения «2» держит пол ступени внутреннего слушателя.
   rpc Revoke (NotificationGrantRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/notificationGrants/{namespace}:revoke"
+      body: "*"
+    };
     option (corelib.api.v1.operation) = {
       metadata: "NotificationGrantMetadata"
       response: "google.protobuf.Empty"
@@ -100,6 +110,10 @@ service InternalNotificationGrantService {
   //
   // Право — администратор кластера, как у `Revoke`.
   rpc Restore (NotificationGrantRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/notificationGrants/{namespace}:restore"
+      body: "*"
+    };
     option (corelib.api.v1.operation) = {
       metadata: "NotificationGrantMetadata"
       response: "google.protobuf.Empty"

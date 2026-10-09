@@ -81,6 +81,12 @@ func registerInternalRESTServices(
 		// по той же причине, что соседи с нулём привязок. Служба поднимается на
 		// слушателе вместе с полосой входа на каждом старте.
 		{"InternalHumanSessionService", iamv1.RegisterInternalHumanSessionServiceHandlerFromEndpoint},
+		// Выдача права на письма (NTF-1, kaname#484). Маршруты контракт объявляет
+		// только у рычага оператора (`Revoke`, `Restore`, под `/internal/`);
+		// `ResolveSend` привязки не имеет и получает непривязанный маршрут под
+		// именем службы, как соседи. Права хоп фронта не прибавляет: рычаг — в
+		// круге края, и политика вызывающего пропускает к нему только край.
+		{"InternalNotificationGrantService", iamv1.RegisterInternalNotificationGrantServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {

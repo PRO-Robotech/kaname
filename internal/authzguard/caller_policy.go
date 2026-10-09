@@ -169,6 +169,16 @@ func GatewayFrontedInternalRPCs() []string {
 		// InternalUserService — identity provisioning (admin tooling through the
 		// gateway's internal mux).
 		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
+		// InternalNotificationGrantService — рычаг оператора над выдачей права
+		// на письма (NTF-1, kaname#484). Зовёт администратор кластера своей
+		// личностью через внутренний край (решение владельца 2026-10-08, п. 1;
+		// маршрут `/iam/v1/internal/notificationGrants/{namespace}:revoke|:restore`),
+		// ни один модуль его не зовёт. Запись круга оживляет ступень каталога
+		// «2» на внутреннем слушателе — величина читается `ACRFloor` из каталога
+		// и здесь не повторяется. `ResolveSend` той же службы здесь НЕТ: его
+		// зовёт служба notify по сертификату, и «только край» отрезал бы её.
+		"/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke",
+		"/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore",
 		// NOT here: InternalBootstrapTokenService/MintBootstrapToken. It has no
 		// REST route on the gateway at all (the mint would be credential-free
 		// there — see the proto / restmux comments), so the api-gateway SA is not

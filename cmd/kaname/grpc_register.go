@@ -142,9 +142,11 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	if svcs != nil && svcs.internalIAMHandler != nil {
 		iamv1.RegisterInternalIAMServiceServer(srv, svcs.internalIAMHandler)
 	}
-	// InternalNotificationGrantService (NTF-1 Р5) — ТОЛЬКО здесь: ни на
-	// публичном слушателе, ни REST-привязок (NTF1-C01, C02). Право `ResolveSend`
-	// решает обработчик (З18), `Revoke`/`Restore` — администратор кластера.
+	// InternalNotificationGrantService (NTF-1 Р5) — ТОЛЬКО здесь, не на
+	// публичном слушателе. Право `ResolveSend` (привязки края нет, зовёт notify)
+	// решает обработчик (З18); `Revoke`/`Restore` зовёт администратор кластера
+	// через внутренний край (маршруты `/iam/v1/internal/notificationGrants/…`,
+	// круг края `GatewayFrontedInternalRPCs`).
 	if svcs != nil && svcs.notificationGrantHandler != nil {
 		iamv1.RegisterInternalNotificationGrantServiceServer(srv, svcs.notificationGrantHandler)
 	}

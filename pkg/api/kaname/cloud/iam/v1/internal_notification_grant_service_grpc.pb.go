@@ -11,10 +11,13 @@
 // mTLS). Право модуля слать письма от имени своего пространства уведомлений
 // (приёмка NTF-1 Р5, замысел issue-2915 З18).
 //
-// НИ ОДНОЙ REST-привязки — намеренно и как инвариант (NTF1-C01, C02):
-// служба не маршрутизируется ни на внешний край, ни на REST внутреннего края.
-// Достижима только прямым gRPC по mTLS на внутренний слушатель kaname; имя
-// `Internal…Service` не публикуется на внешнем слушателе (ban #6).
+// Маршруты — только у рычага оператора и только под сегментом `/internal/`
+// (решение владельца 2026-10-08, п. 1): `Revoke` и `Restore` зовёт
+// администратор кластера своей личностью через ВНУТРЕННИЙ край, новой
+// машинной учётки нет. На внешнем крае служба не маршрутизируется, имя
+// `Internal…Service` на внешнем слушателе не публикуется (ban #6).
+// `ResolveSend` привязки не имеет: его зовёт служба notify прямым gRPC по
+// mTLS, право решает обработчик, и REST-двери у этого вопроса нет.
 //
 // Записи выдачи две, обе у kaname:
 //   - запись пространства `{namespace, выдано, отозвано, отсечка}`; кортеж
@@ -90,7 +93,9 @@ type InternalNotificationGrantServiceClient interface {
 	// (с шаблоном: `… template <name> is already revoked`).
 	//
 	// Право — администратор кластера (`system_admin` на `cluster:cluster_root`),
-	// образец `InternalClusterService/RevokeAdmin`.
+	// образец `InternalClusterService/RevokeAdmin`: метод в круге края — звать
+	// его вправе только край, право судится по пересланной им личности, ступень
+	// подтверждения «2» держит пол ступени внутреннего слушателя.
 	Revoke(ctx context.Context, in *NotificationGrantRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Restore — снимает надгробие и ставит отсечку (момент этого вызова); без
 	// шаблона возвращает кортеж `sender` той же транзакцией, с шаблоном работает
@@ -181,7 +186,9 @@ type InternalNotificationGrantServiceServer interface {
 	// (с шаблоном: `… template <name> is already revoked`).
 	//
 	// Право — администратор кластера (`system_admin` на `cluster:cluster_root`),
-	// образец `InternalClusterService/RevokeAdmin`.
+	// образец `InternalClusterService/RevokeAdmin`: метод в круге края — звать
+	// его вправе только край, право судится по пересланной им личности, ступень
+	// подтверждения «2» держит пол ступени внутреннего слушателя.
 	Revoke(context.Context, *NotificationGrantRequest) (*operation.Operation, error)
 	// Restore — снимает надгробие и ставит отсечку (момент этого вызова); без
 	// шаблона возвращает кортеж `sender` той же транзакцией, с шаблоном работает
