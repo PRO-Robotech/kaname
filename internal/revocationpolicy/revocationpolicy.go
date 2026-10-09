@@ -179,28 +179,40 @@ func Anchor(p service.ResolvedPrincipal, sessionAuthTime time.Time) time.Time {
 //
 // Ошибка возвращается ровно при [Undecidable] и несёт причину для журнала;
 // наружу она не выходит — это забота вызывающего.
-func AtIssuance(ctx context.Context, cutoffs Lookup, p service.ResolvedPrincipal, sessionAuthTime time.Time) (Verdict, error) {
+//
+// cutoff — стоящая отсечка человека, по которой вынесен вердикт [Allowed]
+// (нулевая — отсечки нет либо принципал не человек). Выпуск обязан положить
+// `iat` СТРОГО позже неё (`tokensigner.Request.IssuedAfter`, kaname#684):
+// правило выдачи судит якорь в микросекундах, а `iat` — целые секунды,
+// округлённые вниз, и токен, выпущенный в секунду отсечки после неё, правило
+// отзыва на предъявлении сочло бы выпущенным не позже отсечки. При прочих
+// вердиктах cutoff нулевая: выпуска нет.
+func AtIssuance(ctx context.Context, cutoffs Lookup, p service.ResolvedPrincipal, sessionAuthTime time.Time) (verdict Verdict, cutoff time.Time, err error) {
 	switch p.Kind {
 	case service.PrincipalServiceAccount, service.PrincipalUnresolved:
-		return Allowed, nil
+		return Allowed, time.Time{}, nil
 	case service.PrincipalUser:
 	default:
-		return Undecidable, fmt.Errorf("%w: %q", ErrUnknownPrincipalKind, p.Kind)
+		return Undecidable, time.Time{}, fmt.Errorf("%w: %q", ErrUnknownPrincipalKind, p.Kind)
 	}
 	if cutoffs == nil {
-		return Undecidable, ErrNoLookup
+		return Undecidable, time.Time{}, ErrNoLookup
 	}
 	if p.UserID == "" {
-		return Undecidable, ErrPrincipalWithoutID
+		return Undecidable, time.Time{}, ErrPrincipalWithoutID
 	}
-	cutoff, found, err := cutoffs.UserRevokedBefore(ctx, p.UserID)
+	standing, found, err := cutoffs.UserRevokedBefore(ctx, p.UserID)
 	if err != nil {
-		return Undecidable, fmt.Errorf("revocationpolicy: revoke-all cutoff lookup: %w", err)
+		return Undecidable, time.Time{}, fmt.Errorf("revocationpolicy: revoke-all cutoff lookup: %w", err)
 	}
-	if found && Forbids(cutoff, Anchor(p, sessionAuthTime)) {
-		return Revoked, nil
+	if found && Forbids(standing, Anchor(p, sessionAuthTime)) {
+		return Revoked, time.Time{}, nil
 	}
-	return OwnerAdmission(ctx, cutoffs, p.UserID)
+	verdict, err = OwnerAdmission(ctx, cutoffs, p.UserID)
+	if verdict != Allowed || !found {
+		return verdict, time.Time{}, err
+	}
+	return Allowed, standing, nil
 }
 
 // OwnerAdmission — второй вопрос правила о владельце-человеке (kaname#456,

@@ -72,7 +72,19 @@ var (
 	// ErrClockUnavailable — источник момента выпуска не ответил либо ответил
 	// нулевым моментом. Отказ, а не подпись другими часами.
 	ErrClockUnavailable = errors.New("tokensigner: issue moment unavailable")
+	// ErrIssueMomentNotAfterCutoff — момент выпуска в целых секундах не лёг
+	// строго позже отсечки, по которой выдача вынесла вердикт
+	// ([Request.IssuedAfter]): отсечка позже момента источника больше чем на
+	// секунду либо источник за ожидание не дошёл до следующей секунды. Отказ, а
+	// не токен, который правило отзыва снимет первым же предъявлением.
+	ErrIssueMomentNotAfterCutoff = errors.New("tokensigner: issue moment does not fall after the cutoff the issuance was judged by")
 )
+
+// cutoffWaitCeiling — дольше этого выпуск не ждёт секунды позже отсечки: при
+// отсечке не позже момента источника ожидание не длиннее одной секунды
+// (`iat` округляется вниз до целой секунды), а большее значит, что отсечка
+// стоит впереди часов источника, и ждать её — не наше дело.
+const cutoffWaitCeiling = time.Second
 
 // Clock — источник момента выпуска (`iat`, `nbf` и отсчёт `exp`).
 //
@@ -128,6 +140,17 @@ type Request struct {
 	// меньшее из запрошенного и границы; граница, уже прошедшая к секунде
 	// выпуска, — отказ ErrExpiryRequired, а не токен нулевого срока.
 	NotAfter time.Time
+	// IssuedAfter — отсечка, по которой выдача вынесла вердикт «выдавать»
+	// (`revocationpolicy.AtIssuance`, kaname#684): `iat` обязан лечь СТРОГО
+	// позже неё. Нулевое значение — условия нет.
+	//
+	// Отсечка — микросекунды общего источника, `iat` — целые секунды того же
+	// источника, округлённые вниз, граница правила отзыва включающая. Без этого
+	// условия токен, выпущенный в секунду отсечки после неё, рождался бы
+	// отозванным: выдача его пропускала, предъявление отвергало. Подписант,
+	// застав такую секунду, ждёт следующей (не дольше секунды) и читает момент
+	// источника заново; иначе — ErrIssueMomentNotAfterCutoff.
+	IssuedAfter time.Time
 	// Confirmation — привязка. nil означает «не запрашивали», и это законно
 	// для человеческого принципала.
 	Confirmation *Confirmation
@@ -207,14 +230,10 @@ func (s *Signer) Sign(ctx context.Context, req Request) (Token, error) {
 		return Token{}, err
 	}
 
-	at, err := s.cfg.Clock.Now(ctx)
+	now, err := s.issueMoment(ctx, req.IssuedAfter)
 	if err != nil {
-		return Token{}, fmt.Errorf("%w: %w", ErrClockUnavailable, err)
+		return Token{}, err
 	}
-	if at.IsZero() {
-		return Token{}, fmt.Errorf("%w: zero moment", ErrClockUnavailable)
-	}
-	now := at.UTC().Truncate(time.Second)
 	exp := now.Add(req.TTL)
 	if !req.NotAfter.IsZero() && exp.After(req.NotAfter) {
 		exp = req.NotAfter.UTC()
@@ -334,4 +353,55 @@ func parsePrivateKey(alg domain.SigningAlgorithm, pemBytes []byte) (any, error) 
 	default:
 		return nil, fmt.Errorf("tokensigner: signing algorithm %q is not one of %v", alg, domain.SigningAlgorithms())
 	}
+}
+
+// issueMoment — момент выпуска в целых секундах из источника, строго позже
+// after, когда оно названо ([Request.IssuedAfter]).
+//
+// Секунда момента источника не позже after — ожидание до первой целой секунды
+// после after (не дольше [cutoffWaitCeiling]) и второе чтение источника; оно
+// тоже не позже — отказ. Ожидание обрывает контекст вызова.
+func (s *Signer) issueMoment(ctx context.Context, after time.Time) (time.Time, error) {
+	at, err := s.readClock(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	now := at.Truncate(time.Second)
+	if after.IsZero() || now.After(after) {
+		return now, nil
+	}
+	wait := after.Truncate(time.Second).Add(time.Second).Sub(at)
+	if wait > cutoffWaitCeiling {
+		return time.Time{}, fmt.Errorf("%w: cutoff %s is %s ahead of the issue moment %s",
+			ErrIssueMomentNotAfterCutoff, after.UTC().Format(time.RFC3339Nano), wait, at.Format(time.RFC3339Nano))
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return time.Time{}, fmt.Errorf("%w: waiting for the second after the cutoff: %w", ErrIssueMomentNotAfterCutoff, ctx.Err())
+	case <-timer.C:
+	}
+	at, err = s.readClock(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	now = at.Truncate(time.Second)
+	if !now.After(after) {
+		return time.Time{}, fmt.Errorf("%w: the source moment %s is still not after the cutoff %s",
+			ErrIssueMomentNotAfterCutoff, at.Format(time.RFC3339Nano), after.UTC().Format(time.RFC3339Nano))
+	}
+	return now, nil
+}
+
+// readClock — момент источника; не ответил либо ответил нулём — отказ выпуска.
+func (s *Signer) readClock(ctx context.Context) (time.Time, error) {
+	at, err := s.cfg.Clock.Now(ctx)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %w", ErrClockUnavailable, err)
+	}
+	if at.IsZero() {
+		return time.Time{}, fmt.Errorf("%w: zero moment", ErrClockUnavailable)
+	}
+	return at.UTC(), nil
 }

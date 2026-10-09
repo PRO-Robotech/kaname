@@ -228,7 +228,8 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 	//
 	// После состава и ДО подписи: принципал известен только после состава, а
 	// подписанный и затем выброшенный токен — уже выпущенный токен.
-	if outcome, err := u.weighCutoff(ctx, in.Client, principal); err != nil {
+	cutoff, outcome, err := u.weighCutoff(ctx, in.Client, principal)
+	if err != nil {
 		return Output{}, outcome, err
 	}
 
@@ -246,11 +247,15 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 		notAfter = time.Unix(in.Client.ExpiresAt, 0).UTC()
 	}
 	tok, err := u.signer.Sign(ctx, tokensigner.Request{
-		Subject:      subject,
-		Audience:     audience,
-		TokenType:    tokenpolicy.TokenTypeAccess,
-		TTL:          ttl,
-		NotAfter:     notAfter,
+		Subject:   subject,
+		Audience:  audience,
+		TokenType: tokenpolicy.TokenTypeAccess,
+		TTL:       ttl,
+		NotAfter:  notAfter,
+		// `iat` — строго позже отсечки, по которой судила выдача (kaname#684):
+		// ключ, выданный после отсечки в ту же секунду, иначе получил бы токен,
+		// отвергнутый первым предъявлением.
+		IssuedAfter:  cutoff,
 		Confirmation: in.Confirmation,
 		Claims:       claims,
 	})
@@ -267,7 +272,8 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 }
 
 // weighCutoff отдаёт отказ, когда отсечка отзыва-всех владельца запрещает
-// выдачу, и nil — когда не запрещает.
+// выдачу, и стоящую отсечку — когда не запрещает (нулевая — отсечки нет): по
+// ней подписант кладёт `iat` строго позже неё (kaname#684).
 //
 // Исходы три и все три — значения закрытого словаря со своим счётчиком:
 // «выдавать», «владелец вышел отовсюду» и «спросить не удалось». Третий —
@@ -275,22 +281,22 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 // которого развилка не называет, — тоже отказ: словарь закрыт.
 func (u *UseCase) weighCutoff(
 	ctx context.Context, client domain.AssertionClient, principal service.ResolvedPrincipal,
-) (clientassertion.Outcome, error) {
-	verdict, err := revocationpolicy.AtIssuance(ctx, u.revocations, principal, time.Time{})
+) (time.Time, clientassertion.Outcome, error) {
+	verdict, cutoff, err := revocationpolicy.AtIssuance(ctx, u.revocations, principal, time.Time{})
 	switch verdict {
 	case revocationpolicy.Allowed:
-		return "", nil
+		return cutoff, "", nil
 	case revocationpolicy.Revoked:
-		return clientassertion.OutcomeOwnerRevoked,
+		return time.Time{}, clientassertion.OutcomeOwnerRevoked,
 			fmt.Errorf("client_token: owner of client %s is logged out of everything no earlier than the key was issued", client.ID)
 	case revocationpolicy.Unverified:
-		return clientassertion.OutcomeOwnerUnverified,
+		return time.Time{}, clientassertion.OutcomeOwnerUnverified,
 			fmt.Errorf("client_token: owner of client %s has not verified the email address", client.ID)
 	case revocationpolicy.Undecidable:
-		return clientassertion.OutcomeRevocationCheckFailed,
+		return time.Time{}, clientassertion.OutcomeRevocationCheckFailed,
 			fmt.Errorf("client_token: revoke-all cutoff of the owner of client %s: %w", client.ID, err)
 	default:
-		return clientassertion.OutcomeRevocationCheckFailed,
+		return time.Time{}, clientassertion.OutcomeRevocationCheckFailed,
 			fmt.Errorf("client_token: revoke-all verdict %q is outside the closed dictionary", verdict)
 	}
 }
