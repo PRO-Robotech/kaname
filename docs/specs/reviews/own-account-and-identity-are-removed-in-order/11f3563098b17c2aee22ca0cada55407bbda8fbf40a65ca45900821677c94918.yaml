@@ -1,0 +1,134 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md
+  sha256: 11f3563098b17c2aee22ca0cada55407bbda8fbf40a65ca45900821677c94918
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8b0379e2a
+  content_commit: null
+  content_commit_note: >-
+    Редакция не закоммичена (git status: ?? поверх origin/296 @8b0379e2a). Отпечаток снят с
+    рабочего дерева копии tmp/kaname-664-acc.
+  branch: '664'
+  task: PRO-Robotech/kaname#664
+  related_tasks: [PRO-Robotech/kaname#540, PRO-Robotech/kacho#1266]
+  round: 1
+  round_kind: first
+  previous_record: null
+  fingerprint_predicate: sha256sum <док> → 11f35630…94918 (совпал с заданием); git rev-parse origin/296 → 8b0379e2a; git ls-remote origin refs/heads/664 → пусто
+publication_mode: courier_of_agent_verdict
+
+verdict: RETURN
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+
+constructibility:
+  method: >-
+    Postgres 16 в контейнере, схема накатана мигратором службы (go run ./cmd/migrator up, до
+    20261007150000); посев U(дом A, владелец A), O(владелец B), M(дом A, членство в B),
+    членство U в B, запись отзыва U, личный токен U, ключ сервисного аккаунта в B от U; затем DDL
+    по Р3/Р4 и операторы снятия в форме accountWriter.Delete / userWriter.Delete.
+  seeded: 9
+  of: 9
+  not_executed: 0
+  observed:
+    - до DDL снятие A → users_account_fk; снятие U → accounts_owner_fk (§0.2 подтверждён)
+    - pg_constraint на накатанной схеме — 24 ключа на users/accounts, RESTRICT — 8 (§0.1 подтверждён)
+    - после DDL снятие A → deleted=1; дом U и M стал NULL; членства M и U в B на месте (KN664-10, 13)
+    - снятие O, владеющего B, по-прежнему отказ accounts_owner_fk (KN664-31)
+    - снятие U → deleted=1; запись отзыва U осталась (1); личный токен ушёл (0); ключ SA с created_by=U остался (1); членства U — 0 (KN664-30, 33, 34, 35 на уровне базы)
+    - возврат NOT NULL при человеке без дома → «contains null values» (KN664-03)
+  scope_note: >-
+    Посев — уровень базы. Сценарии уровня двери прав и края (KN664-19, 20, 34, 36) судятся
+    чтением производителя, см. blocking.
+
+blocking:
+  - kind: PRODUCER
+    scenarios: [KN664-19]
+    defect: >-
+      Повтор DELETE /iam/v1/accounts/{A} от U после успеха ожидает 404 «Account A not found». Перед
+      проверкой существования в use-case стоит дверь службы: Delete несёт required_relation
+      v_delete на account, скрытия существования у Delete нет (HidesExistenceOnDeny — только Get+v_get
+      либо явная запись), путь ErrNoPath собственная дверь не производит (checkAdapter). После
+      дренажа выдачи владельца у U нет v_delete → 403 PERMISSION_DENIED «permission denied»; 404
+      возможен лишь в окне положительного кэша вердикта. Производитель «Тогда» назван неверно.
+    evidence: >-
+      proto/kaname/cloud/iam/v1/account_service.proto:107-119; corelib@v1.11.0 authz/hide_existence.go:171-179,
+      authz/interceptor.go:429-512; internal/authzguard/own_door.go:466-491
+    fix: >-
+      Повтор — от администратора облака (короткое замыкание → обработчик → 404, как KN664-42) либо
+      утверждать 403 code 7 для U после дренажа; окно кэша назвать.
+  - kind: PRODUCER
+    scenarios: [KN664-20, KN664-40, KN664-41]
+    defect: >-
+      Набор исходов гонки не замкнут: «ровно один из двух» покраснеет на законном прогоне.
+      KN664-20 — ProjectService.Create гейтится editor на account (project_service.proto:66-69);
+      после дренажа снятия Create отвергается синхронно 403, третьим исходом. KN664-40 — после
+      снятия U отсечка (Р5) даёт синхронный 401 на AccountService.Create, а «Тогда» говорит лишь
+      «ошибкой». KN664-41 — форма приглашения не названа: приглашение с ролью заводит выдачу
+      (invite.go: «optional AccessBinding»), и снятие отвергнется «has active access bindings» —
+      исход, которого в списке нет.
+    fix: >-
+      Перечислить каждый допустимый исход с кодом (включая синхронные отказы двери и отсечки),
+      утверждение инварианта оставить; в KN664-41 назвать приглашение без роли либо добавить исход.
+  - kind: CONSTRUCTIBILITY
+    scenarios: [KN664-34, KN664-36]
+    defect: >-
+      Given KN664-34 («выдача в B уже отозвана администратором B») и положительный близнец KN664-36
+      («после отзыва выдачи … завершилась успешно») не строятся публичным глаголом отзыва:
+      AccessBindingService.Revoke (:revoke) СОХРАНЯЕТ строку со status='REVOKED' (RevokeGuarded),
+      истечение — тоже (RevokeExpiredBinding), а охрана userWriter.Delete считает любую строку
+      access_bindings с subject_id=U без фильтра по статусу. Итог — снятие отвергнуто «has active
+      access bindings», хотя выдача не активна; близнец красный, текст отказа лжёт.
+    evidence: >-
+      internal/repo/kaname/pg/user_repo.go:762-772 (NOT EXISTS без status);
+      internal/repo/kaname/pg/access_binding_repo.go:836-860 (RevokeGuarded удерживает строку);
+      proto/kaname/cloud/iam/v1/access_binding_service.proto:411-412
+    fix: >-
+      Решить и записать в §3: либо охрана снятия личности считает только не-REVOKED выдачи
+      (согласно тексту «active»; оставшаяся REVOKED-строка — историческая мягкая ссылка, как
+      атрибуция Р4) с производителем и пробой, либо назвать в Given/близнеце именно
+      AccessBindingService.Delete и сценарий «отозвана Revoke → всё ещё отказ».
+  - kind: FORMAT
+    scenarios: [KN664-03, KN664-15, KN664-30, KN664-40, KN664-43]
+    defect: >-
+      «Тогда» без конкретного исхода: KN664-03 «ошибкой, называющей причину» — текст не назван;
+      KN664-15 «завершилась с ошибкой» — нет error.code/message; KN664-30 «отказ аутентификации» /
+      «отказ входа» — нет пары HTTP+code; KN664-40 «ошибкой»; KN664-43 «текст … действующий» — не
+      назван (invalid <res> id '<X>').
+    fix: Назвать код и текст (пару для синхронных) в каждом.
+
+important:
+  - kind: FORMAT
+    note: >-
+      KN664-14/37 смешивают записи кортежа: iam_user:U#subject@user:U (объект#отношение@субъект) и
+      account:A#account@iam_user:U (субъект#отношение@объект; по membershipScopeTuple объект —
+      iam_user:U). Привести к одной форме.
+  - kind: COVERAGE
+    note: >-
+      Команда §0.1 (awk … | sort -u) на @8b0379e2a печатает 23 строки, не 24; накатанная схема
+      (pg_constraint) даёт 24 — вывод верен, предикат печатает другое число. Поправить предикат или
+      число.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 11f35630…94918
+    - git rev-parse origin/296 → 8b0379e2a9c5
+    - git ls-remote origin refs/heads/664 → пусто
+    - посев на накатанной схеме (см. constructibility)
+
+effective_approval:
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт RETURN санкции не даёт; событие публикуется для истории круга. Учётка названа, потому
+      что гейт записей ревью ищет событие в subject.task этой учёткой.
+
+event_body: "acceptance-reviewer · RETURN · sha256 11f3563098b17c2aee22ca0cada55407bbda8fbf40a65ca45900821677c94918"
