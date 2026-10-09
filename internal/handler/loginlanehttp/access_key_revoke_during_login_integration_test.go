@@ -314,10 +314,40 @@ func TestF13_21_ConcurrentLoginsAndRevokeLeaveNoLiveSession(t *testing.T) {
 }
 
 // connectionCountingPool — пул над базой стенда, считающий соединения, взятые
-// ОДНОВРЕМЕННО: взятие — `PrepareConn`, возврат — `AfterRelease`.
+// ОДНОВРЕМЕННО. Счёт — трассировщиком пула: взятие — `TraceAcquireEnd` без
+// ошибки, возврат — `TraceRelease`; оба зовутся синхронно в самом вызове.
+// Крючок `AfterRelease` для счёта не годится: пул исполняет его в отдельной
+// горутине, и следующее взятие застаёт прежнее соединение ещё не возвращённым.
 type connectionCountingPool struct {
 	*pgxpool.Pool
 	held, peak atomic.Int64
+}
+
+func (p *connectionCountingPool) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (p *connectionCountingPool) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (p *connectionCountingPool) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
+	return ctx
+}
+
+func (p *connectionCountingPool) TraceAcquireEnd(_ context.Context, _ *pgxpool.Pool, d pgxpool.TraceAcquireEndData) {
+	if d.Err != nil {
+		return
+	}
+	n := p.held.Add(1)
+	for {
+		old := p.peak.Load()
+		if n <= old || p.peak.CompareAndSwap(old, n) {
+			return
+		}
+	}
+}
+
+func (p *connectionCountingPool) TraceRelease(*pgxpool.Pool, pgxpool.TraceReleaseData) {
+	p.held.Add(-1)
 }
 
 func newConnectionCountingPool(t *testing.T, h *sessionLane) *connectionCountingPool {
@@ -325,20 +355,7 @@ func newConnectionCountingPool(t *testing.T, h *sessionLane) *connectionCounting
 	cfg, err := pgxpool.ParseConfig(h.dsn)
 	require.NoError(t, err)
 	p := &connectionCountingPool{}
-	cfg.PrepareConn = func(context.Context, *pgx.Conn) (bool, error) {
-		n := p.held.Add(1)
-		for {
-			old := p.peak.Load()
-			if n <= old || p.peak.CompareAndSwap(old, n) {
-				break
-			}
-		}
-		return true, nil
-	}
-	cfg.AfterRelease = func(*pgx.Conn) bool {
-		p.held.Add(-1)
-		return true
-	}
+	cfg.ConnConfig.Tracer = p
 	p.Pool, err = pgxpool.NewWithConfig(h.ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(p.Close)

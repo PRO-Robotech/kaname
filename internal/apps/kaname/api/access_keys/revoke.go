@@ -131,7 +131,7 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// Последний способ входа судится синхронно, чтобы отказ назвал следующий
 	// шаг клиенту, и ещё раз под замком внутри транзакции — второе чтение
 	// держит инвариант, первое только классифицирует.
-	if err := uc.lastMethodRefusal(ctx, in.UserID, 0); err != nil {
+	if err := uc.lastMethodRefusal(ctx, in.UserID); err != nil {
 		return nil, err
 	}
 	if err := uc.ops.Create(ctx, op); err != nil {
@@ -157,9 +157,11 @@ func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) ([]do
 	return keys, nil
 }
 
-// lastMethodRefusal — человек без пароля с одним ключом (сверх locked)
-// остался бы без способа входа (Ф7-26).
-func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID, lockedCount int) error {
+// lastMethodRefusal — синхронная сверка ДО операции, портом пула (транзакции
+// ещё нет): человек без пароля с одним ключом остался бы без способа входа
+// (Ф7-26). Она только классифицирует — инвариант держит сверка под замком
+// внутри транзакции (`lockedLastMethodRefusal`).
+func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID) error {
 	has, err := uc.deps.Methods.HasPassword(ctx, userID)
 	if err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
@@ -167,19 +169,34 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 	if has {
 		return nil
 	}
-	n := lockedCount
-	if n == 0 {
-		keys, err := uc.keysOf(ctx, userID)
-		if err != nil {
-			return err
-		}
-		n = len(keys)
+	keys, err := uc.keysOf(ctx, userID)
+	if err != nil {
+		return err
 	}
-	if n <= 1 {
-		uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)
-		return lastSignInMethod()
+	return uc.judgeLastMethod(false, len(keys))
+}
+
+// lockedLastMethodRefusal — та же сверка ВНУТРИ транзакции снятия: строки
+// ключей уже под замком (locked), и пароль читается тем же соединением
+// (`RevokeWriter.HasPassword`). Ни одного чтения портом пула здесь нет: второе
+// соединение изнутри транзакции, держащей замки личности и ключей, — взаимная
+// блокировка с входами ключом, которой база не видит (kaname#669).
+func (uc *RevokeUseCase) lockedLastMethodRefusal(ctx context.Context, w RevokeWriter, userID domain.UserID, locked int) error {
+	has, err := w.HasPassword(ctx, userID)
+	if err != nil {
+		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
 	}
-	return nil
+	return uc.judgeLastMethod(has, locked)
+}
+
+// judgeLastMethod — правило Ф7-26 одно на обе сверки: без пароля ключ, который
+// снимают, обязан быть не последним.
+func (uc *RevokeUseCase) judgeLastMethod(hasPassword bool, keys int) error {
+	if hasPassword || keys > 1 {
+		return nil
+	}
+	uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)
+	return lastSignInMethod()
 }
 
 // commit — ОДНА транзакция под замком строк человека.
@@ -193,7 +210,7 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.lock", err)
 	}
-	if err := uc.lastMethodRefusal(ctx, userID, len(locked)); err != nil {
+	if err := uc.lockedLastMethodRefusal(ctx, w, userID, len(locked)); err != nil {
 		return nil, err
 	}
 	removed, found, err := w.DeleteOwnedByID(ctx, userID, keyID)

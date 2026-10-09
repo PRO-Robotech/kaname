@@ -367,6 +367,20 @@ func (w *accessKeyRevokeWriter) FirstAuthentication(ctx context.Context, userID 
 	return w.sessions.FirstAuthentication(ctx, userID)
 }
 
+// HasPassword — см. порт: строка пароля оператором адаптера таблицы секрета
+// (`getLoginMethod`), исполненным соединением этой транзакции, а не пулом.
+func (w *accessKeyRevokeWriter) HasPassword(ctx context.Context, userID domain.UserID) (bool, error) {
+	_, err := w.sessions.LoginMethod(ctx, userID, domain.LoginMethodPassword)
+	switch {
+	case err == nil:
+		return true, nil
+	case stderrors.Is(err, iamerr.ErrNotFound):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
 // UpsertCutoff — см. порт.
 func (w *accessKeyRevokeWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	return w.sessions.UpsertCutoff(ctx, u, revokedBy)

@@ -128,6 +128,13 @@ type RevokeWriter interface {
 	// UpsertCutoff — отсечка личности той же дверью, что у прочих писателей
 	// отсечки (обе записи одним исходом).
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
+	// HasPassword — есть ли у личности способ входа паролем, ТЕМ ЖЕ
+	// соединением транзакции (Ф7-26 под замком, kaname#669). Порт пула
+	// ([LoginMethods]) изнутри транзакции не читается: он взял бы второе
+	// соединение, пока это держит замки личности и ключей, а при занятом пуле
+	// соединения держат входы ключом, ждущие замка личности, — взаимная
+	// блокировка, которой база не видит.
+	HasPassword(ctx context.Context, userID domain.UserID) (bool, error)
 }
 
 // Freshness — момент последнего предъявления человека (Р5, Ф7-04, Ф7-36).
