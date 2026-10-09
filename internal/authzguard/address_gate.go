@@ -143,6 +143,8 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"запись материализации модуля: тот же довод, что у записи"},
 	svcIAM + "CurrentAuthzRevision": {GateOutsideCircle,
 		"токен версии прав для модуля-владельца вида (NTF-3 Р30): снимок транзакций, а не право; круг судит дверь регистрации обработчика"},
+	svcIAM + "SetPublicReadPublication": {GateOutsideCircle,
+		"публикация для анонимного чтения модулем-владельцем типа (NTF-3 Р30): тот же довод, что у записи материализации; круг судит дверь регистрации и владение типом в обработчике"},
 	svcUser + "Get": {GateOutsideCircle,
 		"чтение строки человека краем: ответ — строка, а не право"},
 	// Служба выдачи права на письма (NTF-1, kaname#484): контракт без REST-привязки, края-маршрута нет,
@@ -155,7 +157,7 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"рычаг оператора над выдачей: тот же довод, что у Revoke"},
 	svcRecipients + "Resolve": {GateOutsideCircle,
 		"справочник адресов для службы notify (NTF-3 Р7): вызывающий — служебный принципал по сертификату, маршрута края нет; право решает обработчик вопросом reader на справочник к модели"},
-	svcRecipients + "ListProjectAudience": {GateOutsideCircle,
+	svcRecipients + "ListEventAudience": {GateOutsideCircle,
 		"справочник адресов: тот же довод, что у Resolve"},
 }
 

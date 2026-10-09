@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
@@ -50,8 +51,14 @@ func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	reader := kanamepg.NewResidualTupleReader(pool)
+	reader := kanamepg.NewResidualTupleReader()
 	require.NotNil(t, reader)
+	objectTuples := func(object string) ([]outboxtypes.RelationTuple, error) {
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(ctx) }()
+		return reader.ObjectTuplesTx(ctx, tx, object)
+	}
 
 	const (
 		mine  = "vpc_network:r73net_mine"
@@ -60,7 +67,7 @@ func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
 
 	// Положительный контроль: ДО записи остатка нет. Без него «после записи
 	// нашлось» не утверждает ничего.
-	before, err := reader.ObjectTuples(ctx, mine)
+	before, err := objectTuples(mine)
 	require.NoError(t, err)
 	require.Empty(t, before, "у нетронутого объекта остатка быть не может")
 
@@ -70,7 +77,7 @@ func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
 		{User: "user:usr_r73neighbour", Relation: "owner", Object: other},
 	}))
 
-	got, err := reader.ObjectTuples(ctx, mine)
+	got, err := objectTuples(mine)
 	require.NoError(t, err)
 
 	names := make(map[string]string, len(got))
@@ -89,7 +96,7 @@ func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
 	// Чужой объект остаётся нетронутым и читается отдельно — это вторая половина
 	// того же утверждения, и без неё «называет своё» неотличимо от «называет всё,
 	// а чужого просто не было».
-	neighbour, err := reader.ObjectTuples(ctx, other)
+	neighbour, err := objectTuples(other)
 	require.NoError(t, err)
 	require.Len(t, neighbour, 1)
 	require.Equal(t, "user:usr_r73neighbour", neighbour[0].User)
@@ -104,7 +111,10 @@ func TestR7_3_27_ResidualReaderRefusesAnUnparsableObject(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	_, err = kanamepg.NewResidualTupleReader(pool).ObjectTuples(ctx, "мусор-без-двоеточия")
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = kanamepg.NewResidualTupleReader().ObjectTuplesTx(ctx, tx, "мусор-без-двоеточия")
 	require.Error(t, err,
 		"неразобранный объект обязан быть ошибкой, а не пустым перечнем: пустой перечень "+
 			"здесь означает «снимать нечего» и делает снятие тихо неполным")

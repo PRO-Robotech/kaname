@@ -5,7 +5,7 @@ package seed_test
 
 // recipient_directory_catalog_test.go — контракт и каталог прав справочника
 // адресов (приёмка NTF-3, kacho#2918: Р7, Р28; NTF3-27, NTF3-30, NTF3-151;
-// замысел З27, CX3B-16). Полоса X4D: `Resolve` и `ListProjectAudience`
+// замысел З27, CX3B-16). Методы справочника: `Resolve` и `ListEventAudience`
 // (`ListExpiringCredentials` вне полосы по решению Д96).
 //
 // Что утверждается, и почему каждое — отдельной осью:
@@ -47,8 +47,9 @@ const (
 	rdDirectoryTyp = "notification_recipient_directory"
 )
 
-// rdMethods — методы полосы X4D.
-var rdMethods = []string{"Resolve", "ListProjectAudience"}
+// rdMethods — методы справочника (редакция 42: `ListProjectAudience` снят,
+// его место — `ListEventAudience`, §4 приёмки).
+var rdMethods = []string{"Resolve", "ListEventAudience"}
 
 func rdServiceDescriptor(t *testing.T, name string) (protoreflect.ServiceDescriptor, bool) {
 	t.Helper()
@@ -129,10 +130,10 @@ func TestNTF3151_RecipientDirectoryMethodsAreInThePermissionCatalog(t *testing.T
 // читался бы зелёным по одному контракту.
 func TestD121_RecipientDirectoryReadsCarryTheRoutineFloor(t *testing.T) {
 	want := map[string]string{
-		rdService + "/Resolve":             "1",
-		rdService + "/ListProjectAudience": "1",
-		rdControlSvc + "/Revoke":           "2",
-		rdControlSvc + "/Restore":          "2",
+		rdService + "/Resolve":           "1",
+		rdService + "/ListEventAudience": "1",
+		rdControlSvc + "/Revoke":         "2",
+		rdControlSvc + "/Restore":        "2",
 	}
 
 	reg, err := seed.LoadPermissionRegistry(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))

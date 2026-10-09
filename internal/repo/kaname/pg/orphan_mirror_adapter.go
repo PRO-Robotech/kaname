@@ -119,7 +119,7 @@ func (a *OrphanMirrorAdapter) ListOrphanMirrorRows(ctx context.Context, limit in
 		        m.object_id,
 		        EXISTS (SELECT 1 FROM kaname.resource_parent_edge e
 		                 WHERE e.object_type = m.object_type
-		                   AND e.object_id   = m.object_id) AS repairable
+		                   AND e.object_id   = m.object_id) AS has_chain
 		   FROM kaname.resource_mirror m
 		  WHERE m.parent_project_id = ''
 		    -- Второй носитель. Джойна на projects здесь НЕТ намеренно: при пустом
@@ -127,9 +127,10 @@ func (a *OrphanMirrorAdapter) ListOrphanMirrorRows(ctx context.Context, limit in
 		    -- сводилось бы к этому же сравнению (см. разбор в шапке файла).
 		    AND m.parent_account_id = ''
 		    -- Третий носитель: цепь предков. Её наличие означает, что строка
-		    -- видна пути решения о доступе и ПОЧИНИМА той же базой, — но пустые
-		    -- колонки всё равно делают её невидимой материализации, поэтому она
-		    -- возвращается с признаком, а не отсеивается.
+		    -- видна пути решения о доступе и что родителя из неё выведет
+		    -- следующая регистрация, — но пустые колонки всё равно делают её
+		    -- невидимой материализации, поэтому она возвращается с признаком, а
+		    -- не отсеивается.
 		  ORDER BY m.object_type ASC, m.object_id ASC
 		  LIMIT $1`,
 		limit,
@@ -142,7 +143,7 @@ func (a *OrphanMirrorAdapter) ListOrphanMirrorRows(ctx context.Context, limit in
 	var out []seed.OrphanMirrorRow
 	for rows.Next() {
 		var r seed.OrphanMirrorRow
-		if err := rows.Scan(&r.ObjectType, &r.ObjectID, &r.RepairableFromChain); err != nil {
+		if err := rows.Scan(&r.ObjectType, &r.ObjectID, &r.HasChain); err != nil {
 			return nil, fmt.Errorf("orphan-mirror sweep: scan orphan row: %w", err)
 		}
 		out = append(out, r)
@@ -151,53 +152,4 @@ func (a *OrphanMirrorAdapter) ListOrphanMirrorRows(ctx context.Context, limit in
 		return nil, fmt.Errorf("orphan-mirror sweep: iterate orphan rows: %w", err)
 	}
 	return out, nil
-}
-
-// RepairMirrorParentFromChain выводит колонки родителя из цепи предков и
-// записывает их ОДНИМ оператором.
-//
-// ОДИН оператор, а не «прочитать цепь → записать колонки»: пара чтение-запись
-// есть software check-then-act (запрет #10), и между её половинами снятие
-// регистрации успело бы убрать цепь — колонки записались бы от предка, которого
-// уже нет.
-//
-// Идемпотентность держит `WHERE`, а не вызывающий: строка, у которой колонки уже
-// непусты, оператором не затрагивается, и повтор меняет ноль строк.
-//
-// Из цепи берётся БЛИЖАЙШИЙ предок каждого вида (`depth` по возрастанию):
-// цепь идёт от ближайшего к дальнему, и проект ресурса — тот, что ближе, а не
-// тот, что первым лёг в таблицу.
-func (a *OrphanMirrorAdapter) RepairMirrorParentFromChain(ctx context.Context, objectType, objectID string) (bool, error) {
-	tag, err := a.pool.Exec(ctx,
-		`WITH chain AS (
-		     SELECT
-		       (SELECT e.parent_id FROM kaname.resource_parent_edge e
-		         WHERE e.object_type = $1 AND e.object_id = $2
-		           AND e.parent_type = 'project'
-		         ORDER BY e.depth ASC LIMIT 1) AS project_id,
-		       (SELECT e.parent_id FROM kaname.resource_parent_edge e
-		         WHERE e.object_type = $1 AND e.object_id = $2
-		           AND e.parent_type = 'account'
-		         ORDER BY e.depth ASC LIMIT 1) AS account_id
-		 )
-		 UPDATE kaname.resource_mirror m
-		    SET parent_project_id = COALESCE((SELECT project_id FROM chain), ''),
-		        parent_account_id = COALESCE((SELECT account_id FROM chain), ''),
-		        updated_at        = now()
-		  FROM chain
-		  WHERE m.object_type = $1
-		    AND m.object_id   = $2
-		    -- Идемпотентность: починенную строку оператор не трогает.
-		    AND m.parent_project_id = ''
-		    AND m.parent_account_id = ''
-		    -- Выводить должно быть ИЗ ЧЕГО: цепь без предков вида project/account
-		    -- родителя не даёт, и запись пустых колонок поверх пустых была бы
-		    -- ложным «починено».
-		    AND (chain.project_id IS NOT NULL OR chain.account_id IS NOT NULL)`,
-		objectType, objectID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("orphan-mirror sweep: repair parent from chain: %w", err)
-	}
-	return tag.RowsAffected() == 1, nil
 }

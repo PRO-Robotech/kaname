@@ -37,7 +37,6 @@ package resource_mirror_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -67,7 +66,7 @@ func TestParentEdges_RuntimeAppliedTypeIsWrittenInTheModelDictionary(t *testing.
 		ObjectID:        "net-control",
 		ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A",
-		SourceVersion:   time.Now().Truncate(time.Microsecond),
+		Generation:      1,
 		ParentChain:     []string{"project:prj-P", "account:acc-A"},
 	})
 	require.Equal(t, 2, countEdges(t, ctx, pool, "vpc_network", "net-control"),
@@ -83,7 +82,7 @@ func TestParentEdges_RuntimeAppliedTypeIsWrittenInTheModelDictionary(t *testing.
 		ObjectID:        "inv-runtime",
 		ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A",
-		SourceVersion:   time.Now().Truncate(time.Microsecond),
+		Generation:      1,
 		ParentChain:     []string{"project:prj-P", "account:acc-A"},
 	})
 
@@ -125,19 +124,18 @@ func TestParentEdges_RuntimeAppliedTypeUnregisterClearsTheChain(t *testing.T) {
 
 	applyRuntimeType(t, ctx, pool, "billing", "invoice", "billing_invoice")
 
-	version := time.Now().Truncate(time.Microsecond)
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType:      "billing.invoice",
 		ObjectID:        "inv-gone",
 		ParentProjectID: "prj-P",
 		ParentAccountID: "acc-A",
-		SourceVersion:   version,
+		Generation:      1,
 		ParentChain:     []string{"project:prj-P", "account:acc-A"},
 	})
 	require.Equal(t, 2, countEdges(t, ctx, pool, "billing_invoice", "inv-gone"),
 		"предпосылка пробы не создана: цепи, которую надо снять, нет")
 
-	deleteCommitted(t, ctx, pool, "billing.invoice", "inv-gone", version.Add(time.Second))
+	require.True(t, deleteCommitted(t, ctx, pool, "billing.invoice", "inv-gone", 2))
 
 	require.Zero(t, countEdges(t, ctx, pool, "billing_invoice", "inv-gone"),
 		"цепь пережила снятие: снятие назвало её не тем словарём, каким писала "+

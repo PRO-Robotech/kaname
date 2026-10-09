@@ -5,7 +5,6 @@ package pg
 
 import (
 	"context"
-	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/public_read"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -22,14 +21,26 @@ func NewPublicReadPublisher() *PublicReadPublisher {
 }
 
 // ApplyTx — см. service.PublicReadPublisher.
-func (p *PublicReadPublisher) ApplyTx(ctx context.Context, tx service.Tx, objectType, objectID string, published bool, version time.Time) (bool, error) {
+func (p *PublicReadPublisher) ApplyTx(ctx context.Context, tx service.Tx, in service.PublicReadIntent) (bool, error) {
 	out, err := public_read.ApplyTx(ctx, txAsPgx(tx), public_read.Publication{
-		ObjectType: objectType,
-		ObjectID:   objectID,
-		Published:  published,
-		Version:    version,
+		ObjectType:       in.ObjectType,
+		ObjectID:         in.ObjectID,
+		HeadType:         in.HeadType,
+		Published:        in.Published,
+		Version:          in.Version,
+		ObjectGeneration: in.ObjectGeneration,
 	})
 	return out.Applied, err
+}
+
+// WithdrawTx — см. service.PublicReadPublisher.
+func (p *PublicReadPublisher) WithdrawTx(ctx context.Context, tx service.Tx, objectType, objectID string) error {
+	return public_read.WithdrawTx(ctx, txAsPgx(tx), objectType, objectID)
+}
+
+// DropStaleIncarnationTx — см. service.PublicReadPublisher.
+func (p *PublicReadPublisher) DropStaleIncarnationTx(ctx context.Context, tx service.Tx, objectType, objectID, headType string) error {
+	return public_read.DropStaleIncarnationTx(ctx, txAsPgx(tx), objectType, objectID, headType)
 }
 
 var _ service.PublicReadPublisher = (*PublicReadPublisher)(nil)

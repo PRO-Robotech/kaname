@@ -182,7 +182,7 @@ func TestProjectDelete_PNE_1_13(t *testing.T) {
 		ObjectType:      "vpc.network",
 		ObjectID:        objectID,
 		ParentProjectID: string(prj),
-		SourceVersion:   time.Now().UTC(),
+		Generation:      1,
 		ParentChain:     []string{"project:" + string(prj)},
 	})
 	require.NoError(t, err, "приём регистрации")

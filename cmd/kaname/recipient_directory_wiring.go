@@ -20,9 +20,10 @@ import (
 )
 
 // buildRecipientDirectoryServer — справочник адресов над пулом службы и дверью
-// решения: оба вопроса справочника (право вызывающего на
-// `notification_recipient_directory:root` и `v_get` получателя на ресурс)
-// задаются той же дверью, что отвечает `InternalIAMService/Check`.
+// решения: право вызывающего на `notification_recipient_directory:root` и
+// `v_get` получателя на аккаунт (`account_reader`) задаются той же дверью, что
+// отвечает `InternalIAMService/Check`; аудитория версии события (`event`,
+// `ListEventAudience`) — вопросом с оградой токена над тем же пулом (Р30).
 //
 // relations и cfg подаются той же формой, что строителю службы выдачи: справочник
 // своей ручки не держит и вопроса администратора кластера не задаёт, поэтому
@@ -37,7 +38,7 @@ func buildRecipientDirectoryServer(pool *pgxpool.Pool, door *service.AuthorizeSe
 	}
 	repo := kanamepg.NewRecipientDirectoryRepo(pool)
 	return recipientdirectory.NewHandler(
-		recipientdirectory.NewResolveUseCase(door, repo, logger),
-		recipientdirectory.NewListProjectAudienceUseCase(door, repo, logger),
+		recipientdirectory.NewResolveUseCase(door, repo, repo, logger),
+		recipientdirectory.NewListEventAudienceUseCase(door, repo, logger),
 	), nil
 }

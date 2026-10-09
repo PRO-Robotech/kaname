@@ -117,7 +117,71 @@
 # на первом же прогоне после посадки («записей без предмета 1», rc=1 —
 # MR #270, прогон 35203684548). Запись снята тем изменением, которое правит
 # этот перечень: послабление, которому нечего прощать, — находка.
-breaks: []
+breaks:
+  # СОБЫТИЕ ОБЪЕКТА И ПУБЛИКАЦИЯ СВОИМ МЕТОДОМ (kaname#484, полоса K2; приёмка NTF-3
+  # kacho#2918, Р30 «Единица поколения — событие», «Публикация для анонимного
+  # чтения», сценарий NTF3-182). Регистрация несёт набор кортежей события `tuples`,
+  # снятие адресуется объектом, версию публикации несёт метод
+  # `SetPublicReadPublication`. Снятые номера и имена — `reserved` в обоих
+  # сообщениях. Находок десять, и каждая объявлена одной записью: девять снятых
+  # полей и служебное сообщение снятого отображения `labels` у снятия.
+  #
+  # Вызывающие — модули платформы через `pkg/ownerregister` и свои регистраторы —
+  # переходят на набор подъёмом пина службы эпиком kacho#2918; до подъёма они
+  # собираются против прежнего пина.
+  #
+  # Предикат снятия записей: ветка влита в ствол, база сравнения несёт `reserved`,
+  # и решатель называет все десять записей потерявшими предмет.
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: RegisterResourceRequest.1
+    reason: "поле одиночного кортежа снято: кортеж события выразим одним способом — элементом набора tuples (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: RegisterResourceRequest.2
+    reason: "поле одиночного кортежа снято: кортеж события выразим одним способом — элементом набора tuples (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: RegisterResourceRequest.8
+    reason: "версия-время снята полностью: порядок объекта — generation, порядок публикации — метод SetPublicReadPublication (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.1
+    reason: "снятие адресуется объектом: поля кортежа не читаются, принять и проигнорировать запрещено (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.2
+    reason: "снятие адресуется объектом: поля кортежа не читаются, принять и проигнорировать запрещено (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.5
+    reason: "снятие адресуется объектом: метки не читаются, принять и проигнорировать запрещено (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.6
+    reason: "снятие адресуется объектом: проект не читается, принять и проигнорировать запрещено (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.7
+    reason: "снятие адресуется объектом: аккаунт не читается, принять и проигнорировать запрещено (номер и имя reserved)"
+    issue: kaname#484
+  - rule: FIELD_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.8
+    reason: "версия-время снята полностью: публикация уходит вместе с объектом без своей версии (номер и имя reserved)"
+    issue: kaname#484
+  - rule: MESSAGE_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: UnregisterResourceRequest.LabelsEntry
+    reason: "служебное сообщение снятого поля-отображения labels у снятия уходит вместе с полем"
+    issue: kaname#484
   # ЗАПИСЬ О `magic_link_url` (kaname/cloud/iam/v1/user.proto, kacho#1774) СНЯТА —
   # разрыв стал историей: `reserved 3; reserved "magic_link_url";` лежит в стволе
   # с вливания #218 (`94352d9c`), база сравнения снятие несёт, и решатель

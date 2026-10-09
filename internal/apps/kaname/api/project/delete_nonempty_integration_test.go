@@ -35,7 +35,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -266,17 +265,26 @@ func countRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query stri
 	return n
 }
 
-// unregisterMirrorRow снимает строку зеркала ТЕМ ЖЕ оператором, которым её
-// снимает внутренний глагол владельца `UnregisterResource`
-// (`resource_mirror.DeleteTx`). Владельца дом П не зовёт (приёмка §0.2в, Н3).
+// unregisterMirrorRow снимает строку зеркала ТЕМ ЖЕ приёмом, которым её снимает
+// внутренний глагол владельца `UnregisterResource` (`resource_mirror.DeleteTx`),
+// поколением, следующим за головой объекта, — так снимает владелец, чьё снятие
+// новее всего, что он присылал. Владельца дом П не зовёт (приёмка §0.2в, Н3).
 func unregisterMirrorRow(ctx context.Context, pool *pgxpool.Pool, objectType, objectID string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := resource_mirror.DeleteTx(ctx, tx, objectType, objectID, time.Now().UTC()); err != nil {
+	head, err := resource_mirror.HeadGenerationTx(ctx, tx, objectType, objectID)
+	if err != nil {
 		return err
+	}
+	out, err := resource_mirror.DeleteTx(ctx, tx, objectType, objectID, head+1)
+	if err != nil {
+		return err
+	}
+	if !out.Applied {
+		return fmt.Errorf("снятие %s:%s поколением %d не применилось", objectType, objectID, head+1)
 	}
 	return tx.Commit(ctx)
 }

@@ -29,6 +29,7 @@ const (
 	InternalIAMService_PollSubjectChanges_FullMethodName       = "/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges"
 	InternalIAMService_RegisterResource_FullMethodName         = "/kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
 	InternalIAMService_UnregisterResource_FullMethodName       = "/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource"
+	InternalIAMService_SetPublicReadPublication_FullMethodName = "/kaname.cloud.iam.v1.InternalIAMService/SetPublicReadPublication"
 	InternalIAMService_CurrentAuthzRevision_FullMethodName     = "/kaname.cloud.iam.v1.InternalIAMService/CurrentAuthzRevision"
 	InternalIAMService_ResolveBasicCredential_FullMethodName   = "/kaname.cloud.iam.v1.InternalIAMService/ResolveBasicCredential"
 	InternalIAMService_GetRoleCompiled_FullMethodName          = "/kaname.cloud.iam.v1.InternalIAMService/GetRoleCompiled"
@@ -124,34 +125,54 @@ type InternalIAMServiceClient interface {
 	// observes. Until this refusal existed, sweeping the journal was impossible
 	// by construction, not by preference.
 	PollSubjectChanges(ctx context.Context, in *PollSubjectChangesRequest, opts ...grpc.CallOption) (*PollSubjectChangesResponse, error)
-	// RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
-	// (subject holds `relation` on `object`) on behalf of the resource-owning
-	// module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
-	// those modules никогда не ходят в FGA напрямую — только через IAM.
+	// RegisterResource — регистрация события объекта (`CREATED`, `UPDATED`) от
+	// модуля-владельца вида: набор кортежей события, метки и цепь предков под одним
+	// поколением, атомарно (приёмка NTF-3, Р30 «Единица поколения — событие»).
+	// Модули не пишут права напрямую — только через службу доступа.
 	//
-	// ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
-	// gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
-	// drainer может ретраить безопасно.
+	// ИДЕМПОТЕНТНО (контракт): повтор события (то же поколение) → gRPC OK,
+	// исход REJECTED_STALE без записи, НЕ AlreadyExists. От этого зависит
+	// at-least-once повтор у дренажа владельца.
 	//
 	// Sync unary (как Check), НЕ async через Operation: ретрай и at-least-once
-	// обеспечивает сам drainer.
+	// обеспечивает сам дренаж владельца.
 	//
 	// authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
 	// Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
 	// ServiceAccount → relation `fga_writer` на системном объекте
-	// `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
-	// listener :9091 only — нет google.api.http.
+	// `cluster:cluster_root`, и правилом проксируемой записи на КАЖДЫЙ кортеж набора.
+	// Нет relation → PermissionDenied. cluster-internal listener :9091 only — нет
+	// google.api.http.
 	RegisterResource(ctx context.Context, in *RegisterResourceRequest, opts ...grpc.CallOption) (*RegisterResourceResponse, error)
-	// UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
-	// (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
+	// UnregisterResource — снятие объекта (`DELETED`), адресованное объектом:
+	// все кортежи на объекте, зеркало, рёбра предков и публикация уходят, голова
+	// становится надгробием поколения снятия — одной транзакцией приёма.
 	//
-	// ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
-	// НЕ NotFound — drainer ретраит безопасно.
+	// ИДЕМПОТЕНТНО (контракт): снятие поколением не новее головы → gRPC OK, исход
+	// REJECTED_STALE без записи, НЕ NotFound — дренаж владельца ретраит безопасно.
 	//
 	// Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
-	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
-	// нет google.api.http.
+	// `cluster:cluster_root` и владение типом объекта (см. RegisterResource).
+	// cluster-internal :9091 only, нет google.api.http.
 	UnregisterResource(ctx context.Context, in *UnregisterResourceRequest, opts ...grpc.CallOption) (*UnregisterResourceResponse, error)
+	// SetPublicReadPublication — намерение владельца о публикации объекта для
+	// анонимного чтения (`user:* v_get`): свой метод и своя версия (приёмка NTF-3,
+	// Р30 «Публикация для анонимного чтения»; сценарий NTF3-186).
+	//
+	// Публикация — не событие объекта и поколения объекта не несёт. Её порядок —
+	// `publication_version`: намерение применяется, только если строго новее
+	// хранимой версии публикации объекта. Ложится только на ТЕКУЩЕЕ воплощение
+	// объекта (`object_generation`): при голове-надгробии — если строго новее
+	// надгробия; при живой голове — если не старше поколения регистрации,
+	// начавшей воплощение; головы нет — применяется. Иначе исход REJECTED_STALE
+	// без записи; ответ — успех и на устаревшем намерении.
+	//
+	// Круг вызывающих — модуль-владелец типа, допускающего публикацию (сегодня
+	// registry): дверь та же, что у `RegisterResource` (mTLS client-cert →
+	// ServiceAccount → `fga_writer` на `cluster:cluster_root`), плюс владение типом
+	// объекта; прочие — PERMISSION_DENIED с `ErrorInfo{reason: AUTHZ_DENIED}`.
+	// cluster-internal listener :9091 only — нет google.api.http (ban #6).
+	SetPublicReadPublication(ctx context.Context, in *SetPublicReadPublicationRequest, opts ...grpc.CallOption) (*SetPublicReadPublicationResponse, error)
 	// CurrentAuthzRevision — токен версии прав службы доступа (приёмка NTF-3, Р30
 	// «Производитель токена»; сценарий NTF3-179).
 	//
@@ -300,6 +321,16 @@ func (c *internalIAMServiceClient) UnregisterResource(ctx context.Context, in *U
 	return out, nil
 }
 
+func (c *internalIAMServiceClient) SetPublicReadPublication(ctx context.Context, in *SetPublicReadPublicationRequest, opts ...grpc.CallOption) (*SetPublicReadPublicationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPublicReadPublicationResponse)
+	err := c.cc.Invoke(ctx, InternalIAMService_SetPublicReadPublication_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *internalIAMServiceClient) CurrentAuthzRevision(ctx context.Context, in *CurrentAuthzRevisionRequest, opts ...grpc.CallOption) (*CurrentAuthzRevisionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CurrentAuthzRevisionResponse)
@@ -429,34 +460,54 @@ type InternalIAMServiceServer interface {
 	// observes. Until this refusal existed, sweeping the journal was impossible
 	// by construction, not by preference.
 	PollSubjectChanges(context.Context, *PollSubjectChangesRequest) (*PollSubjectChangesResponse, error)
-	// RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
-	// (subject holds `relation` on `object`) on behalf of the resource-owning
-	// module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
-	// those modules никогда не ходят в FGA напрямую — только через IAM.
+	// RegisterResource — регистрация события объекта (`CREATED`, `UPDATED`) от
+	// модуля-владельца вида: набор кортежей события, метки и цепь предков под одним
+	// поколением, атомарно (приёмка NTF-3, Р30 «Единица поколения — событие»).
+	// Модули не пишут права напрямую — только через службу доступа.
 	//
-	// ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
-	// gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
-	// drainer может ретраить безопасно.
+	// ИДЕМПОТЕНТНО (контракт): повтор события (то же поколение) → gRPC OK,
+	// исход REJECTED_STALE без записи, НЕ AlreadyExists. От этого зависит
+	// at-least-once повтор у дренажа владельца.
 	//
 	// Sync unary (как Check), НЕ async через Operation: ретрай и at-least-once
-	// обеспечивает сам drainer.
+	// обеспечивает сам дренаж владельца.
 	//
 	// authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
 	// Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
 	// ServiceAccount → relation `fga_writer` на системном объекте
-	// `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
-	// listener :9091 only — нет google.api.http.
+	// `cluster:cluster_root`, и правилом проксируемой записи на КАЖДЫЙ кортеж набора.
+	// Нет relation → PermissionDenied. cluster-internal listener :9091 only — нет
+	// google.api.http.
 	RegisterResource(context.Context, *RegisterResourceRequest) (*RegisterResourceResponse, error)
-	// UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
-	// (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
+	// UnregisterResource — снятие объекта (`DELETED`), адресованное объектом:
+	// все кортежи на объекте, зеркало, рёбра предков и публикация уходят, голова
+	// становится надгробием поколения снятия — одной транзакцией приёма.
 	//
-	// ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
-	// НЕ NotFound — drainer ретраит безопасно.
+	// ИДЕМПОТЕНТНО (контракт): снятие поколением не новее головы → gRPC OK, исход
+	// REJECTED_STALE без записи, НЕ NotFound — дренаж владельца ретраит безопасно.
 	//
 	// Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
-	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
-	// нет google.api.http.
+	// `cluster:cluster_root` и владение типом объекта (см. RegisterResource).
+	// cluster-internal :9091 only, нет google.api.http.
 	UnregisterResource(context.Context, *UnregisterResourceRequest) (*UnregisterResourceResponse, error)
+	// SetPublicReadPublication — намерение владельца о публикации объекта для
+	// анонимного чтения (`user:* v_get`): свой метод и своя версия (приёмка NTF-3,
+	// Р30 «Публикация для анонимного чтения»; сценарий NTF3-186).
+	//
+	// Публикация — не событие объекта и поколения объекта не несёт. Её порядок —
+	// `publication_version`: намерение применяется, только если строго новее
+	// хранимой версии публикации объекта. Ложится только на ТЕКУЩЕЕ воплощение
+	// объекта (`object_generation`): при голове-надгробии — если строго новее
+	// надгробия; при живой голове — если не старше поколения регистрации,
+	// начавшей воплощение; головы нет — применяется. Иначе исход REJECTED_STALE
+	// без записи; ответ — успех и на устаревшем намерении.
+	//
+	// Круг вызывающих — модуль-владелец типа, допускающего публикацию (сегодня
+	// registry): дверь та же, что у `RegisterResource` (mTLS client-cert →
+	// ServiceAccount → `fga_writer` на `cluster:cluster_root`), плюс владение типом
+	// объекта; прочие — PERMISSION_DENIED с `ErrorInfo{reason: AUTHZ_DENIED}`.
+	// cluster-internal listener :9091 only — нет google.api.http (ban #6).
+	SetPublicReadPublication(context.Context, *SetPublicReadPublicationRequest) (*SetPublicReadPublicationResponse, error)
 	// CurrentAuthzRevision — токен версии прав службы доступа (приёмка NTF-3, Р30
 	// «Производитель токена»; сценарий NTF3-179).
 	//
@@ -562,6 +613,9 @@ func (UnimplementedInternalIAMServiceServer) RegisterResource(context.Context, *
 }
 func (UnimplementedInternalIAMServiceServer) UnregisterResource(context.Context, *UnregisterResourceRequest) (*UnregisterResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UnregisterResource not implemented")
+}
+func (UnimplementedInternalIAMServiceServer) SetPublicReadPublication(context.Context, *SetPublicReadPublicationRequest) (*SetPublicReadPublicationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetPublicReadPublication not implemented")
 }
 func (UnimplementedInternalIAMServiceServer) CurrentAuthzRevision(context.Context, *CurrentAuthzRevisionRequest) (*CurrentAuthzRevisionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CurrentAuthzRevision not implemented")
@@ -704,6 +758,24 @@ func _InternalIAMService_UnregisterResource_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InternalIAMService_SetPublicReadPublication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPublicReadPublicationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalIAMServiceServer).SetPublicReadPublication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalIAMService_SetPublicReadPublication_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalIAMServiceServer).SetPublicReadPublication(ctx, req.(*SetPublicReadPublicationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _InternalIAMService_CurrentAuthzRevision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CurrentAuthzRevisionRequest)
 	if err := dec(in); err != nil {
@@ -806,6 +878,10 @@ var InternalIAMService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UnregisterResource",
 			Handler:    _InternalIAMService_UnregisterResource_Handler,
+		},
+		{
+			MethodName: "SetPublicReadPublication",
+			Handler:    _InternalIAMService_SetPublicReadPublication_Handler,
 		},
 		{
 			MethodName: "CurrentAuthzRevision",

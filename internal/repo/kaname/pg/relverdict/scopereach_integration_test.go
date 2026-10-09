@@ -37,7 +37,6 @@ package relverdict_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -53,7 +52,7 @@ import (
 // названный потребитель. Проверка `Applied` не формальность: молча не
 // применившаяся регистрация оставила бы пробу зелёной ни на чём.
 func registerThroughProducer(t *testing.T, ctx context.Context, tx pgx.Tx,
-	objectType, objectID string, chain []string, project, account string, version time.Time) {
+	objectType, objectID string, chain []string, project, account string, generation int64) {
 	t.Helper()
 	out, err := resource_mirror.UpsertTx(ctx, tx, resource_mirror.Row{
 		ObjectType:      objectType,
@@ -61,7 +60,7 @@ func registerThroughProducer(t *testing.T, ctx context.Context, tx pgx.Tx,
 		ParentProjectID: project,
 		ParentAccountID: account,
 		ParentChain:     chain,
-		SourceVersion:   version,
+		Generation:      generation,
 	})
 	if err != nil {
 		t.Fatalf("регистрация %s:%s через производителя: %v", objectType, objectID, err)
@@ -84,7 +83,6 @@ func registerThroughProducer(t *testing.T, ctx context.Context, tx pgx.Tx,
 // storage), утверждает соседняя проба — там выше проекта поднимает уже схема.
 func seedChainThroughProducer(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	t.Helper()
-	base := time.Now().UTC().Truncate(time.Microsecond)
 	regs := []struct {
 		objectType, objectID string
 		chain                []string
@@ -97,9 +95,9 @@ func seedChainThroughProducer(t *testing.T, ctx context.Context, tx pgx.Tx) {
 		{catalogFormOf(t, "project"), "prj-1", ownerregister.ParentChain(nil, "", "acc-1"), "", "acc-1"},
 		{catalogFormOf(t, "account"), "acc-1", []string{"cluster:cluster_root"}, "", ""},
 	}
-	for i, r := range regs {
+	for _, r := range regs {
 		registerThroughProducer(t, ctx, tx, r.objectType, r.objectID, r.chain,
-			r.project, r.account, base.Add(time.Duration(i)*time.Millisecond))
+			r.project, r.account, 1)
 	}
 }
 
@@ -227,16 +225,15 @@ func TestScopeReachesTheRootOnTheChainTheTreeActuallyProduces(t *testing.T) {
 		seedTenant(t, ctx, tx)
 		seedRole(t, ctx, tx, "rol-any", "vpc_network", "get", "anchor", "{}")
 
-		base := time.Now().UTC().Truncate(time.Microsecond)
 		// ТОЛЬКО то звено, которое дерево действительно производит: vpc шлёт
 		// ParentChain(nil, projectID, "") — один проект и ничего больше.
 		registerThroughProducer(t, ctx, tx, catalogFormOf(t, "vpc_network"), "net-1",
-			ownerregister.ParentChain(nil, "prj-1", ""), "prj-1", "", base)
+			ownerregister.ParentChain(nil, "prj-1", ""), "prj-1", "", 1)
 		// Второй объект — под проектом, которого в `projects` НЕТ. Достройке не
 		// из чего взять аккаунт, и цепь обязана остановиться.
 		registerThroughProducer(t, ctx, tx, catalogFormOf(t, "vpc_network"), "net-7",
 			ownerregister.ParentChain(nil, "prj-unknown", ""), "prj-unknown", "",
-			base.Add(time.Millisecond))
+			1)
 
 		var edges int
 		if err := tx.QueryRow(ctx,
@@ -354,7 +351,7 @@ func TestAllFourEntryPointsAgreeOnAGrantAboveTheImmediateParent(t *testing.T) {
 		seedRole(t, ctx, tx, "rol-acc", "vpc_network", "get", "anchor", "{}")
 		registerThroughProducer(t, ctx, tx, catalogFormOf(t, "vpc_network"), "net-1",
 			ownerregister.ParentChain(nil, "prj-1", ""), "prj-1", "",
-			time.Now().UTC().Truncate(time.Microsecond))
+			1)
 
 		// Выдача на АККАУНТ — два звена вверх от объекта.
 		exec(t, ctx, tx,

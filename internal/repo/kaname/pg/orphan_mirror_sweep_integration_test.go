@@ -17,14 +17,20 @@ package pg_test
 //
 // # Отрицание — ТОЛЬКО в паре с положительным контролем
 //
-// Проб четыре, и три из них существуют затем, чтобы первая не зеленела на
+// Проб пять, и три из них существуют затем, чтобы первая не зеленела на
 // сломанном предикате:
 //
-//	01  сирота найдена, названа и починена цепью   ← предмет
-//	02  строка без цепи оставлена ВЛАДЕЛЬЦУ        ← граница названа, не обойдена
-//	03  строка с ПРОЕКТОМ не сирота                ← полоса первого условия
-//	04  строка с АККАУНТОМ не сирота               ← полоса второго условия
-//	05  починка идемпотентна                       ← повтор не двигает перепись
+//	01  сирота с цепью найдена и названа, ничего не записано ← предмет
+//	02  строка без цепи оставлена ВЛАДЕЛЬЦУ          ← граница названа, не обойдена
+//	03  строка с ПРОЕКТОМ не сирота                  ← полоса первого условия
+//	04  строка с АККАУНТОМ не сирота                 ← полоса второго условия
+//	05  повтор называет те же строки                 ← проход ничего не пишет
+//
+// Проход НЕ ЧИНИТ: проекцию объекта пишет один производитель — триггер
+// `resource_event` (приёмка NTF-3, Р30; гейт `TestObjectProjectionHasOneProducer`),
+// и вывод родителя из цепи живёт в нём, при приёме регистрации. Фикстуры здесь
+// кладут строки прямо в таблицы — это проба, она изображает строку, легшую до
+// перевода, а не производителя.
 //
 // # Почему полос ДВЕ, а не одна — это разбор ошибки, а не педантизм
 //
@@ -131,12 +137,13 @@ func mirrorParents(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	return project, account
 }
 
-// TestOrphanMirrorSweep_01_NamesTheOrphanAndRepairsItFromTheChain — предмет:
-// строка без родителя НАЙДЕНА, НАЗВАНА и починена выводом из цепи предков.
+// TestOrphanMirrorSweep_01_NamesTheOrphanWithAChainAndWritesNothing — предмет:
+// строка без родителя, но с цепью предков НАЙДЕНА и НАЗВАНА с признаком цепи, а
+// записи проход не делает — колонки остаются пусты до следующей регистрации.
 //
 // Рядом стоит положительный контроль: строка С родителем прохода не тревожит.
 // Без него «нашёл всё подряд» было бы неотличимо от верного предиката.
-func TestOrphanMirrorSweep_01_NamesTheOrphanAndRepairsItFromTheChain(t *testing.T) {
+func TestOrphanMirrorSweep_01_NamesTheOrphanWithAChainAndWritesNothing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -146,7 +153,7 @@ func TestOrphanMirrorSweep_01_NamesTheOrphanAndRepairsItFromTheChain(t *testing.
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	// сирота: колонки пусты, но владелец прислал цепь предков ⇒ ПОЧИНИМА
+	// сирота: колонки пусты, но цепь предков лежит
 	insertMirrorRow(t, ctx, pool, "vpc_network", "net-orphan-01", "", "")
 	insertParentEdge(t, ctx, pool, "vpc_network", "net-orphan-01", "project", "prj-from-chain", 1)
 	insertParentEdge(t, ctx, pool, "vpc_network", "net-orphan-01", "account", "acc-from-chain", 2)
@@ -162,15 +169,15 @@ func TestOrphanMirrorSweep_01_NamesTheOrphanAndRepairsItFromTheChain(t *testing.
 	// Знаменатель НЕ ноль: «сирот одна» при пустом зеркале означало бы другое.
 	assert.GreaterOrEqual(t, res.MirrorRows, 2, "перепись обязана видеть обе строки")
 	assert.Equal(t, 1, res.Orphans, "сирота ровно одна — здоровая строка не находка")
-	assert.Equal(t, 1, res.Repaired, "цепь предков была ⇒ строка починена")
-	assert.Empty(t, res.LeftToOwner, "чинить владельцу нечего: цепь была")
+	assert.Equal(t, 1, res.WithChain, "у сироты есть цепь — признак назван числом")
+	require.Len(t, res.LeftToOwner, 1, "строка НАЗВАНА координатой")
+	assert.True(t, res.LeftToOwner[0].HasChain)
 
-	// починка привела строку К ФАКТУ, а не к выдуманному родителю
+	// Проход не писатель зеркала: колонки остались пусты.
 	project, account := mirrorParents(t, ctx, pool, "vpc_network", "net-orphan-01")
-	assert.Equal(t, "prj-from-chain", project, "проект выведен из ЦЕПИ, а не придуман")
-	assert.Equal(t, "acc-from-chain", account, "аккаунт выведен из ЦЕПИ, а не придуман")
+	assert.Empty(t, project, "проход не пишет зеркало — родителя выведет регистрация")
+	assert.Empty(t, account, "проход не пишет зеркало — родителя выведет регистрация")
 
-	// положительный контроль не тронут ни одним оператором
 	hp, ha := mirrorParents(t, ctx, pool, "vpc_network", "net-healthy-01")
 	assert.Equal(t, "prj-healthy", hp, "здоровая строка не тронута")
 	assert.Equal(t, "acc-healthy", ha, "здоровая строка не тронута")
@@ -199,7 +206,7 @@ func TestOrphanMirrorSweep_02_RowWithoutAChainIsLeftToTheOwner(t *testing.T) {
 	t.Log(res.Census())
 
 	assert.Equal(t, 1, res.Orphans, "сирота найдена")
-	assert.Equal(t, 0, res.Repaired, "чинить не из чего — цепи нет")
+	assert.Equal(t, 0, res.WithChain, "цепи нет")
 	require.Len(t, res.LeftToOwner, 1, "строка НАЗВАНА, а не проглочена")
 	assert.Equal(t, "vpc_network:net-orphan-02", res.LeftToOwner[0].String(),
 		"названа КООРДИНАТОЙ: без неё оператор не знает, что перерегистрировать")
@@ -269,12 +276,10 @@ func TestOrphanMirrorSweep_04_RowWithAccountOnlyIsNotAnOrphan(t *testing.T) {
 	assert.Empty(t, res.LeftToOwner)
 }
 
-// TestOrphanMirrorSweep_05_RepairIsIdempotent — повтор прохода безопасен.
-//
-// Починенная строка в следующую перепись не попадает (у неё появился родитель),
-// и второй прогон НЕ засчитывает её починенной второй раз. Без этой пробы
-// «идемпотентно» осталось бы словом в шапке.
-func TestOrphanMirrorSweep_05_RepairIsIdempotent(t *testing.T) {
+// TestOrphanMirrorSweep_05_RepeatRunNamesTheSameRows — повтор прохода безопасен:
+// он ничего не пишет, поэтому вторая перепись называет те же строки теми же
+// числами. Без этой пробы «повтор безопасен» осталось бы словом в шапке.
+func TestOrphanMirrorSweep_05_RepeatRunNamesTheSameRows(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -292,16 +297,14 @@ func TestOrphanMirrorSweep_05_RepairIsIdempotent(t *testing.T) {
 	first, err := sweeper.RunOnce(ctx)
 	require.NoError(t, err)
 	t.Log("прогон 1: " + first.Census())
-	require.Equal(t, 1, first.Orphans)
-	require.Equal(t, 1, first.Repaired)
 
 	second, err := sweeper.RunOnce(ctx)
 	require.NoError(t, err)
 	t.Log("прогон 2: " + second.Census())
-	assert.Equal(t, 0, second.Orphans, "починенная строка сиротой больше не числится")
-	assert.Equal(t, 0, second.Repaired, "повтор НЕ засчитывает вторую починку")
-	assert.Empty(t, second.LeftToOwner)
 
+	assert.Equal(t, first.Census(), second.Census(), "повтор называет то же самое")
+	require.Len(t, second.LeftToOwner, 1)
+	assert.Equal(t, "vpc_network:net-orphan-05", second.LeftToOwner[0].String())
 	project, _ := mirrorParents(t, ctx, pool, "vpc_network", "net-orphan-05")
-	assert.Equal(t, "prj-idem", project, "значение не сдвинулось от повтора")
+	assert.Empty(t, project, "ни один прогон не записал родителя")
 }

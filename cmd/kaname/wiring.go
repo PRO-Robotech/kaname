@@ -714,6 +714,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// опция: без порта у публикации нет порядка, и запоздавшая доставка открытия
 		// после закрытия вернула бы анонимное чтение приватному объекту.
 		kanamepg.NewPublicReadPublisher(),
+		// Снятие адресуется объектом и не несёт ни одного кортежа: всё, что посредник
+		// мог поставить на объект, называет только хранилище — собственное `owner`
+		// создателя записано от личности, которую после этого никто не хранит.
+		// Читается в транзакции снятия после приёма его поколения: набор, прочитанный
+		// до неё, не видел бы кортежа регистрации, закоммиченной между чтением и
+		// приёмом. Параметр, а не опция: без него снятие оставляло бы все отношения на
+		// объекте, которого уже нет.
+		kanamepg.NewResidualTupleReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
@@ -722,29 +730,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// the creator's per-object v_get materializes before the consumer's create-Operation
 		// reports done — a create→immediate-GET resolves ALLOW without racing the async
 		// reconcile-outbox drain. nil-safe + non-fatal (the drain + sweep are the backstop).
-		WithObjectReconciler(rsabReconciler, logger).
-		// УКАЗАТЕЛЬ ОБЛАСТИ БОЛЬШЕ НЕ ПРИМЕНЯЕТСЯ ВТОРЫМ ПИСАТЕЛЕМ.
 		//
-		// Он применялся напрямую в чужое хранилище — в обе стороны, после коммита, —
-		// потому что реконсайлер его не выводит, а значит никто другой не снял бы его
-		// вовремя: ярус администратора аккаунта достаёт объекты ЧЕРЕЗ этот указатель, и
-		// пережившее снятие ребро оставляло бы ему доступ к ресурсу, который уже
-		// отвечает 404.
-		//
-		// Строка журнала, положенная той же транзакцией, делает то же самое и раньше:
-		// прямой факт складывается из неё триггером в момент коммита. Догонять нечего.
-		// A teardown must take away EVERY relationship this proxy could have written on
-		// the object, not only the one the consumer was able to name. The consumer names
-		// the scope pointer because that is all it holds; the creator's own `owner` was
-		// written from an identity nobody stores afterwards, so the store is the only
-		// side that can still name it. Without this reader that relationship outlived its
-		// object silently — the withdrawal was emitted, delivered and marked sent with no
-		// error, while the model went on deriving all five verbs from what it left behind.
-		//
-		// The bare transport is used deliberately: this needs the STRONG object listing,
-		// and it must not travel the cascade wrapper, whose job is to widen answers to
-		// questions rather than to enumerate what is physically there.
-		WithResidualTupleReader(kanamepg.NewResidualTupleReader(pool))
+		// УКАЗАТЕЛЬ ОБЛАСТИ НЕ ПРИМЕНЯЕТСЯ ВТОРЫМ ПИСАТЕЛЕМ: строка журнала, положенная
+		// той же транзакцией, складывается в прямой факт триггером в момент коммита.
+		WithObjectReconciler(rsabReconciler, logger)
 	// Both post-commit steps above are best-effort: they front a durable queue, so a
 	// failure costs latency and never the change. That is what makes a permanently broken
 	// one invisible — one WARN and a product that keeps working, slower, forever. The

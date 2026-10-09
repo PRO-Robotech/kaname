@@ -4,26 +4,31 @@
 package recipientdirectory
 
 // resolve.go — ResolveUseCase: исход и адрес одного получателя (приёмка NTF-3
-// Р7; замысел З27, CX3-14).
+// Р7, Р30; замысел З27, CX3-14).
 //
 // Порядок несущий:
 //  1. право вызывающего на справочник (caller.go) — до всего;
-//  2. проверка входа целиком (input.go) — до любого вопроса к модели о праве
-//     получателя;
-//  3. получатель: аудитория `account_owner` сначала находит владельца
+//  2. проверка входа целиком (input.go) — до любого вопроса об аудитории;
+//  3. аудитория `event` — вопрос о членстве субъекта в аудитории версии события
+//     с оградой токена (audience.go): непримененное поколение — отказ кодом
+//     `UNAVAILABLE` `OBJECT_GENERATION_NOT_APPLIED`, а не исход по субъекту
+//     (Р7: «ждём, не угадываем»), поэтому он стоит раньше исходов;
+//  4. получатель: аудитория `account_owner` сначала находит владельца
 //     аккаунта (нет — `AUDIENCE_DENIED`); затем запись субъекта одним
 //     оператором: нет — `SUBJECT_NOT_FOUND`, пользователь не ACTIVE —
 //     `SUBJECT_INACTIVE`;
-//  4. аудитория `resource` — вопрос `v_get` о каждой ссылке той же дверью, что
-//     отвечает `InternalIAMService/Check`; ни одна не видна — `AUDIENCE_DENIED`;
-//  5. подтверждённый адрес: учётная запись службы либо неподтверждённый адрес —
-//     `NO_CONFIRMED_ADDRESS`; иначе `ADDRESS` с видимым подмножеством ссылок.
+//  5. аудитория: `event` — субъекта нет в ответе шага 3; `account_reader` —
+//     вопрос `v_get` на `account:<id>` той же дверью, что отвечает
+//     `InternalIAMService/Check` (контакт не событие: ограды нет); не входит —
+//     `AUDIENCE_DENIED`;
+//  6. подтверждённый адрес: учётная запись службы либо неподтверждённый адрес —
+//     `NO_CONFIRMED_ADDRESS`; иначе `ADDRESS`.
 //
-// Вопрос о праве (шаг 4) стоит раньше выдачи адреса (шаг 5) в той же функции:
-// адрес не выдаётся субъекту, которому ресурс не виден. Дверь не допускает к
+// Вопрос об аудитории (шаг 5) стоит раньше выдачи адреса (шаг 6) в той же
+// функции: адрес не выдаётся субъекту вне аудитории. Дверь не допускает к
 // решению человека с неподтверждённым адресом (kaname#456, Р4а) и называет
 // причину `email_not_verified`; такой отказ говорит об адресе, а не об
-// аудитории, и даёт `NO_CONFIRMED_ADDRESS` — исход, который шаг 5 дал бы ему
+// аудитории, и даёт `NO_CONFIRMED_ADDRESS` — исход, который шаг 6 дал бы ему
 // всё равно.
 //
 // Ответ-отказ не несёт ни адреса, ни признака подтверждения. Журнал — без
@@ -47,13 +52,11 @@ import (
 // текста драйвера.
 const unavailableText = "notification recipient directory temporarily unavailable"
 
-// ResolveResult — исход `Resolve`. Address и Visible заполнены только при
+// ResolveResult — исход `Resolve`. Address заполнен только при
 // domain.RecipientAddress.
 type ResolveResult struct {
 	Outcome domain.RecipientOutcome
 	Address string
-	// Visible — видимое подмножество ссылок запроса, в порядке запроса.
-	Visible []ResourceRef
 }
 
 // ResolveUseCase — справочник адресов: один получатель.
@@ -61,15 +64,17 @@ type ResolveUseCase struct {
 	gate       callerGate
 	door       door
 	recipients recipientReader
+	audience   eventAudienceReader
 	logger     *slog.Logger
 }
 
 // NewResolveUseCase — конструктор. logger обязателен.
-func NewResolveUseCase(d door, recipients recipientReader, logger *slog.Logger) *ResolveUseCase {
+func NewResolveUseCase(d door, recipients recipientReader, audience eventAudienceReader, logger *slog.Logger) *ResolveUseCase {
 	return &ResolveUseCase{
 		gate:       callerGate{door: d, logger: logger},
 		door:       d,
 		recipients: recipients,
+		audience:   audience,
 		logger:     logger,
 	}
 }
@@ -81,6 +86,20 @@ func (uc *ResolveUseCase) Execute(ctx context.Context, req ResolveRequest) (Reso
 	}
 	if err := req.validate(); err != nil {
 		return ResolveResult{}, err
+	}
+
+	inEventAudience := false
+	if req.Audience == AudienceEvent {
+		objectType, objectID := req.Event.split()
+		member, err := readAudience(ctx, uc.audience, uc.logger, domain.EventAudienceQuestion{
+			ObjectType: objectType, ObjectID: objectID, Generation: req.Event.Generation,
+			AuthzRev: req.Event.AuthzRev, Facts: req.Event.Facts,
+			ViaSubscription: req.ViaSubscription, Subject: req.Subject, Limit: 1,
+		}, "audience.event.authz_rev")
+		if err != nil {
+			return ResolveResult{}, err
+		}
+		inEventAudience = len(member) == 1 && member[0] == req.Subject
 	}
 
 	subject := req.Subject
@@ -110,57 +129,59 @@ func (uc *ResolveUseCase) Execute(ctx context.Context, req ResolveRequest) (Reso
 		return outcome(domain.RecipientSubjectInactive), nil
 	}
 
-	var visible []ResourceRef
-	if req.Audience == AudienceResource {
-		var notAdmitted bool
-		visible, notAdmitted, err = uc.visibleRefs(ctx, subject, req.Relation, req.Refs)
+	switch req.Audience {
+	case AudienceEvent:
+		if !inEventAudience {
+			return outcome(domain.RecipientAudienceDenied), nil
+		}
+	case AudienceAccountReader:
+		reads, notAdmitted, err := uc.readsAccount(ctx, subject, req.AccountID)
 		if err != nil {
 			return ResolveResult{}, err
 		}
-		if len(visible) == 0 {
+		if !reads {
 			if notAdmitted {
 				return outcome(domain.RecipientNoConfirmedAddress), nil
 			}
 			return outcome(domain.RecipientAudienceDenied), nil
 		}
+	case AudienceUnset, AudienceSelf, AudienceAccountOwner:
 	}
 
 	if !rec.HasConfirmedAddress(kind) {
 		return outcome(domain.RecipientNoConfirmedAddress), nil
 	}
-	return ResolveResult{Outcome: domain.RecipientAddress, Address: rec.Email, Visible: visible}, nil
+	return ResolveResult{Outcome: domain.RecipientAddress, Address: rec.Email}, nil
 }
 
-// visibleRefs — ссылки, на которые у subject есть relation, в порядке запроса.
-// notAdmitted — дверь не допустила субъекта к решению по неподтверждённому
-// адресу (тогда видимых нет). Дверь не ответила — UNAVAILABLE.
-func (uc *ResolveUseCase) visibleRefs(ctx context.Context, subject, relation string, refs []ResourceRef) (
-	visible []ResourceRef, notAdmitted bool, err error,
-) {
-	for _, ref := range refs {
-		verdict, err := uc.door.CheckRelation(ctx, service.CheckRelationRequest{
-			Subject:  subject,
-			Relation: relation,
-			Object:   ref.String(),
-		})
-		if err != nil {
-			uc.logger.ErrorContext(ctx, "recipient directory: audience question unanswered", "err", err.Error())
-			return nil, false, authzguard.AuthzBackendUnavailable()
-		}
-		if verdict == nil {
-			continue
-		}
-		if verdict.Allowed {
-			visible = append(visible, ref)
-			continue
-		}
-		for _, reason := range verdict.DenyReasons {
-			if reason == service.DenyReasonEmailNotVerified {
-				notAdmitted = true
-			}
+// relationAccountReader — право контакта безопасности на аккаунт (Р19, Р20).
+const relationAccountReader = "v_get"
+
+// readsAccount — у subject есть `v_get` на `account:<accountID>`. notAdmitted —
+// дверь не допустила субъекта к решению по неподтверждённому адресу. Дверь не
+// ответила — UNAVAILABLE.
+func (uc *ResolveUseCase) readsAccount(ctx context.Context, subject, accountID string) (reads, notAdmitted bool, err error) {
+	verdict, err := uc.door.CheckRelation(ctx, service.CheckRelationRequest{
+		Subject:  subject,
+		Relation: relationAccountReader,
+		Object:   "account:" + accountID,
+	})
+	if err != nil {
+		uc.logger.ErrorContext(ctx, "recipient directory: account reader question unanswered", "err", err.Error())
+		return false, false, authzguard.AuthzBackendUnavailable()
+	}
+	if verdict == nil {
+		return false, false, nil
+	}
+	if verdict.Allowed {
+		return true, false, nil
+	}
+	for _, reason := range verdict.DenyReasons {
+		if reason == service.DenyReasonEmailNotVerified {
+			notAdmitted = true
 		}
 	}
-	return visible, notAdmitted, nil
+	return false, notAdmitted, nil
 }
 
 // unavailable — сбой чтения хранилища: в журнал — причина, наружу —
@@ -170,7 +191,7 @@ func (uc *ResolveUseCase) unavailable(ctx context.Context, what string, err erro
 	return status.Error(codes.Unavailable, unavailableText)
 }
 
-// outcome — исход по субъекту: ни адреса, ни ссылок.
+// outcome — исход по субъекту: без адреса.
 func outcome(o domain.RecipientOutcome) ResolveResult { return ResolveResult{Outcome: o} }
 
 // recipientOf — вид и id субъекта `user:<id>` либо `service_account:<id>`.

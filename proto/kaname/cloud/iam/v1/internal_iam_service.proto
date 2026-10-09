@@ -165,38 +165,62 @@ service InternalIAMService {
     option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
   }
 
-  // RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
-  // (subject holds `relation` on `object`) on behalf of the resource-owning
-  // module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
-  // those modules никогда не ходят в FGA напрямую — только через IAM.
+  // RegisterResource — регистрация события объекта (`CREATED`, `UPDATED`) от
+  // модуля-владельца вида: набор кортежей события, метки и цепь предков под одним
+  // поколением, атомарно (приёмка NTF-3, Р30 «Единица поколения — событие»).
+  // Модули не пишут права напрямую — только через службу доступа.
   //
-  // ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
-  // gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
-  // drainer может ретраить безопасно.
+  // ИДЕМПОТЕНТНО (контракт): повтор события (то же поколение) → gRPC OK,
+  // исход REJECTED_STALE без записи, НЕ AlreadyExists. От этого зависит
+  // at-least-once повтор у дренажа владельца.
   //
   // Sync unary (как Check), НЕ async через Operation: ретрай и at-least-once
-  // обеспечивает сам drainer.
+  // обеспечивает сам дренаж владельца.
   //
   // authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
   // Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
   // ServiceAccount → relation `fga_writer` на системном объекте
-  // `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
-  // listener :9091 only — нет google.api.http.
+  // `cluster:cluster_root`, и правилом проксируемой записи на КАЖДЫЙ кортеж набора.
+  // Нет relation → PermissionDenied. cluster-internal listener :9091 only — нет
+  // google.api.http.
   rpc RegisterResource (RegisterResourceRequest) returns (RegisterResourceResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
     option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
   }
 
-  // UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
-  // (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
+  // UnregisterResource — снятие объекта (`DELETED`), адресованное объектом:
+  // все кортежи на объекте, зеркало, рёбра предков и публикация уходят, голова
+  // становится надгробием поколения снятия — одной транзакцией приёма.
   //
-  // ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
-  // НЕ NotFound — drainer ретраит безопасно.
+  // ИДЕМПОТЕНТНО (контракт): снятие поколением не новее головы → gRPC OK, исход
+  // REJECTED_STALE без записи, НЕ NotFound — дренаж владельца ретраит безопасно.
   //
   // Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
-  // `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
-  // нет google.api.http.
+  // `cluster:cluster_root` и владение типом объекта (см. RegisterResource).
+  // cluster-internal :9091 only, нет google.api.http.
   rpc UnregisterResource (UnregisterResourceRequest) returns (UnregisterResourceResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // SetPublicReadPublication — намерение владельца о публикации объекта для
+  // анонимного чтения (`user:* v_get`): свой метод и своя версия (приёмка NTF-3,
+  // Р30 «Публикация для анонимного чтения»; сценарий NTF3-186).
+  //
+  // Публикация — не событие объекта и поколения объекта не несёт. Её порядок —
+  // `publication_version`: намерение применяется, только если строго новее
+  // хранимой версии публикации объекта. Ложится только на ТЕКУЩЕЕ воплощение
+  // объекта (`object_generation`): при голове-надгробии — если строго новее
+  // надгробия; при живой голове — если не старше поколения регистрации,
+  // начавшей воплощение; головы нет — применяется. Иначе исход REJECTED_STALE
+  // без записи; ответ — успех и на устаревшем намерении.
+  //
+  // Круг вызывающих — модуль-владелец типа, допускающего публикацию (сегодня
+  // registry): дверь та же, что у `RegisterResource` (mTLS client-cert →
+  // ServiceAccount → `fga_writer` на `cluster:cluster_root`), плюс владение типом
+  // объекта; прочие — PERMISSION_DENIED с `ErrorInfo{reason: AUTHZ_DENIED}`.
+  // cluster-internal listener :9091 only — нет google.api.http (ban #6).
+  rpc SetPublicReadPublication (SetPublicReadPublicationRequest) returns (SetPublicReadPublicationResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
     option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
   }
@@ -386,30 +410,34 @@ message CheckResponse {
 // TOMBSTONE: `WriteCreatorTupleRequest` and `WriteCreatorTupleResponse` were
 // removed together with the `WriteCreatorTuple` RPC (#788). Never re-add
 // messages under these names.
-// RegisterResourceRequest — Internal FGA-proxy register-owner-tuple payload.
-// Форма симметрична CheckRequest.
+// RegisterResourceRequest — регистрация СОБЫТИЯ объекта (`CREATED`, `UPDATED`):
+// набор кортежей события на объекте `object`, состояние объекта (метки, цепь
+// предков) и поколение события (приёмка NTF-3, Р30 «Единица поколения — событие»).
+//
+// Единица поколения — событие, а не кортеж: одно событие — один вызов с одним
+// поколением, и всё, что событие несёт, применяется атомарно под ним — либо
+// целиком, либо исход REJECTED_STALE без единой записи. Применение по одному
+// кортежу запрещено: второй кортеж того же события пришёл бы с тем же
+// поколением, не новее головы, и пропал бы.
 message RegisterResourceRequest {
-  // FGA-subject string. Формат "<type>:<id>", напр.:
-  //   "user:<usr…>"
-  //   "service_account:<sva…>"
-  //   "<owner-type>:<id>"
-  string subject_id = 1;
-
-  // FGA-relation для owner-tuple (как правило "admin" / "parent").
-  string relation = 2;
+  // Поля одиночного кортежа сняты: кортеж события выразим одним способом —
+  // элементом набора `tuples`. Поле версии владельца снято полностью: порядок
+  // объекта — `generation`, порядок публикации — метод `SetPublicReadPublication`.
+  reserved 1, 2, 8;
+  reserved "subject_id", "relation", "source_version";
 
   // Объект решения. Формат "<type>:<id>" словарём МОДЕЛИ прав
   // (НЕ permission-каталог), напр. "vpc_network:<net…>",
   // "compute_instance:<...>".
   string object = 3;
 
-  // Trace-id для correlation в логах (модуль ↔ IAM ↔ FGA). Optional.
+  // Trace-id для correlation в логах (модуль ↔ IAM). Optional.
   string trace_id = 4;
 
-  // Tenant labels зеркала ресурса. Output-only mirror в
+  // Метки объекта на момент события. Output-only mirror в
   // `kaname.resource_mirror`; source of truth = owner-сервис. Питает
-  // `bySelector` (matchLabels) и containment. Пусто для legacy-caller'ов
-  // (graceful). IAM делает минимальную sanity-валидацию, не дублируя owner-pattern.
+  // `bySelector` (matchLabels) и containment. Заменяют прежние как состояние.
+  // IAM делает минимальную sanity-валидацию, не дублируя owner-pattern.
   map<string, string> labels = 5;
 
   // Parent project id ресурса (`prj…`), если ресурс project-scoped.
@@ -420,16 +448,6 @@ message RegisterResourceRequest {
   // Parent account id ресурса (`acc…`), если применимо. Mirror /
   // containment на account-scope.
   string parent_account_id = 7;
-
-  // Монотонный per-object source-version. Маркер «версии
-  // состояния» ресурса у владельца (compute), проставляемый в момент эмита
-  // register-intent внутри writer-tx источника. IAM применяет register в mirror
-  // ТОЛЬКО если этот source_version строго новее уже хранимого (last-source-
-  // state-wins, НЕ last-applier-wins): под HA-drainer reorder двух register одного
-  // object (реплика применяет v2, затем stale v1) устаревший intent → no-op, а не
-  // перезапись свежих labels. Пусто/нулевой → legacy-caller (graceful): IAM
-  // трактует как «-infinity», т.е. любой register применяется (back-compat).
-  google.protobuf.Timestamp source_version = 8;
 
   // Цепь родительства регистрируемого объекта, от БЛИЖАЙШЕГО предка к дальнему.
   //
@@ -444,41 +462,72 @@ message RegisterResourceRequest {
   // области выдачи и из каскада: вопрос о нём задаётся, ответ «нет», и это
   // неотличимо от честного отказа.
   //
-  // АДДИТИВНО: старые вызывающие остаются валидными, номера не переиспользуются.
-  //
-  // ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Здесь стояло
-  // обратное — что iam при пустом поле выведет предков из двух прежних, «ровно
-  // как раньше». Он этого не делает и делать не должен: цепь есть СОСТОЯНИЕ, и
-  // применённая регистрация заменяет набор рёбер объекта целиком, иначе право
-  // пережило бы перенос объекта в другую область. Следствие, названное прямо:
-  // регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже записанных
-  // предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей стороне
-  // (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его иерархия;
-  // iam чужой формы не додумывает. Свойство «каждый потребитель называет цепь»
-  // держится гейтом по дереву (internal/repohygiene), а не этим абзацем.
-  //
-  // ПРИНЯТЬ И НЕ ЗАПИСАТЬ — ЗАПРЕЩЕНО (`api-conventions.md`). Поле обязано иметь
-  // читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
-  // обещает возможность, которой нет, а форма E получает объект без предка —
-  // то есть ровно тот дефект, ради которого поле и заводится.
+  // ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Цепь есть
+  // СОСТОЯНИЕ, и применённая регистрация заменяет набор рёбер объекта целиком,
+  // иначе право пережило бы перенос объекта в другую область. Следствие,
+  // названное прямо: регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже
+  // записанных предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей
+  // стороне (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его
+  // иерархия; iam чужой формы не додумывает. Свойство «каждый потребитель
+  // называет цепь» держится гейтом по дереву (internal/repohygiene), а не этим
+  // абзацем.
   repeated string parent_chain = 9;
+
+  // Поколение события объекта у владельца: целое, строго растущее на каждое
+  // событие объекта, — то же `g_E`, что владелец ставит в строку `resource-event`
+  // своего журнала и берёт из счётчика объекта своей базы (приёмка NTF-3, Р30
+  // «Приём поколения — CAS», «Производитель поколения — счётчик объекта модуля»).
+  //
+  // Обязательно: `0` — `INVALID_ARGUMENT` `generation: required`; приёма без
+  // поколения нет. Применяется, только если строго новее головы объекта в
+  // службе доступа (`kaname.object_head`, включая надгробие снятия); иначе исход
+  // `REJECTED_STALE` — зеркало, рёбра предков, голова и кортежи не меняются, а
+  // вызов отвечает успехом (контракт прокси идемпотентен: отказ породил бы вечный
+  // повтор у дренажа владельца). Регистрация, применённая при отсутствии головы
+  // либо поверх надгробия, начинает ВОПЛОЩЕНИЕ объекта, и её поколение служба
+  // доступа хранит при голове как границу воплощения.
+  int64 generation = 10;
+
+  // Набор кортежей события на объекте `object`: структурные (субъект — предок
+  // объекта) и владения (субъект — `user`, `service_account`, `group#member`).
+  //
+  // Непустой (`INVALID_ARGUMENT` `tuples: required`); пара в наборе одна
+  // (`tuples: duplicate <subject_id>#<relation>`); подстановочного субъекта в
+  // наборе нет (`tuples: wildcard subject is published by
+  // SetPublicReadPublication`) — публикация для анонимного чтения идёт своим
+  // методом. Применённая регистрация пишет кортежи набора, которых ещё нет;
+  // кортеж, отсутствующий в наборе следующего поколения, регистрацией не
+  // снимается — его снимает только снятие объекта.
+  repeated RegisteredTuple tuples = 11;
+}
+
+// RegisteredTuple — кортеж набора события: субъект и отношение на объекте
+// запроса регистрации.
+message RegisteredTuple {
+  // Субъект. Формат "<type>:<id>" либо "<type>:<id>#<relation>", напр.
+  //   "user:<usr…>"
+  //   "service_account:<sva…>"
+  //   "registry_registry:<reg…>"
+  string subject_id = 1;
+
+  // Отношение субъекта к объекту ("parent", "project", "owner").
+  string relation = 2;
 }
 
 // RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
 // контракта (повтор → OK) опирается на пустой ответ без уникального id.
 message RegisterResourceResponse {}
 
-// UnregisterResourceRequest — Internal FGA-proxy unregister-owner-tuple payload.
-// Поля — те же, ЗА ИСКЛЮЧЕНИЕМ `parent_chain`: снятие адресуется объектом, и
-// цепь предков ему не нужна. Прежняя редакция говорила «идентичны», и это стало
-// бы ложью в момент появления девятого поля у соседа — правится здесь же, а не
-// «когда-нибудь», потому что расхождение в прозе не даёт конфликта слияния.
+// UnregisterResourceRequest — снятие объекта (`DELETED`), адресованное объектом:
+// оно снимает ВСЕ кортежи на объекте, зеркало, рёбра предков и публикацию
+// объекта и кладёт надгробие одной транзакцией приёма (приёмка NTF-3, Р30
+// «Единица поколения — событие»).
 message UnregisterResourceRequest {
-  // FGA-subject string (см. RegisterResourceRequest.subject_id).
-  string subject_id = 1;
-
-  // FGA-relation owner-tuple (см. RegisterResourceRequest.relation).
-  string relation = 2;
+  // Поля кортежа и состояния объекта сняты: снятие адресуется объектом и их не
+  // читает, а принять и проигнорировать запрещено. Поле версии владельца снято
+  // полностью: публикация уходит вместе с объектом без своей версии.
+  reserved 1, 2, 5, 6, 7, 8;
+  reserved "subject_id", "relation", "labels", "parent_project_id", "parent_account_id", "source_version";
 
   // FGA-object string (см. RegisterResourceRequest.object).
   string object = 3;
@@ -486,28 +535,46 @@ message UnregisterResourceRequest {
   // Trace-id для correlation в логах. Optional.
   string trace_id = 4;
 
-  // Поля 5/6/7 зарезервированы под форму-симметрию с RegisterResourceRequest.
-  // Unregister удаляет mirror-строку по `object`; эти поля
-  // игнорируются на приеме (симметрия shape, не семантики).
-  map<string, string> labels = 5;
-  // Project the resource belonged to. Empty when the resource is not project-scoped.
-  string parent_project_id = 6;
-  // Account the resource belonged to. Empty when the resource is not account-scoped.
-  string parent_account_id = 7;
-
-  // Tombstone-version: момент Delete у владельца (now() на
-  // эмите unregister-intent). IAM удаляет mirror-строку ТОЛЬКО если этот
-  // source_version >= хранимого (tombstone не старше последнего примененного
-  // register) — Delete-после-Update reorder (unregister(v2) затем stale что-либо)
-  // не теряет свежее состояние. Пусто/нулевой → legacy (graceful): безусловный
-  // DELETE (back-compat). Остаточный edge (stale register ПОСЛЕ unregister →
-  // возможный dangling) чистит reconcile-sweep — см. docs/architecture.
-  google.protobuf.Timestamp source_version = 8;
+  // Поколение снятия объекта (см. RegisterResourceRequest.generation).
+  // Обязательно: `0` — `INVALID_ARGUMENT` `generation: required`. Применённое
+  // снятие оставляет НАДГРОБИЕ — голову объекта с этим поколением: регистрация
+  // поколения не новее надгробия зеркала не восстанавливает (`REJECTED_STALE`).
+  int64 generation = 10;
 }
 
-// UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление
-// отсутствующего tuple → OK (контракт идемпотентности).
+// UnregisterResourceResponse — пусто; success implicit (gRPC OK). Снятие
+// устаревшим поколением → OK (контракт идемпотентности).
 message UnregisterResourceResponse {}
+
+// SetPublicReadPublicationRequest — намерение владельца о публикации объекта
+// для анонимного чтения (кортеж `user:* v_get`).
+message SetPublicReadPublicationRequest {
+  // Объект публикации. Формат "<type>:<id>" словарём МОДЕЛИ прав; тип обязан
+  // допускать публикацию (`INVALID_ARGUMENT` `object: type <type> does not admit
+  // public read`).
+  string object = 1;
+
+  // Открывает ли намерение объект для анонимного чтения.
+  bool published = 2;
+
+  // Версия владельца намерения публикации — штамп строки намерения модуля,
+  // поставленный транзакцией записи. Обязательна (`INVALID_ARGUMENT`
+  // `publication_version: required`). Применяется, только если строго новее
+  // хранимой версии публикации объекта (kaname#107).
+  google.protobuf.Timestamp publication_version = 3;
+
+  // Trace-id для correlation в логах. Optional.
+  string trace_id = 4;
+
+  // Поколение объекта по счётчику модуля в транзакции намерения публикации —
+  // признак ВОПЛОЩЕНИЯ объекта, а не порядок публикации. Обязательно
+  // (`INVALID_ARGUMENT` `object_generation: required`).
+  int64 object_generation = 5;
+}
+
+// SetPublicReadPublicationResponse — пусто; success implicit (gRPC OK), в том
+// числе на устаревшем намерении (контракт идемпотентен).
+message SetPublicReadPublicationResponse {}
 
 // ForceLogoutRequest — admin force-logout payload.
 message ForceLogoutRequest {

@@ -245,11 +245,13 @@ func newStrFixture(t *testing.T, ctx context.Context, tx pgx.Tx) *strFixture {
 	must(t, s.Queue(ctx, scalegrid.MirrorRow{
 		ObjectType: "iam.project", ObjectID: "prj-1",
 		ParentAccountID: "acc-1", ParentChain: []string{"account:acc-1"},
+		Generation: 1,
 	}))
 	must(t, s.Queue(ctx, scalegrid.MirrorRow{
 		ObjectType: "registry.registries", ObjectID: "reg-1",
 		ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 		ParentChain: []string{"project:prj-1", "account:acc-1"},
+		Generation:  1,
 	}))
 	// Два измеряемых объекта на цепи глубины 3 (S_набл = 7 — сегодняшняя форма).
 	must(t, s.Queue(ctx, scalegrid.MirrorRow{
@@ -257,12 +259,14 @@ func newStrFixture(t *testing.T, ctx context.Context, tx pgx.Tx) *strFixture {
 		ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 		Labels:      strLabelKeys(),
 		ParentChain: []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
+		Generation:  1,
 	}))
 	must(t, s.Queue(ctx, scalegrid.MirrorRow{
 		ObjectType: strCatalogType, ObjectID: strDenyObj,
 		ParentProjectID: "prj-1", ParentAccountID: "acc-1",
 		Labels:      map[string]string{"env": "dev"},
 		ParentChain: []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
+		Generation:  1,
 	}))
 	must(t, s.Flush(ctx))
 
@@ -365,6 +369,7 @@ func (f *strFixture) growN(t *testing.T, ctx context.Context, target, allowedSha
 			ParentAccountID: "acc-1",
 			Labels:          labels,
 			ParentChain:     []string{"registry_registry:reg-1", "project:prj-1", "account:acc-1"},
+			Generation:      1,
 		}))
 	}
 	must(t, s.Flush(ctx))
@@ -488,7 +493,8 @@ func (f *strFixture) setScopeShape(t *testing.T, ctx context.Context, s int) {
 		must(t, sd.Queue(ctx, scalegrid.MirrorRow{
 			ObjectType: strCatalogType, ObjectID: pair[0].(string),
 			ParentProjectID: "prj-1", ParentAccountID: "acc-1",
-			Labels: pair[1].(map[string]string),
+			Labels:     pair[1].(map[string]string),
+			Generation: 1,
 		}))
 	}
 	must(t, sd.Flush(ctx))

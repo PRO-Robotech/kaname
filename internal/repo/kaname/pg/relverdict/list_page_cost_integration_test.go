@@ -172,6 +172,7 @@ func TestList_PageStaysFullWhenCandidatesAreInterleaved(t *testing.T) {
 				ParentProjectID: owner,
 				ParentAccountID: "acc-1",
 				ParentChain:     []string{"project:" + owner},
+				Generation:      1,
 			}); err != nil {
 				t.Fatalf("посев объекта %s через производителя: %v", id, err)
 			}
@@ -330,6 +331,7 @@ func seedLabelledSet(t *testing.T, ctx context.Context, tx pgx.Tx, n int) {
 			ParentAccountID: "acc-1",
 			Labels:          map[string]string{"env": "prod"},
 			ParentChain:     []string{"project:prj-1"},
+			Generation:      1,
 		}); err != nil {
 			t.Fatalf("посев объекта %d через производителя: %v", g, err)
 		}

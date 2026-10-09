@@ -6,16 +6,13 @@ package internal_iam
 // register_resource_forward_route_test.go — КАКОЙ вход материализации выбирает
 // кросс-сервисный путь регистрации, и почему это решает окно видимости.
 //
-// ПРЕДМЕТ. Каждая регистрация доезжает до iam ДВАЖДЫ: синхронный регистратор
-// владельца штампует source_version временем ПОСЛЕ коммита, а at-least-once дренаж
-// переигрывает версию, которую БД проставила ВНУТРИ writer-TX, то есть строго
-// раньше. Порядок прибытия при этом ничем не закреплён. Когда первым приходит
-// дренаж, вторая доставка несёт БОЛЕЕ НОВУЮ версию — монотонная стража зеркала её
-// принимает, и прежний гейт повторной доставки (он смотрел только «изменилась ли
-// строка») её не узнаёт. Дальше вторая доставка попадает в ОХРАНЯЕМЫЙ форвард,
-// его страж видит уже материализованных членов (их записала первая доставка) и
-// уводит объект в ПОЛНЫЙ пересчёт под EXCLUSIVE advisory-lock, общий для всех
-// ресурсов аккаунта.
+// ПРЕДМЕТ. Поколение, строго новее головы объекта, применяется и тогда, когда
+// не изменило ничего, по чему объект выбирают селекторы: перерегистрация того же
+// состояния, правка, вернувшая метку к прежнему значению. Гейт повторной доставки
+// такую регистрацию не узнаёт — она не повтор, а новое поколение. Дальше она
+// попадает в ОХРАНЯЕМЫЙ форвард, его страж видит уже материализованных членов (их
+// записала прежняя доставка) и уводит объект в ПОЛНЫЙ пересчёт под EXCLUSIVE
+// advisory-lock, общий для всех ресурсов аккаунта.
 //
 // ЧТО РАЗЛИЧАЕТ ЭТОТ НАБОР. Не «пришла ли регистрация повторно» (этого iam знать
 // неоткуда), а «заменила ли она СОБОЙ ДРУГУЮ проекцию». Устаревшим член может стать
@@ -29,36 +26,35 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // ── зеркало с монотонной стражей И сравнением проекции ──────────────────────
 
-// projectionMirror моделирует kaname.resource_mirror так, как его видит
-// use-case: строка пишется, только если входящая source_version строго новее
-// хранимой, и отдельно сообщается, что запись НЕ заменила проекцию — то есть
-// продвинула версию, оставив parent-область и метки байт-в-байт прежними.
+// projectionMirror моделирует приём проекции так, как его видит use-case: строка
+// пишется, только если поколение строго новее головы объекта (включая надгробие),
+// и отдельно сообщается, что запись НЕ заменила проекцию — то есть продвинула
+// поколение, оставив parent-область и метки байт-в-байт прежними.
 type projectionMirror struct {
 	mu     sync.Mutex
 	stored map[string]projectionRow
+	heads  map[string]int64
 }
 
 type projectionRow struct {
-	version time.Time
 	project string
 	account string
 	labels  map[string]string
 }
 
 func newProjectionMirror() *projectionMirror {
-	return &projectionMirror{stored: map[string]projectionRow{}}
+	return &projectionMirror{stored: map[string]projectionRow{}, heads: map[string]int64{}}
 }
 
 func sameLabels(a, b map[string]string) bool {
@@ -77,26 +73,28 @@ func (m *projectionMirror) UpsertTx(_ context.Context, _ service.Tx, row service
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := row.ObjectType + ":" + row.ObjectID
-	next := projectionRow{version: row.SourceVersion, project: row.ParentProjectID,
-		account: row.ParentAccountID, labels: row.Labels}
-	prev, exists := m.stored[key]
-	if exists && !row.SourceVersion.After(prev.version) {
-		return false, false, nil // не новее — строка не тронута
+	if row.Generation <= m.heads[key] {
+		return false, false, nil // не новее головы — ничего не тронуто
 	}
+	m.heads[key] = row.Generation
+	next := projectionRow{project: row.ParentProjectID, account: row.ParentAccountID, labels: row.Labels}
+	prev, exists := m.stored[key]
 	unchanged := exists && prev.project == next.project && prev.account == next.account &&
 		sameLabels(prev.labels, next.labels)
 	m.stored[key] = next
 	return true, unchanged, nil
 }
 
-func (m *projectionMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *projectionMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, generation int64) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := ot + ":" + oid
-	if prev, ok := m.stored[key]; ok && !prev.version.After(tombstone) {
-		delete(m.stored, key)
+	if generation <= m.heads[key] {
+		return false, nil
 	}
-	return nil
+	m.heads[key] = generation
+	delete(m.stored, key)
+	return true, nil
 }
 
 // ── реконсайлер, воспроизводящий страж устаревших членов ────────────────────
@@ -145,59 +143,54 @@ func (r *guardedReconciler) snapshotPasses() []string {
 
 func newRouteRig() (*RegisterResourceUseCase, *guardedReconciler) {
 	rec := newGuardedReconciler()
-	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, noResidual{}).
 		WithReconcile(&countingReconcileEvents{}).
 		WithObjectReconciler(rec, nil)
 	return uc, rec
 }
 
-// routeReq — registerInput с явной версией, метками и родительской областью.
+// routeReq — registerInput с явным поколением, метками и родительской областью.
 type routeReq struct {
-	object  string
-	project string
-	account string
-	labels  map[string]string
-	version time.Time
+	object     string
+	project    string
+	account    string
+	labels     map[string]string
+	generation int64
 }
 
-func (r *routeReq) GetSubjectId() string { return "project:" + r.project }
-func (r *routeReq) GetRelation() string  { return "project" }
-func (r *routeReq) GetObject() string    { return r.object }
-func (r *routeReq) GetSourceVersion() *timestamppb.Timestamp {
-	return timestamppb.New(r.version)
+func (r *routeReq) GetTuples() []*iamv1.RegisteredTuple {
+	return []*iamv1.RegisteredTuple{{SubjectId: "project:" + r.project, Relation: "project"}}
 }
+func (r *routeReq) GetObject() string            { return r.object }
+func (r *routeReq) GetGeneration() int64         { return r.generation }
 func (r *routeReq) GetLabels() map[string]string { return r.labels }
 func (r *routeReq) GetParentProjectId() string   { return r.project }
 func (r *routeReq) GetParentAccountId() string   { return r.account }
 func (r *routeReq) GetParentChain() []string     { return nil }
 
-// TestRegisterResource_DrainerWonTheRace_StaysOnAdditivePath — ГОНКА, из-за которой
-// окно материализации выходило за клиентский бюджет чтения-своих-записей.
-//
-// Дренаж доставил первым (версия из writer-TX), синхронный регистратор — вторым, с
-// более новой версией и БАЙТ-ИДЕНТИЧНОЙ проекцией. Вторая доставка обязана остаться
-// на аддитивном пути: заменять она ничего не заменила, устареть нечему.
+// TestRegisterResource_NewerGenerationSameProjection_StaysOnAdditivePath — поколение
+// новее головы, проекция БАЙТ-ИДЕНТИЧНА. Такая регистрация обязана остаться на
+// аддитивном пути: заменить она ничего не заменила, устареть нечему.
 //
 // КРАСНЫЙ до правки: use-case звал охраняемый вход, тот видел членов, записанных
-// первой доставкой, и уводил объект в полный пересчёт под EXCLUSIVE-локом, общим
+// прежней доставкой, и уводил объект в полный пересчёт под EXCLUSIVE-локом, общим
 // для всех ресурсов аккаунта.
-func TestRegisterResource_DrainerWonTheRace_StaysOnAdditivePath(t *testing.T) {
+func TestRegisterResource_NewerGenerationSameProjection_StaysOnAdditivePath(t *testing.T) {
 	uc, rec := newRouteRig()
 	ctx := context.Background()
-	inTx := time.Now()
 
-	base := func(v time.Time) *routeReq {
+	base := func(g int64) *routeReq {
 		return &routeReq{object: "vpc_network:net-1", project: "prj-1", account: "acc-1",
-			labels: map[string]string{"tier": "gold"}, version: v}
+			labels: map[string]string{"tier": "gold"}, generation: g}
 	}
 
-	// (1) дренаж — версия, штампованная ВНУТРИ writer-TX.
-	require.NoError(t, uc.Register(ctx, base(inTx)))
+	// (1) первое поколение.
+	require.NoError(t, uc.Register(ctx, base(1)))
 	require.Equal(t, []string{"additive"}, rec.snapshotPasses(),
 		"первая доставка материализует объект аддитивно")
 
-	// (2) синхронный регистратор — версия ПОСЛЕ коммита, строго новее, проекция та же.
-	require.NoError(t, uc.Register(ctx, base(inTx.Add(3*time.Millisecond))))
+	// (2) следующее поколение, проекция та же.
+	require.NoError(t, uc.Register(ctx, base(2)))
 
 	assert.Equal(t, []string{"additive", "additive"}, rec.snapshotPasses(),
 		"доставка, не заменившая проекцию, обязана остаться на аддитивном пути: "+
@@ -215,17 +208,15 @@ func TestRegisterResource_DrainerWonTheRace_StaysOnAdditivePath(t *testing.T) {
 func TestRegisterResource_LabelUpdate_KeepsDeleteStalePath(t *testing.T) {
 	uc, rec := newRouteRig()
 	ctx := context.Background()
-	v1 := time.Now()
-
 	require.NoError(t, uc.Register(ctx, &routeReq{object: "vpc_network:net-1",
 		project: "prj-1", account: "acc-1",
-		labels: map[string]string{"tier": "gold"}, version: v1}))
+		labels: map[string]string{"tier": "gold"}, generation: 1}))
 	require.Equal(t, []string{"additive"}, rec.snapshotPasses())
 
 	// Метка, по которой выдан грант, снята — проекция ЗАМЕНЕНА другой.
 	require.NoError(t, uc.Register(ctx, &routeReq{object: "vpc_network:net-1",
 		project: "prj-1", account: "acc-1",
-		labels: map[string]string{"tier": "bronze"}, version: v1.Add(time.Second)}))
+		labels: map[string]string{"tier": "bronze"}, generation: 2}))
 
 	assert.Equal(t, []string{"additive", "full-exclusive"}, rec.snapshotPasses(),
 		"правка, заменившая проекцию, обязана идти удаляющим проходом — иначе "+
@@ -239,14 +230,12 @@ func TestRegisterResource_LabelUpdate_KeepsDeleteStalePath(t *testing.T) {
 func TestRegisterResource_ParentScopeMove_KeepsDeleteStalePath(t *testing.T) {
 	uc, rec := newRouteRig()
 	ctx := context.Background()
-	v1 := time.Now()
-
 	require.NoError(t, uc.Register(ctx, &routeReq{object: "vpc_network:net-1",
 		project: "prj-1", account: "acc-1",
-		labels: map[string]string{"tier": "gold"}, version: v1}))
+		labels: map[string]string{"tier": "gold"}, generation: 1}))
 	require.NoError(t, uc.Register(ctx, &routeReq{object: "vpc_network:net-1",
 		project: "prj-2", account: "acc-2",
-		labels: map[string]string{"tier": "gold"}, version: v1.Add(time.Second)}))
+		labels: map[string]string{"tier": "gold"}, generation: 2}))
 
 	assert.Equal(t, []string{"additive", "full-exclusive"}, rec.snapshotPasses(),
 		"смена родительской области — тоже замена проекции: гранты прежней области "+
@@ -259,14 +248,12 @@ func TestRegisterResource_ParentScopeMove_KeepsDeleteStalePath(t *testing.T) {
 func TestRegisterResource_Unregister_AlwaysKeepsDeleteStalePath(t *testing.T) {
 	uc, rec := newRouteRig()
 	ctx := context.Background()
-	v1 := time.Now()
-
 	require.NoError(t, uc.Register(ctx, &routeReq{object: "vpc_network:net-1",
 		project: "prj-1", account: "acc-1",
-		labels: map[string]string{"tier": "gold"}, version: v1}))
+		labels: map[string]string{"tier": "gold"}, generation: 1}))
 	require.NoError(t, uc.Unregister(ctx, &unregReq{
-		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
-		version: v1.Add(time.Second)}))
+		object:     "vpc_network:net-1",
+		generation: 2}))
 
 	assert.Equal(t, []string{"additive", "full-exclusive"}, rec.snapshotPasses(),
 		"снятие регистрации обязано идти удаляющим проходом — он и есть отзыв")
@@ -316,30 +303,29 @@ func (r *failingReconciler) ReconcileObjectForwardNoStale(context.Context, strin
 // иначе регресс, загоняющий каждую регистрацию обратно на EXCLUSIVE-пересчёт,
 // виден только как задержка, которую надо заметить.
 func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.T) {
-	inTx := time.Now()
-	base := func(v time.Time) *routeReq {
+	base := func(g int64) *routeReq {
 		return &routeReq{object: "vpc_network:net-1", project: "prj-1", account: "acc-1",
-			labels: map[string]string{"tier": "gold"}, version: v}
+			labels: map[string]string{"tier": "gold"}, generation: g}
 	}
 
 	t.Run("успешные запуски посчитаны, и метка называет выбранный путь", func(t *testing.T) {
 		rec := newGuardedReconciler()
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, noResidual{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(rec, nil).
 			WithMetrics(met)
 		ctx := context.Background()
 
-		require.NoError(t, uc.Register(ctx, base(inTx)))                           // создание
-		require.NoError(t, uc.Register(ctx, base(inTx.Add(3*time.Millisecond))))   // повторная доставка
+		require.NoError(t, uc.Register(ctx, base(1)))                              // создание
+		require.NoError(t, uc.Register(ctx, base(2)))                              // новое поколение, та же проекция
 		require.NoError(t, uc.Register(ctx, &routeReq{object: "vpc_network:net-1", // правка меток
 			project: "prj-1", account: "acc-1",
-			labels: map[string]string{"tier": "bronze"}, version: inTx.Add(time.Second)}))
+			labels: map[string]string{"tier": "bronze"}, generation: 3}))
 
 		assert.Equal(t, []string{
 			"forward_guarded/ok",  // создание: доказательства нет, страж на месте
-			"forward_additive/ok", // повторная доставка: проекция не заменена
+			"forward_additive/ok", // новое поколение: проекция не заменена
 			"forward_guarded/ok",  // правка: проекция заменена, нужен удаляющий проход
 		}, met.snapshot(),
 			"счётчик обязан фиксировать УСПЕШНЫЕ запуски и называть выбранный путь")
@@ -347,12 +333,12 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 
 	t.Run("отказ ускорителя посчитан, а не только залогирован", func(t *testing.T) {
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, noResidual{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(&failingReconciler{err: assertAnError}, nil).
 			WithMetrics(met)
 
-		require.NoError(t, uc.Register(context.Background(), base(inTx)),
+		require.NoError(t, uc.Register(context.Background(), base(1)),
 			"отказ ускорителя не проваливает регистрацию — ресурс уже durable")
 		assert.Equal(t, []string{"forward_guarded/error"}, met.snapshot(),
 			"отказ обязан быть посчитан: один WARN не делает мёртвый ускоритель заметным")

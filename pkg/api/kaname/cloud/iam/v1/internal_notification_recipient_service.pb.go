@@ -31,9 +31,16 @@
 // (`InternalNotificationGrantService/Revoke`, `/Restore`) остаются на «2».
 //
 // Исход по субъекту — в теле ответа, а не кодом: справочник не производит
-// `NOT_FOUND`, `ALREADY_EXISTS`, `FAILED_PRECONDITION`. Сбой чтения хранилища
-// kaname — `UNAVAILABLE` фиксированным текстом `notification recipient
-// directory temporarily unavailable`.
+// `NOT_FOUND` и `ALREADY_EXISTS`. Сбой чтения хранилища kaname — `UNAVAILABLE`
+// фиксированным текстом `notification recipient directory temporarily
+// unavailable`.
+//
+// Вопрос об аудитории версии события (Р30) — `ListEventAudience` и форма
+// `event` у `Resolve` — знает два отказа вызова кодом, а не исходом:
+// поколение объекта службой доступа ещё не применено — `UNAVAILABLE`
+// `ErrorInfo{reason: OBJECT_GENERATION_NOT_APPLIED}` (ждём, а не угадываем);
+// токен версии прав, не выданный этой службой (не форма снимка либо снимок
+// новее текущего), — `INVALID_ARGUMENT` с полем `authz_rev`.
 
 package iamv1
 
@@ -61,14 +68,17 @@ const (
 	// Не назван. Сервер его не отдаёт; читатель классифицирует как расхождение
 	// версий, а не как адрес.
 	RecipientOutcome_RECIPIENT_OUTCOME_UNSPECIFIED RecipientOutcome = 0
-	// Всё выполнено: `address` и `visible_refs` заполнены.
+	// Всё выполнено: `address` заполнен.
 	RecipientOutcome_RECIPIENT_OUTCOME_ADDRESS RecipientOutcome = 1
 	// Субъекта нет.
 	RecipientOutcome_RECIPIENT_OUTCOME_SUBJECT_NOT_FOUND RecipientOutcome = 2
 	// Пользователь не в состоянии `ACTIVE`.
 	RecipientOutcome_RECIPIENT_OUTCOME_SUBJECT_INACTIVE RecipientOutcome = 3
-	// Для `resource` — ни одна ссылка не видна; для `account_owner` — у
-	// аккаунта нет владельца-пользователя.
+	// Для `event` — субъекта нет в аудитории версии (права нет, право
+	// изменилось после `R_E`, право только уровня кластера без
+	// `via_subscription`, право только условное); для `account_reader` — у
+	// субъекта нет `v_get` на аккаунт; для `account_owner` — у аккаунта нет
+	// владельца-пользователя.
 	RecipientOutcome_RECIPIENT_OUTCOME_AUDIENCE_DENIED RecipientOutcome = 4
 	// Субъект — учётная запись службы, либо адрес не подтверждён.
 	RecipientOutcome_RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS RecipientOutcome = 5
@@ -121,34 +131,49 @@ func (RecipientOutcome) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{0}
 }
 
-// RecipientResourceRef — ссылка на ресурс, о котором письмо.
-type RecipientResourceRef struct {
+// RecipientEventFacts — факты объекта на момент события (Р3), переданные
+// вызывающим из строки `resource-event`. Отбор по меткам и цепи предков
+// судится по ним, а не по зеркалу службы доступа: к моменту вопроса зеркало
+// может нести более новое поколение. Принимает их только круг `notify`
+// (справочник — только `service:notify`, Р28).
+//
+// У `UPDATED` аудитория — объединение аудиторий поколений `g_E − 1` и `g_E`:
+// `previous_labels` и `previous_parent_chain` несут факты поколения
+// `g_E − 1`; у `CREATED` и `DELETED` они пусты (у `DELETED` текущие поля —
+// факты поколения `g_E − 1`, то есть объекта до снятия).
+type RecipientEventFacts struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Тип модели прав: вид пространства имён запроса либо `project`, `account`
-	// в любом пространстве. Иное — `INVALID_ARGUMENT`, поле
-	// `resource_refs[i].type`. Членство точное, без строкового префикса.
-	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	// Идентификатор ресурса. Пусто — `INVALID_ARGUMENT`
-	// `resource_refs[i].id: required`. Формат чужого id справочник не судит.
-	Id            string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Проект объекта; пусто у объекта вне проекта.
+	ProjectId string `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	// Аккаунт объекта.
+	AccountId string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// Метки объекта поколения события; набор, порядок не значим.
+	Labels map[string]string `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Цепь предков `<тип модели>:<id>` от ближайшего; объект `cluster` в цепи
+	// аудиторию не расширяет (права уровня кластера аудитории не образуют).
+	ParentChain []string `protobuf:"bytes,4,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
+	// Метки поколения `g_E − 1` (только у `UPDATED`); набор.
+	PreviousLabels map[string]string `protobuf:"bytes,5,rep,name=previous_labels,json=previousLabels,proto3" json:"previous_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Цепь предков поколения `g_E − 1` (только у `UPDATED`).
+	PreviousParentChain []string `protobuf:"bytes,6,rep,name=previous_parent_chain,json=previousParentChain,proto3" json:"previous_parent_chain,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
-func (x *RecipientResourceRef) Reset() {
-	*x = RecipientResourceRef{}
+func (x *RecipientEventFacts) Reset() {
+	*x = RecipientEventFacts{}
 	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RecipientResourceRef) String() string {
+func (x *RecipientEventFacts) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RecipientResourceRef) ProtoMessage() {}
+func (*RecipientEventFacts) ProtoMessage() {}
 
-func (x *RecipientResourceRef) ProtoReflect() protoreflect.Message {
+func (x *RecipientEventFacts) ProtoReflect() protoreflect.Message {
 	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -160,82 +185,140 @@ func (x *RecipientResourceRef) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RecipientResourceRef.ProtoReflect.Descriptor instead.
-func (*RecipientResourceRef) Descriptor() ([]byte, []int) {
+// Deprecated: Use RecipientEventFacts.ProtoReflect.Descriptor instead.
+func (*RecipientEventFacts) Descriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *RecipientResourceRef) GetType() string {
+func (x *RecipientEventFacts) GetProjectId() string {
 	if x != nil {
-		return x.Type
+		return x.ProjectId
 	}
 	return ""
 }
 
-func (x *RecipientResourceRef) GetId() string {
+func (x *RecipientEventFacts) GetAccountId() string {
 	if x != nil {
-		return x.Id
+		return x.AccountId
 	}
 	return ""
 }
 
-// RecipientResourceAudience — аудитория «субъект, которому видны ресурсы».
-type RecipientResourceAudience struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Ссылки одного типа, от 1 до 100. Ссылок 0 — `INVALID_ARGUMENT`
-	// `resource_refs: required`; больше 100 либо смесь типов —
-	// `INVALID_ARGUMENT`, поле `resource_refs`. Порядок значим: видимое
-	// подмножество в ответе — в порядке запроса.
-	ResourceRefs []*RecipientResourceRef `protobuf:"bytes,1,rep,name=resource_refs,json=resourceRefs,proto3" json:"resource_refs,omitempty"`
-	// Отношение — из закрытого набора `{v_get}` (corelib `notify/spec`). Иное —
-	// `INVALID_ARGUMENT`, поле `relation`.
-	Relation      string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RecipientResourceAudience) Reset() {
-	*x = RecipientResourceAudience{}
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RecipientResourceAudience) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RecipientResourceAudience) ProtoMessage() {}
-
-func (x *RecipientResourceAudience) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[1]
+func (x *RecipientEventFacts) GetLabels() map[string]string {
 	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RecipientResourceAudience.ProtoReflect.Descriptor instead.
-func (*RecipientResourceAudience) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *RecipientResourceAudience) GetResourceRefs() []*RecipientResourceRef {
-	if x != nil {
-		return x.ResourceRefs
+		return x.Labels
 	}
 	return nil
 }
 
-func (x *RecipientResourceAudience) GetRelation() string {
+func (x *RecipientEventFacts) GetParentChain() []string {
 	if x != nil {
-		return x.Relation
+		return x.ParentChain
+	}
+	return nil
+}
+
+func (x *RecipientEventFacts) GetPreviousLabels() map[string]string {
+	if x != nil {
+		return x.PreviousLabels
+	}
+	return nil
+}
+
+func (x *RecipientEventFacts) GetPreviousParentChain() []string {
+	if x != nil {
+		return x.PreviousParentChain
+	}
+	return nil
+}
+
+// RecipientEventAudience — аудитория «субъект входит в аудиторию версии
+// события» (Р30).
+type RecipientEventAudience struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Объект `<тип модели>:<id>`; тип — вид пространства имён запроса. Пусто —
+	// `INVALID_ARGUMENT` `audience.event.object: required`; иная форма либо
+	// тип — `INVALID_ARGUMENT` с полем `audience.event.object`.
+	Object string `protobuf:"bytes,1,opt,name=object,proto3" json:"object,omitempty"`
+	// Поколение объекта `g_E`. `0` — `INVALID_ARGUMENT`
+	// `audience.event.source_version: required`.
+	SourceVersion int64 `protobuf:"varint,2,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
+	// Токен версии прав `R_E` (`InternalIAMService/CurrentAuthzRevision`).
+	// Пусто — `INVALID_ARGUMENT` `audience.event.authz_rev: required`.
+	AuthzRev string `protobuf:"bytes,3,opt,name=authz_rev,json=authzRev,proto3" json:"authz_rev,omitempty"`
+	// Факты объекта на момент события.
+	Facts *RecipientEventFacts `protobuf:"bytes,4,opt,name=facts,proto3" json:"facts,omitempty"`
+	// Подписчик цели, которого нет в строках аудитории приёма (Р11): права
+	// уровня кластера учитываются ТОЛЬКО при этом признаке; подстановочные и
+	// условные права — ни при каком.
+	ViaSubscription bool `protobuf:"varint,5,opt,name=via_subscription,json=viaSubscription,proto3" json:"via_subscription,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RecipientEventAudience) Reset() {
+	*x = RecipientEventAudience{}
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecipientEventAudience) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecipientEventAudience) ProtoMessage() {}
+
+func (x *RecipientEventAudience) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecipientEventAudience.ProtoReflect.Descriptor instead.
+func (*RecipientEventAudience) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RecipientEventAudience) GetObject() string {
+	if x != nil {
+		return x.Object
 	}
 	return ""
+}
+
+func (x *RecipientEventAudience) GetSourceVersion() int64 {
+	if x != nil {
+		return x.SourceVersion
+	}
+	return 0
+}
+
+func (x *RecipientEventAudience) GetAuthzRev() string {
+	if x != nil {
+		return x.AuthzRev
+	}
+	return ""
+}
+
+func (x *RecipientEventAudience) GetFacts() *RecipientEventFacts {
+	if x != nil {
+		return x.Facts
+	}
+	return nil
+}
+
+func (x *RecipientEventAudience) GetViaSubscription() bool {
+	if x != nil {
+		return x.ViaSubscription
+	}
+	return false
 }
 
 // RecipientSelfAudience — адрес самого субъекта, без вопроса о ресурсе.
@@ -275,6 +358,54 @@ func (*RecipientSelfAudience) Descriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{2}
 }
 
+// RecipientAccountReaderAudience — субъект имеет `v_get` на `account:<id>`
+// (контакт безопасности, Р19, Р20). Не событие ресурса: ограды у вопроса нет.
+type RecipientAccountReaderAudience struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Аккаунт. Пусто — `INVALID_ARGUMENT`
+	// `audience.account_reader.account_id: required`.
+	AccountId     string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecipientAccountReaderAudience) Reset() {
+	*x = RecipientAccountReaderAudience{}
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecipientAccountReaderAudience) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecipientAccountReaderAudience) ProtoMessage() {}
+
+func (x *RecipientAccountReaderAudience) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecipientAccountReaderAudience.ProtoReflect.Descriptor instead.
+func (*RecipientAccountReaderAudience) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RecipientAccountReaderAudience) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
 // RecipientAccountOwnerAudience — адрес владельца аккаунта; субъект запроса
 // не передаётся.
 type RecipientAccountOwnerAudience struct {
@@ -289,7 +420,7 @@ type RecipientAccountOwnerAudience struct {
 
 func (x *RecipientAccountOwnerAudience) Reset() {
 	*x = RecipientAccountOwnerAudience{}
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[3]
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -301,7 +432,7 @@ func (x *RecipientAccountOwnerAudience) String() string {
 func (*RecipientAccountOwnerAudience) ProtoMessage() {}
 
 func (x *RecipientAccountOwnerAudience) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[3]
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -314,7 +445,7 @@ func (x *RecipientAccountOwnerAudience) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecipientAccountOwnerAudience.ProtoReflect.Descriptor instead.
 func (*RecipientAccountOwnerAudience) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{3}
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RecipientAccountOwnerAudience) GetAccountId() string {
@@ -331,17 +462,18 @@ type ResolveRecipientRequest struct {
 	// `namespace: required` при любой аудитории.
 	Namespace string `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Получатель, `user:<id>` либо `service_account:<id>`. Обязателен при
-	// `resource` и `self`: пусто либо без id после `:` — `INVALID_ARGUMENT`
-	// `subject: required`. При `account_owner` задан — `INVALID_ARGUMENT`
-	// `subject: must be empty for audience account_owner`.
+	// `event`, `self` и `account_reader`: пусто либо без id после `:` —
+	// `INVALID_ARGUMENT` `subject: required`. При `account_owner` задан —
+	// `INVALID_ARGUMENT` `subject: must be empty for audience account_owner`.
 	Subject string `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
-	// Аудитория — одна из трёх форм. Не задана — `INVALID_ARGUMENT`
+	// Аудитория — одна из четырёх форм. Не задана — `INVALID_ARGUMENT`
 	// `audience: required`.
 	//
 	// Types that are valid to be assigned to Audience:
 	//
-	//	*ResolveRecipientRequest_Resource
+	//	*ResolveRecipientRequest_Event
 	//	*ResolveRecipientRequest_Self
+	//	*ResolveRecipientRequest_AccountReader
 	//	*ResolveRecipientRequest_AccountOwner
 	Audience      isResolveRecipientRequest_Audience `protobuf_oneof:"audience"`
 	unknownFields protoimpl.UnknownFields
@@ -350,7 +482,7 @@ type ResolveRecipientRequest struct {
 
 func (x *ResolveRecipientRequest) Reset() {
 	*x = ResolveRecipientRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[4]
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +494,7 @@ func (x *ResolveRecipientRequest) String() string {
 func (*ResolveRecipientRequest) ProtoMessage() {}
 
 func (x *ResolveRecipientRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[4]
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +507,7 @@ func (x *ResolveRecipientRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveRecipientRequest.ProtoReflect.Descriptor instead.
 func (*ResolveRecipientRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{4}
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ResolveRecipientRequest) GetNamespace() string {
@@ -399,10 +531,10 @@ func (x *ResolveRecipientRequest) GetAudience() isResolveRecipientRequest_Audien
 	return nil
 }
 
-func (x *ResolveRecipientRequest) GetResource() *RecipientResourceAudience {
+func (x *ResolveRecipientRequest) GetEvent() *RecipientEventAudience {
 	if x != nil {
-		if x, ok := x.Audience.(*ResolveRecipientRequest_Resource); ok {
-			return x.Resource
+		if x, ok := x.Audience.(*ResolveRecipientRequest_Event); ok {
+			return x.Event
 		}
 	}
 	return nil
@@ -412,6 +544,15 @@ func (x *ResolveRecipientRequest) GetSelf() *RecipientSelfAudience {
 	if x != nil {
 		if x, ok := x.Audience.(*ResolveRecipientRequest_Self); ok {
 			return x.Self
+		}
+	}
+	return nil
+}
+
+func (x *ResolveRecipientRequest) GetAccountReader() *RecipientAccountReaderAudience {
+	if x != nil {
+		if x, ok := x.Audience.(*ResolveRecipientRequest_AccountReader); ok {
+			return x.AccountReader
 		}
 	}
 	return nil
@@ -430,42 +571,45 @@ type isResolveRecipientRequest_Audience interface {
 	isResolveRecipientRequest_Audience()
 }
 
-type ResolveRecipientRequest_Resource struct {
-	Resource *RecipientResourceAudience `protobuf:"bytes,3,opt,name=resource,proto3,oneof"`
+type ResolveRecipientRequest_Event struct {
+	Event *RecipientEventAudience `protobuf:"bytes,6,opt,name=event,proto3,oneof"`
 }
 
 type ResolveRecipientRequest_Self struct {
 	Self *RecipientSelfAudience `protobuf:"bytes,4,opt,name=self,proto3,oneof"`
 }
 
+type ResolveRecipientRequest_AccountReader struct {
+	AccountReader *RecipientAccountReaderAudience `protobuf:"bytes,7,opt,name=account_reader,json=accountReader,proto3,oneof"`
+}
+
 type ResolveRecipientRequest_AccountOwner struct {
 	AccountOwner *RecipientAccountOwnerAudience `protobuf:"bytes,5,opt,name=account_owner,json=accountOwner,proto3,oneof"`
 }
 
-func (*ResolveRecipientRequest_Resource) isResolveRecipientRequest_Audience() {}
+func (*ResolveRecipientRequest_Event) isResolveRecipientRequest_Audience() {}
 
 func (*ResolveRecipientRequest_Self) isResolveRecipientRequest_Audience() {}
 
+func (*ResolveRecipientRequest_AccountReader) isResolveRecipientRequest_Audience() {}
+
 func (*ResolveRecipientRequest_AccountOwner) isResolveRecipientRequest_Audience() {}
 
-// ResolveRecipientResponse — исход `Resolve`. Кроме исхода `ADDRESS` ни
-// адреса, ни ссылок ответ не несёт.
+// ResolveRecipientResponse — исход `Resolve`. Кроме исхода `ADDRESS` адреса
+// ответ не несёт.
 type ResolveRecipientResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Исход; см. `RecipientOutcome`.
 	Outcome RecipientOutcome `protobuf:"varint,1,opt,name=outcome,proto3,enum=kaname.cloud.iam.v1.RecipientOutcome" json:"outcome,omitempty"`
 	// Подтверждённый адрес; только при `ADDRESS`.
-	Address string `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	// Видимое получателю подмножество ссылок запроса, в порядке запроса; только
-	// при `ADDRESS` и аудитории `resource`, иначе пусто.
-	VisibleRefs   []*RecipientResourceRef `protobuf:"bytes,3,rep,name=visible_refs,json=visibleRefs,proto3" json:"visible_refs,omitempty"`
+	Address       string `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ResolveRecipientResponse) Reset() {
 	*x = ResolveRecipientResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -477,7 +621,7 @@ func (x *ResolveRecipientResponse) String() string {
 func (*ResolveRecipientResponse) ProtoMessage() {}
 
 func (x *ResolveRecipientResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -490,7 +634,7 @@ func (x *ResolveRecipientResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveRecipientResponse.ProtoReflect.Descriptor instead.
 func (*ResolveRecipientResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{5}
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ResolveRecipientResponse) GetOutcome() RecipientOutcome {
@@ -507,45 +651,43 @@ func (x *ResolveRecipientResponse) GetAddress() string {
 	return ""
 }
 
-func (x *ResolveRecipientResponse) GetVisibleRefs() []*RecipientResourceRef {
-	if x != nil {
-		return x.VisibleRefs
-	}
-	return nil
-}
-
-// ListProjectAudienceRequest — вход `ListProjectAudience`. Пагинация
-// проверяется первым шагом: `page_size` вне `[0..1000]` и мусорный
-// `page_token` — `INVALID_ARGUMENT` с именем поля, в том числе на пустом
-// результате.
-type ListProjectAudienceRequest struct {
+// ListEventAudienceRequest — вход `ListEventAudience`.
+type ListEventAudienceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Проект. Пусто — `INVALID_ARGUMENT` `project_id: required`; не по форме —
-	// `INVALID_ARGUMENT` `invalid project id '<X>'`.
-	ProjectId string `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	// Объект `<тип модели>:<id>`; тип — из типов опубликованных видов. Пусто —
+	// `INVALID_ARGUMENT` `object: required`; иная форма либо тип —
+	// `INVALID_ARGUMENT` с полем `object`.
+	Object string `protobuf:"bytes,1,opt,name=object,proto3" json:"object,omitempty"`
+	// Поколение объекта `g_E`. `0` — `INVALID_ARGUMENT`
+	// `source_version: required`.
+	SourceVersion int64 `protobuf:"varint,2,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
+	// Токен версии прав `R_E`. Пусто — `INVALID_ARGUMENT` `authz_rev: required`.
+	AuthzRev string `protobuf:"bytes,3,opt,name=authz_rev,json=authzRev,proto3" json:"authz_rev,omitempty"`
+	// Факты объекта на момент события.
+	Facts *RecipientEventFacts `protobuf:"bytes,4,opt,name=facts,proto3" json:"facts,omitempty"`
 	// Непрозрачный курсор; пусто — первая страница.
-	PageToken string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken string `protobuf:"bytes,5,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// 0 — умолчание 50, наибольшее 1000.
-	PageSize      int32 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageSize      int32 `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListProjectAudienceRequest) Reset() {
-	*x = ListProjectAudienceRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[6]
+func (x *ListEventAudienceRequest) Reset() {
+	*x = ListEventAudienceRequest{}
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListProjectAudienceRequest) String() string {
+func (x *ListEventAudienceRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListProjectAudienceRequest) ProtoMessage() {}
+func (*ListEventAudienceRequest) ProtoMessage() {}
 
-func (x *ListProjectAudienceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[6]
+func (x *ListEventAudienceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,34 +698,55 @@ func (x *ListProjectAudienceRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListProjectAudienceRequest.ProtoReflect.Descriptor instead.
-func (*ListProjectAudienceRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{6}
+// Deprecated: Use ListEventAudienceRequest.ProtoReflect.Descriptor instead.
+func (*ListEventAudienceRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ListProjectAudienceRequest) GetProjectId() string {
+func (x *ListEventAudienceRequest) GetObject() string {
 	if x != nil {
-		return x.ProjectId
+		return x.Object
 	}
 	return ""
 }
 
-func (x *ListProjectAudienceRequest) GetPageToken() string {
+func (x *ListEventAudienceRequest) GetSourceVersion() int64 {
+	if x != nil {
+		return x.SourceVersion
+	}
+	return 0
+}
+
+func (x *ListEventAudienceRequest) GetAuthzRev() string {
+	if x != nil {
+		return x.AuthzRev
+	}
+	return ""
+}
+
+func (x *ListEventAudienceRequest) GetFacts() *RecipientEventFacts {
+	if x != nil {
+		return x.Facts
+	}
+	return nil
+}
+
+func (x *ListEventAudienceRequest) GetPageToken() string {
 	if x != nil {
 		return x.PageToken
 	}
 	return ""
 }
 
-func (x *ListProjectAudienceRequest) GetPageSize() int32 {
+func (x *ListEventAudienceRequest) GetPageSize() int32 {
 	if x != nil {
 		return x.PageSize
 	}
 	return 0
 }
 
-// ListProjectAudienceResponse — страница субъектов.
-type ListProjectAudienceResponse struct {
+// ListEventAudienceResponse — страница аудитории.
+type ListEventAudienceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// `user:<id>`, по id пользователя по возрастанию; упорядоченный список.
 	Subjects []string `protobuf:"bytes,1,rep,name=subjects,proto3" json:"subjects,omitempty"`
@@ -593,21 +756,21 @@ type ListProjectAudienceResponse struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListProjectAudienceResponse) Reset() {
-	*x = ListProjectAudienceResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[7]
+func (x *ListEventAudienceResponse) Reset() {
+	*x = ListEventAudienceResponse{}
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListProjectAudienceResponse) String() string {
+func (x *ListEventAudienceResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListProjectAudienceResponse) ProtoMessage() {}
+func (*ListEventAudienceResponse) ProtoMessage() {}
 
-func (x *ListProjectAudienceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[7]
+func (x *ListEventAudienceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -618,19 +781,19 @@ func (x *ListProjectAudienceResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListProjectAudienceResponse.ProtoReflect.Descriptor instead.
-func (*ListProjectAudienceResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{7}
+// Deprecated: Use ListEventAudienceResponse.ProtoReflect.Descriptor instead.
+func (*ListEventAudienceResponse) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *ListProjectAudienceResponse) GetSubjects() []string {
+func (x *ListEventAudienceResponse) GetSubjects() []string {
 	if x != nil {
 		return x.Subjects
 	}
 	return nil
 }
 
-func (x *ListProjectAudienceResponse) GetNextPageToken() string {
+func (x *ListEventAudienceResponse) GetNextPageToken() string {
 	if x != nil {
 		return x.NextPageToken
 	}
@@ -641,36 +804,56 @@ var File_kaname_cloud_iam_v1_internal_notification_recipient_service_proto proto
 
 const file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDesc = "" +
 	"\n" +
-	"Akaname/cloud/iam/v1/internal_notification_recipient_service.proto\x12\x13kaname.cloud.iam.v1\x1a$corelib/authz/v1/authz_options.proto\":\n" +
-	"\x14RecipientResourceRef\x12\x12\n" +
-	"\x04type\x18\x01 \x01(\tR\x04type\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"\x87\x01\n" +
-	"\x19RecipientResourceAudience\x12N\n" +
-	"\rresource_refs\x18\x01 \x03(\v2).kaname.cloud.iam.v1.RecipientResourceRefR\fresourceRefs\x12\x1a\n" +
-	"\brelation\x18\x02 \x01(\tR\brelation\"\x17\n" +
-	"\x15RecipientSelfAudience\">\n" +
-	"\x1dRecipientAccountOwnerAudience\x12\x1d\n" +
-	"\n" +
-	"account_id\x18\x01 \x01(\tR\taccountId\"\xc8\x02\n" +
-	"\x17ResolveRecipientRequest\x12\x1c\n" +
-	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x18\n" +
-	"\asubject\x18\x02 \x01(\tR\asubject\x12L\n" +
-	"\bresource\x18\x03 \x01(\v2..kaname.cloud.iam.v1.RecipientResourceAudienceH\x00R\bresource\x12@\n" +
-	"\x04self\x18\x04 \x01(\v2*.kaname.cloud.iam.v1.RecipientSelfAudienceH\x00R\x04self\x12Y\n" +
-	"\raccount_owner\x18\x05 \x01(\v22.kaname.cloud.iam.v1.RecipientAccountOwnerAudienceH\x00R\faccountOwnerB\n" +
-	"\n" +
-	"\baudience\"\xc3\x01\n" +
-	"\x18ResolveRecipientResponse\x12?\n" +
-	"\aoutcome\x18\x01 \x01(\x0e2%.kaname.cloud.iam.v1.RecipientOutcomeR\aoutcome\x12\x18\n" +
-	"\aaddress\x18\x02 \x01(\tR\aaddress\x12L\n" +
-	"\fvisible_refs\x18\x03 \x03(\v2).kaname.cloud.iam.v1.RecipientResourceRefR\vvisibleRefs\"w\n" +
-	"\x1aListProjectAudienceRequest\x12\x1d\n" +
+	"Akaname/cloud/iam/v1/internal_notification_recipient_service.proto\x12\x13kaname.cloud.iam.v1\x1a$corelib/authz/v1/authz_options.proto\"\xdd\x03\n" +
+	"\x13RecipientEventFacts\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x02 \x01(\tR\tpageToken\x12\x1b\n" +
-	"\tpage_size\x18\x03 \x01(\x05R\bpageSize\"a\n" +
-	"\x1bListProjectAudienceResponse\x12\x1a\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\x12L\n" +
+	"\x06labels\x18\x03 \x03(\v24.kaname.cloud.iam.v1.RecipientEventFacts.LabelsEntryR\x06labels\x12!\n" +
+	"\fparent_chain\x18\x04 \x03(\tR\vparentChain\x12e\n" +
+	"\x0fprevious_labels\x18\x05 \x03(\v2<.kaname.cloud.iam.v1.RecipientEventFacts.PreviousLabelsEntryR\x0epreviousLabels\x122\n" +
+	"\x15previous_parent_chain\x18\x06 \x03(\tR\x13previousParentChain\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aA\n" +
+	"\x13PreviousLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdf\x01\n" +
+	"\x16RecipientEventAudience\x12\x16\n" +
+	"\x06object\x18\x01 \x01(\tR\x06object\x12%\n" +
+	"\x0esource_version\x18\x02 \x01(\x03R\rsourceVersion\x12\x1b\n" +
+	"\tauthz_rev\x18\x03 \x01(\tR\bauthzRev\x12>\n" +
+	"\x05facts\x18\x04 \x01(\v2(.kaname.cloud.iam.v1.RecipientEventFactsR\x05facts\x12)\n" +
+	"\x10via_subscription\x18\x05 \x01(\bR\x0fviaSubscription\"\x17\n" +
+	"\x15RecipientSelfAudience\"?\n" +
+	"\x1eRecipientAccountReaderAudience\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\">\n" +
+	"\x1dRecipientAccountOwnerAudience\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\"\xad\x03\n" +
+	"\x17ResolveRecipientRequest\x12\x1c\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x18\n" +
+	"\asubject\x18\x02 \x01(\tR\asubject\x12C\n" +
+	"\x05event\x18\x06 \x01(\v2+.kaname.cloud.iam.v1.RecipientEventAudienceH\x00R\x05event\x12@\n" +
+	"\x04self\x18\x04 \x01(\v2*.kaname.cloud.iam.v1.RecipientSelfAudienceH\x00R\x04self\x12\\\n" +
+	"\x0eaccount_reader\x18\a \x01(\v23.kaname.cloud.iam.v1.RecipientAccountReaderAudienceH\x00R\raccountReader\x12Y\n" +
+	"\raccount_owner\x18\x05 \x01(\v22.kaname.cloud.iam.v1.RecipientAccountOwnerAudienceH\x00R\faccountOwnerB\n" +
+	"\n" +
+	"\baudienceJ\x04\b\x03\x10\x04R\bresource\"\x89\x01\n" +
+	"\x18ResolveRecipientResponse\x12?\n" +
+	"\aoutcome\x18\x01 \x01(\x0e2%.kaname.cloud.iam.v1.RecipientOutcomeR\aoutcome\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddressJ\x04\b\x03\x10\x04R\fvisible_refs\"\xf2\x01\n" +
+	"\x18ListEventAudienceRequest\x12\x16\n" +
+	"\x06object\x18\x01 \x01(\tR\x06object\x12%\n" +
+	"\x0esource_version\x18\x02 \x01(\x03R\rsourceVersion\x12\x1b\n" +
+	"\tauthz_rev\x18\x03 \x01(\tR\bauthzRev\x12>\n" +
+	"\x05facts\x18\x04 \x01(\v2(.kaname.cloud.iam.v1.RecipientEventFactsR\x05facts\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x05 \x01(\tR\tpageToken\x12\x1b\n" +
+	"\tpage_size\x18\x06 \x01(\x05R\bpageSize\"_\n" +
+	"\x19ListEventAudienceResponse\x12\x1a\n" +
 	"\bsubjects\x18\x01 \x03(\tR\bsubjects\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken*\xf8\x01\n" +
 	"\x10RecipientOutcome\x12!\n" +
@@ -679,11 +862,11 @@ const file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_raw
 	"#RECIPIENT_OUTCOME_SUBJECT_NOT_FOUND\x10\x02\x12&\n" +
 	"\"RECIPIENT_OUTCOME_SUBJECT_INACTIVE\x10\x03\x12%\n" +
 	"!RECIPIENT_OUTCOME_AUDIENCE_DENIED\x10\x04\x12*\n" +
-	"&RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS\x10\x052\xd8\x03\n" +
+	"&RECIPIENT_OUTCOME_NO_CONFIRMED_ADDRESS\x10\x052\xd0\x03\n" +
 	"$InternalNotificationRecipientService\x12\xc7\x01\n" +
 	"\aResolve\x12,.kaname.cloud.iam.v1.ResolveRecipientRequest\x1a-.kaname.cloud.iam.v1.ResolveRecipientResponse\"_\x8a\xb5\x18#iam.notification_recipients.resolve\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
-	" notification_recipient_directory\x12\x01*\xa2\xb5\x18\x011\x12\xe5\x01\n" +
-	"\x13ListProjectAudience\x12/.kaname.cloud.iam.v1.ListProjectAudienceRequest\x1a0.kaname.cloud.iam.v1.ListProjectAudienceResponse\"k\x8a\xb5\x18/iam.notification_recipients.listProjectAudience\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
+	" notification_recipient_directory\x12\x01*\xa2\xb5\x18\x011\x12\xdd\x01\n" +
+	"\x11ListEventAudience\x12-.kaname.cloud.iam.v1.ListEventAudienceRequest\x1a..kaname.cloud.iam.v1.ListEventAudienceResponse\"i\x8a\xb5\x18-iam.notification_recipients.listEventAudience\x92\xb5\x18\x06reader\x9a\xb5\x18%\n" +
 	" notification_recipient_directory\x12\x01*\xa2\xb5\x18\x011BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
@@ -699,34 +882,40 @@ func file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawD
 }
 
 var file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_goTypes = []any{
-	(RecipientOutcome)(0),                 // 0: kaname.cloud.iam.v1.RecipientOutcome
-	(*RecipientResourceRef)(nil),          // 1: kaname.cloud.iam.v1.RecipientResourceRef
-	(*RecipientResourceAudience)(nil),     // 2: kaname.cloud.iam.v1.RecipientResourceAudience
-	(*RecipientSelfAudience)(nil),         // 3: kaname.cloud.iam.v1.RecipientSelfAudience
-	(*RecipientAccountOwnerAudience)(nil), // 4: kaname.cloud.iam.v1.RecipientAccountOwnerAudience
-	(*ResolveRecipientRequest)(nil),       // 5: kaname.cloud.iam.v1.ResolveRecipientRequest
-	(*ResolveRecipientResponse)(nil),      // 6: kaname.cloud.iam.v1.ResolveRecipientResponse
-	(*ListProjectAudienceRequest)(nil),    // 7: kaname.cloud.iam.v1.ListProjectAudienceRequest
-	(*ListProjectAudienceResponse)(nil),   // 8: kaname.cloud.iam.v1.ListProjectAudienceResponse
+	(RecipientOutcome)(0),                  // 0: kaname.cloud.iam.v1.RecipientOutcome
+	(*RecipientEventFacts)(nil),            // 1: kaname.cloud.iam.v1.RecipientEventFacts
+	(*RecipientEventAudience)(nil),         // 2: kaname.cloud.iam.v1.RecipientEventAudience
+	(*RecipientSelfAudience)(nil),          // 3: kaname.cloud.iam.v1.RecipientSelfAudience
+	(*RecipientAccountReaderAudience)(nil), // 4: kaname.cloud.iam.v1.RecipientAccountReaderAudience
+	(*RecipientAccountOwnerAudience)(nil),  // 5: kaname.cloud.iam.v1.RecipientAccountOwnerAudience
+	(*ResolveRecipientRequest)(nil),        // 6: kaname.cloud.iam.v1.ResolveRecipientRequest
+	(*ResolveRecipientResponse)(nil),       // 7: kaname.cloud.iam.v1.ResolveRecipientResponse
+	(*ListEventAudienceRequest)(nil),       // 8: kaname.cloud.iam.v1.ListEventAudienceRequest
+	(*ListEventAudienceResponse)(nil),      // 9: kaname.cloud.iam.v1.ListEventAudienceResponse
+	nil,                                    // 10: kaname.cloud.iam.v1.RecipientEventFacts.LabelsEntry
+	nil,                                    // 11: kaname.cloud.iam.v1.RecipientEventFacts.PreviousLabelsEntry
 }
 var file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_depIdxs = []int32{
-	1, // 0: kaname.cloud.iam.v1.RecipientResourceAudience.resource_refs:type_name -> kaname.cloud.iam.v1.RecipientResourceRef
-	2, // 1: kaname.cloud.iam.v1.ResolveRecipientRequest.resource:type_name -> kaname.cloud.iam.v1.RecipientResourceAudience
-	3, // 2: kaname.cloud.iam.v1.ResolveRecipientRequest.self:type_name -> kaname.cloud.iam.v1.RecipientSelfAudience
-	4, // 3: kaname.cloud.iam.v1.ResolveRecipientRequest.account_owner:type_name -> kaname.cloud.iam.v1.RecipientAccountOwnerAudience
-	0, // 4: kaname.cloud.iam.v1.ResolveRecipientResponse.outcome:type_name -> kaname.cloud.iam.v1.RecipientOutcome
-	1, // 5: kaname.cloud.iam.v1.ResolveRecipientResponse.visible_refs:type_name -> kaname.cloud.iam.v1.RecipientResourceRef
-	5, // 6: kaname.cloud.iam.v1.InternalNotificationRecipientService.Resolve:input_type -> kaname.cloud.iam.v1.ResolveRecipientRequest
-	7, // 7: kaname.cloud.iam.v1.InternalNotificationRecipientService.ListProjectAudience:input_type -> kaname.cloud.iam.v1.ListProjectAudienceRequest
-	6, // 8: kaname.cloud.iam.v1.InternalNotificationRecipientService.Resolve:output_type -> kaname.cloud.iam.v1.ResolveRecipientResponse
-	8, // 9: kaname.cloud.iam.v1.InternalNotificationRecipientService.ListProjectAudience:output_type -> kaname.cloud.iam.v1.ListProjectAudienceResponse
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	10, // 0: kaname.cloud.iam.v1.RecipientEventFacts.labels:type_name -> kaname.cloud.iam.v1.RecipientEventFacts.LabelsEntry
+	11, // 1: kaname.cloud.iam.v1.RecipientEventFacts.previous_labels:type_name -> kaname.cloud.iam.v1.RecipientEventFacts.PreviousLabelsEntry
+	1,  // 2: kaname.cloud.iam.v1.RecipientEventAudience.facts:type_name -> kaname.cloud.iam.v1.RecipientEventFacts
+	2,  // 3: kaname.cloud.iam.v1.ResolveRecipientRequest.event:type_name -> kaname.cloud.iam.v1.RecipientEventAudience
+	3,  // 4: kaname.cloud.iam.v1.ResolveRecipientRequest.self:type_name -> kaname.cloud.iam.v1.RecipientSelfAudience
+	4,  // 5: kaname.cloud.iam.v1.ResolveRecipientRequest.account_reader:type_name -> kaname.cloud.iam.v1.RecipientAccountReaderAudience
+	5,  // 6: kaname.cloud.iam.v1.ResolveRecipientRequest.account_owner:type_name -> kaname.cloud.iam.v1.RecipientAccountOwnerAudience
+	0,  // 7: kaname.cloud.iam.v1.ResolveRecipientResponse.outcome:type_name -> kaname.cloud.iam.v1.RecipientOutcome
+	1,  // 8: kaname.cloud.iam.v1.ListEventAudienceRequest.facts:type_name -> kaname.cloud.iam.v1.RecipientEventFacts
+	6,  // 9: kaname.cloud.iam.v1.InternalNotificationRecipientService.Resolve:input_type -> kaname.cloud.iam.v1.ResolveRecipientRequest
+	8,  // 10: kaname.cloud.iam.v1.InternalNotificationRecipientService.ListEventAudience:input_type -> kaname.cloud.iam.v1.ListEventAudienceRequest
+	7,  // 11: kaname.cloud.iam.v1.InternalNotificationRecipientService.Resolve:output_type -> kaname.cloud.iam.v1.ResolveRecipientResponse
+	9,  // 12: kaname.cloud.iam.v1.InternalNotificationRecipientService.ListEventAudience:output_type -> kaname.cloud.iam.v1.ListEventAudienceResponse
+	11, // [11:13] is the sub-list for method output_type
+	9,  // [9:11] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_init() }
@@ -734,9 +923,10 @@ func file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_init
 	if File_kaname_cloud_iam_v1_internal_notification_recipient_service_proto != nil {
 		return
 	}
-	file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[4].OneofWrappers = []any{
-		(*ResolveRecipientRequest_Resource)(nil),
+	file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_msgTypes[5].OneofWrappers = []any{
+		(*ResolveRecipientRequest_Event)(nil),
 		(*ResolveRecipientRequest_Self)(nil),
+		(*ResolveRecipientRequest_AccountReader)(nil),
 		(*ResolveRecipientRequest_AccountOwner)(nil),
 	}
 	type x struct{}
@@ -745,7 +935,7 @@ func file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_init
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_internal_notification_recipient_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

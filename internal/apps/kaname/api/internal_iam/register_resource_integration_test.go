@@ -9,7 +9,7 @@
 //   - A-02 idempotent register: re-issue same tuple → OK (вторая строка журнала;
 //     схлопывает их ПРОЕКЦИЯ — триггер `relation_fact_from_journal` пишет прямой
 //     факт через ON CONFLICT, поэтому два намерения дают один факт);
-//   - A-03 unregister: enqueues fga.tuple.delete;
+//   - A-03 unregister: enqueues fga.tuple.delete for the tuple standing on the object;
 //   - A-04 idempotent unregister: missing tuple → OK (no NotFound);
 //   - A-05 invalid args: empty subject/relation/object + malformed object →
 //     sync InvalidArgument, NO outbox row.
@@ -63,6 +63,7 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	)
 	return uc, &outboxProbe{pool: pool}
 }
@@ -78,9 +79,9 @@ func TestRegisterResource_A01_EnqueuesWriteTupleInTx(t *testing.T) {
 	const obj = "vpc_network:enp00000000000000001"
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1",
-		Relation:  "parent",
-		Object:    obj,
+		Tuples:     []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}},
+		Object:     obj,
+		Generation: 1,
 	})
 	require.NoError(t, err)
 
@@ -107,18 +108,19 @@ func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
 
 	const obj = "vpc_network:enp00000000000000001"
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: obj,
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Object: obj,
+		Generation: 1,
 	}
 	err := uc.Register(ctx, req)
 	require.NoError(t, err)
 	err = uc.Register(ctx, req) // repeat — must be OK, never AlreadyExists.
 	require.NoError(t, err, "repeat register must be OK, not AlreadyExists (idempotency contract)")
 
-	// Two write rows enqueued; схлопывает их ПРОЕКЦИЯ (триггер журнала пишет прямой
-	// факт через ON CONFLICT), а не применитель дренажа — его не существует.
-	// The RPC never surfaces AlreadyExists.
+	// One write row: the repeat carries the SAME generation, which is not newer than
+	// the object's head — REJECTED_STALE, nothing written, and the call still answers
+	// OK. The RPC never surfaces AlreadyExists.
 	n, _, _ := h.lastOutbox(t, ctx, obj)
-	require.Equal(t, 2, n)
+	require.Equal(t, 1, n)
 }
 
 func TestRegisterResource_A03_UnregisterEnqueuesDeleteTuple(t *testing.T) {
@@ -130,14 +132,24 @@ func TestRegisterResource_A03_UnregisterEnqueuesDeleteTuple(t *testing.T) {
 
 	const obj = "vpc_network:enp00000000000000001"
 
+	// Снятие адресуется объектом и уносит то, что на нём стоит: регистрация
+	// поколения 1 кладёт кортеж, снятие поколения 2 — строку его снятия.
+	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+		Object:     obj,
+		Tuples:     []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}},
+		Generation: 1,
+	}))
 	err := uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: obj,
+		Object:     obj,
+		Generation: 2,
 	})
 	require.NoError(t, err)
 
-	n, et, _ := h.lastOutbox(t, ctx, obj)
-	require.Equal(t, 1, n)
+	n, et, payload := h.lastOutbox(t, ctx, obj)
+	require.Equal(t, 2, n, "строка регистрации и строка снятия")
 	require.Equal(t, "fga.tuple.delete", et)
+	require.Equal(t, "project:prj-1", payload["user"], "снятие называет кортеж, стоявший на объекте")
+	require.Equal(t, "parent", payload["relation"])
 }
 
 func TestRegisterResource_A04_IdempotentUnregister(t *testing.T) {
@@ -149,7 +161,8 @@ func TestRegisterResource_A04_IdempotentUnregister(t *testing.T) {
 
 	// Tuple never registered — unregister must be OK, never NotFound.
 	err := uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp99999999999999999",
+		Object:     "vpc_network:enp99999999999999999",
+		Generation: 2,
 	})
 	require.NoError(t, err, "unregister of absent tuple must be OK, not NotFound")
 }
@@ -165,11 +178,12 @@ func TestRegisterResource_A05_InvalidArgsNoOutbox(t *testing.T) {
 		name string
 		req  *iamv1.RegisterResourceRequest
 	}{
-		{"empty subject_id", &iamv1.RegisterResourceRequest{Relation: "parent", Object: "vpc_network:enp1"}},
-		{"empty relation", &iamv1.RegisterResourceRequest{SubjectId: "project:prj-1", Object: "vpc_network:enp1"}},
-		{"empty object", &iamv1.RegisterResourceRequest{SubjectId: "project:prj-1", Relation: "parent"}},
-		{"object with space", &iamv1.RegisterResourceRequest{SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp 1"}},
-		{"object missing colon", &iamv1.RegisterResourceRequest{SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network"}},
+		{"empty subject_id", &iamv1.RegisterResourceRequest{Tuples: []*iamv1.RegisteredTuple{{Relation: "parent"}}, Object: "vpc_network:enp1", Generation: 1}},
+		{"empty relation", &iamv1.RegisterResourceRequest{Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1"}}, Object: "vpc_network:enp1", Generation: 1}},
+		{"empty tuples", &iamv1.RegisterResourceRequest{Object: "vpc_network:enp1", Generation: 1}},
+		{"empty object", &iamv1.RegisterResourceRequest{Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Generation: 1}},
+		{"object with space", &iamv1.RegisterResourceRequest{Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Object: "vpc_network:enp 1", Generation: 1}},
+		{"object missing colon", &iamv1.RegisterResourceRequest{Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1", Relation: "parent"}}, Object: "vpc_network", Generation: 1}},
 	}
 	// Область отбора ВЫВОДИТСЯ из тех же запросов, что уходят в use-case, —
 	// её нельзя забыть обновить при правке случая.

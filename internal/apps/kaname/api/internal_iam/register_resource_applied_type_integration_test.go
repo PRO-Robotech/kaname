@@ -78,6 +78,7 @@ func newRegisterUCApplied(t *testing.T) (*internaliam.RegisterResourceUseCase, *
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	)
 	return uc, pool
 }
@@ -128,10 +129,10 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	// «путь регистрации не работает вовсе».
 	const liveObj = "compute_instance:inst-live-1990"
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1990", Relation: "parent"}},
 		Object:          liveObj,
 		ParentProjectId: "prj-1990",
+		Generation:      1,
 	}), "живой сосед не зарегистрировался — путь регистрации сломан, о предмете пробы вердикта нет")
 	require.Equal(t, 1, mirrorRowCount(t, ctx, pool, "compute.instance", "inst-live-1990"),
 		"живой сосед не лёг в зеркало точечным именем")
@@ -140,10 +141,10 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	seedAppliedType(t, ctx, pool)
 	const appliedObj = appliedType + ":obj-1990"
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1990", Relation: "parent"}},
 		Object:          appliedObj,
 		ParentProjectId: "prj-1990",
+		Generation:      1,
 	})
 	require.NoError(t, err,
 		"регистрация объекта типа, заведённого ПРИМЕНЕНИЕМ, отвергнута: строки зеркала нет, "+
@@ -173,19 +174,18 @@ func TestUnregisterResource_AppliedTypeLeavesNoMirrorRow(t *testing.T) {
 
 	const objID = "obj-1990-teardown"
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-1990", Relation: "parent"}},
 		Object:          appliedType + ":" + objID,
 		ParentProjectId: "prj-1990",
+		Generation:      1,
 	}
 	require.NoError(t, uc.Register(ctx, req))
 	require.Equal(t, 1, mirrorRowCount(t, ctx, pool, appliedDotted, objID),
 		"условие сценария не создано: снимать нечего")
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: req.SubjectId,
-		Relation:  req.Relation,
-		Object:    req.Object,
+		Object:     req.Object,
+		Generation: 2,
 	}))
 	require.Equal(t, 0, mirrorRowCount(t, ctx, pool, appliedDotted, objID),
 		"снятие не убрало строку зеркала: объект, объявленный снятым, продолжает отбираться правилом")

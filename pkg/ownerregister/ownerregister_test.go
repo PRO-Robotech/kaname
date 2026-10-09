@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -41,26 +40,29 @@ func (r *recordingRPC) RegisterResource(ctx context.Context, in *iamv1.RegisterR
 	return &iamv1.RegisterResourceResponse{}, nil
 }
 
-func reg(object string, v time.Time) ownerregister.Registration {
+func reg(object string, g int64) ownerregister.Registration {
 	return ownerregister.Registration{
-		Tuple:           ownerregister.Tuple{SubjectID: "project:prj-1", Relation: "project", Object: object},
+		Object: object,
+		Tuples: []ownerregister.Tuple{
+			{SubjectID: "project:prj-1", Relation: "project"},
+			{SubjectID: "user:usr-1", Relation: "owner"},
+		},
 		TraceID:         "res-1",
 		Labels:          map[string]string{"env": "prod"},
 		ParentProjectID: "prj-1",
 		ParentAccountID: "acc-1",
-		SourceVersion:   v,
+		Generation:      g,
 	}
 }
 
-// TestVersionFromWriterTxIsForwardedVerbatim — маркер, проштампованный БД внутри
+// TestGenerationFromWriterTxIsForwardedVerbatim — поколение, проставленное в
 // writer-транзакции, доезжает до владельца прав БЕЗ ИЗМЕНЕНИЙ.
 //
-// Это и есть предмет всей унификации: обе доставки одной строки обязаны нести
-// одно значение, иначе гашение редоставки у принимающей стороны зависит от
-// того, кто выиграл гонку. Утверждается РАВЕНСТВО отправленного исходному, а не
-// «версия не пуста»: «не пуста» зеленеет и на часах момента доставки.
-func TestVersionFromWriterTxIsForwardedVerbatim(t *testing.T) {
-	stamp := time.Date(2026, 8, 10, 12, 0, 0, 123456000, time.UTC)
+// Обе доставки одной строки обязаны нести одно значение — иначе гашение
+// редоставки у принимающей стороны зависит от того, кто выиграл гонку.
+// Утверждается РАВЕНСТВО отправленного исходному, а не «поколение не пусто».
+func TestGenerationFromWriterTxIsForwardedVerbatim(t *testing.T) {
+	const stamp int64 = 41
 	rpc := &recordingRPC{}
 	r, err := ownerregister.New(rpc)
 	if err != nil {
@@ -72,13 +74,14 @@ func TestVersionFromWriterTxIsForwardedVerbatim(t *testing.T) {
 	if len(rpc.got) != 1 {
 		t.Fatalf("доставок %d, ждали 1", len(rpc.got))
 	}
-	if gotV := rpc.got[0].GetSourceVersion().AsTime(); !gotV.Equal(stamp) {
-		t.Fatalf("версия изменилась в пути: отправлено %s, штамп writer-транзакции %s", gotV, stamp)
+	if gotG := rpc.got[0].GetGeneration(); gotG != stamp {
+		t.Fatalf("поколение изменилось в пути: отправлено %d, проставлено writer-транзакцией %d", gotG, stamp)
 	}
 }
 
 // TestEveryFieldOfTheMirrorFeedIsForwarded — форвардится ВЕСЬ набор полей
-// зеркала, включая TraceID и ParentAccountID.
+// зеркала, включая TraceID и ParentAccountID, и ВЕСЬ набор кортежей события —
+// одним вызовом (приёмка NTF-3, Р30 «Единица поколения — событие»).
 //
 // Их недосылали три регистратора из пяти. Недосланное поле не роняет ничего
 // сразу — оно молча обедняет зеркало владельца прав, а по зеркалу резолвится
@@ -86,15 +89,24 @@ func TestVersionFromWriterTxIsForwardedVerbatim(t *testing.T) {
 func TestEveryFieldOfTheMirrorFeedIsForwarded(t *testing.T) {
 	rpc := &recordingRPC{}
 	r, _ := ownerregister.New(rpc)
-	in := reg("nlb_load_balancer:lb-1", time.Unix(1, 0).UTC())
+	in := reg("nlb_load_balancer:lb-1", 1)
 	if err := r.Register(context.Background(), []ownerregister.Registration{in}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+	if len(rpc.got) != 1 {
+		t.Fatalf("событие ушло %d вызовами, ждали один — кортежи одного поколения по отдельности теряются", len(rpc.got))
+	}
 	got := rpc.got[0]
+	if len(got.GetTuples()) != len(in.Tuples) {
+		t.Fatalf("кортежей события в пути %d, отправлено %d", len(got.GetTuples()), len(in.Tuples))
+	}
+	for i, tp := range in.Tuples {
+		if g := got.GetTuples()[i]; g.GetSubjectId() != tp.SubjectID || g.GetRelation() != tp.Relation {
+			t.Fatalf("кортеж %d события изменился в пути: %s#%s, ждали %s#%s", i, g.GetSubjectId(), g.GetRelation(), tp.SubjectID, tp.Relation)
+		}
+	}
 	for _, c := range []struct{ name, want, have string }{
-		{"SubjectId", in.Tuple.SubjectID, got.GetSubjectId()},
-		{"Relation", in.Tuple.Relation, got.GetRelation()},
-		{"Object", in.Tuple.Object, got.GetObject()},
+		{"Object", in.Object, got.GetObject()},
 		{"TraceId", in.TraceID, got.GetTraceId()},
 		{"ParentProjectId", in.ParentProjectID, got.GetParentProjectId()},
 		{"ParentAccountId", in.ParentAccountID, got.GetParentAccountId()},
@@ -108,17 +120,16 @@ func TestEveryFieldOfTheMirrorFeedIsForwarded(t *testing.T) {
 	}
 }
 
-// TestUnversionedRegistrationIsRefusedAndNotSent — регистрация без маркера
-// версии НЕ отправляется и отказ называет объект.
+// TestUnversionedRegistrationIsRefusedAndNotSent — регистрация без поколения НЕ
+// отправляется и отказ называет объект.
 //
-// Отправить её было бы «корректно, но тихо дорого»: у принимающей стороны нет
-// доказательства редоставки, она открывается в сторону работы, и сервис платит
-// за обе доставки на каждом создании — навсегда и молча. Непротащенный маркер
-// есть ошибка программиста, и она обязана быть слышна.
+// Принимающая сторона приёма без поколения не имеет и ответила бы отказом,
+// который дренаж повторял бы вечно. Непротащенное поколение есть ошибка
+// программиста, и она обязана быть слышна здесь, до провода.
 func TestUnversionedRegistrationIsRefusedAndNotSent(t *testing.T) {
 	rpc := &recordingRPC{}
 	r, _ := ownerregister.New(rpc)
-	err := r.Register(context.Background(), []ownerregister.Registration{reg("storage_volume:vol-1", time.Time{})})
+	err := r.Register(context.Background(), []ownerregister.Registration{reg("storage_volume:vol-1", 0)})
 	if !errors.Is(err, ownerregister.ErrUnversioned) {
 		t.Fatalf("регистрация без версии принята: %v", err)
 	}
@@ -139,8 +150,8 @@ func TestNilClientRefusesInsteadOfSilentlyDoingNothing(t *testing.T) {
 	}
 }
 
-// TestFailureOnOneTupleDoesNotAbandonTheRest — отказ на одной строке НЕ
-// прекращает набор: пробуются все, отказы объединяются.
+// TestFailureOnOneTupleDoesNotAbandonTheRest — отказ на одном событии НЕ
+// прекращает набор событий: пробуются все, отказы объединяются.
 //
 // Положительная половина утверждения обязательна: без неё «все отвергнуты»
 // зеленело бы на полностью мёртвом регистраторе. Поэтому здесь сразу два факта
@@ -150,10 +161,9 @@ func TestFailureOnOneTupleDoesNotAbandonTheRest(t *testing.T) {
 	rpc := &recordingRPC{errs: []error{boom}}
 	r, _ := ownerregister.New(rpc)
 
-	v := time.Unix(2, 0).UTC()
 	err := r.Register(context.Background(), []ownerregister.Registration{
-		reg("registry_registry:reg-1", v),
-		reg("registry_repository:reg-1/app", v.Add(time.Microsecond)),
+		reg("registry_registry:reg-1", 2),
+		reg("registry_repository:reg-1/app", 2),
 	})
 
 	if len(rpc.got) != 2 {
@@ -175,7 +185,7 @@ func TestErrorIsSurfacedNotClassifiedAway(t *testing.T) {
 	denied := status.Error(codes.PermissionDenied, "least-priv отказал")
 	rpc := &recordingRPC{errs: []error{denied}}
 	r, _ := ownerregister.New(rpc)
-	err := r.Register(context.Background(), []ownerregister.Registration{reg("compute_instance:ins-1", time.Unix(3, 0).UTC())})
+	err := r.Register(context.Background(), []ownerregister.Registration{reg("compute_instance:ins-1", 3)})
 	if err == nil {
 		t.Fatal("терминальный отказ в правах проглочен — о нерегистрируемом ресурсе не узнает никто")
 	}

@@ -31,9 +31,16 @@
 // (`InternalNotificationGrantService/Revoke`, `/Restore`) остаются на «2».
 //
 // Исход по субъекту — в теле ответа, а не кодом: справочник не производит
-// `NOT_FOUND`, `ALREADY_EXISTS`, `FAILED_PRECONDITION`. Сбой чтения хранилища
-// kaname — `UNAVAILABLE` фиксированным текстом `notification recipient
-// directory temporarily unavailable`.
+// `NOT_FOUND` и `ALREADY_EXISTS`. Сбой чтения хранилища kaname — `UNAVAILABLE`
+// фиксированным текстом `notification recipient directory temporarily
+// unavailable`.
+//
+// Вопрос об аудитории версии события (Р30) — `ListEventAudience` и форма
+// `event` у `Resolve` — знает два отказа вызова кодом, а не исходом:
+// поколение объекта службой доступа ещё не применено — `UNAVAILABLE`
+// `ErrorInfo{reason: OBJECT_GENERATION_NOT_APPLIED}` (ждём, а не угадываем);
+// токен версии прав, не выданный этой службой (не форма снимка либо снимок
+// новее текущего), — `INVALID_ARGUMENT` с полем `authz_rev`.
 
 package iamv1
 
@@ -50,8 +57,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InternalNotificationRecipientService_Resolve_FullMethodName             = "/kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve"
-	InternalNotificationRecipientService_ListProjectAudience_FullMethodName = "/kaname.cloud.iam.v1.InternalNotificationRecipientService/ListProjectAudience"
+	InternalNotificationRecipientService_Resolve_FullMethodName           = "/kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve"
+	InternalNotificationRecipientService_ListEventAudience_FullMethodName = "/kaname.cloud.iam.v1.InternalNotificationRecipientService/ListEventAudience"
 )
 
 // InternalNotificationRecipientServiceClient is the client API for InternalNotificationRecipientService service.
@@ -65,20 +72,26 @@ type InternalNotificationRecipientServiceClient interface {
 	//
 	// Проверка входа — синхронно, в порядке: (1) обязательность (`<field>:
 	// required`); (2) `subject` при `account_owner` — `subject: must be empty
-	// for audience account_owner`; (3) тип ссылки, отношение, число ссылок и
-	// смесь типов. Вопрос к модели о праве получателя задаётся только после
-	// проверки входа целиком.
+	// for audience account_owner`; (3) форма и тип объекта `event`, форма
+	// токена `authz_rev`. Вопрос об аудитории задаётся только после проверки
+	// входа целиком.
 	Resolve(ctx context.Context, in *ResolveRecipientRequest, opts ...grpc.CallOption) (*ResolveRecipientResponse, error)
-	// ListProjectAudience — субъекты `user:<id>` с действующей (не отозванной,
-	// не истёкшей) привязкой с субъектом-пользователем на `project:<id>`.
-	// Группы не раскрываются, привязки аккаунта не входят, адресов в ответе нет.
+	// ListEventAudience — субъекты `user:<id>` аудитории версии события (Р30):
+	// поколение `source_version` объекта `object`, ограда токена `authz_rev`,
+	// отбор по меткам и цепи предков — по фактам события `facts`. Права уровня
+	// кластера, подстановочные и условные права, сервисные аккаунты и
+	// служебные субъекты в перечень не входят; группы раскрыты в членов;
+	// адресов в ответе нет.
 	//
 	// Порядок — по id пользователя по возрастанию; курсор — позиция последнего
 	// выданного id. Отступление от курсора `(created_at, id)` названо: элемент
-	// выдачи — пользователь, выведенный из одной или нескольких привязок, своего
-	// `created_at` у него нет, и пользователь с двумя привязками под курсором
-	// привязки выдавался бы дважды.
-	ListProjectAudience(ctx context.Context, in *ListProjectAudienceRequest, opts ...grpc.CallOption) (*ListProjectAudienceResponse, error)
+	// выдачи — пользователь аудитории, своего `created_at` у него нет.
+	//
+	// Пагинация проверяется первым шагом (`page_size` вне `[0..1000]`, мусорный
+	// `page_token` — `INVALID_ARGUMENT` с именем поля, в том числе на
+	// непримененном поколении); затем обязательность `object`,
+	// `source_version`, `authz_rev`; затем форма и тип `object` и форма токена.
+	ListEventAudience(ctx context.Context, in *ListEventAudienceRequest, opts ...grpc.CallOption) (*ListEventAudienceResponse, error)
 }
 
 type internalNotificationRecipientServiceClient struct {
@@ -99,10 +112,10 @@ func (c *internalNotificationRecipientServiceClient) Resolve(ctx context.Context
 	return out, nil
 }
 
-func (c *internalNotificationRecipientServiceClient) ListProjectAudience(ctx context.Context, in *ListProjectAudienceRequest, opts ...grpc.CallOption) (*ListProjectAudienceResponse, error) {
+func (c *internalNotificationRecipientServiceClient) ListEventAudience(ctx context.Context, in *ListEventAudienceRequest, opts ...grpc.CallOption) (*ListEventAudienceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListProjectAudienceResponse)
-	err := c.cc.Invoke(ctx, InternalNotificationRecipientService_ListProjectAudience_FullMethodName, in, out, cOpts...)
+	out := new(ListEventAudienceResponse)
+	err := c.cc.Invoke(ctx, InternalNotificationRecipientService_ListEventAudience_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -120,20 +133,26 @@ type InternalNotificationRecipientServiceServer interface {
 	//
 	// Проверка входа — синхронно, в порядке: (1) обязательность (`<field>:
 	// required`); (2) `subject` при `account_owner` — `subject: must be empty
-	// for audience account_owner`; (3) тип ссылки, отношение, число ссылок и
-	// смесь типов. Вопрос к модели о праве получателя задаётся только после
-	// проверки входа целиком.
+	// for audience account_owner`; (3) форма и тип объекта `event`, форма
+	// токена `authz_rev`. Вопрос об аудитории задаётся только после проверки
+	// входа целиком.
 	Resolve(context.Context, *ResolveRecipientRequest) (*ResolveRecipientResponse, error)
-	// ListProjectAudience — субъекты `user:<id>` с действующей (не отозванной,
-	// не истёкшей) привязкой с субъектом-пользователем на `project:<id>`.
-	// Группы не раскрываются, привязки аккаунта не входят, адресов в ответе нет.
+	// ListEventAudience — субъекты `user:<id>` аудитории версии события (Р30):
+	// поколение `source_version` объекта `object`, ограда токена `authz_rev`,
+	// отбор по меткам и цепи предков — по фактам события `facts`. Права уровня
+	// кластера, подстановочные и условные права, сервисные аккаунты и
+	// служебные субъекты в перечень не входят; группы раскрыты в членов;
+	// адресов в ответе нет.
 	//
 	// Порядок — по id пользователя по возрастанию; курсор — позиция последнего
 	// выданного id. Отступление от курсора `(created_at, id)` названо: элемент
-	// выдачи — пользователь, выведенный из одной или нескольких привязок, своего
-	// `created_at` у него нет, и пользователь с двумя привязками под курсором
-	// привязки выдавался бы дважды.
-	ListProjectAudience(context.Context, *ListProjectAudienceRequest) (*ListProjectAudienceResponse, error)
+	// выдачи — пользователь аудитории, своего `created_at` у него нет.
+	//
+	// Пагинация проверяется первым шагом (`page_size` вне `[0..1000]`, мусорный
+	// `page_token` — `INVALID_ARGUMENT` с именем поля, в том числе на
+	// непримененном поколении); затем обязательность `object`,
+	// `source_version`, `authz_rev`; затем форма и тип `object` и форма токена.
+	ListEventAudience(context.Context, *ListEventAudienceRequest) (*ListEventAudienceResponse, error)
 	mustEmbedUnimplementedInternalNotificationRecipientServiceServer()
 }
 
@@ -147,8 +166,8 @@ type UnimplementedInternalNotificationRecipientServiceServer struct{}
 func (UnimplementedInternalNotificationRecipientServiceServer) Resolve(context.Context, *ResolveRecipientRequest) (*ResolveRecipientResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Resolve not implemented")
 }
-func (UnimplementedInternalNotificationRecipientServiceServer) ListProjectAudience(context.Context, *ListProjectAudienceRequest) (*ListProjectAudienceResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListProjectAudience not implemented")
+func (UnimplementedInternalNotificationRecipientServiceServer) ListEventAudience(context.Context, *ListEventAudienceRequest) (*ListEventAudienceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEventAudience not implemented")
 }
 func (UnimplementedInternalNotificationRecipientServiceServer) mustEmbedUnimplementedInternalNotificationRecipientServiceServer() {
 }
@@ -190,20 +209,20 @@ func _InternalNotificationRecipientService_Resolve_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _InternalNotificationRecipientService_ListProjectAudience_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListProjectAudienceRequest)
+func _InternalNotificationRecipientService_ListEventAudience_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEventAudienceRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(InternalNotificationRecipientServiceServer).ListProjectAudience(ctx, in)
+		return srv.(InternalNotificationRecipientServiceServer).ListEventAudience(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: InternalNotificationRecipientService_ListProjectAudience_FullMethodName,
+		FullMethod: InternalNotificationRecipientService_ListEventAudience_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(InternalNotificationRecipientServiceServer).ListProjectAudience(ctx, req.(*ListProjectAudienceRequest))
+		return srv.(InternalNotificationRecipientServiceServer).ListEventAudience(ctx, req.(*ListEventAudienceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -220,8 +239,8 @@ var InternalNotificationRecipientService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _InternalNotificationRecipientService_Resolve_Handler,
 		},
 		{
-			MethodName: "ListProjectAudience",
-			Handler:    _InternalNotificationRecipientService_ListProjectAudience_Handler,
+			MethodName: "ListEventAudience",
+			Handler:    _InternalNotificationRecipientService_ListEventAudience_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

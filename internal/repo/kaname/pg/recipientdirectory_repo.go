@@ -4,13 +4,15 @@
 package pg
 
 // recipientdirectory_repo.go — чтения справочника адресов (приёмка NTF-3 Р7):
-// запись получателя, владелец аккаунта и аудитория проекта. Только чтение;
-// каждое — один оператор. «Не найдено» различается ровно в одном месте —
+// запись получателя, владелец аккаунта и аудитория версии события. Только
+// чтение; запись и владелец — один оператор, аудитория — одна транзакция
+// одного снимка. «Не найдено» различается ровно в одном месте —
 // `errors.Is(err, pgx.ErrNoRows)`; любая иная ошибка уходит вызывающему, и тот
 // отвечает `UNAVAILABLE` фиксированным текстом.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 // RecipientDirectoryRepo — чтения справочника над пулом службы.
@@ -76,32 +79,77 @@ func (r *RecipientDirectoryRepo) ReadAccountOwner(ctx context.Context, accountID
 	return owner, true, nil
 }
 
-// ListProjectUsers — id пользователей с действующей прямой привязкой на
-// `project:<projectID>`, строго больше afterID, по возрастанию, не больше
-// limit. Действующая — ACTIVE (не отозвана, не ожидает) и не истекла к моменту
-// запроса. Пользователь с несколькими привязками — один элемент.
+// ReadEventAudience — барьер поколения и страница аудитории версии события
+// (Р30) ОДНИМ снимком: транзакция только чтения уровня REPEATABLE READ, первый
+// оператор которой берёт снимок не старше токена (токен снят раньше вопроса).
 //
-// Субъекты привязки — строки `access_binding_subjects` (привязка с несколькими
-// субъектами — несколько строк); группы не раскрываются: субъект-группа сюда
-// не попадает по `subject_type`.
-func (r *RecipientDirectoryRepo) ListProjectUsers(ctx context.Context, projectID, afterID string, limit int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT s.subject_id
-		  FROM kaname.access_bindings b
-		  JOIN kaname.access_binding_subjects s ON s.binding_id = b.id
-		 WHERE b.resource_type = 'project' AND b.resource_id = $1
-		   AND b.status = 'ACTIVE'
-		   AND (b.expires_at IS NULL OR b.expires_at > now())
-		   AND s.subject_type = 'user'
-		   AND s.subject_id > $2
-		 ORDER BY s.subject_id
-		 LIMIT $3`, projectID, afterID, limit)
+// Порядок несущий: (1) снимок вопроса не старше `R_E` — иначе токен не выдан
+// этой службой; (2) голова объекта несёт поколение не меньше `g_E` — иначе
+// поколение не применено, вопрос не задаётся; (3) аудитория с оградой
+// (`relverdict.FencedSubjects`).
+func (r *RecipientDirectoryRepo) ReadEventAudience(ctx context.Context, q domain.EventAudienceQuestion) (
+	domain.EventAudiencePage, error,
+) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, fmt.Errorf("list project audience: %w", err)
+		return domain.EventAudiencePage{}, fmt.Errorf("event audience: begin: %w", err)
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Голова объекта названа словарём КАТАЛОГА (тем же, что зеркало); имя берётся
+	// у живой строки каталога тем же порядком, что у вопроса о доступе.
+	var tokenBehind bool
+	var head *int64
+	err = tx.QueryRow(ctx, `
+		SELECT pg_snapshot_xmax($1::pg_snapshot) <= pg_snapshot_xmax(pg_current_snapshot()),
+		       (SELECT h.generation
+		          FROM kaname.object_head h
+		         WHERE h.object_id = $3::text
+		           AND h.object_type = (SELECT r.dotted
+		                                  FROM kaname.catalog_resource r
+		                                 WHERE r.object_type = $2::text
+		                                 ORDER BY r.live DESC, r.dotted
+		                                 LIMIT 1))`,
+		q.AuthzRev, q.ObjectType, q.ObjectID).Scan(&tokenBehind, &head)
 	if err != nil {
-		return nil, fmt.Errorf("list project audience: %w", err)
+		return domain.EventAudiencePage{}, fmt.Errorf("event audience: barrier: %w", err)
 	}
-	return ids, nil
+	if !tokenBehind {
+		return domain.EventAudiencePage{Verdict: domain.EventAudienceTokenAhead}, nil
+	}
+	if head == nil || *head < q.Generation {
+		return domain.EventAudiencePage{Verdict: domain.EventAudienceGenerationNotApplied}, nil
+	}
+
+	labels, err := json.Marshal(factLabels(q.Facts.Labels))
+	if err != nil {
+		return domain.EventAudiencePage{}, fmt.Errorf("event audience: labels: %w", err)
+	}
+	prev, err := json.Marshal(factLabels(q.Facts.PreviousLabels))
+	if err != nil {
+		return domain.EventAudiencePage{}, fmt.Errorf("event audience: previous labels: %w", err)
+	}
+	subjects, _, err := relverdict.FencedSubjects(ctx, tx, relverdict.FencedSubjectsQuery{
+		ObjectType: q.ObjectType, ObjectID: q.ObjectID, Relation: audienceRelation,
+		AuthzRev: q.AuthzRev, Scope: q.Facts.Scope(),
+		LabelsJSON: string(labels), PreviousLabelsJSON: string(prev),
+		ViaSubscription: q.ViaSubscription, Subject: q.Subject,
+		AfterSubject: q.AfterSubject, Limit: q.Limit,
+	})
+	if err != nil {
+		return domain.EventAudiencePage{}, fmt.Errorf("event audience: %w", err)
+	}
+	return domain.EventAudiencePage{Verdict: domain.EventAudienceAnswered, Subjects: subjects}, nil
+}
+
+// audienceRelation — отношение аудитории: читать объект (Р30, Д129 (1)).
+const audienceRelation = "v_get"
+
+// factLabels — метки фактов события; отсутствие — пустой объект, а не null:
+// `null @> селектор` дало бы NULL, и ветвь меток молча не совпала бы ни с чем.
+func factLabels(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }

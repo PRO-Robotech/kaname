@@ -32,7 +32,6 @@ package resource_mirror_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -53,16 +52,15 @@ func TestParentEdges_UnregisterClearsTheChain(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	v1 := time.Now().Truncate(time.Microsecond)
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-unreg-chain", ParentProjectID: "prj-P",
-		ParentAccountID: "acc-A", SourceVersion: v1,
+		ParentAccountID: "acc-A", Generation: 1,
 		ParentChain: []string{"project:prj-P", "account:acc-A"},
 	})
 	require.NotEmpty(t, readParentChain(t, ctx, pool, "compute_instance", "inst-unreg-chain"),
 		"регистрация не записала цепь — предмета у пробы нет")
 
-	deleteCommitted(t, ctx, pool, "compute.instance", "inst-unreg-chain", v1.Add(time.Second))
+	require.True(t, deleteCommitted(t, ctx, pool, "compute.instance", "inst-unreg-chain", 2))
 
 	require.Empty(t, readParentChain(t, ctx, pool, "compute_instance", "inst-unreg-chain"),
 		"цепь пережила снятие регистрации: обход вниз по-прежнему числит объект под "+
@@ -81,18 +79,17 @@ func TestParentEdges_StaleUnregisterKeepsTheChain(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 
 	chain := []string{"project:prj-P", "account:acc-A"}
-	fresh := time.Now().Truncate(time.Microsecond)
 	upsertCommitted(t, ctx, pool, resource_mirror.Row{
 		ObjectType: "compute.instance", ObjectID: "inst-unreg-stale", ParentProjectID: "prj-P",
-		ParentAccountID: "acc-A", SourceVersion: fresh, ParentChain: chain,
+		ParentAccountID: "acc-A", Generation: 3, ParentChain: chain,
 	})
 
-	// Надгробие СТАРШЕ хранимой регистрации — перестановка доставки.
-	deleteCommitted(t, ctx, pool, "compute.instance", "inst-unreg-stale", fresh.Add(-time.Hour))
+	// Снятие СТАРШЕ хранимой регистрации — перестановка доставки.
+	require.False(t, deleteCommitted(t, ctx, pool, "compute.instance", "inst-unreg-stale", 2))
 
 	require.Equal(t, chain, readParentChain(t, ctx, pool, "compute_instance", "inst-unreg-stale"),
 		"устаревшее надгробие снесло цепь свежей регистрации: снятие безусловно, и "+
 			"объект, которого никто не снимал, выпал из области выдачи")
-	require.Equal(t, fresh, readMirrorVersion(t, ctx, pool, "compute.instance", "inst-unreg-stale"),
+	require.Equal(t, int64(3), readMirrorVersion(t, ctx, pool, "compute.instance", "inst-unreg-stale"),
 		"устаревшее надгробие тронуло строку зеркала")
 }

@@ -21,13 +21,13 @@
 //	usr-X — без привязок; usr-ca — администратор облака;
 //	адреса подтверждены у всех людей.
 //
-// Право чтения ресурса (`v_get`) — прямыми фактами модели (источник 1 формы
+// Право чтения (`v_get`) — прямыми фактами модели (источник 1 формы
 // вердикта, `relverdict` TestAsk_DirectFactAllows): `usr-A` видит vol-1, vol-2
 // и acc-1; `usr-B`, `usr-blk`, `sva-1` — vol-1; `usr-E` — project:prj-1 и ни
-// одного ресурса модуля; vol-20 (prj-2) не видит никто из них. Привязки
-// (`access_bindings`) — предмет `ListProjectAudience`, а не источник `v_get`
-// для `Resolve`: так два метода судятся по разным осям мира, и отказ одного
-// не маскируется миром другого.
+// одного ресурса модуля; vol-20 (prj-2) не видит никто из них. Вопрос двери
+// здесь задаёт форма `account_reader` (`v_get` на `account:acc-1`); аудитория
+// версии события (`event`, `ListEventAudience`) — предмет мира GW
+// (`audience_fence_fixture_test.go`): у G0 поколений объектов нет.
 package main
 
 import (
@@ -53,7 +53,7 @@ const (
 
 	// Записи перечня звена Р2 в форме файла (Р28).
 	rdResolveKey  = "kaname.cloud.iam.v1.InternalNotificationRecipientService/Resolve"
-	rdAudienceKey = "kaname.cloud.iam.v1.InternalNotificationRecipientService/ListProjectAudience"
+	rdAudienceKey = "kaname.cloud.iam.v1.InternalNotificationRecipientService/ListEventAudience"
 	rdServiceName = "kaname.cloud.iam.v1.InternalNotificationRecipientService"
 )
 

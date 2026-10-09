@@ -31,10 +31,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧЕМ ЭТО ДЕРЖИТСЯ ТЕПЕРЬ — ПОСТРОЕНИЕМ
 //
-// Оба стейтмента объявлены ОДИН раз, у производителя, экспортируемыми
-// константами; посевщик подаёт в пачку ИХ. Расхождение стало невыразимо, и
-// сверять больше нечего — гейт ниже стережёт только то, чтобы копия не завелась
-// снова.
+// Проекцию объекта пишет один производитель — триггер `resource_event` на
+// вставке в приём (приёмка NTF-3, Р30 «Поколение и проекция — один
+// производитель»). Вставка приёма объявлена ОДИН раз, у производителя,
+// экспортируемой константой `resource_mirror.StmtIntake`; посевщик подаёт в пачку
+// ЕЁ. Гейт ниже стережёт, чтобы у посевщика не завелось ни копии вставки приёма,
+// ни записи в таблицы проекции мимо него.
 //
 // Пачку это не трогает: посевщик по-прежнему шлёт стейтменты пачкой (в этом и
 // состоит предмет замера — миллион объектов за сто секунд вместо семи минут),
@@ -55,6 +57,9 @@ import (
 // mirrorTableToken — имя таблицы зеркала.
 const mirrorTableToken = "kaname.resource_mirror"
 
+// intakeTableToken — приём, на вставке в который срабатывает производитель.
+const intakeTableToken = "kaname.resource_event_intake"
+
 // mirrorWriteForms — формы, которыми в зеркало ПИШУТ. Предмет гейта — они, а не
 // всякое упоминание таблицы.
 //
@@ -66,7 +71,17 @@ const mirrorTableToken = "kaname.resource_mirror"
 var mirrorWriteForms = []string{
 	"INSERT INTO " + mirrorTableToken,
 	"UPDATE " + mirrorTableToken,
+	"DELETE FROM " + mirrorTableToken,
+	"INSERT INTO kaname.resource_parent_edge",
+	"DELETE FROM kaname.resource_parent_edge",
+	"INSERT INTO kaname.object_head",
+	"UPDATE kaname.object_head",
+	"INSERT INTO " + intakeTableToken,
 }
+
+// intakeWriteForms — форма, которую ОБЯЗАН нести производитель: без неё
+// «ноль у посевщика» утверждал бы о дереве, где приёма нет вовсе.
+var intakeWriteForms = []string{"INSERT INTO " + intakeTableToken}
 
 // mirrorWriteLiterals — строковые литералы файла, ПИШУЩИЕ в зеркало.
 //
@@ -74,6 +89,11 @@ var mirrorWriteForms = []string{
 // файле — не раз), и в шапке посевщика. Гейт по подстроке краснел бы на
 // собственном объяснении.
 func mirrorWriteLiterals(path string) ([]string, error) {
+	return writeLiterals(path, mirrorWriteForms)
+}
+
+// writeLiterals — строковые литералы файла, содержащие одну из форм.
+func writeLiterals(path string, forms []string) ([]string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -85,7 +105,7 @@ func mirrorWriteLiterals(path string) ([]string, error) {
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		for _, form := range mirrorWriteForms {
+		for _, form := range forms {
 			if !strings.Contains(collapseSpace(lit.Value), form) {
 				continue
 			}
@@ -159,33 +179,32 @@ func TestSeederTakesStatementsFromTheProducer(t *testing.T) {
 	var producerHits []string
 	producerFiles := goFilesOf(t, producerDir)
 	for _, path := range producerFiles {
-		hits, err := mirrorWriteLiterals(path)
+		hits, err := writeLiterals(path, intakeWriteForms)
 		if err != nil {
 			t.Fatalf("%s не разобран: %v", path, err)
 		}
 		producerHits = append(producerHits, hits...)
 	}
 
-	t.Logf("перепись: исходников посевщика %d · пишущих в %s литералов у него %d · "+
-		"исходников производителя %d · пишущих литералов у него %d "+
+	t.Logf("перепись: исходников посевщика %d · пишущих в проекцию или в приём литералов у него %d · "+
+		"исходников производителя %d · вставок в %s у него %d "+
 		"(читающие переписи посевщика — его собственный вопрос и под гейт не подпадают)",
-		len(seederFiles), mirrorTableToken, len(seederHits),
-		len(producerFiles), len(producerHits))
+		len(seederFiles), len(seederHits),
+		len(producerFiles), intakeTableToken, len(producerHits))
 
 	// КОНТРОЛЬ: без него «ноль у посевщика» зеленело бы на дереве, где
 	// стейтментов нет ни у кого — то есть на снятом предмете.
 	if len(producerHits) == 0 {
-		t.Fatalf("обход пуст: у производителя (%s) не найдено ни одного ПИШУЩЕГО в %s "+
-			"литерала — предмет снят либо разбор его не видит, и утверждение "+
-			"ниже беспредметно", producerDir, mirrorTableToken)
+		t.Fatalf("обход пуст: у производителя (%s) не найдено ни одной вставки в %s "+
+			"— предмет снят либо разбор его не видит, и утверждение "+
+			"ниже беспредметно", producerDir, intakeTableToken)
 	}
 
 	if len(seederHits) > 0 {
-		t.Errorf("посевщик держит СВОЮ копию стейтментов зеркала — %d литерал(ов): %s.\n"+
-			"Копия расходится с производителем молча: сверка строк результата на живом типе "+
-			"даёт одно и то же, а прибор порядков мерит запрос, которого продукт не выпускает.\n"+
-			"Объяви стейтмент один раз в %s экспортируемой константой и подавай в пачку ЕЁ — "+
-			"тогда расхождение невыразимо, и сверять нечего.",
+		t.Errorf("посевщик пишет проекцию или держит СВОЮ копию вставки приёма — %d литерал(ов): %s.\n"+
+			"Копия расходится с производителем молча, а запись мимо приёма — второй производитель "+
+			"проекции: прибор порядков мерит запрос, которого продукт не выпускает.\n"+
+			"Подавай в пачку вставку приёма, объявленную один раз в %s (`StmtIntake`).",
 			len(seederHits), strings.Join(seederHits, ", "), producerDir)
 	}
 }

@@ -40,7 +40,8 @@
 //	                           субъекта на этом объекте; см. emitTx); у строки
 //	                           ПУБЛИКАЦИИ ещё "source_version" — версия
 //	                           владельца (см. EmitPublicationTx)
-//	created_at    timestamptz  default now()
+//	created_at    timestamptz  default now(); этот производитель ставит
+//	                           момент входа строки (clock_timestamp(), см. emitTx)
 //
 // Величин доставки (`sent_at`, `last_error`, `attempt_count`) здесь НЕТ, и перечислять
 // их было бы не описанием, а обещанием: запрос по ним отвергается базой (42703).
@@ -258,9 +259,19 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	// какой задал groupByGrant, — а ему порядок задан ОБЩИЙ для всех писателей (см.
 	// там). Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
 	// коммутативны, и id второго вызова всегда больше id первого.
+	//
+	// МЕТКА СТРОКИ — МОМЕНТ ЕЁ ВХОДА В ЖУРНАЛ (`clock_timestamp()`), А НЕ НАЧАЛА
+	// ТРАНЗАКЦИИ (`now()`). Проекция в прямой факт упорядочивает строку без версии
+	// владельца этой меткой, а порядок двух намерений об одном объекте задаёт
+	// блокировка его головы: снятие кладёт свою строку, лишь дождавшись коммита
+	// регистрации, которую снимает. С меткой начала транзакции снятие, начавшее её
+	// раньше регистрации, несло метку старше записанного факта, и факт переживал
+	// своё снятие — кортеж `parent` оставался на снятом объекте (NTF3-174,
+	// kaname#667). Метка входа упорядочена так же, как блокировка, под которой
+	// строка входит.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, p::jsonb, now() FROM unnest($2::text[]) AS p`,
+		 SELECT $1, p::jsonb, clock_timestamp() FROM unnest($2::text[]) AS p`,
 		eventType, payloads,
 	); err != nil {
 		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)

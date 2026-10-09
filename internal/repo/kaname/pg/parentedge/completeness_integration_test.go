@@ -50,7 +50,6 @@ package parentedge_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -126,7 +125,7 @@ type registration struct {
 // Проверка `Applied` здесь не формальность: молча не применившаяся регистрация
 // оставила бы зелёной обе стороны гейта, и он снова утверждал бы свойство своей
 // фикстуры.
-func register(t *testing.T, pool *pgxpool.Pool, r registration, version time.Time) {
+func register(t *testing.T, pool *pgxpool.Pool, r registration, generation int64) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -140,7 +139,7 @@ func register(t *testing.T, pool *pgxpool.Pool, r registration, version time.Tim
 		ObjectID:        r.objectID,
 		ParentProjectID: r.parentProjectID,
 		ParentChain:     r.parentChain,
-		SourceVersion:   version,
+		Generation:      generation,
 	})
 	if err != nil {
 		t.Fatalf("регистрация %s (%s:%s): %v", r.consumer, r.objectType, r.objectID, err)
@@ -160,9 +159,8 @@ func register(t *testing.T, pool *pgxpool.Pool, r registration, version time.Tim
 // читает).
 func seedThroughProducer(t *testing.T, pool *pgxpool.Pool, regs ...registration) {
 	t.Helper()
-	base := time.Now().UTC().Truncate(time.Microsecond)
-	for i, r := range regs {
-		register(t, pool, r, base.Add(time.Duration(i)*time.Millisecond))
+	for _, r := range regs {
+		register(t, pool, r, 1)
 	}
 }
 

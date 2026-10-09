@@ -69,6 +69,7 @@ func registerAsProducerDoes(
 		ParentAccountID: "acc-1",
 		ParentChain:     ownerregister.ParentChain(nil, "prj-1", "acc-1"),
 		Labels:          labels,
+		Generation:      1,
 	}); err != nil {
 		t.Fatalf("регистрация объекта %s: %v", objectID, err)
 	}

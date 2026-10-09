@@ -27,6 +27,17 @@ package pg
 // база тем же соединением, которым идёт остальная работа. Просьбы к чужому
 // транспорту «ответь не с реплики» больше нет, потому что нет чужого транспорта.
 //
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧИТАЕТСЯ В ТРАНЗАКЦИИ СНЯТИЯ, ПОСЛЕ ПРИЁМА ЕГО ПОКОЛЕНИЯ
+//
+// Приём снятия сравнивает поколение с головой объекта и держит замок её строки
+// до фиксации (триггер `resource_event`). Набор, прочитанный ПОСЛЕ этого в той же
+// транзакции, полон: регистрация, закоммиченная раньше приёма, в нём есть, а
+// регистрация, пришедшая позже, ждёт на голове и уходит REJECTED_STALE. Набор,
+// прочитанный ДО транзакции, не видел бы кортежа регистрации, закоммиченной между
+// чтением и приёмом, — и тот пережил бы снятие своего объекта (приёмка NTF-3,
+// NTF3-185 (г): снятие уносит ВСЕ кортежи на объекте).
+//
 // Постраничность оставлена: объект несёт горсть отношений, и одна страница
 // отвечает на практике, — но «на практике» не гарантия, а молча усечённое чтение
 // недоудалило бы ровно то, ради чего этот читатель заведён.
@@ -42,18 +53,18 @@ package pg
 // Глагол-строка в проекции бывает ОДНОГО вида — публикация объекта для
 // анонимного чтения (`user:* #v_get`, kaname#107): её объявляет владелец ресурса,
 // выдача её не выводит. Этот читатель её возвращает, как всякую строку объекта, а
-// снимает её НЕ он: снятие объекта снимает публикацию своим путём, в порядке версий
-// владельца (`internal_iam.RegisterResourceUseCase.emit`), потому что голое удаление
-// строки глагола версии владельца не несёт, и проекция такую строку не складывает.
+// снимает её НЕ он: снятие объекта снимает публикацию своим путём
+// (`public_read.WithdrawTx`) — вместе со строкой публикации и строкой журнала под
+// её версией, потому что голое удаление строки глагола версии владельца не несёт,
+// и проекция такую строку не складывает.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // errResidualListingUnbounded — перечисление объекта не сошлось за отведённые
@@ -70,36 +81,27 @@ const (
 //
 // Отбор «какие из них принадлежат посреднику» — работа use-case'а: политика у
 // него, поэтому адаптер отдаёт строки как есть и не решает ничего.
-type ResidualTupleReader struct {
-	pool *pgxpool.Pool
-}
+type ResidualTupleReader struct{}
 
-// NewResidualTupleReader собирает адаптер. nil-пул даёт nil — композиционный
-// корень сборки без базы получает путь «только очередь», а не панику.
-func NewResidualTupleReader(pool *pgxpool.Pool) *ResidualTupleReader {
-	if pool == nil {
-		return nil
-	}
-	return &ResidualTupleReader{pool: pool}
-}
+// NewResidualTupleReader собирает адаптер. Состояния нет: чтение идёт в
+// транзакции вызывающего.
+func NewResidualTupleReader() *ResidualTupleReader { return &ResidualTupleReader{} }
 
-// ObjectTuples перечисляет отношения, стоящие на `object` («тип:идентификатор»).
-func (r *ResidualTupleReader) ObjectTuples(ctx context.Context, object string) ([]outboxtypes.RelationTuple, error) {
-	if r == nil || r.pool == nil || object == "" {
-		return nil, nil
-	}
+// ObjectTuplesTx перечисляет отношения, стоящие на `object` («тип:идентификатор»),
+// в транзакции вызывающего.
+func (r *ResidualTupleReader) ObjectTuplesTx(ctx context.Context, tx service.Tx, object string) ([]outboxtypes.RelationTuple, error) {
 	objectType, objectID, ok := splitObjectRef(object)
 	if !ok {
 		return nil, fmt.Errorf("relation_fact: объект %q не разбирается как «тип:идентификатор»", object)
 	}
-
+	q := txAsPgx(tx)
 	var (
 		out       []outboxtypes.RelationTuple
 		afterRel  string
 		afterSubj string
 	)
 	for page := 0; page < residualReadPageCap; page++ {
-		rows, err := r.pool.Query(ctx, `
+		rows, err := q.Query(ctx, `
 			SELECT f.relation, f.subject
 			  FROM kaname.relation_fact f
 			 WHERE f.object_type = $1
@@ -136,7 +138,6 @@ func (r *ResidualTupleReader) ObjectTuples(ctx context.Context, object string) (
 	return nil, errResidualListingUnbounded
 }
 
-// splitObjectRef — «тип:идентификатор» надвое.
 func splitObjectRef(s string) (objectType, objectID string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		if s[i] == ':' {

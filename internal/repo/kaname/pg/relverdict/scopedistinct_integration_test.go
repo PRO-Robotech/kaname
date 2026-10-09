@@ -55,7 +55,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -168,9 +167,8 @@ func measureScopeShape(t *testing.T, ctx context.Context, shape chainShape) scop
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	seedTenant(t, ctx, tx)
-	base := time.Now().UTC().Truncate(time.Microsecond)
 	registerThroughProducer(t, ctx, tx, catalogFormOf(t, "vpc_network"), "net-1",
-		shape.chain, projectOf(shape.chain), accountOf(shape.chain), base)
+		shape.chain, projectOf(shape.chain), accountOf(shape.chain), 1)
 
 	// ВОПРОС ЗАДАЁТСЯ ОТКАЗНЫЙ, И ЭТО НЕ СЛУЧАЙНОСТЬ: на разрешающем ветвь выдач
 	// останавливается на первой же строке (`LIMIT 1`), и цена дублей не платится

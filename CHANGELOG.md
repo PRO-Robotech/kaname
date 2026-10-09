@@ -33,6 +33,51 @@
 
 Состояние вершины ствола. Записи станут первой версией, когда она будет выпущена.
 
+### Справочник адресов: аудитория версии события с оградой
+
+- **ЛОМАЕТ** — службы уведомлений (`service:notify`), читающей справочник
+  `InternalNotificationRecipientService`. Аудитория письма — аудитория **версии
+  события** объекта: новый глагол `ListEventAudience{object, source_version,
+  authz_rev, facts, page_token, page_size}` отдаёт пользователей `user:<id>`,
+  чьё право читать объект есть и не менялось с токена версии прав события
+  (`authz_rev` — `InternalIAMService/CurrentAuthzRevision`); у `Resolve` формы
+  аудитории — `event{object, source_version, authz_rev, facts, via_subscription}`,
+  `self`, `account_reader{account_id}`, `account_owner{account_id}`. Права
+  уровня кластера (только при `via_subscription`), подстановочные и условные
+  права, сервисные аккаунты аудитории не образуют. Поколение объекта, ещё не
+  применённое службой доступа, — `UNAVAILABLE` с `ErrorInfo{reason:
+  OBJECT_GENERATION_NOT_APPLIED}`. Сняты: глагол `ListProjectAudience`, форма
+  `resource{resource_refs, relation}` и поле ответа `visible_refs` (`reserved`
+  номер и имя). Что поменять: перевести приём событий на `ListEventAudience`, а
+  адресованные строки — на `Resolve{event}` с полями строки `resource-event`.
+
+### Регистрация объекта — событием с поколением, публикация — своим глаголом
+
+- **ЛОМАЕТ** — модулей, регистрирующих свои объекты в службе доступа.
+  `InternalIAMService/RegisterResource` несёт **событие** объекта: набор его
+  кортежей `tuples` (`RegisteredTuple{subject_id, relation}`), метки, цепь
+  предков и обязательное поколение `generation` (целое, строго растущее на
+  каждое событие объекта; `0` — `INVALID_ARGUMENT generation: required`). Весь
+  набор применяется одним вызовом атомарно; поколение не новее головы объекта —
+  исход «устарело», ничего не записано, ответ успех. Поля `subject_id`,
+  `relation`, `source_version` сняты (`reserved`). `UnregisterResource`
+  адресуется объектом и поколением и уносит все кортежи на объекте и его
+  публикацию; поля `subject_id`, `relation`, `labels`, `parent_project_id`,
+  `parent_account_id`, `source_version` сняты (`reserved`).
+- **Что появилось:** `InternalIAMService/SetPublicReadPublication{object,
+  published, publication_version, object_generation}` — публикация объекта для
+  анонимного чтения своим глаголом, в порядке версии публикации владельца и
+  только для текущего воплощения объекта. Звать вправе модуль — владелец типа,
+  допускающего публикацию; прочим — `PERMISSION_DENIED`.
+- **МИГРАЦИЯ:** голова объекта, поколение у зеркала и цепи предков, граница
+  воплощения у головы и поколение воплощения у публикации — `kaname-migrator up`
+  до запуска новых процессов. Миграции рассчитаны на пустые таблицы головы и
+  публикации (посадки пересоздаются); база, где строки публикации есть, миграцию
+  не примет и скажет это отказом проверки.
+- **Что сделать:** модулям — регистрировать событие одним вызовом с набором
+  (`pkg/ownerregister.Registration{Object, Tuples, …, Generation}`), публикацию —
+  новым глаголом. Kaname#484.
+
 ### Внутренний глагол приёма исхода восстановления от прежнего поставщика снят
 
 - **ЛОМАЕТ** — только того, кто звал его сам. Снят

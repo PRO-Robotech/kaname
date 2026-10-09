@@ -8,7 +8,7 @@ package shared
 //
 // # Почему форма — параметр одной функции
 //
-// У списков справочника порядок выдачи разный: `ListProjectAudience` выдаёт
+// У списков справочника порядок выдачи разный: `ListEventAudience` выдаёт
 // пользователей по id (своего `created_at` у элемента нет — он выведен из
 // одной или нескольких привязок), список истекающих учётных данных — по паре
 // «момент истечения, id». Курсор у каждого — позиция последнего выданного
@@ -44,9 +44,10 @@ type DirectoryCursorForm struct {
 	keyed bool
 }
 
-// AudienceCursor — курсор `ListProjectAudience`: позиция — id последнего
-// выданного пользователя.
-var AudienceCursor = DirectoryCursorForm{tag: "rda1.", keyed: false}
+// EventAudienceCursor — курсор `ListEventAudience`: позиция — id последнего
+// выданного пользователя аудитории. Метка своя, а не метка снятого
+// `ListProjectAudience` (`rda1.`): курсор снятого списка этим не разбирается.
+var EventAudienceCursor = DirectoryCursorForm{tag: "rde1.", keyed: false}
 
 // DirectoryPosition — позиция последнего выданного элемента.
 type DirectoryPosition struct {

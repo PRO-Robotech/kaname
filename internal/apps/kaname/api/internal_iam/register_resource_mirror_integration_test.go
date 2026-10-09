@@ -49,6 +49,7 @@ func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		kanamepg.NewResidualTupleReader(),
 	)
 	return uc, &mirrorProbe{pool: pool}
 }
@@ -65,12 +66,12 @@ func TestRegisterResource_B01_MirrorRowAndTupleCoCommit(t *testing.T) {
 	const obj = "compute_instance:inst-abc"
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-P",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}},
 		Object:          obj,
 		Labels:          map[string]string{"env": "dev", "team": "core"},
 		ParentProjectId: "prj-P",
 		ParentAccountId: "acc-A",
+		Generation:      1,
 	})
 	require.NoError(t, err)
 
@@ -92,11 +93,11 @@ func TestRegisterResource_B02_EmptyLabelsGraceful(t *testing.T) {
 	uc, p := newRegisterUCWithMirror(t)
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-P",
-		Relation:        "parent",
+		Tuples:          []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}},
 		Object:          "compute_instance:inst-nolabels",
 		Labels:          map[string]string{},
 		ParentProjectId: "prj-P",
+		Generation:      1,
 	})
 	require.NoError(t, err)
 
@@ -119,8 +120,9 @@ func TestRegisterResource_B03_AtomicCoCommit(t *testing.T) {
 	const obj = "compute_instance:inst-atomic"
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: obj,
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P", ParentAccountId: "acc-A",
+		Generation: 1,
 	}))
 
 	prj, _, _ := p.readMirror(t, ctx, "compute.instance", "inst-atomic")
@@ -137,8 +139,9 @@ func TestRegisterResource_B06_IdempotentMirrorUpsert(t *testing.T) {
 	uc, p := newRegisterUCWithMirror(t)
 
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-idem",
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: "compute_instance:inst-idem",
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P",
+		Generation: 1,
 	}
 	require.NoError(t, uc.Register(ctx, req))
 	require.NoError(t, uc.Register(ctx, req), "repeat must be OK (idempotent)")
@@ -147,8 +150,8 @@ func TestRegisterResource_B06_IdempotentMirrorUpsert(t *testing.T) {
 		"PK ⇒ exactly one mirror row on repeat (β-06)")
 }
 
-// concurrency — parallel Register of one object with different labels →
-// exactly one mirror row, deterministic last-write (no half-write, ban #10).
+// concurrency — parallel Register of one object with different labels and generations
+// → exactly one mirror row carrying the highest generation (no half-write, ban #10).
 func TestRegisterResource_B05_ConcurrentUpsertOneRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -170,8 +173,9 @@ func TestRegisterResource_B05_ConcurrentUpsertOneRow(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			errs[i] = uc.Register(ctx, &iamv1.RegisterResourceRequest{
-				SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-race",
+				Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: "compute_instance:inst-race",
 				Labels: labelSets[i%len(labelSets)], ParentProjectId: "prj-P",
+				Generation: int64(i + 1),
 			})
 		}(i)
 	}
@@ -183,8 +187,8 @@ func TestRegisterResource_B05_ConcurrentUpsertOneRow(t *testing.T) {
 	require.Equal(t, 1, p.mirrorCount(t, ctx, "compute.instance", "inst-race"),
 		"PK serializes concurrent writers ⇒ exactly one row (β-05)")
 	_, _, labels := p.readMirror(t, ctx, "compute.instance", "inst-race")
-	require.Contains(t, []string{"dev", "prod", "staging"}, labels["env"],
-		"final labels are one deterministic last-write, not a half-merge")
+	require.Equal(t, labelSets[(n-1)%len(labelSets)], labels,
+		"final labels are those of the HIGHEST generation, whatever the arrival order — not a half-merge")
 }
 
 // Unregister → mirror row deleted AND tuple-revoke emitted in one tx.
@@ -198,13 +202,15 @@ func TestRegisterResource_B07_UnregisterDeletesMirrorAndRevokesTuple(t *testing.
 	const obj = "compute_instance:inst-gone"
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: obj,
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P",
+		Generation: 1,
 	}))
 	require.Equal(t, 1, p.mirrorCount(t, ctx, "compute.instance", "inst-gone"))
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
+		Object:     obj,
+		Generation: 2,
 	}))
 	require.Equal(t, 0, p.mirrorCount(t, ctx, "compute.instance", "inst-gone"),
 		"Unregister removes the mirror row (β-07)")
@@ -221,12 +227,13 @@ func TestRegisterResource_B07b_UnregisterAbsentIsOK(t *testing.T) {
 	uc, _ := newRegisterUCWithMirror(t)
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-never",
+		Object:     "compute_instance:inst-never",
+		Generation: 2,
 	}), "unregister of absent object must be OK (β-07/D-β5)")
 }
 
-// backward-compat — legacy caller sends only fields 1-4 → mirror row with
-// empty labels/parent (graceful), tuple emitted as before.
+// a caller that names no labels and no parent (fields 1-4 and the generation) → mirror
+// row with empty labels/parent, tuple emitted as before.
 func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -237,8 +244,9 @@ func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	const obj = "compute_instance:inst-legacy"
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
-		// no labels / parent_* — old compute
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: obj,
+		// no labels / parent_* — old compute,
+		Generation: 1,
 	}))
 
 	prj, acc, labels := p.readMirror(t, ctx, "compute.instance", "inst-legacy")
@@ -263,8 +271,9 @@ func TestRegisterResource_B15_InvalidLabelsRejected(t *testing.T) {
 	before := p.totalRows(t, ctx)
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: obj,
 		Labels: map[string]string{"ENV": "x"}, ParentProjectId: "prj-P",
+		Generation: 1,
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "invalid label key → InvalidArgument (β-15)")
@@ -283,8 +292,9 @@ func TestRegisterResource_B16_MirrorShapeAndDanglingSurvives(t *testing.T) {
 	uc, p := newRegisterUCWithMirror(t)
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-orphan",
+		Tuples: []*iamv1.RegisteredTuple{{SubjectId: "project:prj-P", Relation: "parent"}}, Object: "compute_instance:inst-orphan",
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P", ParentAccountId: "acc-A",
+		Generation: 1,
 	}))
 
 	// Column set is exactly the tenant-facing projection (no infra columns).
