@@ -21,24 +21,35 @@ Covered RPCs (публичный фронт службы):
 
 ПРОИЗВОДИТЕЛЬ УТВЕРЖДЕНИЙ — СЛУЖБА. Все шаги идут на собственный публичный
 фронт (`ownRestBaseUrl`), CAP-21 — ещё и на собственный внутренний
-(`ownInternalRestBaseUrl`). Края платформы здесь нет: порог на крае и его отказ
-`401` с `WWW-Authenticate` — предмет набора края (CAP-25, `kacho#3093`); на
-публичном слушателе службы порог предъявленного удостоверения судит её
-политика вызывающего по своей копии каталога и отвечает `403`.
+(`ownInternalRestBaseUrl`). Края платформы здесь нет: порог на крае — предмет
+набора края (CAP-25, `kacho#3093`); на публичном слушателе службы порог
+предъявленного удостоверения судит её политика вызывающего по своей копии
+каталога. Недостаток уровня там — УКАЗАНИЕ повысить уровень той же формой, что
+край (решение Р11 одобренной приёмки уровня уверенности, редакция 9,
+`kaname#511`): `401`, тело `{"code":16,"message":"<текст Р11>","details":[]}`,
+вызов `Bearer` с `error="insufficient_user_authentication"`, `acr_values` и
+`error_description`, называющим требуемый и предъявленный уровни. Прежний
+ответ `403` / `7` `permission denied` Р11 отвергла (п. «б»), и CAP-08
+утверждает новую форму, а не прежнюю.
 
 Аудит с публичной поверхности не наблюдаем: утверждения о строках аудита
 (CAP-04, 05, 06, 17, 19) — в интеграционных пробах службы
 (`internal/apps/kaname/api/cluster/public_twin_integration_test.go`).
 
 ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — СКАЗАНО ВСЛУХ. Внутренние ноги CAP-20 (чтение и
-снятие внутренним путём) и близнец CAP-21 «внутренний путь на внутреннем фронте
-отвечает 200» на автономном стенде не исполнимы by construction: внутренние
-глаголы администраторов кластера фронтируются краем
+снятие внутренним путём) и ответ `200` внутреннего пути на внутреннем фронте на
+автономном стенде не конструируемы by construction: внутренние глаголы
+администраторов кластера допускают только край
 (`authzguard.GatewayFrontedInternalRPCs`), а внутренний фронт службы идёт к
-своему слушателю СВОИМ удостоверением и кругом края не становится. Поэтому
-CAP-21 утверждает здесь, что внутренний путь на внутреннем фронте ОБСЛУЖЕН
-владельцем (ответ — не промах маршрутизатора), а «назначено одним путём — видно
-другим» держит интеграционная проба `TestClusterPublic_CAP20_OneWritePathBothTransports`.
+своему слушателю СВОИМ удостоверением и кругом края не становится (Р8, З22
+приёмки). Поэтому близнец CAP-21 утверждает здесь ответ ВЛАДЕЛЬЦА на этом пути —
+отказ круга края: `403`, `code = 7`, `message = "permission denied"`, `ErrorInfo`
+с `reason = AUTHZ_DENIED` и `fqn` внутреннего глагола, следующий шаг —
+`authz.grant_required`, а не `authz.step_up` порога уверенности, стоящего позади
+круга (оба отказа — `403 AUTHZ_DENIED` одним текстом). Положительный ответ
+внутреннего пути — предмет набора края (CAP-26, близнец), «назначено одним путём
+— видно другим» держит интеграционная проба
+`TestClusterPublic_CAP20_OneWritePathBothTransports`.
 
 CRUD fixture dependency (посев `tests/authz-fixtures/seed_ceremony.py --wave`):
   jwtBootstrap                         — `m-admin`, машинный `system_admin` (машинный посев);
@@ -79,6 +90,11 @@ GHOST_USER = "usrzzzzzzzzzzzzzzzzz"
 GHOST_SVA = "svazzzzzzzzzzzzzzzzz"
 TS_RE = r"/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/"
 CAG_RE = r"/^cag_[0-9a-hjkmnp-tv-z]{17}$/"
+
+# Внутренний перечень администраторов — по строке своей копии каталога
+# (`permission`, `fqn`); ярус отказа — `cluster` (`scopeTier`).
+INTERNAL_LIST_ACTION = "iam.cluster_admins.list"
+INTERNAL_LIST_FQN = "kaname.cloud.iam.v1.InternalClusterService/ListAdmins"
 
 _INTERNAL_WHY = ("собственный внутренний REST-фронт службы; без него CAP-21 не различает, "
                  "на каком фронте стоит путь")
@@ -368,25 +384,44 @@ CASES.append(Case(
     ],
 ))
 
+# Текст указания Р11 — дословно, как его объявляет служба
+# (`internal/errors/step_up.go`, `TextStepUpRequired`).
+STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                "or present a credential of another kind")
+
+
+def _step_up(label, required, presented):
+    """Указание повысить уровень (Р11): пара `401`/`16`, текст дословно и вызов
+    `WWW-Authenticate`, разобранный ПО ПАРАМЕТРАМ, а не сравнением строки."""
+    return [
+        *_pair(401, CODE_UNAUTHENTICATED, label),
+        *_message(_q(STEP_UP_TEXT), label),
+        f"pm.test({_q(label + ': вызов Bearer называет шаг и уровни')}, () => {{",
+        "  const h = pm.response.headers.get('WWW-Authenticate') || '';",
+        r"  pm.expect(h, 'WWW-Authenticate').to.match(/^Bearer\s/);",
+        "  const params = {};",
+        r"""  h.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { params[k] = v; return m; });""",
+        "  pm.expect(params.error, h).to.eql('insufficient_user_authentication');",
+        f"  pm.expect(params.acr_values, h).to.eql({_q(required)});",
+        f"  pm.expect(params.error_description, h).to.include({_q('Required ACR ' + required)});",
+        f"  pm.expect(params.error_description, h).to.include({_q('presented ACR ' + presented)});",
+        "});",
+    ]
+
+
 _DENY_L1 = "CAP-08 h-admin/1"
 CASES.append(Case(
     id="CAP-08-ASSURANCE-FLOOR",
-    title="Порог назначения и снятия «2», чтения «1»: h-admin/1 — 403 на мутациях, 200 на чтениях; h-admin/2 — проходит",
+    title="Порог назначения и снятия «2», чтения «1»: h-admin/1 — указание повысить уровень на мутациях, 200 на чтениях; h-admin/2 — проходит",
     classes=["AUTHZ", "NEG"], priority="P0",
     steps=[
-        _grant("cap08-l1-grant", HA1, TARGET, tests=[
-            *_pair(403, CODE_PERMISSION_DENIED, _DENY_L1 + " GrantAdmin"),
-            *_message(_q("permission denied"), _DENY_L1 + " GrantAdmin"),
-        ]),
+        _grant("cap08-l1-grant", HA1, TARGET, tests=_step_up(_DENY_L1 + " GrantAdmin", "2", "1")),
         _list("cap08-l1-list", HA1,
               _entries_for(_env("ceremonyCapTargetUserId"), "назначение уровнем «1» выдачи не создало; чтение уровнем «1» — 200", 0)),
         Step(name="cap08-l1-get", method="GET", path="/iam/v1/cluster", auth=HA1,
              test_script=[*assert_status(200)]),
         _grant("cap08-l2-grant", HA2, TARGET, tests=_op_ok("CAP-08 близнец GrantAdmin")),
-        _revoke("cap08-l1-revoke", HA1, TARGET, tests=[
-            *_pair(403, CODE_PERMISSION_DENIED, _DENY_L1 + " RevokeAdmin"),
-            *_message(_q("permission denied"), _DENY_L1 + " RevokeAdmin"),
-        ]),
+        _revoke("cap08-l1-revoke", HA1, TARGET, tests=_step_up(_DENY_L1 + " RevokeAdmin", "2", "1")),
         _list("cap08-list-after-denied-revoke", HA1,
               _entries_for(_env("ceremonyCapTargetUserId"), "снятие уровнем «1» выдачу не тронуло", 1)),
         _revoke("cap08-l2-revoke", HA2, TARGET, tests=_op_ok("CAP-08 близнец RevokeAdmin")),
@@ -630,7 +665,7 @@ def _routing_miss(label):
 
 CASES.append(Case(
     id="CAP-21-FRONT-SEPARATION",
-    title="Внутренний путь на публичном фронте и публичный на внутреннем — промах маршрутизатора; на своих фронтах — обслужены",
+    title="Внутренний путь на публичном фронте и публичный на внутреннем — промах маршрутизатора; публичный на публичном — обслужен, внутренний на внутреннем — отказ владельца",
     classes=["SEC", "NEG"], priority="P0",
     steps=[
         Step(name="cap21-internal-path-on-public", method="GET",
@@ -645,12 +680,35 @@ CASES.append(Case(
              pre_script=require_env_url("ownInternalRestBaseUrl", "/iam/v1/internal/cluster/admins",
                                         _INTERNAL_WHY),
              test_script=[
-                 # Внутренний путь на СВОЁМ фронте обслужен владельцем: ответ не
-                 # промах маршрутизатора. Исход владельца на автономном стенде —
-                 # отказ круга вызывающих (глагол фронтируется краем), см. шапку.
-                 "pm.test('CAP-21 близнец: внутренний путь на внутреннем фронте обслужен, не промах маршрутизатора', () => {",
-                 "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                 "  pm.expect(pm.response.code === 404 && j.message === 'Not Found', pm.response.text()).to.eql(false);",
+                 # Внутренний путь на СВОЁМ фронте доходит до владельца, и ответ
+                 # владельца — отказ круга края (Р8, З22 приёмки): хоп фронта
+                 # краем не становится. Утверждается сам отказ — код, текст и
+                 # причина, — а не «что-нибудь, кроме промаха маршрутизатора»:
+                 # такое утверждение зеленело бы и на обслуживании (`200`),
+                 # которого этот путь давать не вправе.
+                 *assert_scoped_authz_deny(INTERNAL_LIST_ACTION, scope="cluster"),
+                 *_message(_q("permission denied"), "CAP-21 близнец, внутренний путь на внутреннем фронте"),
+                 # Отказал ВНУТРЕННИЙ глагол, а не публичный близнец того же
+                 # действия: `fqn` — функция метода (deny_details.go), и только
+                 # он различает два глагола с общим правом.
+                 "pm.test('CAP-21 близнец: отказ назван внутренним глаголом', () => {",
+                 "  const j = pm.response.json();",
+                 "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
+                 "  pm.expect(info, JSON.stringify(j)).to.be.an('object');",
+                 f"  pm.expect((info.metadata || {{}}).fqn, JSON.stringify(j)).to.eql({_q(INTERNAL_LIST_FQN)});",
+                 "});",
+                 # Отказал КРУГ КРАЯ, а не порог уверенности позади него. Оба
+                 # отказа — `403 AUTHZ_DENIED` с тем же текстом; различает их
+                 # следующий шаг: у отказа порога он `authz.step_up`, и совет
+                 # «запросите право» тогда не прикладывается (deny_details.go).
+                 # Измерено инъекцией: хоп, допущенный мимо круга края, получает
+                 # отказ порога, и без этого утверждения набор зеленел бы на нём.
+                 "pm.test('CAP-21 близнец: отказ круга края, а не порога уверенности', () => {",
+                 "  const j = pm.response.json();",
+                 "  const types = (j.details || [])",
+                 "    .filter(d => (d['@type'] || '').includes('PreconditionFailure'))",
+                 "    .flatMap(d => (d.violations || []).map(v => v.type));",
+                 "  pm.expect(types, JSON.stringify(j)).to.eql(['authz.grant_required']);",
                  "});",
              ]),
     ],

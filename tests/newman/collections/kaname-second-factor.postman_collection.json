@@ -1530,7 +1530,7 @@
                   "});",
                   "pm.test('PE-WRONG-PW: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled');",
                   "});",
                   "pm.test('PE-WRONG-PW: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.environment.set('sfWrongPasswordRefusalBody', pm.response.text());"
@@ -1661,7 +1661,7 @@
                   "});",
                   "pm.test('PE-PENDING-CODE: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled');",
                   "});",
                   "pm.test('PE-PENDING-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('PE-PENDING-CODE: тело побайтово равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
@@ -4705,7 +4705,7 @@
                   "});",
                   "pm.test('REPLAY: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled');",
                   "});",
                   "pm.test('REPLAY: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));"
                 ]
@@ -6070,7 +6070,7 @@
                   "});",
                   "pm.test('LB-AGAIN: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled');",
                   "});",
                   "pm.test('LB-AGAIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('LB-AGAIN: тело побайтово равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
@@ -6664,7 +6664,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('OE-3-AGAIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('OE-3-AGAIN: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('OE-3-AGAIN: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -7875,7 +7875,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('SU-REPLAY: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('SU-REPLAY: тело равно отказу неверного кода', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('SU-REPLAY: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -8463,7 +8463,7 @@
                   "});",
                   "pm.test('SU-S2-WRONG: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('SU-S2-WRONG: печений не пишет — носитель и контекст прежние', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie').length, 'печений').to.eql(0));",
-                  "pm.test('SU-S2-WRONG: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('SU-S2-WRONG: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -9704,7 +9704,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-0: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-0: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-0: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -9811,7 +9811,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-2: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-2: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-2: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -9918,7 +9918,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-3: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-3: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-3: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -10129,7 +10129,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-4: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-4: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-4: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -10236,7 +10236,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-5: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-5: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-5: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -10343,7 +10343,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-6: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-6: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-6: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -10450,7 +10450,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-7: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-7: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-7: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -10661,7 +10661,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-8: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-8: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-8: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -10768,7 +10768,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('RG-OLD-9: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('RG-OLD-9: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('RG-OLD-9: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -11991,7 +11991,7 @@
                   "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
                   "});",
                   "pm.test('EX-ELEVENTH: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
-                  "pm.test('EX-ELEVENTH: тело равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"
+                  "pm.test('EX-ELEVENTH: тело равно общему отказу (Ф3-02)', () => pm.expect(pm.response.text() === pm.environment.get('sfNoSessionRefusalBody'), 'тело равно эталону').to.eql(true));"
                 ]
               }
             }
@@ -14244,7 +14244,7 @@
                   "});",
                   "pm.test('WRONG-PW-WITH-CODE: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled');",
                   "});",
                   "pm.test('WRONG-PW-WITH-CODE: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.environment.set('sfWrongPasswordRefusalBody', pm.response.text());"
@@ -14347,7 +14347,7 @@
                   "});",
                   "pm.test('NOT-ENROLLED-ON-LOGIN: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled');",
                   "});",
                   "pm.test('NOT-ENROLLED-ON-LOGIN: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));",
                   "pm.test('NOT-ENROLLED-ON-LOGIN: тело побайтово равно отказу на неверный пароль', () => pm.expect(pm.response.text() === pm.environment.get('sfWrongPasswordRefusalBody'), 'тело равно эталону').to.eql(true));"

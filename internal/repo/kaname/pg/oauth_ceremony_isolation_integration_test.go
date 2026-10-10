@@ -1061,6 +1061,28 @@ var sessionEnderDoors = []sessionEnderDoor{
 			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailChanged)
 		},
 	},
+	{
+		// Снятие ключа доступа (kaname#669, Ф13 Р8): транзакция, открытая
+		// замком строки личности, снимает записи сессии человека. Дверь —
+		// `openRevokeWriter`: её же открывает сброс ключей (kaname#638), который
+		// записей сессии не снимает, а отсекает, — сцена идёт через снятие ключа.
+		name: "AccessKeyRepo.openRevokeWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewAccessKeyRepo(pool).RevokeWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			defer func() { _ = w.Rollback(ctx) }()
+			n, err := w.EndOtherSessions(ctx, domain.UserID(sc.UserID), "", time.Now(), domain.RevokeReasonAccessKeyRevoked)
+			if err != nil {
+				return 0, err
+			}
+			if err = w.Commit(ctx); err != nil {
+				return 0, err
+			}
+			return n, nil
+		},
+	},
 }
 
 // TestSessionEndWaitingOnIssuanceRevokesTheIssuedFamily — ОБРАТНАЯ сцена пары

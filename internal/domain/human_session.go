@@ -283,6 +283,12 @@ const (
 	// отсечкой `now` существующим писателем принудительного выхода. В словарь
 	// снятия сессии НЕ входит: ни одному снимающему методу она не передаётся.
 	RevokeReasonSecondFactorReset = "second-factor-reset"
+	// RevokeReasonAccessKeysReset — причина отсечки, которую пишет сброс ключей
+	// доступа администратором облака (kaname#638; приёмка
+	// `cloud-administrator-resets-login-methods.md`, Р4): все сессии человека
+	// покрыты отсечкой `now`. Как и у сброса второго фактора, в словарь снятия
+	// сессии НЕ входит: записи сессии она не снимает, а отсекает.
+	RevokeReasonAccessKeysReset = "access-keys-reset"
 	// RevokeReasonAdminForceLogout — выход, произведённый распорядителем
 	// (`InternalIAMService.ForceLogout`; kaname#334, приёмка
 	// `forced-exit-has-its-own-session-end-reason.md`, Р1, Р3). Роли у слова
@@ -310,12 +316,28 @@ const (
 	// приёмка `own-sessions-are-listed-and-ended-by-their-owner.md`, Р6). Причина
 	// снятия записи сессии; отсечки эти глаголы не пишут.
 	RevokeReasonEndedFromAnotherSession = "ended-from-another-session"
+	// RevokeReasonAccessKeyRevoked — снятие ключа доступа гасит сессии
+	// человека (Ф13 Р8, kaname#669): ключ снимают чаще всего потому, что
+	// устройства лишились, и живая сессия на нём — сессия держателя устройства.
+	// Причина снятия записи сессии и причина отсечки.
+	RevokeReasonAccessKeyRevoked = "access-key-revoked"
 )
+
+// CutoffBelowFirstAuthentication — момент отсечки, которой глагол снимает
+// носители, выданные ДО первой аутентификации личности нашей посадкой, и не
+// задевает ни одной сессии нашей посадки: на единицу разрешения хранилища
+// (микросекунда) раньше первой аутентификации (Ф3 Р4, Р5, Ф1 §4.2). Край
+// сравнивает отсечку с моментом сессии включающе, поэтому равенство с первой
+// аутентификацией сняло бы самую раннюю сессию. Правило одно для выхода, смены
+// пароля и снятия ключа доступа (Ф13 Р8): второе написание разошлось бы молча.
+func CutoffBelowFirstAuthentication(first time.Time) time.Time {
+	return first.Add(-time.Microsecond)
+}
 
 // HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
 // сессии: ровно те значения, что принимает `human_sessions_ended_reason_check`.
-// Причина отсечки RevokeReasonSecondFactorReset в него не входит — она не
-// снимает ни одной записи.
+// Причины отсечки RevokeReasonSecondFactorReset и RevokeReasonAccessKeysReset в
+// него не входят — они не снимают ни одной записи.
 //
 // Функция, а не переменная: каждый вызов отдаёт СВЕЖИЙ срез, и вызывающий,
 // дописавший в него, словаря не меняет. Элементы — константы по имени, а не
@@ -331,6 +353,7 @@ func HumanSessionEndReasons() []string {
 		RevokeReasonEmailVerified,
 		RevokeReasonEmailChanged,
 		RevokeReasonEndedFromAnotherSession,
+		RevokeReasonAccessKeyRevoked,
 	}
 }
 

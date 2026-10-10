@@ -908,7 +908,7 @@ func TestEC23_TheChangeWithdrawsALiveRecoveryCode(t *testing.T) {
 				"email": address, "code": recovery[0].code, "newPassword": newPassword, "csrfToken": ctok,
 			}, fwd(), ctxCk2)
 			if tc.changed {
-				requireRefusal(t, r, http.StatusUnauthorized, 16, "", "authentication failed", "EC-23: код, выданный на прежний адрес")
+				requireRefusal(t, r, http.StatusUnauthorized, 16, "", stepRecoveryRefused, "EC-23: код, выданный на прежний адрес — отказ завершения Ф5 Р10 п. 2")
 				require.Equal(t, http.StatusOK, h.loginReply(t, address, integrationPassword).status, "EC-23: пароль прежний")
 				return
 			}

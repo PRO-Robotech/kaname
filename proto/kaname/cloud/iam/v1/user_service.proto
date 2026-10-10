@@ -482,6 +482,55 @@ service UserService {
     option (corelib.authz.v1.required_acr_min)  = "2";
   }
 
+  // Resets the access keys of the specified User: the cloud administrator's
+  // path for a person whose authenticator was lost or taken.
+  //
+  // WHO MAY: the cloud administrator only — `identity_suspender`, the same
+  // relation and the same step-up floor as ResetSecondFactor and Block. An
+  // administrator or owner of an Account the person belongs to may not: the
+  // person is one identity across all his Accounts, and the reset ends every
+  // session of his. Anyone who is not a cloud administrator — the person
+  // himself included — gets PERMISSION_DENIED, the same on an existing and on
+  // a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+  // administrator only. The person removes a single key of his own with
+  // `AccessKeyService.Revoke`.
+  //
+  // ONE TRANSACTION: EVERY access key row of the person is removed (the
+  // ceiling slots return with them); registration challenges issued before
+  // the reset stop being usable, so a registration finished from a session the
+  // reset ended leaves no key behind; EVERY session of the person is covered
+  // by a cutoff at `now` with reason `access-keys-reset` and the administrator
+  // as the actor — whoever holds the lost device may hold a session too; the
+  // audit event `iam.user.access_keys_reset` names both actors.
+  //
+  // A person WITHOUT an access key is refused synchronously:
+  // FAILED_PRECONDITION with `ErrorInfo.reason = ACCESS_KEYS_NOT_ENROLLED` and
+  // the text `user has no access key to reset`; nothing is ended. Whether the
+  // person has a password does not change that answer. Of two resets racing on
+  // one person exactly one is applied; the other finishes its Operation with
+  // the same refusal and ends nothing.
+  //
+  // WHAT IT DOES NOT DO: it does not remove, replace or devalue the password
+  // and does not open the recovery path — a person resets the password by
+  // recovering access with a code sent to the address; it does not reset the
+  // second factor (ResetSecondFactor), does not change the state of the person
+  // and does not lift or set a block. To stop sign-in with the password at
+  // once the administrator blocks the person (Block).
+  rpc ResetAccessKeys (ResetAccessKeysRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/users/{user_id}:resetAccessKeys" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "ResetAccessKeysMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.resetAccessKeys";
+    option (corelib.authz.v1.required_relation) = "identity_suspender";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
   // Lists operations for the specified user.
   rpc ListOperations (ListUserOperationsRequest) returns (ListUserOperationsResponse) {
     option (google.api.http) = { get: "/iam/v1/users/{user_id}/operations" };
@@ -619,6 +668,12 @@ message UnblockUserRequest {
 message ResetSecondFactorRequest {
   // ID of the User whose second factor is reset. The only input: there is no
   // code to present — the caller is the administrator, not the person.
+  string user_id = 1;
+}
+
+message ResetAccessKeysRequest {
+  // ID of the User whose access keys are reset. The only input: there is no
+  // choice of keys — the reset removes all of them.
   string user_id = 1;
 }
 

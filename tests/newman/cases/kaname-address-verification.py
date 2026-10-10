@@ -177,7 +177,10 @@ _NOT_VERIFIED_REASON = "EMAIL_NOT_VERIFIED"
 # `ProductSuffix` и `ServiceIAM`), а не величина посадки.
 _REFUSAL_DOMAIN = "iam.kaname.cloud"
 _TOO_MANY = "too many attempts; try again later"
-_REG_REFUSED = "registration refused"
+# Единый отказ регистрации — текст Ф4 Р3, редакция 8 (kaname#211): называет шаг,
+# не называя причины.
+_REG_REFUSED = ("registration refused; if this address is already yours, sign in or recover access; "
+                "if you were invited, ask an account administrator to invite again; otherwise try again later")
 
 # Величины профиля, с которыми стенд поднят: стенд `chart-own` ставит
 # `deploy/values.prod.yaml` как есть (накладка несёт координаты и посадку, не

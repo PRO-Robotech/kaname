@@ -96,6 +96,9 @@ func liveAuthLaneContract() authLaneContract {
 		EdgeRoutes: []string{"/iam/v1/auth/me"},
 		Texts: []string{
 			humansession.TextAuthenticationFailed,
+			humansession.TextLoginWithSecondFactorFailed,
+			humansession.TextAccessNotRestored,
+			humansession.TextRecoveryNextStep,
 			humansession.TextTooManyAttempts,
 			humansession.TextFormTokenRejected,
 			humansession.TextLogoutNotPerformed,

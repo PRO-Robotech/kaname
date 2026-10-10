@@ -195,6 +195,10 @@ type sessionLaneOptions struct {
 	recoverySourcePace humansession.SourcePace
 	// recoveryObserver — приёмник исходов запроса кода; nil — молчащий.
 	recoveryObserver humansession.Observer
+	// akKeys — хранилище полосы входа ключом поверх адаптера стенда: пробы
+	// чередования ставят встречное действие между операторами входа; nil — сам
+	// адаптер.
+	akKeys func(humansession.AccessKeyLoginStore) humansession.AccessKeyLoginStore
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -330,9 +334,13 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	// Полоса входа ключом (Ф13) — теми же хранилищами и той же привязкой,
 	// что корень композиции, с привязкой стенда (`laneKeyBinding`).
 	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	var akKeys humansession.AccessKeyLoginStore = kanamepg.NewAccessKeyLoginRepo(pool, accessKeys)
+	if opts.akKeys != nil {
+		akKeys = opts.akKeys(akKeys)
+	}
 	akDeps := humansession.AccessKeyLoginDeps{
 		CutoffClock: momentclock.Func(time.Now),
-		Store:       sessions, Keys: kanamepg.NewAccessKeyLoginRepo(pool, accessKeys), Methods: methods,
+		Store:       sessions, Keys: akKeys, Methods: methods,
 		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
 		UserVerification: access_keys.UserVerificationAssertion,
 		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,

@@ -136,7 +136,7 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 			register: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: RegistrationOutcomesMetric,
 				Help: "Outcomes of registration by lane and cause. The caller always sees ONE refusal " +
-					"(registration refused) for an occupied address and for the admission-rate ceiling; " +
+					"(reason REGISTRATION_REFUSED) for an occupied address and for the admission-rate ceiling; " +
 					"the cause is visible only here and in the journal (Ф4 Р3).",
 			}, []string{"lane", "outcome"}),
 			recReq: prometheus.NewCounterVec(prometheus.CounterOpts{

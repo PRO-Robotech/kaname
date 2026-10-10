@@ -18,8 +18,10 @@ import (
 // Один конструктор на оба фронта: два места об одном предмете разошлись бы
 // молча, и разошлись бы именно в той части, где расхождение не видно снаружи.
 //
-// Своего обработчика ошибок здесь НЕТ намеренно — см. шапку пакета: пока его
-// нет, множество производимых статусов задаёт библиотека.
+// Обработчик ошибок вызова — stepUpErrorHandler (stepup.go): он рендерит ОДИН
+// ответ — указание повысить уровень (Р11, kaname#511) — и всё прочее отдаёт
+// умолчанию библиотеки. Отображение кодов в статусы он не трогает ни одним
+// значением: указание и так `UNAUTHENTICATED`, то есть `401` у умолчания.
 //
 // Обработчик ошибок МАРШРУТИЗАЦИИ — другой предмет и заводится отдельно
 // (см. routingErrorHandler): он судит промах глагола, а не исход вызова, и
@@ -33,6 +35,7 @@ func newMux() *runtime.ServeMux {
 	return runtime.NewServeMux(
 		narrowingHeaderMatcherOption(),
 		runtime.WithRoutingErrorHandler(routingErrorHandler),
+		runtime.WithErrorHandler(stepUpErrorHandler),
 		runtime.WithMiddlewares(routeProbeMiddleware),
 	)
 }

@@ -341,7 +341,7 @@ func acrossReplicas(t *testing.T, wire func(s oneClockStand, issuer, writer *rep
 				{"выданное после отсечки", idAfter, revocationpolicy.Allowed},
 			} {
 				issued := s.standingIssuedAt(t, c.id)
-				got, err := revocationpolicy.AtIssuance(ctx, adapter, service.ResolvedPrincipal{
+				got, _, err := revocationpolicy.AtIssuance(ctx, adapter, service.ResolvedPrincipal{
 					Kind: service.PrincipalUser, UserID: string(s.user.ID), StandingCredentialIssuedAt: &issued,
 				}, time.Time{})
 				require.NoError(t, err)
@@ -374,7 +374,7 @@ func acrossReplicas(t *testing.T, wire func(s oneClockStand, issuer, writer *rep
 				{"сессия до отсечки", sessBefore, revocationpolicy.Revoked},
 				{"сессия после отсечки", sessAfter, revocationpolicy.Allowed},
 			} {
-				got, err := revocationpolicy.AtIssuance(ctx, rule, service.ResolvedPrincipal{
+				got, _, err := revocationpolicy.AtIssuance(ctx, rule, service.ResolvedPrincipal{
 					Kind: service.PrincipalUser, UserID: string(s.user.ID),
 				}, c.at)
 				require.NoError(t, err)

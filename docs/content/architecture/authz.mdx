@@ -140,7 +140,10 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
 ## Step-up (ACR floor) {#step-up}
 
 `required_acr_min=2` — **минимальный уровень свежести аутентификации** (second-factor): если ACR
-токена ниже требуемого, запрос отклоняется независимо от наличия отношения. Service→service-вызовы
+токена ниже требуемого, запрос не исполняется независимо от наличия отношения. Ответ — **указание
+повысить уровень**, а не отказ прав: `401` / `16`, текст, называющий шаг, и вызов
+`insufficient_user_authentication` с `acr_values` — одной формой на краю и на REST-фронте и
+gRPC службы ([форма указания](/api/rest-surface#step-up)). Service→service-вызовы
 (SA-principal) освобождены от ACR-floor.
 
 Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком. Критерий —
@@ -154,7 +157,7 @@ Floor стоит на **узком наборе** RPC, а не на пользо
   <tbody>
     <tr><td>выдача и отзыв удостоверений</td><td><code>UserTokenService.Issue</code>, <code>UserTokenService.Revoke</code>, <code>SAKeyService.Issue</code>, <code>SAKeyService.Revoke</code></td></tr>
     <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>, <code>AccessBindingService.Update</code>, <code>AccessBindingService.Delete</code>, <code>AccessBindingService.Revoke</code>, <code>RoleService.Update</code>, <code>GroupService.AddMember</code>, <code>GroupService.RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>, <code>InternalClusterService.RevokeAdmin</code>, <code>ClusterService.GrantAdmin</code>, <code>ClusterService.RevokeAdmin</code></td></tr>
-    <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
+    <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>UserService.ResetAccessKeys</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
     <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>, <code>InternalInteractiveClientService.Update</code>, <code>InternalInteractiveClientService.Delete</code></td></tr>
     <tr><td>применение модели доступов модуля</td><td><code>InternalModuleService.Apply</code></td></tr>
     <tr><td>необратимое удаление</td><td><code>AccountService.Delete</code>, <code>ProjectService.Delete</code>, <code>GroupService.Delete</code>, <code>RoleService.Delete</code></td></tr>
@@ -164,7 +167,7 @@ Floor стоит на **узком наборе** RPC, а не на пользо
 Приглашение и повторная отправка письма стоят в перечне по той же причине, что и
 `AccessBindingService.Create`: `projectId` + `roleId` заводят привязку атомарно с членством, и
 порог ниже порога привязки был бы обходом step-up через более дешёвую дверь; сброс второго
-фактора — надзор облака над способом входа человека.
+фактора и сброс ключей доступа — надзор облака над способами входа человека.
 
 Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
 повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.

@@ -901,6 +901,32 @@ func TestF12_35_UnreadableMaterialIsUnavailableNotARefusal(t *testing.T) {
 	require.Equal(t, 1, h.obs.sfRefusals[humansession.RefusalUnavailable])
 }
 
+// TestF12_35g_BackupSetMissingIsUnavailableWithTheSameText — Ф12-35 «г»
+// (редакция 17, круг 13 Б1): у способа `lookup_secret` ключа нет, и материал
+// «не открывается» только при дефекте хранения — строка `totp` в `active`, а
+// строки набора нет (снята мимо глаголов семейства; схема это допускает). Исход
+// — тот же 503, что у «в», тем же текстом, без попытки; клетка «материал не
+// открывается» способа набора выросла. Положительный близнец — та же личность
+// с невредимой строкой набора: код сверяется. Отличающий факт — один: есть ли
+// строка набора.
+func TestF12_35g_BackupSetMissingIsUnavailableWithTheSameText(t *testing.T) {
+	h := newSFHarness(t)
+	twin, _, twinCodes := h.enrolled(t, "usr-bg1", "bg1@example.invalid", "correct horse battery")
+	_, err := h.stepUp.Execute(context.Background(), humansession.StepUpInput{Bearer: twin.Bearer, Method: assurance.MethodLookupSecret, Code: twinCodes[0], Source: "203.0.113.7"})
+	require.NoError(t, err, "близнец: строка набора цела — код сверяется (Ф12-18 форма)")
+
+	login, _, codes := h.enrolled(t, "usr-bg2", "bg2@example.invalid", "correct horse battery")
+	delete(h.store.factors[login.View.User.ID], domain.LoginMethodLookupSecret)
+	_, ok := h.sfRow(login.View.User.ID, domain.LoginMethodTOTP)
+	require.True(t, ok, "Дано: строка totp на месте")
+	_, err = h.stepUp.Execute(context.Background(), humansession.StepUpInput{Bearer: login.Bearer, Method: assurance.MethodLookupSecret, Code: codes[0], Source: "203.0.113.7"})
+	require.ErrorIs(t, err, humansession.ErrSecondFactorUnavailable)
+	require.EqualError(t, err, "second factor cannot be verified; ask the administrator of this installation",
+		"текст побайтово тот же, что у «в» (Р2: текст один на оба способа)")
+	require.Zero(t, h.failures(humansession.FailureByAddress, "bg2@example.invalid"), "в счёт попыток не идёт")
+	require.Equal(t, 1, h.obs.sfPresent[sfKey(assurance.MethodLookupSecret, humansession.PresentationMaterialUnreadable)])
+}
+
 // TestSecondFactorRefusalTextsAreTheContract — тексты и токены (Р4, §7 инв. 14).
 func TestSecondFactorRefusalTextsAreTheContract(t *testing.T) {
 	require.Equal(t, "second factor is not enrolled", humansession.ErrSecondFactorNotEnrolled.Error())
@@ -911,7 +937,7 @@ func TestSecondFactorRefusalTextsAreTheContract(t *testing.T) {
 	require.Equal(t, "ENROLLMENT_NOT_PENDING", humansession.ReasonEnrollmentNotPending)
 	require.Equal(t, "re-authentication required: present a credential again", humansession.ErrSessionNotFresh.Error())
 	require.Equal(t, "SESSION_NOT_FRESH", humansession.ReasonSessionNotFresh)
-	require.Equal(t, "second factor temporarily unavailable", humansession.ErrSecondFactorUnavailable.Error())
+	require.Equal(t, "second factor cannot be verified; ask the administrator of this installation", humansession.ErrSecondFactorUnavailable.Error())
 	require.True(t, strings.HasPrefix(humansession.AuditSecondFactorEnrolled, "iam.user."))
 }
 

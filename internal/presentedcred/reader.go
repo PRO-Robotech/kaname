@@ -411,10 +411,11 @@ func (r *Reader) decide(
 	// Отказ пары вызывающий читает из pairErr.
 	_, _ = forwarded(ctx)
 
-	principal, acr, err := r.verify(ctx, raw)
+	v, err := r.verify(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
+	principal, acr := v.principal, v.acr
 	r.accepted.Add(1)
 
 	// Личность модуля из сертификата пира решается НЕ предъявленным, и на этой
@@ -454,6 +455,9 @@ func (r *Reader) decide(
 	// Значение сюда попадает только после полной проверки, поэтому оно не
 	// утверждение предъявителя о себе.
 	base = callerorigin.WithAssurance(base, acr)
+	if v.credentialID != "" {
+		base = callerorigin.WithCredentialID(base, v.credentialID)
+	}
 	return callerorigin.With(operations.WithPrincipal(base, principal), callerorigin.PresentedCredential), nil
 }
 
@@ -481,14 +485,22 @@ func chainStream(interceptors ...grpc.StreamServerInterceptor) grpc.StreamServer
 	}
 }
 
+// verified — что даёт ЦЕЛИКОМ проверенное удостоверение: личность, уровень
+// доверия и идентификатор выпуска (`jti`; пусто — токен его не несёт).
+type verified struct {
+	principal    operations.Principal
+	acr          string
+	credentialID string
+}
+
 // verify исполняет все одиннадцать проверок единого перечня.
-func (r *Reader) verify(ctx context.Context, raw string) (operations.Principal, string, error) {
+func (r *Reader) verify(ctx context.Context, raw string) (verified, error) {
 	byKID, err := r.keySnapshot(ctx, false)
 	if err != nil {
 		// Нечитаемый реестр НЕ ЕСТЬ «ключ не найден»: это третий исход, и
 		// смешать его с отказом значило бы сделать сбой хранилища неотличимым
 		// от негодного токена — для оператора, а не для предъявителя.
-		return operations.Principal{}, "", r.unavail("key registry", err)
+		return verified{}, r.unavail("key registry", err)
 	}
 
 	claims := jwt.MapClaims{}
@@ -533,10 +545,10 @@ func (r *Reader) verify(ctx context.Context, raw string) (operations.Principal, 
 		// поломка, а не негодный вход: испорченный ключ отвергал бы всё,
 		// наращивая ряд «отвергнуто», и оператор пошёл бы разбираться с
 		// клиентами.
-		return operations.Principal{}, "", r.unavail("key registry", err)
+		return verified{}, r.unavail("key registry", err)
 	}
 	if err != nil {
-		return operations.Principal{}, "", r.refuse("token did not verify: " + err.Error())
+		return verified{}, r.refuse("token did not verify: " + err.Error())
 	}
 	headerType, _ := tok.Header["typ"].(string)
 
@@ -544,15 +556,15 @@ func (r *Reader) verify(ctx context.Context, raw string) (operations.Principal, 
 	// поверхность. ОТСУТСТВИЕ типа и НЕСОВПАДЕНИЕ дают один исход: «тип не
 	// назван» не означает «любой».
 	if headerType != tokenpolicy.TokenTypeAccess {
-		return operations.Principal{}, "", r.refuse("token type is not the one this surface accepts")
+		return verified{}, r.refuse("token type is not the one this surface accepts")
 	}
 
 	revoked, err := r.revoked(ctx, raw, claims)
 	if err != nil {
-		return operations.Principal{}, "", r.unavail("revocation authority", err)
+		return verified{}, r.unavail("revocation authority", err)
 	}
 	if revoked {
-		return operations.Principal{}, "", r.refuse("credential is revoked")
+		return verified{}, r.refuse("credential is revoked")
 	}
 
 	acr, _ := claims["acr"].(string)
@@ -561,9 +573,13 @@ func (r *Reader) verify(ctx context.Context, raw string) (operations.Principal, 
 		// Токен проверился целиком и не назвал, за кого говорит. Принять его
 		// значило бы отдать вызов личности, которой никто не называл, —
 		// «назвать некого» и «назван системный» разные состояния.
-		return operations.Principal{}, "", r.refuse("verified token names no principal")
+		return verified{}, r.refuse("verified token names no principal")
 	}
-	return principal, acr, nil
+	// Идентификатор выпуска — из ПРОВЕРЕННОГО токена: по нему звено, которому
+	// нужна запись сессии вызывающего, находит её через семейство выпуска.
+	// Токен без него законен — тогда носитель остаётся пустым.
+	jti, _ := claims["jti"].(string)
+	return verified{principal: principal, acr: acr, credentialID: jti}, nil
 }
 
 // keySnapshot отдаёт снимок публикуемого набора, обновляя его по одному из двух

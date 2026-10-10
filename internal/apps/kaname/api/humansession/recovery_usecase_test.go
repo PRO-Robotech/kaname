@@ -192,10 +192,12 @@ func TestRecovery_F5_04_ExpiredCodeIsRefusedAndDoesNotRevive(t *testing.T) {
 
 	h.clock = ucBase.Add(rcCodeTTL)
 	_, err := h.complete("r04@example.invalid", letter, "brand-new-password-4")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "в момент срока кода уже нет")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "в момент срока кода уже нет")
+	require.EqualError(t, err, "access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator",
+		"Ф5-04 (редакция 10): текст Р10 п. 2 дословно")
 	h.clock = ucBase.Add(rcCodeTTL + time.Minute)
 	_, err = h.complete("r04@example.invalid", letter, "brand-new-password-4")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "повтор не оживляет")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "повтор не оживляет")
 	require.Empty(t, h.store.rows, "сессия не выдана")
 	require.Nil(t, h.store.codesOf(u.ID)[0].ConsumedAt)
 	require.Equal(t, 2, h.obs.recoveryCompletion[humansession.RecoveryCompletionCodeRejected])
@@ -213,7 +215,7 @@ func TestRecovery_F5_05_SecondPresentationIsRefused(t *testing.T) {
 	_, err := h.complete("r05@example.invalid", letter, "brand-new-password-5")
 	require.NoError(t, err)
 	_, err = h.complete("r05@example.invalid", letter, "another-new-password-5")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored)
 	require.Len(t, h.store.rows, 1, "второй сессии нет")
 	require.Len(t, h.store.completions, 1, "второй записи журнала нет (Ф5-16)")
 }
@@ -227,7 +229,7 @@ func TestRecovery_F5_07_StoredDigestIsNotAPresentation(t *testing.T) {
 	stored := string(h.store.codesOf(u.ID)[0].Digest)
 
 	_, err := h.complete("r07@example.invalid", stored, "brand-new-password-7")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored)
 	_, err = h.complete("r07@example.invalid", h.letterOf(t, u.ID), "brand-new-password-7")
 	require.NoError(t, err, "положительный контроль: настоящий код в тот же срок проходит")
 }
@@ -261,7 +263,7 @@ func TestRecovery_F5_08_TooManyWrongCodesIsARateRefusalThatRevealsNothing(t *tes
 	h2.request(t, "r08b@example.invalid")
 	for i := 0; i < n-1; i++ {
 		_, err := h2.complete("r08b@example.invalid", "AAAAA-AAAAA", "brand-new-password-8")
-		require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+		require.ErrorIs(t, err, humansession.ErrAccessNotRestored)
 	}
 	_, err := h2.complete("r08b@example.invalid", h2.letterOf(t, u2.ID), "brand-new-password-8")
 	require.NoError(t, err)
@@ -285,7 +287,7 @@ func TestRecovery_F5_17_BlockedIdentityGetsTheBlockedLoginRefusal(t *testing.T) 
 
 	h.clock = ucBase.Add(time.Minute)
 	_, err := h.complete("r17@example.invalid", letter, "brand-new-password-17")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "тот же отказ, что на входе заблокированной (Ф1-05)")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "отказ завершения Р10 п. 2 — блокировка не отличима от прочих причин глагола (Ф1-59, Д22)")
 	require.Equal(t, 1, h.obs.recoveryCompletion[humansession.RecoveryCompletionBlocked])
 
 	require.Len(t, h.store.rows, 1, "новая сессия не выдана")
@@ -419,7 +421,7 @@ func TestRecovery_F5_25_CompletionResetsTheAddressCountOnlyAsALoginCompletedToEv
 			"и бюджет подбора кода второго фактора не обновлён; получено %v (счёт после завершения %d)", a.after[1], a.count)
 
 	// (в) замок: заблокирована — сессии нет, вход не завершён, отказ — попытка.
-	require.ErrorIs(t, c.err, humansession.ErrAuthenticationFailed, "(в): тот же отказ, что на входе заблокированной (Ф1-59)")
+	require.ErrorIs(t, c.err, humansession.ErrAccessNotRestored, "(в): отказ завершения Р10 п. 2 (Ф1-59 по свойству, Д22)")
 	require.True(t, c.completion.Bearer.IsZero(), "(в): сессии нет")
 	assert.True(t, isAddressRate(c.after[0]),
 		"(в): первый неверный пароль после завершения обязан упереться в частоту по адресу — отказ завершения "+
@@ -512,8 +514,8 @@ func TestRecovery_WrongCodeRefusalIsTheSameForNobodyAndForSomeone(t *testing.T) 
 
 	_, errSomeone := h.complete("rwc@example.invalid", "AAAAA-AAAAA", "brand-new-password-wc")
 	_, errNobody := h.complete("nobody@example.invalid", "AAAAA-AAAAA", "brand-new-password-wc")
-	require.ErrorIs(t, errSomeone, humansession.ErrAuthenticationFailed)
-	require.ErrorIs(t, errNobody, humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, errSomeone, humansession.ErrAccessNotRestored)
+	require.ErrorIs(t, errNobody, humansession.ErrAccessNotRestored)
 	require.True(t, errors.Is(errSomeone, errNobody))
 	require.Equal(t, errSomeone.Error(), errNobody.Error())
 	require.Len(t, h.store.failures, 4)

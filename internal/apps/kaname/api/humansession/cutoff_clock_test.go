@@ -180,6 +180,7 @@ func TestCutoffClock_AccessKeyLoginStampsTheSessionFromTheSharedSource(t *testin
 				ID: "ak-clk3", UserID: u.ID, CredentialID: auth.CredentialID(), PublicKey: auth.COSEPublicKey(t),
 				Algorithm: auth.Algorithm(), UserHandle: handle,
 			}}
+			h.store.accessKeyRows[keys.key.ID] = u.ID
 			replica := func() time.Time { return h.clock }
 			deps := humansession.AccessKeyLoginDeps{
 				Store: h.store, Keys: keys, Methods: fakeMethods{h.store},

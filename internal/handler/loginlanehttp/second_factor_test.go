@@ -391,7 +391,7 @@ func TestLane_F12_RefusalsCarryTheirTokens(t *testing.T) {
 	stub.confirmErr = humansession.ErrSecondFactorUnavailable
 	r = call()
 	require.Equal(t, http.StatusServiceUnavailable, r.status)
-	require.JSONEq(t, `{"code":14,"message":"second factor temporarily unavailable","details":[]}`, r.body)
+	require.JSONEq(t, refusalWire(14, stepSecondFactorUnavailable), r.body)
 
 	stub.confirmErr = humansession.ErrAuthenticationFailed
 	r = call()

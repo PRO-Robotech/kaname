@@ -75,7 +75,7 @@ func TestLane_F4_11_12_RefusalIsOneFixedBodyWithoutACause(t *testing.T) {
 
 	r := l.do(t, c, http.MethodPost, loginlanehttp.PathRegister, form, nil, ctxCk)
 	require.Equal(t, http.StatusBadRequest, r.status)
-	require.JSONEq(t, `{"code":9,"message":"registration refused","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"REGISTRATION_REFUSED","domain":"iam.kaname.cloud"}]}`, r.body)
+	require.JSONEq(t, `{"code":9,"message":"`+stepRegistrationRefused+`","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"REGISTRATION_REFUSED","domain":"iam.kaname.cloud"}]}`, r.body)
 	require.Empty(t, r.cookies, "без Set-Cookie")
 	require.Empty(t, r.header.Get("Retry-After"), "потолок темпа не выдаётся заголовком")
 	first := r.body

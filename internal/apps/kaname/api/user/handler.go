@@ -35,6 +35,7 @@ type Handler struct {
 	resend  *ResendInviteUseCase
 	listOp  *shared.ListOperationsUseCase
 	reset   *ResetSecondFactorUseCase
+	keys    *ResetAccessKeysUseCase
 }
 
 func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d *DeleteUserUseCase,
@@ -58,6 +59,15 @@ func (h *Handler) WithResendInvite(uc *ResendInviteUseCase) *Handler {
 // отвечает `Unimplemented` — ровно как контракт, у которого нет исполнителя.
 func (h *Handler) WithResetSecondFactor(uc *ResetSecondFactorUseCase) *Handler {
 	h.reset = uc
+	return h
+}
+
+// WithResetAccessKeys — сброс ключей доступа администратором облака (kaname#638).
+// Отдельной провязкой по той же причине, что [Handler.WithResetSecondFactor]:
+// исполнитель несёт полоса входа (хранилища ключей и сессий), которую корень
+// собирает после служб; вызов без провязки отвечает `Unimplemented`.
+func (h *Handler) WithResetAccessKeys(uc *ResetAccessKeysUseCase) *Handler {
+	h.keys = uc
 	return h
 }
 
@@ -190,6 +200,20 @@ func (h *Handler) ResetSecondFactor(ctx context.Context, req *iamv1.ResetSecondF
 		return nil, status.Error(codes.Unimplemented, "second factor reset is not wired")
 	}
 	op, err := h.reset.Execute(ctx, domain.UserID(req.GetUserId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// ResetAccessKeys — сброс ключей доступа администратором облака (kaname#638).
+// Тонкий транспорт: разбор → глагол → форма ответа; непровязанный обработчик
+// отвечает как контракт без исполнителя, а не паникой.
+func (h *Handler) ResetAccessKeys(ctx context.Context, req *iamv1.ResetAccessKeysRequest) (*operationpb.Operation, error) {
+	if h.keys == nil {
+		return nil, status.Error(codes.Unimplemented, "access keys reset is not wired")
+	}
+	op, err := h.keys.Execute(ctx, domain.UserID(req.GetUserId()))
 	if err != nil {
 		return nil, err
 	}
