@@ -85,11 +85,11 @@ func (f EnqueuerFinding) String() string {
 	if f.Ref.DotImport {
 		return fmt.Sprintf("%s:%d — импорт с точкой каталога шаблонов %s: ссылка на Send* неотличима от "+
 			"своего идентификатора, и разбор не может её судить. Импортируйте каталог по имени; постановка — "+
-			"только через mail.Enqueuer (design.md З1)", f.Ref.File, f.Ref.Line, FeedgenDir)
+			"только через mail.Enqueuer", f.Ref.File, f.Ref.Line, FeedgenDir)
 	}
 	return fmt.Sprintf("%s:%d — %s вне пакета %s: письмо, поставленное мимо mail.Enqueue, обходит флаг почты, "+
-		"окно адресата и лимит шаблона. Соберите письмо конструктором mail.Letter и поставьте Enqueue "+
-		"(design.md З1, И1)", f.Ref.File, f.Ref.Line, f.Ref.Ref, MailPackageDir)
+		"окно адресата и лимит шаблона. Соберите письмо конструктором "+
+		"mail.Letter и поставьте его mail.Enqueue", f.Ref.File, f.Ref.Line, f.Ref.Ref, MailPackageDir)
 }
 
 // EnqueuerCensus — объём осмотренного.

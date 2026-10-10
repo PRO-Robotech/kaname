@@ -366,6 +366,13 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 | `kaname_invite_activations_total` | `outcome` | исходы активации приглашения внутренним глаголом `InternalUserService.UpsertFromIdentity`. Активацию подтверждением адреса на полосе входа этот ряд не считает: её отказ виден исходом `invite-not-valid` ряда `kaname_address_verification_outcomes_total` |
 | `kaname_bootstrap_admin_attempts_total` | `outcome` | попытки посева доступа кластерного администратора |
 
+## Почта на ленте извещений
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_notifications_enabled` | — | флаг почты установки (`notifications.enabled`): `1` — включён, `0` — выключен. Ряд заводится и при `0`: «почта выключена» отличимо от «ряда нет» |
+| `kaname_mail_intents_total` | `verb`, `outcome` | исходы работ окна адресата по глаголу (`recovery`, `register`, `verify-email`): `queued`, `resent_same`, `cooldown`, `capped`, `floor`, `trusted_device`, `dropped_overload`. Клетки заведены нулём при старте. Ответ сверх предела тот же, что в норме, поэтому исход окна виден только здесь |
+
 ## Дорог к прежнему издателю нет
 
 Семейство исходов дорог к внешнему поставщику снято вместе с последней из них — обменом
