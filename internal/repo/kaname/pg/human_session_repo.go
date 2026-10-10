@@ -270,15 +270,75 @@ func (r *HumanSessionRepo) Writer(ctx context.Context) (humansession.Writer, err
 // SessionSetWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята
 // строка личности замком писателя нескольких сессий (`lockPersonForSessionSetSQL`).
 func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := r.openSessionSetWriter(ctx, userID, "HumanSession.SessionSetWriter")
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// openSessionSetWriter — открытие транзакции под замком писателя нескольких
+// сессий, общее у `SessionSetWriter` и сброса второго фактора
+// (`SecondFactorResetWriter`): одна дверь, один порядок «личность → дети».
+func (r *HumanSessionRepo) openSessionSetWriter(ctx context.Context, userID domain.UserID, site string) (*humanSessionWriter, error) {
 	w, err := beginHumanSessionWriter(ctx, r.pool)
 	if err != nil {
-		return nil, mapErr(err, "HumanSession.SessionSetWriter", "")
+		return nil, mapErr(err, site, "")
 	}
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
 		_ = w.tx.Rollback(ctx)
 		return nil, err
 	}
 	return w, nil
+}
+
+// SecondFactorResetTx — транзакция СБРОСА второго фактора человека
+// администратором облака (kaname#680; приёмка
+// `second-factor-totp-and-recovery-codes.md`, Р10): дверь писателя нескольких
+// сессий — строка личности под замком `FOR NO KEY UPDATE` ПЕРВЫМ оператором, —
+// и момент отсечки, прочитанный соединением этой транзакции после захвата.
+// Исполняет порт `user.SecondFactorResetWriter` (соответствие закрепляет корень
+// композиции): снятие строк фактора, отсечка и событие — операторы писателя
+// сессии.
+//
+// Замок конфликтует с захватом выдачи входа (`lockPersonForLoginSQL`, `FOR
+// SHARE`): выдача, взявшая личность раньше, фиксируется до момента сброса и
+// отсечкой покрыта; выдача, пришедшая позже, ждёт фиксации сброса и читает его
+// отсечку.
+type SecondFactorResetTx struct{ *humanSessionWriter }
+
+// SecondFactorResetWriter — см. [SecondFactorResetTx].
+func (r *HumanSessionRepo) SecondFactorResetWriter(ctx context.Context, userID domain.UserID) (*SecondFactorResetTx, error) {
+	if userID == "" {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	w, err := r.openSessionSetWriter(ctx, userID, "HumanSession.SecondFactorResetWriter")
+	if err != nil {
+		return nil, err
+	}
+	return &SecondFactorResetTx{humanSessionWriter: w}, nil
+}
+
+// Now — момент отсечки сброса: часы первичной базы соединением ЭТОЙ
+// транзакции после захвата строки личности (`momentInTx`).
+func (w *SecondFactorResetTx) Now(ctx context.Context) (time.Time, error) {
+	return momentInTx(ctx, w.tx)
+}
+
+// momentInTx — момент отсечки, читаемый писателем сброса (ключей, второго
+// фактора): часы первичной базы (источник kaname#589, `SharedClock`),
+// прочитанные соединением ОТКРЫТОЙ транзакции после захвата строки личности.
+// `clock_timestamp()`, а не `now()`: `now()` в транзакции — момент её начала,
+// то есть до ожидания замка, и выдача, зафиксированная за это ожидание, его
+// опередила бы. Своё соединение, а не пул: чтение из пула изнутри открытой
+// транзакции брало бы второе соединение на запрос (довод `SharedClock`).
+// Ошибка — как есть: класс для журнала выделяет вызывающий.
+func momentInTx(ctx context.Context, q rowQuerier) (time.Time, error) {
+	var at time.Time
+	if err := q.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		return time.Time{}, err
+	}
+	return at.UTC(), nil
 }
 
 // PersonWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята строка

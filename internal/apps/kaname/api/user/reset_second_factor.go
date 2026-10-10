@@ -14,14 +14,33 @@ package user
 // получают от края `PERMISSION_DENIED`, один на существующем и несуществующем
 // `user_id`; свой фактор человек снимает кодом (`remove`, Р9).
 //
-// # Одна транзакция — писателя сессии, а не зеркала
+// # Одна транзакция — писателя сессии, под замком строки личности
 //
 // Строки `totp` (`active`) и `lookup_secret` сняты; ВСЕ сессии человека покрыты
-// отсечкой (момент общего источника, kaname#589) с причиной `second-factor-reset` и актором — администратором облака
+// отсечкой с причиной `second-factor-reset` и актором — администратором облака
 // (держатель украденного устройства мог держать и сессию); событие
 // `iam.user.second_factor_reset` с обоими акторами — одним коммитом писателя
 // хранилища сессий: у него есть и оператор снятия, и отсечка, и очередь аудита.
-// Писатель зеркала здесь не участвует — строку личности глагол не трогает.
+// Транзакцию открывает дверь писателя нескольких сессий
+// (`SecondFactorResetWriter`): ПЕРВЫМ оператором взята строка личности замком
+// `FOR NO KEY UPDATE`, раньше строк фактора — тот же порядок «личность →
+// строки фактора», что у входа и у самостоятельного снятия (`sf_remove.go`).
+// Строку личности глагол только держит, не пишет; писатель зеркала не участвует.
+//
+// # Момент отсечки — ПОСЛЕ захвата строки личности (kaname#680)
+//
+// Записи сессии сброс не снимает — отсекает, поэтому «гаснут ВСЕ» держится
+// только моментом отсечки, и момент читается писателем — соединением его
+// транзакции, ПОСЛЕ захвата строки личности (`SecondFactorResetWriter.Now`), а
+// не до открытия транзакции. Выдача входа держит строку личности (`FOR SHARE`)
+// до своей фиксации; сброс, ждавший её, читает момент позже фиксации, и
+// сессия, выданная до фиксации сброса, отсечкой покрыта (сравнение у края
+// включающее). Выдача, начатая после захвата, ждёт фиксации сброса и читает его
+// отсечку. Момент прежнего порядка (прочитанный до транзакции) опережала
+// выдача, взявшая личность раньше, и её сессия переживала сброс — проба
+// `reset_second_factor_cutoff_race_integration_test.go`. Источник тот же —
+// часы первичной базы (kaname#589), — а второго соединения изнутри открытой
+// транзакции нет. Образец — сброс ключей (`reset_access_keys.go`).
 //
 // # Что синхронно, а что в Operation
 //
@@ -42,6 +61,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -70,14 +90,20 @@ type LoginMethodReader interface {
 }
 
 // SecondFactorResetStore — порт хранилища сессий для сброса: писатель одной
-// транзакции. Реализует адаптер хранилища сессий (композиционный корень).
+// транзакции, первым оператором которой взята строка личности userID.
+// Реализует адаптер хранилища сессий (композиционный корень).
 type SecondFactorResetStore interface {
-	ResetWriter(ctx context.Context) (SecondFactorResetWriter, error)
+	ResetWriter(ctx context.Context, userID domain.UserID) (SecondFactorResetWriter, error)
 }
 
-// SecondFactorResetWriter — ровно то, что нужно сбросу: снятие обеих строк,
-// отсечка, событие, фиксация.
+// SecondFactorResetWriter — ровно то, что нужно сбросу: момент, снятие обеих
+// строк, отсечка, событие, фиксация; порядок вызовов задаёт глагол.
 type SecondFactorResetWriter interface {
+	// Now — момент первичной базы, прочитанный соединением этой транзакции
+	// ПОСЛЕ захвата строки личности (шапка файла, «Момент отсечки»): выдача,
+	// зафиксированная до захвата, его не опережает. Делает писателя
+	// источником [revocationpolicy.Clock].
+	Now(ctx context.Context) (time.Time, error)
 	// RemoveSecondFactor снимает строку `totp` в состоянии `active` и строку
 	// `lookup_secret`; false — строки `active` нет (ничего не снято).
 	RemoveSecondFactor(ctx context.Context, userID domain.UserID) (bool, error)
@@ -95,24 +121,12 @@ type ResetSecondFactorUseCase struct {
 	opsRepo  operations.Repo
 	methods  LoginMethodReader
 	sessions SecondFactorResetStore
-	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки (kaname#589).
-	cutoffClock revocationpolicy.Clock
 }
 
-// NewResetSecondFactorUseCase — построение. Источник момента отсечки подаёт
-// корень ([ResetSecondFactorUseCase.WithCutoffClock]); без него снятие
-// отказывает, а не берёт часы процесса.
+// NewResetSecondFactorUseCase — построение. Момент отсечки даёт писатель сброса
+// (шапка файла, «Момент отсечки»): своего источника у глагола нет.
 func NewResetSecondFactorUseCase(r Repo, opsRepo operations.Repo, methods LoginMethodReader, sessions SecondFactorResetStore) *ResetSecondFactorUseCase {
 	return &ResetSecondFactorUseCase{repo: r, opsRepo: opsRepo, methods: methods, sessions: sessions}
-}
-
-// WithCutoffClock провязывает источник момента отсечки. Composition-root only.
-//
-// Отсечка сравнивается с моментами, которые ставят другие реплики (вход,
-// выдача удостоверения, `iat`), — источник у них обязан быть один (kaname#589).
-func (u *ResetSecondFactorUseCase) WithCutoffClock(c revocationpolicy.Clock) *ResetSecondFactorUseCase {
-	u.cutoffClock = c
-	return u
 }
 
 // Execute — порядок: личность вызывающего → форма id → строка человека (промах
@@ -175,18 +189,13 @@ func (u *ResetSecondFactorUseCase) enrolled(ctx context.Context, id domain.UserI
 	}
 }
 
-// doReset — снятие, отсечка и событие одним коммитом писателя сессии.
+// doReset — захват личности, момент, снятие, отсечка и событие одним коммитом
+// писателя сессии (шапка файла).
 func (u *ResetSecondFactorUseCase) doReset(ctx context.Context, subject domain.User, actor string) (*anypb.Any, error) {
-	// Момент отсечки — из общего источника и ДО открытия транзакции писателя:
-	// источник читается своим соединением, и чтение изнутри открытой
-	// транзакции брало бы второе соединение на запрос (kaname#589).
-	now, err := revocationpolicy.Moment(ctx, u.cutoffClock)
-	if err != nil {
-		slog.ErrorContext(ctx, "ResetSecondFactor: cutoff moment unavailable",
-			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
-		return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	if u.sessions == nil {
+		return nil, status.Error(codes.Internal, "second factor reset is not wired")
 	}
-	w, err := u.sessions.ResetWriter(ctx)
+	w, err := u.sessions.ResetWriter(ctx, subject.ID)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
@@ -196,6 +205,13 @@ func (u *ResetSecondFactorUseCase) doReset(ctx context.Context, subject domain.U
 			_ = w.Rollback(ctx)
 		}
 	}()
+	// Момент отсечки — писателем, после захвата строки личности (шапка файла).
+	now, err := revocationpolicy.Moment(ctx, w)
+	if err != nil {
+		slog.ErrorContext(ctx, "ResetSecondFactor: cutoff moment unavailable",
+			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return nil, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
 	removed, err := w.RemoveSecondFactor(ctx, subject.ID)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)

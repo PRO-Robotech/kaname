@@ -24,7 +24,6 @@ package user
 import (
 	"context"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -32,7 +31,6 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // actionsUserID — a well-formed user id. Well-formed on purpose: a malformed one
@@ -123,7 +121,7 @@ func TestHandlerServesResetSecondFactor(t *testing.T) {
 		NewBlockUserUseCase(nil, nil),
 		NewUnblockUserUseCase(nil, nil),
 		NewRemoveFromAccountUseCase(nil, nil),
-	).WithResetSecondFactor(NewResetSecondFactorUseCase(nil, nil, nil, nil).WithCutoffClock(momentclock.Func(time.Now)))
+	).WithResetSecondFactor(NewResetSecondFactorUseCase(nil, nil, nil, nil))
 	_, err := srv.ResetSecondFactor(context.Background(), &iamv1.ResetSecondFactorRequest{UserId: actionsUserID})
 	requireUserHandlerAnswered(t, err, "ResetSecondFactor")
 }
