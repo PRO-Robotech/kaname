@@ -20,8 +20,8 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 h1:XRzhVemXdgv
 github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
-github.com/PRO-Robotech/corelib v1.12.0 h1:bkH+buFk/AKDIlRrx3kNUx72nLvJt0Fxl+JYp8hA8zo=
-github.com/PRO-Robotech/corelib v1.12.0/go.mod h1:u6gUI6RxMwoFRPNuEOTNnchMPsqYZd7m9O88jgqDzo8=
+github.com/PRO-Robotech/corelib v1.13.0 h1:TjQCpBwq8nC2we4k4thj86ISGkq8ZLhyy0ezqyATBPM=
+github.com/PRO-Robotech/corelib v1.13.0/go.mod h1:fIe7HXP0gWz9cv6hylVD65obodFnvE+tix0bV6xiVc0=
 github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b h1:mimo19zliBX/vSQ6PWWSL9lK8qwHozUj03+zLoEB8O0=
 github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b/go.mod h1:fvzegU4vN3H1qMT+8wDmzjAcDONcgo2/SZ/TyfdUOFs=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 h1:DklsrG3dyBCFEj5IhUbnKptjxatkF07cF2ak3yi77so=
