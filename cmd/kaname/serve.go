@@ -536,6 +536,11 @@ func runServe(cfg config.Config) error {
 	if reset := lane.resetSecondFactorUseCase(kanameRepo, opsRepo); reset != nil {
 		svcs.userHandler.WithResetSecondFactor(reset)
 	}
+	// `UserService/ResetAccessKeys` (kaname#638) — теми же хранилищами, что
+	// полоса: ключи и их испытания, отсечка личности.
+	if reset := lane.resetAccessKeysUseCase(kanameRepo, opsRepo); reset != nil {
+		svcs.userHandler.WithResetAccessKeys(reset)
+	}
 	// `AccessKeyService` (Ф7, kacho#1273) — шесть глаголов ключа доступа теми
 	// же хранилищами, что полоса.
 	svcs.accessKeyHandler, err = lane.accessKeyHandler(cfg, opsRepo, metricsReg, logger)
@@ -1860,16 +1865,9 @@ func runServe(cfg config.Config) error {
 			Observer: metricsReg.NewBootstrapAdminRecorder(),
 		},
 	)
-	tasks = append(tasks, func() error {
-		if bootstrapEmail == "" {
-			logger.Info("bootstrap admin disabled (KANAME_BOOTSTRAP_ROOT_EMAIL unset)")
-			return nil
-		}
-		logger.Info("bootstrap admin reconciler starting", "email", bootstrapEmail)
-		// Non-fatal: reconciler errors must not crash the server. It returns
-		// nil on convergence / terminal-skip / shutdown by design.
+	tasks = append(tasks, bootstrapAdminTask(logger, bootstrapEmail, func() error {
 		return bootstrapReconciler.Run(taskCtx)
-	})
+	}))
 
 	// γ reconciler-worker (epic «Resource-scoped AccessBinding», D7). Drains
 	// resource_reconcile_outbox (Q1=(c) event-driven, written atomically by

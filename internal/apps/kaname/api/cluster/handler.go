@@ -6,7 +6,9 @@ package cluster
 // handler.go — thin gRPC transport layer for InternalClusterService.
 //
 // Запрет #6: this handler is registered ONLY on the internal listener (:9091).
-// Never on the external TLS endpoint.
+// Never on the external TLS endpoint. The public twin `ClusterService` is a
+// separate transport (package clusterpublic) that delegates to THIS handler, so
+// both twins share one translation path over the same use-cases.
 //
 // Each method delegates immediately to the appropriate use-case; no business
 // logic lives here — only request parsing and response formatting.
@@ -55,12 +57,10 @@ func (h *Handler) Get(ctx context.Context, _ *iamv1.GetClusterRequest) (*iamv1.C
 
 // GrantAdmin — grants cluster-admin authority to a subject (synchronous).
 //
-// REST default: `DELETE /iam/v1/internal/cluster/admins/{subject_id}` and
-// `POST  /iam/v1/internal/cluster/admins` URL patterns don't carry
-// subject_type — REST clients (UI/curl) typically omit it, defaulting
-// to UNSPECIFIED. Since USER is the only supported value in this version
-// (per validation in use-case), substitute UNSPECIFIED → USER here so
-// REST callers don't see 400 "only 'user' supported".
+// REST default: the REST paths of both twins don't require subject_type —
+// REST clients (UI/curl) typically omit it, defaulting to UNSPECIFIED. The
+// transport substitutes UNSPECIFIED → USER; a service account is named
+// explicitly (`subjectType = SERVICE_ACCOUNT`).
 func (h *Handler) GrantAdmin(ctx context.Context, req *iamv1.GrantClusterAdminRequest) (*operationpb.Operation, error) {
 	st := req.GetSubjectType()
 	if st == iamv1.ClusterGrantSubjectType_CLUSTER_GRANT_SUBJECT_TYPE_UNSPECIFIED {
@@ -143,6 +143,7 @@ func clusterAdminEntryToProto(e domain.ClusterAdminEntry) *iamv1.ClusterAdminEnt
 		SubjectType:         clusterGrantSubjectTypeToProto(e.SubjectType),
 		SubjectId:           e.SubjectID,
 		SubjectEmail:        e.SubjectEmail,
+		SubjectDisplayName:  e.SubjectDisplayName,
 		GrantedByUserId:     e.GrantedByUserID,
 		GrantedByEmail:      e.GrantedByEmail,
 		GrantedAt:           timestamppb.New(e.GrantedAt.Truncate(1_000_000_000)),

@@ -1,0 +1,111 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: 7829ef01d3939246a893493c7564eb31d1d0d9a64ec2b04a2448d1bf3a567112
+  revision: 10
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 10 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (origin/296); отпечаток
+    снят с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a (голова эпика 296)
+  task: PRO-Robotech/kaname#211
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/recovery-of-access.md
+  fingerprint_reproduced: true
+  lines: 2531
+  round: 9
+  predecessor_record: docs/specs/reviews/recovery-of-access/be4dfb5a4f367514919d9ae5324537b6535acc9eab1d690266936c5b80ad1bb0.yaml (APPROVED, редакция 9)
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 10 к 8b0379e2a (Р10, Р5 п.1, «Тогда» Ф5-01/04/05/17/25 «в», Д22, §7, §9, §21);
+  прочее одобрено кругом 8 и не перерассматривалось
+blocking_count: 1
+blocking_kinds_distinct: [DoD]
+
+premise_check:
+  premise: ответ запроса кода — 200 {} на всех исходах; отказ завершения — текст отказа входа
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git grep -c 'return ErrAuthenticationFailed' 8b0379e2a -- .../recovery_complete.go → 3;
+    requestRecovery отвечает пустым объектом (handler.go). Р10 согласна с Р8 п.3 (окно запроса
+    молчит, 429 — только предъявление Ф5-08).
+
+blocking:
+  - id: B9-1
+    kind: DoD
+    summary: >-
+      §21 и DoD редакции 10 не видят сквозного слоя: кейсы newman утверждают прежние ответы и
+      краснеют на посадке. На 8b0379e2a: tests/newman/cases/kaname-recovery-lane.py:277 (WRONG-CODE —
+      _refusal(401, 16, "authentication failed") на завершении); tests/newman/cases/kaname-access-keys.py:2680
+      (F13-25-RECOVERY — тело запроса ровно '{}'); их собранные коллекции. DoD п.1–4 называют
+      Go-пробу полосы и страницу, финального сквозного пункта нет (чек-лист 3.7).
+    fix: >-
+      Строка переписи §21 «кейсы newman, утверждающие тело запроса и текст завершения» с исходом
+      «тем же изменением, коллекции пересобраны»; пункт DoD: наборы kaname-recovery-lane и
+      kaname-access-keys зелены на текстах Р10 (запрос — nextStep дословно, завершение — текст Р10 п.2),
+      предикат перемера по tests/newman на прежние ожидания ('{}' и "authentication failed" на
+      пути завершения) → 0.
+
+non_blocking:
+  - id: N9-1
+    summary: >-
+      Строка состава редакции 10 перечисляет правленые «Тогда» Ф5-01, 04, 17, 25 «в», но не Ф5-05,
+      хотя его «Тогда» правлено («тело и код побайтово равны отказу Ф5-04»). Дописать.
+  - id: N9-2
+    summary: >-
+      Р10 п.2 перечисляет Ф5-07 среди наблюдаемых, но «Тогда» Ф5-07 не правлено; равенство Ф5-07
+      отказу Ф5-04 держится лишь DoD п.2. Либо И в Ф5-07, либо убрать из перечня.
+
+accepted_parts: >-
+  Отрицательный контроль Ф5-04 прогнан на тексте: expired / used / invalid / blocked / wrong /
+  not found — 0 попаданий. Поле nextStep всегда, одно на все исходы — не признак. Д22 (интерпретация
+  Ф1-59) обоснована: различие текстов различает глагол, а не причину. Близнецы прежние (Ф5-02 к
+  Ф5-01, Ф5-18 к Ф5-17).
+
+constructibility:
+  seeded: 0
+  named_fixtures: 0
+  not_performed: 0
+  detail: «Дано» и «Когда» редакция 10 не меняет; фикстуры одобрены кругом 8.
+
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 7829ef01d3939246a893493c7564eb31d1d0d9a64ec2b04a2448d1bf3a567112
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт — возврат; одобрение круга 8 (be4dfb5a) на редакцию 10 не переносится.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#211
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#211
+  status: pending
+  published: false
+  verdict: CHANGES_REQUESTED
+  subject_sha256: 7829ef01d3939246a893493c7564eb31d1d0d9a64ec2b04a2448d1bf3a567112
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · 7829ef01d3939246a893493c7564eb31d1d0d9a64ec2b04a2448d1bf3a567112'

@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 775
+Всего кейсов: 817
 
 ## Перепись по модулям
 
@@ -66,11 +66,13 @@
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
-| `cases/kaname-login-lane.py` | 22 |
-| `cases/kaname-recovery-lane.py` | 10 |
+| `cases/kaname-login-lane.py` | 23 |
+| `cases/kaname-recovery-lane.py` | 13 |
 | `cases/kaname-registration.py` | 2 |
-| `cases/kaname-address-verification.py` | 7 |
-| `cases/kaname-access-keys.py` | 10 |
+| `cases/kaname-address-verification.py` | 8 |
+| `cases/kaname-email-change.py` | 3 |
+| `cases/kaname-access-keys.py` | 27 |
+| `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
@@ -962,7 +964,7 @@
 - `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
 - `IAM-AUTHCODE-NEG-CODE-EXPIRED`
 
-## `cases/kaname-login-lane.py` — 22 кейсов
+## `cases/kaname-login-lane.py` — 23 кейсов
 
 > Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
 > формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
@@ -971,8 +973,10 @@
 > создано» помеченным утверждением — не в зелёное и не в красное. Гоняет набор
 > задание `chart-own` процесса `e2e-newman.yml`: стенд чарта посадки `own` с
 > листом края и посевом человека (`stand-chart.sh`, `seed_login_lane.py`), а
-> «Дано» PWV-01/02 — посевом хранимых значений (`seed_stored_value.py`);
-> провенанс и числа замеров — `docs/RESULTS.md`, разделы о полосе входа паролем.
+> «Дано» PWV-01/02 — посевом хранимых значений (`seed_stored_value.py`), «Дано»
+> FP-12 (личность без пароля с ключом) — посевом `seed_key_person.py` той же
+> подкоманды; провенанс и числа замеров — `docs/RESULTS.md`, разделы о полосе
+> входа паролем.
 
 - `IAM-LOGINLANE-OK-CSRF-ISSUED`
 - `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
@@ -996,8 +1000,9 @@
 - `IAM-LOGINLANE-OK-NOT-COUNTED`
 - `IAM-LOGINLANE-OK-STORED-FORMAT-A`
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
+- `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
 
-## `cases/kaname-recovery-lane.py` — 10 кейсов
+## `cases/kaname-recovery-lane.py` — 13 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1008,6 +1013,10 @@
 > прогонщика, что набор входа, после него. Блокировку личности (Ф5-17, Ф5-25)
 > зовёт надзор облака стенда — своего человека с `system_admin` и вторым
 > фактором кладёт посев церемонии (kaname#468); его предъявитель кейс куёт сам.
+> Окна частоты запроса кода (Ф5-26, Ф5-27) и возраст неотправленного письма
+> (Ф5-14) кейсы читают клетками слушателя метрик процесса (`standMetricsUrl`);
+> величины окон и адресата с заполненным окном приглашения кладёт посев
+> `seed_mail_pace.py`, задержку приёма — дверь `POST /hold` приёмника писем.
 
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
@@ -1019,6 +1028,9 @@
 - `IAM-RECOVERY-OK-ENDS-EVERY-SESSION`
 - `IAM-RECOVERY-NEG-BLOCKED-STAYS-BLOCKED`
 - `IAM-RECOVERY-OK-COMPLETION-RESETS-AS-FULL-LOGIN`
+- `IAM-RECOVERY-OK-UNDELIVERED-AGE-VISIBLE`
+- `IAM-RECOVERY-NEG-PACED-PER-RECIPIENT`
+- `IAM-RECOVERY-NEG-PACED-PER-SOURCE`
 
 ## `cases/kaname-registration.py` — 2 кейса
 
@@ -1033,7 +1045,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 10 кейсов
+## `cases/kaname-access-keys.py` — 27 кейсов
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1047,6 +1059,14 @@
 > потолок ключей набор берёт из `deploy/values.prod.yaml` при генерации.
 > Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
 > прогонщика, последним.
+>
+> Вход без пароля ключом доступа (Ф13, kaname#643, приёмка
+> `passwordless-login-with-access-key.md`): два глагола полосы формы
+> (`access-key/begin`, `access-key/login`) на `loginLaneBaseUrl` тем же
+> подставным аутентификатором; единый отказ входа сверяется побайтово с отказом
+> неверному паролю. «Личность без пароля» кладёт посев стенда
+> (`seed_key_person.py`, приставка `f13Person`); код по времени — функцией набора
+> второго фактора, разбором его модуля.
 
 - `IAM-ACCESSKEY-OK-REGISTRATION-CHALLENGE-NAMES-THE-CONTRACT`
 - `IAM-ACCESSKEY-OK-REGISTER-LIST-ASSERT`
@@ -1058,8 +1078,25 @@
 - `IAM-ACCESSKEY-OK-PASSWORD-AND-KEY-ROWS-INDEPENDENT`
 - `IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY`
 - `IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE`
+- `IAM-AKLOGIN-NEG-PERSON-WITHOUT-KEY-ROW`
+- `IAM-AKLOGIN-OK-CHALLENGE-NAMES-NOBODY`
+- `IAM-AKLOGIN-NEG-BEGIN-FORM`
+- `IAM-AKLOGIN-OK-SIGN-IN-WITHOUT-PASSWORD`
+- `IAM-AKLOGIN-NEG-LOGIN-FORM`
+- `IAM-AKLOGIN-NEG-CHALLENGE-REPLACED`
+- `IAM-AKLOGIN-NEG-CHALLENGE-ONE-TIME`
+- `IAM-AKLOGIN-NEG-LOGIN-FORM-KIND`
+- `IAM-AKLOGIN-BVA-BEGIN-BY-SOURCE`
+- `IAM-AKLOGIN-BVA-KEY-LOGIN-RESETS-ADDRESS-COUNT`
+- `IAM-AKLOGIN-OK-TWO-LANES-INDEPENDENT`
+- `IAM-AKLOGIN-OK-LEVEL-COPIES-READ-THE-RECORD`
+- `IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS`
+- `IAM-AKLOGIN-OK-PASSWORDLESS-PERSON`
+- `IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON`
+- `IAM-AKLOGIN-SEC-REVOKE-ENDS-OTHER-SESSIONS`
+- `IAM-AKLOGIN-OK-CLEANUP-KEYS`
 
-## `cases/kaname-address-verification.py` — 7 кейсов
+## `cases/kaname-address-verification.py` — 8 кейсов
 
 > Подтверждение адреса и положение подтверждения (kaname#456, приёмка
 > `access-beyond-login-needs-a-verified-address.md`, позиции уровня E): сессия
@@ -1072,7 +1109,10 @@
 > письмами ждёт по `Retry-After` ответа службы. На автономном стенде посадки
 > `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Гоняет набор
 > задание `chart-own` процесса `e2e-newman.yml` тем же вызовом прогонщика,
-> последним.
+> последним. Свои сессии (kaname#634, OS-16) — перечень, выход из выбранной и
+> из всех, кроме текущей, — живут здесь же: им нужен тот же свежий человек с
+> подтверждённым адресом; служба стенда без этих путей (404) — «условие не
+> создано».
 
 - `IAM-ADDRVERIFY-OK-REGISTRATION-OPENS-THE-POSITION`
 - `IAM-ADDRVERIFY-OK-LETTER-ONLY-ON-REQUEST`
@@ -1081,6 +1121,24 @@
 - `IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME`
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
 - `IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS`
+- `IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED`
+
+## `cases/kaname-email-change.py` — 3 кейса
+
+> Смена адреса почты с подтверждением с нового адреса (kaname#635, приёмка
+> `email-change-is-confirmed-from-the-new-address.md`, позиции уровня E EC-25…EC-27):
+> запрос смены и предъявление кода на том же слушателе формы, что вход. Адресуется
+> `loginLaneBaseUrl`, коды писем читает у приёмника писем стенда (`standMailboxUrl`,
+> `GET /codes`); людей набор заводит сам регистрацией и подтверждением адреса.
+> Отсутствие письма на занятый адрес судит барьер — письмо, законно запрошенное тем
+> же человеком позже; интервал ждёт по `Retry-After` ответа службы, несвежесть сессии —
+> по окну свежести профиля. Без посадки `own` либо приёмника писем — «условие не
+> создано». Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
+> прогонщика.
+
+- `IAM-EMAILCHANGE-OK-CHANGE-END-TO-END`
+- `IAM-EMAILCHANGE-NEG-TAKEN-ADDRESS-INDISTINGUISHABLE`
+- `IAM-EMAILCHANGE-NEG-STALE-SESSION-STEP-UP`
 
 ## `cases/kaname-second-factor.py` — 18 кейсов
 
@@ -1120,6 +1178,31 @@
 - `IAM-2FA-NEG-CODE-GUESSING-RATE`
 - `IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS`
 - `IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED`
+
+## `cases/kaname-cluster-admins.py` — 17 кейсов
+
+> Публичный близнец `ClusterService` — администраторы кластера на публичной
+> поверхности (kaname#661, приёмка ADM-CA): те же сценарии, то же право
+> `system_admin` на синглтоне кластера и тот же порог, что у внутренней службы;
+> каждый отказ — в паре с близнецом, отличающимся одним фактом.
+
+- `CAP-01-LIST-ADMINS`
+- `CAP-02-GET-CLUSTER`
+- `CAP-03-GRANT-HUMAN`
+- `CAP-04-REGRANT-IDEMPOTENT`
+- `CAP-05-REVOKE`
+- `CAP-06-REGRANT-AFTER-REVOKE`
+- `CAP-07-NO-GRANT-NO-ACCESS`
+- `CAP-08-ASSURANCE-FLOOR`
+- `CAP-09-ANONYMOUS`
+- `CAP-10-MALFORMED-INPUT`
+- `CAP-11-ABSENT-HUMAN`
+- `CAP-12-SUBJECT-BARRED`
+- `CAP-13-REVOKE-NON-ADMIN`
+- `CAP-14-NO-SELF-REVOKE`
+- `CAP-17-MACHINE-SUBJECT`
+- `CAP-20-ONE-WRITE-PATH`
+- `CAP-21-FRONT-SEPARATION`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

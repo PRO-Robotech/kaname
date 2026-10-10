@@ -158,12 +158,18 @@ func (uc *LookupSubjectUseCase) byEmail(ctx context.Context, email string) (*iam
 	}
 	// Действующих нет. Это либо «адрес никому не принадлежит», либо «строка
 	// есть, но аутентификация ей запрещена» — два разных ответа.
+	//
+	// Адрес в текст отказа НЕ подставляется ни на одном исходе (kaname#641):
+	// текст уезжает вызывающему и во все журналы по пути, а адрес — личные
+	// данные и изменяемое значение. Строку называет её неизменяемый
+	// идентификатор, тем же текстом, что у ветки по идентификатору; ненайденный
+	// адрес не называется вовсе — вызывающий его и так знает.
 	u, err := rd.Users().GetByEmail(ctx, domain.Email(email))
 	if err == nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "identity %s %s", email, userStateReason(u.InviteStatus))
+		return nil, status.Errorf(codes.FailedPrecondition, "User %s %s", u.ID, userStateReason(u.InviteStatus))
 	}
 	if stderrors.Is(err, iamerr.ErrNotFound) {
-		return nil, status.Errorf(codes.NotFound, "subject not found by email=%s", email)
+		return nil, status.Error(codes.NotFound, "subject not found by email")
 	}
 	return nil, status.Error(codes.Internal, "user lookup by email")
 }

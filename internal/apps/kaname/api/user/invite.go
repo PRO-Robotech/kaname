@@ -23,9 +23,9 @@ package user
 //     cascade-traversal покрывает editor/admin/owner; viewer не может).
 //  2. (sync) validate project_id + role_id consistency; peer-check project
 //     принадлежит указанному account.
-//  3. async (LRO worker): найти existing user-row через GetByAccountEmail —
-//     если есть ACTIVE → idempotent (если project+role указаны → создать AB);
-//     если есть PENDING → idempotent; если нет → InsertPending в TX
+//  3. async (LRO worker): InsertPending в TX — ВСЕГДА, и для новой почты, и
+//     для строки, которая уже есть (в этом аккаунте либо в другом): оператор
+//     вставки — единственный арбитр строки, членства и срока приглашения
 //     (+ optionally INSERT AccessBinding).
 //  4. response = User; metadata = {user_id, account_id}.
 //
@@ -519,20 +519,12 @@ type inviteOutcome struct {
 // плюс синхронная материализация после коммита.
 func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUserInput) (inviteOutcome, error) {
 	candidateID, invitedBy := adm.candidateUserID, adm.invitedBy
-	// 4.1 Read-side check (быстрый path для idempotent ACTIVE/PENDING).
-	rd, err := uc.repo.Reader(ctx)
-	if err != nil {
-		return inviteOutcome{}, shared.MapRepoErr(err)
-	}
-	existing, exErr := rd.Users().GetByAccountEmail(ctx, in.AccountID, in.Email)
-	_ = rd.Rollback(ctx)
-
 	dn := in.DisplayName
 	if dn == "" {
 		dn = defaultDisplayName(in.Email)
 	}
 
-	// 4.2 INSERT (или Get-existing) + AB-INSERT в одной TX.
+	// INSERT строки и членства + AB-INSERT в одной TX.
 	type inviteTxResult struct {
 		user       domain.User
 		userIsNew  bool
@@ -547,34 +539,34 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 	res, err := shared.DoWithWriteTx(ctx, uc.repo,
 		func(ctx context.Context, w Writer) (inviteTxResult, error) {
 			var out inviteTxResult
-			if exErr == nil {
-				// Idempotent: row already exists (ACTIVE / PENDING / BLOCKED).
-				out.user = existing
-			} else {
-				// «Человек существует и приглашён СЮДА». Признак заведения —
-				// несущий, и отбрасывать его больше нельзя: с глобальным ключом
-				// идентичности конфликт означает не «эта строка уже есть в этом
-				// аккаунте» (такую ловит быстрый путь выше), а «человек уже есть
-				// в платформе» — его приглашают во ВТОРОЙ аккаунт. Приняв это за
-				// заведение, вызывающий эмитировал бы указатель на предка и
-				// материализацию для строки, которая не заводилась, и объявил бы
-				// её аккаунтом тот, что назван приглашением, — тогда как её
-				// аккаунтов теперь несколько, а звено цепи областей берётся из
-				// членств.
-				ins, insertedNow, err := w.UsersW().InsertPending(ctx, domain.User{
-					ID:           candidateID,
-					AccountID:    in.AccountID,
-					Email:        in.Email,
-					DisplayName:  dn,
-					InviteStatus: domain.InviteStatusPending,
-					InvitedBy:    invitedBy,
-				}, uc.inviteDeadline())
-				if err != nil {
-					return inviteTxResult{}, err
-				}
-				out.user = ins
-				out.userIsNew = insertedNow
+			// ОПЕРАТОР ВСТАВКИ — ОДИН НА КАЖДОЙ ВЕТВИ, и строка, которая уже есть
+			// в этом аккаунте, проходит через него так же, как новая и как строка
+			// человека, приглашаемого во второй аккаунт (приёмка A198, Р5). Срок
+			// приглашения пишет ТОЛЬКО он — правилом «продлить, не укорачивая,
+			// лишь у PENDING» под замком строки (`ON CONFLICT … DO UPDATE`).
+			// Прежде здесь стояла быстрая ветвь «строка уже в этом аккаунте —
+			// взять как есть» по чтению ДО транзакции: она решала ветвь вне
+			// замка (запрет #10) и обходила правило срока, так что повторное
+			// приглашение истёкшей строки отвечало успехом, ставило письмо — и
+			// оставляло приглашение невыкупаемым. Второй писатель срока в той
+			// ветви дал бы два места об одном правиле; поэтому ветви нет вовсе.
+			//
+			// Признак заведения — несущий: с глобальным ключом идентичности
+			// конфликт означает «человек уже есть в платформе», и для такой
+			// строки указатель на предка и материализация не эмитятся.
+			ins, insertedNow, err := w.UsersW().InsertPending(ctx, domain.User{
+				ID:           candidateID,
+				AccountID:    in.AccountID,
+				Email:        in.Email,
+				DisplayName:  dn,
+				InviteStatus: domain.InviteStatusPending,
+				InvitedBy:    invitedBy,
+			}, uc.inviteDeadline())
+			if err != nil {
+				return inviteTxResult{}, err
 			}
+			out.user = ins
+			out.userIsNew = insertedNow
 
 			// Optional bind-to-Project. The insert is STRICT create, NOT idempotent:
 			// the `ON CONFLICT DO UPDATE SET id = access_bindings.id` this comment used
@@ -653,12 +645,24 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 				// журнала проекция `relation_fact` не увидит никогда, и форма E
 				// ответит «нет» там, где движок отвечает «да», — молча, потому что
 				// пустая проекция неотличима от честного отказа.
-				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+				//
+				// ВЕДОМОСТЬ — ТЕМ ЖЕ НАБОРОМ И В ТОЙ ЖЕ ТРАНЗАКЦИИ (kaname#670, класс
+				// #665). Снятие выдачи — штатное (`AccessBinding.Delete`) и дренажом
+				// области при удалении проекта (`shared.RevokeBindingsInScope`) —
+				// снимает РОВНО записанное в ведомости выпущенных кортежей. Без неё
+				// строка выдачи уходила, а указатель оставался фактом модели прав на
+				// проект, которого больше нет. Эмитируемое и записанное выпущенным —
+				// одно значение, а не два списка.
+				bindingTuples := []service.RelationTuple{{
 					User:     fmt.Sprintf("project:%s", ins.ResourceID),
 					Relation: "project",
 					Object:   fmt.Sprintf("iam_access_binding:%s", ins.ID),
-				}}); ferr != nil {
+				}}
+				if ferr := w.EmitFGARelationWrite(ctx, bindingTuples); ferr != nil {
 					return inviteTxResult{}, ferr
+				}
+				if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, ins.ID, ledgerTuples(bindingTuples)); lerr != nil {
+					return inviteTxResult{}, lerr
 				}
 			}
 			// A freshly-inserted invitee user row must forward-materialize under the

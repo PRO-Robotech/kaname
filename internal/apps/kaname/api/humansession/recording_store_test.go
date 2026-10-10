@@ -126,6 +126,11 @@ func (s recordingStore) RecoveryTarget(ctx context.Context, email domain.Email) 
 	return s.inner.RecoveryTarget(ctx, email)
 }
 
+func (s recordingStore) SessionsOf(ctx context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
+	defer s.rec("SessionsOf")()
+	return s.inner.SessionsOf(ctx, userID, now, size, token)
+}
+
 func (s recordingStore) Writer(ctx context.Context) (humansession.Writer, error) {
 	defer s.rec("Writer")()
 	w, err := s.inner.Writer(ctx)
@@ -171,6 +176,11 @@ func (w recordingWriter) LockPersonForLogin(ctx context.Context, userID domain.U
 	return w.inner.LockPersonForLogin(ctx, userID)
 }
 
+func (w recordingWriter) HoldAccessKeyForLogin(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	defer w.rec("HoldAccessKeyForLogin")()
+	return w.inner.HoldAccessKeyForLogin(ctx, userID, keyID)
+}
+
 func (w recordingWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
 	defer w.rec("InsertSession")()
 	return w.inner.InsertSession(ctx, s, digest)
@@ -194,6 +204,21 @@ func (w recordingWriter) EndSession(ctx context.Context, id domain.HumanSessionI
 func (w recordingWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
 	defer w.rec("EndOtherSessions")()
 	return w.inner.EndOtherSessions(ctx, userID, keep, at, reason)
+}
+
+func (w recordingWriter) EndOwnSession(ctx context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (bool, error) {
+	defer w.rec("EndOwnSession")()
+	return w.inner.EndOwnSession(ctx, userID, target, now, reason)
+}
+
+func (w recordingWriter) EndOtherLiveSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error) {
+	defer w.rec("EndOtherLiveSessions")()
+	return w.inner.EndOtherLiveSessions(ctx, userID, keep, now, reason)
+}
+
+func (w recordingWriter) SessionLive(ctx context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error) {
+	defer w.rec("SessionLive")()
+	return w.inner.SessionLive(ctx, userID, id, now)
 }
 
 func (w recordingWriter) RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error {

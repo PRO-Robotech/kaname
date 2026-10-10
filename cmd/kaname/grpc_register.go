@@ -102,6 +102,15 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.accessKeyHandler != nil {
 		iamv1.RegisterAccessKeyServiceServer(srv, svcs.accessKeyHandler)
 	}
+	// ClusterService — публичный близнец InternalClusterService (приёмка
+	// ADM-CA, Р1/Р8): администраторы кластера на публичной поверхности. Только
+	// здесь; внутренний близнец остаётся только на внутреннем слушателе.
+	// Право — `system_admin` на синглтоне кластера: его спрашивает дверь
+	// публичного слушателя (карта выводится из аннотаций пакета) и, для
+	// мутаций, сам сценарий.
+	if svcs != nil && svcs.publicClusterHandler != nil {
+		iamv1.RegisterClusterServiceServer(srv, svcs.publicClusterHandler)
+	}
 	// ЗДЕСЬ РЕГИСТРИРОВАЛАСЬ `LimitService` — административная поверхность
 	// величин на публичном слушателе. Авторитет величин выпилен из службы
 	// доступа целиком решением владельца 2026-09-06

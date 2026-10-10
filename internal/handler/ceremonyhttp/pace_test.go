@@ -276,9 +276,9 @@ func TestKNPACE28_PaceSpendsAnyOutcomeButTheMethodRefusal(t *testing.T) {
 	t.Run("b POST", func(t *testing.T) {
 		s := newSeedA(t, remoteHost)
 		for i := 0; i < authorizePace; i++ {
-			if rec := s.do(sourceP, http.MethodPost, goodQueryA(knownClient)); rec.Code != http.StatusMethodNotAllowed {
-				t.Fatalf("запрос %d: %d — ожидался 405", i+1, rec.Code)
-			}
+			// Строка b (ред. 6): форма Р12 — `405`, тело побайтово, `Allow: GET`.
+			requireR12(t, s.do(sourceP, http.MethodPost, goodQueryA(knownClient)), http.MethodGet,
+				fmt.Sprintf("запрос %d", i+1))
 		}
 		requireNoSessionAnswer(t, s.do(sourceP, http.MethodGet, goodQueryA(knownClient)))
 	})

@@ -176,7 +176,7 @@ func TestAtIssuance_Verdicts(t *testing.T) {
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := revocationpolicy.AtIssuance(ctx, c.store, c.principal, c.session)
+			got, _, err := revocationpolicy.AtIssuance(ctx, c.store, c.principal, c.session)
 			require.Equal(t, c.want, got)
 			if c.wantErr != nil {
 				require.ErrorIs(t, err, c.wantErr)
@@ -191,12 +191,12 @@ func TestAtIssuance_Verdicts(t *testing.T) {
 // TestAtIssuance_NoLookupIsUndecidableNotAllowed — неподанный читатель не
 // означает «отсечки нет».
 func TestAtIssuance_NoLookupIsUndecidableNotAllowed(t *testing.T) {
-	got, err := revocationpolicy.AtIssuance(context.Background(), nil, person("usr_a", at(cutoff)), time.Time{})
+	got, _, err := revocationpolicy.AtIssuance(context.Background(), nil, person("usr_a", at(cutoff)), time.Time{})
 	require.Equal(t, revocationpolicy.Undecidable, got)
 	require.ErrorIs(t, err, revocationpolicy.ErrNoLookup)
 
 	// Для машины читатель не нужен вовсе, и его отсутствие ей не мешает.
-	got, err = revocationpolicy.AtIssuance(context.Background(), nil,
+	got, _, err = revocationpolicy.AtIssuance(context.Background(), nil,
 		service.ResolvedPrincipal{Kind: service.PrincipalServiceAccount}, time.Time{})
 	require.Equal(t, revocationpolicy.Allowed, got)
 	require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestAtIssuance_PrincipalKindIsAClosedDictionary(t *testing.T) {
 			store := &cutoffs{at: map[string]time.Time{"usr_a": cutoff}}
 			p := person("usr_a", at(cutoff.Add(-time.Hour)))
 			p.Kind = c.kind
-			got, err := revocationpolicy.AtIssuance(ctx, store, p, time.Time{})
+			got, _, err := revocationpolicy.AtIssuance(ctx, store, p, time.Time{})
 			require.Equal(t, c.want, got)
 			if c.want == revocationpolicy.Undecidable {
 				require.ErrorIs(t, err, revocationpolicy.ErrUnknownPrincipalKind,
@@ -287,7 +287,7 @@ func TestWithDeadline_EachReadCarriesItsOwnLimitAndAnAbsentReaderStaysAbsent(t *
 
 	// Неподанный читатель через обёртку — по-прежнему Undecidable, а не паника
 	// и не выдача.
-	v, err := revocationpolicy.AtIssuance(context.Background(), absent, person("usr_x", nil), cutoff)
+	v, _, err := revocationpolicy.AtIssuance(context.Background(), absent, person("usr_x", nil), cutoff)
 	require.Equal(t, revocationpolicy.Undecidable, v)
 	require.ErrorIs(t, err, revocationpolicy.ErrNoLookup)
 }

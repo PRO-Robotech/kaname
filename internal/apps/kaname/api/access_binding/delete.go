@@ -35,6 +35,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -161,10 +162,69 @@ func (u *DeleteAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	return &op, nil
 }
 
+// deleteAttempts — сколько раз тело снятия исполняет СВОЮ транзакцию, если база
+// откатила её как сторону взаимной блокировки либо конфликта сериализации.
+//
+// ПОЧЕМУ ПОВТОР ЗДЕСЬ, А НЕ ОТКАЗ ВЫЗЫВАЮЩЕМУ. Транзакцию снятия под параллельной
+// нагрузкой делят строки с фоновой материализацией того же субъекта (строка
+// выдачи, на которую дочерние вставки берут `FOR KEY SHARE`, и строки прямого
+// факта). Цикл ожиданий база разрывает, откатывая одну сторону ЦЕЛИКОМ, и
+// сторона арендатора не обязана быть той, кто за фоновую работу платит:
+// наблюдалось (kaname#679) — операция снятия `done:true` с ABORTED, выдача жива,
+// каждое следующее создание той же тройки получает ALREADY_EXISTS.
+//
+// ПОЧЕМУ ПОВТОР БЕЗОПАСЕН — СВОЙСТВО ЭТОГО ТЕЛА, А НЕ ИСПОЛНИТЕЛЯ. Тело — ровно
+// одна транзакция записи, и после её коммита оно не делает ничего (см. хвост
+// [DeleteAccessBindingUseCase.deleteOnce]); на отказе 40P01/40001 база откатила
+// её целиком, поэтому «частично применилось» исключено, и повтор исполняет то же
+// самое с чистого листа: заново берёт замок выдачи, заново читает её и её
+// ведомость. Выдача, которую за это время снял другой, даёт NotFound — честный
+// исход, а не второй отзыв. Признак повтора — `iamerr.ErrAborted`, и только он:
+// его ставит переводчик отказов базы ровно на этот класс (pgmaperr), а не на
+// «что-то пошло не так».
+//
+// Число — не запас «на всякий случай»: цикл разрывается снятием ОДНОЙ стороны,
+// после чего выжившая доходит до коммита, и следующая попытка встаёт уже за ней,
+// а не в цикл. На стенде за прогон набора наблюдалась одна такая жертва. Третья
+// попытка покрывает второго контрагента, пришедшего в окно отступа; исчерпание
+// отдаёт прежний терминальный отказ — изменение не применено, и вызывающий узнаёт
+// это тем же текстом, что и раньше.
+const deleteAttempts = 3
+
+// deleteRetryBackoff — отступ перед следующей попыткой: выжившей стороне цикла
+// нужно дойти до коммита, а не встретить повтор на той же строке.
+const deleteRetryBackoff = 50 * time.Millisecond
+
 func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.AccessBindingID, actor string) (*anypb.Any, error) {
+	for attempt := 1; ; attempt++ {
+		err := u.deleteOnce(ctx, id, actor)
+		if err == nil {
+			return anypb.New(&emptypb.Empty{})
+		}
+		if !stderrors.Is(err, iamerr.ErrAborted) || attempt == deleteAttempts {
+			return nil, shared.MapRepoErr(err)
+		}
+		if u.logger != nil {
+			u.logger.Warn("access_binding delete: transaction lost a concurrent-change conflict, retrying",
+				"binding_id", string(id), "attempt", attempt, "of", deleteAttempts)
+		}
+		timer := time.NewTimer(time.Duration(attempt) * deleteRetryBackoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, shared.MapRepoErr(ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+// deleteOnce — ОДНА транзакция снятия. Отказы возвращаются НЕпереведёнными в
+// статус: признак повтора (`iamerr.ErrAborted`) читает [doDelete], а перевод в
+// gRPC-код делается там один раз — статус признака уже не несёт.
+func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.AccessBindingID, actor string) error {
 	w, err := u.repo.Writer(ctx)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	committed := false
 	defer func() {
@@ -189,13 +249,13 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// возвратом блокировки: применение к хранилищу прав у обеих сторон происходит ПОСЛЕ
 	// коммита, то есть заведомо вне любой xact-блокировки.
 	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	// Read the binding's subject_id within the writer TX before deletion,
 	// so we can emit the outbox row atomically.
 	deletedBinding, err := w.AccessBindings().Get(ctx, id)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	// F3/#178 — SYMMETRIC revoke from the PERSISTED emitted-set, NOT a re-derive
 	// from the binding's CURRENT role. The role's permissions may have changed
@@ -208,7 +268,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// rows on delete).
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	// CROSS-BINDING SHARED TUPLES (access-loss fix). The ledger is keyed PER binding
 	// while a relation fact is not refcounted, so replaying `stored` verbatim would
@@ -218,7 +278,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// binding's true revoke-set (see revoke_set.go).
 	revokeTuples, retained, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	if len(retained) > 0 && u.logger != nil {
 		u.logger.Info("access_binding delete: tuples retained — still granted by another ACTIVE binding",
@@ -230,7 +290,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// protection between the sync pre-check and here, DeleteGuarded returns
 	// FAILED_PRECONDITION and the binding stays (the row-lock serializes them).
 	if err := w.AccessBindingsW().DeleteGuarded(ctx, id); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	// Atomic revoke emit-in-tx. Tx rollback ⇒ neither the binding row is
 	// gone NOR is the outbox row visible to drainer. The at-least-once async
@@ -238,7 +298,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// below — otherwise the drainer would strip a still-claimed tuple seconds
 	// after the sync path correctly kept it.
 	if err := w.AccessBindingsW().EmitRelationDelete(ctx, revokeTuples); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	// Симметрия созданию (kacho#2055): создание со-коммитит событие реконсайла,
 	// которым материализуется пообъектный кортеж владельца, — снятие обязано
@@ -250,7 +310,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// который эмитировала САМА привязка. Событие отзывает пообъектные
 	// кортежи, которые материализовали ДРУГИЕ привязки НА этом объекте.
 	if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventDelete, "iam.accessBinding", string(id)); rerr != nil {
-		return nil, shared.MapRepoErr(rerr)
+		return rerr
 	}
 	// Emit subject_change_outbox row in the same TX as the deletion: a rollback
 	// of this TX will not leave an orphan outbox row (atomicity guarantee).
@@ -258,7 +318,7 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// emitSubjectChangeForEverySubject.
 	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
 		deletedBinding, "binding_revoke", "binding_delete"); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 
 	// Emit the durable audit_outbox compliance event in the SAME writer-tx
@@ -281,10 +341,10 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 		BindingID:       string(deletedBinding.ID),
 		TenantAccountID: auditTenantAccountID(deletedBinding),
 	}); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	if err := w.Commit(ctx); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return err
 	}
 	committed = true
 
@@ -299,5 +359,5 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	// в ТОЙ ЖЕ транзакции, что и снятие выдачи. Отзыв действует С КОММИТА не «быстрее»,
 	// а по построению, и догонять его вторым писателем нечего.
 
-	return anypb.New(&emptypb.Empty{})
+	return nil
 }

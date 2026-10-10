@@ -195,6 +195,29 @@ func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.Second
 	return s.sessions.Writer(ctx)
 }
 
+// resetAccessKeysUseCase — сброс ключей доступа администратором облака
+// (kaname#638) теми же хранилищами, что полоса: есть ли ключи — хранилище
+// способов, снятие испытаний и ключей, отсечка и событие — писатель хранилища
+// ключей под замком строки личности; nil — полосы нет.
+func (l *loginLane) resetAccessKeysUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetAccessKeysUseCase {
+	if !l.wired() {
+		return nil
+	}
+	return userapp.NewResetAccessKeysUseCase(repo, opsRepo, l.methods, accessKeysResetStore{keys: l.keys})
+}
+
+// accessKeysResetStore — адаптер хранилища ключей к порту сброса: соответствие
+// писателя порту закрепляется здесь.
+type accessKeysResetStore struct{ keys *kanamepg.AccessKeyRepo }
+
+func (s accessKeysResetStore) ResetWriter(ctx context.Context, userID domain.UserID) (userapp.AccessKeysResetWriter, error) {
+	w, err := s.keys.AccessKeysResetWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 // resolveHandler — `Resolve` для внутреннего слушателя; nil — полосы нет.
 func (l *loginLane) resolveHandler() *humansession.Handler {
 	if l == nil {
@@ -214,6 +237,7 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 		Challenges: l.keys, ChallengeTTL: access_keys.ChallengeTTL,
 		VerificationCodes: l.sessions, SourceWindows: l.sessions, BearerLetters: l.sessions,
 		LetterWindow: l.letterWindow, SourceWindow: l.limits.SourceWindow,
+		EmailChangeCodes: l.sessions,
 	}
 	// Нулевой указатель НЕ становится ненулевым интерфейсом: реестр читает
 	// «полоса входа ключом не провязана» по nil интерфейса.
@@ -646,6 +670,23 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Смена адреса почты (kaname#635, Р1–Р8): два глагола под сессией над тем
+	// же составом транзакции, что подтверждение; величины — ручки кода
+	// подтверждения (Р5, Р6), окно свежести правки своих данных (Р2) и окно
+	// писем адресата нашего отправителя (Р6).
+	emailChangeDeps := humansession.EmailChangeDeps{
+		Store: emailChangeStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
+		Freshness: cfg.AuthN.SelfServiceFreshness, MailLimit: inviteMailRateLimit(cfg),
+		Observer: rec, Now: time.Now, Logger: logger,
+	}
+	requestEmailChangeUC, err := humansession.NewRequestEmailChangeUseCase(emailChangeDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	confirmEmailChangeUC, err := humansession.NewConfirmEmailChangeUseCase(emailChangeDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	positionUC, err := humansession.NewPositionUseCase(sessions, time.Now)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -672,6 +713,23 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Свои сессии (kaname#634): три глагола над хранилищем сессии; окно свежести
+	// снятия — величина правки своих данных (Р8), та же, что у второго фактора.
+	ownDeps := humansession.OwnSessionsDeps{
+		Store: sessions, Freshness: cfg.AuthN.SelfServiceFreshness, Observer: rec, Now: time.Now, Logger: logger,
+	}
+	ownListUC, err := humansession.NewListOwnSessionsUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	ownEndUC, err := humansession.NewEndOwnSessionUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	ownEndOthersUC, err := humansession.NewEndOtherOwnSessionsUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -685,6 +743,8 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
 		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
 		akBegin: akBeginUC, akLogin: akLoginUC, enrollPassword: enrollPasswordUC,
+		requestEmailChange: requestEmailChangeUC, confirmEmailChange: confirmEmailChangeUC,
+		ownList: ownListUC, ownEnd: ownEndUC, ownEndOthers: ownEndOthersUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -760,6 +820,26 @@ func (w verificationWriter) ActivateInviteOnVerification(ctx context.Context, pe
 	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
+// emailChangeStore — адаптер хранилища глаголов смены адреса к порту: сессия —
+// читатель записи сессии, транзакция — писатель регистрации, открытый замком
+// писателя нескольких сессий на строке человека (kaname#635).
+type emailChangeStore struct {
+	sessions *kanamepg.HumanSessionRepo
+	inner    *kanamepg.RegistrationStore
+}
+
+func (s emailChangeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s emailChangeStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (humansession.EmailChangeWriter, error) {
+	w, err := s.inner.EmailChangeWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 // ownerReconcilerOrNone — nil указателя НЕ становится ненулевым интерфейсом:
 // глагол читает «реконсайлера нет» по nil интерфейса и оставляет
 // материализацию уборке по намерениям.
@@ -794,6 +874,33 @@ type laneVerbs struct {
 	akLogin *humansession.AccessKeyLoginUseCase
 	// Заведение первого пароля из живой сессии (kaname#213).
 	enrollPassword *humansession.EnrollPasswordUseCase
+	// Смена адреса почты (kaname#635).
+	requestEmailChange *humansession.RequestEmailChangeUseCase
+	confirmEmailChange *humansession.ConfirmEmailChangeUseCase
+	// Свои сессии (kaname#634).
+	ownList      *humansession.ListOwnSessionsUseCase
+	ownEnd       *humansession.EndOwnSessionUseCase
+	ownEndOthers *humansession.EndOtherOwnSessionsUseCase
+}
+
+func (v laneVerbs) RequestEmailChange(ctx context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error) {
+	return v.requestEmailChange.Execute(ctx, in)
+}
+
+func (v laneVerbs) ConfirmEmailChange(ctx context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error) {
+	return v.confirmEmailChange.Execute(ctx, in)
+}
+
+func (v laneVerbs) ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	return v.ownList.Execute(ctx, in)
+}
+
+func (v laneVerbs) EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	return v.ownEnd.Execute(ctx, in)
+}
+
+func (v laneVerbs) EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	return v.ownEndOthers.Execute(ctx, in)
 }
 
 func (v laneVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {

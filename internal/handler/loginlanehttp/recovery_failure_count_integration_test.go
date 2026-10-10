@@ -137,7 +137,8 @@ func TestLaneIntegration_F5_25_RecoveryCompletionDecidesTheAddressCountLikeALogi
 
 	// (в) замок: заблокирована — сессии нет, вход не завершён, отказ — попытка.
 	assert.Equal(t, http.StatusUnauthorized, c.completion.status, "(в): отказ завершения: %s", c.completion.body)
-	assert.Equal(t, c.before.body, c.completion.body, "(в): тот же отказ, что на входе заблокированной (Ф1-59, Ф3-02)")
+	assert.Equal(t, refusalWire(16, stepRecoveryRefused), c.completion.body,
+		"(в): отказ завершения Р10 п. 2, побайтово равный Ф5-04 (Ф1-59 по свойству, Д22)")
 	assert.Nil(t, cookieNamed(c.completion.cookies, loginlanehttp.CookieSession), "(в): сессии нет")
 	_, live := people[2].lane.sessionsOfPerson(t)
 	assert.Zero(t, live, "(в): живых сессий нет — прежние сняты, новая не выдана (Ф5-17)")

@@ -52,7 +52,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -131,8 +130,12 @@ func ctBuild(t *testing.T, f assertionFixture, now time.Time) ctContour {
 	require.NoError(t, err)
 	require.NoError(t, ks.EnsureSigningKey(ctx))
 
+	// Момент выпуска — часы базы, как в корне (kaname#589): отсечку пробы
+	// датирует та же база, и подписант кладёт `iat` строго позже неё
+	// (kaname#684). Часы утверждения пробы (`now`) — для срока утверждения, а не
+	// для `iat`: подписант на них видел бы отсечку на недели впереди себя.
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: ctIssuer, Clock: momentclock.Func(clock), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: ctIssuer, Clock: kanamepg.NewSharedClock(f.pool), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ks)
 	require.NoError(t, err)
 

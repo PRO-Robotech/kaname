@@ -12,7 +12,8 @@ package domain
 //
 // Сессия — ЗАПИСЬ с закрытым составом (Р1): субъект, момент аутентификации,
 // момент последнего предъявления, срок, уровень уверенности, множество
-// предъявленного. Требования сменить пароль в составе НЕТ (kacho#2697,
+// предъявленного и — с kaname#634 — описание клиента, каким его назвал запрос
+// выдачи. Требования сменить пароль в составе НЕТ (kacho#2697,
 // kaname#201): восстановление задаёт пароль тем же обращением, что предъявляет
 // код, и сессия появляется уже полноправной. Носитель — НЕПРОЗРАЧНОЕ значение
 // у клиента: из него не читается ни субъект, ни момент, ни номер записи; он
@@ -37,13 +38,47 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 )
 
-// HumanSessionID — идентификатор записи сессии. Наружу не выходит: клиент
-// держит носитель, край получает субъекта и поля записи; номер записи не
-// адресуется ничем внешним.
+// HumanSessionID — идентификатор записи сессии. Адресуется ровно одним
+// внешним путём — её ВЛАДЕЛЬЦЕМ на полосе формы (kaname#634, приёмка
+// `own-sessions-are-listed-and-ended-by-their-owner.md`, Р4, Р5): перечень своих
+// сессий его называет, выход из выбранной его принимает. Края он не достигает
+// (ответ `Resolve` его не несёт), носителем не является и о субъекте ничего не
+// говорит; субъект глагола — всегда субъект носителя запроса.
 type HumanSessionID string
+
+// HumanSessionIDPrefix — приставка идентификатора записи в дефисном каноне.
+const HumanSessionIDPrefix = "hss"
+
+// humanSessionIDBody — тело идентификатора: 17 знаков crockford-base32 в
+// нижнем регистре (алфавит канона `ids`: без i, l, o, u).
+const humanSessionIDBody = 17
+
+// TextHumanSessionIDRule — правило формы идентификатора записи, как его
+// называет отказ формы (Р5): `Illegal argument sessionId: <правило>`.
+const TextHumanSessionIDRule = "must match ^hss-[crockford-base32]{17}$"
+
+// ParseHumanSessionID — идентификатор записи, присланный клиентом; форма
+// судится ДО хранилища. Пустое значение — отказ «required» — вызывающий судит
+// раньше этого разбора; здесь ok=false значит «не та форма».
+func ParseHumanSessionID(s string) (id HumanSessionID, ok bool) {
+	body, found := strings.CutPrefix(s, HumanSessionIDPrefix+"-")
+	if !found || len(body) != humanSessionIDBody {
+		return "", false
+	}
+	for i := 0; i < len(body); i++ {
+		if !strings.ContainsRune(crockfordLower, rune(body[i])) {
+			return "", false
+		}
+	}
+	return HumanSessionID(s), true
+}
+
+// crockfordLower — алфавит тела идентификатора (тот же, что у `ids`).
+const crockfordLower = "0123456789abcdefghjkmnpqrstvwxyz"
 
 // SessionBearerBytes — длина случайной части носителя в байтах: 32 байта = 256
 // бит, не меньше 128 требуемых (Ф3 §8 инв. 9). В URL-безопасном base64 без
@@ -167,6 +202,11 @@ type HumanSession struct {
 	// PresentedMethods — множество предъявленного (Ф11 Р2), слова словаря
 	// `assurance.Methods`. Читается внутри службы правилом уровня.
 	PresentedMethods []string
+	// Client — описание клиента, каким его назвал запрос выдачи (kaname#634,
+	// Р3). Пишет его ТОЛЬКО операция выдачи; перевыпуск носителя его не трогает.
+	// Читатель — ровно перечень своих сессий: в ответ краю и в событие аудита оно
+	// не идёт.
+	Client ClientDescription
 	// CreatedAt назначает запись.
 	CreatedAt time.Time
 }
@@ -243,6 +283,12 @@ const (
 	// отсечкой `now` существующим писателем принудительного выхода. В словарь
 	// снятия сессии НЕ входит: ни одному снимающему методу она не передаётся.
 	RevokeReasonSecondFactorReset = "second-factor-reset"
+	// RevokeReasonAccessKeysReset — причина отсечки, которую пишет сброс ключей
+	// доступа администратором облака (kaname#638; приёмка
+	// `cloud-administrator-resets-login-methods.md`, Р4): все сессии человека
+	// покрыты отсечкой `now`. Как и у сброса второго фактора, в словарь снятия
+	// сессии НЕ входит: записи сессии она не снимает, а отсекает.
+	RevokeReasonAccessKeysReset = "access-keys-reset"
 	// RevokeReasonAdminForceLogout — выход, произведённый распорядителем
 	// (`InternalIAMService.ForceLogout`; kaname#334, приёмка
 	// `forced-exit-has-its-own-session-end-reason.md`, Р1, Р3). Роли у слова
@@ -259,12 +305,39 @@ const (
 	// сессия, в которой код предъявлен. Причина снятия записи сессии; отсечки
 	// подтверждение не пишет.
 	RevokeReasonEmailVerified = "email-verified"
+	// RevokeReasonEmailChanged — исход смены адреса снимает ПРОЧИЕ сессии
+	// человека (kaname#635, Р8 п. 4): адрес — канал восстановления, и после
+	// смены канала прежние устройства за учётную запись не держатся; текущая
+	// сессия получает новый носитель. Причина снятия записи сессии; отсечки
+	// смена адреса не пишет.
+	RevokeReasonEmailChanged = "email-changed"
+	// RevokeReasonEndedFromAnotherSession — человек снял свою запись из ДРУГОЙ
+	// своей сессии: выход из выбранной либо из всех, кроме текущей (kaname#634,
+	// приёмка `own-sessions-are-listed-and-ended-by-their-owner.md`, Р6). Причина
+	// снятия записи сессии; отсечки эти глаголы не пишут.
+	RevokeReasonEndedFromAnotherSession = "ended-from-another-session"
+	// RevokeReasonAccessKeyRevoked — снятие ключа доступа гасит сессии
+	// человека (Ф13 Р8, kaname#669): ключ снимают чаще всего потому, что
+	// устройства лишились, и живая сессия на нём — сессия держателя устройства.
+	// Причина снятия записи сессии и причина отсечки.
+	RevokeReasonAccessKeyRevoked = "access-key-revoked"
 )
+
+// CutoffBelowFirstAuthentication — момент отсечки, которой глагол снимает
+// носители, выданные ДО первой аутентификации личности нашей посадкой, и не
+// задевает ни одной сессии нашей посадки: на единицу разрешения хранилища
+// (микросекунда) раньше первой аутентификации (Ф3 Р4, Р5, Ф1 §4.2). Край
+// сравнивает отсечку с моментом сессии включающе, поэтому равенство с первой
+// аутентификацией сняло бы самую раннюю сессию. Правило одно для выхода, смены
+// пароля и снятия ключа доступа (Ф13 Р8): второе написание разошлось бы молча.
+func CutoffBelowFirstAuthentication(first time.Time) time.Time {
+	return first.Add(-time.Microsecond)
+}
 
 // HumanSessionEndReasons — перечень ЗАКРЫТОГО словаря причин снятия записи
 // сессии: ровно те значения, что принимает `human_sessions_ended_reason_check`.
-// Причина отсечки RevokeReasonSecondFactorReset в него не входит — она не
-// снимает ни одной записи.
+// Причины отсечки RevokeReasonSecondFactorReset и RevokeReasonAccessKeysReset в
+// него не входят — они не снимают ни одной записи.
 //
 // Функция, а не переменная: каждый вызов отдаёт СВЕЖИЙ срез, и вызывающий,
 // дописавший в него, словаря не меняет. Элементы — константы по имени, а не
@@ -278,6 +351,9 @@ func HumanSessionEndReasons() []string {
 		RevokeReasonSecondFactorRemoved,
 		RevokeReasonAdminForceLogout,
 		RevokeReasonEmailVerified,
+		RevokeReasonEmailChanged,
+		RevokeReasonEndedFromAnotherSession,
+		RevokeReasonAccessKeyRevoked,
 	}
 }
 
@@ -321,11 +397,21 @@ const (
 	// приёмка A7 Р1): свой вид, не вид смены — заведение и смена суть разные
 	// действия с разными основаниями.
 	FormPasswordEnroll FormKind = "password-enroll"
+	// Смена адреса почты (kaname#635, приёмка email-change Р1): запрос смены и
+	// предъявление кода с нового адреса — две формы, два вида; признак одного
+	// другому не годится.
+	FormEmailChange        FormKind = "email-change"
+	FormEmailChangeConfirm FormKind = "email-change-confirm"
+	// FormSessionEnd — снятие своих записей сессии (kaname#634, Р1): ОДИН вид на
+	// оба снимающих глагола — выход из выбранной и из всех, кроме текущей. Предмет
+	// у них один (снятие своих записей), и признак различает формы, а не исходы —
+	// как у семейства второго фактора.
+	FormSessionEnd FormKind = "session-end"
 )
 
 var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete,
 	FormSecondFactor, FormStepUp, FormVerifyEmail, FormVerifyEmailConfirm, FormAccessKeyBegin, FormAccessKeyLogin,
-	FormPasswordEnroll}
+	FormPasswordEnroll, FormEmailChange, FormEmailChangeConfirm, FormSessionEnd}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

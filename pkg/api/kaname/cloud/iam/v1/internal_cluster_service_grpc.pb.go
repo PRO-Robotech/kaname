@@ -12,12 +12,13 @@
 // under `/iam/v1/internal/cluster/...`; never on the external TLS endpoint.
 //
 // Manages cluster-RBAC admin grants on the singleton `cluster:cluster_root`
-// FGA object. Replaces the prior `kubectl exec`-into-openfga workflow for
-// granting / revoking `system_admin` to humans. All mutations follow the
-// `Operation` async envelope: the handler
-// inserts `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a
-// single transaction, then the existing `FGAOutboxDrainer` worker pushes the
-// tuple as a journal intent and flips the Operation to `done=true` within ≤2s.
+// FGA object, for users and service accounts. All mutations return an
+// `Operation`: it is persisted before the mutation, the handler inserts
+// `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a single
+// transaction, and the same request completes the Operation (`done=true`). The
+// relation tuple itself reaches the model asynchronously, through the
+// `fga_outbox` drainer. The public twin `ClusterService`
+// (`cluster_service.proto`) executes the same use-cases.
 //
 // Read RPCs (`Get`, `ListAdmins`) are synchronous; they hit the local
 // `kaname` schema only.
@@ -71,11 +72,12 @@ type InternalClusterServiceClient interface {
 	// re-granting an already-active subject returns success with the existing
 	// grant id.
 	//
-	// The handler validates user existence (`kaname.users` SELECT in the
-	// same TX) and then atomically inserts a `cluster_admin_grants` row
-	// (`INSERT … ON CONFLICT (subject_type, subject_id) WHERE granted_until IS
-	// NULL DO NOTHING`), an `fga_outbox` write-tuple row, and an
-	// `audit_outbox` row in one transaction.
+	// The handler first checks the subject's state by kind (`kaname.users` for
+	// `USER`, `kaname.service_accounts` for `SERVICE_ACCOUNT`), and then
+	// atomically inserts a `cluster_admin_grants` row (`INSERT … ON CONFLICT ON
+	// CONSTRAINT cluster_admin_grants_cluster_subject_uniq DO NOTHING`, then an
+	// in-place reactivate of a revoked row), an `fga_outbox` write-tuple row, and
+	// an `audit_outbox` row in one transaction.
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	GrantAdmin(ctx context.Context, in *GrantClusterAdminRequest, opts ...grpc.CallOption) (*operation.Operation, error)
@@ -167,11 +169,12 @@ type InternalClusterServiceServer interface {
 	// re-granting an already-active subject returns success with the existing
 	// grant id.
 	//
-	// The handler validates user existence (`kaname.users` SELECT in the
-	// same TX) and then atomically inserts a `cluster_admin_grants` row
-	// (`INSERT … ON CONFLICT (subject_type, subject_id) WHERE granted_until IS
-	// NULL DO NOTHING`), an `fga_outbox` write-tuple row, and an
-	// `audit_outbox` row in one transaction.
+	// The handler first checks the subject's state by kind (`kaname.users` for
+	// `USER`, `kaname.service_accounts` for `SERVICE_ACCOUNT`), and then
+	// atomically inserts a `cluster_admin_grants` row (`INSERT … ON CONFLICT ON
+	// CONSTRAINT cluster_admin_grants_cluster_subject_uniq DO NOTHING`, then an
+	// in-place reactivate of a revoked row), an `fga_outbox` write-tuple row, and
+	// an `audit_outbox` row in one transaction.
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	GrantAdmin(context.Context, *GrantClusterAdminRequest) (*operation.Operation, error)

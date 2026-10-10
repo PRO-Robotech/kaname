@@ -36,6 +36,7 @@ const sidebars: SidebarsConfig = {
         'api/group',
         'api/role',
         'api/access-binding',
+        'api/cluster',
         'api/tokens',
         'api/auth-lane',
         'api/oauth-ceremony',

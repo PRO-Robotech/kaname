@@ -67,6 +67,9 @@ _LANE_WHY = ("слушатель полосы формы службы; подн�
 
 _CSRF = "/iam/v1/auth/csrf"
 _REGISTER = "/iam/v1/auth/register"
+# Единый отказ регистрации — текст Ф4 Р3, редакция 8 (kaname#211).
+_REG_REFUSED = ("registration refused; if this address is already yours, sign in or recover access; "
+                "if you were invited, ask an account administrator to invite again; otherwise try again later")
 _LOGOUT = "/iam/v1/auth/logout"
 _STATUS = "/iam/v1/auth/second-factor"
 
@@ -249,8 +252,8 @@ CASES.append(Case(
     steps=[
         _csrf_step("reg-csrf-register-again", "register", "regCsrfRegister", "CSRF-REGISTER"),
         _register("reg-register-occupied", "regEmail", "OCCUPIED",
-                  _refusal(400, 9, "registration refused", "OCCUPIED", reason="REGISTRATION_REFUSED")),
+                  _refusal(400, 9, _REG_REFUSED, "OCCUPIED", reason="REGISTRATION_REFUSED")),
         _register("reg-register-occupied-other-case", "regEmailUpper", "OCCUPIED-CASE",
-                  _refusal(400, 9, "registration refused", "OCCUPIED-CASE", reason="REGISTRATION_REFUSED")),
+                  _refusal(400, 9, _REG_REFUSED, "OCCUPIED-CASE", reason="REGISTRATION_REFUSED")),
     ],
 ))

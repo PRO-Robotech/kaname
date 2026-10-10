@@ -52,6 +52,10 @@ const (
 	// Подтверждение адреса (kaname#456, П13): исходы глаголов подтверждения и
 	// отказы положения на путях полосы.
 	AddressVerificationOutcomesMetric = Namespace + "_address_verification_outcomes_total"
+	// Смена адреса почты (kaname#635): исходы запроса смены и предъявления
+	// кода. Занятый адрес на запросе — своя клетка: вызывающему он не
+	// отличим от свободного, и различие живёт только здесь.
+	EmailChangeOutcomesMetric = Namespace + "_email_change_outcomes_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -78,6 +82,7 @@ type LoginLaneRecorder struct {
 	sfEvent      *prometheus.CounterVec
 	akLogin      *prometheus.CounterVec
 	addrVerify   *prometheus.CounterVec
+	emailChange  *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -131,7 +136,7 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 			register: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: RegistrationOutcomesMetric,
 				Help: "Outcomes of registration by lane and cause. The caller always sees ONE refusal " +
-					"(registration refused) for an occupied address and for the admission-rate ceiling; " +
+					"(reason REGISTRATION_REFUSED) for an occupied address and for the admission-rate ceiling; " +
 					"the cause is visible only here and in the journal (Ф4 Р3).",
 			}, []string{"lane", "outcome"}),
 			recReq: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -192,10 +197,17 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 					"already verified, no session, confirmed, code mismatched or not found, invite not valid, store " +
 					"failed, and refusals of lane paths while the address is not verified. No address and no code.",
 			}, []string{"outcome"}),
+			emailChange: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: EmailChangeOutcomesMetric,
+				Help: "Outcomes of the email-change verbs: letter queued, request to a taken address (answered " +
+					"like a free one), person or recipient paced, no session, not verified, not fresh, field " +
+					"refused, confirmed, code mismatched, not found or exhausted, address in use at confirmation, " +
+					"store failed. No address and no code.",
+			}, []string{"outcome"}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
 			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
-			rec.addrVerify, rec.akLogin)
+			rec.addrVerify, rec.akLogin, rec.emailChange)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -248,6 +260,9 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.VerificationOutcomes() {
 			rec.addrVerify.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.EmailChangeOutcomes() {
+			rec.emailChange.WithLabelValues(string(o)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -332,7 +347,13 @@ func (l *LoginLaneRecorder) AddressVerificationObserved(o humansession.Verificat
 	l.addrVerify.WithLabelValues(string(o)).Inc()
 }
 
+// EmailChangeObserved — исход глаголов смены адреса (kaname#635).
+func (l *LoginLaneRecorder) EmailChangeObserved(o humansession.EmailChangeOutcome) {
+	l.emailChange.WithLabelValues(string(o)).Inc()
+}
+
 var (
+	_ humansession.EmailChangeObserver         = (*LoginLaneRecorder)(nil)
 	_ humansession.Observer                    = (*LoginLaneRecorder)(nil)
 	_ humansession.AddressVerificationObserver = (*LoginLaneRecorder)(nil)
 	_ passwordverify.Observer                  = (*LoginLaneRecorder)(nil)

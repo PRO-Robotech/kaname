@@ -313,7 +313,7 @@ func (uc *GrantAdminUseCase) doGrant(
 		if err := uc.audit.EmitTx(ctx, tx, service.AuditEvent{
 			EventType: auditEventClusterAdminGranted,
 			Payload: clusterAdminAuditPayload(
-				grantedBy, string(subject), string(grant.ID)),
+				grantedBy, subjectType, string(subject), string(grant.ID)),
 		}); err != nil {
 			return domain.ClusterAdminGrant{}, fmt.Errorf("audit emit grant: %w", err)
 		}

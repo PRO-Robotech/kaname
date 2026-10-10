@@ -664,6 +664,52 @@ func (x *ResetSecondFactorRequest) GetUserId() string {
 	return ""
 }
 
+type ResetAccessKeysRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ID of the User whose access keys are reset. The only input: there is no
+	// choice of keys — the reset removes all of them.
+	UserId        string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetAccessKeysRequest) Reset() {
+	*x = ResetAccessKeysRequest{}
+	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetAccessKeysRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetAccessKeysRequest) ProtoMessage() {}
+
+func (x *ResetAccessKeysRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetAccessKeysRequest.ProtoReflect.Descriptor instead.
+func (*ResetAccessKeysRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ResetAccessKeysRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 type ListUserOperationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the User resource to list operations for.
@@ -678,7 +724,7 @@ type ListUserOperationsRequest struct {
 
 func (x *ListUserOperationsRequest) Reset() {
 	*x = ListUserOperationsRequest{}
-	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[11]
+	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -690,7 +736,7 @@ func (x *ListUserOperationsRequest) String() string {
 func (*ListUserOperationsRequest) ProtoMessage() {}
 
 func (x *ListUserOperationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[11]
+	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -703,7 +749,7 @@ func (x *ListUserOperationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUserOperationsRequest.ProtoReflect.Descriptor instead.
 func (*ListUserOperationsRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP(), []int{11}
+	return file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListUserOperationsRequest) GetUserId() string {
@@ -739,7 +785,7 @@ type ListUserOperationsResponse struct {
 
 func (x *ListUserOperationsResponse) Reset() {
 	*x = ListUserOperationsResponse{}
-	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[12]
+	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +797,7 @@ func (x *ListUserOperationsResponse) String() string {
 func (*ListUserOperationsResponse) ProtoMessage() {}
 
 func (x *ListUserOperationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[12]
+	mi := &file_kaname_cloud_iam_v1_user_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +810,7 @@ func (x *ListUserOperationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUserOperationsResponse.ProtoReflect.Descriptor instead.
 func (*ListUserOperationsResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP(), []int{12}
+	return file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListUserOperationsResponse) GetOperations() []*operation.Operation {
@@ -829,6 +875,8 @@ const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\x12UnblockUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"3\n" +
 	"\x18ResetSecondFactorRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"1\n" +
+	"\x16ResetAccessKeysRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"p\n" +
 	"\x19ListUserOperationsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
@@ -839,7 +887,7 @@ const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\n" +
 	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x8c\x13\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x92\x15\n" +
 	"\vUserService\x12\x9c\x01\n" +
 	"\x03Get\x12#.kaname.cloud.iam.v1.GetUserRequest\x1a\x19.kaname.cloud.iam.v1.User\"U\x8a\xb5\x18\riam.users.get\x92\xb5\x18\x05v_get\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/users/{user_id}\x12\x82\x01\n" +
@@ -870,7 +918,10 @@ const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\x13UnblockUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/iam/v1/users/{user_id}:unblock\x12\x8d\x02\n" +
 	"\x11ResetSecondFactor\x12-.kaname.cloud.iam.v1.ResetSecondFactorRequest\x1a\x1c.corelib.operation.Operation\"\xaa\x01\x8a\xb5\x18\x1biam.users.resetSecondFactor\x92\xb5\x18\x12identity_suspender\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*!\n" +
-	"\x19ResetSecondFactorMetadata\x12\x04User\x82\xd3\xe4\x93\x02.:\x01*\")/iam/v1/users/{user_id}:resetSecondFactor\x12\xeb\x01\n" +
+	"\x19ResetSecondFactorMetadata\x12\x04User\x82\xd3\xe4\x93\x02.:\x01*\")/iam/v1/users/{user_id}:resetSecondFactor\x12\x83\x02\n" +
+	"\x0fResetAccessKeys\x12+.kaname.cloud.iam.v1.ResetAccessKeysRequest\x1a\x1c.corelib.operation.Operation\"\xa4\x01\x8a\xb5\x18\x19iam.users.resetAccessKeys\x92\xb5\x18\x12identity_suspender\x9a\xb5\x18\x13\n" +
+	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*\x1f\n" +
+	"\x17ResetAccessKeysMetadata\x12\x04User\x82\xd3\xe4\x93\x02,:\x01*\"'/iam/v1/users/{user_id}:resetAccessKeys\x12\xeb\x01\n" +
 	"\x0eListOperations\x12..kaname.cloud.iam.v1.ListUserOperationsRequest\x1a/.kaname.cloud.iam.v1.ListUserOperationsResponse\"x\x8a\xb5\x18$iam.user_operationses.listOperations\x92\xb5\x18\x06v_list\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02$\x12\"/iam/v1/users/{user_id}/operationsBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
@@ -886,7 +937,7 @@ func file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_user_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_kaname_cloud_iam_v1_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_kaname_cloud_iam_v1_user_service_proto_goTypes = []any{
 	(*GetUserRequest)(nil),               // 0: kaname.cloud.iam.v1.GetUserRequest
 	(*ListUsersRequest)(nil),             // 1: kaname.cloud.iam.v1.ListUsersRequest
@@ -899,18 +950,19 @@ var file_kaname_cloud_iam_v1_user_service_proto_goTypes = []any{
 	(*BlockUserRequest)(nil),             // 8: kaname.cloud.iam.v1.BlockUserRequest
 	(*UnblockUserRequest)(nil),           // 9: kaname.cloud.iam.v1.UnblockUserRequest
 	(*ResetSecondFactorRequest)(nil),     // 10: kaname.cloud.iam.v1.ResetSecondFactorRequest
-	(*ListUserOperationsRequest)(nil),    // 11: kaname.cloud.iam.v1.ListUserOperationsRequest
-	(*ListUserOperationsResponse)(nil),   // 12: kaname.cloud.iam.v1.ListUserOperationsResponse
-	nil,                                  // 13: kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
-	(*User)(nil),                         // 14: kaname.cloud.iam.v1.User
-	(*fieldmaskpb.FieldMask)(nil),        // 15: google.protobuf.FieldMask
-	(*operation.Operation)(nil),          // 16: corelib.operation.Operation
+	(*ResetAccessKeysRequest)(nil),       // 11: kaname.cloud.iam.v1.ResetAccessKeysRequest
+	(*ListUserOperationsRequest)(nil),    // 12: kaname.cloud.iam.v1.ListUserOperationsRequest
+	(*ListUserOperationsResponse)(nil),   // 13: kaname.cloud.iam.v1.ListUserOperationsResponse
+	nil,                                  // 14: kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
+	(*User)(nil),                         // 15: kaname.cloud.iam.v1.User
+	(*fieldmaskpb.FieldMask)(nil),        // 16: google.protobuf.FieldMask
+	(*operation.Operation)(nil),          // 17: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_user_service_proto_depIdxs = []int32{
-	14, // 0: kaname.cloud.iam.v1.ListUsersResponse.users:type_name -> kaname.cloud.iam.v1.User
-	15, // 1: kaname.cloud.iam.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
-	13, // 2: kaname.cloud.iam.v1.UpdateUserRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
-	16, // 3: kaname.cloud.iam.v1.ListUserOperationsResponse.operations:type_name -> corelib.operation.Operation
+	15, // 0: kaname.cloud.iam.v1.ListUsersResponse.users:type_name -> kaname.cloud.iam.v1.User
+	16, // 1: kaname.cloud.iam.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
+	14, // 2: kaname.cloud.iam.v1.UpdateUserRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
+	17, // 3: kaname.cloud.iam.v1.ListUserOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0,  // 4: kaname.cloud.iam.v1.UserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
 	1,  // 5: kaname.cloud.iam.v1.UserService.List:input_type -> kaname.cloud.iam.v1.ListUsersRequest
 	3,  // 6: kaname.cloud.iam.v1.UserService.Invite:input_type -> kaname.cloud.iam.v1.InviteUserRequest
@@ -921,20 +973,22 @@ var file_kaname_cloud_iam_v1_user_service_proto_depIdxs = []int32{
 	8,  // 11: kaname.cloud.iam.v1.UserService.Block:input_type -> kaname.cloud.iam.v1.BlockUserRequest
 	9,  // 12: kaname.cloud.iam.v1.UserService.Unblock:input_type -> kaname.cloud.iam.v1.UnblockUserRequest
 	10, // 13: kaname.cloud.iam.v1.UserService.ResetSecondFactor:input_type -> kaname.cloud.iam.v1.ResetSecondFactorRequest
-	11, // 14: kaname.cloud.iam.v1.UserService.ListOperations:input_type -> kaname.cloud.iam.v1.ListUserOperationsRequest
-	14, // 15: kaname.cloud.iam.v1.UserService.Get:output_type -> kaname.cloud.iam.v1.User
-	2,  // 16: kaname.cloud.iam.v1.UserService.List:output_type -> kaname.cloud.iam.v1.ListUsersResponse
-	16, // 17: kaname.cloud.iam.v1.UserService.Invite:output_type -> corelib.operation.Operation
-	16, // 18: kaname.cloud.iam.v1.UserService.ResendInvite:output_type -> corelib.operation.Operation
-	16, // 19: kaname.cloud.iam.v1.UserService.Update:output_type -> corelib.operation.Operation
-	16, // 20: kaname.cloud.iam.v1.UserService.Delete:output_type -> corelib.operation.Operation
-	16, // 21: kaname.cloud.iam.v1.UserService.RemoveFromAccount:output_type -> corelib.operation.Operation
-	16, // 22: kaname.cloud.iam.v1.UserService.Block:output_type -> corelib.operation.Operation
-	16, // 23: kaname.cloud.iam.v1.UserService.Unblock:output_type -> corelib.operation.Operation
-	16, // 24: kaname.cloud.iam.v1.UserService.ResetSecondFactor:output_type -> corelib.operation.Operation
-	12, // 25: kaname.cloud.iam.v1.UserService.ListOperations:output_type -> kaname.cloud.iam.v1.ListUserOperationsResponse
-	15, // [15:26] is the sub-list for method output_type
-	4,  // [4:15] is the sub-list for method input_type
+	11, // 14: kaname.cloud.iam.v1.UserService.ResetAccessKeys:input_type -> kaname.cloud.iam.v1.ResetAccessKeysRequest
+	12, // 15: kaname.cloud.iam.v1.UserService.ListOperations:input_type -> kaname.cloud.iam.v1.ListUserOperationsRequest
+	15, // 16: kaname.cloud.iam.v1.UserService.Get:output_type -> kaname.cloud.iam.v1.User
+	2,  // 17: kaname.cloud.iam.v1.UserService.List:output_type -> kaname.cloud.iam.v1.ListUsersResponse
+	17, // 18: kaname.cloud.iam.v1.UserService.Invite:output_type -> corelib.operation.Operation
+	17, // 19: kaname.cloud.iam.v1.UserService.ResendInvite:output_type -> corelib.operation.Operation
+	17, // 20: kaname.cloud.iam.v1.UserService.Update:output_type -> corelib.operation.Operation
+	17, // 21: kaname.cloud.iam.v1.UserService.Delete:output_type -> corelib.operation.Operation
+	17, // 22: kaname.cloud.iam.v1.UserService.RemoveFromAccount:output_type -> corelib.operation.Operation
+	17, // 23: kaname.cloud.iam.v1.UserService.Block:output_type -> corelib.operation.Operation
+	17, // 24: kaname.cloud.iam.v1.UserService.Unblock:output_type -> corelib.operation.Operation
+	17, // 25: kaname.cloud.iam.v1.UserService.ResetSecondFactor:output_type -> corelib.operation.Operation
+	17, // 26: kaname.cloud.iam.v1.UserService.ResetAccessKeys:output_type -> corelib.operation.Operation
+	13, // 27: kaname.cloud.iam.v1.UserService.ListOperations:output_type -> kaname.cloud.iam.v1.ListUserOperationsResponse
+	16, // [16:28] is the sub-list for method output_type
+	4,  // [4:16] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -952,7 +1006,7 @@ func file_kaname_cloud_iam_v1_user_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_user_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_user_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

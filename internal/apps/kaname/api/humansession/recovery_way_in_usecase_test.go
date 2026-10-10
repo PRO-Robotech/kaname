@@ -113,7 +113,7 @@ func TestRecovery_F5_30_PresentationSetsTheFirstPasswordAndVerifiesTheAddress(t 
 	h.mustLogin(t, "r30@example.invalid", "brand-new-password-30")
 
 	_, err = h.complete("r30@example.invalid", letter, "another-password-30")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "Ф5-30: второе предъявление — отказ Ф5-05")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "Ф5-30: второе предъявление — отказ Ф5-05")
 }
 
 // Ф5-30 (б) — близнец подтверждённостью адреса: отметка подтверждения прежняя.
@@ -180,14 +180,14 @@ func TestRecovery_F5_34_IdentityWithoutAPasswordRowCompletesLikeOneWithIt(t *tes
 	}
 	// (в): отказ заблокированной, не 503.
 	_, err := h.complete(string(nb.Email), letters[nb.ID], "brand-new-password-34")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "Ф5-34 (в): отказ Ф5-17")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "Ф5-34 (в): отказ Ф5-17")
 
 	h.clock = h.clock.Add(time.Second)
 	h.mustLogin(t, string(n.Email), "brand-new-password-34")
 	h.mustLogin(t, string(w.Email), "brand-new-password-34")
 	for _, u := range []domain.User{n, w, nb} {
 		_, err := h.complete(string(u.Email), letters[u.ID], "another-password-34")
-		require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "Ф5-34: повторное предъявление %s — отказ Ф5-05", u.ID)
+		require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "Ф5-34: повторное предъявление %s — отказ Ф5-05", u.ID)
 	}
 	// (г): строка «пароль» у N и NB — одна (дублёр держит одну на личность).
 	for _, u := range []domain.User{n, nb} {

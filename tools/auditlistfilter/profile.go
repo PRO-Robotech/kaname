@@ -203,6 +203,7 @@ var Profile = listfiltergate.Profile{
 
 	ProtoFiles: []string{
 		"kaname/cloud/iam/v1/access_key_service.proto",
+		"kaname/cloud/iam/v1/cluster_service.proto",
 		"kaname/cloud/iam/v1/internal_cluster_service.proto",
 		"kaname/cloud/iam/v1/membership_service.proto",
 		"kaname/cloud/iam/v1/sa_key_service.proto",
@@ -296,6 +297,11 @@ var Profile = listfiltergate.Profile{
 		// "authenticated" and narrow nothing. The gate reads the model and tells the
 		// two apart rather than assuming either.
 		"cluster.ListAdmins": edgeGate("internal_cluster_service.proto", "*"),
+		// Публичный близнец (приёмка ADM-CA, Р7) — та же форма против СВОЕГО
+		// контракта: вопрос `system_admin` к синглтону кластера, отношение без
+		// подстановки. Свой пакет у транспорта затем и заведён, чтобы публичный
+		// перечень судился аннотацией `cluster_service.proto`, а не внутренней.
+		"clusterpublic.ListAdmins": edgeGate("cluster_service.proto", "*"),
 		// conditions.List stood here and is GONE with its subject: the tenant-facing
 		// conditional-access surface was retired — proto, api/conditions package and
 		// repo all removed — so this declaration has nothing left to describe. The

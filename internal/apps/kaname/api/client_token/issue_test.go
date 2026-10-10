@@ -45,6 +45,12 @@ func (s stubKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial
 
 func newSigner(t *testing.T) *tokensigner.Signer {
 	t.Helper()
+	return newSignerOn(t, func() time.Time { return now })
+}
+
+// newSignerOn — тот же подписант над названными часами.
+func newSignerOn(t *testing.T, clock func() time.Time) *tokensigner.Signer {
+	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	der, err := x509.MarshalPKCS8PrivateKey(k)
@@ -53,7 +59,7 @@ func newSigner(t *testing.T) *tokensigner.Signer {
 	require.NoError(t, err)
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      issuerID,
-		Clock:       momentclock.Func(func() time.Time { return now }),
+		Clock:       momentclock.Func(clock),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, stubKeys{mat: tokensigner.SigningMaterial{
 		KID:           "kacho-test",

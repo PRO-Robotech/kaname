@@ -268,6 +268,14 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		Observer:  nop, Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
+	// Завершение восстановления — НАСТОЯЩИЙ глагол (EC-23 предъявляет код
+	// восстановления после смены адреса).
+	completeR, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
+		CutoffClock: momentclock.Func(clock.Now),
+		Store:       sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
+		Observer: nop, Now: clock.Now, Logger: logger,
+	})
+	require.NoError(t, err)
 	failApply := &atomic.Bool{}
 	vdeps := humansession.VerificationDeps{
 		Store: avVerificationStore{sessions: sessions, inner: registrationPG, failApply: failApply}, Pace: pace,
@@ -279,14 +287,36 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	require.NoError(t, err)
 	position, err := humansession.NewPositionUseCase(sessions, clock.Now)
 	require.NoError(t, err)
+	// Смена адреса почты (kaname#635): тот же состав, что в композиционном
+	// корне; окно писем адресата — величина окна писем восстановления стенда
+	// (EC-19: ручка задаёт ограничение нашего отправителя, и окно смены берёт
+	// то же значение).
+	cdeps := humansession.EmailChangeDeps{
+		Store: avEmailChangeStore{sessions: sessions, inner: registrationPG}, Pace: pace, Freshness: laneFreshness,
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: perRecipient, Window: time.Hour},
+		Now:       clock.Now, Logger: logger,
+	}
+	requestC, err := humansession.NewRequestEmailChangeUseCase(cdeps)
+	require.NoError(t, err)
+	confirmC, err := humansession.NewConfirmEmailChangeUseCase(cdeps)
+	require.NoError(t, err)
 
 	enrollPw, err := humansession.NewEnrollPasswordUseCase(humansession.EnrollPasswordDeps{
 		Store: sessions, Hasher: hasher, Rule: rule, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
-	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, register: register, login: login, logout: logout, change: change,
+	// Свои сессии (kaname#634) — НАСТОЯЩИЕ глаголы над тем же хранилищем, окно
+	// свежести — величина стенда (Ф1 §4.1).
+	ownDeps := humansession.OwnSessionsDeps{Store: sessions, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger}
+	ownList, err := humansession.NewListOwnSessionsUseCase(ownDeps)
+	require.NoError(t, err)
+	ownEnd, err := humansession.NewEndOwnSessionUseCase(ownDeps)
+	require.NoError(t, err)
+	ownEndOthers, err := humansession.NewEndOtherOwnSessionsUseCase(ownDeps)
+	require.NoError(t, err)
+	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, ownList: ownList, ownEnd: ownEnd, ownEndOthers: ownEndOthers, register: register, login: login, logout: logout, change: change,
 		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery,
-		requestV: requestV, confirmV: confirmV, position: position}
+		requestV: requestV, confirmV: confirmV, position: position, requestC: requestC, confirmC: confirmC, completeR: completeR}
 	l := newLaneOver(t, verbs, "")
 	return &avLane{
 		ctx: ctx, pool: pool, lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
@@ -340,6 +370,25 @@ func (w avVerificationWriter) ActivateInviteOnVerification(ctx context.Context, 
 	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
+// avEmailChangeStore — хранилище глаголов смены тем же составом, что в
+// композиционном корне (`emailChangeStore`).
+type avEmailChangeStore struct {
+	sessions *kanamepg.HumanSessionRepo
+	inner    *kanamepg.RegistrationStore
+}
+
+func (s avEmailChangeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s avEmailChangeStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (humansession.EmailChangeWriter, error) {
+	w, err := s.inner.EmailChangeWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 // avVerbs — глаголы слушателя стенда: настоящие варианты использования.
 type avVerbs struct {
 	*stubLane
@@ -359,6 +408,39 @@ type avVerbs struct {
 	position  *humansession.PositionUseCase
 	// Заведение первого пароля (kaname#213) — НАСТОЯЩИЙ глагол.
 	enrollPw *humansession.EnrollPasswordUseCase
+	// Смена адреса почты (kaname#635) — НАСТОЯЩИЕ глаголы.
+	requestC *humansession.RequestEmailChangeUseCase
+	confirmC *humansession.ConfirmEmailChangeUseCase
+	// Завершение восстановления (EC-23) — НАСТОЯЩИЙ глагол.
+	completeR *humansession.CompleteRecoveryUseCase
+	// Свои сессии (kaname#634) — НАСТОЯЩИЕ глаголы.
+	ownList      *humansession.ListOwnSessionsUseCase
+	ownEnd       *humansession.EndOwnSessionUseCase
+	ownEndOthers *humansession.EndOtherOwnSessionsUseCase
+}
+
+func (v avVerbs) CompleteRecovery(ctx context.Context, in humansession.CompleteRecoveryInput) (humansession.CompleteRecoveryOutput, error) {
+	return v.completeR.Execute(ctx, in)
+}
+
+func (v avVerbs) RequestEmailChange(ctx context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error) {
+	return v.requestC.Execute(ctx, in)
+}
+
+func (v avVerbs) ConfirmEmailChange(ctx context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error) {
+	return v.confirmC.Execute(ctx, in)
+}
+
+func (v avVerbs) ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	return v.ownList.Execute(ctx, in)
+}
+
+func (v avVerbs) EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	return v.ownEnd.Execute(ctx, in)
+}
+
+func (v avVerbs) EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	return v.ownEndOthers.Execute(ctx, in)
 }
 
 func (v avVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {

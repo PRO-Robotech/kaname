@@ -96,6 +96,9 @@ func liveAuthLaneContract() authLaneContract {
 		EdgeRoutes: []string{"/iam/v1/auth/me"},
 		Texts: []string{
 			humansession.TextAuthenticationFailed,
+			humansession.TextLoginWithSecondFactorFailed,
+			humansession.TextAccessNotRestored,
+			humansession.TextRecoveryNextStep,
 			humansession.TextTooManyAttempts,
 			humansession.TextFormTokenRejected,
 			humansession.TextLogoutNotPerformed,
@@ -121,6 +124,14 @@ func liveAuthLaneContract() authLaneContract {
 			humansession.ReasonEmailNotVerified,
 			humansession.ReasonEmailAlreadyVerified,
 			humansession.ReasonInviteNotValid,
+			// Смена адреса почты (kaname#635).
+			humansession.TextEmailInUse,
+			humansession.ReasonEmailInUse,
+			// Свои сессии (kaname#634).
+			humansession.TextSessionNotFound,
+			humansession.TextSessionIsCurrent,
+			humansession.ReasonSessionNotFound,
+			humansession.ReasonSessionIsCurrent,
 		},
 		Cookies:  []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
 		BodyKeys: loginlanehttp.ResponseObjectKeys(),

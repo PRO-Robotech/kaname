@@ -201,7 +201,7 @@ func TestLaneIntegration_F12_13e_NotEnrolledOnLoginIsByteIdenticalToAWrongPasswo
 	// (1) неверный пароль + код — отказ входа.
 	r1 := h.lane.do(t, c, http.MethodPost, "/iam/v1/auth/login", withCode("not-the-password"), fwd(), ctxCk)
 	require.Equal(t, http.StatusUnauthorized, r1.status, r1.body)
-	require.JSONEq(t, `{"code":16,"message":"authentication failed","details":[]}`, r1.body)
+	require.Equal(t, refusalWire(16, stepLoginWithCode), r1.body, "текст формы с кодом (Ф12 Р4, редакция 17)")
 	require.Empty(t, r1.cookies, "отказ печений не пишет")
 	require.Equal(t, 1, h.failuresByAddress(t), "(1) — попытка")
 

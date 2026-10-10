@@ -475,6 +475,13 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	// COALESCE(r.name, '') so a LEFT JOIN miss (dangling role) scans as "" — the
 	// Go scan target is a plain string, never NULL.
 	//
+	// COALESCE(ab.role_id, '') — по той же причине, что в abCols: у ФОРМЫ
+	// ОТНОШЕНИЯ (системная выдача, access_bindings_grant_form_ck) роли нет и
+	// колонка NULL. Голый ab.role_id ронял перечень ЦЕЛИКОМ на первой такой
+	// строке («cannot scan NULL into *string»), а наружу это уходило внутренней
+	// ошибкой. Пустая строка — отсутствие роли в том виде, в каком его выражает
+	// весь домен; для такой строки LEFT JOIN не находит роли, и role_name тоже "".
+	//
 	// The last two columns attribute the row: `is_direct` is true when the binding
 	// names the subject itself; otherwise it was reached through the group named by
 	// `via_group_id`. A binding that is BOTH direct and group-carried resolves to
@@ -482,7 +489,7 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	// predicate is a disjunction on the same row, never a join, so cardinality stays
 	// one-row-per-binding and the (created_at, id) keyset cursor stays valid.
 	q := fmt.Sprintf(`
-		SELECT ab.id, ab.role_id, COALESCE(r.name, ''),
+		SELECT ab.id, COALESCE(ab.role_id, ''), COALESCE(r.name, ''),
 		       ab.resource_type, ab.resource_id, ab.scope, ab.status,
 		       ab.created_at, ab.granted_by_user_id, ab.expires_at,
 		       (ab.subject_type = $1 AND ab.subject_id = $2) AS is_direct,
@@ -523,7 +530,8 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 }
 
 // scanSubjectPrivilege — maps a ListSubjectPrivileges row into the enriched
-// domain projection. role_name is already COALESCE'd to ” (dangling role).
+// domain projection. role_id and role_name are already COALESCE'd to "" (the
+// relation form has no role; the LEFT JOIN then finds none).
 // scope is bounds-checked the same way as scanAB. The trailing
 // is_direct/via_group_id columns carry the derivation attribution (DIRECT vs
 // GROUP-derived — see the query comment).
@@ -1211,14 +1219,22 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 		}
 		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
 	}
+	var err error
 	switch eventType {
 	case fga_outbox.EventTypeWrite:
-		return fga_outbox.EmitWriteTx(ctx, w.tx, out)
+		err = fga_outbox.EmitWriteTx(ctx, w.tx, out)
 	case fga_outbox.EventTypeDelete:
-		return fga_outbox.EmitDeleteTx(ctx, w.tx, out)
+		err = fga_outbox.EmitDeleteTx(ctx, w.tx, out)
 	default:
 		return fmt.Errorf("emit fga_outbox: unknown event type %q", eventType)
 	}
+	// Отказ базы на записи журнала переводится ТЕМ ЖЕ переводчиком, что у каждого
+	// другого стейтмента этой транзакции. Запись журнала — стейтмент, на котором
+	// триггер берёт строки прямого факта, то есть именно тот, где транзакция
+	// встречает взаимную блокировку; без перевода 40P01 уезжал наружу как
+	// `internal error`, а не как признак конфликта, по которому снятие выдачи
+	// повторяет свою транзакцию (kaname#679).
+	return mapErr(err, "", "")
 }
 
 // EmitAuditEvent atomically appends one durable compliance row into

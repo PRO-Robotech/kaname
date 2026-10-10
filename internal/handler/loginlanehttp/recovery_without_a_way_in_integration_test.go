@@ -107,4 +107,5 @@ func TestLaneIntegration_F5_29_IdentityWithoutAWayInRecoversByMail(t *testing.T)
 	h.login(t, fresh)
 	again := h.completeRecovery(t, code, "another-password-after-608", map[string]string{loginlanehttp.HeaderForwardedFor: src}, ctxA)
 	require.Equal(t, http.StatusUnauthorized, again.status, "Ф5-30: второе предъявление того же кода — отказ Ф5-05: %s", again.body)
+	require.Equal(t, refusalWire(16, stepRecoveryRefused), again.body, "Ф5-05: текст Р10 п. 2 (редакция 10)")
 }

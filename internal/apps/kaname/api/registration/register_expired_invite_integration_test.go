@@ -6,14 +6,13 @@
 // `docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md`,
 // A198; задача PRO-Robotech/kaname#198).
 //
-// Сценарии A198-01, A198-03, A198-04: регистрация адресом истёкшего приглашения —
-// единый отказ, и ничего не меняется; снятие строки распорядителем освобождает
-// регистрацию; распорядитель узнаёт об истечении от `ResendInvite`. Сценарий
-// A198-02 (повторное приглашение в тот же аккаунт освобождает регистрацию) на
-// дереве не выполняется: быстрый путь приглашения находит строку по членству и
-// срока не продлевает, — его производитель есть правка прод-кода, которую
-// приёмка не называет (её DoD п. 3), и он ведётся новой редакцией приёмки. Каждая проба утверждает и положительного близнеца, меняющего
-// ровно один факт. Глаголы распорядителя — настоящие use-case'ы над настоящей
+// Сценарии A198-01…07: регистрация адресом истёкшего приглашения — единый
+// отказ, и ничего не меняется; повторное приглашение (обоими глаголами потока,
+// `UserService.Invite` и `MembershipService.Create`) продлевает срок одним
+// правилом оператора вставки и освобождает регистрацию, но срок не укорачивает и
+// выкупленной строки не трогает; снятие строки распорядителем освобождает
+// регистрацию; распорядитель узнаёт об истечении от `ResendInvite`. Каждая проба
+// утверждает и положительного близнеца, меняющего ровно один факт. Глаголы распорядителя — настоящие use-case'ы над настоящей
 // базой и настоящим хранилищем операций; права на них решает модель на крае,
 // поэтому дверь здесь — пропускающая.
 package registration_test
@@ -31,10 +30,13 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/membership"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // a198AllowAll — дверь решения глаголов распорядителя: пропускает (вопрос прав
@@ -253,4 +255,193 @@ func TestA198_04_TheInviterLearnsOfTheExpiry(t *testing.T) {
 	done := s.await(t, op)
 	require.Nil(t, done.Error, "A198-04 близнец: done без ошибки: %v", done.Error)
 	require.Equal(t, queuedBefore+1, letters(live.ID), "A198-04 близнец: намерение письма приглашения стоит в очереди")
+}
+
+// a198InviteTTL — срок посадки, под которым распорядитель приглашает в
+// сценариях A198-02, -05, -06, -07 (§3 приёмки: 24 ч).
+const a198InviteTTL = 24 * time.Hour
+
+// invite — настоящий use-case обоих глаголов потока приглашения над настоящей
+// базой: срок посадки 24 ч, окно писем не мешает сценарию.
+func (s *a198Scene) invite() *user.InviteUserUseCase {
+	return user.NewInviteUserUseCase(s.repo, s.ops, a198AllowAll{}).
+		WithInviteTTL(a198InviteTTL).
+		WithInviteMailRateLimit(a198MailLimit, nil)
+}
+
+// letters — намерений письма приглашения на строку в очереди.
+func (s *a198Scene) letters(t *testing.T, id domain.UserID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, s.pool.QueryRow(s.ctx,
+		`SELECT count(*) FROM kaname.invite_mail_outbox WHERE event_type = 'mail.invite.send' AND payload->>'user_id' = $1`,
+		string(id)).Scan(&n))
+	return n
+}
+
+// rowsOf — строк человека с этим адресом (вторая строка не заводится).
+func (s *a198Scene) rowsOf(t *testing.T, email string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, s.pool.QueryRow(s.ctx, `SELECT count(*) FROM kaname.users WHERE lower(email) = lower($1)`, email).Scan(&n))
+	return n
+}
+
+// reinvite — `UserService.Invite` распорядителя этим адресом в свой аккаунт;
+// возвращает ответ операции и момент вызова (срок считается не раньше его).
+func (s *a198Scene) reinvite(t *testing.T, email string) (*iamv1.User, time.Time) {
+	t.Helper()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	op, err := s.invite().Execute(s.pctx, user.InviteUserInput{AccountID: s.inviter.AccountID, Email: domain.Email(email)})
+	require.NoError(t, err, "приглашение принято")
+	done := s.await(t, op)
+	require.Nil(t, done.Error, "Invite — Operation.done без ошибки: %v", done.Error)
+	var u iamv1.User
+	require.NoError(t, done.Response.UnmarshalTo(&u), "ответ операции — User")
+	return &u, at
+}
+
+// TestA198_02_ReInvitingIntoTheSameAccountReleasesTheRegistration — A198-02;
+// близнец — A198-01 (повторного приглашения нет — единый отказ, срок прежний).
+func TestA198_02_ReInvitingIntoTheSameAccountReleasesTheRegistration(t *testing.T) {
+	s := newA198Scene(t)
+	uc := s.useCase(t, s.store)
+
+	addr := "exp-b-" + freshEmail("a198-02")[4:]
+	row := s.pending(t, addr, -time.Minute)
+	require.Equal(t, "PENDING", s.inviteRow(t, row.ID).member, "ПРЕДПОСЫЛКА: человек уже состоит в аккаунте членством PENDING")
+	lettersBefore := s.letters(t, row.ID)
+	invitedBefore := s.obs.count(registration.OutcomeIssuedInvited)
+
+	got, at := s.reinvite(t, addr)
+	require.Equal(t, string(row.ID), got.GetId(), "A198-02: ответ операции — User прежней строки")
+
+	after := s.inviteRow(t, row.ID)
+	require.Equal(t, "PENDING", after.status, "A198-02: строка по-прежнему PENDING")
+	require.False(t, after.deadline.Before(at.Add(a198InviteTTL)),
+		"A198-02: срок продлён не раньше момента вызова + 24 ч: срок %s, вызов %s", after.deadline, at)
+	require.Equal(t, 1, s.rowsOf(t, addr), "A198-02: вторая строка человека не заведена")
+	require.Equal(t, lettersBefore+1, s.letters(t, row.ID), "A198-02: намерение письма приглашения на строку в очереди")
+
+	out, err := s.register(t, uc, addr)
+	require.NoError(t, err, "A198-02: после повторного приглашения регистрация проходит")
+	require.True(t, out.Invited, "A198-02: регистрация ложится на строку приглашения")
+	require.Equal(t, row.ID, out.View.User.ID, "A198-02: id прежний")
+	require.Equal(t, invitedBefore+1, s.obs.count(registration.OutcomeIssuedInvited), "A198-02: клетка issued-invited")
+
+	// Близнец (A198-01): повторного приглашения нет — единый отказ, срок прежний.
+	twin := "exp-b-twin-" + freshEmail("a198-02b")[4:]
+	twinRow := s.pending(t, twin, -time.Minute)
+	twinBefore := s.inviteRow(t, twinRow.ID)
+	_, err = s.register(t, uc, twin)
+	require.ErrorIs(t, err, registration.ErrRefused, "A198-02 близнец: без повторного приглашения — единый отказ")
+	require.True(t, twinBefore.deadline.Equal(s.inviteRow(t, twinRow.ID).deadline), "A198-02 близнец: срок прежний")
+}
+
+// TestA198_05_TheSecondVerbExtendsTheDeadlineTheSameWay — A198-05; близнец —
+// A198-01 (без MembershipService.Create регистрация — единый отказ).
+func TestA198_05_TheSecondVerbExtendsTheDeadlineTheSameWay(t *testing.T) {
+	s := newA198Scene(t)
+	uc := s.useCase(t, s.store)
+
+	addr := "exp-e-" + freshEmail("a198-05")[4:]
+	row := s.pending(t, addr, -time.Minute)
+	var membershipID string
+	require.NoError(t, s.pool.QueryRow(s.ctx, `SELECT id FROM kaname.memberships WHERE user_id = $1 AND account_id = $2 AND state = 'PENDING'`,
+		string(row.ID), string(s.inviter.AccountID)).Scan(&membershipID), "ПРЕДПОСЫЛКА: членство PENDING")
+
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	op, err := s.invite().CreateMembership(s.pctx, membership.CreateInput{AccountID: s.inviter.AccountID, Email: domain.Email(addr)})
+	require.NoError(t, err, "A198-05: создание членства принято")
+	done := s.await(t, op)
+	require.Nil(t, done.Error, "A198-05: Operation.done без ошибки: %v", done.Error)
+	var m iamv1.Membership
+	require.NoError(t, done.Response.UnmarshalTo(&m), "A198-05: ответ — Membership")
+	require.Equal(t, membershipID, m.GetId(), "A198-05: id прежнего членства")
+	require.Equal(t, string(row.ID), m.GetUserId(), "A198-05: userId прежней строки")
+
+	after := s.inviteRow(t, row.ID)
+	require.False(t, after.deadline.Before(at.Add(a198InviteTTL)),
+		"A198-05: срок продлён не раньше момента вызова + 24 ч: срок %s, вызов %s", after.deadline, at)
+
+	out, err := s.register(t, uc, addr)
+	require.NoError(t, err, "A198-05: регистрация проходит")
+	require.True(t, out.Invited, "A198-05: регистрация ложится на строку приглашения")
+	require.Equal(t, row.ID, out.View.User.ID)
+
+	twin := "exp-e-twin-" + freshEmail("a198-05b")[4:]
+	s.pending(t, twin, -time.Minute)
+	_, err = s.register(t, uc, twin)
+	require.ErrorIs(t, err, registration.ErrRefused, "A198-05 близнец: без MembershipService.Create — единый отказ")
+}
+
+// TestA198_06_ReInvitingNeverShortensTheDeadline — A198-06; близнец — A198-02
+// (прежний срок истёк — продлён до «момент вызова + 24 ч»).
+func TestA198_06_ReInvitingNeverShortensTheDeadline(t *testing.T) {
+	s := newA198Scene(t)
+
+	addr := "exp-f-" + freshEmail("a198-06")[4:]
+	row := s.pending(t, addr, 30*24*time.Hour)
+	before := s.inviteRow(t, row.ID)
+
+	s.reinvite(t, addr)
+	after := s.inviteRow(t, row.ID)
+	require.True(t, before.deadline.Equal(after.deadline),
+		"A198-06: срок побайтово прежний (через 30 суток), а не «сейчас + 24 ч»: было %s, стало %s", before.deadline, after.deadline)
+
+	// Близнец: прежний срок истёк минуту назад — срок продлён.
+	twin := "exp-f-twin-" + freshEmail("a198-06b")[4:]
+	twinRow := s.pending(t, twin, -time.Minute)
+	_, at := s.reinvite(t, twin)
+	require.False(t, s.inviteRow(t, twinRow.ID).deadline.Before(at.Add(a198InviteTTL)), "A198-06 близнец: срок продлён")
+}
+
+// redeemed — выкупленное приглашение тем путём, которым его выкупает продукт:
+// регистрация адресом живого приглашения кладёт способ входа на строку
+// приглашения (строка остаётся PENDING), затем подтверждение адреса — отметка
+// единственным её оператором и активация приглашения (`ActivateInvite`).
+func (s *a198Scene) redeemed(t *testing.T, email string) domain.User {
+	t.Helper()
+	row := s.pending(t, email, a198InviteTTL)
+	out, err := s.register(t, s.useCase(t, s.store), email)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): регистрация адресом живого приглашения")
+	require.True(t, out.Invited, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): регистрация легла на строку приглашения")
+	require.NoError(t, kanamepg.NewLoginMethodRepo(s.pool).MarkEmailVerified(s.ctx, row.ID, domain.Email(email), time.Now().UTC()),
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): отметка подтверждения адреса")
+	w, err := s.repo.Writer(s.ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(s.ctx) }()
+	_, err = w.UsersW().ActivateInvite(s.ctx, row.ID, domain.ExternalSubject("ext-"+string(row.ID)), "")
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): выкуп приглашения")
+	require.NoError(t, w.Commit(s.ctx))
+	return row
+}
+
+// TestA198_07_ReInvitingARedeemedRowChangesNothing — A198-07; близнец — A198-02
+// (строка PENDING с истёкшим сроком: срок продлён, намерение письма прибавилось).
+func TestA198_07_ReInvitingARedeemedRowChangesNothing(t *testing.T) {
+	s := newA198Scene(t)
+
+	addr := "exp-g-" + freshEmail("a198-07")[4:]
+	row := s.redeemed(t, addr)
+	before := s.inviteRow(t, row.ID)
+	require.Equal(t, [2]string{"ACTIVE", "ACTIVE"}, [2]string{before.status, before.member},
+		"ПРЕДПОСЫЛКА: строка и членство выкуплены")
+	lettersBefore := s.letters(t, row.ID)
+
+	got, _ := s.reinvite(t, addr)
+	require.Equal(t, string(row.ID), got.GetId(), "A198-07: ответ — User прежней строки")
+	require.Equal(t, iamv1.User_ACTIVE, got.GetInviteStatus(), "A198-07: inviteStatus = ACTIVE")
+	after := s.inviteRow(t, row.ID)
+	require.True(t, before.deadline.Equal(after.deadline), "A198-07: срок не изменился: было %s, стало %s", before.deadline, after.deadline)
+	require.Equal(t, "ACTIVE", after.member, "A198-07: членство осталось ACTIVE")
+	require.Equal(t, lettersBefore, s.letters(t, row.ID), "A198-07: намерения письма приглашения не прибавилось")
+
+	// Близнец: строка PENDING с истёкшим сроком — срок продлён, письмо прибавилось.
+	twin := "exp-g-twin-" + freshEmail("a198-07b")[4:]
+	twinRow := s.pending(t, twin, -time.Minute)
+	twinLetters := s.letters(t, twinRow.ID)
+	_, at := s.reinvite(t, twin)
+	require.False(t, s.inviteRow(t, twinRow.ID).deadline.Before(at.Add(a198InviteTTL)), "A198-07 близнец: срок продлён")
+	require.Equal(t, twinLetters+1, s.letters(t, twinRow.ID), "A198-07 близнец: намерение письма прибавилось")
 }
