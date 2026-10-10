@@ -147,17 +147,30 @@ func (r *HumanSessionRepo) OldestFailureSince(ctx context.Context, scope humanse
 }
 
 // sessionsOfSQL — живые записи личности на момент $2 (без отметки снятия, срок
-// позже $2) после курсора ($3, $4) в порядке выдачи (kaname#634, Р4). Срок
-// судится переданным моментом, а не `now()` базы: часы — у вызывающего (форма
-// Ф-д), как у `Resolve`. Порядок `(created_at, id)` — порядок курсора службы;
-// строки одной личности ищет индекс `human_sessions_user_id_idx`.
+// позже $2, не отсечены отсечкой личности) после курсора ($3, $4) в порядке
+// выдачи (kaname#634, Р4). Срок судится переданным моментом, а не `now()` базы:
+// часы — у вызывающего (форма Ф-д), как у `Resolve`. Порядок `(created_at, id)`
+// — порядок курсора службы; строки одной личности ищет индекс
+// `human_sessions_user_id_idx`.
+//
+// # Отсечка — в операторе, до предела страницы (kaname#681)
+//
+// Сбросы распорядителем (ключей, второго фактора), принудительный выход и
+// смена пароля записей сессии не снимают — отсекают: край отвергает носителя
+// записи, аутентифицированной НЕ позже отсечки личности. Перечень, не судящий
+// отсечку, показывал бы такую запись живой. Предикат — ТОТ ЖЕ текст, что у
+// выдачи церемонии (`sessionCutOffBySubjectSQL`, алиас `s`, сравнение
+// включающее, как у края): второго написания сравнения нет. Он стоит в
+// условии выборки, а не фильтром после чтения: иначе страница была бы короче
+// предела при непустом курсоре, и курсор указывал бы на скрытую строку.
 const sessionsOfSQL = `
-	SELECT id, user_id, authenticated_at, last_presented_at, expires_at,
-	       assurance_level, presented_methods, user_agent, created_at
-	  FROM human_sessions
-	 WHERE user_id = $1 AND ended_at IS NULL AND expires_at > $2
-	   AND (created_at, id) > ($3::timestamptz, $4::text)
-	 ORDER BY created_at, id
+	SELECT s.id, s.user_id, s.authenticated_at, s.last_presented_at, s.expires_at,
+	       s.assurance_level, s.presented_methods, s.user_agent, s.created_at
+	  FROM human_sessions s
+	 WHERE s.user_id = $1 AND s.ended_at IS NULL AND s.expires_at > $2
+	   AND NOT ` + sessionCutOffBySubjectSQL + `
+	   AND (s.created_at, s.id) > ($3::timestamptz, $4::text)
+	 ORDER BY s.created_at, s.id
 	 LIMIT $5`
 
 // SessionsOf — см. порт. Курсор и величина страницы судятся здесь ещё раз
