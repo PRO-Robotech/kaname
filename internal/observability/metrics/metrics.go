@@ -119,6 +119,13 @@ type Registry struct {
 	// (Ф7, kacho#1273), по той же причине, что соседи.
 	accessKeyOnce sync.Once
 	accessKey     *AccessKeyRecorder
+
+	// mailMu/mail — единственный приёмник серий почты личности (NTF-2): флаг
+	// процесса один (З2), и второй приёмник с другим значением флага — отказ,
+	// а не вторая серия. Мьютекс, а не Once: повтор с другим флагом обязан
+	// получить ошибку, а не первый экземпляр молча.
+	mailMu sync.Mutex
+	mail   *MailRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

@@ -68,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/mail"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
@@ -228,6 +229,21 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(InviteMailIntentOutcomes),
 		Build: func(r *Registry) { r.NewInviteMailIntentRecorder() },
 		Why:   "ограничение частоты для вызывающего невидимо by construction (Р9); незасеянная клетка rate_limited означала бы «сюда никто не приходил» там, где письма молча не уходят",
+	},
+	// ── ПОЧТА ЛИЧНОСТИ НА ЛЕНТЕ NOTIFY (NTF-2, kacho#2917 З11) ───────────────
+	MailIntentsMetric: {
+		Cells: len(mail.Verbs()) * len(mail.IntentOutcomes()), // глагол × исход
+		Build: func(r *Registry) {
+			on := true
+			e, err := mail.EnabledFrom(&on)
+			if err != nil {
+				panic(err)
+			}
+			if _, err := r.MailRecorder(e); err != nil {
+				panic(err)
+			}
+		},
+		Why: "ответ сверх предела тот же, что в норме (Р6); исход окна виден только клеткой, и «ни разу capped» обязано быть отличимо от «работа окна не провязана»",
 	},
 	Namespace + "_module_catalog_applies_total": {
 		Cells: len(ModuleCatalogApplyOutcomes),
