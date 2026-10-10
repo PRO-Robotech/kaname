@@ -207,11 +207,14 @@ func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeAccessKeyRequest)
 	if err != nil {
 		return nil, err
 	}
-	// Выпуск предъявленного удостоверения — из носителя читателя предъявленного:
-	// по нему снятие находит текущую сессию и оставляет её (Ф13 Р8).
+	// Текущая сессия вызывающего — из носителей `callerorigin`: номер записи
+	// кладёт читатель переданного краем (`internal/edgecredential`, kaname#677),
+	// выпуск — читатель предъявленного либо он же. По ним снятие оставляет
+	// текущую сессию живой (Ф13 Р8).
 	acting, _ := callerorigin.CredentialIDFrom(ctx)
+	session, _ := callerorigin.SessionIDFrom(ctx)
 	op, err := h.revoke.Execute(ctx, RevokeInput{UserID: domain.UserID(req.GetUserId()), Actor: actor,
-		AccessKeyID: req.GetAccessKeyId(), ActingCredential: acting})
+		AccessKeyID: req.GetAccessKeyId(), ActingCredential: acting, ActingSession: domain.HumanSessionID(session)})
 	if err != nil {
 		return nil, err
 	}

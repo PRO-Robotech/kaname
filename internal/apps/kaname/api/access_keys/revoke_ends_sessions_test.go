@@ -9,9 +9,10 @@ package access_keys_test
 // `internal/handler/loginlanehttp/access_key_revoke_ends_sessions_integration_test.go`;
 // здесь — то, что базой не вызвать: подставной отказ КАЖДОЙ записи
 // транзакции (форма Ф3-16), выбор текущей сессии по выпуску предъявленного и
-// выбор момента отсечки.
+// по номеру записи, названному краем (kaname#677), и выбор момента отсечки.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -20,8 +21,10 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
+	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 const (
@@ -88,9 +91,9 @@ func TestRevokeEndsOtherSessionsKeepsTheCurrent(t *testing.T) {
 	require.False(t, cutBob)
 }
 
-// TestRevokeWithoutActingCredentialEndsEverySession — выпуска нет (личность
-// передана краем): текущую отличить нечем, сняты ВСЕ записи человека
-// (kaname#677); чужой выпуск текущей не называет — тот же исход.
+// TestRevokeWithoutActingCredentialEndsEverySession — ни выпуска, ни номера
+// записи: текущую отличить нечем, сняты ВСЕ записи человека; чужой выпуск
+// текущей не называет — тот же исход.
 func TestRevokeWithoutActingCredentialEndsEverySession(t *testing.T) {
 	t.Parallel()
 	for name, acting := range map[string]string{"no-credential": "", "foreign-credential": tokBob, "unknown-credential": "tok0000000000000000zz"} {
@@ -158,4 +161,92 @@ func TestRefusedRevokeLeavesSessionsAlive(t *testing.T) {
 	require.Empty(t, h.store.endedOf(s1))
 	require.Empty(t, h.store.endedOf(s2))
 	require.Empty(t, h.store.cutoffs)
+}
+
+// revokeFromSession — снятие из вызова, чью сессию назвал край номером записи
+// session (kaname#677); actor — кто звонит, user — чей ключ.
+func (h *harness) revokeFromSession(user, actor domain.UserID, id string, session domain.HumanSessionID) (*operations.Operation, error) {
+	h.t.Helper()
+	uc, err := access_keys.NewRevokeUseCase(h.deps, h.ops)
+	require.NoError(h.t, err)
+	op, err := uc.Execute(h.ctx(), access_keys.RevokeInput{UserID: user, Actor: actor, AccessKeyID: id, ActingSession: session})
+	if err != nil {
+		return nil, err
+	}
+	return h.ops.await(h.t, op.ID), nil
+}
+
+// TestRevokeFromAForwardedSessionKeepsIt — Р8 на полосе края (kaname#677):
+// край назвал номер записи S2 — S2 жива, S1 снята причиной
+// `access-key-revoked`, сессия Боба не тронута. Выпуска у вызова нет: текущую
+// называет номер записи, а не выпуск.
+func TestRevokeFromAForwardedSessionKeepsIt(t *testing.T) {
+	t.Parallel()
+	h, k := givenTwoSessions(t)
+	op, err := h.revokeFromSession(alice, alice, string(k.ID), s2)
+	require.NoError(t, err)
+	require.Nil(t, op.Error)
+	require.Equal(t, domain.RevokeReasonAccessKeyRevoked, h.store.endedOf(s1), "Р8: прочая сессия снята")
+	require.Empty(t, h.store.endedOf(s2), "Р8: текущая сессия, названная краем, жива")
+	require.Empty(t, h.store.endedOf(sBob))
+}
+
+// TestForwardedSessionSavesNothingThatIsNotTheCallers — отрицание (kaname#677):
+// номер записи бережёт ТОЛЬКО сессию самого человека, который снимает СВОЙ
+// ключ. (а) Номер чужой записи (Боба) не бережёт ни одной записи Алисы и записи
+// Боба не касается; (б) снимает не сам человек — номер его же записи S2,
+// пришедший с вызовом другого, S2 не бережёт: текущая сессия вызывающего —
+// не сессия человека, чей ключ снят; (в) номера нет — прежний исход, сняты все.
+func TestForwardedSessionSavesNothingThatIsNotTheCallers(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		actor   domain.UserID
+		session domain.HumanSessionID
+	}{
+		"foreign-record": {actor: alice, session: sBob},
+		"another-caller": {actor: bob, session: s2},
+		"no-record":      {actor: alice, session: ""},
+		"unknown-record": {actor: alice, session: "hss-0000000000000000zz"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, k := givenTwoSessions(t)
+			op, err := h.revokeFromSession(alice, c.actor, string(k.ID), c.session)
+			require.NoError(t, err)
+			require.Nil(t, op.Error)
+			require.Equal(t, domain.RevokeReasonAccessKeyRevoked, h.store.endedOf(s1))
+			require.Equal(t, domain.RevokeReasonAccessKeyRevoked, h.store.endedOf(s2), "номер записи не бережёт S2")
+			require.Empty(t, h.store.endedOf(sBob), "запись Боба снятие ключа Алисы не трогает")
+		})
+	}
+}
+
+// TestRevokeHandlerTakesTheCurrentSessionFromTheCarrier — транспорт (kaname#677):
+// номер записи, положенный читателем переданного краем в носитель
+// `callerorigin`, доезжает до глагола — S2 жива, S1 снята. Близнец — тот же
+// вызов без носителя: сняты обе (прежний исход личности без номера).
+func TestRevokeHandlerTakesTheCurrentSessionFromTheCarrier(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		ctx    func() context.Context
+		s2Kept bool
+	}{
+		"carrier":    {ctx: func() context.Context { return callerorigin.WithSessionID(asUser(alice), string(s2)) }, s2Kept: true},
+		"no-carrier": {ctx: func() context.Context { return asUser(alice) }, s2Kept: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, k := givenTwoSessions(t)
+			op, err := h.handler().Revoke(c.ctx(), &iamv1.RevokeAccessKeyRequest{UserId: string(alice), AccessKeyId: string(k.ID)})
+			require.NoError(t, err)
+			done := h.ops.await(t, op.GetId())
+			require.Nil(t, done.Error)
+			require.Equal(t, domain.RevokeReasonAccessKeyRevoked, h.store.endedOf(s1))
+			if c.s2Kept {
+				require.Empty(t, h.store.endedOf(s2), "текущая, названная носителем, жива")
+			} else {
+				require.Equal(t, domain.RevokeReasonAccessKeyRevoked, h.store.endedOf(s2), "без носителя текущая не названа")
+			}
+		})
+	}
 }
