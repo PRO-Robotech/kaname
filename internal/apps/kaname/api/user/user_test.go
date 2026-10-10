@@ -379,7 +379,10 @@ func (fakeABW) EmitSubjectChangeEvent(context.Context, access_binding.SubjectCha
 }
 func (fakeABW) EmitRelationWrite(context.Context, []access_binding.RelationTuple) error  { return nil }
 func (fakeABW) EmitRelationDelete(context.Context, []access_binding.RelationTuple) error { return nil }
-func (fakeABW) EmitAuditEvent(context.Context, access_binding.AuditEvent) error          { return nil }
+func (fakeABW) EmitRelationJournal(context.Context, []access_binding.RelationTuple, []access_binding.RelationTuple) error {
+	return nil
+}
+func (fakeABW) EmitAuditEvent(context.Context, access_binding.AuditEvent) error { return nil }
 func (fakeABW) InsertEmittedTuples(context.Context, domain.AccessBindingID, []access_binding.RelationTuple) error {
 	return nil
 }

@@ -232,7 +232,7 @@ func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 		typ string
 	}
 	// Отбор по КЛЮЧУ СТРОКИ — (субъект, объект): строка несёт набор отношений субъекта
-	// на объекте, поэтому отношение в отборе не участвует (см. fga_outbox.emitTx).
+	// на объекте, поэтому отношение в отборе не участвует (см. fga_outbox.EmitJournalTx).
 	rows, err := pool.Query(ctx, `
 		SELECT id, event_type FROM kaname.fga_outbox
 		 WHERE payload->>'user'=$1 AND payload->>'object'=$2

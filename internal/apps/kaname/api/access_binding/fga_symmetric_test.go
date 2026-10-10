@@ -283,6 +283,10 @@ type abFakeRepo struct {
 	// trigger folds into `kaname.relation_fact` inside the same transaction.
 	fgaWritten []ab_repo.RelationTuple
 	fgaDeleted []ab_repo.RelationTuple
+	// journalFolds — сколько раз транзакция положила набор в журнал. Каждый вызов —
+	// отдельный проход триггера по строкам факта в своём порядке; транзакция с набором
+	// больше одного обязана класть его ОДНИМ вызовом (fga_outbox.EmitJournalTx).
+	journalFolds int
 	// Captured audit_outbox compliance events emitted in the writer-tx.
 	auditEvents []ab_repo.AuditEvent
 	// groupMembers — backing store for the IsMember adapter.
@@ -1031,7 +1035,22 @@ func (w *fakeABWtr) EmitSubjectChangeEvent(_ context.Context, _ ab_repo.SubjectC
 func (w *fakeABWtr) EmitRelationWrite(_ context.Context, tuples []ab_repo.RelationTuple) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
+	w.repo.journalFolds++
 	w.repo.fgaWritten = append(w.repo.fgaWritten, tuples...)
+	return nil
+}
+
+// EmitRelationJournal — набор транзакции одним вызовом: выдачи и отзывы. Отзыв
+// оставляет ту же отметку в следе транзакции, что EmitRelationDelete (см. ниже).
+func (w *fakeABWtr) EmitRelationJournal(_ context.Context, writes, deletes []ab_repo.RelationTuple) error {
+	if len(deletes) > 0 {
+		w.repo.recordTxOp("emit_relation_delete")
+	}
+	w.repo.mu.Lock()
+	defer w.repo.mu.Unlock()
+	w.repo.journalFolds++
+	w.repo.fgaWritten = append(w.repo.fgaWritten, writes...)
+	w.repo.fgaDeleted = append(w.repo.fgaDeleted, deletes...)
 	return nil
 }
 
@@ -1048,6 +1067,7 @@ func (w *fakeABWtr) EmitRelationDelete(_ context.Context, tuples []ab_repo.Relat
 	w.repo.recordTxOp("emit_relation_delete")
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
+	w.repo.journalFolds++
 	w.repo.fgaDeleted = append(w.repo.fgaDeleted, tuples...)
 	return nil
 }

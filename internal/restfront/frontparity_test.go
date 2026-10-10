@@ -418,9 +418,9 @@ func TestRESTAndGRPCServiceSetsMatchBothWays(t *testing.T) {
 
 	// Служба, контракт которой НЕ объявляет ни одного HTTP-маршрута, на
 	// REST-фронте стоять НЕ обязана: «маршруты, объявленные контрактом и
-	// недосягаемые по HTTP» у неё пусты. Приёмка NTF-1 (NTF1-C01, C02) требует
-	// этого для `InternalNotificationGrantService`: достижима только прямым gRPC
-	// по mTLS. Регистрация такой службы на фронте (маршруты генератора по
+	// недосягаемые по HTTP» у неё пусты. Так устроена
+	// `InternalNotificationRecipientService` (NTF3-30): достижима только прямым
+	// gRPC по mTLS. Регистрация такой службы на фронте (маршруты генератора по
 	// умолчанию) этим гейтом не судится — у трёх служб она есть и сегодня.
 	declared, _ := contractRoutes()
 	routeless := func(svc string) bool {

@@ -1226,18 +1226,15 @@ func (s *reconcileStore) TuplesStillClaimedByOtherBindings(ctx context.Context, 
 	return out, nil
 }
 
-// EmitTupleWrite / EmitTupleDelete enqueue per-object FGA tuples on the tx.
-func (s *reconcileStore) EmitTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
-	return fga_outbox.EmitWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
-}
-
-func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
-	return fga_outbox.EmitDeleteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+// EmitTupleJournal folds the pass's per-object tuple set into the journal on the tx —
+// one statement, canonical order (fga_outbox.EmitJournalTx).
+func (s *reconcileStore) EmitTupleJournal(ctx context.Context, writes, deletes []domain.MembershipTuple) error {
+	return fga_outbox.EmitJournalTx(ctx, s.tx, membershipTuplesToClients(writes), membershipTuplesToClients(deletes))
 }
 
 // RecordEmittedTuples co-commits the per-member FGA tuples into the persisted
 // emitted-tuple ledger (kaname.access_binding_emitted_tuples — F3/#178) on the
-// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10). The INSERT is
+// reconcile writer-tx, alongside the matching EmitTupleJournal (ban #10). The INSERT is
 // `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'` (the
 // DO UPDATE only re-tags a pre-0032 source='binding' row; the object-spaces are disjoint,
 // so no real binding↔member collision), so a repeated reconcile of the same ACTIVE member
