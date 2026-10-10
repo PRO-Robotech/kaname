@@ -87,6 +87,11 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 свой предмет и истекает вместе с препятствием, а не остаётся ведомостью прощения.
 Форма держателя закрыта (`HOLDER_RE`): адрес задачи и то, что она сделает.
 
+ДЕРЖАТЕЛЬ ЖИВ (kaname#468). Закрытая задача записи не снимет, а форма этого не
+видит: Ф5-24 держала закрытая kacho#1269, Ф5-12 — закрытая kaname#475. Состояние
+каждого держателя спрашивается у трекера (`gh`, обёртка подставляемая), закрытый —
+находка с именами записей, трекер не ответил — код 75, «не выполнилось».
+
 ПОЛОСА, НАЗВАННАЯ ДЕРЖАТЕЛЕМ, СВЕРЯЕТСЯ С МОДУЛЕМ КЕЙСОВ (kaname#361). Держатель
 вправе назвать полосы своей коллекции, и такое имя — утверждение о модуле:
 полоса `<СЕМЕЙСТВО>-<номер>` стоит там приставкой значения `id=` кейса. Держатель
@@ -137,6 +142,7 @@ import json
 import pathlib
 import re
 import subprocess
+from collections.abc import Callable
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -952,8 +958,9 @@ PRODUCER_CATEGORIES = {
 
 # ФОРМА ДЕРЖАТЕЛЯ ЗАКРЫТА: адрес задачи и, через тире, что она сделает. Адрес —
 # с владельцем и репозиторием, потому что держатель бывает и в дереве платформы, а
-# голый `#N` читался бы номером того репозитория, где его прочли. Состояние задачи
-# в трекере перепись НЕ сверяет — сверка сетевая; это названо строкой вывода.
+# голый `#N` читался бы номером того репозитория, где его прочли. Форма не
+# доказывает, что задача жива: состояние спрашивается у трекера отдельно
+# (`reconcile_holder_liveness`, kaname#468), и закрытый держатель — находка.
 HOLDER_RE = re.compile(r"^PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]* — \S")
 HOLDER_REF_RE = re.compile(r"^(PRO-Robotech/[a-z0-9][a-z0-9-]*#[1-9][0-9]*)")
 
@@ -1155,10 +1162,10 @@ SCENARIO_DEBT: ScenarioDebt = {}
 # ЧЕМ: стенд `chart-own` ставит поставляемый профиль как есть, края платформы на нём
 # нет (его место занимает прогонщик набора с листом края), а кейс newman ходит
 # только HTTP по слушателю формы. Производитель каждой — по §7 приёмки Ф3.
-_HOLDER_F3_PLATFORM = (
 # Фаза Ф3 (kacho#1269) закрыта, а её сквозные позиции на стенде платформы не
 # утверждены; их держит эпик фаз своей личности — так же, как позиции закрытой
 # фазы Ф5 (`_HOLDER_F5_TIMING`). Держатель сменён проверкой живости (kaname#468).
+_HOLDER_F3_PLATFORM = (
     "PRO-Robotech/kacho#1266 — эпик фаз своей личности держит сквозные позиции закрытой "
     "фазы Ф3 (kacho#1269): проба на живом стенде платформы после перевода посадки (§7 "
     "приёмки Ф3 называет производителя), где есть край, его полоса сессии и "
@@ -1942,10 +1949,68 @@ def reconcile_scenario_debt(newman: pathlib.Path, debt: ScenarioDebt,
     return out, positions, carried, docs, forms
 
 
+# ДЕРЖАТЕЛЬ ЖИВ (kaname#468). Запись долга держится задачей, которая её снимет, и
+# форма держателя (`HOLDER_RE`) этого не доказывает: закрытая задача ничего не
+# снимет, а запись остаётся зелёной. Так и было — Ф5-24 держала закрытая
+# kacho#1269, Ф5-12 — закрытая kaname#475. Состояние задачи спрашивается у трекера
+# через обёртку, которую подставляет вызывающий: самопроверка — словарём, перепись
+# дерева — `gh`. Трекер не ответил — третий исход («не выполнилось»), а не молчание
+# и не находка.
+HolderTracker = Callable[[str], "str | None"]
+
+
+def gh_issue_state(ref: str) -> str | None:
+    """Состояние задачи `owner/repo#N` по трекеру: 'open' | 'closed' | None (не ответил)."""
+    repo, _, num = ref.partition("#")
+    try:
+        proc = subprocess.run(["gh", "api", f"repos/{repo}/issues/{num}", "--jq", ".state"],
+                              capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    state = proc.stdout.strip()
+    return state if proc.returncode == 0 and state in ("open", "closed") else None
+
+
+def reconcile_holder_liveness(ledger: Ledger, scenario_debt: ScenarioDebt, tracker: HolderTracker
+                              ) -> tuple[list[str], list[str], dict[str, int]]:
+    """Держатель каждой записи — открытая задача. Закрытый — находка с именами записей.
+
+    Возвращает (находки, не выполнилось, перепись). Один держатель спрашивается один
+    раз, сколько бы записей он ни держал."""
+    held: dict[str, list[str]] = {}
+    for stem, row in ledger.items():
+        m = HOLDER_REF_RE.match(row[2] or "")
+        if m:
+            held.setdefault(m.group(1), []).append(f"коллекции {stem}")
+    for sid, (_why, holder) in scenario_debt.items():
+        m = HOLDER_REF_RE.match(holder or "")
+        if m:
+            held.setdefault(m.group(1), []).append(f"позиции {sid}")
+    bad: list[str] = []
+    unmet: list[str] = []
+    census = {"holders": len(held), "records": sum(len(v) for v in held.values()),
+              "open": 0, "closed": 0, "unknown": 0}
+    for ref, records in sorted(held.items()):
+        state = tracker(ref)
+        if state == "open":
+            census["open"] += 1
+        elif state == "closed":
+            census["closed"] += 1
+            bad.append(f"держатель {ref} закрыт, а записи держатся им ({len(records)}): "
+                       f"{', '.join(records)} — закрытая задача записи не снимет; передать "
+                       f"живому держателю по предмету записи либо снять запись с предметом")
+        else:
+            census["unknown"] += 1
+            unmet.append(f"держатель {ref} ({len(records)} записей): трекер не ответил о "
+                         f"состоянии задачи — живость не выполнилась")
+    return bad, unmet, census
+
+
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
         ledger: Ledger | None = None, scenario_debt: ScenarioDebt | None = None,
         scenario_home: ScenarioHome | None = None,
-        absence_claims: AbsenceClaims | None = None) -> int:
+        absence_claims: AbsenceClaims | None = None,
+        tracker: HolderTracker | None = None) -> int:
     # Ведомости позиций, как и ведомость производителя, — ПАРАМЕТРЫ. Объявленные
     # берутся только для объявленного дерева: синтетическая ведомость коллекций
     # значит синтетическое дерево, и объявленных позиций у него нет.
@@ -2011,6 +2076,16 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
             abs_drift.append(f"предикат довода «{name}» (`ABSENCE_CLAIMS`) не называет ни один довод "
                              f"ведомостей — запись пережила свой довод")
     drift += abs_drift
+    # ДЕРЖАТЕЛЬ ЖИВ (kaname#468): на объявленном дереве трекер по умолчанию — `gh`;
+    # синтетическое дерево без обёртки трекера не судится, и это печатается.
+    if tracker is None and declared_tree:
+        tracker = gh_issue_state
+    live_unmet: list[str] = []
+    live_census: dict[str, int] | None = None
+    if tracker is not None:
+        live_bad, live_unmet, live_census = reconcile_holder_liveness(
+            PRODUCER_LEDGER if ledger is None else ledger, scenario_debt, tracker)
+        drift += live_bad
     if drift:
         print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
         for d in drift:
@@ -2042,7 +2117,7 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
         by_holder.setdefault(m.group(1) if m else "—", []).append(stem)
     held_n = sum(len(v) for k, v in by_holder.items() if k != "—")
     print(f"НЕ гоняет ни один шаг: {len(unrun)} — держатель назван у {held_n}")
-    print("по ДЕРЖАТЕЛЮ (задача, которая прогонит; состояние в трекере здесь НЕ сверяется):")
+    print("по ДЕРЖАТЕЛЮ (задача, которая прогонит):")
     for ref, stems in sorted(by_holder.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         print(f"  · {ref}: {len(stems)} ({', '.join(stems)})")
     # Объём осмотренного сверкой полос — рядом со сводом держателей: «ноль
@@ -2163,6 +2238,18 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print("    стенд чарта — задание `chart-own` (врезка в .github/scripts/stand-own.sh);")
     print("  · человеческого предъявителя не куёт ни один посев: волна церемонии")
     print("    печатает свой долг сама (tests/authz-fixtures/ceremony_credentials.py --debt).")
+    print()
+    if live_census is None:
+        print("живость держателей: НЕ СУДИЛАСЬ — обёртки трекера нет (синтетическое дерево)")
+    else:
+        print(f"живость держателей: держателей {live_census['holders']} · записей "
+              f"{live_census['records']} · открыты {live_census['open']} · закрыты "
+              f"{live_census['closed']} · трекер не ответил {live_census['unknown']}")
+    if live_unmet:
+        print("УСЛОВИЕ НЕ СОЗДАНО — живость держателей не выполнилась:", file=sys.stderr)
+        for u in live_unmet:
+            print(f"  · {u}", file=sys.stderr)
+        return RC_UNMET
     return 0
 
 
@@ -3341,6 +3428,50 @@ def self_test() -> int:
     live, census = reconcile_absence_claims(ROOT, {"позиции Ф13-01": "довод без отсутствия"}, f13_claim)
     _c("живое дерево: ЗАКОННЫЙ БЛИЗНЕЦ — довод без утверждения об отсутствии не судится",
        live == [] and census["claims"] == 0, f"{live} {census}")
+
+    # Ось 22: ДЕРЖАТЕЛЬ ЖИВ (kaname#468). Запись долга держится задачей, которая её
+    # снимет; закрытая задача ничего не снимет, и запись переживает держателя молча:
+    # Ф5-24 держала закрытая kacho#1269, Ф5-12 — закрытая kaname#475. Трекер —
+    # подставляемая обёртка, сеть в инъекции не нужна. Различие против близнеца —
+    # в одном факте: состояние задачи держателя.
+    syn_ledger = {"syn-col": ("C", "довод", "PRO-Robotech/kaname#9001 — снимет препятствие")}
+    syn_debt = {"SYN-01": ("довод", "PRO-Robotech/kacho#9002 — заведёт кейс"),
+                "SYN-02": ("довод", "PRO-Robotech/kacho#9002 — заведёт кейс")}
+    for label, states, want_bad, want_unmet, want_texts in (
+            ("ЗАКОННЫЙ БЛИЗНЕЦ: оба держателя открыты — молчание",
+             {"PRO-Robotech/kaname#9001": "open", "PRO-Robotech/kacho#9002": "open"}, 0, 0, ()),
+            ("держатель позиций закрыт — находка называет обе записи и держателя",
+             {"PRO-Robotech/kaname#9001": "open", "PRO-Robotech/kacho#9002": "closed"}, 1, 0,
+             ("PRO-Robotech/kacho#9002", "позиции SYN-01", "позиции SYN-02", "закрыт")),
+            ("держатель коллекции закрыт — находка называет коллекцию",
+             {"PRO-Robotech/kaname#9001": "closed", "PRO-Robotech/kacho#9002": "open"}, 1, 0,
+             ("PRO-Robotech/kaname#9001", "коллекции syn-col")),
+            ("трекер не ответил — не находка и не молчание, а «не выполнилось»",
+             {"PRO-Robotech/kaname#9001": "open"}, 0, 1, ("PRO-Robotech/kacho#9002",))):
+        bad, unmet, census = reconcile_holder_liveness(syn_ledger, syn_debt, states.get)
+        text = "\n".join(bad + unmet)
+        _c(f"живость держателя: {label}",
+           len(bad) == want_bad and len(unmet) == want_unmet and all(w in text for w in want_texts)
+           and census["holders"] == 2 and census["records"] == 3, f"{bad} {unmet} {census}")
+    _, _, census = reconcile_holder_liveness({}, {}, lambda _ref: "open")
+    _c("живость держателя: пустая ведомость — ноль держателей названо числом, а не молчанием",
+       census == {"holders": 0, "records": 0, "open": 0, "closed": 0, "unknown": 0}, f"{census}")
+    # Провязка в перепись — на объявленном дереве: держатель, которого трекер называет
+    # закрытым, роняет перепись кодом 1 с именем записи; все открыты — код 0;
+    # трекер молчит — код 75.
+    declared_refs = sorted({m.group(1) for _w, h in SCENARIO_DEBT.values()
+                            if (m := HOLDER_REF_RE.match(h or ""))})
+    victim = declared_refs[0] if declared_refs else ""
+    for label, tracker, want_rc, want_text in (
+            ("ЗАКОННЫЙ БЛИЗНЕЦ: все держатели открыты — код 0", lambda _ref: "open", 0, ""),
+            ("один держатель закрыт — код 1 и его имя",
+             lambda ref: "closed" if ref == victim else "open", 1, victim),
+            ("трекер молчит — код 75, а не зелёное", lambda _ref: None, RC_UNMET, "не выполнилось")):
+        err = io.StringIO()
+        with contextlib.redirect_stdout(err), contextlib.redirect_stderr(err):
+            rc = run(ROOT / "tests" / "newman", tracker=tracker)
+        _c(f"живость держателя в переписи дерева: {label}",
+           bool(victim) and rc == want_rc and want_text in err.getvalue(), f"код {rc}; {err.getvalue()[-600:]}")
     print()
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
