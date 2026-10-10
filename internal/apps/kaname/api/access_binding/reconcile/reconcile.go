@@ -318,8 +318,8 @@ type ReconcileStore interface {
 
 	// RecordEmittedTuples / ForgetEmittedTuples co-commit the per-member FGA tuples
 	// into the persisted emitted-tuple ledger (access_binding_emitted_tuples)
-	// in the SAME reconcile writer-tx as the matching EmitTupleJournal (ban #10). The ledger is the authoritative "what was emitted"
-	// set the symmetric revoke (delete.go) replays and the Role.Update reconcile
+	// in the SAME reconcile writer-tx as the matching EmitTupleJournal (ban #10). The
+	// ledger is the authoritative "what was emitted" set the symmetric revoke (delete.go) replays and the Role.Update reconcile
 	// fan-out diffs against — UNIFYING the selector arm's per-member tuples with the
 	// all_in_scope / resources[] arms' tuples already in the ledger. Without this the
 	// selector member-tuples were emitted to fga_outbox but never recorded, so the
@@ -640,8 +640,9 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 		if err := r.reconcileBinding(ctx, s, bindingID, col); err != nil {
 			return err
 		}
-		// Flush the deferred tuple-deletes with the cross-binding surviving-claims
-		// subtraction (a tuple another active binding still holds is not stripped).
+		// Fold the pass's journal last: the deferred grants plus the deferred deletes
+		// after the cross-binding surviving-claims subtraction (a tuple another active
+		// binding still holds is not stripped).
 		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
@@ -771,9 +772,10 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 				return err
 			}
 		}
-		// Flush the pass's deferred tuple-deletes AFTER every binding reconciled, so
-		// the cross-binding surviving-claims subtraction sees the full write-set + the
-		// committed-in-tx ledger of every sibling binding (order-independent).
+		// Fold the pass's journal AFTER every binding reconciled, so the cross-binding
+		// surviving-claims subtraction sees the full write-set + the committed-in-tx
+		// ledger of every sibling binding (order-independent), and the shared fact rows
+		// are taken last, in the one order every journal writer shares.
 		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
@@ -832,7 +834,8 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 				return fmt.Errorf("expire: delete member %s/%s:%s: %w", m.RuleFP, m.ObjectType, m.ObjectID, err)
 			}
 		}
-		// Flush the deferred deletes with the cross-binding surviving-claims subtraction.
+		// Fold the deferred deletes last, with the cross-binding surviving-claims
+		// subtraction.
 		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
