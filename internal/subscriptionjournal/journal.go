@@ -233,6 +233,10 @@ func state(r subscription.Row) (*anypb.Any, subscription.StateAbsence, error) {
 	case KindAccount, KindProject, KindUser, KindGroup,
 		KindServiceAccount, KindRole, KindAccessBinding:
 		return nil, subscription.StateNotProduced, nil
+	case KindFeed:
+		// Сигнал ленты будит notify; строки он забирает `Claim`, а не из
+		// события (NTF-2 Р1, З17, CX2-27).
+		return nil, subscription.StateNotProduced, nil
 	default:
 		return nil, subscription.StateAbsenceUnnamed, fmt.Errorf(
 			"subscriptionjournal: вид %q вне словаря журнала службы: "+
