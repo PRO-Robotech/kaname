@@ -114,7 +114,9 @@ func TestEveryKindIsALiveTypeOfTheModel(t *testing.T) {
 	}
 	require.NotEmpty(t, live, "перепись типов пуста: модель прочитана не та")
 
-	for kind, binding := range Journal().Mapping.Kinds {
+	// Оба объявления — без флага почты и с ним (FeedJournal): вид ключа ленты
+	// судится той же переписью, что прочие.
+	for kind, binding := range FeedJournal().Mapping.Kinds {
 		assert.True(t, live[binding.ObjectType],
 			"вид %q объявлен типом %q, которого в модели прав НЕТ: "+
 				"строка такого вида не доставляется, а поток по нему молчит, "+
@@ -130,7 +132,7 @@ func TestEveryKindIsALiveTypeOfTheModel(t *testing.T) {
 
 // TestStateIsNotProducedAndSaysSo — состояние не производится, причина названа.
 func TestStateIsNotProducedAndSaysSo(t *testing.T) {
-	for kind := range Journal().Mapping.Kinds {
+	for kind := range FeedJournal().Mapping.Kinds {
 		st, absence, err := state(subscription.Row{Kind: kind})
 		assert.NoError(t, err, "вид %q словарю принадлежит: ошибки быть не должно", kind)
 		assert.Nil(t, st, "состояние этот журнал не производит ни по одному виду")
