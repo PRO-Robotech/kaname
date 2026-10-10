@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/diagnostics"
@@ -2255,20 +2256,31 @@ func identityStream(cfg config.Config) []grpc.StreamServerInterceptor {
 // полосы взаимно исключают друг друга, и решение о том, КТО звонит,
 // принимается в одном месте. Держится это исходом, а не комментарием:
 // личность, назначенная читателем, обязана доживать до обработчика.
+//
+// # Последнее звено — чем звонит человек, переданный краем
+//
+// За решением «кто звонит» стоит читатель переданного краем удостоверения
+// (`internal/edgecredential`, kaname#677): номер записи сессии и номер
+// выпуска, которыми край называет текущую сессию человека. Он берёт вердикт
+// пары о доверенном отправителе и своего не заводит, поэтому стоит ПОСЛЕ неё и
+// внутри этого сборщика: цепочка, собранная мимо сборщика, потеряла бы его
+// молча, а пробы размещения (`edge_credential_chain_test.go`) собирают её им.
+// Внутреннему слушателю он не нужен: глагол, читающий текущую сессию (снятие
+// ключа доступа), там не смонтирован.
 func publicIdentityUnary(cfg config.Config, presented *presentedcred.Reader) []grpc.UnaryServerInterceptor {
 	pair := identityUnary(cfg)
 	if presented == nil {
-		return pair
+		return append(pair, edgecredential.Unary())
 	}
-	return []grpc.UnaryServerInterceptor{presented.UnaryOver(pair)}
+	return []grpc.UnaryServerInterceptor{presented.UnaryOver(pair), edgecredential.Unary()}
 }
 
 func publicIdentityStream(cfg config.Config, presented *presentedcred.Reader) []grpc.StreamServerInterceptor {
 	pair := identityStream(cfg)
 	if presented == nil {
-		return pair
+		return append(pair, edgecredential.Stream())
 	}
-	return []grpc.StreamServerInterceptor{presented.StreamOver(pair)}
+	return []grpc.StreamServerInterceptor{presented.StreamOver(pair), edgecredential.Stream()}
 }
 
 // requireGRPCListenerMTLS — оба gRPC-слушателя обязаны идти под TLS в боевом

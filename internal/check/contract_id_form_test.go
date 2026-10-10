@@ -124,6 +124,10 @@ var mintedPrefixes = []mintedPrefix{
 	// Ключ доступа (Ф7, kacho#1273; Р10): дефисная форма, префикс `ak` заведён в
 	// каноне фундамента (`corelib#18`) прежде первой чеканки.
 	{"ak", mintHyphen, "ids.NewHyphenID(ids.PrefixAccessKeyHyphen)", []string{"services/iam"}},
+	// Запись сессии человека (Ф3 Р1): дефисная форма. Контракт приводит её
+	// примером с тех пор, как ответ краю о носителе называет номер записи
+	// (kaname#677).
+	{"hss", mintHyphen, "ids.NewHyphenID(sessionIDPrefix)", []string{"services/iam"}},
 	{"mbr", mintHyphenSQL, "'mbr-' || substr", []string{"services/iam/internal/migrations"}},
 	// Чужие домены, чьи идентификаторы контракт iam приводит в примерах. Место
 	// чеканки у них — дерево ПЛАТФОРМЫ, и здесь его нет: перечень пуст, строка

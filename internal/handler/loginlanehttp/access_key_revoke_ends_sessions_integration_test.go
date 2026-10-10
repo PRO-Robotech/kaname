@@ -14,17 +14,19 @@
 // корень композиции. Исход судится тем, что видит край: ответ службы о
 // носителе (`Resolve`), — и записью сессии с её причиной.
 //
-// # Почему S2 тоже снята — и где это решено
+// # Почему S2 жива — и чем она названа
 //
-// Р8 гасит ВСЕ ПРОЧИЕ сессии человека и оставляет текущую. Номера записи у
-// глагола RPC нет: текущую он находит по выпуску предъявленного токена
-// (выпуск → семейство → сессия церемонии; держит
-// `internal/repo/kaname/pg/access_key_revoke_writer_integration_test.go`).
-// Здесь снятие зовётся так, как его зовёт личность, переданная краем: выпуска
-// нет, текущую отличить нечем, и снимаются ВСЕ записи человека — сторона,
-// закрывающая доступ. Различение текущей на полосах края — задача
-// PRO-Robotech/kaname#677; предикат её снятия — утверждение о S2 ниже
-// переворачивается в «жива».
+// Р8 гасит ВСЕ ПРОЧИЕ сессии человека и оставляет текущую. Здесь снятие
+// зовётся так, как его зовёт личность, переданная краем (kaname#677): край
+// спросил службу о носителе S2 (`Resolve`), получил номер её записи и вернул
+// его службе вместе с личностью. Номер берётся из ОТВЕТА `Resolve`, а не из
+// базы: так проба держит оба звена цепочки — ответ краю называет запись, и
+// снятие её бережёт. Доставку номера от края до глагола только по доверенному
+// отправителю держит `internal/edgecredential`; выбор текущей по выпуску
+// предъявленного токена — `internal/repo/kaname/pg/access_key_revoke_writer_integration_test.go`.
+//
+// Отрицание — номер чужой записи: он не бережёт ни одной сессии человека, и
+// сессии другого не касается.
 //
 // # Почему причина — литералом
 //
@@ -67,10 +69,18 @@ func keySession(t *testing.T, h *sessionLane, k akKey) string {
 	return ck.Value
 }
 
-// revokeOverProduct — снятие ключа НАСТОЯЩИМ глаголом над адаптерами базы.
-// Синхронный отказ возвращается как есть; принятая операция дожидается
-// исполнителя (событием очереди, не сроком) и возвращается терминальной.
+// revokeOverProduct — снятие ключа НАСТОЯЩИМ глаголом над адаптерами базы, без
+// номера текущей записи. Синхронный отказ возвращается как есть; принятая
+// операция дожидается исполнителя (событием очереди, не сроком) и
+// возвращается терминальной.
 func revokeOverProduct(t *testing.T, h *sessionLane, user domain.UserID, keyID string) (*operations.Operation, error) {
+	t.Helper()
+	return revokeOverProductAs(t, h, access_keys.RevokeInput{UserID: user, Actor: user, AccessKeyID: keyID})
+}
+
+// revokeOverProductAs — то же снятие с полным входом глагола: номер записи
+// текущей сессии, который передал край, — `in.ActingSession`.
+func revokeOverProductAs(t *testing.T, h *sessionLane, in access_keys.RevokeInput) (*operations.Operation, error) {
 	t.Helper()
 	ops := operations.NewRepo(h.pool, "kaname")
 	uc, err := access_keys.NewRevokeUseCase(access_keys.Deps{
@@ -82,7 +92,7 @@ func revokeOverProduct(t *testing.T, h *sessionLane, user domain.UserID, keyID s
 		Now:             time.Now,
 	}, ops)
 	require.NoError(t, err)
-	op, err := uc.Execute(h.ctx, access_keys.RevokeInput{UserID: user, Actor: user, AccessKeyID: keyID})
+	op, err := uc.Execute(h.ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +103,15 @@ func revokeOverProduct(t *testing.T, h *sessionLane, user domain.UserID, keyID s
 	require.NoErrorf(t, err, "операция %s не прочитана — это «не выполнилось», а не отказ", op.ID)
 	require.Truef(t, got.Done, "операция %s не терминальна", op.ID)
 	return got, nil
+}
+
+// recordOf — номер записи сессии из ответа краю (`Resolve`) — ровно то, что
+// край возвращает службе (kaname#677).
+func (h *sessionLane) recordOf(t *testing.T, bearer string) domain.HumanSessionID {
+	t.Helper()
+	id := h.resolve(t, bearer).GetSession().GetSessionId()
+	require.NotEmpty(t, id, "Дано: ответ краю называет номер записи сессии (kaname#677)")
+	return domain.HumanSessionID(id)
 }
 
 // endedReason — причина конца записи сессии по носителю; "" — не снята.
@@ -120,8 +139,9 @@ func (h *sessionLane) cutoffReason(t *testing.T, user domain.UserID) string {
 }
 
 // TestF13_21_RevokingAKeyEndsTheSessionsOfThePerson — Ф13-21, первая ветвь:
-// снятие ключа A снимает сессию S1, выданную входом A, причиной
-// `access-key-revoked`; ключ B входит дальше.
+// из S2 снят ключ A — сессия S1, выданная входом A, снята причиной
+// `access-key-revoked`; S2 — текущая, названная краем номером записи, — жива,
+// её уровень «1» не изменён; ключ B входит дальше.
 func TestF13_21_RevokingAKeyEndsTheSessionsOfThePerson(t *testing.T) {
 	h := newSessionLane(t)
 	kA := givenAcceptedKey(t, h, h.user.ID)
@@ -133,16 +153,18 @@ func TestF13_21_RevokingAKeyEndsTheSessionsOfThePerson(t *testing.T) {
 	require.True(t, h.resolve(t, s1).GetFound(), "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: S1 годна до снятия")
 	require.True(t, h.resolve(t, s2).GetFound(), "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: S2 годна до снятия")
 
-	op, err := revokeOverProduct(t, h, h.user.ID, string(kA.id))
+	op, err := revokeOverProductAs(t, h, access_keys.RevokeInput{UserID: h.user.ID, Actor: h.user.ID,
+		AccessKeyID: string(kA.id), ActingSession: h.recordOf(t, s2)})
 	require.NoError(t, err)
 	require.Nilf(t, op.Error, "Ф13-21: снятие ключа исполнено: %v", op.Error)
 
 	require.False(t, h.resolve(t, s1).GetFound(), "Ф13-21: носитель S1 (вход снятым ключом) отвергается")
 	require.Equal(t, reasonAccessKeyRevoked, h.endedReason(t, s1), "Ф13-21: причина конца S1 — снятие ключа (Р8)")
-	// Текущей сессии глагол RPC не знает (шапка файла): S2 снята той же
-	// причиной; kaname#677 переворачивает это утверждение.
-	require.False(t, h.resolve(t, s2).GetFound(), "без номера записи вызывающего снимаются все сессии человека")
-	require.Equal(t, reasonAccessKeyRevoked, h.endedReason(t, s2))
+	// Текущая — запись, названная краем (шапка файла): жива, уровень прежний.
+	current := h.resolve(t, s2)
+	require.True(t, current.GetFound(), "Ф13-21: S2 — текущая — жива (kaname#677)")
+	require.Equal(t, "1", current.GetSession().GetAssuranceLevel(), "Ф13-21: уровень текущей не изменён")
+	require.Empty(t, h.endedReason(t, s2), "Ф13-21: запись S2 не снята")
 	require.Equal(t, reasonAccessKeyRevoked, h.cutoffReason(t, h.user.ID), "Ф13-21: отсечка личности той же причиной")
 
 	// Ключ A — единый отказ входа; ключ B входит и выдаёт годную сессию.
@@ -201,5 +223,33 @@ func TestF13_21_RefusedRevokeAndAnotherPersonKeepTheirSessions(t *testing.T) {
 	require.Nil(t, op.Error)
 	require.False(t, h.resolve(t, s1).GetFound())
 	require.True(t, h.resolve(t, sOther).GetFound(), "близнец (б): сессия другого человека жива")
+	require.Empty(t, h.endedReason(t, sOther))
+}
+
+// TestF13_21_ForeignRecordSavesNoSession — отрицание (kaname#677): номер записи
+// ДРУГОГО человека, пришедший вместо номера текущей, не бережёт ни одной сессии
+// снимающего — S1 и S2 сняты, — и сессии другого не касается: она жива и до, и
+// после. Отличие от первой ветви — один факт: чей номер записи передан.
+func TestF13_21_ForeignRecordSavesNoSession(t *testing.T) {
+	h := newSessionLane(t)
+	kA := givenAcceptedKey(t, h, h.user.ID)
+	givenAcceptedKey(t, h, h.user.ID)
+	s1 := keySession(t, h, kA)
+	s2 := h.login(t, integrationPassword).bearer.Value
+
+	other := registerPerson(t, h, "ak-revoke-foreign")
+	kOther := givenAcceptedKey(t, h, other)
+	sOther := keySession(t, h, kOther)
+	foreign := h.recordOf(t, sOther)
+
+	op, err := revokeOverProductAs(t, h, access_keys.RevokeInput{UserID: h.user.ID, Actor: h.user.ID,
+		AccessKeyID: string(kA.id), ActingSession: foreign})
+	require.NoError(t, err)
+	require.Nil(t, op.Error)
+
+	require.False(t, h.resolve(t, s1).GetFound(), "чужой номер не бережёт S1")
+	require.False(t, h.resolve(t, s2).GetFound(), "чужой номер не бережёт S2")
+	require.Equal(t, reasonAccessKeyRevoked, h.endedReason(t, s2))
+	require.True(t, h.resolve(t, sOther).GetFound(), "сессия другого человека жива")
 	require.Empty(t, h.endedReason(t, sOther))
 }

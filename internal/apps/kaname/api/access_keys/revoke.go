@@ -22,16 +22,29 @@ package access_keys
 // # Какие сессии гаснут
 //
 // Р8 гасит все ПРОЧИЕ сессии человека, а текущую оставляет. Номера записи
-// сессии у глагола RPC нет (шапка `iface.go`), и текущая выводится из
-// предъявленного удостоверения: его выпуск называет семейство, семейство —
-// сессию, в которой шла церемония (`SessionOfCredential`). Так названа
-// текущая у вызывающего, предъявившего токен нашей церемонии сам.
+// сессии у глагола RPC нет (публичный контракт его не несёт), и текущую
+// называет то, ЧЕМ человек звонит:
 //
-// Личность, переданная краем, выпуска не несёт: край передаёт личность, а не
-// номер выпуска и не номер записи. Тогда отличить текущую нечем, и гаснут ВСЕ
-// записи человека — сторона, закрывающая доступ: ключ снимают, лишившись
-// устройства, и сессия держателя устройства неотличима от текущей. Номер
-// записи вызывающего от края — kaname#677.
+//   - край передал личность из браузерной сессии — край называет и номер её
+//     записи (`RevokeInput.ActingSession`; ответ `Resolve` краю его несёт, край
+//     возвращает его службе метаданным доверенного отправителя, читатель —
+//     `internal/edgecredential`, kaname#677);
+//   - вызывающий предъявил токен нашей церемонии — сам ли, через край ли, —
+//     текущую называет выпуск: выпуск → семейство → сессия, в которой шла
+//     церемония (`RevokeInput.ActingCredential`, `SessionOfCredential`).
+//
+// Номер записи сильнее выпуска: он называет запись прямо. Текущая бережётся
+// ТОЛЬКО когда человек снимает СВОЙ ключ (`Actor == UserID`): сессия
+// вызывающего, снимающего чужой ключ, — не сессия того, чей ключ снят, и
+// поддельный номер чужой записи не бережёт ни одной записи человека; снятие
+// касается записей ЭТОГО человека и никаких иных (`EndOtherSessions` сужен
+// личностью).
+//
+// Ничем не названа — гаснут ВСЕ записи человека: у вызывающего нет текущей
+// сессии (служебный вызов, токен не нашей церемонии), и «прочие» — это все.
+// Отказ здесь не годится: он сделал бы снятие ключа недоступным полосе, у
+// которой записи сессии нет by construction, а ключ снимают как раз лишившись
+// устройства.
 
 import (
 	"context"
@@ -55,9 +68,14 @@ type RevokeInput struct {
 	AccessKeyID string
 	// ActingCredential — идентификатор выпуска удостоверения, которым
 	// вызывающий аутентифицирован (`jti`, проверенный целиком читателем
-	// предъявленного); пусто — личность передана краем и выпуска не несёт.
-	// По нему находится текущая сессия, которую снятие оставляет (Р8).
+	// предъявленного либо краем — доверенным отправителем); пусто — выпуска
+	// нет. По нему находится текущая сессия, которую снятие оставляет (Р8).
 	ActingCredential string
+	// ActingSession — номер записи сессии, из которой звонит человек, как его
+	// назвал край доверенным отправителем (kaname#677); пусто — не назван.
+	// Сильнее выпуска: называет запись прямо. Бережёт запись только при
+	// `Actor == UserID` (шапка файла).
+	ActingSession domain.HumanSessionID
 }
 
 // RevokeUseCase — снятие ключа.
@@ -138,11 +156,26 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 		return nil, err
 	}
 	actor := string(in.Actor)
-	acting := in.ActingCredential
+	acting := actingOf(in)
 	operations.Run(ctx, uc.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
 		return uc.commit(ctx, in.UserID, keyID, user.AccountID, actor, acting)
 	})
 	return &op, nil
+}
+
+// currentSession — чем названа текущая сессия вызывающего (шапка файла).
+type currentSession struct {
+	session    domain.HumanSessionID
+	credential string
+}
+
+// actingOf — текущая сессия бережётся только у человека, снимающего СВОЙ ключ:
+// у вызывающего, снимающего чужой, она не названа вовсе.
+func actingOf(in RevokeInput) currentSession {
+	if in.Actor != in.UserID {
+		return currentSession{}
+	}
+	return currentSession{session: in.ActingSession, credential: in.ActingCredential}
 }
 
 // keysOf — ключи человека. Ошибка чтения — внутренняя ошибка (текст
@@ -200,7 +233,7 @@ func (uc *RevokeUseCase) judgeLastMethod(hasPassword bool, keys int) error {
 }
 
 // commit — ОДНА транзакция под замком строк человека.
-func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID, account domain.AccountID, actor, acting string) (*anypb.Any, error) {
+func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID, account domain.AccountID, actor string, acting currentSession) (*anypb.Any, error) {
 	w, err := uc.deps.Store.RevokeWriter(ctx, userID)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.writer", err)
@@ -235,9 +268,9 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 }
 
 // endSessionsOf — снятие записей сессии человека, кроме текущей, и его
-// отсечка (Ф13 Р8) в транзакции снятия ключа. Текущая — запись, в которой
-// выпущено предъявленное удостоверение (шапка файла); не названа — снимаются
-// все. Момент снятия — часы глагола; момент отсечки — тот же, что у смены
+// отсечка (Ф13 Р8) в транзакции снятия ключа. Текущая — запись, названная
+// краем, либо запись, в которой выпущено удостоверение вызывающего (шапка
+// файла); не названа — снимаются все. Момент снятия — часы глагола; момент отсечки — тот же, что у смены
 // пароля: на единицу разрешения раньше первой аутентификации личности нашей
 // посадкой (`domain.CutoffBelowFirstAuthentication`), — им снимаются носители
 // прежней посадки, а записи нашей снимает дверь снятия, и текущую отсечка не
@@ -246,11 +279,11 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 // перепись `revocationpolicy`), а память пишет каждая выдача, и без неё у
 // личности нет ни одной выданной нами сессии; расхождение — находка о посеве,
 // и оно пишется в журнал.
-func (uc *RevokeUseCase) endSessionsOf(ctx context.Context, w RevokeWriter, userID domain.UserID, actor, acting string) error {
+func (uc *RevokeUseCase) endSessionsOf(ctx context.Context, w RevokeWriter, userID domain.UserID, actor string, acting currentSession) error {
 	now := uc.deps.Now().UTC()
-	var keep domain.HumanSessionID
-	if acting != "" {
-		current, found, err := w.SessionOfCredential(ctx, userID, acting)
+	keep := acting.session
+	if keep == "" && acting.credential != "" {
+		current, found, err := w.SessionOfCredential(ctx, userID, acting.credential)
 		if err != nil {
 			return mapStoreErr(uc.deps, "access_keys.Revoke.current_session", err)
 		}
