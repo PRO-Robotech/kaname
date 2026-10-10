@@ -605,22 +605,42 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 штатное состояние. Звонят отказы **нашей** стороны: человек получает один и тот же отказ, а
 причина видна только в `outcome` (ряды [полосы входа](#login-lane)).
 
+Второй фактор входит в оба правила. Материал фактора, который не открывается ни одним ключом
+перечня, — отказ нашей стороны: человек с верным кодом получает `503`, и повтор этого не
+исправит. Его клетка — `kaname_second_factor_refusals_total{reason="unavailable"}`: производитель
+пишет её парой с исходом предъявления `material-unreadable` на каждом глаголе и у обоих способов,
+поэтому правило читает одну клетку и не считает отказ дважды. Порядок разбора —
+[Смена ключа обёртки второго фактора](/advanced/second-factor-wrapping-key): вернуть прежний ключ в
+перечень, затем перенести секреты под новый.
+
+Правило ёмкости читает исчерпание у **проверяющего**, а не только у входа: тот же проверяющий
+сверяет пароль при повышении уровня и секрет клиента в церемонии, и эти отказы ряда входа не
+пишут. Его клетка — `kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}`.
+Вход пишет исчерпание и в свой ряд, и в ряд проверяющего; порог правила — «больше нуля», и
+двойной счёт его не сдвигает. Запасной код (`lookup_secret`) делит ту же ёмкость, но сверяется
+мимо счётчика проверяющего, поэтому у него своя клетка в том же правиле. Все клетки, которые
+читают правила, заведены с нулём до первого события: слагаемое без ряда обнулило бы всё выражение.
+
 ```yaml
 - alert: KanameLoginLaneFailing
   expr: |
     sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
       + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
       + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
-      + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m])) > 0
+      + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m]))
+      + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m])) > 0
   for: 5m
   annotations:
-    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище либо проверяющий пароля; человек видит один отказ, причина в outcome"
+    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome и reason. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
 
 - alert: KanameLoginVerifierCapacityExhausted
-  expr: increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]) > 0
+  expr: |
+    sum(increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}[10m]))
+      + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m])) > 0
   for: 5m
   annotations:
-    summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке; величина authn.login.verifier-capacity"
+    summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке. Проверяющий один: вход паролем, повышение уровня паролем, сверка секрета клиента церемонией и запасной код второго фактора; причина — в outcome и method. Величина authn.login.verifier-capacity"
 ```
 
 Эти правила **везёт сам чарт** — объектом `PrometheusRule`, поэтому переносить их руками не нужно.
