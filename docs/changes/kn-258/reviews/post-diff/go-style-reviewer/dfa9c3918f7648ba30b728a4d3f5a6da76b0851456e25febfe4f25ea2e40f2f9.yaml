@@ -1,0 +1,139 @@
+# Пост-дифф ревью Go-кода продукта — роль go-style-reviewer.
+#
+# Имя файла — content_digest по канону kaname (форма --full-index, без
+# docs/changes; образец — docs/changes/kn-341/reviews/post-diff/go-style-reviewer/).
+# Прежние записи не правятся; сменился дайджест — новый запуск и новый файл.
+schema_version: 1
+change_id: kn-258
+holder: post-diff/go-style-reviewer
+owner: go-style-reviewer
+subject: '#258 — тревоги полосы входа считают отказы второго фактора; адрес полосы назван в INSTALL'
+
+# ── отпечаток ──────────────────────────────────────────────────────────────
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: '258'
+  worktree: /home/dk/workspace/github/PRO-Robotech/cloud-demo/kacho-workspace/tmp/wave-540/N-OBS/wt
+  base: 9351ab09122759b3680615da8a251e5d1a6f20da   # origin/296 = refs/heads/296 по git ls-remote; совпадает с merge-base
+  head: b4f9701e07a90baae20d213035ac727107cb531d   # = refs/heads/258 по git ls-remote
+content_digest: sha256:dfa9c3918f7648ba30b728a4d3f5a6da76b0851456e25febfe4f25ea2e40f2f9
+task_digest: sha256:ee734abcee368c05741912ac377c1633500feafe45351bc27ee21ba5474eeaa2
+names_digest: sha256:1f6ec03d66d7d8f2561e8625f9adc546d823e98cd099e4aaddffb0aff4f98930
+digest_definition: >-
+  content_digest — sha256 вывода `git diff --full-index 9351ab09..b4f9701e -- . ':!docs/changes' | sha256sum`
+  (git 2.53.0), форма канона kaname. task_digest — команда задания
+  `git diff origin/296...b4f9701e0 | sha256sum`. names_digest —
+  `git diff --name-only 9351ab09..b4f9701e | sort | sha256sum`. База совпадает с
+  merge-base, поэтому две и три точки дают один дифф.
+
+# ── вердикт ────────────────────────────────────────────────────────────────
+verdict: returned            # ⛔ возврат
+blocks_landing: true
+timestamp: '2026-10-10T04:23:30Z'
+review_scope: >-
+  Полный закоммиченный дифф: 6 файлов, +448 / -8. Свежих маркеров отсрочки 0
+  (grep добавленных строк по TODO|FIXME|XXX|t.Skip). Пробы в том же PR: да.
+  Не-тестовый Go-код не тронут; прод-изменения — правило тревоги, страница и INSTALL.
+
+files_reviewed:
+  - {path: deploy/templates/prometheusrule.yaml, blob: deb6bca0d035284dd1d55696e80fa5483e32fff6}
+  - {path: docs/content/advanced/observability.mdx, blob: 03506258d1d17dd4962e03a7a92853ac6ea00d6f}
+  - {path: INSTALL.md, blob: 40121334bc2dc3df27a65c1cf0baf874b0d481cd}
+  - {path: deploy/second_factor_alert_cells_test.go, blob: 6f8e8b09e388769349512946c041a1655d2023a1}
+  - {path: deploy/delivery_roster_test.go, blob: e5c3642bfc6a68b94e199a5a69ab0d81783bf7b1}
+  - {path: cmd/kaname/login_lane_address_install_test.go, blob: 071f4d6c95d3d44f1119c9048fd451a299cb1194}
+
+# ── исполнение (своя команда, выгрузка git archive в scratchpad; копия полосы не менялась) ──
+executed:
+  - cmd: go test -count=1 -run 'SecondFactorCells|OwnLaneAlertsCountTheSecondFactorCells|DeliveredAlertRulesMatchThePublishedPage|DeliveryRoster' ./deploy/
+    at: b4f9701e
+    result: зелёных 9 верхних тестов · красных 0; перепись — правил 19 · требований 2 · найдено 2 на prod и dev; предзаведённых клеток в выдаче 219, проверено 2
+  - cmd: go test -count=1 -run InstallNames ./cmd/kaname/
+    at: b4f9701e
+    result: зелёных 2 · красных 0; строк вне порождённого блока 618, назвавших ручку 1
+  - injection: prometheusrule.yaml базы 9351ab09 под пробой головы
+    result: КРАСНАЯ, находок 2 на каждом профиле — проба держит снятие слагаемого
+  - injection: строка INSTALL об адресе удалена
+    result: КРАСНАЯ, назвавших 0 — проба держит строку
+  - injection: слагаемое refusals{reason="unavailable"} ЗАКОММЕНТИРОВАНО в выражении (`# + sum(...)`), остальное как в голове
+    result: ЗЕЛЁНАЯ — маска, см. critical[0]
+
+# ── находки ────────────────────────────────────────────────────────────────
+critical:
+  - kind: probe-mask
+    at: deploy/second_factor_alert_cells_test.go:91, :125-135
+    finding: >-
+      exprReadsCell ищет селектор регулярным выражением по сырому тексту
+      выражения и засчитывает селектор внутри PromQL-комментария `#`. Измерено
+      инъекцией: слагаемое второго фактора в KanameLoginLaneFailing
+      закомментировано, правило клетку не читает, а проба зелёная. Утверждение С1
+      («правило несёт отбор клетки») при этом ложно.
+    requirement: >-
+      Перед поиском селекторов срезать комментарии PromQL (от `#` вне строкового
+      литерала до конца строки). В инъекцию добавить близнеца: тот же lawful-текст,
+      в котором слагаемое закомментировано, — это должно давать находку.
+    return_to: автор диффа kaname#258 (полоса N-OBS)
+
+important:
+  - kind: alert-coverage
+    at: deploy/templates/prometheusrule.yaml:151-156; internal/apps/kaname/api/humansession/step_up.go:112-115; internal/passwordverify/verifier.go:148-150; cmd/kaname/loginlane.go:126-128
+    finding: >-
+      Исчерпание ёмкости того же проверяющего на церемонии повышения (ветвь
+      password) и при сверке секрета клиента церемонией пишется только в
+      kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}
+      (verifier.observed). KanameLoginVerifierCapacityExhausted этот ряд не
+      читает. Аннотация называет двух потребителей проверяющего, а их не меньше
+      четырёх.
+    requirement: >-
+      Слагаемое login_outcomes заменить на password_verification_outcomes_total
+      {outcome="capacity-exhausted"}: эта клетка покрывает каждый Verify. Запасной
+      код (SetCandidate идёт мимо observed) остаётся отдельным слагаемым. Строку
+      добавить в secondFactorCellDemands либо в соседнее требование. Если это
+      вне предмета #258, завести задачу с предикатом.
+  - kind: alert-coverage (producer, вне диффа)
+    at: internal/apps/kaname/api/humansession/step_up.go:122-123,152-153; sf_remove.go:80-81,104-106; sf_backup_codes.go:72-74,109-111
+    finding: >-
+      Сбой хранилища на глаголах второго фактора (повышение, снятие, перечеканка)
+      отвечает ErrStoreUnavailable и не пишет ни одной клетки. Вход в том же
+      случае пишет login_outcomes{store-failed} (login.go:307). Значит, отказ
+      нашей стороны в этих глаголах KanameLoginLaneFailing не видит. Этот класс
+      шире остатка, который назвал автор: клетки нет у самого производителя.
+    requirement: задача о корректности наблюдаемости — клетка store-failed второго фактора, предзаведённая, и требование в пробе правил.
+  - kind: doc-not-held
+    at: INSTALL.md:582; cmd/kaname/login_lane_address_install_test.go
+    finding: >-
+      Проба держит только строку адреса. Строку TLS (KANAME_LOGINLANE_SERVER_MTLS_ENABLE,
+      ..._CLIENTAUTHMODE=mutual) с отказами стража (loginlane.go:294-305) не сличает
+      ничто: при переименовании ручки INSTALL продолжит называть прежнее имя.
+    requirement: сличить и эти имена со стражем (по константам либо по тексту отказа), с инъекцией.
+
+author_residual:
+  claim: новая клетка отказа у производителя без строки в secondFactorCellDemands гейтом не ловится
+  blocks: false
+  reasoning: >-
+    Сегодня закрытые перечни разобраны полностью. Отказы (second_factor.go:305-316):
+    четыре на стороне вызывающего и unavailable на нашей. Клетки предъявления
+    (:285-298): material-unreadable пишется парой с unavailable (sf_present.go:218-220,
+    sf_enroll.go:215-216), capacity-exhausted требуется пробой. Пропущенной клетки
+    нет. Остаток — будущая регрессия, а не дефект головы. По запрету #11 он
+    обязан стать предметом: дешевле всего закрыть его сразу полной
+    классификацией — суждение обходит SecondFactorRefusals() и
+    PresentationCells(), и каждое значение без записи «наша → правило / чужая →
+    нет» даёт находку. Иначе — задача с предикатом снятия.
+
+security_comments_vs_code: []   # строка TLS в INSTALL и шапки проб сверены с кодом (loginlane.go:285-306; sf_present.go:214-221) — расхождений нет
+
+foundation_candidates: []
+
+style:
+  - at: cmd/kaname/login_lane_address_install_test.go:37-45
+    note: keyOfEnv — третья копия правила связывания (tools/surfaceroster/roster.go:392 settingKeyFromEnv; обратное — config/load.go:361 envNameOf). Литерал на :74 держит пробу, но лучше одна функция.
+  - at: deploy/second_factor_alert_cells_test.go:203-220
+    note: анонимная структура дублирует cellTerm — взять cellTerm.
+
+approved:
+  - производитель клеток назван константами пакета metrics/humansession/assurance, а не литералами
+  - предзаведение клеток судится по выдаче настоящего реестра
+  - С2 (слагаемое в соседнем правиле не засчитывается) держится инъекцией
+  - перепись печатается, пустой обход красный
+  - паники, context.Background и логирования в диффе нет; Go-код только в пробах
