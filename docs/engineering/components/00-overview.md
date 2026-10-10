@@ -238,7 +238,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9091`   | `InternalBootstrapTokenService` | `MintBootstrapToken` — удостоверение начальной настройки |
 | `:9091`   | `InternalSubscriptionService`   | `Subscribe` — поток изменений семи собственных видов, сужаемый пообъектно |
 | `:9091`   | `InternalHumanSessionService`   | `Resolve` — наша сессия человека по носителю; регистрируется только под посадкой `own` (Ф3) |
-| `:9091`   | `InternalNotificationGrantService` | `ResolveSend` — решение о письме источника (право решает обработчик: служебный субъект `reader` ленты); `Revoke` / `Restore` выдачи — администратор кластера; без REST-привязок (NTF-1 Р5) |
+| `:9091`   | `InternalNotificationGrantService` | `ResolveSend` — решение о письме источника (право решает обработчик: служебный субъект `reader` ленты); `Revoke` / `Restore` выдачи — администратор кластера через внутренний край (`/iam/v1/internal/notificationGrants/{namespace}:revoke`, `:restore`; ступень «2»); у `ResolveSend` привязки нет (NTF-1 Р5) |
 | `:9091`   | `InternalNotificationRecipientService` | `Resolve`, `ListEventAudience` — справочник адресов получателей писем для `service:notify` (право решает обработчик: `reader` на `notification_recipient_directory:root`, тип без надзора администратора облака); аудитория версии события — вопрос с оградой токена версии прав `R_E` и барьером поколения объекта; без REST-привязок (NTF-3 Р7, Р28, Р30) |
 
 **Состав таблицы держит гейт, а не внимание.** Перечень уже расходился с деревом —

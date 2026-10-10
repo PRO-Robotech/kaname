@@ -66,9 +66,18 @@ func request_InternalNotificationGrantService_Revoke_0(ctx context.Context, mars
 	var (
 		protoReq NotificationGrantRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["namespace"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "namespace")
+	}
+	protoReq.Namespace, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "namespace", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
@@ -81,9 +90,18 @@ func local_request_InternalNotificationGrantService_Revoke_0(ctx context.Context
 	var (
 		protoReq NotificationGrantRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["namespace"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "namespace")
+	}
+	protoReq.Namespace, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "namespace", err)
 	}
 	msg, err := server.Revoke(ctx, &protoReq)
 	return msg, metadata, err
@@ -93,9 +111,18 @@ func request_InternalNotificationGrantService_Restore_0(ctx context.Context, mar
 	var (
 		protoReq NotificationGrantRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["namespace"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "namespace")
+	}
+	protoReq.Namespace, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "namespace", err)
 	}
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
@@ -108,9 +135,18 @@ func local_request_InternalNotificationGrantService_Restore_0(ctx context.Contex
 	var (
 		protoReq NotificationGrantRequest
 		metadata runtime.ServerMetadata
+		err      error
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	val, ok := pathParams["namespace"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "namespace")
+	}
+	protoReq.Namespace, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "namespace", err)
 	}
 	msg, err := server.Restore(ctx, &protoReq)
 	return msg, metadata, err
@@ -148,7 +184,7 @@ func RegisterInternalNotificationGrantServiceHandlerServer(ctx context.Context, 
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke", runtime.WithHTTPPathPattern("/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke", runtime.WithHTTPPathPattern("/iam/v1/internal/notificationGrants/{namespace}:revoke"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -168,7 +204,7 @@ func RegisterInternalNotificationGrantServiceHandlerServer(ctx context.Context, 
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore", runtime.WithHTTPPathPattern("/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore", runtime.WithHTTPPathPattern("/iam/v1/internal/notificationGrants/{namespace}:restore"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -243,7 +279,7 @@ func RegisterInternalNotificationGrantServiceHandlerClient(ctx context.Context, 
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke", runtime.WithHTTPPathPattern("/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Revoke", runtime.WithHTTPPathPattern("/iam/v1/internal/notificationGrants/{namespace}:revoke"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -260,7 +296,7 @@ func RegisterInternalNotificationGrantServiceHandlerClient(ctx context.Context, 
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore", runtime.WithHTTPPathPattern("/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/kaname.cloud.iam.v1.InternalNotificationGrantService/Restore", runtime.WithHTTPPathPattern("/iam/v1/internal/notificationGrants/{namespace}:restore"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -278,8 +314,8 @@ func RegisterInternalNotificationGrantServiceHandlerClient(ctx context.Context, 
 
 var (
 	pattern_InternalNotificationGrantService_ResolveSend_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"kaname.cloud.iam.v1.InternalNotificationGrantService", "ResolveSend"}, ""))
-	pattern_InternalNotificationGrantService_Revoke_0      = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"kaname.cloud.iam.v1.InternalNotificationGrantService", "Revoke"}, ""))
-	pattern_InternalNotificationGrantService_Restore_0     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"kaname.cloud.iam.v1.InternalNotificationGrantService", "Restore"}, ""))
+	pattern_InternalNotificationGrantService_Revoke_0      = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 1, 0, 4, 1, 5, 4}, []string{"iam", "v1", "internal", "notificationGrants", "namespace"}, "revoke"))
+	pattern_InternalNotificationGrantService_Restore_0     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 1, 0, 4, 1, 5, 4}, []string{"iam", "v1", "internal", "notificationGrants", "namespace"}, "restore"))
 )
 
 var (

@@ -37,11 +37,11 @@
 //	event_type    text         IN ('fga.tuple.write','fga.tuple.delete')
 //	payload       jsonb        {"user":"…","object":"…"} плюс ЛИБО "relation"
 //	                           (одно отношение), ЛИБО "relations" (весь набор
-//	                           субъекта на этом объекте; см. emitTx); у строки
+//	                           субъекта на этом объекте; см. EmitJournalTx); у строки
 //	                           ПУБЛИКАЦИИ ещё "source_version" — версия
 //	                           владельца (см. EmitPublicationTx)
 //	created_at    timestamptz  default now(); этот производитель ставит
-//	                           момент входа строки (clock_timestamp(), см. emitTx)
+//	                           момент входа строки (clock_timestamp(), см. EmitJournalTx)
 //
 // Величин доставки (`sent_at`, `last_error`, `attempt_count`) здесь НЕТ, и перечислять
 // их было бы не описанием, а обещанием: запрос по ним отвергается базой (42703).
@@ -114,7 +114,7 @@ func RelationPredicate(payloadExpr, arg string) string {
 // len(tuples)==0 is a no-op (returns nil) — caller decides whether 0 tuples
 // is an error.
 func EmitWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
-	return emitTx(ctx, tx, EventTypeWrite, tuples)
+	return EmitJournalTx(ctx, tx, tuples, nil)
 }
 
 // EmitDeleteTx INSERTs N revoke rows into `kaname.fga_outbox` (event_type
@@ -123,7 +123,89 @@ func EmitWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple)
 // Caller supplies the EXACT tuples that were originally written by EmitWriteTx
 // — symmetric revoke. Same atomicity contract as EmitWriteTx.
 func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
-	return emitTx(ctx, tx, EventTypeDelete, tuples)
+	return EmitJournalTx(ctx, tx, nil, tuples)
+}
+
+// EmitJournalTx кладёт в журнал ВЕСЬ набор транзакции — выдачи и отзывы — ОДНИМ
+// оператором в ОДНОМ порядке, общем для всех писателей: (объект, субъект, отношение).
+//
+// # Зачем один вызов на транзакцию, а не по вызову на выдачу
+//
+// Строку журнала прямой факт складывает триггер (`kaname.relation_fact_from_journal`),
+// и он берёт блокировку строки факта на каждый кортеж в порядке строк набора. Порядок
+// внутри одного вызова канонический (см. groupByGrant), но МЕЖДУ вызовами его не держит
+// никто: транзакция, кладущая журнал по выдаче — член первой, её кортежи, член второй, —
+// приходит к очередной строке факта, уже удерживая строку предыдущей. Встречная
+// транзакция с тем же набором в каноническом порядке берёт те же строки в обратном
+// порядке, и база снимает одну из сторон отказом 40P01. Воспроизведено пробой
+// (access_binding/delete_sibling_full_pass_deadlock_integration_test.go): снятие выдачи
+// на аккаунт, совпавшее с полным проходом соседней выдачи того же субъекта на проект,
+// кончается отказом, и снятая выдача остаётся жить; тот же исход снятия наблюдался на
+// конвейере (kaname#689).
+//
+// Поэтому вызывающий, у которого журнала больше одного набора, КОПИТ его и кладёт здесь
+// один раз — последним шагом своей работы со строками прав: тогда к строкам факта он
+// приходит, не удерживая ничего, чего ждал бы встречный писатель факта.
+//
+// # Выдача и отзыв одного ключа в одном наборе
+//
+// Кортеж не может быть в обоих списках сразу: порядок «выдать, потом снять» и «снять,
+// потом выдать» дают разный исход, а один оператор порядка между ними не несёт. Такой
+// набор отвергается, а не упорядочивается молча.
+//
+// Разные отношения одного субъекта на одном объекте — законны (правило роли поменяло
+// глаголы: одни сняты, другие выданы). Строка журнала несёт отношения ОДНОГО рода, и
+// группа «выдано» шла бы целиком раньше группы «снято» — то есть порядок по отношению
+// внутри пары субъект–объект был бы нарушен ровно там, где обе транзакции её делят.
+// Такая пара раскладывается по строке на отношение: порядок (объект, субъект,
+// отношение) сохраняется до последнего кортежа. Цена — несколько строк вместо одной
+// на пару, которая и без того меняет свой набор; видимость не дробится, потому что
+// факт складывается в той же транзакции и становится виден с её коммитом.
+//
+// len(writes)+len(deletes)==0 — пустая операция.
+func EmitJournalTx(ctx context.Context, tx pgx.Tx, writes, deletes []clients.RelationTuple) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	rows, err := journalRows(writes, deletes)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	eventTypes := make([]string, 0, len(rows))
+	payloads := make([]string, 0, len(rows))
+	for _, r := range rows {
+		payload, err := r.payload()
+		if err != nil {
+			return err
+		}
+		eventTypes = append(eventTypes, r.eventType)
+		payloads = append(payloads, payload)
+	}
+	// ОДИН стейтмент на весь набор. Порядок строк задан ЯВНО (`ORDER BY ord`), а
+	// возрастающие id и метки назначаются в нём же — то есть в каноническом порядке.
+	//
+	// МЕТКА СТРОКИ — МОМЕНТ ЕЁ ВХОДА В ЖУРНАЛ (`clock_timestamp()`), А НЕ НАЧАЛА
+	// ТРАНЗАКЦИИ (`now()`). Проекция в прямой факт упорядочивает строку без версии
+	// владельца этой меткой, а порядок двух намерений об одном объекте задаёт
+	// блокировка его головы: снятие кладёт свою строку, лишь дождавшись коммита
+	// регистрации, которую снимает. С меткой начала транзакции снятие, начавшее её
+	// раньше регистрации, несло метку старше записанного факта, и факт переживал
+	// своё снятие — кортеж `parent` оставался на снятом объекте (NTF3-174,
+	// kaname#667). Метка входа упорядочена так же, как блокировка, под которой
+	// строка входит.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+		 SELECT u.e, u.p::jsonb, clock_timestamp()
+		   FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS u(e, p, ord)
+		  ORDER BY u.ord`,
+		eventTypes, payloads,
+	); err != nil {
+		return fmt.Errorf("fga_outbox: insert journal set (%d rows): %w", len(rows), err)
+	}
+	return nil
 }
 
 // EmitPublicationTx кладёт строку журнала ПУБЛИКАЦИИ объекта для анонимного
@@ -190,8 +272,9 @@ func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object st
 	return nil
 }
 
-// emitTx enqueues the tuples GROUPED BY (user, object): one row per subject per
-// object, carrying that subject's WHOLE relation set on it.
+// journalRow — one row of the journal set: one subject's relations of ONE kind on one
+// object. journalRows builds them GROUPED BY (user, object): one row per subject per
+// object, carrying that subject's WHOLE relation set of that kind on it.
 //
 // WHY THE ROW IS THE SET AND NOT THE TUPLE. The drainer applies one row per call,
 // so the row is the unit that lands atomically. With a row per tuple the
@@ -211,72 +294,94 @@ func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object st
 // them changes. Only a genuine SET takes the `relations` form, and only a GRANT set
 // additionally carries the compatibility echo — see the branch below for why the two
 // directions differ.
-func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple) error {
-	if tx == nil {
-		return fmt.Errorf("fga_outbox: tx must not be nil")
+type journalRow struct {
+	eventType string
+	grantGroup
+}
+
+// journalRows раскладывает набор транзакции в строки журнала канонического порядка
+// (объект, субъект, отношение) — разбор см. у EmitJournalTx.
+func journalRows(writes, deletes []clients.RelationTuple) ([]journalRow, error) {
+	type key struct{ user, object string }
+	written := make(map[clients.RelationTuple]struct{}, len(writes))
+	for _, t := range writes {
+		written[t] = struct{}{}
 	}
-	if len(tuples) == 0 {
-		return nil
+	for _, t := range deletes {
+		if _, both := written[t]; both {
+			return nil, fmt.Errorf("fga_outbox: tuple %s#%s@%s is both granted and revoked in one journal set — "+
+				"the order between them is not carried by one statement", t.Object, t.Relation, t.User)
+		}
 	}
-	groups := groupByGrant(tuples)
-	payloads := make([]string, 0, len(groups))
-	for _, g := range groups {
-		fields := map[string]any{"user": g.user, "object": g.object}
-		if len(g.relations) == 1 {
-			fields["relation"] = g.relations[0]
-		} else {
-			fields["relations"] = g.relations
-			if eventType == EventTypeWrite {
-				// COMPATIBILITY ECHO — GRANTS ONLY, and the asymmetry is the point.
-				//
-				// During a rolling upgrade a pod that predates the set form still claims
-				// these rows. Given an echo it applies ONE relation and marks the row
-				// delivered; given none it cannot decode the row and poisons it.
-				//
-				// For a GRANT the first outcome is better: the subject ends up with less
-				// access than it is owed (fail-closed), the row is consumed, and the next
-				// reconcile pass completes it.
-				//
-				// For a REVOKE it is strictly worse, and irrecoverably so: the row is
-				// marked delivered while most of the set SURVIVES ITS OWN REMOVAL — an
-				// over-grant that is invisible to the poison ledger, to the wedge warning
-				// and to the redrive, because as far as the queue is concerned the work
-				// is done. A poisoned revoke, by contrast, is visible in all three and is
-				// re-driven on the first model observation after a pod starts — which the
-				// end of the rollout guarantees. So revokes carry no echo: better stuck
-				// and loud than applied in part and silent.
-				fields["relation"] = g.relations[0]
+	wg, dg := groupByGrant(writes), groupByGrant(deletes)
+	mixed := make(map[key]struct{})
+	inWrites := make(map[key]struct{}, len(wg))
+	for _, g := range wg {
+		inWrites[key{g.user, g.object}] = struct{}{}
+	}
+	for _, g := range dg {
+		if _, ok := inWrites[key{g.user, g.object}]; ok {
+			mixed[key{g.user, g.object}] = struct{}{}
+		}
+	}
+	rows := make([]journalRow, 0, len(wg)+len(dg))
+	add := func(eventType string, groups []grantGroup) {
+		for _, g := range groups {
+			if _, split := mixed[key{g.user, g.object}]; !split {
+				rows = append(rows, journalRow{eventType: eventType, grantGroup: g})
+				continue
+			}
+			for _, rel := range g.relations {
+				rows = append(rows, journalRow{eventType: eventType,
+					grantGroup: grantGroup{user: g.user, object: g.object, relations: []string{rel}}})
 			}
 		}
-		payload, err := json.Marshal(fields)
-		if err != nil {
-			return fmt.Errorf("fga_outbox: marshal payload: %w", err)
+	}
+	add(EventTypeWrite, wg)
+	add(EventTypeDelete, dg)
+	// Отношения строки отсортированы (groupByGrant), а строки одной пары разного рода
+	// разложены по отношению — поэтому сравнения по первому отношению достаточно для
+	// полного порядка (объект, субъект, отношение).
+	slices.SortStableFunc(rows, func(a, b journalRow) int {
+		return cmp.Or(cmp.Compare(a.object, b.object), cmp.Compare(a.user, b.user),
+			cmp.Compare(a.relations[0], b.relations[0]))
+	})
+	return rows, nil
+}
+
+func (r journalRow) payload() (string, error) {
+	fields := map[string]any{"user": r.user, "object": r.object}
+	if len(r.relations) == 1 {
+		fields["relation"] = r.relations[0]
+	} else {
+		fields["relations"] = r.relations
+		if r.eventType == EventTypeWrite {
+			// COMPATIBILITY ECHO — GRANTS ONLY, and the asymmetry is the point.
+			//
+			// During a rolling upgrade a pod that predates the set form still claims
+			// these rows. Given an echo it applies ONE relation and marks the row
+			// delivered; given none it cannot decode the row and poisons it.
+			//
+			// For a GRANT the first outcome is better: the subject ends up with less
+			// access than it is owed (fail-closed), the row is consumed, and the next
+			// reconcile pass completes it.
+			//
+			// For a REVOKE it is strictly worse, and irrecoverably so: the row is
+			// marked delivered while most of the set SURVIVES ITS OWN REMOVAL — an
+			// over-grant that is invisible to the poison ledger, to the wedge warning
+			// and to the redrive, because as far as the queue is concerned the work
+			// is done. A poisoned revoke, by contrast, is visible in all three and is
+			// re-driven on the first model observation after a pod starts — which the
+			// end of the rollout guarantees. So revokes carry no echo: better stuck
+			// and loud than applied in part and silent.
+			fields["relation"] = r.relations[0]
 		}
-		payloads = append(payloads, string(payload))
 	}
-	// ОДИН стейтмент на все строки вместо одного на строку. `unnest` в FROM выдаёт
-	// элементы в порядке массива, поэтому возрастающие id назначаются в том порядке,
-	// какой задал groupByGrant, — а ему порядок задан ОБЩИЙ для всех писателей (см.
-	// там). Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
-	// коммутативны, и id второго вызова всегда больше id первого.
-	//
-	// МЕТКА СТРОКИ — МОМЕНТ ЕЁ ВХОДА В ЖУРНАЛ (`clock_timestamp()`), А НЕ НАЧАЛА
-	// ТРАНЗАКЦИИ (`now()`). Проекция в прямой факт упорядочивает строку без версии
-	// владельца этой меткой, а порядок двух намерений об одном объекте задаёт
-	// блокировка его головы: снятие кладёт свою строку, лишь дождавшись коммита
-	// регистрации, которую снимает. С меткой начала транзакции снятие, начавшее её
-	// раньше регистрации, несло метку старше записанного факта, и факт переживал
-	// своё снятие — кортеж `parent` оставался на снятом объекте (NTF3-174,
-	// kaname#667). Метка входа упорядочена так же, как блокировка, под которой
-	// строка входит.
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, p::jsonb, clock_timestamp() FROM unnest($2::text[]) AS p`,
-		eventType, payloads,
-	); err != nil {
-		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return "", fmt.Errorf("fga_outbox: marshal payload: %w", err)
 	}
-	return nil
+	return string(payload), nil
 }
 
 // grantGroup — one subject's relation set on one object: the unit a row carries and
@@ -303,7 +408,11 @@ type grantGroup struct {
 // Reordering is safe because nothing inside one call depends on the caller's order:
 // the rows of one set are always different (user, object) keys, and rows of different
 // keys commute. The order that does matter — a grant and a revoke of the SAME key —
-// lies across calls, and the INSERT below keeps it (later call, larger id).
+// lies across calls, and the INSERT keeps it (later call, larger id).
+//
+// The order is canonical WITHIN one call only. A transaction that folds the journal in
+// several calls takes fact rows in call order, which no other writer shares — so a
+// transaction with more than one set accumulates it and folds it once (EmitJournalTx).
 //
 // De-duplication matters because the store rejected a request naming the same tuple
 // twice (cannot_allow_duplicate_tuples_in_one_request), and a caller that

@@ -11,10 +11,13 @@
 // mTLS). Право модуля слать письма от имени своего пространства уведомлений
 // (приёмка NTF-1 Р5, замысел issue-2915 З18).
 //
-// НИ ОДНОЙ REST-привязки — намеренно и как инвариант (NTF1-C01, C02):
-// служба не маршрутизируется ни на внешний край, ни на REST внутреннего края.
-// Достижима только прямым gRPC по mTLS на внутренний слушатель kaname; имя
-// `Internal…Service` не публикуется на внешнем слушателе (ban #6).
+// Маршруты — только у рычага оператора и только под сегментом `/internal/`
+// (решение владельца 2026-10-08, п. 1): `Revoke` и `Restore` зовёт
+// администратор кластера своей личностью через ВНУТРЕННИЙ край, новой
+// машинной учётки нет. На внешнем крае служба не маршрутизируется, имя
+// `Internal…Service` на внешнем слушателе не публикуется (ban #6).
+// `ResolveSend` привязки не имеет: его зовёт служба notify прямым gRPC по
+// mTLS, право решает обработчик, и REST-двери у этого вопроса нет.
 //
 // Записи выдачи две, обе у kaname:
 //   - запись пространства `{namespace, выдано, отозвано, отсечка}`; кортеж
@@ -38,6 +41,7 @@ import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
 	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -351,7 +355,7 @@ var File_kaname_cloud_iam_v1_internal_notification_grant_service_proto protorefl
 
 const file_kaname_cloud_iam_v1_internal_notification_grant_service_proto_rawDesc = "" +
 	"\n" +
-	"=kaname/cloud/iam/v1/internal_notification_grant_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x8b\x01\n" +
+	"=kaname/cloud/iam/v1/internal_notification_grant_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x8b\x01\n" +
 	"\x12ResolveSendRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12;\n" +
@@ -371,15 +375,15 @@ const file_kaname_cloud_iam_v1_internal_notification_grant_service_proto_rawDesc
 	"\x19SEND_DECISION_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05ALLOW\x10\x01\x12\x13\n" +
 	"\x0fNOT_YET_GRANTED\x10\x02\x12\v\n" +
-	"\aREVOKED\x10\x032\xd8\x04\n" +
+	"\aREVOKED\x10\x032\xdd\x05\n" +
 	" InternalNotificationGrantService\x12\x83\x01\n" +
-	"\vResolveSend\x12'.kaname.cloud.iam.v1.ResolveSendRequest\x1a(.kaname.cloud.iam.v1.ResolveSendResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xd4\x01\n" +
-	"\x06Revoke\x12-.kaname.cloud.iam.v1.NotificationGrantRequest\x1a\x1c.corelib.operation.Operation\"}\x8a\xb5\x18\x1eiam.notification_grants.revoke\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\vResolveSend\x12'.kaname.cloud.iam.v1.ResolveSendRequest\x1a(.kaname.cloud.iam.v1.ResolveSendResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x96\x02\n" +
+	"\x06Revoke\x12-.kaname.cloud.iam.v1.NotificationGrantRequest\x1a\x1c.corelib.operation.Operation\"\xbe\x01\x8a\xb5\x18\x1eiam.notification_grants.revoke\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*2\n" +
-	"\x19NotificationGrantMetadata\x12\x15google.protobuf.Empty\x12\xd6\x01\n" +
-	"\aRestore\x12-.kaname.cloud.iam.v1.NotificationGrantRequest\x1a\x1c.corelib.operation.Operation\"~\x8a\xb5\x18\x1fiam.notification_grants.restore\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\x19NotificationGrantMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02;:\x01*\"6/iam/v1/internal/notificationGrants/{namespace}:revoke\x12\x99\x02\n" +
+	"\aRestore\x12-.kaname.cloud.iam.v1.NotificationGrantRequest\x1a\x1c.corelib.operation.Operation\"\xc0\x01\x8a\xb5\x18\x1fiam.notification_grants.restore\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*2\n" +
-	"\x19NotificationGrantMetadata\x12\x15google.protobuf.EmptyBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"\x19NotificationGrantMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02<:\x01*\"7/iam/v1/internal/notificationGrants/{namespace}:restoreBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_internal_notification_grant_service_proto_rawDescOnce sync.Once

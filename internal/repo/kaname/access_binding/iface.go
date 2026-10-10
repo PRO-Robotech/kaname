@@ -266,6 +266,14 @@ type WriterIface interface {
 	// EmitRelationDelete — symmetric revoke for EmitRelationWrite (event_type='fga.tuple.delete').
 	EmitRelationDelete(ctx context.Context, tuples []RelationTuple) error
 
+	// EmitRelationJournal — the transaction's WHOLE journal set, grants and revokes, in
+	// ONE call: one statement, in the one order every journal writer shares (object,
+	// subject, relation). A transaction with more than one set (a fan-out over several
+	// bindings, a revoke plus a grant) uses THIS instead of a write and a delete call
+	// each — the trigger takes fact rows in call order, which no other writer shares
+	// (fga_outbox.EmitJournalTx). A tuple may not be both granted and revoked.
+	EmitRelationJournal(ctx context.Context, writes, deletes []RelationTuple) error
+
 	// InsertEmittedTuples persists the EXACT FGA tuples emitted for a binding into
 	// kaname.access_binding_emitted_tuples in THIS writer-tx — co-committed with
 	// the matching EmitRelationWrite (ban #10). The ledger row commits iff

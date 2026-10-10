@@ -91,9 +91,9 @@ const (
 	svcRecipients  = "/kaname.cloud.iam.v1.InternalNotificationRecipientService/"
 )
 
-// internalAddressGateTable — таблицы Р4в: 18 строк круга и 18 вне круга.
+// internalAddressGateTable — таблицы Р4в: 20 строк круга и 18 вне круга.
 var internalAddressGateTable = map[string]InternalAddressGateRow{
-	// ── круг края (18) ──
+	// ── круг края (20) ──
 	svcRevocations + "Revoke": {GateAllowsSelfRevoke,
 		"снятие собственного удостоверения есть выход (Р2) и доступа не прибавляет; о другом человеке — не выход"},
 	svcRevocations + "ListByUser": {GateRefuses,
@@ -115,6 +115,13 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 	svcOperations + "ListIamOperations": {GateRefuses, "операции службы — чтение распорядителя"},
 	svcUser + "UpsertFromIdentity": {GateRefuses,
 		"от лица человека — отказ; без принципала-человека (обратный вызов поставщика от имени системы) рубеж молчит, исход судит правило приглашения"},
+	// Рычаг оператора над выдачей права на письма (NTF-1, kaname#484): зовёт
+	// администратор кластера своей личностью через внутренний край (решение
+	// владельца 2026-10-08, п. 1).
+	svcNotifyGrant + "Revoke": {GateRefuses,
+		"рычаг оператора над выдачей права на письма — действие распорядителя облака через край"},
+	svcNotifyGrant + "Restore": {GateRefuses,
+		"рычаг оператора над выдачей права на письма — действие распорядителя облака через край"},
 
 	// ── вне круга (18) ──
 	svcIAM + "Check": {GateOutsideCircle,
@@ -147,14 +154,10 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"публикация для анонимного чтения модулем-владельцем типа (NTF-3 Р30): тот же довод, что у записи материализации; круг судит дверь регистрации и владение типом в обработчике"},
 	svcUser + "Get": {GateOutsideCircle,
 		"чтение строки человека краем: ответ — строка, а не право"},
-	// Служба выдачи права на письма (NTF-1, kaname#484): контракт без REST-привязки, края-маршрута нет,
-	// поэтому в круг края методы не входят. Попадёт метод в круг — строка переходит туда же.
+	// Служба выдачи права на письма (NTF-1, kaname#484): решение о письме привязки края не имеет,
+	// его зовёт служба notify; рычаг оператора (`Revoke`, `Restore`) — в круге выше.
 	svcNotifyGrant + "ResolveSend": {GateOutsideCircle,
 		"решение о письме для службы notify: вызывающий — служебный принципал по сертификату, человека на пути нет; право решает обработчик вопросом reader к модели"},
-	svcNotifyGrant + "Revoke": {GateOutsideCircle,
-		"рычаг оператора над выдачей: маршрута края нет, человек-принципал до метода не доходит; право system_admin судит путь обслуживания, который заводит K3"},
-	svcNotifyGrant + "Restore": {GateOutsideCircle,
-		"рычаг оператора над выдачей: тот же довод, что у Revoke"},
 	svcRecipients + "Resolve": {GateOutsideCircle,
 		"справочник адресов для службы notify (NTF-3 Р7): вызывающий — служебный принципал по сертификату, маршрута края нет; право решает обработчик вопросом reader на справочник к модели"},
 	svcRecipients + "ListEventAudience": {GateOutsideCircle,

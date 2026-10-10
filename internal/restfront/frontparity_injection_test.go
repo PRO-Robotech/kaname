@@ -370,9 +370,9 @@ func build() *runtime.ServeMux {
 // пустая, а не как неизвестная; близнец — внутренняя служба с маршрутами.
 func TestContractRoutesKnowsARoutelessService(t *testing.T) {
 	declared, _ := contractRoutes()
-	routes, known := declared["InternalNotificationGrantService"]
+	routes, known := declared["InternalNotificationRecipientService"]
 	if !known || len(routes) != 0 {
-		t.Fatalf("InternalNotificationGrantService: известна=%v, маршрутов %d — ожидалась известная служба без маршрутов",
+		t.Fatalf("InternalNotificationRecipientService: известна=%v, маршрутов %d — ожидалась известная служба без маршрутов",
 			known, len(routes))
 	}
 	if twin := declared["InternalClusterService"]; len(twin) == 0 {

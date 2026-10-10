@@ -216,17 +216,19 @@ func TestEV61_AdmissionBeforeArgumentParsing(t *testing.T) {
 	require.True(t, found, "EV-61 (б): нарушение поля page_size")
 }
 
-// TestEV62_EdgeCircleOnTheInternalListener — EV-62: 18 методов круга края; 17 —
+// TestEV62_EdgeCircleOnTheInternalListener — EV-62: 20 методов круга края; 19 —
 // отказ Р3, Revoke о себе — своим исходом; контроль вида принципала —
 // системный принципал отказа положения не получает. Приёмка называет 19: в
 // круг входил глагол обратного вызова прежнего поставщика восстановления,
-// снятый вместе с поставщиком (kaname#564).
+// снятый вместе с поставщиком (kaname#564); два глагола рычага над выдачей
+// права на письма (`InternalNotificationGrantService/Revoke`, `/Restore`)
+// вошли в круг с маршрутом внутреннего края (решение владельца 2026-10-08).
 func TestEV62_EdgeCircleOnTheInternalListener(t *testing.T) {
 	w := newGateWorld(t)
 	w.person(t, "usr-ev62a", false)
 	w.person(t, "usr-ev62b", true)
 	circle := authzguard.GatewayFrontedInternalRPCs()
-	require.Len(t, circle, 18, "перепись круга края")
+	require.Len(t, circle, 20, "перепись круга края")
 	revoke := "/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke"
 	var refused int
 	for _, m := range circle {
@@ -253,7 +255,7 @@ func TestEV62_EdgeCircleOnTheInternalListener(t *testing.T) {
 		require.NoErrorf(t, err, "EV-62: системный принципал — рубеж судит человека, а не метод (%s)", m)
 		require.True(t, reached)
 	}
-	require.Equal(t, 17, refused, "EV-62 (а): отказ Р3 на 17 методах")
+	require.Equal(t, 19, refused, "EV-62 (а): отказ Р3 на 19 методах")
 	t.Logf("EV-62: осмотрено методов круга %d, отказов %d", len(circle), refused)
 }
 
@@ -351,7 +353,7 @@ func TestInternalAddressGateTablesAreClosed(t *testing.T) {
 	findings := authzguard.InternalAddressGateFindings(circle, internal, table)
 	t.Logf("перепись: круг края %d · методов внутренних служб %d · строк таблиц %d", len(circle), len(internal), len(table))
 	require.Empty(t, findings)
-	require.Len(t, circle, 18)
+	require.Len(t, circle, 20)
 	require.Len(t, internal, 38)
 }
 
