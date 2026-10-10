@@ -60,6 +60,13 @@ FP-12 заводит ей пароль, и после прогона полос�
          записи недостижимы; клиента церемонии в окружении нет. Вердикта о
          дереве нет.
 
+ПРИВЯЗКА СТЕНДА (kaname#684). Имя доверяющей стороны и происхождение консоли —
+величины установки: посев берёт их из переменных `KANAME_STAND_ACCESS_KEYS_RP_ID`
+и `KANAME_STAND_ACCESS_KEYS_ORIGIN` (обе либо ни одной), а без них — из профиля
+поставки (`deploy/values.prod.yaml`, `authn.accessKeys`, первое происхождение).
+Разрешённая привязка уезжает в окружение ключами `accessKeysRpId` и
+`accessKeysOrigin`: набор `kaname-access-keys` собирает церемонии под неё же.
+
 ПАРОЛЬ, ТОКЕН И ПОЧТА НЕ ПЕЧАТАЮТСЯ.
 
 САМОПРОВЕРКА — `--self-test`: кодирование аттестации (CBOR, ключ COSE RS256) и
@@ -76,6 +83,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import secrets
@@ -105,7 +113,12 @@ RC_UNMET = 75
 # «личность без пароля» Ф13 набора ключей доступа.
 PREFIXES = ("keyPerson", "f13Person")
 FIELDS = ("Email", "CredentialId", "UserHandle", "Origin")
-MINTED_KEYS = tuple(prefix + field for prefix in PREFIXES for field in FIELDS)
+# Привязка ключей доступа СТЕНДА — имя доверяющей стороны и происхождение консоли,
+# под которыми посев доказал регистрацию. Набор `kaname-access-keys` собирает
+# церемонии под них же (ключ окружения, иначе величина профиля), поэтому они
+# уезжают в окружение тем же посевом, а не выписываются в наборе второй раз.
+BINDING_KEYS = ("accessKeysRpId", "accessKeysOrigin")
+MINTED_KEYS = tuple(prefix + field for prefix in PREFIXES for field in FIELDS) + BINDING_KEYS
 MINTED_SURFACE = "служба (собственный REST-фронт)"
 
 DOMAIN = "kaname.local"
@@ -116,6 +129,15 @@ KEY_SLOT = 0
 
 AUTHENTICATOR = ROOT / "tests" / "newman" / "cases" / "kaname-access-keys.py"
 PROFILE = ROOT / "deploy" / "values.prod.yaml"
+
+# Ручки стенда (kaname#684): имя доверяющей стороны и происхождение консоли,
+# которые объявляет СТЕНД. Автономный стенд службы их не называет — тогда
+# величины профиля поставки; стенд платформы объявляет свои (происхождение — из
+# адреса консоли своего пространства) и называет их здесь. Обе или ни одной.
+ENV_RP_ID = "KANAME_STAND_ACCESS_KEYS_RP_ID"
+ENV_ORIGIN = "KANAME_STAND_ACCESS_KEYS_ORIGIN"
+_RP_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
+_ORIGIN_RE = re.compile(r"^https://([a-z0-9.-]+)(:[0-9]{1,5})?$")
 
 OP_BUDGET_S, OP_STEP_S = 30.0, 0.5
 
@@ -164,6 +186,37 @@ def profile_binding(path: pathlib.Path = PROFILE) -> tuple[str, str]:
     if len(found) != 1:
         raise Finding(f"{path.name}: блок authn.accessKeys найден {len(found)} раз — ждали ровно один")
     return found[0]
+
+
+def stand_binding(environ) -> tuple[str, str]:
+    """Привязка стенда: переменные `KANAME_STAND_ACCESS_KEYS_*`, без них — профиль.
+
+    Названа одна из двух — условие не создано: половина привязки стенда с
+    половиной профиля дала бы церемонию, которую продукт честно отвергнет, и
+    отказ читался бы дефектом. По той же причине отвергается величина, под
+    которой аутентификатор церемонию не собрал бы: имя со схемой, портом либо
+    заглавными; происхождение не `https://хост[:порт]` либо вне имени доверяющей
+    стороны; происхождение, совпавшее с «чужим» набора (`https://elsewhere.<имя>`)."""
+    rp_id = (environ.get(ENV_RP_ID) or "").strip()
+    origin = (environ.get(ENV_ORIGIN) or "").strip()
+    if not rp_id and not origin:
+        return profile_binding()
+    if not (rp_id and origin):
+        raise Unmet(f"названа одна из двух ручек привязки стенда ({ENV_RP_ID}, {ENV_ORIGIN}) — "
+                    "нужны обе либо ни одной")
+    if not _RP_ID_RE.match(rp_id):
+        raise Unmet(f"{ENV_RP_ID}: ждали доменное имя строчными без схемы и порта")
+    m = _ORIGIN_RE.match(origin)
+    if not m:
+        raise Unmet(f"{ENV_ORIGIN}: ждали https://хост[:порт] без пути")
+    host = m.group(1)
+    if host != rp_id and not host.endswith("." + rp_id):
+        raise Unmet(f"{ENV_ORIGIN}: хост происхождения не лежит под именем доверяющей стороны "
+                    f"из {ENV_RP_ID}")
+    if origin == "https://elsewhere." + rp_id:
+        raise Unmet(f"{ENV_ORIGIN} совпадает с «чужим» происхождением набора — отрицательные кейсы "
+                    "перестанут быть отрицательными")
+    return rp_id, origin
 
 
 # ─────────────────────────── результат церемонии регистрации ─────────────────
@@ -264,7 +317,9 @@ def register_key(doors, token: str, user: str, key: dict, rp_id: str, origin: st
     if not challenge or not handle:
         raise Finding("испытание регистрации ключа без challenge либо без рукоятки user.id")
     if (ch.get("rp") or {}).get("id") != rp_id:
-        raise Finding("испытание называет доверяющую сторону, которой профиль не объявляет")
+        raise Finding("испытание называет доверяющую сторону, отличную от привязки посева — стенд "
+                      f"объявляет своё имя, а {ENV_RP_ID} и {ENV_ORIGIN} его не называют либо называют "
+                      "не то")
     cred_id = secrets.token_bytes(16)
     code, _, text = doors.http(base, method="POST", headers=auth, body={
         "name": "", "description": "", "credential": registration_result(key, challenge, rp_id, origin, cred_id)})
@@ -334,7 +389,7 @@ def client_of(env_file: pathlib.Path) -> tuple[str, str, str]:
 def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
          sleep=time.sleep, prefix: str = PREFIXES[0]) -> dict:
     key = (keys or authenticator_keys())[KEY_SLOT]
-    rp_id, origin = binding or profile_binding()
+    rp_id, origin = binding or stand_binding(os.environ)
     email = f"key-person-{secrets.token_hex(6)}@{DOMAIN}"
     password = "Key-" + secrets.token_hex(12)
     seed_person(lane, mailbox, email, password, sleep)
@@ -358,12 +413,18 @@ def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None
 
 def seed_all(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
              sleep=time.sleep) -> dict:
-    """Обе личности, каждая под своей приставкой: свежая почта, свой ключ, своя рукоятка."""
+    """Обе личности, каждая под своей приставкой: свежая почта, свой ключ, своя рукоятка.
+
+    Привязка разрешается ОДИН раз и уезжает в окружение рядом с личностями: набор
+    ключей доступа собирает церемонии под ту же привязку, под которой посев
+    доказал регистрацию."""
+    binding = binding or stand_binding(os.environ)
     patch: dict = {}
     for prefix in PREFIXES:
         patch.update(seed(lane, mailbox, doors, store, client, keys=keys, binding=binding,
                           sleep=sleep, prefix=prefix))
         say(f"  ok   личность «{prefix}» положена")
+    patch.update(dict(zip(BINDING_KEYS, binding)))
     return patch
 
 
@@ -461,6 +522,33 @@ def self_test() -> int:
         rp, origin = profile_binding()
         _c("имя доверяющей стороны и происхождение — из профиля поставки", bool(rp) and origin.startswith("https://"),
            f"{rp} {origin}")
+        stand_rp, stand_origin = "stand.example.invalid", "https://console.stand.example.invalid:20001"
+        for label, env, want in [
+            ("переменных стенда нет — величины профиля", {}, ("ok", str((rp, origin)))),
+            ("переменные пусты — величины профиля", {ENV_RP_ID: "", ENV_ORIGIN: " "}, ("ok", str((rp, origin)))),
+            ("обе переменные названы — величины стенда",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: stand_origin}, ("ok", str((stand_rp, stand_origin)))),
+            ("происхождение — само имя без поддомена — законно",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: "https://" + stand_rp}, ("ok", str((stand_rp, "https://" + stand_rp)))),
+            ("названо одно имя — условие не создано", {ENV_RP_ID: stand_rp}, ("unmet", None)),
+            ("названо одно происхождение — условие не создано", {ENV_ORIGIN: stand_origin}, ("unmet", None)),
+            ("имя со схемой — условие не создано", {ENV_RP_ID: "https://" + stand_rp, ENV_ORIGIN: stand_origin},
+             ("unmet", None)),
+            ("имя заглавными — условие не создано", {ENV_RP_ID: stand_rp.upper(), ENV_ORIGIN: stand_origin},
+             ("unmet", None)),
+            ("происхождение без https — условие не создано",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: "http://console." + stand_rp}, ("unmet", None)),
+            ("происхождение с путём — условие не создано",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: stand_origin + "/"}, ("unmet", None)),
+            ("происхождение вне имени доверяющей стороны — условие не создано",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: "https://console.other.example.invalid"}, ("unmet", None)),
+            ("хвост имени без точки не делает происхождение своим — условие не создано",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: "https://evil" + stand_rp}, ("unmet", None)),
+            ("происхождение совпало с «чужим» набора — условие не создано",
+             {ENV_RP_ID: stand_rp, ENV_ORIGIN: "https://elsewhere." + stand_rp}, ("unmet", None)),
+        ]:
+            got = _outcome(lambda env=env: stand_binding(env))
+            _c(label, got[0] == want[0] and (want[1] is None or got[1] == want[1]), f"{got}")
 
         res = registration_result({"n": "c0ffee", "e": "010001"}, b"\x01" * 4, "kaname.local",
                                   "https://kaname.local", b"\x02" * 16)
@@ -481,7 +569,8 @@ def self_test() -> int:
         def sow(doors=None, store=None, after_login=None):
             login_answer["value"] = after_login
             d, s = doors or _FakeDoors(rp=rp), store or _FakeStore()
-            return _outcome(lambda: seed_all(None, None, d, s, ("c", "s", "r"), sleep=lambda _: None)), d, s
+            return _outcome(lambda: seed_all(None, None, d, s, ("c", "s", "r"), binding=(rp, origin),
+                                             sleep=lambda _: None)), d, s
 
         (kind, text), d, s = sow()
         _c("законный мир — у каждой из двух личностей ключ заведён, затем строка пароля снята, вход "
@@ -496,6 +585,23 @@ def self_test() -> int:
         _c("личности разные: своя почта и своё удостоверение у каждой приставки",
            kind == "ok" and patch["keyPersonEmail"] != patch["f13PersonEmail"]
            and patch["keyPersonCredentialId"] != patch["f13PersonCredentialId"], f"{patch}")
+        _c("привязка профиля уезжает в окружение рядом с личностями",
+           kind == "ok" and (patch["accessKeysRpId"], patch["accessKeysOrigin"]) == (rp, origin), f"{patch}")
+
+        login_answer["value"] = None
+        d_st = _FakeDoors(rp=stand_rp)
+        kind_st, text_st = _outcome(lambda: seed_all(None, None, d_st, _FakeStore(), ("c", "s", "r"),
+                                                     binding=stand_binding({ENV_RP_ID: stand_rp,
+                                                                            ENV_ORIGIN: stand_origin}),
+                                                     sleep=lambda _: None))
+        patch_st = json.loads(text_st.replace("'", '"')) if kind_st == "ok" else {}
+        origins_st = {json.loads(base64.b64decode(f["credential"]["clientDataJson"]))["origin"]
+                      for f in d_st.finished}
+        _c("привязка стенда: испытание под его имя проходит, регистрация собрана с его происхождением, "
+           "она же уезжает в окружение",
+           kind_st == "ok" and origins_st == {stand_origin}
+           and (patch_st["accessKeysRpId"], patch_st["accessKeysOrigin"]) == (stand_rp, stand_origin)
+           and patch_st["f13PersonOrigin"] == stand_origin, f"{kind_st}: {text_st} {origins_st}")
         for label, kw, want in [
             ("испытание без рукоятки — находка", {"doors": _FakeDoors(handle=False, rp=rp)}, "finding"),
             ("доверяющая сторона чужая — находка", {"doors": _FakeDoors(rp="elsewhere")}, "finding"),
