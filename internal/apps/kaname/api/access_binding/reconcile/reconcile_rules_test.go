@@ -18,6 +18,7 @@ package reconcile
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -335,14 +336,29 @@ func (f *fakeStore) LedgerTuplesForObject(ctx context.Context, id domain.AccessB
 func (f *fakeStore) TuplesStillClaimedByOtherBindings(ctx context.Context, exclude domain.AccessBindingID, ts []domain.MembershipTuple) (map[domain.MembershipTuple]struct{}, error) {
 	return map[domain.MembershipTuple]struct{}{}, nil
 }
-func (f *fakeStore) EmitTupleWrite(ctx context.Context, ts []domain.MembershipTuple) error {
-	f.note()
-	f.writes = append(f.writes, ts)
-	return nil
-}
-func (f *fakeStore) EmitTupleDelete(ctx context.Context, ts []domain.MembershipTuple) error {
-	f.note()
-	f.tdeletes = append(f.tdeletes, ts)
+
+// EmitTupleJournal кладёт выдачи и отзывы набора в те же наблюдаемые двойника, что
+// прежде клали раздельные вызовы: пробы утверждают, ЧТО записано и снято, а не сколько
+// раз звали. Пустая половина ничего не добавляет. Кортеж в обеих половинах двойник
+// отвергает так же, как настоящий журнал (fga_outbox.EmitJournalTx).
+func (f *fakeStore) EmitTupleJournal(ctx context.Context, writes, deletes []domain.MembershipTuple) error {
+	written := make(map[domain.MembershipTuple]struct{}, len(writes))
+	for _, t := range writes {
+		written[t] = struct{}{}
+	}
+	for _, t := range deletes {
+		if _, both := written[t]; both {
+			return fmt.Errorf("fake journal: tuple %v both granted and revoked in one set", t)
+		}
+	}
+	if len(writes) > 0 {
+		f.note()
+		f.writes = append(f.writes, writes)
+	}
+	if len(deletes) > 0 {
+		f.note()
+		f.tdeletes = append(f.tdeletes, deletes)
+	}
 	return nil
 }
 func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {

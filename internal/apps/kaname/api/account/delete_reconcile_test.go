@@ -355,6 +355,9 @@ func (w delABWriter) Delete(_ context.Context, id domain.AccessBindingID) error 
 func (w delABWriter) EmitRelationDelete(context.Context, []access_binding.RelationTuple) error {
 	return nil
 }
+func (w delABWriter) EmitRelationJournal(context.Context, []access_binding.RelationTuple, []access_binding.RelationTuple) error {
+	return nil
+}
 func (w delABWriter) EmitAuditEvent(context.Context, access_binding.AuditEvent) error { return nil }
 
 // TestAccountDelete_RevokesEveryBinding_NotJustTheFirstPage — deleting an account

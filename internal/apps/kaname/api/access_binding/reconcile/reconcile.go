@@ -307,16 +307,18 @@ type ReconcileStore interface {
 	// other binding be ACTIVE (a REVOKED other binding does not keep a tuple alive).
 	TuplesStillClaimedByOtherBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []domain.MembershipTuple) (map[domain.MembershipTuple]struct{}, error)
 
-	// EmitTupleWrite / EmitTupleDelete enqueue the per-object FGA tuples (+ the
-	// scope hierarchy parent-pointer is the binding-lifecycle concern handled at
-	// Create/Delete, NOT per member) into fga_outbox on the tx.
-	EmitTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error
-	EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error
+	// EmitTupleJournal folds the pass's WHOLE per-object tuple set — grants and
+	// revokes — into the journal (fga_outbox) on the tx, ONCE, in the one order every
+	// journal writer shares (object, subject, relation). The scope hierarchy
+	// parent-pointer is the binding-lifecycle concern handled at Create/Delete, NOT per
+	// member. A pass calls it exactly once, as its LAST write to rights rows: see
+	// syncFGACollector for why a per-member emit deadlocks against a sibling writer.
+	// A tuple may not be both granted and revoked in one set.
+	EmitTupleJournal(ctx context.Context, writes, deletes []domain.MembershipTuple) error
 
 	// RecordEmittedTuples / ForgetEmittedTuples co-commit the per-member FGA tuples
 	// into the persisted emitted-tuple ledger (access_binding_emitted_tuples)
-	// in the SAME reconcile writer-tx as the matching EmitTupleWrite /
-	// EmitTupleDelete (ban #10). The ledger is the authoritative "what was emitted"
+	// in the SAME reconcile writer-tx as the matching EmitTupleJournal (ban #10). The ledger is the authoritative "what was emitted"
 	// set the symmetric revoke (delete.go) replays and the Role.Update reconcile
 	// fan-out diffs against — UNIFYING the selector arm's per-member tuples with the
 	// all_in_scope / resources[] arms' tuples already in the ledger. Without this the
@@ -454,29 +456,53 @@ func (r *Reconciler) observeSize(desired []DesiredMember) {
 	r.size.ObserveBindingMaterialization(len(objects), tuples)
 }
 
-// syncFGACollector accumulates, across a single reconcile pass, the per-object tuples a
-// reconcileBinding emitted to fga_outbox for ACTIVE members. NOTHING is applied anywhere
-// after the pass commits — see the note above SyncFGATuple: the direct fact is folded out
-// of the journal row by a trigger, inside the same transaction. What the collector is
-// still FOR is the subtraction at the end of the pass: flushDeletes must not strip a
-// tuple this very pass re-wrote. A nil collector de-duplicates nothing and the collect
-// calls degrade to cheap pass-throughs. Not concurrency-shared: one collector per WithTx
-// pass, and a pass runs single-goroutine under the per-binding advisory lock.
+// syncFGACollector accumulates, across a single reconcile pass, the per-object tuples the
+// pass grants and revokes, and folds them into the journal ONCE, at the end of the pass
+// (flushJournal). NOTHING is applied anywhere after the pass commits — see the note above
+// SyncFGATuple: the direct fact is folded out of the journal row by a trigger, inside the
+// same transaction. Not concurrency-shared: one collector per WithTx pass, and a pass runs
+// single-goroutine under the per-binding advisory lock.
+//
+// ПОЧЕМУ ЖУРНАЛ КЛАДЁТСЯ В КОНЦЕ ПРОХОДА, А НЕ ПО ЧЛЕНУ. Строку журнала прямой факт
+// складывает триггер, и он берёт блокировку строки факта — общей для всех выдач
+// субъекта: факт ключуется субъектом, объектом и отношением, а не выдачей. Проход,
+// писавший журнал по члену, приходил к строке члена следующей выдачи (либо к строке
+// факта следующего члена) уже удерживая строку факта предыдущего — а встречные писатели
+// берут те же строки в своём порядке:
+//
+//   - быстрый путь создания соседней выдачи держит СВОИ строки членов и ждёт строку
+//     факта, которую проход уже взял, — проход ждёт строку члена, которую держит он
+//     (forward_object_fanout_deadlock_integration_test.go);
+//   - снятие выдачи того же субъекта берёт строки факта в каноническом порядке, а проход
+//     — в порядке правил роли (сначала член самой области, потом объекты по правилу), и
+//     они встречаются на двух строках факта крест-накрест
+//     (delete_sibling_full_pass_deadlock_integration_test.go).
+//
+// Оба цикла база разрывает отказом 40P01 одной из сторон. Снятая сторона первого —
+// быстрый путь: выдача остаётся без членов до сведения, и сведение её полным проходом
+// попадает во второй цикл, где снятой стороной бывает снятие соседней выдачи —
+// `done:true` с отказом, выдача жива; тот же исход снятия наблюдался на конвейере
+// (kaname#689). Отложив журнал до конца прохода и положив его одним набором в общем
+// порядке, проход приходит к строкам факта последним шагом и не держит в этот момент
+// ничего, чего ждал бы писатель факта.
 type syncFGACollector struct {
-	// seen — что ЭТОТ проход уже записал. Единственный носитель, ради которого
-	// сбор и существует: вычитание в конце прохода.
+	// seen — что ЭТОТ проход уже записал: по нему вычитание в конце прохода не снимает
+	// перезаписанного, а отложенная выдача не повторяет уже отложенного.
 	//
-	// Рядом лежали два накопителя — записанное и снятое, — и оба уезжали
+	// Прежде рядом лежали два накопителя — записанное и снятое, — и оба уезжали
 	// пост-коммитным применителем в чужое хранилище. Применителя нет (стадия S6,
-	// эпик #747), и накопители сняты вместе с ним: срез, который заполняют и
-	// никогда не читают, снаружи неотличим от работающего механизма.
+	// эпик #747), и те накопители сняты вместе с ним. writes и pendingDeletes ниже —
+	// не они: их читает flushJournal в той же транзакции.
 	seen map[SyncFGATuple]struct{}
+	// writes — grants the pass folds at the end (flushJournal), de-duplicated by seen,
+	// in the order the pass derived them; the journal orders them canonically.
+	writes []domain.MembershipTuple
 	// pendingDeletes — the per-binding FGA tuple-deletes the pass wants to emit,
-	// DEFERRED to the end of the pass (flushDeletes) so the cross-binding
+	// DEFERRED to the end of the pass (flushJournal) so the cross-binding
 	// shared-tuple subtraction can run against the FULL pass write-set + the
 	// other-active-bindings ledger regardless of the order bindings reconcile in.
 	// A binding that loses a member (label swap / rule removal) collects its
-	// would-be-deletes here; flushDeletes emits only the tuples NO surviving claim
+	// would-be-deletes here; flushJournal emits only the tuples NO surviving claim
 	// (in-pass write OR another active binding's ledger) keeps alive. Without the
 	// deferral a binding revoked BEFORE its sibling binding writes the identical
 	// tuple would strip a still-valid cross-binding tuple.
@@ -497,6 +523,14 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 		return
 	}
 	c.pendingDeletes = append(c.pendingDeletes, pendingDelete{binding: binding, tuples: tuples})
+}
+
+// deferWrite records a member's ACTIVE grant for the end-of-pass journal fold — only the
+// tuples this pass has not already recorded (collectNew). Every pass constructs its
+// collector; there is no nil form to fall back on, because a dropped grant would be
+// silent.
+func (c *syncFGACollector) deferWrite(tuples []domain.MembershipTuple) {
+	c.writes = append(c.writes, c.collectNew(tuples)...)
 }
 
 // collectNew records a member's ACTIVE-emit tuples DE-DUPLICATED across the whole pass
@@ -542,23 +576,27 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 	return fresh
 }
 
-// flushDeletes emits the pass's DEFERRED tuple-deletes inside the writer-tx, AFTER
-// every binding in the pass has reconciled (so the full pass write-set is known and
-// every active binding's emitted-tuple ledger row is committed-in-tx). For each
-// pending delete it subtracts (a) tuples WRITTEN by any member in THIS pass (a sibling
-// binding re-materialized the identical tuple — col.seen) and (b) tuples still recorded
-// in the ledger of an ACTIVE binding OTHER than the revoking one (cross-binding shared
-// claim — TuplesStillClaimedByOtherBindings). The remainder — tuples no surviving claim
-// keeps alive — is the only set safe to delete from the non-refcounted rights state.
-// This makes the cross-binding shared-tuple revoke order-independent: a binding
-// revoked before its sibling writes the same tuple no longer
-// strips it. The per-binding ledger ForgetEmittedTuples already ran inline at revoke
-// time (that bookkeeping is binding-local and correct); only the global FGA delete is
-// gated here.
-func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *syncFGACollector) error {
-	if c == nil || len(c.pendingDeletes) == 0 {
-		return nil
-	}
+// flushJournal folds the pass's journal — every grant the pass recorded and every
+// revoke it deferred — into fga_outbox ONCE, as the LAST write of the pass, in the one
+// order every journal writer shares (see syncFGACollector for why a per-member emit
+// deadlocks). It runs AFTER every binding in the pass has reconciled, so the full pass
+// write-set is known and every active binding's emitted-tuple ledger row is
+// committed-in-tx.
+//
+// For each pending delete it subtracts (a) tuples WRITTEN by any member in THIS pass (a
+// sibling binding re-materialized the identical tuple — col.seen) and (b) tuples still
+// recorded in the ledger of an ACTIVE binding OTHER than the revoking one (cross-binding
+// shared claim — TuplesStillClaimedByOtherBindings). The remainder — tuples no surviving
+// claim keeps alive — is the only set safe to delete from the non-refcounted rights
+// state. This makes the cross-binding shared-tuple revoke order-independent: a binding
+// revoked before its sibling writes the same tuple no longer strips it. The per-binding
+// ledger ForgetEmittedTuples already ran inline at revoke time (that bookkeeping is
+// binding-local and correct); only the global delete is gated here.
+//
+// Subtraction (a) also makes the two lists disjoint, which the one-statement fold
+// requires: a tuple the pass writes is never in its revoke list.
+func (r *Reconciler) flushJournal(ctx context.Context, s ReconcileStore, c *syncFGACollector) error {
+	var revokes []domain.MembershipTuple
 	for _, pd := range c.pendingDeletes {
 		// Candidate tuples not re-written in this pass (a sibling binding's emit keeps
 		// the live tuple — never delete what was just (re)written).
@@ -576,21 +614,20 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 		// not reconciled in this pass, or one whose member stayed ACTIVE unchanged).
 		claimed, err := s.TuplesStillClaimedByOtherBindings(ctx, pd.binding, notRewritten)
 		if err != nil {
-			return fmt.Errorf("flush deletes: still-claimed lookup for %s: %w", pd.binding, err)
+			return fmt.Errorf("flush journal: still-claimed lookup for %s: %w", pd.binding, err)
 		}
-		revoke := notRewritten[:0:0]
 		for _, t := range notRewritten {
 			if _, stillClaimed := claimed[t]; stillClaimed {
 				continue
 			}
-			revoke = append(revoke, t)
+			revokes = append(revokes, t)
 		}
-		if len(revoke) == 0 {
-			continue
-		}
-		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
-			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
-		}
+	}
+	if len(c.writes) == 0 && len(revokes) == 0 {
+		return nil
+	}
+	if err := s.EmitTupleJournal(ctx, c.writes, revokes); err != nil {
+		return fmt.Errorf("flush journal: emit (%d grants, %d revokes): %w", len(c.writes), len(revokes), err)
 	}
 	return nil
 }
@@ -605,7 +642,7 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 		}
 		// Flush the deferred tuple-deletes with the cross-binding surviving-claims
 		// subtraction (a tuple another active binding still holds is not stripped).
-		return r.flushDeletes(ctx, s, col)
+		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
 	}
@@ -646,7 +683,7 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 //     (binding_id, fga_user, relation, object): a shared row implies the SAME object.
 //     Restricting the desired set to one object therefore computes exactly the same
 //     subtraction the full set would have.
-//   - The CROSS-binding subtraction (flushDeletes → TuplesStillClaimedByOtherBindings)
+//   - The CROSS-binding subtraction (flushJournal → TuplesStillClaimedByOtherBindings)
 //     reads the ledger directly and does not consult the desired set at all, so it is
 //     unaffected by the narrowing.
 //   - The fan-out itself was ALREADY object-narrowed (BindingsForObject ∪
@@ -737,7 +774,7 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// Flush the pass's deferred tuple-deletes AFTER every binding reconciled, so
 		// the cross-binding surviving-claims subtraction sees the full write-set + the
 		// committed-in-tx ledger of every sibling binding (order-independent).
-		return r.flushDeletes(ctx, s, col)
+		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
 	}
@@ -781,7 +818,7 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 		}
 		for _, m := range members {
 			if m.VerificationStatus == domain.VerificationActive {
-				// Read the saved ledger and DEFER the FGA delete to flushDeletes. On
+				// Read the saved ledger and DEFER the FGA delete to flushJournal. On
 				// expiry EVERY member of THIS binding is revoked, so no member of this
 				// binding survives (within-binding survivingClaims empty). But ANOTHER
 				// active binding of the same subject may hold the identical tuple — the
@@ -796,7 +833,7 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 			}
 		}
 		// Flush the deferred deletes with the cross-binding surviving-claims subtraction.
-		return r.flushDeletes(ctx, s, col)
+		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
 	}
@@ -1203,15 +1240,13 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			if !tupleOK {
 				return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 			}
-			// Enqueue ONLY the tuples this pass has not already enqueued, and record the
-			// same set in the pass collector — the set the deletion subtraction below
-			// reads, so a tuple re-written here is never stripped by a sibling's revoke
-			// in the same pass.
-			if fresh := col.collectNew(tuples); len(fresh) > 0 {
-				if err := s.EmitTupleWrite(ctx, fresh); err != nil {
-					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
-				}
-			}
+			// Defer ONLY the tuples this pass has not already recorded to the end-of-pass
+			// journal fold (flushJournal), and record the same set in the pass collector —
+			// the set the deletion subtraction reads, so a tuple re-written here is never
+			// stripped by a sibling's revoke in the same pass. Folding it HERE, per member,
+			// would take the shared fact rows before the next member's row (see
+			// syncFGACollector).
+			col.deferWrite(tuples)
 			// Co-commit the emitted member-tuple into the ledger — the
 			// symmetric revoke + Role.Update reconcile both rest on it (ban #10).
 			if err := s.RecordEmittedTuples(ctx, bs.BindingID, tuples); err != nil {
@@ -1289,7 +1324,7 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 //
 // The within-binding survivingClaims handles same-binding shared tuples; the FGA
 // tuple-delete itself is DEFERRED into the collector (deferDelete) and emitted at the end
-// of the pass by flushDeletes, which additionally subtracts the CROSS-binding still-claimed
+// of the pass by flushJournal, which additionally subtracts the CROSS-binding still-claimed
 // set (another active binding of the same subject holds the identical tuple — the
 // non-refcounted rights state must keep it alive until the LAST binding releases it).
 // The ledger ForgetEmittedTuples stays inline here because it

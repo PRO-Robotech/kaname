@@ -507,15 +507,21 @@ type forwardWriteSet struct {
 }
 
 // flush записывает накопленное — три обращения к базе на ВЕСЬ веер вместо трёх на выдачу.
+//
+// Журнал — ПОСЛЕДНИМ. Строки членов и реестра принадлежат выдачам, а строки прямого
+// факта, которые складывает из журнала триггер, общие для всех выдач субъекта; к ним
+// проход приходит, уже записав всё своё, — то есть не удерживая строки факта, пока
+// ждёт строку члена или реестра, которую держит встречный писатель (разбор — у
+// syncFGACollector).
 func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}
-	if err := s.EmitTupleWrite(ctx, w.fresh); err != nil {
-		return fmt.Errorf("forward: emit tuple write (%d): %w", len(w.fresh), err)
-	}
 	if err := s.RecordEmittedTuplesBatch(ctx, w.ledger); err != nil {
 		return fmt.Errorf("forward: record emitted tuples (%d): %w", len(w.ledger), err)
+	}
+	if err := s.EmitTupleJournal(ctx, w.fresh, nil); err != nil {
+		return fmt.Errorf("forward: emit tuple write (%d): %w", len(w.fresh), err)
 	}
 	return nil
 }

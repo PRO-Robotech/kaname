@@ -1139,6 +1139,20 @@ func (w *abWriter) EmitRelationDelete(ctx context.Context, tuples []access_bindi
 	return w.emitFGAOutbox(ctx, "fga.tuple.delete", tuples)
 }
 
+// EmitRelationJournal — the transaction's whole journal set in one statement
+// (fga_outbox.EmitJournalTx).
+func (w *abWriter) EmitRelationJournal(ctx context.Context, writes, deletes []access_binding.RelationTuple) error {
+	ws, err := relationTuplesToClients(writes)
+	if err != nil {
+		return err
+	}
+	ds, err := relationTuplesToClients(deletes)
+	if err != nil {
+		return err
+	}
+	return fga_outbox.EmitJournalTx(ctx, w.tx, ws, ds)
+}
+
 // InsertEmittedTuples persists the EXACT FGA tuples emitted for a binding into
 // kaname.access_binding_emitted_tuples in the current writer-tx, co-committed
 // with the matching EmitRelationWrite (ban #10). ON CONFLICT DO NOTHING
@@ -1203,13 +1217,9 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 	if len(tuples) == 0 {
 		return nil
 	}
-	out := make([]clients.RelationTuple, 0, len(tuples))
-	for _, t := range tuples {
-		if t.User == "" || t.Relation == "" || t.Object == "" {
-			return fmt.Errorf("emit fga_outbox: incomplete tuple (user=%q relation=%q object=%q)",
-				t.User, t.Relation, t.Object)
-		}
-		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
+	out, err := relationTuplesToClients(tuples)
+	if err != nil {
+		return err
 	}
 	switch eventType {
 	case fga_outbox.EventTypeWrite:
@@ -1219,6 +1229,20 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 	default:
 		return fmt.Errorf("emit fga_outbox: unknown event type %q", eventType)
 	}
+}
+
+// relationTuplesToClients converts the repo tuples to the journal's form, refusing an
+// incomplete one: a row the trigger cannot project would grant nothing and say nothing.
+func relationTuplesToClients(tuples []access_binding.RelationTuple) ([]clients.RelationTuple, error) {
+	out := make([]clients.RelationTuple, 0, len(tuples))
+	for _, t := range tuples {
+		if t.User == "" || t.Relation == "" || t.Object == "" {
+			return nil, fmt.Errorf("emit fga_outbox: incomplete tuple (user=%q relation=%q object=%q)",
+				t.User, t.Relation, t.Object)
+		}
+		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
+	}
+	return out, nil
 }
 
 // EmitAuditEvent atomically appends one durable compliance row into

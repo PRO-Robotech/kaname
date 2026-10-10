@@ -50,8 +50,20 @@ func NewRoleTupleReconciler() *RoleTupleReconciler { return &RoleTupleReconciler
 //     scope-anchor / per-rule scope_grant projection,
 //  2. read oldTuples = SelectEmittedTuples(binding),
 //  3. diff: removed = old\new, added = new\old,
-//  4. EmitRelationDelete(removed) + EmitRelationWrite(added) +
-//     ReplaceEmittedTuples(binding, newTuples).
+//  4. ReplaceEmittedTuples(binding, newTuples), and the delta joins the transaction's
+//     journal set.
+//
+// The journal set — every binding's removed and added — is folded ONCE, after the
+// loop (EmitRelationJournal). A fold per binding (or a delete and a write call each)
+// takes the fact rows in call order, which no other journal writer shares, while this
+// transaction already holds the previous binding's fact rows and is about to wait on
+// the next binding's ledger rows: the shape the database breaks with 40P01 (see
+// fga_outbox.EmitJournalTx). Folding last, the fan-out reaches the shared fact rows
+// holding nothing a fact writer waits on.
+//
+// A tuple both removed (from one binding) and added (by another) is folded by its LAST
+// intent in binding order — the same final state the per-binding sequence produced,
+// since only the last journal row of a tuple decides its fact.
 //
 // Bounded: the fan-out iterates only the ACTIVE bindings of the SINGLE mutated
 // role (ListActiveByRole), not all bindings. Idempotent: an unchanged tier
@@ -61,6 +73,17 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 	bindings, err := w.AccessBindings().ListActiveByRole(ctx, roleID)
 	if err != nil {
 		return fmt.Errorf("list active bindings of role %s: %w", roleID, err)
+	}
+	// intent — the journal set, last intent per tuple in binding order (see the doc).
+	intent := make(map[abrepo.RelationTuple]bool)
+	var order []abrepo.RelationTuple
+	note := func(ts []abrepo.RelationTuple, write bool) {
+		for _, t := range ts {
+			if _, seen := intent[t]; !seen {
+				order = append(order, t)
+			}
+			intent[t] = write
+		}
 	}
 	for i := range bindings {
 		b := bindings[i]
@@ -80,16 +103,8 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 		}
 
 		removed, added := diffTuples(oldTuples, newTuples)
-		if len(removed) > 0 {
-			if err := w.AccessBindingsW().EmitRelationDelete(ctx, removed); err != nil {
-				return fmt.Errorf("emit relation delete for binding %s: %w", b.ID, err)
-			}
-		}
-		if len(added) > 0 {
-			if err := w.AccessBindingsW().EmitRelationWrite(ctx, added); err != nil {
-				return fmt.Errorf("emit relation write for binding %s: %w", b.ID, err)
-			}
-		}
+		note(removed, false)
+		note(added, true)
 		// Keep the ledger in lock-step with the new emitted projection. When the
 		// delta is empty this is a no-op swap (same set in, same set out).
 		if len(removed) > 0 || len(added) > 0 {
@@ -97,6 +112,20 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 				return fmt.Errorf("replace emitted-set of binding %s: %w", b.ID, err)
 			}
 		}
+	}
+	var writes, deletes []abrepo.RelationTuple
+	for _, t := range order {
+		if intent[t] {
+			writes = append(writes, t)
+		} else {
+			deletes = append(deletes, t)
+		}
+	}
+	if len(writes) == 0 && len(deletes) == 0 {
+		return nil
+	}
+	if err := w.AccessBindingsW().EmitRelationJournal(ctx, writes, deletes); err != nil {
+		return fmt.Errorf("emit relation journal for role %s (%d grants, %d revokes): %w", roleID, len(writes), len(deletes), err)
 	}
 	return nil
 }
