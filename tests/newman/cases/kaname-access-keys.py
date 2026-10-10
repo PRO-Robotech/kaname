@@ -600,7 +600,8 @@ def _await_letter(p, name, head=_HEAD_VERIFY, seen="MailSeen", code="Code", kind
     """Письмо вида `head` сверх уже прочитанных: петля с настоящей паузой.
 
     Счёт прочитанного (`seen`) и место кода (`code`) — свои у каждого вида письма:
-    коды подтверждения и восстановления приёмник отдаёт разными перечнями."""
+    коды подтверждения и восстановления приёмник отдаёт разными перечнями. Счёт —
+    только писем своего вида: письмо другого вида дверь кодов отдаёт null."""
     path = f"/codes?to={{{{{p}Email}}}}&after={_urlparse.quote(head)}"
     counter, started = f"_akmb_{p}_{name}".replace("-", "_"), f"_akmbs_{p}_{name}".replace("-", "_")
     label = name.upper()
@@ -617,7 +618,10 @@ def _await_letter(p, name, head=_HEAD_VERIFY, seen="MailSeen", code="Code", kind
             f"const __n = parseInt({_env(counter)} || '0', 10);",
             f"const __seen = parseInt({_env(p + seen)} || '0', 10);",
             "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
-            "const __all = Array.isArray(__codes) ? __codes : [];",
+            # Письмо чужого вида дверь кодов отдаёт null: в счёт идут только коды
+            # своего вида — иначе письмо посева, лежащее у приёмника раньше, сошло
+            # бы за пришедшее, и код был бы пуст (kaname#684, Ф13-25).
+            "const __all = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
             f"if (pm.response.code === 200 && __all.length <= __seen && __n < {_MAIL_WAIT_CAP}) {{",
             "  " + _set(counter, "String(__n + 1)"),
             f"  const _akd = Date.now(); while (Date.now() - _akd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
