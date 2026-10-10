@@ -121,3 +121,34 @@ func TestResolveWire_KN201_ContractCarriesNoPasswordChangeRequired(t *testing.T)
 	require.True(t, desc.ReservedRanges().Has(8),
 		"номер 8 зарезервирован — другое поле его занять не может")
 }
+
+// TestResolveWire_KN677_SessionNamesItsRecord — ответ краю называет НОМЕР ЗАПИСИ
+// сессии (kaname#677): край возвращает его службе на каждом запросе этой
+// сессии, и снятие ключа доступа по нему оставляет текущую запись живой (Ф13
+// Р8). Две живые сессии одного человека — два РАЗНЫХ номера, и каждый равен
+// номеру своей записи: одинаковое значение у обеих сделало бы «текущую»
+// неотличимой, то есть вернуло бы дефект под зелёным полем. Отказ («сессии
+// нет») номера не несёт — он побайтово один на все причины (Ф3-27).
+func TestResolveWire_KN677_SessionNamesItsRecord(t *testing.T) {
+	h := newHarness(t, nil)
+	h.person(t, "usr-a", "a@example.invalid", "correct horse battery", true)
+	handler := humansession.NewHandler(h.resolve)
+	ctx := context.Background()
+
+	first := h.mustLogin(t, "a@example.invalid", "correct horse battery")
+	second := h.mustLogin(t, "a@example.invalid", "correct horse battery")
+	require.NotEqual(t, first.View.Session.ID, second.View.Session.ID, "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: две записи — два номера")
+
+	for name, live := range map[string]humansession.LoginOutput{"first": first, "second": second} {
+		resp, err := handler.Resolve(ctx, &iamv1.ResolveHumanSessionRequest{Bearer: live.Bearer.CookieValue()})
+		require.NoError(t, err)
+		require.True(t, resp.GetFound(), "%s: ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: сессия жива", name)
+		require.Equal(t, string(live.View.Session.ID), resp.GetSession().GetSessionId(),
+			"%s: ответ краю называет номер своей записи (kaname#677)", name)
+	}
+
+	none, err := handler.Resolve(ctx, &iamv1.ResolveHumanSessionRequest{Bearer: "nobody-knows-this-bearer"})
+	require.NoError(t, err)
+	require.False(t, none.GetFound())
+	require.Empty(t, none.GetSession().GetSessionId(), "отказ номера не несёт")
+}

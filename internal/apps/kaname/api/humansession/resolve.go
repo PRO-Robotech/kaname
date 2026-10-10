@@ -91,7 +91,10 @@ func (h *Handler) Resolve(ctx context.Context, req *iamv1.ResolveHumanSessionReq
 }
 
 // sessionProto — состав Р1 на проводе. Момент аутентификации — НЕ усечён
-// (§4.1 п.19, названное отступление); срок — по конвенции, до секунды.
+// (§4.1 п.19, названное отступление); срок — по конвенции, до секунды. Номер
+// записи — для края, который возвращает его службе с каждым запросом этой
+// сессии: по нему снятие ключа доступа оставляет текущую запись живой
+// (Ф13 Р8, kaname#677).
 func sessionProto(v SessionView) *iamv1.HumanSession {
 	return &iamv1.HumanSession{
 		UserId:          string(v.User.ID),
@@ -101,5 +104,6 @@ func sessionProto(v SessionView) *iamv1.HumanSession {
 		ExpiresAt:       shared.TimestampProto(v.Session.ExpiresAt),
 		AssuranceLevel:  v.Session.AssuranceLevel,
 		EmailVerified:   v.EmailVerified,
+		SessionId:       string(v.Session.ID),
 	}
 }
