@@ -157,3 +157,29 @@ func TestPresentedCredentialIsNotOverriddenByForwardedMetadata(t *testing.T) {
 	require.False(t, got.hasSession, "переданный номер записи на полосе предъявленного не читается")
 	require.Equal(t, "jti-presented", got.credential, "выпуск предъявленного не подменён переданным")
 }
+
+// TestForwardedSessionIsReadUnderTheCatalogueName — край ставит номер записи
+// под именем каталога фундамента (`principalwire`, запись token-session-id;
+// corelib#97), и читатель службы читает ровно его. Имя берётся из каталога, а
+// не из константы этого пакета: две записи одного имени провода разошлись бы
+// молча — край ставил бы одно, служба читала бы другое, и снятие ключа гасило
+// бы текущую сессию без единого отказа.
+func TestForwardedSessionIsReadUnderTheCatalogueName(t *testing.T) {
+	var name string
+	for _, k := range principalwire.Keys() {
+		if k.Name == "token-session-id" {
+			name = k.Meta
+		}
+	}
+	require.NotEmpty(t, name, "каталог фундамента на закреплённой версии не несёт записи "+
+		"token-session-id — имя ключа номера записи у края и у службы записано каждой стороной своей рукой")
+
+	md := metadata.Pairs(
+		principalwire.MetaPrincipalType, "user",
+		principalwire.MetaPrincipalID, "usr-alice",
+		name, sessionOfAlice,
+	)
+	got := through(t, md, nil)
+	require.True(t, got.hasSession, "номер записи под именем каталога (%s) не прочитан", name)
+	require.Equal(t, sessionOfAlice, got.session)
+}
