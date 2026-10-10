@@ -22,9 +22,11 @@
 // ёмкости обязано считать и его.
 //
 // Выражение судится РАЗБОРОМ PromQL: клетка засчитывается, только если она —
-// слагаемое левой части сравнения правила (`sum(increase(…))` либо
+// слагаемое считающей стороны сравнения правила (`sum(increase(…))` либо
 // `increase(…)`), читающее момент вычисления (без `offset` и `@ <число>`), и
-// все слагаемые цепочки выходят с одним набором меток. Слагаемое в
+// все слагаемые цепочки выходят с одним набором меток. Считающая сторона —
+// векторная сторона сравнения с порогом в сторону роста (`A > 0` и `0 < A`);
+// ветки `or` складываются, ветка за `and`/`unless` не считает. Слагаемое в
 // комментарии, `0 * sum(…)`, `… unless sum(…)`, `sum by (reason)(…)` и голый
 // `increase(…)` рядом с `sum(…)` клетку не считают. Каждая форма, о которой
 // суждение выносит вердикт, и поставляемые правила сверяются с настоящим
@@ -45,6 +47,7 @@
 package deploy_test
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -143,14 +146,25 @@ func sameCell(got, want map[string]string) bool {
 // отбором `__name__`): судить надо узел разбора, а не слово.
 var promqlParser = parser.NewParser(parser.Options{})
 
-// exprCountedCells — клетки, которые выражение СЧИТАЕТ: слагаемые левой части
-// сравнения правила. Слагаемое — `sum(increase(ряд{…}[окно]))` либо
+// exprCountedCells — клетки, которые выражение СЧИТАЕТ: рост клетки поднимает
+// тревогу, а без него правило молчит.
+//
+// Правило звонит, когда его выражение непусто. Вершина правила — сравнение
+// либо `or`: `A or B` непусто, когда непуста любая ветка, и клетки веток
+// складываются. Сравнение с числом звонит на рост ВЕКТОРНОЙ стороны, где бы она
+// ни стояла (`A > 0` и `0 < A` — одно правило), и только в сторону роста:
+// `> c` при c ≥ 0 и `>= c` при c > 0; `< c`, `>= 0`, `> -1`, `==` звонят без роста
+// либо не звонят на рост. Сравнение двух векторов считает левую сторону только
+// оператором `>`. Ветка за `and` и `unless`, правило без сравнения и
+// сравнение с модификатором `bool` не считают ни одной клетки: первые
+// сужаются чужой стороной, последние два непусты всегда.
+//
+// Считающая сторона — цепочка слагаемых `sum(increase(ряд{…}[окно]))` либо
 // `increase(ряд{…}[окно])`, в любых скобках. Селектор вне такого слагаемого не
-// засчитывается: `0 * sum(…)` и `… unless sum(…)` держат клетку в тексте, но
-// не дают ей поднять тревогу. Селектор с неточным отбором (`=~`, `!=`, `!~`),
-// со сдвигом `offset` либо с моментом `@ <число>` клеткой не является: он
-// читает не момент вычисления правила (`@ start()` и `@ end()` у правила —
-// момент вычисления).
+// засчитывается: `0 * sum(…)` держит клетку в тексте, но не даёт ей поднять
+// тревогу. Селектор с неточным отбором (`=~`, `!=`, `!~`), со сдвигом `offset`
+// либо с моментом `@ <число>` клеткой не является: он читает не момент
+// вычисления правила (`@ start()` и `@ end()` у правила — момент вычисления).
 //
 // Цепочка из нескольких слагаемых считает что-либо, только если КАЖДОЕ
 // слагаемое выходит с одним и тем же набором меток: `sum(…) + sum by (reason)(…)`
@@ -162,14 +176,96 @@ func exprCountedCells(expr string) ([]cellTerm, error) {
 	if err != nil {
 		return nil, fmt.Errorf("выражение не разбирается: %w", err)
 	}
-	counted := unparen(root)
-	if be, ok := counted.(*parser.BinaryExpr); ok && be.Op.IsComparisonOperator() {
-		if be.ReturnBool {
-			return nil, fmt.Errorf("сравнение с модификатором bool даёт 0 либо 1 всегда — тревога звонит без клетки")
+	return ruleCountedCells(root)
+}
+
+// ruleCountedCells — клетки, которые считает выражение правила либо ветка `or`.
+func ruleCountedCells(e parser.Expr) ([]cellTerm, error) {
+	be, ok := unparen(e).(*parser.BinaryExpr)
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("на вершине `%s` нет сравнения — выражение непусто всегда, тревога звонит без роста клетки", e)
+	case be.Op == parser.LOR:
+		left, lerr := ruleCountedCells(be.LHS)
+		right, rerr := ruleCountedCells(be.RHS)
+		cells := append(left, right...)
+		if len(cells) == 0 {
+			return nil, errors.Join(lerr, rerr)
 		}
-		counted = be.LHS
+		return cells, nil
+	case be.Op == parser.LAND || be.Op == parser.LUNLESS:
+		return nil, fmt.Errorf("ветка `%s` сужена `%s` чужой стороной — рост клетки тревогу не поднимает", e, be.Op)
+	case !be.Op.IsComparisonOperator():
+		return nil, fmt.Errorf("на вершине `%s` нет сравнения — выражение непусто всегда, тревога звонит без роста клетки", e)
+	case be.ReturnBool:
+		return nil, fmt.Errorf("сравнение с модификатором bool даёт 0 либо 1 всегда — тревога звонит без клетки")
 	}
-	terms := additiveTerms(counted)
+	side, err := risingSide(be)
+	if err != nil {
+		return nil, err
+	}
+	return sideCountedCells(side)
+}
+
+// risingSide — сторона сравнения, рост которой поднимает тревогу.
+func risingSide(be *parser.BinaryExpr) (parser.Expr, error) {
+	if c, ok := numberValue(be.RHS); ok {
+		return be.LHS, thresholdRises(be.Op, c, be)
+	}
+	if c, ok := numberValue(be.LHS); ok {
+		return be.RHS, thresholdRises(mirroredComparison(be.Op), c, be)
+	}
+	if be.Op != parser.GTR {
+		return nil, fmt.Errorf("сравнение двух векторов `%s` оператором %s — рост левой стороны тревогу не поднимает", be, be.Op)
+	}
+	return be.LHS, nil
+}
+
+// thresholdRises — звонит ли `вектор op c` на рост вектора от нуля и молчит ли
+// без него.
+func thresholdRises(op parser.ItemType, c float64, be *parser.BinaryExpr) error {
+	if (op == parser.GTR && c >= 0) || (op == parser.GTE && c > 0) {
+		return nil
+	}
+	return fmt.Errorf("сравнение `%s` звонит без роста клетки либо не звонит на её рост", be)
+}
+
+// mirroredComparison — оператор, при котором `c op A` равно `A op' c`.
+func mirroredComparison(op parser.ItemType) parser.ItemType {
+	switch op {
+	case parser.LSS:
+		return parser.GTR
+	case parser.LTE:
+		return parser.GTE
+	case parser.GTR:
+		return parser.LSS
+	case parser.GTE:
+		return parser.LTE
+	}
+	return op
+}
+
+// numberValue — значение стороны, если она число (с унарным знаком и в скобках).
+func numberValue(e parser.Expr) (float64, bool) {
+	switch n := unparen(e).(type) {
+	case *parser.NumberLiteral:
+		return n.Val, true
+	case *parser.UnaryExpr:
+		v, ok := numberValue(n.Expr)
+		if !ok {
+			return 0, false
+		}
+		if n.Op == parser.SUB {
+			return -v, true
+		}
+		return v, true
+	}
+	return 0, false
+}
+
+// sideCountedCells — клетки цепочки слагаемых считающей стороны сравнения.
+func sideCountedCells(side parser.Expr) ([]cellTerm, error) {
+	terms := additiveTerms(side)
 	if err := chainSharesOneLabelSet(terms); err != nil {
 		return nil, err
 	}
@@ -351,7 +447,7 @@ func exprReadsCell(expr string, c cellTerm) (reads bool, why string) {
 			return true, ""
 		}
 	}
-	return false, "среди слагаемых левой части сравнения нет слагаемого с точной записью клетки"
+	return false, "среди слагаемых считающей стороны сравнения нет слагаемого с точной записью клетки"
 }
 
 // exprCoversCell — читает ли выражение клетку ХОТЬ ГДЕ-НИБУДЬ: какой-либо
@@ -463,10 +559,7 @@ func TestSecondFactorCellsTheRulesReadArePreSeeded(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "выдача производителя не читается")
 
 	exposed := 0
-	var cells []struct {
-		series string
-		labels map[string]string
-	}
+	var cells []cellTerm
 	for _, line := range strings.Split(rec.Body.String(), "\n") {
 		m := exposedCellRe.FindStringSubmatch(line)
 		if m == nil {
@@ -477,10 +570,7 @@ func TestSecondFactorCellsTheRulesReadArePreSeeded(t *testing.T) {
 		if !ok {
 			continue
 		}
-		cells = append(cells, struct {
-			series string
-			labels map[string]string
-		}{m[1], labels})
+		cells = append(cells, cellTerm{series: m[1], labels: labels})
 	}
 
 	seen := 0
@@ -622,6 +712,23 @@ func secondFactorExpressionForms() map[string]expressionForm {
 		"J7 близнец: @ end() — момент вычисления": {expr: base + "\n  + sum(increase(" + cell + "[10m] @ end())) > 0", reads: true},
 		"J8 селектор со сдвигом offset 10m":       {expr: base + "\n  + sum(increase(" + cell + "[10m] offset 10m)) > 0", reads: false},
 		"J8 близнец: offset 0s — сдвига нет":      {expr: base + "\n  + sum(increase(" + cell + "[10m] offset 0s)) > 0", reads: true},
+		// N: сторона и ветка, которые СЧИТАЮТ. Сравнение с числом звонит на рост
+		// векторной стороны, где бы она ни стояла; `or` звонит, если звонит любая
+		// ветка; ветка за `and`/`unless` и сравнение не в сторону роста — нет.
+		"N3 сравнение наоборот: 0 < цепочка":               {expr: "0 < " + base + "\n  + sum(increase(" + cell + "[10m]))", reads: true},
+		"N3 близнец: 0 > цепочка — звонит только на убыль": {expr: "0 > " + base + "\n  + sum(increase(" + cell + "[10m]))", reads: false},
+		"N1 близнец: живая ветка or":                       {expr: base + " > 0\n  or sum(increase(" + cell + "[10m])) > 0", reads: true},
+		"N1 близнец: клетка в первой ветке or":             {expr: "sum(increase(" + cell + "[10m])) > 0\n  or " + base + " > 0", reads: true},
+		"N1 мёртвая ветка or: and on() vector(0) > 0":      {expr: base + " > 0\n  or sum(increase(" + cell + "[10m])) and on() vector(0) > 0", reads: false},
+		"N1 ветка or без сравнения звонит всегда":          {expr: base + " > 0\n  or sum(increase(" + cell + "[10m]))", reads: false},
+		"N4 цепочка < 1 — звонит без роста":                {expr: base + "\n  + sum(increase(" + cell + "[10m])) < 1", reads: false},
+		"N4 цепочка >= 0 — звонит без роста":               {expr: base + "\n  + sum(increase(" + cell + "[10m])) >= 0", reads: false},
+		"N4 близнец: цепочка >= 1":                         {expr: base + "\n  + sum(increase(" + cell + "[10m])) >= 1", reads: true},
+		"N4 цепочка > -1 — звонит без роста":               {expr: base + "\n  + sum(increase(" + cell + "[10m])) > -1", reads: false},
+		"N5 правило без сравнения звонит всегда":           {expr: base + "\n  + sum(increase(" + cell + "[10m]))", reads: false},
+		"N6 близнец: цепочка > vector(0)":                  {expr: base + "\n  + sum(increase(" + cell + "[10m])) > vector(0)", reads: true},
+		"N6 цепочка >= vector(0) — звонит без роста":       {expr: base + "\n  + sum(increase(" + cell + "[10m])) >= vector(0)", reads: false},
+		"N7 близнец: порог со знаком в скобках, 0 < …":     {expr: "(-0) < (" + base + "\n  + sum(increase(" + cell + "[10m])))", reads: true},
 	}
 }
 

@@ -19,6 +19,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.44.0
+	github.com/yuin/goldmark v1.8.6
 	go.uber.org/multierr v1.11.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/mod v0.41.0
