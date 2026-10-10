@@ -23,8 +23,12 @@
 //
 // Выражение судится РАЗБОРОМ PromQL: клетка засчитывается, только если она —
 // слагаемое левой части сравнения правила (`sum(increase(…))` либо
-// `increase(…)`). Слагаемое в комментарии, `0 * sum(…)` и `… unless sum(…)`
-// клетку не считают.
+// `increase(…)`), читающее момент вычисления (без `offset` и `@ <число>`), и
+// все слагаемые цепочки выходят с одним набором меток. Слагаемое в
+// комментарии, `0 * sum(…)`, `… unless sum(…)`, `sum by (reason)(…)` и голый
+// `increase(…)` рядом с `sum(…)` клетку не считают. Каждая форма, о которой
+// суждение выносит вердикт, и поставляемые правила сверяются с настоящим
+// движком (second_factor_promql_engine_test.go).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО УТВЕРЖДАЕТСЯ
@@ -143,19 +147,34 @@ var promqlParser = parser.NewParser(parser.Options{})
 // сравнения правила. Слагаемое — `sum(increase(ряд{…}[окно]))` либо
 // `increase(ряд{…}[окно])`, в любых скобках. Селектор вне такого слагаемого не
 // засчитывается: `0 * sum(…)` и `… unless sum(…)` держат клетку в тексте, но
-// не дают ей поднять тревогу. Селектор с неточным отбором (`=~`, `!=`, `!~`)
-// клеткой не является.
+// не дают ей поднять тревогу. Селектор с неточным отбором (`=~`, `!=`, `!~`),
+// со сдвигом `offset` либо с моментом `@ <число>` клеткой не является: он
+// читает не момент вычисления правила (`@ start()` и `@ end()` у правила —
+// момент вычисления).
+//
+// Цепочка из нескольких слагаемых считает что-либо, только если КАЖДОЕ
+// слагаемое выходит с одним и тем же набором меток: `sum(…) + sum by (reason)(…)`
+// и `sum(…) + increase(…)` движок вычисляет в пустоту — сопоставлять нечего, и
+// тревога не звонит никогда. Тогда не считается ни одна клетка, а ошибка
+// называет причину.
 func exprCountedCells(expr string) ([]cellTerm, error) {
 	root, err := promqlParser.ParseExpr(expr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("выражение не разбирается: %w", err)
 	}
 	counted := unparen(root)
 	if be, ok := counted.(*parser.BinaryExpr); ok && be.Op.IsComparisonOperator() {
+		if be.ReturnBool {
+			return nil, fmt.Errorf("сравнение с модификатором bool даёт 0 либо 1 всегда — тревога звонит без клетки")
+		}
 		counted = be.LHS
 	}
+	terms := additiveTerms(counted)
+	if err := chainSharesOneLabelSet(terms); err != nil {
+		return nil, err
+	}
 	var cells []cellTerm
-	for _, term := range additiveTerms(counted) {
+	for _, term := range terms {
 		vs, ok := increaseSelector(term)
 		if !ok {
 			continue
@@ -177,17 +196,107 @@ func unparen(e parser.Expr) parser.Expr {
 	}
 }
 
-// additiveTerms — слагаемые цепочки `a + b + …`; прочие операторы слагаемых не
-// раскрывают.
+// matchesOnAllLabels — сопоставление векторов по всем меткам: без `on(…)` и
+// `ignoring(…)`.
+func matchesOnAllLabels(be *parser.BinaryExpr) bool {
+	vm := be.VectorMatching
+	return vm == nil || (!vm.On && len(vm.MatchingLabels) == 0)
+}
+
+// additiveTerms — слагаемые цепочки `a + b + …`; прочие операторы и сложение с
+// `on(…)`/`ignoring(…)` слагаемых не раскрывают.
 func additiveTerms(e parser.Expr) []parser.Expr {
 	e = unparen(e)
-	if be, ok := e.(*parser.BinaryExpr); ok && be.Op == parser.ADD {
+	if be, ok := e.(*parser.BinaryExpr); ok && be.Op == parser.ADD && matchesOnAllLabels(be) {
 		return append(additiveTerms(be.LHS), additiveTerms(be.RHS)...)
 	}
 	return []parser.Expr{e}
 }
 
-// increaseSelector — селектор слагаемого `sum(increase(…))` либо `increase(…)`.
+// outLabels — набор меток на выходе узла. known=false — набор зависит от рядов
+// (метки ряда и метки цели, которые дописывает сбор), его разбор не знает;
+// scalar — число без меток, с любым вектором сопоставляется.
+type outLabels struct {
+	known, scalar bool
+	names         string // имена меток, отсортированные, через запятую
+}
+
+// termLabels — набор меток на выходе слагаемого.
+func termLabels(e parser.Expr) outLabels {
+	switch n := unparen(e).(type) {
+	case *parser.NumberLiteral:
+		return outLabels{known: true, scalar: true}
+	case *parser.AggregateExpr:
+		if n.Without {
+			return outLabels{}
+		}
+		switch n.Op {
+		case parser.SUM, parser.AVG, parser.MIN, parser.MAX, parser.COUNT, parser.GROUP,
+			parser.STDDEV, parser.STDVAR, parser.QUANTILE:
+			g := append([]string(nil), n.Grouping...)
+			sort.Strings(g)
+			return outLabels{known: true, names: strings.Join(g, ",")}
+		}
+		return outLabels{}
+	case *parser.Call:
+		switch n.Func.Name {
+		case "vector":
+			return outLabels{known: true}
+		case "scalar", "time":
+			return outLabels{known: true, scalar: true}
+		}
+		return outLabels{}
+	case *parser.BinaryExpr:
+		l, r := termLabels(n.LHS), termLabels(n.RHS)
+		switch {
+		case l.scalar && r.scalar:
+			return l
+		case l.scalar:
+			return r
+		case r.scalar:
+			return l
+		case !matchesOnAllLabels(n):
+			return outLabels{}
+		case n.Op == parser.LAND || n.Op == parser.LUNLESS:
+			return l
+		case l.known && r.known && l.names == r.names:
+			return l
+		}
+		return outLabels{}
+	}
+	return outLabels{}
+}
+
+// chainSharesOneLabelSet — все векторные слагаемые цепочки выходят с одним
+// набором меток; единственное слагаемое сопоставлять не с чем.
+func chainSharesOneLabelSet(terms []parser.Expr) error {
+	if len(terms) < 2 {
+		return nil
+	}
+	var first *outLabels
+	for _, term := range terms {
+		ol := termLabels(term)
+		if ol.scalar {
+			continue
+		}
+		if !ol.known {
+			return fmt.Errorf("слагаемое `%s` выходит с метками рядов, а не с общим набором цепочки — "+
+				"`A + B` с разными наборами меток пусто, тревога не звонит никогда", term)
+		}
+		if first == nil {
+			first = &ol
+			continue
+		}
+		if ol.names != first.names {
+			return fmt.Errorf("слагаемые цепочки выходят с разными наборами меток (by (%s) и by (%s)) — "+
+				"`A + B` пусто, тревога не звонит никогда", first.names, ol.names)
+		}
+	}
+	return nil
+}
+
+// increaseSelector — селектор слагаемого `sum(increase(…))` либо `increase(…)`,
+// читающий момент вычисления правила: без `offset` и без `@ <число>`.
 func increaseSelector(e parser.Expr) (*parser.VectorSelector, bool) {
 	e = unparen(e)
 	if ag, ok := e.(*parser.AggregateExpr); ok {
@@ -205,7 +314,10 @@ func increaseSelector(e parser.Expr) (*parser.VectorSelector, bool) {
 		return nil, false
 	}
 	vs, ok := ms.VectorSelector.(*parser.VectorSelector)
-	return vs, ok
+	if !ok || vs.OriginalOffset != 0 || vs.Timestamp != nil {
+		return nil, false
+	}
+	return vs, true
 }
 
 // selectorCell — клетка селектора: имя ряда (из имени либо из отбора
@@ -226,19 +338,63 @@ func selectorCell(vs *parser.VectorSelector) (cellTerm, bool) {
 }
 
 // exprReadsCell — считает ли выражение клетку: слагаемое с ровно таким рядом и
-// ровно такими точными отборами. Неразборное выражение не считает ничего —
-// сервер правил его не примет.
-func exprReadsCell(expr string, c cellTerm) bool {
+// ровно такими точными отборами. why — причина, по которой не считает:
+// неразборное выражение (сервер правил его не примет) либо цепочка, которую
+// движок вычисляет в пустоту.
+func exprReadsCell(expr string, c cellTerm) (reads bool, why string) {
 	cells, err := exprCountedCells(expr)
 	if err != nil {
-		return false
+		return false, err.Error()
 	}
 	for _, got := range cells {
 		if got.series == c.series && sameCell(got.labels, c.labels) {
-			return true
+			return true, ""
 		}
 	}
-	return false
+	return false, "среди слагаемых левой части сравнения нет слагаемого с точной записью клетки"
+}
+
+// exprCoversCell — читает ли выражение клетку ХОТЬ ГДЕ-НИБУДЬ: какой-либо
+// селектор в любой функции и в любой позиции, каждый отбор которого
+// выполняется на клетке. Отбор по метке, которой в клетке нет, — метка цели
+// либо чужая: её значения разбор не знает, и такой отбор считается
+// выполнимым. Это суждение шире [exprReadsCell] нарочно: оно ищет ЛИШНЕЕ
+// чтение, и сомнение здесь — находка, а не молчание.
+func exprCoversCell(expr string, c cellTerm) (bool, error) {
+	root, err := promqlParser.ParseExpr(expr)
+	if err != nil {
+		return false, fmt.Errorf("выражение не разбирается: %w", err)
+	}
+	covered := false
+	parser.Inspect(root, func(n parser.Node, _ []parser.Node) error {
+		if vs, ok := n.(*parser.VectorSelector); ok && !covered {
+			covered = selectorCovers(vs, c)
+		}
+		return nil
+	})
+	return covered, nil
+}
+
+func selectorCovers(vs *parser.VectorSelector, c cellTerm) bool {
+	if vs.Name != "" && vs.Name != c.series {
+		return false
+	}
+	for _, m := range vs.LabelMatchers {
+		if m.Name == labels.MetricName {
+			if !m.Matches(c.series) {
+				return false
+			}
+			continue
+		}
+		v, own := c.labels[m.Name]
+		if !own {
+			continue
+		}
+		if !m.Matches(v) {
+			return false
+		}
+	}
+	return true
 }
 
 // cellDemandCensus — объём осмотренного одним суждением.
@@ -266,8 +422,8 @@ func judgeSecondFactorCells(rules []alertRule, demands map[string][]cellTerm) (c
 				findings = append(findings, alert+": правила нет в наборе — клетку "+c.String()+" не читает никто")
 				continue
 			}
-			if !exprReadsCell(r.Expr, c) {
-				findings = append(findings, alert+": выражение не читает клетку "+c.String())
+			if reads, why := exprReadsCell(r.Expr, c); !reads {
+				findings = append(findings, alert+": выражение не читает клетку "+c.String()+": "+why)
 				continue
 			}
 			census.matched++
@@ -380,7 +536,7 @@ func TestSecondFactorCellsInjection_DroppedTermIsFound(t *testing.T) {
 
 // Слагаемое, стоящее в СОСЕДНЕМ правиле, своё правило не спасает.
 func TestSecondFactorCellsInjection_TermInTheNeighbourIsFound(t *testing.T) {
-	neighbourCarries := `increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m])
+	neighbourCarries := `sum(increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]))
   + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
   + sum(increase(kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}[10m]))
   + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m])) > 0`
@@ -425,25 +581,55 @@ var refusalUnavailableCell = cellTerm{
 	labels: map[string]string{"reason": string(humansession.RefusalUnavailable)},
 }
 
-// J1, J4 — слагаемое присутствует ТЕКСТОМ, но правило его не считает:
-// находка. T3, T4 — законные написания той же клетки: молчание.
-func TestSecondFactorCellsInjection_ExpressionForms(t *testing.T) {
-	const base = `sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))`
-	for name, tc := range map[string]struct {
-		expr  string
-		reads bool
-	}{
-		"J1 слагаемое в комментарии PromQL": {expr: base + "\n  # + sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m]))\n  > 0", reads: false},
-		"J1 комментарий в конце строки":     {expr: base + " > 0 # sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m]))", reads: false},
-		"J4 слагаемое, умноженное на ноль":  {expr: base + "\n  + 0 * sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: false},
-		"J4 слагаемое за unless":            {expr: base + " unless sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: false},
+// expressionForm — запись выражения и вердикт: считает ли она клетку
+// refusal/unavailable. Вердикт сверяется и с суждением, и с движком
+// ([TestSecondFactorExpressionFormsAgreeWithTheEngine]).
+type expressionForm struct {
+	expr  string
+	reads bool
+}
+
+const expressionFormsBase = `sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))`
+
+// secondFactorExpressionForms — J1, J4…J8: слагаемое присутствует ТЕКСТОМ, но
+// правило его не считает (движок вычисляет цепочку в пустоту либо в постоянный
+// отказ): находка. T3, T4 и близнецы — законные написания той же клетки:
+// молчание.
+func secondFactorExpressionForms() map[string]expressionForm {
+	const (
+		base = expressionFormsBase
+		cell = `kaname_second_factor_refusals_total{reason="unavailable"}`
+	)
+	return map[string]expressionForm{
+		"J1 слагаемое в комментарии PromQL": {expr: base + "\n  # + sum(increase(" + cell + "[10m]))\n  > 0", reads: false},
+		"J1 комментарий в конце строки":     {expr: base + " > 0 # sum(increase(" + cell + "[10m]))", reads: false},
+		"J4 слагаемое, умноженное на ноль":  {expr: base + "\n  + 0 * sum(increase(" + cell + "[10m])) > 0", reads: false},
+		"J4 слагаемое за unless":            {expr: base + " unless sum(increase(" + cell + "[10m])) > 0", reads: false},
 		"T3 одинарные кавычки":              {expr: base + "\n  + sum(increase(kaname_second_factor_refusals_total{reason='unavailable'}[10m])) > 0", reads: true},
 		"T4 имя ряда отбором __name__":      {expr: base + "\n  + sum(increase({__name__=\"kaname_second_factor_refusals_total\",reason=\"unavailable\"}[10m])) > 0", reads: true},
-		"близнец: каноническая запись":      {expr: base + "\n  + sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: true},
-		"близнец: без sum и в скобках":      {expr: "(" + base + " + increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: true},
-	} {
+		"близнец: каноническая запись":      {expr: base + "\n  + sum(increase(" + cell + "[10m])) > 0", reads: true},
+
+		// J5: слагаемое выходит с иным набором меток, чем цепочка: `{} + {reason=…}` — пусто.
+		"J5 sum by (reason) в цепочке sum":     {expr: base + "\n  + sum by (reason) (increase(" + cell + "[10m])) > 0", reads: false},
+		"J5 sum without (job) в цепочке sum":   {expr: base + "\n  + sum without (job) (increase(" + cell + "[10m])) > 0", reads: false},
+		"J5 близнец: sum by () — тот же набор": {expr: base + "\n  + sum by () (increase(" + cell + "[10m])) > 0", reads: true},
+		// J6: голый increase несёт метки ряда и цели; рядом с sum(…) — пусто.
+		"J6 голый increase в цепочке sum, в скобках":          {expr: "(" + base + " + increase(" + cell + "[10m])) > 0", reads: false},
+		"J6 голый increase в цепочке sum":                     {expr: base + "\n  + increase(" + cell + "[10m]) > 0", reads: false},
+		"J6 близнец: голый increase — единственное слагаемое": {expr: "increase(" + cell + "[10m]) > 0", reads: true},
+		// J7, J8: селектор читает не момент вычисления правила.
+		"J7 селектор с @ 0":                       {expr: base + "\n  + sum(increase(" + cell + "[10m] @ 0)) > 0", reads: false},
+		"J7 близнец: @ end() — момент вычисления": {expr: base + "\n  + sum(increase(" + cell + "[10m] @ end())) > 0", reads: true},
+		"J8 селектор со сдвигом offset 10m":       {expr: base + "\n  + sum(increase(" + cell + "[10m] offset 10m)) > 0", reads: false},
+		"J8 близнец: offset 0s — сдвига нет":      {expr: base + "\n  + sum(increase(" + cell + "[10m] offset 0s)) > 0", reads: true},
+	}
+}
+
+func TestSecondFactorCellsInjection_ExpressionForms(t *testing.T) {
+	for name, tc := range secondFactorExpressionForms() {
 		t.Run(name, func(t *testing.T) {
-			require.Equal(t, tc.reads, exprReadsCell(tc.expr, refusalUnavailableCell), "выражение:\n%s", tc.expr)
+			reads, why := exprReadsCell(tc.expr, refusalUnavailableCell)
+			require.Equal(t, tc.reads, reads, "выражение:\n%s\nпричина: %s", tc.expr, why)
 		})
 	}
 }

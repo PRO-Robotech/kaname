@@ -47,6 +47,11 @@ func keyOfEnv(env string) string {
 // installVisibleBlocks — утверждения INSTALL, которые оператор ЧИТАЕТ как
 // объявление: текст вне порождённого блока, без HTML-комментариев (их не видно
 // на странице) и без блоков кода (там пример либо прежняя, снятая ручка).
+// Блок кода — огороженный (```, ~~~) либо ОТСТУПНОЙ: строка с отступом в
+// четыре колонки (табуляция — до следующей кратной четырём) после пустой
+// строки; внутри пункта списка отступ считается от колонки его содержимого,
+// и меньший отступ там — абзац-продолжение пункта, а не код. Отступ без
+// пустой строки перед ним — продолжение абзаца.
 // Единица утверждения — блок markdown: абзац (строки до пустой) целиком, а
 // строка таблицы и пункт списка — каждый отдельно. Ключ и переменная в соседних
 // строках одного абзаца — одно утверждение, перенесённое по ширине; в соседних
@@ -54,10 +59,12 @@ func keyOfEnv(env string) string {
 // вне порождённого блока (перепись).
 func installVisibleBlocks(text string) (blocks []string, outside int) {
 	var (
-		inGenerated, inComment bool
-		fence                  string
-		cur                    []string
+		inGenerated, inComment, inIndentedCode bool
+		fence                                  string
+		cur                                    []string
+		listContent, codeBase                  int
 	)
+	prevBlank := true // начало документа — как после пустой строки
 	flush := func() {
 		if len(cur) > 0 {
 			blocks = append(blocks, strings.Join(cur, "\n"))
@@ -72,20 +79,44 @@ func installVisibleBlocks(text string) (blocks []string, outside int) {
 			continue
 		case installGeneratedEnd:
 			inGenerated = false
+			prevBlank = true
 			continue
 		}
 		if inGenerated {
 			continue
 		}
 		outside++
-		trimmed := strings.TrimLeft(line, " ")
+		blank := strings.TrimSpace(line) == ""
+		wasBlank := prevBlank
+		prevBlank = blank
+		indent := indentColumns(line)
+		trimmed := strings.TrimLeft(line, " \t")
 		if fence != "" {
 			if strings.HasPrefix(trimmed, fence) && strings.Trim(strings.TrimSpace(trimmed), fence[:1]) == "" {
 				fence = ""
 			}
 			continue
 		}
-		if !inComment && len(line)-len(trimmed) < 4 &&
+		if inIndentedCode {
+			if blank || indent >= codeBase+4 {
+				continue
+			}
+			inIndentedCode = false
+		}
+		if !inComment && !blank && wasBlank {
+			base := 0
+			if listContent > 0 && indent >= listContent {
+				base = listContent
+			} else {
+				listContent = 0
+			}
+			if indent >= base+4 {
+				flush()
+				inIndentedCode, codeBase = true, base
+				continue
+			}
+		}
+		if !inComment && indent < 4 &&
 			(strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")) {
 			flush()
 			fence = trimmed[:3]
@@ -104,7 +135,7 @@ func installVisibleBlocks(text string) (blocks []string, outside int) {
 		case v == "":
 			// Пустая строка (или целиком комментарий) — граница абзаца, только
 			// если строка и в источнике пуста; строка-комментарий абзаца не рвёт.
-			if strings.TrimSpace(line) == "" {
+			if blank {
 				flush()
 			}
 		case strings.HasPrefix(v, "|"), isListItem(v):
@@ -112,6 +143,8 @@ func installVisibleBlocks(text string) (blocks []string, outside int) {
 			cur = append(cur, visible)
 			if strings.HasPrefix(v, "|") {
 				flush()
+			} else {
+				listContent = indent + listMarkerWidth(v)
 			}
 		case strings.HasPrefix(v, "#"):
 			flush()
@@ -124,8 +157,38 @@ func installVisibleBlocks(text string) (blocks []string, outside int) {
 	return blocks, outside
 }
 
+// indentColumns — ширина ведущего отступа в колонках: пробел — одна,
+// табуляция — до следующей кратной четырём.
+func indentColumns(line string) int {
+	col := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			col++
+		case '\t':
+			col += 4 - col%4
+		default:
+			return col
+		}
+	}
+	return col
+}
+
+// listMarkerWidth — ширина маркера пункта вместе с пробелом за ним.
+func listMarkerWidth(v string) int {
+	i := 0
+	for i < len(v) && v[i] >= '0' && v[i] <= '9' {
+		i++
+	}
+	if i > 0 {
+		return i + 2
+	}
+	return 2
+}
+
 // stripHTMLComments — видимая часть строки; inComment — открыт ли комментарий
-// на входе, второе значение — открыт ли он на выходе.
+// на входе, второе значение — открыт ли он на выходе. Инлайн-код (`…`)
+// комментария не открывает: `<!--` внутри него — текст.
 func stripHTMLComments(line string, inComment bool) (string, bool) {
 	var b strings.Builder
 	for line != "" {
@@ -139,6 +202,21 @@ func stripHTMLComments(line string, inComment bool) (string, bool) {
 			continue
 		}
 		start := strings.Index(line, "<!--")
+		tick := strings.IndexByte(line, '`')
+		if tick >= 0 && (start < 0 || tick < start) {
+			n := tick
+			for n < len(line) && line[n] == '`' {
+				n++
+			}
+			run := line[tick:n]
+			b.WriteString(line[:n])
+			line = line[n:]
+			if end := closingCodeSpan(line, len(run)); end >= 0 {
+				b.WriteString(line[:end])
+				line = line[end:]
+			}
+			continue
+		}
 		if start < 0 {
 			b.WriteString(line)
 			break
@@ -148,6 +226,26 @@ func stripHTMLComments(line string, inComment bool) (string, bool) {
 		inComment = true
 	}
 	return b.String(), inComment
+}
+
+// closingCodeSpan — конец закрывающей серии ровно из n обратных кавычек в s
+// (индекс за ней) либо -1: незакрытая серия — текст, а не инлайн-код.
+func closingCodeSpan(s string, n int) int {
+	for i := 0; i < len(s); {
+		if s[i] != '`' {
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && s[j] == '`' {
+			j++
+		}
+		if j-i == n {
+			return j
+		}
+		i = j
+	}
+	return -1
 }
 
 // isListItem — начало пункта списка: `- `, `* `, `+ ` либо `N. `.
@@ -198,6 +296,7 @@ func TestInstallNamesTheLoginLaneAddressTheLandingGuardDemands(t *testing.T) {
 func TestInstallNamesKnobInjection(t *testing.T) {
 	key, env := "api-server.login-lane-endpoint", "KANAME_API_SERVER__LOGIN_LANE_ENDPOINT"
 	row := "| `" + key + "` | переменная `" + env + "` | боевой режим | … |"
+	stmt := "Адрес полосы — `" + key + "` (переменная `" + env + "`)."
 	for name, tc := range map[string]struct {
 		text string
 		want int
@@ -221,6 +320,19 @@ func TestInstallNamesKnobInjection(t *testing.T) {
 		"L2 близнец: соседние строки таблицы — разные утверждения": {text: "| `" + key + "` | … |\n| `" + env + "` | … |\n", want: 0},
 		"L2 близнец: разные абзацы — не в счёт":                    {text: "`" + key + "`\n\n`" + env + "`\n", want: 0},
 		"L2 близнец: соседние пункты списка — не в счёт":           {text: "- `" + key + "`\n- `" + env + "`\n", want: 0},
+		// M3: отступной блок кода (4 пробела либо табуляция после пустой строки) — тот же класс, что M2.
+		"M3 строка в отступном блоке кода — не в счёт":              {text: "Пример:\n\n    " + row + "\n", want: 0},
+		"M3 утверждение в отступном блоке кода — не в счёт":         {text: "Пример:\n\n    " + stmt + "\n", want: 0},
+		"M3 отступной блок в начале документа — не в счёт":          {text: "    " + stmt + "\n", want: 0},
+		"M3 отступ табуляцией — не в счёт":                          {text: "Пример:\n\n\t" + stmt + "\n", want: 0},
+		"M3 блок кода внутри пункта списка — не в счёт":             {text: "- пункт\n\n      " + stmt + "\n", want: 0},
+		"M3 близнец: та же строка без отступа — в счёт":             {text: "Пример:\n\n" + stmt + "\n", want: 1},
+		"M3 близнец: отступ без пустой строки — продолжение абзаца": {text: "Пример:\n    " + stmt + "\n", want: 1},
+		"M3 близнец: абзац-продолжение пункта списка — в счёт":      {text: "- пункт\n\n    " + stmt + "\n", want: 1},
+		"M3 близнец: после отступного блока — в счёт":               {text: "    код\n\n" + stmt + "\n", want: 1},
+		// M4: `<!--` внутри инлайн-кода — текст, а не начало комментария.
+		"M4 `<!--` в инлайн-коде не прячет следующую строку":  {text: "Комментарий открывается `<!--`.\n" + row + "\n", want: 1},
+		"M4 близнец: настоящий комментарий после инлайн-кода": {text: "`x` <!--\n" + row + "\n-->\n", want: 0},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, naming := installNamesKnob(tc.text, key, env)

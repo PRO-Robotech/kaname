@@ -22,9 +22,11 @@
 //	Л2  у каждой записи есть значение (запись, пережившая своё значение, — находка);
 //	Л3  «наша сторона» — выражение названного правила СЧИТАЕТ названную клетку
 //	    (разбором PromQL, [exprReadsCell]);
-//	Л4  «сторона вызывающего» — ни одно правило объекта её клетку не считает:
-//	    тревога на отказ, вызванный предъявителем, звонила бы на каждый
-//	    неверный код.
+//	Л4  «сторона вызывающего» — ни одно правило объекта её клетку не ЧИТАЕТ:
+//	    ни один селектор ни в какой функции и ни в какой позиции не покрывает
+//	    её отборами ([exprCoversCell]: весь ряд, ряд без метки, `=~`, `!=`,
+//	    `rate` — покрытие). Тревога на отказ, вызванный предъявителем,
+//	    звонила бы на каждый неверный код.
 package deploy_test
 
 import (
@@ -142,9 +144,14 @@ func judgeSideLedger(values []producerValue, ledger map[string]sideVerdict, rule
 		if verdict.rule == "" {
 			census.caller++
 			for _, r := range rules {
-				if exprReadsCell(r.Expr, v.cell) {
+				covered, err := exprCoversCell(r.Expr, v.cell)
+				switch {
+				case err != nil:
 					findings = append(findings, v.key+": сторона вызывающего, а правило "+r.Alert+
-						" считает её клетку "+v.cell.String()+" — тревога звонила бы на отказ предъявителя")
+						" не судимо — "+err.Error())
+				case covered:
+					findings = append(findings, v.key+": сторона вызывающего, а правило "+r.Alert+
+						" читает её клетку "+v.cell.String()+" — тревога звонила бы на отказ предъявителя")
 				}
 			}
 			continue
@@ -159,9 +166,9 @@ func judgeSideLedger(values []producerValue, ledger map[string]sideVerdict, rule
 			findings = append(findings, v.key+": наша сторона, а правила "+verdict.rule+" в наборе нет")
 			continue
 		}
-		if !exprReadsCell(r.Expr, want) {
+		if reads, why := exprReadsCell(r.Expr, want); !reads {
 			findings = append(findings, v.key+": наша сторона, а правило "+verdict.rule+
-				" не считает клетку "+want.String())
+				" не считает клетку "+want.String()+": "+why)
 		}
 	}
 	for key := range ledger {
@@ -232,11 +239,91 @@ func TestSideLedgerInjection_OurSideNotCountedIsFound(t *testing.T) {
 	}
 }
 
+// callerForm — правило KanameLoginLaneFailing с добавленным слагаемым, которое
+// считает клетку стороны вызывающего, и ключ значения, о котором находка.
+type callerForm struct {
+	expr string
+	key  string
+	cell cellTerm
+}
+
+// withExtraTerm — законное правило полосы входа плюс слагаемое term.
+func withExtraTerm(term string) string {
+	return lawfulFailingExpr[:len(lawfulFailingExpr)-len(" > 0")] + "\n  + " + term + " > 0"
+}
+
+func presentationCell(method, outcome string) cellTerm {
+	return cellTerm{series: metrics.SecondFactorPresentationsMetric,
+		labels: map[string]string{"method": method, "outcome": outcome}}
+}
+
+// callerSideCountingForms — формы, в которых правило СЧИТАЕТ клетку стороны
+// вызывающего: точная запись (контроль) и записи шире клетки. Каждая звонит на
+// рост названной клетки по исходу движка ([TestCallerSideFormsRingByTheEngine]).
+func callerSideCountingForms() map[string]callerForm {
+	const pres = "kaname_second_factor_presentations_total"
+	return map[string]callerForm{
+		"контроль: точная запись клетки": {
+			expr: withExtraTerm(`sum(increase(` + pres + `{method="totp",outcome="mismatched"}[10m]))`),
+			key:  "presentation/totp/mismatched", cell: presentationCell("totp", "mismatched")},
+		"ряд целиком": {
+			expr: withExtraTerm(`sum(increase(` + pres + `[10m]))`),
+			key:  "presentation/totp/mismatched", cell: presentationCell("totp", "mismatched")},
+		"без метки method": {
+			expr: withExtraTerm(`sum(increase(` + pres + `{outcome="mismatched"}[10m]))`),
+			key:  "presentation/lookup_secret/mismatched", cell: presentationCell("lookup_secret", "mismatched")},
+		"неточный отбор =~": {
+			expr: withExtraTerm(`sum(increase(` + pres + `{outcome=~"mismatched|replayed"}[10m]))`),
+			key:  "presentation/totp/replayed", cell: presentationCell("totp", "replayed")},
+		"отрицание != на ряде отказов": {
+			expr: withExtraTerm(`sum(increase(kaname_second_factor_refusals_total{reason!="unavailable"}[10m]))`),
+			key:  "refusal/not-enrolled",
+			cell: cellTerm{series: metrics.SecondFactorRefusalsMetric, labels: map[string]string{"reason": "not-enrolled"}}},
+		"rate вместо increase": {
+			expr: withExtraTerm(`sum(rate(` + pres + `{method="totp",outcome="mismatched"}[10m]))`),
+			key:  "presentation/totp/mismatched", cell: presentationCell("totp", "mismatched")},
+	}
+}
+
+// Л4 судит ПОКРЫТИЕ: селектор, чьи отборы выполняются на клетке стороны
+// вызывающего, — находка в любой функции и в любой форме записи.
 func TestSideLedgerInjection_CallerSideCountedIsFound(t *testing.T) {
-	noisy := lawfulFailingExpr[:len(lawfulFailingExpr)-len(" > 0")] +
-		"\n  + sum(increase(kaname_second_factor_presentations_total{method=\"totp\",outcome=\"mismatched\"}[10m])) > 0"
+	for name, tc := range callerSideCountingForms() {
+		t.Run(name, func(t *testing.T) {
+			_, findings := judgeSideLedger(secondFactorProducerValues(), secondFactorSideLedger(),
+				injectedRules(tc.expr, lawfulCapacityExpr))
+			require.NotEmpty(t, findings, "выражение:\n%s", tc.expr)
+			joined := strings.Join(findings, "\n")
+			require.Contains(t, joined, tc.key+": сторона вызывающего, а правило KanameLoginLaneFailing")
+			for _, f := range findings {
+				require.Contains(t, f, ": сторона вызывающего, а правило ", "находка не о стороне вызывающего: %s", f)
+			}
+		})
+	}
+}
+
+// Покрытие судится в любой позиции: селектор под `0 *` тревоги не поднимает,
+// но читает клетку вызывающего — на этой стороне безопасный отказ, а не молчание.
+func TestSideLedgerInjection_CallerSideSelectorInAnyPositionIsFound(t *testing.T) {
+	expr := withExtraTerm(`0 * sum(increase(kaname_second_factor_presentations_total{method="totp",outcome="mismatched"}[10m]))`)
 	_, findings := judgeSideLedger(secondFactorProducerValues(), secondFactorSideLedger(),
-		injectedRules(noisy, lawfulCapacityExpr))
+		injectedRules(expr, lawfulCapacityExpr))
 	require.Len(t, findings, 1, "%v", findings)
-	require.Contains(t, findings[0], "presentation/totp/mismatched: сторона вызывающего, а правило KanameLoginLaneFailing")
+	require.Contains(t, findings[0], "presentation/totp/mismatched: сторона вызывающего")
+}
+
+// Законный близнец: отбор шире клетки, но покрывающий только клетки НАШЕЙ
+// стороны, — молчание.
+func TestSideLedgerInjection_WideSelectorOverOurSideOnlyIsSilent(t *testing.T) {
+	for name, term := range map[string]string{
+		"исход material-unreadable без метки method": `sum(increase(kaname_second_factor_presentations_total{outcome="material-unreadable"}[10m]))`,
+		"неточный отбор только нашей клетки":         `sum(increase(kaname_second_factor_refusals_total{reason=~"unavail.*"}[10m]))`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			census, findings := judgeSideLedger(secondFactorProducerValues(), secondFactorSideLedger(),
+				injectedRules(withExtraTerm(term), lawfulCapacityExpr))
+			require.Empty(t, findings)
+			require.NotZero(t, census.caller)
+		})
+	}
 }
