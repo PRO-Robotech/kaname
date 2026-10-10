@@ -258,8 +258,14 @@ func TestResourceJournal_LiveKindDictionaryIsTheOwnersPlusTheFeedKey(t *testing.
 	sort.Strings(live)
 	require.NotEmpty(t, live, "перепись словаря пуста: прочитано не то ограничение")
 
-	want := []string{feed.JournalKey}
+	// Множество, а не список: когда объявление владельца само назовёт ключ
+	// ленты, слово не должно считаться дважды.
+	set := map[string]bool{feed.JournalKey: true}
 	for k := range subscriptionjournal.Journal().Mapping.Kinds {
+		set[k] = true
+	}
+	want := make([]string, 0, len(set))
+	for k := range set {
 		want = append(want, k)
 	}
 	sort.Strings(want)
