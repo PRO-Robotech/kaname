@@ -67,6 +67,11 @@ FP-12 заводит ей пароль, и после прогона полос�
 Разрешённая привязка уезжает в окружение ключами `accessKeysRpId` и
 `accessKeysOrigin`: набор `kaname-access-keys` собирает церемонии под неё же.
 
+ПОТОЛОК СТЕНДА (kaname#699). Потолок ключей человека — тоже величина установки:
+посев берёт его из `KANAME_STAND_ACCESS_KEYS_CEILING`, а без неё — из профиля
+(`ownCeilings.accessKeysPerUser`), и пишет ключом `accessKeysCeiling`. Не число,
+ниже трёх либо выше предела повтора набора — условие не создано (код 75).
+
 ПАРОЛЬ, ТОКЕН И ПОЧТА НЕ ПЕЧАТАЮТСЯ.
 
 САМОПРОВЕРКА — `--self-test`: кодирование аттестации (CBOR, ключ COSE RS256) и
@@ -118,7 +123,10 @@ FIELDS = ("Email", "CredentialId", "UserHandle", "Origin")
 # церемонии под них же (ключ окружения, иначе величина профиля), поэтому они
 # уезжают в окружение тем же посевом, а не выписываются в наборе второй раз.
 BINDING_KEYS = ("accessKeysRpId", "accessKeysOrigin")
-MINTED_KEYS = tuple(prefix + field for prefix in PREFIXES for field in FIELDS) + BINDING_KEYS
+# Потолок ключей человека СТЕНДА (kaname#699): набор заполняет его до конца и
+# судит отказ сверх него, поэтому читает величину стенда, а не профиля.
+CEILING_KEY = "accessKeysCeiling"
+MINTED_KEYS = tuple(prefix + field for prefix in PREFIXES for field in FIELDS) + BINDING_KEYS + (CEILING_KEY,)
 MINTED_SURFACE = "служба (собственный REST-фронт)"
 
 DOMAIN = "kaname.local"
@@ -136,6 +144,14 @@ PROFILE = ROOT / "deploy" / "values.prod.yaml"
 # адреса консоли своего пространства) и называет их здесь. Обе или ни одной.
 ENV_RP_ID = "KANAME_STAND_ACCESS_KEYS_RP_ID"
 ENV_ORIGIN = "KANAME_STAND_ACCESS_KEYS_ORIGIN"
+# Потолок ключей человека, который объявляет СТЕНД (kaname#699). Автономный стенд
+# службы его не называет — тогда `ownCeilings.accessKeysPerUser` профиля; стенд
+# платформы объявляет свой (чарт платформы ставит службе другую величину).
+ENV_CEILING = "KANAME_STAND_ACCESS_KEYS_CEILING"
+# Набор заводит до потолка два ключа сам и судит отказ сверх него: ниже трёх
+# «Дано» кейса потолка не строится. Выше предела повтора набора заполнение не
+# дошло бы до потолка — это тоже несозданное условие, а не величина продукта.
+CEILING_MIN, CEILING_MAX = 3, 32
 _RP_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
 _ORIGIN_RE = re.compile(r"^https://([a-z0-9.-]+)(:[0-9]{1,5})?$")
 
@@ -186,6 +202,32 @@ def profile_binding(path: pathlib.Path = PROFILE) -> tuple[str, str]:
     if len(found) != 1:
         raise Finding(f"{path.name}: блок authn.accessKeys найден {len(found)} раз — ждали ровно один")
     return found[0]
+
+
+def profile_ceiling(path: pathlib.Path = PROFILE) -> int:
+    """`ownCeilings.accessKeysPerUser` профиля — ровно одно вхождение."""
+    found = re.findall(r"^  accessKeysPerUser: (\d+)\s*$", path.read_text(encoding="utf-8"), re.M)
+    if len(found) != 1:
+        raise Finding(f"{path.name}: ownCeilings.accessKeysPerUser найден {len(found)} раз — ждали ровно один")
+    return int(found[0])
+
+
+def stand_ceiling(environ) -> int:
+    """Потолок стенда: переменная `KANAME_STAND_ACCESS_KEYS_CEILING`, без неё — профиль.
+
+    Величина не той формы — условие не создано, а не молчаливая подстановка
+    профиля: набор заполнил бы чужой потолок, и отказ продукта на «лишнем» ключе
+    читался бы дефектом."""
+    raw = (environ.get(ENV_CEILING) or "").strip()
+    if not raw:
+        return profile_ceiling()
+    if not re.fullmatch(r"[1-9][0-9]*", raw):
+        raise Unmet(f"{ENV_CEILING}: ждали целое положительное число без знака и пробелов")
+    n = int(raw)
+    if not CEILING_MIN <= n <= CEILING_MAX:
+        raise Unmet(f"{ENV_CEILING}: набор судит потолок от {CEILING_MIN} до {CEILING_MAX} — "
+                    f"ниже «Дано» кейса потолка не строится, выше заполнение не дойдёт до него")
+    return n
 
 
 def stand_binding(environ) -> tuple[str, str]:
@@ -412,19 +454,21 @@ def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None
 
 
 def seed_all(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
-             sleep=time.sleep) -> dict:
+             ceiling=None, sleep=time.sleep) -> dict:
     """Обе личности, каждая под своей приставкой: свежая почта, свой ключ, своя рукоятка.
 
     Привязка разрешается ОДИН раз и уезжает в окружение рядом с личностями: набор
     ключей доступа собирает церемонии под ту же привязку, под которой посев
     доказал регистрацию."""
     binding = binding or stand_binding(os.environ)
+    ceiling = stand_ceiling(os.environ) if ceiling is None else ceiling
     patch: dict = {}
     for prefix in PREFIXES:
         patch.update(seed(lane, mailbox, doors, store, client, keys=keys, binding=binding,
                           sleep=sleep, prefix=prefix))
         say(f"  ok   личность «{prefix}» положена")
     patch.update(dict(zip(BINDING_KEYS, binding)))
+    patch[CEILING_KEY] = str(ceiling)
     return patch
 
 
@@ -550,6 +594,23 @@ def self_test() -> int:
             got = _outcome(lambda env=env: stand_binding(env))
             _c(label, got[0] == want[0] and (want[1] is None or got[1] == want[1]), f"{got}")
 
+        prof_ceiling = profile_ceiling()
+        for label, env, want in [
+            ("потолок: переменной стенда нет — величина профиля", {}, ("ok", str(prof_ceiling))),
+            ("потолок: переменная пуста — величина профиля", {ENV_CEILING: " "}, ("ok", str(prof_ceiling))),
+            ("потолок: переменная названа — величина стенда", {ENV_CEILING: "8"}, ("ok", "8")),
+            ("потолок: на границе предела повтора — величина стенда", {ENV_CEILING: str(CEILING_MAX)},
+             ("ok", str(CEILING_MAX))),
+            ("потолок: не число — условие не создано", {ENV_CEILING: "восемь"}, ("unmet", None)),
+            ("потолок: со знаком — условие не создано", {ENV_CEILING: "+8"}, ("unmet", None)),
+            ("потолок: с ведущим нулём — условие не создано", {ENV_CEILING: "08"}, ("unmet", None)),
+            ("потолок: ниже трёх — условие не создано", {ENV_CEILING: "2"}, ("unmet", None)),
+            ("потолок: выше предела повтора — условие не создано", {ENV_CEILING: str(CEILING_MAX + 1)},
+             ("unmet", None)),
+        ]:
+            got = _outcome(lambda env=env: stand_ceiling(env))
+            _c(label, got[0] == want[0] and (want[1] is None or got[1] == want[1]), f"{got}")
+
         res = registration_result({"n": "c0ffee", "e": "010001"}, b"\x01" * 4, "kaname.local",
                                   "https://kaname.local", b"\x02" * 16)
         att = base64.b64decode(res["attestationObject"])
@@ -587,6 +648,14 @@ def self_test() -> int:
            and patch["keyPersonCredentialId"] != patch["f13PersonCredentialId"], f"{patch}")
         _c("привязка профиля уезжает в окружение рядом с личностями",
            kind == "ok" and (patch["accessKeysRpId"], patch["accessKeysOrigin"]) == (rp, origin), f"{patch}")
+        _c("потолок уезжает в окружение тем же посевом",
+           kind == "ok" and patch.get(CEILING_KEY) == str(stand_ceiling(os.environ)), f"{patch}")
+        kind_c, text_c = _outcome(lambda: seed_all(None, None, _FakeDoors(rp=rp), _FakeStore(), ("c", "s", "r"),
+                                                   binding=(rp, origin), ceiling=stand_ceiling({ENV_CEILING: "8"}),
+                                                   sleep=lambda _: None))
+        patch_c = json.loads(text_c.replace("'", '"')) if kind_c == "ok" else {}
+        _c("потолок стенда уезжает в окружение величиной стенда, а не профиля",
+           kind_c == "ok" and patch_c.get(CEILING_KEY) == "8", f"{kind_c}: {text_c}")
 
         login_answer["value"] = None
         d_st = _FakeDoors(rp=stand_rp)

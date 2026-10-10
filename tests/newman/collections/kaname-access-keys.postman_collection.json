@@ -10671,11 +10671,11 @@
       ]
     },
     {
-      "name": "IAM-ACCESSKEY-BVA-CEILING — Ф7-37, Ф7-14: ключей ровно 3 — принят, ещё один — отказ со следующим шагом; снятие возвращает слот",
+      "name": "IAM-ACCESSKEY-BVA-CEILING — Ф7-37, Ф7-14: ключей ровно потолок стенда — принят, ещё один — отказ со следующим шагом; снятие возвращает слот",
       "description": "class:BVA | class:NEG | priority:P1",
       "item": [
         {
-          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-k3-begin",
+          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-begin",
           "request": {
             "method": "POST",
             "header": [
@@ -10738,10 +10738,15 @@
                   "  pm.execution.skipRequest();",
                   "}",
                   "if (!pm.environment.get('akAUserId')) {",
-                  "  pm.test('AK37-FILL-K3-BEGIN: человек не назван входом', () => {",
+                  "  pm.test('AK37-FILL-BEGIN: человек не назван входом', () => {",
                   "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
                   "  });",
                   "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('akFillRun') !== pm.environment.get('runId')) {",
+                  "  pm.environment.set('akFillKeyIds', '[]');",
+                  "  pm.environment.set('akFillLastKeyId', '');",
+                  "  pm.environment.set('akFillRun', pm.environment.get('runId'));",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -10770,19 +10775,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.environment.unset('akRegChK3');",
-                  "pm.test('AK37-FILL-K3-BEGIN: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('akRegChF');",
+                  "pm.test('AK37-FILL-BEGIN: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK37-FILL-K3-BEGIN: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
-                  "if (__j.challenge) { pm.environment.set('akRegChK3', __j.challenge); }",
-                  "if (__j.expiresAt) { pm.environment.set('akRegExpK3', __j.expiresAt); }"
+                  "pm.test('AK37-FILL-BEGIN: испытание выдано непустым', () => pm.expect(typeof __j.challenge === 'string' && __j.challenge.length > 0).to.eql(true));",
+                  "if (__j.challenge) { pm.environment.set('akRegChF', __j.challenge); }",
+                  "if (__j.expiresAt) { pm.environment.set('akRegExpF', __j.expiresAt); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-k3-finish",
+          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-finish",
           "request": {
             "method": "POST",
             "header": [
@@ -10845,13 +10850,13 @@
                   "  pm.execution.skipRequest();",
                   "}",
                   "if (!pm.environment.get('akAUserId')) {",
-                  "  pm.test('AK37-FILL-K3-FINISH: человек не назван входом', () => {",
+                  "  pm.test('AK37-FILL-FINISH: человек не назван входом', () => {",
                   "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('akRegChK3')) {",
-                  "  pm.test('AK37-FILL-K3-FINISH: испытание не выдано', () => {",
+                  "if (!pm.environment.get('akRegChF')) {",
+                  "  pm.test('AK37-FILL-FINISH: испытание не выдано', () => {",
                   "    pm.expect.fail('шаг выдачи испытания выше не вернул challenge — собирать результат не на чем');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -10908,8 +10913,8 @@
                   "  return { utf8: utf8, b64: b64, unb64: unb64, rand: rand, register: register, assert: assert };",
                   "})();",
                   "const _akCred = _ak.rand(16);",
-                  "pm.environment.set('akK3CredId', _ak.b64(_akCred));",
-                  "const _akR = _ak.register({ challenge: _ak.unb64(pm.environment.get('akRegChK3') || ''), rpId: (pm.environment.get('accessKeysRpId') || 'access.example.invalid'), origin: (pm.environment.get('accessKeysOrigin') || 'https://console.access.example.invalid'), flags: 69, credId: _akCred, key: 0, alg: -257 });",
+                  "pm.environment.set('akFCredId', _ak.b64(_akCred));",
+                  "const _akR = _ak.register({ challenge: _ak.unb64(pm.environment.get('akRegChF') || ''), rpId: (pm.environment.get('accessKeysRpId') || 'access.example.invalid'), origin: (pm.environment.get('accessKeysOrigin') || 'https://console.access.example.invalid'), flags: 69, credId: _akCred, key: 0, alg: -257 });",
                   "const _akC = { id: _akR.id, clientDataJson: _akR.clientDataJson, attestationObject: _akR.attestationObject };",
                   "_akC.discoverable = true;",
                   "const _akBody = JSON.stringify({ name: '', description: '', credential: _akC });",
@@ -10941,18 +10946,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.environment.unset('akK3Op');",
-                  "pm.test('AK37-FILL-K3-FINISH: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('akFOp');",
+                  "pm.test('AK37-FILL-FINISH: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK37-FILL-K3-FINISH: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
-                  "if (__j.id) { pm.environment.set('akK3Op', __j.id); }"
+                  "pm.test('AK37-FILL-FINISH: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
+                  "if (__j.id) { pm.environment.set('akFOp', __j.id); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-k3-op",
+          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-op",
           "request": {
             "method": "GET",
             "header": [
@@ -10962,13 +10967,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{akK3Op}}",
+              "raw": "{{baseUrl}}/operations/{{akFOp}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{akK3Op}}"
+                "{{akFOp}}"
               ]
             }
           },
@@ -10995,22 +11000,22 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akK3Op}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akFOp}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('akK3Op')) {",
-                  "  pm.test('AK37-FILL-K3-OP: операция не возвращена шагом выше', () => {",
+                  "if (!pm.environment.get('akFOp')) {",
+                  "  pm.test('AK37-FILL-OP: операция не возвращена шагом выше', () => {",
                   "    pm.expect.fail('мутация выше отвергнута синхронно либо не вернула id операции — опрашивать нечего; причина — в ней, не здесь');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_akops_K3_ak37_fill_k3_op') !== pm.info.requestName) {",
-                  "  pm.environment.set('_akop_K3_ak37_fill_k3_op', '0');",
-                  "  pm.environment.set('_akops_K3_ak37_fill_k3_op', pm.info.requestName);",
+                  "if (pm.environment.get('_akops_F_ak37_fill_op') !== pm.info.requestName) {",
+                  "  pm.environment.set('_akop_F_ak37_fill_op', '0');",
+                  "  pm.environment.set('_akops_F_ak37_fill_op', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -11039,25 +11044,33 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const __n = parseInt(pm.environment.get('_akop_K3_ak37_fill_k3_op') || '0', 10);",
+                  "const __n = parseInt(pm.environment.get('_akop_F_ak37_fill_op') || '0', 10);",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "if (pm.response.code === 200 && !__j.done && __n < 50) {",
-                  "  pm.environment.set('_akop_K3_ak37_fill_k3_op', String(__n + 1));",
+                  "  pm.environment.set('_akop_F_ak37_fill_op', String(__n + 1));",
                   "  const _akpd = Date.now(); while (Date.now() - _akpd < 500) { /* inter-poll delay: operation not done yet */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_akop_K3_ak37_fill_k3_op');",
-                  "pm.environment.unset('_akops_K3_ak37_fill_k3_op');",
-                  "pm.test('AK37-FILL-K3-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('AK37-FILL-K3-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
-                  "pm.test('AK37-FILL-K3-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));",
+                  "pm.environment.unset('_akop_F_ak37_fill_op');",
+                  "pm.environment.unset('_akops_F_ak37_fill_op');",
+                  "pm.test('AK37-FILL-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('AK37-FILL-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
+                  "pm.test('AK37-FILL-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));",
                   "const _akK = (__j.response && __j.response.accessKey) || {};",
-                  "pm.test('AK37-FILL-K3-OP: ключ назван платформенным id формы ak-<17>', () => pm.expect(/^ak-[0-9a-hjkmnp-tv-z]{17}$/.test(String(_akK.id || ''))).to.eql(true));",
-                  "if (_akK.id) { pm.environment.set('akK3KeyId', _akK.id); }",
-                  "pm.environment.set('akK3Count', '0');",
-                  "pm.environment.set('akK3LastUsed', '');",
-                  "pm.environment.set('akK3Mat', '0');"
+                  "pm.test('AK37-FILL-OP: ключ назван платформенным id формы ak-<17>', () => pm.expect(/^ak-[0-9a-hjkmnp-tv-z]{17}$/.test(String(_akK.id || ''))).to.eql(true));",
+                  "if (_akK.id) { pm.environment.set('akFKeyId', _akK.id); }",
+                  "pm.environment.set('akFCount', '0');",
+                  "pm.environment.set('akFLastUsed', '');",
+                  "pm.environment.set('akFMat', '0');",
+                  "const _akFill = JSON.parse(pm.environment.get('akFillKeyIds') || '[]');",
+                  "if (_akK.id) { _akFill.push(_akK.id); pm.environment.set('akFillKeyIds', JSON.stringify(_akFill)); pm.environment.set('akFillLastKeyId', _akK.id); }",
+                  "const _akCeil = parseInt(pm.environment.get('accessKeysCeiling') || '3', 10);",
+                  "pm.test('AK37-FILL-OP: заполнение не вышло за предел повтора', () => pm.expect(_akFill.length <= 32).to.eql(true));",
+                  "if (_akK.id && 2 + _akFill.length < _akCeil && _akFill.length < 32) {",
+                  "  const _akfd = Date.now(); while (Date.now() - _akfd < 100) { /* pause before the next fill ceremony */ }",
+                  "  pm.execution.setNextRequest('IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-begin');",
+                  "}"
                 ]
               }
             }
@@ -11153,7 +11166,7 @@
                   "pm.test('AK37-LIST-FULL: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK37-LIST-FULL: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));"
+                  "pm.test('AK37-LIST-FULL: ключей у человека — потолок стенда', () => pm.expect(_akL.length).to.eql(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10)));"
                 ]
               }
             }
@@ -11818,7 +11831,7 @@
                   "pm.test('AK37-OVER-OP: код отказа операции 8', () => pm.expect(__j.error && __j.error.code).to.eql(8));",
                   "pm.test('AK37-OVER-OP: отказ называет следующий шаг и действующую величину', () => {",
                   "  const __m = String((__j.error && __j.error.message) || '');",
-                  "  pm.expect([__m.indexOf('revoke an access key you no longer need') >= 0, __m.indexOf('3') >= 0]).to.eql([true, true]); });"
+                  "  pm.expect([__m.indexOf('revoke an access key you no longer need') >= 0, __m.indexOf(String(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10))) >= 0]).to.eql([true, true]); });"
                 ]
               }
             }
@@ -11914,7 +11927,7 @@
                   "pm.test('AK37-LIST-STILL-FULL: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK37-LIST-STILL-FULL: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));"
+                  "pm.test('AK37-LIST-STILL-FULL: ключей у человека — потолок стенда', () => pm.expect(_akL.length).to.eql(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10)));"
                 ]
               }
             }
@@ -12310,7 +12323,7 @@
           ]
         },
         {
-          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-revoke-k3",
+          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-revoke-fill-last",
           "request": {
             "method": "DELETE",
             "header": [
@@ -12320,7 +12333,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{akAUserId}}/accessKeys/{{akK3KeyId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{akAUserId}}/accessKeys/{{akFillLastKeyId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -12330,7 +12343,7 @@
                 "users",
                 "{{akAUserId}}",
                 "accessKeys",
-                "{{akK3KeyId}}"
+                "{{akFillLastKeyId}}"
               ]
             }
           },
@@ -12357,7 +12370,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akAUserId}}/accessKeys/{{akK3KeyId}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akAUserId}}/accessKeys/{{akFillLastKeyId}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -12365,8 +12378,14 @@
                   "  pm.execution.skipRequest();",
                   "}",
                   "if (!pm.environment.get('akAUserId')) {",
-                  "  pm.test('AK37-REVOKE-K3: человек не назван входом', () => {",
+                  "  pm.test('AK37-REVOKE-FILL-LAST: человек не назван входом', () => {",
                   "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.environment.get('akFillLastKeyId')) {",
+                  "  pm.test('AK37-REVOKE-FILL-LAST: ключ заполнения не заведён', () => {",
+                  "    pm.expect.fail('заполнение выше не завело ни одного ключа — снимать нечего');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -12433,18 +12452,18 @@
                   "}",
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
-                  "pm.environment.unset('akK3ROp');",
-                  "pm.test('AK37-REVOKE-K3: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('akFROp');",
+                  "pm.test('AK37-REVOKE-FILL-LAST: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK37-REVOKE-K3: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
-                  "if (__j.id) { pm.environment.set('akK3ROp', __j.id); }"
+                  "pm.test('AK37-REVOKE-FILL-LAST: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
+                  "if (__j.id) { pm.environment.set('akFROp', __j.id); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-revoke-k3-op",
+          "name": "IAM-ACCESSKEY-BVA-CEILING :: ak37-revoke-fill-last-op",
           "request": {
             "method": "GET",
             "header": [
@@ -12454,13 +12473,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{akK3ROp}}",
+              "raw": "{{baseUrl}}/operations/{{akFROp}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{akK3ROp}}"
+                "{{akFROp}}"
               ]
             }
           },
@@ -12487,22 +12506,22 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akK3ROp}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akFROp}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('akK3ROp')) {",
-                  "  pm.test('AK37-REVOKE-K3-OP: операция не возвращена шагом выше', () => {",
+                  "if (!pm.environment.get('akFROp')) {",
+                  "  pm.test('AK37-REVOKE-FILL-LAST-OP: операция не возвращена шагом выше', () => {",
                   "    pm.expect.fail('мутация выше отвергнута синхронно либо не вернула id операции — опрашивать нечего; причина — в ней, не здесь');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_akops_K3R_ak37_revoke_k3_op') !== pm.info.requestName) {",
-                  "  pm.environment.set('_akop_K3R_ak37_revoke_k3_op', '0');",
-                  "  pm.environment.set('_akops_K3R_ak37_revoke_k3_op', pm.info.requestName);",
+                  "if (pm.environment.get('_akops_FR_ak37_revoke_fill_last_op') !== pm.info.requestName) {",
+                  "  pm.environment.set('_akop_FR_ak37_revoke_fill_last_op', '0');",
+                  "  pm.environment.set('_akops_FR_ak37_revoke_fill_last_op', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -12531,19 +12550,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const __n = parseInt(pm.environment.get('_akop_K3R_ak37_revoke_k3_op') || '0', 10);",
+                  "const __n = parseInt(pm.environment.get('_akop_FR_ak37_revoke_fill_last_op') || '0', 10);",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "if (pm.response.code === 200 && !__j.done && __n < 50) {",
-                  "  pm.environment.set('_akop_K3R_ak37_revoke_k3_op', String(__n + 1));",
+                  "  pm.environment.set('_akop_FR_ak37_revoke_fill_last_op', String(__n + 1));",
                   "  const _akpd = Date.now(); while (Date.now() - _akpd < 500) { /* inter-poll delay: operation not done yet */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_akop_K3R_ak37_revoke_k3_op');",
-                  "pm.environment.unset('_akops_K3R_ak37_revoke_k3_op');",
-                  "pm.test('AK37-REVOKE-K3-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('AK37-REVOKE-K3-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
-                  "pm.test('AK37-REVOKE-K3-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));"
+                  "pm.environment.unset('_akop_FR_ak37_revoke_fill_last_op');",
+                  "pm.environment.unset('_akops_FR_ak37_revoke_fill_last_op');",
+                  "pm.test('AK37-REVOKE-FILL-LAST-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('AK37-REVOKE-FILL-LAST-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
+                  "pm.test('AK37-REVOKE-FILL-LAST-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));"
                 ]
               }
             }
@@ -13028,7 +13047,7 @@
                   "pm.test('AK37-LIST-AFTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK37-LIST-AFTER: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));"
+                  "pm.test('AK37-LIST-AFTER: ключей у человека — потолок стенда', () => pm.expect(_akL.length).to.eql(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10)));"
                 ]
               }
             }
@@ -15502,7 +15521,7 @@
                   "pm.test('AK34-LIST-BEFORE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK34-LIST-BEFORE: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));",
+                  "pm.test('AK34-LIST-BEFORE: ключей у человека — потолок стенда', () => pm.expect(_akL.length).to.eql(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10)));",
                   "{",
                   "const _akRow = _akL.filter((k) => k.id === pm.environment.get('akK1KeyId'))[0] || null;",
                   "pm.test('AK34-LIST-BEFORE: ключ K1 в перечне назван своим id', () => pm.expect(!!_akRow).to.eql(true));",
@@ -16806,7 +16825,7 @@
                   "pm.test('AK34-LIST-UNCHANGED: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK34-LIST-UNCHANGED: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));",
+                  "pm.test('AK34-LIST-UNCHANGED: ключей у человека — потолок стенда', () => pm.expect(_akL.length).to.eql(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10)));",
                   "{",
                   "const _akRow = _akL.filter((k) => k.id === pm.environment.get('akK1KeyId'))[0] || null;",
                   "pm.test('AK34-LIST-UNCHANGED: ключ K1 в перечне назван своим id', () => pm.expect(!!_akRow).to.eql(true));",
@@ -17404,7 +17423,7 @@
                   "pm.test('AK47-LIST-A-KEPT: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-                  "pm.test('AK47-LIST-A-KEPT: ключей у человека 3', () => pm.expect(_akL.length).to.eql(3));"
+                  "pm.test('AK47-LIST-A-KEPT: ключей у человека — потолок стенда', () => pm.expect(_akL.length).to.eql(parseInt(pm.environment.get('accessKeysCeiling') || '3', 10)));"
                 ]
               }
             }
@@ -18270,7 +18289,7 @@
           ]
         },
         {
-          "name": "IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-k37b",
+          "name": "IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-a-next",
           "request": {
             "method": "DELETE",
             "header": [
@@ -18280,7 +18299,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/users/{{akAUserId}}/accessKeys/{{akK37bKeyId}}",
+              "raw": "{{baseUrl}}/iam/v1/users/{{akAUserId}}/accessKeys/{{akCleanAId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -18290,7 +18309,7 @@
                 "users",
                 "{{akAUserId}}",
                 "accessKeys",
-                "{{akK37bKeyId}}"
+                "{{akCleanAId}}"
               ]
             }
           },
@@ -18317,7 +18336,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akAUserId}}/accessKeys/{{akK37bKeyId}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{akAUserId}}/accessKeys/{{akCleanAId}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -18325,8 +18344,21 @@
                   "  pm.execution.skipRequest();",
                   "}",
                   "if (!pm.environment.get('akAUserId')) {",
-                  "  pm.test('AK-CLEANUP-K37B: человек не назван входом', () => {",
+                  "  pm.test('AK-CLEANUP-A-NEXT: человек не назван входом', () => {",
                   "    pm.expect.fail('вход выше не вернул user.id — путь глагола не собрать');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('akCleanARun') !== pm.environment.get('runId')) {",
+                  "  const _akQ = JSON.parse(pm.environment.get('akFillKeyIds') || '[]').filter((id) => id !== pm.environment.get('akFillLastKeyId'));",
+                  "  if (pm.environment.get('akK37bKeyId')) { _akQ.push(pm.environment.get('akK37bKeyId')); }",
+                  "  pm.environment.set('akCleanAQueue', JSON.stringify(_akQ));",
+                  "  pm.environment.set('akCleanARun', pm.environment.get('runId'));",
+                  "}",
+                  "pm.environment.set('akCleanAId', JSON.parse(pm.environment.get('akCleanAQueue') || '[]')[0] || '');",
+                  "if (!pm.environment.get('akCleanAId')) {",
+                  "  pm.test('AK-CLEANUP-A-NEXT: снимать нечего', () => {",
+                  "    pm.expect.fail('очередь уборки пуста — ключ K37b выше не заведён, и уборка не знает, что снимать');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -18357,18 +18389,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.environment.unset('akK37bCOp');",
-                  "pm.test('AK-CLEANUP-K37b: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.unset('akACOp');",
+                  "pm.test('AK-CLEANUP-A-NEXT: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK-CLEANUP-K37b: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
-                  "if (__j.id) { pm.environment.set('akK37bCOp', __j.id); }"
+                  "pm.test('AK-CLEANUP-A-NEXT: ответ — операция службы iam', () => pm.expect(typeof __j.id === 'string' && /^iop[a-z0-9]+$/.test(__j.id)).to.eql(true));",
+                  "if (__j.id) { pm.environment.set('akACOp', __j.id); }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-k37b-op",
+          "name": "IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-a-next-op",
           "request": {
             "method": "GET",
             "header": [
@@ -18378,13 +18410,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{akK37bCOp}}",
+              "raw": "{{baseUrl}}/operations/{{akACOp}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{akK37bCOp}}"
+                "{{akACOp}}"
               ]
             }
           },
@@ -18411,22 +18443,22 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akK37bCOp}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{akACOp}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный фронт службы: шесть глаголов ключа доступа и опрос операций стоят на нём', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('akK37bCOp')) {",
-                  "  pm.test('AK-CLEANUP-K37B-OP: операция не возвращена шагом выше', () => {",
+                  "if (!pm.environment.get('akACOp')) {",
+                  "  pm.test('AK-CLEANUP-A-NEXT-OP: операция не возвращена шагом выше', () => {",
                   "    pm.expect.fail('мутация выше отвергнута синхронно либо не вернула id операции — опрашивать нечего; причина — в ней, не здесь');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (pm.environment.get('_akops_K37bC_ak_cleanup_k37b_op') !== pm.info.requestName) {",
-                  "  pm.environment.set('_akop_K37bC_ak_cleanup_k37b_op', '0');",
-                  "  pm.environment.set('_akops_K37bC_ak_cleanup_k37b_op', pm.info.requestName);",
+                  "if (pm.environment.get('_akops_AC_ak_cleanup_a_next_op') !== pm.info.requestName) {",
+                  "  pm.environment.set('_akop_AC_ak_cleanup_a_next_op', '0');",
+                  "  pm.environment.set('_akops_AC_ak_cleanup_a_next_op', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -18455,19 +18487,26 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const __n = parseInt(pm.environment.get('_akop_K37bC_ak_cleanup_k37b_op') || '0', 10);",
+                  "const __n = parseInt(pm.environment.get('_akop_AC_ak_cleanup_a_next_op') || '0', 10);",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "if (pm.response.code === 200 && !__j.done && __n < 50) {",
-                  "  pm.environment.set('_akop_K37bC_ak_cleanup_k37b_op', String(__n + 1));",
+                  "  pm.environment.set('_akop_AC_ak_cleanup_a_next_op', String(__n + 1));",
                   "  const _akpd = Date.now(); while (Date.now() - _akpd < 500) { /* inter-poll delay: operation not done yet */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_akop_K37bC_ak_cleanup_k37b_op');",
-                  "pm.environment.unset('_akops_K37bC_ak_cleanup_k37b_op');",
-                  "pm.test('AK-CLEANUP-K37B-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('AK-CLEANUP-K37B-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
-                  "pm.test('AK-CLEANUP-K37B-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));"
+                  "pm.environment.unset('_akop_AC_ak_cleanup_a_next_op');",
+                  "pm.environment.unset('_akops_AC_ak_cleanup_a_next_op');",
+                  "pm.test('AK-CLEANUP-A-NEXT-OP: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('AK-CLEANUP-A-NEXT-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
+                  "pm.test('AK-CLEANUP-A-NEXT-OP: операция без ошибки и с ответом', () => pm.expect([!!__j.error, !!__j.response]).to.eql([false, true]));",
+                  "const _akQ = JSON.parse(pm.environment.get('akCleanAQueue') || '[]');",
+                  "_akQ.shift();",
+                  "pm.environment.set('akCleanAQueue', JSON.stringify(_akQ));",
+                  "if (_akQ.length > 0 && !__j.error) {",
+                  "  const _akcd = Date.now(); while (Date.now() - _akcd < 100) { /* pause before the next cleanup revoke */ }",
+                  "  pm.execution.setNextRequest('IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE :: ak-cleanup-a-next');",
+                  "}"
                 ]
               }
             }

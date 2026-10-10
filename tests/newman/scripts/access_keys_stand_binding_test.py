@@ -139,6 +139,123 @@ def test_seed_names_both_keys_among_minted():
     assert {RP_KEY, ORIGIN_KEY} <= minted, f"посев не называет {RP_KEY}/{ORIGIN_KEY} записываемыми: {sorted(minted)}"
 
 
+# ── потолок ключей человека (kaname#699) ─────────────────────────────────────
+#
+# Потолок — величина установки, как имя и происхождение: автономный стенд службы
+# берёт профильную (`ownCeilings.accessKeysPerUser`), стенд платформы объявляет
+# свою. Набор прежде вшивал профильную при сборке — и числом заводимых ключей, и
+# числом в утверждениях перечня, — и на стенде с другим потолком кейсы потолка
+# краснели не по продукту. Теперь посев пишет величину стенда ключом
+# `accessKeysCeiling` (переменная `KANAME_STAND_ACCESS_KEYS_CEILING`, без неё —
+# профиль), а шаги потолка читают её в момент исполнения.
+
+CEILING_KEY = "accessKeysCeiling"
+CEILING_ENV = "KANAME_STAND_ACCESS_KEYS_CEILING"
+# Шаги, чьё утверждение ЗАВИСИТ от потолка: перечни человека A после заполнения
+# (Ф7-37, Ф7-34, Ф7-47) и отказ сверх потолка, называющий действующую величину.
+_CEILING_STEP = re.compile(r":: ak(?:37-list-|34-list-|47-list-a-|37-over-op$)")
+
+
+def _profile_ceiling() -> int:
+    found = re.findall(r"^  accessKeysPerUser: (\d+)\s*$", PROFILE.read_text(encoding="utf-8"), re.M)
+    assert len(found) == 1, f"ownCeilings.accessKeysPerUser найден {len(found)} раз в профиле — ждали ровно один"
+    return int(found[0])
+
+
+def _ceiling_form(ceiling: int) -> str:
+    return f"parseInt(pm.environment.get('{CEILING_KEY}') || '{ceiling}', 10)"
+
+
+def _items(node, out=None) -> list[tuple[str, list[str]]]:
+    out = [] if out is None else out
+    for child in node.get("item", []) or []:
+        if "request" in child:
+            lines: list[str] = []
+            for ev in child.get("event", []) or []:
+                lines.extend((ev.get("script") or {}).get("exec", []) or [])
+            out.append((child.get("name", ""), lines))
+        else:
+            _items(child, out)
+    return out
+
+
+def ceiling_steps_without_stand_value(items: list[tuple[str, list[str]]], ceiling: int) -> list[str]:
+    """Шаги потолка, не читающие величину стенда формой «ключ окружения, иначе профиль».
+
+    Судится ШАГ, а не число в строке: у человека B ровно три ключа при любом
+    потолке, и его перечень законно несёт ту же цифру, что профильный потолок."""
+    form = _ceiling_form(ceiling)
+    return [name for name, lines in items if _CEILING_STEP.search(name) and form not in "\n".join(lines)]
+
+
+def fill_registrations(items: list[tuple[str, list[str]]]) -> list[str]:
+    """Шаги заведения ключей заполнения: их число не обязано зависеть от потолка."""
+    return [name for name, _ in items if re.search(r":: ak37-fill(?:-[^:]*)?-begin$", name)]
+
+
+def test_ceiling_steps_read_the_stand_value_with_the_profile_fallback():
+    ceiling = _profile_ceiling()
+    items = _items(json.loads(COLLECTION.read_text(encoding="utf-8")))
+    judged = [n for n, _ in items if _CEILING_STEP.search(n)]
+    bare = ceiling_steps_without_stand_value(items, ceiling)
+    print(f"шагов осмотрено: {len(items)}; шагов потолка: {len(judged)}; без величины стенда: {len(bare)}")
+    assert len(judged) >= 6, f"шагов потолка найдено {len(judged)} — обход не узнаёт их, вердикта нет"
+    assert not bare, f"шаг потолка судит профильную величину, вшитую при сборке: {bare}"
+
+
+def test_fill_is_one_ceremony_repeated_up_to_the_stand_ceiling():
+    items = _items(json.loads(COLLECTION.read_text(encoding="utf-8")))
+    fills = fill_registrations(items)
+    assert len(fills) == 1, (f"шагов заведения ключей заполнения {len(fills)} — число вшито при сборке и "
+                             f"равно профильному потолку минус два: {fills}")
+    loop = [ln for n, lines in items if n.endswith(":: ak37-fill-op") for ln in lines]
+    assert any("setNextRequest('IAM-ACCESSKEY-BVA-CEILING :: ak37-fill-begin')" in ln for ln in loop), (
+        "опрос заведения не возвращает к испытанию — заполнение не доходит до потолка стенда")
+    assert any(_ceiling_form(_profile_ceiling()) in ln for ln in loop), "повтор заведения не сверяется с потолком стенда"
+
+
+def test_injection_profile_ceiling_in_a_step_is_found_and_stand_form_is_silent():
+    ceiling = 3
+    bare = [("C :: ak37-list-full", ["pm.test('AK37-LIST-FULL: ключей у человека 3', () => "
+                                     "pm.expect(_akL.length).to.eql(3));"]),
+            ("C :: ak37-over-op", ["pm.expect(__m.indexOf('3') >= 0).to.eql(true);"])]
+    lawful = [("C :: ak37-list-full", [f"pm.expect(_akL.length).to.eql({_ceiling_form(ceiling)});"]),
+              ("C :: ak27-list-b-kept", ["pm.expect(_akL.length).to.eql(3);"])]
+    assert ceiling_steps_without_stand_value(bare, ceiling) == [n for n, _ in bare], "вшитый потолок не распознан"
+    assert ceiling_steps_without_stand_value(lawful, ceiling) == [], (
+        "законная форма либо перечень человека B (три ключа при любом потолке) приняты за вшитый потолок")
+    assert fill_registrations([("C :: ak37-fill-k3-begin", []), ("C :: ak37-fill-k4-begin", [])]) == [
+        "C :: ak37-fill-k3-begin", "C :: ak37-fill-k4-begin"], "заполнение по слоту не распознано"
+
+
+def test_template_declares_the_ceiling_key_empty():
+    doc = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+    values = {v.get("key"): v for v in doc.get("values", [])}
+    assert CEILING_KEY in values, f"шаблон окружения не объявляет {CEILING_KEY}"
+    assert values[CEILING_KEY].get("value", "") == "", f"{CEILING_KEY} в шаблоне не пуст — потолок выписан литералом"
+    assert CEILING_ENV in values[CEILING_KEY].get("description", ""), (
+        f"описание {CEILING_KEY} не называет переменную стенда {CEILING_ENV}")
+
+
+def test_seed_names_the_ceiling_key_among_minted():
+    proc = subprocess.run([sys.executable, str(SEED), "--minted-keys"], capture_output=True, text=True,
+                          timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert CEILING_KEY in set(proc.stdout.split()), f"посев не называет {CEILING_KEY} записываемым"
+
+
+def test_seed_tells_the_stand_ceiling_from_the_profile():
+    """Заданная величина и профиль различимы: самопроверка посева гоняет обе стороны."""
+    proc = subprocess.run([sys.executable, str(SEED), "--self-test"], capture_output=True, text=True, timeout=300)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-3000:]
+    for label in ("потолок: переменной стенда нет — величина профиля",
+                  "потолок: переменная названа — величина стенда",
+                  "потолок: не число — условие не создано",
+                  "потолок: ниже трёх — условие не создано"):
+        assert label in out, f"самопроверка посева не различает исход «{label}»"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
