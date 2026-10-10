@@ -16,7 +16,15 @@
 //
 // Ёмкость проверяющего пароля у `lookup_secret` — та же ёмкость, что у входа
 // (один проверяющий), и правило `KanameLoginVerifierCapacityExhausted` обязано
-// звонить на её исчерпание и здесь.
+// звонить на её исчерпание и здесь. Тем же проверяющим сверяются пароль при
+// повышении уровня и секрет клиента в церемонии; их исчерпание пишет только
+// ряд проверяющего (`kaname_password_verification_outcomes_total`), и правило
+// ёмкости обязано считать и его.
+//
+// Выражение судится РАЗБОРОМ PromQL: клетка засчитывается, только если она —
+// слагаемое левой части сравнения правила (`sum(increase(…))` либо
+// `increase(…)`). Слагаемое в комментарии, `0 * sum(…)` и `… unless sum(…)`
+// клетку не считают.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО УТВЕРЖДАЕТСЯ
@@ -41,11 +49,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
 // cellTerm — клетка ряда, которую правило обязано читать: имя ряда и точные
@@ -78,6 +89,9 @@ func secondFactorCellDemands() map[string][]cellTerm {
 			labels: map[string]string{"reason": string(humansession.RefusalUnavailable)},
 		}},
 		"KanameLoginVerifierCapacityExhausted": {{
+			series: metrics.PasswordVerificationOutcomesMetric,
+			labels: map[string]string{"outcome": string(passwordverify.OutcomeCapacityExhausted)},
+		}, {
 			series: metrics.SecondFactorPresentationsMetric,
 			labels: map[string]string{
 				"method":  assurance.MethodLookupSecret.String(),
@@ -87,10 +101,9 @@ func secondFactorCellDemands() map[string][]cellTerm {
 	}
 }
 
-// exprSelectorRe — ряд и его отбор внутри выражения: `имя{...}`.
-var exprSelectorRe = regexp.MustCompile(`\b([a-z_][a-z0-9_]*)\{([^}]*)\}`)
-
-// exprMatcherRe — отбор метки с оператором: `метка<оп>"значение"`.
+// exprMatcherRe — отбор метки в ТЕКСТОВОЙ ВЫДАЧЕ производителя (формат
+// экспозиции: значение всегда в двойных кавычках). Выражения правил этим не
+// читаются — их читает разбор PromQL ([exprCountedCells]).
 var exprMatcherRe = regexp.MustCompile(`([a-z_][a-z0-9_]*)\s*(=~|!~|!=|=)\s*"((?:[^"\\]|\\.)*)"`)
 
 // selectorLabels — точные отборы селектора; ok=false, если среди отборов есть
@@ -120,14 +133,108 @@ func sameCell(got, want map[string]string) bool {
 	return true
 }
 
-// exprReadsCell — читает ли выражение клетку: ряд с ровно такими точными
-// отборами.
-func exprReadsCell(expr string, c cellTerm) bool {
-	for _, m := range exprSelectorRe.FindAllStringSubmatch(expr, -1) {
-		if m[1] != c.series {
+// promqlParser — тот же разборщик, что у сервера правил. Текстовый поиск по
+// выражению засчитывал слагаемое, перенесённое в комментарий (`# + sum(…)`), и
+// не узнавал законных написаний той же клетки (одинарные кавычки, имя ряда
+// отбором `__name__`): судить надо узел разбора, а не слово.
+var promqlParser = parser.NewParser(parser.Options{})
+
+// exprCountedCells — клетки, которые выражение СЧИТАЕТ: слагаемые левой части
+// сравнения правила. Слагаемое — `sum(increase(ряд{…}[окно]))` либо
+// `increase(ряд{…}[окно])`, в любых скобках. Селектор вне такого слагаемого не
+// засчитывается: `0 * sum(…)` и `… unless sum(…)` держат клетку в тексте, но
+// не дают ей поднять тревогу. Селектор с неточным отбором (`=~`, `!=`, `!~`)
+// клеткой не является.
+func exprCountedCells(expr string) ([]cellTerm, error) {
+	root, err := promqlParser.ParseExpr(expr)
+	if err != nil {
+		return nil, err
+	}
+	counted := unparen(root)
+	if be, ok := counted.(*parser.BinaryExpr); ok && be.Op.IsComparisonOperator() {
+		counted = be.LHS
+	}
+	var cells []cellTerm
+	for _, term := range additiveTerms(counted) {
+		vs, ok := increaseSelector(term)
+		if !ok {
 			continue
 		}
-		if got, ok := selectorLabels(m[2]); ok && sameCell(got, c.labels) {
+		if c, exact := selectorCell(vs); exact {
+			cells = append(cells, c)
+		}
+	}
+	return cells, nil
+}
+
+func unparen(e parser.Expr) parser.Expr {
+	for {
+		p, ok := e.(*parser.ParenExpr)
+		if !ok {
+			return e
+		}
+		e = p.Expr
+	}
+}
+
+// additiveTerms — слагаемые цепочки `a + b + …`; прочие операторы слагаемых не
+// раскрывают.
+func additiveTerms(e parser.Expr) []parser.Expr {
+	e = unparen(e)
+	if be, ok := e.(*parser.BinaryExpr); ok && be.Op == parser.ADD {
+		return append(additiveTerms(be.LHS), additiveTerms(be.RHS)...)
+	}
+	return []parser.Expr{e}
+}
+
+// increaseSelector — селектор слагаемого `sum(increase(…))` либо `increase(…)`.
+func increaseSelector(e parser.Expr) (*parser.VectorSelector, bool) {
+	e = unparen(e)
+	if ag, ok := e.(*parser.AggregateExpr); ok {
+		if ag.Op != parser.SUM {
+			return nil, false
+		}
+		e = unparen(ag.Expr)
+	}
+	call, ok := e.(*parser.Call)
+	if !ok || call.Func == nil || call.Func.Name != "increase" || len(call.Args) != 1 {
+		return nil, false
+	}
+	ms, ok := unparen(call.Args[0]).(*parser.MatrixSelector)
+	if !ok {
+		return nil, false
+	}
+	vs, ok := ms.VectorSelector.(*parser.VectorSelector)
+	return vs, ok
+}
+
+// selectorCell — клетка селектора: имя ряда (из имени либо из отбора
+// `__name__`) и точные отборы меток; exact=false — среди отборов неточный.
+func selectorCell(vs *parser.VectorSelector) (cellTerm, bool) {
+	c := cellTerm{series: vs.Name, labels: map[string]string{}}
+	for _, m := range vs.LabelMatchers {
+		if m.Type != labels.MatchEqual {
+			return cellTerm{}, false
+		}
+		if m.Name == labels.MetricName {
+			c.series = m.Value
+			continue
+		}
+		c.labels[m.Name] = m.Value
+	}
+	return c, c.series != ""
+}
+
+// exprReadsCell — считает ли выражение клетку: слагаемое с ровно таким рядом и
+// ровно такими точными отборами. Неразборное выражение не считает ничего —
+// сервер правил его не примет.
+func exprReadsCell(expr string, c cellTerm) bool {
+	cells, err := exprCountedCells(expr)
+	if err != nil {
+		return false
+	}
+	for _, got := range cells {
+		if got.series == c.series && sameCell(got.labels, c.labels) {
 			return true
 		}
 	}
@@ -253,6 +360,7 @@ const (
 	lawfulFailingExpr = `sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
   + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m])) > 0`
 	lawfulCapacityExpr = `sum(increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]))
+  + sum(increase(kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}[10m]))
   + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m])) > 0`
 )
 
@@ -274,6 +382,7 @@ func TestSecondFactorCellsInjection_DroppedTermIsFound(t *testing.T) {
 func TestSecondFactorCellsInjection_TermInTheNeighbourIsFound(t *testing.T) {
 	neighbourCarries := `increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m])
   + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
+  + sum(increase(kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}[10m]))
   + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m])) > 0`
 	dropped := `sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m])) > 0`
 	_, findings := judgeSecondFactorCells(injectedRules(dropped, neighbourCarries), secondFactorCellDemands())
@@ -290,8 +399,12 @@ func TestSecondFactorCellsInjection_OtherCellOfTheSameSeriesIsFound(t *testing.T
 		"капасити без метода": `sum(increase(kaname_second_factor_presentations_total{outcome="capacity-exhausted"}[10m])) > 0`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, findings := judgeSecondFactorCells(injectedRules(expr, expr), secondFactorCellDemands())
-			require.Len(t, findings, 2, "оба правила обязаны быть находками: %v", findings)
+			census, findings := judgeSecondFactorCells(injectedRules(expr, expr), secondFactorCellDemands())
+			require.Zero(t, census.matched, "ни одно требование не выполнено: %v", findings)
+			require.Len(t, findings, census.demands, "каждое требование — находка: %v", findings)
+			joined := strings.Join(findings, "\n")
+			require.Contains(t, joined, "KanameLoginLaneFailing:")
+			require.Contains(t, joined, "KanameLoginVerifierCapacityExhausted:")
 		})
 	}
 }
@@ -299,6 +412,38 @@ func TestSecondFactorCellsInjection_OtherCellOfTheSameSeriesIsFound(t *testing.T
 func TestSecondFactorCellsInjection_MissingRuleIsFound(t *testing.T) {
 	_, findings := judgeSecondFactorCells([]alertRule{{Alert: "KanameLoginLaneFailing", Expr: lawfulFailingExpr}},
 		secondFactorCellDemands())
-	require.Len(t, findings, 1)
-	require.Contains(t, findings[0], "KanameLoginVerifierCapacityExhausted: правила нет")
+	require.Len(t, findings, 2, "у пропавшего правила две клетки — две находки")
+	for _, f := range findings {
+		require.Contains(t, f, "KanameLoginVerifierCapacityExhausted: правила нет")
+	}
+}
+
+// --- формы записи выражения: прочтение разбором PromQL, а не текстом ---
+
+var refusalUnavailableCell = cellTerm{
+	series: metrics.SecondFactorRefusalsMetric,
+	labels: map[string]string{"reason": string(humansession.RefusalUnavailable)},
+}
+
+// J1, J4 — слагаемое присутствует ТЕКСТОМ, но правило его не считает:
+// находка. T3, T4 — законные написания той же клетки: молчание.
+func TestSecondFactorCellsInjection_ExpressionForms(t *testing.T) {
+	const base = `sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))`
+	for name, tc := range map[string]struct {
+		expr  string
+		reads bool
+	}{
+		"J1 слагаемое в комментарии PromQL": {expr: base + "\n  # + sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m]))\n  > 0", reads: false},
+		"J1 комментарий в конце строки":     {expr: base + " > 0 # sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m]))", reads: false},
+		"J4 слагаемое, умноженное на ноль":  {expr: base + "\n  + 0 * sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: false},
+		"J4 слагаемое за unless":            {expr: base + " unless sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: false},
+		"T3 одинарные кавычки":              {expr: base + "\n  + sum(increase(kaname_second_factor_refusals_total{reason='unavailable'}[10m])) > 0", reads: true},
+		"T4 имя ряда отбором __name__":      {expr: base + "\n  + sum(increase({__name__=\"kaname_second_factor_refusals_total\",reason=\"unavailable\"}[10m])) > 0", reads: true},
+		"близнец: каноническая запись":      {expr: base + "\n  + sum(increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: true},
+		"близнец: без sum и в скобках":      {expr: "(" + base + " + increase(kaname_second_factor_refusals_total{reason=\"unavailable\"}[10m])) > 0", reads: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tc.reads, exprReadsCell(tc.expr, refusalUnavailableCell), "выражение:\n%s", tc.expr)
+		})
+	}
 }
