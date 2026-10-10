@@ -7,9 +7,13 @@ package standalonetargets_test
 // смолчать. Каждая пара меняет ровно один факт.
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -399,4 +403,119 @@ func TestProbeFailureMark_HasAProducerInTheTree(t *testing.T) {
 		producer, standalonetargets.ProbeFailureMark)
 	t.Logf("осмотрено: производитель %s прочитан, %d байт · метка %q найдена",
 		producer, len(body), standalonetargets.ProbeFailureMark)
+}
+
+// --- Инъекция в ВЛОЖЕННЫЙ ВХОД (задача #685) ---------------------------------
+//
+// Гейт зовёт `make <цель>` в клоне, и одна из целей — `test-standalone` — снова
+// гоняет пробы модуля, среди которых он сам. От повторного входа его держал ОДИН
+// признак: `testing.Short()`, а `-short` скрипт подставляет только при пустых
+// аргументах. Вложенный `make` наследовал окружение внешнего — с `MAKEFLAGS`, а в
+// нём и с `ARGS`, — поэтому `make test-standalone ARGS=-race` получал `-race` без
+// `-short` на КАЖДОМ уровне: цепочка клонов без конца, память и процессор машины.
+//
+// Пары ниже меняют против близнеца ровно один факт и ограничены ПО ПОСТРОЕНИЮ:
+// первая зовёт настоящий раннер гейта на рецепте из одной строки, вторая — сам
+// гейт отдельным процессом под сроком и с уровнем, уже объявленным вложенным.
+
+// nestedProbeRecipe — рецепт, печатающий то, что вложенный `make` получил от
+// внешнего: переменную рецепта `ARGS`, переменные окружения `ARGS` и `MAKEFLAGS`
+// и уровень вложенности гейта. Печать в скобках — чтобы пустое было видно.
+const nestedProbeRecipe = "show:\n" +
+	"\t@echo \"recipe-args=[$(ARGS)]\"\n" +
+	"\t@echo \"env-args=[$${ARGS:-}]\"\n" +
+	"\t@echo \"env-makeflags=[$${MAKEFLAGS:-}]\"\n" +
+	"\t@echo \"gate-level=[$${STANDALONE_GATE_LEVEL:-}]\"\n" +
+	"\t@echo \"neighbour=[$${STANDALONE_NESTED_PROBE_NEIGHBOUR:-}]\"\n"
+
+func runNestedProbe(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte(nestedProbeRecipe), 0o600))
+	code, out, err := makeRunner(t)(dir, "show")
+	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: make не запустился")
+	require.Zerof(t, code, "проверка НЕ ИСПОЛНЯЛАСЬ: рецепт пробы отказал: %s", out)
+	return out
+}
+
+// TestRunner_NestedMakeDoesNotInheritTheOuterArgs — инъекция: внешний уровень
+// позван как `make test-standalone ARGS=-race`, то есть его окружение несёт
+// `ARGS` и `MAKEFLAGS` с ним. Вложенный уровень обязан их не получить.
+func TestRunner_NestedMakeDoesNotInheritTheOuterArgs(t *testing.T) {
+	t.Setenv("ARGS", "-race")
+	t.Setenv("MAKEFLAGS", " -- ARGS=-race")
+	t.Setenv("MFLAGS", "")
+	t.Setenv("MAKELEVEL", "1")
+	t.Setenv("MAKEOVERRIDES", "${-*-command-variables-*-}")
+	t.Setenv("STANDALONE_NESTED_PROBE_NEIGHBOUR", "сосед")
+	// Сама проба может идти внутри клона гейта, где уровень уже объявлен; здесь
+	// внешний уровень — нулевой, и это часть условия, а не предмет.
+	t.Setenv("STANDALONE_GATE_LEVEL", "")
+
+	out := runNestedProbe(t)
+	require.Containsf(t, out, "recipe-args=[]",
+		"вложенный make получил ARGS внешнего уровня — `-short` не подставится, и гейт войдёт в себя снова:\n%s", out)
+	require.Containsf(t, out, "env-args=[]",
+		"ARGS внешнего уровня осталась в окружении вложенного:\n%s", out)
+	require.NotContainsf(t, out, "ARGS=-race",
+		"MAKEFLAGS внешнего уровня донёс ARGS до вложенного:\n%s", out)
+	require.Containsf(t, out, "gate-level=[1]",
+		"вложенный уровень не объявлен — повторный вход отсечь нечем:\n%s", out)
+}
+
+// TestRunner_NeighbourVariableStillReachesTheNestedMake — законный близнец:
+// очистка снимает ТОЛЬКО переменные, несущие флаги внешнего make, а не всё
+// окружение (иначе клон потерял бы PATH, GOPATH и кэш сборки). Отличается от
+// инъекции одним фактом — внешний уровень не несёт `ARGS`.
+func TestRunner_NeighbourVariableStillReachesTheNestedMake(t *testing.T) {
+	t.Setenv("STANDALONE_NESTED_PROBE_NEIGHBOUR", "сосед")
+
+	out := runNestedProbe(t)
+	require.Containsf(t, out, "neighbour=[сосед]",
+		"очистка сняла переменную, не несущую флагов make, — клон потеряет окружение сборки:\n%s", out)
+	require.Containsf(t, out, "recipe-args=[]", "ARGS появилась ниоткуда:\n%s", out)
+}
+
+// TestGate_ReentryIsRefusedWithinABoundedTime — инъекция: гейт позван отдельным
+// процессом БЕЗ `-short` и с уровнем, уже объявленным вложенным. Это ровно то
+// состояние, в котором до задачи #685 цепочка уходила вглубь. Гейт обязан
+// отказать СЛОВАМИ и сразу, а не собирать клон.
+//
+// Проба ограничена по построению: срок, по истечении которого группа процессов
+// снимается целиком, и уровень, заданный явно. Сама она — интеграционного
+// порядка (собирает пакет отдельным `go test`), поэтому под `-short` не идёт.
+func TestGate_ReentryIsRefusedWithinABoundedTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("зовёт go test отдельным процессом — прогон интеграционного порядка")
+	}
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "test", "-count=1",
+		"-run", "^TestStandaloneTargetsWorkInAStandaloneClone$", ".")
+	cmd.Dir = wd
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 10 * time.Second
+	// Окружение — то же, что раннер гейта даёт вложенному уровню (уровень 1), а
+	// временный каталог — СВОЙ у пробы: процесс, снятый по сроку, своих
+	// t.TempDir() не убирает, а этот каталог снимет уборка самой пробы.
+	t.Setenv(gateLevelVar, "")
+	cmd.Env = append(nestedEnv(os.Environ()), "TMPDIR="+t.TempDir())
+
+	start := time.Now()
+	out, runErr := cmd.CombinedOutput()
+	took := time.Since(start).Round(time.Second)
+	t.Logf("вложенный гейт: %s, код %v, вывода %d байт", took, runErr, len(out))
+
+	require.NoErrorf(t, ctx.Err(),
+		"гейт с объявленным вложенным уровнем не завершился за срок — повторный вход не отсечён:\n%s",
+		standalonetargets.Tail(string(out), 40))
+	require.Errorf(t, runErr, "гейт с объявленным вложенным уровнем прошёл молча — повторный вход не отсечён:\n%s",
+		standalonetargets.Tail(string(out), 40))
+	require.Containsf(t, string(out), "ПОВТОРНЫЙ ВХОД",
+		"гейт отказал, но не назвал повторный вход — причина не названа словами:\n%s",
+		standalonetargets.Tail(string(out), 40))
 }

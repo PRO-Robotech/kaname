@@ -15,6 +15,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +84,16 @@ var waivers = []standalonetargets.Waiver{
 func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 	if testing.Short() {
 		t.Skip("собирает клон и зовёт цели сборки — прогон интеграционного порядка")
+	}
+	// ПОВТОРНЫЙ ВХОД отсекается СЛОВАМИ, а не пропуском (задача #685). Уровень
+	// объявляет раннер ниже; если он объявлен, а `-short` нет, — значит флаги
+	// внешнего уровня всё-таки дошли до вложенного, и пойти дальше значило бы
+	// собрать ещё один клон и снова позвать себя. Пропуск спрятал бы ровно этот
+	// дефект в перепись «пропущено по флагам», поэтому здесь отказ.
+	if lvl := os.Getenv(gateLevelVar); lvl != "" {
+		t.Fatalf("ПОВТОРНЫЙ ВХОД: гейт позван внутри собственного клона (%s=%s) без -short — "+
+			"флаги внешнего уровня дошли до вложенного; клон не собирается, цели не зовутся",
+			gateLevelVar, lvl)
 	}
 
 	wd, err := os.Getwd()
@@ -211,7 +223,7 @@ func makeRunner(t *testing.T) func(dir, target string) (int, string, error) {
 	return func(dir, target string) (int, string, error) {
 		cmd := exec.Command("make", target)
 		cmd.Dir = dir
-		cmd.Env = append(gitenv.Env(), "GOFLAGS=-mod=mod")
+		cmd.Env = append(nestedEnv(gitenv.Env()), "GOFLAGS=-mod=mod")
 		start := time.Now()
 		out, err := cmd.CombinedOutput()
 		t.Logf("цель %s: %s, вывода %d байт", target, time.Since(start).Round(time.Millisecond), len(out))
@@ -224,4 +236,40 @@ func makeRunner(t *testing.T) func(dir, target string) (int, string, error) {
 		}
 		return 0, "", err
 	}
+}
+
+// gateLevelVar — уровень вложенности гейта: раннер объявляет его вложенному
+// `make`, гейт отказывает, если позван на объявленном уровне без `-short`.
+//
+// Приставки службы (`KANAME_`) у имени нет намеренно: её пространство — ручки
+// конфигурации, и пробы профиля в клоне (`deploy/prod_profile_test.go`,
+// `requireCleanEnv`) законно краснеют на любой посторонней `KANAME_*` в
+// окружении. Так и нашлось — первым прогоном гейта с этой правкой.
+const gateLevelVar = "STANDALONE_GATE_LEVEL"
+
+// outerMakeVars — переменные, которыми внешний `make` передаёт вложенному свои
+// флаги и переменные командной строки. `make test-standalone ARGS=-race` кладёт
+// `ARGS` и в окружение рецепта, и в `MAKEFLAGS`; вложенный `make` в клоне читал
+// оба и получал `-race` без `-short` — гейт входил в себя на каждом уровне
+// (задача #685). Клон судится так, как его позвал бы арендатор: без флагов того,
+// кто позвал гейт.
+var outerMakeVars = []string{"ARGS", "MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", gateLevelVar}
+
+// nestedEnv — окружение вложенного уровня: без флагов внешнего `make` и с
+// объявленным уровнем. Остальное окружение (PATH, GOPATH, кэш сборки) едет
+// как есть — без него клон не соберётся.
+func nestedEnv(base []string) []string {
+	out := make([]string, 0, len(base)+1)
+	for _, kv := range base {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(outerMakeVars, name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	level := 1
+	if n, err := strconv.Atoi(os.Getenv(gateLevelVar)); err == nil && n > 0 {
+		level = n + 1
+	}
+	return append(out, gateLevelVar+"="+strconv.Itoa(level))
 }
