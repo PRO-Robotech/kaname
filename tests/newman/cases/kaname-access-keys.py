@@ -299,10 +299,11 @@ if _CEILING < 3:
     raise SystemExit(f"kaname-access-keys: потолок ключей профиля {_CEILING} < 3 — порядок кейсов "
                      "заводит два ключа до кейса потолка")
 
-# Происхождение и имя, которых профиль НЕ объявляет: поддомен того же корня
+# Происхождение и имя, которых установка НЕ объявляет: поддомен того же корня
 # (аутентификатор собирает такой результат без отказа — §1.2 приёмки) и чужое имя.
+# Выводятся из имени доверяющей стороны В МОМЕНТ ШАГА (`_FOREIGN_*_JS` ниже);
+# здесь — только сверка с профилем. Для привязки стенда ту же сверку делает посев.
 _FOREIGN_ORIGIN = "https://elsewhere." + _RP_ID
-_FOREIGN_RP_ID = "elsewhere-" + _RP_ID
 if _FOREIGN_ORIGIN in _ORIGINS:
     raise SystemExit("kaname-access-keys: «чужое» происхождение набора объявлено профилем")
 
@@ -492,6 +493,24 @@ def _set(key, expr):
     return f"pm.environment.set({js_str(key)}, {expr});"
 
 
+# ── привязка стенда (kaname#684) ─────────────────────────────────────────────
+#
+# Имя доверяющей стороны и происхождение консоли — величины УСТАНОВКИ, а не
+# набора: стенд платформы объявляет свои (происхождение — из адреса консоли своего
+# пространства), автономный стенд службы — профильные. Поэтому шаг читает их из
+# окружения в момент исполнения: `accessKeysRpId` и `accessKeysOrigin` пишет посев
+# личностей с ключом (`tests/authz-fixtures/seed_key_person.py`) из переменных
+# стенда `KANAME_STAND_ACCESS_KEYS_RP_ID` / `_ORIGIN`, а без них — из профиля.
+# Незаписанный ключ — величина профиля, вшитая при сборке: прогон без посева на
+# автономном стенде собирает церемонии как прежде. Голого литерала профиля в шаге
+# нет — держит `scripts/access_keys_stand_binding_test.py`.
+_RP_ID_KEY, _ORIGIN_KEY = "accessKeysRpId", "accessKeysOrigin"
+_RP_JS = f"({_env(_RP_ID_KEY)} || {js_str(_RP_ID)})"
+_ORIGIN_JS = f"({_env(_ORIGIN_KEY)} || {js_str(_ORIGIN)})"
+_FOREIGN_ORIGIN_JS = f"('https://elsewhere.' + {_RP_JS})"
+_FOREIGN_RP_ID_JS = f"('elsewhere-' + {_RP_JS})"
+
+
 def _status_is(code, label):
     return [f"pm.test({js_str(label + f': ответ {code}')}, () => pm.expect(pm.response.code).to.eql({code}));"]
 
@@ -581,7 +600,8 @@ def _await_letter(p, name, head=_HEAD_VERIFY, seen="MailSeen", code="Code", kind
     """Письмо вида `head` сверх уже прочитанных: петля с настоящей паузой.
 
     Счёт прочитанного (`seen`) и место кода (`code`) — свои у каждого вида письма:
-    коды подтверждения и восстановления приёмник отдаёт разными перечнями."""
+    коды подтверждения и восстановления приёмник отдаёт разными перечнями. Счёт —
+    только писем своего вида: письмо другого вида дверь кодов отдаёт null."""
     path = f"/codes?to={{{{{p}Email}}}}&after={_urlparse.quote(head)}"
     counter, started = f"_akmb_{p}_{name}".replace("-", "_"), f"_akmbs_{p}_{name}".replace("-", "_")
     label = name.upper()
@@ -598,7 +618,10 @@ def _await_letter(p, name, head=_HEAD_VERIFY, seen="MailSeen", code="Code", kind
             f"const __n = parseInt({_env(counter)} || '0', 10);",
             f"const __seen = parseInt({_env(p + seen)} || '0', 10);",
             "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
-            "const __all = Array.isArray(__codes) ? __codes : [];",
+            # Письмо чужого вида дверь кодов отдаёт null: в счёт идут только коды
+            # своего вида — иначе письмо посева, лежащее у приёмника раньше, сошло
+            # бы за пришедшее, и код был бы пуст (kaname#684, Ф13-25).
+            "const __all = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
             f"if (pm.response.code === 200 && __all.length <= __seen && __n < {_MAIL_WAIT_CAP}) {{",
             "  " + _set(counter, "String(__n + 1)"),
             f"  const _akd = Date.now(); while (Date.now() - _akd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
@@ -865,7 +888,9 @@ def _finish_registration(p, name, *, slot, ch, key=_MAT_MAIN, fresh_cred=True, f
 
     `ch` — переменная выданного испытания либо None (испытание, которого служба не
     выдавала). `replay` — переменная с телом прежнего запроса: шлётся дословно.
-    `keep_as` — переменная, куда тело запроса записывается для повтора."""
+    `keep_as` — переменная, куда тело запроса записывается для повтора.
+    `origin`, `rp_id` и `origin_header` — выражения JS, вычисляемые в момент шага;
+    по умолчанию — привязка стенда (`_ORIGIN_JS`, `_RP_JS`)."""
     pre = []
     if replay is not None:
         pre += [*_need(replay, f"{name.upper()}: прежний результат не записан",
@@ -878,8 +903,8 @@ def _finish_registration(p, name, *, slot, ch, key=_MAT_MAIN, fresh_cred=True, f
         pre += [
             *_LIB,
             *_cred_js(slot, fresh_cred),
-            f"const _akR = _ak.register({{ challenge: {_challenge_js(ch)}, rpId: {js_str(rp_id or _RP_ID)}, "
-            f"origin: {js_str(origin or _ORIGIN)}, flags: {int(flags)}, credId: _akCred, key: {int(key)}, alg: {int(alg)} }});",
+            f"const _akR = _ak.register({{ challenge: {_challenge_js(ch)}, rpId: {rp_id or _RP_JS}, "
+            f"origin: {origin or _ORIGIN_JS}, flags: {int(flags)}, credId: _akCred, key: {int(key)}, alg: {int(alg)} }});",
             "const _akC = { id: _akR.id, clientDataJson: _akR.clientDataJson, attestationObject: _akR.attestationObject };",
             *([] if discoverable is None else [f"_akC.discoverable = {'true' if discoverable else 'false'};"]),
             f"const _akBody = JSON.stringify({{ name: {js_str(key_name)}, description: {js_str(description)}, credential: _akC }});",
@@ -888,7 +913,7 @@ def _finish_registration(p, name, *, slot, ch, key=_MAT_MAIN, fresh_cred=True, f
         if keep_as is not None:
             pre.append(_set(keep_as, "_akBody"))
     if origin_header is not None:
-        pre.append(f"pm.request.headers.upsert({{key: 'Origin', value: {js_str(origin_header)}}});")
+        pre.append(f"pm.request.headers.upsert({{key: 'Origin', value: {origin_header}}});")
     return _own(p, name, "POST", _keys_path(p), body={}, pre=pre, tests=list(tests))
 
 
@@ -1028,7 +1053,9 @@ def _finish_assertion(p, name, *, slot, ch, key=None, cred_slot=None, unknown_cr
     `ch` — переменная выданного испытания предъявления либо None (невыданное);
     `key` — материал подписи (по умолчанию — материал строки); `cred_slot` —
     чей идентификатор удостоверения назван (по умолчанию — строки `slot`);
-    `count` — 'next' (записанный + 1), 'same' (записанный) либо число."""
+    `count` — 'next' (записанный + 1), 'same' (записанный) либо число;
+    `origin`, `rp_id` и `origin_header` — выражения JS, вычисляемые в момент шага;
+    по умолчанию — привязка стенда (`_ORIGIN_JS`, `_RP_JS`)."""
     pre = []
     if replay is not None:
         pre += [*_need(replay, f"{name.upper()}: прежнее утверждение не записано",
@@ -1054,8 +1081,8 @@ def _finish_assertion(p, name, *, slot, ch, key=None, cred_slot=None, unknown_cr
             *(["const _akCred = _ak.rand(16);"] if unknown_cred else _cred_js(cred, False)),
             f"const _akN = {count_expr};",
             _set("_akSentCount", "String(_akN)"),
-            f"const _akA = _ak.assert({{ challenge: {_challenge_js(ch)}, rpId: {js_str(rp_id or _RP_ID)}, "
-            f"origin: {js_str(origin or _ORIGIN)}, flags: {int(flags)}, count: _akN, credId: _akCred, "
+            f"const _akA = _ak.assert({{ challenge: {_challenge_js(ch)}, rpId: {rp_id or _RP_JS}, "
+            f"origin: {origin or _ORIGIN_JS}, flags: {int(flags)}, count: _akN, credId: _akCred, "
             f"key: {key_expr}, tamper: {'true' if tamper else 'false'} }});",
             "const _akBody = JSON.stringify({ credential: _akA });",
             *_raw_body("_akBody"),
@@ -1063,7 +1090,7 @@ def _finish_assertion(p, name, *, slot, ch, key=None, cred_slot=None, unknown_cr
         if keep_as is not None:
             pre.append(_set(keep_as, "_akBody"))
     if origin_header is not None:
-        pre.append(f"pm.request.headers.upsert({{key: 'Origin', value: {js_str(origin_header)}}});")
+        pre.append(f"pm.request.headers.upsert({{key: 'Origin', value: {origin_header}}});")
     return _own(p, name, "POST", "/iam/v1/accessKeys:finishAssertion", body={}, pre=pre, tests=list(tests))
 
 
@@ -1166,7 +1193,7 @@ def _challenge_named(label):
     algs = _json.dumps(_ALGORITHMS, separators=(",", ":"))
     return [
         "const _akSix = [",
-        f"  ['rp.id', !!__j.rp && __j.rp.id === {js_str(_RP_ID)}],",
+        f"  ['rp.id', !!__j.rp && __j.rp.id === {_RP_JS}],",
         f"  ['pubKeyCredParams', Array.isArray(__j.pubKeyCredParams) && JSON.stringify(__j.pubKeyCredParams.map((x) => Number(x.alg))) === {js_str(algs)}"
         " && __j.pubKeyCredParams.every((x) => x.type === 'public-key')],",
         "  ['rp.name', !!__j.rp && typeof __j.rp.name === 'string' && __j.rp.name.length > 0],",
@@ -1224,7 +1251,7 @@ CASES.append(Case(
         ])),
         _begin_assertion(_A, "ak42-begin", "1", tests=[
             f"pm.test('AK42-BEGIN: требование проверки пользователя — preferred, имя доверяющей стороны — объявленное', () => "
-            f"pm.expect([__j.userVerification, __j.rpId]).to.eql([{js_str(_UV_PREFERRED)}, {js_str(_RP_ID)}]));",
+            f"pm.expect([__j.userVerification, __j.rpId]).to.eql([{js_str(_UV_PREFERRED)}, {_RP_JS}]));",
             "pm.test('AK42-BEGIN: перечень удостоверений — свой ключ вызывающего', () => "
             f"pm.expect((__j.allowCredentials || []).map((c) => [c.type, c.id])).to.eql([['public-key', {_env('akK1CredId')}]]));",
         ]),
@@ -1268,10 +1295,10 @@ CASES.append(Case(
                              tests=_ceremony_refused(_ALG_REFUSED, "AK35-ALGORITHM-OUTSIDE")),
         _finish_registration(_A, "ak41-not-discoverable", slot="X41", ch="akRegChX", discoverable=False,
                              tests=_ceremony_refused(_NOT_DISCOVERABLE, "AK41-NOT-DISCOVERABLE")),
-        _finish_registration(_A, "ak44-origin-outside", slot="X44", ch="akRegChX", origin=_FOREIGN_ORIGIN,
-                             origin_header=_FOREIGN_ORIGIN,
+        _finish_registration(_A, "ak44-origin-outside", slot="X44", ch="akRegChX", origin=_FOREIGN_ORIGIN_JS,
+                             origin_header=_FOREIGN_ORIGIN_JS,
                              tests=_ceremony_refused(_ORIGIN_REFUSED, "AK44-ORIGIN-OUTSIDE")),
-        _finish_registration(_A, "ak45-foreign-rp-hash", slot="X45", ch="akRegChX", rp_id=_FOREIGN_RP_ID,
+        _finish_registration(_A, "ak45-foreign-rp-hash", slot="X45", ch="akRegChX", rp_id=_FOREIGN_RP_ID_JS,
                              tests=_ceremony_refused(_RP_REFUSED, "AK45-FOREIGN-RP-HASH")),
         _finish_registration(_A, "ak48-verified-not-present", slot="X48", ch="akRegChX", flags=_UV | _AT,
                              tests=_ceremony_refused(_UP_REFUSED, "AK48-VERIFIED-NOT-PRESENT")),
@@ -1313,11 +1340,11 @@ CASES.append(Case(
                           tests=_single_refusal("AK08-SIGNED-BY-SECOND-KEY")),
         _finish_assertion(_A, "ak09-unknown-credential", slot="K1", ch="akAsChS", unknown_cred=True,
                           tests=_single_refusal("AK09-UNKNOWN-CREDENTIAL")),
-        _finish_assertion(_A, "ak10-origin-outside", slot="K1", ch="akAsChS", origin=_FOREIGN_ORIGIN,
+        _finish_assertion(_A, "ak10-origin-outside", slot="K1", ch="akAsChS", origin=_FOREIGN_ORIGIN_JS,
                           tests=_single_refusal("AK10-ORIGIN-OUTSIDE")),
-        _finish_assertion(_A, "ak11-origin-header-agrees", slot="K1", ch="akAsChS", origin=_FOREIGN_ORIGIN,
-                          origin_header=_FOREIGN_ORIGIN, tests=_single_refusal("AK11-ORIGIN-HEADER-AGREES")),
-        _finish_assertion(_A, "ak-foreign-rp-hash", slot="K1", ch="akAsChS", rp_id=_FOREIGN_RP_ID,
+        _finish_assertion(_A, "ak11-origin-header-agrees", slot="K1", ch="akAsChS", origin=_FOREIGN_ORIGIN_JS,
+                          origin_header=_FOREIGN_ORIGIN_JS, tests=_single_refusal("AK11-ORIGIN-HEADER-AGREES")),
+        _finish_assertion(_A, "ak-foreign-rp-hash", slot="K1", ch="akAsChS", rp_id=_FOREIGN_RP_ID_JS,
                           tests=_single_refusal("AK-FOREIGN-RP-HASH")),
         _finish_assertion(_A, "ak49-not-present", slot="K1", ch="akAsChS", flags=_UV,
                           tests=_single_refusal("AK49-NOT-PRESENT")),
@@ -1787,8 +1814,8 @@ def _assertion_js(slot, ch, *, flags, count, key, handle, unknown_cred, tamper, 
          else f"const _akCred = _ak.unb64({_env('ak' + slot + 'CredId')} || '');"),
         f"const _akN = {count_expr};",
         _set("_akSentCount", "String(_akN)"),
-        f"const _akA = _ak.assert({{ challenge: _ak.unb64({_env(ch)} || ''), rpId: {js_str(_RP_ID)}, "
-        f"origin: {js_str(_ORIGIN)}, flags: {int(flags)}, count: _akN, credId: _akCred, key: {key_expr}, "
+        f"const _akA = _ak.assert({{ challenge: _ak.unb64({_env(ch)} || ''), rpId: {_RP_JS}, "
+        f"origin: {_ORIGIN_JS}, flags: {int(flags)}, count: _akN, credId: _akCred, key: {key_expr}, "
         f"tamper: {'true' if tamper else 'false'} }});",
         "const _akR = { clientDataJSON: _akU(_akA.clientDataJson), authenticatorData: _akU(_akA.authenticatorData), "
         f"signature: _akU(_akA.signature), userHandle: {handle_expr} }};",
@@ -2048,7 +2075,7 @@ CASES.append(Case(
             "pm.test('F13-01-BEGIN: испытание base64url без дополнения', () => "
             "pm.expect(/^[A-Za-z0-9_-]+$/.test(String(_akPk.challenge || ''))).to.eql(true));",
             f"pm.test('F13-01-BEGIN: имя доверяющей стороны и срок испытания — объявленные', () => "
-            f"pm.expect([_akPk.rpId, _akPk.timeout]).to.eql([{js_str(_RP_ID)}, {_CHALLENGE_TTL_MS}]));",
+            f"pm.expect([_akPk.rpId, _akPk.timeout]).to.eql([{_RP_JS}, {_CHALLENGE_TTL_MS}]));",
             f"pm.test('F13-01-BEGIN: проверка пользователя — preferred', () => pm.expect(_akPk.userVerification).to.eql({js_str(_UV_PREFERRED)}));",
             "pm.test('F13-01-BEGIN: allowCredentials — пустой массив словом, не отсутствие', () => "
             "pm.expect(Array.isArray(_akPk.allowCredentials) && _akPk.allowCredentials.length === 0).to.eql(true));",
