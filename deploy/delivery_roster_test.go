@@ -75,6 +75,7 @@ var deliveryRoster = []string{
 	"boot_guard_defaults_injection_test.go",
 	"boot_guard_defaults_test.go",
 	"ceremony_lifespans_chart_test.go",
+	"ceremony_share_alert_test.go",
 	"chart_raise_has_a_holder_injection_test.go",
 	"chart_raise_has_a_holder_test.go",
 	"client_token_endpoint_chart_test.go",

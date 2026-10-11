@@ -38,6 +38,17 @@ type SecretChecker interface {
 	Capacity() int
 }
 
+// ShareObserver — приёмник отказов по доле церемонии (kaname#693). Отказ сверх
+// доли рождается здесь, ДО проверяющего: его собственная клетка исчерпания не
+// растёт, а наружу он неотличим от исчерпания самого проверяющего (тот же
+// `ErrVerifierAtCapacity`, тот же 503 с `Retry-After`). Различимость живёт
+// только этой клеткой. Метода с аргументами нет нарочно: имя клиента на
+// токен-эндпоинте предъявляется ДО доказательства клиента, и метка с ним
+// давала бы ряду кардинальность, которую назначает вызывающий.
+type ShareObserver interface {
+	CeremonyShareExhaustedObserved()
+}
+
 // ClientSecrets — адаптер порта сверки секрета клиента
 // (`oauthceremony.ClientSecretVerifier`).
 //
@@ -81,6 +92,8 @@ type ClientSecrets struct {
 	checker SecretChecker
 	// share — места доли церемонии: неблокирующий захват одной отправкой в канал.
 	share chan struct{}
+	// shareObserver — клетка отказа сверх доли.
+	shareObserver ShareObserver
 }
 
 var (
@@ -91,13 +104,16 @@ var (
 // NewClientSecrets собирает адаптер. Без справочника сверять не с чем, без
 // проверяющего нечем, а невыровненный проверяющий отвечал бы неизвестному
 // клиенту дешевле, чем известному, — сборка отказывает, а не отвечает на первом
-// запросе.
-func NewClientSecrets(store SecretVerifierStore, checker SecretChecker) (*ClientSecrets, error) {
+// запросе. Без приёмника отказов по доле сборка отказывает тоже: отказ сверх
+// доли наружу неотличим от исчерпания проверяющего, и без клетки он молчал бы.
+func NewClientSecrets(store SecretVerifierStore, checker SecretChecker, share ShareObserver) (*ClientSecrets, error) {
 	switch {
 	case store == nil:
 		return nil, errors.New("ceremonyport: client secret verifier needs the verifier store")
 	case checker == nil:
 		return nil, errors.New("ceremonyport: client secret verifier needs the secret checker")
+	case share == nil:
+		return nil, errors.New("ceremonyport: client secret verifier needs the observer of the ceremony share")
 	case !checker.Aligned():
 		return nil, errors.New("ceremonyport: the secret checker has no decoy; a refusal to an unknown " +
 			"client would cost less than a refusal to a wrong secret")
@@ -105,7 +121,8 @@ func NewClientSecrets(store SecretVerifierStore, checker SecretChecker) (*Client
 		return nil, fmt.Errorf("ceremonyport: the secret checker capacity %d leaves no share for the ceremony "+
 			"beside the sign-in lane; declare a capacity of at least 2", checker.Capacity())
 	}
-	return &ClientSecrets{store: store, checker: checker, share: make(chan struct{}, checker.Capacity()/2)}, nil
+	return &ClientSecrets{store: store, checker: checker, share: make(chan struct{}, checker.Capacity()/2),
+		shareObserver: share}, nil
 }
 
 // VerifyClientSecret сверяет секрет, предъявленный от имени клиента clientID.
@@ -118,6 +135,7 @@ func (c *ClientSecrets) VerifyClientSecret(ctx context.Context, clientID string,
 	case c.share <- struct{}{}:
 		defer func() { <-c.share }()
 	default:
+		c.shareObserver.CeremonyShareExhaustedObserved()
 		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
 			"the ceremony share of the checker is at capacity: %w", clientID, domain.ErrVerifierAtCapacity)
 	}

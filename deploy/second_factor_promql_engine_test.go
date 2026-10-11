@@ -60,6 +60,8 @@ func engineSeries() []cellTerm {
 	for _, v := range storeFailureProducerValues() {
 		out = append(out, v.cell)
 	}
+	// Отказ сверх доли церемонии (kaname#693): ряд без меток.
+	out = append(out, ceremonyShareCell)
 	return out
 }
 

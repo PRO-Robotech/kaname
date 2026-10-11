@@ -12,6 +12,7 @@ package ceremonyport_test
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -172,3 +173,10 @@ func (admitAll) UserRevokedBefore(context.Context, string) (time.Time, bool, err
 func (admitAll) PersonMarks(context.Context, []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }
+
+// shareCounter — приёмник отказов по доле церемонии, считающий их (kaname#693).
+type shareCounter struct{ n atomic.Int64 }
+
+func (c *shareCounter) CeremonyShareExhaustedObserved() { c.n.Add(1) }
+
+func (c *shareCounter) count() int64 { return c.n.Load() }

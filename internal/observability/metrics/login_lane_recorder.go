@@ -16,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
@@ -59,6 +60,9 @@ const (
 	// Сбой хранилища у глаголов своих данных под живой сессией (kaname#691):
 	// наружу один отказ без причины, глагол — только здесь.
 	SelfServiceStoreFailuresMetric = Namespace + "_self_service_store_failures_total"
+	// Отказ сверки секрета клиента сверх доли церемонии в ёмкости проверяющего
+	// (kaname#693): рождается до проверяющего, и его клетка исчерпания не растёт.
+	CeremonyShareExhaustedMetric = Namespace + "_password_verifier_ceremony_share_exhausted_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -87,6 +91,7 @@ type LoginLaneRecorder struct {
 	addrVerify   *prometheus.CounterVec
 	emailChange  *prometheus.CounterVec
 	storeFailure *prometheus.CounterVec
+	shareFull    prometheus.Counter
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -214,10 +219,17 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 					"step-up, second-factor enroll/confirm/status/remove, backup-codes regenerate, password change " +
 					"and enroll. The caller sees one UNAVAILABLE without a cause; the verb lives only here.",
 			}, []string{"verb"}),
+			shareFull: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: CeremonyShareExhaustedMetric,
+				Help: "Client-secret checks of the sign-in ceremony refused because the ceremony share of the " +
+					"password verifier capacity was taken: refused before the verifier, so its own " +
+					"capacity-exhausted outcome does not grow. The half of the capacity left to people's sign-in " +
+					"is untouched by this refusal.",
+			}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
 			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
-			rec.addrVerify, rec.akLogin, rec.emailChange, rec.storeFailure)
+			rec.addrVerify, rec.akLogin, rec.emailChange, rec.storeFailure, rec.shareFull)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -370,7 +382,11 @@ func (l *LoginLaneRecorder) StoreFailureObserved(v humansession.StoreFailureVerb
 	l.storeFailure.WithLabelValues(string(v)).Inc()
 }
 
+// CeremonyShareExhaustedObserved — отказ сверх доли церемонии (kaname#693).
+func (l *LoginLaneRecorder) CeremonyShareExhaustedObserved() { l.shareFull.Inc() }
+
 var (
+	_ ceremonyport.ShareObserver               = (*LoginLaneRecorder)(nil)
 	_ humansession.EmailChangeObserver         = (*LoginLaneRecorder)(nil)
 	_ humansession.Observer                    = (*LoginLaneRecorder)(nil)
 	_ humansession.AddressVerificationObserver = (*LoginLaneRecorder)(nil)

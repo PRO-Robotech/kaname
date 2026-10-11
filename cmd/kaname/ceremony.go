@@ -90,6 +90,7 @@ func buildCeremonySurface(
 	signer *tokensigner.Signer,
 	keys ceremonyport.KeySetSource,
 	secrets ceremonyport.SecretChecker,
+	share ceremonyport.ShareObserver,
 	source *issuingsource.Rule,
 	logger *slog.Logger,
 ) (*ceremonySurface, error) {
@@ -108,6 +109,8 @@ func buildCeremonySurface(
 		return nil, errors.New("ceremony: the published key set is not wired")
 	case secrets == nil:
 		return nil, errors.New("ceremony: the client secret checker is not wired")
+	case share == nil:
+		return nil, errors.New("ceremony: the observer of the ceremony share of the checker is not wired")
 	case logger == nil:
 		return nil, errors.New("ceremony: a logger is required")
 	}
@@ -140,7 +143,7 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
-	clientSecrets, err := ceremonyport.NewClientSecrets(store, secrets)
+	clientSecrets, err := ceremonyport.NewClientSecrets(store, secrets, share)
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
