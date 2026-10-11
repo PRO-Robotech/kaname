@@ -88,15 +88,11 @@ func requireFresh(d SecondFactorDeps, s domain.HumanSession, now time.Time) erro
 	return nil
 }
 
-// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
-// единственная точка на выходе, а не каждый возврат по отдельности.
-func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput) (EnrollOutput, error) {
-	out, err := uc.execute(ctx, in)
-	return out, observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorEnroll, err)
-}
-
-// execute — заведение.
-func (uc *EnrollSecondFactorUseCase) execute(ctx context.Context, in EnrollInput) (EnrollOutput, error) {
+// Execute — заведение.
+func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput) (_ EnrollOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorEnroll, err) }()
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)
 	if err != nil {
@@ -174,16 +170,12 @@ func NewConfirmSecondFactorUseCase(d SecondFactorDeps) (*ConfirmSecondFactorUseC
 	return &ConfirmSecondFactorUseCase{deps: d, gate: d.gate()}, nil
 }
 
-// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
-// единственная точка на выходе, а не каждый возврат по отдельности.
-func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInput) (ConfirmOutput, error) {
-	out, err := uc.execute(ctx, in)
-	return out, observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorConfirm, err)
-}
-
-// execute — подтверждение. Порядок: сессия → свежесть → частота → состояние
+// Execute — подтверждение. Порядок: сессия → свежесть → частота → состояние
 // (матрица) → срок → сверка → четыре записи одним исходом.
-func (uc *ConfirmSecondFactorUseCase) execute(ctx context.Context, in ConfirmInput) (ConfirmOutput, error) {
+func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInput) (_ ConfirmOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorConfirm, err) }()
 	if in.Code == "" {
 		return ConfirmOutput{}, FieldRequired("code")
 	}

@@ -47,16 +47,12 @@ func NewRegenerateBackupCodesUseCase(d SecondFactorDeps) (*RegenerateBackupCodes
 	return &RegenerateBackupCodesUseCase{deps: d, gate: d.gate()}, nil
 }
 
-// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
-// единственная точка на выходе, а не каждый возврат по отдельности.
-func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in RegenerateBackupCodesInput) (RegenerateBackupCodesOutput, error) {
-	out, err := uc.execute(ctx, in)
-	return out, observeStoreFailure(uc.deps.Observer, StoreFailureBackupCodesRegenerate, err)
-}
-
-// execute — порядок: форма → сессия → частота → состояние → сверка → набор
+// Execute — порядок: форма → сессия → частота → состояние → сверка → набор
 // целиком и событие одним исходом.
-func (uc *RegenerateBackupCodesUseCase) execute(ctx context.Context, in RegenerateBackupCodesInput) (RegenerateBackupCodesOutput, error) {
+func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in RegenerateBackupCodesInput) (_ RegenerateBackupCodesOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureBackupCodesRegenerate, err) }()
 	if err := JudgeCodeForm("code", in.Factor); err != nil {
 		return RegenerateBackupCodesOutput{}, err
 	}

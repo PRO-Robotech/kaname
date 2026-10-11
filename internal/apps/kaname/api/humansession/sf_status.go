@@ -54,15 +54,11 @@ func NewSecondFactorStatusUseCase(d SecondFactorDeps) (*SecondFactorStatusUseCas
 	return &SecondFactorStatusUseCase{deps: d}, nil
 }
 
-// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
-// единственная точка на выходе, а не каждый возврат по отдельности.
-func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput) (StatusOutput, error) {
-	out, err := uc.execute(ctx, in)
-	return out, observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorStatus, err)
-}
-
-// execute — состояние по матрице Р4: нет · `pending` · `active`.
-func (uc *SecondFactorStatusUseCase) execute(ctx context.Context, in StatusInput) (StatusOutput, error) {
+// Execute — состояние по матрице Р4: нет · `pending` · `active`.
+func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput) (_ StatusOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorStatus, err) }()
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)
 	if err != nil {
