@@ -62,14 +62,15 @@ func (r *UserPoolRepo) GetByID(ctx context.Context, id domain.UserID) (domain.Us
 func scanUserFromRow(row scanner) (domain.User, error) {
 	var u domain.User
 	var displayName, externalID string
-	var invitedBy *string
+	var invitedBy, home *string
 	if err := row.Scan(
-		(*string)(&u.ID), (*string)(&u.AccountID), &externalID,
+		(*string)(&u.ID), &home, &externalID,
 		(*string)(&u.Email), &displayName,
 		(*string)(&u.InviteStatus), &invitedBy, &u.CreatedAt,
 	); err != nil {
 		return domain.User{}, err
 	}
+	u.AccountID = homeAccount(home)
 	u.ExternalID = domain.ExternalSubject(externalID)
 	u.DisplayName = domain.DisplayName(displayName)
 	if invitedBy != nil {

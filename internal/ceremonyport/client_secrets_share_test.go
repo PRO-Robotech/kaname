@@ -72,7 +72,7 @@ func (c *holdingChecker) peakInFlight() int {
 func TestClientSecrets_TheCeremonyHoldsAtMostItsShareOfTheChecker(t *testing.T) {
 	const capacity = 4
 	checker := newHoldingChecker(capacity)
-	port, err := ceremonyport.NewClientSecrets(&secretStore{verifiers: map[string]domain.LoginVerifier{}}, checker)
+	port, err := ceremonyport.NewClientSecrets(&secretStore{verifiers: map[string]domain.LoginVerifier{}}, checker, &shareCounter{})
 	require.NoError(t, err)
 
 	// Поток запросов на всю ёмкость проверяющего.
@@ -117,7 +117,7 @@ wait:
 func TestClientSecrets_SequentialVerificationsAreNotLimitedByTheShare(t *testing.T) {
 	checker := newHoldingChecker(2)
 	close(checker.release)
-	port, err := ceremonyport.NewClientSecrets(&secretStore{verifiers: map[string]domain.LoginVerifier{}}, checker)
+	port, err := ceremonyport.NewClientSecrets(&secretStore{verifiers: map[string]domain.LoginVerifier{}}, checker, &shareCounter{})
 	require.NoError(t, err)
 	for i := 0; i < 5; i++ {
 		verdict, err := port.VerifyClientSecret(context.Background(), unknownClientID,
@@ -125,4 +125,57 @@ func TestClientSecrets_SequentialVerificationsAreNotLimitedByTheShare(t *testing
 		require.NoError(t, err, "сверка %d", i)
 		require.Equal(t, oauthceremony.SecretMismatched, verdict)
 	}
+}
+
+// Отказ сверх доли церемонии рождается ДО проверяющего: клетка исчерпания
+// проверяющего не растёт, и без своей клетки этот отказ не видит ни одно
+// правило (kaname#693). Отказ сверх доли — +1 клетке доли и тот же
+// ErrVerifierAtCapacity, что у исчерпания проверяющего (снаружи — тот же 503);
+// сверка при свободной доле клетку не трогает; исчерпание САМОГО проверяющего
+// — не отказ по доле.
+func TestClientSecrets_RefusalOverTheShareCountsItsCell(t *testing.T) {
+	const capacity = 4
+	checker := newHoldingChecker(capacity)
+	share := &shareCounter{}
+	port, err := ceremonyport.NewClientSecrets(&secretStore{verifiers: map[string]domain.LoginVerifier{}}, checker, share)
+	require.NoError(t, err)
+
+	// Доля занята целиком: capacity/2 сверок держат места.
+	var wg sync.WaitGroup
+	for i := 0; i < capacity/2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = port.VerifyClientSecret(context.Background(), unknownClientID, oauthceremony.NewPresentedSecret(wrongClientSecret))
+		}()
+	}
+	for i := 0; i < capacity/2; i++ {
+		select {
+		case <-checker.entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("сверки доли не вошли в проверяющего — доля не занята, судить нечего")
+		}
+	}
+	require.Zero(t, share.count(), "ни одного отказа ещё не было")
+
+	_, err = port.VerifyClientSecret(context.Background(), unknownClientID, oauthceremony.NewPresentedSecret(wrongClientSecret))
+	require.ErrorIs(t, err, domain.ErrVerifierAtCapacity, "отказ сверх доли снаружи — тот же отказ по ёмкости")
+	require.Equal(t, int64(1), share.count(), "отказ сверх доли не оставил клетки — правило ёмкости о нём молчит")
+
+	close(checker.release)
+	wg.Wait()
+
+	// Близнец: доля свободна — сверка проходит, клетка стоит.
+	verdict, err := port.VerifyClientSecret(context.Background(), unknownClientID, oauthceremony.NewPresentedSecret(wrongClientSecret))
+	require.NoError(t, err)
+	require.Equal(t, oauthceremony.SecretMismatched, verdict)
+	require.Equal(t, int64(1), share.count(), "сверка при свободной доле — не отказ по доле")
+
+	// Исчерпание самого проверяющего — его клетка, а не клетка доли.
+	exhausted, err := ceremonyport.NewClientSecrets(&secretStore{verifiers: map[string]domain.LoginVerifier{}},
+		stubChecker{outcome: passwordverify.OutcomeCapacityExhausted}, share)
+	require.NoError(t, err)
+	_, err = exhausted.VerifyClientSecret(context.Background(), unknownClientID, oauthceremony.NewPresentedSecret(wrongClientSecret))
+	require.ErrorIs(t, err, domain.ErrVerifierAtCapacity)
+	require.Equal(t, int64(1), share.count(), "исчерпание проверяющего посчитано отказом по доле")
 }

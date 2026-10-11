@@ -76,12 +76,13 @@ func (r *HumanSessionRepo) Resolve(ctx context.Context, digest domain.BearerDige
 		emailVerAt  *time.Time
 		methods     []string
 		inviteState string
+		home        *string
 	)
 	err := r.pool.QueryRow(ctx, resolveSQL, string(digest)).Scan(
 		&out.Session.ID, &out.Session.UserID, &out.Session.AuthenticatedAt, &out.Session.LastPresentedAt,
 		&out.Session.ExpiresAt, &out.Session.AssuranceLevel, &methods,
 		&endedAt, &out.Session.CreatedAt,
-		&out.User.AccountID, &out.User.ExternalID, &out.User.Email, &out.User.DisplayName, &inviteState,
+		&home, &out.User.ExternalID, &out.User.Email, &out.User.DisplayName, &inviteState,
 		&invitedBy, &out.User.CreatedAt, &labels, &emailVerAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -104,6 +105,7 @@ func (r *HumanSessionRepo) Resolve(ctx context.Context, digest domain.BearerDige
 	}
 	out.Session.PresentedMethods = methods
 	out.User.ID = out.Session.UserID
+	out.User.AccountID = homeAccount(home)
 	out.User.InviteStatus = domain.InviteStatus(inviteState)
 	if invitedBy != nil {
 		out.User.InvitedBy = domain.UserID(*invitedBy)

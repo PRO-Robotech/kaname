@@ -50,7 +50,18 @@ type AccountServiceClient interface {
 	// update_mask returns InvalidArgument.
 	Update(ctx context.Context, in *UpdateAccountRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Deletes the specified account.
-	// Account with non-empty Projects returns FailedPrecondition.
+	//
+	// An Account that still contains anything is refused with FAILED_PRECONDITION,
+	// and the message names what is left: "Account <id> contains projects |
+	// service accounts | groups | custom roles and cannot be deleted". Nothing is
+	// cascaded — the caller removes the content first.
+	//
+	// Removing an Account does not remove any person. Every person whose home was
+	// this Account stays and simply has no home; his memberships in this Account
+	// go, and so do the rights-model facts that pointed at it (membership pointers,
+	// grants on the Account, the cluster pointer), in the same transaction. This
+	// is the first step of a self-registered tenant leaving the platform: delete
+	// the projects, then the Account, then the identity (`UserService.Delete`).
 	Delete(ctx context.Context, in *DeleteAccountRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified account (operations on the account
 	// resource itself, filtered by resource_id=account_id).
@@ -160,7 +171,18 @@ type AccountServiceServer interface {
 	// update_mask returns InvalidArgument.
 	Update(context.Context, *UpdateAccountRequest) (*operation.Operation, error)
 	// Deletes the specified account.
-	// Account with non-empty Projects returns FailedPrecondition.
+	//
+	// An Account that still contains anything is refused with FAILED_PRECONDITION,
+	// and the message names what is left: "Account <id> contains projects |
+	// service accounts | groups | custom roles and cannot be deleted". Nothing is
+	// cascaded — the caller removes the content first.
+	//
+	// Removing an Account does not remove any person. Every person whose home was
+	// this Account stays and simply has no home; his memberships in this Account
+	// go, and so do the rights-model facts that pointed at it (membership pointers,
+	// grants on the Account, the cluster pointer), in the same transaction. This
+	// is the first step of a self-registered tenant leaving the platform: delete
+	// the projects, then the Account, then the identity (`UserService.Delete`).
 	Delete(context.Context, *DeleteAccountRequest) (*operation.Operation, error)
 	// Lists operations for the specified account (operations on the account
 	// resource itself, filtered by resource_id=account_id).

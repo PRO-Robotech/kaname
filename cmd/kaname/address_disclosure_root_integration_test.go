@@ -103,7 +103,7 @@ func disclosureRootAsk(t *testing.T, reg *metrics.Registry, strangerVerified, st
 	// Дверь — та же, что корень выдаёт стражам и решателю края (`wiring.go`).
 	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	require.True(t, door.FormReachable(), "НЕ-ВЫПОЛНИЛОСЬ(предпосылка): дверь собрана без формы")
-	bundle := buildAuthZServices(kanamepg.New(pool, pool), door, reg, true)
+	bundle := buildAuthZServices(kanamepg.New(pool, pool), door, kanamepg.NewHumanSessionRepo(pool), reg, true)
 
 	req := &iamv1.AuthorizeCheckRequest{Subject: "user:" + stranger, Resource: &iamv1.ResourceRef{Type: "account", Id: acc},
 		Action: "iam.account.edit", RequiredRelation: "editor"}

@@ -1,0 +1,151 @@
+{
+  "keys": [
+    {
+      "name": "access_key_challenges_user_fk",
+      "table": "access_key_challenges",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "испытание регистрации ключа доступа — состояние церемонии человека, без него смысла не имеет"
+    },
+    {
+      "name": "accounts_owner_fk",
+      "table": "accounts",
+      "references": "users",
+      "on_delete": "RESTRICT",
+      "reason": "владеющий аккаунтом человек не снимается: отказ «owns accounts» называет следующий шаг — снять аккаунт (kaname#664, Р3)"
+    },
+    {
+      "name": "email_change_codes_user_fk",
+      "table": "email_change_codes",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "код смены адреса — состояние церемонии человека"
+    },
+    {
+      "name": "email_verification_codes_user_fk",
+      "table": "email_verification_codes",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "код подтверждения адреса — состояние церемонии человека"
+    },
+    {
+      "name": "groups_account_fk",
+      "table": "groups",
+      "references": "accounts",
+      "on_delete": "RESTRICT",
+      "reason": "аккаунт с группами не снимается: каскада внутри арендатора нет, отказ называет группы (kaname#664, Р2)"
+    },
+    {
+      "name": "human_first_authentications_user_fk",
+      "table": "human_first_authentications",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "отметка первой аутентификации — факт о самом человеке"
+    },
+    {
+      "name": "human_sessions_user_fk",
+      "table": "human_sessions",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "сессии уходят вместе с человеком: отказ предъявления — отсутствие строки (kaname#664, Р5)"
+    },
+    {
+      "name": "memberships_account_fk",
+      "table": "memberships",
+      "references": "accounts",
+      "on_delete": "CASCADE",
+      "reason": "членство в снятом аккаунте уходит; указатель модели прав снимается намерением той же транзакции (kaname#664, Р6)"
+    },
+    {
+      "name": "memberships_user_fk",
+      "table": "memberships",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "членства уходят вместе с человеком; указатели снимаются намерениями той же транзакции (kaname#664, Р6)"
+    },
+    {
+      "name": "projects_account_fk",
+      "table": "projects",
+      "references": "accounts",
+      "on_delete": "RESTRICT",
+      "reason": "аккаунт с проектами не снимается: отказ называет шаг — снять проекты (kaname#664, Р2)"
+    },
+    {
+      "name": "recovery_codes_user_fk",
+      "table": "recovery_codes",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "коды восстановления — материал самого человека"
+    },
+    {
+      "name": "roles_account_fk",
+      "table": "roles",
+      "references": "accounts",
+      "on_delete": "RESTRICT",
+      "reason": "аккаунт со своими ролями не снимается: отказ называет роли (kaname#664, Р2)"
+    },
+    {
+      "name": "service_accounts_account_fk",
+      "table": "service_accounts",
+      "references": "accounts",
+      "on_delete": "RESTRICT",
+      "reason": "аккаунт с сервисными аккаунтами не снимается: отказ называет их (kaname#664, Р2)"
+    },
+    {
+      "name": "token_families_user_fk",
+      "table": "token_families",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "семейства токенов — выданное человеку, уходит с ним"
+    },
+    {
+      "name": "user_access_keys_user_fk",
+      "table": "user_access_keys",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "ключи доступа — способ входа человека, уходят с ним"
+    },
+    {
+      "name": "user_ceremony_handles_user_fk",
+      "table": "user_ceremony_handles",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "рукоять церемонии — состояние церемонии человека"
+    },
+    {
+      "name": "user_login_methods_user_fk",
+      "table": "user_login_methods",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "способы входа уходят вместе с человеком"
+    },
+    {
+      "name": "user_oauth_clients_user_fk",
+      "table": "user_oauth_clients",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "личные токены уходят вместе с человеком; выпущенное ими отсекает триггер снятия клиента (kaname#664, KN664-35)"
+    },
+    {
+      "name": "user_token_revocations_user_fk",
+      "table": "user_token_revocations",
+      "references": "users",
+      "on_delete": "CASCADE",
+      "reason": "первая запись отсечки уходит с человеком, вторая (minted_token_revocations) ключом не связана и живёт до уборки (kaname#664, Р5)"
+    },
+    {
+      "name": "users_account_fk",
+      "table": "users",
+      "references": "accounts",
+      "on_delete": "SET NULL",
+      "reason": "снятие аккаунта оставляет его участников без дома, а не отказывает: разрыв цикла с accounts_owner_fk (kaname#664, Р3)"
+    },
+    {
+      "name": "users_invited_by_fk",
+      "table": "users",
+      "references": "users",
+      "on_delete": "SET NULL",
+      "reason": "«кто пригласил» пустеет со снятием пригласившего; приглашённый не зависит от его судьбы"
+    }
+  ]
+}

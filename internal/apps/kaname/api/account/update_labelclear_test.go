@@ -159,6 +159,10 @@ func (w *lcaAcctWtr) Update(_ context.Context, a domain.Account, mask []string) 
 	return w.parent.acct, nil
 }
 func (w *lcaAcctWtr) Delete(context.Context, domain.AccountID) error { return nil }
+func (*lcaAcctWtr) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (*lcaAcctWtr) LockOwner(context.Context, domain.UserID) error { return nil }
 
 // ── fake ops repo (no-op; worker runs via operations.Run + Wait) ────────────────
 

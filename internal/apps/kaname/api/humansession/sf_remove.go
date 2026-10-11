@@ -57,7 +57,10 @@ func NewRemoveSecondFactorUseCase(d SecondFactorDeps) (*RemoveSecondFactorUseCas
 
 // Execute — порядок: форма → сессия → частота → состояние → сверка → снятие
 // одним исходом.
-func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecondFactorInput) (RemoveSecondFactorOutput, error) {
+func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecondFactorInput) (_ RemoveSecondFactorOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorRemove, err) }()
 	if err := JudgeCodeForm("code", in.Factor); err != nil {
 		return RemoveSecondFactorOutput{}, err
 	}

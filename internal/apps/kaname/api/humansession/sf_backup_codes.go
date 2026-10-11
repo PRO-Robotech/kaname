@@ -49,7 +49,10 @@ func NewRegenerateBackupCodesUseCase(d SecondFactorDeps) (*RegenerateBackupCodes
 
 // Execute — порядок: форма → сессия → частота → состояние → сверка → набор
 // целиком и событие одним исходом.
-func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in RegenerateBackupCodesInput) (RegenerateBackupCodesOutput, error) {
+func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in RegenerateBackupCodesInput) (_ RegenerateBackupCodesOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureBackupCodesRegenerate, err) }()
 	if err := JudgeCodeForm("code", in.Factor); err != nil {
 		return RegenerateBackupCodesOutput{}, err
 	}

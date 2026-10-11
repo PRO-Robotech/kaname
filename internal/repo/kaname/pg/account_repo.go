@@ -413,6 +413,55 @@ func (w *accountWriter) Delete(ctx context.Context, id domain.AccountID) error {
 	return iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
 }
 
+// LockForRemoval — см. порт. Замок строки аккаунта — ПЕРВЫМ оператором
+// транзакции, перечень участников — после него: вставка членства берёт ключевой
+// замок той же строки (`memberships_account_fk`) и сериализуется со снятием
+// (kaname#664, Р6).
+func (w *accountWriter) LockForRemoval(ctx context.Context, id domain.AccountID) ([]domain.UserID, error) {
+	var one int
+	err := w.tx.QueryRow(ctx, `SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE`, string(id)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
+	}
+	if err != nil {
+		return nil, mapErr(err, "Account.Delete", string(id))
+	}
+	rows, err := w.tx.Query(ctx,
+		`SELECT user_id FROM memberships WHERE account_id = $1 ORDER BY user_id`, string(id))
+	if err != nil {
+		return nil, mapErr(err, "Account.Delete", string(id))
+	}
+	defer rows.Close()
+	var out []domain.UserID
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, mapErr(err, "Account.Delete", string(id))
+		}
+		out = append(out, domain.UserID(uid))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "Account.Delete", string(id))
+	}
+	return out, nil
+}
+
+// LockOwner — см. порт. Ключевой замок (`FOR KEY SHARE`) — тот же, что берёт
+// внешний ключ владельца при вставке аккаунта, только раньше и с текстом:
+// отсутствие строки отвечает «User <id> not found» с кодом предусловия, тем же
+// текстом, что отказ ключа `accounts_owner_fk` на фиксации.
+func (w *accountWriter) LockOwner(ctx context.Context, owner domain.UserID) error {
+	var one int
+	err := w.tx.QueryRow(ctx, `SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE`, string(owner)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s not found", owner)
+	}
+	if err != nil {
+		return mapErr(err, "", string(owner))
+	}
+	return nil
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 type scanner interface {

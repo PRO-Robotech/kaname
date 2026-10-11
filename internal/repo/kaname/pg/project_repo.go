@@ -21,6 +21,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/corelib/db/pgfault"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
@@ -187,7 +189,15 @@ func (w *projectWriter) Insert(ctx context.Context, p domain.Project) (domain.Pr
 	)
 	out, err := scanProject(row)
 	if err != nil {
-		return domain.Project{}, mapErr(err, "", string(p.Name))
+		// Подсказка — по стороне отказа. Ключ аккаунта называет АККАУНТ, ключ
+		// уникальности — ИМЯ проекта; одна подсказка на обе ветви отвечала на
+		// создание в снятом аккаунте «Account <имя проекта> not found»
+		// (kaname#664, гонка KN664-20).
+		hint := string(p.Name)
+		if pgfault.Classify(err).Class == pgfault.ForeignKey {
+			hint = string(p.AccountID)
+		}
+		return domain.Project{}, mapErr(err, "", hint)
 	}
 	return out, nil
 }

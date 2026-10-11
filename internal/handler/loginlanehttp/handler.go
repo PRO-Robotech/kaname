@@ -1426,6 +1426,10 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextSessionIsCurrent,
 			&errorInfo{Reason: humansession.ReasonSessionIsCurrent, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrSecondFactorUnavailable):
+		// Запись журнала уровня ошибки (Ф12-35 «в», «г») — дело глагола, где
+		// известны личность и способ: у общей сверки (вход, step-up, снятие,
+		// выпуск набора) её пишет `sf_present.go` (kaname#700). Край второй
+		// записи не пишет — она удвоила бы счёт.
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextSecondFactorUnavailable, nil)
 	case errors.Is(err, humansession.ErrStoreUnavailable), errors.Is(err, humansession.ErrBreachAuthorityMisconfigured):
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)

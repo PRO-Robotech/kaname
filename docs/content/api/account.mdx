@@ -182,8 +182,14 @@ immutable** — его наличие в `updateMask` вернёт `INVALID_ARGU
 
 <ApiOperation method="DELETE" endpoint="/iam/v1/accounts/{account_id}" async>
 
-Удаляет аккаунт. Если у аккаунта есть проекты — удаление блокируется `FAILED_PRECONDITION`
-(сначала удалите проекты). Требует `v_delete`. Асинхронно.
+Удаляет аккаунт. Пока в аккаунте что-то есть, удаление отвергается `FAILED_PRECONDITION`, и
+текст называет, что осталось: проекты, сервисные аккаунты, группы или собственные роли —
+каскада нет, содержимое удаляется сначала. Требует `v_delete` и сессию уровня `2`. Асинхронно.
+
+Людей удаление аккаунта не удаляет. Всякий, чей дом — этот аккаунт, остаётся и просто
+остаётся без дома; его членство в этом аккаунте уходит, а вместе с ним — факты модели прав,
+указывавшие на аккаунт. Это первый шаг ухода самостоятельно зарегистрированного арендатора:
+проекты → аккаунт → личность ([`UserService.Delete`](/api/user)).
 
 <CodeBlock language="bash">
   {dedent`
@@ -234,7 +240,8 @@ account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Тре�
     <tr><td><code>name</code> в форме идентификатора аккаунта, не равный собственному <code>id</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument name: the account id form is reserved for the account's own id"</code>. На <code>Create</code> и <code>Update</code></td></tr>
     <tr><td><code>name</code> начинается с <code>personal-cloud-</code> (на <code>Update</code> — только когда имя меняется)</td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument name: prefix 'personal-cloud-' is reserved for personal accounts"</code>. Синхронно, до заведения операции; имя негодной формы получает прежний отказ формы. Правка прочих полей личного аккаунта и повтор его текущего имени не отвергаются</td></tr>
     <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"ownerUserId is immutable after Account.Create"</code></td></tr>
-    <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала удалить все проекты аккаунта — <strong>включая созданный вместе с ним <code>default</code></strong></td></tr>
+    <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td><code>"Account &lt;id&gt; contains projects and cannot be deleted"</code> в исходе операции. Сначала удалить все проекты аккаунта — <strong>включая созданный вместе с ним <code>default</code></strong></td></tr>
+    <tr><td>Delete аккаунта с сервисными аккаунтами, группами или собственными ролями</td><td><code>FAILED_PRECONDITION</code></td><td><code>"Account &lt;id&gt; contains service accounts | groups | custom roles and cannot be deleted"</code> в исходе операции</td></tr>
     <tr><td>Нет нужного отношения</td><td><code>PERMISSION_DENIED</code></td><td>Authz-Check не прошёл</td></tr>
   </tbody>
 </table>

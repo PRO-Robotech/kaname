@@ -26,8 +26,18 @@ package pg
 // Within-service refs — DB-level invariants:
 //   - UNIQUE (lower(email))                                  → 23505 / iamerr.ErrAlreadyExists
 //   - UNIQUE (external_id) WHERE external_id<>''             → 23505 / iamerr.ErrAlreadyExists
-//   - DEFERRABLE FK users.account_id → accounts(id)          → 23503 на COMMIT
-//   - DEFERRABLE FK accounts.owner_user_id → users(id)       → 23503 на COMMIT
+//   - DEFERRABLE FK users.account_id → accounts(id)          → 23503 на COMMIT;
+//     ON DELETE SET NULL (kaname#664, Р3): снятие аккаунта оставляет его
+//     участников без дома, NULL означает «дома нет» (`homeAccount`)
+//   - DEFERRABLE FK accounts.owner_user_id → users(id)       → 23503 на COMMIT;
+//     ON DELETE RESTRICT: владеющий аккаунтом человек не снимается —
+//     «User <id> owns accounts and cannot be deleted» (порядок «аккаунт → личность»)
+//   - РЕЕСТР issued_user_ids (kaname#664, Р11): идентификатор, выданный однажды,
+//     вставкой не принимается → FailedPrecondition «User <id> not found»
+//   - ключей RESTRICT со стороны записей, переживающих человека, нет: запись
+//     отзыва удостоверения и «кто выпустил» у личного токена и ключа сервисного
+//     аккаунта — мягкие ссылки (kaname#664, Р4); полную перепись ключей на
+//     users и accounts держит ведомость `internal/migrations/person_and_account_keys.json`
 //   - CHECK users_invite_status_consistency (PENDING ⇔ external_id='')
 //   - InsertPending: атомарный ON CONFLICT (lower(email)) DO UPDATE — строка
 //                    возвращается и на конфликте, поэтому конкурентное первое
@@ -745,13 +755,33 @@ func (w *userWriter) InsertActive(ctx context.Context, u domain.User) (domain.Us
 	)
 	out, err := scanUser(row)
 	if err != nil {
-		return domain.User{}, mapErr(err, "", string(u.ExternalID))
+		// Подсказка — идентификатор строки: его называет отказ реестра
+		// выданных идентификаторов (`issued_user_ids_pkey`, kaname#664).
+		// Ветви уникальности по внешнему субъекту отвечают фиксированным
+		// текстом и подсказки не читают.
+		return domain.User{}, mapErr(err, "", string(u.ID))
 	}
 	return out, nil
 }
 
-// Delete — атомарный DELETE с гвардом NOT EXISTS на access_bindings +
-// access_binding_subjects + group_members.
+// Delete — атомарный DELETE с гвардом NOT EXISTS на владение аккаунтами +
+// ДЕЙСТВУЮЩИЕ access_bindings + access_binding_subjects ДЕЙСТВУЮЩИХ выдач +
+// group_members.
+//
+// ВЛАДЕНИЕ — ПЕРВЫМ, и порядок несущий (kaname#664, KN664-31). Владелец
+// аккаунта держит на нём собственническую выдачу, поэтому гвард выдач отвечал
+// ему «has active access bindings» — текстом, не называющим шага. Шаг один:
+// снять аккаунт, и выдача уйдёт вместе с ним. Отказ ключа `accounts_owner_fk`
+// говорит то же самое («owns accounts»), но срабатывает только тогда, когда
+// гвард выдач пропустил строку, — то есть не срабатывал никогда. Теперь
+// гвард владения стоит в предикате, а ключ остаётся рубежом гонки: аккаунт,
+// зафиксированный после снимка оператора, отвергнет снятие тем же текстом.
+//
+// ОТОЗВАННАЯ ВЫДАЧА НЕ ДЕРЖИТ (kaname#664, Р10). Условие действующей выдачи —
+// `revoked_at IS NULL` — то же, что у частичной уникальности
+// `access_bindings_active_grant_uniq` и у функции триггера
+// `principal_not_referenced_as_subject`; у группы и сервисного аккаунта —
+// дословно оно же. Текст отказа говорит «active», и он обязан быть правдой.
 //
 // The access_bindings guard covers the LEGACY subjects[0] projection; the
 // access_binding_subjects guard covers subjects[1..N] — an independent grantee of a
@@ -765,23 +795,27 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 		WITH del AS (
 			DELETE FROM users u
 			WHERE u.id = $1
-			  AND NOT EXISTS (SELECT 1 FROM access_bindings         WHERE subject_type = 'user' AND subject_id = $1)
-			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects WHERE subject_type = 'user' AND subject_id = $1)
-			  AND NOT EXISTS (SELECT 1 FROM group_members           WHERE member_type  = 'user' AND member_id  = $1)
+			  AND NOT EXISTS (SELECT 1 FROM accounts WHERE owner_user_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_bindings b WHERE b.subject_type = 'user' AND b.subject_id = $1 AND b.revoked_at IS NULL)
+			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id WHERE s.subject_type = 'user' AND s.subject_id = $1 AND b.revoked_at IS NULL)
+			  AND NOT EXISTS (SELECT 1 FROM group_members WHERE member_type = 'user' AND member_id = $1)
 			RETURNING 1
 		)
 		SELECT
-		  (SELECT count(*) FROM del)::int                                                                    AS deleted,
-		  EXISTS(SELECT 1 FROM users WHERE id = $1)                                                          AS user_exists,
-		  (EXISTS(SELECT 1 FROM access_bindings         WHERE subject_type='user' AND subject_id = $1)
-		   OR EXISTS(SELECT 1 FROM access_binding_subjects WHERE subject_type='user' AND subject_id = $1))   AS has_bindings,
-		  EXISTS(SELECT 1 FROM group_members WHERE member_type='user' AND member_id = $1)                    AS has_group_mems
+		  (SELECT count(*) FROM del)::int                                                    AS deleted,
+		  EXISTS(SELECT 1 FROM users WHERE id = $1)                                          AS user_exists,
+		  EXISTS(SELECT 1 FROM accounts WHERE owner_user_id = $1)                            AS owns_accounts,
+		  (EXISTS(SELECT 1 FROM access_bindings b
+		           WHERE b.subject_type = 'user' AND b.subject_id = $1 AND b.revoked_at IS NULL)
+		   OR EXISTS(SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id
+		              WHERE s.subject_type = 'user' AND s.subject_id = $1 AND b.revoked_at IS NULL)) AS has_bindings,
+		  EXISTS(SELECT 1 FROM group_members WHERE member_type = 'user' AND member_id = $1)  AS has_group_mems
 	`
 	var (
-		deleted                               int
-		userExists, hasBindings, hasGroupMems bool
+		deleted                                             int
+		userExists, ownsAccounts, hasBindings, hasGroupMems bool
 	)
-	err := w.tx.QueryRow(ctx, q, string(id)).Scan(&deleted, &userExists, &hasBindings, &hasGroupMems)
+	err := w.tx.QueryRow(ctx, q, string(id)).Scan(&deleted, &userExists, &ownsAccounts, &hasBindings, &hasGroupMems)
 	if err != nil {
 		return mapErr(err, "User.Delete", string(id))
 	}
@@ -792,6 +826,12 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
 	}
 	switch {
+	case ownsAccounts:
+		// Полоса — «ещё ссылаются» (`ErrReferenceInUse`, вложена в
+		// FailedPrecondition), та же, что у ветви ключа `accounts_owner_fk`
+		// в `fkText`: один отказ — одна полоса, каким бы рубежом он ни пришёл.
+		return iamerr.Wrapf(iamerr.ErrReferenceInUse,
+			"User %s owns accounts and cannot be deleted", id)
 	case hasBindings:
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"User %s has active access bindings and cannot be deleted", id)
@@ -800,6 +840,56 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 			"User %s is a member of one or more groups and cannot be deleted", id)
 	}
 	return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+}
+
+// LockForRemoval — см. порт. Замок строки — ПЕРВЫМ оператором транзакции, перечень
+// членств — после него: вставка членства берёт ключевой замок той же строки
+// (`memberships_user_fk`) и сериализуется со снятием, поэтому перечень полон и
+// под гонкой (kaname#664, Р6, KN664-41).
+func (w *userWriter) LockForRemoval(ctx context.Context, id domain.UserID) ([]domain.AccountID, error) {
+	var one int
+	err := w.tx.QueryRow(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, string(id)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+	}
+	if err != nil {
+		return nil, mapErr(err, "User.Delete", string(id))
+	}
+	rows, err := w.tx.Query(ctx,
+		`SELECT account_id FROM memberships WHERE user_id = $1 ORDER BY account_id`, string(id))
+	if err != nil {
+		return nil, mapErr(err, "User.Delete", string(id))
+	}
+	defer rows.Close()
+	var out []domain.AccountID
+	for rows.Next() {
+		var acc string
+		if err := rows.Scan(&acc); err != nil {
+			return nil, mapErr(err, "User.Delete", string(id))
+		}
+		out = append(out, domain.AccountID(acc))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "User.Delete", string(id))
+	}
+	return out, nil
+}
+
+// Now — см. порт: `clock_timestamp()` открытой транзакции (`momentInTx`), а не
+// `now()` — тот был бы моментом её начала, то есть до ожидания замка строки.
+func (w *userWriter) Now(ctx context.Context) (time.Time, error) {
+	return momentInTx(ctx, w.tx)
+}
+
+// CutOffForRemoval — см. порт. Запись — единственной дверью отсечки
+// (`upsertSubjectCutoff`). Первая запись уходит каскадом снятия строки той же
+// транзакцией, вторая (`minted_token_revocations`) ключом на людей не связана и
+// судит предъявление до уборки по горизонту.
+func (w *userWriter) CutOffForRemoval(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+	if err := u.Validate(); err != nil {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	return upsertSubjectCutoff(ctx, w.tx, u, revokedBy)
 }
 
 // UpdateLabels — single-statement UPDATE tenant-facing меток. Row-lock на
@@ -936,6 +1026,21 @@ func scanUser(row scanner) (domain.User, error) {
 		return domain.User{}, err
 	}
 	return u, nil
+}
+
+// homeAccount — колонка дома человека, прочитанная как есть. NULL означает «дома
+// нет» и только это (kaname#664, Р3: снятие аккаунта пустит колонку его
+// участников ключом `users_account_fk ON DELETE SET NULL`). Здесь он
+// становится пустым идентификатором — тем же отсутствием, которым тип уже
+// выражает человека без аккаунта; второго написания у отсутствия нет. Всякий
+// читатель колонки сканирует её сюда, а не в `string`: скан NULL в `string`
+// отказывает, и человек без дома не мог бы ни предъявить сессию, ни получить
+// личный токен.
+func homeAccount(col *string) domain.AccountID {
+	if col == nil {
+		return ""
+	}
+	return domain.AccountID(*col)
 }
 
 // scanUserInto — ЕДИНСТВЕННОЕ объявление порядка назначений под userCols.

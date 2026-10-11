@@ -226,6 +226,27 @@ func (w *fakeUsrWtr) Delete(context.Context, domain.UserID) error {
 	}
 	return nil
 }
+
+// LockForRemoval — замок строки и перечень членств; фейк держит одно членство —
+// аккаунт, которым построен (пустой — членств нет).
+func (w *fakeUsrWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.AccountID, error) {
+	if w.parent == nil {
+		return nil, nil
+	}
+	w.parent.record("lock-row")
+	if w.parent.accID == "" {
+		return nil, nil
+	}
+	return []domain.AccountID{domain.AccountID(w.parent.accID)}, nil
+}
+
+func (w *fakeUsrWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
+func (w *fakeUsrWtr) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+	if w.parent != nil {
+		w.parent.record("cutoff")
+	}
+	return nil
+}
 func (w *fakeUsrWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }

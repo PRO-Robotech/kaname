@@ -238,6 +238,13 @@ func (w *updUserWtr) InsertActive(context.Context, domain.User) (domain.User, er
 	return domain.User{}, nil
 }
 func (w *updUserWtr) Delete(context.Context, domain.UserID) error { return nil }
+func (*updUserWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.AccountID, error) {
+	return nil, nil
+}
+func (*updUserWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
+func (*updUserWtr) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+	return nil
+}
 func (w *updUserWtr) UpdateLabels(_ context.Context, id domain.UserID, labels domain.Labels) (domain.User, error) {
 	w.parent.mu.Lock()
 	defer w.parent.mu.Unlock()
