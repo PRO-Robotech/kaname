@@ -66,13 +66,19 @@ var catalogImmediateOnlyKeys = []keyRef{
 // restrictDeferrableExempt — ключи, которым форма `RESTRICT … DEFERRABLE`
 // прощена ПОИМЁННО, с причиной и предикатом снятия.
 //
-// # Почему прощены, а не объявлены находкой
+// # Почему прощён, а не объявлен находкой
 //
 // `accounts.owner_user_id → users.id` и `users.account_id → accounts.id` — цикл,
 // и отложенность на нём НЕСУЩАЯ: заведение личного аккаунта вставляет строку
 // пользователя первой, а сам аккаунт — следом, в той же транзакции. Это записано
 // решением в дереве и цитирует оба ключа поимённо (снятая миграция
 // 470001_memberships_expand.sql, комментарий у ключа членства).
+//
+// Записей было две, осталась одна: `users_account_fk` с kaname#664 несёт
+// `ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED` (миграция
+// `20261011061435_own_account_and_identity_are_removed_in_order.sql`, Р3) —
+// формы `RESTRICT` рядом с `DEFERRABLE` у него больше нет, и его запись снята
+// тем же изменением, что сменило форму, как требует самоистечение ниже.
 //
 // Опасность, которую называет запрет, к ним не относится: `ON DELETE RESTRICT`
 // не откладывается никогда, но откладывается ПРОВЕРКА СО СТОРОНЫ ССЫЛАЮЩЕГОСЯ —
@@ -94,7 +100,6 @@ var catalogImmediateOnlyKeys = []keyRef{
 // ключу на ЛЮБОЙ другой таблице (проверено инъекцией «чужая таблица»).
 var restrictDeferrableExempt = []keyRef{
 	{"kaname.accounts", "accounts_owner_fk"},
-	{"kaname.users", "users_account_fk"},
 }
 
 // TestIAMCT113_CatalogKeysCarryTheDeclaredForm — Т1 и Т2.

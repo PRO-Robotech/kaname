@@ -87,6 +87,16 @@ func (u *DeleteAccountUseCase) Execute(ctx context.Context, id domain.AccountID)
 func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID, actor string) (*anypb.Any, error) {
 	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
 		func(ctx context.Context, w Writer) error {
+			// ПЕРВЫЙ ОПЕРАТОР — замок строки аккаунта и перечень его участников
+			// (kaname#664, Р6). Членства уходят каскадом ключа
+			// `memberships_account_fk`, а их указатели в модели прав — нет:
+			// каскад снимает строки, не кортежи. Перечень читается под замком,
+			// поэтому членство, зафиксированное конкурентно, либо ждёт снятия,
+			// либо уже в перечне.
+			members, lerr := w.AccountsW().LockForRemoval(ctx, id)
+			if lerr != nil {
+				return lerr
+			}
 			// Symmetrically revoke the account's owner-tuples BEFORE deleting the
 			// account row — otherwise the FGA `define admin: … or owner` derivation
 			// leaves the ex-owner with standing admin on a deleted account.
@@ -98,6 +108,12 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 			}
 			if derr := w.AccountsW().Delete(ctx, id); derr != nil {
 				return derr
+			}
+			// Колонка дома участников пустеет действием ключа `users_account_fk`
+			// (`ON DELETE SET NULL`, kaname#664, Р3) той же транзакцией; их
+			// указатели членства снимаются намерениями здесь же.
+			if perr := w.EmitFGARelationDelete(ctx, membershipPointersOf(id, members)); perr != nil {
+				return shared.MapRepoErr(perr)
 			}
 			// Симметрия созданию (kacho#2055): создание со-коммитит событие реконсайла,
 			// которым материализуется пообъектный кортеж владельца, — снятие обязано
@@ -124,6 +140,16 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 	}
 	// DeleteOperation.response = Empty (parity с services/vpc/internal/apps/.../delete.go).
 	return anypb.New(&emptypb.Empty{})
+}
+
+// membershipPointersOf — указатели членства всех участников снимаемого аккаунта
+// (`iam_user:<u>#account@account:<A>`), формой снимающих (`shared.MembershipPointer`).
+func membershipPointersOf(id domain.AccountID, members []domain.UserID) []service.RelationTuple {
+	out := make([]service.RelationTuple, 0, len(members))
+	for _, uid := range members {
+		out = append(out, shared.MembershipPointer(uid, id))
+	}
+	return out
 }
 
 // revokeAccountOwnerTuples performs the symmetric FGA-tuple revoke for an account

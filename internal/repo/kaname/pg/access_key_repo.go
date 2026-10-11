@@ -70,10 +70,14 @@ func (r *AccessKeyRepo) UserOf(ctx context.Context, id domain.UserID) (domain.Us
 	if id == "" {
 		return domain.User{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
-	var u domain.User
+	var (
+		u    domain.User
+		home *string
+	)
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, account_id, email, display_name, invite_status, created_at
-		  FROM users WHERE id = $1`, string(id)).Scan(&u.ID, &u.AccountID, &u.Email, &u.DisplayName, &u.InviteStatus, &u.CreatedAt)
+		  FROM users WHERE id = $1`, string(id)).Scan(&u.ID, &home, &u.Email, &u.DisplayName, &u.InviteStatus, &u.CreatedAt)
+	u.AccountID = homeAccount(home)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
 	}

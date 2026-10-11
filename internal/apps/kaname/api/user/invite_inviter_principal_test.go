@@ -286,6 +286,13 @@ func (w *invPrincUserWtr) InsertActive(_ context.Context, u domain.User) (domain
 	return u, nil
 }
 func (w *invPrincUserWtr) Delete(context.Context, domain.UserID) error { return nil }
+func (*invPrincUserWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.AccountID, error) {
+	return nil, nil
+}
+func (*invPrincUserWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
+func (*invPrincUserWtr) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+	return nil
+}
 func (w *invPrincUserWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }

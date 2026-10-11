@@ -338,6 +338,10 @@ func (w delAcctWriter) Delete(_ context.Context, _ domain.AccountID) error {
 	w.repo.acctDelCnt++
 	return nil
 }
+func (delAcctWriter) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (delAcctWriter) LockOwner(context.Context, domain.UserID) error { return nil }
 
 type delABWriter struct {
 	access_binding.WriterIface

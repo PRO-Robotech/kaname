@@ -111,9 +111,27 @@ type WriterIface interface {
 	// DEFERRABLE FK violation проверяется на COMMIT.
 	InsertActive(ctx context.Context, u domain.User) (domain.User, error)
 
-	// Delete — UserService.Delete. RESTRICT если у user'а есть Account'ы /
-	// GroupMember'ы / AccessBinding'и.
+	// Delete — UserService.Delete. Отказ, если человек владеет аккаунтами,
+	// несёт ДЕЙСТВУЮЩИЕ выдачи или состоит в группах (kaname#664, Р10).
 	Delete(ctx context.Context, id domain.UserID) error
+
+	// LockForRemoval — ПЕРВЫЙ оператор транзакции снятия личности (kaname#664,
+	// Р6): замок строки человека на изменение и перечень аккаунтов его
+	// членств, прочитанный ПОСЛЕ замка. Новое членство ссылается на строку
+	// человека внешним ключом и потому ждёт фиксации снятия либо зафиксировано
+	// раньше и попадает в перечень — членства, о котором намерения снятия
+	// указателей не знают, после снятия не остаётся. Строки нет → ErrNotFound.
+	LockForRemoval(ctx context.Context, id domain.UserID) ([]domain.AccountID, error)
+
+	// Now — момент записи отсечки: часы базы, прочитанные ЭТОЙ транзакцией
+	// после замка строки (источник моментов `revocationpolicy.Clock`). Тот же
+	// источник, что у сбросов ключей и второго фактора.
+	Now(ctx context.Context) (time.Time, error)
+
+	// CutOffForRemoval — отсечка субъекта снимаемой личности (kaname#664, Р5)
+	// единственной дверью записи отсечки: обе записи, один замок. Всё выданное
+	// личности не позже `u.RevokeBefore` на предъявлении отвергается.
+	CutOffForRemoval(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
 
 	// UpdateLabels — атомарный UPDATE tenant-facing меток (единственное mutable
 	// поле User через публичный UpdateUser RPC). Single-statement

@@ -278,21 +278,26 @@ func (w *saWriter) SetEnabled(ctx context.Context, id domain.ServiceAccountID, e
 // hard-rule #10). The concurrent delete-vs-add-subject window is closed at the DB
 // level by the BEFORE DELETE trigger (migration 0050); this software guard is the
 // fast common-case reject + canonical error text.
+//
+// Считаются только ДЕЙСТВУЮЩИЕ выдачи (`revoked_at IS NULL`) — то же условие, что
+// у человека, группы и функции триггера (kaname#664, Р10).
 func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error {
 	const q = `
 		WITH del AS (
 			DELETE FROM service_accounts s
 			WHERE s.id = $1
-			  AND NOT EXISTS (SELECT 1 FROM access_bindings         WHERE subject_type = 'service_account' AND subject_id = $1)
-			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects WHERE subject_type = 'service_account' AND subject_id = $1)
-			  AND NOT EXISTS (SELECT 1 FROM group_members           WHERE member_type  = 'service_account' AND member_id  = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_bindings b WHERE b.subject_type = 'service_account' AND b.subject_id = $1 AND b.revoked_at IS NULL)
+			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id WHERE s.subject_type = 'service_account' AND s.subject_id = $1 AND b.revoked_at IS NULL)
+			  AND NOT EXISTS (SELECT 1 FROM group_members WHERE member_type = 'service_account' AND member_id = $1)
 			RETURNING 1
 		)
 		SELECT
-		  (SELECT count(*) FROM del)::int                                                                                     AS deleted,
-		  EXISTS(SELECT 1 FROM service_accounts WHERE id = $1)                                                                AS sa_exists,
-		  (EXISTS(SELECT 1 FROM access_bindings         WHERE subject_type='service_account' AND subject_id = $1)
-		   OR EXISTS(SELECT 1 FROM access_binding_subjects WHERE subject_type='service_account' AND subject_id = $1))         AS has_bindings,
+		  (SELECT count(*) FROM del)::int                                                              AS deleted,
+		  EXISTS(SELECT 1 FROM service_accounts WHERE id = $1)                                         AS sa_exists,
+		  (EXISTS(SELECT 1 FROM access_bindings b
+		           WHERE b.subject_type = 'service_account' AND b.subject_id = $1 AND b.revoked_at IS NULL)
+		   OR EXISTS(SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id
+		              WHERE s.subject_type = 'service_account' AND s.subject_id = $1 AND b.revoked_at IS NULL)) AS has_bindings,
 		  EXISTS(SELECT 1 FROM group_members WHERE member_type='service_account' AND member_id = $1)                          AS has_group_mems
 	`
 	var (
