@@ -140,9 +140,28 @@ event_body: "acceptance-reviewer · APPROVED · sha256 b52c2960ce878b1d4ed755360
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#458
-  status: not_performed
-  published: false
-  reason: Событие публикует курьер; блок дописывается фактом публикации тем же заходом.
+  status: performed
+  published: true
+  database_id: 6110377442
+  node_id: IC_kwDOUO26pM8AAAABbDT14g
+  url: https://github.com/PRO-Robotech/kaname/issues/458#issuecomment-6110377442
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6110377442
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/458
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-11T15:04:26Z'
+  body_sha256: d1a5c0210d07aeb162b9d2851e0ed1f652123a14f549fbb44e632bb07590b9c1
+  subject_sha256: b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5
+  subject_revision: 3c97eb99d8044515db709e04c4180a408a334240
+  verdict: APPROVED
+  publication_note: >-
+    Блок дописан отдельным коммитом поверх записи рецензента; вердикт, разбор и находки задним
+    числом не правлены. Тело события — дословно event_body. Отпечаток предмета перемерен перед
+    публикацией (`sha256sum` файла и `git show HEAD:<док> | sha256sum` на 3c97eb99d) и совпал
+    с именем записи; содержимое документа на 3c97eb99d совпадает с content_commit dece897ac.
+    Поля события — `gh api repos/PRO-Robotech/kaname/issues/comments/6110377442`
+    (created_at == updated_at); отпечаток тела — `gh api … | jq -j .body | sha256sum`.
 
 attribution:
   reviewer_kind: claude_agent
