@@ -1,0 +1,370 @@
+{
+ "_doc": "Карта «пути → задание» — единственный источник выбора затронутого (kaname#707; тот же механизм в kacho — kacho#3148). Читают: .github/scripts/affected.py (детектор процессов, сводный вердикт prverdict, локальный прогон). Задание — «<процесс>:<id>». Путь, не выбранный ни одной группой, и путь из full_on выбирают ВСЁ. Файл процесса выбирает все задания своего процесса. Проводку сверяет `affected.py --check-wiring .github/workflows` в обе стороны.",
+ "full_bases": [
+  "main"
+ ],
+ "full_on": [
+  ".github/ci-paths.json",
+  ".github/scripts/affected.py",
+  ".github/actions/**"
+ ],
+ "always": [
+  "ci.yml:changes",
+  "ci.yml:prverdict",
+  "ci.yml:trunkverdict",
+  "e2e-newman.yml:changes",
+  "e2e-newman.yml:prverdict",
+  "e2e-newman.yml:trunkverdict",
+  "docker-build.yml:changes",
+  "docker-build.yml:trunkverdict",
+  "pr-rule.yml:pr-rule"
+ ],
+ "detectors": {
+  "ci.yml": "changes",
+  "e2e-newman.yml": "changes",
+  "docker-build.yml": "changes"
+ },
+ "groups": [
+  {
+   "id": "go-build",
+   "why": "сборка, vet, gofmt, линтер, gosec; хуки отправки и записи ревью — в задании сборки",
+   "jobs": [
+    "ci.yml:build",
+    "ci.yml:lint",
+    "ci.yml:gosec"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    ".github/golangci.yml",
+    "scripts/hooks/**",
+    ".github/scripts/review-event-silence.py",
+    "docs/specs/reviews/**"
+   ],
+   "local": [
+    {
+     "kind": "go-build"
+    },
+    {
+     "kind": "go-lint"
+    },
+    {
+     "kind": "cmd",
+     "title": "записи ревью не молчат об опубликованном событии",
+     "argv": [
+      "python3",
+      ".github/scripts/review-event-silence.py"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "go-unit",
+   "why": "пробы -race -short: пакеты и пробы, обходящие дерево (deploy/, tests/newman, миграции) — любой путь",
+   "jobs": [
+    "ci.yml:unit"
+   ],
+   "paths": [
+    "**"
+   ],
+   "local": [
+    {
+     "kind": "go-test"
+    }
+   ]
+  },
+  {
+   "id": "tree-gates-newman",
+   "why": "Go-пробы, читающие tests/newman",
+   "jobs": [
+    "ci.yml:unit"
+   ],
+   "paths": [
+    "tests/**"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "Go-пробы над сюитами",
+     "argv": [
+      "go",
+      "test",
+      "-count=1",
+      "-short",
+      "./tools/...",
+      "./internal/check/",
+      "./internal/restfront/"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "newman-suite",
+   "why": "набор: оснастка, пробы, покрытие, долг, провенанс вендоринга; самопроверки против подставного края",
+   "jobs": [
+    "e2e-newman.yml:suite",
+    "e2e-newman.yml:edgeselftests"
+   ],
+   "paths": [
+    "tests/newman/**",
+    "tests/authz-fixtures/**",
+    "proto/kaname/cloud/iam/v1/*.proto",
+    ".github/scripts/*newman*",
+    ".github/scripts/run-python-probes.py"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "вендоренный слой сходится с записью (провенанс)",
+     "argv": [
+      "python3",
+      "tests/newman/scripts/vendor_provenance_test.py"
+     ]
+    },
+    {
+     "kind": "cmd",
+     "title": "каталог кейсов сходится с деревом",
+     "argv": [
+      "python3",
+      "tests/newman/scripts/validate-cases.py"
+     ]
+    },
+    {
+     "kind": "cmd",
+     "title": "пробы набора",
+     "argv": [
+      "python3",
+      ".github/scripts/run-python-probes.py"
+     ]
+    },
+    {
+     "kind": "cmd",
+     "title": "долг сквозного набора",
+     "argv": [
+      "python3",
+      ".github/scripts/newman-suite-debt.py"
+     ]
+    },
+    {
+     "kind": "stand",
+     "title": "коллекции на автономном стенде и стенде посадки own — нужен стенд"
+    }
+   ]
+  },
+  {
+   "id": "stand",
+   "why": "бинарь службы, посев, стенд: автономный стенд, волна церемонии, посадка own, образ",
+   "jobs": [
+    "e2e-newman.yml:stand",
+    "e2e-newman.yml:stand-ceremony",
+    "e2e-newman.yml:chart-own"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    "proto/**",
+    "schema/**",
+    "**/*.sql",
+    "deploy/**",
+    "tests/**",
+    "Dockerfile",
+    ".github/scripts/stand-*",
+    "Makefile",
+    "*.mk"
+   ],
+   "local": [
+    {
+     "kind": "stand",
+     "title": "автономный стенд, волна церемонии, chart-own — нужен стенд"
+    }
+   ]
+  },
+  {
+   "id": "integration",
+   "why": "интеграция на Postgres в контейнерах: репозитории, миграции, схема",
+   "jobs": [
+    "ci.yml:integration"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    "schema/**",
+    "**/*.sql",
+    "**/migrations/**",
+    ".github/scripts/run-integration.sh",
+    ".github/scripts/classify-integration-outcome.sh"
+   ],
+   "local": [
+    {
+     "kind": "stand",
+     "title": "интеграция testcontainers (тяжёлый слот) — судит конвейер"
+    }
+   ]
+  },
+  {
+   "id": "proto",
+   "why": "контракты: buf lint, стабы в синхроне",
+   "jobs": [
+    "ci.yml:proto"
+   ],
+   "paths": [
+    "proto/**",
+    "pkg/api/**",
+    "tools/declaredbreak/**",
+    "**/buf*.yaml",
+    "Makefile"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "buf lint",
+     "argv": [
+      "make",
+      "proto-lint"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "standalone",
+   "why": "цели рецепта в самостоятельном клоне",
+   "jobs": [
+    "ci.yml:standalone"
+   ],
+   "paths": [
+    "Makefile",
+    "*.mk",
+    "tools/standalonetargets/**",
+    "**/go.mod",
+    "**/go.sum"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "цели рецепта в самостоятельном клоне",
+     "argv": [
+      "make",
+      "test-standalone"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "listfilter",
+   "why": "listauthz: списочные RPC сужены по объекту",
+   "jobs": [
+    "ci.yml:listfilter"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    "tools/audit-list-filter.sh"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "listauthz",
+     "argv": [
+      "make",
+      "audit-list-filter"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "authzartifacts",
+   "why": "манифесты модулей и канон модели доступов",
+   "jobs": [
+    "ci.yml:authzartifacts"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    "**/manifest.yaml",
+    "MODEL-MANIFEST.md",
+    "schema/**",
+    "deploy/**",
+    "Makefile"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "манифесты модулей и канон модели",
+     "argv": [
+      "make",
+      "module-manifest-check",
+      "model-canon-check"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "catalogparity",
+   "why": "каталог прав — копия сходится с копией края (нужно дерево платформы)",
+   "jobs": [
+    "ci.yml:catalogparity"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    "**/permission_catalog.json",
+    "Makefile"
+   ],
+   "local": [
+    {
+     "kind": "stand",
+     "title": "паритет каталога с краем (нужен клон платформы) — судит конвейер"
+    }
+   ]
+  },
+  {
+   "id": "govulncheck",
+   "why": "уязвимости зависимостей",
+   "jobs": [
+    "ci.yml:govulncheck"
+   ],
+   "paths": [
+    "**/go.mod",
+    "**/go.sum"
+   ],
+   "local": [
+    {
+     "kind": "cmd",
+     "title": "govulncheck",
+     "argv": [
+      "govulncheck",
+      "./..."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "image",
+   "why": "образ службы: Dockerfile и всё, что компилирует бинарь",
+   "jobs": [
+    "docker-build.yml:image"
+   ],
+   "paths": [
+    "**/*.go",
+    "**/go.mod",
+    "**/go.sum",
+    "proto/**",
+    "schema/**",
+    "Dockerfile",
+    ".github/scripts/image-published-revision.sh"
+   ],
+   "local": [
+    {
+     "kind": "stand",
+     "title": "сборка образа (docker) — судит конвейер"
+    }
+   ]
+  }
+ ]
+}

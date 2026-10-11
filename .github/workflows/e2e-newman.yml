@@ -62,6 +62,7 @@ on:
     branches:
       - main
       - '[0-9]+'
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -76,6 +77,34 @@ defaults:
     shell: bash
 
 jobs:
+  # Выбор затронутого (kaname#707): на черновике запроса в ветку эпика задания ниже
+  # исполняются, только если их выбрала карта `.github/ci-paths.json`; на ready, на
+  # запросе в main, на push и ручном запуске — полный прогон. Пропуск даёт `skipped`,
+  # а сводный вердикт `prverdict` на черновике красный по построению.
+  changes:
+    name: выбор затронутого (e2e-newman)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.pick.outputs.full }}
+      jobs: ${{ steps.pick.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: выбор затронутого по карте путей
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/affected.py --github-output e2e-newman.yml
+
   # ── НАБОР БЕЗ СТЕНДА: его собственная оснастка и её вердикт ─────────────────
   #
   # Это задание не поднимает ничего и потому дёшево. Оно судит то, что можно
@@ -83,6 +112,8 @@ jobs:
   # каталог кейсов, исполняются ли пробы самого набора, измеряется ли покрытие
   # RPC и не правили ли вендоренный слой молча.
   suite:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'suite') }}
+    needs: [changes]
     name: набор — оснастка, пробы, покрытие, долг
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -166,6 +197,13 @@ jobs:
       # включая законных близнецов и третий исход.
       - name: прогонщик проб способен упасть (самопроба инъекцией)
         run: python3 .github/scripts/run-python-probes.py --self-test
+
+      # Выбор затронутого (kaname#707): пробы карты, детектора и сводного вердикта
+      # запроса, и сверка проводки процессов с картой в обе стороны.
+      - name: выбор затронутого — пробы и проводка
+        run: |
+          python3 .github/scripts/affected_test.py
+          python3 .github/scripts/affected.py --check-wiring .github/workflows
 
       # ── ВЕНДОРЕННЫЙ СЛОЙ, ПОЛОВИНА ПЕРВАЯ: КОПИЯ СХОДИТСЯ С ЗАПИСЬЮ ─────────
       #
@@ -407,6 +445,8 @@ jobs:
   # поставщика удостоверений нет вовсе. Предмет задания — свойства, чей
   # производитель САМА служба.
   stand:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'stand') }}
+    needs: [changes]
     name: автономный стенд — служба без платформы
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -820,6 +860,8 @@ jobs:
   # автономном стенде 2026-09-30: машинный посев 64 с, посев церемонии 14 с, прогон
   # четырнадцати коллекций — 8 мин 50 с.
   stand-ceremony:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'stand-ceremony') }}
+    needs: [changes]
     name: автономный стенд — волна церемонии и распорядители аккаунта (второй шард)
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -1045,6 +1087,8 @@ jobs:
   # читается ОТДЕЛЬНО. Одна строка с тремя вызовами через `&&` схлопнула бы три
   # вердикта в один и остановилась бы на первой находке.
   edgeselftests:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'edgeselftests') }}
+    needs: [changes]
     name: самопроверки против подставного края (стенда не нужно)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1138,6 +1182,8 @@ jobs:
   # конфиденциальные клиенты церемонии заводятся глаголом `Create` (kaname#405).
   # Им гоняется набор `kaname-authorization-code` (LINE-A-1, kaname#423).
   chart-own:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'chart-own') }}
+    needs: [changes]
     name: стенд посадки own (kind) — полоса входа паролем и своя церемония
     runs-on: ubuntu-latest
     timeout-minutes: 80
@@ -1453,6 +1499,8 @@ jobs:
       - stand-ceremony
       - edgeselftests
       - chart-own
+      - changes
+      - prverdict
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
@@ -1482,9 +1530,35 @@ jobs:
             "${{ needs.stand.result }}" \
             "${{ needs.stand-ceremony.result }}" \
             "${{ needs.edgeselftests.result }}" \
+            "${{ needs.changes.result }}" \
+            "${{ needs.prverdict.result }}" \
             "${{ needs.chart-own.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
             1) echo "::error title=СТВОЛ КРАСЕН::держатель заведён либо дополнен в трекере. Пока он открыт, ствол считается красным; закрывать — с артефактом починки"; exit 1 ;;
             *) echo "::error title=НЕ ИСПОЛНЯЛАСЬ::событие НЕ произведено — либо исходы не разобраны, либо производитель отказал. Читателя у красного НЕ появилось"; exit 1 ;;
           esac
+
+  # Сводный вердикт запроса (kaname#707). На черновике — КРАСНЫЙ по построению:
+  # исполнены только задания, выбранные картой `.github/ci-paths.json`, а пропуск
+  # защита ветки засчитала бы за успех. На полном прогоне (ready, запрос в main,
+  # ручной запуск) — зелёный, только если каждое задание процесса завершилось успехом.
+  # Вливание держит этот контекст, когда он внесён в защиту ветки.
+  prverdict:
+    name: сводный вердикт запроса (e2e-newman)
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    needs: [changes, chart-own, edgeselftests, stand, stand-ceremony, suite]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: целевой или полный — и исход
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/affected.py --pr-aggregate e2e-newman.yml

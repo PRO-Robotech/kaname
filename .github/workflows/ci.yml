@@ -76,6 +76,7 @@ on:
     branches:
       - main
       - '[0-9]+'
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -98,8 +99,38 @@ defaults:
     shell: bash
 
 jobs:
+  # Выбор затронутого (kaname#707): на черновике запроса в ветку эпика задания ниже
+  # исполняются, только если их выбрала карта `.github/ci-paths.json`; на ready, на
+  # запросе в main, на push и ручном запуске — полный прогон. Пропуск даёт `skipped`,
+  # а сводный вердикт `prverdict` на черновике красный по построению.
+  changes:
+    name: выбор затронутого (ci)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.pick.outputs.full }}
+      jobs: ${{ steps.pick.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: выбор затронутого по карте путей
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/affected.py --github-output ci.yml
+
   # ── СБОРКА · VET · ФОРМАТ ────────────────────────────────────────────────────
   build:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'build') }}
+    needs: [changes]
     name: сборка · vet · gofmt
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -234,6 +265,8 @@ jobs:
 
   # ── ЮНИТЫ ───────────────────────────────────────────────────────────────────
   unit:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit') }}
+    needs: [changes]
     name: пробы -race -short (числовой вердикт)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -270,6 +303,8 @@ jobs:
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'lint') }}
+    needs: [changes]
     name: golangci-lint (пин v2.12.2)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -315,6 +350,8 @@ jobs:
   # прогон — красным по построению, а не по предмету. Каталог влит, и адъюдикация
   # заведена ниже (kaname#35).
   proto:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'proto') }}
+    needs: [changes]
     name: контракты — buf lint · стабы в синхроне
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -434,6 +471,8 @@ jobs:
   # ручки полосы считает отсутствие helm третьим исходом и выходит нулём —
   # то есть предпосылку он назначает сам, и подменять её установкой не надо.
   standalone:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'standalone') }}
+    needs: [changes]
     name: цели рецепта работают в самостоятельном клоне
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -461,6 +500,8 @@ jobs:
 
   # ── СТАТИЧЕСКИЙ АНАЛИЗ БЕЗОПАСНОСТИ ──────────────────────────────────────────
   gosec:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'gosec') }}
+    needs: [changes]
     name: gosec (пин v2.28.0)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -553,6 +594,8 @@ jobs:
 
   # ── КОНТЕЙНЕРНЫЕ ПРОБЫ ──────────────────────────────────────────────────────
   integration:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'integration') }}
+    needs: [changes]
     name: интеграция (Postgres в контейнерах)
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -628,6 +671,8 @@ jobs:
   # операнд — каталог контрактов — живёт теперь в этом дереве, поэтому цель
   # исполнима и у арендатора, и это замерено прогоном в клоне из состава коммита.
   listfilter:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'listfilter') }}
+    needs: [changes]
     name: listauthz — списочные методы сужены по объекту
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -655,6 +700,8 @@ jobs:
   # объявляет цель», и «кто её зовёт», сверяют в обе стороны и читают РАЗОБРАННЫЙ
   # YAML — иначе зеленели бы на этом самом комментарии, который цели называет.
   authzartifacts:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'authzartifacts') }}
+    needs: [changes]
     name: манифесты модулей · канон модели доступов
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -753,6 +800,8 @@ jobs:
 
   # ── ИЗВЕСТНЫЕ УЯЗВИМОСТИ ────────────────────────────────────────────────────
   govulncheck:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'govulncheck') }}
+    needs: [changes]
     name: govulncheck
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -785,6 +834,8 @@ jobs:
   # `internal/check/catalog_check_wiring_test.go`: он краснеет и на снятом вызове
   # формы-проверки, и на появившемся вызове пишущей формы.
   catalogparity:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'catalogparity') }}
+    needs: [changes]
     name: каталог прав — копия сходится с копией края
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -927,6 +978,8 @@ jobs:
       - authzartifacts
       - govulncheck
       - catalogparity
+      - changes
+      - prverdict
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
@@ -964,9 +1017,35 @@ jobs:
             "${{ needs.listfilter.result }}" \
             "${{ needs.authzartifacts.result }}" \
             "${{ needs.govulncheck.result }}" \
+            "${{ needs.changes.result }}" \
+            "${{ needs.prverdict.result }}" \
             "${{ needs.catalogparity.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
             1) echo "::error title=СТВОЛ КРАСЕН::держатель заведён либо дополнен в трекере. Пока он открыт, ствол считается красным; закрывать — с артефактом починки"; exit 1 ;;
             *) echo "::error title=НЕ ИСПОЛНЯЛАСЬ::событие НЕ произведено — либо исходы не разобраны, либо производитель отказал. Читателя у красного НЕ появилось"; exit 1 ;;
           esac
+
+  # Сводный вердикт запроса (kaname#707). На черновике — КРАСНЫЙ по построению:
+  # исполнены только задания, выбранные картой `.github/ci-paths.json`, а пропуск
+  # защита ветки засчитала бы за успех. На полном прогоне (ready, запрос в main,
+  # ручной запуск) — зелёный, только если каждое задание процесса завершилось успехом.
+  # Вливание держит этот контекст, когда он внесён в защиту ветки.
+  prverdict:
+    name: сводный вердикт запроса (ci)
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, lint, listfilter, proto, standalone, unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: целевой или полный — и исход
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/affected.py --pr-aggregate ci.yml
