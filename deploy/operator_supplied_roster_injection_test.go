@@ -43,7 +43,7 @@ func TestOperatorSuppliedRosterInjection_CompleteRosterIsSilent(t *testing.T) {
 
 func TestOperatorSuppliedRosterInjection_UnguardedCoordinateIsAFinding(t *testing.T) {
 	// ИНЪЕКЦИЯ, ОДИН ФАКТ: координата класса выпала из перечня. Это и есть
-	// состояние до фикса #2488.
+	// состояние до фикса kacho#2488.
 	c, g, n, e := rosterSets(
 		[]string{"image", "tls.secretName"},
 		[]string{"image"},

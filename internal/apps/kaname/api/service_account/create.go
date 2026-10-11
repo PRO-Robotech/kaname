@@ -94,7 +94,7 @@ func (u *CreateServiceAccountUseCase) Execute(ctx context.Context, sa domain.Ser
 	}
 	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
 	// вход создания и означает «назови сам», а умолчание производится ОТ
-	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279).
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (kacho#1279).
 	saID := ids.NewID(domain.PrefixServiceAccount)
 	sa.Name = domain.SvcAccountName(corevalidate.NameOrDefault(string(sa.Name), saID))
 

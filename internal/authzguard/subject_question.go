@@ -4,7 +4,7 @@
 package authzguard
 
 // subject_question.go — THE question about the caller, asked once per list
-// request, with its failure kept (task #645, acceptance §3.6).
+// request, with its failure kept (task kacho#645, acceptance §3.6).
 //
 // # Why the existing form does not serve a list
 //

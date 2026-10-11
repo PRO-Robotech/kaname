@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // scope_default_retired_tier_arm_integration_test.go — умолчание области не
-// знает яруса, снятого из словаря (задача продукта #2060).
+// знает яруса, снятого из словаря (задача продукта kacho#2060).
 //
 // # Предмет
 //

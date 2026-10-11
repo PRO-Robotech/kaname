@@ -584,11 +584,11 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 // ЗДЕСЬ СТОЯЛО «без `iam_user`-hierarchy-tuple per-resource UserService.Get/
 // Update/Delete никогда не авторизуется» — И ЭТО НЕВЕРНО СО ДНЯ СНЯТИЯ ВНЕШНЕГО
 // ДВИЖКА. Предка личности называет не этот кортеж, а цепь областей
-// (`kaname.resource_scope_edge`), и берёт она его из таблицы членств (#944;
+// (`kaname.resource_scope_edge`), и берёт она его из таблицы членств (kacho#944;
 // прежде — из колонки строки). Читателя у самого кортежа на пути решения нет:
 // атом плана ищет `admin`/`owner` НА ОБЪЕКТЕ-ПРЕДКЕ, а не отношение `account` на
 // личности. Кортеж пишется тремя местами и не читается ни одним — предмет
-// заведён отдельно (#946), здесь он назван, а не снят: уборка и отрыв — разные
+// заведён отдельно (kacho#946), здесь он назван, а не снят: уборка и отрыв — разные
 // изменения.
 //
 // rbac-contract-a-flat-fallout: the `admin@account` self-grant tuple is DROPPED —
@@ -603,7 +603,7 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 //     ЧИТАЮЩИЙ ГЛАГОЛ НАЗВАН ТОЧНО, и это не педантизм: здесь стояло `viewer`,
 //     а гейт чтения — `v_get`, и `subject` в нём отсутствовал. Кортеж писался,
 //     проверкой не читался, самочтение не работало ни у кого. Восстановлено
-//     в модели (#715-follow-up); комментарий обязан называть то отношение, от
+//     в модели (kacho#715-follow-up); комментарий обязан называть то отношение, от
 //     которого зависит исход, иначе следующий читатель снова сверит не с тем.
 //   - account:<acc>#account @ iam_access_binding:<ownerBindingID> — the owner-
 //     binding OBJECT hierarchy parent-pointer (parity with account/create.go

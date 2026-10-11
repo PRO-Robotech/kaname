@@ -15,7 +15,7 @@
 //     the cluster anchor». It used to be asked of the fga_outbox JOURNAL on the
 //     retired `iam_fgaproxy:system` anchor, counting writes and ignoring their
 //     deletes; the doc comment on requireFGAWriterTuple says what that measured
-//     and why it stopped (#2452);
+//     and why it stopped (kacho#2452);
 //   - immutable system role; idempotent ON CONFLICT re-apply.
 //
 // The permission strings the backing roles once carried are deliberately NOT
@@ -135,7 +135,7 @@ func TestSeedModuleSA_B01_ModuleIdentitiesCreated(t *testing.T) {
 // остаётся: это положительная половина пары, без неё «ноль» выше был бы получен
 // из пустой базы. Спрашивается оно у ПРЯМОГО ФАКТА цепью «член группы писателей
 // отношений» + «группа несёт отношение на кластере», а не у строки журнала на
-// снятом якоре (#2452, см. requireFGAWriterTuple).
+// снятом якоре (kacho#2452, см. requireFGAWriterTuple).
 func TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -297,7 +297,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	//
 	// Прежняя редакция считала строки БЕЗ различения формы, и это было точным
 	// выражением предмета ровно до тех пор, пока форма у выдачи была ОДНА.
-	// Работа #893/#895 завела вторую (`granted_relation` ВЗАМЕН `role_id`,
+	// Работа kacho#893/#895 завела вторую (`granted_relation` ВЗАМЕН `role_id`,
 	// взаимоисключающе по access_bindings_grant_form_ck) и перенесла на
 	// поверхность выдач встроенный доступ, который раньше лежал прямым фактом
 	// посева. Встроенный `system_viewer@cluster` учёток шлюза, vpc и compute
@@ -344,7 +344,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 			require.Equalf(t, 1, relCnt,
 				"встроенный system_viewer@cluster учётки kacho-%s (миграция 0014) обязан быть ВИДЕН "+
 					"на поверхности выдач в форме отношения: иначе доступ есть, а перечисление "+
-					"выдач о нём молчит — предмет #893/#895", svc)
+					"выдач о нём молчит — предмет kacho#893/#895", svc)
 			continue
 		}
 		require.Zerof(t, relCnt,
@@ -404,7 +404,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 // requireFGAWriterTuple — есть ли у служебной записи ДЕЙСТВУЮЩЕЕ право писать
 // кортежи отношений.
 //
-// # Здесь считались строки ЖУРНАЛА, и это измеряло не то (#2452)
+// # Здесь считались строки ЖУРНАЛА, и это измеряло не то (kacho#2452)
 //
 // Прежняя редакция считала в `kaname.fga_outbox` строки события записи с
 // отношением `fga_writer` на объекте `iam_fgaproxy:system` — и считала ТОЛЬКО

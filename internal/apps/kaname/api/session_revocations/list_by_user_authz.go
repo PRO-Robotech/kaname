@@ -13,7 +13,7 @@ package session_revocations
 // owners need.
 //
 // The relation is `session_reader` — the person themselves plus cloud oversight,
-// and nobody else (#1140). It is the SAME relation the catalog record for this
+// and nobody else (kacho#1140). It is the SAME relation the catalog record for this
 // RPC declares; the record and the code must not be able to drift into
 // describing different lanes.
 //
@@ -26,7 +26,7 @@ package session_revocations
 // with the identity→account link taken from membership, so a right held inside
 // ONE account disclosed the person's whole history, sessions in unrelated
 // accounts included. Fourth side of the owner's directive of 2026-08-23 that
-// #1086, #1102 and #1133 closed on their own subjects.
+// kacho#1086, kacho#1102 and kacho#1133 closed on their own subjects.
 //
 // Narrowing the READ takes nothing away from TERMINATION, and that is measured
 // rather than assumed: `Revoke` and `ForceLogout` sit in the catalog as

@@ -6,7 +6,7 @@ package pg_test
 // role_ownership_tier_integration_test.go — ЯРУС ВЛАДЕНИЯ роли отделён от
 // кластерного якоря; инвариант держит СТРОКА, а не разбор.
 //
-// Задача продукта #1032 (P0). Приёмка — APPROVED круга 2,
+// Задача продукта kacho#1032 (P0). Приёмка — APPROVED круга 2,
 // `services/iam/docs/engineering/acceptance/role-ownership-tier-apart-from-cluster-anchor.md`,
 // сценарии IAM-OM-1-06 … -12. Миграция —
 // `20260902190500_role_ownership_tier_apart_from_cluster_anchor.sql`.
@@ -30,17 +30,17 @@ package pg_test
 //	имя без точки-разделителя                    → 23514 того же ограничения
 //	владелец вне каталога                        → 23503 roles_owner_module_fk
 //	владелец в каталоге                          → проходит          (иначе -10 зеленел бы на ключе, отвергающем ВСЯКОГО владельца)
-//	владелец СНЯТ из каталога                    → 23503 roles_owner_module_live_fk   ← ПЕРЕВЁРНУТО (#2026)
-//	снятие модуля при ЖИВОЙ роли                 → 23503 roles_owner_module_live_fk   ← ПЕРЕВЁРНУТО (#2026)
+//	владелец СНЯТ из каталога                    → 23503 roles_owner_module_live_fk   ← ПЕРЕВЁРНУТО (kacho#2026)
+//	снятие модуля при ЖИВОЙ роли                 → 23503 roles_owner_module_live_fk   ← ПЕРЕВЁРНУТО (kacho#2026)
 //	снятие модуля, все роли которого СНЯТЫ       → проходит          — без этой половины два отрицания выше
 //	                                                                  неотличимы от «модуль снять нельзя никогда»
 //
 // # Две последние строки ПЕРЕВЁРНУТЫ, и переворот был ЗАКАЗАН, а не случился
 //
-// До #2026 обе читались «проходит», и это было верно: ключ шёл на первичный ключ
+// До kacho#2026 обе читались «проходит», и это было верно: ключ шёл на первичный ключ
 // каталога и о живости не спрашивал. Шапки обоих сценариев называли условие
 // своего переворота дословно — «его обязано ПЕРЕВЕРНУТЬ то изменение, которое
-// даст роли собственную живость (#1913)». Условие наступило: пометка снятия роли
+// даст роли собственную живость (kacho#1913)». Условие наступило: пометка снятия роли
 // в дереве есть, производитель провязан, и `roles_owner_module_live_fk` делает
 // оба состояния непредставимыми.
 //
@@ -78,7 +78,7 @@ func insertSystemRole(ctx context.Context, q interface {
 		INSERT INTO kaname.roles (id, cluster_id, name, description, permissions, rules, owner_module)
 		VALUES ($1, $2, $3, $4, '[]'::jsonb, $5::jsonb, $6)`,
 		ids.NewID(domain.PrefixRole), domain.ClusterSingletonID, name,
-		"ярус владения роли, проба #1032", rules, owner)
+		"ярус владения роли, проба kacho#1032", rules, owner)
 	return err
 }
 
@@ -320,11 +320,11 @@ func retireModuleReturningErr(t *testing.T, ctx context.Context, pool *pgxpool.P
 }
 
 // TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey — IAM-OM-1-11,
-// ПЕРЕВЁРНУТ задачей #2026.
+// ПЕРЕВЁРНУТ задачей kacho#2026.
 //
 // Прежняя редакция закрепляла обратное — «роль со снятым владельцем
 // записывается» — и называла условие своего переворота дословно: «его обязано
-// ПЕРЕВЕРНУТЬ то изменение, которое даст роли собственную живость (#1913)».
+// ПЕРЕВЕРНУТЬ то изменение, которое даст роли собственную живость (kacho#1913)».
 // Условие наступило, и сценарий ЗАМЕНЁН утверждением о новом свойстве того же
 // предмета, а не ослаблен.
 func TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey(t *testing.T) {
@@ -338,7 +338,7 @@ func TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey(t *testing.T) {
 	// снять одну строку модуля нельзя by construction. Помощник тот же, каким
 	// пользуется проба соседней приёмки, — своего второго писателя здесь не
 	// заводится.
-	verbs, refs := withdrawModule(t, ctx, pool, withdrawnModule, "проба #2026 -11")
+	verbs, refs := withdrawModule(t, ctx, pool, withdrawnModule, "проба kacho#2026 -11")
 	t.Logf("модуль %q снят: переселено выдач %d, объявлений %d", withdrawnModule, verbs, refs)
 
 	var live bool
@@ -368,7 +368,7 @@ func TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey(t *testing.T) {
 }
 
 // TestRetiringAModuleThatOwnsALiveRoleIsRefused — IAM-OM-1-12, ПЕРЕВЁРНУТ
-// задачей #2026, и вместе с ним переехал его довод.
+// задачей kacho#2026, и вместе с ним переехал его довод.
 //
 // Прежняя редакция требовала, чтобы снятие модуля при живой роли ПРОХОДИЛО, и
 // обосновывала это так: с ключом на пару строка роли отпускала бы референт
@@ -376,7 +376,7 @@ func TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey(t *testing.T) {
 // не снимался бы никогда.
 //
 // Посылка была верна и БОЛЬШЕ НЕ ВЕРНА. Роль отпускает референт не удалением, а
-// ПОМЕТКОЙ снятия (#1913): у снятой строки составляющая ключа обращается в NULL.
+// ПОМЕТКОЙ снятия (kacho#1913): у снятой строки составляющая ключа обращается в NULL.
 // Поэтому положительный контроль ниже — не послабление, а ровно тот вход, на
 // котором прежний довод держался: модуль, все роли которого сняты, снимается.
 func TestRetiringAModuleThatOwnsALiveRoleIsRefused(t *testing.T) {
@@ -392,7 +392,7 @@ func TestRetiringAModuleThatOwnsALiveRoleIsRefused(t *testing.T) {
 
 	// ОТРИЦАНИЕ. Помощник соседней приёмки снимает модуль полным путём и на
 	// последнем шаге упирается в ключ живости роли.
-	err := retireModuleReturningErr(t, ctx, pool, owner, "проба #2026 -12")
+	err := retireModuleReturningErr(t, ctx, pool, owner, "проба kacho#2026 -12")
 	require.Error(t, err,
 		"снятие модуля при ЖИВОЙ роли обязано отвергаться: иначе роль снятого модуля "+
 			"продолжает грантовать")
@@ -407,12 +407,12 @@ func TestRetiringAModuleThatOwnsALiveRoleIsRefused(t *testing.T) {
 	// приёмки отверг форму ключа живости.
 	res, err := pool.Exec(ctx, `
 		UPDATE kaname.roles
-		   SET live = false, retired_at = now(), retired_reason = 'проба #2026 -12'
+		   SET live = false, retired_at = now(), retired_reason = 'проба kacho#2026 -12'
 		 WHERE owner_module = $1 AND live`, owner)
 	require.NoError(t, err, "пометка снятия ролей модуля")
 	require.Positive(t, res.RowsAffected(), "предпосылка контроля: снимать было что")
 
-	verbs, refs := withdrawModule(t, ctx, pool, owner, "проба #2026 -12 контроль")
+	verbs, refs := withdrawModule(t, ctx, pool, owner, "проба kacho#2026 -12 контроль")
 
 	var live bool
 	require.NoError(t, pool.QueryRow(ctx,
@@ -421,7 +421,7 @@ func TestRetiringAModuleThatOwnsALiveRoleIsRefused(t *testing.T) {
 		"модуль %q, все роли которого СНЯТЫ, обязан сниматься: обратное означало бы, что "+
 			"ключ не держит порядок, а запирает каталог навсегда", owner)
 
-	// Строки ролей ПЕРЕЖИЛИ снятие модуля — на этом стоит обратимость (#1913).
+	// Строки ролей ПЕРЕЖИЛИ снятие модуля — на этом стоит обратимость (kacho#1913).
 	var roles, liveRoles int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*), count(*) FILTER (WHERE live)

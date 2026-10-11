@@ -34,7 +34,7 @@ type projectReader struct {
 const projectCols = "id, account_id, name, description, labels, created_at"
 
 // projectUpdateQ — оператор записи проекта. СТАТИЧЕСКИЙ: набор колонок известен
-// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
 // `mutable_triplet_update.go`). `account_id` неизменяем и в перечень не входит —
 // вызывающий отвергает его до записи.
 const projectUpdateQ = `UPDATE projects SET` + mutableTripletSetSQL +
@@ -56,7 +56,7 @@ func (r *projectReader) Get(ctx context.Context, id domain.ProjectID) (domain.Pr
 
 // List — cursor pagination + опц. filter (name="…") + опц. AccountID scope.
 func (r *projectReader) List(ctx context.Context, f project.ListFilter) ([]domain.Project, string, error) {
-	pageSize, err := effectivePageSize(f.PageSize) // #184: reject >max, no silent clamp
+	pageSize, err := effectivePageSize(f.PageSize) // kacho-iam#184: reject >max, no silent clamp
 	if err != nil {
 		return nil, "", err
 	}
@@ -72,7 +72,7 @@ func (r *projectReader) List(ctx context.Context, f project.ListFilter) ([]domai
 	}
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
 		// expression, so the column follows the whitelist instead of being
 		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
@@ -104,7 +104,7 @@ func (r *projectReader) List(ctx context.Context, f project.ListFilter) ([]domai
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякий объект, перед которым
 	// лежит больше `page_size` невидимых предшественников — он до фильтра просто
 	// не доезжает.

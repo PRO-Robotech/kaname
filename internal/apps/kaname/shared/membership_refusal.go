@@ -18,7 +18,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
 
-// Отказ «членство несёт права» на пути наружу (задача продукта #1686).
+// Отказ «членство несёт права» на пути наружу (задача продукта kacho#1686).
 //
 // # Почему эта полоса разбирается отдельно от прочих предусловий
 //
@@ -57,7 +57,7 @@ const (
 //
 // Берётся у ЕДИНСТВЕННОГО объявления продукта, а не пишется здесь литералом:
 // совпадение с соседними полосами прежде держалось комментарием, то есть ничем.
-// Задача продукта #2099, приёмка WIRE-1, сценарий WIRE-3-01.
+// Задача продукта kacho#2099, приёмка WIRE-1, сценарий WIRE-3-01.
 func membershipReasonDomain() string { return refusaldomain.For(refusaldomain.ServiceIAM) }
 
 // MaxNamedBlockingGrants — сколько выдач называется поимённо.
@@ -122,7 +122,7 @@ func NameBlockingGrants(err error, named []string, total int) error {
 
 // blockingSuffix — человекочитаемая половина: что именно мешает и что с этим
 // делать. Следующий шаг называется ПРЯМО: отказ, не восстанавливающий следующий
-// шаг клиента, и есть предмет задачи #1686.
+// шаг клиента, и есть предмет задачи kacho#1686.
 func blockingSuffix(named []string, total int) string {
 	s := ": " + strings.Join(named, ", ")
 	if total > len(named) {

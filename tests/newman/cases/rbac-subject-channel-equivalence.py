@@ -85,7 +85,7 @@ id) → no pre-clean needed.
 
 Discovery deliberately uses `:listByScope` on the account, NOT `:listBySubject`: the
 latter WAS a strict self-list by contract, so for the admin caller it refused every time
-and the pre-clean never ran at all. Since #1352 that read admits the account administrator
+and the pre-clean never ran at all. Since kacho#1352 that read admits the account administrator
 as well (narrowed to that account); the choice stands anyway — the pre-clean wants every
 subject in the account scope, and that is the question `:listByScope` answers.
 
@@ -167,7 +167,7 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exis
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     op_var = js_name(op_var,
                      where="iam/rbac-subject-channel-equivalence/poll_op/op_var")
     capture = ""
@@ -226,7 +226,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     tag = js_name(tag,
                   where="iam/rbac-subject-channel-equivalence/pre_clean/tag")
     dup_var = f"{tag}DupAcb"
@@ -254,7 +254,7 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 # успех. Рабочая замена уже была в дереве (набор by-label visibility):
                 # перечисление по ОБЛАСТИ аккаунта + фильтр по субъекту.
                 #
-                # Контракт с тех пор изменён (#1352): чтение допускает и распорядителя
+                # Контракт с тех пор изменён (kacho#1352): чтение допускает и распорядителя
                 # домашнего аккаунта субъекта, сужая ответ границами этого аккаунта.
                 # Замена от этого не устарела — предочистке нужны ВСЕ субъекты области.
                 *assert_status(200),
@@ -461,7 +461,7 @@ def _revoke_phantom(grant_op_var):
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     grant_op_var = js_name(
         grant_op_var,
         where="iam/rbac-subject-channel-equivalence/_revoke_phantom/grant_op_var")
@@ -506,7 +506,7 @@ def revoke_await(name_prefix, acb_var, rev_op_var, grant_op_var=None):
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     rev_op_var = js_name(
         rev_op_var,
         where="iam/rbac-subject-channel-equivalence/revoke_await/rev_op_var")
@@ -602,7 +602,7 @@ def member_op(name, verb, group_var, member_id_tmpl, op_var):
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     op_var = js_name(op_var,
                      where="iam/rbac-subject-channel-equivalence/member_op/op_var")
     return [

@@ -18,7 +18,7 @@ import (
 // invite, or a PENDING row activated on first-login (matched by email).
 // BLOCKED — административный запрет на членство в Account'е. Ставится и снимается
 // ДЕЙСТВИЯМИ `UserService.Block` / `Unblock` (право `identity_suspender@iam_user`
-// = админ аккаунта плюс каскад облака; `v_update` с этого типа снят, #1128);
+// = админ аккаунта плюс каскад облака; `v_update` с этого типа снят, kacho#1128);
 // писатель — `userWriter.SetInviteStatus`.
 //
 // Состояние принадлежит СТРОКЕ ЧЛЕНСТВА, а не человеку. Одна личность держит по

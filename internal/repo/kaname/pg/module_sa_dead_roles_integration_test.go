@@ -188,7 +188,7 @@ func TestModuleSACapabilitiesSurviveRetirement(t *testing.T) {
 	// Спрашивается ДЕЙСТВУЮЩЕЕ право, а не строка журнала на снятом якоре: право
 	// переехало на кластерное отношение (`20260823002000`), и прежние записи
 	// журнала лежат рядом со своими событиями снятия. Разбор — доккомментарий
-	// `requireFGAWriterTuple` (#2452); здесь он не пересказывается.
+	// `requireFGAWriterTuple` (kacho#2452); здесь он не пересказывается.
 	fgaWriters := []string{"vpc", "compute", "nlb", "registry", "storage"}
 	for _, svc := range fgaWriters {
 		require.Equal(t, 1,

@@ -48,7 +48,7 @@ type Resolver struct {
 	repo kanamerepo.Repository
 	keys AccessKeyReader
 	log  *slog.Logger
-	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (#1994).
+	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (kacho#1994).
 	//
 	// Нужен здесь по той же причине, что и на пути чтения: осиротевшая операция
 	// над ролью доводится до терминального исхода ЭТИМ кодом, и её ответ несёт то
@@ -225,7 +225,7 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindUpdate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 
 	case *iamv1.RemoveUserFromAccountMetadata:
-		// Исключение человека из аккаунта (#1127). Разрешается по ОТСУТСТВИЮ
+		// Исключение человека из аккаунта (kacho#1127). Разрешается по ОТСУТСТВИЮ
 		// членства — той самой строки, которую операция и снимает.
 		//
 		// Общий `resolveExistence` здесь не годится, и это не оформительская
@@ -441,7 +441,7 @@ func marshalGroup(g domain.Group) (*anypb.Any, error) {
 // marshalRole — проекция роли для терминального ответа операции.
 //
 // Метод, а не свободная функция: набор глаголов типа берётся у ЖИВОГО каталога
-// резолвера, а не у словаря, порождённого сборкой (#1994).
+// резолвера, а не у словаря, порождённого сборкой (kacho#1994).
 //
 // Вычисленное состояние снимается ЯВНО ([domain.Role.WithoutComputedState]) —
 // тем же доводом, что у второго переводчика роли: обещание «нулевое значение

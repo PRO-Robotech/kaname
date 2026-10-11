@@ -4,7 +4,7 @@
 package refusaldomain_test
 
 // refusaldomain_test.go — сценарии WIRE-3-01 и WIRE-3-03 приёмки WIRE-1
-// (APPROVED, 2026-09-06; предмет ПР-3, задача продукта #2099).
+// (APPROVED, 2026-09-06; предмет ПР-3, задача продукта kacho#2099).
 //
 // # Что здесь утверждается
 //

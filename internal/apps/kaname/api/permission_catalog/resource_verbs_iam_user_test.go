@@ -4,17 +4,17 @@
 package permission_catalog
 
 // resource_verbs_iam_user_test.go — редактор ролей НЕ ПРЕДЛАГАЕТ арендатору
-// глагол, которого никто не спрашивает (#1189).
+// глагол, которого никто не спрашивает (kacho#1189).
 //
 // # Предмет
 //
 // Выпадающий список редактора ролей строится из `CatalogResource.verbs` — набора
-// глаголов САМОГО ресурса (#1128). Пока тип `iam_user` объявлял `v_delete`, набор
+// глаголов САМОГО ресурса (kacho#1128). Пока тип `iam_user` объявлял `v_delete`, набор
 // нёс `delete`, и арендатор видел его в списке наравне с `get` и `list`.
 //
 // Читателя у пары (`iam_user`, `v_delete`) нет ни одного: снятие строки личности
-// спрашивает `identity_remover` (#1131), правку записи — `record_writer`, запрет и
-// его снятие — `identity_suspender` (#1102). То есть список предлагал выбор,
+// спрашивает `identity_remover` (kacho#1131), правку записи — `record_writer`, запрет и
+// его снятие — `identity_suspender` (kacho#1102). То есть список предлагал выбор,
 // который не даёт ничего: роль авторуется, выдаётся, материализуется — и не
 // энфорсится нигде. Узнать это можно было только по последствиям.
 //
@@ -83,14 +83,14 @@ func TestCatalogVerbs_IdentityDoesNotOfferTheVerbNobodyAsks(t *testing.T) {
 	}
 	if !contains(neighbour.Offered, "delete") {
 		t.Fatalf("%s больше не предлагает `delete` (набор %v) — сужение задело не только %s, "+
-			"и это уже не предмет #1189", neighbourOfIdentity, neighbour.Offered, identityResource)
+			"и это уже не предмет kacho#1189", neighbourOfIdentity, neighbour.Offered, identityResource)
 	}
 
 	// ── Предмет ─────────────────────────────────────────────────────────────
 	if contains(identity.Offered, "delete") {
 		t.Errorf("%s предлагает редактору `delete` (набор %v), а спросить его некому: "+
 			"каталог прав не несёт ни одной записи с парой (iam_user, v_delete) — снятие строки "+
-			"личности спрашивает identity_remover (#1131). Роль, авторованная этим глаголом, "+
+			"личности спрашивает identity_remover (kacho#1131). Роль, авторованная этим глаголом, "+
 			"выдаётся и материализуется, но не энфорсится нигде",
 			identityResource, identity.Offered)
 	}

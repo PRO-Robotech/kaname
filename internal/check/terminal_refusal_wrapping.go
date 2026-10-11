@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// terminal_refusal_wrapping.go — разбор для двух гейтов приёмки #2439:
+// terminal_refusal_wrapping.go — разбор для двух гейтов приёмки kacho#2439:
 // репозиторий операций попадает в use-case только ОБЁРНУТЫМ, и тексты отказа
 // объявлены в одном месте.
 //

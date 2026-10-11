@@ -53,7 +53,7 @@ func (r *saReader) Get(ctx context.Context, id domain.ServiceAccountID) (domain.
 }
 
 func (r *saReader) List(ctx context.Context, f service_account.ListFilter) ([]domain.ServiceAccount, string, error) {
-	pageSize, err := effectivePageSize(f.PageSize) // #184: reject >max, no silent clamp
+	pageSize, err := effectivePageSize(f.PageSize) // kacho-iam#184: reject >max, no silent clamp
 	if err != nil {
 		return nil, "", err
 	}
@@ -67,7 +67,7 @@ func (r *saReader) List(ctx context.Context, f service_account.ListFilter) ([]do
 	}
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
 		// expression, so the column follows the whitelist instead of being
 		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
@@ -99,7 +99,7 @@ func (r *saReader) List(ctx context.Context, f service_account.ListFilter) ([]do
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякую служебную учётку, перед
 	// которой лежит больше `page_size` невидимых предшественников — она до фильтра
 	// просто не доезжает.
@@ -174,7 +174,7 @@ func (w *saWriter) Insert(ctx context.Context, sa domain.ServiceAccount) (domain
 // ─── Запись служебной учётки: набор колонок известен КОМПИЛЯТОРУ ────────────
 //
 // Оператор СТАТИЧЕСКИЙ, и это несущее свойство, а не стиль (задача продукта
-// #2058). Прежде список `SET` собирался из маски форматированием строки: какие
+// kacho#2058). Прежде список `SET` собирался из маски форматированием строки: какие
 // колонки пишет оператор, решалось во время исполнения и не проверялось ни
 // типами, ни компилятором. Применимость поля переехала из ТЕКСТА оператора в его
 // ПАРАМЕТР: колонка, которую маска не назвала, переписывается сама в себя —

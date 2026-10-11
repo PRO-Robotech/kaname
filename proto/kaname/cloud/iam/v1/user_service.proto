@@ -155,11 +155,11 @@ service UserService {
   // Async — возвращает Operation (как Update всех iam-ресурсов).
   //
   // WHO may call it is `record_writer` on `iam_user`, and it carries NO
-  // account-level source (#1102). The row is a GLOBAL identity — one per person
+  // account-level source (kacho#1102). The row is a GLOBAL identity — one per person
   // for the whole platform — so `labels`, its only mutable field, decides which
   // selector grants match the person in EVERY Account, not just the one the label
   // was set from. A label being per-Account in meaning while living on a global
-  // row is its own subject (#1126); the right to write it stopped being an
+  // row is its own subject (kacho#1126); the right to write it stopped being an
   // account-level one already.
   //
   // Reading the record keeps its account-level sources on purpose: seeing the
@@ -193,14 +193,14 @@ service UserService {
   // the cloud, and nobody else. It used to be `v_delete`, which carried THREE
   // account-level sources: the per-object grant the reconciler materializes on
   // an invitee's row, the delegated Account administrator, and the Account
-  // owner. That is strictly worse than the block #1102 already took out of the
-  // Account's hands — a block is reversible, a deletion is not (#1131).
+  // owner. That is strictly worse than the block kacho#1102 already took out of the
+  // Account's hands — a block is reversible, a deletion is not (kacho#1131).
   //
   // WHAT THE PERSON WHO INVITED HIM KEEPS is what the owner's directive names —
   // adding and removing rights in his own Account (`iam_access_binding`), seeing
   // his people (`v_get` / `v_list` keep their account-level sources
   // deliberately), and now REMOVING A PERSON FROM HIS ACCOUNT
-  // (`RemoveFromAccount` below, #1127). The last one is what he actually wanted
+  // (`RemoveFromAccount` below, kacho#1127). The last one is what he actually wanted
   // when he reached for Delete: it drops the membership and leaves the identity
   // alone.
   //
@@ -237,7 +237,7 @@ service UserService {
   // Account" could only be expressed by withdrawing the grants. That is NOT an
   // exclusion, and the difference is observable: the membership stayed, the
   // person stayed in the Account's people list, and `account_admission_rate` kept
-  // counting him (#1127).
+  // counting him (kacho#1127).
   //
   // WHAT IT MUST NOT TOUCH, stated as a boundary rather than a hope: not one
   // field of the `iam_user` row. A person removed from Account A goes on working
@@ -335,7 +335,7 @@ service UserService {
   //
   // WHO may call it is `identity_suspender` on `iam_user` — a relation of its
   // own, with NO account-level source: neither a per-object grant, nor the
-  // delegated Account administrator, nor the Account owner (#1102).
+  // delegated Account administrator, nor the Account owner (kacho#1102).
   //
   // It used to be `v_update`, shared with Update, and the argument for sharing
   // was that whoever may rename a membership may also suspend it. That argument
@@ -353,7 +353,7 @@ service UserService {
   // Per-account exclusion as an ACTION now EXISTS, and that changes who this
   // paragraph points at. It used to say that no such action existed and that
   // "block within my Account" therefore had to be expressed by withdrawing the
-  // grants. `RemoveFromAccount` (above, #1127) is that action: it drops the
+  // grants. `RemoveFromAccount` (above, kacho#1127) is that action: it drops the
   // membership row, leaves the identity untouched, and is gated by
   // `member_remover` on the ACCOUNT — the same circle that may invite into it.
   // The sentence is rewritten rather than deleted because the reason it gave is

@@ -16,7 +16,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
-// SigningKeyRepo — ключница подписных ключей платформы (задача #897).
+// SigningKeyRepo — ключница подписных ключей платформы (задача kacho#897).
 //
 // # Что здесь держит инвариант, а что только его выражает
 //

@@ -4,11 +4,11 @@
 // role_iam_user_delete_grants_nothing_integration_test.go — глагол `delete` на
 // `iam.user` больше НЕ ПОПАДАЕТ в проекцию, которую читает вердикт.
 //
-// # Предмет (#1189)
+// # Предмет (kacho#1189)
 //
 // Тип `iam_user` объявлял глагол `v_delete`, и читателя у него не было ни одного:
-// снятие строки личности спрашивает `identity_remover` (#1131), правку записи —
-// `record_writer`, запрет и его снятие — `identity_suspender` (#1102). Каталог
+// снятие строки личности спрашивает `identity_remover` (kacho#1131), правку записи —
+// `record_writer`, запрет и его снятие — `identity_suspender` (kacho#1102). Каталог
 // прав не нёс ни одной записи с парой (`iam_user`, `v_delete`), и явного Check в
 // хендлере тоже не было.
 //
@@ -24,7 +24,7 @@
 // материализует ярус наблюдателя и ровно те же два глагола, что `iam.user.view`, —
 // дубликат под именем, обещающим администрирование. Она выведена из обращения той
 // же работой, как `iam.user.edit` была выведена вместе со снятием `v_update`
-// (#1128).
+// (kacho#1128).
 //
 // # Что здесь утверждается — СТРОКИ, а не объявление
 //
@@ -98,7 +98,7 @@ func TestRoleIamUserDelete_GrantsNothingAndIsNoLongerProjected(t *testing.T) {
 		"проекция всё ещё даёт `delete` на iam.user — роли: %s. Глагол снят с типа, значит правило, "+
 			"назвавшее его (в том числе подстановкой `*`), не должно давать ничего: читателя "+
 			"у пары (iam_user, v_delete) нет ни одного, снятие строки личности спрашивает "+
-			"identity_remover (#1131)", offenders)
+			"identity_remover (kacho#1131)", offenders)
 
 	// ── СЛЕДСТВИЕ: роль `iam.user.admin` ВЫВЕДЕНА ИЗ ОБРАЩЕНИЯ ──────────────
 	//
@@ -122,7 +122,7 @@ func TestRoleIamUserDelete_GrantsNothingAndIsNoLongerProjected(t *testing.T) {
 	viewRole := scalarString(t, ctx, pool, `'rol' || substr(md5('iam.user.view'), 1, 17)`)
 	require.Equal(t, 1, scalarInt(t, ctx, pool,
 		`SELECT count(*) FROM kaname.roles WHERE id = $1`, viewRole),
-		"роль iam.user.view исчезла — снято больше, чем предмет #1189: чтение своих людей "+
+		"роль iam.user.view исчезла — снято больше, чем предмет kacho#1189: чтение своих людей "+
 			"остаётся правом аккаунта")
 	for _, verb := range []string{"get", "list"} {
 		require.Equalf(t, 1, scalarInt(t, ctx, pool,
@@ -136,5 +136,5 @@ func TestRoleIamUserDelete_GrantsNothingAndIsNoLongerProjected(t *testing.T) {
 	require.Positive(t, scalarInt(t, ctx, pool,
 		`SELECT count(*) FROM kaname.role_verb WHERE verb = 'delete' AND object_type <> 'iam.user'`),
 		"глагол `delete` не встречается в проекции НИ У ОДНОГО типа — сужение задело не только "+
-			"iam.user, и это уже не предмет #1189")
+			"iam.user, и это уже не предмет kacho#1189")
 }

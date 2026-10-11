@@ -191,7 +191,7 @@ func TestIntegration_Issue2003_ScopeKeysComeFromTranslationNotTruncation(t *test
 			c.dotted, c.modelName, c.konstanta)
 	}
 
-	// ── Утверждение #2003: каждый из семи кандидатов найден ПО СВОЕМУ имени модели.
+	// ── Утверждение kacho#2003: каждый из семи кандидатов найден ПО СВОЕМУ имени модели.
 	scope := scopeOfUser(t, ctx, pool, subject)
 
 	for _, c := range cases {

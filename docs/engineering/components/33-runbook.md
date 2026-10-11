@@ -121,7 +121,7 @@ api-gateway кэширует срез прав субъекта и **гасит 
 > `subject_change_outbox` — журнал с курсором, а не очередь с доставкой: iam ничего
 > в него не «отправляет». Колонок `sent_at` / `attempt_count` / `last_error` /
 > `notified_at` в схеме **больше нет** — сняты миграцией
-> `20260829181500_subject_change_journal_drops_the_delivery_columns.sql` (задача #1396)
+> `20260829181500_subject_change_journal_drops_the_delivery_columns.sql` (задача kacho#1396)
 > после того, как писателей не осталось. Выборка идёт по `id > since_id`.
 >
 > Это меняет и то, чем оканчивается ошибка процедуры. Прежняя редакция раздела

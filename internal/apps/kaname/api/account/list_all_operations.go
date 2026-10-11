@@ -122,7 +122,7 @@ func (u *ListAllOperationsUseCase) requireAccountViewAuthority(ctx context.Conte
 		//
 		// ПРОМАХ остаётся отказом в правах намеренно — это скрытие
 		// существования, и ответ обязан быть ПОБАЙТОВО тем же, что у настоящего
-		// отказа, иначе посторонний отличает «нет» от «нету» (задача #2585).
+		// отказа, иначе посторонний отличает «нет» от «нету» (задача kacho#2585).
 		if errors.Is(gerr, iamerr.ErrNotFound) {
 			return authzguard.PermissionDenied()
 		}

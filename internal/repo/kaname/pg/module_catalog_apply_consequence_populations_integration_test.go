@@ -8,7 +8,7 @@ package pg_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.6; сценарии `IAM-MA-1-19`, `-20` — их предпосылка.
-// Задача продукта #1034.
+// Задача продукта kacho#1034.
 //
 // # Зачем эта проба, если потолков ещё нет
 //
@@ -74,7 +74,7 @@ func TestApplyMovesThreePopulationsOfConsequenceNotTwo(t *testing.T) {
 	// нельзя: её проекции применитель не переселяет намеренно, и снятие отвергнул
 	// бы КЛЮЧ — проба читала бы чужой отказ как перепись последствий.
 	tn := seedVerdictTenant(t, ctx, pool)
-	// Роль заводится ТЕМ ЖЕ путём, что у арендатора (use-case создания, #1999);
+	// Роль заводится ТЕМ ЖЕ путём, что у арендатора (use-case создания, kacho#1999);
 	// id чеканит он, а этой пробе он не нужен — её предмет перепись последствий.
 	_, pairs := declareRole(t, ctx, pool, repo, snap,
 		tn.accountID, tn.userID, anchoredModule, spareResource)

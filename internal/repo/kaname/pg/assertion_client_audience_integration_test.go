@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // assertion_client_audience_integration_test.go — сужение адресатов доезжает от
-// записи ключа до полосы выпуска (задача #1136).
+// записи ключа до полосы выпуска (задача kacho#1136).
 //
 // # Что здесь измеряется, чего не измеряют пробы уровня use-case
 //
@@ -45,7 +45,7 @@ func insertSAKey(t *testing.T, f assertionFixture, c domain.ServiceAccountOAuthC
 // saKeyRow — минимальная строка ключа с ключевым материалом.
 func saKeyRow(f assertionFixture, id string, audiences []string) domain.ServiceAccountOAuthClient {
 	return domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:    domain.CredentialKindKeypair,
 		ID:                domain.SAOAuthClientID(id),

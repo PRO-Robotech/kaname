@@ -88,7 +88,7 @@ func SubjectIsClusterAdmin(ctx context.Context, checker RelationChecker, subject
 //
 // A list whose page is a page of the visible must use an E-variant: swallowing
 // this failure there produces a well-formed, silently narrowed `200` that the
-// caller cannot tell from a revocation (task #645, acceptance §3.6).
+// caller cannot tell from a revocation (task kacho#645, acceptance §3.6).
 func SubjectIsClusterAdminPlainE(ctx context.Context, checker RelationChecker, subject string) (bool, error) {
 	if checker == nil || subject == "" {
 		return false, nil

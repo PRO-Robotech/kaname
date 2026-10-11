@@ -50,7 +50,7 @@ func TestSAKeyNToOne_ConcurrentIssue_NoSvaUnique(t *testing.T) {
 
 	newRow := func(suffix string) domain.ServiceAccountOAuthClient {
 		return domain.ServiceAccountOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 			// словарь таблицы отвергает строку, вида не назвавшую.
 			CredentialKind:  domain.CredentialKindKeypair,
 			ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),

@@ -102,7 +102,7 @@ func TestSessionAudit_5_2_03_RevokeJtiEmits(t *testing.T) {
 		"single-jti revoke must emit exactly one iam.session.revoked row")
 
 	id, status, payloadRaw := readOneAudit(ctx, t, pool, "iam.session.revoked", string(target))
-	require.Regexp(t, sessionEvtIDRe, id, "audit id must match the 22-char evt_ format (#126 guard)")
+	require.Regexp(t, sessionEvtIDRe, id, "audit id must match the 22-char evt_ format (kacho-iam#126 guard)")
 	require.Equal(t, "pending", status)
 
 	var payload map[string]string

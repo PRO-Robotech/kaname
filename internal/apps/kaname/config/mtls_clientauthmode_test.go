@@ -23,7 +23,7 @@ import (
 // identity provider is gone with it (kaname#363), and the scenarios that were
 // about the edge MECHANICS (not about the hooks' HMAC) are held here on the
 // key-set publisher (:9097) and metrics edges. The :9092 server-side mTLS was
-// SHIPPED but gated OFF in prod (#122/#137) because serverTLSConfig hardcoded
+// SHIPPED but gated OFF in prod (kacho-iam#122/kacho-iam#137) because serverTLSConfig hardcoded
 // ClientAuth = RequireAndVerifyClientCert, which rejected the HMAC-authed
 // webhooks (no client cert) at the TLS handshake. 5.5 introduced a per-edge
 // clientAuthMode:
@@ -181,7 +181,7 @@ func TestMTLS_55_06_UnknownMode_FailClosed(t *testing.T) {
 // Key-set publisher default = server-tls-only (the registry data plane presents
 // no client cert); metrics default = server-tls-only (no scrape client cert yet). The default is an
 // explicit safe choice — NOT a silent fall-through to RequireAndVerifyClientCert
-// (that was bug #122).
+// (that was bug kacho-iam#122).
 func TestMTLS_55_07_DefaultMode_ServerTLSOnly(t *testing.T) {
 	certFile, keyFile, _ := writeTestCert(t)
 	// Key-set publisher: enabled, cert+key, NO clientAuthMode, NO client-CA.
@@ -201,7 +201,7 @@ func TestMTLS_55_07_DefaultMode_ServerTLSOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, jwksCfg)
 	assert.Equal(t, tls.NoClientCert, jwksCfg.ClientAuth,
-		"key-set publisher default = server-tls-only → NoClientCert (NOT RequireAndVerifyClientCert; bug #122)")
+		"key-set publisher default = server-tls-only → NoClientCert (NOT RequireAndVerifyClientCert; bug kacho-iam#122)")
 
 	metricsCfg, err := m.MetricsServerTLSConfig()
 	require.NoError(t, err)

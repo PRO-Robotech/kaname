@@ -47,7 +47,7 @@ func TestPostureEnvGate_CanFailAndStaysSilent(t *testing.T) {
 			name:  "названное не доезжает",
 			files: 1, axes: []axisText{dead}, reaches: reachNothing,
 			want: "KANAME_METRICS_ADDR названа текстом самоотчёта об оси",
-			why:  "ровно предмет #2042: оператор задаёт названное и не меняет ничего",
+			why:  "ровно предмет kacho#2042: оператор задаёт названное и не меняет ничего",
 		},
 		{
 			name:  "находка называет ИМЯ и КООРДИНАТУ",

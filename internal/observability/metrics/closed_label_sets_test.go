@@ -90,7 +90,7 @@ type openLabelSet struct {
 	Reason string
 
 	// Поля `ProducerMethod` здесь больше НЕТ — снято вместе со своим
-	// единственным предметом (#2638).
+	// единственным предметом (kacho#2638).
 	//
 	// Оно делало прощение самоистекающим у семейства, которому прощали
 	// «засевать нечем, производителя нет вовсе»: появился вызывающий — набор
@@ -531,7 +531,7 @@ func packageStringConsts(file *ast.File) map[string]string {
 	return out
 }
 
-// TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration — гейт задачи #2500.
+// TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration — гейт задачи kacho#2500.
 func TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration(t *testing.T) {
 	files, err := packageGoFiles(".")
 	if err != nil {

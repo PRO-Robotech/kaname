@@ -90,7 +90,7 @@ func (uc *ApplyUseCase) Execute(
 	if err != nil {
 		return nil, err
 	}
-	// ОПОРА — из ТОЙ ЖЕ доставки, которой взят манифест (#1861), и она едет
+	// ОПОРА — из ТОЙ ЖЕ доставки, которой взят манифест (kacho#1861), и она едет
 	// ЗАПРОСОМ: применитель один на процесс, а запросов у него много
 	// одновременно.
 	deliveredAnchor, aerr := modulecatalog.AnchorOfDelivery(delivery)

@@ -45,7 +45,7 @@ func newMux() *runtime.ServeMux {
 const TextMethodNotAllowed = "method not allowed"
 
 // routingErrorHandler отвечает на промах ГЛАГОЛА формой, одной у обеих
-// HTTP-поверхностей службы (задачи #2493, #261; решение R36 п. 3): `405`,
+// HTTP-поверхностей службы (задачи kacho#2493, #261; решение R36 п. 3): `405`,
 // `{"code":12,"message":"method not allowed","details":[]}` и заголовок
 // `Allow` с методами, которые маршрутизатор на этом пути обслуживает.
 //

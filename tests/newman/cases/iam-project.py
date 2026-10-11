@@ -206,7 +206,7 @@ CASES.append(Case(
             ],
         ),
         # Текст владельца ЦЕЛИКОМ: «already exists» несут пять разных отказов iam,
-        # и утверждение об общей части проходило на отказе о ЧУЖОМ ресурсе (#1748).
+        # и утверждение об общей части проходило на отказе о ЧУЖОМ ресурсе (kacho#1748).
         assert_op_error(6, "ALREADY_EXISTS",
                         msg_text="Project with name prj-{{runId}} already exists"),
     ],
@@ -558,7 +558,7 @@ CASES.append(Case(
             # курсорная семантика ASC — заявленный контракт.
             # Тот же класс уже чинили ровно так же для
             # IAM-ROL-LS-SYSTEM-PLUS-CUSTOM-WITH-ACCOUNT (56 системных ролей вытесняли
-            # созданную прогоном роль за страницу) — см. комментарий #193 в
+            # созданную прогоном роль за страницу) — см. комментарий kacho-iam#193 в
             # scripts/assert-suites-green.sh.
             method="GET",
             path="/iam/v1/projects?accountId={{accountAId}}&pageSize=1000",

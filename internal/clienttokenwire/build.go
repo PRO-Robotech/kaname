@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package clienttokenwire — сборка токен-эндпоинта платформы (задача #898,
+// Package clienttokenwire — сборка токен-эндпоинта платформы (задача kacho#898,
 // приёмка F2 §9.1 п. 11).
 //
 // # Зачем отдельный пакет сборки
@@ -58,7 +58,7 @@ type BuildConfig struct {
 	// полосе аутентификации клиента.
 	AssertionLifetimeCeiling time.Duration
 	// FederatedLifetimeCeiling — тот же потолок на федеративной полосе, где
-	// утверждение подписал внешний издатель (#1124). Отдельная величина, а не
+	// утверждение подписал внешний издатель (kacho#1124). Отдельная величина, а не
 	// та же: внешний издатель выпускает своей нагрузке токен со своим сроком.
 	FederatedLifetimeCeiling time.Duration
 	// ClockSkew — допуск расхождения часов, на обе стороны.

@@ -125,7 +125,7 @@ service ProjectService {
   // (PRO-Robotech/kacho). What remains open under PRO-Robotech/kacho#1231 is the
   // end-to-end observation of a live resource of another domain holding the
   // project through the platform edge; the mechanism itself lives here.
-  // (The decision was taken under #1594, which is closed — a reader sent there
+  // (The decision was taken under kacho#1594, which is closed — a reader sent there
   // would read "closed" as "done".)
   rpc Delete (DeleteProjectRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/projects/{project_id}" };

@@ -122,7 +122,7 @@ func scanToolConsumers(files []string, ownDir string) (importers []string, c con
 	return importers, c, nil
 }
 
-// TestIAM2640_ToolConsumersAreNamed — гейт задачи #2640, предмет А.
+// TestIAM2640_ToolConsumersAreNamed — гейт задачи kacho#2640, предмет А.
 func TestIAM2640_ToolConsumersAreNamed(t *testing.T) {
 	root := moduleRootFromTool(t)
 	files, err := treecorpus.UnderWithSuffix(root, ".go")

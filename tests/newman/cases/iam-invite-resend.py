@@ -1,7 +1,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Повторная отправка письма приглашения — UserService.ResendInvite (приёмка
-ID-MAIL-1, §10 п. 9; MAIL-36, MAIL-37, MAIL-38, MAIL-25; задача продукта #1774).
+ID-MAIL-1, §10 п. 9; MAIL-36, MAIL-37, MAIL-38, MAIL-25; задача продукта kacho#1774).
 
 Чёрный ящик через СОБСТВЕННЫЙ REST-фронт службы (автономный стенд): предмет —
 глагол службы, и производитель у него — служба.

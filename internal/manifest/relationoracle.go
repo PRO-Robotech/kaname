@@ -6,7 +6,7 @@ package manifest
 import "github.com/PRO-Robotech/kaname/internal/domain"
 
 // relationoracle.go — модель прав ВНОСИТСЯ в загрузчик вызывающим (задача
-// продукта #2002; приёмка
+// продукта kacho#2002; приёмка
 // `docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md`,
 // §2 п. 6, сценарий `IAM-MB-1-17`).
 //

@@ -76,7 +76,7 @@ def _gone_case(case_id, *, gone_auth, witness_auth=None, witness_path=None,
 # ---------------------------------------------------------------------------
 
 def test_gone_step_under_a_principal_that_never_saw_the_object_is_a_finding(tmp_path):
-    # Ровно форма #1068: удаляет владелец, а «ушёл?» спрашивает посторонний.
+    # Ровно форма kacho#1068: удаляет владелец, а «ушёл?» спрашивает посторонний.
     d = _emit(tmp_path, _gone_case("T-BLIND", gone_auth="jwtStranger"))
     res = gen.audit_gone_principal(d)
     assert res["census"]["gone_steps"] == 1

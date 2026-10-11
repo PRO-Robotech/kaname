@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // relationgrant_test.go — выдача ОТНОШЕНИЕМ объявляется манифестом модуля
-// (задача продукта #1936, приёмка
+// (задача продукта kacho#1936, приёмка
 // services/iam/docs/engineering/acceptance/module-manifest-relation-grant.md,
 // APPROVED круг 1; сценарии MOD-RG-01…13 и 23).
 //
@@ -38,7 +38,7 @@ import (
 
 // canonOracle — модель, ВНЕСЁННАЯ в загрузчик пробой.
 //
-// С #2002 связность выдачи отношением судится не тем, что загрузчик добыл сам, а
+// С kacho#2002 связность выдачи отношением судится не тем, что загрузчик добыл сам, а
 // тем, что внёс вызывающий. Пробы этого файла — про СВЯЗНОСТЬ, поэтому вносят
 // канон образа: он и был судьёй, которого загрузчик прежде добывал.
 //
@@ -408,7 +408,7 @@ func TestMODRG13SeedableCheckPrecedesTheCanonCheck(t *testing.T) {
 // резолва типа якоря канон спрашивать не о чем.
 //
 // Выдача РОЛЬЮ этой проверкой не затронута — её якорь остаётся предметом
-// задачи продукта #1953, и MOD-RG-02 это утверждает молчанием.
+// задачи продукта kacho#1953, и MOD-RG-02 это утверждает молчанием.
 func TestMODRG23RelationGrantOnANonClusterAnchorIsRefused(t *testing.T) {
 	doc := seedWithBinding(`    - subjects:
         - {type: serviceAccount, name: kacho-vpc}

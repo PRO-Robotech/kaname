@@ -366,7 +366,7 @@ func membershipInAny(argIdx int) string {
 }
 
 func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User, string, error) {
-	pageSize, err := effectivePageSize(f.PageSize) // #184: reject >max, no silent clamp
+	pageSize, err := effectivePageSize(f.PageSize) // kacho-iam#184: reject >max, no silent clamp
 	if err != nil {
 		return nil, "", err
 	}
@@ -401,7 +401,7 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 
 	if f.Filter != "" {
 		// Whitelist is closed; an expression outside it is refused by name rather
-		// than dropped (#445). This resource dispatches on the parsed field instead
+		// than dropped (kacho#445). This resource dispatches on the parsed field instead
 		// of emitting ast.ToSQL, because none of the four terms is addressed as the
 		// field is written: `email` is compared case-insensitively, and `search` is
 		// not a column at all — it is a term spanning two of them. The switch is
@@ -414,7 +414,7 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 		}
 		if ast != nil {
 			// The grammar carries an OPERATOR, and this switch reads only ast.Value —
-			// so before #460 `email CONTAINS "acme"` was answered as `email = "acme"`:
+			// so before kacho#460 `email CONTAINS "acme"` was answered as `email = "acme"`:
 			// the caller asked for everyone at that domain and got the single exact
 			// match under a 200, with nothing in the response to tell the two apart.
 			// §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows
@@ -484,7 +484,7 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякую запись, перед которой
 	// лежит больше `page_size` невидимых предшественников — она до фильтра просто
 	// не доезжает. Собственная строка вызывающего приходит в ObjectIDs (см. порт),
@@ -946,7 +946,7 @@ func scanUser(row scanner) (domain.User, error) {
 // — `scanUser` и этот, — и компилятор их не связывал: расхождение выражалось бы
 // только отказом живой Postgres на пути чтения. Ровно так у роли колонка,
 // добавленная в проекцию и не добавленная во вторую копию списка, положила
-// правку КАЖДОЙ роли (#1943). Заводя колонку в userCols, правь список здесь.
+// правку КАЖДОЙ роли (kacho#1943). Заводя колонку в userCols, правь список здесь.
 func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 	var (
 		accountID    sql.NullString

@@ -159,7 +159,7 @@ func TestConditionedRelationHasAProducer(t *testing.T) {
 //
 // `cluster#console` stood here as a third entry and is GONE with its subject: the
 // relation unioned nothing, so it was unreachable outright, and it was withdrawn
-// from the canonical model (#1820). The entry left by the same change — an
+// from the canonical model (kacho#1820). The entry left by the same change — an
 // exception with nothing to exclude is a finding, and TestNoStaleConditionExceptions
 // says so on its own.
 var unproducedConditionSites = map[string]string{

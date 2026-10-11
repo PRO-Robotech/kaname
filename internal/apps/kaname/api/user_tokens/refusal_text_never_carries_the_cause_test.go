@@ -5,7 +5,7 @@ package user_tokens
 
 // refusal_text_never_carries_the_cause_test.go — переводчик этого пакета не
 // отдаёт вызывающему текст ПОЛУЧЕННОЙ ошибки на признаке недоступности
-// (задача #2464). Утверждение — `internal/testsupport/refusaltext`.
+// (задача kacho#2464). Утверждение — `internal/testsupport/refusaltext`.
 
 import (
 	"testing"

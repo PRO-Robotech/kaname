@@ -31,7 +31,7 @@ syntax = "proto3";
 // THE PLATFORM SIGNER MINTS THAT TOKEN (internal/tokensigner, wired through
 // internal/bootstraptokenwire). This line used to say that the external
 // provider stays the signer and iam only brokers the exchange — the claim
-// outlived its subject (#1119); the provider and both roads to it were removed
+// outlived its subject (kacho#1119); the provider and both roads to it were removed
 // (kaname#363), and a production start without own minting is refused.
 //
 // Only the requested `audience` differs from the registry lane —

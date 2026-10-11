@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subject_change_floor_integration_test.go — ЧИТАТЕЛЬ ОБНАРУЖИВАЕТ ПРОПУСК
-// (задача #1712).
+// (задача kacho#1712).
 //
 // # Предмет
 //

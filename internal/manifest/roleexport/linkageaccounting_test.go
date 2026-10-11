@@ -71,7 +71,7 @@ func realManifests(t *testing.T) []*manifest.Manifest {
 	return out
 }
 
-// TestEveryCatalogEntryOfADeclaredResourceIsAccounted — НОВЫЙ предикат #1091 по
+// TestEveryCatalogEntryOfADeclaredResourceIsAccounted — НОВЫЙ предикат kacho#1091 по
 // НАСТОЯЩЕМУ дереву: записей каталога без счёта ноль.
 //
 // Прежний предикат задачи требовал равенства двух популяций («сумма покрытых

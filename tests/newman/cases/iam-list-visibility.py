@@ -1,7 +1,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Case-set iam-list-visibility — страница списка есть страница ВИДИМОГО (задача #645).
+"""Case-set iam-list-visibility — страница списка есть страница ВИДИМОГО (задача kacho#645).
 
 ПРЕДМЕТ, И ПОЧЕМУ ЕГО ОБЯЗАН ВИДЕТЬ ЧЁРНЫЙ ЯЩИК. Дефект наблюдали снаружи:
 арендатор получал `200` с пустым массивом на списке, тогда как чтение того же
@@ -176,7 +176,7 @@ for _slug, _path, _field, _own_var, _foreign_var, _belongs in _SURFACES:
                     "  pm.expect(rows.some(r => r.id === own), 'page of ' + rows.length +"
                     f" ' row(s) at pageSize={PAGE} does not contain ' + own +"
                     " ': older rows the caller cannot see occupy the window, so the row"
-                    " never reaches the narrowing — that IS the defect of #645. Page: '"
+                    " never reaches the narrowing — that IS the defect of kacho#645. Page: '"
                     " + body).to.eql(true);",
                     "});",
                     # ОТРИЦАНИЕ по конкретному чужому идентификатору. Повтором НЕ

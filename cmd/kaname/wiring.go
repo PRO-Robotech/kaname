@@ -239,7 +239,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// существу — оно превращает провязку в утверждение о том, какая реализация
 	// пришла, и это утверждение проверялось бы в рантайме, а не сборкой.
 	membershipRepo membershipapp.Repo,
-	// catalogSource — КАТАЛОЖНЫЙ ФАКТ из ЖИВЫХ строк (задача #1816): какие пары
+	// catalogSource — КАТАЛОЖНЫЙ ФАКТ из ЖИВЫХ строк (задача kacho#1816): какие пары
 	// грантуемы и какие глаголы объявлены. Приходит отдельным параметром, а не
 	// спрашивается у литерала внутри use-case'ов: ответ на него может измениться
 	// в работающем процессе — снятием строки, — и читатель на литерале
@@ -286,7 +286,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// копились с тех пор, когда их читало теневое сравнение форм; сравнения
 	// больше нет, а форма стала единственным источником вердикта — то есть
 	// считаются они теперь на живом пути решения о доступе, и читателя у них не
-	// было ни одного (#1224).
+	// было ни одного (kacho#1224).
 	//
 	// Читается СНИМОК носителя, а не запомненное число: коллектор спрашивает
 	// источник на каждом сборе.
@@ -348,7 +348,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithObjectReconciler(rsabReconciler)
 	accountDelete := accountapp.NewDeleteAccountUseCase(kanameRepo, opsRepo)
 	accountGet := accountapp.NewGetAccountUseCase(kanameRepo).WithRelationStore(relationStore)
-	// listScanRec — съём стоимости страницы для списков с добором (#653).
+	// listScanRec — съём стоимости страницы для списков с добором (kacho#653).
 	// Один экземпляр на сборку: гистограммы размечены видом ресурса.
 	listScanRec := metricsReg.NewListScanRecorder()
 
@@ -420,7 +420,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	userBlock := userapp.NewBlockUserUseCase(kanameRepo, opsRepo)
 	userUnblock := userapp.NewUnblockUserUseCase(kanameRepo, opsRepo)
 	// Исключение из аккаунта — пара к приглашению: тот вводит человека в
-	// аккаунт, этот выводит (#1127). Строку личности не трогает.
+	// аккаунт, этот выводит (kacho#1127). Строку личности не трогает.
 	userRemoveFromAccount := userapp.NewRemoveFromAccountUseCase(kanameRepo, opsRepo)
 	// Повторная отправка письма приглашения — то, что приходит взамен снятого
 	// поля ссылки (ID-MAIL-1, §10 п. 9). Право приглашать спрашивается у того
@@ -597,7 +597,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// per-object tuple on iam_access_binding — would get an empty page here while
 	// every sibling read returns the full set.
 	// Соседняя поверхность верхнего яруса супер-доступа читается ОТСЮДА ЖЕ
-	// (#914, решение 2): выдают и отзывают кластерного администратора своим
+	// (kacho#914, решение 2): выдают и отзывают кластерного администратора своим
 	// глаголом, но спрашивающий «кто имеет доступ» обязан получать полный ответ
 	// из ОДНОЙ точки чтения — иначе две поверхности об одном предмете расходятся
 	// молча. Читатель тот же, что обслуживает `InternalClusterService.ListAdmins`:
@@ -609,9 +609,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithListScanRecorder(listScanRec)
 	// ListBySubject — тот же вопрос, что и у ListSubjectPrivileges («какие выдачи
 	// есть у этого субъекта»), поэтому и допуск у него ТОТ ЖЕ, единым предикатом
-	// (#1352). Оба порта обязательны: RelationStore решает полосы надзора облака
+	// (kacho#1352). Оба порта обязательны: RelationStore решает полосы надзора облака
 	// и делегированного распорядителя, RelationQueries сужает СТРАНИЦУ полосы
-	// распорядителя построчно (#1354). Непровязанный порт этим чтением
+	// распорядителя построчно (kacho#1354). Непровязанный порт этим чтением
 	// ОТКАЗЫВАЕТ — провязка здесь не удобство, а условие работоспособности полосы.
 	abListBySub := accessbindingapp.NewListBySubjectUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger).
@@ -623,7 +623,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// RelationStore wired so the delegated-admin (FGA admin@account) authz path
 	// resolves admins who are not the home-account owner (D-4 path b);
 	// RelationQueries — пообъектный вопрос, которым СТРАНИЦА сужается по правам
-	// вызывающего (#1354). Непровязанный порт этим чтением ОТКАЗЫВАЕТ, поэтому
+	// вызывающего (kacho#1354). Непровязанный порт этим чтением ОТКАЗЫВАЕТ, поэтому
 	// провязка здесь — не удобство, а условие работоспособности полосы
 	// распорядителя аккаунта.
 	abListSubjPriv := accessbindingapp.NewListSubjectPrivilegesUseCase(kanameRepo).
@@ -753,7 +753,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	if metricsReg != nil {
 		checkAuthz = metrics.NewInstrumentedAuthorizer(authzServices.authorizeSvc, metricsReg)
 	}
-	// Авторитет о предъявленном базовом секрете (#1142) — с объявленным пределом
+	// Авторитет о предъявленном базовом секрете (kacho#1142) — с объявленным пределом
 	// на обращение к базе (kaname#379). Сборка — basic_credential_lane.go.
 	basicAuthority, basicAuthorityErr := newBasicCredentialAuthority(pool)
 	if basicAuthorityErr != nil {
@@ -772,7 +772,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 			kanamepg.NewSubjectChangeRepo(pool, logger))).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
-		// #1142 — авторитет о предъявленном базовом секрете. Край зовёт его на
+		// kacho#1142 — авторитет о предъявленном базовом секрете. Край зовёт его на
 		// промахе своего кэша вердикта; отзыв доходит до предъявления тем, что
 		// резолв не находит СНЯТОЙ строки.
 		WithBasicCredentialResolver(basicAuthority).
@@ -832,7 +832,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
 	// Чеканит НАШ подписант: дороги к внешнему поставщику на этом пути нет ни
-	// одной (задача #1119). Сборка — bootstrap_token.go.
+	// одной (задача kacho#1119). Сборка — bootstrap_token.go.
 	bootstrapTokenH, bootstrapErr := buildBootstrapTokenHandler(pool, cfg, tokenSigner, logger)
 	// Отказ построения здесь — «контур включён, а выпускать нечем». Это отказ в
 	// СТАРТЕ, а не деградация: стенд, поднявшийся Ready с неработающей чеканкой
@@ -942,7 +942,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	permissionCatalogHandler := permissioncatalogapp.NewHandler(
 		permissioncatalogapp.NewListPermissionCatalogUseCase(catalogSource))
 
-	// ── InternalModuleService — каталог прав ОДНОГО модуля (задача #1034) ──
+	// ── InternalModuleService — каталог прав ОДНОГО модуля (задача kacho#1034) ──
 	//
 	// Применитель здесь — ГЛАГОЛЬНЫЙ (`NewVerbApplier`), а не тот, которым
 	// пользуется путь старта: он сверяет опору БЕЗУСЛОВНО и требует
@@ -1121,7 +1121,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	if ownIssuance {
 		issueUC.WithOwnIssuance()
 	}
-	// Перечень доверенных издателей федеративного ключа — НАША таблица (#1124):
+	// Перечень доверенных издателей федеративного ключа — НАША таблица (kacho#1124):
 	// писатель провязан здесь, читает её проверка утверждения на пути запроса.
 	issueUC.WithTrustedIssuerWriter(kanamepg.NewTrustedIssuerRepo(pool))
 	// Wire the post-Issue secret redactor. After the Operation is
@@ -1159,7 +1159,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 // buildUserTokensHandler wires the UserTokenService handler — персональные
 // access-токены пользователя (поток private_key_jwt к НАШЕМУ издателю).
 //
-// Клиента у внешнего поставщика этот контур не заводит и не снимает (#1121),
+// Клиента у внешнего поставщика этот контур не заводит и не снимает (kacho#1121),
 // поэтому ни клиента администрирования поставщика, ни приёмника компенсирующих
 // намерений здесь нет: компенсировать нечего — единственный след выдачи это своя
 // строка, и она либо закоммичена, либо откачена.
@@ -1243,7 +1243,7 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 	// публичной службы и решателем встаёт декоратор, считающий вопросы края и
 	// вопросы сужателя списочной выдачи. До него счётчик владельца прав видел
 	// одну полосу из трёх, и всякое «проверок в секунду», снятое с него, было
-	// занижено — на пути чтения по идентификатору ровно вдвое (задача #772).
+	// занижено — на пути чтения по идентификатору ровно вдвое (задача kacho#772).
 	//
 	// nil-реестр даёт неинструментированный решатель — ровно как у соседней
 	// полосы `CheckRelation` выше по файлу.

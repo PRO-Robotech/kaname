@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// sweeper_test.go — перепись прогона и разъезд реплик (задача #1264).
+// sweeper_test.go — перепись прогона и разъезд реплик (задача kacho#1264).
 
 package expiredcredsweep_test
 

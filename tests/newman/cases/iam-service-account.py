@@ -240,7 +240,7 @@ CASES.append(Case(
             ],
         ),
         # Текст владельца ЦЕЛИКОМ: «already exists» несут пять разных отказов iam,
-        # и утверждение об общей части проходило на отказе о ЧУЖОМ ресурсе (#1748).
+        # и утверждение об общей части проходило на отказе о ЧУЖОМ ресурсе (kacho#1748).
         assert_op_error(6, "ALREADY_EXISTS",
                         msg_text="ServiceAccount with name sva-{{runId}} already exists"),
     ],

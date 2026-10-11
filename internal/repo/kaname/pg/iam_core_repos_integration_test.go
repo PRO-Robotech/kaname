@@ -389,7 +389,7 @@ func TestIamExtRepos_6_6_6_SAOAuth_Insert_Happy(t *testing.T) {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
 	out, err := repo.Insert(ctx, tx, domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
@@ -420,7 +420,7 @@ func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateID_Unique(t *testing.T) {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
 	_, err := repo.Insert(ctx, tx, domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              id,
@@ -452,7 +452,7 @@ func TestIamExtRepos_6_6_7b_SAOAuth_MissingSva_FK(t *testing.T) {
 	repo := kanamepg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
 	_, err := repo.Insert(ctx, tx, domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),

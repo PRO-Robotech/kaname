@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ledger_read_cost_injection_test.go — доказательство, что пробы соседа
-// СПОСОБНЫ упасть (#2001).
+// СПОСОБНЫ упасть (kacho#2001).
 //
 // # Зачем отдельный файл, а не «и так видно»
 //

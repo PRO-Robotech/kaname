@@ -130,7 +130,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetServiceAccountRequest) 
 // ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
 // того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListServiceAccountsRequest) (*iamv1.ListServiceAccountsResponse, error) {
-	// Форма токена этого списка — граница ВИДИМОЙ последовательности (#645), а не
+	// Форма токена этого списка — граница ВИДИМОЙ последовательности (kacho#645), а не
 	// сырой страницы, поэтому и на границе транспорта судится она.
 	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err

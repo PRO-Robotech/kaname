@@ -23,7 +23,7 @@ type basicCredentialResolver interface {
 	ResolveBasic(ctx context.Context, presented string) (domain.BasicCredential, error)
 	TouchLastUsed(ctx context.Context, credentialID string, throttle time.Duration) error
 	// CheckBasicLive — тот же предикат живости, спрошенный по идентификатору,
-	// без предъявления секрета (#1450). Порт ОДИН на оба вопроса намеренно:
+	// без предъявления секрета (kacho#1450). Порт ОДИН на оба вопроса намеренно:
 	// второй порт об одном предмете дал бы возможность провязать один вопрос и
 	// не провязать другой — молча и ровно на том стенде, где это заметить
 	// некому.

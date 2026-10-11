@@ -178,7 +178,7 @@ func TestMODMF21StructSideFieldPathsAreDerivedNotWritten(t *testing.T) {
 		"seed.accessBindings[].subjects[].type",
 		"seed.joins[].serviceAccount.name",
 		"seed.joins[].why",
-		// Три раздела #1778: список ресурсов, обе формы глагола и КАРТА
+		// Три раздела kacho#1778: список ресурсов, обе формы глагола и КАРТА
 		// устаревших глаголов — форма, которой обход не знал до неё.
 		"resources[].verbs[].class",
 		"resources[].relations[].definition",

@@ -78,7 +78,7 @@ type pageCostRoleRelations struct {
 	granted map[string]bool // "<relation>|<object>"
 
 	// objectCalls counts questions about a ROW being read. subjectCalls counts the
-	// one asked about the CALLER ("is he a cloud administrator", #645).
+	// one asked about the CALLER ("is he a cloud administrator", kacho#645).
 	//
 	// They are counted apart because they scale differently and mixing them loses
 	// both statements: the per-row number must not follow the population, the

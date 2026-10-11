@@ -36,7 +36,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// evtIDFormat — the audit_outbox_id_check shape (bug #126 regression-guard:
+// evtIDFormat — the audit_outbox_id_check shape (bug kacho-iam#126 regression-guard:
 // 22-char body, NOT the 17-char NewKac127ID).
 var evtIDFormat = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)
 

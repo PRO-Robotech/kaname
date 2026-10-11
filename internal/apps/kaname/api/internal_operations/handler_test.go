@@ -147,7 +147,7 @@ func TestListIamOperations_NilChecker_FailClosed(t *testing.T) {
 }
 
 // TestListIamOperations_CheckerError_RefusesWithUnavailable — the model could not
-// be asked: the feed is refused, and the code says so (issue #497).
+// be asked: the feed is refused, and the code says so (issue kacho#497).
 //
 // It matters most on exactly this RPC: an operator reads this feed DURING an
 // incident, and PermissionDenied would tell them their admin grant is gone at the

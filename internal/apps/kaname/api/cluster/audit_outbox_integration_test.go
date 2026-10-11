@@ -159,7 +159,7 @@ func TestClusterAudit_5_2_01_GrantAdminEmits(t *testing.T) {
 		"actor must be the verified caller principal (not from body)")
 	require.Equal(t, string(target), r.payload["subject_id"])
 	require.Equal(t, "pending", r.status, "fresh audit row starts pending for the drainer")
-	require.Regexp(t, evtIDFormat, r.id, "audit id must match the 22-char evt_ format (bug #126 guard)")
+	require.Regexp(t, evtIDFormat, r.id, "audit id must match the 22-char evt_ format (bug kacho-iam#126 guard)")
 	require.NotEmpty(t, r.payload["resource_id"], "resourceId = id of the cluster_admin_grant")
 }
 

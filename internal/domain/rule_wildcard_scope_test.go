@@ -3,7 +3,7 @@
 
 package domain
 
-// rule_wildcard_scope_test.go — RBAC explicit-model 2026 / issue #224.
+// rule_wildcard_scope_test.go — RBAC explicit-model 2026 / issue kacho-iam#224.
 //
 // Owner role `*.*.*` bound at a BOUNDED scope (ACCOUNT/PROJECT) MUST forward-
 // materialize per-object CONTENT: the wildcard rule expands to the full closed set
@@ -13,7 +13,7 @@ package domain
 // is the D-9 cluster super-admin short-circuit (one flat cluster relation).
 //
 // Acceptance: D-3 (bounded vs GLOBAL `*.*.*`), D-8a/C-01b (owner content forward),
-// D-9 (cluster short-circuit). This is the domain-layer locus of the #224 fix:
+// D-9 (cluster short-circuit). This is the domain-layer locus of the kacho-iam#224 fix:
 // dottedTypes previously dropped wildcard for ALL scopes, yielding 0 content.
 
 import (
@@ -53,7 +53,7 @@ func TestAllMaterializableTypes_CoversMirrorAndIAMDirect(t *testing.T) {
 	}
 }
 
-// TestMaterializingSelectorsInScope_WildcardBounded_ExpandsToAllTypes — issue #224
+// TestMaterializingSelectorsInScope_WildcardBounded_ExpandsToAllTypes — issue kacho-iam#224
 // core: a wildcard rule @ ACCOUNT scope expands to ALL materializable types as one
 // ARM_ANCHOR selector (per-object content materialization), NOT empty.
 func TestMaterializingSelectorsInScope_WildcardBounded_ExpandsToAllTypes(t *testing.T) {
@@ -65,7 +65,7 @@ func TestMaterializingSelectorsInScope_WildcardBounded_ExpandsToAllTypes(t *test
 		sel := sels[0]
 		assert.Equal(t, ArmAnchor, sel.Arm, "wildcard `all` selector is ARM_ANCHOR")
 		assert.NotEmpty(t, sel.ObjectTypes,
-			"scope %s: wildcard MUST expand to per-object content types (issue #224)", scope)
+			"scope %s: wildcard MUST expand to per-object content types (issue kacho-iam#224)", scope)
 		assert.ElementsMatch(t, AllMaterializableTypes(), sel.ObjectTypes,
 			"scope %s: wildcard expands to the full materializable type set", scope)
 		assert.ElementsMatch(t, []string{wildcard}, sel.Verbs, "verbs carried through")

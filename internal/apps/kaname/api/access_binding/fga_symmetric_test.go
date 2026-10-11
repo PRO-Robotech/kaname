@@ -293,7 +293,7 @@ type abFakeRepo struct {
 	// seedABListByAccount; used by ListByAccountUseCase unit tests.
 	lbaRows []domain.AccessBinding
 	// lbrRows — фикстурные строки ListByRole. Засевается seedABListByRole;
-	// используется пробами стоимости страницы (#2054). Пусто ⇒ читается
+	// используется пробами стоимости страницы (kacho#2054). Пусто ⇒ читается
 	// одиночная `ab`, как было, поэтому существующие пробы не задеты.
 	lbrRows []domain.AccessBinding
 	// lbsRows — fixture rows returned by ListByScope. Seed via seedABListByScope;
@@ -301,7 +301,7 @@ type abFakeRepo struct {
 	// the unified List fake.
 	lbsRows []domain.AccessBinding
 	// lbsubRows — фикстурные строки чтения ListBySubject. Засеваются
-	// seedABListBySubject. До #1352 это чтение отдавало пустоту всегда, и дублёр
+	// seedABListBySubject. До kacho#1352 это чтение отдавало пустоту всегда, и дублёр
 	// отвечал тем же — на пустом ответе сужение утверждать нечем: «чужого нет»
 	// зеленело бы на полностью сломанной полосе.
 	lbsubRows []domain.AccessBinding
@@ -349,7 +349,7 @@ type abFakeRepo struct {
 	// membersOfGroupsErr — отказ чтения состава групп. Ручка нужна, потому что
 	// «полнота перечисления» держится ТОЛЬКО тем, что отказ соседа отказывает
 	// запросу: проглоченный отказ даёт тихо усечённый ответ, неотличимый от
-	// честного «в группах никого» (#914).
+	// честного «в группах никого» (kacho#914).
 	membersOfGroupsErr error
 	// groupsReaderNil — непровязанный читатель групп. Отдельная полоса от
 	// отказа: «мне нечем ответить» и «ответ пуст» — разные факты, и второй не
@@ -1213,7 +1213,7 @@ func (r *abFakeWriter) Visibility() visibility.ReaderIface { return nil }
 // MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
 // пробы другой, и подставной ответ был бы утверждением, которого никто не
 // делал. Единственный прод-вызывающий — разрешение осиротевшей операции
-// исключения из аккаунта (#1127).
+// исключения из аккаунта (kacho#1127).
 func (*fakeUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

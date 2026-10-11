@@ -115,7 +115,7 @@ func TestTrustedSubject_Validate(t *testing.T) {
 			in:      TrustedSubject{PublicKeyPEM: testSPKI, KeyAlgorithm: "ES256", Issuer: "https://x.example", SubjectPattern: ".*"},
 			wantErr: "literal anchored subject",
 		},
-		// Ключевой материал ИЗДАТЕЛЯ — с задачи #1124. Пустой ключ означал бы
+		// Ключевой материал ИЗДАТЕЛЯ — с задачи kacho#1124. Пустой ключ означал бы
 		// «доверяем паре без проверки подписи», то есть ровно тот класс, ради
 		// которого перечень и заводится.
 		{
@@ -191,7 +191,7 @@ func TestSAOAuthClient_Validate_FederatedVsPrivateKey(t *testing.T) {
 		SvaID:           "sva_01",
 		CreatedByUserID: "usr_01",
 		// Имя названо явно, потому что предмет этой пробы — вид удостоверения,
-		// а не имя: строка без имени отвергалась бы формой (#1279), и
+		// а не имя: строка без имени отвергалась бы формой (kacho#1279), и
 		// положительный контроль ниже падал бы по чужой причине.
 		Name: "federated-key",
 	}

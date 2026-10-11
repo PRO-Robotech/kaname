@@ -205,7 +205,7 @@ func replaceRoleVerbsInOwnTx(
 // на том же соединении, что и запись, нельзя.
 func listMaterializingSystemRoles(ctx context.Context, pool *pgxpool.Pool) ([]systemRoleRules, error) {
 	rows, err := pool.Query(ctx,
-		// Снятая роль ПРОПУСКАЕТСЯ, а не отвергается ключом (#1913).
+		// Снятая роль ПРОПУСКАЕТСЯ, а не отвергается ключом (kacho#1913).
 		//
 		// Отзыв есть ПОМЕТКА: `is_system` и `rules` у снятой роли остаются
 		// прежними навсегда, поэтому предикат без живости достаёт её всякий раз.

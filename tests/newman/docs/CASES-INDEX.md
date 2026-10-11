@@ -389,20 +389,20 @@
 
 ## `cases/basic-access-token.py` — 2 кейсов
 
-> Case-set basic-access-token — БАЗОВЫЙ ТОКЕН ДОСТУПА (задача #1142).
+> Case-set basic-access-token — БАЗОВЫЙ ТОКЕН ДОСТУПА (задача kacho#1142).
 
 - `IAM-BAT-SECRET-LIFECYCLE-OK`
 - `IAM-BAT-SECRET-TTL-ABOVE-CEILING-NEG`
 
 ## `cases/docker-lane-credential-kind.py` — 1 кейсов
 
-> Case-set docker-lane-credential-kind — ДОКЕР-ПОЛОСА ПРИНИМАЕТ ОДИН ВИД (#1143).
+> Case-set docker-lane-credential-kind — ДОКЕР-ПОЛОСА ПРИНИМАЕТ ОДИН ВИД (kacho#1143).
 
 - `IAM-DOCKER-LANE-BASIC-TOKEN-ONLY`
 
 ## `cases/iam-access-binding-account-scope.py` — 9 кейсов
 
-> Case-set: «выдачи субъекта в названном аккаунте» одним вызовом (задача #1737).
+> Case-set: «выдачи субъекта в названном аккаунте» одним вызовом (задача kacho#1737).
 
 - `IAM-AB-SIA-01-FANOUT-OK`
 - `IAM-AB-SIA-06-DISCRIMINATING-OK`
@@ -602,7 +602,7 @@
 
 ## `cases/iam-list-visibility.py` — 3 кейсов
 
-> Case-set iam-list-visibility — страница списка есть страница ВИДИМОГО (задача #645).
+> Case-set iam-list-visibility — страница списка есть страница ВИДИМОГО (задача kacho#645).
 
 - `IAM-645-LIST-VISIBLE-PAGE-PROJECTS`
 - `IAM-645-LIST-VISIBLE-PAGE-ACCOUNTS`
@@ -824,7 +824,7 @@
 
 ## `cases/iam-subject-privileges-read.py` — 6 кейсов
 
-> Case-set чтения ПРИВИЛЕГИЙ названного субъекта чёрным ящиком (задача #1438).
+> Case-set чтения ПРИВИЛЕГИЙ названного субъекта чёрным ящиком (задача kacho#1438).
 
 - `IAM-ACB-LSP-SELF-OK`
 - `IAM-ACB-LSP-ADMIN-NARROWED`

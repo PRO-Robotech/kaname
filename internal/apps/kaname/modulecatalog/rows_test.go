@@ -268,7 +268,7 @@ func TestEmptyNamesAreRefused(t *testing.T) {
 // (`catalog_resource_object_type_form`), то есть отказ пришёл бы ЧУЖОЙ полосой —
 // фразой Postgres про имя ограничения, — и автор манифеста искал бы дефект в
 // базе, а не в своём файле. Хуже того, до заведения колонки такой ресурс
-// записывался БЕЗ отказа и молча не давал ни одной пары проекции (#1816).
+// записывался БЕЗ отказа и молча не давал ни одной пары проекции (kacho#1816).
 func TestResourceWithoutObjectTypeIsRefused(t *testing.T) {
 	_, err := modulecatalog.RowsOf(&manifest.Manifest{
 		APIVersion: "iam/v1", Module: "vpc",

@@ -4,11 +4,11 @@
 // role_iam_user_edit_retired_integration_test.go — роль `iam.user.edit` выведена
 // из обращения, и её соседи по каталогу — НЕТ.
 //
-// # Предмет (#1128)
+// # Предмет (kacho#1128)
 //
 // Роль объявляла один глагол — `update` на `iam.user`. Тем же изменением этот
 // глагол снят с типа `iam_user`: правку содержимого строки личности спрашивает
-// `record_writer`, запрет и его снятие — `identity_suspender` (#1102), и читателя
+// `record_writer`, запрет и его снятие — `identity_suspender` (kacho#1102), и читателя
 // у глагола не осталось ни одного.
 //
 // После снятия роль не даёт НИЧЕГО: набор глаголов правила сверяется с набором
@@ -24,7 +24,7 @@
 //
 // Здесь стояла ВТОРАЯ соседка — `iam.user.admin`, «подстановка разворачивается в
 // набор типа, поэтому роль продолжает давать всё, что тип объявляет». Довод был
-// верен и перестал им быть: снятие `v_delete` (#1189) оставило типу только чтение,
+// верен и перестал им быть: снятие `v_delete` (kacho#1189) оставило типу только чтение,
 // роль стала дубликатом `view` под именем, обещающим администрирование, и выведена
 // из обращения той же работой. Контроль перепривязан к пережившей роли — привязка
 // к снимаемому предмету истекает вместе с ним.
@@ -90,7 +90,7 @@ func TestRoleIamUserEdit_RetiredWhileItsNeighboursRemain(t *testing.T) {
 		id := scalarString(t, ctx, pool, `'rol' || substr(md5('`+n.name+`'), 1, 17)`)
 		require.Equalf(t, 1, scalarInt(t, ctx, pool,
 			`SELECT count(*) FROM kaname.roles WHERE id = $1`, id),
-			"роль %s исчезла — снято больше, чем предмет #1128 (%s)", n.name, n.why)
+			"роль %s исчезла — снято больше, чем предмет kacho#1128 (%s)", n.name, n.why)
 		require.Positivef(t, scalarInt(t, ctx, pool,
 			`SELECT count(*) FROM kaname.role_verb WHERE role_id = $1`, id),
 			"роль %s не даёт ни одного глагола — она осталась строкой, но перестала быть правом (%s)",
@@ -103,7 +103,7 @@ func TestRoleIamUserEdit_RetiredWhileItsNeighboursRemain(t *testing.T) {
 	require.Positive(t, scalarInt(t, ctx, pool,
 		`SELECT count(*) FROM kaname.role_verb WHERE verb = 'update' AND object_type <> 'iam.user'`),
 		"глагол `update` не встречается в проекции НИ У ОДНОГО типа — сужение задело не только "+
-			"iam.user, и это уже не предмет #1128")
+			"iam.user, и это уже не предмет kacho#1128")
 	require.Zero(t, scalarInt(t, ctx, pool,
 		`SELECT count(*) FROM kaname.role_verb WHERE verb = 'update' AND object_type = 'iam.user'`),
 		"проекция всё ещё даёт `update` на iam.user — глагол снят с типа, значит правило, "+

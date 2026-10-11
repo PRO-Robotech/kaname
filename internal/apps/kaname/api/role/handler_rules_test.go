@@ -79,18 +79,18 @@ func TestRoleHandler_RulesFromProto(t *testing.T) {
 	}
 }
 
-// #184: List with page_size > 1000 → sync INVALID_ARGUMENT (no silent clamp).
+// kacho-iam#184: List with page_size > 1000 → sync INVALID_ARGUMENT (no silent clamp).
 // The reject is the first statement (validate.PageSize) so a nil use-case is safe.
 func TestRoleHandler_184_ListRejectsPageSizeOverMax(t *testing.T) {
 	h := &Handler{} // list use-case nil — reject must precede the use-case
 	_, err := h.List(context.Background(), &iamv1.ListRolesRequest{PageSize: 1001})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.InvalidArgument {
-		t.Fatalf("List(page_size=1001) code = %v, want InvalidArgument (#184, no silent clamp)", st.Code())
+		t.Fatalf("List(page_size=1001) code = %v, want InvalidArgument (kacho-iam#184, no silent clamp)", st.Code())
 	}
 }
 
-// #184: page_size == 0 is allowed (default applied downstream) and page_size <= 1000
+// kacho-iam#184: page_size == 0 is allowed (default applied downstream) and page_size <= 1000
 // passes the validate gate (reaching the use-case). With a nil use-case the call
 // would panic if it got past the gate, so we only assert that page_size=0 / 1000 do
 // NOT produce an InvalidArgument from the page_size validation itself.
@@ -101,11 +101,11 @@ func TestRoleHandler_184_ListAcceptsPageSizeAtBoundary(t *testing.T) {
 	_, err := h.List(ctxUser("usr-u1"), &iamv1.ListRolesRequest{PageSize: 1000})
 	st, _ := status.FromError(err)
 	if st.Code() == codes.InvalidArgument {
-		t.Fatalf("List(page_size=1000) must NOT be InvalidArgument (#184 boundary); got %v", st.Code())
+		t.Fatalf("List(page_size=1000) must NOT be InvalidArgument (kacho-iam#184 boundary); got %v", st.Code())
 	}
 }
 
-// #185: List handler maps req.AccountId into the use-case filter (scope). We verify
+// kacho-iam#185: List handler maps req.AccountId into the use-case filter (scope). We verify
 // via a fake use-case repo that the AccountID reaches the repo ListFilter.
 func TestRoleHandler_185_ListPassesAccountIdToFilter(t *testing.T) {
 	repo := newRoleListFakeRepo()
@@ -123,6 +123,6 @@ func TestRoleHandler_185_ListPassesAccountIdToFilter(t *testing.T) {
 		t.Fatalf("List err = %v", err)
 	}
 	if got := string(repo.lastFilter.AccountID); got != "acc0000000000000acca" {
-		t.Fatalf("AccountID not passed to filter: got %q want acc...acca (#185)", got)
+		t.Fatalf("AccountID not passed to filter: got %q want acc...acca (kacho-iam#185)", got)
 	}
 }

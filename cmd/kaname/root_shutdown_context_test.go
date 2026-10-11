@@ -293,7 +293,7 @@ func adjudicate(sites []bgSite, ledger map[string]bgExemption, c *rootCtxCensus)
 	return findings, stale
 }
 
-// TestIAM2465_NoRootTaskRunsOnANonCancellableContext — гейт задачи #2465.
+// TestIAM2465_NoRootTaskRunsOnANonCancellableContext — гейт задачи kacho#2465.
 func TestIAM2465_NoRootTaskRunsOnANonCancellableContext(t *testing.T) {
 	root := iamServiceRoot(t)
 

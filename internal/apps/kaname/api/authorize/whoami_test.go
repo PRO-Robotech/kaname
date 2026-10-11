@@ -497,7 +497,7 @@ func (r *fakeWhoAmIReader) Visibility() visibility.ReaderIface { return nil }
 // MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
 // пробы другой, и подставной ответ был бы утверждением, которого никто не
 // делал. Единственный прод-вызывающий — разрешение осиротевшей операции
-// исключения из аккаунта (#1127).
+// исключения из аккаунта (kacho#1127).
 func (*fakeUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

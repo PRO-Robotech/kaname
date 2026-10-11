@@ -8,7 +8,7 @@
 //     полосы.
 //
 //   - SAClientLookupAdapter — обратный резолв ключа служебной учётки по
-//     client_id. Живёт ТОЛЬКО ради окна перехода #1143: полоса предъявленного
+//     client_id. Живёт ТОЛЬКО ради окна перехода kacho#1143: полоса предъявленного
 //     удостоверения принимает базовый токен доступа, а ключевой материал — лишь
 //     пока оператор держит окно открытым. Предикат снятия — снятие ручки
 //     `api-server.registry-token.key-material-window-until`.
@@ -72,7 +72,7 @@ func (a *SAClientLookupAdapter) KeyByClientID(ctx context.Context, clientID stri
 		KeyAlgorithm:   row.KeyAlgorithm,
 		ExpiresAt:      row.ExpiresAt,
 		SubjectEnabled: sa.MayAuthenticate(),
-		// Сужение адресатов, объявленное при выдаче ключа (#1136). Читается ЗДЕСЬ
+		// Сужение адресатов, объявленное при выдаче ключа (kacho#1136). Читается ЗДЕСЬ
 		// и уезжает в выдачу: колонка, которую пишут и не читают, невидима
 		// отовсюду — её нет ни в ответе, ни в решении.
 		DeclaredAudiences: row.DeclaredAudiences,

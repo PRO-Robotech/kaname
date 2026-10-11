@@ -8,7 +8,7 @@ IAM-сервис Kachō: control-plane для identity & access. Управля�
   + internal `Check` (authz-gate, который зовут остальные сервисы). Вердикт
   вычисляется **в той же базе**, что и остальное состояние службы
   (`internal/authzcascade` поверх `repo/kaname/pg/relverdict`); внешнего движка
-  отношений в пути решения нет — он снят целиком стадией S6 эпика #747, и его
+  отношений в пути решения нет — он снят целиком стадией S6 эпика kacho#747, и его
   возвращение стережёт гейт `internal/repohygiene/authzengineretired.go`. Гранты
   `AccessBinding` кладутся строками журнала намерений (`kaname.fga_outbox`)
   тем же writer-tx, что меняет выдачу, — журнал остался, снят его прежний

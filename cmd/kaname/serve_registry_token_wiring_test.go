@@ -42,7 +42,7 @@ func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 	if got := tok.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
 		t.Errorf("TokenIssuer() = %q, want https://api.kacho.local/iam/token", got)
 	}
-	// АДРЕСАТ УМОЛЧАНИЯ НЕ ИМЕЕТ (задача #1184): имя службы реестра объявляет
+	// АДРЕСАТ УМОЛЧАНИЯ НЕ ИМЕЕТ (задача kacho#1184): имя службы реестра объявляет
 	// посадка ОДИН раз на обе стороны полосы (`global.kacho.registry.serviceAud`),
 	// и здесь оно не задано. Прежде проба закрепляла встроенное умолчание — то
 	// самое второе объявление предмета, которое молча расходилось с именем,

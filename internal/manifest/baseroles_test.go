@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // baseroles_test.go — два признака раздела `resources`, которых требует приёмка
-// `#1090` (задача PRO-Robotech/kacho#1843): `baseRoles` у ресурса (§3.3) и
+// `kacho#1090` (задача PRO-Robotech/kacho#1843): `baseRoles` у ресурса (§3.3) и
 // `internal` у действия (§3.8).
 //
 // # Почему признаки заводятся ВМЕСТЕ и проверяются здесь ОДНОЙ пробой

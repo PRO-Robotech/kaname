@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // shows_the_live_catalog_test.go — витрина разрешений отвечает СТРОКАМИ каталога,
-// а не перечнем, порождённым сборкой (#1976, #1816).
+// а не перечнем, порождённым сборкой (kacho#1976, kacho#1816).
 //
 // # Предмет
 //
@@ -10,7 +10,7 @@
 // и базы не спрашивала. Строки каталога расходятся с этой таблицей В ОБЕ стороны,
 // и обе половины наблюдаемы арендатору:
 //
-//	СНЯТИЕ    строка снята (#1861), перечень сборки её по-прежнему называет →
+//	СНЯТИЕ    строка снята (kacho#1861), перечень сборки её по-прежнему называет →
 //	          витрина предлагает тип, на который выдача отвергается ключом
 //	          (`role_rule_ref_res_fk` / `role_verb_type_fk`);
 //	ЗАВЕДЕНИЕ тип заведён применением манифеста в РАБОТАЮЩЕМ процессе, сборка о
@@ -106,11 +106,11 @@ func TestCatalogOffersExactlyTheLiveRows(t *testing.T) {
 	want := []string{"billing.invoice", "vpc.network"}
 	if len(got) != len(want) {
 		t.Fatalf("витрина назвала %d пар, живых строк %d: %v\n"+
-			"перечень витрины обязан РАВНЯТЬСЯ живым строкам каталога (#1976)", len(got), len(want), got)
+			"перечень витрины обязан РАВНЯТЬСЯ живым строкам каталога (kacho#1976)", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("витрина назвала %v, живые строки называют %v (#1976)", got, want)
+			t.Fatalf("витрина назвала %v, живые строки называют %v (kacho#1976)", got, want)
 		}
 	}
 }
@@ -133,20 +133,20 @@ func TestCatalogVerbsComeFromTheLiveRow(t *testing.T) {
 	} {
 		r, ok := pairs[tc.dotted]
 		if !ok {
-			t.Fatalf("витрина не назвала пару %q, объявленную живой строкой (#1976)", tc.dotted)
+			t.Fatalf("витрина не назвала пару %q, объявленную живой строкой (kacho#1976)", tc.dotted)
 		}
 		got := append([]string(nil), r.GetVerbs()...)
 		sort.Strings(got)
 		if len(got) != len(tc.want) {
-			t.Fatalf("%s: витрина назвала глаголы %v, живая строка объявляет %v (#1976)", tc.dotted, got, tc.want)
+			t.Fatalf("%s: витрина назвала глаголы %v, живая строка объявляет %v (kacho#1976)", tc.dotted, got, tc.want)
 		}
 		for i := range tc.want {
 			if got[i] != tc.want[i] {
-				t.Fatalf("%s: витрина назвала глаголы %v, живая строка объявляет %v (#1976)", tc.dotted, got, tc.want)
+				t.Fatalf("%s: витрина назвала глаголы %v, живая строка объявляет %v (kacho#1976)", tc.dotted, got, tc.want)
 			}
 		}
 		if !r.GetHasVerbRelations() {
-			t.Fatalf("%s: живая строка объявляет глаголы, витрина говорит, что отношений действия нет (#1976)", tc.dotted)
+			t.Fatalf("%s: живая строка объявляет глаголы, витрина говорит, что отношений действия нет (kacho#1976)", tc.dotted)
 		}
 	}
 }
@@ -165,11 +165,11 @@ func TestCatalogCommonVerbsAreTheIntersectionOfLiveRows(t *testing.T) {
 	// поэтому ответ витрины различает два источника, а не совпадает с обоими.
 	want := []string{"get", "list", "update"}
 	if len(got) != len(want) {
-		t.Fatalf("общий набор витрины %v, пересечение живых строк %v (#1976)", got, want)
+		t.Fatalf("общий набор витрины %v, пересечение живых строк %v (kacho#1976)", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("общий набор витрины %v, пересечение живых строк %v (#1976)", got, want)
+			t.Fatalf("общий набор витрины %v, пересечение живых строк %v (kacho#1976)", got, want)
 		}
 	}
 }

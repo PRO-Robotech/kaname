@@ -10,14 +10,14 @@ package user
 //	visible(id) = Check(subj,"viewer","iam_user:"+id)
 //	            ∨ Check(subj,"v_list","iam_user:"+id)
 //
-// спрашиваемых для КАНДИДАТОВ, отобранных сужённо (задача #645, см. ниже).
+// спрашиваемых для КАНДИДАТОВ, отобранных сужённо (задача kacho#645, см. ниже).
 // Перечисление у МОДЕЛИ («перечислить всё видимое и пересечь») остаётся
 // запрещённым. У прежнего движка оно молча резалось серверным пределом без
 // продолжения; движка нет, а запрет остаётся по существу — вопрос «перечисли
 // всё видимое» неограничен по построению, и ответ на него страницей не является
 // (см. internal/authzfilter).
 //
-// # Страница этого списка — страница ВИДИМОГО (задача #645)
+// # Страница этого списка — страница ВИДИМОГО (задача kacho#645)
 //
 // Прежде страница бралась окном по всей таблице, и видимое вычиталось после.
 // Такой порядок теряет всякую строку, перед которой по времени создания лежит
@@ -74,7 +74,7 @@ type ListUsersUseCase struct {
 	// iam_user. При nil use-case fail-closed (никогда unfiltered).
 	relationQueries clients.RelationQueries
 
-	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// listScan — узкий порт наблюдаемости стоимости страницы (kacho#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
 }
@@ -84,7 +84,7 @@ func NewListUsersUseCase(r Repo) *ListUsersUseCase {
 }
 
 // WithRelationStore wires the FGA ListObjects client (паритет с account/SA/role List).
-// WithListScanRecorder провязывает съём стоимости страницы (#653).
+// WithListScanRecorder провязывает съём стоимости страницы (kacho#653).
 func (uc *ListUsersUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListUsersUseCase {
 	uc.listScan = rec
 	return uc
@@ -197,7 +197,7 @@ func (uc *ListUsersUseCase) subjectScope(
 // Прежде она была — параметром `unfiltered` под системный бутстрап, — и не
 // исполнялась НИ ПРИ КАКОМ входе: замыкание по личности выше по Execute относит
 // бутстрап к анонимным (authzguard.IsAnonymous). Ветка снята вместе с параметром
-// (#648); несужённая страница администратору облака остаётся достижимой, но по
+// (kacho#648); несужённая страница администратору облака остаётся достижимой, но по
 // структурному пути — scope.Unrestricted из subjectScope.
 func (uc *ListUsersUseCase) collectVisiblePage(
 	ctx context.Context, rd kanamerepo.Reader, subject, self string,

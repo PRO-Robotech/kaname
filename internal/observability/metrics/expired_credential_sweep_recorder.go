@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expired_credential_sweep_recorder.go — величины ВТОРОГО уборщика по сроку
-// (задача продукта #2499).
+// (задача продукта kacho#2499).
 //
 // # Почему полосы двух уборщиков обязаны совпасть
 //
