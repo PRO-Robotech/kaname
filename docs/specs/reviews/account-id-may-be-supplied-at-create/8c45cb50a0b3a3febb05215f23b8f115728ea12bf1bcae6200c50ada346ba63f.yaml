@@ -63,3 +63,23 @@ non_blocking:
       стоит перенести оговорку в само предложение, чтобы тело не читалось без сноски как ложь.
 
 event_body: acceptance-reviewer · APPROVED · sha256 8c45cb50a0b3a3febb05215f23b8f115728ea12bf1bcae6200c50ada346ba63f
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  policy_revision: 8f0cb36f0
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256) в задаче subject.task.
+    До его публикации запись санкцию не утверждает.
