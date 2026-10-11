@@ -256,6 +256,69 @@ def test_seed_tells_the_stand_ceiling_from_the_profile():
         assert label in out, f"самопроверка посева не различает исход «{label}»"
 
 
+
+# ── адрес шага собирается ДО предусловия шага (kaname#699, прогон на стенде) ──
+#
+# Шаг собственного фронта службы получает адрес строкой оснастки
+# `pm.request.url = <фронт> + pm.variables.replaceIn('<путь>')` — первой в
+# предусловии, раньше предусловия самого шага. Переменная пути, которую шаг
+# назначает СВОИМ предусловием, подставляется поэтому ПРОШЛОЙ величиной: при
+# повторе шага (`setNextRequest`) запрос уходит по адресу прошлого захода. Так
+# уборка человека A на стенде снимала один и тот же ключ дважды (второй — 404) и
+# оставляла пять ключей. Переменную пути назначает шаг ВЫШЕ — своим утверждением.
+
+_URL_REWRITE = re.compile(r"pm\.request\.url = .*pm\.variables\.replaceIn\('([^']*)'\)")
+_ENV_SET = re.compile(r"pm\.environment\.set\('([A-Za-z0-9_]+)'")
+
+
+def _prerequest_items(node, out=None) -> list[tuple[str, list[str]]]:
+    out = [] if out is None else out
+    for child in node.get("item", []) or []:
+        if "request" in child:
+            lines: list[str] = []
+            for ev in child.get("event", []) or []:
+                if ev.get("listen") == "prerequest":
+                    lines.extend((ev.get("script") or {}).get("exec", []) or [])
+            out.append((child.get("name", ""), lines))
+        else:
+            _prerequest_items(child, out)
+    return out
+
+
+def path_vars_set_after_the_url_is_built(items: list[tuple[str, list[str]]]) -> list[str]:
+    """Шаги, чьё предусловие назначает переменную пути ПОСЛЕ сборки адреса."""
+    found = []
+    for name, lines in items:
+        built = [(i, m.group(1)) for i, ln in enumerate(lines) if (m := _URL_REWRITE.search(ln))]
+        if not built:
+            continue
+        at, path = built[0]
+        late = {v for ln in lines[at + 1:] for v in _ENV_SET.findall(ln) if "{{" + v + "}}" in path}
+        found.extend(f"{name} ← {v}" for v in sorted(late))
+    return found
+
+
+def test_no_step_sets_its_own_path_variable_after_the_url_is_built():
+    items = _prerequest_items(json.loads(COLLECTION.read_text(encoding="utf-8")))
+    built = [n for n, lines in items if any(_URL_REWRITE.search(ln) for ln in lines)]
+    late = path_vars_set_after_the_url_is_built(items)
+    print(f"шагов осмотрено: {len(items)}; с адресом от оснастки: {len(built)}; "
+          f"переменная пути назначена после сборки адреса: {len(late)}")
+    assert built, "ни у одного шага не узнана сборка адреса оснасткой — обход пуст, вердикта нет"
+    assert not late, ("шаг назначает переменную своего пути после того, как оснастка собрала адрес — "
+                      f"при повторе запрос уйдёт по прошлой величине: {late}")
+
+
+def test_injection_late_path_variable_is_found_and_step_above_is_silent():
+    rewrite = "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/users/{{u}}/accessKeys/{{k}}');"
+    late = [("C :: drop-next", [rewrite, "pm.environment.set('k', JSON.parse(q)[0]);"])]
+    lawful = [("C :: drop-next", [rewrite, "pm.environment.set('other', '1');"]),
+              ("C :: drop-next-op", ["pm.environment.set('k', JSON.parse(q)[0]);"]),
+              ("C :: drop-before", ["pm.environment.set('k', '1');", rewrite])]
+    assert path_vars_set_after_the_url_is_built(late) == ["C :: drop-next ← k"], "поздняя переменная пути не найдена"
+    assert path_vars_set_after_the_url_is_built(lawful) == [], (
+        "законные формы (чужая переменная, назначение шагом выше либо до сборки адреса) приняты за находку")
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

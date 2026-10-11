@@ -1642,22 +1642,28 @@ def _not_found_same_form(label, sent_id_expr, *, record=False):
 # Уборка человека A: K1 — своим шагом; ключи заполнения (кроме снятого кейсом
 # потолка) и K37b — одним снятием, повторяемым по очереди `akCleanAQueue`. Очередь
 # не пуста при любом потолке: в ней всегда K37b.
-_CLEAN_Q, _CLEAN_ID, _CLEAN_RUN = "akCleanAQueue", "akCleanAId", "akCleanARun"
+#
+# Ключ, который снимает очередной заход, назначает шаг ВЫШЕ своим утверждением —
+# опрос снятия K1 (голова очереди) и опрос предыдущего снятия (следующая голова).
+# Своим предусловием шаг снятия его не назначает: адрес шага собирает оснастка
+# первой строкой предусловия, и назначенное ниже подставилось бы при повторе
+# прошлой величиной (держит `access_keys_stand_binding_test.py`).
+_CLEAN_Q, _CLEAN_ID = "akCleanAQueue", "akCleanAId"
 
 
-def _clean_a_pick():
-    """Очередь собирается один раз на прогон; шаг снимает её голову."""
+def _clean_a_queue():
+    """Очередь уборки и её голова — после снятия K1, один раз на прогон."""
     return [
-        f"if ({_env(_CLEAN_RUN)} !== {_env('runId')}) {{",
-        f"  const _akQ = JSON.parse({_env(_FILL_IDS)} || '[]').filter((id) => id !== {_env(_FILL_LAST)});",
-        f"  if ({_env('akK37bKeyId')}) {{ _akQ.push({_env('akK37bKeyId')}); }}",
-        "  " + _set(_CLEAN_Q, "JSON.stringify(_akQ)"),
-        "  " + _set(_CLEAN_RUN, _env("runId")),
-        "}",
-        _set(_CLEAN_ID, f"JSON.parse({_env(_CLEAN_Q)} || '[]')[0] || ''"),
-        *_need(_CLEAN_ID, "AK-CLEANUP-A-NEXT: снимать нечего",
-               "очередь уборки пуста — ключ K37b выше не заведён, и уборка не знает, что снимать"),
+        f"const _akQ = JSON.parse({_env(_FILL_IDS)} || '[]').filter((id) => id !== {_env(_FILL_LAST)});",
+        f"if ({_env('akK37bKeyId')}) {{ _akQ.push({_env('akK37bKeyId')}); }}",
+        _set(_CLEAN_Q, "JSON.stringify(_akQ)"),
+        _set(_CLEAN_ID, "_akQ[0] || ''"),
     ]
+
+
+def _clean_a_need():
+    return _need(_CLEAN_ID, "AK-CLEANUP-A-NEXT: снимать нечего",
+                 "очередь уборки пуста — ключ K37b выше не заведён, и уборка не знает, что снимать")
 
 
 def _clean_a_next():
@@ -1665,6 +1671,7 @@ def _clean_a_next():
         f"const _akQ = JSON.parse({_env(_CLEAN_Q)} || '[]');",
         "_akQ.shift();",
         _set(_CLEAN_Q, "JSON.stringify(_akQ)"),
+        _set(_CLEAN_ID, "_akQ[0] || ''"),
         f"if (_akQ.length > 0 && !__j.error) {{",
         "  const _akcd = Date.now(); while (Date.now() - _akcd < 100) { /* pause before the next cleanup revoke */ }",
         "  pm.execution.setNextRequest('ak-cleanup-a-next');",
@@ -1701,8 +1708,8 @@ CASES.append(Case(
                           tests=_assertion_passed(_A, "K1", "AK25-OTHER-KEY", uv=True)),
         # Уборка: прочие ключи обоих людей — следующий прогон заводит своих.
         _revoke(_A, "ak-cleanup-k1", "K1", tests=_registration_accepted("K1C", "AK-CLEANUP-K1")),
-        _await_op(_A, "ak-cleanup-k1-op", "K1C"),
-        _own(_A, "ak-cleanup-a-next", "DELETE", _keys_path(_A) + "/{{" + _CLEAN_ID + "}}", pre=_clean_a_pick(),
+        _await_op(_A, "ak-cleanup-k1-op", "K1C", tests=_clean_a_queue()),
+        _own(_A, "ak-cleanup-a-next", "DELETE", _keys_path(_A) + "/{{" + _CLEAN_ID + "}}", pre=_clean_a_need(),
              tests=_registration_accepted("AC", "AK-CLEANUP-A-NEXT")),
         _await_op(_A, "ak-cleanup-a-next-op", "AC", tests=_clean_a_next()),
         *[s for slot in _CLEAN_B for s in (
