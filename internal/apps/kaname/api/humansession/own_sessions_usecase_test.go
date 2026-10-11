@@ -133,3 +133,51 @@ func TestOS15_StoreUnavailableOnResolveAndAuditFailureRollsBackTheEnd(t *testing
 		require.Len(t, page.Sessions, 2)
 	})
 }
+
+// TestOwnSessionsList_681_RecordsCutBySubjectCutoffAreNotListed — перечень
+// своих сессий (kaname#681) не показывает живой запись, отсечённую отсечкой
+// личности (сброс ключей, сброс второго фактора, принудительный выход):
+// момент аутентификации НЕ позже отсечки — записи в выдаче нет (граница
+// включающая); запись носителя запроса, аутентифицированная позже, в выдаче
+// есть. Дублёр хранилища обязан судить так же, как адаптер: снисходительный
+// дублёр давал бы зелёное при красном продукте.
+func TestOwnSessionsList_681_RecordsCutBySubjectCutoffAreNotListed(t *testing.T) {
+	ctx := context.Background()
+	g := givenOSU(t)
+	issueAt := func(at time.Time) domain.HumanSession {
+		w, err := g.h.store.Writer(ctx)
+		require.NoError(t, err)
+		s, _, err := humansession.IssueSession(ctx, w, humansession.IssueInput{
+			User: g.user, Presented: []assurance.Presentation{assurance.PasswordPresented()}, At: at, TTL: ucTTL,
+		})
+		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): выдача записи")
+		require.NoError(t, w.Commit(ctx))
+		return s
+	}
+	cutoff := g.h.clock.Add(-time.Minute)
+	older := issueAt(cutoff.Add(-time.Minute))
+	atCutoff := issueAt(cutoff)
+
+	page, err := g.list.Execute(ctx, humansession.ListOwnSessionsInput{Bearer: g.raBearer})
+	require.NoError(t, err)
+	require.Len(t, page.Sessions, 4, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): до отсечки в перечне все четыре записи")
+
+	w, err := g.h.store.Writer(ctx)
+	require.NoError(t, err)
+	require.NoError(t, w.UpsertCutoff(ctx, domain.UserTokenRevocation{
+		UserID: g.user.ID, RevokeBefore: cutoff, Reason: domain.RevokeReasonAccessKeysReset, RevokedBy: g.user.ID,
+	}, g.user.ID))
+	require.NoError(t, w.Commit(ctx))
+
+	page, err = g.list.Execute(ctx, humansession.ListOwnSessionsInput{Bearer: g.raBearer})
+	require.NoError(t, err)
+	listed := map[domain.HumanSessionID]bool{}
+	for _, s := range page.Sessions {
+		listed[s.Session.ID] = true
+	}
+	require.False(t, listed[older.ID], "kaname#681: запись до отсечки показана живой")
+	require.False(t, listed[atCutoff.ID], "kaname#681: запись, аутентифицированная в момент отсечки, показана живой (граница включающая)")
+	require.True(t, listed[g.ra.ID], "близнец: запись носителя позже отсечки в перечне")
+	require.True(t, listed[g.rb.ID], "близнец: вторая запись позже отсечки в перечне")
+	require.Len(t, page.Sessions, 2)
+}
