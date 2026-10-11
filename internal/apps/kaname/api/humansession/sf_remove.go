@@ -55,9 +55,16 @@ func NewRemoveSecondFactorUseCase(d SecondFactorDeps) (*RemoveSecondFactorUseCas
 	return &RemoveSecondFactorUseCase{deps: d, gate: d.gate()}, nil
 }
 
-// Execute — порядок: форма → сессия → частота → состояние → сверка → снятие
-// одним исходом.
+// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
+// единственная точка на выходе, а не каждый возврат по отдельности.
 func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecondFactorInput) (RemoveSecondFactorOutput, error) {
+	out, err := uc.execute(ctx, in)
+	return out, observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorRemove, err)
+}
+
+// execute — порядок: форма → сессия → частота → состояние → сверка → снятие
+// одним исходом.
+func (uc *RemoveSecondFactorUseCase) execute(ctx context.Context, in RemoveSecondFactorInput) (RemoveSecondFactorOutput, error) {
 	if err := JudgeCodeForm("code", in.Factor); err != nil {
 		return RemoveSecondFactorOutput{}, err
 	}

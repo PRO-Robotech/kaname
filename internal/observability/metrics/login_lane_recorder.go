@@ -56,6 +56,9 @@ const (
 	// кода. Занятый адрес на запросе — своя клетка: вызывающему он не
 	// отличим от свободного, и различие живёт только здесь.
 	EmailChangeOutcomesMetric = Namespace + "_email_change_outcomes_total"
+	// Сбой хранилища у глаголов своих данных под живой сессией (kaname#691):
+	// наружу один отказ без причины, глагол — только здесь.
+	SelfServiceStoreFailuresMetric = Namespace + "_self_service_store_failures_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -83,6 +86,7 @@ type LoginLaneRecorder struct {
 	akLogin      *prometheus.CounterVec
 	addrVerify   *prometheus.CounterVec
 	emailChange  *prometheus.CounterVec
+	storeFailure *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -204,10 +208,16 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 					"refused, confirmed, code mismatched, not found or exhausted, address in use at confirmation, " +
 					"store failed. No address and no code.",
 			}, []string{"outcome"}),
+			storeFailure: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SelfServiceStoreFailuresMetric,
+				Help: "Self-service verbs under a live session refused because the store did not answer, by verb: " +
+					"step-up, second-factor enroll/confirm/status/remove, backup-codes regenerate, password change " +
+					"and enroll. The caller sees one UNAVAILABLE without a cause; the verb lives only here.",
+			}, []string{"verb"}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
 			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
-			rec.addrVerify, rec.akLogin, rec.emailChange)
+			rec.addrVerify, rec.akLogin, rec.emailChange, rec.storeFailure)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -263,6 +273,9 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.EmailChangeOutcomes() {
 			rec.emailChange.WithLabelValues(string(o)).Add(0)
+		}
+		for _, v := range humansession.StoreFailureVerbs() {
+			rec.storeFailure.WithLabelValues(string(v)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -350,6 +363,11 @@ func (l *LoginLaneRecorder) AddressVerificationObserved(o humansession.Verificat
 // EmailChangeObserved — исход глаголов смены адреса (kaname#635).
 func (l *LoginLaneRecorder) EmailChangeObserved(o humansession.EmailChangeOutcome) {
 	l.emailChange.WithLabelValues(string(o)).Inc()
+}
+
+// StoreFailureObserved — сбой хранилища у глагола своих данных (kaname#691).
+func (l *LoginLaneRecorder) StoreFailureObserved(v humansession.StoreFailureVerb) {
+	l.storeFailure.WithLabelValues(string(v)).Inc()
 }
 
 var (

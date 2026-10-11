@@ -126,6 +126,7 @@ var deliveryRoster = []string{
 	"second_factor_alert_cells_test.go",
 	"second_factor_producer_ledger_test.go",
 	"second_factor_promql_engine_test.go",
+	"self_service_store_failure_ledger_test.go",
 	"service_links_are_off_injection_test.go",
 	"service_links_are_off_test.go",
 	"shipped_chains_declare_every_own_ceiling_injection_test.go",

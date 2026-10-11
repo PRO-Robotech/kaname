@@ -142,10 +142,11 @@ spec:
               + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
               + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
               + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m]))
-              + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m])) > 0
+              + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
+              + sum(increase(kaname_self_service_store_failures_total[10m])) > 0
           for: 5m
           annotations:
-            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome и reason. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
+            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище). Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
 
         - alert: KanameLoginVerifierCapacityExhausted
           expr: |

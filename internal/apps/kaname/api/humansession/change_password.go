@@ -105,8 +105,15 @@ func NewChangePasswordUseCase(d ChangePasswordDeps) (*ChangePasswordUseCase, err
 	}, nil
 }
 
-// Execute — смена пароля из сессии носителя.
+// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
+// единственная точка на выходе, а не каждый возврат по отдельности.
 func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordInput) (ChangePasswordOutput, error) {
+	out, err := uc.execute(ctx, in)
+	return out, observeStoreFailure(uc.observer, StoreFailurePasswordChange, err)
+}
+
+// execute — смена пароля из сессии носителя.
+func (uc *ChangePasswordUseCase) execute(ctx context.Context, in ChangePasswordInput) (ChangePasswordOutput, error) {
 	if in.CurrentPassword == "" {
 		return ChangePasswordOutput{}, FieldRequired("currentPassword")
 	}

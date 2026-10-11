@@ -52,6 +52,11 @@ func engineSeries() []cellTerm {
 		"kaname_recovery_completion_outcomes_total"} {
 		out = append(out, cellTerm{series: series, labels: map[string]string{"outcome": "store-failed"}})
 	}
+	// Сбой хранилища у глаголов своих данных (kaname#691): правило читает ряд
+	// целиком, и без его клеток слагаемое было бы пустым.
+	for _, v := range storeFailureProducerValues() {
+		out = append(out, v.cell)
+	}
 	return out
 }
 

@@ -98,9 +98,16 @@ func NewEnrollPasswordUseCase(d EnrollPasswordDeps) (*EnrollPasswordUseCase, err
 	return &EnrollPasswordUseCase{deps: d}, nil
 }
 
-// Execute — порядок: сессия → свежесть → правило → значение → строка и
-// событие одним исходом.
+// Execute — глагол и его клетка сбоя хранилища (kaname#691): исход судит
+// единственная точка на выходе, а не каждый возврат по отдельности.
 func (uc *EnrollPasswordUseCase) Execute(ctx context.Context, in EnrollPasswordInput) (EnrollPasswordOutput, error) {
+	out, err := uc.execute(ctx, in)
+	return out, observeStoreFailure(uc.deps.Observer, StoreFailurePasswordEnroll, err)
+}
+
+// execute — порядок: сессия → свежесть → правило → значение → строка и
+// событие одним исходом.
+func (uc *EnrollPasswordUseCase) execute(ctx context.Context, in EnrollPasswordInput) (EnrollPasswordOutput, error) {
 	now := uc.deps.Now().UTC()
 	if in.Bearer.IsZero() {
 		return EnrollPasswordOutput{}, ErrAuthenticationFailed

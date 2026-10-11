@@ -81,6 +81,12 @@ type fakeStore struct {
 	// порта); "" — не отказывает. "writer" — отказ открыть транзакцию;
 	// "resolve" — отказ чтения.
 	failOn string
+	// touched — точки отказа, которые прогон СПРОСИЛ (`failsAt`): глагол,
+	// не спросивший точку, отказать на ней не может, и проба сбоя хранилища
+	// (store_unavailable_cells_test.go) судит только спрошенные. Свой замок —
+	// точки спрашиваются и под f.mu, и без него.
+	touchedMu sync.Mutex
+	touched   map[string]bool
 	// opened — каждая открытая транзакция, в порядке открытия: чем она открыта
 	// и чьи записи сессии в ней сняты — часть утверждений о порядке замков.
 	opened []*fakeWriter
@@ -142,7 +148,7 @@ func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now t
 	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failOn == "resolve" {
+	if f.failsAt("resolve") {
 		return humansession.Resolved{}, "", errFakePort
 	}
 	for _, r := range f.rows {
@@ -185,7 +191,7 @@ func (f *fakeStore) SessionsOf(_ context.Context, userID domain.UserID, now time
 	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failOn == "list" {
+	if f.failsAt("list") {
 		return nil, "", errFakePort
 	}
 	var rows []*fakeRow
@@ -290,7 +296,7 @@ func (f *fakeStore) PersonWriter(_ context.Context, userID domain.UserID) (human
 
 func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
 	f.trip()
-	if f.failOn == "writer" {
+	if f.failsAt("writer") {
 		return nil, errFakePort
 	}
 	w := &fakeWriter{store: f, lockedFor: lockedFor}
@@ -362,10 +368,40 @@ func (w *fakeWriter) holdPersonForKey(userID domain.UserID) error {
 }
 
 func (w *fakeWriter) fail(op string) error {
-	if w.store.failOn == op {
+	if w.store.failsAt(op) {
 		return errFakePort
 	}
 	return nil
+}
+
+// failsAt — отказывает ли дублёр на точке op; точка отмечается спрошенной.
+func (f *fakeStore) failsAt(op string) bool {
+	f.touchedMu.Lock()
+	if f.touched == nil {
+		f.touched = map[string]bool{}
+	}
+	f.touched[op] = true
+	f.touchedMu.Unlock()
+	return f.failOn == op
+}
+
+// touchedPoints — спрошенные точки отказа с начала жизни дублёра (либо с
+// последнего сброса).
+func (f *fakeStore) touchedPoints() map[string]bool {
+	f.touchedMu.Lock()
+	defer f.touchedMu.Unlock()
+	out := make(map[string]bool, len(f.touched))
+	for k := range f.touched {
+		out[k] = true
+	}
+	return out
+}
+
+// resetTouched — забыть спрошенные точки: прогон судится отдельно от подготовки.
+func (f *fakeStore) resetTouched() {
+	f.touchedMu.Lock()
+	defer f.touchedMu.Unlock()
+	f.touched = nil
 }
 
 func (w *fakeWriter) InsertSession(_ context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
@@ -1077,6 +1113,8 @@ type countingObserver struct {
 	sfEvents   map[humansession.SecondFactorEvent]int
 	// Вход ключом (Ф13): исходы по причине.
 	akLogin map[humansession.AccessKeyLoginOutcome]int
+	// storeFailures — сбои хранилища у глаголов своих данных (kaname#691).
+	storeFailures map[humansession.StoreFailureVerb]int
 }
 
 func newCountingObserver() *countingObserver {
@@ -1090,7 +1128,14 @@ func newCountingObserver() *countingObserver {
 		sfRefusals:         map[humansession.SecondFactorRefusal]int{},
 		sfEvents:           map[humansession.SecondFactorEvent]int{},
 		akLogin:            map[humansession.AccessKeyLoginOutcome]int{},
+		storeFailures:      map[humansession.StoreFailureVerb]int{},
 	}
+}
+
+func (o *countingObserver) StoreFailureObserved(x humansession.StoreFailureVerb) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.storeFailures[x]++
 }
 
 func (o *countingObserver) SecondFactorPresentationObserved(m assurance.Method, x humansession.PresentationOutcome) {
