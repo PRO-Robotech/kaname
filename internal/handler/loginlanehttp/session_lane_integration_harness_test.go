@@ -195,6 +195,11 @@ type sessionLaneOptions struct {
 	recoverySourcePace humansession.SourcePace
 	// recoveryObserver — приёмник исходов запроса кода; nil — молчащий.
 	recoveryObserver humansession.Observer
+	// ceremonyNow — часы входа ключом и церемонии повышения (`AccessKeyLoginDeps.Now`,
+	// `SecondFactorDeps.Now`); nil — часы процесса. Пробы окна свежести условия
+	// `mfa_fresh` (Ф11-37, -38) строят момент аутентификации второй сессии и
+	// момент предъявления внутри первой управляемыми часами (§3.0а приёмки Ф11).
+	ceremonyNow func() time.Time
 	// akKeys — хранилище полосы входа ключом поверх адаптера стенда: пробы
 	// чередования ставят встречное действие между операторами входа; nil — сам
 	// адаптер.
@@ -284,6 +289,10 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	if opts.loginNow != nil {
 		loginNow = opts.loginNow
 	}
+	ceremonyNow := time.Now
+	if opts.ceremonyNow != nil {
+		ceremonyNow = opts.ceremonyNow
+	}
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		CutoffClock: momentclock.Func(loginNow),
 		Store:       loginStore, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
@@ -300,7 +309,7 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	require.NoError(t, err)
 	secondFactor := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
-		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: time.Now, Logger: logger,
+		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: ceremonyNow, Logger: logger,
 	}
 	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
 	require.NoError(t, err)
@@ -339,11 +348,11 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 		akKeys = opts.akKeys(akKeys)
 	}
 	akDeps := humansession.AccessKeyLoginDeps{
-		CutoffClock: momentclock.Func(time.Now),
+		CutoffClock: momentclock.Func(ceremonyNow),
 		Store:       sessions, Keys: akKeys, Methods: methods,
 		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
 		UserVerification: access_keys.UserVerificationAssertion,
-		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
+		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: ceremonyNow, Logger: logger,
 	}
 	akBegin, err := humansession.NewBeginAccessKeyLoginUseCase(akDeps)
 	require.NoError(t, err)
