@@ -324,6 +324,11 @@ const (
 	// устройства лишились, и живая сессия на нём — сессия держателя устройства.
 	// Причина снятия записи сессии и причина отсечки.
 	RevokeReasonAccessKeyRevoked = "access-key-revoked"
+	// RevokeReasonIdentityRemoved — снятие личности (`UserService.Delete`)
+	// обрывает всё, выданное ей до момента снятия (kaname#664, Р5). Только
+	// причина отсечки: записи сессии уходят каскадом той же транзакции и
+	// причиной снятия не помечаются.
+	RevokeReasonIdentityRemoved = "identity-removed"
 )
 
 // CutoffBelowFirstAuthentication — момент отсечки, которой глагол снимает

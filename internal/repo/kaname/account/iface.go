@@ -44,6 +44,22 @@ type WriterIface interface {
 	Insert(ctx context.Context, a domain.Account) (domain.Account, error)
 	Update(ctx context.Context, a domain.Account, updateMask []string) (domain.Account, error)
 	Delete(ctx context.Context, id domain.AccountID) error
+
+	// LockForRemoval — ПЕРВЫЙ оператор транзакции снятия аккаунта (kaname#664,
+	// Р6): замок строки аккаунта на изменение и перечень участников его
+	// членств, прочитанный ПОСЛЕ замка. Новое членство ссылается на строку
+	// аккаунта внешним ключом и потому ждёт фиксации снятия либо зафиксировано
+	// раньше и попадает в перечень. Строки нет → ErrNotFound.
+	LockForRemoval(ctx context.Context, id domain.AccountID) ([]domain.UserID, error)
+
+	// LockOwner — ПЕРВЫЙ оператор транзакции создания аккаунта (kaname#664,
+	// KN664-40 (в)): ключевой замок строки будущего владельца. Снятие личности
+	// берёт ту же строку на изменение первым оператором, поэтому две
+	// транзакции сериализуются на ней, и создание, встретившее снятого
+	// владельца, отвечает одним текстом — «User <id> not found» с кодом
+	// предусловия, — а не текстом той вставки, которая первой наткнулась на
+	// отсутствие.
+	LockOwner(ctx context.Context, owner domain.UserID) error
 }
 
 // ListFilter — параметры List-RPC (ListAccountsRequest).

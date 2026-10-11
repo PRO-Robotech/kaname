@@ -117,10 +117,14 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 // пустой результат, не отличит его от несуществующего. Состояние возвращается,
 // чтобы его судили, а не выводили из отсутствия.
 //
+// Человек без дома (его аккаунт снят, колонка пуста — kaname#664, Р3) — пустой
+// аккаунт и состояние, а не отказ: выдача личного токена ему не зависит от
+// судьбы аккаунта, а метаданные операции без аккаунта законны.
+//
 // Нет User → ErrNotFound.
 func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
 	var (
-		accountID    string
+		accountID    *string
 		inviteStatus string
 	)
 	err := r.pool.QueryRow(ctx,
@@ -131,7 +135,7 @@ func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.User
 	if err != nil {
 		return "", false, mapErr(err, "UserOAuthClient.AccountForUser", string(id))
 	}
-	return domain.AccountID(accountID), domain.InviteStatus(inviteStatus).MayAuthenticate(), nil
+	return homeAccount(accountID), domain.InviteStatus(inviteStatus).MayAuthenticate(), nil
 }
 
 // List возвращает токены владельца-User, страница по id ASC (cursor-based).

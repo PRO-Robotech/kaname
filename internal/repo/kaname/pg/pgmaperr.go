@@ -38,6 +38,9 @@ import (
 //	accounts_pkey,
 //	issued_account_ids_pkey     → ErrAlreadyExists "Account %s already exists"
 //	accounts_owner_fk           → ErrFailedPrecondition "User %s not found"
+//	ключ реестра выданных
+//	идентификаторов людей       → ErrFailedPrecondition "User %s not found"
+//	                              (идентификатор снятого человека, kaname#664)
 //	<таблица>_name_check        → ErrInternal (защита последнего рубежа: форму
 //	                              имени проверяет сам сервис, значит срабатывание
 //	                              ограничения — НАШ дефект, а не ввод вызывающего)
@@ -158,6 +161,18 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// перепись гейта (задача #2018).
 		return iamerr.Wrapf(integritySentinel(pgErr, kindHint), "%s", integrityText(pgErr, kindHint, idHint))
 	case pgfault.Unique: // unique_violation
+		// Реестр выданных идентификаторов людей (kaname#664, Р11): вставка строки
+		// человека с идентификатором, который уже выдавался, — это строка,
+		// прочитанная живой до транзакции и снятая до вставки (гонка приглашения
+		// со снятием личности). Названной строки нет, поэтому отказ — «не
+		// найден» с кодом предусловия, а не «уже существует»: второе назвало бы
+		// существующим то, что снято. Ветвь выбирается по ИМЕНИ ограничения и
+		// потому действует у обоих операторов вставки строки человека; текст
+		// строится из известного вызывающему идентификатора, а не из `Detail`
+		// ошибки сервера.
+		if pgErr.ConstraintName == "issued_user_ids_pkey" {
+			return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s not found", idHint)
+		}
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case pgfault.ForeignKey: // foreign_key_violation
 		// Инвариант «у ACTIVE есть способ входа либо открытый путь
