@@ -1004,7 +1004,10 @@ var sessionEnderDoors = []sessionEnderDoor{
 	},
 	{
 		// Смена пароля, снятие второго фактора, завершение восстановления.
-		name: "HumanSessionRepo.SessionSetWriter",
+		// Дверь — `openSessionSetWriter`: её же открывает сброс второго
+		// фактора (kaname#680), который записей сессии не снимает, а
+		// отсекает, — сцена идёт через `SessionSetWriter`.
+		name: "HumanSessionRepo.openSessionSetWriter",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).SessionSetWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {
