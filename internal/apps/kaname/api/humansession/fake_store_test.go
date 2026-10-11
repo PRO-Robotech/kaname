@@ -104,6 +104,14 @@ type fakeStore struct {
 // trip — один оператор базы: обращение, дошедшее до неё.
 func (f *fakeStore) trip() { f.trips.Add(1) }
 
+// cutBySubjectCutoff — запись отсечена отсечкой своей личности правилом края и
+// адаптера (`sessionCutOffBySubjectSQL`): момент аутентификации НЕ позже
+// отсечки. Вызывается под f.mu.
+func (f *fakeStore) cutBySubjectCutoff(s domain.HumanSession) bool {
+	c, ok := f.cutoffs[s.UserID]
+	return ok && !s.AuthenticatedAt.After(c.at)
+}
+
 // tripCount — операторов базы с начала жизни дублёра.
 func (f *fakeStore) tripCount() int64 { return f.trips.Load() }
 
@@ -156,6 +164,8 @@ func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now t
 
 // SessionsOf — живые записи личности страницей (kaname#634): отказы
 // аргументом адаптера — до оператора; порядок — вставка (seq), затем id.
+// Отсечку личности судит, как адаптер (kaname#681): запись, аутентифицированная
+// НЕ позже отсечки, живой не показывается — до предела страницы.
 func (f *fakeStore) SessionsOf(_ context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
 	if size < 0 || size > 1000 {
 		return nil, "", errFakeArg("page_size must be in [0..1000] (0 means default)")
@@ -180,7 +190,7 @@ func (f *fakeStore) SessionsOf(_ context.Context, userID domain.UserID, now time
 	}
 	var rows []*fakeRow
 	for _, r := range f.rows {
-		if r.s.UserID == userID && r.ended == nil && !r.s.Expired(now) && r.seq > after {
+		if r.s.UserID == userID && r.ended == nil && !r.s.Expired(now) && r.seq > after && !f.cutBySubjectCutoff(r.s) {
 			rows = append(rows, r)
 		}
 	}

@@ -68,7 +68,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -130,9 +129,6 @@ type loginLane struct {
 	// letterWindow — окно писем подтверждения адреса (kaname#456, Р9): порог
 	// уборки строк кодов, по которым считается предел писем.
 	letterWindow time.Duration
-	// clock — общий источник моментов, сравниваемых с отсечкой (kaname#589):
-	// им же отсечку ставит сброс второго фактора.
-	clock revocationpolicy.Clock
 }
 
 // secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
@@ -178,21 +174,25 @@ func laneWiringOf(l *loginLane) config.LaneWiring {
 
 // resetSecondFactorUseCase — сброс второго фактора администратором облака (Ф12 Р10)
 // теми же хранилищами, что полоса: чтение строки способа — хранилище способов,
-// снятие/отсечка/событие — писатель хранилища сессий; nil — полосы нет.
+// момент/снятие/отсечка/событие — писатель хранилища сессий под замком строки
+// личности (kaname#680); nil — полосы нет.
 func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetSecondFactorUseCase {
 	if !l.wired() {
 		return nil
 	}
-	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions}).
-		WithCutoffClock(l.clock)
+	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions})
 }
 
-// secondFactorResetStore — адаптер хранилища сессий к порту сброса: писатель
-// сессии несёт все четыре операции порта, соответствие закрепляется здесь.
+// secondFactorResetStore — адаптер хранилища сессий к порту сброса: соответствие
+// писателя сброса порту закрепляется здесь.
 type secondFactorResetStore struct{ sessions *kanamepg.HumanSessionRepo }
 
-func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.SecondFactorResetWriter, error) {
-	return s.sessions.Writer(ctx)
+func (s secondFactorResetStore) ResetWriter(ctx context.Context, userID domain.UserID) (userapp.SecondFactorResetWriter, error) {
+	w, err := s.sessions.SecondFactorResetWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
 }
 
 // resetAccessKeysUseCase — сброс ключей доступа администратором облака
@@ -756,7 +756,6 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		keys:      accessKeys, keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
 		loginChallenges: loginChallenges,
 		verifier:        verifier, letterWindow: login.VerificationResendWindow,
-		clock: sharedClock,
 	}, nil
 }
 
