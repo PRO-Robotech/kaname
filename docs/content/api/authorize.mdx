@@ -36,7 +36,9 @@ per-subject/per-resource решение принимает handler.
 <ApiOperation method="POST" endpoint="/iam/v1/authorize:check">
 
 Возвращает `allowed=true`, если FGA-модель резолвит отношение между `subject` и `resource` **и**
-все условия по пути резолюции истинны для `context`. При отказе — `denyReasons` с коротким
+все условия по пути резолюции истинны. Доводы о своей аутентификации из `context` не читаются —
+их служба выводит сама (уровень — от края, способы и момент — из записи сессии вопроса; см.
+«Условия на кортежах» в архитектуре прав). При отказе — `denyReasons` с коротким
 упорядоченным списком (`["mfa_fresh: acr=2 (need 3)"]` или `["no path"]`).
 
 <CodeBlock language="bash">
