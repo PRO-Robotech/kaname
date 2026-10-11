@@ -106,7 +106,10 @@ func NewChangePasswordUseCase(d ChangePasswordDeps) (*ChangePasswordUseCase, err
 }
 
 // Execute — смена пароля из сессии носителя.
-func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordInput) (ChangePasswordOutput, error) {
+func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordInput) (_ ChangePasswordOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.observer, StoreFailurePasswordChange, err) }()
 	if in.CurrentPassword == "" {
 		return ChangePasswordOutput{}, FieldRequired("currentPassword")
 	}

@@ -214,6 +214,8 @@ sum by (reason) (rate(kaname_human_session_no_session_total[5m]))
 | `kaname_second_factor_presentations_total` | `method`, `outcome` | предъявления кода второго фактора по способу (`totp`, `lookup_secret`) и исходу: `matched`, `mismatched`, `replayed` (только `totp`: код той же ступени, что уже принят строкой), `material-unreadable` (**наш** хранимый секрет не открывается ни одним ключом кольца — находка о ключнице, человеку отвечают 503; рост сразу после смены ключа — прежний ключ снят из перечня раньше переобёртки: [Смена ключа обёртки второго фактора](/advanced/second-factor-wrapping-key)), `capacity-exhausted` (только `lookup_secret`: ёмкость проверяющего пароля исчерпана). Клетка заводится только для пар, которые полоса производит; предъявление при несошедшемся пароле сюда не идёт — пароль его не открыл |
 | `kaname_second_factor_refusals_total` | `reason` | отказы второго фактора, которые **не попытки** и в счёт подбора не идут: `not-enrolled`, `already-enrolled`, `enrollment-not-pending`, `session-not-fresh`, `unavailable`. Рост `session-not-fresh` при живой консоли — признак вызова глагола без предварительного предъявления |
 | `kaname_second_factor_events_total` | `event` | события второго фактора: `enrollment-started`, `enrollment-confirmed`, `removed`, `backup-codes-regenerated`, `backup-code-consumed`. Ноль заведений за всю жизнь посадки виден только потому, что клетка есть |
+| `kaname_self_service_store_failures_total` | `verb` | отказы глаголов своих данных под живой сессией, потому что **хранилище не ответило**: `step-up` (повышение уровня), `second-factor-enroll`, `second-factor-confirm`, `second-factor-status`, `second-factor-remove`, `backup-codes-regenerate`, `password-change`, `password-enroll`. Человек получает `503` без причины; какой глагол — видно только здесь. Отказ на входе сюда не идёт — у входа своя клетка `store-failed` в `kaname_login_outcomes_total`. Клетка каждого глагола есть с нулём до первого события |
+| `kaname_password_verifier_ceremony_share_exhausted_total` | — | сверки секрета клиента церемонией, получившие отказ потому, что **доля церемонии** в ёмкости проверяющего пароля занята целиком. Отказ рождается до проверяющего, поэтому `capacity-exhausted` у `kaname_password_verification_outcomes_total` не растёт; наружу — тот же `503` с `Retry-After`, что при исчерпании самого проверяющего. Вторая половина ёмкости этим отказом не тронута: вход людей её сохраняет |
 | `kaname_access_key_refusals_total` | `lane`, `reason` | отказы по ключам доступа (WebAuthn) по полосе (`registration`, `assertion`, `revoke`) и причине: `session-not-fresh`, `challenge-not-issued`, `challenge-consumed`, `challenge-expired`, `malformed`, `origin-not-allowed`, `rp-id-mismatch`, `user-not-present`, `algorithm-not-allowed`, `not-discoverable`, `signature`, `unknown-credential`, `foreign-key`, `user-handle-mismatch`, `counter`, `counter-race`, `last-sign-in-method`, `not-found`, `form`. На полосе `assertion` человек получает **единый** отказ без причины (оракул существования и признанности ключа закрыт); причина видна только здесь и в журнале. Рост `origin-not-allowed` или `rp-id-mismatch` при живой консоли — признак смены доменного имени или происхождения консоли без правки привязки (`authn.access-keys.*`) |
 | `kaname_access_key_events_total` | `event` | события ключей доступа: `registration-challenge-issued`, `registered`, `assertion-challenge-issued`, `asserted`, `revoked`, `transferred` (перенос из прежнего компонента). Ноль заведений за всю жизнь посадки виден только потому, что клетка есть |
 | `kaname_access_key_login_outcomes_total` | `outcome` | исходы полосы **входа ключом** (вход без пароля): `issued`, `challenge-issued` (выдано испытание) и причины единого отказа — `signature`, `credential-unknown`, `origin`, `rp-id-hash`, `presence`, `counter`, `challenge` (испытание не выдавалось, уже предъявлено, истекло либо выдано в другом контексте формы), `user-handle`, `blocked`; плюс `rate-limited` и `store-failed`. Вызывающий получает **один** отказ на все причины — различить их можно только здесь и по журналу. Снятый ключ и «удостоверения не было» считает одна клетка `credential-unknown`: снятие удаляет строку, и у проверяющего эти два состояния суть одно. Рост `challenge` при живой консоли — признак того, что между выдачей испытания и предъявлением сменился контекст формы (например, в той же вкладке состоялся вход паролем) |
@@ -294,7 +296,7 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 
 | Ряд | Метки | Что значит |
 |---|---|---|
-| `kaname_ceremony_outcomes_total` | `outcome` | исходы обращений к церемонии. Набор значений закрытый: у эндпоинта авторизации — `authorize-code-issued` и по значению на каждый отказ (`authorize-client-unknown`, `authorize-redirect-unregistered`, `authorize-state-below-floor`, `authorize-login-required`, `authorize-step-up-required` и прочие, в том числе отказы по темпу `authorize-source-pace-exceeded` и `authorize-in-flight-ceiling-reached`), у полос обмена — `token-code-exchanged`, `token-refreshed`, `token-grant-refused`, `token-client-refused`, `token-request-refused`, `token-unavailable` |
+| `kaname_ceremony_outcomes_total` | `outcome` | исходы обращений к церемонии. Набор значений закрытый: у эндпоинта авторизации — `authorize-code-issued` и по значению на каждый отказ (`authorize-client-unknown`, `authorize-redirect-unregistered`, `authorize-state-below-floor`, `authorize-login-required`, `authorize-step-up-required` и прочие, в том числе отказы по темпу `authorize-source-pace-exceeded` и `authorize-in-flight-ceiling-reached`), у полос обмена — `token-code-exchanged`, `token-refreshed`, `token-grant-refused`, `token-owner-unverified` (владелец гранта не подтвердил адрес), `token-client-refused`, `token-request-refused`, `token-unavailable` |
 
 | `outcome="…"` | Кто чинит |
 |---|---|
@@ -613,12 +615,32 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 [Смена ключа обёртки второго фактора](/advanced/second-factor-wrapping-key): вернуть прежний ключ в
 перечень, затем перенести секреты под новый.
 
+Сбой хранилища у глаголов своих данных под живой сессией — повышения уровня, второго фактора,
+запасных кодов, смены и заведения пароля — тоже отказ нашей стороны: человек получает `503`, и
+повторять ему нечего, пока хранилище не ответит. Правило читает ряд
+`kaname_self_service_store_failures_total` целиком: все его значения — наша сторона, а какой глагол
+отказал, видно по метке `verb`.
+
+Негодное хранимое значение пароля — формат вне перечня, повреждённое тело, параметры выше
+потолка — тоже отказ нашей стороны, и человек с верным паролем его не обойдёт. Проверяющий один
+на всех, кто им сверяет: вход, повышение уровня паролем, смена пароля и сверка секрета клиента
+церемонией. Поэтому правило читает три клетки «нашей стороны» ряда
+`kaname_password_verification_outcomes_total`, а не только исход входа `verifier-issue`: иначе
+испорченное значение у повышения уровня или у секрета клиента тревоги не поднимало бы. Неудачный
+вход пишет такой исход и в свой ряд, и в ряд проверяющего — это одно событие, а не два; порог
+правила «больше нуля», и двойной счёт его не сдвигает. Исходы `mismatched` и `material-missing`
+правило не читает: это вход человека, и тревога звонила бы на каждый неверный пароль.
+
 Правило ёмкости читает исчерпание у **проверяющего**, а не только у входа: тот же проверяющий
 сверяет пароль при повышении уровня и секрет клиента в церемонии, и эти отказы ряда входа не
 пишут. Его клетка — `kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}`.
 Вход пишет исчерпание и в свой ряд, и в ряд проверяющего; порог правила — «больше нуля», и
 двойной счёт его не сдвигает. Запасной код (`lookup_secret`) делит ту же ёмкость, но сверяется
-мимо счётчика проверяющего, поэтому у него своя клетка в том же правиле. Все клетки, которые
+мимо счётчика проверяющего, поэтому у него своя клетка в том же правиле. Сверка секрета клиента
+церемонией занимает не больше половины ёмкости проверяющего; сверка сверх этой доли получает отказ
+до проверяющего, и его клетка исчерпания не растёт, — у такого отказа своя клетка
+`kaname_password_verifier_ceremony_share_exhausted_total` в том же правиле. Растёт только она —
+занята доля церемонии, а вторая половина ёмкости осталась входу людей. Все клетки, которые
 читают правила, заведены с нулём до первого события: слагаемое без ряда обнулило бы всё выражение.
 
 ```yaml
@@ -628,19 +650,24 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
       + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
       + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
       + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m]))
-      + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m])) > 0
+      + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
+      + sum(increase(kaname_self_service_store_failures_total[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="format-not-in-registry"}[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="body-not-parsable"}[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="params-above-ceiling"}[10m])) > 0
   for: 5m
   annotations:
-    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome и reason. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
+    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище). Негодное хранимое значение пароля либо секрета клиента считает ряд проверяющего — у всех, кто сверяет им: вход, повышение уровня, смена пароля, церемония; неудачный вход пишет его и в verifier-issue, это одно событие, а не два. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
 
 - alert: KanameLoginVerifierCapacityExhausted
   expr: |
     sum(increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]))
       + sum(increase(kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}[10m]))
-      + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m])) > 0
+      + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m]))
+      + sum(increase(kaname_password_verifier_ceremony_share_exhausted_total[10m])) > 0
   for: 5m
   annotations:
-    summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке. Проверяющий один: вход паролем, повышение уровня паролем, сверка секрета клиента церемонией и запасной код второго фактора; причина — в outcome и method. Величина authn.login.verifier-capacity"
+    summary: "ёмкость проверяющего пароля исчерпана — отказано по нагрузке. Проверяющий один: вход паролем, повышение уровня паролем, сверка секрета клиента церемонией и запасной код второго фактора; причина — в outcome и method. Величина authn.login.verifier-capacity. Если растёт только kaname_password_verifier_ceremony_share_exhausted_total — занята доля церемонии на токен-эндпоинте, людям вход сохранён: смотреть обращения за токеном церемонии, а не поднимать ёмкость входа"
 ```
 
 Эти правила **везёт сам чарт** — объектом `PrometheusRule`, поэтому переносить их руками не нужно.

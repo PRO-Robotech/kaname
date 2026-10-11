@@ -488,6 +488,10 @@ func (w *fakeAcctWriter) Update(context.Context, domain.Account, []string) (doma
 func (w *fakeAcctWriter) Delete(context.Context, domain.AccountID) error {
 	return stderrors.New("fakeAcctWriter.Delete not stubbed")
 }
+func (*fakeAcctWriter) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (*fakeAcctWriter) LockOwner(context.Context, domain.UserID) error { return nil }
 
 // fakeAccountABWriter — minimal access_binding.WriterIface for the owner
 // auto-binding co-commit. Only Insert / InsertSubjects / EmitAuditEvent are

@@ -504,39 +504,40 @@ func TestRetentionSweep_StopLeavesNoPartialState(t *testing.T) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// RET-SWP-20 — смена наблюдаемого исхода UserService.Delete не приезжает молча
+// RET-SWP-20 — исход UserService.Delete от уборки отзывов НЕ ЗАВИСИТ
 // ───────────────────────────────────────────────────────────────────────────
 //
-// Пятый читатель таблицы отзывов — ограничение целостности
-// `session_revocations_user_fk` (`ON DELETE RESTRICT`). Он судит по НАЛИЧИЮ
-// строки и сравнения со временем не содержит, поэтому согласовать с ним порог
-// нельзя НИ ПРИ КАКОМ значении: любая уборка меняет его исход по построению.
-// Проба не объявляет уборку способом чинить удаление — она не даёт смене
-// исхода приехать незамеченной. Сам внешний ключ — предмет задачи-преемника П1.
-
-func TestRetentionSweep_UserDeleteOutcomeChangesOnlyForExpiredRows(t *testing.T) {
+// Прежде пятым читателем таблицы отзывов было ограничение целостности
+// `session_revocations_user_fk` (`ON DELETE RESTRICT`): оно судило по НАЛИЧИЮ
+// строки, и любая уборка меняла исход снятия человека. Проба держала эту смену
+// исхода, а сам ключ называла предметом задачи-преемника П1.
+//
+// Предмет снят kaname#664 (приёмка `own-account-and-identity-are-removed-in-order.md`,
+// Р4): ключа нет, запись отзыва — мягкая ссылка и переживает человека до своего
+// срока. Проба переведена на новое наблюдаемое: снятие проходит и при истёкшей,
+// и при действующей строке, ДО уборки и независимо от неё, а строки отзыва после
+// снятия на месте — уборка остаётся единственным, кто их уносит.
+func TestRetentionSweep_UserDeleteOutcomeDoesNotDependOnRevocationRows(t *testing.T) {
 	ctx, pool := retentionPool(t)
-	repo := kanamepg.NewSessionRevocationRepo(pool)
 	repository := kanamepg.New(pool, nil)
 
 	withExpired := seedNonOwningUser(t, ctx, pool, "ret-20-expired")
 	withLive := seedNonOwningUser(t, ctx, pool, "ret-20-live")
-	putRevocationAt(t, ctx, pool, withExpired, "ret20-exp-"+ids.NewID(domain.PrefixUser), -time.Hour)
-	putRevocationAt(t, ctx, pool, withLive, "ret20-live-"+ids.NewID(domain.PrefixUser), time.Hour)
+	expiredJTI := "ret20-exp-" + ids.NewID(domain.PrefixUser)
+	liveJTI := "ret20-live-" + ids.NewID(domain.PrefixUser)
+	putRevocationAt(t, ctx, pool, withExpired, expiredJTI, -time.Hour)
+	putRevocationAt(t, ctx, pool, withLive, liveJTI, time.Hour)
 
-	// До прохода неудаляемы ОБА: строка есть у каждого.
-	require.Error(t, deleteUser(t, ctx, repository, withExpired),
-		"пользователь со строкой отзыва удалился ДО прохода — предпосылка пробы не выполняется")
-
-	_, _, err := repo.DeleteExpired(ctx, 0, sweepBatch)
-	require.NoError(t, err)
-
-	// Обе стороны: истёкшая строка ушла — удаление проходит; действующая на
-	// месте — удаление по-прежнему отвергается.
 	require.NoError(t, deleteUser(t, ctx, repository, withExpired),
-		"строка истекла и снята, а удаление всё равно отвергнуто")
-	require.Error(t, deleteUser(t, ctx, repository, withLive),
-		"снята действующая строка отзыва — уборка сняла защиту")
+		"строка отзыва (истёкшая) больше не держит человека")
+	require.NoError(t, deleteUser(t, ctx, repository, withLive),
+		"строка отзыва (действующая) больше не держит человека")
+
+	var left int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.session_revocations WHERE token_jti = ANY($1)`,
+		[]string{expiredJTI, liveJTI}).Scan(&left))
+	require.Equal(t, 2, left, "записи отзыва переживают человека до уборки по сроку")
 }
 
 // seedNonOwningUser заводит пользователя, который НИЧЕГО не держит, кроме
@@ -544,11 +545,10 @@ func TestRetentionSweep_UserDeleteOutcomeChangesOnlyForExpiredRows(t *testing.T)
 //
 // `mustSeedUser` заводит пользователя вместе с аккаунтом, которым тот ВЛАДЕЕТ, а
 // `accounts_owner_fk` — тоже `ON DELETE RESTRICT`. Такой пользователь неудаляем
-// всегда, независимо от уборки: проба RET-SWP-20 на нём зеленела бы обеими
-// половинами и не различала бы НИЧЕГО — отказ приходил бы от невиновного
-// ограничения. Здесь владелец аккаунта — отдельный пользователь, а испытуемый
-// лишь состоит в том же аккаунте, поэтому единственное, что стоит между ним и
-// удалением, — `session_revocations_user_fk`.
+// всегда, независимо от уборки: проба RET-SWP-20 на нём отвечала бы отказом
+// от невиновного ограничения. Здесь владелец аккаунта — отдельный пользователь,
+// а испытуемый лишь состоит в том же аккаунте, поэтому его снятию ничто, кроме
+// строки отзыва, не могло бы помешать — и после kaname#664 она не мешает.
 func seedNonOwningUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) domain.UserID {
 	t.Helper()
 	owner := mustSeedUser(t, ctx, pool, suffix+"-owner")

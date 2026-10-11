@@ -46,12 +46,22 @@ func engineSeries() []cellTerm {
 	for _, o := range []string{"store-failed", "verifier-issue", "capacity-exhausted"} {
 		out = append(out, cellTerm{series: "kaname_login_outcomes_total", labels: map[string]string{"outcome": o}})
 	}
-	out = append(out, cellTerm{series: "kaname_password_verification_outcomes_total",
-		labels: map[string]string{"outcome": "capacity-exhausted"}})
+	// Ряд проверяющего — весь словарь (kaname#692): правило отказов читает его
+	// исходы нашей стороны, правило ёмкости — исчерпание.
+	for _, v := range verifierProducerValues() {
+		out = append(out, v.cell)
+	}
 	for _, series := range []string{"kaname_registration_outcomes_total", "kaname_recovery_request_outcomes_total",
 		"kaname_recovery_completion_outcomes_total"} {
 		out = append(out, cellTerm{series: series, labels: map[string]string{"outcome": "store-failed"}})
 	}
+	// Сбой хранилища у глаголов своих данных (kaname#691): правило читает ряд
+	// целиком, и без его клеток слагаемое было бы пустым.
+	for _, v := range storeFailureProducerValues() {
+		out = append(out, v.cell)
+	}
+	// Отказ сверх доли церемонии (kaname#693): ряд без меток.
+	out = append(out, ceremonyShareCell)
 	return out
 }
 

@@ -147,9 +147,20 @@ type UserServiceClient interface {
 	// The narrowing takes away the right to erase SOMEONE ELSE, never one's own
 	// row.
 	//
-	// Deleting an identity that still owns Accounts is refused by the database
-	// (`accounts_owner_fk`) → FAILED_PRECONDITION "User <id> owns accounts and
-	// cannot be deleted"; that is unchanged.
+	// THE ORDER IS ACCOUNT, THEN IDENTITY. Deleting an identity that still owns
+	// Accounts is refused → FAILED_PRECONDITION "User <id> owns accounts and
+	// cannot be deleted": delete the Account first (`AccountService.Delete`).
+	// Only ACTIVE grants hold a person: "User <id> has active access bindings and
+	// cannot be deleted" names a grant that still gives rights; a revoked grant is
+	// history and does not stand in the way.
+	//
+	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
+	// access keys, recovery codes, personal tokens and memberships go in the same
+	// transaction, and every credential issued to it up to that moment is refused
+	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
+	// the declared revocation window after the deletion commits. Records that
+	// only attribute an act to the person (who issued a service-account key, who
+	// granted a binding) keep the identifier; it is never issued again.
 	Delete(ctx context.Context, in *DeleteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Removes the specified person from the specified Account: the MEMBERSHIP
 	// goes, the identity stays.
@@ -625,9 +636,20 @@ type UserServiceServer interface {
 	// The narrowing takes away the right to erase SOMEONE ELSE, never one's own
 	// row.
 	//
-	// Deleting an identity that still owns Accounts is refused by the database
-	// (`accounts_owner_fk`) → FAILED_PRECONDITION "User <id> owns accounts and
-	// cannot be deleted"; that is unchanged.
+	// THE ORDER IS ACCOUNT, THEN IDENTITY. Deleting an identity that still owns
+	// Accounts is refused → FAILED_PRECONDITION "User <id> owns accounts and
+	// cannot be deleted": delete the Account first (`AccountService.Delete`).
+	// Only ACTIVE grants hold a person: "User <id> has active access bindings and
+	// cannot be deleted" names a grant that still gives rights; a revoked grant is
+	// history and does not stand in the way.
+	//
+	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
+	// access keys, recovery codes, personal tokens and memberships go in the same
+	// transaction, and every credential issued to it up to that moment is refused
+	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
+	// the declared revocation window after the deletion commits. Records that
+	// only attribute an act to the person (who issued a service-account key, who
+	// granted a binding) keep the identifier; it is never issued again.
 	Delete(context.Context, *DeleteUserRequest) (*operation.Operation, error)
 	// Removes the specified person from the specified Account: the MEMBERSHIP
 	// goes, the identity stays.

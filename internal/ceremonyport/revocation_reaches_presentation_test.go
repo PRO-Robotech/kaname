@@ -387,7 +387,7 @@ func newFlowRig(t *testing.T) *flowRig {
 
 	hasher := floorHasher(t)
 	secrets, err := ceremonyport.NewClientSecrets(vaults.secrets,
-		alignedVerifier(t, hasher, &outcomeCounter{cells: map[passwordverify.Outcome]int{}}))
+		alignedVerifier(t, hasher, &outcomeCounter{cells: map[passwordverify.Outcome]int{}}), &shareCounter{})
 	require.NoError(t, err)
 	rig.vaults, rig.hasher = vaults, hasher
 	rig.registerClient(t, testClientID, flowSecret)

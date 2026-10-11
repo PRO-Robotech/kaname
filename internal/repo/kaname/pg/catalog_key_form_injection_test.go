@@ -21,8 +21,8 @@ import (
 )
 
 // keyFormSchema — цикл двух ключей формы `RESTRICT … DEFERRABLE` (как у
-// `accounts_owner_fk`/`users_account_fk`) и ключ проекции, объявленный
-// немедленным.
+// `accounts_owner_fk`/`users_account_fk` до kaname#664, где второй стал
+// `SET NULL`) и ключ проекции, объявленный немедленным.
 var keyFormSchema = []string{
 	`CREATE TABLE owners (id text PRIMARY KEY, member_id text)`,
 	`CREATE TABLE members (id text PRIMARY KEY, owner_id text, ref_id text)`,

@@ -5,15 +5,27 @@ package user
 
 // delete.go — DeleteUserUseCase.
 //
-// FK SQLSTATE 23503 на accounts_owner_fk → FailedPrecondition
-// "User <id> owns accounts and cannot be deleted" (через mapErr/errors/fkText).
-// GroupMember + AccessBinding — soft-ref (нет FK), но atomic DELETE WHERE NOT EXISTS
-// в user_repo.Delete ловит их (within-service refs защищены на DB-уровне).
+// Порядок снятия «аккаунт → личность» (kaname#664, приёмка
+// `own-account-and-identity-are-removed-in-order.md`): владеющий аккаунтом
+// человек получает FailedPrecondition "User <id> owns accounts and cannot be
+// deleted" — шаг назван, снять аккаунт; после снятия аккаунта колонка дома пуста
+// (`users_account_fk ON DELETE SET NULL`), и снятие личности проходит.
+// Действующие выдачи и членство в группах отвергаются atomic DELETE WHERE NOT
+// EXISTS в user_repo.Delete (within-service refs защищены на DB-уровне);
+// отозванная выдача — история и снятия не держит (Р10).
+//
+// Транзакция снятия, по порядку: замок строки и перечень членств (Р6) →
+// отсечка субъекта (Р5) → снятие строки (каскад сессий, способов входа,
+// ключей, кодов, личных токенов, членств) → намерения снятия кортежей объекта
+// личности, включая указатели ВСЕХ членств → событие реконсайла → аудит.
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -24,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -70,15 +83,12 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 	// удалит. Класс — §«Авторизация живёт в МОДЕЛИ, а не в
 	// самодельных проверках»; тем же классом kacho#1102 снял двенадцать мест.
 	//
-	// ЦЕНА ИЗМЕРЕНА, А НЕ ПРЕДПОЛОЖЕНА, и она в БУДУЩЕМ ВРЕМЕНИ. Ветка была
-	// НЕДОСТИЖИМА на этом дереве: `users.account_id` объявлена NOT NULL и несёт
-	// внешний ключ на `accounts(id)`, аккаунта с пустым идентификатором нет ни
-	// одного, поэтому вставка с пустым аккаунтом отвергается (23503) — проверено
-	// прогоном против настоящей базы, а не выведено. Осиротевшая личность
-	// сегодня выражается СНЯТЫМ ЧЛЕНСТВОМ (kacho#1127), а колонка остаётся легаси.
-	// Значит проверка была не действующим отказом, а ВЗВЕДЁННЫМ: она сработала
-	// бы в день снятия колонки — то самое направление, которое объявляет
-	// миграция 944001, — и сработала бы молча, на каждой осиротевшей строке.
+	// ЦЕНА БЫЛА В БУДУЩЕМ ВРЕМЕНИ — и это время наступило. Пока
+	// `users.account_id` была NOT NULL с ключом RESTRICT, строка без дома была
+	// непредставима, и снятая проверка была взведённой, а не действующей. С
+	// kaname#664 колонка допускает NULL, а ключ — `ON DELETE SET NULL`: снятие
+	// аккаунта оставляет его участников без дома, и надзор облака снимает такую
+	// личность (KN664-39) — ровно тот путь, который проверка бы закрыла.
 	//
 	// СНЯТИЕ НИЧЕГО НЕ РАСШИРЯЕТ, и это утверждается вердиктом, а не доводом: у
 	// строки БЕЗ ЗВЕНА ЦЕПИ к аккаунту (осиротевшей — той, у которой снято
@@ -115,7 +125,12 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 //
 //	iam_user:<u> # subject @ user:<u>        — «прочитать себя» (flat-model D-4);
 //	iam_user:<u> # account @ account:<A>     — указатель принадлежности, от
-//	                                           которого выводится админ-уровень.
+//	                                           которого выводится админ-уровень,
+//	                                           — для КАЖДОГО членства человека.
+//
+// Указатели снимаются по перечню членств, прочитанному под замком строки
+// (`LockForRemoval`), а не по колонке дома: колонка называет один аккаунт из
+// многих, и указатели прочих членств переживали бы человека (kaname#664, Р6).
 //
 // Прочие кортежи создания (владение аккаунтом, админ проекта, указатели
 // кластера) объектом личности НЕ являются и здесь не перечисляются: аккаунт и
@@ -123,10 +138,9 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 // пути — `accounts_owner_fk` отвергает снятие владеющего человека немедленно.
 //
 // Пустой аккаунт кортежа НЕ порождает: строка вида `account: # account @ …`
-// адресовала бы аккаунт, которого никто не называл. Строка человека без
-// аккаунта уже существует в этом коде как отдельный случай (см. пробу про
-// пустой account_id в метаданных операции).
-func identityTuplesForRemoval(id domain.UserID, accountID string) []service.RelationTuple {
+// адресовала бы аккаунт, которого никто не называл. Человек без членств (и без
+// дома) снимает только самокортеж.
+func identityTuplesForRemoval(id domain.UserID, memberOf []domain.AccountID) []service.RelationTuple {
 	tuples := []service.RelationTuple{
 		{
 			User:     fmt.Sprintf("user:%s", id),
@@ -134,12 +148,11 @@ func identityTuplesForRemoval(id domain.UserID, accountID string) []service.Rela
 			Object:   fmt.Sprintf("iam_user:%s", id),
 		},
 	}
-	if accountID != "" {
-		tuples = append(tuples, service.RelationTuple{
-			User:     fmt.Sprintf("account:%s", accountID),
-			Relation: "account",
-			Object:   fmt.Sprintf("iam_user:%s", id),
-		})
+	for _, acc := range memberOf {
+		if acc == "" {
+			continue
+		}
+		tuples = append(tuples, shared.MembershipPointer(id, acc))
 	}
 	return tuples
 }
@@ -147,6 +160,34 @@ func identityTuplesForRemoval(id domain.UserID, accountID string) []service.Rela
 func (uc *DeleteUserUseCase) doDelete(ctx context.Context, id domain.UserID, actor, accountID string) (*anypb.Any, error) {
 	if err := shared.DoWithWriteTxVoid(ctx, uc.repo,
 		func(ctx context.Context, w Writer) error {
+			// ПЕРВЫЙ ОПЕРАТОР — замок строки человека и перечень его членств
+			// (Р6): новое членство ссылается на строку внешним ключом и потому
+			// либо ждёт фиксации снятия, либо уже в перечне.
+			memberOf, lerr := w.UsersW().LockForRemoval(ctx, id)
+			if lerr != nil {
+				return lerr
+			}
+			// Отсечка субъекта (Р5) — до снятия строки: первая запись держится
+			// ключом на человека и уходит каскадом ниже, вторая переживает его и
+			// отвергает на предъявлении всё, выданное до этого момента. Отказ
+			// снятия ниже откатывает и её — отвергнутое снятие ничего не обрывает.
+			//
+			// Момент — часы базы этой транзакции после замка строки, тем же
+			// источником, что у сбросов: неустановленный момент — отказ
+			// UNAVAILABLE с фиксированным текстом, а не нулевая отсечка (нулевая
+			// не отсекла бы ничего).
+			at, merr := revocationpolicy.Moment(ctx, w.UsersW())
+			if merr != nil {
+				slog.ErrorContext(ctx, "DeleteUser: cutoff moment unavailable",
+					"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(merr))
+				return status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+			}
+			revokedBy := domain.UserID(actor)
+			if cerr := w.UsersW().CutOffForRemoval(ctx, domain.UserTokenRevocation{
+				UserID: id, RevokeBefore: at, Reason: domain.RevokeReasonIdentityRemoved, RevokedBy: revokedBy,
+			}, revokedBy); cerr != nil {
+				return cerr
+			}
 			if derr := w.UsersW().Delete(ctx, id); derr != nil {
 				return derr
 			}
@@ -155,7 +196,7 @@ func (uc *DeleteUserUseCase) doDelete(ctx context.Context, id domain.UserID, act
 			// best-effort: процесс, умерший между коммитом и вызовом, оставил бы
 			// в модели прав утверждения о человеке, которого уже нет, и заметить
 			// это было бы нечем.
-			if terr := w.EmitFGARelationDelete(ctx, identityTuplesForRemoval(id, accountID)); terr != nil {
+			if terr := w.EmitFGARelationDelete(ctx, identityTuplesForRemoval(id, memberOf)); terr != nil {
 				return terr
 			}
 			// Симметрия созданию (kacho#2055): создание со-коммитит событие

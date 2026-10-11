@@ -113,7 +113,7 @@ func newICSecretWorld(t *testing.T) *icSecretWorld {
 	decoy, err := floorHasher(t).Hash("decoy-nobody-knows")
 	require.NoError(t, err)
 	require.NoError(t, checker.SetDecoy(decoy))
-	w.secrets, err = ceremonyport.NewClientSecrets(w.ceremony, checker)
+	w.secrets, err = ceremonyport.NewClientSecrets(w.ceremony, checker, nopShareObserver{})
 	require.NoError(t, err)
 	return w
 }
@@ -573,3 +573,9 @@ func TestIntegration_MalformedVerifierIsOurDefectNotTheCallers(t *testing.T) {
 		"ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: строки о сработавшем ограничении в журнале нет")
 	require.NotContains(t, captured.String(), "not-a-body-marker-5f2", "журнал несёт материал")
 }
+
+// nopShareObserver — приёмник отказов по доле церемонии, ничего не считающий:
+// предмет мира — справочник клиентов, а не доля (kaname#693).
+type nopShareObserver struct{}
+
+func (nopShareObserver) CeremonyShareExhaustedObserved() {}

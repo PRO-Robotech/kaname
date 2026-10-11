@@ -100,7 +100,10 @@ func NewEnrollPasswordUseCase(d EnrollPasswordDeps) (*EnrollPasswordUseCase, err
 
 // Execute — порядок: сессия → свежесть → правило → значение → строка и
 // событие одним исходом.
-func (uc *EnrollPasswordUseCase) Execute(ctx context.Context, in EnrollPasswordInput) (EnrollPasswordOutput, error) {
+func (uc *EnrollPasswordUseCase) Execute(ctx context.Context, in EnrollPasswordInput) (_ EnrollPasswordOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailurePasswordEnroll, err) }()
 	now := uc.deps.Now().UTC()
 	if in.Bearer.IsZero() {
 		return EnrollPasswordOutput{}, ErrAuthenticationFailed

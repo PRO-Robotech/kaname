@@ -657,7 +657,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(kanameRepo, relationStore,
+	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
 		metricsReg, cfg.AuthN.Mode.IsProduction())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
@@ -1217,8 +1217,11 @@ type authzServiceBundle struct {
 // движка то, чего обёртка не добавляла. Добавлять больше нечего: цепь областей и
 // надзор администратора облака форма поднимает своим планом, поэтому «два ответа
 // на один вопрос» перестало быть возможным by construction, а не по договорённости.
+//
+// sessions — записи сессий человека: из записи сессии вопроса служба выводит
+// доводы способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
 func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
+	sessions service.SessionRecords, metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
@@ -1227,6 +1230,7 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 	authSvc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           ownGates,
 		ClusterAdminChecker: ownGates,
+		SessionRecords:      sessions,
 	})
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kanameRepo, ownGates)
 	// WithCallerAuthority wires the caller-authority gate (a tenant principal may

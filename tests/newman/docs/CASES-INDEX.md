@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 817
+Всего кейсов: 818
 
 ## Перепись по модулям
 
@@ -63,7 +63,7 @@
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-grant-visibility.py` | 1 |
 | `cases/iam-token-facade-conformance.py` | 4 |
-| `cases/iam-user.py` | 43 |
+| `cases/iam-user.py` | 44 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 23 |
@@ -848,7 +848,7 @@
 - `IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK`
 - `IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED`
 
-## `cases/iam-user.py` — 43 кейсов
+## `cases/iam-user.py` — 44 кейсов
 
 > Case-set для UserService.
 
@@ -874,6 +874,7 @@
 - `IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS`
 - `IAM-USR-DL-CRUD-OK`
 - `IAM-USR-DL-NEG-ACTIVE-BINDINGS`
+- `IAM-USR-DL-NEG-OWNS-ACCOUNTS`
 - `IAM-USR-DL-NEG-NOTFOUND`
 - `IAM-USR-DL-AUTHZ-ANON-DENY`
 - `IAM-USR-DL-AUTHZ-NONADMIN-DENY`

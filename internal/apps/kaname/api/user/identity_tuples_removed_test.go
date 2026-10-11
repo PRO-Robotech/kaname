@@ -148,7 +148,7 @@ func TestIntegration_IdentityTuplesAreRemovedFromTheModel(t *testing.T) {
 	}
 
 	// ── снятие: применяем ровно тот список, который эмитит путь удаления ─────
-	deletes := identityTuplesForRemoval(domain.UserID(userID), accountID)
+	deletes := identityTuplesForRemoval(domain.UserID(userID), []domain.AccountID{accountID})
 	require.NotEmpty(t, deletes,
 		"список снятия пуст — тогда удаление ничего не снимает, а проба ниже зеленеет вхолостую")
 	journalDelete(t, ctx, pool, toClientTuples(deletes))
@@ -193,11 +193,12 @@ func TestDeleteUser_EmitsIdentityTupleDeletesInTx(t *testing.T) {
 	_, err := uc.doDelete(context.Background(), delUserID, "actor-"+delUserID, delAccID)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"delete-row", "emit-delete", "commit"}, repo.sequence(),
-		"порядок внутри транзакции: строка снята → намерение эмитировано → и только "+
+	require.Equal(t, []string{"lock-row", "cutoff", "delete-row", "emit-delete", "commit"}, repo.sequence(),
+		"порядок внутри транзакции: замок строки и перечень членств первыми (kaname#664, Р6) → "+
+			"отсечка субъекта (Р5) → строка снята → намерение эмитировано → и только "+
 			"потом фиксация. Намерение ПОСЛЕ фиксации — это уже не транзакция")
 
-	require.ElementsMatch(t, identityTuplesForRemoval(delUserID, delAccID), repo.deletedTuples(),
+	require.ElementsMatch(t, identityTuplesForRemoval(delUserID, []domain.AccountID{delAccID}), repo.deletedTuples(),
 		"снимаются ровно кортежи объекта личности — не меньше (иначе утверждение "+
 			"переживает человека) и не больше (иначе снятие человека рушит аккаунт)")
 }

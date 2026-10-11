@@ -20679,6 +20679,95 @@
           ]
         },
         {
+          "name": "IAM-RECOVERY-NEG-PACED-PER-RECIPIENT :: pace-q-baseline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_pace_q_baseline') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_pace_q_baseline', '0');",
+                  "  pm.environment.set('_mts_pace_q_baseline', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "pm.test('PACE-Q-BASELINE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('RCVPACEQ0: клетка queued публикуется до события кейса', () => pm.expect(__out('queued')).to.be.a('number'));",
+                  "pm.environment.set('rcvPaceQ0_queued', String(__out('queued')));",
+                  "pm.test('RCVPACEQ0: клетка recipient-paced публикуется до события кейса', () => pm.expect(__out('recipient-paced')).to.be.a('number'));",
+                  "pm.environment.set('rcvPaceQ0_recipient-paced', String(__out('recipient-paced')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-RECOVERY-NEG-PACED-PER-RECIPIENT :: pace-q-same-window",
           "request": {
             "method": "POST",
@@ -21033,7 +21122,7 @@
                   "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
                   "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
                   "const __n = parseInt(pm.environment.get('_mt_pace_cells_after_q') || '0', 10);",
-                  "if (!((__out('queued') - __num('rcvPace0_queued')) >= __num('recoveryLettersPerRecipient') + 1) && __n < 120) {",
+                  "if (!((__out('queued') - __num('rcvPaceQ0_queued')) >= 1) && __n < 120) {",
                   "  pm.environment.set('_mt_pace_cells_after_q', String(__n + 1));",
                   "  const _mtd = Date.now(); while (Date.now() - _mtd < 1000) { /* inter-poll delay: condition on the metrics not reached yet */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
@@ -21042,7 +21131,7 @@
                   "pm.environment.unset('_mt_pace_cells_after_q');",
                   "pm.environment.unset('_mts_pace_cells_after_q');",
                   "pm.test('PACE-CELLS-AFTER-Q: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла ещё на 1, recipient-paced не выросла', () => pm.expect([(__out('queued') - __num('rcvPace0_queued')), (__out('recipient-paced') - __num('rcvPace0_recipient-paced'))]).to.eql([__num('recoveryLettersPerRecipient') + 1, 1]));"
+                  "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла на 1 от базы перед Q, recipient-paced не выросла', () => pm.expect([(__out('queued') - __num('rcvPaceQ0_queued')), (__out('recipient-paced') - __num('rcvPaceQ0_recipient-paced'))]).to.eql([1, 0]));"
                 ]
               }
             }
@@ -22710,6 +22799,95 @@
           ]
         },
         {
+          "name": "IAM-RECOVERY-NEG-PACED-PER-SOURCE :: src-s2-baseline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_src_s2_baseline') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_src_s2_baseline', '0');",
+                  "  pm.environment.set('_mts_src_s2_baseline', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "pm.test('SRC-S2-BASELINE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('RCVSRCS20: клетка queued публикуется до события кейса', () => pm.expect(__out('queued')).to.be.a('number'));",
+                  "pm.environment.set('rcvSrcS20_queued', String(__out('queued')));",
+                  "pm.test('RCVSRCS20: клетка source-paced публикуется до события кейса', () => pm.expect(__out('source-paced')).to.be.a('number'));",
+                  "pm.environment.set('rcvSrcS20_source-paced', String(__out('source-paced')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "IAM-RECOVERY-NEG-PACED-PER-SOURCE :: src-p-other-source",
           "request": {
             "method": "POST",
@@ -23064,7 +23242,7 @@
                   "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
                   "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
                   "const __n = parseInt(pm.environment.get('_mt_src_cells_after_other_source') || '0', 10);",
-                  "if (!((__out('queued') - __num('rcvSrc0_queued')) >= 1) && __n < 120) {",
+                  "if (!((__out('queued') - __num('rcvSrcS20_queued')) >= 1) && __n < 120) {",
                   "  pm.environment.set('_mt_src_cells_after_other_source', String(__n + 1));",
                   "  const _mtd = Date.now(); while (Date.now() - _mtd < 1000) { /* inter-poll delay: condition on the metrics not reached yet */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
@@ -23073,7 +23251,7 @@
                   "pm.environment.unset('_mt_src_cells_after_other_source');",
                   "pm.environment.unset('_mts_src_cells_after_other_source');",
                   "pm.test('SRC-CELLS-AFTER-OTHER-SOURCE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('SRC-CELLS-S2: queued выросла на 1, source-paced осталась +1', () => pm.expect([(__out('queued') - __num('rcvSrc0_queued')), (__out('source-paced') - __num('rcvSrc0_source-paced'))]).to.eql([1, 1]));"
+                  "pm.test('SRC-CELLS-S2: письмо с S′ поставлено — queued выросла на 1 от базы перед S′, source-paced не выросла', () => pm.expect([(__out('queued') - __num('rcvSrcS20_queued')), (__out('source-paced') - __num('rcvSrcS20_source-paced'))]).to.eql([1, 0]));"
                 ]
               }
             }

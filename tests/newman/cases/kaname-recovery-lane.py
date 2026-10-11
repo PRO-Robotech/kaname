@@ -103,6 +103,60 @@ Coverage:
 применённый код), граница счёта по адресу (N−1 · N · N+1), угадывание ошибок
 (одновременное предъявление одного кода), переходы состояния сессии (жива →
 отозвана), положительный близнец у каждого отказа.
+
+СПОСОБНОСТЬ Ф5-26 И Ф5-27 УПАСТЬ ДОКАЗАНА ИНЪЕКЦИЯМИ §9 ПРИЁМКИ (kaname#614).
+Красного до кода у этих позиций нет — код окон уже в дереве, — поэтому
+способность упасть доказана правкой кода службы во ВРЕМЕННОЙ сборке образа, по
+одному различию на опыт. Инъекции в дерево не входят. Носитель — kind-стенд
+задания `chart-own` (`.github/scripts/stand-chart.sh up` → `assert` →
+`seed-login-lane` → `seed-ceremony` → `seed-stored-value`), прогон —
+`tests/newman/scripts/run.sh --service kaname-recovery-lane` с листом края
+стенда; коллекция `collections/kaname-recovery-lane.postman_collection.json`
+этой ревизии набора. Это единственный носитель, собирающий образ из локально
+правленого дерева. Провенанс каждого опыта сверен `assert` по ревизии образа в
+работающем контейнере («сходится» у всех пяти), посадка — боевая. Образ назван
+идентификатором локальной сборки. Счёт — утверждения отчёта newman. (а), (б) и
+(в) — части кейса: (б) и (в) — законные близнецы (а).
+
+  контроль, без инъекции, образ sha256:fbf1fb201efe — коллекция: запросов 362,
+    утверждений 572, упавших 0. Ф5-26 (а) 22/0 · (б) 8/0 · (в) 13/0;
+    Ф5-27 (а) 16/0 · (б) 8/0 (утверждений/упавших).
+  (1) окно адресата не списывается (`EmitRecoveryMail` без
+    `chargeInviteMailWindowTx`), образ sha256:e271ad15d414 — упавших 3, все в
+    Ф5-26 (а): PACE-CELLS ×2 (recipient-paced не выросла, queued выросла на N + 1),
+    PACE-P-LETTERS-EXACTLY ×1. Ф5-26 (б) 8/0 · (в) 13/0 · Ф5-27 0 упавших.
+  (2) окно, общее для видов письма (восстановление списывается окном вида
+    `invite`), образ sha256:e81f7761b86d — упавших 3, все в Ф5-26 (в):
+    PACE-INVITE-FULL ×1, PACE-INVITE-FULL-LETTERS ×2. Ф5-26 (а) 22/0 · (б) 8/0 ·
+    Ф5-27 0 упавших.
+  (4) окно источника не списывается (`ChargeSource` снят), образ
+    sha256:cf710a4c10ce — упавших 2, все в Ф5-27 (а): SRC-CELLS ×1 (source-paced
+    не выросла, queued выросла), SRC-P-LETTERS-EXACTLY ×1. Ф5-27 (б) 8/0 · Ф5-26
+    0 упавших.
+  (5) окно источника списывается только на полосе «адрес есть» (`ChargeSource`
+    после чтения адреса), образ sha256:5ecad8690cfa — упавших 1, в Ф5-27 (а):
+    SRC-CELLS ×1 (запросы о несуществующем адресе окна не исчерпали: запрос для
+    P с S поставлен). Ф5-27 (б) 8/0 · Ф5-26 0 упавших.
+
+Свидетель опытов (4) и (5) — SRC-CELLS: он красный во всех четырёх прогонах этих
+опытов (два прогона на опыт). SRC-P-LETTERS-EXACTLY — нет: письмо с S он
+считает один раз, без ожидания, и в двух из этих четырёх прогонов письма к
+чтению ещё не было.
+
+Первым кругом близнецы (б) краснели под (1), (4) и (5): PACE-CELLS-Q и
+SRC-CELLS-S2 считали клетки от базы кейса и несли в ожидание близнеца исход (а).
+Теперь база снимается перед запросом близнеца (`pace-q-baseline`,
+`src-s2-baseline`), и цифры выше — второй круг, уже с ней.
+
+Опыта «вытеснение прежнего кода раньше списания окна» нет: прежний код жив по
+построению. `RequestRecoveryUseCase.write` (`internal/apps/kaname/api/humansession/
+recovery_request.go`) вытесняет прежние коды (`SupersedeRecoveryCodes`),
+пишет строку кода (`InsertRecoveryCode`) и списывает окно с намерением письма
+(`EmitRecoveryMail`) в ОДНОЙ транзакции записи с отложенным `Rollback`. Отказ
+списания (`ErrLetterWindowFull`) откатывает и вытеснение. Перестановка внутри
+этой транзакции различия не даёт, поэтому такой опыт не доказал бы ничего.
+Держит свойство утверждение PACE-NTH-CODE: оно зелёное в контроле и во всех
+опытах.
 """
 
 import urllib.parse as _urlparse
@@ -1656,16 +1710,20 @@ CASES.append(Case(
         ]),
         _mailbox_count(_P26, "pace-p-letters", _HEAD_RECOVERY, at_least="__num('recoveryLettersPerRecipient')"),
         # (б) Q — тот же источник, та же форма, другой адрес: письмо поставлено.
+        # Клетки близнеца считаются от СВОЕЙ базы, снятой перед запросом Q: база
+        # (а) несла бы в ожидание близнеца исход (а), и снятое списание окна
+        # адресата красило бы (б), чей факт — адрес — не менялся (kaname#614,
+        # опыт (1)).
+        _metrics_step("pace-q-baseline", tests=[*_keep_outcomes("rcvPaceQ0", ("queued", "recipient-paced"))]),
         _request_for(_P26, "pace-q-same-window", f"{{{{{_v(_Q26, 'Email')}}}}}", "rcvPaceSrc"),
         _await_code(_Q26, "pace-q-letter", _HEAD_RECOVERY, "MailCode"),
         # Письмо Q дошло — поставленное до него письмо P дошло бы тоже: писем P ровно N.
         _mailbox_count(_P26, "pace-p-letters-exactly", _HEAD_RECOVERY,
                        exactly="__num('recoveryLettersPerRecipient')"),
-        _metrics_step("pace-cells-after-q", until=f"{_delta('rcvPace0', 'queued')} >= "
-                                                 "__num('recoveryLettersPerRecipient') + 1", tests=[
-            "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла ещё на 1, recipient-paced не выросла', () => "
-            f"pm.expect([{_delta('rcvPace0', 'queued')}, {_delta('rcvPace0', 'recipient-paced')}])"
-            ".to.eql([__num('recoveryLettersPerRecipient') + 1, 1]));",
+        _metrics_step("pace-cells-after-q", until=f"{_delta('rcvPaceQ0', 'queued')} >= 1", tests=[
+            "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла на 1 от базы перед Q, recipient-paced не выросла', () => "
+            f"pm.expect([{_delta('rcvPaceQ0', 'queued')}, {_delta('rcvPaceQ0', 'recipient-paced')}])"
+            ".to.eql([1, 0]));",
         ]),
         # Код N-го письма проходит: сверхнормативный запрос прежнего кода не вытеснил.
         _csrf_step(_P26, "pace-csrf-complete", "recovery-complete"),
@@ -1729,13 +1787,16 @@ CASES.append(Case(
             f"pm.expect({_delta('rcvSrc0', 'no-row')}).to.eql(__num('recoverySourceAttempts')));",
         ]),
         # (б) S′ — другой источник, тот же адрес: письмо поставлено (исход Ф5-01).
+        # Клетки близнеца — от СВОЕЙ базы перед запросом с S′, по той же причине,
+        # что у близнеца (б) Ф5-26: исход (а) в ожидание близнеца не входит.
+        _metrics_step("src-s2-baseline", tests=[*_keep_outcomes("rcvSrcS20", ("queued", "source-paced"))]),
         _request_for(_P27, "src-p-other-source", f"{{{{{_v(_P27, 'Email')}}}}}", "rcvSrcS2"),
         _await_code(_P27, "src-p-letter-other-source", _HEAD_RECOVERY, "MailCode"),
         # Письмо с S′ дошло; письма с S не было — писем восстановления у P ровно одно.
         _mailbox_count(_P27, "src-p-letters-exactly", _HEAD_RECOVERY, exactly=1),
-        _metrics_step("src-cells-after-other-source", until=f"{_delta('rcvSrc0', 'queued')} >= 1", tests=[
-            "pm.test('SRC-CELLS-S2: queued выросла на 1, source-paced осталась +1', () => "
-            f"pm.expect([{_delta('rcvSrc0', 'queued')}, {_delta('rcvSrc0', 'source-paced')}]).to.eql([1, 1]));",
+        _metrics_step("src-cells-after-other-source", until=f"{_delta('rcvSrcS20', 'queued')} >= 1", tests=[
+            "pm.test('SRC-CELLS-S2: письмо с S′ поставлено — queued выросла на 1 от базы перед S′, source-paced не выросла', () => "
+            f"pm.expect([{_delta('rcvSrcS20', 'queued')}, {_delta('rcvSrcS20', 'source-paced')}]).to.eql([1, 0]));",
         ]),
     ],
 ))
