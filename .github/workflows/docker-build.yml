@@ -106,6 +106,7 @@ on:
     branches:
       - main
       - '[0-9]+'
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 # `actions: write` — НЕ право «на всякий случай»: кэш `type=gha` пишется через
@@ -143,7 +144,37 @@ env:
   IMAGE_NAME: kaname
 
 jobs:
+  # Выбор затронутого (kaname#707): на черновике запроса в ветку эпика задания ниже
+  # исполняются, только если их выбрала карта `.github/ci-paths.json`; на ready, на
+  # запросе в main, на push и ручном запуске — полный прогон. Пропуск даёт `skipped`,
+  # а сводный вердикт `prverdict` на черновике красный по построению.
+  changes:
+    name: выбор затронутого (образ)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.pick.outputs.full }}
+      jobs: ${{ steps.pick.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: выбор затронутого по карте путей
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/affected.py --github-output docker-build.yml
+
   image:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'image') }}
+    needs: [changes]
     name: образ службы (сборка · публикация по пину)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -365,6 +396,7 @@ jobs:
     # по-прежнему читается как «без вердикта» и событие производит.
     needs:
       - image
+      - changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
@@ -390,6 +422,7 @@ jobs:
         run: |
           rc=0
           .github/scripts/trunk-verdict-holder.sh \
+            "${{ needs.changes.result }}" \
             "${{ needs.image.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
