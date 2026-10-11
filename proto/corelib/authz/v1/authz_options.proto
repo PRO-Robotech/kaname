@@ -83,7 +83,7 @@ option go_package = "github.com/PRO-Robotech/corelib/api/corelib/authz/v1;authzv
 //
 // Extension field numbers occupy the reserved range `[50000, 50999]`, chosen to
 // avoid collision with `corelib.api.v1` (87334 — moved out of the platform root
-// `kacho.cloud.api` by kacho#2395, number unchanged) and the retired
+// `kacho.cloud.api` by #2395, number unchanged) and the retired
 // `kacho.cloud.validation` (101400+).
 //
 // THE NUMBERS DID NOT CHANGE WHEN THE PACKAGE MOVED, AND THAT IS LOAD-BEARING.

@@ -112,9 +112,25 @@ var issueRefExclusions = []IssueRefExclusion{
 			"исключение покраснеет и снимается",
 		Match: func(rel string) bool { return strings.HasPrefix(rel, "docs/engineering/acceptance/") },
 	},
+	{
+		Name: "proto/corelib",
+		Why: "входной контракт, копия из corelib: его отпечаток записан в ведомости входных " +
+			"контрактов, и правка здесь разводит копию с источником. Ссылка правится в corelib " +
+			"и приходит сюда новой копией вместе с ведомостью",
+		Match: func(rel string) bool { return strings.HasPrefix(rel, "proto/corelib/") },
+	},
+	{
+		Name: "fga_model.fga",
+		Why: "канон модели прав и его побайтовая вшитая копия: длину канона в байтах и символах " +
+			"называют шапка internal/modelrender/canon.go и одобренная приёмка, так что правка " +
+			"комментария канона — правка одобренного числа; правит владелец приёмки вместе с шапкой",
+		Match: func(rel string) bool {
+			return rel == "proto/kaname/cloud/iam/v1/fga_model.fga" || rel == "internal/authzmodel/fga_model.fga"
+		},
+	},
 }
 
-var issueRefAllowances = []IssueRefAllowance{
+var issueRefAllowances = append([]IssueRefAllowance{
 	{Path: "tools/known_failing_expiry_injection_test.go", Number: 4242,
 		Why: "выдуманный номер в фикстуре разборщика маркера known-failing: форма `#<N>` и есть разбираемый вход"},
 	{Path: "tools/known_failing_expiry_injection_test.go", Number: 7777,
@@ -131,6 +147,24 @@ var issueRefAllowances = []IssueRefAllowance{
 		Why: "фикстура манифеста повторяет значение описания дословно"},
 	{Path: "internal/apps/kaname/seed/orphan_scope_sweep.go", Number: 810,
 		Why: "значение поля reason события аудита — данные, которые читают потребители журнала"},
+}, manifestModelBlockAllowances()...)
+
+// manifestModelBlockNumbers — номера в комментариях БЛОКОВ МОДЕЛИ внутри манифеста
+// службы. Блок модели в манифесте порождает блок канона, и порождённое сверяется с
+// каноном побайтово (internal/modelrender); канон — исключение "fga_model.fga". Правка
+// комментария здесь развела бы манифест с каноном, поэтому номер правится вместе с
+// каноном, его шапкой и приёмкой. Комментарии манифеста вне блоков модели судятся.
+var manifestModelBlockNumbers = []int{1086, 1101, 1102, 1114, 1115, 1126, 1127, 1128, 1131, 1133, 1140, 1189}
+
+func manifestModelBlockAllowances() []IssueRefAllowance {
+	var out []IssueRefAllowance
+	for _, path := range []string{"manifest.yaml", "internal/servicemanifest/manifest.embedded.yaml"} {
+		for _, n := range manifestModelBlockNumbers {
+			out = append(out, IssueRefAllowance{Path: path, Number: n,
+				Why: "комментарий блока модели в манифесте: блок сверяется с каноном модели побайтово"})
+		}
+	}
+	return out
 }
 
 // IssueRefExclusions — объявленные исключения; копия, проба её не двигает.
