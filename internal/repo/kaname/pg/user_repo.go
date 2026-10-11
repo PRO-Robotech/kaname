@@ -827,7 +827,10 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 	}
 	switch {
 	case ownsAccounts:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+		// Полоса — «ещё ссылаются» (`ErrReferenceInUse`, вложена в
+		// FailedPrecondition), та же, что у ветви ключа `accounts_owner_fk`
+		// в `fkText`: один отказ — одна полоса, каким бы рубежом он ни пришёл.
+		return iamerr.Wrapf(iamerr.ErrReferenceInUse,
 			"User %s owns accounts and cannot be deleted", id)
 	case hasBindings:
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
