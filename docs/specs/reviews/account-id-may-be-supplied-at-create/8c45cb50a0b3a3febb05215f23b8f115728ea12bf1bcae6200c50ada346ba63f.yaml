@@ -74,12 +74,34 @@ authority:
   allowlisted_for_role: false
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-11T11:05:18Z'
+  ban1_lifted: true
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu
   why: >-
     Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
     (role, verdict, subject, subject_revision, subject_sha256) в задаче subject.task.
-    До его публикации запись санкцию не утверждает.
+    Событие 6108359086 учётки pointpu несёт все пять полей, subject_sha256 равен
+    отпечатку этой записи, subject_revision 29ce260db383 опубликована на origin раньше
+    события (git branch -r --contains 29ce260db383 даёт origin/664 и origin/678); запрет #1
+    по этому отпечатку снят. Дописано отдельным коммитом поверх записи, вердикт и разбор
+    задним числом не правились.
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#664
+  status: performed
+  published: true
+  database_id: 6108359086
+  node_id: IC_kwDOUO26pM8AAAABbBYprg
+  url: https://github.com/PRO-Robotech/kaname/issues/664#issuecomment-6108359086
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6108359086
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-11T11:05:18Z'
+  body_sha256: 64a197ba8373f3d5a7b690862747d312569f900362b7d964b8335a8492bdbaff
+  subject_sha256: 8c45cb50a0b3a3febb05215f23b8f115728ea12bf1bcae6200c50ada346ba63f
+  subject_revision_commit: 29ce260db383e90c5f84f0ffb62e349df6356337
