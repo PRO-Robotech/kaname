@@ -40,7 +40,7 @@ type SubjectChange struct {
 // следующем такте; вечное молчание закрывает его собственный fail-closed.
 var ErrSubjectChangeNotSettled = errors.New("subject change journal position is not settled yet")
 
-// SubjectChangePositionLostError — КУРСОР НИЖЕ ПОЛА ЖУРНАЛА (задача #1712).
+// SubjectChangePositionLostError — КУРСОР НИЖЕ ПОЛА ЖУРНАЛА (задача kacho#1712).
 //
 // Строки между курсором вызывающего и полом СНЯТЫ, и он их уже не получит.
 //

@@ -3,7 +3,7 @@
 
 package modulecatalog_test
 
-// applyall_test.go — применение ВСЕЙ доставки как одного действия (задача #1034).
+// applyall_test.go — применение ВСЕЙ доставки как одного действия (задача kacho#1034).
 //
 // # Почему это отдельный глагол, а не цикл в композиционном корне
 //
@@ -49,7 +49,7 @@ type recordingWriter struct {
 	unchangedModules map[string]bool
 	// audited — следы применения, дошедшие до писателя.
 	audited []modulecatalog.AppliedEvent
-	// resettleAuthor / pruneAuthor — АВТОР, с которым звали обе ведомости (#2005).
+	// resettleAuthor / pruneAuthor — АВТОР, с которым звали обе ведомости (kacho#2005).
 	// Захватывается, а не игнорируется: «автор доехал до писателя» и «автор
 	// записан в строку» — разные факты, и первый проверяется здесь, без базы.
 	resettleAuthor string
@@ -180,7 +180,7 @@ func fixtureManifest(module string, resources ...string) *manifest.Manifest {
 		m.Resources = append(m.Resources, manifest.Resource{
 			// `objectType` проставляется всегда: манифест без него негоден —
 			// его отвергают загрузчик, деривация и схема. Фикстура без поля
-			// была снисходительнее продукта (#1816).
+			// была снисходительнее продукта (kacho#1816).
 			ObjectType: module + "_" + name,
 			Name:       name,
 			Verbs:      []manifest.Verb{{Name: "get"}},

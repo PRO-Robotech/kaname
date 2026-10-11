@@ -4,7 +4,7 @@
 package toproto
 
 // role_preview_reads_the_live_catalog_test.go — превью роли называет набор ТИПА
-// по ЖИВЫМ строкам каталога (#1994, #1816).
+// по ЖИВЫМ строкам каталога (kacho#1994, kacho#1816).
 //
 // # Предмет
 //
@@ -25,7 +25,7 @@ package toproto
 // # Почему обе стороны в одной пробе
 //
 // Утверждение «тип применения показывает свой набор» зеленело бы на реализации,
-// отнявшей запасной набор у `*.*`, — а это уже наблюдавшийся дефект (#1189).
+// отнявшей запасной набор у `*.*`, — а это уже наблюдавшийся дефект (kacho#1189).
 // Поэтому положительный контроль стоит здесь же: `*.*` обязана по-прежнему
 // называть ВЕСЬ словарь живого каталога.
 
@@ -97,11 +97,11 @@ func TestRolePreviewNamesTheVerbsOfTheAppliedType(t *testing.T) {
 	want := []string{"get", "list"}
 	if len(got) != len(want) {
 		t.Fatalf("превью назвало %v, живая строка billing.invoice объявляет %v — "+
-			"превью взяло запасной набор вместо набора типа (#1994)", got, want)
+			"превью взяло запасной набор вместо набора типа (kacho#1994)", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("превью назвало %v, живая строка billing.invoice объявляет %v (#1994)", got, want)
+			t.Fatalf("превью назвало %v, живая строка billing.invoice объявляет %v (kacho#1994)", got, want)
 		}
 	}
 }
@@ -110,7 +110,7 @@ func TestRolePreviewNamesTheVerbsOfTheAppliedType(t *testing.T) {
 //
 // Меняется РОВНО ОДИН факт против пробы выше: правило адресует `*.*` вместо
 // названной пары. Без этого контроля правка отняла бы у роли-суперпользователя
-// её же показ — наблюдалось при #1189.
+// её же показ — наблюдалось при kacho#1189.
 func TestRolePreviewStillShowsEveryVerbForTheWildcardRole(t *testing.T) {
 	facts := appliedTypeFacts(t)
 
@@ -135,11 +135,11 @@ func TestRolePreviewStillShowsEveryVerbForTheWildcardRole(t *testing.T) {
 	sort.Strings(all)
 	if len(got) != len(all) {
 		t.Fatalf("превью роли `*.*` назвало %v, живой каталог объявляет %v — "+
-			"роль-суперпользователь обещает не то, что даёт (#1189)", got, all)
+			"роль-суперпользователь обещает не то, что даёт (kacho#1189)", got, all)
 	}
 	for i := range all {
 		if got[i] != all[i] {
-			t.Fatalf("превью роли `*.*` назвало %v, живой каталог объявляет %v (#1189)", got, all)
+			t.Fatalf("превью роли `*.*` назвало %v, живой каталог объявляет %v (kacho#1189)", got, all)
 		}
 	}
 
@@ -168,6 +168,6 @@ func TestRoleProjectionRefusesWithoutTheCatalog(t *testing.T) {
 	}
 	if _, err := (roleObj{}).toPb(r); err == nil {
 		t.Fatal("проекция роли без каталожного факта обязана ОТКАЗАТЬ: показ по " +
-			"словарю сборки неотличим от честного превью (#1994)")
+			"словарю сборки неотличим от честного превью (kacho#1994)")
 	}
 }

@@ -174,7 +174,7 @@ func TestListSubjectPrivileges_1_3_01_OwnerSeesMemberEnriched(t *testing.T) {
 	})
 	// Модель прав: владелец acc-A--------------- держит `v_get` на обеих выдачах — он выводится
 	// у него через `super_admin from account` / `... from project`. Дублёр не
-	// выводит, поэтому предпосылка сужения названа здесь явно (#1354).
+	// выводит, поэтому предпосылка сужения названа здесь явно (kacho#1354).
 	uc := NewListSubjectPrivilegesUseCase(repo).
 		WithRelationStore(&denyingFGA{}, nil).
 		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01", "acb00000000000bind02"))
@@ -206,7 +206,7 @@ func TestListSubjectPrivileges_1_3_07_AccountAdminViaFGA_Allowed(t *testing.T) {
 	// Отношение выдаётся ТОЧЕЧНО, а не дублёром, отвечающим «да» на всё: такой
 	// дублёр делает вызывающего ещё и администратором облака, и проба, названная
 	// полосой делегированного распорядителя, молча проверяла бы полосу надзора —
-	// оставаясь зелёной при полностью сломанной первой (#1354).
+	// оставаясь зелёной при полностью сломанной первой (kacho#1354).
 	fga := &scopedFGA{allow: map[string]bool{"admin|account:" + spAccA: true}}
 	uc := NewListSubjectPrivilegesUseCase(repo).
 		WithRelationStore(fga, nil).

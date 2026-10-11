@@ -54,7 +54,7 @@ func TestPortTableGateIsSilentOnTheLawfulPair(t *testing.T) {
 }
 
 // TestPortTableGateRedsWhenRegistrationOutgrowsTheDoc — прямая сторона: служба села
-// на слушатель, строку в таблицу не дописали. Это ровно #1359.
+// на слушатель, строку в таблицу не дописали. Это ровно kacho#1359.
 func TestPortTableGateRedsWhenRegistrationOutgrowsTheDoc(t *testing.T) {
 	src := strings.Replace(lawfulRegisterSrc,
 		"	iamv1.RegisterInternalIAMServiceServer(srv, h)",

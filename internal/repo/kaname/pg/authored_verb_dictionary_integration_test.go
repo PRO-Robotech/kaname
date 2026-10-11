@@ -4,7 +4,7 @@
 package pg_test
 
 // authored_verb_dictionary_integration_test.go — АВТОРСКИЙ словарь глаголов
-// отделён от ПООБЪЕКТНОГО, и `create` живёт в первом (задача продукта #1863).
+// отделён от ПООБЪЕКТНОГО, и `create` живёт в первом (задача продукта kacho#1863).
 //
 // # Что здесь утверждается — ОБЕ половины предиката снятия, а не одна
 //
@@ -36,7 +36,7 @@ import (
 )
 
 // TestAuthoredCreateIsAcceptedAndProducesNoPerObjectRelation — предикат снятия
-// задачи #1863 целиком.
+// задачи kacho#1863 целиком.
 //
 // Ресурс — `storage.volumes`, и он выбран не наугад: ровно эта пара стоит в
 // посеве матрицы прав (`PRO-Robotech/kacho:tests/authz-fixtures/prodseed_matrix.py`,

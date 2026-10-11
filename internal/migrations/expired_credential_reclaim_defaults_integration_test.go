@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expired_credential_reclaim_defaults_integration_test.go — ВЕЛИЧИНЫ УМОЛЧАНИЯ
-// потолка после пересмотра (задача #1264, приёмка
+// потолка после пересмотра (задача kacho#1264, приёмка
 // `expired-credential-reclaim.md` §4, сценарий CRED-RCL-29).
 //
 // # Почему проба нужна отдельно от самой уборки
@@ -77,7 +77,7 @@ func TestCredRcl29_CeilingDefaultsInTheTreeAreTheRevisedOnes(t *testing.T) {
 	require.NoError(t, goose.SetDialect("postgres"))
 	require.NoError(t, goose.Up(db, "."), "цепочка миграций обязана примениться целиком")
 
-	// ИСТОЧНИК ВЕЛИЧИНЫ ПЕРЕЕХАЛ (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
+	// ИСТОЧНИК ВЕЛИЧИНЫ ПЕРЕЕХАЛ (приёмка `KAN-QUOTA-1`, `П25`; задача kacho#2117).
 	//
 	// Здесь стояло чтение `kaname.limits`, и предмет утверждения СМЕНИЛСЯ:
 	// величину этих двух видов больше не назначает авторитет — её объявляет

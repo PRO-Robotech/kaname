@@ -9,7 +9,7 @@ package iampgtest
 // ОТКУДА ВЗЯЛСЯ ЭТОТ ПОМОЩНИК
 //
 // Тем же делом занимался `pg.CreatorTupleWriter` — адаптер снятого RPC
-// `InternalIAMService.WriteCreatorTuple`. RPC снят надгробиями (#788, «порт
+// `InternalIAMService.WriteCreatorTuple`. RPC снят надгробиями (kacho#788, «порт
 // записи снят НАМЕРЕННО»), прод-вызывателей у писателя не осталось НИ ОДНОГО, и
 // жив он был только тремя интеграционными пробами (kaname#115).
 //

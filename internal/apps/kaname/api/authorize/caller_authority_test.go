@@ -269,7 +269,7 @@ func TestCallerAuthority_BatchCheck_OneForeign_DeniesBatch(t *testing.T) {
 	requireDenied(t, err)
 }
 
-// ── #665: тот же класс на внутреннем страже AuthorizeService ─────────────────
+// ── kacho#665: тот же класс на внутреннем страже AuthorizeService ─────────────────
 
 // TestCallerAuthority_StoreOutage_IsUnavailableNotDenied — «хранилище отношений
 // не ответило» обязано приезжать НЕДОСТУПНОСТЬЮ, а не отказом в правах.

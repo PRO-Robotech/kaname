@@ -3,7 +3,7 @@
 
 package pg
 
-// orphan_scope_adapter.go — pgx-адаптер порта seed.OrphanScopeStore (задача #810).
+// orphan_scope_adapter.go — pgx-адаптер порта seed.OrphanScopeStore (задача kacho#810).
 //
 // Держит РОВНО две вещи: общий на кластер try-lock и перепись областей, чьей
 // строки-владельца в базе iam нет. Снятие выдач сюда не попадает by construction:

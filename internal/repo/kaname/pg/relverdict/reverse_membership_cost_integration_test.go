@@ -3,7 +3,7 @@
 
 package relverdict_test
 
-// reverse_membership_cost_integration_test.go — #758: СТОИМОСТЬ ОБРАТНОГО
+// reverse_membership_cost_integration_test.go — kacho#758: СТОИМОСТЬ ОБРАТНОГО
 // ВОПРОСА НЕ ПРИНАДЛЕЖИТ ЧУЖИМ ЧЛЕНСТВАМ.
 //
 // ─────────────────────────────────────────────────────────────────────────────

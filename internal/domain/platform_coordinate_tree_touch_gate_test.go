@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // platform_coordinate_tree_touch_gate_test.go — ОСЬ ЯКОРЯ по ВСЕМУ МОДУЛЮ, а не
-// по одному пакету (задача #2420).
+// по одному пакету (задача kacho#2420).
 //
 // # Предмет
 //

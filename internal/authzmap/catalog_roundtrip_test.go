@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // catalog_roundtrip_test.go — предпосылка, на которой стоят читатели каталога
-// сборки (#1980).
+// сборки (kacho#1980).
 //
 // `Catalog()` производит пары, разбивая ключи закрытой таблицы по ПЕРВОЙ точке;
 // `ObjectType(module, resource)` ищет по склейке `module + "." + resource`.

@@ -208,7 +208,7 @@ commit_msg_cases() { # $1 — набор
     expect "коммит: «#8» на ветке 7" refuse "«#8» на ветке «7»" "$rc" "$out"
 
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Co-authored-by: Ivan <ivan@example.invalid>"
-    expect "коммит: соавтор-человек — запрещён ключ, а не значение (#861)" refuse "атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
+    expect "коммит: соавтор-человек — запрещён ключ, а не значение (kacho-workspace#861)" refuse "атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Снята строка шаблона Co-authored-by: Ivan <ivan@example.invalid> — подставлялась"
     expect "коммит: ключ Co-Authored-By в середине строки прозы — упоминание" pass - "$rc" "$out"
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Снята строка шаблона Claude-Session: https://example.invalid/s — подставлялась"
@@ -304,7 +304,7 @@ push_fixture() { # $1 — набор
     "${G[@]}" checkout -q -b 23 20; "${G[@]}" commit -q --allow-empty -m "#24 чужой номер"
     "${G[@]}" checkout -q -b 25 20; "${G[@]}" commit -q --allow-empty --author="Other <other@example.invalid>" -m "#25 чужой автор"
     "${G[@]}" checkout -q -b 26 20; GIT_COMMITTER_EMAIL=other@example.invalid "${G[@]}" commit -q --allow-empty -m "#26 чужой коммиттер"
-    # #861: коммиты записаны мимо хука коммита (в этой фикстуре его нет вовсе).
+    # kacho-workspace#861: коммиты записаны мимо хука коммита (в этой фикстуре его нет вовсе).
     "${G[@]}" checkout -q -b 2840 20; "${G[@]}" commit -q --allow-empty -F "$tmp/real-1.msg"
     "${G[@]}" checkout -q -b 2840t 20; "${G[@]}" commit -q --allow-empty -F "$tmp/real-1.twin"
     "${G[@]}" checkout -q -b 27 20; "${G[@]}" commit -q --allow-empty -m "#27 задача" -m "Co-authored-by: Ivan <ivan@example.invalid>"
@@ -412,7 +412,7 @@ push_rule_cases() {
     rule_run "$(line 2840t 2840)"
     expect "отправка: близнец настоящего входа без блока трейлеров" pass - "$rc" "$out"
     rule_run "$(line 27)"
-    expect "отправка: соавтор-человек — назван sha (#861)" refuse "$(git -C "$PP" rev-parse --short=10 27) атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
+    expect "отправка: соавтор-человек — назван sha (kacho-workspace#861)" refuse "$(git -C "$PP" rev-parse --short=10 27) атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
     rule_run "$(line 28)"
     expect "отправка: ключ в середине строки прозы — упоминание" pass - "$rc" "$out"
     rule_run "$(line old-trailer)"
@@ -467,7 +467,7 @@ pr_cases() {
     pr_run 21 origin/20 21 "#21 задача, Generated with [Claude Code](https://example.invalid)" "обычное тело"
     expect "запрос: атрибуция в заголовке" refuse "заголовок: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"Co-authored-by: Ivan <ivan@example.invalid>"
-    expect "запрос: соавтор-человек в теле — запрещён ключ (#861)" refuse "тело: атрибуция" "$rc" "$out"
+    expect "запрос: соавтор-человек в теле — запрещён ключ (kacho-workspace#861)" refuse "тело: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     expect "запрос: тело с трейлером Claude" refuse "тело: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"🤖 Generated with [Claude Code](https://example.invalid)"

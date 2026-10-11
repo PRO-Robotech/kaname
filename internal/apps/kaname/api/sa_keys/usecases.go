@@ -87,7 +87,7 @@ type SAClientRepo interface {
 	OwnerUserForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.UserID, error)
 }
 
-// TrustedIssuerWriter — запись НАШЕГО перечня доверенных издателей (#1124).
+// TrustedIssuerWriter — запись НАШЕГО перечня доверенных издателей (kacho#1124).
 //
 // # Почему запись идёт в транзакции вызывающего, а не своим обращением
 //
@@ -263,10 +263,10 @@ type IssueInput struct {
 	// of the listed `(issuer, subject_pattern)` tuples; наш проверяющий
 	// принимает утверждение тогда и только тогда, когда пара (iss, sub) есть
 	// в НАШЕМ перечне доверенных издателей и подпись сошлась с записанным там
-	// ключом издателя (#1124). Empty slice = private_key_jwt mode.
+	// ключом издателя (kacho#1124). Empty slice = private_key_jwt mode.
 	TrustedSubjects []domain.TrustedSubject
 
-	// Audience — сужение адресатов, объявленное заказчиком (#1136): ключ
+	// Audience — сужение адресатов, объявленное заказчиком (kacho#1136): ключ
 	// сможет заказать только адресатов из этого перечня и только внутри
 	// перечня посадки (`authn.client-token.allowed-audiences`). Порядок
 	// сохраняется, пустые элементы снимаются, повторы схлопываются. Пустой
@@ -280,7 +280,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 		return nil, status.Error(codes.InvalidArgument, "service_account_id required")
 	}
 	// Формат СВОЕГО идентификатора судит общая проверка, а не копия рядом
-	// (задача #1791). Копия сверяла только префикс и потому принимала
+	// (задача kacho#1791). Копия сверяла только префикс и потому принимала
 	// обрезанный идентификатор, производя при этом ПОБАЙТОВО ТОТ ЖЕ отказ, —
 	// расхождение было невидимо всякой пробе, сверяющей сообщение.
 	if err := shared.ValidateResourceID(string(in.ServiceAccountID), domain.PrefixServiceAccount, "service account"); err != nil {
@@ -335,7 +335,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	// Форма имени на пути СОЗДАНИЯ: пустая строка законна и означает «назови
 	// сам» — до записи её заменит умолчание, производное от идентификатора
 	// (`commitMapping`). Судить её здесь доменным типом значило бы отвергнуть
-	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (#1279).
+	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (kacho#1279).
 	if err := corevalidate.NameOnCreate("name", in.Name); err != nil {
 		return nil, err
 	}
@@ -661,7 +661,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		KeyAlgorithm:    key.Algorithm,
 		Name:            domain.OAuthClientName(in.Name),
 		Labels:          in.Labels,
-		// Сужение адресатов — то, что назвал ЗАКАЗЧИК, и ничего сверх (#1136).
+		// Сужение адресатов — то, что назвал ЗАКАЗЧИК, и ничего сверх (kacho#1136).
 		DeclaredAudiences: declaredAudiences(in),
 		// Вид ЗАПИСЫВАЕТСЯ, а не вычисляется читателем.
 		CredentialKind: domain.CredentialKindKeypair,
@@ -685,7 +685,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		PublicKeyPem:  key.PublicPEM,
 		Algorithm:     key.Algorithm,
 		KeyId:         string(keyID),
-		// Перечень адресатов ключа — ЗАПИСАННОЕ сужение (#1136). Пустой перечень
+		// Перечень адресатов ключа — ЗАПИСАННОЕ сужение (kacho#1136). Пустой перечень
 		// — утверждение, а не умолчание: «сужения нет, действует перечень
 		// посадки».
 		Audiences: persisted.DeclaredAudiences,
@@ -728,7 +728,7 @@ func declaredAudiences(in IssueInput) []string {
 
 // doIssueFederated — выдача федеративного ключа: ключевого материала у него нет,
 // а его перечень доверенных издателей пишется НАШЕЙ таблицей в той же
-// транзакции, что и строка ключа (задача #1124).
+// транзакции, что и строка ключа (задача kacho#1124).
 //
 // Утверждение внешней нагрузки проверяет наш проверяющий
 // (`internal/clientassertion`, федеративная полоса) по нашему перечню, а
@@ -782,7 +782,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		PublicKeyPem:  "",
 		Algorithm:     "",
 		KeyId:         string(keyID),
-		// Перечень адресатов ключа — записанное сужение (#1136).
+		// Перечень адресатов ключа — записанное сужение (kacho#1136).
 		Audiences: persisted.DeclaredAudiences,
 	}
 	return anypb.New(resp)
@@ -819,7 +819,7 @@ func (u *IssueSAKeyUseCase) resolveExpiry(in IssueInput) *time.Time {
 // nothing to compensate.
 func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
 	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
-	// идентификатор уже назначен, его заменяет имя, производное от него (#1279).
+	// идентификатор уже назначен, его заменяет имя, производное от него (kacho#1279).
 	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
 	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
 	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
@@ -839,7 +839,7 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 		return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.insert", err)
 	}
 	// Перечень доверенных издателей — в ТОЙ ЖЕ транзакции, что строка ключа
-	// (#1124). Ключ без перечня не примет никого; перечень без ключа ручался бы
+	// (kacho#1124). Ключ без перечня не примет никого; перечень без ключа ручался бы
 	// за постороннего от имени того, кого нет. Записанные двумя обращениями, они
 	// разъезжаются на отказе между ними — и разъезжаются в сторону, которую
 	// никто не увидит, потому что выдача ответит успехом.
@@ -1194,7 +1194,7 @@ func CredentialKindFromProto(k iamv1.CredentialKind) (domain.CredentialKind, err
 // значило бы сменить контракт мимо приёмки. Читателя даёт
 // `shared.LogMappedErr`, у которого решение «какие исходы называть журналу»
 // живёт в единственном экземпляре: разойдясь в нём, домены разошлись бы в том,
-// что считается заметным (задача #2507).
+// что считается заметным (задача kacho#2507).
 //
 // Логгер берётся у вызывающего, а если у того его нет — у умолчания процесса.
 // Умолчание ЗАДАНО композиционным корнем (`slog.SetDefault`, cmd/kaname), так
@@ -1256,14 +1256,14 @@ func mapPGErr(err error) error {
 		// цепочки, то есть обёртка вызывающего доезжала до провода дословно;
 		// утечки не случалось лишь потому, что производители этого признака в
 		// службе опаковы сами — «by construction» на деле означало «пока никто не
-		// обернул» (задача #2464).
+		// обернул» (задача kacho#2464).
 		//
 		// Текст — тот же, что у канонического переводчика, и берётся У НЕГО:
 		// свой литерал здесь был бы вторым местом об одном контракте, и разошлись
 		// бы они ровно так, как разошлись эти переводчики.
 		//
 		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
-		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
+		// `mapPGErrLogged`, который называет причину журналу (задача kacho#2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		// Конец контекста — повторяемый отказ, а не поломка (kaname#383); текст —

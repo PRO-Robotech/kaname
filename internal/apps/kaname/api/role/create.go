@@ -95,7 +95,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
-	// #212: a custom role is EXACTLY ONE scope — account XOR project. System
+	// kacho-iam#212: a custom role is EXACTLY ONE scope — account XOR project. System
 	// roles are seeded via migration, never via this RPC. The DB CHECK
 	// roles_definition_tier_xor is the backstop; this gives a friendly sync error first.
 	accountSet := r.AccountID != ""
@@ -130,7 +130,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	// the compiler enforces the ≤1024 compiled-cap (A-12).
 	// Набор модулей — ЖИВЫЕ строки каталога, а не литерал: снятый модуль
 	// обязан перестать приниматься без перезапуска службы, а заведённый строкой
-	// — начать приниматься без релиза (#1927). Снимок один и тот же, что у
+	// — начать приниматься без релиза (kacho#1927). Снимок один и тот же, что у
 	// проекции глаголов ниже, поэтому обе стороны правила судятся согласованным
 	// множеством, а не двумя моментами времени.
 	facts := u.cat.Facts()
@@ -146,7 +146,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	// more specific), and BEFORE CompileRules so the compiled projection never
 	// carries an ungrantable token.
 	// Источник — ТОТ ЖЕ снимок живых строк, которым выше судился сегмент МОДУЛЯ
-	// и ниже строится проекция глаголов (#1993): обе стороны правила обязаны
+	// и ниже строится проекция глаголов (kacho#1993): обе стороны правила обязаны
 	// судиться согласованным множеством, а не двумя моментами времени и не двумя
 	// словарями. Прежде здесь спрашивалась таблица, ПОРОЖДЁННАЯ СБОРКОЙ, и тип,
 	// заведённый применением манифеста в работающем процессе, отвергался ею —
@@ -245,7 +245,7 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// MATERIALIZED per-object by the reconciler (see the reconcile-event emit
 			// below), not derived from this pointer.
 			//
-			// #212: ONLY account-scoped roles get this pointer (the iam_role type has a
+			// kacho-iam#212: ONLY account-scoped roles get this pointer (the iam_role type has a
 			// single `account` hierarchy relation, no `project` ancestor).
 			if inserted.AccountID != "" {
 				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{

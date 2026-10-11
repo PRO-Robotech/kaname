@@ -10,7 +10,7 @@ import (
 )
 
 // presented_credential_binding_test.go — семейство BIND приёмки KAN-AUTHN-1
-// (задача продукта #2191).
+// (задача продукта kacho#2191).
 //
 // # Предмет
 //

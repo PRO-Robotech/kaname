@@ -167,7 +167,7 @@ func TestMintBootstrapToken_Concurrent_SingleBootstrapSA(t *testing.T) {
 	// у него теперь СВОЁ: он сериализует запись строки соответствия, и проигравшие
 	// читают строку победителя вместо того, чтобы столкнуться на UNIQUE(sva_id).
 	// Прежде здесь стояло «внешний клиент заводится не более раза» — предмет того
-	// утверждения снят вместе с дорогой к поставщику (задача #1119).
+	// утверждения снят вместе с дорогой к поставщику (задача kacho#1119).
 	require.Equal(t, 1, countRows(t, dsn, `SELECT count(*) FROM service_account_oauth_clients WHERE sva_id=$1`, id.SvaID),
 		"exactly one bootstrap mapping row under concurrency (no dup / no constraint-INTERNAL-leak)")
 	require.Equal(t, n, minter.count(), "каждый вызывающий получил СВОЁ свежее удостоверение")

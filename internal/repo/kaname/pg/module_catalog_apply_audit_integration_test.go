@@ -8,7 +8,7 @@ package pg_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.7; сценарии `IAM-MA-1-29`, `-30`, `-31`.
-// Задача продукта #1034.
+// Задача продукта kacho#1034.
 //
 // # Что здесь утверждается
 //

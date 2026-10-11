@@ -123,7 +123,7 @@ func newUseCase(t *testing.T, store BootstrapStore, minter LocalMinter, cfg Conf
 	return NewMintUseCase(store, &fakeTxBeginner{}, minter, cfg)
 }
 
-// ── чеканка идёт БЕЗ внешней стороны (задача #1119, предикат снятия п.2) ───────
+// ── чеканка идёт БЕЗ внешней стороны (задача kacho#1119, предикат снятия п.2) ───────
 
 // TestMintBootstrapToken_MintsWithNoProviderAnywhere — удостоверение выпускается
 // на контуре, у которого внешнего поставщика нет ВОВСЕ.
@@ -232,7 +232,7 @@ func TestMintBootstrapToken_FirstCall_RecordsOurClientRow(t *testing.T) {
 
 func TestMintBootstrapToken_Idempotent_ReusesExistingMapping(t *testing.T) {
 	existing := domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             domain.SAOAuthClientID(DeriveIdentity().SocID),

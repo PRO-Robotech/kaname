@@ -3,7 +3,7 @@
 
 package pg
 
-// user_list_filter_operator_test.go — #460. `pkg/filter` grammar has two
+// user_list_filter_operator_test.go — kacho#460. `pkg/filter` grammar has two
 // operators, `=` and `CONTAINS`, and this reader dispatches on ast.Field while
 // taking only ast.Value — so `email CONTAINS "acme"` built `lower(email) =
 // lower($1)` and answered the substring question with an equality page under a

@@ -8,7 +8,7 @@ package access_binding
 // Visibility is the caller's `viewer ∪ v_list` set on iam_access_binding, resolved
 // PER-OBJECT for the rows on the page.
 //
-// # A page of this list is a page of the VISIBLE (task #645)
+// # A page of this list is a page of the VISIBLE (task kacho#645)
 //
 // It used to be a window over the whole `access_bindings` table, from which the
 // visible was subtracted afterwards. That order loses every binding with more
@@ -85,7 +85,7 @@ import (
 // Своя поверхность у них остаётся (выдать / отозвать / перечислить своим
 // глаголом), но ЧТЕНИЕ сводится сюда: две поверхности об одном предмете
 // расходятся молча — спрашивающий «кто имеет доступ» получает ответ с одной из
-// них и считает его полным (#914, решение 2).
+// них и считает его полным (kacho#914, решение 2).
 type clusterAdminReader interface {
 	ListActive(ctx context.Context) ([]domain.ClusterAdminEntry, error)
 }
@@ -134,7 +134,7 @@ type ListUseCase struct {
 	// wired port whose ANSWER fails is a different fact and refuses.
 	relations clients.RelationStore
 
-	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// listScan — узкий порт наблюдаемости стоимости страницы (kacho#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
 
@@ -150,7 +150,7 @@ func NewListUseCase(r Repo) *ListUseCase {
 }
 
 // WithRelationQueries wires the FGA ListObjects port (viewer ∪ v_list floor).
-// WithListScanRecorder провязывает съём стоимости страницы (#653).
+// WithListScanRecorder провязывает съём стоимости страницы (kacho#653).
 func (u *ListUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListUseCase {
 	u.listScan = rec
 	return u
@@ -162,7 +162,7 @@ func (u *ListUseCase) WithRelationQueries(q clients.RelationQueries) *ListUseCas
 }
 
 // WithClusterAdmins провязывает чтение соседней поверхности кластерных
-// администраторов (#914, решение 2). nil-safe: непровязанный порт вида не даёт.
+// администраторов (kacho#914, решение 2). nil-safe: непровязанный порт вида не даёт.
 func (u *ListUseCase) WithClusterAdmins(r clusterAdminReader) *ListUseCase {
 	u.clusterAdmins = r
 	return u
@@ -200,7 +200,7 @@ func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) (ListPag
 	if err != nil {
 		return ListPage{}, err
 	}
-	// account_id — ФОРМАТ здесь же, до решения о том, кто спрашивает (#1737,
+	// account_id — ФОРМАТ здесь же, до решения о том, кто спрашивает (kacho#1737,
 	// IAM-AB-SIA-14). Проверка стоит в ТОЙ ЖЕ функции, которая замыкается на
 	// неопознанном вызывающем: guard этажом выше не защищает второго
 	// вызывающего этой функции, а до репозитория замыкание не доходит by

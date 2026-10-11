@@ -4,7 +4,7 @@
 // subject_change_gap_detection_test.go — держатель `TestSubjectChangeJournalDetectsAGapOnBothSides`
 // (порт-ЗЕРКАЛО, СУЖЕННЫЙ ДО СВОЕЙ СТОРОНЫ ШВА, с монорепо
 // `internal/repohygiene/subjectchangegapdetection.go`/`_test.go`, снят
-// вынесением службы доступа — `kacho#2597`; задача продукта #1712).
+// вынесением службы доступа — `kacho#2597`; задача продукта kacho#1712).
 //
 // Имя держателя сохранено ДОСЛОВНО: `docs/engineering/architecture/
 // journal-retention-is-a-policy.md` (живёт в дереве kaname) цитирует его как

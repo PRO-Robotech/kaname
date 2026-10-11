@@ -33,7 +33,7 @@ func runCommand(t *testing.T, args []string, env map[string]string) (stdout, std
 	return sout.String(), serr.String(), err
 }
 
-// TestExtraPositionalArgumentIsRefused — задача #1461: лишний позиционный
+// TestExtraPositionalArgumentIsRefused — задача kacho#1461: лишний позиционный
 // аргумент обязан получить ответ, а не молчаливый накат.
 //
 // Cobra по умолчанию (`Args == nil`) принимает произвольные позиционные
@@ -82,7 +82,7 @@ func TestLegitimateFlagsSurviveTheArgumentCheck(t *testing.T) {
 }
 
 // TestEmptyCommandLineIsRefused — пустая командная строка обязана быть ОТКАЗОМ,
-// а не успехом (#1461).
+// а не успехом (kacho#1461).
 //
 // Cobra при корне без исполнения печатает помощь и выходит УСПЕХОМ. Опыт по
 // собранным бинарям: `iam-migrator; echo $?` давал 0 у трёх делегирующих
@@ -124,7 +124,7 @@ func TestUnknownCommandIsStillNamed(t *testing.T) {
 	}
 }
 
-// TestRefusalTextsComeFromTheSharedProducer — форма отказа одна на семь (#1461).
+// TestRefusalTextsComeFromTheSharedProducer — форма отказа одна на семь (kacho#1461).
 //
 // Опыт по собранным бинарям на одинаковом входе показал две редакции одного
 // отказа: делегирующая форма говорила «unknown command …» там, где прямая

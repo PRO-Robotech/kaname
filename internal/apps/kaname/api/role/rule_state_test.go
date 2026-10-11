@@ -4,7 +4,7 @@
 package role
 
 // rule_state_test.go — постатейное состояние правила заполняется ОДИНАКОВО в
-// Get и в List (задача продукта #1962).
+// Get и в List (задача продукта kacho#1962).
 //
 // Приёмка `services/iam/docs/engineering/acceptance/rule-state-names-withdrawn-apart-from-unresolved.md`,
 // сценарии MOD-RS-02, MOD-RS-03, MOD-RS-06, MOD-RS-12.

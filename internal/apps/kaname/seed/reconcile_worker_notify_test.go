@@ -66,7 +66,7 @@ func (q *fakeNotifyQueue) MarkReconcileEventSent(_ context.Context, id int64) er
 	return nil
 }
 
-// RecordReconcileEventFailure — порт учёта отказа (#2050). Здесь он не предмет:
+// RecordReconcileEventFailure — порт учёта отказа (kacho#2050). Здесь он не предмет:
 // сверка в этих пробах не отказывает, поэтому дублёр обязан молчать, а не
 // считать. Вызов на успешном пути — находка, и её ловит
 // `TestReconcileDrain_SuccessIsNotCounted`.

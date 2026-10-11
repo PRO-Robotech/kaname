@@ -46,7 +46,7 @@ type BuildConfig struct {
 	// отсрочки снятия ключа, поэтому объявлено числом, а не выведено.
 	TokenTTL time.Duration
 
-	// KeyMaterialWindowUntil — ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ #1143:
+	// KeyMaterialWindowUntil — ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ kacho#1143:
 	// мгновение, до которого полоса ПРОДОЛЖАЕТ принимать ключевой материал в
 	// поле пароля наряду с базовым токеном доступа. Нулевое — окна нет
 	// (умолчание, fail-closed).
@@ -79,7 +79,7 @@ type BuildConfig struct {
 
 // Build assembles the registry `/iam/token` shim from a pgx pool: the authority
 // on the presented BASIC ACCESS TOKEN (the only credential kind this lane accepts,
-// задача #1143) and OUR signer, the lane's only issuer. The caller mounts the
+// задача kacho#1143) and OUR signer, the lane's only issuer. The caller mounts the
 // returned mux on an EXTERNAL-reachable HTTP listener.
 //
 // Composition root only — this is the single wire-up call for serve.go. The shim
@@ -105,7 +105,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 				"api-server.registry-token.endpoint empty in the settings file so the lane is not raised")
 	}
 	// Страж построения полосы: без объявленного адресата выдача чеканит тому,
-	// кого назовёт вызывающий (задача #1184).
+	// кого назовёт вызывающий (задача kacho#1184).
 	//
 	// Отказ ЗДЕСЬ — отказ в старте, видимый оператору сразу и называющий
 	// настройку. Пропустив пустое, мы получили бы полосу, выдающую
@@ -133,8 +133,8 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 		return nil, fmt.Errorf("registrytokenwire: %w", err)
 	}
 
-	// ПОЛОСА БАЗОВОГО СЕКРЕТА (#1142) — ЕДИНСТВЕННАЯ полоса предъявленного
-	// удостоверения после задачи #1143. Авторитет — тот же пул, что и у прочих
+	// ПОЛОСА БАЗОВОГО СЕКРЕТА (kacho#1142) — ЕДИНСТВЕННАЯ полоса предъявленного
+	// удостоверения после задачи kacho#1143. Авторитет — тот же пул, что и у прочих
 	// читателей, и тот же объявленный корнем предел на обращение: своей связи и
 	// своих величин полоса не заводит.
 	//
@@ -153,7 +153,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 	// вместе с окном, молчал бы ровно на той посадке, ради которой заведён.
 	useCase = useCase.WithCredentialKindObserver(cfg.CredentialKindObserver)
 
-	// ОКНО ПЕРЕХОДА #1143. Мгновение и проверяющий уезжают ОДНИМ вызовом:
+	// ОКНО ПЕРЕХОДА kacho#1143. Мгновение и проверяющий уезжают ОДНИМ вызовом:
 	// порознь они дают два неисправных состояния, и оба выглядят настроенными
 	// (разбор — registry_token/key_material_window.go).
 	//

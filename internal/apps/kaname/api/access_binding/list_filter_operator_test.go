@@ -3,7 +3,7 @@
 
 package access_binding
 
-// list_filter_operator_test.go — #460. The filter grammar carries an OPERATOR
+// list_filter_operator_test.go — kacho#460. The filter grammar carries an OPERATOR
 // (`=` and `CONTAINS`), and this resource compares exact identifiers: subject,
 // role, scope and scopeId are ids, not prose. There is no substring of an id.
 //

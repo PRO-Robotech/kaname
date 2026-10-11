@@ -593,7 +593,7 @@ CASES.append(Case(
         # Вхождением, а не равенством: хвост зависит от того, разобралась ли
         # подсказка области («…granted to %s on %s» против «…granted to %s»), и
         # статически он не вычисляется. Утверждается при этом ВЕСЬ текст
-        # владельца до подстановки, а не общая часть тона «already granted» (#1748).
+        # владельца до подстановки, а не общая часть тона «already granted» (kacho#1748).
         assert_op_error(6, "ALREADY_EXISTS",
                         msg_text_contains="these permissions are already granted to {{userNOBId}}"),
         # Уборка снимает ОБЕ выдачи, а не только действующую. Отзыв — переход

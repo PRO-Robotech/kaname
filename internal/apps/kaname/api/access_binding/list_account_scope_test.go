@@ -4,7 +4,7 @@
 package access_binding
 
 // list_account_scope_test.go — приёмка «выдачи субъекта в названном аккаунте
-// одним вызовом» (задача #1737, док
+// одним вызовом» (задача kacho#1737, док
 // docs/engineering/acceptance/subject-grants-within-an-account.md).
 //
 // Предмет: поле `account_id` у `ListAccessBindingsRequest` сужает страницу до

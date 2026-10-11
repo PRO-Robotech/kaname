@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // authz_wrapper_outcome_lanes.go — булева ОБЁРТКА вопроса о правах не
-// вызывается там, где у неё есть парная форма с исходом (задача #1045).
+// вызывается там, где у неё есть парная форма с исходом (задача kacho#1045).
 //
 // Порт с монорепо (`internal/repohygiene/authzwrapperoutcomelanes_test.go`,
 // снят вынесением службы — `kacho#2597`). В кaname живёт как минимум одна

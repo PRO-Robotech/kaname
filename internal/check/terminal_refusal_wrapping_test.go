@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// terminal_refusal_wrapping_test.go — гейты приёмки #2439: KN-RTX-06 и KN-RTX-08.
+// terminal_refusal_wrapping_test.go — гейты приёмки kacho#2439: KN-RTX-06 и KN-RTX-08.
 //
 // Что предикат устанавливает и чего НЕ устанавливает — в шапке
 // `terminal_refusal_wrapping.go`; здесь это не пересказывается.

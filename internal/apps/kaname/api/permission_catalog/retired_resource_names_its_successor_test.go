@@ -126,7 +126,7 @@ func TestIAMSUC05a_RetiredWithoutSuccessorIsNamedAndPromisesNothing(t *testing.T
 }
 
 // TestIAMSUC01_RetiredIsNotOfferedAsGrantable — `IAM-SUC-01`, положительный
-// контроль посаженного решения `#1976`.
+// контроль посаженного решения `kacho#1976`.
 //
 // Перечень ГРАНТУЕМОГО снятого не называет — и не начинает называть оттого, что
 // снятое поехало своим полем. Без этого контроля `IAM-SUC-02` зеленел бы на

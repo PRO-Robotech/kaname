@@ -3,7 +3,7 @@
 
 package pg_test
 
-// roles_page_cost_integration_test.go — задача #1964: страница фиксированного
+// roles_page_cost_integration_test.go — задача kacho#1964: страница фиксированного
 // размера обязана стоить одинаково при любой населённости таблицы ролей.
 //
 // # Что здесь утверждается
@@ -145,7 +145,7 @@ func TestRolesPage_CostBelongsToThePageNotToThePopulation(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	// Точки сетки — те же три, на которых задача #1964 назвала рост.
+	// Точки сетки — те же три, на которых задача kacho#1964 назвала рост.
 	populations := []int{1000, 2000, 4000}
 
 	type point struct {

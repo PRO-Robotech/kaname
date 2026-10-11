@@ -1,8 +1,8 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// fga_model_drift_test.go — CI drift-gate (system-design W-1, KAC #177
-// follow-up). Closes the fail-open risk that re-opened #177: the FGA emitter
+// fga_model_drift_test.go — CI drift-gate (system-design W-1, KAC kacho-iam#177
+// follow-up). Closes the fail-open risk that re-opened kacho-iam#177: the FGA emitter
 // (access_binding/scope_grant_tuples.go) and the catalog (this package's
 // objectTypes + TypeHasVerbRelations) must NEVER drift from the canonical
 // authorization model. A drift — e.g. an objectTypes entry whose model type does
@@ -132,18 +132,18 @@ var tierOnlyObjectTypes = map[string]bool{}
 //   - cluster — the platform singleton (`cluster:cluster_root`). Its
 //     relations are the platform-role ladder (system_admin/system_viewer/
 //     console); the cluster itself is not a per-project grantable
-//     resource, it is the D-9 super-admin short-circuit anchor. С #914 он несёт и
+//     resource, it is the D-9 super-admin short-circuit anchor. С kacho#914 он несёт и
 //     `fga_writer` — право модуля писать кортежи, переехавшее сюда с якоря вне
 //     иерархии: там оно не выражалось выдачей и не поддавалось отзыву.
 //   - iam_fgaproxy — ИСТОРИЧЕСКИЙ якорь того же права. Живых фактов на нём нет
-//     (#914 их снял), но выдают его уже ПРИМЕНЁННЫЕ миграции, а применённую
+//     (kacho#914 их снял), но выдают его уже ПРИМЕНЁННЫЕ миграции, а применённую
 //     миграцию не правят: тип обязан оставаться объявленным, пока они в цепи.
 var nonGrantableModelTypes = map[string]string{
 	"user":            "subject type (left side of a tuple, never an authz object)",
 	"service_account": "subject type (left side of a tuple, never an authz object)",
 	"group":           "subject-set type for group#member usersets (the grantable resource is iam_group)",
 	"cluster":         "platform singleton cluster:cluster_root — super-admin ladder anchor, not a grantable resource",
-	"iam_fgaproxy":    "исторический якорь права писать кортежи: живых фактов нет (#914), но его выдают уже применённые миграции",
+	"iam_fgaproxy":    "исторический якорь права писать кортежи: живых фактов нет (kacho#914), но его выдают уже применённые миграции",
 }
 
 // canonicalModelRelPath — the canonical authorization model, relative to the
@@ -381,7 +381,7 @@ func TestDrift_TypeVerbSetsMatchModelExactly(t *testing.T) {
 
 // D-3: the emission guard (authzmap.TypeHasVerbRelations) must equal the model
 // EXACTLY for every grantable object type — no drift in either direction. This
-// is the gate that catches a future #177-class fail-open: if someone adds a type
+// is the gate that catches a future kacho-iam#177-class fail-open: if someone adds a type
 // to objectTypes without v_* but the guard still returns true (or vice-versa),
 // the emitter would write dangling tuples again.
 func TestDrift_GuardMatchesModel(t *testing.T) {

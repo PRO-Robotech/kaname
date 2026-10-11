@@ -37,7 +37,7 @@ type groupReader struct {
 const groupCols = "id, account_id, name, description, labels, created_at"
 
 // groupUpdateQ — оператор записи группы. СТАТИЧЕСКИЙ: набор колонок известен
-// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
 // `mutable_triplet_update.go`). `account_id` неизменяем и в перечень не входит —
 // вызывающий отвергает его до записи.
 const groupUpdateQ = `UPDATE groups SET` + mutableTripletSetSQL +
@@ -71,7 +71,7 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 	}
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
 		// expression, so the column follows the whitelist instead of being
 		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
@@ -103,7 +103,7 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякую группу, перед которой
 	// лежит больше `page_size` невидимых предшественников — она до фильтра просто
 	// не доезжает.

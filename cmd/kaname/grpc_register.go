@@ -163,7 +163,7 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	// instead of a separate public :9090 conn.
 	//
 	// Перечисления объектов в этом перечне больше нет: оно снято с контракта
-	// стадией S6 (эпик #747). Сужение списка идёт пообъектной проверкой СТРАНИЦЫ,
+	// стадией S6 (эпик kacho#747). Сужение списка идёт пообъектной проверкой СТРАНИЦЫ,
 	// прочитанной курсором из своей БД, — то есть тем самым `BatchCheck`, ради
 	// которого ребро и держится.
 	//
@@ -195,7 +195,7 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 		iamv1.RegisterInternalInteractiveClientServiceServer(srv, svcs.interactiveClientHandler)
 	}
 	// InternalModuleService — четыре глагола над строками каталога прав ОДНОГО
-	// модуля: план, применение, два чтения (задача #1034). Internal-only
+	// модуля: план, применение, два чтения (задача kacho#1034). Internal-only
 	// (запрет #6): НИКОГДА не регистрируется на внешнем слушателе, и префикс
 	// `Internal` в имени службы — действующий дискриминатор, а не привычка
 	// именования.

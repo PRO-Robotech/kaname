@@ -97,7 +97,7 @@ func TestGrantAdmin_DeniesWhenNoSystemAdmin(t *testing.T) {
 // TestGrantAdmin_RefusesWithUnavailableWhenCheckerErrors — the model could not be
 // asked: the mutation still does not run, and the caller is told so in the code.
 //
-// The expectation moved off PermissionDenied with issue #497 and the assertion is
+// The expectation moved off PermissionDenied with issue kacho#497 and the assertion is
 // not weakened — fail-closed is asserted directly (the grant is not issued). What
 // changed is what the caller is told. "You may not" means an identical retry is
 // pointless, so a two-second outage of the model read to a cluster admin exactly
@@ -143,7 +143,7 @@ func TestRevokeAdmin_DeniesWhenNoSystemAdmin(t *testing.T) {
 }
 
 // TestRevokeAdmin_RefusesWithUnavailableWhenCheckerErrors — see the Grant twin
-// above for why the code is Unavailable and not PermissionDenied (issue #497).
+// above for why the code is Unavailable and not PermissionDenied (issue kacho#497).
 func TestRevokeAdmin_RefusesWithUnavailableWhenCheckerErrors(t *testing.T) {
 	chk := &fakeAdminChecker{err: errors.New("fga backend down")}
 	uc := clusterapp.NewRevokeAdminUseCase(nil, nil, nil, nil).WithAdminChecker(chk)

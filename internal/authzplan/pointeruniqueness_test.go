@@ -9,7 +9,7 @@ import (
 )
 
 // pointeruniqueness_test.go — вход, на котором `AssertOnePointerPerParentType`
-// разыменовывал nil (#1987).
+// разыменовывал nil (kacho#1987).
 //
 // Метод объявлен утверждением О МОДЕЛИ («его обязан уметь задать и тот, кто
 // модель проверяет, не компилируя»), то есть предназначен для НЕДОВЕРЕННОГО
@@ -23,7 +23,7 @@ import (
 // `PointerTargets` его разыменовывал.
 
 // splitPointerNamesAcrossDuplicateBlocks — два блока одного имени, у каждого свой
-// указатель в `account` под своим именем. Разбор такой вход ПРИНИМАЕТ (#1978:
+// указатель в `account` под своим именем. Разбор такой вход ПРИНИМАЕТ (kacho#1978:
 // занятость имени он не проверяет), поэтому вход достижим, а не искусствен.
 const splitPointerNamesAcrossDuplicateBlocks = `type user
 type account

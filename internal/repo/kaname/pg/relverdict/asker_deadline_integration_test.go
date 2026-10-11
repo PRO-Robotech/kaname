@@ -64,7 +64,7 @@ func heldInTransaction(t *testing.T, observer *pgxpool.Pool, appName string) int
 	return n
 }
 
-// TestShadowDeadlineLeavesNoOpenTransaction — предикат 2 задачи #751.
+// TestShadowDeadlineLeavesNoOpenTransaction — предикат 2 задачи kacho#751.
 //
 // Блокировка таблицы даёт ДЕТЕРМИНИРОВАННЫЙ срыв срока: читающий запрос встаёт
 // на замке, а не «иногда не успевает», поэтому проба не зависит ни от загрузки

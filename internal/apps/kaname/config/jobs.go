@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// jobs.go — секция фоновых заданий сервиса (задача #1264).
+// jobs.go — секция фоновых заданий сервиса (задача kacho#1264).
 //
 // # Почему СЕКЦИЯ, а не константы
 //

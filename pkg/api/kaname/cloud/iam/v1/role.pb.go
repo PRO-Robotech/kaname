@@ -82,7 +82,7 @@ func (RoleLifecycleState) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_role_proto_rawDescGZIP(), []int{0}
 }
 
-// RuleLifecycle — состояние правила роли (#1962).
+// RuleLifecycle — состояние правила роли (kacho#1962).
 //
 // Отзыв и неразрешённость РАЗДЕЛЕНЫ намеренно: это разные события с разными
 // причинами и разным следующим шагом. Отозванное объясняет ведомость (кто снял и
@@ -211,7 +211,7 @@ func (SelectorPruneOutcome) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_role_proto_rawDescGZIP(), []int{2}
 }
 
-// WithdrawnGrantCause — ПОЧЕМУ проекция переселена в ведомость (#1913).
+// WithdrawnGrantCause — ПОЧЕМУ проекция переселена в ведомость (kacho#1913).
 //
 // Причины разделены намеренно: у них разное будущее. Строку причины «снята
 // роль» снимает оживление роли; строку причины «снят каталог» не снимает ничто,
@@ -327,7 +327,7 @@ func (WithdrawnGrantSource) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_role_proto_rawDescGZIP(), []int{4}
 }
 
-// RoleHealth — состояние целости роли (#1035): даёт ли она то, что объявляет.
+// RoleHealth — состояние целости роли (kacho#1035): даёт ли она то, что объявляет.
 //
 // Выводится из ТОГО ЖЕ, что читает вердикт: «правило есть, строк проекции нет»
 // ⇒ не HEALTHY, какова бы ни была причина. Каталог и ведомость снятого только
@@ -419,10 +419,10 @@ func (RoleHealth) EnumDescriptor() ([]byte, []int) {
 //     Исход ПРИСЛАННОГО значения зависит от пути и от маски, и он ровно один на
 //     каждый — назван в комментарии самого поля (tag 5) и здесь НАМЕРЕННО НЕ
 //     пересказывается: пересказ и есть второе место об одном предмете. Оно уже
-//     разошлось однажды — фикс #1949 правил комментарий поля, а эта шапка
+//     разошлось однажды — фикс kacho#1949 правил комментарий поля, а эта шапка
 //     пережила его и продолжала называть один вход двумя взаимоисключающими
 //     исходами сразу («игнорируется» и «отвергается»), причём ПЕРВОЙ: читатель,
-//     открывший файл сверху, доходил до неё раньше, чем до поля (#1973).
+//     открывший файл сверху, доходил до неё раньше, чем до поля (kacho#1973).
 //
 // aggregationRule (composite roles) — пока не реализовано; будет добавлено
 // append-only позже отдельным tag'ом (tag НЕ зарезервирован заранее).
@@ -528,16 +528,16 @@ type Role struct {
 	// identifier here (`vpc.address.admin`), exactly as a custom role does. The
 	// human prose of such a role is carried by `description`: the module author
 	// writes it in the module manifest, and it reaches this response unchanged.
-	// A second carrier for the same prose is deliberately not introduced (#1925).
+	// A second carrier for the same prose is deliberately not introduced (kacho#1925).
 	DisplayName string `protobuf:"bytes,20,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Purpose of a CANONICAL role (redesign-2026 F6) — a one-line statement of
 	// what the role is for, held by the same catalog of four names. Output-only.
 	//
 	// EMPTY for every other role, a module role included, and the empty value
 	// means "this catalog has no entry for that role" — not "the role has no
-	// purpose". A module role states its purpose in `description` (#1925).
+	// purpose". A module role states its purpose in `description` (kacho#1925).
 	Purpose string `protobuf:"bytes,21,opt,name=purpose,proto3" json:"purpose,omitempty"`
-	// Целость роли (#1035) — даёт ли роль то, что объявляет. Output-only,
+	// Целость роли (kacho#1035) — даёт ли роль то, что объявляет. Output-only,
 	// производное; на входе Create/Update поля нет вовсе (перечень полей запроса
 	// его не содержит), поэтому прислать его нельзя ни одним путём.
 	//
@@ -556,7 +556,7 @@ type Role struct {
 	// Складывать их в один предикат нельзя: они отвечают на разные вопросы —
 	// «что роль обещает» и «что вердикт по ней даёт».
 	Health RoleHealth `protobuf:"varint,22,opt,name=health,proto3,enum=kaname.cloud.iam.v1.RoleHealth" json:"health,omitempty"`
-	// Сколько АДРЕСУЕМЫХ сегментов объявляют правила роли (#1035). Output-only.
+	// Сколько АДРЕСУЕМЫХ сегментов объявляют правила роли (kacho#1035). Output-only.
 	//
 	// Сегмент — пара «точечный ресурс × глагол» либо «точечный ресурс × любой
 	// глагол» (правило с `verbs: ["*"]` даёт ОДИН сегмент, а не по одному на
@@ -567,12 +567,12 @@ type Role struct {
 	// отличается СОСТОЯНИЕМ рядом, а не собственной величиной.
 	DeclaredSegments int32 `protobuf:"varint,23,opt,name=declared_segments,json=declaredSegments,proto3" json:"declared_segments,omitempty"`
 	// Сколько из объявленных сегментов не дают НИ ОДНОЙ строки проекции,
-	// которую читает вердикт (#1035). Output-only.
+	// которую читает вердикт (kacho#1035). Output-only.
 	//
 	// Равен нулю у здоровой роли, равен `declared_segments` у роли, не дающей
 	// ничего. Значим только при `health != ROLE_HEALTH_UNSPECIFIED`.
 	UnresolvedSegments int32 `protobuf:"varint,24,opt,name=unresolved_segments,json=unresolvedSegments,proto3" json:"unresolved_segments,omitempty"`
-	// Что у роли ОТОБРАНО и почему (#1992). Output-only, производное.
+	// Что у роли ОТОБРАНО и почему (kacho#1992). Output-only, производное.
 	//
 	// `unresolved_segments` говорит СКОЛЬКО сегментов перестало проецироваться и
 	// не говорит, ЧТО именно и по какой причине. Со стороны арендатора «право
@@ -583,7 +583,7 @@ type Role struct {
 	// несёт: пустой список там означает «этим ответом не вычислено», ровно как
 	// `ROLE_HEALTH_UNSPECIFIED` рядом.
 	//
-	// ИСТОЧНИК — ведомость переселения, и причин у переселения ДВЕ (#1913):
+	// ИСТОЧНИК — ведомость переселения, и причин у переселения ДВЕ (kacho#1913):
 	//
 	//	снята строка КАТАЛОГА  правило роли перестало резолвиться;
 	//	снята сама РОЛЬ        объявление модуля убрано, право отобрано целиком.
@@ -606,7 +606,7 @@ type Role struct {
 	// Порядок элементов НЕ ЗНАЧИМ — это набор; сверять его надо по составу, а не
 	// по индексу.
 	WithdrawnGrants []*WithdrawnGrant `protobuf:"bytes,25,rep,name=withdrawn_grants,json=withdrawnGrants,proto3" json:"withdrawn_grants,omitempty"`
-	// Какие точечные типы ВЫРЕЗАНЫ из отбора правил этой роли и почему (#1988).
+	// Какие точечные типы ВЫРЕЗАНЫ из отбора правил этой роли и почему (kacho#1988).
 	// Output-only, производное.
 	//
 	// Сосед `withdrawn_grants` отвечает про ДВЕ проекции правила, адресуемые парой
@@ -635,7 +635,7 @@ type Role struct {
 	// арендатору он не даёт ничего: своё правило он знает содержанием. Следствие
 	// названо прямо: записи, различавшиеся ТОЛЬКО отпечатком, приезжают ОДНОЙ.
 	PrunedSelectorTypes []*PrunedSelectorType `protobuf:"bytes,26,rep,name=pruned_selector_types,json=prunedSelectorTypes,proto3" json:"pruned_selector_types,omitempty"`
-	// Состояние КАЖДОГО правила роли (#1962). Output-only, производное.
+	// Состояние КАЖДОГО правила роли (kacho#1962). Output-only, производное.
 	//
 	// Соседи выше отвечают СКОЛЬКО сегментов роль потеряла (`unresolved_segments`)
 	// и ЧТО именно (`withdrawn_grants`). Между ними остаётся вопрос, на который не
@@ -669,7 +669,7 @@ type Role struct {
 	// глаголов = 16 384 записи на роль, при `page_size` до 1000 это ответ, который
 	// не отдают. Смешанный случай назван вместо этого счётчиками — см. RuleState.
 	RuleStates []*RuleState `protobuf:"bytes,27,rep,name=rule_states,json=ruleStates,proto3" json:"rule_states,omitempty"`
-	// ОБЪЯВЛЕНА ли роль манифестом своего модуля СЕГОДНЯ — либо СНЯТА (#1913).
+	// ОБЪЯВЛЕНА ли роль манифестом своего модуля СЕГОДНЯ — либо СНЯТА (kacho#1913).
 	// Output-only, производное.
 	//
 	// ПОЧЕМУ ЭТО ОТДЕЛЬНОЕ ПОЛЕ, А НЕ ЗНАЧЕНИЕ `health`.
@@ -928,7 +928,7 @@ func (x *Role) GetLifecycle() *RoleLifecycle {
 }
 
 // RoleLifecycle — объявлена роль манифестом модуля либо снята, и при каких
-// обстоятельствах (#1913).
+// обстоятельствах (kacho#1913).
 //
 // Три сопутствующие величины непусты ТОЛЬКО у снятой роли, и это свойство
 // СХЕМЫ, а не кода: состояние «снята и жива» неконструируемо.
@@ -1010,7 +1010,7 @@ func (x *RoleLifecycle) GetRetiredBy() string {
 	return ""
 }
 
-// RuleState — состояние ОДНОГО правила роли (#1962) и три величины, из которых
+// RuleState — состояние ОДНОГО правила роли (kacho#1962) и три величины, из которых
 // оно выведено.
 //
 // Состояние ВЫВОДИТСЯ из того же, что читает вердикт, и хранимой колонки у него
@@ -1141,7 +1141,7 @@ func (x *RuleState) GetExplainedSegments() int32 {
 }
 
 // PrunedSelectorType — точечный тип, ВЫРЕЗАННЫЙ из отбора правила роли при
-// снятии строки ресурса платформы (#1988).
+// снятии строки ресурса платформы (kacho#1988).
 type PrunedSelectorType struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Точечный тип объекта (`<модуль>.<ресурс>`), чью строку каталога сняли.
@@ -1156,7 +1156,7 @@ type PrunedSelectorType struct {
 	// Момент вырезания. Время ТРАНЗАКЦИИ применения: у всего, что вырезано одним
 	// применением, он совпадает дословно.
 	PrunedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=pruned_at,json=prunedAt,proto3" json:"pruned_at,omitempty"`
-	// АВТОР применения, вырезавшего этот тип (#2005). Та же величина и тот же
+	// АВТОР применения, вырезавшего этот тип (kacho#2005). Та же величина и тот же
 	// источник, что у соседа `WithdrawnGrant.applied_by`: вопрос «кто снял» у
 	// обеих ведомостей общий — арендатор не различает, какой из проекций правила
 	// он лишился.
@@ -1233,13 +1233,13 @@ func (x *PrunedSelectorType) GetAppliedBy() string {
 }
 
 // WithdrawnGrant — одна проекция правила роли, ПЕРЕСЕЛЁННАЯ в ведомость
-// отобранного (#1992).
+// отобранного (kacho#1992).
 //
 // Пара «тип объекта + глагол» адресует ровно то, что перестало действовать.
 // Пустой `verb` — ЯКОРЬ: строка пришла из объявления правила, у которого глагол
 // не назван поимённо.
 //
-// ПРИЧИН ПЕРЕСЕЛЕНИЯ ДВЕ, и их называет `cause` (#1913). Здесь стояло, что
+// ПРИЧИН ПЕРЕСЕЛЕНИЯ ДВЕ, и их называет `cause` (kacho#1913). Здесь стояло, что
 // причина одна — снятие строки каталога, — и это перестало быть верным в день,
 // когда у роли появился путь снятия: строки второй причины приезжают в ЭТОТ ЖЕ
 // список.
@@ -1257,7 +1257,7 @@ type WithdrawnGrant struct {
 	// Момент переселения. Время ТРАНЗАКЦИИ применения: у всего, что отобрано
 	// одним применением, он совпадает дословно.
 	WithdrawnAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=withdrawn_at,json=withdrawnAt,proto3" json:"withdrawn_at,omitempty"`
-	// АВТОР применения, снявшего эту строку (#2005).
+	// АВТОР применения, снявшего эту строку (kacho#2005).
 	//
 	// Проверенная личность вызывающего на пути глагола либо названный процессный
 	// актор на пути старта. НЕ учётка, под которой исполнялась транзакция: на
@@ -1271,7 +1271,7 @@ type WithdrawnGrant struct {
 	// «автора потеряли»: у таких строк его не записывал никто, и восстановить его
 	// не из чего.
 	AppliedBy string `protobuf:"bytes,6,opt,name=applied_by,json=appliedBy,proto3" json:"applied_by,omitempty"`
-	// ПОЧЕМУ строка переселена (#1913). Output-only.
+	// ПОЧЕМУ строка переселена (kacho#1913). Output-only.
 	//
 	// Различие НАБЛЮДАЕМО, потому что от него зависит поведение: оживление роли
 	// снимает из ведомости строки причины `ROLE_RETIRED` и НЕ трогает строк

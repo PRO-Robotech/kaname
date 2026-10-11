@@ -86,7 +86,7 @@ func TestRoleIntegrity_UnresolvedSegments_AgainstLiveProjection(t *testing.T) {
 		require.Len(t, got[role.ID], 2,
 			"тип, которого проекция не знает, обязан дать неразрешённые сегменты")
 		// СОСТАВ, а не только число: срез заведён ради того, чтобы состояние
-		// правила знало, КАКОЙ сегмент потерян (#1962). Сверка по числу
+		// правила знало, КАКОЙ сегмент потерян (kacho#1962). Сверка по числу
 		// зеленела бы на выборке, вернувшей два любых сегмента.
 		require.ElementsMatch(t,
 			[]domain.RoleSegment{seg("probe.thing", "get"), seg("probe.thing", "list")},

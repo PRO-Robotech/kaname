@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package tokenintrospecthttp — авторитет отзыва НАШИХ токенов на
-// cluster-внутреннем слушателе (задача #897).
+// cluster-внутреннем слушателе (задача kacho#897).
 //
 // # Зачем он существует
 //

@@ -6,7 +6,7 @@
 // `internal/repohygiene/systemrolerowisneverdeleted.go`, снят вынесением
 // службы доступа — `kacho#2597`; решение
 // `docs/engineering/architecture/role-withdrawal-is-a-mark.md`, задача
-// продукта #1913).
+// продукта kacho#1913).
 //
 // # Предмет
 //

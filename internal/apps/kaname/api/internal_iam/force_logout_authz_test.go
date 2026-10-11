@@ -96,7 +96,7 @@ func TestForceLogout_DeniesWhenPrincipalEmpty(t *testing.T) {
 // TestForceLogout_RefusesWithUnavailableWhenCheckerErrors — the model could not be
 // asked: nothing is revoked, and the code says which of the two happened.
 //
-// The expectation moved off PermissionDenied with issue #497; the assertion is not
+// The expectation moved off PermissionDenied with issue kacho#497; the assertion is not
 // weakened, since fail-closed is asserted directly (`rec.allCnt` stays zero — no
 // cutoff was recorded). "You may not" would tell the caller that retrying is
 // pointless, which is false of an outage that lasts a moment.

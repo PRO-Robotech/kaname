@@ -283,7 +283,7 @@ func startInviteMailBackstop(
 		MaxAttempts: cfg.InviteMail.MaxAttemptsOrDefault(),
 		Interval:    15 * time.Second,
 	})
-	// Исход скана — через единственного производителя (#2062).
+	// Исход скана — через единственного производителя (kacho#2062).
 	go col.Run(ctx, metrics.OutboxScanObserver(rec, clients.InviteMailTable, logger,
 		"invite mail outbox metrics scan failed"))
 

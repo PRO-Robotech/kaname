@@ -3,7 +3,7 @@
 
 package config_test
 
-// manifests_test.go — страж доставки манифестов модулей (задача #1875).
+// manifests_test.go — страж доставки манифестов модулей (задача kacho#1875).
 //
 // Утверждается ОБЕ стороны: сочетание «опираемся и каталога не назвали» обязано
 // отказать в пуске, а каждое законное сочетание — пройти. Односторонняя проба
@@ -70,7 +70,7 @@ func TestManifestsGuardRefusesRequiredWithoutDir(t *testing.T) {
 // До этой правки сочетание «каталог назван, опоры нет» ПРИНИМАЛОСЬ и означало не
 // то, что говорит: чтение включает сам каталог, и сорванную доставку `LoadDelivered`
 // отвергает независимо от значения. То есть исполнимых состояний было два, а
-// объявленных три (#1924).
+// объявленных три (kacho#1924).
 func TestManifestsGuardRefusesADirWithoutReliance(t *testing.T) {
 	err := config.ManifestsConfig{Required: false, Dir: "/etc/kaname/manifests"}.Validate()
 	if err == nil {
@@ -166,7 +166,7 @@ func TestManifestEnvNamesAreNotBoundToAValue(t *testing.T) {
 			"значение, и доставка выглядела бы объявленной на посадке, которая её не объявляла",
 			cfg.Manifests.Dir, cfg.Manifests.Required)
 	}
-	// Те же две половины у ручек сборки (#1971): привязка обязана
+	// Те же две половины у ручек сборки (kacho#1971): привязка обязана
 	// РЕГИСТРИРОВАТЬ ключ, не давая ему значения. Подставленный допуск был бы
 	// непуст всегда, и сборка выглядела бы судимой на посадке, её не объявлявшей.
 	if cfg.Manifests.ComposeModel || cfg.Manifests.Admission != "" {
@@ -177,7 +177,7 @@ func TestManifestEnvNamesAreNotBoundToAValue(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// СБОРКА МОДЕЛИ ПРАВ ИЗ ДОСТАВЛЕННЫХ МАНИФЕСТОВ И ЕЁ ДОПУСК (задача #1971).
+// СБОРКА МОДЕЛИ ПРАВ ИЗ ДОСТАВЛЕННЫХ МАНИФЕСТОВ И ЕЁ ДОПУСК (задача kacho#1971).
 //
 // Приёмка `composed-model-admits-only-what-it-owns.md`, сценарии `ADM-B-01`…
 // `ADM-B-06`; производитель — `З-02` (две величины секции `manifests`).
@@ -294,7 +294,7 @@ func TestManifestsGuardRefusesCompositionWithoutDelivery(t *testing.T) {
 
 // TestManifestsGuardKeepsTheHalfPairRefusalItsOwnText — `ADM-B-03`, вторая
 // половина: неполная ПОЛОВИНА пары доставки по-прежнему отвергается собственным
-// текстом стража пары (#1924), и отказ сборки его НЕ ПОДМЕНЯЕТ — виновная ручка
+// текстом стража пары (kacho#1924), и отказ сборки его НЕ ПОДМЕНЯЕТ — виновная ручка
 // называется одна.
 func TestManifestsGuardKeepsTheHalfPairRefusalItsOwnText(t *testing.T) {
 	err := config.ManifestsConfig{

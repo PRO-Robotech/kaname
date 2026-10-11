@@ -53,7 +53,7 @@ func ValidateResourceID(id, prefix, resourceName string) error {
 	// принимает ровно те строки, которые продукт посеял сам и которые неизменяемы
 	// by construction (ban #15, ban #5). Объявлять собственный посев негодным —
 	// значит отвечать `INVALID_ARGUMENT` на id, выданный этим же сервисом в
-	// ответе `List` (задача #1808). Префикс при этом проверен ВЫШЕ, поэтому
+	// ответе `List` (задача kacho#1808). Префикс при этом проверен ВЫШЕ, поэтому
 	// посеянный id роли не пройдёт там, где ждут аккаунт.
 	if len(id) != domain.ShortIDLen && !domain.IsSeededResourceID(id) {
 		return status.Errorf(codes.InvalidArgument, "invalid %s id '%s'", resourceName, id)

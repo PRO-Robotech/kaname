@@ -380,7 +380,7 @@ type RelationTuple struct {
 type SubjectChangeEvent struct {
 	// SubjectID — raw (unprefixed) FGA subject id (e.g. "usr_alice",
 	// "sva_bot", "grp_admins"). The drainer applier maps to FGA-prefixed
-	// form; читателем журнала является КРАЙ, открывающий чтение сам (задача #1024).
+	// form; читателем журнала является КРАЙ, открывающий чтение сам (задача kacho#1024).
 	SubjectID string `json:"subject_id"`
 
 	// SubjectType — FGA object type of the subject: user | service_account |
@@ -445,7 +445,7 @@ type ListFilter struct {
 	ScopeType string // scope= (bare resource_type: cluster|account|project)
 	ScopeID   string // scopeId= (matches resource_id)
 	// AccountID — сужение до области ОДНОГО аккаунта: строки, привязанные к
-	// самому аккаунту, ПЛЮС строки на каждом его проекте (задача #1737).
+	// самому аккаунту, ПЛЮС строки на каждом его проекте (задача kacho#1737).
 	//
 	// Это НЕ ScopeID. ScopeID сверяется с resource_id строки, поэтому
 	// `ScopeType="account"` + `ScopeID=<acct>` отдаёт привязки к САМОМУ аккаунту
@@ -477,7 +477,7 @@ type ListFilter struct {
 	After *Cursor
 
 	// Candidates — сужение НАБОРА КАНДИДАТОВ до надмножества видимого
-	// вызывающему (задача #645).
+	// вызывающему (задача kacho#645).
 	//
 	// # Почему у привязки сужение шире, чем «колонка аккаунта»
 	//
@@ -487,7 +487,7 @@ type ListFilter struct {
 	//
 	// ЗДЕСЬ СТОЯЛО «это ровно то выражение, которым пользуется ListByAccount, и
 	// репозиторий переиспользует его, а не заводит второе» — и это было неверно
-	// (#1737, §9 приёмки). Выражение сужения кандидатов от предиката
+	// (kacho#1737, §9 приёмки). Выражение сужения кандидатов от предиката
 	// ListByAccount отличается: у него есть дизъюнкт по `id` и массив вместо
 	// скаляра, потому что оно называет НАБОР аккаунтов, а не один. Комментарий,
 	// противоречащий коду, — латентный дефект: следующий правит код под него.

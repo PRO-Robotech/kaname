@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // retired_engine_model_version_test.go — таблица версии модели, загруженной
-// во ВНЕШНИЙ движок прав, не живёт в схеме kaname (задача продукта #1717).
+// во ВНЕШНИЙ движок прав, не живёт в схеме kaname (задача продукта kacho#1717).
 //
 // Порт с монорепо (`internal/repohygiene/retiredenginemodelversion_test.go`,
 // снят вынесением службы — `kacho#2597`). Изменилось СУЩЕСТВЕННО: там

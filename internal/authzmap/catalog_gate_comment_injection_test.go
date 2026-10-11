@@ -46,7 +46,7 @@ func TestCatalogGateCommentInjection_TreeCarriesAJudgeableMark(t *testing.T) {
 
 func TestCatalogGateCommentInjection_TheOriginalWrongRelationIsFound(t *testing.T) {
 	// ДЕФЕКТ, ВОЗВРАЩЁННЫЙ ДОСЛОВНО: отметка называет отношение, которое стояло
-	// в комментарии до починки (#1258).
+	// в комментарии до починки (kacho#1258).
 	broken := collectCatalogGateMarks("handler.go",
 		"// ГЕЙТ КАТАЛОГА kaname.cloud.iam.v1.UserTokenService/Issue: v_update@iam_user\n")
 	if len(broken) != 1 {

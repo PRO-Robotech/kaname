@@ -63,7 +63,7 @@ func TestExpandAccess_OnlyRelationsWired_StillGated(t *testing.T) {
 	// Тип назван так, как его знает МОДЕЛЬ (`compute_instance`). Прежде здесь
 	// стояла точечная форма каталога (`compute.instance`), которую модель не
 	// объявляет вовсе: с ней вход отвергается раньше стража, и проба утверждала бы
-	// про порядок отказов, а не про то, что страж безусловен (#1290).
+	// про порядок отказов, а не про то, что страж безусловен (kacho#1290).
 	exp := &fakeLister{byNode: map[string][]string{
 		"compute_instance:inst_x#v_delete": {"user:usr_secret_member"},
 	}}

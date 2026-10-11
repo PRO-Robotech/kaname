@@ -5,7 +5,7 @@ package account
 
 // list.go — ListAccountsUseCase. Sync read с pagination.
 //
-// # A page of this list is a page of the VISIBLE (task #645)
+// # A page of this list is a page of the VISIBLE (task kacho#645)
 //
 // It used to be a window over the whole `accounts` table, from which the visible
 // was subtracted afterwards. That order loses every account with more than
@@ -113,7 +113,7 @@ type ListAccountsUseCase struct {
 	// service); production wiring always injects it via WithRelationStore.
 	relationQueries clients.RelationQueries
 
-	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// listScan — узкий порт наблюдаемости стоимости страницы (kacho#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
 }
@@ -125,7 +125,7 @@ func NewListAccountsUseCase(r Repo) *ListAccountsUseCase {
 
 // WithRelationStore wires the FGA ListObjects client used to resolve the principal's
 // `viewer`-relation account-id set. Mirrors ListProjectsUseCase.
-// WithListScanRecorder провязывает съём стоимости страницы (#653).
+// WithListScanRecorder провязывает съём стоимости страницы (kacho#653).
 func (u *ListAccountsUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListAccountsUseCase {
 	u.listScan = rec
 	return u

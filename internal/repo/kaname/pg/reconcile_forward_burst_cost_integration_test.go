@@ -5,7 +5,7 @@ package pg_test
 
 // reconcile_forward_burst_cost_integration_test.go — ЗАМЕР всплеска созданий в
 // одном аккаунте, где владельческая привязка ОДНА на всех (задача продукта
-// #2059).
+// kacho#2059).
 //
 // # Посылка задачи и что с ней стало
 //
@@ -118,7 +118,7 @@ func (c *advisoryStatementCounter) take() (advisory, total int) {
 	return advisory, total
 }
 
-// TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize — замер #2059.
+// TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize — замер kacho#2059.
 func TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -203,7 +203,7 @@ func TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize(t *testing.T) {
 	require.Positive(t, fullAdvisory,
 		"близнец не взял блокировки — счётчик не считает, и ноль у форварда был бы о пустоте")
 	require.Zero(t, fwdAdvisory,
-		"форвард пути создания взял advisory-блокировку: посылка #2059 подтверждается, "+
+		"форвард пути создания взял advisory-блокировку: посылка kacho#2059 подтверждается, "+
 			"и предметом становится очередь на ключе привязки")
 
 	// ── ЗАМЕР: волна из N и 2N против ТЕХ ЖЕ N последовательно ────────────────
@@ -212,7 +212,7 @@ func TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize(t *testing.T) {
 	seqN := forwardSequence(t, ctx, rec, take(n))
 	seq2N := forwardSequence(t, ctx, rec, take(twoN))
 
-	t.Logf("ЗАМЕР #2059 (одна посадка, прогрето: %d прогревов; ось — число одновременных)", warm)
+	t.Logf("ЗАМЕР kacho#2059 (одна посадка, прогрето: %d прогревов; ось — число одновременных)", warm)
 	t.Logf("точка 1  · один проход: %v", oneObject)
 	t.Logf("точка N  · одновременных %d: волна целиком %v, на объект медиана %v, максимум %v",
 		n, waveN.wall, waveN.median, waveN.max)

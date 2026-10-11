@@ -172,7 +172,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// change, recompile the INTERNAL permissions projection (anchor/names; matchLabels
 	// excluded; ≤1024 cap) and store both. permissions itself is immutable input
 	// (rejected in update_mask above).
-	// Набор модулей — ЖИВЫЕ строки каталога (#1927), тот же снимок, которым
+	// Набор модулей — ЖИВЫЕ строки каталога (kacho#1927), тот же снимок, которым
 	// ниже строится проекция глаголов: обе стороны правила обязаны судиться
 	// согласованным множеством, а не двумя моментами времени.
 	facts := u.cat.Facts()
@@ -186,7 +186,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		// Update that swaps a valid token for a typo'd one would otherwise silently
 		// DEMOTE a working grant to an empty one.
 		// Источник — ТОТ ЖЕ снимок живых строк, что и у сегмента модуля выше
-		// (#1993). Паритет с Create здесь несущий: приняв роль над заведённым
+		// (kacho#1993). Паритет с Create здесь несущий: приняв роль над заведённым
 		// типом и отвергнув её ПРАВКУ, платформа сделала бы роль неисправимой.
 		if verr := validateRuleCatalog(in.Rules, current.IsSystem, facts); verr != nil {
 			return nil, shared.MapValidationErr(verr)

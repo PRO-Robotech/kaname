@@ -116,7 +116,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*iamv1.Us
 // ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
 // того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListUsersRequest) (*iamv1.ListUsersResponse, error) {
-	// Форма токена этого списка — граница ВИДИМОЙ последовательности (#645), а не
+	// Форма токена этого списка — граница ВИДИМОЙ последовательности (kacho#645), а не
 	// сырой страницы, поэтому и на границе транспорта судится она.
 	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err
@@ -222,8 +222,8 @@ func (h *Handler) ResetAccessKeys(ctx context.Context, req *iamv1.ResetAccessKey
 
 // RemoveFromAccount — человек перестаёт состоять в названном аккаунте. Пара к
 // Invite: тот вводит человека в аккаунт, этот выводит. Строку личности не
-// трогает — её снятие спрашивает `identity_remover` (#1131), а это отношение
-// аккаунта `member_remover` (#1127).
+// трогает — её снятие спрашивает `identity_remover` (kacho#1131), а это отношение
+// аккаунта `member_remover` (kacho#1127).
 func (h *Handler) RemoveFromAccount(ctx context.Context, req *iamv1.RemoveUserFromAccountRequest) (*operationpb.Operation, error) {
 	op, err := h.remove.Execute(ctx,
 		domain.UserID(req.GetUserId()), domain.AccountID(req.GetAccountId()))

@@ -112,7 +112,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetRoleRequest) (*iamv1.Ro
 func (h *Handler) List(ctx context.Context, req *iamv1.ListRolesRequest) (*iamv1.ListRolesResponse, error) {
 	// Форма страницы судится ЗДЕСЬ, на транспортной границе, и первым
 	// стейтментом — как у остальных шести списочных поверхностей сервиса
-	// (#660). Прежде роли судили величину здесь, а форму токена — первым
+	// (kacho#660). Прежде роли судили величину здесь, а форму токена — первым
 	// стейтментом use-case: порядок «формат до замыкания по личности»
 	// соблюдался, но форма была одна из семи, и следующий, кто заведёт
 	// восьмую поверхность, скопировал бы ту, на которую посмотрел.
@@ -126,7 +126,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListRolesRequest) (*iamv1
 		PageSize:  safeconv.ClampNonNegInt32(req.GetPageSize()),
 		PageToken: req.GetPageToken(),
 		Filter:    req.GetFilter(),
-		// #185: scope the catalog to a single Account (system + that Account's
+		// kacho-iam#185: scope the catalog to a single Account (system + that Account's
 		// custom roles). Empty → unscoped (subject to per-object visibility).
 		AccountID: domain.AccountID(req.GetAccountId()),
 	}
@@ -163,7 +163,7 @@ func (h *Handler) ListOperations(ctx context.Context, req *iamv1.ListRoleOperati
 // ----- helpers -----
 
 // roleFromCreateReq maps a CreateRoleRequest into the domain.Role for the
-// use-case. BOTH scope columns are mapped (account_id XOR project_id, #212) —
+// use-case. BOTH scope columns are mapped (account_id XOR project_id, kacho-iam#212) —
 // the use-case enforces the XOR. IsSystem is always false (system roles are
 // seeded by migration, never via this RPC).
 func roleFromCreateReq(req *iamv1.CreateRoleRequest) (domain.Role, error) {

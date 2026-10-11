@@ -7,7 +7,7 @@ package pg_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/rule-segments-have-a-referent.md`
 // (APPROVED круга 3), сценарии IAM-CT-1-02, -03, -05, -06, -07, -08, -09, -10,
-// -11, -12, -14. Задача продукта #1030.
+// -11, -12, -14. Задача продукта kacho#1030.
 //
 // # Что здесь утверждается и чего здесь НЕТ
 //
@@ -145,13 +145,13 @@ func pgCode(err error) (code, constraint string) {
 // затем сама строка ресурса. У каждого шага `retired_at` и `live` ОДНИМ
 // оператором (требование Т3).
 //
-// # Почему шага стало ДВА (#1878)
+// # Почему шага стало ДВА (kacho#1878)
 //
 // Ключ `catalog_verb_resource_live_fk` держит порядок «глаголы → ресурсы» так
 // же, как `catalog_resource_module_live_fk` держит «ресурсы → модуль»: снятие
 // ресурса при живом глаголе отвергается `23503`. Прежде такой ход проходил
 // МОЛЧА, оставляя живые глаголы под снятым ресурсом, — это и было предметом
-// #1868. Порядок здесь выписан, но держит его не он: держит ключ, а выписанный
+// kacho#1868. Порядок здесь выписан, но держит его не он: держит ключ, а выписанный
 // порядок — форма административного глагола. Тот же порядок и по той же причине
 // у `withdrawModule` уровнем выше.
 //
@@ -237,7 +237,7 @@ func TestIAMCT104_CatalogSeedMatchesTheLiteralBothWays(t *testing.T) {
 			wantVerb[e.Module+"."+e.Resource+"."+v] = true
 		}
 	}
-	// Половин у словаря глаголов ДВЕ (#1863), и сверяются они порознь: слитая
+	// Половин у словаря глаголов ДВЕ (kacho#1863), и сверяются они порознь: слитая
 	// сверка молчала бы на строке, перетёкшей из одной в другую, — а перетекание
 	// в ПООБЪЕКТНУЮ и есть возврат снятого отношения.
 	for _, v := range authzmap.CatalogSeedVerbs() {
@@ -783,7 +783,7 @@ func TestIAMCT107_InjectionOneCompositeKeyLetsTheAnchorThrough(t *testing.T) {
 		INSERT INTO inj.cat_res (module, resource) VALUES ('vpc', 'network');
 		INSERT INTO inj.cat_verb (module, resource, verb) VALUES ('vpc', 'network', 'get');
 
-		-- ОДИН составной ключ, как просило тело задачи #1030.
+		-- ОДИН составной ключ, как просило тело задачи kacho#1030.
 		CREATE TABLE inj.rule_one (
 		  module text NOT NULL, resource text NOT NULL, verb text,
 		  live boolean NOT NULL DEFAULT true,

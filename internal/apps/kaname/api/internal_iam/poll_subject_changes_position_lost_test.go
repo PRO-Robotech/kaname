@@ -4,7 +4,7 @@
 package internal_iam
 
 // poll_subject_changes_position_lost_test.go — тон отказа «позиция утрачена»
-// (задача #1712).
+// (задача kacho#1712).
 //
 // # Что здесь держится
 //

@@ -7,7 +7,7 @@
 // `TestSystemRoleRowIsNeverDeleted`, снят вынесением службы доступа —
 // `kacho#2597`; запись решения
 // `docs/engineering/architecture/role-withdrawal-is-a-mark.md`, задача
-// продукта #1913).
+// продукта kacho#1913).
 //
 // Способность гейта упасть и смолчать доказана инъекцией —
 // system_role_row_is_never_deleted_injection_test.go.

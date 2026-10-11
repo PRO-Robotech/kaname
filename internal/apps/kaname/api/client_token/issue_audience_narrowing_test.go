@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // issue_audience_narrowing_test.go — сужение адресатов, объявленное САМИМ
-// ключом, действует на выпуске (задача #1136).
+// ключом, действует на выпуске (задача kacho#1136).
 //
 // # Что здесь измеряется
 //
@@ -42,7 +42,7 @@ func narrowedTo(list ...string) func(*domain.AssertionClient) {
 // TestDeclaredAudienceNarrowsWithinTheLandingList — ключ, объявивший ОДИН
 // адресат, не получает токена для второго адресата посадки.
 //
-// Именно этот вход сужение обязано заворачивать, и именно он до задачи #1136
+// Именно этот вход сужение обязано заворачивать, и именно он до задачи kacho#1136
 // проходил: перечень посадки в профилях `dev-prod`, `fe3455-prod` и `prod`
 // называет два адресата, один из которых — адресат края.
 func TestDeclaredAudienceNarrowsWithinTheLandingList(t *testing.T) {
