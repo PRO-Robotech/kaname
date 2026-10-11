@@ -1656,16 +1656,20 @@ CASES.append(Case(
         ]),
         _mailbox_count(_P26, "pace-p-letters", _HEAD_RECOVERY, at_least="__num('recoveryLettersPerRecipient')"),
         # (б) Q — тот же источник, та же форма, другой адрес: письмо поставлено.
+        # Клетки близнеца считаются от СВОЕЙ базы, снятой перед запросом Q: база
+        # (а) несла бы в ожидание близнеца исход (а), и снятое списание окна
+        # адресата красило бы (б), чей факт — адрес — не менялся (kaname#614,
+        # опыт (1)).
+        _metrics_step("pace-q-baseline", tests=[*_keep_outcomes("rcvPaceQ0", ("queued", "recipient-paced"))]),
         _request_for(_P26, "pace-q-same-window", f"{{{{{_v(_Q26, 'Email')}}}}}", "rcvPaceSrc"),
         _await_code(_Q26, "pace-q-letter", _HEAD_RECOVERY, "MailCode"),
         # Письмо Q дошло — поставленное до него письмо P дошло бы тоже: писем P ровно N.
         _mailbox_count(_P26, "pace-p-letters-exactly", _HEAD_RECOVERY,
                        exactly="__num('recoveryLettersPerRecipient')"),
-        _metrics_step("pace-cells-after-q", until=f"{_delta('rcvPace0', 'queued')} >= "
-                                                 "__num('recoveryLettersPerRecipient') + 1", tests=[
-            "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла ещё на 1, recipient-paced не выросла', () => "
-            f"pm.expect([{_delta('rcvPace0', 'queued')}, {_delta('rcvPace0', 'recipient-paced')}])"
-            ".to.eql([__num('recoveryLettersPerRecipient') + 1, 1]));",
+        _metrics_step("pace-cells-after-q", until=f"{_delta('rcvPaceQ0', 'queued')} >= 1", tests=[
+            "pm.test('PACE-CELLS-Q: письмо Q поставлено — queued выросла на 1 от базы перед Q, recipient-paced не выросла', () => "
+            f"pm.expect([{_delta('rcvPaceQ0', 'queued')}, {_delta('rcvPaceQ0', 'recipient-paced')}])"
+            ".to.eql([1, 0]));",
         ]),
         # Код N-го письма проходит: сверхнормативный запрос прежнего кода не вытеснил.
         _csrf_step(_P26, "pace-csrf-complete", "recovery-complete"),
@@ -1729,13 +1733,16 @@ CASES.append(Case(
             f"pm.expect({_delta('rcvSrc0', 'no-row')}).to.eql(__num('recoverySourceAttempts')));",
         ]),
         # (б) S′ — другой источник, тот же адрес: письмо поставлено (исход Ф5-01).
+        # Клетки близнеца — от СВОЕЙ базы перед запросом с S′, по той же причине,
+        # что у близнеца (б) Ф5-26: исход (а) в ожидание близнеца не входит.
+        _metrics_step("src-s2-baseline", tests=[*_keep_outcomes("rcvSrcS20", ("queued", "source-paced"))]),
         _request_for(_P27, "src-p-other-source", f"{{{{{_v(_P27, 'Email')}}}}}", "rcvSrcS2"),
         _await_code(_P27, "src-p-letter-other-source", _HEAD_RECOVERY, "MailCode"),
         # Письмо с S′ дошло; письма с S не было — писем восстановления у P ровно одно.
         _mailbox_count(_P27, "src-p-letters-exactly", _HEAD_RECOVERY, exactly=1),
-        _metrics_step("src-cells-after-other-source", until=f"{_delta('rcvSrc0', 'queued')} >= 1", tests=[
-            "pm.test('SRC-CELLS-S2: queued выросла на 1, source-paced осталась +1', () => "
-            f"pm.expect([{_delta('rcvSrc0', 'queued')}, {_delta('rcvSrc0', 'source-paced')}]).to.eql([1, 1]));",
+        _metrics_step("src-cells-after-other-source", until=f"{_delta('rcvSrcS20', 'queued')} >= 1", tests=[
+            "pm.test('SRC-CELLS-S2: письмо с S′ поставлено — queued выросла на 1 от базы перед S′, source-paced не выросла', () => "
+            f"pm.expect([{_delta('rcvSrcS20', 'queued')}, {_delta('rcvSrcS20', 'source-paced')}]).to.eql([1, 0]));",
         ]),
     ],
 ))
