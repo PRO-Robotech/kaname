@@ -164,6 +164,14 @@ ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop", "AccRsv",
                    # заводящий сценарий и один общий для незаводящих.
                    "AidTen01", "AidTen21", "AidTen23", "AidTen25", "AidTenShared")
 
+# СЛОТЫ УХОДЯЩЕГО АРЕНДАТОРА (kaname#664, приёмка
+# own-account-and-identity-are-removed-in-order, S4 и близнецы KN664-11/36).
+# Кейс снимает у человека проект, аккаунт и самого человека — это
+# РАСХОДУЮЩИЙ сценарий, и человек у него свой: общий человек церемонии после
+# такого кейса исчез бы у соседних наборов. Слотов два, по одному на
+# вызывающего: сам арендатор (KN664-50) и администратор облака (KN664-51).
+LEAVE_SLOTS = ("Kn664Leave", "Kn664Cloud")
+
 # СЛОТЫ АДМИНИСТРАТОРОВ ОБЛАКА (kaname#549, §6.2 приёмки). Тот же человек слота,
 # и посев выдаёт ему `system_admin` на кластере глаголом
 # `InternalClusterService.GrantAdmin` под машинным `system_admin` шага 1 — так же,
@@ -230,7 +238,7 @@ MINTED_WAVE = (
     # права не держит by construction. Предъявитель ему не нужен — доступ судит
     # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
     "ceremonyInviteeEmail", "ceremonyInviteeUserId",
-) + tuple(k for s in ADMISSION_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT,)
+) + tuple(k for s in ADMISSION_SLOTS + LEAVE_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT,)
           for k in slot_keys(s)) + MINTED_CAP
 # Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
 # ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
@@ -900,6 +908,14 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
         values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
         values[kid] = su
     say(f"  ok   слоты заведения аккаунта: {len(ADMISSION_SLOTS)} людей, у каждого "
+        f"предъявители уровней «1» и «2»")
+    for slot in LEAVE_SLOTS:
+        _, ss, su = person(slot_slug(slot))
+        k1, k2, kid = slot_keys(slot)
+        values[k1], _ = ceremony_bearer(stand, client, ss, su, "1")
+        values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
+        values[kid] = su
+    say(f"  ok   слоты уходящего арендатора: {len(LEAVE_SLOTS)} людей, у каждого "
         f"предъявители уровней «1» и «2»")
     cap_admin = None
     for slot in ADMIN_SLOTS:
