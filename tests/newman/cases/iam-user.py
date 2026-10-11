@@ -1372,6 +1372,343 @@ CASES.append(Case(
 ))
 
 
+# ===========================================================================
+# АРЕНДАТОР УХОДИТ ЦЕЛИКОМ (kaname#664, приёмка
+# `docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md`,
+# S4: KN664-50, KN664-51; близнецы KN664-11, KN664-36, KN664-46 на той же цепочке).
+#
+# ЛЮДИ — СЛОТЫ ВОЛНЫ ЦЕРЕМОНИИ `Kn664Leave` и `Kn664Cloud`
+# (`tests/authz-fixtures/seed_ceremony.py`, `LEAVE_SLOTS`): самостоятельно
+# зарегистрированный человек, подтверждённый адрес, предъявители уровней «1» и
+# «2». Сценарий РАСХОДУЮЩИЙ — снимает проект, аккаунт и самого человека, —
+# поэтому человек у каждого кейса свой, а не общий человек церемонии.
+#
+# АККАУНТ И ПРОЕКТ ПО УМОЛЧАНИЮ берутся у края, а не литералом
+# (`e2e-flow.md#catalog-values-from-edge`): личный аккаунт — единственная строка
+# `accounts[]` снимка «кто я» с ролью `owner`, проект — единственная строка
+# перечня проектов этого аккаунта.
+#
+# ОКНО ОТЗЫВА. Токен, которым шли три вызова, принят ДО снятия, и рубеж
+# предъявителя держит вердикт «не отозван» в кеше на объявленное окно
+# (`RevocationCacheTTL`, на стенде `stand-ceremony` — 30 с). Поэтому отказ
+# утверждается ожиданием УСЛОВИЯ (`e2e-flow.md#wait-condition-not-time`): шаг
+# повторяет предъявление с паузой 1 с, пока ответ 200, но не дольше 75 с
+# (два с половиной окна стенда), и только затем утверждает 401 / 16 / текст.
+# Ответ, не ставший отказом за этот срок, — красный.
+#
+# ЧЕГО КЕЙСЫ НЕ УТВЕРЖДАЮТ (и где держатель):
+#   · «браузерная сессия U → 401 authentication failed» — слушатель формы на
+#     стенде волны допускает только лист края, а прогон набора предъявляет лист
+#     службы; каскад сессий человека держит уровень I —
+#     `TestKN664_30_PersonRemovesSelfAfterTheAccount`
+#     (`internal/repo/kaname/pg/identity_removal_in_order_integration_test.go`);
+#   · «в очереди намерений после дренажа нет недоставленных строк» — очередь
+#     намерений краем не видна; её держит уровень I —
+#     `TestKN664_14_AccountRemovalRemovesEveryMembershipPointer`
+#     (`account_delete_cycle_integration_test.go`) и
+#     `TestKN664_37_PersonRemovalRemovesEveryMembershipPointer` (там же, где KN664-30).
+# Техники: переход состояний (аккаунт с проектом → без проекта → снят; человек с
+# выдачей → выдача отозвана → снят), таблица решений (вызывающий: сам ×
+# администратор облака), угадывание ошибок (отказ, подменённый отказом того же кода
+# — тексты утверждаются целиком).
+# ===========================================================================
+
+_KN664_WINDOW_MS = 75000
+
+
+def _kn664_find_tenant(tag: str, auth: str) -> list:
+    """Снимок «кто я» и перечень проектов: личный аккаунт и проект по умолчанию."""
+    return [
+        Step(
+            name=f"{tag}-whoami",
+            method="GET",
+            path="/iam/v1/me",
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "const own = (j.accounts || []).filter(a => (a.roles || []).includes('owner'));",
+                "pm.test('tenant owns exactly one account (the personal one of its registration)', () => "
+                "pm.expect(own.length, JSON.stringify(j)).to.eql(1));",
+                f"pm.environment.set({js_str(tag + 'AccId')}, own.length === 1 ? own[0].accountId : '');",
+                f"pm.test('personal account id has the account form', () => "
+                f"pm.expect(pm.environment.get({js_str(tag + 'AccId')})).to.match(/^acc[0-9a-z]{{17}}$/));",
+            ],
+        ),
+        Step(
+            name=f"{tag}-default-project",
+            method="GET",
+            path="/iam/v1/projects?accountId={{" + tag + "AccId}}",
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "const ps = j.projects || [];",
+                "pm.test('the personal account carries exactly one project — the default one', () => "
+                "pm.expect(ps.length, JSON.stringify(j)).to.eql(1));",
+                f"pm.test('the project belongs to the personal account', () => "
+                f"pm.expect(ps[0] && ps[0].accountId, JSON.stringify(j)).to.eql(pm.environment.get({js_str(tag + 'AccId')})));",
+                f"pm.environment.set({js_str(tag + 'PrjId')}, ps.length === 1 ? ps[0].id : '');",
+                f"pm.test('default project id has the project form', () => "
+                f"pm.expect(pm.environment.get({js_str(tag + 'PrjId')})).to.match(/^prj[0-9a-z]{{17}}$/));",
+            ],
+        ),
+    ]
+
+
+def _kn664_delete(name: str, path: str, auth: str, op_var: str) -> Step:
+    return Step(
+        name=name,
+        method="DELETE",
+        path=path,
+        auth=auth,
+        test_script=[
+            *assert_status(200),
+            *assert_iam_operation_envelope(),
+            *save_from_response("j.id", op_var),
+        ],
+    )
+
+
+def _kn664_account_refused_with_project(tag: str, auth: str) -> list:
+    """KN664-11: аккаунт с проектом не снимается, и ничего не снято."""
+    return [
+        _kn664_delete(f"{tag}-delete-account-with-project", "/iam/v1/accounts/{{" + tag + "AccId}}",
+                      auth, f"{tag}AccRefOpId"),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="Account {{" + tag + "AccId}} contains projects and cannot be deleted",
+                        op_var=f"{tag}AccRefOpId"),
+        Step(
+            name=f"{tag}-account-still-there",
+            method="GET",
+            path="/iam/v1/accounts/{{" + tag + "AccId}}",
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                f"pm.test('KN664-11: the refused account is still readable', () => "
+                f"pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get({js_str(tag + 'AccId')})));",
+            ],
+        ),
+    ]
+
+
+def _kn664_visible(tag: str, admin: str, user_var: str) -> list:
+    """Свидетель: до снятия администратор облака ВИДИТ P, A и U (200). Без него 404
+    после снятия неотличим от скрытия существования — текст у них один."""
+    out = []
+    for what, var in (("projects", tag + "PrjId"), ("accounts", tag + "AccId"),
+                      ("users", user_var)):
+        out.append(Step(
+            name=f"{tag}-{what}-visible-to-cloud-admin",
+            method="GET",
+            path=f"/iam/v1/{what}/{{{{{var}}}}}",
+            auth=admin,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                f"pm.test('the cloud admin reads the live object before removal', () => "
+                f"pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get({js_str(var)})));",
+            ],
+        ))
+    return out
+
+
+def _kn664_gone(tag: str, admin: str, user_var: str) -> list:
+    """P, A, U отвечают NOT_FOUND администратору облака — текстом владельца."""
+    out = []
+    for what, var, label in (("projects", tag + "PrjId", "Project"),
+                             ("accounts", tag + "AccId", "Account"),
+                             ("users", user_var, "User")):
+        out.append(Step(
+            name=f"{tag}-{what}-gone-for-cloud-admin",
+            method="GET",
+            path=f"/iam/v1/{what}/{{{{{var}}}}}",
+            auth=admin,
+            test_script=[
+                *assert_status(404),
+                *assert_grpc_code(5, "NOT_FOUND"),
+                *assert_refusal_message(label + " {{" + var + "}} not found"),
+            ],
+        ))
+    return out
+
+
+def _kn664_token_refused_after_window(tag: str, auth: str) -> Step:
+    """Предъявленный до снятия токен отвергается после окна отзыва (ожидание условия)."""
+    started = f"_{tag}WinStarted"
+    t0 = f"_{tag}WinT0"
+    return Step(
+        name=f"{tag}-token-refused-after-revocation-window",
+        method="GET",
+        path="/iam/v1/me",
+        auth=auth,
+        pre_script=[
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            f"  pm.environment.set({js_str(t0)}, String(Date.now()));",
+            "}",
+        ],
+        test_script=[
+            f"const _w0 = parseInt(pm.environment.get({js_str(t0)}) || '0', 10);",
+            f"if (pm.response.code === 200 && Date.now() - _w0 < {_KN664_WINDOW_MS}) {{",
+            "  // токен ещё в окне кеша вердикта «не отозван» — объявленное окно, ждём условия",
+            "  const _wd = Date.now(); while (Date.now() - _wd < 1000) { /* real inter-poll delay 1s */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(started)});",
+            f"pm.environment.unset({js_str(t0)});",
+            *assert_status(401),
+            *assert_grpc_code(16, "UNAUTHENTICATED"),
+            *assert_refusal_message("credential is not accepted"),
+        ],
+    )
+
+
+_kl1, _kl2, _klu = "jwtHumanKn664Leave", "jwtHumanKn664LeaveStepUp", "humanKn664LeaveUserId"
+
+CASES.append(Case(
+    id="IAM-USR-DL-FLOW-TENANT-LEAVES",
+    title="KN664-50 (с близнецами KN664-11, KN664-36, KN664-46): самостоятельно "
+          "зарегистрированный арендатор снимает проект по умолчанию, личный аккаунт и себя — "
+          "все три операции успешны, P/A/U → 404 администратору облака, токен трёх вызовов "
+          "после окна отзыва → 401 'credential is not accepted'",
+    classes=["STATE", "CRUD", "NEG"],
+    priority="P1",
+    steps=[
+        *_kn664_find_tenant("kn664L", _kl2),
+        # KN664-11 — близнец: проект не снят, аккаунт не снимается.
+        *_kn664_account_refused_with_project("kn664L", _kl2),
+        Step(
+            name="kn664L-membership-still-there",
+            method="GET",
+            path="/iam/v1/me",
+            auth=_kl2,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('KN664-11: the tenant is still a member (owner) of the refused account', () => "
+                "pm.expect((j.accounts || []).some(a => a.accountId === pm.environment.get('kn664LAccId') "
+                "&& (a.roles || []).includes('owner')), JSON.stringify(j)).to.eql(true));",
+            ],
+        ),
+        *_kn664_visible("kn664L", "jwtHumanAidAdmSharedStepUp", _klu),
+        # KN664-50 — первый глагол: проект.
+        _kn664_delete("kn664L-delete-project", "/iam/v1/projects/{{kn664LPrjId}}", _kl2, "kn664LPrjOpId"),
+        assert_op_success(op_var="kn664LPrjOpId"),
+        # Второй глагол: аккаунт.
+        _kn664_delete("kn664L-delete-account", "/iam/v1/accounts/{{kn664LAccId}}", _kl2, "kn664LAccOpId"),
+        assert_op_success(op_var="kn664LAccOpId"),
+        # KN664-36 — близнец третьего глагола: на человека выдал права чужой аккаунт.
+        Step(
+            name="kn664L-foreign-grant",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body={"subjectType": "user", "subjectId": "{{" + _klu + "}}",
+                  "roleId": ROLE_VIEW, "scopeType": "iam.account", "scopeId": "{{accountAId}}",
+                  "target": {"allInScope": {}}},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "kn664LGrantOpId"),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", "kn664LBindingId"),
+            ],
+        ),
+        assert_op_success(op_var="kn664LGrantOpId"),
+        _kn664_delete("kn664L-delete-self-with-foreign-grant", "/iam/v1/users/{{" + _klu + "}}",
+                      _kl2, "kn664LUsrRefOpId"),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="User {{" + _klu + "}} has active access bindings and cannot be deleted",
+                        op_var="kn664LUsrRefOpId"),
+        Step(
+            name="kn664L-self-still-there",
+            method="GET",
+            path="/iam/v1/users/{{" + _klu + "}}",
+            auth=_kl2,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('KN664-36: the refused person is still there', () => "
+                f"pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get({js_str(_klu)})));",
+            ],
+        ),
+        # KN664-46: выдача отозвана глаголом `:revoke` — строка REVOKED человека не держит.
+        Step(
+            name="kn664L-revoke-foreign-grant",
+            method="POST",
+            path="/iam/v1/accessBindings/{{kn664LBindingId}}:revoke",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "kn664LRevokeOpId"),
+            ],
+        ),
+        Step(
+            name="kn664L-revoke-committed-as-revoked",
+            method="GET",
+            path="/operations/{{kn664LRevokeOpId}}",
+            auth="jwtAccountAdminAStepUp",
+            op_var="kn664LRevokeOpId",
+            test_script=[
+                "const j = pm.response.json();",
+                "if (pm.environment.get('_kn664RvStarted') !== pm.info.requestName) { pm.environment.set('_kn664RvCount', '0'); pm.environment.set('_kn664RvStarted', pm.info.requestName); }",
+                "const rc = parseInt(pm.environment.get('_kn664RvCount') || '0', 10);",
+                f"if (!j.done && rc < {POLL_CAP}) {{",
+                "  pm.environment.set('_kn664RvCount', String(rc + 1));",
+                "  const _rv = Date.now(); while (Date.now() - _rv < 500) { /* real inter-poll delay */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_kn664RvCount'); pm.environment.unset('_kn664RvStarted');",
+                "pm.test('revoke operation succeeded', () => pm.expect(j.done === true && !j.error && Boolean(j.response), JSON.stringify(j)).to.eql(true));",
+                "pm.test('KN664-46: the binding row stays, in state REVOKED', () => "
+                "pm.expect(j.response && j.response.status, JSON.stringify(j)).to.eql('REVOKED'));",
+            ],
+        ),
+        # Третий глагол: человек снимает себя.
+        _kn664_delete("kn664L-delete-self", "/iam/v1/users/{{" + _klu + "}}", _kl2, "kn664LUsrOpId"),
+        assert_op_success(op_var="kn664LUsrOpId"),
+        *_kn664_gone("kn664L", "jwtHumanAidAdmSharedStepUp", _klu),
+        _kn664_token_refused_after_window("kn664L", _kl2),
+    ],
+))
+
+
+_kc1, _kc2, _kcu = "jwtHumanKn664Cloud", "jwtHumanKn664CloudStepUp", "humanKn664CloudUserId"
+_kn664_admin = "jwtHumanAidAdmSharedStepUp"
+
+CASES.append(Case(
+    id="IAM-USR-DL-FLOW-CLOUD-REMOVES-TENANT",
+    title="KN664-51 (с близнецом KN664-11 от облака): администратор облака снимает у "
+          "самостоятельно зарегистрированного арендатора проект, аккаунт и личность — все три "
+          "операции успешны, P/A/U → 404, токен арендатора после окна отзыва → 401",
+    classes=["STATE", "CRUD", "NEG", "AUTHZ"],
+    priority="P1",
+    steps=[
+        # Токен арендатора предъявлен здесь, ДО снятия, — после окна он утверждается отказом.
+        *_kn664_find_tenant("kn664C", _kc1),
+        *_kn664_visible("kn664C", _kn664_admin, _kcu),
+        # KN664-11 от облака: проект не снят — аккаунт не снимается и администратором.
+        *_kn664_account_refused_with_project("kn664C", _kn664_admin),
+        _kn664_delete("kn664C-delete-project", "/iam/v1/projects/{{kn664CPrjId}}", _kn664_admin,
+                      "kn664CPrjOpId"),
+        assert_op_success(op_var="kn664CPrjOpId"),
+        _kn664_delete("kn664C-delete-account", "/iam/v1/accounts/{{kn664CAccId}}", _kn664_admin,
+                      "kn664CAccOpId"),
+        assert_op_success(op_var="kn664CAccOpId"),
+        _kn664_delete("kn664C-delete-person", "/iam/v1/users/{{" + _kcu + "}}", _kn664_admin,
+                      "kn664CUsrOpId"),
+        assert_op_success(op_var="kn664CUsrOpId"),
+        *_kn664_gone("kn664C", _kn664_admin, _kcu),
+        _kn664_token_refused_after_window("kn664C", _kc1),
+    ],
+))
+
+
 # ---------------------------------------------------------------------------
 # IAM-USR-DL-NEG-NOTFOUND — Delete non-existent user → 404 or 403
 # ---------------------------------------------------------------------------
