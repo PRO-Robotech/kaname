@@ -63,7 +63,7 @@ const (
 	sessionRelation = "session_reader"
 	sessionType     = "iam_user"
 
-	// sessionInjectedWidth — форма, стоявшая здесь до #1140. Читательский ярус
+	// sessionInjectedWidth — форма, стоявшая здесь до kacho#1140. Читательский ярус
 	// был не отдельным объявлением, а именем в записи каталога, поэтому
 	// дословное возвращение прежнего состояния — это отношение, равное ярусу.
 	sessionInjectedWidth = "define session_reader: viewer"
@@ -76,7 +76,7 @@ const (
 	sessionInjectedNoCloud = "define session_reader: subject"
 
 	// credentialSideWidened — ось V: расширена ВТОРАЯ сторона личности. Форма
-	// настоящая — ровно та, что стояла у `token_reader` до #1133.
+	// настоящая — ровно та, что стояла у `token_reader` до kacho#1133.
 	credentialSideWidened = "define token_reader: subject or v_list"
 )
 
@@ -229,7 +229,7 @@ func TestSessionHistoryGate_SidesDisagreeWhenTheOtherSideMoves(t *testing.T) {
 // прогоне, где инъекция краснеет.
 //
 // Близнецы выбраны по СМЫСЛУ, а не по написанию: `token_issuer` сужен по тому же
-// основанию (#1086), `record_writer` несёт надзор облака той же формой (#1102).
+// основанию (kacho#1086), `record_writer` несёт надзор облака той же формой (kacho#1102).
 // Близнец, полученный из дефекта заменой имени, доказывал бы лишь то, что
 // предикат различает две строки.
 func TestSessionHistoryGate_TwinsStaySilent(t *testing.T) {

@@ -37,7 +37,7 @@ import (
 // principals — two statements about one subject, of which one was true — and the
 // false one was read as a licence: three listing use-cases carried an
 // "unfiltered page for the bootstrap identity" branch that no input could reach,
-// because IsAnonymous had already refused (#648).
+// because IsAnonymous had already refused (kacho#648).
 //
 // Message text is the Kachō canonical `"permission denied"` (no leak of
 // internal details).

@@ -70,7 +70,7 @@ func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, subject string, verbs []s
 	// Набор глаголов считает ОДИН предикат — тот же, которым наполняется проекция
 	// `role_verb`, читаемая формой E. Две реализации одного вопроса («что роль
 	// разрешает на типе») по отдельности непротиворечивы и расходятся молча: ровно
-	// так роль-администратор давала движку всё, а форме E — ничего (#496).
+	// так роль-администратор давала движку всё, а форме E — ничего (kacho#496).
 	granted := cat.GrantedVerbs(fgaType, verbs, typeVerbs)
 
 	seen := map[domain.MembershipTuple]struct{}{}
@@ -138,7 +138,7 @@ func scopeSelfMember(cat *catalog.Facts, subject string, scopeType, scopeID stri
 // (RBAC explicit-model 2026 P4 / D-7 / КФ-3 / C-01). It is the unified-reconciler
 // equivalent of the removed binding-time scope-anchor/scope_grant emit: the tier
 // (back-compat) tuple is the write-authz anchor / no-access-loss anchor, plus the
-// closed v_* set when the scope type is verb-bearing (account/project, #218).
+// closed v_* set when the scope type is verb-bearing (account/project, kacho-iam#218).
 //
 // Only the verb-bearing hierarchy scopes account/project materialize a per-object
 // scope-self member. cluster is DELIBERATELY excluded: cluster super-admin is served
@@ -200,7 +200,7 @@ func scopeSelfTuplesWithTypeVerbs(cat *catalog.Facts, subject, scopeType, scopeI
 //
 // Здесь стоял собственный переходник реконсайлера — тонкая оболочка над
 // `authzmap.FGAObjectType`, то есть над словарём, ПОРОЖДЁННЫМ СБОРКОЙ
-// (`authzmap/tables_gen.go` из манифестов, #1092). Тип, которого сборка не
+// (`authzmap/tables_gen.go` из манифестов, kacho#1092). Тип, которого сборка не
 // знала, получал `ok=false`, и вызывающий пропускал его МОЛЧА: строки каталога
 // записаны, членство модуля отвечает «да», роль создаётся без отказа — и ни одного
 // кортежа не материализуется. Теперь имя читается из строки каталога

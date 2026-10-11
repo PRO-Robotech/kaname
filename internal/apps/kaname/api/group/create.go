@@ -96,7 +96,7 @@ func (u *CreateGroupUseCase) Execute(ctx context.Context, g domain.Group) (*oper
 	}
 	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
 	// вход создания и означает «назови сам», а умолчание производится ОТ
-	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279).
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (kacho#1279).
 	grpID := ids.NewID(domain.PrefixGroup)
 	g.Name = domain.GroupName(corevalidate.NameOrDefault(string(g.Name), grpID))
 

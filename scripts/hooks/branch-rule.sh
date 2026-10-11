@@ -97,7 +97,7 @@ branch_rule_merge_form() { [[ "$1" =~ ^#[0-9]+\ merge\ (#[0-9]+|main)([^0-9A-Za-
 # branch_rule_attribution <текст> — печатает первую строку атрибуции; 1 — её нет.
 # Регистр не различается. Трейлер — строка, НАЧАТАЯ его именем: то же имя в
 # середине строки — упоминание, а не трейлер. Co-Authored-By судится по ключу,
-# значение не читается (#861).
+# значение не читается (kacho-workspace#861).
 branch_rule_attribution() {
     local line found=1 restore
     restore="$(shopt -p nocasematch)"

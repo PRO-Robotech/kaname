@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// usecase_secret_kind_test.go — ВЫДАЧА БАЗОВОГО СЕКРЕТА (задача #1142,
+// usecase_secret_kind_test.go — ВЫДАЧА БАЗОВОГО СЕКРЕТА (задача kacho#1142,
 // приёмка BAT-1 §2.5, §4.3, §7; сценарии BAT-1-09, 11, 12, 14, 16, 17, 21, 22).
 
 package user_tokens

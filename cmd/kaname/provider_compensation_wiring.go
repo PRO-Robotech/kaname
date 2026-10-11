@@ -47,7 +47,7 @@ func runProviderCompensationMetrics(
 		MaxAttempts: compensationMaxAttempts,
 		Interval:    15 * time.Second,
 	})
-	// Исход скана — через единственного производителя (#2062).
+	// Исход скана — через единственного производителя (kacho#2062).
 	collector.Run(ctx, metrics.OutboxScanObserver(rec, clients.ProviderCompensationTable, logger,
 		"provider compensation outbox metrics scan failed"))
 }

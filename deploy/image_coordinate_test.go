@@ -307,7 +307,7 @@ func auditImageCoordinate(chartDir string) (findings []string, census string, er
 
 // ── проба ────────────────────────────────────────────────────────────────────
 
-// TestImageCoordinateIsNamedByWhoeverInstalls — несущая проба задачи #2094.
+// TestImageCoordinateIsNamedByWhoeverInstalls — несущая проба задачи kacho#2094.
 func TestImageCoordinateIsNamedByWhoeverInstalls(t *testing.T) {
 	chartDir := filepath.Join(serviceRoot(t), "deploy")
 

@@ -23,7 +23,7 @@
 //   - a listing that takes its page from an enumeration is REFUSED, and the finding
 //     names the call and the coordinate. Injected in both flavours: the store's
 //     (`ListObjects`) and iam's own database (`Objects` — the third form, invisible
-//     to the gate until #651 because a name it was never told about is a name it
+//     to the gate until kacho#651 because a name it was never told about is a name it
 //     cannot refuse);
 //   - the derivation expires with its subject. A source type that moved is a
 //     FINDING, because a source resolving to nothing would take its whole derived
@@ -32,7 +32,7 @@
 //     cannot open reports a finding, never OK;
 //   - a RowFilter listing that stops asking the per-object question is REFUSED, and a
 //     listing that asks it in another legitimate form is NOT. This one was written
-//     after the gate spent a day unable to tell those two apart: #2054 moved
+//     after the gate spent a day unable to tell those two apart: kacho#2054 moved
 //     ListByRole's per-row question behind a per-request memo, the analyser does not
 //     walk calls on a local variable, and the profile still named the old call. The
 //     finding was real ON THE PROFILE'S TERMS and false about the code — the narrowing
@@ -183,7 +183,7 @@ func TestGate_RealTreePasses_AndLegitimateEnumeratorsStaySilent(t *testing.T) {
 		// and the legitimate caller was judged, not skipped.
 		//
 		// Их было двое, пока существовало перечисление объектов; RPC снят с
-		// контракта стадией S6 (эпик #747), и объявление профиля снято вместе с
+		// контракта стадией S6 (эпик kacho#747), и объявление профиля снято вместе с
 		// ним. Имя `ListObjects` при этом ОСТАЁТСЯ в запрете выше — как чужой
 		// словарь, который нельзя вывести из дерева и потому обязан быть выписан.
 		"authorize.ListSubjects",
@@ -274,7 +274,7 @@ func TestGate_RefusesAPageTakenFromAnEnumeration(t *testing.T) {
 //     was granted what, and project scope alone does not answer whether the caller
 //     may see THESE rows;
 //   - "narrowing in the older form" — the same question, asked by calling
-//     requireGrantAuthority directly per row. That is what the code did before #2054
+//     requireGrantAuthority directly per row. That is what the code did before kacho#2054
 //     and it narrows correctly, just at two store questions per row. The gate must
 //     stay SILENT on it, or the entry naming the memo would be proof that the gate
 //     fires on a TOKEN rather than on the property, and the fix for the red would be
@@ -341,7 +341,7 @@ func TestGate_EnumerationSourceExpiresWithItsSubject(t *testing.T) {
 	// intact — which is correct behaviour, and would make this injection model nothing.
 	//
 	// ПОЭТОМУ ФАЙЛОВ ДВА, а не один. Приёмники типа живут и в соседнем файле
-	// (`asker_gate.go`, заведён стадией S6 эпика #747), и пока хоть один из них
+	// (`asker_gate.go`, заведён стадией S6 эпика kacho#747), и пока хоть один из них
 	// называет прежнее имя, набор методов типа находится — то есть инъекция
 	// перестаёт моделировать «источник переехал». Замечено прогоном: после
 	// появления второго файла эта проба зазеленела, ничего не проверив.

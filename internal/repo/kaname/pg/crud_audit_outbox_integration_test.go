@@ -158,6 +158,6 @@ func TestCrudAudit_5_2_37_38_EventIdAndTypeCheck(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT id FROM kaname.audit_outbox WHERE event_payload->>'resource_id' = $1`,
 			marker).Scan(&id), "row for %s must read back (CHECK passed, not dropped)", et)
-		require.Regexp(t, sessionEvtIDRe, id, "id for %s must be 22-char evt_ format (#126 guard)", et)
+		require.Regexp(t, sessionEvtIDRe, id, "id for %s must be 22-char evt_ format (kacho-iam#126 guard)", et)
 	}
 }

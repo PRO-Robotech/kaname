@@ -4,7 +4,7 @@
 package domain
 
 // role_rule_state.go — ПОСТАТЕЙНОЕ состояние правила роли: отозвано отдельно от
-// неразрешённого (задача продукта #1962, приёмка
+// неразрешённого (задача продукта kacho#1962, приёмка
 // `docs/engineering/acceptance/rule-state-names-withdrawn-apart-from-unresolved.md`).
 //
 // # Зачем это рядом с уже стоящими счётчиками

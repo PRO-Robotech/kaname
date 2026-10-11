@@ -3,7 +3,7 @@
 
 package main
 
-// module_roles_apply_integration_test.go — ВТОРАЯ половина предиката #2010:
+// module_roles_apply_integration_test.go — ВТОРАЯ половина предиката kacho#2010:
 // роль, объявленная ТОЛЬКО доставленным манифестом, после прохода пути старта
 // лежит в базе.
 //
@@ -30,7 +30,7 @@ package main
 // имя и назначение приехали из объявления, а проекция объявленных сегментов
 // легла в той же транзакции.
 //
-// Проба РОНЯЕТСЯ дефектом #2010 by construction: сделай
+// Проба РОНЯЕТСЯ дефектом kacho#2010 by construction: сделай
 // `applyDeliveredModuleRoles` пустым — и «после применения» станет равно «до».
 
 import (
@@ -125,7 +125,7 @@ func countBootRuleRefs(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id
 }
 
 // TestIAM2010_BootPathWritesARoleDeclaredOnlyByTheDeliveredManifest — предикат
-// снятия #2010 целиком.
+// снятия kacho#2010 целиком.
 func TestIAM2010_BootPathWritesARoleDeclaredOnlyByTheDeliveredManifest(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -169,7 +169,7 @@ func TestIAM2010_BootPathWritesARoleDeclaredOnlyByTheDeliveredManifest(t *testin
 	// ── Положительный контроль: строка есть, и она приехала из ОБЪЯВЛЕНИЯ ────
 	assert.Equal(t, 1, countBootRoleRows(t, ctx, pool, id),
 		"роль, объявленная доставленным манифестом, после прохода пути старта обязана "+
-			"лежать в базе — ровно этого не было до #2010: применитель существовал и не был позван")
+			"лежать в базе — ровно этого не было до kacho#2010: применитель существовал и не был позван")
 
 	var name, description string
 	require.NoError(t, pool.QueryRow(ctx,

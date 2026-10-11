@@ -53,7 +53,7 @@ package check
 // паритета (`apps/kaname/seed`), загрузчик манифеста (`manifest`) и оснастка
 // дерева (`modelrender`). Все они спрашивают канон ЗАКОННО: их вопрос — «объявлен
 // ли модуль платформой», и ответ обязан быть воспроизводим ИЗ ДЕРЕВА, потому что
-// у них базы нет by construction. Разведение двух вопросов — решение #1927,
+// у них базы нет by construction. Разведение двух вопросов — решение kacho#1927,
 // записанное в `domain/module_set.go`; гейт его исполняет, а не пересматривает.
 // Молчание на каждом из четырёх доказано инъекцией, а не заявлено здесь.
 //
@@ -327,7 +327,7 @@ func requestPathFiles(root string) ([]string, error) {
 	return all, nil
 }
 
-// TestIAM1927_RequestPathAsksLiveRowsForModuleMembership — гейт задачи #1927.
+// TestIAM1927_RequestPathAsksLiveRowsForModuleMembership — гейт задачи kacho#1927.
 func TestIAM1927_RequestPathAsksLiveRowsForModuleMembership(t *testing.T) {
 	root := catalogRepoRoot(t)
 
@@ -366,7 +366,7 @@ func TestIAM1927_RequestPathAsksLiveRowsForModuleMembership(t *testing.T) {
 		t.Logf("членство модуля на пути запроса отвечает СНИМОК каталога " +
 			"(`catalog.Facts`, взятый у use-case'а как `u.cat.Facts()`), а канон — " +
 			"левая сторона паритета: его спрашивают страж старта, применитель ролей и " +
-			"оснастка дерева, у которой базы нет by construction (решение #1927, " +
+			"оснастка дерева, у которой базы нет by construction (решение kacho#1927, " +
 			"`services/iam/internal/domain/module_set.go`)")
 	}
 }

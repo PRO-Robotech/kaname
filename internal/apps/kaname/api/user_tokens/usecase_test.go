@@ -45,12 +45,12 @@ type stubUserClientRepo struct {
 	blocked    bool
 	blockedIDs map[domain.UserID]bool
 	// insertErr — запись отвергнута хранилищем. Заведено пробой отказа учёта
-	// (#1191): решение о потолке принимает атомарный оператор вставки, поэтому
+	// (kacho#1191): решение о потолке принимает атомарный оператор вставки, поэтому
 	// подать его в use-case можно только отказом самой записи.
 	insertErr error
 	// accountErr — хранилище НЕ ОТВЕТИЛО на резолв аккаунта. Отдельно от
 	// `getErr`: там «строки нет» (ответ), здесь ответа нет вовсе, и разводить
-	// эти два состояния — предмет пробы наблюдаемости (#2507).
+	// эти два состояния — предмет пробы наблюдаемости (kacho#2507).
 	accountErr error
 	// readErr — хранилище НЕ ОТВЕТИЛО на синхронной сверке существования
 	// удостоверения (CVR-12). Отдельно от `getErr`: там ответ «строки нет»,
@@ -212,7 +212,7 @@ func (e errRedactor) RedactResponseField(context.Context, string, []string) erro
 // private_key_pem + client_id + key_id + algorithm=ES256 + token{uoc…}.
 //
 // Форма регистрации у внешнего поставщика здесь больше не утверждается: её нет
-// (#1121). Что удостоверение годно к предъявлению НАШЕМУ издателю, утверждают
+// (kacho#1121). Что удостоверение годно к предъявлению НАШЕМУ издателю, утверждают
 // пробы `usecase_one_client_name_test.go` и интеграционная проба реестра.
 func TestIssue_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
@@ -335,7 +335,7 @@ func TestIssue_AuditNoSecret(t *testing.T) {
 func TestRevoke_CrossUserIsolation(t *testing.T) {
 	repo := &stubUserClientRepo{
 		getRow: domain.UserOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 			// словарь таблицы отвергает строку, вида не назвавшую.
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "uoc00000000000000001",
@@ -367,7 +367,7 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 func TestRevoke_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{
 		getRow: domain.UserOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 			// словарь таблицы отвергает строку, вида не назвавшую.
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "uoc00000000000000009",

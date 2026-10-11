@@ -6,7 +6,7 @@ package access_binding
 // get_self_multisubject_test.go — самопол `Get` судит ВЕСЬ набор субъектов
 // выдачи, а не только легаси-первого (`SubjectID` = `Subjects[0]`).
 //
-// Задача #2049. Полный набор `Subjects` загружается той же читающей
+// Задача kacho#2049. Полный набор `Subjects` загружается той же читающей
 // транзакцией двадцатью строками выше самопола (`get.go`,
 // `rd.AccessBindings().ListSubjects`) — и в самополе не итерировался. Субъект,
 // стоящий в мультисубъектной выдаче НЕ первым, самопола не проходил и уезжал в
@@ -76,7 +76,7 @@ func getAsPrincipal(t *testing.T, principalID string) (domain.AccessBinding, err
 	return uc.Execute(ctx, id)
 }
 
-// TestGetAccessBinding_SelfCheckSpansEverySubjectOfTheSet — предмет #2049.
+// TestGetAccessBinding_SelfCheckSpansEverySubjectOfTheSet — предмет kacho#2049.
 //
 // Перепись печатает объём осмотренного: сколько позиций набора пройдено и
 // сколько из них самопол принял. Одно число («принял N») скрывало бы ровно тот
@@ -142,7 +142,7 @@ func TestGetAccessBinding_SelfCheckIgnoresTheSubjectsOfAnotherBinding(t *testing
 // ── вторая полоса того же класса: перечисление держателей роли ───────────────
 //
 // Самопол выдачи в дереве стоит в ДВУХ местах, и оба читали легаси-первого:
-// `get.go` (предмет #2049) и `list_by_role.go`. Набор субъектов там наполнен
+// `get.go` (предмет kacho#2049) и `list_by_role.go`. Набор субъектов там наполнен
 // тем же путём чтения (`readBindingsWithSubjects` → `projectSubjectsBatch`),
 // поэтому дефект и его починка у полос общие. Чинится класс, а не экземпляр
 // (`testing.md` §«Гейт на класс», п. 1); перепись прод-дерева, из которой взят

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // module_seed_writer_integration_test.go — свойства применителя посева, которые
-// нельзя утверждать иначе как прогоном против живой Postgres (#2452).
+// нельзя утверждать иначе как прогоном против живой Postgres (kacho#2452).
 //
 // # Почему именно эти три
 //

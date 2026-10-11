@@ -5,7 +5,7 @@ package domain_test
 
 // rule_policy_test.go — политик ТРИ, и различает их ВЛАДЕЛЕЦ, а не ярус.
 //
-// Задача продукта #1032 (P0). Приёмка — APPROVED круга 2,
+// Задача продукта kacho#1032 (P0). Приёмка — APPROVED круга 2,
 // `services/iam/docs/engineering/acceptance/role-ownership-tier-apart-from-cluster-anchor.md`,
 // сценарии IAM-OM-1-01 … -05, -17, -18.
 //

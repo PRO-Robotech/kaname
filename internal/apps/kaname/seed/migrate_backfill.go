@@ -288,7 +288,7 @@ func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) erro
 	// any Exec on the same tx (pgx forbids interleaving a live Rows with another query
 	// on the same conn).
 	rows, err := tx.Query(ctx,
-		// Снятая роль ПРОПУСКАЕТСЯ, а не отвергается ключом (#1913).
+		// Снятая роль ПРОПУСКАЕТСЯ, а не отвергается ключом (kacho#1913).
 		//
 		// Отзыв есть ПОМЕТКА: `is_system` и `rules` у снятой роли остаются
 		// прежними навсегда, поэтому предикат без живости достаёт её всякий раз.

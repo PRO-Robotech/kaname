@@ -61,7 +61,7 @@ type subjectChanger interface {
 
 // relationWriteGate — narrow authz port for the resource-registration RPCs.
 // Authorize resolves the mTLS client-cert→SA identity and
-// ReBAC-checks `fga_writer` on `cluster:cluster_root` (#914). Implemented by
+// ReBAC-checks `fga_writer` on `cluster:cluster_root` (kacho#914). Implemented by
 // *authzguard.RelationWriteGate.
 type relationWriteGate interface {
 	Authorize(ctx context.Context) (callerDomain string, err error)
@@ -102,7 +102,7 @@ type Handler struct {
 	registrar resourceRegistrar
 	regGate   relationWriteGate
 
-	// basicCredentials — авторитет о предъявленном базовом секрете (#1142).
+	// basicCredentials — авторитет о предъявленном базовом секрете (kacho#1142).
 	// nil → глагол fail-closed Unavailable.
 	basicCredentials basicCredentialResolver
 
@@ -177,7 +177,7 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	// Словарь владения типом подаётся ЗДЕСЬ: правило живёт в общем фундаменте, а
 	// закрытая таблица типов — за границей его видимости (см. proxy_type_owner.go).
 	// Без него «чей это тип» отвечала бы приставка имени, то есть соглашение об
-	// именовании, и тип, чьё имя приставке не подчиняется, был бы невыразим (#1885).
+	// именовании, и тип, чьё имя приставке не подчиняется, был бы невыразим (kacho#1885).
 	if err := proxytuple.ValidateTuple(callerDomain, subject, relation, object,
 		proxytuple.WithTypeOwner(catalogTypeOwner{})); err != nil {
 		return status.Error(codes.PermissionDenied, "permission denied")
@@ -245,7 +245,7 @@ func (h *Handler) authorizeRegistration(ctx context.Context) (string, error) {
 	return h.regGate.Authorize(ctx)
 }
 
-// TOMBSTONE. `WriteCreatorTuple` стоял здесь и снят (#788): он писал кортёж
+// TOMBSTONE. `WriteCreatorTuple` стоял здесь и снят (kacho#788): он писал кортёж
 // создателя в движок НАПРЯМУЮ, мимо `kaname.fga_outbox`, поэтому проекция
 // `relation_fact` (миграция 0098) его не увидела бы никогда. Вызывающих не
 // осталось ни одного — все пять соседей ушли на RegisterResource. Порт записи
@@ -309,7 +309,7 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 			// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед,
 			// гейт прав), и её текст вызывающему не адресован. Прежде здесь стоял
 			// разбор цепочки, то есть обёртка вызывающего доезжала до провода
-			// дословно (задача #2464).
+			// дословно (задача kacho#2464).
 			//
 			// Подробность уходит в ЖУРНАЛ: у глагола есть логгер, и «ноль отказов
 			// за всю жизнь контроля» обязано быть заметно.
@@ -364,7 +364,7 @@ func (h *Handler) PollSubjectChanges(ctx context.Context, req *iamv1.PollSubject
 			return nil, status.Error(codes.Unavailable, "subject change position not settled")
 		}
 		// «Позиция утрачена» — ТРЕТЬЯ полоса, и слить её нельзя ни с одной из
-		// двух соседних (задача #1712).
+		// двух соседних (задача kacho#1712).
 		//
 		// С «позиции ещё нет» — потому что советы противоположны: та говорит
 		// «переспроси на следующем такте», эта — «повтор не пройдёт НИКОГДА,

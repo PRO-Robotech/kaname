@@ -4,7 +4,7 @@
 package shared
 
 // visiblecursor.go — the page token of a list whose page is a page of the
-// VISIBLE (task #645).
+// VISIBLE (task kacho#645).
 //
 // # Why a second token form exists at all
 //
@@ -72,7 +72,7 @@ func DecodeVisiblePageToken(field, token string) (*VisibleCursor, error) {
 	if !ok {
 		return nil, InvalidArg(field, "Illegal argument "+field)
 	}
-	// Тело — КАНОНИЧЕСКАЯ форма курсора, объявленная один раз (#652). Своим
+	// Тело — КАНОНИЧЕСКАЯ форма курсора, объявленная один раз (kacho#652). Своим
 	// здесь остаётся только префикс: он метит вид страницы и является частью
 	// значения на проводе.
 	c, ok := pagetoken.Decode(rest)

@@ -3,7 +3,7 @@
 
 package pg_test
 
-// selector_type_membership_integration_test.go — задача #2053: отбор селекторов
+// selector_type_membership_integration_test.go — задача kacho#2053: отбор селекторов
 // по типу объекта обязан идти формой, которую обслуживает GIN.
 //
 // # Предмет
@@ -175,7 +175,7 @@ func TestSelectorTypeMembership_GinServesContainmentNotScalarAny(t *testing.T) {
 	// между формами не было бы, и правка была бы косметикой; проба обязана
 	// сказать это вслух, а не молчать.
 	require.NotContains(t, strings.Join(scalarAny.indexes, ","), "role_rule_selectors_object_types_idx",
-		"старая форма внезапно обслуживается GIN — предмет задачи #2053 отпал, правку надо пересмотреть: узлы %v",
+		"старая форма внезапно обслуживается GIN — предмет задачи kacho#2053 отпал, правку надо пересмотреть: узлы %v",
 		scalarAny.nodeTypes)
 	require.Contains(t, scalarAny.nodeTypes, "Seq Scan",
 		"старая форма не читает столбец последовательно: узлы %v", scalarAny.nodeTypes)

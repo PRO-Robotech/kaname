@@ -903,7 +903,7 @@ func (uc *InviteUserUseCase) resolveCanonicalSubjectID(
 		// распоряжаемся сроком хранения.
 		// Коррелировать есть по чему — обе строки названы своими
 		// идентификаторами, и именно они отвечают на вопрос «почему выдача ушла
-		// не на свежую строку» (задача #2482).
+		// не на свежую строку» (задача kacho#2482).
 		uc.logger.Info("invite: project-grant bound to canonical identity row",
 			"per_account_row", string(perAccountRow.ID),
 			"canonical_row", string(canonical))

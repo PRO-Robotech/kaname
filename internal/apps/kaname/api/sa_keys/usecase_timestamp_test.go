@@ -19,7 +19,7 @@ func TestSAClientToProto_TruncatesTimestampsToSeconds(t *testing.T) {
 	used := time.Date(2026, 6, 16, 11, 22, 33, 999999999, time.UTC)
 
 	pb := saClientToProto(domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             "sak_test_1234567890abcd",

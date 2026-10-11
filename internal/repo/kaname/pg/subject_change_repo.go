@@ -148,7 +148,7 @@ func (r *SubjectChangeRepo) PollSubjectChanges(ctx context.Context, sinceID int6
 		return nil, 0, fmt.Errorf("iterate subject_change: %w", err)
 	}
 
-	// ПОЛ СПРАШИВАЕТСЯ ПОСЛЕ СТРАНИЦЫ, и порядок здесь — сама защита (#1712).
+	// ПОЛ СПРАШИВАЕТСЯ ПОСЛЕ СТРАНИЦЫ, и порядок здесь — сама защита (kacho#1712).
 	//
 	// # Почему «до» не работает, хотя выглядит естественнее
 	//

@@ -244,7 +244,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	}
 	// (2) page_token format: garbage → InvalidArgument, BEFORE listauthz.
 	//
-	// Форма токена этого списка — граница ВИДИМОЙ последовательности (#645), а не
+	// Форма токена этого списка — граница ВИДИМОЙ последовательности (kacho#645), а не
 	// сырой страницы. Общая ValidatePageToken приняла бы токен прежней формы, и
 	// обход, начатый до выкатки, продолжился бы приблизительно — молча пропуская
 	// строки.
@@ -264,7 +264,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	// key) so it COMPOSES with the single-predicate filter expression; default
 	// false keeps parity with those two RPCs.
 	f.IncludeRevoked = req.GetIncludeRevoked()
-	// (5) account scope: the account⇒child-project fan-out (#1737). Like
+	// (5) account scope: the account⇒child-project fan-out (kacho#1737). Like
 	// include_revoked it is a dedicated field, NOT a filter key, so it composes
 	// with the single-predicate filter expression — and the two axes the question
 	// "what does THIS subject hold in THIS account" needs can be named at once.
@@ -305,7 +305,7 @@ func parseABListFilter(expr string) (repoab.ListFilter, error) {
 	// with an equality page under a 200, which
 	// §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" rules out: implement, refuse by name,
 	// or drop from the contract. This is the second outcome, and it names both the
-	// operator and the key so the caller learns which token was not honoured (#460).
+	// operator and the key so the caller learns which token was not honoured (kacho#460).
 	//
 	// It stands BEFORE the switch on purpose: `scope CONTAINS "x"` must be refused
 	// for its operator, not for the value failing the dotted-scope vocabulary — the

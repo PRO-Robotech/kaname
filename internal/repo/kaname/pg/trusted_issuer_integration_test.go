@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // trusted_issuer_integration_test.go — НАШ перечень доверенных издателей
-// (задача #1124).
+// (задача kacho#1124).
 //
 // # На какой НЕВЕРНОЙ реализации эти пробы зелены — и чем это закрыто
 //

@@ -626,7 +626,7 @@ func (fakeUserUR) Membership(context.Context, domain.UserID, domain.AccountID) (
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: снятие членства
-// проверяется своими пробами (#1127).
+// проверяется своими пробами (kacho#1127).
 func (*fakeUserUW) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

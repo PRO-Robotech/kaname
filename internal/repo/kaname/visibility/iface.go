@@ -9,7 +9,7 @@
 // A list page must be a page of what the caller may SEE. To build one, the page
 // has to be SELECTED narrowed — a window over the whole table from which the
 // visible is subtracted afterwards loses every object with more than `page_size`
-// invisible predecessors (task #645). Narrowing needs a set of CANDIDATES, and
+// invisible predecessors (task kacho#645). Narrowing needs a set of CANDIDATES, and
 // the candidates are read from iam's own database.
 //
 // The set this package answers with is a SUPERSET of the visible by

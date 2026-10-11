@@ -198,7 +198,7 @@ func referencesByName(files []string) (refs, decls map[string]int, err error) {
 	return refs, decls, nil
 }
 
-// TestIAM2638_EveryDeclaredMetricProducerHasACaller — гейт задачи #2638.
+// TestIAM2638_EveryDeclaredMetricProducerHasACaller — гейт задачи kacho#2638.
 func TestIAM2638_EveryDeclaredMetricProducerHasACaller(t *testing.T) {
 	pkgFiles, err := packageGoFiles(".")
 	if err != nil {

@@ -340,7 +340,7 @@ type clusterAdminVerdict struct {
 // subsequent calls for the SAME subject reuse it. Different subjects resolve
 // independently and in parallel.
 //
-// ВОЗВРАЩАЕТ ТРИ ИСХОДА, А НЕ ДВА (задача #1045). `(false, nil)` — хранилище
+// ВОЗВРАЩАЕТ ТРИ ИСХОДА, А НЕ ДВА (задача kacho#1045). `(false, nil)` — хранилище
 // ответило «не администратор»; `(false, err)` — хранилище не ответило вовсе.
 // Прежде булева обёртка сводила второе к первому, и это была ОБЩАЯ ДВЕРЬ: сюда
 // приходит интерсептор каждой службы платформы и фильтр списка каждого соседа.

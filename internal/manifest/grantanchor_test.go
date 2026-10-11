@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // grantanchor_test.go — ЯКОРЬ выдачи посева судится ПО ЗНАЧЕНИЮ, и одинаково
-// для обеих форм выдачи (задача продукта #1953).
+// для обеих форм выдачи (задача продукта kacho#1953).
 //
 // # Что здесь было неверно
 //
@@ -16,8 +16,8 @@
 // Замер ВЫЗОВОМ, а не чтением, на ревизии заведения задачи: загрузчик принимал
 // `scopeType: iam.project`, `iam.account` и даже выдуманный `iam.galaxy`, а
 // `scopeId: cluster_something_else` проходил у ОБЕИХ форм выдачи — включая ту,
-// которую #1936 только что укрепил. То есть радиус шире, чем названо задачей:
-// #1936 запинил у формы отношения ОДИН ключ якоря из двух.
+// которую kacho#1936 только что укрепил. То есть радиус шире, чем названо задачей:
+// kacho#1936 запинил у формы отношения ОДИН ключ якоря из двух.
 //
 // # Почему судья ОДИН на обе формы, а не ветвь на каждую
 //
@@ -111,7 +111,7 @@ func TestGrantAnchorScopeTypeIsRefusedByValueForBothGrantForms(t *testing.T) {
 // TestGrantAnchorScopeIdIsRefusedByValueForBothGrantForms — ОБЪЕКТ якоря
 // судится по значению у обеих форм.
 //
-// Этот ключ не судился ни у одной формы: #1936 запинил у формы отношения только
+// Этот ключ не судился ни у одной формы: kacho#1936 запинил у формы отношения только
 // ярус. Кластер — singleton, поэтому объект у него ровно один, и «другой
 // кластер» есть строка, которой не отвечает ни одна живая.
 func TestGrantAnchorScopeIdIsRefusedByValueForBothGrantForms(t *testing.T) {
@@ -153,12 +153,12 @@ func TestGrantAnchorLegalValuePassesForBothGrantForms(t *testing.T) {
 // выдачи.
 //
 // До этой работы текст говорил «выдача ролью этой проверкой не затронута
-// (#1953)» — верно на своей ревизии и ложь после неё. Утверждение, пережившее
+// (kacho#1953)» — верно на своей ревизии и ложь после неё. Утверждение, пережившее
 // свой предмет, читается чаще всего именно в отказе: его видит автор манифеста.
 func TestGrantAnchorRefusalNamesTheKeyAndNotTheForm(t *testing.T) {
 	doc := seedWithBinding(bindingRelationAt(domain.ScopeTypeProjectDotted, domain.ClusterSingletonID))
 	msg := mustRefuseGrant(t, doc, manifest.ErrBindingAnchor, "scopeType")
-	for _, stale := range []string{"выдача ролью этой проверкой не затронута", "#1953"} {
+	for _, stale := range []string{"выдача ролью этой проверкой не затронута", "kacho#1953"} {
 		if strings.Contains(msg, stale) {
 			t.Errorf("отказ несёт утверждение, пережившее свой предмет (%q): %s", stale, msg)
 		}

@@ -101,7 +101,7 @@ func TestMigrationTouchesStructure_ProvenByInjection(t *testing.T) {
 		},
 		{
 			name: "временная таблица ИЗ ВЫБОРКИ измеряемой — не влияет",
-			// #1833. `CREATE TEMP TABLE … ON COMMIT DROP AS SELECT … FROM <измеряемая>`
+			// kacho#1833. `CREATE TEMP TABLE … ON COMMIT DROP AS SELECT … FROM <измеряемая>`
 			// несёт в ОДНОМ операторе и `CREATE`, и `DROP`, и имя измеряемой
 			// таблицы — но DDL идёт над ВРЕМЕННОЙ таблицей, а измеряемая только
 			// ЧИТАЕТСЯ. Плана чтения это не меняет, значит отчёт не устаревает.

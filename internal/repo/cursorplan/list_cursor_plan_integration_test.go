@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// list_cursor_plan_integration_test.go — задача #708, доказательство ДЕЙСТВИЯ.
+// list_cursor_plan_integration_test.go — задача kacho#708, доказательство ДЕЙСТВИЯ.
 //
 // Гейт `internal/repohygiene` утверждает о схеме: индекс такой-то формы
 // объявлен. Здесь утверждается о поведении: план настоящего Postgres на

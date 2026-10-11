@@ -104,7 +104,7 @@ type AccessBindingServiceClient interface {
 	// Admission is the SAME predicate `ListSubjectPrivileges` uses — the two verbs
 	// answer one question and had answered it differently, so a delegated account
 	// administrator could read an employee's grants through one and not the other
-	// (task #1352). The lanes, and what each sees:
+	// (task kacho#1352). The lanes, and what each sees:
 	//
 	//   - the subject itself (for a group subject — a member of it) — all of its
 	//     own grants, unnarrowed;
@@ -113,7 +113,7 @@ type AccessBindingServiceClient interface {
 	//     cursor and then narrowed PER ROW on `v_get` on `iam_access_binding:<id>`
 	//     — the same relation that gates the single-object read — so the reply
 	//     never names a scope in an account the caller has nothing to do with
-	//     (task #1354, same class as the membership-listing decision in #1085);
+	//     (task kacho#1354, same class as the membership-listing decision in kacho#1085);
 	//   - the cluster administrator — everything, unnarrowed.
 	//
 	// Existence is NEVER reported: a subject that does not resolve answers with an
@@ -500,7 +500,7 @@ type AccessBindingServiceServer interface {
 	// Admission is the SAME predicate `ListSubjectPrivileges` uses — the two verbs
 	// answer one question and had answered it differently, so a delegated account
 	// administrator could read an employee's grants through one and not the other
-	// (task #1352). The lanes, and what each sees:
+	// (task kacho#1352). The lanes, and what each sees:
 	//
 	//   - the subject itself (for a group subject — a member of it) — all of its
 	//     own grants, unnarrowed;
@@ -509,7 +509,7 @@ type AccessBindingServiceServer interface {
 	//     cursor and then narrowed PER ROW on `v_get` on `iam_access_binding:<id>`
 	//     — the same relation that gates the single-object read — so the reply
 	//     never names a scope in an account the caller has nothing to do with
-	//     (task #1354, same class as the membership-listing decision in #1085);
+	//     (task kacho#1354, same class as the membership-listing decision in kacho#1085);
 	//   - the cluster administrator — everything, unnarrowed.
 	//
 	// Existence is NEVER reported: a subject that does not resolve answers with an

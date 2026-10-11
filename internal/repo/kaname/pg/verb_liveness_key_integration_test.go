@@ -6,7 +6,7 @@ package pg_test
 // verb_liveness_key_integration_test.go — УРОВЕНЬ ГЛАГОЛОВ: живость ресурса
 // держит КЛЮЧ, а не рассуждение о потребителях.
 //
-// Задача продукта #1878, решение — #1868, записано в
+// Задача продукта kacho#1878, решение — kacho#1868, записано в
 // `services/iam/docs/engineering/architecture/catalog-liveness-key-per-level.md`.
 // Приёмка `module-withdrawal-is-described.md` §2.2 и §9.2.
 //
@@ -155,7 +155,7 @@ func TestVerbsUnderARetiredResourceAreAbsent(t *testing.T) {
 	require.Positive(t, verbRows, "строк каталога глаголов ноль — каталог не посеян")
 	require.Zero(t, contradicted,
 		"живой глагол под снятым ресурсом — ключ живости такую строку не примет, "+
-			"и миграция #1878 не применится, пока строка жива")
+			"и миграция kacho#1878 не применится, пока строка жива")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ func TestRetiringAResourceWithLiveVerbsIsRefused(t *testing.T) {
 	require.Positivef(t, verbs,
 		"предпосылка сценария: у %s.%s есть живые глаголы", module, resource)
 
-	err := retireResourceRowOnly(ctx, pool, module, resource, "проба #1878 вниз")
+	err := retireResourceRowOnly(ctx, pool, module, resource, "проба kacho#1878 вниз")
 	require.Errorf(t, err,
 		"снятие ресурса %s.%s при %d живых глаголах обязано отвергаться КЛЮЧОМ",
 		module, resource, verbs)
@@ -207,12 +207,12 @@ func TestResourceWithAllVerbsRetiredIsRetired(t *testing.T) {
 	before := liveVerbsOf(t, ctx, pool, module, resource)
 	require.Positive(t, before)
 
-	require.NoError(t, retireVerbsOf(ctx, pool, module, resource, "проба #1878 контроль"),
+	require.NoError(t, retireVerbsOf(ctx, pool, module, resource, "проба kacho#1878 контроль"),
 		"снятие глаголов ресурса ключом не запрещено")
 	require.Zero(t, liveVerbsOf(t, ctx, pool, module, resource))
 
 	require.NoError(t,
-		retireResourceRowOnly(ctx, pool, module, resource, "проба #1878 контроль"),
+		retireResourceRowOnly(ctx, pool, module, resource, "проба kacho#1878 контроль"),
 		"ресурс, ВСЕ глаголы которого сняты, ОБЯЗАН сниматься")
 
 	var live bool
@@ -246,8 +246,8 @@ func TestRevivingAVerbUnderARetiredResourceIsRefused(t *testing.T) {
 	ctx, pool := catalogPool(t)
 
 	module, resource := freeLiveResource(t, ctx, pool)
-	require.NoError(t, retireVerbsOf(ctx, pool, module, resource, "проба #1878 вверх"))
-	require.NoError(t, retireResourceRowOnly(ctx, pool, module, resource, "проба #1878 вверх"))
+	require.NoError(t, retireVerbsOf(ctx, pool, module, resource, "проба kacho#1878 вверх"))
+	require.NoError(t, retireResourceRowOnly(ctx, pool, module, resource, "проба kacho#1878 вверх"))
 
 	var verb string
 	require.NoError(t, pool.QueryRow(ctx, `

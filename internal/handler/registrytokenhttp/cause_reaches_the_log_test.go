@@ -110,7 +110,7 @@ func TestHandlerWithoutALoggerStillAnswers(t *testing.T) {
 }
 
 // TestRemovedCredentialKindReachesTheLogButNotTheBody — снятый вид удостоверения
-// называется ЖУРНАЛУ и НЕ называется телу (задача #1143).
+// называется ЖУРНАЛУ и НЕ называется телу (задача kacho#1143).
 //
 // # Зачем эта строка вообще нужна
 //

@@ -5,7 +5,7 @@ package project
 
 // list.go — ListProjectsUseCase.
 //
-// # A page of this list is a page of the VISIBLE (task #645)
+// # A page of this list is a page of the VISIBLE (task kacho#645)
 //
 // It used to be a window over the whole `projects` table, from which the visible
 // was subtracted afterwards. That order loses every project with more than
@@ -106,7 +106,7 @@ type ListProjectsUseCase struct {
 	// per-object verdicts. When nil the whole read fails closed.
 	relationQueries clients.RelationQueries
 
-	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// listScan — узкий порт наблюдаемости стоимости страницы (kacho#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
 }
@@ -116,7 +116,7 @@ func NewListProjectsUseCase(r Repo) *ListProjectsUseCase {
 }
 
 // WithRelationStore wires the relation-store port.
-// WithListScanRecorder провязывает съём стоимости страницы (#653).
+// WithListScanRecorder провязывает съём стоимости страницы (kacho#653).
 func (u *ListProjectsUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListProjectsUseCase {
 	u.listScan = rec
 	return u

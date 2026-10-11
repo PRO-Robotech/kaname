@@ -14,8 +14,8 @@ package user
 // which voided owner-granted delegation.
 //
 // NOTE — обе оставшиеся здесь самодельные развилки Delete с тех пор сняты.
-// Гейт RPC ушёл с `v_delete` на `identity_remover` (#1131), а вслед за ним
-// снята и «безаккаунтный удаляет только сам себя» (#1174): у неё не осталось
+// Гейт RPC ушёл с `v_delete` на `identity_remover` (kacho#1131), а вслед за ним
+// снята и «безаккаунтный удаляет только сам себя» (kacho#1174): у неё не осталось
 // предмета, а работала она отказом надзору облака. Предмет и пара утверждений —
 // `account_less_delete_test.go`.
 
@@ -66,7 +66,7 @@ func TestDeleteUser_NonSelfNonOwnerPrincipal_NotRejectedInService(t *testing.T) 
 			op, err := uc.Execute(ctx, domain.UserID(updUserID))
 			require.NoError(t, err,
 				"UserService.Delete is gated by identity_remover@iam_user at the gateway "+
-					"(#1131 — the verb v_delete named here before is gone from the type, #1189); "+
+					"(kacho#1131 — the verb v_delete named here before is gone from the type, kacho#1189); "+
 					"deleting someone else's user must not require being the account owner")
 			assert.NotNil(t, op)
 		})

@@ -43,14 +43,14 @@ const (
 
 	// SystemAdminRoleID — the hand-rolled deterministic id of the second `*.*.*`
 	// superuser system role (`system.admin`; свод посеял её под именем
-	// `kacho-system.admin`, перевод — миграция 20260913143007, #2554), seeded by migration 0001 and
+	// `kacho-system.admin`, перевод — миграция 20260913143007, kacho#2554), seeded by migration 0001 and
 	// re-seeded with `*.*.*` rules by migration 0031. Also a legitimate
 	// cluster-admin superuser.
 	SystemAdminRoleID = "rol000000000sysadmin"
 
 	// SystemViewerRoleID — рукописный детерминированный id второй системной роли
 	// пола каталога (`system.viewer`; свод посеял её под именем `kacho-system.viewer`,
-	// перевод — миграция 20260913143007, #2554), посеянной миграцией 0001.
+	// перевод — миграция 20260913143007, kacho#2554), посеянной миграцией 0001.
 	//
 	// ДЛИНА ЕГО — 21, а не 20, и это ФАКТ ПРИМЕНЁННОЙ МИГРАЦИИ, а не описка,
 	// которую можно поправить: id неизменяем на всю жизнь ресурса (ban #15,
@@ -61,7 +61,7 @@ const (
 	//
 	// Поэтому литерал назван здесь и стоит в закрытом перечне
 	// `SeededResourceIDs()`: проверка формы принимает то, что продукт сам посеял,
-	// а не объявляет собственный посев негодным. Задача #1808.
+	// а не объявляет собственный посев негодным. Задача kacho#1808.
 	SystemViewerRoleID = "rol000000000sysviewer"
 )
 

@@ -317,7 +317,7 @@ func (r *invPrincWriter) Visibility() visibility.ReaderIface { return nil }
 // MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
 // пробы другой, и подставной ответ был бы утверждением, которого никто не
 // делал. Единственный прод-вызывающий — разрешение осиротевшей операции
-// исключения из аккаунта (#1127).
+// исключения из аккаунта (kacho#1127).
 func (invPrincUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }
@@ -340,7 +340,7 @@ func (r invPrincUserRdr) Membership(_ context.Context, userID domain.UserID, acc
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой
-// пробы другой. Снятие членства проверяется своими пробами (#1127).
+// пробы другой. Снятие членства проверяется своими пробами (kacho#1127).
 func (*invPrincUserWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

@@ -331,7 +331,7 @@ func (r *fakeUsrWriter) Visibility() visibility.ReaderIface { return nil }
 // MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
 // пробы другой, и подставной ответ был бы утверждением, которого никто не
 // делал. Единственный прод-вызывающий — разрешение осиротевшей операции
-// исключения из аккаунта (#1127).
+// исключения из аккаунта (kacho#1127).
 func (*fakeUsrRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }
@@ -343,7 +343,7 @@ func (*fakeUsrRdr) Membership(context.Context, domain.UserID, domain.AccountID) 
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой
-// пробы другой. Снятие членства проверяется своими пробами (#1127).
+// пробы другой. Снятие членства проверяется своими пробами (kacho#1127).
 func (*fakeUsrWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

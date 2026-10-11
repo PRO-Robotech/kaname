@@ -122,7 +122,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		// вывода `<модуль>_<ресурс>` в дереве снято целиком, и манифест объявляет
 		// имя типа сам (`manifest.Resource.ObjectType`, поле обязательное).
 		// Потеряй деривация это поле — ресурс доехал бы до строки безымянным, и
-		// читатель пропустил бы его молча при действующей на вид роли (#1816).
+		// читатель пропустил бы его молча при действующей на вид роли (kacho#1816).
 		out.Resources = append(out.Resources, catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
 		})

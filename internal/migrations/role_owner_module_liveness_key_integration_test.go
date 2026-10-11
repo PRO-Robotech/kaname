@@ -3,7 +3,7 @@
 
 // role_owner_module_liveness_key_integration_test.go — живость МОДУЛЯ-владельца
 // у `kaname.roles` держится КЛЮЧОМ, а не рассуждением (задача продукта
-// #2026).
+// kacho#2026).
 //
 // # Предмет
 //
@@ -23,12 +23,12 @@
 // ни одного. Модуль с ролью не снимался бы НИКОГДА — ровно тот вход, на котором
 // `IAM-MW-1-08` соседней приёмки отвергла ту же форму уровнем выше.
 //
-// `#1913` дал роли пометку снятия (`roles.live`), и половина, которой не
+// `kacho#1913` дал роли пометку снятия (`roles.live`), и половина, которой не
 // хватало, появилась: составляющая `CASE WHEN live THEN true END` обращается в
 // `NULL` у снятой строки, и снятая роль модуль ОТПУСКАЕТ. Довод записан
 // `architecture/role-withdrawal-is-a-mark.md` §«Что это решение РАЗМЫКАЕТ»;
 // форма усиления названа IAM-OM-1 §2.1 дословно («усиление до пары
-// `(module, live)` — это `ADD CONSTRAINT` в изменении `#1913`»); предикат снятия
+// `(module, live)` — это `ADD CONSTRAINT` в изменении `kacho#1913`»); предикат снятия
 // — `role-withdrawal-has-a-producer.md` §9 Р1.
 //
 // # Что здесь ДОКАЗЫВАЕТСЯ парой, а не одним утверждением
@@ -100,7 +100,7 @@ func seedModuleWithLiveRole(t *testing.T, db *sql.DB) {
 	_, err = db.Exec(`
 		INSERT INTO kaname.roles
 		       (id, cluster_id, name, description, permissions, owner_module, created_at)
-		VALUES ($1, 'cluster_root', $2, 'проба #2026',
+		VALUES ($1, 'cluster_root', $2, 'проба kacho#2026',
 		        '["t2probe.thing.*.get"]'::jsonb, $3, now())`,
 		livenessTestRole, livenessTestModule+".viewer", livenessTestModule)
 	require.NoError(t, err, "живая роль своего модуля")
@@ -131,7 +131,7 @@ func withdrawRole(t *testing.T, db *sql.DB) {
 	res, err := db.Exec(`
 		UPDATE kaname.roles
 		   SET live = false, retired_at = now(),
-		       retired_reason = 'проба #2026', retired_by = 'probe'
+		       retired_reason = 'проба kacho#2026', retired_by = 'probe'
 		 WHERE id = $1 AND live`, livenessTestRole)
 	require.NoError(t, err, "пометка снятия роли")
 	n, err := res.RowsAffected()
@@ -335,7 +335,7 @@ func TestIntegration_ModuleWithAllRolesWithdrawnIsRetired(t *testing.T) {
 		livenessTestModule).Scan(&moduleLive))
 	require.False(t, moduleLive)
 
-	// Строка роли ПЕРЕЖИЛА снятие модуля — на этом стоит обратимость (#1913):
+	// Строка роли ПЕРЕЖИЛА снятие модуля — на этом стоит обратимость (kacho#1913):
 	// цикл «снять модуль → поставить снова» возвращает ТУ ЖЕ роль с тем же `id`.
 	var roleRows, roleLive int
 	require.NoError(t, db.QueryRow(

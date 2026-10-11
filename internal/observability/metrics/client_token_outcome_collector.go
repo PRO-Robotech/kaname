@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // client_token_outcome_collector.go — читатель переписи исходов токен-эндпоинта
-// платформы (задача продукта #2501).
+// платформы (задача продукта kacho#2501).
 //
 // # Предмет
 //

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // key_material_refusal_test.go — НАБЛЮДАЕМЫЙ отказ докерной полосы после снятия
-// приёма ключевого материала (задача #1143, предикат снятия п.1 и п.2).
+// приёма ключевого материала (задача kacho#1143, предикат снятия п.1 и п.2).
 //
 // # Почему проба здесь, а не только у use-case'а
 //
@@ -94,7 +94,7 @@ func login(t *testing.T, h http.Handler, user, pass string) observed {
 	return observed{code: w.Code, wwwa: w.Header().Get("WWW-Authenticate"), body: string(b)}
 }
 
-// #1143 п.2 — наблюдаемый отказ БАЙТОВО одинаков для негодного вида и для
+// kacho#1143 п.2 — наблюдаемый отказ БАЙТОВО одинаков для негодного вида и для
 // неверного секрета; годная строка проходит (положительный контроль).
 func TestRefusalIsByteIdenticalForKeyMaterialAndForAWrongSecret(t *testing.T) {
 	h, credID, secret := realDockerLane(t)
@@ -117,7 +117,7 @@ func TestRefusalIsByteIdenticalForKeyMaterialAndForAWrongSecret(t *testing.T) {
 	}
 }
 
-// #1143 п.1 — отказ НАЗЫВАЕТ годный вид: без этого арендатор, настроенный
+// kacho#1143 п.1 — отказ НАЗЫВАЕТ годный вид: без этого арендатор, настроенный
 // по-старому, не узнает, чем заменить.
 func TestRefusalNamesTheAcceptedCredentialKind(t *testing.T) {
 	h, credID, _ := realDockerLane(t)

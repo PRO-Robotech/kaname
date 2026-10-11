@@ -73,7 +73,7 @@ var callerAuthorityRelations = []string{"admin"}
 // Fail-closed on every degraded mode (nil checker, Check transport error): a
 // tenant principal that cannot prove authority is denied, never allowed.
 //
-// ОТКАЗЫ РАЗНЫЕ, И РАЗЛИЧИЕ НАЗЫВАЕТСЯ КОДОМ (#665). Отказ в правах говорит
+// ОТКАЗЫ РАЗНЫЕ, И РАЗЛИЧИЕ НАЗЫВАЕТСЯ КОДОМ (kacho#665). Отказ в правах говорит
 // вызывающему «повтор бессмыслен»: решение зависит от тройки (субъект,
 // отношение, объект), и одинаковый повтор не меняет ни одного из трёх. Если же
 // хотя бы один заданный вопрос остался БЕЗ ОТВЕТА (хранилище отношений не

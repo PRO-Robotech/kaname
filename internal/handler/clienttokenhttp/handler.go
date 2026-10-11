@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package clienttokenhttp — токен-эндпоинт платформы (задача #898, приёмка F2
+// Package clienttokenhttp — токен-эндпоинт платформы (задача kacho#898, приёмка F2
 // §9.1 п. 1).
 //
 // Клиент предъявляет подписанное утверждение, мы сверяем подпись его открытым

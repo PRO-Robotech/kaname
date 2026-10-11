@@ -4,7 +4,7 @@
 package pg_test
 
 // access_binding_list_account_scope_integration_test.go — SQL-сторона поля
-// `ListFilter.AccountID` (задача #1737, приёмка
+// `ListFilter.AccountID` (задача kacho#1737, приёмка
 // services/iam/docs/engineering/acceptance/subject-grants-within-an-account.md).
 //
 // Что здесь утверждается и чего НЕ видит проба уровня use-case: настоящий

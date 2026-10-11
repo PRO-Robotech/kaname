@@ -3,7 +3,7 @@
 
 // list_operations_test.go — unit test for AccountService.ListOperations.
 //
-// Verifies the fix for issue #152: AccountService.ListOperations was registered
+// Verifies the fix for issue kacho-iam#152: AccountService.ListOperations was registered
 // in proto + api-gateway route + permission_catalog, but the Account handler had
 // NO ListOperations method, so the call fell through to
 // UnimplementedAccountServiceServer.ListOperations → gRPC Unimplemented → REST 501.

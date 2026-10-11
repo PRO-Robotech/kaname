@@ -69,7 +69,7 @@ type Registry struct {
 	outbox     *OutboxRecorder
 
 	// registryTokenKindOnce/registryTokenKind — единственный экземпляр счётчика
-	// исходов докерной полосы по виду предъявленного удостоверения (#1143).
+	// исходов докерной полосы по виду предъявленного удостоверения (kacho#1143).
 	// Серии у него общие и различаются лейблом `outcome`; второй конструктор
 	// уронил бы старт на duplicate-register.
 	registryTokenKindOnce sync.Once
@@ -97,7 +97,7 @@ type Registry struct {
 	inviteMailIntent     *InviteMailIntentRecorder
 
 	// readinessOnce/readiness — единственный экземпляр приёмника исхода
-	// готовности (#2494). Носитель готовности собирается в прогоне не единожды
+	// готовности (kacho#2494). Носитель готовности собирается в прогоне не единожды
 	// (интеграционные пробы поднимают поверхность заново в том же процессе), а
 	// второй конструктор уронил бы старт на повторной регистрации семейства с
 	// тем же именем.
@@ -105,7 +105,7 @@ type Registry struct {
 	readiness     *ReadinessRecorder
 
 	// expiredCredSweepOnce/expiredCredSweep — единственный экземпляр приёмника
-	// величин второго уборщика по сроку (#2499).
+	// величин второго уборщика по сроку (kacho#2499).
 	expiredCredSweepOnce sync.Once
 	expiredCredSweep     *ExpiredCredentialSweepRecorder
 
@@ -292,7 +292,7 @@ func (r *Registry) ObserveAuthzDecision(rpc string, allowed, failed bool) {
 }
 
 // ПОПЫТКИ К ХРАНИЛИЩУ ВЕРДИКТА ЗДЕСЬ БОЛЬШЕ НЕ СЧИТАЮТСЯ — семейство снято
-// вместе со своим предметом (#2638).
+// вместе со своим предметом (kacho#2638).
 //
 // Здесь стояло `kaname_authz_store_attempts_total{op,outcome,reused}` и метод
 // `ObserveAuthzStoreAttempt`. Семейство заводилось под ВНЕШНИЙ движок отношений:

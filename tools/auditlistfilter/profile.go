@@ -48,7 +48,7 @@
 // # What is NOT proven here, stated so nobody reads more into a pass
 //
 // access_binding.ListByRole narrows per row, but not by a batched VisibleSet: it asks
-// grant-authority about each row's SCOPE. Since #2054 it asks through a per-request
+// grant-authority about each row's SCOPE. Since kacho#2054 it asks through a per-request
 // memo (pageAuthority.grantAuthorityVerdict) — the super-gate once per request, the
 // scope once per DISTINCT scope — because page_size reaches 1000 and the un-memoised
 // form spent two store questions per row. The memo changes no verdict; it removes the
@@ -56,7 +56,7 @@
 // requireGrantAuthority, which the single-object verbs still use.
 //
 // This caveat said "by evaluating requireGrantAuthority inside the loop" until
-// 2026-09-06, and #2054 had made that false three weeks after it was written: the loop
+// 2026-09-06, and kacho#2054 had made that false three weeks after it was written: the loop
 // evaluates the memo, and the analyser walks calls on the RECEIVER and its fields but
 // not on a local variable, so nothing along ListByRole reached any declared filter. The
 // gate went red — correctly, on its own terms — while the narrowing was fully present
@@ -126,7 +126,7 @@ var Profile = listfiltergate.Profile{
 	// page filter reaches; Visible is the single-object form. The two grant-authority
 	// names are the per-row form of access_binding: requireGrantAuthority asks it once
 	// for a single object, grantAuthorityVerdict asks it per row out of a per-request
-	// memo (#2054). See the caveat in the package comment.
+	// memo (kacho#2054). See the caveat in the package comment.
 	//
 	// НАЗВАНО ИМЕНЕМ ПО СУЩЕСТВУ, А НЕ ХВОСТОМ СЕЛЕКТОРА. Метод зовётся через
 	// локальную переменную, поэтому анализатор записывает голое имя — и голым именем
@@ -146,7 +146,7 @@ var Profile = listfiltergate.Profile{
 	Filters: []string{"VisibleSet", "Visible", "requireGrantAuthority", "grantAuthorityVerdict"},
 	// The hand-written FLOOR only. Оба имени — чужой словарь: `ListAllowedIDs`
 	// не объявлен в iam нигде, а `ListObjects` был поверхностью снятого хранилища
-	// отношений (стадия S6, эпик #747) и объявления тоже больше не имеет. Пол
+	// отношений (стадия S6, эпик kacho#747) и объявления тоже больше не имеет. Пол
 	// держится именно ими: пол, съёживающийся вместе со снятой деривацией, полом
 	// не является — имя, которое нельзя вывести, обязано быть выписано.
 	Banned: []string{"ListAllowedIDs", "ListObjects"},
@@ -154,7 +154,7 @@ var Profile = listfiltergate.Profile{
 	// exactly two declared surfaces, and both are named here so their method sets
 	// derive the ban instead of someone remembering to extend a list.
 	//
-	// The second one is why #651 exists. `ListObjects` and `ListAllowedIDs` name the
+	// The second one is why kacho#651 exists. `ListObjects` and `ListAllowedIDs` name the
 	// store's enumeration, and for a while that was the whole ban — while a THIRD
 	// form sat in iam's own database: relverdict resolves verdicts a page at a time
 	// over iam's own tables, cursor by object id, default page 500. The gate could
@@ -247,11 +247,11 @@ var Profile = listfiltergate.Profile{
 		// ответа называют области выдач — в том числе в чужих аккаунтах. Допуск
 		// поэтому полнотой защиты не является, и объявлен здесь именно РЯДНЫЙ
 		// фильтр: полоса распорядителя аккаунта проходит пообъектный вопрос, полосы
-		// собственного чтения и надзора облака его не требуют (#1354).
+		// собственного чтения и надзора облака его не требуют (kacho#1354).
 		"access_binding.ListSubjectPrivileges": rowFilter,
 
 		// ListBySubject отвечает на ТОТ ЖЕ вопрос, что и ListSubjectPrivileges, и
-		// с #1352 решает допуск ТЕМ ЖЕ предикатом. Раньше здесь стоял охраняющий
+		// с kacho#1352 решает допуск ТЕМ ЖЕ предикатом. Раньше здесь стоял охраняющий
 		// объект: вызывающий обязан был БЫТЬ субъектом, поэтому сужать было
 		// нечего. Теперь чтение допускает и распорядителя аккаунта, чьи строки
 		// называют области выдач — в том числе в чужих аккаунтах, — и полнотой
@@ -279,12 +279,12 @@ var Profile = listfiltergate.Profile{
 		// came for, so the ban is inapplicable by construction, not waived. What
 		// protects it is the gate on the resource the caller named.
 		//
-		// ListSubjects was declared ParentGate until #651, and that was an
+		// ListSubjects was declared ParentGate until kacho#651, and that was an
 		// under-declaration nothing could reveal: the ban held two names, neither of
 		// them `ListSubjects`, so the wrong shape cost nothing and stayed.
 		//
 		// Второй записи здесь больше нет: перечисление ОБЪЕКТОВ снято с контракта
-		// стадией S6 (эпик #747). Объявление, пережившее свой RPC, делает вид, что
+		// стадией S6 (эпик kacho#747). Объявление, пережившее свой RPC, делает вид, что
 		// профиль покрывает поверхность, которой нет.
 		"authorize.ListSubjects": {Shape: listfiltergate.StoreQuery, Gate: "authorizeCaller"},
 

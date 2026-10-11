@@ -432,7 +432,7 @@ func (x *CheckResponse) GetReason() string {
 }
 
 // TOMBSTONE: `WriteCreatorTupleRequest` and `WriteCreatorTupleResponse` were
-// removed together with the `WriteCreatorTuple` RPC (#788). Never re-add
+// removed together with the `WriteCreatorTuple` RPC (kacho#788). Never re-add
 // messages under these names.
 // RegisterResourceRequest — Internal FGA-proxy register-owner-tuple payload.
 // Форма симметрична CheckRequest.
@@ -1049,7 +1049,7 @@ type SubjectChange struct {
 	// потому, что контракт не нёс половины имени.
 	//
 	// Прежде пару собирал ТОЛЧОК из iam в край, потому что читал `payload`
-	// напрямую. Толчок снят вместе со своим пакетом контракта (задача #1024):
+	// напрямую. Толчок снят вместе со своим пакетом контракта (задача kacho#1024):
 	// соединение открывает потребитель, и край читает этот журнал курсором сам.
 	// Поле осталось потому, что предмет его пережил механизм — имя субъекта
 	// нужно ЧИТАЮЩЕМУ, кем бы он ни был.

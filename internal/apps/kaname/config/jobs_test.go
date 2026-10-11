@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// jobs_test.go — страж старта секции фоновых заданий (задача #1264).
+// jobs_test.go — страж старта секции фоновых заданий (задача kacho#1264).
 
 package config
 

@@ -44,19 +44,31 @@ FAILURES: list[str] = []
 def build_tree(dst: pathlib.Path, only_identical: bool = False) -> None:
     """Синтетическое дерево: только то, что проба читает, и ничего больше.
 
-    `only_identical` оставляет в записи ТОЛЬКО файлы без подстановок. Это нужно
-    осям про оригинал: там синтетическое «дерево платформы» собирается копией
-    местных файлов, и для файла БЕЗ подстановок копия равна оригиналу BY
-    CONSTRUCTION — то есть предпосылка близнеца не вычисляется тем же кодом,
+    `only_identical` строит запись, в которой НИ У ОДНОГО файла нет подстановок:
+    оригиналом каждого объявляется сама копия (отпечаток оригинала = отпечаток
+    копии, подстановок ноль). Это нужно осям про оригинал: там синтетическое
+    «дерево платформы» собирается копией местных файлов, и копия равна оригиналу
+    BY CONSTRUCTION — то есть предпосылка близнеца не вычисляется тем же кодом,
     который проба проверяет. Взять полную запись значило бы восстанавливать
     оригинал по её же объявлению, и близнец доказывал бы объявление, а не факт.
+
+    ПОЧЕМУ НЕ ОТБОРОМ ЖИВЫХ ФАЙЛОВ БЕЗ ПОДСТАНОВОК. Так было, и самопроверка
+    зависела от состава ЖИВОЙ записи: ось «оригинал приехал частично» снимает один
+    файл из синтетического оригинала и требует, чтобы остальные сверились, то есть
+    ей нужно не меньше ДВУХ файлов. Пока побайтово равных было четыре, это
+    выполнялось молча; когда подстановки объявили ещё в трёх (kaname#387), равным
+    остался один, сверено стало 0, и ось покраснела третьим исходом — при
+    исправном держателе. Синтетика, не зависящая от числа живых равных файлов,
+    этой предпосылки не несёт.
     """
     (dst / "tests/newman/scripts").mkdir(parents=True)
     (dst / "tests/newman/kacholib").mkdir(parents=True)
     shutil.copy2(REPO / GATE_REL, dst / GATE_REL)
     record = json.loads((REPO / RECORD_REL).read_text(encoding="utf-8"))
     if only_identical:
-        record["files"] = [e for e in record["files"] if not e["rewrites"]]
+        for e in record["files"]:
+            e["rewrites"] = []
+            e["upstream_sha256"] = e["local_sha256"]
     for entry in record["files"]:
         rel = entry["path"]
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -179,10 +191,8 @@ def main() -> int:
         #    Обе стороны оси идут на записи ТОЛЬКО из побайтово равных файлов —
         #    см. `build_tree(only_identical=True)`: иначе предпосылку близнеца
         #    вычислял бы тот же разбор подстановок, который проба и проверяет.
-        n_identical = sum(
-            1 for e in json.loads((REPO / RECORD_REL).read_text(encoding="utf-8"))["files"]
-            if not e["rewrites"])
         t = base / "upstream-moved"; build_tree(t, only_identical=True)
+        n_identical = len(record_of(t)["files"])
         up_tree = base / "upstream-moved-up"; build_tree(up_tree, only_identical=True)
         q = up_tree / "tests/newman/kacholib/stems.sh"
         q.write_text(q.read_text(encoding="utf-8") + "\n# оригинал ушёл вперёд\n", encoding="utf-8")

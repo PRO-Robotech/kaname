@@ -44,7 +44,7 @@ import (
 // Must be ≥ the token's exp so the cache stays authoritative for the token's
 // lifetime; 30d mirrors the proto docstring + the api-gateway logout handler.
 //
-// Экспортирована с задачи #1292: она — слагаемое ПОТОЛКА (ниже), и потолок
+// Экспортирована с задачи kacho#1292: она — слагаемое ПОТОЛКА (ниже), и потолок
 // проверяется пробой. Копия величины в пробе разошлась бы с продуктом молча.
 //
 // Названное и НЕ решённое здесь: 30 сут против потолка срока токена

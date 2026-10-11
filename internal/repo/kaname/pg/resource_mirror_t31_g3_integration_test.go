@@ -99,7 +99,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 	require.Equal(t, acc, acc0)
 	require.JSONEq(t, `{"network":"treska"}`, labels0)
 
-	// When: the label is fully removed → consumer (#113 fix) re-emits
+	// When: the label is fully removed → consumer (kacho-iam#113 fix) re-emits
 	// RegisterResource (mirror.upsert) with labels={} and a NEWER source_version
 	// (G-3: upsert {}, NOT UnregisterResource).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{

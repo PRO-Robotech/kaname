@@ -124,7 +124,7 @@ func TestRoleLabels_T33MAT01_LabelGrantMaterializesMatchingSet(t *testing.T) {
 	// Account-scoped rules-role granting iam.role.list by label team=payments.
 	//
 	// Глагол `get` этим правилом БОЛЬШЕ НЕ НАЗЫВАЕТСЯ: он снят с ресурса `role`
-	// (#1922) — отношения `v_get` на типе `iam_role` не спрашивал ни один путь
+	// (kacho#1922) — отношения `v_get` на типе `iam_role` не спрашивал ни один путь
 	// запроса, — и правило, называющее снятый глагол, отвергается на входе
 	// («get is not a live verb of resource role»). Предмет пробы — отбор по
 	// метке, и от числа глаголов правила он не зависит.

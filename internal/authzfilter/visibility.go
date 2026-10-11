@@ -22,7 +22,7 @@
 // working. Asking for a larger cap did not help: that argument was only a
 // CLIENT-side trim of an already-cut response.
 //
-// Обе стороны этого разбора — история. Движок снят стадией S6 (эпик #747), а его
+// Обе стороны этого разбора — история. Движок снят стадией S6 (эпик kacho#747), а его
 // перечисление снято с контракта тем же изменением: продолжения у ответа не было
 // by construction, и остаток оставался недостижимым при живых правах. Разбор
 // оставлен, потому что ФОРМА ВОПРОСА, к которой он привёл, и есть предмет этого
@@ -86,7 +86,7 @@ import (
 // an account owner's projects, the system-role catalog).
 //
 // The qualifier is load-bearing, not pedantry: `iam_role` declares no `v_get` at all
-// since #1922 — the relation had no reader, and `iam.role` no longer offers the `get`
+// since kacho#1922 — the relation had no reader, and `iam.role` no longer offers the `get`
 // verb, so nothing authors it and nothing emits it. Read the sentence without the
 // qualifier and the next contributor looks for an emission that cannot happen.
 //

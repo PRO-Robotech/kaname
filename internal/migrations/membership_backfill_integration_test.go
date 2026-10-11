@@ -118,7 +118,7 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 	// Снимок берётся ДО посева — то есть отбором своих строк, а не вычитанием
 	// чужих. Список «все, кроме моих трёх» стареет молча: он растёт от работы, к
 	// пробе отношения не имеющей, и, исключив лишнее, даёт ноль — утверждение
-	// зеленеет, не посмотрев ни на одну строку (issue #510).
+	// зеленеет, не посмотрев ни на одну строку (issue kacho#510).
 	var seededByMigrations int
 	require.NoError(t, db.QueryRowContext(ctx,
 		`SELECT count(*) FROM kaname.users`).Scan(&seededByMigrations))

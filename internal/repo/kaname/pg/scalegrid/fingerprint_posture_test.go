@@ -13,7 +13,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
-// ОТПЕЧАТОК НЕ ЗАВИСИТ ОТ ПОСАДКИ (задача продукта #2273)
+// ОТПЕЧАТОК НЕ ЗАВИСИТ ОТ ПОСАДКИ (задача продукта kacho#2273)
 //
 // # Предмет
 //
@@ -255,7 +255,7 @@ func TestFingerprintIsTheSameInBothPostures(t *testing.T) {
 			"  разошлись: %s\n"+
 			"  словарь координат обязан выводиться из ПОСТАВКИ модуля, а не из состава корня:\n"+
 			"  корень монорепо несёт %v, а модуль — %v, и словарь из корня делает отпечаток\n"+
-			"  функцией посадки (задача продукта #2273)",
+			"  функцией посадки (задача продукта kacho#2273)",
 			platform.Content, standalone.Content, strings.Join(perFileDiff(t, p), "; "),
 			posturePlatformOnlyDirs, postureModuleDirs)
 	}

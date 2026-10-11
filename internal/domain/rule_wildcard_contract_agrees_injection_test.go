@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // rule_wildcard_contract_agrees_injection_test.go — доказательство того, что
-// гейт СПОСОБЕН упасть и способен смолчать (задача продукта #1961).
+// гейт СПОСОБЕН упасть и способен смолчать (задача продукта kacho#1961).
 //
 // Вход синтетический: настоящее дерево не трогается, поэтому доказательство не
 // истекает вместе с починкой предмета (`testing.md` §«Гейт на класс», п. 5 —
@@ -70,7 +70,7 @@ func TestRuleWildcardContractGate_CanFailAndStaysSilent(t *testing.T) {
 			wantFindings: 0, wantFields: 1,
 		},
 		{
-			name:         "заявлено, а домен ПРИНИМАЕТ у арендатора — предмет #1961",
+			name:         "заявлено, а домен ПРИНИМАЕТ у арендатора — предмет kacho#1961",
 			proto:        protoWith(claimEN, "verbs"),
 			probes:       map[string]wildcardProbe{"verbs": synthProbe(false, false)},
 			wantFindings: 1, wantNamed: "verbs", wantFields: 1,

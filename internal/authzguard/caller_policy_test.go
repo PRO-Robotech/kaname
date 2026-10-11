@@ -273,7 +273,7 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		"/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
 		"/kaname.cloud.iam.v1.InternalIAMService/RegisterResource",
 		"/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource",
-		// Здесь стояла WriteCreatorTuple. Запись снята вместе с RPC (#788):
+		// Здесь стояла WriteCreatorTuple. Запись снята вместе с RPC (kacho#788):
 		// имени, которого нет в контракте, отрицание не о чем утверждать —
 		// оно проходило бы всегда и ничего не проверяло.
 		// IsRevoked is the api-gateway hot-path lookup (chicken-and-egg: runs

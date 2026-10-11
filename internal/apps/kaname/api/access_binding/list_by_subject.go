@@ -53,7 +53,7 @@ func (u *ListBySubjectUseCase) WithRelationQueries(q clients.RelationQueries) *L
 
 func (u *ListBySubjectUseCase) Execute(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, f repoab.PageFilter) ([]domain.AccessBinding, string, error) {
 	// Формат страницы — ПЕРВЫМ стейтментом и в ТОЙ ЖЕ функции, которая ниже
-	// замыкается допуском (#1437). Вопрос «правильно ли составлен запрос» имеет
+	// замыкается допуском (kacho#1437). Вопрос «правильно ли составлен запрос» имеет
 	// ОДИН ответ для всех вызывающих, поэтому отвечать на него надо раньше, чем
 	// на вопрос «что этому вызывающему видно»: иначе один и тот же мусорный
 	// курсор получает `InvalidArgument` тому, у кого полоса есть, и
@@ -79,7 +79,7 @@ func (u *ListBySubjectUseCase) Execute(ctx context.Context, subjectType domain.S
 	// (subject_read_authority.go). Прежде здесь стояло СВОЁ условие — «вызывающий
 	// обязан БЫТЬ субъектом», — и оно расходилось с соседним глаголом: тот же
 	// вопрос про того же субъекта получал разный ответ в зависимости от того,
-	// какой глагол выбран (#1352).
+	// какой глагол выбран (kacho#1352).
 	//
 	// Существование субъекта это чтение НЕ сообщает вовсе: нерезолвящийся субъект
 	// отвечает пустой страницей собственному чтению и `PermissionDenied` всякому
@@ -101,7 +101,7 @@ func (u *ListBySubjectUseCase) Execute(ctx context.Context, subjectType domain.S
 
 	// Полоса распорядителя аккаунта: строки называют ОБЛАСТЬ каждой выдачи, а
 	// области у одного субъекта бывают в разных аккаунтах. Остаются те, чью выдачу
-	// вызывающий вправе прочитать по идентификатору (#1354).
+	// вызывающий вправе прочитать по идентификатору (kacho#1354).
 	visible, verr := visibleOnNarrowedPage(ctx, u.queries, bindingIDs(rows))
 	if verr != nil {
 		return nil, "", verr

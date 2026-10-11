@@ -15,7 +15,7 @@ package pg_test
 //   - повтор идентификатора строки: коллизия ключа → 23505 → ErrAlreadyExists.
 //   - USR-09(c): FK user_id → users ON DELETE CASCADE (удаление user снимает токены).
 //   - USR-13: DeleteOwnedByID идемпотентен и СУЖЕН ВЛАДЕЛЬЦЕМ — повторное
-//     снятие и снятие чужой строки дают found=false БЕЗ ошибки (#1216).
+//     снятие и снятие чужой строки дают found=false БЕЗ ошибки (kacho#1216).
 //
 // Запуск: `go test ./internal/repo/kaname/pg/... -run UserOAuthClient`. Skip с -short.
 
@@ -44,7 +44,7 @@ func newUOC(userID domain.UserID, suffix string) domain.UserOAuthClient {
 	return domain.UserOAuthClient{
 		// Момент выдачи — обязательный вход записи (kaname#589).
 		CreatedAt: time.Now().UTC(),
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
@@ -256,7 +256,7 @@ func TestUserOAuthClient_09c_UserDelete_CascadesTokens(t *testing.T) {
 }
 
 // TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped — USR-13 в
-// редакции #1216.
+// редакции kacho#1216.
 //
 // Прежняя редакция утверждала обратное: «повторный revoke уже удалённого токена
 // → ErrNotFound». Утверждение было верным про код, который здесь стоял, и

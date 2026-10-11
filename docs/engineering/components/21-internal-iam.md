@@ -43,7 +43,7 @@ kacho-loadbalancer) общаются с kaname:
 | `RegisterResource`      | sync             | Постановка иерархического указателя через журнал. |
 | `UnregisterResource`    | sync             | Снятие того же указателя.                        |
 
-> [!note] Здесь стоял `WriteCreatorTuple` — RPC снят (#788)
+> [!note] Здесь стоял `WriteCreatorTuple` — RPC снят (kacho#788)
 > Он писал кортёж создателя в движок НАПРЯМУЮ, мимо журнала `kaname.fga_outbox`,
 > поэтому проекция `relation_fact` (инвариант миграции 0098) его не увидела бы никогда.
 > Вызывающих не осталось ни одного: все пять соседей ушли на `RegisterResource`, у
@@ -164,7 +164,7 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
 - **PollSubjectChanges:** narrow port `subjectChanger` over `*service.SubjectChangeService`.
 - **Порты обработчика:** `Authorizer`, `subjectChanger`, `relationWriteGate`,
   `resourceRegistrar`, `roleCompiledReader`. Отдельного порта ЗАПИСИ среди них нет:
-  `relationWriter` снят вместе с `WriteCreatorTuple` (#788) намеренно — тип без него
+  `relationWriter` снят вместе с `WriteCreatorTuple` (kacho#788) намеренно — тип без него
   нельзя переоткрыть одной строкой вызова. Запись идёт через `resourceRegistrar`,
   который кладёт строку журнала в собственной транзакции.
 - **Auth-interceptor:** реализован на стороне api-gateway (валидация JWT +
@@ -180,7 +180,7 @@ grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \
   «закоммичено», а не «поставлено в очередь»; окна материализации у этого пути нет,
   и ban #9 к нему неприменим — гейтить нечего.
   Ручной дописи указателя не существует: прямой путь снят вместе с `WriteTuples`
-  (#788), а внешнего хранилища, мимо которого можно было бы писать, больше нет.
+  (kacho#788), а внешнего хранилища, мимо которого можно было бы писать, больше нет.
 - **Check без principal context** — caller обязан передать subject параметром.
 
 ## Связанные компоненты

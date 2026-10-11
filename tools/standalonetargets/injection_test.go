@@ -100,8 +100,8 @@ func TestJudged_WaiverOfAMarkedTargetIsAlsoAFinding(t *testing.T) {
 // TestPremise_FixtureInsideARepositoryIsRefused — инъекция в предпосылку
 // фикстуры: каталог лежит внутри репозитория.
 //
-// Это тот самый класс, ради которого написаны tree-root.sh (#2145) и резолв
-// канона (#2159). Гейт, воспроизводящий его собственной фикстурой, судил бы
+// Это тот самый класс, ради которого написаны tree-root.sh (kacho#2145) и резолв
+// канона (kacho#2159). Гейт, воспроизводящий его собственной фикстурой, судил бы
 // ЧУЖОЕ дерево — и зелёным.
 func TestPremise_FixtureInsideARepositoryIsRefused(t *testing.T) {
 	outer := t.TempDir()

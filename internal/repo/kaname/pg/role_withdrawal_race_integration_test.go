@@ -8,7 +8,7 @@ package pg_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4); сценарии IAM-RW-1-26, IAM-RW-1-27, IAM-RW-1-28. Задача
-// продукта #1913. Требование `data-integrity.md` §«Чек-лист нового ссылочного
+// продукта kacho#1913. Требование `data-integrity.md` §«Чек-лист нового ссылочного
 // поля», п. 5: спорный путь без пробы под конкуренцией не мёржится — гонку
 // юнит-тестом не поймать.
 //

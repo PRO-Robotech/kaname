@@ -85,7 +85,7 @@ func TestDenyDetail_EveryScopeFilteredMethodNamesItsAction(t *testing.T) {
 
 	// Полоса отбирается по ОБЪЯВЛЕННОМУ имени пакета контракта, а не по
 	// выписанной приставке: приставка, выписанная литералом, чужое имя не
-	// отвергает — она его НЕ ВИДИТ, и полоса молча становится пустой (#2168).
+	// отвергает — она его НЕ ВИДИТ, и полоса молча становится пустой (kacho#2168).
 	ownBand := contractnaming.OwnContractPackage() + "."
 	var band []seed.PermissionEntry
 	for _, e := range reg.All() {

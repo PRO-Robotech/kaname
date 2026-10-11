@@ -59,7 +59,7 @@ func TestIAMMB106_TypeDeclaredOnlyByAManifestReachesThePlan(t *testing.T) {
 		t.Fatal("собранный текст не начинается каноном ПОБАЙТОВО — Д7(а) допуска невыразима")
 	}
 
-	// ДОПУСК: err проверяется ПЕРВЫМ (см. #2000 — нулевой отчёт отвечает «допущено»).
+	// ДОПУСК: err проверяется ПЕРВЫМ (см. kacho#2000 — нулевой отчёт отвечает «допущено»).
 	adm, aerr := authzmodel.Admit(composed)
 	if aerr != nil {
 		t.Fatalf("допуск не состоялся: %v; перепись: %s", aerr, adm.Census())
@@ -161,7 +161,7 @@ func deliveredManifests(t *testing.T) []*manifest.Manifest {
 //
 // Утверждение не косметическое: все типы модулей канон уже объявляет, поэтому
 // собранный текст обязан совпасть с каноном ПОБАЙТОВО. Расхождение здесь
-// означало бы, что рендер и канон разошлись, — и это находка соседа (#1089),
+// означало бы, что рендер и канон разошлись, — и это находка соседа (kacho#1089),
 // а не композиции.
 func TestIAMMB101_OnTodaysTreeCompositionIsIdentity(t *testing.T) {
 	composed, rep, err := modelcompose.Compose(authzmodel.DSL, deliveredManifests(t))
