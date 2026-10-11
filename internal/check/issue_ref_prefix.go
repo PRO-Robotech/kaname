@@ -76,10 +76,24 @@ func (r BareIssueRef) String() string {
 //
 // Исключение без находок под собой — тоже находка (гейт сверяет это сам):
 // послабление, которому нечего прощать, не истечёт больше никогда.
+//
+// MatchLine сужает исключение до строк файла: когда он задан, вне суждения только
+// строки, на которых он истинен, а остальные строки того же файла судятся.
 type IssueRefExclusion struct {
-	Name  string
-	Why   string
-	Match func(rel string) bool
+	Name      string
+	Why       string
+	Match     func(rel string) bool
+	MatchLine func(line string) bool
+}
+
+// VendorRecordPath — запись вендоренного слоя newman-набора.
+const VendorRecordPath = "tests/newman/vendor-provenance.json"
+
+// vendorRecordUpstreamLine — строка записи, несущая поле `upstream` подстановки:
+// дословный текст оригинала. Запись пишется по полю на строку (переводы строк
+// внутри значения экранированы), поэтому строка поля узнаётся по её началу.
+func vendorRecordUpstreamLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), `"upstream": "`)
 }
 
 // IssueRefAllowance — номер в названном файле, где голая форма есть ВХОД, а не
@@ -118,6 +132,15 @@ var issueRefExclusions = []IssueRefExclusion{
 			"контрактов, и правка здесь разводит копию с источником. Ссылка правится в corelib " +
 			"и приходит сюда новой копией вместе с ведомостью",
 		Match: func(rel string) bool { return strings.HasPrefix(rel, "proto/corelib/") },
+	},
+	{
+		Name: "vendor-provenance.json upstream",
+		Why: "поле `upstream` подстановки — ДОСЛОВНЫЙ текст оригинала из дерева платформы, где " +
+			"голая `#<N>` и есть задача монорепо; держатель вендоринга восстанавливает по нему " +
+			"оригинал и сверяет отпечаток, так что префикс здесь сломал бы сверку. Поля `local` " +
+			"и `why` той же записи судятся: `local` повторяет текст копии, `why` пишется здесь",
+		Match:     func(rel string) bool { return rel == VendorRecordPath },
+		MatchLine: vendorRecordUpstreamLine,
 	},
 	{
 		Name: "fga_model.fga",
@@ -288,14 +311,20 @@ func AuditBareIssueRefs(root string, rels []string, ceiling int) ([]BareIssueRef
 			continue
 		}
 		census.Read++
-		excludedBy := ""
+		var fileExcl []IssueRefExclusion
 		for _, e := range issueRefExclusions {
 			if e.Match(rel) {
-				excludedBy = e.Name
-				break
+				fileExcl = append(fileExcl, e)
 			}
 		}
 		for _, ref := range BareIssueRefs(rel, src) {
+			excludedBy := ""
+			for _, e := range fileExcl {
+				if e.MatchLine == nil || e.MatchLine(ref.Text) {
+					excludedBy = e.Name
+					break
+				}
+			}
 			if excludedBy == "" {
 				census.Bare++
 			}

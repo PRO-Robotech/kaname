@@ -148,6 +148,23 @@ func TestBareIssueRefInjection_ExclusionAndAllowanceAreNotWider(t *testing.T) {
 	require.Len(t, f, 1, "позволение — на свой файл, а не на номер")
 }
 
+// Исключение записи вендоринга — на поле `upstream`, а не на файл: поле `why`
+// той же записи и строка `local` судятся.
+func TestBareIssueRefInjection_VendorRecordExclusionIsTheUpstreamFieldOnly(t *testing.T) {
+	t.Parallel()
+	const name = "vendor-provenance.json upstream"
+	f, c := auditOne(t, check.VendorRecordPath, unmask("     \"upstream\": \"# задача №2117\",\n"))
+	require.Empty(t, f, "поле upstream — дословный оригинал")
+	require.Equal(t, 1, c.Excluded[name])
+	for _, field := range []string{"local", "why"} {
+		f, c = auditOne(t, check.VendorRecordPath, unmask("     \""+field+"\": \"# задача №2117\",\n"))
+		require.Lenf(t, f, 1, "поле %s судится", field)
+		require.Zero(t, c.Excluded[name])
+	}
+	f, _ = auditOne(t, "x/vendor-provenance.json", unmask("     \"upstream\": \"# задача №2117\",\n"))
+	require.Len(t, f, 1, "исключение — на свой файл, а не на имя поля")
+}
+
 func TestBareIssueRefInjection_EmptyInputIsAnError(t *testing.T) {
 	t.Parallel()
 	_, _, err := check.AuditBareIssueRefs(t.TempDir(), nil, check.KanameNumberCeiling)
