@@ -1216,39 +1216,158 @@ CASES.append(Case(
 # exposed: a user holding active AccessBindings CANNOT be deleted. This is the
 # behaviour the old IAM-USR-DL-CRUD-OK was silently hitting; asserted here on
 # purpose, with the verbatim text so it cannot pass on an unrelated refusal.
+#
+# СУБЪЕКТ — СВОЙ, С ВЫДАЧЕЙ И БЕЗ АККАУНТА (kaname#664, KN664-31). Прежде кейс
+# снимал человека церемонии, а тот ВЛАДЕЕТ аккаунтом посева (`ceremonyAccountId`).
+# Гвард владения стоит теперь ПЕРВЫМ, и такому человеку приходит «owns accounts»
+# — это верный ответ, он утверждается близнецом IAM-USR-DL-NEG-OWNS-ACCOUNTS ниже.
+# Здесь же нужен человек, которого держит ИМЕННО выдача: кейс сеет его тем же
+# приглашением, что IAM-USR-DL-CRUD-OK (без роли — ни выдачи, ни своего
+# аккаунта), и выдаёт ему роль просмотра на аккаунте A. От положительного
+# близнеца CRUD-OK отличается ровно одним фактом — действующей выдачей.
+# Техники: таблица решений (владение × выдача), угадывание ошибок (подмена
+# отказа другим отказом того же кода).
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-DL-NEG-ACTIVE-BINDINGS",
-    title="Delete a user that holds active AccessBindings → Operation.error FAILED_PRECONDITION (9) "
-          "'has active access bindings and cannot be deleted'",
+    title="Delete a user that holds active AccessBindings and owns no account → Operation.error "
+          "FAILED_PRECONDITION (9) 'has active access bindings and cannot be deleted'",
     classes=["NEG"],
     priority="P1",
     steps=[
         Step(
+            name="seed-bound-user",
+            method="POST",
+            path="/iam/v1/users:invite",
+            # No roleId ⇒ no binding yet and no own account; the binding is granted below.
+            body={"accountId": "{{accountAId}}", "email": "dlbound-{{runId}}@kacho.local"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="capture-bound-user",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('seed invite succeeded (no op.error)', () => pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                "pm.test('seed invite returned a User', () => {",
+                "  pm.expect(j.response && j.response.id, JSON.stringify(j)).to.match(/^usr[a-z0-9]+$/);",
+                "});",
+                *save_from_response("j.response && j.response.id", "boundUserId"),
+            ],
+        ),
+        Step(
+            name="grant-bound-user",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body={"subjectType": "user", "subjectId": "{{boundUserId}}",
+                  "roleId": ROLE_VIEW, "scopeType": "iam.account", "scopeId": "{{accountAId}}",
+                  "target": {"allInScope": {}}},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", "boundUserBindingId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        retry_until_authorized(Step(
             name="delete-bound-user",
             method="DELETE",
-            # Self-delete: the ceremony human always holds bindings — the ceremony seed
-            # creates an account HE owns (`ceremonyAccountId`, stage 8б) before any
-            # collection runs — so the RESTRICT guard is reached rather than the authz
-            # gate. Deliberately not left to accumulate from other collections: that
-            # would make the precondition depend on collection order.
-            path="/iam/v1/users/{{ceremonyUserId}}",
-            auth="jwtHumanCeremony",
+            path="/iam/v1/users/{{boundUserId}}",
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "boundDelOpId"),
             ],
-        ),
-        # Polls as jwtHumanCeremony — inherited from the step that minted the operation.
+        )),
         # Текст владельца ЦЕЛИКОМ: «has active access bindings and cannot be deleted»
         # несут отказы User, Group и ServiceAccount, и утверждение об общей части не
         # различало, ЧЕЙ отказ пришёл (#1748).
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_text="User {{ceremonyUserId}} has active access bindings "
+                        msg_text="User {{boundUserId}} has active access bindings "
                                  "and cannot be deleted",
                         op_var="boundDelOpId"),
+        # Уборка: отозванная выдача человека не держит (Р10), после неё снятие проходит.
+        Step(
+            name="cleanup-bound-binding",
+            method="DELETE",
+            path="/iam/v1/accessBindings/{{boundUserBindingId}}",
+            auth="jwtAccountAdminA",
+            test_script=[*save_from_response("j.id", "opId")],
+        ),
+        poll_operation_until_done(required=False),
+        Step(
+            name="cleanup-bound-user",
+            method="DELETE",
+            path="/iam/v1/users/{{boundUserId}}",
+            auth="jwtBootstrap",
+            test_script=[*save_from_response("j.id", "opId")],
+        ),
+        poll_operation_until_done(required=False),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-DL-NEG-OWNS-ACCOUNTS — близнец KN664-31: человек ещё владеет аккаунтом.
+# Человек церемонии владеет аккаунтом посева (`ceremonyAccountId`, этап 8б) и
+# держит на нём собственническую выдачу; гвард владения стоит ПЕРВЫМ, поэтому
+# отказ называет шаг — снять аккаунт, — а не выдачу. Самоснятие: authz-ворота
+# пропускают самого человека, и отказ приходит от гварда, а не от ворот.
+# Человек после отказа остаётся — кейс ничего не снимает и убирать нечего.
+# Техники: таблица решений (владение × выдача), переход состояний (снятие
+# личности до снятия аккаунта).
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-DL-NEG-OWNS-ACCOUNTS",
+    title="Delete a user that still owns an account → Operation.error FAILED_PRECONDITION (9) "
+          "'owns accounts and cannot be deleted' (ownership is checked before bindings)",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="delete-owner-user",
+            method="DELETE",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "ownerDelOpId"),
+            ],
+        ),
+        # Polls as jwtHumanCeremony — inherited from the step that minted the operation.
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="User {{ceremonyUserId}} owns accounts and cannot be deleted",
+                        op_var="ownerDelOpId"),
+        # KN664-31 «And»: отказ ничего не снял — токен человека по-прежнему принимается
+        # и строка на месте.
+        Step(
+            name="owner-still-present",
+            method="GET",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('owner user still present after refused delete', () =>",
+                "  pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('ceremonyUserId')));",
+            ],
+        ),
     ],
 ))
 

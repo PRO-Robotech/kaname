@@ -1,0 +1,65 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/account-id-may-be-supplied-at-create.md
+  sha256: 8c45cb50a0b3a3febb05215f23b8f115728ea12bf1bcae6200c50ada346ba63f
+  static_status: DRAFT
+  content_commit: 29ce260db383e90c5f84f0ffb62e349df6356337
+  reviewed_revision: f9f1a585effb13816e8525fc51304e0c468a379a
+  branch: '664'
+  merged_into: '678'
+  task: PRO-Robotech/kaname#664
+  wave: PRO-Robotech/kaname#678
+  lines: 1033
+  round: 3
+  predecessor_record: docs/specs/reviews/account-id-may-be-supplied-at-create/a2521905fa86c4c15a8cf9fe21ba9addc7a5a4ce07715eddaeeee6292024cf4f.yaml
+  fingerprint_predicate: >-
+    git show f9f1a585e:<путь> | sha256sum и sha256sum <путь> в копии ветки 664 на 29ce260db —
+    оба 8c45cb50…a63f; git show 29ce260db~1:<путь> | sha256sum — a2521905…cf4f (одобренная редакция).
+  fingerprint_note: >-
+    Дифф a2521905 → 8c45cb50 — ровно коммит 29ce260db (+10 −2 по документу; git diff
+    29ce260db~1 f9f1a585e -- <путь> даёт тот же объём): в абзаце ветви (в) AID-18 утверждение
+    о ключе дома помечено «до kaname#664» и сноской [^kn664] в конце документа. Шаги сценариев,
+    предикаты, §6, DoD не менялись.
+  static_status_note: >-
+    Слово DRAFT в шапке документа — то, что туда вписали; шапка намеренно не правлена.
+    Вердикт выводится из этой записи и внешнего события.
+  publication_mode: record_file_committed_event_by_courier
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-11'
+
+blocking:
+  count: 0
+  kinds: []
+  items: []
+
+checks:
+  scenarios_unchanged: >-
+    Уникальных ID AID — 29 до и после (grep -oE '\*\*AID-[0-9K]+' | sort -u | wc -l);
+    строк Given/When/Then/And/Дано/Когда/Тогда в начале строки — 154 до и после.
+    Изменённые строки 719-720 — довод «почему ветвь (в) не снимается», не шаг и не предикат.
+  footnote_truth: >-
+    Сноска сверена с деревом @29ce260db: internal/migrations/20261011061435_own_account_and_identity_are_removed_in_order.sql:87-91
+    — DROP NOT NULL на users.account_id и users_account_fk ON DELETE SET NULL DEFERRABLE
+    INITIALLY DEFERRED; приёмка own-account-and-identity-are-removed-in-order.md в дереве есть.
+  branch_c_claim: >-
+    Ветвь (в) по-прежнему утверждает внесение в реестр, а не освобождение; утверждение о
+    реестре не ослаблено. Свойство «удаление не освобождает» держат ветви (а) и (б), как в круге 2.
+  scope_coverage_producer_twin_dod: без изменений к кругу 2 (запись a2521905…).
+  constructibility: >-
+    Новых Дано нет — посев не требуется; прежние подтверждения круга 2 относятся к неизменённым шагам.
+  security: правка поверхности прав не трогает.
+  open_questions: ноль.
+
+non_blocking:
+  - id: N5
+    kind: FORMAT
+    note: >-
+      Строка 719 оставляет в теле «Штатного удаления личного аккаунта в продукте нет», верное
+      только до kaname#664; правду несёт сноска. При следующей содержательной правке документа
+      стоит перенести оговорку в само предложение, чтобы тело не читалось без сноски как ложь.
+
+event_body: acceptance-reviewer · APPROVED · sha256 8c45cb50a0b3a3febb05215f23b8f115728ea12bf1bcae6200c50ada346ba63f
