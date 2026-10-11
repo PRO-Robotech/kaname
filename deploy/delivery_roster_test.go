@@ -106,6 +106,7 @@ var deliveryRoster = []string{
 	"own_lane_knobs_declared_test.go",
 	"own_lane_memory_ceiling_injection_test.go",
 	"own_lane_memory_ceiling_test.go",
+	"password_verifier_side_ledger_test.go",
 	"pod_env_execution_test.go",
 	"port_knob_moves_its_listener_injection_test.go",
 	"port_knob_moves_its_listener_test.go",

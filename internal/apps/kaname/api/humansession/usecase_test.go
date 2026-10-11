@@ -37,12 +37,15 @@ type harness struct {
 	clock    time.Time
 	hasher   *passwordverify.Hasher
 	verifier *passwordverify.Verifier
-	totp     *totpverify.Verifier
-	login    *humansession.LoginUseCase
-	logout   *humansession.LogoutUseCase
-	change   *humansession.ChangePasswordUseCase
-	resolve  *humansession.ResolveUseCase
-	rule     *humansession.PasswordRule
+	// verifyObs — исходы проверяющего по клетке: проверяющий один на все
+	// полосы харнесса, как в процессе (kaname#692).
+	verifyObs *verifyCounter
+	totp      *totpverify.Verifier
+	login     *humansession.LoginUseCase
+	logout    *humansession.LogoutUseCase
+	change    *humansession.ChangePasswordUseCase
+	resolve   *humansession.ResolveUseCase
+	rule      *humansession.PasswordRule
 	// envelope — дублёр огибающей по потолку (Ф3-31, kaname#188): потолок
 	// задаёт проба; envelopePort — то, что получает полоса: по умолчанию
 	// дублёр, измерительная проба подставляет настоящую огибающую.
@@ -62,6 +65,27 @@ const rcCodeTTL = 5 * time.Minute
 type nopVerifyObserver struct{}
 
 func (nopVerifyObserver) VerificationObserved(passwordverify.Outcome) {}
+
+// verifyCounter — приёмник исходов проверяющего, считающий клетки.
+type verifyCounter struct {
+	mu    sync.Mutex
+	cells map[passwordverify.Outcome]int
+}
+
+func (v *verifyCounter) VerificationObserved(o passwordverify.Outcome) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cells == nil {
+		v.cells = map[passwordverify.Outcome]int{}
+	}
+	v.cells[o]++
+}
+
+func (v *verifyCounter) count(o passwordverify.Outcome) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.cells[o]
+}
 
 func declared() passwordverify.Declared {
 	return passwordverify.Declared{
@@ -101,7 +125,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	var err error
 	h.hasher, err = passwordverify.NewHasher(declared())
 	require.NoError(t, err)
-	h.verifier, err = passwordverify.New(4, nopVerifyObserver{})
+	h.verifyObs = &verifyCounter{}
+	h.verifier, err = passwordverify.New(4, h.verifyObs)
 	require.NoError(t, err)
 	// Выравнивание полосы «материала нет» — как в композиционном корне.
 	decoy, err := h.hasher.Hash("decoy-of-the-harness")

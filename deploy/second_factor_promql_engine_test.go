@@ -46,8 +46,11 @@ func engineSeries() []cellTerm {
 	for _, o := range []string{"store-failed", "verifier-issue", "capacity-exhausted"} {
 		out = append(out, cellTerm{series: "kaname_login_outcomes_total", labels: map[string]string{"outcome": o}})
 	}
-	out = append(out, cellTerm{series: "kaname_password_verification_outcomes_total",
-		labels: map[string]string{"outcome": "capacity-exhausted"}})
+	// Ряд проверяющего — весь словарь (kaname#692): правило отказов читает его
+	// исходы нашей стороны, правило ёмкости — исчерпание.
+	for _, v := range verifierProducerValues() {
+		out = append(out, v.cell)
+	}
 	for _, series := range []string{"kaname_registration_outcomes_total", "kaname_recovery_request_outcomes_total",
 		"kaname_recovery_completion_outcomes_total"} {
 		out = append(out, cellTerm{series: series, labels: map[string]string{"outcome": "store-failed"}})

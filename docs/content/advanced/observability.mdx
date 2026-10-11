@@ -620,6 +620,16 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 `kaname_self_service_store_failures_total` целиком: все его значения — наша сторона, а какой глагол
 отказал, видно по метке `verb`.
 
+Негодное хранимое значение пароля — формат вне перечня, повреждённое тело, параметры выше
+потолка — тоже отказ нашей стороны, и человек с верным паролем его не обойдёт. Проверяющий один
+на всех, кто им сверяет: вход, повышение уровня паролем, смена пароля и сверка секрета клиента
+церемонией. Поэтому правило читает три клетки «нашей стороны» ряда
+`kaname_password_verification_outcomes_total`, а не только исход входа `verifier-issue`: иначе
+испорченное значение у повышения уровня или у секрета клиента тревоги не поднимало бы. Неудачный
+вход пишет такой исход и в свой ряд, и в ряд проверяющего — это одно событие, а не два; порог
+правила «больше нуля», и двойной счёт его не сдвигает. Исходы `mismatched` и `material-missing`
+правило не читает: это вход человека, и тревога звонила бы на каждый неверный пароль.
+
 Правило ёмкости читает исчерпание у **проверяющего**, а не только у входа: тот же проверяющий
 сверяет пароль при повышении уровня и секрет клиента в церемонии, и эти отказы ряда входа не
 пишут. Его клетка — `kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}`.
@@ -636,10 +646,13 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
       + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
       + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m]))
       + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
-      + sum(increase(kaname_self_service_store_failures_total[10m])) > 0
+      + sum(increase(kaname_self_service_store_failures_total[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="format-not-in-registry"}[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="body-not-parsable"}[10m]))
+      + sum(increase(kaname_password_verification_outcomes_total{outcome="params-above-ceiling"}[10m])) > 0
   for: 5m
   annotations:
-    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище). Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
+    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище). Негодное хранимое значение пароля либо секрета клиента считает ряд проверяющего — у всех, кто сверяет им: вход, повышение уровня, смена пароля, церемония; неудачный вход пишет его и в verifier-issue, это одно событие, а не два. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
 
 - alert: KanameLoginVerifierCapacityExhausted
   expr: |
