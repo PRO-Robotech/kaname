@@ -76,7 +76,10 @@ func NewStepUpUseCase(d SecondFactorDeps) (*StepUpUseCase, error) {
 // Execute — порядок: форма → сессия → частота → (у кода) состояние → сверка →
 // предъявление одним исходом с журналом повышения; суждённый отказ — след
 // попытки одним исходом с журналом повышения.
-func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOutput, error) {
+func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureStepUp, err) }()
 	if err := JudgeStepUpForm(in); err != nil {
 		return StepUpOutput{}, err
 	}

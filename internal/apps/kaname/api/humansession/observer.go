@@ -7,7 +7,11 @@ package humansession
 // до первого события (форма Ф-е) — перечни исходов закрыты и отдаются
 // приёмнику словарями ниже; приёмник ими и засевает клетки.
 
-import "github.com/PRO-Robotech/kaname/internal/assurance"
+import (
+	"errors"
+
+	"github.com/PRO-Robotech/kaname/internal/assurance"
+)
 
 // LoginOutcome — исход входа по причине. Перечень закрыт: исходы проверяющего
 // — из его словаря (`passwordverify.OutcomeNames`), плюс исходы полосы.
@@ -189,6 +193,49 @@ func RecoveryCompletionOutcomes() []RecoveryCompletionOutcome {
 	}
 }
 
+// StoreFailureVerb — глагол своих данных под живой сессией, которому хранилище
+// не ответило (kaname#691). Наружу такой отказ один — `UNAVAILABLE` без
+// причины; без клетки оператор узнавал о нём от людей, а не от тревоги.
+//
+// Перечень закрыт и называет ГЛАГОЛЫ, а не шаги внутри них: клетку ставит
+// единственная точка на выходе глагола ([observeStoreFailure]), и новый
+// возврат `ErrStoreUnavailable` в его теле считается без отдельной правки.
+// Помощники, общие со входом (сверка кода, разрешение сессии), клетку не
+// ставят: вход пишет свой исход `store-failed`, и один сбой не считается
+// дважды под разными именами.
+type StoreFailureVerb string
+
+const (
+	StoreFailureStepUp                StoreFailureVerb = "step-up"
+	StoreFailureSecondFactorEnroll    StoreFailureVerb = "second-factor-enroll"
+	StoreFailureSecondFactorConfirm   StoreFailureVerb = "second-factor-confirm"
+	StoreFailureSecondFactorStatus    StoreFailureVerb = "second-factor-status"
+	StoreFailureSecondFactorRemove    StoreFailureVerb = "second-factor-remove"
+	StoreFailureBackupCodesRegenerate StoreFailureVerb = "backup-codes-regenerate"
+	StoreFailurePasswordChange        StoreFailureVerb = "password-change"
+	StoreFailurePasswordEnroll        StoreFailureVerb = "password-enroll"
+)
+
+// StoreFailureVerbs — закрытый перечень: приёмник засевает им клетки нулём до
+// первого события (Ф3 Р14).
+func StoreFailureVerbs() []StoreFailureVerb {
+	return []StoreFailureVerb{
+		StoreFailureStepUp, StoreFailureSecondFactorEnroll, StoreFailureSecondFactorConfirm,
+		StoreFailureSecondFactorStatus, StoreFailureSecondFactorRemove, StoreFailureBackupCodesRegenerate,
+		StoreFailurePasswordChange, StoreFailurePasswordEnroll,
+	}
+}
+
+// observeStoreFailure — классификатор на выходе глагола: сбой хранилища
+// (`ErrStoreUnavailable`, в том числе обёрнутый) растит клетку глагола, всякий
+// иной исход — нет. Ошибку возвращает как есть: наблюдение исхода не меняет.
+func observeStoreFailure(o Observer, verb StoreFailureVerb, err error) error {
+	if errors.Is(err, ErrStoreUnavailable) {
+		o.StoreFailureObserved(verb)
+	}
+	return err
+}
+
 // Observer — приёмник событий полосы. Все методы обязаны быть дёшевы и не
 // возвращать ничего: наблюдение не меняет исхода.
 type Observer interface {
@@ -213,6 +260,9 @@ type Observer interface {
 	// AccessKeyLoginObserved — исход полосы входа ключом (Ф13 Р10): наружу
 	// отказы неразличимы, поэтому причина живёт только здесь.
 	AccessKeyLoginObserved(outcome AccessKeyLoginOutcome)
+	// StoreFailureObserved — глагол своих данных отказал, потому что хранилище
+	// не ответило (kaname#691).
+	StoreFailureObserved(verb StoreFailureVerb)
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
@@ -232,3 +282,4 @@ func (NopObserver) SecondFactorPresentationObserved(assurance.Method, Presentati
 func (NopObserver) SecondFactorRefusalObserved(SecondFactorRefusal)                        {}
 func (NopObserver) SecondFactorEventObserved(SecondFactorEvent)                            {}
 func (NopObserver) AccessKeyLoginObserved(AccessKeyLoginOutcome)                           {}
+func (NopObserver) StoreFailureObserved(StoreFailureVerb)                                  {}

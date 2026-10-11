@@ -55,7 +55,10 @@ func NewSecondFactorStatusUseCase(d SecondFactorDeps) (*SecondFactorStatusUseCas
 }
 
 // Execute — состояние по матрице Р4: нет · `pending` · `active`.
-func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput) (StatusOutput, error) {
+func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput) (_ StatusOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorStatus, err) }()
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)
 	if err != nil {

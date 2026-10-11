@@ -29,7 +29,7 @@ func TestPortsCarryTheEndOfTheCallOnAStoreFailure(t *testing.T) {
 	grants, err := ceremonyport.NewGrants(&recordingFamilies{err: storeFailure})
 	require.NoError(t, err)
 	secrets, err := ceremonyport.NewClientSecrets(&secretStore{fail: storeFailure},
-		stubChecker{outcome: "unused"})
+		stubChecker{outcome: "unused"}, &shareCounter{})
 	require.NoError(t, err)
 
 	for _, call := range []struct {
