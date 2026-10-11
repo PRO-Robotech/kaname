@@ -40,7 +40,7 @@ type accountReader struct {
 const accountCols = "id, name, description, labels, owner_user_id, created_at"
 
 // accountUpdateQ — оператор записи аккаунта. СТАТИЧЕСКИЙ: набор колонок известен
-// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
 // `mutable_triplet_update.go`). `owner_user_id` неизменяем и в перечень не
 // входит — вызывающий отвергает его до записи.
 const accountUpdateQ = `UPDATE accounts SET` + mutableTripletSetSQL +
@@ -74,7 +74,7 @@ func (r *accountReader) List(ctx context.Context, f account.ListFilter) ([]domai
 	argIdx := 1
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
 		// expression, so the column follows the whitelist instead of being
 		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
@@ -106,7 +106,7 @@ func (r *accountReader) List(ctx context.Context, f account.ListFilter) ([]domai
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякий аккаунт, перед которым
 	// лежит больше `page_size` невидимых предшественников — он до фильтра просто
 	// не доезжает.
@@ -224,7 +224,7 @@ func splitAccountInsertHint(hint string) (id, name string) {
 // в монорепо. Следить за таким утверждением некому дважды: приватный адаптер
 // чужого сервиса меняется своей полосой, а по коду сервисы друг от друга не
 // зависят вовсе. Довод «UTC ради детерминированности» самодостаточен и в чужом
-// подтверждении не нуждается (#1951).
+// подтверждении не нуждается (kacho#1951).
 func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Account, error) {
 	labelsJSON, err := marshalLabels(a.Labels)
 	if err != nil {
@@ -522,7 +522,7 @@ func unmarshalLabels(b []byte) (domain.Labels, error) {
 
 // ---- filter / page-token helpers ------------------------------------------
 
-// Форма курсора объявлена ОДИН раз — в `pkg/pagetoken` (#652). Здесь стоял
+// Форма курсора объявлена ОДИН раз — в `pkg/pagetoken` (kacho#652). Здесь стоял
 // авторитетный кодек, а на границе приложения — его рукописное зеркало, и
 // зеркало бежало ПЕРВЫМ: смена формы вносилась бы в два места, и первое же
 // пропущенное дало бы ответ, зависящий от того, какой декодер отработал раньше.

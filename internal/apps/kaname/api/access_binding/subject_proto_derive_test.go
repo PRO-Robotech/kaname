@@ -4,7 +4,7 @@
 package access_binding
 
 // subject_proto_derive_test.go — Design-B (flat-authz verb-bearing complete)
-// acceptance VBC-16 (subject id-prefix derive, #243). When a binding-Create
+// acceptance VBC-16 (subject id-prefix derive, kacho-iam#243). When a binding-Create
 // request carries SUBJECT_TYPE_UNSPECIFIED (protojson DiscardUnknown drops a
 // lowercase `"type":"user"` to the zero enum on the UI flow), subjectsFromProto
 // derives the subject type from the id prefix:

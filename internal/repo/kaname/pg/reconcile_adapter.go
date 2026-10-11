@@ -261,7 +261,7 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 		return ro, nil
 	}
 	// Читается ТЕМ ЖЕ загрузчиком, что пакетный путь: жизненное состояние роли
-	// решает, даёт ли она покрытие (#1913), и два оператора об одном предмете
+	// решает, даёт ли она покрытие (kacho#1913), и два оператора об одном предмете
 	// разошлись бы молча — на живой роли они отвечают одинаково.
 	loaded, err := loadRolesWithLifecycle(ctx, s.tx, []string{string(id)})
 	if err != nil {
@@ -321,7 +321,7 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 // поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
 func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
 	// СНЯТАЯ роль даёт ровно то же, что РОЛЬ, УДАЛЁННАЯ из-под выдачи, — «нет
-	// покрытия» (#1913). Правила у неё целы: отзыв есть ПОМЕТКА, и `rules`
+	// покрытия» (kacho#1913). Правила у неё целы: отзыв есть ПОМЕТКА, и `rules`
 	// остаются прежними навсегда. Оставь их читаться — и реконсайлер вычислит
 	// непустой желаемый состав, а вставку отвергнет
 	// `access_binding_target_members_role_live_fk`; `23503` в этой полосе не
@@ -356,7 +356,7 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 		// ARM_LABELS. Empty for a thin (legacy permissions-only) role → no
 		// materialized members.
 		//
-		// SCOPE-AWARE (issue #224 / D-8a / D-9): a wildcard `*.*` rule expands to the
+		// SCOPE-AWARE (issue kacho-iam#224 / D-8a / D-9): a wildcard `*.*` rule expands to the
 		// full materializable type set ONLY for a BOUNDED scope (ACCOUNT/PROJECT) so
 		// the owner becomes an explicit per-object admin on the account's content; a
 		// GLOBAL/CLUSTER `*.*` binding (cluster super-admin) yields no content
@@ -493,7 +493,7 @@ func (s *reconcileStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []s
 //     project-scoped role/SA so the account-scoped owner binding still contains it),
 //     parent_project = project_id (NULL → ”).
 //   - iam.user — аккаунты берутся из kaname.memberships, а НЕ из колонки строки
-//     (#1172); их бывает несколько, поэтому источник назван parentAccountsExpr.
+//     (kacho#1172); их бывает несколько, поэтому источник назван parentAccountsExpr.
 //   - iam.accessBinding — scoped by (resource_type, resource_id): account-scoped →
 //     parent_account; project-scoped → parent_project (+ its account via the projects
 //     join); cluster-scoped → neither (contained only in cluster scope).
@@ -567,12 +567,12 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 		objectType: "iam.serviceAccount", table: "kaname.service_accounts",
 		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
 	},
-	// ЛИЧНОСТЬ — аккаунты из СВЯЗИ, а не из колонки строки (#1172).
+	// ЛИЧНОСТЬ — аккаунты из СВЯЗИ, а не из колонки строки (kacho#1172).
 	//
 	// `kaname.users.account_id` называет ОДИН аккаунт человека из многих:
-	// принадлежность стала отдельной связью (#470/#471), и цепь областей читает
-	// её из `kaname.memberships` с #944. Колонка при этом осталась
-	// легаси-полем перехода — её не правит ни исключение из аккаунта (#1127), ни
+	// принадлежность стала отдельной связью (kacho#470/#471), и цепь областей читает
+	// её из `kaname.memberships` с kacho#944. Колонка при этом осталась
+	// легаси-полем перехода — её не правит ни исключение из аккаунта (kacho#1127), ни
 	// приглашение во второй, — поэтому опора на неё давала выдаче ДВА неверных
 	// исхода сразу: второй аккаунт не находил своего человека, а первый
 	// продолжал накрывать исключённого.
@@ -614,7 +614,7 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 //     the Go re-verify — over-broad is safe, under-broad is not).
 //
 // Аккаунт спрашивается ВХОЖДЕНИЕМ В НАБОР, потому что набор и есть то, что
-// проецирует SELECT: у личности аккаунтов столько, сколько членств (#1172), и
+// проецирует SELECT: у личности аккаунтов столько, сколько членств (kacho#1172), и
 // равенство скаляру отбросило бы человека, чьё членство в спрашиваемом аккаунте
 // НЕ ПЕРВОЕ, — то есть дало бы недостачу, а не избыток.
 //
@@ -958,7 +958,7 @@ func (s *reconcileStore) SelectorBindingsMatchingObject(ctx context.Context, obj
 		    -- Форма ЧЛЕНСТВА, а не "скаляр = ANY(массив)": под столбцом стоит
 		    -- GIN, а он обслуживает @> / && / = и НЕ обслуживает вторую форму —
 		    -- планировщик на ней индекс не берёт и читает столбец
-		    -- последовательно. Семантика одна, путь доступа разный (#2053).
+		    -- последовательно. Семантика одна, путь доступа разный (kacho#2053).
 		    AND rrs.object_types @> ARRAY[$1::text]
 		    AND ( (rrs.arm = 'anchor' AND (
 		                b.resource_type = 'cluster'
@@ -1059,7 +1059,7 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	        JOIN ` + spec.table + ` o ON o.id = $2 ` + spec.join + `
 	       WHERE b.status = 'ACTIVE'
 	         -- Форма ЧЛЕНСТВА — см. соседний отбор выше: GIN не обслуживает
-	         -- "скаляр = ANY(массив)" (#2053).
+	         -- "скаляр = ANY(массив)" (kacho#2053).
 	         AND rrs.object_types @> ARRAY[$1::text]
 	         AND ( ` + anchorBranch + `
 	            OR (rrs.arm = 'names'  AND $2 = ANY(rrs.resource_names))` + labelsBranch + ` )
@@ -1474,7 +1474,7 @@ func (a *ReconcileAdapter) MarkReconcileEventSent(ctx context.Context, id int64)
 //
 // Пулом, а не транзакцией сверки: та откатывается целиком при отказе, и учёт
 // попытки откатился бы вместе с ней — счётчик не двигался бы никогда, а отсечка
-// была бы недостижима by construction (#2050).
+// была бы недостижима by construction (kacho#2050).
 func (a *ReconcileAdapter) RecordReconcileEventFailure(ctx context.Context, id int64, cause string) (int, error) {
 	return reconcile_outbox.RecordFailure(ctx, a.pool, id, cause)
 }
@@ -1533,7 +1533,7 @@ func (a *ReconcileAdapter) ListSelectorBindingIDs(ctx context.Context) ([]domain
 // подмена по совпадению: пока наборы типов совпадали, пересечение равнялось «всем
 // глаголам». Пересечение объявлено СУЖАЮЩИМСЯ, поэтому сужение набора у ЧУЖОГО
 // типа отнимало глагол здесь — а понижение яруса на кластере ровно то, чего этот
-// комментарий и обещал не допустить. Наблюдалось при #1189: пересечение стало
+// комментарий и обещал не допустить. Наблюдалось при kacho#1189: пересечение стало
 // `[get list]`, ярус подстановки — `viewer`. Держит `scope_anchor_tier_test.go`.
 // Каталог приходит ПАРАМЕТРОМ, а не спрашивается у литерала (kacho#1816):
 // «какие глаголы объявлены» может измениться в РАБОТАЮЩЕМ процессе снятием

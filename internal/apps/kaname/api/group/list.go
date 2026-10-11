@@ -10,14 +10,14 @@ package group
 //	visible(id) = Check(subj,"viewer","iam_group:"+id)
 //	            ∨ Check(subj,"v_list","iam_group:"+id)
 //
-// спрашиваемых для КАНДИДАТОВ, отобранных сужённо (задача #645, см. ниже).
+// спрашиваемых для КАНДИДАТОВ, отобранных сужённо (задача kacho#645, см. ниже).
 // Перечисление у МОДЕЛИ («перечислить всё видимое и пересечь») остаётся
 // запрещённым. У прежнего движка оно молча резалось серверным пределом без
 // продолжения; движка нет, а запрет остаётся по существу — вопрос «перечисли
 // всё видимое» неограничен по построению, и ответ на него страницей не является
 // (см. internal/authzfilter).
 //
-// # Страница этого списка — страница ВИДИМОГО (задача #645)
+// # Страница этого списка — страница ВИДИМОГО (задача kacho#645)
 //
 // Прежде страница бралась окном по всей таблице, и видимое вычиталось после.
 // Такой порядок теряет всякую строку, перед которой по времени создания лежит
@@ -72,7 +72,7 @@ type ListGroupsUseCase struct {
 	// iam_group. При nil use-case fail-closed (никогда unfiltered).
 	relationQueries clients.RelationQueries
 
-	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// listScan — узкий порт наблюдаемости стоимости страницы (kacho#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
 }
@@ -83,7 +83,7 @@ func NewListGroupsUseCase(r Repo) *ListGroupsUseCase {
 
 // WithRelationStore wires the FGA ListObjects client (паритет с
 // account/project/service_account/role List).
-// WithListScanRecorder провязывает съём стоимости страницы (#653).
+// WithListScanRecorder провязывает съём стоимости страницы (kacho#653).
 func (u *ListGroupsUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListGroupsUseCase {
 	u.listScan = rec
 	return u

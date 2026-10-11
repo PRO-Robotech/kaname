@@ -930,7 +930,7 @@ type ListAccessBindingsResponse struct {
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	// ПОЛНОЕ перечисление поверхности выдач для этой страницы: сами выдачи плюс
 	// записи двух соседних поверхностей — состава групп и кластерных
-	// администраторов (#914, решение 2). Каждая запись называет свой ВИД.
+	// администраторов (kacho#914, решение 2). Каждая запись называет свой ВИД.
 	//
 	// ЧТО СЮДА ПОПАДАЕТ И ПОЧЕМУ ИМЕННО ЭТО:
 	//   - выдачи — ровно те, что в `access_bindings`, вид ACCESS_BINDING;

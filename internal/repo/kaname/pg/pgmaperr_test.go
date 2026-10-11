@@ -80,7 +80,7 @@ func TestWrapPgErr_NoLeak_OnUnmappedConstraints(t *testing.T) {
 		sentinel error
 		wantText string
 	}{
-		// Код состояния остаётся в ЦЕПОЧКЕ ради журнала (#666); клиенту он не
+		// Код состояния остаётся в ЦЕПОЧКЕ ради журнала (kacho#666); клиенту он не
 		// достаётся — перевод sentinel'а в статус заменяет сообщение `Internal`
 		// целиком, и это утверждает отдельная проба ниже.
 		{"unmapped-sqlstate", "XX000", iamerr.ErrInternal, "database error: sqlstate XX000"},
@@ -138,7 +138,7 @@ func TestWrapPgErr_SerializationFailure_Aborted(t *testing.T) {
 // класса без пробы — это половина, которую сузят, не заметив.
 //
 // Взаимная блокировка поднимается при ЛЮБОМ уровне изоляции, поэтому довод
-// «у нас READ COMMITTED» её не исключает (задача #2439).
+// «у нас READ COMMITTED» её не исключает (задача kacho#2439).
 func TestWrapPgErr_Deadlock_Aborted(t *testing.T) {
 	err := wrapPgErr(mkPgErr("40P01", secretConstraint), "", "")
 	if !stderrors.Is(err, iamerr.ErrAborted) {
@@ -254,7 +254,7 @@ func TestWrapPgErr_NonPgError_PassesThrough(t *testing.T) {
 	}
 }
 
-// ── #666: отказ соединения — недоступность, а не поломка ────────────────────
+// ── kacho#666: отказ соединения — недоступность, а не поломка ────────────────────
 
 // TestWrapPgErr_ConnectionRefusals_AreUnavailable — отказ ОТКРЫТЬ соединение
 // читается как временная недоступность, а не как поломка сервиса.
@@ -401,7 +401,7 @@ func TestWrapPgErr_UnmappedSqlstate_KeepsTheCodeForTheLog(t *testing.T) {
 }
 
 // TestWrapPgErr_KNRTX02_SyncLaneKeepsItsTextAndCode — СИНХРОННАЯ полоса не
-// тронута разведением текстов (приёмка #2439, сценарий KN-RTX-02).
+// тронута разведением текстов (приёмка kacho#2439, сценарий KN-RTX-02).
 //
 // # Зачем ещё одна проба рядом с двумя выше
 //

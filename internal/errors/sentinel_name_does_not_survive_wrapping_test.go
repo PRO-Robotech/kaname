@@ -4,7 +4,7 @@
 package errors_test
 
 // sentinel_name_does_not_survive_wrapping_test.go — имя сентинела не уезжает
-// вызывающему, КОГДА БЫ ОНО НИ ОКАЗАЛОСЬ В СЕРЕДИНЕ сообщения (задача #1889).
+// вызывающему, КОГДА БЫ ОНО НИ ОКАЗАЛОСЬ В СЕРЕДИНЕ сообщения (задача kacho#1889).
 //
 // ПРЕДМЕТ. `StripSentinel` снимала имя признака ПРЕФИКСОМ. Вызывающий,
 // добавивший свой контекст перед отказом репозитория (`fmt.Errorf("%w: %s: %w",
@@ -59,7 +59,7 @@ func TestSentinelNameDoesNotSurviveCallerWrapping(t *testing.T) {
 					"resources: %s is not a live platform resource", "probeWithdrawn")),
 			want: "moduleroles: writing the declared role failed: vpc.network.admin: " +
 				"resources: probeWithdrawn is not a live platform resource",
-			why: "предмет задачи #1889",
+			why: "предмет задачи kacho#1889",
 		},
 		{
 			name: "две обёртки контекста — имя признака всё равно уходит",
@@ -95,7 +95,7 @@ func TestSentinelNameDoesNotSurviveCallerWrapping(t *testing.T) {
 			name: "вырожденный: обёртка без текста — замещается именем признака",
 			err:  iamerr.Wrapf(iamerr.ErrNotFound, "%s", ""),
 			want: "not found",
-			why:  "отказ БЕЗ СООБЩЕНИЯ остаётся невозможным (#1658)",
+			why:  "отказ БЕЗ СООБЩЕНИЯ остаётся невозможным (kacho#1658)",
 		},
 		{
 			name: "нет отказа — нет текста",
@@ -129,6 +129,6 @@ func TestSentinelNameDoesNotSurviveCallerWrapping(t *testing.T) {
 	}
 	t.Logf("перепись: из них с контекстом вызывающего впереди %d", wrapped)
 	if wrapped == 0 {
-		t.Fatal("ни одной обёртки контекста — проба не касается предмета #1889")
+		t.Fatal("ни одной обёртки контекста — проба не касается предмета kacho#1889")
 	}
 }

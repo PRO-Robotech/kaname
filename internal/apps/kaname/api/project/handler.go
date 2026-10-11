@@ -108,7 +108,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetProjectRequest) (*iamv1
 // того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListProjectsRequest) (*iamv1.ListProjectsResponse, error) {
 	// Форма токена этого списка — визуальная граница ВИДИМОЙ последовательности
-	// (#645), а не сырой страницы, поэтому и на границе транспорта судится она.
+	// (kacho#645), а не сырой страницы, поэтому и на границе транспорта судится она.
 	// Общая ValidateRawPagination приняла бы токен прежней формы, и обход,
 	// начатый до выкатки, продолжился бы приблизительно — молча пропуская строки.
 	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {

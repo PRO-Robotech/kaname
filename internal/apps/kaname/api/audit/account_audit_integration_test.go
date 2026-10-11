@@ -50,7 +50,7 @@ func TestAccountAudit_5_2_10_CreateEmits(t *testing.T) {
 	require.Equal(t, "acme-acc10", r.payload["name"])
 	require.Equal(t, string(owner), r.payload["actor"])
 	require.Equal(t, "pending", r.status)
-	require.Regexp(t, evtIDFormat, r.id, "audit id must be the 22-char evt_ format (#126 guard)")
+	require.Regexp(t, evtIDFormat, r.id, "audit id must be the 22-char evt_ format (kacho-iam#126 guard)")
 }
 
 func TestAccountAudit_5_2_11_UpdateEmits(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// TestIntegration_IAM_NameFormConstraintIsEnforced — задача #1279.
+// TestIntegration_IAM_NameFormConstraintIsEnforced — задача kacho#1279.
 //
 // iam пришёл к единственной форме имени последним из семи схем: до этого его
 // таблицы несли СВОЮ форму (`^[a-z][-a-z0-9]{2,62}$`), расходившуюся с каноном
@@ -155,7 +155,7 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 		// Таблицы, несущие форму имени НАМЕРЕННО ДРУГУЮ.
 		OtherForm: map[string]string{
 			"roles": "идентификатор роли (`roles/vpc.admin`), а не косметическая метка: " +
-				"на него ссылаются привязки — записанное решение владельца (#715)",
+				"на него ссылаются привязки — записанное решение владельца (kacho#715)",
 			"clusters": "кластер — посевной синглтон, глагола создания у него нет; " +
 				"имя приходит одной строкой миграции",
 		},

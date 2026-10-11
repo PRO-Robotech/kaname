@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// usecase_id_length_test.go — ПОЛОСА ОТКАЗА для задачи #1791: проверка формата
+// usecase_id_length_test.go — ПОЛОСА ОТКАЗА для задачи kacho#1791: проверка формата
 // идентификатора служебной учётки на пути выдачи ключа обязана судить ДЛИНУ, а
 // не только префикс.
 //

@@ -3,7 +3,7 @@
 
 package pg_test
 
-// module_catalog_delivered_anchor_integration_test.go — предикат задачи #1861
+// module_catalog_delivered_anchor_integration_test.go — предикат задачи kacho#1861
 // ПРОТИВ ЖИВОЙ БАЗЫ: модуль, которого образ не несёт, применяется, и следующий
 // старт проходит.
 //
@@ -74,7 +74,7 @@ func containsRow(haystack, needle string) bool {
 }
 
 // TestDeliveredModuleTheImageDoesNotCarryApplesAndTheNextBootPasses — три
-// предиката задачи #1861 подряд, на одной живой базе.
+// предиката задачи kacho#1861 подряд, на одной живой базе.
 func TestDeliveredModuleTheImageDoesNotCarryApplesAndTheNextBootPasses(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	applier := applierOver(t, pool)

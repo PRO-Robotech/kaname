@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// pageDenies — страница в том виде, в каком она лгала до #2525.
+// pageDenies — страница в том виде, в каком она лгала до kacho#2525.
 const pageDenies = `## Приглашение
 
 ` + "`Operation.metadata`" + ` вернёт ` + "`magicLinkUrl`" + ` — ссылку первого входа, которую админ передаёт
@@ -150,7 +150,7 @@ func TestInviteMailLaneProducers_TestFileIsNotAProducer(t *testing.T) {
 // не даёт ни красного, ни зелёного.
 
 // pageDeniesInflected — предмет в родительном падеже, отрицание голое. Ровно
-// тот текст, что жил на странице до второго захода #2525.
+// тот текст, что жил на странице до второго захода kacho#2525.
 const pageDeniesInflected = `## Что должно быть до начала
 
 Администратор передаёт ссылку приглашённому вручную — автоматической отправки

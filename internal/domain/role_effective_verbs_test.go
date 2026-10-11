@@ -106,7 +106,7 @@ func TestRole_IAM_1_15_AuthoredVerbs_MultiRule(t *testing.T) {
 // утверждала бы отсутствие там, где отсутствует всё.
 func TestRole_PreviewOfARetiredResourceShowsNoVerb(t *testing.T) {
 	// Живой каталог знает `compute.instance`; `compute.disk` снят и живой
-	// строки не имеет — ровно то, что делает снятие (#1861).
+	// строки не имеет — ровно то, что делает снятие (kacho#1861).
 	live := func(module, resource string) ([]string, bool) {
 		if module == "compute" && resource == "instance" {
 			return []string{"get", "list", "create", "update", "delete"}, true

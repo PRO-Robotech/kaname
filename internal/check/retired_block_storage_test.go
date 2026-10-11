@@ -182,7 +182,7 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 	// per-object type was never producible as an anchor. It answered true here only
 	// because the anchor whitelist was a second, diverged copy carrying 20
 	// unreachable entries, so this control was pairing a real negative with a
-	// positive that WAS the defect. The whitelist is removed (#1092) and the
+	// positive that WAS the defect. The whitelist is removed (kacho#1092) and the
 	// control is an actual anchor, which is what "the predicate is not false for
 	// everything" needs.
 	for _, r := range retiredBlockStorage {
@@ -328,7 +328,7 @@ func TestRetiredBlockStorageIsNotInAuthorizationModel(t *testing.T) {
 // создано»), то есть копия платформы осталась бы без сторожа, а её молчание не
 // отличалось бы от исправной работы.
 //
-// Поэтому утверждение РАЗДЕЛЕНО (задача продукта #2361): половина края
+// Поэтому утверждение РАЗДЕЛЕНО (задача продукта kacho#2361): половина края
 // переехала в дерево платформы —
 // `internal/repohygiene` `TestRetiredBlockStorageIsNotInTheEdgePermissionCatalog`
 // плюс её инъекция и проверка живости собственной таблицы. Здесь остаётся

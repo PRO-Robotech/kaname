@@ -34,14 +34,14 @@ package role
 //     via the viewer branch (account-tier cascade).
 //
 //     Whether this type ought to carry a content relation at all WAS an open
-//     decision (#1922); it is decided and closed. `v_get` is no longer declared
+//     decision (kacho#1922); it is decided and closed. `v_get` is no longer declared
 //     on `iam_role` at all — not "declared and ungated": no reader ever asked
 //     it, no catalog entry ever named it for this type, and a relation nobody
 //     asks is a promise of a right rather than a right. It was retired from the
 //     manifest, from the canonical model and from the catalog row, so the open
 //     question is gone together with its subject rather than left standing.
 //
-// # A page of this list is a page of the VISIBLE (task #645)
+// # A page of this list is a page of the VISIBLE (task kacho#645)
 //
 // The page used to be a raw window over `roles`, from which the visible was
 // subtracted afterwards — and on THIS surface that defect arrived on day one,
@@ -97,7 +97,7 @@ import (
 
 type ListRolesUseCase struct {
 	repo Repo
-	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (#1994).
+	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (kacho#1994).
 	// Приходит ОБЯЗАТЕЛЬНЫМ параметром, а не опцией: непровязанный источник даёт
 	// роль без набора, а проекция такую роль отвергает — то есть чтение отказало
 	// бы целиком и в рантайме. Компилятор ловит это раньше.
@@ -108,7 +108,7 @@ type ListRolesUseCase struct {
 	// closed.
 	relationQueries clients.RelationQueries
 
-	// listScan — узкий порт наблюдаемости стоимости страницы (#653).
+	// listScan — узкий порт наблюдаемости стоимости страницы (kacho#653).
 	// Не провязан ⇒ наблюдение выключено, а не сломано.
 	listScan shared.ListScanRecorder
 }
@@ -120,7 +120,7 @@ func NewListRolesUseCase(r Repo, cat catalog.Source) *ListRolesUseCase {
 // WithRelationStore wires the FGA client used to resolve the principal's
 // readable-role visibility on iam_role. Mirrors ListAccountsUseCase /
 // ListProjectsUseCase.
-// WithListScanRecorder провязывает съём стоимости страницы (#653).
+// WithListScanRecorder провязывает съём стоимости страницы (kacho#653).
 func (u *ListRolesUseCase) WithListScanRecorder(rec shared.ListScanRecorder) *ListRolesUseCase {
 	u.listScan = rec
 	return u

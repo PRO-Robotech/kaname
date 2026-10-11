@@ -6,7 +6,7 @@ package pg
 // pgmaperr_account_owner_lane_test.go — `accounts_owner_fk` несёт ОБЕ стороны
 // пары сентинелов, а не одну.
 //
-// ПРЕДМЕТ (#2048). Ветвь отвечала «User %s not found» + `ErrReferenceMissing`
+// ПРЕДМЕТ (kacho#2048). Ветвь отвечала «User %s not found» + `ErrReferenceMissing`
 // при ЛЮБОМ исходе. Ограничение объявлено `ON DELETE RESTRICT`, то есть
 // срабатывает и на снятии человека, ВЛАДЕЮЩЕГО аккаунтом, — а это состояние
 // «ещё ссылаются», противоположное «ссылки нет». Человек, которого только что
@@ -34,7 +34,7 @@ import (
 
 // ownerLaneRefusal — текст стороны «ещё ссылаются». Держится здесь дословно,
 // потому что его же обещает шапка use-case снятия человека
-// (`internal/apps/kaname/api/user/delete.go`), и до #2048 у этого обещания не
+// (`internal/apps/kaname/api/user/delete.go`), и до kacho#2048 у этого обещания не
 // было производителя нигде в дереве: единственным вхождением строки был сам
 // комментарий.
 const ownerLaneRefusal = "owns accounts and cannot be deleted"

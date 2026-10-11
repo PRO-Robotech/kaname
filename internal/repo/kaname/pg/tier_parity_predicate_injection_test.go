@@ -66,7 +66,7 @@ func TestTierParityPredicateFallsOnAnInjectedDivergenceAndIsSilentOnItsLegalTwin
 	// ── Законный близнец ────────────────────────────────────────────────────
 	//
 	// `iam.user` несёт ОДИН тир, и это верно: набор типа `iam_user` — `[get
-	// list]`, распоряжающегося глагола у него нет (#1128, #1189), поэтому ось
+	// list]`, распоряжающегося глагола у него нет (kacho#1128, kacho#1189), поэтому ось
 	// семейства сужена до `view`. `vpc.network` несёт все три: у его типа есть и
 	// `delete`, и `update`.
 	twin := []tierParityRole{

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // remove_from_account_names_grants_test.go — отказ исключения ОБЯЗАН НАЗВАТЬ
-// выдачи, которые мешают (задача продукта #1686).
+// выдачи, которые мешают (задача продукта kacho#1686).
 //
 // # Предмет — обещание контракта, у которого не было производителя
 //
@@ -131,7 +131,7 @@ func errorInfoOf(t *testing.T, err error) *errdetails.ErrorInfo {
 	return nil
 }
 
-// TestRemoveFromAccount_RefusalNamesTheGrantsThatHold — #1686.
+// TestRemoveFromAccount_RefusalNamesTheGrantsThatHold — kacho#1686.
 //
 // Утверждает ПАРУ: код и текст. Кода одного мало — FAILED_PRECONDITION приходит и
 // на отказе, который выдач не называет, то есть ровно на дефекте.

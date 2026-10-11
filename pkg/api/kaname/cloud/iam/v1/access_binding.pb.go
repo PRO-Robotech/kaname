@@ -82,7 +82,7 @@ func (SubjectType) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_access_binding_proto_rawDescGZIP(), []int{0}
 }
 
-// GrantSurfaceKind — ВИД записи поверхности выдач (#914, решение 2).
+// GrantSurfaceKind — ВИД записи поверхности выдач (kacho#914, решение 2).
 //
 // Поверхностей ВЫДАЧИ три, и они остаются раздельными: выдача заводится и
 // отзывается своим глаголом, состав группы — своим, кластерный администратор —

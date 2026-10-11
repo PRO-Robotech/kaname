@@ -13,7 +13,7 @@ import (
 
 // resourceforms_test.go — ФОРМЫ раздела `resources`, заведённые ради блоков,
 // которые канон несёт сегодня и которые прежняя форма не выражала ни при каком
-// входе (#1845, #1846, #1853, #1858, #1860).
+// входе (kacho#1845, kacho#1846, kacho#1853, kacho#1858, kacho#1860).
 //
 // Каждая проба здесь — ПАРА: отрицание (загрузчик отвергает и называет поле и
 // правило) плюс положительный контроль (законный близнец проходит). Отрицание без
@@ -45,7 +45,7 @@ func mustRefuse(t *testing.T, doc string, kind error, mentions ...string) {
 }
 
 // ЗДЕСЬ ФИКСТУРЫ НАЗЫВАЛИ РЕСУРС `repository` при типе `registry_repository`, и
-// после размыкания таблицы типов (#2015) это стало НАХОДКОЙ, а не безобидной
+// после размыкания таблицы типов (kacho#2015) это стало НАХОДКОЙ, а не безобидной
 // синтетикой: образ объявляет `registry_repository` строкой `registry.repositories`,
 // то есть фикстура присваивала чужой типа ДРУГОЙ строке. Имя приведено к тому,
 // каким его несёт образ; предмет проб — форма указателя — не изменился, и
@@ -61,7 +61,7 @@ func mustAccept(t *testing.T, doc string) *manifest.Manifest {
 	return m
 }
 
-// ── Указатели: имя и тип раздельно (#1860), их бывает несколько (#1858) ──────
+// ── Указатели: имя и тип раздельно (kacho#1860), их бывает несколько (kacho#1858) ──────
 
 // TestMODMR28ParentTypeMayBeAClosedTableType — тип указателя расширен ТИПАМИ, а
 // не якорями области.
@@ -146,7 +146,7 @@ func TestMODMR29AnUnknownKeyInsideAParentIsRefusedWithItsLine(t *testing.T) {
 		"    parents:\n      - {name: parent, type: registry_registry}\n    verbs: [get]\n")
 }
 
-// ── Каскад и ярусы: ссылка обязана иметь предмет (#1858) ─────────────────────
+// ── Каскад и ярусы: ссылка обязана иметь предмет (kacho#1858) ─────────────────────
 
 // TestMODMR30ACascadeTermDerivesFromADeclaredParent — вывод по указателю,
 // которого блок не объявляет, дал бы вердикт «нет» всегда.
@@ -209,7 +209,7 @@ func TestMODMR31TheLongTierFormIsRefusedWithoutOwnSources(t *testing.T) {
 	mustAccept(t, resourceDoc("    parents: [project]\n    tiers: [admin, viewer]\n"))
 }
 
-// ── Класс действия берётся из набора ТИПА, а не из пятёрки (#1853) ───────────
+// ── Класс действия берётся из набора ТИПА, а не из пятёрки (kacho#1853) ───────────
 
 // targetGroupDoc — манифест балансировщика с ресурсом, чей ТИП объявляет набор
 // шире канонического CRUD: `nlb_target_group` несёт `v_addtargets` и
@@ -287,7 +287,7 @@ func TestMODMR32AClassNoActionOfThisResourceProducesIsRefused(t *testing.T) {
 	mustAccept(t, resourceDoc("    parents: [project]\n"))
 }
 
-// ── Источники и субъекты действия (#1846) ────────────────────────────────────
+// ── Источники и субъекты действия (kacho#1846) ────────────────────────────────────
 
 // TestMODMR33AVerbSourceMustBeDeclaredByTheBlock — действие, выведенное от
 // несуществующего отношения, остаётся на вид полноценным и не даёт ничего.
@@ -319,7 +319,7 @@ func TestMODMR33AnEmptySourceOrSubjectListIsRefused(t *testing.T) {
 	mustAccept(t, head+"    verbs:\n      - {name: get, subjects: [\"user:*\", user]}\n")
 }
 
-// ── Место авторского отношения (#1862) ───────────────────────────────────────
+// ── Место авторского отношения (kacho#1862) ───────────────────────────────────────
 
 // TestMODMR34ARelationPlaceOutsideTheClosedSetIsRefused — место, которого рендер
 // не знает, оставило бы отношение там, где его никто не решал ставить.
@@ -343,7 +343,7 @@ func TestMODMR34ARelationPlaceOutsideTheClosedSetIsRefused(t *testing.T) {
 	}
 }
 
-// ── Примечание с якорем (#1845) ──────────────────────────────────────────────
+// ── Примечание с якорем (kacho#1845) ──────────────────────────────────────────────
 
 // TestMODMR35ANoteAnchorMustBeDeclaredByTheBlock — примечание с якорем в пустоту
 // не напечаталось бы вовсе, а вызывающий получил бы успех.

@@ -4,7 +4,7 @@
 package check_test
 
 // seeded_id_exception_subject_test.go — у КАЖДОЙ записи закрытого перечня
-// `domain.SeededResourceIDs()` обязан быть ПРЕДМЕТ. Гейт задачи #1808.
+// `domain.SeededResourceIDs()` обязан быть ПРЕДМЕТ. Гейт задачи kacho#1808.
 //
 // # ЗАЧЕМ
 //

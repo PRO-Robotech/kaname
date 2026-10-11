@@ -98,7 +98,7 @@ func classifySystemRole(name string) (family, tier string, tiered bool) {
 // Полная ось (`admin`/`edit`/`view`) была верным ожиданием, пока набор глаголов
 // был платформенной константой: у каждого типа находился глагол любого тира. С
 // набором, ставшим атрибутом ТИПА, это перестало быть верным — у `iam_user` снят
-// `update` (#1128), и тир `edit` на нём стал НЕВЫРАЗИМ: роль `iam.user.edit`
+// `update` (kacho#1128), и тир `edit` на нём стал НЕВЫРАЗИМ: роль `iam.user.edit`
 // материализовала бы ноль кортежей, а её имя обещало бы правку.
 //
 // Ожидание поэтому ВЫВОДИТСЯ из набора типа, а не выписывается послаблением:
@@ -227,7 +227,7 @@ func legacyTierMap(perms []string) map[string]string {
 // равнялось набору любого типа — то есть было верным по совпадению. Пересечение
 // объявлено СУЖАЮЩИМСЯ: как только тип снимает у себя глагол, оно перестаёт
 // совпадать с набором СОСЕДНЕГО типа, и ожидание пробы расходится с тем, что
-// считает прод (#1189: пересечение стало `[get list]`, и 17 семейств `admin`
+// считает прод (kacho#1189: пересечение стало `[get list]`, и 17 семейств `admin`
 // вычислялись здесь как `viewer`). Предикат обязан спрашивать тот же набор, что
 // материализация, — иначе это второе место об одном предмете.
 func rulesTierMap(rules domain.Rules) map[string]string {
@@ -260,7 +260,7 @@ type jsonRule struct {
 // Прежде оба свойства стояли ВНУТРИ тела пробы ниже, и воспроизвести их у
 // второй популяции было нечем. Копия завела бы второе место об одном предмете,
 // и разошлись бы они МОЛЧА: обе стороны остались бы зелёными, утверждая разное.
-// Поэтому предикат — функция, а популяция — её аргумент (задача #1894).
+// Поэтому предикат — функция, а популяция — её аргумент (задача kacho#1894).
 //
 // Популяций сегодня две, и обе идут через ЭТОТ вызов:
 //
@@ -279,7 +279,7 @@ type jsonRule struct {
 // Три координаты приёмки `system-role-segments-resolve.md` пинят СТРОКУ
 // `legacyVerbTier` (`…tier_parity_integration_test.go:182`), и всякая вставка
 // выше неё сдвигает их МОЛЧА: гейта на координату вида `файл:строка` в дереве
-// нет (заведено задачей #1896, гейт координат судит только имя пробы). Поэтому
+// нет (заведено задачей kacho#1896, гейт координат судит только имя пробы). Поэтому
 // новое стоит ниже 182-й строки, а объяснение — здесь, у предмета, а не в шапке.
 // Координата П21 на выборку популяции всё равно уехала: код, на который она
 // указывала, переехал в `systemRolesOfBase`, и удержать её было нечем — но её
@@ -532,7 +532,7 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 			// материализация на якоре без собственного (см. scopeTypeVerbs).
 			_, wantTier := domain.ResolveVerbsAndTier(rule.Verbs, authzmap.AllVerbVocabulary())
 			require.Containsf(t, []string{"viewer", "editor", "admin"}, wantTier,
-				"#201 emit-fact: wildcard system-role %s must resolve to a tier-tuple relation (got %q) — an unresolved tier is the empty-grant #201 bug",
+				"kacho-iam#201 emit-fact: wildcard system-role %s must resolve to a tier-tuple relation (got %q) — an unresolved tier is the empty-grant kacho-iam#201 bug",
 				r.name, wantTier)
 		}
 	}
@@ -543,10 +543,10 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 	// be re-guessed whenever the catalog moves.
 	for _, tier := range catalogTiers {
 		name, ok := rep.Families[globalFamily][tier]
-		require.Truef(t, ok, "#201 emit-fact: the %s family has no %q member — checked by the catalog tier parity above",
+		require.Truef(t, ok, "kacho-iam#201 emit-fact: the %s family has no %q member — checked by the catalog tier parity above",
 			globalFamily, tier)
 		require.Truef(t, wildcardBearers[name],
-			"#201 emit-fact: %s family role %q carries no full-wildcard `*.*` rule — that is the shape which silently emits nothing",
+			"kacho-iam#201 emit-fact: %s family role %q carries no full-wildcard `*.*` rule — that is the shape which silently emits nothing",
 			globalFamily, name)
 	}
 }

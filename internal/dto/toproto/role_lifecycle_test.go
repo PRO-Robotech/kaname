@@ -3,7 +3,7 @@
 
 package toproto
 
-// role_lifecycle_test.go — жизненное состояние роли на проводе (#1913).
+// role_lifecycle_test.go — жизненное состояние роли на проводе (kacho#1913).
 //
 // Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // §2.6; сценарии IAM-RW-1-17, IAM-RW-1-19, IAM-RW-1-20.

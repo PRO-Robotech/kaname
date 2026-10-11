@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subject_change_retention_integration_test.go — УБОРКА ЖУРНАЛА СМЕНЫ СУБЪЕКТА
-// (задача #1758).
+// (задача kacho#1758).
 //
 // # Что здесь утверждается — ИНВАРИАНТ, а не расписание
 //

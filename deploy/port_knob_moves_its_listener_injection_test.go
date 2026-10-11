@@ -37,7 +37,7 @@ const portsBlockAfterTheFix = "ports:\n  grpc: 9090\n  internalGrpc: 9091\n"
 // retiredKnobGuardInclude — провязка стража снятых ключей.
 const retiredKnobGuardInclude = `{{- include "kaname-svc.requireNoRetiredKnobs" . -}}`
 
-// chartCopyBeforeTheFix — копия чарта в состоянии ДО починки #2394: ключ
+// chartCopyBeforeTheFix — копия чарта в состоянии ДО починки kacho#2394: ключ
 // `ports.metrics` объявлен профилем, шаблон пода читает ЕГО, стража снятых
 // ключей нет. Три правки суть ОДИН факт — «состояние до починки», — и тем же
 // способом инъицирует соседний гейт маршрутов.

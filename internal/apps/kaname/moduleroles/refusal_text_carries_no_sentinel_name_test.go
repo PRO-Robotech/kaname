@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // refusal_text_carries_no_sentinel_name_test.go — текст отказа, который читает
-// ВЫЗЫВАЮЩИЙ, не несёт служебного имени признака (задача #1889).
+// ВЫЗЫВАЮЩИЙ, не несёт служебного имени признака (задача kacho#1889).
 //
 // ПОЧЕМУ ЗДЕСЬ, А НЕ ТОЛЬКО В `internal/errors`. Юнит на `StripSentinel` зовёт
 // функцию без вызывающего и без тракта: он закрепляет ОТВЕТ функции, а не то,
@@ -81,7 +81,7 @@ func TestWriterRefusalTextCarriesNoSentinelName(t *testing.T) {
 	if !strings.Contains(msg, "moduleroles: writing the declared role failed: vpc.network.admin") {
 		t.Errorf("отказ потерял контекст вызывающего: %q", msg)
 	}
-	// КОНТРОЛЬ 4: полоса по-прежнему различима машинно (#1880 не сломан).
+	// КОНТРОЛЬ 4: полоса по-прежнему различима машинно (kacho#1880 не сломан).
 	if got := moduleroles.RefusalLane(err); got != moduleroles.LaneWriteFailed {
 		t.Errorf("полоса писателя перестала доезжать: %q, хотел %q", got, moduleroles.LaneWriteFailed)
 	}

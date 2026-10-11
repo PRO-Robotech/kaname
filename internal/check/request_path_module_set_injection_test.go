@@ -91,7 +91,7 @@ func modules() int { return len(platformmodules.All()) }
 `
 
 // domainWithReturnedLiteral — СНЯТОЕ объявление, вернувшееся дословно. Предикат
-// тела задачи #1927 («инъекция возвращает литерал и краснеет») — частный случай
+// тела задачи kacho#1927 («инъекция возвращает литерал и краснеет») — частный случай
 // свойства, и он обязан выполняться.
 const domainWithReturnedLiteral = `package domain
 
@@ -126,7 +126,7 @@ const usecaseNamingCanonInProse = `package role
 import "github.com/PRO-Robotech/kaname/internal/domain"
 
 // Набор модулей — ЖИВЫЕ строки каталога, а не канон authzmap.CatalogSeedModules:
-// снятый модуль обязан перестать приниматься без перезапуска службы (#1927).
+// снятый модуль обязан перестать приниматься без перезапуска службы (kacho#1927).
 func validate(r domain.Rules, facts domain.ModuleSet) error {
 	return r.Validate(domain.PolicyOfRole(false, ""), facts)
 }

@@ -97,7 +97,7 @@ func TestRevoke_AccountIDStampedOnMetadata(t *testing.T) {
 	repo := &stubUserClientRepo{
 		accountID: "acc00000000000000042",
 		getRow: domain.UserOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 			// словарь таблицы отвергает строку, вида не назвавшую.
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "uoc00000000000000009",

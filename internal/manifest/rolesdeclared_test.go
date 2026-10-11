@@ -4,7 +4,7 @@
 // rolesdeclared_test.go — ОБЪЯВЛЕННОСТЬ раздела `roles` доезжает до
 // применителя ЗНАЧЕНИЕМ (приёмка
 // `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
-// §2.2, сценарии IAM-RW-1-09 и -24; задача продукта #1913).
+// §2.2, сценарии IAM-RW-1-09 и -24; задача продукта kacho#1913).
 //
 // # Почему это не педантизм, а предмет
 //

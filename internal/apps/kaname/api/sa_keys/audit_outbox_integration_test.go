@@ -222,7 +222,7 @@ func TestSAKeyAudit_5_2_20_IssueEmitsNoSecret(t *testing.T) {
 	require.Equal(t, keyID, r.payload["key_id"])
 	require.Equal(t, "ES256", r.payload["key_algorithm"])
 	require.Equal(t, "pending", r.status)
-	require.Regexp(t, sakeyEvtIDRe, r.id, "audit id must match the 22-char evt_ format (#126 guard)")
+	require.Regexp(t, sakeyEvtIDRe, r.id, "audit id must match the 22-char evt_ format (kacho-iam#126 guard)")
 
 	assertNoSecrets(t, r.payloadRaw)
 }

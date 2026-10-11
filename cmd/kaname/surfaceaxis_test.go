@@ -47,7 +47,7 @@ func axisExplanations(dir string) (calls []string, explained []bool, err error) 
 		return nil, nil, err
 	}
 	// Константы берутся из ТОГО ЖЕ каталога: причина выключения бывает собрана
-	// из имени ручки, объявленного константой пакета (#2639).
+	// из имени ручки, объявленного константой пакета (kacho#2639).
 	consts, err := packageStringConsts(dir)
 	if err != nil {
 		return nil, nil, err
@@ -84,7 +84,7 @@ func axisExplanations(dir string) (calls []string, explained []bool, err error) 
 // Выражение иной формы — переменная, вызов, поле — за объяснение НЕ
 // засчитывается: причина обязана читаться в месте объявления, а не получать
 // значение в рантайме. Константа это требование выполняет, и форма добавлена
-// вместе с ручками поверхностей (#2639); обе стороны границы доказаны
+// вместе с ручками поверхностей (kacho#2639); обе стороны границы доказаны
 // инъекцией.
 func hasNonEmptyText(call *ast.CallExpr, idx int, consts map[string]string) bool {
 	if len(call.Args) <= idx {
@@ -132,7 +132,7 @@ func TestEveryDisabledSurfaceSaysWhatItDoesNotServe(t *testing.T) {
 //
 // Источник принимается доводом (имя и байты), а не читается по фиксированной
 // координате: тем же вызовом инъекция подаёт синтетический вход, меняя ровно
-// один факт. До #2479 источник был вписан в тело пробы, и способность её упасть
+// один факт. До kacho#2479 источник был вписан в тело пробы, и способность её упасть
 // доказать было нечем.
 func frontKnobsNamedByAxes(name string, src []byte, knobs []string,
 	consts map[string]string) (map[string]bool, error) {

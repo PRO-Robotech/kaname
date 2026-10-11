@@ -24,7 +24,7 @@ syntax = "proto3";
 // = ∅`, and the service is registered on the cluster-internal listener of iam
 // only.
 //
-// REST ROUTES ON THE EDGE INTERNAL MUX — LANDED BY THE NAMED SUCCESSOR (#1991).
+// REST ROUTES ON THE EDGE INTERNAL MUX — LANDED BY THE NAMED SUCCESSOR (kacho#1991).
 // Here stood "no REST binding in this sub-phase", and it was true when written:
 // the routes were deliberately out of scope so that the route table would not
 // move together with the contract. They are in scope now, and all four verbs
@@ -72,7 +72,7 @@ syntax = "proto3";
 // option is omitted: an unstated floor would arrive as sensitive by accident
 // rather than by decision.
 //
-// THE FLOOR OF `Apply` IS NO LONGER INERT (#1991). Here stood the opposite, and
+// THE FLOOR OF `Apply` IS NO LONGER INERT (kacho#1991). Here stood the opposite, and
 // it named its own removal predicate: the floor is enforced by an interceptor
 // reading a hand-written roster of gateway-fronted internal RPCs, the same entry
 // ALSO declares that only the edge may dial the method, and the edge had no REST

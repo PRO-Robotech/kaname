@@ -281,7 +281,7 @@ def revoke_binding_steps(bind_op_var, name_suffix):
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     acb_var = js_name(f"{bind_op_var}Acb",
                       where="iam/iam-rbac-scope-grant/revoke_binding_steps/bind_op_var")
     return [

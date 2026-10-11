@@ -9,7 +9,7 @@
 // use-case emitted was the FGA tuple intent, which travels to the relation store
 // and reaches NO verdict cache. Verdict caches are dropped by the `subject_change`
 // journal: строка пишется ЗДЕСЬ, а гасит кэш её ЧИТАТЕЛЬ — край, открывающий
-// чтение сам (задача #1024 развернула направление; прежде строку толкал дренаж
+// чтение сам (задача kacho#1024 развернула направление; прежде строку толкал дренаж
 // владельца прав). With no row emitted, the sole way a removed member stops
 // passing is the cache entry ageing out — i.e. the revocation window, and only
 // that.

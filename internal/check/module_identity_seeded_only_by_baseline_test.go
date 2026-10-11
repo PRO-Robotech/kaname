@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // module_identity_seeded_only_by_baseline_test.go — ГЕЙТ: рост долга ПР-5
-// запрещён (задача продукта #2098).
+// запрещён (задача продукта kacho#2098).
 //
 // Порт с монорепо (`internal/repohygiene/moduleidentityseededonlybythebaseline_test.go`,
 // снят вынесением службы — `kacho#2597`). Имя функции сохранено ДОСЛОВНО.
@@ -14,8 +14,8 @@
 // не-тестовый файл `seeded_service_accounts.go` (см. его шапку — нужны
 // ДВУМ семействам монорепо).
 //
-// Предмет, текущее состояние на день переноса (долг #2098 закрыт задачей
-// #2452, гейт стережёт РЕГРЕСС) — в шапке `module_identity_seeded_only_by_baseline.go`.
+// Предмет, текущее состояние на день переноса (долг kacho#2098 закрыт задачей
+// kacho#2452, гейт стережёт РЕГРЕСС) — в шапке `module_identity_seeded_only_by_baseline.go`.
 //
 // Способность гейта упасть и смолчать доказана инъекцией —
 // `module_identity_seeded_only_by_baseline_injection_test.go`.
@@ -90,7 +90,7 @@ func TestOnlyTheAppliedBaselineSeedsAModuleIdentity(t *testing.T) {
 		"находок %d",
 		len(ordered), baseline, stmts, len(alive), modules, len(findings))
 	t.Logf("перепись долга ПР-5/#2098: личностей модулей, живых в дереве сегодня, %d — все "+
-		"посеяны базовой миграцией (%d из %d). Основной объём долга закрыт задачей #2452 "+
+		"посеяны базовой миграцией (%d из %d). Основной объём долга закрыт задачей kacho#2452 "+
 		"(пять из семи личностей сняты, применитель заведён); этот гейт стережёт РЕГРЕСС — "+
 		"появление новой миграции, сеющей модульную личность мимо применителя",
 		modules, byBaseline, modules)

@@ -103,7 +103,7 @@ func TestDatingGateRedsOnSelfReference(t *testing.T) {
 }
 
 // TestDatingGateRedsOnAForeignLineRevision — ось «резолвится, но не предок».
-// Это и есть предмет находки B задачи #1805.
+// Это и есть предмет находки B задачи kacho#1805.
 func TestDatingGateRedsOnAForeignLineRevision(t *testing.T) {
 	docs := synthDocs()
 	docs["architecture/known-divergences.md"] = synthForeign
@@ -224,7 +224,7 @@ func TestDatingGateIsSilentOnProseInsideACallout(t *testing.T) {
 
 // --- Историй ДВЕ: своя и предшественника -------------------------------------
 //
-// Ось заведена задачей #2554. Прежняя редакция знала два положения хеша вместо
+// Ось заведена задачей kacho#2554. Прежняя редакция знала два положения хеша вместо
 // четырёх и сваливала «не резолвится вовсе» в «резолвится, но не предок», печатая
 // про первое текст второго. Ниже — контроль, инъекция по каждому новому положению
 // и законный близнец на каждой оси.

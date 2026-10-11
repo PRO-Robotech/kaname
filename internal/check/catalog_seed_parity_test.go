@@ -208,7 +208,7 @@ func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
 
 	if c.RetiredSeeded == 0 {
 		t.Error("снятых строк посеяно ноль: снятие выражено запретительным списком в Go, " +
-			"и перенос его строками — половина предмета #1030")
+			"и перенос его строками — половина предмета kacho#1030")
 	}
 	for _, f := range findings {
 		t.Error(f)
@@ -216,7 +216,7 @@ func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ярусная половина словаря (задача продукта #1863)
+// Ярусная половина словаря (задача продукта kacho#1863)
 
 // TestTierOnlyVerbSeedMatchesTheLiteral — посев ярусной половины согласен с
 // литералом, в ОБЕ стороны.

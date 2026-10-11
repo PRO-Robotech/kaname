@@ -14,7 +14,7 @@
 //     ServiceAccount id (`'sva' || substr(md5('kacho-<svc>'),1,17)`).
 //  2. A ReBAC Check `service_account:<sva>#fga_writer@cluster:cluster_root`
 //     is issued. ALLOW → the RPC proceeds; DENY → PermissionDenied. Право
-//     выдаётся системной выдачей на кластере (#914) — оно видно перечислением
+//     выдаётся системной выдачей на кластере (kacho#914) — оно видно перечислением
 //     выдач и закрывается отзывом.
 //
 // Fail-closed: an unverified peer, a malformed / foreign-trust-domain SAN, an
@@ -47,7 +47,7 @@ const (
 	//
 	// Прежде здесь стоял якорь вне иерархии `cluster → account → project`.
 	// У такого якоря нет ни яруса, ни владельца: право не выражалось выдачей,
-	// не было видно перечислением выдач и не отзывалось (#914, решение 1 в
+	// не было видно перечислением выдач и не отзывалось (kacho#914, решение 1 в
 	// `docs/engineering/architecture/grant-surface-boundaries.md`).
 	// Фактический доступ переезд не расширяет: модуль и прежде писал кортежи по
 	// всему кластеру — честнее стало ОБЪЯВЛЕНИЕ этого права.

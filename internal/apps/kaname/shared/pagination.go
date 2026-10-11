@@ -21,7 +21,7 @@ import (
 // well-formed keyset cursor (base64 of `<RFC3339Nano>|<id>`). Empty → OK (first
 // page). The message is the stable contract form "Illegal argument <field>".
 func ValidatePageToken(field, token string) error {
-	// Разбор — ТОТ ЖЕ, что исполняется на пути чтения (#652). Здесь стояло
+	// Разбор — ТОТ ЖЕ, что исполняется на пути чтения (kacho#652). Здесь стояло
 	// рукописное зеркало формы, и оно было СЛАБЕЕ авторитетного кодека: пустой
 	// идентификатор оно принимало, а репозиторий отвергал. То есть проверка,
 	// стоящая ПЕРВОЙ, пропускала токен, на котором чтение падало ниже, — и

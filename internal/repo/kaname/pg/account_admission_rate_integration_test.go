@@ -301,7 +301,7 @@ func TestAccountRate_DeletingAnAccountDoesNotReturnARateSlot(t *testing.T) {
 //
 // Пробы темпа, наоборот, поднимают потолок объёма из-под ног не поднимая ничего:
 // им хватает того, что темп бьёт раньше. Взаимодействие двух потолков названо в
-// собственной пробе (`TestAccountRate_*`) и в миграции задачи #618, а не размазано по
+// собственной пробе (`TestAccountRate_*`) и в миграции задачи kacho#618, а не размазано по
 // чужим утверждениям.
 func liftRateCeilingOutOfTheWay(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()

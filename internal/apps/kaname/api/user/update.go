@@ -143,7 +143,7 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 	// Anti-anon floor only. WHO may update this user is decided by the MODEL:
 	// the api-gateway Checks `record_writer@iam_user:<user_id>` before iam is dialed
 	// (каталог прав, `UserService/Update`). Здесь стояло `v_update` — отношение,
-	// СНЯТОЕ с этого типа вместе со своим читателем (#1128, #1258).
+	// СНЯТОЕ с этого типа вместе со своим читателем (kacho#1128, kacho#1258).
 	// The former in-service owner-equality check against the owning account's
 	// owner_user_id was narrower than that per-object relation and unsatisfiable
 	// by a machine principal — §«Авторизация живёт в МОДЕЛИ, а не в

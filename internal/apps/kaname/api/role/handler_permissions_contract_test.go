@@ -5,7 +5,7 @@ package role
 
 // handler_permissions_contract_test.go — ТРИ исхода входного `permissions`,
 // закреплённые поведением, потому что комментарий контракта называл ОДИН
-// («на входе Create/Update игнорируется», `#1949`). Исход зависит от ПУТИ и от
+// («на входе Create/Update игнорируется», `kacho#1949`). Исход зависит от ПУТИ и от
 // МАСКИ, а не от самого поля:
 //
 //	Create, поле непусто               → INVALID_ARGUMENT «Illegal argument

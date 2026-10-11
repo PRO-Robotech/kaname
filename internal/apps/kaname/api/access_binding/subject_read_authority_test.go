@@ -4,7 +4,7 @@
 package access_binding
 
 // subject_read_authority_test.go — ДВЕ полосы чтения выдач субъекта решают
-// допуск ОДНИМ предикатом, и страница каждой сужается построчно (#1352, #1354).
+// допуск ОДНИМ предикатом, и страница каждой сужается построчно (kacho#1352, kacho#1354).
 //
 // # Предмет
 //
@@ -96,7 +96,7 @@ func srBindingIDs(rows []domain.AccessBinding) []string {
 	return out
 }
 
-// ── НЕСУЩАЯ ПРОБА #1352: один допуск, два глагола ───────────────────────────
+// ── НЕСУЩАЯ ПРОБА kacho#1352: один допуск, два глагола ───────────────────────────
 
 func TestSubjectReads_1352_BothVerbsAdmitTheSameCallers(t *testing.T) {
 	type row struct {
@@ -154,7 +154,7 @@ func TestSubjectReads_1352_BothVerbsAdmitTheSameCallers(t *testing.T) {
 		if gotBySubject != gotPriv {
 			t.Errorf("%s: полосы решают допуск ПО-РАЗНОМУ — ListBySubject=%v (%v), "+
 				"ListSubjectPrivileges=%v (%v). Ответ на один вопрос зависит от выбранного "+
-				"глагола; расхождение и есть предмет #1352",
+				"глагола; расхождение и есть предмет kacho#1352",
 				r.name, gotBySubject, errBySubject, gotPriv, errPriv)
 			continue
 		}
@@ -176,7 +176,7 @@ func TestSubjectReads_1352_BothVerbsAdmitTheSameCallers(t *testing.T) {
 	}
 }
 
-// ── НЕСУЩАЯ ПРОБА #1354 на ОБЕИХ полосах: сужение построчно ─────────────────
+// ── НЕСУЩАЯ ПРОБА kacho#1354 на ОБЕИХ полосах: сужение построчно ─────────────────
 
 // TestSubjectReads_1352_DelegatedAdministratorIsNarrowedOnBothVerbs — исход для
 // делегированного распорядителя, снятый с ОБОИХ глаголов сразу.
@@ -223,7 +223,7 @@ func TestSubjectReads_1352_DelegatedAdministratorIsNarrowedOnBothVerbs(t *testin
 		if spContains(got.ids, srBindForeign) {
 			t.Errorf("%s: выдача в ЧУЖОМ аккаунте отдана вызывающему, который им не "+
 				"распоряжается: %v — состав арендаторов картируется по областям выдач "+
-				"ровно так же, как по членствам (#1085)", got.verb, got.ids)
+				"ровно так же, как по членствам (kacho#1085)", got.verb, got.ids)
 		}
 	}
 }

@@ -65,7 +65,7 @@ func TestDiffFallsOnlyOnWhatItJudges(t *testing.T) {
 	})
 
 	t.Run("КОНТРОЛЬ: пустая ведомость на согласном дереве — не поломка", func(t *testing.T) {
-		// Пустая ведомость и есть ЦЕЛЬ #1891. Падение на её достижении толкало бы
+		// Пустая ведомость и есть ЦЕЛЬ kacho#1891. Падение на её достижении толкало бы
 		// держать запись ради зелёного, то есть работало бы против себя.
 		require.Empty(t, moduleroleparity.Diff(
 			[]moduleroleparity.ModuleState{declaredAndLive(base)},
@@ -83,7 +83,7 @@ func TestDiffFallsOnlyOnWhatItJudges(t *testing.T) {
 		st := declaredAndLive(base)
 		st.Declared = nil
 		require.Empty(t, moduleroleparity.Diff([]moduleroleparity.ModuleState{st},
-			[]moduleroleparity.Postponement{{Module: "loadbalancer", Why: "#1904"}}))
+			[]moduleroleparity.Postponement{{Module: "loadbalancer", Why: "kacho#1904"}}))
 	})
 
 	t.Run("объявленной роли нет в базе", func(t *testing.T) {
@@ -132,14 +132,14 @@ func TestDiffFallsOnlyOnWhatItJudges(t *testing.T) {
 	t.Run("ведомость истекает: модуль уже объявил свои роли", func(t *testing.T) {
 		requireFinding(t, moduleroleparity.Diff(
 			[]moduleroleparity.ModuleState{declaredAndLive(base)},
-			[]moduleroleparity.Postponement{{Module: "loadbalancer", Why: "#1904"}}),
+			[]moduleroleparity.Postponement{{Module: "loadbalancer", Why: "kacho#1904"}}),
 			"запись потеряла предмет", "loadbalancer")
 	})
 
 	t.Run("ведомость истекает: у модуля нет живых ролей", func(t *testing.T) {
 		st := declaredAndLive()
 		requireFinding(t, moduleroleparity.Diff([]moduleroleparity.ModuleState{st},
-			[]moduleroleparity.Postponement{{Module: "loadbalancer", Why: "#1904"}}),
+			[]moduleroleparity.Postponement{{Module: "loadbalancer", Why: "kacho#1904"}}),
 			"откладывать нечего", "loadbalancer")
 	})
 

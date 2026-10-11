@@ -6,7 +6,7 @@ package seed_test
 // retired_role_is_skipped_by_the_seeders_integration_test.go — ДОСЕВ СТАРТА
 // ПРОПУСКАЕТ снятую роль, а не упирается в её ключ живости.
 //
-// Задача продукта #1913, находка `system-design-reviewer` при ревью отзыва роли.
+// Задача продукта kacho#1913, находка `system-design-reviewer` при ревью отзыва роли.
 //
 // # Предмет — СТЫК, а не одна из сторон
 //

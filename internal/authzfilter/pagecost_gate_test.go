@@ -248,7 +248,7 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 	"SubjectIsClusterAdmin": {relationGuardRoot, 2, -1, -1},
 	// SubjectIsClusterAdminE(ctx, checker, subject) — same shape, and listed for
 	// the same reason: it is the ONE question a visible-page list puts about its
-	// caller (#645), asked once per request. That "once" is a property nothing but
+	// caller (kacho#645), asked once per request. That "once" is a property nothing but
 	// this gate can see — the call sits one package away and lexically outside any
 	// loop, so a copy of it moved INTO the page loop would cost a question per row
 	// and contribute to no counter at all.
@@ -494,7 +494,7 @@ func TestRelationQuestionsStayInsideTheMeasuredPath(t *testing.T) {
 // asking through a different function — which is not a false alarm but the point:
 // a renamed callee means the shape of the question changed, and the standing
 // prose about its cost has to be re-read rather than carried over. That has now
-// fired for real (#2054): the loop below moved from `requireGrantAuthority` to
+// fired for real (kacho#2054): the loop below moved from `requireGrantAuthority` to
 // `pageAuthority.verdict`, and the declaration it orphaned was still claiming a
 // per-page cost that the same commit had already halved.
 var declaredPerRowQuestions = map[string]string{

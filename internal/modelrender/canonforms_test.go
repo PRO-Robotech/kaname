@@ -60,14 +60,14 @@ func mustContainLine(t *testing.T, block, line string) {
 }
 
 // TestMODMR28APointerWhoseNameDiffersFromItsTypeIsExpressible — имя указателя и
-// тип объекта, на который он указывает, суть РАЗНЫЕ строки (#1860).
+// тип объекта, на который он указывает, суть РАЗНЫЕ строки (kacho#1860).
 //
 // Замер, из которого проба выведена: `registry_repository` несёт
 // `define parent: [registry_registry]` — единственный блок канона, у которого имя
 // указателя не равно типу. Пока имя выводилось из типа, эта пара не порождалась
 // НИ ПРИ КАКОМ значении ключа, то есть блок был недостижим by construction.
 // ЗДЕСЬ ФИКСТУРЫ НАЗЫВАЛИ РЕСУРС `repository` при типе `registry_repository`.
-// После размыкания таблицы типов (#2015) это стало НАХОДКОЙ: образ адресует
+// После размыкания таблицы типов (kacho#2015) это стало НАХОДКОЙ: образ адресует
 // `registry_repository` строкой `registry.repositories`, то есть фикстура
 // присваивала чужой тип ДРУГОЙ строке, и загрузчик такое отвергает. Имя
 // приведено к тому, каким его несёт образ; предмет проб — форма указателя и
@@ -108,7 +108,7 @@ resources:
 }
 
 // TestMODMR29ASecondScopePointerIsExpressible — указателей у блока бывает
-// БОЛЬШЕ ОДНОГО (#1858).
+// БОЛЬШЕ ОДНОГО (kacho#1858).
 //
 // Замер по канону: `project` несёт `define cluster: [cluster]` сверх `account`,
 // `iam_access_binding` — `account` и `cluster` сверх `project`. Пока указатель
@@ -140,7 +140,7 @@ resources:
 	}
 }
 
-// ── Каскад супер-доступа и источники яруса (#1858) ───────────────────────────
+// ── Каскад супер-доступа и источники яруса (kacho#1858) ───────────────────────────
 
 // TestMODMR30TheCascadeIsDeclaredByTheManifest — написаний каскада в каноне
 // ЧЕТЫРЕ, и рендер знал одно.
@@ -249,7 +249,7 @@ resources:
 	mustContainLine(t, block, "    define viewer: [user, service_account] or admin\n")
 }
 
-// ── Отношение действия сверх умолчания (#1846) ───────────────────────────────
+// ── Отношение действия сверх умолчания (kacho#1846) ───────────────────────────────
 
 // TestMODMR33AVerbRelationMayCarryItsOwnSubjectsAndSources — `v_*`, отличный от
 // умолчания, выразим манифестом.
@@ -290,7 +290,7 @@ resources:
 // `define v_addtargets: [user, service_account, group#member] or v_update` —
 // надмножество права правки, объявленное односторонне. Форма та же, что у пробы
 // выше, поэтому отдельного ключа она не заводит (сам блок целиком — предмет
-// #1091).
+// kacho#1091).
 func TestMODMR33AVerbMayDeriveFromAnotherVerb(t *testing.T) {
 	block := renderFromYAML(t, `apiVersion: iam/v1
 module: loadbalancer
@@ -339,7 +339,7 @@ resources:
 		"    define v_get: [user, service_account, group#member] or super_admin\n")
 }
 
-// ── Место авторского отношения в блоке (#1862) ───────────────────────────────
+// ── Место авторского отношения в блоке (kacho#1862) ───────────────────────────────
 
 // TestMODMR34ThePlaceOfAnAuthoredRelationComesFromTheManifest — раскладок в
 // каноне ТРИ, и постоянная рендера знала одну.
@@ -415,7 +415,7 @@ resources:
 	}
 }
 
-// ── Проза блока: примечание с ЯКОРЕМ (#1845) ─────────────────────────────────
+// ── Проза блока: примечание с ЯКОРЕМ (kacho#1845) ─────────────────────────────────
 
 // TestMODMR35ProseIsAnchoredToTheRelationItPrecedes — внутриблочная проза стоит
 // там, где её ставит канон, а не в одном месте на весь блок.
@@ -445,12 +445,12 @@ resources:
         text: |
           # первая строка разбора
           #
-          # третья строка, со ссылкой #1089
+          # третья строка, со ссылкой kacho#1089
     verbs: [get, list, update, delete]
 `)
 	mustContainLine(t, block, "    # примечание у указателя\n    define project: [project]\n")
 	mustContainLine(t, block, "    # первая строка разбора\n    #\n"+
-		"    # третья строка, со ссылкой #1089\n    define v_get: ")
+		"    # третья строка, со ссылкой kacho#1089\n    define v_get: ")
 
 	// Знак комментария принадлежит ТЕКСТУ: рендер воспроизводит строку дословно
 	// и своего правила оформления не имеет — иначе оно жило бы в двух местах.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // credential_ceiling_test.go — каталог знает потолок числа удостоверений на
-// принципала (задача #1191, приёмка
+// принципала (задача kacho#1191, приёмка
 // `services/iam/docs/engineering/acceptance/credential-ceiling-per-principal.md`).
 //
 // Предмет — ЗАПИСИ каталога, а не поведение списания: вид, которого каталог не

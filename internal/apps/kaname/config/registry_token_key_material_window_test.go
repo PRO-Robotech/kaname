@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// registry_token_key_material_window_test.go — РУЧКА ОКНА ПЕРЕХОДА #1143.
+// registry_token_key_material_window_test.go — РУЧКА ОКНА ПЕРЕХОДА kacho#1143.
 //
 // Утверждается четыре свойства, и ни одно не выводится из остальных:
 //  1. умолчание — окно ЗАКРЫТО (незаданное не означает «принимать оба»);

@@ -279,7 +279,7 @@ func TestF2_02_ExactlyOneAssertionIsAccepted(t *testing.T) {
 
 // TestF2_43_GrantTypeDictionaryIsClosed — «прочее» не является корзиной приёма.
 //
-// Видов в словаре ДВА с задачи #1124 (второй — федеративная выдача), и это не
+// Видов в словаре ДВА с задачи kacho#1124 (второй — федеративная выдача), и это не
 // ослабление: перечень по-прежнему закрыт и перечисляет оба поимённо. Проба
 // сверяет перечень отвергаемых с ОБЪЯВЛЕННЫМ словарём, а не со своим списком —
 // иначе третий заведённый вид остался бы ею незамеченным.
@@ -327,7 +327,7 @@ func TestF2_33_EveryAuthenticationRefusalLooksIdenticalAndEachHasItsOwnCounter(t
 		clientassertion.OutcomeIdentityMismatch,
 		clientassertion.OutcomeClientUnknown,
 		clientassertion.OutcomeClientCannotAssert,
-		// Два исхода федеративной полосы (#1124). Перепись потребовала их
+		// Два исхода федеративной полосы (kacho#1124). Перепись потребовала их
 		// входов раньше человека — ровно так, как и задумана.
 		clientassertion.OutcomeIssuerUntrusted,
 		clientassertion.OutcomeTrustExpired,

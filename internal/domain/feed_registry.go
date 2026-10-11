@@ -122,7 +122,7 @@ var materializableTypes = func() map[string]struct{} {
 
 // AllMaterializableTypes returns the closed, sorted, deduped set of
 // `<module>.<resource>` types the reconciler can materialize per-object. It is the
-// wildcard-expansion set for a BOUNDED-scope `*.*` rule (issue #224 / D-8a): an owner
+// wildcard-expansion set for a BOUNDED-scope `*.*` rule (issue kacho-iam#224 / D-8a): an owner
 // role bound at ACCOUNT/PROJECT becomes an explicit per-object admin on EVERY object
 // kind inside the scope, instead of relying on the FGA derivation cascade.
 //

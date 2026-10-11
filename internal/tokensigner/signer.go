@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package tokensigner — подписант токенов платформы (задача #897).
+// Package tokensigner — подписант токенов платформы (задача kacho#897).
 //
 // # Что этот подписант производит
 //

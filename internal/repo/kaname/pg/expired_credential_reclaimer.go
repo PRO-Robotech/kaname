@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expired_credential_reclaimer.go — долговечная половина снятия истёкших
-// удостоверений (задача #1264, приёмка `expired-credential-reclaim.md`).
+// удостоверений (задача kacho#1264, приёмка `expired-credential-reclaim.md`).
 //
 // # ЧТО ЭТО ДЕЛАЕТ
 //

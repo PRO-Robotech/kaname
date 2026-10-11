@@ -174,8 +174,8 @@ func TestListByUser_Self_IsServedWithNoRelationPortAtAll(t *testing.T) {
 // Holding the READ TIER on that user no longer opens the session history.
 //
 // This assertion is INVERTED, not removed. It used to read "a delegate granted
-// the read on that user is served", and under #797 that was correct: this RPC
-// was gated by `iam_user.viewer`, so the tier was the grant. #1140 narrowed the
+// the read on that user is served", and under kacho#797 that was correct: this RPC
+// was gated by `iam_user.viewer`, so the tier was the grant. kacho#1140 narrowed the
 // gate to `session_reader` — a session history is information ABOUT A PERSON,
 // not a right over their account, and identity is global here, so a tier held
 // inside one account disclosed the person's history across all of them. From

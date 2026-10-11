@@ -99,7 +99,7 @@ type PublicReadPublisher interface {
 }
 
 // AuditEvent — service-layer payload for a durable kaname.audit_outbox
-// compliance row. The repo adapter generates the id (evt_<22-char> — bug #126
+// compliance row. The repo adapter generates the id (evt_<22-char> — bug kacho-iam#126
 // regression-guard), marshals Payload to the event_payload jsonb, and inserts
 // it with status='pending'. EventType must satisfy the audit_outbox_event_type
 // CHECK (`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`).

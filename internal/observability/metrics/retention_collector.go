@@ -6,7 +6,7 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 // retention_collector.go — величины фоновой уборки, снятые ПО КАЖДОМУ ПРЕДМЕТУ
-// отдельно (задача #1292, приёмка §3.4).
+// отдельно (задача kacho#1292, приёмка §3.4).
 //
 // # Почему по предмету, а не одним числом
 //
@@ -36,7 +36,7 @@ type RetentionCounts struct {
 
 // Имена серий уборки. Собираются ИЗ КОНСТАНТЫ пространства имён, а не
 // выписываются: имя серии — контракт с панелями и правилами тревог, и
-// повторённое литералом оно не двигается вместе с константой (задача #2479).
+// повторённое литералом оно не двигается вместе с константой (задача kacho#2479).
 const (
 	RetentionPassesMetric       = Namespace + "_retention_passes_total"
 	RetentionRowsRemovedMetric  = Namespace + "_retention_rows_removed_total"

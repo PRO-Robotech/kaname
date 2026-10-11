@@ -1,20 +1,20 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// withdrawal_producer_arrives_with_the_applier_test.go — гейт задачи #1913:
+// withdrawal_producer_arrives_with_the_applier_test.go — гейт задачи kacho#1913:
 // применитель ролей модуля не приводится в действие БЕЗ производителя отзыва
 // роли (порт с монорепо
 // `internal/repohygiene/withdrawalproducerarriveswiththeapplier_test.go`,
 // держатель `TestWithdrawalProducerArrivesWithTheApplier`, снят вынесением
 // службы доступа — `kacho#2597`).
 //
-// # Триггер #1034/#2010 УЖЕ СРАБОТАЛ В KANAME — это надо сказать прямо
+// # Триггер kacho#1034/#2010 УЖЕ СРАБОТАЛ В KANAME — это надо сказать прямо
 //
 // Монорепошный предок был написан как САМОИСТЕКАЮЩЕЕ послабление: на день его
 // заведения применитель в проде не вызывался, и гейт молчал по построению
 // (первая строка таблицы согласия). Порт застаёт дерево kaname В ДРУГОЙ
 // клетке той же таблицы: `cmd/kaname/serve.go` зовёт `moduleroles.NewApplier`
-// (задача #2010, файл `cmd/kaname/module_roles_apply.go`), а
+// (задача kacho#2010, файл `cmd/kaname/module_roles_apply.go`), а
 // `internal/repo/kaname/pg/role_withdrawal_repo.go` несёт
 // `UPDATE kaname.roles SET live = false, retired_at = now(), …` — оператор
 // формы, которую сам этот гейт распознаёт производителем. Обе половины

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // wrapping_key_rotation_test.go — смена ключа ОБЁРТКИ не теряет ни одного
-// подписного ключа (задача #1065).
+// подписного ключа (задача kacho#1065).
 //
 // # Что именно утверждается
 //
@@ -111,7 +111,7 @@ func mintRequest() tokensigner.Request {
 }
 
 // TestTokenIssuedBeforeTheWrappingKeyChangeStillVerifiesAfterIt — предикат
-// снятия #1065: смена ключа обёртки без потери записанного.
+// снятия kacho#1065: смена ключа обёртки без потери записанного.
 func TestTokenIssuedBeforeTheWrappingKeyChangeStillVerifiesAfterIt(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)

@@ -84,7 +84,7 @@ func TestIssue_EnabledServiceAccount_StillIssues(t *testing.T) {
 func TestRevoke_DisabledServiceAccount_StillRevokes(t *testing.T) {
 	repo := &stubSAClientRepo{disabled: true}
 	repo.getRow = domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             "soc00000000000000001",

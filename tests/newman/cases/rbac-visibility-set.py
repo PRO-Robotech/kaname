@@ -74,7 +74,7 @@ slate is clean (zero residual account-A bindings) before granting the by-label r
 uses the ADMIN-AUTHORIZED :listByScope on account/accountAId (owner sees all subjects, filter
 by subjectId) — NOT :listBySubject, which at the time 403'd for the admin caller and yielded a
 FALSE clean slate (the residual binding survived and leaked M− into the visible set). Since
-#1352 :listBySubject admits the account administrator too (narrowed to that account), so the
+kacho#1352 :listBySubject admits the account administrator too (narrowed to that account), so the
 403 above is HISTORY, not the contract; the choice stands on its own merit — the pre-clean
 wants every subject in the account scope, which is what :listByScope answers. This makes the exact-set assertion self-contained and deterministic — it does NOT depend
 on any other case/suite having torn down.
@@ -125,7 +125,7 @@ POLL_CAP = 50
 # одного кейса, и разъехавшаяся половина означала бы отказ в правах посреди
 # фикстуры — симптом, неотличимый на вид от продуктового дефекта видимости.
 # ЧЕЛОВЕК У КЕЙСА СВОЙ, А НЕ ОБЩИЙ ЧЕЛОВЕК ЦЕРЕМОНИИ. Кейс ЗАВОДИТ аккаунт, а
-# заведение списывается с темпа личности (#618, умолчание — три в час на внешний
+# заведение списывается с темпа личности (kacho#618, умолчание — три в час на внешний
 # идентификатор входа). Восемь заведений волны под одним человеком давали десять
 # списаний при потолке три: отказ был верен, а падало не то место, которое полку
 # исчерпало. Личность слота заводит РОВНО ОДИН аккаунт — свой; её выдаёт волна
@@ -234,7 +234,7 @@ def preclean_account_loop(tag, next_step):
     # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
     # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
     # вовсе, — экранировать одну сторону значит развести писателя и читателя
-    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    # молча. Поэтому исход — проверка годности при генерации (kacho#1220).
     tag = js_name(tag,
                   where="iam/rbac-visibility-set/preclean_account_loop/tag")
     dup = f"{tag}Dup"
@@ -509,7 +509,7 @@ def robust_revoke_binding(name, acb_var, auth="jwtAccountAdminA"):
     binding object), the v_list-only object inherits v_get from the leaked {get,list} grant
     → its detail Get returns 200 instead of 404 (the invariant violated). The cross-subject preclean
     could not clean it (at the time the admin got 403 on listBySubject for another user; since
-    #1352 that read admits the account administrator, narrowed to the account), so the revoke
+    kacho#1352 that read admits the account administrator, narrowed to the account), so the revoke
     itself must commit. Retry the DELETE while 403, then require it to have committed.
 
     ИСХОД ОДИН — 200 С OPERATION, и «already-gone 404» из утверждения убран. Он описывал

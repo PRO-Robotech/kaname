@@ -3,7 +3,7 @@
 
 package main
 
-// outbox_scan_observer_wiring_test.go — задача #2062, половина «одинаково для
+// outbox_scan_observer_wiring_test.go — задача kacho#2062, половина «одинаково для
 // ВСЕХ очередей сервиса».
 //
 // Решение об исходе скана объявлено одним производителем

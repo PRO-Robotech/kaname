@@ -306,9 +306,9 @@ go test -short -count=1 -timeout 120s \
   (`PollSubjectChanges`, курсор). См. [`29-relational-verdict.md`](29-relational-verdict.md).
 - **Anti-leak guards:** `ListBySubject` анонимно → ничего не вернёт
   (`list_by_subject_anti_leak_test.go`). Допуск у него и у `ListSubjectPrivileges`
-  — ОДИН предикат (`subject_read_authority.go`, #1352), а страница полосы
+  — ОДИН предикат (`subject_read_authority.go`, kacho#1352), а страница полосы
   распорядителя аккаунта сужается построчно по `v_get` на выдаче, поэтому области
-  в чужих аккаунтах в ответ не попадают (#1354). Сравнение полос между собой —
+  в чужих аккаунтах в ответ не попадают (kacho#1354). Сравнение полос между собой —
   `subject_read_authority_test.go`.
 
 ## Gotchas / известные ограничения

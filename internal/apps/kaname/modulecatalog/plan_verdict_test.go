@@ -7,7 +7,7 @@ package modulecatalog_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.11 и §5 «Различение починки от кирпича»; сценарии
-// `IAM-MA-1-02`, `-36`, `-36а`, `-36б`. Задача продукта #1034.
+// `IAM-MA-1-02`, `-36`, `-36а`, `-36б`. Задача продукта kacho#1034.
 //
 // # Что здесь утверждается
 //

@@ -93,7 +93,7 @@ type ProjectServiceClient interface {
 	// (PRO-Robotech/kacho). What remains open under PRO-Robotech/kacho#1231 is the
 	// end-to-end observation of a live resource of another domain holding the
 	// project through the platform edge; the mechanism itself lives here.
-	// (The decision was taken under #1594, which is closed — a reader sent there
+	// (The decision was taken under kacho#1594, which is closed — a reader sent there
 	// would read "closed" as "done".)
 	Delete(ctx context.Context, in *DeleteProjectRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified project.
@@ -230,7 +230,7 @@ type ProjectServiceServer interface {
 	// (PRO-Robotech/kacho). What remains open under PRO-Robotech/kacho#1231 is the
 	// end-to-end observation of a live resource of another domain holding the
 	// project through the platform edge; the mechanism itself lives here.
-	// (The decision was taken under #1594, which is closed — a reader sent there
+	// (The decision was taken under kacho#1594, which is closed — a reader sent there
 	// would read "closed" as "done".)
 	Delete(context.Context, *DeleteProjectRequest) (*operation.Operation, error)
 	// Lists operations for the specified project.
