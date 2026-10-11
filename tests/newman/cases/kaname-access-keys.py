@@ -510,6 +510,17 @@ _ORIGIN_JS = f"({_env(_ORIGIN_KEY)} || {js_str(_ORIGIN)})"
 _FOREIGN_ORIGIN_JS = f"('https://elsewhere.' + {_RP_JS})"
 _FOREIGN_RP_ID_JS = f"('elsewhere-' + {_RP_JS})"
 
+# Потолок ключей человека — тоже величина УСТАНОВКИ (kaname#699): автономный стенд
+# службы берёт профильный, стенд платформы объявляет свой. Посев пишет величину
+# стенда ключом `accessKeysCeiling` (переменная `KANAME_STAND_ACCESS_KEYS_CEILING`,
+# без неё — профиль; не той формы — условие не создано, посев не пишет ничего), и
+# шаги потолка читают её в момент исполнения. Незаписанный ключ — величина
+# профиля. Поэтому и заполнение до потолка — ОДНА церемония, повторяемая, пока
+# ключей у человека меньше потолка, а не столько шагов, сколько дал профиль при
+# сборке. Держит `scripts/access_keys_stand_binding_test.py`.
+_CEILING_KEY = "accessKeysCeiling"
+_CEILING_JS = f"parseInt({_env(_CEILING_KEY)} || {js_str(str(_CEILING))}, 10)"
+
 
 def _status_is(code, label):
     return [f"pm.test({js_str(label + f': ответ {code}')}, () => pm.expect(pm.response.code).to.eql({code}));"]
@@ -797,14 +808,17 @@ def _raw_body(expr):
     return [f"pm.request.body = {{ mode: 'raw', raw: {expr}, options: {{ raw: {{ language: 'json' }} }} }};"]
 
 
-def _list(p, name, *, count, extra=()):
-    """Перечень ключей человека: число строк и, по выбору, утверждения сверх него."""
+def _list(p, name, *, count, count_says=None, extra=()):
+    """Перечень ключей человека: число строк и, по выбору, утверждения сверх него.
+
+    `count` — число либо выражение JS (потолок стенда); `count_says` — как оно
+    названо в заголовке утверждения, когда это выражение."""
     label = name.upper()
     return _own(p, name, "GET", _keys_path(p), tests=[
         *_status_is(200, label),
         *_parse_body(),
         "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
-        f"pm.test({js_str(label + f': ключей у человека {count}')}, () => pm.expect(_akL.length).to.eql({count}));",
+        f"pm.test({js_str(label + f': ключей у человека {count_says or count}')}, () => pm.expect(_akL.length).to.eql({count}));",
         *extra,
     ])
 
@@ -836,9 +850,9 @@ def _key_listed(slot, label, *, last_used=None, row_tests=()):
     return out
 
 
-def _begin_registration(p, name, slot, *, tests=()):
+def _begin_registration(p, name, slot, *, pre=(), tests=()):
     label = name.upper()
-    return _own(p, name, "POST", _keys_path(p) + ":beginRegistration", body={}, tests=[
+    return _own(p, name, "POST", _keys_path(p) + ":beginRegistration", body={}, pre=list(pre), tests=[
         f"pm.environment.unset({js_str('akRegCh' + slot)});",
         *_status_is(200, label),
         *_parse_body(),
@@ -1416,15 +1430,55 @@ CASES.append(Case(
 # ───────────────────────────────────────────────────────────────────────────
 # Ф7-37, Ф7-14: потолок ключей человека — величина профиля.
 # ───────────────────────────────────────────────────────────────────────────
-_FILL = [f"K{n}" for n in range(3, _CEILING + 1)]
+# Заполнение до потолка — одна церемония заведения, повторяемая опросом её
+# операции, пока ключей у человека меньше потолка стенда. Перед заполнением у A
+# два ключа (K1 — Ф7-01, K2 — положительный контроль осей церемонии). Каждый
+# заведённый ключ ложится в перечень `akFillKeyIds`: последний снимается кейсом
+# (слот возвращается), прочие — уборкой Ф7-47. Повтор ограничен `_FILL_CAP`:
+# потолок больше предела посев не пишет (условие не создано), и предел здесь —
+# защита от бесконечного повтора, а не величина продукта.
+_HELD_BEFORE_FILL = 2
+_FILL_CAP = 32
+_FILL_IDS, _FILL_LAST, _FILL_RUN = "akFillKeyIds", "akFillLastKeyId", "akFillRun"
+
+
+def _fill_reset():
+    """Перечень ключей заполнения обнуляется один раз на прогон — первым заходом."""
+    return [
+        f"if ({_env(_FILL_RUN)} !== {_env('runId')}) {{",
+        "  " + _set(_FILL_IDS, "'[]'"),
+        "  " + _set(_FILL_LAST, "''"),
+        "  " + _set(_FILL_RUN, _env("runId")),
+        "}",
+    ]
+
+
+def _fill_next():
+    """После заведения: ключ — в перечень; ключей меньше потолка — назад к испытанию."""
+    return [
+        f"const _akFill = JSON.parse({_env(_FILL_IDS)} || '[]');",
+        f"if (_akK.id) {{ _akFill.push(_akK.id); {_set(_FILL_IDS, 'JSON.stringify(_akFill)')} {_set(_FILL_LAST, '_akK.id')} }}",
+        f"const _akCeil = {_CEILING_JS};",
+        f"pm.test('AK37-FILL-OP: заполнение не вышло за предел повтора', () => pm.expect(_akFill.length <= {_FILL_CAP}).to.eql(true));",
+        f"if (_akK.id && {_HELD_BEFORE_FILL} + _akFill.length < _akCeil && _akFill.length < {_FILL_CAP}) {{",
+        "  const _akfd = Date.now(); while (Date.now() - _akfd < 100) { /* pause before the next fill ceremony */ }",
+        "  pm.execution.setNextRequest('ak37-fill-begin');",
+        "}",
+    ]
+
+
+_CEILING_SAYS = "— потолок стенда"
 CASES.append(Case(
     id="IAM-ACCESSKEY-BVA-CEILING",
-    title=f"Ф7-37, Ф7-14: ключей ровно {_CEILING} — принят, ещё один — отказ со следующим шагом; снятие возвращает слот",
+    title="Ф7-37, Ф7-14: ключей ровно потолок стенда — принят, ещё один — отказ со следующим шагом; снятие возвращает слот",
     classes=["BVA", "NEG"],
     priority="P1",
     steps=[
-        *[s for slot in _FILL for s in _register_ok(_A, f"ak37-fill-{slot.lower()}", slot)],
-        _list(_A, "ak37-list-full", count=_CEILING),
+        _begin_registration(_A, "ak37-fill-begin", "F", pre=_fill_reset()),
+        _finish_registration(_A, "ak37-fill-finish", slot="F", ch="akRegChF",
+                             tests=_registration_accepted("F", "AK37-FILL-FINISH")),
+        _await_op(_A, "ak37-fill-op", "F", tests=[*_key_registered("F", "AK37-FILL-OP"), *_fill_next()]),
+        _list(_A, "ak37-list-full", count=_CEILING_JS, count_says=_CEILING_SAYS),
         _begin_assertion(_A, "ak14-begin", "14"),
         _finish_assertion(_A, "ak14-first-key-unchanged", slot="K1", ch="akAsCh14",
                           tests=_assertion_passed(_A, "K1", "AK14-FIRST-KEY-UNCHANGED", uv=True)),
@@ -1434,17 +1488,20 @@ CASES.append(Case(
         _await_op(_A, "ak37-over-op", "K37", ok=False, error_code=8, tests=[
             "pm.test('AK37-OVER-OP: отказ называет следующий шаг и действующую величину', () => {",
             "  const __m = String((__j.error && __j.error.message) || '');",
-            f"  pm.expect([__m.indexOf({js_str(_CEILING_NEXT_STEP)}) >= 0, __m.indexOf({js_str(str(_CEILING))}) >= 0]).to.eql([true, true]); }});",
+            f"  pm.expect([__m.indexOf({js_str(_CEILING_NEXT_STEP)}) >= 0, __m.indexOf(String({_CEILING_JS})) >= 0]).to.eql([true, true]); }});",
         ]),
-        _list(_A, "ak37-list-still-full", count=_CEILING),
+        _list(_A, "ak37-list-still-full", count=_CEILING_JS, count_says=_CEILING_SAYS),
         # Потолок другого человека не расходуется: у B один ключ, второй заводится.
         *_register_ok(_B, "ak37-other-human", "KB2", key=_MAT_SECOND),
-        # Снятие возвращает слот (Ф7-25 — свой кейс ниже); та же церемония проходит.
-        _own(_A, f"ak37-revoke-{_FILL[-1].lower()}", "DELETE", _keys_path(_A) + "/{{ak" + _FILL[-1] + "KeyId}}",
-             tests=_registration_accepted(_FILL[-1] + "R", f"AK37-REVOKE-{_FILL[-1]}")),
-        _await_op(_A, f"ak37-revoke-{_FILL[-1].lower()}-op", _FILL[-1] + "R"),
+        # Снятие возвращает слот (Ф7-25 — свой кейс ниже): снимается последний
+        # ключ заполнения, та же церемония проходит.
+        _own(_A, "ak37-revoke-fill-last", "DELETE", _keys_path(_A) + "/{{" + _FILL_LAST + "}}",
+             pre=_need(_FILL_LAST, "AK37-REVOKE-FILL-LAST: ключ заполнения не заведён",
+                       "заполнение выше не завело ни одного ключа — снимать нечего"),
+             tests=_registration_accepted("FR", "AK37-REVOKE-FILL-LAST")),
+        _await_op(_A, "ak37-revoke-fill-last-op", "FR"),
         *_register_ok(_A, "ak37-slot-returned", "K37b"),
-        _list(_A, "ak37-list-after", count=_CEILING),
+        _list(_A, "ak37-list-after", count=_CEILING_JS, count_says=_CEILING_SAYS),
     ],
 ))
 
@@ -1539,7 +1596,7 @@ CASES.append(Case(
     classes=["BVA", "NEG"],
     priority="P1",
     steps=[
-        _list(_A, "ak34-list-before", count=_CEILING, extra=_key_listed("K1", "AK34-LIST-BEFORE", last_used="record")),
+        _list(_A, "ak34-list-before", count=_CEILING_JS, count_says=_CEILING_SAYS, extra=_key_listed("K1", "AK34-LIST-BEFORE", last_used="record")),
         _begin_registration(_A, "ak34-begin", "34"),
         _begin_assertion(_A, "ak54-begin", "54"),
         _clock_until(_A, "ak34-wait-expiry", "akRegExp34"),
@@ -1549,7 +1606,7 @@ CASES.append(Case(
                              tests=_ceremony_refused(_CHALLENGE_EXPIRED, "AK34-EXPIRED")),
         _finish_assertion(_A, "ak54-expired", slot="K1", ch="akAsCh54",
                           tests=_single_refusal("AK54-EXPIRED")),
-        _list(_A, "ak34-list-unchanged", count=_CEILING, extra=_key_listed("K1", "AK34-LIST-UNCHANGED", last_used="kept")),
+        _list(_A, "ak34-list-unchanged", count=_CEILING_JS, count_says=_CEILING_SAYS, extra=_key_listed("K1", "AK34-LIST-UNCHANGED", last_used="kept")),
     ],
 ))
 
@@ -1582,7 +1639,46 @@ def _not_found_same_form(label, sent_id_expr, *, record=False):
     return out
 
 
-_CLEAN_A = ["K1", "K2", *_FILL[:-1], "K37b"]
+# Уборка человека A: K1 — своим шагом; ключи заполнения (кроме снятого кейсом
+# потолка) и K37b — одним снятием, повторяемым по очереди `akCleanAQueue`. Очередь
+# не пуста при любом потолке: в ней всегда K37b.
+#
+# Ключ, который снимает очередной заход, назначает шаг ВЫШЕ своим утверждением —
+# опрос снятия K1 (голова очереди) и опрос предыдущего снятия (следующая голова).
+# Своим предусловием шаг снятия его не назначает: адрес шага собирает оснастка
+# первой строкой предусловия, и назначенное ниже подставилось бы при повторе
+# прошлой величиной (держит `access_keys_stand_binding_test.py`).
+_CLEAN_Q, _CLEAN_ID = "akCleanAQueue", "akCleanAId"
+
+
+def _clean_a_queue():
+    """Очередь уборки и её голова — после снятия K1, один раз на прогон."""
+    return [
+        f"const _akQ = JSON.parse({_env(_FILL_IDS)} || '[]').filter((id) => id !== {_env(_FILL_LAST)});",
+        f"if ({_env('akK37bKeyId')}) {{ _akQ.push({_env('akK37bKeyId')}); }}",
+        _set(_CLEAN_Q, "JSON.stringify(_akQ)"),
+        _set(_CLEAN_ID, "_akQ[0] || ''"),
+    ]
+
+
+def _clean_a_need():
+    return _need(_CLEAN_ID, "AK-CLEANUP-A-NEXT: снимать нечего",
+                 "очередь уборки пуста — ключ K37b выше не заведён, и уборка не знает, что снимать")
+
+
+def _clean_a_next():
+    return [
+        f"const _akQ = JSON.parse({_env(_CLEAN_Q)} || '[]');",
+        "_akQ.shift();",
+        _set(_CLEAN_Q, "JSON.stringify(_akQ)"),
+        _set(_CLEAN_ID, "_akQ[0] || ''"),
+        f"if (_akQ.length > 0 && !__j.error) {{",
+        "  const _akcd = Date.now(); while (Date.now() - _akcd < 100) { /* pause before the next cleanup revoke */ }",
+        "  pm.execution.setNextRequest('ak-cleanup-a-next');",
+        "}",
+    ]
+
+
 _CLEAN_B = ["KB", "KB2", "KB3"]
 CASES.append(Case(
     id="IAM-ACCESSKEY-NEG-REVOKE-REFUSALS-AND-REVOKE",
@@ -1598,7 +1694,7 @@ CASES.append(Case(
         _revoke(_A, "ak47-foreign-known-type", "-", path_id=_FOREIGN_TYPE_ID,
                 tests=_not_found_same_form("AK47-FOREIGN-KNOWN-TYPE", js_str(_FOREIGN_TYPE_ID))),
         _list(_B, "ak27-list-b-kept", count=3, extra=_key_listed("KB", "AK27-LIST-B-KEPT")),
-        _list(_A, "ak47-list-a-kept", count=_CEILING),
+        _list(_A, "ak47-list-a-kept", count=_CEILING_JS, count_says=_CEILING_SAYS),
         # Ф7-25: снятие K2; утверждение K2 перестаёт проходить, K1 проходит.
         _revoke(_A, "ak25-revoke", "K2", tests=_registration_accepted("K2R", "AK25-REVOKE")),
         _await_op(_A, "ak25-revoke-op", "K2R", tests=[
@@ -1611,9 +1707,11 @@ CASES.append(Case(
         _finish_assertion(_A, "ak25-other-key", slot="K1", ch="akAsCh25",
                           tests=_assertion_passed(_A, "K1", "AK25-OTHER-KEY", uv=True)),
         # Уборка: прочие ключи обоих людей — следующий прогон заводит своих.
-        *[s for slot in _CLEAN_A if slot != "K2" for s in (
-            _revoke(_A, f"ak-cleanup-{slot.lower()}", slot, tests=_registration_accepted(slot + "C", f"AK-CLEANUP-{slot}")),
-            _await_op(_A, f"ak-cleanup-{slot.lower()}-op", slot + "C"))],
+        _revoke(_A, "ak-cleanup-k1", "K1", tests=_registration_accepted("K1C", "AK-CLEANUP-K1")),
+        _await_op(_A, "ak-cleanup-k1-op", "K1C", tests=_clean_a_queue()),
+        _own(_A, "ak-cleanup-a-next", "DELETE", _keys_path(_A) + "/{{" + _CLEAN_ID + "}}", pre=_clean_a_need(),
+             tests=_registration_accepted("AC", "AK-CLEANUP-A-NEXT")),
+        _await_op(_A, "ak-cleanup-a-next-op", "AC", tests=_clean_a_next()),
         *[s for slot in _CLEAN_B for s in (
             _revoke(_B, f"ak-cleanup-{slot.lower()}", slot, tests=_registration_accepted(slot + "C", f"AK-CLEANUP-{slot}")),
             _await_op(_B, f"ak-cleanup-{slot.lower()}-op", slot + "C"))],
