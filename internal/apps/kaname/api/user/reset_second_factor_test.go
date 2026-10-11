@@ -28,7 +28,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // rsfMethods — дублёр хранилища способов: одна строка `totp` в заданном состоянии.
@@ -60,6 +60,13 @@ type rsfSessions struct {
 	writers  int
 	commits  int
 	failOn   string
+	// heldFor — личность, строку которой открытие писателя взяло первым
+	// оператором (у адаптера — замок писателя нескольких сессий).
+	heldFor domain.UserID
+	// clock — часы писателя (`Now`); nil — часы процесса.
+	clock revocationpolicy.Clock
+	// rollbacks — откатанных транзакций писателя.
+	rollbacks int
 }
 
 type rsfWriter struct {
@@ -71,14 +78,24 @@ type rsfWriter struct {
 	rolledBk bool
 }
 
-func (s *rsfSessions) ResetWriter(context.Context) (SecondFactorResetWriter, error) {
+func (s *rsfSessions) ResetWriter(_ context.Context, userID domain.UserID) (SecondFactorResetWriter, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.writers++
 	if s.failOn == "writer" {
 		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
 	}
+	s.heldFor = userID
 	return &rsfWriter{s: s}, nil
+}
+
+// Now — момент писателя: у адаптера — часы первичной базы соединением
+// транзакции после захвата личности; у дублёра — поданные часы.
+func (w *rsfWriter) Now(ctx context.Context) (time.Time, error) {
+	if w.s.clock != nil {
+		return w.s.clock.Now(ctx)
+	}
+	return time.Now().UTC(), nil
 }
 
 func (w *rsfWriter) RemoveSecondFactor(_ context.Context, _ domain.UserID) (bool, error) {
@@ -129,7 +146,13 @@ func (w *rsfWriter) Commit(context.Context) error {
 	return nil
 }
 
-func (w *rsfWriter) Rollback(context.Context) error { w.rolledBk = true; return nil }
+func (w *rsfWriter) Rollback(context.Context) error {
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	w.rolledBk = true
+	w.s.rollbacks++
+	return nil
+}
 
 func rsfActive() *rsfMethods {
 	return &rsfMethods{row: &domain.LoginMethod{
@@ -161,7 +184,7 @@ func rsfReason(t *testing.T, err error) string {
 func TestResetSecondFactor_F12_30_SyncRefusals(t *testing.T) {
 	methods := rsfActive()
 	sessions := &rsfSessions{methods: methods}
-	uc := NewResetSecondFactorUseCase(newUpdUserRepo(), newUpdOpsRepo(), methods, sessions).WithCutoffClock(momentclock.Func(time.Now))
+	uc := NewResetSecondFactorUseCase(newUpdUserRepo(), newUpdOpsRepo(), methods, sessions)
 
 	op, err := uc.Execute(context.Background(), domain.UserID(updUserID))
 	require.Error(t, err)
@@ -176,7 +199,7 @@ func TestResetSecondFactor_F12_30_SyncRefusals(t *testing.T) {
 
 	absentRepo := newUpdUserRepo()
 	absentRepo.getErr = iamerr.Wrapf(iamerr.ErrNotFound, "User usr000000000000absnt not found")
-	op, err = NewResetSecondFactorUseCase(absentRepo, newUpdOpsRepo(), methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), "usr000000000000absnt")
+	op, err = NewResetSecondFactorUseCase(absentRepo, newUpdOpsRepo(), methods, sessions).Execute(ownerCtx(), "usr000000000000absnt")
 	require.Error(t, err)
 	assert.Nil(t, op)
 	assert.Equal(t, codes.NotFound, status.Code(err))
@@ -195,7 +218,7 @@ func TestResetSecondFactor_F12_30_NotEnrolledIsOneRefusal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			sessions := &rsfSessions{methods: methods}
 			ops := newUpdOpsRepo()
-			op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
+			op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).Execute(ownerCtx(), domain.UserID(updUserID))
 			require.Error(t, err)
 			assert.Nil(t, op, "отказ до порождения Operation")
 			assert.Equal(t, codes.FailedPrecondition, status.Code(err))
@@ -221,7 +244,7 @@ func TestResetSecondFactor_F12_30_ResetIsOneTransaction(t *testing.T) {
 	sessions := &rsfSessions{methods: methods}
 	repo := newUpdUserRepo()
 	before := time.Now().UTC()
-	op, err := NewResetSecondFactorUseCase(repo, newUpdOpsRepo(), methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
+	op, err := NewResetSecondFactorUseCase(repo, newUpdOpsRepo(), methods, sessions).Execute(ownerCtx(), domain.UserID(updUserID))
 	require.NoError(t, err)
 	require.NotNil(t, op)
 	assert.Contains(t, op.Description, "Reset second factor")
@@ -254,7 +277,7 @@ func TestResetSecondFactor_F12_30_ResetIsOneTransaction(t *testing.T) {
 	methods2 := rsfActive()
 	sessions2 := &rsfSessions{methods: methods2, failOn: "audit"}
 	ops2 := newUpdOpsRepo()
-	op, err = NewResetSecondFactorUseCase(newUpdUserRepo(), ops2, methods2, sessions2).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
+	op, err = NewResetSecondFactorUseCase(newUpdUserRepo(), ops2, methods2, sessions2).Execute(ownerCtx(), domain.UserID(updUserID))
 	require.NoError(t, err)
 	require.NoError(t, operations.Wait(context.Background()))
 	assert.NotNil(t, methods2.row, "при отказе записи события строка не снята")
@@ -274,7 +297,7 @@ func TestResetSecondFactor_F12_30_RaceWithSelfRemoval(t *testing.T) {
 	methods := rsfActive()
 	sessions := &rsfSessions{methods: methods, failOn: "vanish"}
 	ops := newUpdOpsRepo()
-	op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).WithCutoffClock(momentclock.Func(time.Now)).Execute(ownerCtx(), domain.UserID(updUserID))
+	op, err := NewResetSecondFactorUseCase(newUpdUserRepo(), ops, methods, sessions).Execute(ownerCtx(), domain.UserID(updUserID))
 	require.NoError(t, err, "синхронная проверка видела active")
 	require.NoError(t, operations.Wait(context.Background()))
 	assert.Zero(t, sessions.commits)
