@@ -35,6 +35,25 @@
 # печатается. Запись, дописанная тем же запросом о своём же коммите, видна
 # только в диффе ведомости: механизма против неё нет, держится ревью запроса.
 #
+# СЕРВЕРНОЕ СЛИЯНИЕ ЗАПРОСА (PRO-Robotech/kaname#716). Коммит слияния, который
+# площадка сделала при вливании запроса волны в ветку-номер, несёт первую строку,
+# заданную площадкой: заголовок запроса и « (#M)» (merge_commit_title=PR_TITLE)
+# либо тему, переданную при вливании. Он попадает в диапазон только запроса
+# следующего уровня (эпик → main), а коммиты влитого запроса уже судились его
+# прогоном. Такое слияние узнаётся признаком ПЛОЩАДКИ, а не формой текста:
+#   · у коммита ≥ 2 родителей, первая строка — «#<N> » (иначе судится как прежде);
+#   · GET repos/$GITHUB_REPOSITORY/commits/<sha>/pulls называет запрос, который
+#     влит (merged_at) и чей merge_commit_sha — этот sha;
+#   · коммит первородительской цепочки головы — слияние В неё: база запроса —
+#     голова;
+#   · « (#M)» в конце первой строки — номер того же запроса.
+# Узнанному снимаются два нарушения формы (форма слияния, номер ветки-номера);
+# атрибуция и подпись — нет. Спрашивается только слияние, которое без признака
+# было бы нарушением, — число спрошенного печатается. Нет GITHUB_REPOSITORY или
+# `gh` — сверки нет, слияния судятся по форме, и это печатается; площадка не
+# ответила — так же, с её ответом. Подделать признак коммитом нельзя: его даёт
+# площадка, а не сообщение.
+#
 # Вход — окружение: PR_TITLE, PR_BODY, HEAD_REF, BASE_SHA, HEAD_SHA. Заголовок и
 # тело приходят переменными, а не подстановкой в текст шага: это ввод автора
 # запроса.
@@ -180,6 +199,70 @@ if [ "$head" != main ] && ! branch_rule_is_number "$head"; then
 fi
 
 owned="$(git rev-list --first-parent "${range[@]}")"
+
+# ── Серверные слияния запросов (kaname#716) ───────────────────────────────────────
+# server_merge_confirmed <sha> <владеемый: 0|1> <первая строка> — 0: площадка
+# называет влитой запрос с этим merge_commit_sha (номер — в SM_PR); 1: не
+# называет; 2: площадка не ответила (ответ — в SM_ERR).
+server_merge_confirmed() {
+    local sha="$1" own="$2" subj="$3" ref="" rows row num merged mc base
+    SM_PR="" SM_ERR=""
+    [[ "$subj" =~ \ \(#([0-9]+)\)$ ]] && ref="${BASH_REMATCH[1]}"
+    rows="$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+        --jq '.[] | [.number, (.merged_at // ""), (.merge_commit_sha // ""), .base.ref] | @tsv' 2>&1)" || {
+        SM_ERR="$(printf '%s' "$rows" | tr '\n' ' ' | cut -c1-200)"
+        return 2
+    }
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        ledger_split "$row"
+        [ "${#LV_F[@]}" = 4 ] || continue
+        num="${LV_F[0]}" merged="${LV_F[1]}" mc="${LV_F[2]}" base="${LV_F[3]}"
+        [[ "$num" =~ ^[0-9]+$ ]] && [ -n "$merged" ] && [ "$mc" = "$sha" ] || continue
+        [ -z "$ref" ] || [ "$num" = "$ref" ] || continue
+        [ "$own" = 0 ] || [ "$base" = "$head" ] || continue
+        SM_PR="$num"
+        return 0
+    done <<< "$rows"
+    return 1
+}
+
+server=""
+SM_CAND=0 SM_ASKED=0 SM_OK=0
+SM_REPORT=()
+sm_why=""
+if [ -z "${GITHUB_REPOSITORY:-}" ]; then
+    sm_why="нет GITHUB_REPOSITORY"
+elif ! command -v gh > /dev/null 2>&1; then
+    sm_why="нет gh"
+fi
+while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    [ "$(git show -s --format=%at "$m")" -ge "$BRANCH_RULE_T0" ] || continue
+    msubj="$(git show -s --format=%B "$m")"
+    msubj="${msubj%%$'\n'*}"
+    mn="$(branch_rule_subject_task "$msubj")" || continue
+    mown=0
+    [[ $'\n'"$owned"$'\n' == *$'\n'"$m"$'\n'* ]] && mown=1
+    if branch_rule_merge_form "$msubj" &&
+        ! { branch_rule_is_number "$head" && [ "$mown" = 1 ] && [ "$mn" != "$head" ]; }; then
+        continue
+    fi
+    SM_CAND=$((SM_CAND + 1))
+    [ -z "$sm_why" ] || continue
+    SM_ASKED=$((SM_ASKED + 1))
+    server_merge_confirmed "$m" "$mown" "$msubj"
+    case $? in
+        0) server+="$m"$'\n'
+           SM_OK=$((SM_OK + 1))
+           SM_REPORT+=("${m:0:10} — слияние запроса #$SM_PR, подтверждено площадкой") ;;
+        1) SM_REPORT+=("${m:0:10} — площадка влитого запроса с этим merge_commit_sha не называет") ;;
+        *) SM_REPORT+=("${m:0:10} — площадка не ответила: $SM_ERR") ;;
+    esac
+done < <(git rev-list --min-parents=2 "${range[@]}")
+# shellcheck disable=SC2034  # читает branch_rule_judge_commits (branch-rule.sh)
+BR_SERVER_MERGES="$server"
+
 branch_rule_judge_commits "$head" "$owned" - "${range[@]}"
 
 # Годная запись, чей коммит в диапазоне: прощённое печатается поимённо под
@@ -213,6 +296,13 @@ else
 fi
 if [ "${#LV_REPORT[@]}" -gt 0 ]; then
     printf '     %s\n' "${LV_REPORT[@]}"
+fi
+echo "   серверные слияния запросов (kaname#716): слияний не по форме $SM_CAND, спрошено $SM_ASKED, подтверждено площадкой $SM_OK"
+if [ -n "$sm_why" ] && [ "$SM_CAND" -gt 0 ]; then
+    echo "     не сверялись $SM_CAND — $sm_why: судятся по форме"
+fi
+if [ "${#SM_REPORT[@]}" -gt 0 ]; then
+    printf '     %s\n' "${SM_REPORT[@]}"
 fi
 if [ "${#BR_FINDINGS[@]}" -gt 0 ]; then
     echo "   нарушений: ${#BR_FINDINGS[@]}"
