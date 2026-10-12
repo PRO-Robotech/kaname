@@ -904,7 +904,7 @@ const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\xb2\xd2*\x1a\n" +
 	"\x12UpdateUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\x1c:\x01*2\x17/iam/v1/users/{user_id}\x12\xe3\x01\n" +
 	"\x06Delete\x12&.kaname.cloud.iam.v1.DeleteUserRequest\x1a\x1c.corelib.operation.Operation\"\x92\x01\x8a\xb5\x18\x10iam.users.delete\x92\xb5\x18\x10identity_remover\x9a\xb5\x18\x13\n" +
-	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\xb2\xd2*+\n" +
+	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*+\n" +
 	"\x12DeleteUserMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x19*\x17/iam/v1/users/{user_id}\x12\xa4\x02\n" +
 	"\x11RemoveFromAccount\x121.kaname.cloud.iam.v1.RemoveUserFromAccountRequest\x1a\x1c.corelib.operation.Operation\"\xbd\x01\x8a\xb5\x18\x1biam.users.removeFromAccount\x92\xb5\x18\x0emember_remover\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +

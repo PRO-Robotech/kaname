@@ -161,6 +161,11 @@ type UserServiceClient interface {
 	// the declared revocation window after the deletion commits. Records that
 	// only attribute an act to the person (who issued a service-account key, who
 	// granted a binding) keep the identifier; it is never issued again.
+	//
+	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
+	// irreversible removal is never cheaper than the reversible operations on the
+	// same subject (`Block`, `Unblock`, `ResetSecondFactor` already ask for it),
+	// and the floor is the same whoever calls — the person himself or the cloud.
 	Delete(ctx context.Context, in *DeleteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Removes the specified person from the specified Account: the MEMBERSHIP
 	// goes, the identity stays.
@@ -650,6 +655,11 @@ type UserServiceServer interface {
 	// the declared revocation window after the deletion commits. Records that
 	// only attribute an act to the person (who issued a service-account key, who
 	// granted a binding) keep the identifier; it is never issued again.
+	//
+	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
+	// irreversible removal is never cheaper than the reversible operations on the
+	// same subject (`Block`, `Unblock`, `ResetSecondFactor` already ask for it),
+	// and the floor is the same whoever calls — the person himself or the cloud.
 	Delete(context.Context, *DeleteUserRequest) (*operation.Operation, error)
 	// Removes the specified person from the specified Account: the MEMBERSHIP
 	// goes, the identity stays.

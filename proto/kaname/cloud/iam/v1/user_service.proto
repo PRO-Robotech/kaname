@@ -222,6 +222,11 @@ service UserService {
   // the declared revocation window after the deletion commits. Records that
   // only attribute an act to the person (who issued a service-account key, who
   // granted a binding) keep the identifier; it is never issued again.
+  //
+  // IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
+  // irreversible removal is never cheaper than the reversible operations on the
+  // same subject (`Block`, `Unblock`, `ResetSecondFactor` already ask for it),
+  // and the floor is the same whoever calls — the person himself or the cloud.
   rpc Delete (DeleteUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/users/{user_id}" };
     option (corelib.api.v1.operation) = {
@@ -234,7 +239,7 @@ service UserService {
       object_type:        "iam_user"
       from_request_field: "user_id"
     };
-    option (corelib.authz.v1.required_acr_min) = "1";
+    option (corelib.authz.v1.required_acr_min) = "2";
   }
 
   // Removes the specified person from the specified Account: the MEMBERSHIP
