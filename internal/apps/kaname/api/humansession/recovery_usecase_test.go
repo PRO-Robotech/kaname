@@ -84,10 +84,15 @@ func TestRecovery_F5_01_RequestForAVerifiedAddressMintsACodeAndQueuesTheLetter(t
 
 // TestRecovery_F5_02_RequestForNobodyOrUnverifiedQueuesNothingAndAnswersTheSame —
 // Ф5-02 (Ф1-26): адреса нет ни у кого — в очередь не поставлено ничего, ответ
-// тот же; неподтверждённый адрес — то же (Ф1-25: код — для подтверждённого).
+// тот же; неподтверждённый адрес строки `BLOCKED` — то же (kaname#458, Р2:
+// строке `BLOCKED` неподтверждённый адрес кода не даёт — блокировку снимает
+// распорядитель). Мир записи `ACTIVE` с паролем этой пробе больше не
+// принадлежит: такая запись код получает (A458-01).
 func TestRecovery_F5_02_RequestForNobodyOrUnverifiedQueuesNothingAndAnswersTheSame(t *testing.T) {
 	h := newHarness(t, nil)
 	unverified := h.person(t, "usr-r02", "r02@example.invalid", "old-password-2", false)
+	unverified.InviteStatus = domain.InviteStatusBlocked
+	h.store.users[unverified.ID] = unverified
 
 	h.request(t, "nobody@example.invalid")
 	h.request(t, "r02@example.invalid")
@@ -534,7 +539,8 @@ func TestRecovery_ClosedOutcomeSetsAreDeclared(t *testing.T) {
 	require.ElementsMatch(t, []humansession.RecoveryCompletionOutcome{
 		humansession.RecoveryCompletionIssued, humansession.RecoveryCompletionNoRow, humansession.RecoveryCompletionCodeRejected,
 		humansession.RecoveryCompletionBlocked, humansession.RecoveryCompletionRateLimited, humansession.RecoveryCompletionPasswordRejected,
-		humansession.RecoveryCompletionStoreFailed,
+		humansession.RecoveryCompletionStoreFailed, humansession.RecoveryCompletionAddressClaimed,
+		humansession.RecoveryCompletionAddressVerified, humansession.RecoveryCompletionInviteNotValid,
 	}, humansession.RecoveryCompletionOutcomes())
 }
 

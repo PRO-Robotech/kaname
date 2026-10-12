@@ -286,10 +286,17 @@ func (r *AccessKeyRepo) AccessKeysResetWriter(ctx context.Context, userID domain
 // регистрации человека сняты одним оператором; строки, потреблённые
 // регистрацией, остаются — их предмет уже исполнен, и уборка снимет их сроком.
 func (w *AccessKeysResetTx) RetireRegistrationChallenges(ctx context.Context, userID domain.UserID) (int64, error) {
+	return retireRegistrationChallengesTx(ctx, w.tx, userID)
+}
+
+// retireRegistrationChallengesTx — оператор снятия выданных и не предъявленных
+// испытаний регистрации человека: один у сброса ключей администратором облака
+// и у перехода записи к владельцу ящика (kaname#458).
+func retireRegistrationChallengesTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
 	if userID == "" {
 		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
-	tag, err := w.tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		DELETE FROM access_key_challenges
 		 WHERE user_id = $1 AND purpose = $2 AND consumed_at IS NULL`, string(userID), string(domain.ChallengeForRegistration))
 	if err != nil {
@@ -308,10 +315,18 @@ func (w *AccessKeysResetTx) Now(ctx context.Context) (time.Time, error) {
 // DeleteAccessKeysOf — все строки ключей человека одним оператором; слоты
 // потолка возвращает триггер на удалении в той же транзакции.
 func (w *AccessKeysResetTx) DeleteAccessKeysOf(ctx context.Context, userID domain.UserID) (int64, error) {
+	return deleteAccessKeysOfTx(ctx, w.tx, userID)
+}
+
+// deleteAccessKeysOfTx — оператор снятия всех строк ключей человека: один у
+// сброса ключей администратором облака и у перехода записи к владельцу ящика
+// (kaname#458). Порядок у обоих — после снятия испытаний регистрации (Р7
+// сброса, шапка [AccessKeysResetTx]).
+func deleteAccessKeysOfTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
 	if userID == "" {
 		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
-	tag, err := w.tx.Exec(ctx, `DELETE FROM user_access_keys WHERE user_id = $1`, string(userID))
+	tag, err := tx.Exec(ctx, `DELETE FROM user_access_keys WHERE user_id = $1`, string(userID))
 	if err != nil {
 		return 0, mapErr(err, "AccessKey.DeleteAllOf", "")
 	}

@@ -98,6 +98,14 @@ Coverage:
   IAM-RECOVERY-NEG-PACED-PER-SOURCE     — Ф5-27: M запросов о Z с источника S — запрос для P с
                                           S тот же ответ, письма нет, source-paced +1, no-row +M;
                                           (б) с S′ — письмо поставлено
+  IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED — A458-01, A458-02 (kaname#458, DoD п. 10):
+                                          (а) регистрация без подтверждения адреса — запрос кода
+                                          200, тело побайтово равно ответу о несуществующем адресе,
+                                          письмо восстановления у приёмника, queued +1, unverified 0;
+                                          завершение кодом из письма — 200, emailVerified: true, сессия
+                                          регистрации негодна, вход прежним паролем 401 / 16, новым 200;
+                                          (б) близнец — адрес подтверждён кодом письма регистрации до
+                                          запроса: тот же путь, queued +1
 
 Техники: классы эквивалентности (годный / негодный пароль; свой / чужой /
 применённый код), граница счёта по адресу (N−1 · N · N+1), угадывание ошибок
@@ -384,8 +392,17 @@ _REGISTER = "/iam/v1/auth/register"
 _LOGIN = "/iam/v1/auth/login"
 _VERIFY_CONFIRM = "/iam/v1/auth/verify-email/confirm"
 # Чтение, требующее живой сессии и ничего не меняющее: состояние второго
-# фактора. Живая сессия — 200, отозванная — 401 `authentication failed`.
+# фактора. Три ответа — три ответа `Resolve`: живая с подтверждённым адресом —
+# 200; живая в положении подтверждения — 403 EMAIL_NOT_VERIFIED (путь объявлен
+# отказом положения, `pathPositions` полосы); отозванная — 401
+# `authentication failed`.
 _SESSION_PROBE = "/iam/v1/auth/second-factor"
+_NOT_VERIFIED = ("email address is not verified: confirm it with the code from the letter "
+                 "(POST /iam/v1/auth/verify-email/confirm)")
+_NOT_VERIFIED_REASON = "EMAIL_NOT_VERIFIED"
+# Домен отказов службы — константа продукта (`internal/refusaldomain`), а не
+# величина посадки.
+_REFUSAL_DOMAIN = "iam.kaname.cloud"
 
 _MAILBOX_WHY = ("чтение приёмника писем стенда посадки `own`; адрес пишет посев "
                 "полосы входа — вне стенда `own` приёмника нет, и это условие, "
@@ -616,9 +633,36 @@ def _issued(p, label, store="RecoveredCookie"):
     ]
 
 
+def _position_refused(label):
+    """Отказ положения дословно: 403, код 7, текст, ErrorInfo с доменом службы.
+
+    Выносится только носителю, которого служба УЗНАЛА живым: неузнанный идёт
+    дальше, к глаголу, и получает 401."""
+    return [
+        *_refused(403, 7, _NOT_VERIFIED, label),
+        "const __info = (Array.isArray(__r.details) ? __r.details : [])"
+        ".filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
+        f"pm.test({js_str(label + ': признак отказа ' + _NOT_VERIFIED_REASON)}, () => "
+        f"pm.expect(__info.reason).to.eql({js_str(_NOT_VERIFIED_REASON)}));",
+        f"pm.test({js_str(label + ': домен признака — домен отказов службы')}, () => "
+        f"pm.expect(__info.domain).to.eql({js_str(_REFUSAL_DOMAIN)}));",
+    ]
+
+
 def _session_probe(p, name, cookie_var, alive):
-    """Жива ли сессия: чтение, требующее сессии; ничего не меняет."""
+    """Жива ли сессия: чтение, требующее сессии; ничего не меняет.
+
+    `alive`: True — узнана в обычном положении (200); "position" — узнана живой
+    в положении подтверждения (403 EMAIL_NOT_VERIFIED); False — не узнана (401)."""
     label = name.upper()
+    if alive == "position":
+        tests = _position_refused(label + " (сессия жива, адрес не подтверждён)")
+    elif alive is True:
+        tests = _status_is(200, label + " (сессия жива)")
+    elif alive is False:
+        tests = _refused(401, 16, "authentication failed", label + " (сессия отозвана)")
+    else:
+        raise ValueError(f"_session_probe: исход {alive!r} не объявлен")
     return Step(
         name=name, method="GET", path=_SESSION_PROBE,
         pre_script=[*require_env_url("loginLaneBaseUrl", _SESSION_PROBE, _LANE_WHY), *_src_pre(p),
@@ -626,8 +670,7 @@ def _session_probe(p, name, cookie_var, alive):
                     f"pm.expect(!!pm.environment.get({js_str(_v(p, cookie_var))})).to.eql(true));",
                     *_with_cookies(("kaname_session", _v(p, cookie_var)))],
         insecure_tls=True, auth="anonymous", cookie_jar=False,
-        test_script=(_status_is(200, label + " (сессия жива)") if alive
-                     else _refused(401, 16, "authentication failed", label + " (сессия отозвана)")),
+        test_script=tests,
     )
 
 
@@ -1798,5 +1841,89 @@ CASES.append(Case(
             "pm.test('SRC-CELLS-S2: письмо с S′ поставлено — queued выросла на 1 от базы перед S′, source-paced не выросла', () => "
             f"pm.expect([{_delta('rcvSrcS20', 'queued')}, {_delta('rcvSrcS20', 'source-paced')}]).to.eql([1, 0]));",
         ]),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# A458-01, A458-02 (kaname#458; приёмка
+# `docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md`,
+# ред. 3, DoD п. 10): адрес, занятый неподтверждённой записью, переходит к
+# владельцу ящика восстановлением. (а) Человек зарегистрирован, письмо
+# регистрации НЕ прочитано — адрес не подтверждён; код восстановления приходит
+# в ящик, его предъявление подтверждает адрес и снимает сессию регистрации.
+# (б) Близнец по одному факту — адрес подтверждён кодом письма регистрации до
+# запроса. Техники: классы эквивалентности (подтверждён / не подтверждён),
+# положительный близнец, переход состояния сессии (жива → отозвана).
+# ───────────────────────────────────────────────────────────────────────────
+_PCL, _PCV = "rcvClaim", "rcvClaimV"
+
+
+def _unverified_person(p, tag):
+    """Человек кейса без подтверждения адреса: регистрация, письмо не читается."""
+    return [
+        _csrf_step(p, f"{tag}-csrf-register", "register", init=_person_init(p, tag)),
+        _post(p, f"{tag}-register", _REGISTER,
+              {"email": f"{{{{{_v(p, 'Email')}}}}}", "password": f"{{{{{_v(p, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              test_script=[
+                  *_status_is(200, f"{tag.upper()}-REGISTER"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  f"pm.test({js_str(tag.upper() + '-REGISTER: адрес не подтверждён')}, () => "
+                  "pm.expect(!!(__j.session && __j.session.emailVerified === false)).to.eql(true));",
+                  *_capture(p, "kaname_session", "SessionCookie", f"{tag.upper()}-REGISTER"),
+                  *_capture(p, "kaname_form", "FormCookie", f"{tag.upper()}-REGISTER", required=False),
+              ]),
+    ]
+
+
+def _claimed(p, label):
+    """Успех завершения перехода: тело, носитель и `session.emailVerified: true`."""
+    return [
+        *_issued(p, label),
+        f"pm.test({js_str(label + ': session.emailVerified = true — адрес подтверждён предъявлением кода')}, () => "
+        "pm.expect(!!(__j.session && __j.session.emailVerified === true)).to.eql(true));",
+    ]
+
+
+def _claim_path(p, tag, *, unverified_delta):
+    """Запрос кода (ответ равен ответу о несуществующем адресе) → письмо → клетки →
+    завершение → сессия регистрации негодна → вход прежним 401, новым 200."""
+    base = f"{p}Cells0"
+    return [
+        _metrics_step(f"{tag}-cells-baseline", tests=[*_keep_outcomes(base, ("queued", "unverified"))]),
+        _csrf_step(p, f"{tag}-csrf-recovery", "recovery"),
+        _request_for(p, f"{tag}-request-code", f"{{{{{_v(p, 'Email')}}}}}", _v(p, "Src"), keep=f"{p}RequestBody"),
+        _request_for(p, f"{tag}-request-nobody", f"nobody-{tag}-{{{{runId}}}}@example.invalid", _v(p, "Src"),
+                     same_as=f"{p}RequestBody"),
+        _await_code(p, f"{tag}-recovery-letter", _HEAD_RECOVERY, "MailCode"),
+        _metrics_step(f"{tag}-cells", until=f"{_delta(base, 'queued')} >= 1", tests=[
+            f"pm.test({js_str(tag.upper() + '-CELLS: queued выросла ровно на 1, unverified — на ' + str(unverified_delta))}, () => "
+            f"pm.expect([{_delta(base, 'queued')}, {_delta(base, 'unverified')}]).to.eql([1, {unverified_delta}]));",
+        ]),
+        _csrf_step(p, f"{tag}-csrf-complete", "recovery-complete"),
+        _complete(p, f"{tag}-complete", test_script=_claimed(p, f"{tag.upper()}-COMPLETE")),
+        _session_probe(p, f"{tag}-registration-session", "SessionCookie", alive=False),
+        *_login(p, f"{tag}-login-old-password", "Password", ok=False),
+        *_login(p, f"{tag}-login-new-password", "NewPassword", ok=True),
+    ]
+
+
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED",
+    title="A458-01, A458-02: адрес, занятый неподтверждённой записью, переходит к владельцу ящика кодом восстановления; близнец — подтверждённый адрес",
+    classes=["SEC", "STATE", "CONF"],
+    priority="P0",
+    steps=[
+        # (а) адрес не подтверждён.
+        *_unverified_person(_PCL, "claim"),
+        # Сессия регистрации жива ДО перехода: адрес не подтверждён, поэтому живая
+        # сессия узнаётся отказом положения (403 EMAIL_NOT_VERIFIED), а не 200;
+        # после перехода та же сессия не узнаётся — 401 (шаг `claim-registration-session`).
+        _session_probe(_PCL, "claim-registration-session-alive-before", "SessionCookie", alive="position"),
+        *_claim_path(_PCL, "claim", unverified_delta=0),
+        # (б) близнец: адрес подтверждён кодом письма регистрации до запроса.
+        *_person(_PCV, "claim-verified"),
+        *_claim_path(_PCV, "claim-verified", unverified_delta=0),
     ],
 ))
