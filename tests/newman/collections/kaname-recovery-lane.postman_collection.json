@@ -23258,6 +23258,3222 @@
           ]
         }
       ]
+    },
+    {
+      "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED — A458-01, A458-02: адрес, занятый неподтверждённой записью, переходит к владельцу ящика кодом восстановления; близнец — подтверждённый адрес",
+      "description": "class:SEC | class:STATE | class:CONF | priority:P0",
+      "item": [
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-csrf-register",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=register"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "{",
+                  "  const __nonce = () => Math.floor(Math.random() * 2176782336).toString(36);",
+                  "  pm.environment.set('rcvClaimEmail', 'claim-' + pm.environment.get('runId') + '-' + __nonce() + '@kaname.local');",
+                  "  pm.environment.set('rcvClaimPassword', 'Pw-' + __nonce() + __nonce() + '-first');",
+                  "  pm.environment.set('rcvClaimNewPassword', 'Pw-' + __nonce() + __nonce() + '-renewed');",
+                  "  pm.environment.set('rcvClaimSrc', '198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+                  "  pm.environment.set('rcvClaimMailSeenVerifyCode', '0');",
+                  "  pm.environment.set('rcvClaimMailSeenMailCode', '0');",
+                  "  pm.environment.unset('rcvClaimFormCookie');",
+                  "  pm.environment.unset('rcvClaimSessionCookie');",
+                  "  pm.environment.unset('rcvClaimCsrf');",
+                  "  pm.environment.unset('rcvClaimVerifyCode');",
+                  "  pm.environment.unset('rcvClaimMailCode');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=register');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-CSRF-REGISTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-CSRF-REGISTER: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimEmail}}\", \"password\": \"{{rcvClaimPassword}}\", \"csrfToken\": \"{{rcvClaimCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/register');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-REGISTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-REGISTER: адрес не подтверждён', () => pm.expect(!!(__j.session && __j.session.emailVerified === false)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('CLAIM-REGISTER: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-registration-session-alive-before",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/second-factor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "second-factor"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/second-factor');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "pm.test('CLAIM-REGISTRATION-SESSION-ALIVE-BEFORE: носитель, который предъявляется, был выдан (контроль непустоты)', () => pm.expect(!!pm.environment.get('rcvClaimSessionCookie')).to.eql(true));",
+                  "const __cookie = ((pm.environment.get('rcvClaimSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvClaimSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-REGISTRATION-SESSION-ALIVE-BEFORE (сессия жива): ответ 200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-cells-baseline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_claim_cells_baseline') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_claim_cells_baseline', '0');",
+                  "  pm.environment.set('_mts_claim_cells_baseline', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "pm.test('CLAIM-CELLS-BASELINE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('RCVCLAIMCELLS0: клетка queued публикуется до события кейса', () => pm.expect(__out('queued')).to.be.a('number'));",
+                  "pm.environment.set('rcvClaimCells0_queued', String(__out('queued')));",
+                  "pm.test('RCVCLAIMCELLS0: клетка unverified публикуется до события кейса', () => pm.expect(__out('unverified')).to.be.a('number'));",
+                  "pm.environment.set('rcvClaimCells0_unverified', String(__out('unverified')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-csrf-recovery",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=recovery"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-CSRF-RECOVERY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-CSRF-RECOVERY: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-request-code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimEmail}}\", \"csrfToken\": \"{{rcvClaimCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (pm.environment.get('_rqs_rcvClaim_claim_request_code') !== pm.info.requestName) {",
+                  "  pm.environment.set('_rq_rcvClaim_claim_request_code', '0');",
+                  "  pm.environment.set('_rq_rcvClaim_claim_request_code_bad', '0');",
+                  "  pm.environment.set('_rqs_rcvClaim_claim_request_code', pm.info.requestName);",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-REQUEST-CODE: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
+                  "pm.environment.set('rcvClaimRequestBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-request-nobody",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"nobody-claim-{{runId}}@example.invalid\", \"csrfToken\": \"{{rcvClaimCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (pm.environment.get('_rqs_rcvClaim_claim_request_nobody') !== pm.info.requestName) {",
+                  "  pm.environment.set('_rq_rcvClaim_claim_request_nobody', '0');",
+                  "  pm.environment.set('_rq_rcvClaim_claim_request_nobody_bad', '0');",
+                  "  pm.environment.set('_rqs_rcvClaim_claim_request_nobody', pm.info.requestName);",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-REQUEST-NOBODY: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
+                  "pm.test('CLAIM-REQUEST-NOBODY: тело побайтово равно запомненному ответу', () => pm.expect(pm.response.text() === pm.environment.get('rcvClaimRequestBody')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-recovery-letter",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/codes?to={{rcvClaimEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "codes?to={{rcvClaimEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/codes?to={{rcvClaimEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mbs_rcvClaim_claim_recovery_letter') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mb_rcvClaim_claim_recovery_letter', '0');",
+                  "  pm.environment.set('_mbs_rcvClaim_claim_recovery_letter', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_mb_rcvClaim_claim_recovery_letter') || '0', 10);",
+                  "const __seen = parseInt(pm.environment.get('rcvClaimMailSeenMailCode') || '0', 10);",
+                  "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                  "const __got = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
+                  "if (pm.response.code === 200 && __got.length <= __seen && __n < 90) {",
+                  "  pm.environment.set('_mb_rcvClaim_claim_recovery_letter', String(__n + 1));",
+                  "  const _mbd = Date.now(); while (Date.now() - _mbd < 1000) { /* inter-poll delay: letter not yet at the stand mailbox */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mb_rcvClaim_claim_recovery_letter');",
+                  "pm.environment.unset('_mbs_rcvClaim_claim_recovery_letter');",
+                  "pm.test('CLAIM-RECOVERY-LETTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('CLAIM-RECOVERY-LETTER: письмо с кодом дошло до приёмника стенда в пределе ожидания', () => pm.expect(__got.length > __seen).to.eql(true));",
+                  "if (__got.length > __seen) {",
+                  "  pm.environment.set('rcvClaimMailCode', __got[__got.length - 1]);",
+                  "  pm.environment.set('rcvClaimMailSeenMailCode', String(__got.length));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-cells",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_claim_cells') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_claim_cells', '0');",
+                  "  pm.environment.set('_mts_claim_cells', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "const __n = parseInt(pm.environment.get('_mt_claim_cells') || '0', 10);",
+                  "if (!((__out('queued') - __num('rcvClaimCells0_queued')) >= 1) && __n < 120) {",
+                  "  pm.environment.set('_mt_claim_cells', String(__n + 1));",
+                  "  const _mtd = Date.now(); while (Date.now() - _mtd < 1000) { /* inter-poll delay: condition on the metrics not reached yet */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mt_claim_cells');",
+                  "pm.environment.unset('_mts_claim_cells');",
+                  "pm.test('CLAIM-CELLS: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('CLAIM-CELLS: queued выросла ровно на 1, unverified — на 0', () => pm.expect([(__out('queued') - __num('rcvClaimCells0_queued')), (__out('unverified') - __num('rcvClaimCells0_unverified'))]).to.eql([1, 0]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-csrf-complete",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=recovery-complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=recovery-complete"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=recovery-complete');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-CSRF-COMPLETE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-CSRF-COMPLETE: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery",
+                "complete"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimEmail}}\", \"code\": \"{{rcvClaimMailCode}}\", \"newPassword\": \"{{rcvClaimNewPassword}}\", \"csrfToken\": \"{{rcvClaimCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery/complete');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-COMPLETE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-COMPLETE: тело несёт человека и сессию', () => pm.expect(!!(__j.user && __j.user.id && __j.session && __j.session.expiresAt)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('CLAIM-COMPLETE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimRecoveredCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}",
+                  "pm.test('CLAIM-COMPLETE: session.emailVerified = true — адрес подтверждён предъявлением кода', () => pm.expect(!!(__j.session && __j.session.emailVerified === true)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-registration-session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/second-factor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "second-factor"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/second-factor');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "pm.test('CLAIM-REGISTRATION-SESSION: носитель, который предъявляется, был выдан (контроль непустоты)', () => pm.expect(!!pm.environment.get('rcvClaimSessionCookie')).to.eql(true));",
+                  "const __cookie = ((pm.environment.get('rcvClaimSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvClaimSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-REGISTRATION-SESSION (сессия отозвана): ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
+                  "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
+                  "pm.test('CLAIM-REGISTRATION-SESSION (сессия отозвана): код отказа 16', () => pm.expect(__r.code).to.eql(16));",
+                  "pm.test('CLAIM-REGISTRATION-SESSION (сессия отозвана): текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('CLAIM-REGISTRATION-SESSION (сессия отозвана): носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-login-old-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-LOGIN-OLD-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-LOGIN-OLD-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-login-old-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimEmail}}\", \"password\": \"{{rcvClaimPassword}}\", \"csrfToken\": \"{{rcvClaimCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-LOGIN-OLD-PASSWORD: ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
+                  "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
+                  "pm.test('CLAIM-LOGIN-OLD-PASSWORD: код отказа 16', () => pm.expect(__r.code).to.eql(16));",
+                  "pm.test('CLAIM-LOGIN-OLD-PASSWORD: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('CLAIM-LOGIN-OLD-PASSWORD: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-login-new-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-LOGIN-NEW-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-LOGIN-NEW-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-login-new-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimEmail}}\", \"password\": \"{{rcvClaimNewPassword}}\", \"csrfToken\": \"{{rcvClaimCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-LOGIN-NEW-PASSWORD: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-LOGIN-NEW-PASSWORD: сессия выдана', () => pm.expect(!!(__j.session && __j.session.expiresAt)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('CLAIM-LOGIN-NEW-PASSWORD: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimLoginCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-csrf-register",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=register"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "{",
+                  "  const __nonce = () => Math.floor(Math.random() * 2176782336).toString(36);",
+                  "  pm.environment.set('rcvClaimVEmail', 'claim-verified-' + pm.environment.get('runId') + '-' + __nonce() + '@kaname.local');",
+                  "  pm.environment.set('rcvClaimVPassword', 'Pw-' + __nonce() + __nonce() + '-first');",
+                  "  pm.environment.set('rcvClaimVNewPassword', 'Pw-' + __nonce() + __nonce() + '-renewed');",
+                  "  pm.environment.set('rcvClaimVSrc', '198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+                  "  pm.environment.set('rcvClaimVMailSeenVerifyCode', '0');",
+                  "  pm.environment.set('rcvClaimVMailSeenMailCode', '0');",
+                  "  pm.environment.unset('rcvClaimVFormCookie');",
+                  "  pm.environment.unset('rcvClaimVSessionCookie');",
+                  "  pm.environment.unset('rcvClaimVCsrf');",
+                  "  pm.environment.unset('rcvClaimVVerifyCode');",
+                  "  pm.environment.unset('rcvClaimVMailCode');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=register');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-CSRF-REGISTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-CSRF-REGISTER: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimVCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimVEmail}}\", \"password\": \"{{rcvClaimVPassword}}\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/register');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-REGISTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('CLAIM-VERIFIED-REGISTER: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-verify-letter",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/codes?to={{rcvClaimVEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%BF%D0%BE%D0%B4%D1%82%D0%B2%D0%B5%D1%80%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F%3A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "codes?to={{rcvClaimVEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%BF%D0%BE%D0%B4%D1%82%D0%B2%D0%B5%D1%80%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F%3A"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/codes?to={{rcvClaimVEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%BF%D0%BE%D0%B4%D1%82%D0%B2%D0%B5%D1%80%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F%3A');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mbs_rcvClaimV_claim_verified_verify_letter') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mb_rcvClaimV_claim_verified_verify_letter', '0');",
+                  "  pm.environment.set('_mbs_rcvClaimV_claim_verified_verify_letter', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_mb_rcvClaimV_claim_verified_verify_letter') || '0', 10);",
+                  "const __seen = parseInt(pm.environment.get('rcvClaimVMailSeenVerifyCode') || '0', 10);",
+                  "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                  "const __got = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
+                  "if (pm.response.code === 200 && __got.length <= __seen && __n < 90) {",
+                  "  pm.environment.set('_mb_rcvClaimV_claim_verified_verify_letter', String(__n + 1));",
+                  "  const _mbd = Date.now(); while (Date.now() - _mbd < 1000) { /* inter-poll delay: letter not yet at the stand mailbox */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mb_rcvClaimV_claim_verified_verify_letter');",
+                  "pm.environment.unset('_mbs_rcvClaimV_claim_verified_verify_letter');",
+                  "pm.test('CLAIM-VERIFIED-VERIFY-LETTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('CLAIM-VERIFIED-VERIFY-LETTER: письмо с кодом дошло до приёмника стенда в пределе ожидания', () => pm.expect(__got.length > __seen).to.eql(true));",
+                  "if (__got.length > __seen) {",
+                  "  pm.environment.set('rcvClaimVVerifyCode', __got[__got.length - 1]);",
+                  "  pm.environment.set('rcvClaimVMailSeenVerifyCode', String(__got.length));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-csrf-verify",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=verify-email-confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=verify-email-confirm"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=verify-email-confirm');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '') + (pm.environment.get('rcvClaimVSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvClaimVSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-CSRF-VERIFY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-CSRF-VERIFY: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimVCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/verify-email/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "verify-email",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"code\": \"{{rcvClaimVVerifyCode}}\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/verify-email/confirm');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '') + (pm.environment.get('rcvClaimVSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvClaimVSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-VERIFY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-VERIFY: адрес подтверждён', () => pm.expect(!!(__j.session && __j.session.emailVerified === true)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-cells-baseline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_claim_verified_cells_baseline') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_claim_verified_cells_baseline', '0');",
+                  "  pm.environment.set('_mts_claim_verified_cells_baseline', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "pm.test('CLAIM-VERIFIED-CELLS-BASELINE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('RCVCLAIMVCELLS0: клетка queued публикуется до события кейса', () => pm.expect(__out('queued')).to.be.a('number'));",
+                  "pm.environment.set('rcvClaimVCells0_queued', String(__out('queued')));",
+                  "pm.test('RCVCLAIMVCELLS0: клетка unverified публикуется до события кейса', () => pm.expect(__out('unverified')).to.be.a('number'));",
+                  "pm.environment.set('rcvClaimVCells0_unverified', String(__out('unverified')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-csrf-recovery",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=recovery"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-CSRF-RECOVERY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-CSRF-RECOVERY: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimVCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-request-code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimVEmail}}\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (pm.environment.get('_rqs_rcvClaimV_claim_verified_request_code') !== pm.info.requestName) {",
+                  "  pm.environment.set('_rq_rcvClaimV_claim_verified_request_code', '0');",
+                  "  pm.environment.set('_rq_rcvClaimV_claim_verified_request_code_bad', '0');",
+                  "  pm.environment.set('_rqs_rcvClaimV_claim_verified_request_code', pm.info.requestName);",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-REQUEST-CODE: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
+                  "pm.environment.set('rcvClaimVRequestBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-request-nobody",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"nobody-claim-verified-{{runId}}@example.invalid\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (pm.environment.get('_rqs_rcvClaimV_claim_verified_request_nobody') !== pm.info.requestName) {",
+                  "  pm.environment.set('_rq_rcvClaimV_claim_verified_request_nobody', '0');",
+                  "  pm.environment.set('_rq_rcvClaimV_claim_verified_request_nobody_bad', '0');",
+                  "  pm.environment.set('_rqs_rcvClaimV_claim_verified_request_nobody', pm.info.requestName);",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-REQUEST-NOBODY: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
+                  "pm.test('CLAIM-VERIFIED-REQUEST-NOBODY: тело побайтово равно запомненному ответу', () => pm.expect(pm.response.text() === pm.environment.get('rcvClaimVRequestBody')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-recovery-letter",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/codes?to={{rcvClaimVEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "codes?to={{rcvClaimVEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/codes?to={{rcvClaimVEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mbs_rcvClaimV_claim_verified_recovery_letter') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mb_rcvClaimV_claim_verified_recovery_letter', '0');",
+                  "  pm.environment.set('_mbs_rcvClaimV_claim_verified_recovery_letter', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_mb_rcvClaimV_claim_verified_recovery_letter') || '0', 10);",
+                  "const __seen = parseInt(pm.environment.get('rcvClaimVMailSeenMailCode') || '0', 10);",
+                  "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                  "const __got = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
+                  "if (pm.response.code === 200 && __got.length <= __seen && __n < 90) {",
+                  "  pm.environment.set('_mb_rcvClaimV_claim_verified_recovery_letter', String(__n + 1));",
+                  "  const _mbd = Date.now(); while (Date.now() - _mbd < 1000) { /* inter-poll delay: letter not yet at the stand mailbox */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mb_rcvClaimV_claim_verified_recovery_letter');",
+                  "pm.environment.unset('_mbs_rcvClaimV_claim_verified_recovery_letter');",
+                  "pm.test('CLAIM-VERIFIED-RECOVERY-LETTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('CLAIM-VERIFIED-RECOVERY-LETTER: письмо с кодом дошло до приёмника стенда в пределе ожидания', () => pm.expect(__got.length > __seen).to.eql(true));",
+                  "if (__got.length > __seen) {",
+                  "  pm.environment.set('rcvClaimVMailCode', __got[__got.length - 1]);",
+                  "  pm.environment.set('rcvClaimVMailSeenMailCode', String(__got.length));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-cells",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_claim_verified_cells') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_claim_verified_cells', '0');",
+                  "  pm.environment.set('_mts_claim_verified_cells', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "const __n = parseInt(pm.environment.get('_mt_claim_verified_cells') || '0', 10);",
+                  "if (!((__out('queued') - __num('rcvClaimVCells0_queued')) >= 1) && __n < 120) {",
+                  "  pm.environment.set('_mt_claim_verified_cells', String(__n + 1));",
+                  "  const _mtd = Date.now(); while (Date.now() - _mtd < 1000) { /* inter-poll delay: condition on the metrics not reached yet */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mt_claim_verified_cells');",
+                  "pm.environment.unset('_mts_claim_verified_cells');",
+                  "pm.test('CLAIM-VERIFIED-CELLS: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('CLAIM-VERIFIED-CELLS: queued выросла ровно на 1, unverified — на 0', () => pm.expect([(__out('queued') - __num('rcvClaimVCells0_queued')), (__out('unverified') - __num('rcvClaimVCells0_unverified'))]).to.eql([1, 0]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-csrf-complete",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=recovery-complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=recovery-complete"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=recovery-complete');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-CSRF-COMPLETE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-CSRF-COMPLETE: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimVCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery",
+                "complete"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimVEmail}}\", \"code\": \"{{rcvClaimVMailCode}}\", \"newPassword\": \"{{rcvClaimVNewPassword}}\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery/complete');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-COMPLETE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-COMPLETE: тело несёт человека и сессию', () => pm.expect(!!(__j.user && __j.user.id && __j.session && __j.session.expiresAt)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('CLAIM-VERIFIED-COMPLETE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVRecoveredCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}",
+                  "pm.test('CLAIM-VERIFIED-COMPLETE: session.emailVerified = true — адрес подтверждён предъявлением кода', () => pm.expect(!!(__j.session && __j.session.emailVerified === true)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-registration-session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/second-factor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "second-factor"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/second-factor');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "pm.test('CLAIM-VERIFIED-REGISTRATION-SESSION: носитель, который предъявляется, был выдан (контроль непустоты)', () => pm.expect(!!pm.environment.get('rcvClaimVSessionCookie')).to.eql(true));",
+                  "const __cookie = ((pm.environment.get('rcvClaimVSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvClaimVSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-REGISTRATION-SESSION (сессия отозвана): ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
+                  "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
+                  "pm.test('CLAIM-VERIFIED-REGISTRATION-SESSION (сессия отозвана): код отказа 16', () => pm.expect(__r.code).to.eql(16));",
+                  "pm.test('CLAIM-VERIFIED-REGISTRATION-SESSION (сессия отозвана): текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('CLAIM-VERIFIED-REGISTRATION-SESSION (сессия отозвана): носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-login-old-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-LOGIN-OLD-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-LOGIN-OLD-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimVCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-login-old-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimVEmail}}\", \"password\": \"{{rcvClaimVPassword}}\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-LOGIN-OLD-PASSWORD: ответ 401', () => pm.expect(pm.response.code).to.eql(401));",
+                  "let __r = {}; try { __r = pm.response.json(); } catch (e) { __r = {}; }",
+                  "pm.test('CLAIM-VERIFIED-LOGIN-OLD-PASSWORD: код отказа 16', () => pm.expect(__r.code).to.eql(16));",
+                  "pm.test('CLAIM-VERIFIED-LOGIN-OLD-PASSWORD: текст отказа фиксирован', () => pm.expect(__r.message).to.eql('authentication failed'));",
+                  "pm.test('CLAIM-VERIFIED-LOGIN-OLD-PASSWORD: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-login-new-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-LOGIN-NEW-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-LOGIN-NEW-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvClaimVCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED :: claim-verified-login-new-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvClaimVEmail}}\", \"password\": \"{{rcvClaimVNewPassword}}\", \"csrfToken\": \"{{rcvClaimVCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvClaimVSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvClaimVFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvClaimVFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CLAIM-VERIFIED-LOGIN-NEW-PASSWORD: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('CLAIM-VERIFIED-LOGIN-NEW-PASSWORD: сессия выдана', () => pm.expect(!!(__j.session && __j.session.expiresAt)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('CLAIM-VERIFIED-LOGIN-NEW-PASSWORD: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVLoginCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvClaimVFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

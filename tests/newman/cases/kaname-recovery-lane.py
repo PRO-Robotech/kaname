@@ -98,6 +98,14 @@ Coverage:
   IAM-RECOVERY-NEG-PACED-PER-SOURCE     — Ф5-27: M запросов о Z с источника S — запрос для P с
                                           S тот же ответ, письма нет, source-paced +1, no-row +M;
                                           (б) с S′ — письмо поставлено
+  IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED — A458-01, A458-02 (kaname#458, DoD п. 10):
+                                          (а) регистрация без подтверждения адреса — запрос кода
+                                          200, тело побайтово равно ответу о несуществующем адресе,
+                                          письмо восстановления у приёмника, queued +1, unverified 0;
+                                          завершение кодом из письма — 200, emailVerified: true, сессия
+                                          регистрации негодна, вход прежним паролем 401 / 16, новым 200;
+                                          (б) близнец — адрес подтверждён кодом письма регистрации до
+                                          запроса: тот же путь, queued +1
 
 Техники: классы эквивалентности (годный / негодный пароль; свой / чужой /
 применённый код), граница счёта по адресу (N−1 · N · N+1), угадывание ошибок
@@ -1798,5 +1806,86 @@ CASES.append(Case(
             "pm.test('SRC-CELLS-S2: письмо с S′ поставлено — queued выросла на 1 от базы перед S′, source-paced не выросла', () => "
             f"pm.expect([{_delta('rcvSrcS20', 'queued')}, {_delta('rcvSrcS20', 'source-paced')}]).to.eql([1, 0]));",
         ]),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# A458-01, A458-02 (kaname#458; приёмка
+# `docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md`,
+# ред. 3, DoD п. 10): адрес, занятый неподтверждённой записью, переходит к
+# владельцу ящика восстановлением. (а) Человек зарегистрирован, письмо
+# регистрации НЕ прочитано — адрес не подтверждён; код восстановления приходит
+# в ящик, его предъявление подтверждает адрес и снимает сессию регистрации.
+# (б) Близнец по одному факту — адрес подтверждён кодом письма регистрации до
+# запроса. Техники: классы эквивалентности (подтверждён / не подтверждён),
+# положительный близнец, переход состояния сессии (жива → отозвана).
+# ───────────────────────────────────────────────────────────────────────────
+_PCL, _PCV = "rcvClaim", "rcvClaimV"
+
+
+def _unverified_person(p, tag):
+    """Человек кейса без подтверждения адреса: регистрация, письмо не читается."""
+    return [
+        _csrf_step(p, f"{tag}-csrf-register", "register", init=_person_init(p, tag)),
+        _post(p, f"{tag}-register", _REGISTER,
+              {"email": f"{{{{{_v(p, 'Email')}}}}}", "password": f"{{{{{_v(p, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              test_script=[
+                  *_status_is(200, f"{tag.upper()}-REGISTER"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  f"pm.test({js_str(tag.upper() + '-REGISTER: адрес не подтверждён')}, () => "
+                  "pm.expect(!!(__j.session && __j.session.emailVerified === false)).to.eql(true));",
+                  *_capture(p, "kaname_session", "SessionCookie", f"{tag.upper()}-REGISTER"),
+                  *_capture(p, "kaname_form", "FormCookie", f"{tag.upper()}-REGISTER", required=False),
+              ]),
+    ]
+
+
+def _claimed(p, label):
+    """Успех завершения перехода: тело, носитель и `session.emailVerified: true`."""
+    return [
+        *_issued(p, label),
+        f"pm.test({js_str(label + ': session.emailVerified = true — адрес подтверждён предъявлением кода')}, () => "
+        "pm.expect(!!(__j.session && __j.session.emailVerified === true)).to.eql(true));",
+    ]
+
+
+def _claim_path(p, tag, *, unverified_delta):
+    """Запрос кода (ответ равен ответу о несуществующем адресе) → письмо → клетки →
+    завершение → сессия регистрации негодна → вход прежним 401, новым 200."""
+    base = f"{p}Cells0"
+    return [
+        _metrics_step(f"{tag}-cells-baseline", tests=[*_keep_outcomes(base, ("queued", "unverified"))]),
+        _csrf_step(p, f"{tag}-csrf-recovery", "recovery"),
+        _request_for(p, f"{tag}-request-code", f"{{{{{_v(p, 'Email')}}}}}", _v(p, "Src"), keep=f"{p}RequestBody"),
+        _request_for(p, f"{tag}-request-nobody", f"nobody-{tag}-{{{{runId}}}}@example.invalid", _v(p, "Src"),
+                     same_as=f"{p}RequestBody"),
+        _await_code(p, f"{tag}-recovery-letter", _HEAD_RECOVERY, "MailCode"),
+        _metrics_step(f"{tag}-cells", until=f"{_delta(base, 'queued')} >= 1", tests=[
+            f"pm.test({js_str(tag.upper() + '-CELLS: queued выросла ровно на 1, unverified — на ' + str(unverified_delta))}, () => "
+            f"pm.expect([{_delta(base, 'queued')}, {_delta(base, 'unverified')}]).to.eql([1, {unverified_delta}]));",
+        ]),
+        _csrf_step(p, f"{tag}-csrf-complete", "recovery-complete"),
+        _complete(p, f"{tag}-complete", test_script=_claimed(p, f"{tag.upper()}-COMPLETE")),
+        _session_probe(p, f"{tag}-registration-session", "SessionCookie", alive=False),
+        *_login(p, f"{tag}-login-old-password", "Password", ok=False),
+        *_login(p, f"{tag}-login-new-password", "NewPassword", ok=True),
+    ]
+
+
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED",
+    title="A458-01, A458-02: адрес, занятый неподтверждённой записью, переходит к владельцу ящика кодом восстановления; близнец — подтверждённый адрес",
+    classes=["SEC", "STATE", "CONF"],
+    priority="P0",
+    steps=[
+        # (а) адрес не подтверждён.
+        *_unverified_person(_PCL, "claim"),
+        _session_probe(_PCL, "claim-registration-session-alive-before", "SessionCookie", alive=True),
+        *_claim_path(_PCL, "claim", unverified_delta=0),
+        # (б) близнец: адрес подтверждён кодом письма регистрации до запроса.
+        *_person(_PCV, "claim-verified"),
+        *_claim_path(_PCV, "claim-verified", unverified_delta=0),
     ],
 ))
