@@ -77,17 +77,26 @@ package humansession
 // `PENDING` негодно после ГОДНОГО кода (kaname#458, Р6): ErrInviteNotValid
 // называется только тому, кто доказал владение ящиком.
 //
-// # Переход записи к владельцу ящика (kaname#458, Р3, Р4)
+// # Неподтверждённая запись с паролем (kaname#458, Р3, Р4)
 //
-// Ветвь исхода решает отметка подтверждения, прочитанная ЭТОЙ транзакцией
-// после захвата строки личности (`AddressVerified`), а не чтение адреса до
-// транзакции (запрет #10): запись, подтверждённая между выдачей кода и его
-// предъявлением, — обычное восстановление (подтвердить её мог только владелец
-// ящика). Отметки нет, а строка пароля у записи была — исход ПЕРЕХОДА той же
-// транзакцией: отметка на значение адреса · снятие второго фактора, ключей
-// доступа с испытаниями и личных токенов · снятие всех сессий и отсечка
-// причиной `address-claimed` · активация строки `PENDING` той же функцией, что
-// исход подтверждения · сессия владельцу ящика · событие с `address_claimed`.
+// Ветвь исхода решают отметка подтверждения и наличие удостоверений,
+// прочитанные ЭТОЙ транзакцией после захвата строки личности
+// (`AddressVerified`; заведённые второй фактор и ключ доступа — тем же
+// чтением, которым решается счёт по адресу; личный токен — `UserTokenHeld`), а
+// не чтение до транзакции (запрет #10). Запись, подтверждённая между выдачей
+// кода и его предъявлением, — обычное восстановление (подтвердить её мог только
+// владелец ящика). Отметки нет, а строка пароля у записи была — общее для обеих
+// ветвей той же транзакцией: отметка на значение адреса · замена пароля ·
+// снятие всех сессий и отсечка · активация строки `PENDING` той же функцией,
+// что исход подтверждения · сессия «1» владельцу ящика · событие с
+// `address_claimed`. Дальше ветвь решает один факт — есть ли на записи
+// удостоверения, которые мог завести её законный владелец:
+//
+//	удостоверений нет  — ПЕРЕХОД: снимаются начатые заведения, причина
+//	                     `address-claimed`, клетка `address-claimed`;
+//	удостоверения есть — они остаются на записи, причина `password-change`,
+//	                     клетка `address-verified` (исход Ф5 сверх отметки).
+//
 // Отметки нет и пароль заведён впервые — Ф5 Р9 без перехода: прежнего
 // держателя с паролем у такой записи не было. Отказ любого шага откатывает
 // исход целиком: код годен, ничего не снято (Ф5-33).
@@ -321,11 +330,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 		// считается, как у входа.
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, RecoveryCompletionBlocked, addressKey, in.Source, now)
 	}
-	if res.claimed {
-		uc.observer.RecoveryCompletionObserved(RecoveryCompletionAddressClaimed)
-	} else {
-		uc.observer.RecoveryCompletionObserved(RecoveryCompletionIssued)
-	}
+	uc.observer.RecoveryCompletionObserved(res.outcome)
 	return res.out, nil
 }
 
@@ -338,8 +343,10 @@ type completion struct {
 	out CompleteRecoveryOutput
 	// blocked — сессии нет: личность не `ACTIVE` после исхода.
 	blocked bool
-	// claimed — исход перехода записи к владельцу ящика (kaname#458, Р3).
-	claimed bool
+	// outcome — клетка выданного исхода: `issued`, `address-claimed` у
+	// перехода либо `address-verified` у восстановления неподтверждённой
+	// записи с удостоверениями (kaname#458, Р3 п. 7).
+	outcome RecoveryCompletionOutcome
 	// user — личность после исхода (у строки `PENDING`, переведённой
 	// переходом, — уже `ACTIVE`).
 	user domain.User
@@ -357,7 +364,7 @@ func (uc *CompleteRecoveryUseCase) reconcileOwnerBinding(ctx context.Context, re
 		return
 	}
 	if rerr := uc.reconciler.ReconcileBinding(ctx, res.ownerBinding); rerr != nil {
-		uc.logger.Error("recovery completion: owner-binding reconcile failed (sweep will retry)",
+		uc.logger.ErrorContext(ctx, "recovery completion: owner-binding reconcile failed (sweep will retry)",
 			"user_id", string(res.user.ID), "binding_id", string(res.ownerBinding), "err", rerr.Error())
 	}
 }
@@ -381,18 +388,43 @@ func (uc *CompleteRecoveryUseCase) complete(
 	if err != nil {
 		return completion{}, err
 	}
-	// Переход (kaname#458, Р3): отметки нет, а строка пароля была — запись
-	// заводил кто-то, и чем он мог войти, неизвестно.
-	claimed := !emailVerified && !created
+	// Неподтверждённая запись, у которой строка пароля была (kaname#458, Р3):
+	// запись заводил кто-то, и ветвь решают удостоверения на ней.
+	unverifiedHolder := !emailVerified && !created
+	// Заведённое (ось «заведено» места решения входа) читается ЭТОЙ
+	// транзакцией и только здесь, после точки решения (шапка): им решаются и
+	// ветвь неподтверждённой записи (Р4), и счёт по адресу ниже.
+	enrolled, err := enrolledForCompletion(ctx, w.LoginMethod, w.AccessKeyEnrolled, user.ID)
+	if err != nil {
+		uc.logger.ErrorContext(ctx, "recovery completion: enrolled login methods unreadable — the outcome is rolled back, the code stays usable",
+			"user_id", string(user.ID), "err", err.Error())
+		return completion{}, fmt.Errorf("recovery completion: enrolled login methods unreadable: %w", err)
+	}
+	held := false
+	if unverifiedHolder {
+		if held, err = credentialsHeld(ctx, w, user.ID, enrolled); err != nil {
+			return completion{}, err
+		}
+	}
+	// Переход — только у записи без удостоверений (Р3 п. 2): удостоверения,
+	// заведённые законным владельцем, владение ящиком само по себе не снимает.
+	claimed := unverifiedHolder && !held
+	outcome := RecoveryCompletionIssued
 	reason := domain.RevokeReasonPasswordChange
+	switch {
+	case claimed:
+		outcome, reason = RecoveryCompletionAddressClaimed, domain.RevokeReasonAddressClaimed
+	case unverifiedHolder:
+		outcome = RecoveryCompletionAddressVerified
+	}
 	var ownerBinding domain.AccessBindingID
 	if !emailVerified {
 		// Код дошёл до ящика, и предъявивший доказал владение адресом: отметка
 		// подтверждения ставится на значение адреса, на которое выдан код, тем
 		// же оператором, что у глагола подтверждения (Ф6) — и у первого пароля
-		// (Ф5 Р9 п. 3), и у перехода записи (kaname#458, Р3 п. 1). Всё — той же
-		// транзакцией: отказ любого шага откатывает исход целиком, код остаётся
-		// годным (Ф5-33).
+		// (Ф5 Р9 п. 3), и у неподтверждённой записи с паролем в обеих ветвях
+		// (kaname#458, Р3 п. 1). Всё — той же транзакцией: отказ любого шага
+		// откатывает исход целиком, код остаётся годным (Ф5-33).
 		marked, err := w.MarkEmailVerified(ctx, user.ID, user.Email, now)
 		if err != nil {
 			return completion{}, err
@@ -400,7 +432,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		if !marked {
 			// Адрес строки сменился между чтением и записью: подтверждать
 			// нечего — код доставлен на прежнее значение.
-			if claimed {
+			if unverifiedHolder {
 				return completion{}, errClaimAddressMoved
 			}
 			return completion{}, fmt.Errorf("recovery completion: address of user %s changed before the first password was set", user.ID)
@@ -413,12 +445,12 @@ func (uc *CompleteRecoveryUseCase) complete(
 			return completion{}, err
 		}
 	}
-	if claimed {
-		activated, binding, err := uc.claim(ctx, w, user)
+	if unverifiedHolder {
+		activated, binding, err := uc.settleUnverifiedHolder(ctx, w, user, claimed)
 		if err != nil {
 			return completion{}, err
 		}
-		user, ownerBinding, reason = activated, binding, domain.RevokeReasonAddressClaimed
+		user, ownerBinding = activated, binding
 	}
 	// Сессия выдаётся только действующей (Ф1-59); строка `PENDING`, переведённая
 	// переходом, к этому месту уже `ACTIVE`.
@@ -477,14 +509,8 @@ func (uc *CompleteRecoveryUseCase) complete(
 		// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых
 		// у личности факторов (Ф3 Р10, Ф12 Р7, Ф5 Р5): сессия восстановления —
 		// «1», и при заведённом втором факторе вход не завершён. У
-		// заблокированной решения нет вовсе — сессии нет. Заведённое читается
-		// ЭТОЙ транзакцией и только здесь, после точки решения (шапка).
-		enrolled, err := enrolledForCompletion(ctx, w.LoginMethod, w.AccessKeyEnrolled, user.ID)
-		if err != nil {
-			uc.logger.ErrorContext(ctx, "recovery completion: enrolled login methods unreadable — the outcome is rolled back, the code stays usable",
-				"user_id", string(user.ID), "err", err.Error())
-			return completion{}, fmt.Errorf("recovery completion: enrolled login methods unreadable: %w", err)
-		}
+		// заблокированной решения нет вовсе — сессии нет. Заведённое прочитано
+		// этой транзакцией выше, после точки решения (шапка).
 		if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 			Enrolled: enrolled, EnrolledKnown: true,
 			AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
@@ -500,35 +526,66 @@ func (uc *CompleteRecoveryUseCase) complete(
 	if err := w.Commit(ctx); err != nil {
 		return completion{}, err
 	}
-	return completion{out: out, blocked: blocked, claimed: claimed, user: user, ownerBinding: ownerBinding}, nil
+	return completion{out: out, blocked: blocked, outcome: outcome, user: user, ownerBinding: ownerBinding}, nil
 }
 
-// claim — операторы перехода записи к владельцу ящика на открытой транзакции
-// исхода (kaname#458, Р3 пп. 2, 4), после отметки подтверждения (п. 1, её
-// ставит вызывающий): снятие всего, чем мог войти прежний держатель;
-// активация строки `PENDING` той же функцией, что в исходе подтверждения, —
-// после отметки: оператор активации судит её в своём условии. Отвечает
-// личностью после исхода и собственнической выдачей, если активация её завела.
-//
-// Отказы: ErrInviteNotValid — приглашение негодно (Р6); прочие — отказ
-// хранилища. Вызывающий откатывает исход целиком.
-func (uc *CompleteRecoveryUseCase) claim(ctx context.Context, w RecoveryCompletionWriter, user domain.User) (domain.User, domain.AccessBindingID, error) {
-	retired, err := w.RetireCredentialsOf(ctx, user.ID)
+// credentialsHeld — есть ли на записи удостоверения, которые мог завести её
+// законный владелец (kaname#458, Р3 п. 2): заведённые второй фактор или ключ
+// доступа (enrolled — ось «заведено», прочитанная этой транзакцией) либо
+// строка личного токена, прочитанная той же транзакцией. Начатое заведение
+// удостоверением не считается: войти им нельзя.
+func credentialsHeld(ctx context.Context, w RecoveryCompletionWriter, userID domain.UserID, enrolled []assurance.Method) (bool, error) {
+	if holdsEnrolledCredential(enrolled) {
+		return true, nil
+	}
+	held, err := w.UserTokenHeld(ctx, userID)
 	if err != nil {
-		return domain.User{}, "", err
+		return false, fmt.Errorf("recovery completion: personal tokens of the record unreadable: %w", err)
+	}
+	return held, nil
+}
+
+// holdsEnrolledCredential — заведён ли второй фактор (генератор, с которым
+// заведён и набор резервных кодов) либо ключ доступа. Пароль удостоверением
+// этой оси не считается: его заменяет сам исход.
+func holdsEnrolledCredential(enrolled []assurance.Method) bool {
+	for _, m := range enrolled {
+		switch m {
+		case assurance.MethodTOTP, assurance.MethodLookupSecret, assurance.MethodWebAuthn:
+			return true
+		}
+	}
+	return false
+}
+
+// settleUnverifiedHolder — операторы исхода неподтверждённой записи с паролем
+// на открытой транзакции (kaname#458, Р3 пп. 2, 4), после отметки
+// подтверждения (п. 1, её ставит вызывающий): у перехода (claimed) — снятие
+// начатых заведений; в обеих ветвях — активация строки `PENDING` той же
+// функцией, что в исходе подтверждения, — после отметки: оператор активации
+// судит её в своём условии. Отвечает личностью после исхода и
+// собственнической выдачей, если активация её завела.
+//
+// Отказы: ErrInviteNotValid (в обёртке шага) — приглашение негодно (Р6);
+// прочие — отказ хранилища. Вызывающий откатывает исход целиком.
+func (uc *CompleteRecoveryUseCase) settleUnverifiedHolder(ctx context.Context, w RecoveryCompletionWriter, user domain.User, claimed bool) (domain.User, domain.AccessBindingID, error) {
+	if claimed {
+		retired, err := w.RetireStartedEnrolmentsOf(ctx, user.ID)
+		if err != nil {
+			return domain.User{}, "", fmt.Errorf("recovery completion: started enrolments not retired: %w", err)
+		}
+		uc.logger.InfoContext(ctx, "recovery completion: the record without credentials passes to the owner of the mailbox — started enrolments retired",
+			"user_id", string(user.ID),
+			"second_factor_rows", retired.SecondFactorRows, "access_key_challenge_rows", retired.AccessKeyChallengeRows)
 	}
 	var binding domain.AccessBindingID
 	if user.InviteStatus == domain.InviteStatusPending {
 		act, err := w.ActivateInviteOnVerification(ctx, user)
 		if err != nil {
-			return domain.User{}, "", err
+			return domain.User{}, "", fmt.Errorf("recovery completion: invitation not activated: %w", err)
 		}
 		user, binding = act.User, act.OwnerBindingID
 	}
-	uc.logger.InfoContext(ctx, "recovery completion: the record passes to the owner of the mailbox — credentials of the previous holder retired",
-		"user_id", string(user.ID),
-		"second_factor_rows", retired.SecondFactorRows, "access_key_challenge_rows", retired.AccessKeyChallengeRows,
-		"access_key_rows", retired.AccessKeyRows, "user_token_rows", retired.UserTokenRows)
 	return user, binding, nil
 }
 

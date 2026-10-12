@@ -209,20 +209,19 @@ func (r *UserOAuthClientRepo) DeleteOwnedByID(
 	return out, true, nil
 }
 
-// deleteUserTokensOfTx снимает ВСЕ личные токены человека одним оператором,
-// суженным владельцем (kaname#458, Р3 п. 2): ключи утверждения клиента и
-// базовые секреты. Отсечку отчеканенного каждым живым удостоверением ставит
-// триггер удаления строки (`user_oauth_client_removal_cuts_minted_tokens`) той
-// же транзакцией — так же, как при снятии одного. Отвечает числом снятых.
-func deleteUserTokensOfTx(ctx context.Context, tx pgx.Tx, ownerID domain.UserID) (int64, error) {
+// userTokenHeldTx — есть ли у человека хоть одна строка личного токена
+// (kaname#458, Р3 п. 2, Р4): ключ утверждения клиента либо базовый секрет,
+// независимо от срока, — одним чтением соединением открытой транзакции.
+// Ошибка чтения — не «нет»: она уходит вызывающему, и исход откатывается.
+func userTokenHeldTx(ctx context.Context, tx pgx.Tx, ownerID domain.UserID) (bool, error) {
 	if ownerID == "" {
-		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM user_oauth_clients WHERE user_id = $1`, string(ownerID))
-	if err != nil {
-		return 0, mapErr(err, "UserOAuthClient.DeleteAllOf", "")
+	var held bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_oauth_clients WHERE user_id = $1)`, string(ownerID)).Scan(&held); err != nil {
+		return false, mapErr(err, "UserOAuthClient.HeldBy", "")
 	}
-	return tag.RowsAffected(), nil
+	return held, nil
 }
 
 // ExistsOwnedByID — есть ли у человека ownerID удостоверение id. Предикат тот

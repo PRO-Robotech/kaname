@@ -8,9 +8,9 @@ package humansession_test
 // kaname#458). Дублёр повторяет РАБОТУ адаптера
 // (`internal/repo/kaname/pg/recovery_completion_store.go`): открытие и
 // оператор замка строки личности — та же дверь и та же цена, что
-// `SessionSetWriter`; у операторов перехода — по одному оператору базы на
-// обращение, у снятия удостоверений — четыре (второй фактор · испытания
-// регистрации ключа · ключи · личные токены). Журнал пишет каждое обращение
+// `SessionSetWriter`; у операторов исхода — по одному оператору базы на
+// обращение, у снятия начатых заведений — два (начатое заведение генератора ·
+// испытания регистрации ключа). Журнал пишет каждое обращение
 // явно, как и обёртки портов `recording_store_test.go`.
 
 import (
@@ -53,33 +53,43 @@ func (w fakeCompletionWriter) AddressVerified(_ context.Context, userID domain.U
 	return w.store.verified[userID], nil
 }
 
-// RetireCredentialsOf — четыре оператора снятия; записи — на фиксации. Отказ по
-// имени "retire-credentials".
-func (w fakeCompletionWriter) RetireCredentialsOf(_ context.Context, userID domain.UserID) (humansession.RetiredCredentials, error) {
+// UserTokenHeld — одно чтение наличия строки личного токена. Отказ по имени
+// "user-token-held".
+func (w fakeCompletionWriter) UserTokenHeld(_ context.Context, userID domain.UserID) (bool, error) {
 	if userID == "" {
-		return humansession.RetiredCredentials{}, errFakeArg("Illegal argument user_id: required")
+		return false, errFakeArg("Illegal argument user_id: required")
 	}
-	for range 4 {
-		w.store.trip()
-	}
-	if err := w.fail("retire-credentials"); err != nil {
-		return humansession.RetiredCredentials{}, err
+	w.store.trip()
+	if err := w.fail("user-token-held"); err != nil {
+		return false, err
 	}
 	w.store.mu.Lock()
-	out := humansession.RetiredCredentials{SecondFactorRows: int64(len(w.store.factors[userID]))}
-	for _, owner := range w.store.accessKeyRows {
-		if owner == userID {
-			out.AccessKeyRows++
-		}
+	defer w.store.mu.Unlock()
+	return w.store.userTokens[userID], nil
+}
+
+// RetireStartedEnrolmentsOf — два оператора снятия (начатое заведение
+// генератора · испытания регистрации ключа); записи — на фиксации. Заведённую
+// строку оператор не касается, как и адаптер. Отказ по имени "retire-started".
+func (w fakeCompletionWriter) RetireStartedEnrolmentsOf(_ context.Context, userID domain.UserID) (humansession.RetiredEnrolments, error) {
+	if userID == "" {
+		return humansession.RetiredEnrolments{}, errFakeArg("Illegal argument user_id: required")
+	}
+	for range 2 {
+		w.store.trip()
+	}
+	if err := w.fail("retire-started"); err != nil {
+		return humansession.RetiredEnrolments{}, err
+	}
+	w.store.mu.Lock()
+	var out humansession.RetiredEnrolments
+	if row, ok := w.store.factors[userID][domain.LoginMethodTOTP]; ok && row.State == domain.LoginMethodStatePending {
+		out.SecondFactorRows = 1
 	}
 	w.store.mu.Unlock()
 	w.ops = append(w.ops, func() {
-		delete(w.store.factors, userID)
-		delete(w.store.keys, userID)
-		for id, owner := range w.store.accessKeyRows {
-			if owner == userID {
-				delete(w.store.accessKeyRows, id)
-			}
+		if row, ok := w.store.factors[userID][domain.LoginMethodTOTP]; ok && row.State == domain.LoginMethodStatePending {
+			delete(w.store.factors[userID], domain.LoginMethodTOTP)
 		}
 	})
 	return out, nil
@@ -137,9 +147,14 @@ func (w recordingCompletionWriter) AddressVerified(ctx context.Context, userID d
 	return w.completion.AddressVerified(ctx, userID)
 }
 
-func (w recordingCompletionWriter) RetireCredentialsOf(ctx context.Context, userID domain.UserID) (humansession.RetiredCredentials, error) {
-	defer w.rec("RetireCredentialsOf")()
-	return w.completion.RetireCredentialsOf(ctx, userID)
+func (w recordingCompletionWriter) UserTokenHeld(ctx context.Context, userID domain.UserID) (bool, error) {
+	defer w.rec("UserTokenHeld")()
+	return w.completion.UserTokenHeld(ctx, userID)
+}
+
+func (w recordingCompletionWriter) RetireStartedEnrolmentsOf(ctx context.Context, userID domain.UserID) (humansession.RetiredEnrolments, error) {
+	defer w.rec("RetireStartedEnrolmentsOf")()
+	return w.completion.RetireStartedEnrolmentsOf(ctx, userID)
 }
 
 func (w recordingCompletionWriter) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {

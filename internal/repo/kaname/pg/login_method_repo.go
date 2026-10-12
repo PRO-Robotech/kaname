@@ -543,20 +543,19 @@ func removeSecondFactorTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) 
 	return removed == 1, nil
 }
 
-// retireSecondFactorTx — ВСЕ строки второго фактора человека одним оператором
-// (kaname#458, Р3 п. 2): `totp` в любом состоянии — заведённый фактор и
-// начатое заведение — и набор `lookup_secret`. В отличие от
-// [removeSecondFactorTx] строка `pending` снимается: переход записи снимает
-// всё, что знал прежний держатель, а начатое заведение — его секрет.
-// Отвечает числом снятых строк.
-func retireSecondFactorTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
+// retireStartedEnrolmentTx — начатое и не завершённое заведение генератора
+// человека (строка `totp` в состоянии `pending`) одним оператором (kaname#458,
+// Р3 п. 2, ветвь перехода записи без удостоверений). Заведённую строку и набор
+// `lookup_secret` оператор не касается по построению: условие на состоянии —
+// часть оператора, а не чтение перед ним. Отвечает числом снятых строк.
+func retireStartedEnrolmentTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
 	if userID == "" {
 		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method.user_id: required")
 	}
-	q := `DELETE FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind IN ($2, $3)`
-	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodTOTP), string(domain.LoginMethodLookupSecret))
+	q := `DELETE FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2 AND state = $3`
+	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodTOTP), string(domain.LoginMethodStatePending))
 	if err != nil {
-		return 0, mapErr(err, "LoginMethod.RetireSecondFactor", loginMethodHint(userID, domain.LoginMethodTOTP))
+		return 0, mapErr(err, "LoginMethod.RetireStartedEnrolment", loginMethodHint(userID, domain.LoginMethodTOTP))
 	}
 	return tag.RowsAffected(), nil
 }

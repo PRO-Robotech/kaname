@@ -97,25 +97,22 @@ func (w *recoveryCompletionTx) AddressVerified(ctx context.Context, userID domai
 	return at != nil, nil
 }
 
-// RetireCredentialsOf — см. порт. Порядок операторов: второй фактор, затем
-// испытания регистрации ключа РАНЬШЕ строк ключей (довод — шапка
-// [AccessKeysResetTx]: регистрация, потребившая испытание раньше, видна
-// снятию ключей новым снимком; пришедшая позже находит ноль испытаний), затем
-// личные токены.
-func (w *recoveryCompletionTx) RetireCredentialsOf(ctx context.Context, userID domain.UserID) (humansession.RetiredCredentials, error) {
-	var out humansession.RetiredCredentials
+// UserTokenHeld — см. порт: наличие строки личного токена соединением ЭТОЙ
+// транзакции после захвата строки личности.
+func (w *recoveryCompletionTx) UserTokenHeld(ctx context.Context, userID domain.UserID) (bool, error) {
+	return userTokenHeldTx(ctx, w.tx, userID)
+}
+
+// RetireStartedEnrolmentsOf — см. порт. Порядок операторов: начатое
+// заведение генератора, затем испытания регистрации ключа.
+func (w *recoveryCompletionTx) RetireStartedEnrolmentsOf(ctx context.Context, userID domain.UserID) (humansession.RetiredEnrolments, error) {
+	var out humansession.RetiredEnrolments
 	var err error
-	if out.SecondFactorRows, err = retireSecondFactorTx(ctx, w.tx, userID); err != nil {
-		return humansession.RetiredCredentials{}, err
+	if out.SecondFactorRows, err = retireStartedEnrolmentTx(ctx, w.tx, userID); err != nil {
+		return humansession.RetiredEnrolments{}, err
 	}
 	if out.AccessKeyChallengeRows, err = retireRegistrationChallengesTx(ctx, w.tx, userID); err != nil {
-		return humansession.RetiredCredentials{}, err
-	}
-	if out.AccessKeyRows, err = deleteAccessKeysOfTx(ctx, w.tx, userID); err != nil {
-		return humansession.RetiredCredentials{}, err
-	}
-	if out.UserTokenRows, err = deleteUserTokensOfTx(ctx, w.tx, userID); err != nil {
-		return humansession.RetiredCredentials{}, err
+		return humansession.RetiredEnrolments{}, err
 	}
 	return out, nil
 }

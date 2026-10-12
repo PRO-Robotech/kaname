@@ -183,11 +183,14 @@ const (
 	RecoveryCompletionRateLimited      RecoveryCompletionOutcome = "rate-limited"      // отказ по частоте
 	RecoveryCompletionPasswordRejected RecoveryCompletionOutcome = "password-rejected" // новый пароль негоден по правилу
 	RecoveryCompletionStoreFailed      RecoveryCompletionOutcome = "store-failed"      // хранилище не ответило
-	// Переход записи с неподтверждённым адресом к владельцу ящика (kaname#458):
-	// исход перехода, сессия выдана · приглашение под строкой `PENDING`
-	// негодно — исход откатан, код годен (Р6).
-	RecoveryCompletionAddressClaimed RecoveryCompletionOutcome = "address-claimed"
-	RecoveryCompletionInviteNotValid RecoveryCompletionOutcome = "invite-not-valid"
+	// Неподтверждённая запись с паролем (kaname#458, Р3 п. 7): переход записи
+	// без удостоверений к владельцу ящика, сессия выдана · восстановление
+	// записи с удостоверениями (отметка поставлена, удостоверения на месте),
+	// сессия выдана · приглашение под строкой `PENDING` негодно — исход
+	// откатан, код годен (Р6).
+	RecoveryCompletionAddressClaimed  RecoveryCompletionOutcome = "address-claimed"
+	RecoveryCompletionAddressVerified RecoveryCompletionOutcome = "address-verified"
+	RecoveryCompletionInviteNotValid  RecoveryCompletionOutcome = "invite-not-valid"
 )
 
 // RecoveryCompletionOutcomes — закрытый перечень.
@@ -195,7 +198,7 @@ func RecoveryCompletionOutcomes() []RecoveryCompletionOutcome {
 	return []RecoveryCompletionOutcome{
 		RecoveryCompletionIssued, RecoveryCompletionNoRow, RecoveryCompletionCodeRejected, RecoveryCompletionBlocked,
 		RecoveryCompletionRateLimited, RecoveryCompletionPasswordRejected, RecoveryCompletionStoreFailed,
-		RecoveryCompletionAddressClaimed, RecoveryCompletionInviteNotValid,
+		RecoveryCompletionAddressClaimed, RecoveryCompletionAddressVerified, RecoveryCompletionInviteNotValid,
 	}
 }
 

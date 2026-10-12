@@ -540,7 +540,7 @@ func TestRecovery_ClosedOutcomeSetsAreDeclared(t *testing.T) {
 		humansession.RecoveryCompletionIssued, humansession.RecoveryCompletionNoRow, humansession.RecoveryCompletionCodeRejected,
 		humansession.RecoveryCompletionBlocked, humansession.RecoveryCompletionRateLimited, humansession.RecoveryCompletionPasswordRejected,
 		humansession.RecoveryCompletionStoreFailed, humansession.RecoveryCompletionAddressClaimed,
-		humansession.RecoveryCompletionInviteNotValid,
+		humansession.RecoveryCompletionAddressVerified, humansession.RecoveryCompletionInviteNotValid,
 	}, humansession.RecoveryCompletionOutcomes())
 }
 

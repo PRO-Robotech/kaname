@@ -108,6 +108,8 @@ type fakeStore struct {
 	// inviteGone — приглашения, истёкшие либо снятые так, как их судит оператор
 	// активации адаптера (kaname#458, Р6).
 	inviteGone map[domain.UserID]bool
+	// userTokens — у кого есть строка личного токена (kaname#458, Р3 п. 2).
+	userTokens map[domain.UserID]bool
 }
 
 // trip — один оператор базы: обращение, дошедшее до неё.
@@ -140,6 +142,7 @@ func newFakeStore() *fakeStore {
 		openPath:      map[domain.UserID]bool{},
 		keys:          map[domain.UserID]bool{},
 		accessKeyRows: map[domain.AccessKeyID]domain.UserID{},
+		userTokens:    map[domain.UserID]bool{},
 	}
 }
 

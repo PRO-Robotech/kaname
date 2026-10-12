@@ -21,31 +21,56 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// seedSecondFactor — строка второго фактора и ключ доступа прежнего держателя.
-func (h *harness) seedSecondFactor(t *testing.T, u domain.User) {
+// seedFactorRow — строка генератора в состоянии state (заведён либо начат).
+func (h *harness) seedFactorRow(t *testing.T, u domain.User, state domain.LoginMethodState) {
 	t.Helper()
 	material, err := domain.NewLoginVerifier("seeded-second-factor-a458")
 	require.NoError(t, err)
 	h.store.factors[u.ID] = map[domain.LoginMethodKind]*domain.LoginMethod{
 		domain.LoginMethodTOTP: {UserID: u.ID, Kind: domain.LoginMethodTOTP, Verifier: material,
-			State: domain.LoginMethodStateActive, CreatedAt: ucBase},
+			State: state, CreatedAt: ucBase},
 	}
+}
+
+// seedSecondFactor — заведённый второй фактор и ключ доступа на записи.
+func (h *harness) seedSecondFactor(t *testing.T, u domain.User) {
+	t.Helper()
+	h.seedFactorRow(t, u, domain.LoginMethodStateActive)
 	h.store.keys[u.ID] = true
 }
 
-// TestRecovery_A458_UnverifiedRecordWithAPasswordPassesToTheMailboxOwner — Р3:
-// отметка, снятие второго фактора и ключей, причина `address-claimed` у
-// снятых сессий и у отсечки, поле события, клетка `address-claimed`.
-// Близнец (меняется один факт — адрес подтверждён): обычное восстановление.
-func TestRecovery_A458_UnverifiedRecordWithAPasswordPassesToTheMailboxOwner(t *testing.T) {
+// TestRecovery_A458_BranchIsDecidedByTheCredentialsOfTheRecord — Р3 п. 2, Р4:
+// у неподтверждённой записи с паролем ветвь решает один факт — есть ли на ней
+// удостоверения (заведённый второй фактор, ключ доступа, личный токен); у
+// перехода снимается только начатое заведение. Близнец — подтверждённая запись.
+func TestRecovery_A458_BranchIsDecidedByTheCredentialsOfTheRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		verified bool
-	}{{"переход: адрес не подтверждён", false}, {"близнец: адрес подтверждён", true}} {
+		seed     func(h *harness, u domain.User)
+		reason   string
+		cell     humansession.RecoveryCompletionOutcome
+		claimed  bool
+		// factorLeft — строка генератора после исхода; keyLeft — ключ доступа.
+		factorLeft, keyLeft bool
+	}{
+		{name: "переход: удостоверений нет, заведение начато", seed: func(h *harness, u domain.User) {
+			h.seedFactorRow(t, u, domain.LoginMethodStatePending)
+		}, reason: domain.RevokeReasonAddressClaimed, cell: humansession.RecoveryCompletionAddressClaimed, claimed: true},
+		{name: "второй фактор заведён", seed: func(h *harness, u domain.User) {
+			h.seedFactorRow(t, u, domain.LoginMethodStateActive)
+		}, reason: domain.RevokeReasonPasswordChange, cell: humansession.RecoveryCompletionAddressVerified, factorLeft: true},
+		{name: "ключ доступа", seed: func(h *harness, u domain.User) { h.store.keys[u.ID] = true },
+			reason: domain.RevokeReasonPasswordChange, cell: humansession.RecoveryCompletionAddressVerified, keyLeft: true},
+		{name: "личный токен", seed: func(h *harness, u domain.User) { h.store.userTokens[u.ID] = true },
+			reason: domain.RevokeReasonPasswordChange, cell: humansession.RecoveryCompletionAddressVerified},
+		{name: "близнец: адрес подтверждён", verified: true, seed: func(h *harness, u domain.User) { h.seedSecondFactor(t, u) },
+			reason: domain.RevokeReasonPasswordChange, cell: humansession.RecoveryCompletionIssued, factorLeft: true, keyLeft: true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, nil)
 			u := h.person(t, "usr-a458", "a458@example.invalid", "old-password-a458", tc.verified)
-			h.seedSecondFactor(t, u)
+			tc.seed(h, u)
 			old := h.mustLogin(t, "a458@example.invalid", "old-password-a458")
 			h.clock = ucBase.Add(time.Minute)
 			h.request(t, "a458@example.invalid")
@@ -54,25 +79,46 @@ func TestRecovery_A458_UnverifiedRecordWithAPasswordPassesToTheMailboxOwner(t *t
 			out, err := h.complete("a458@example.invalid", letter, "mailbox-owner-secret-pw")
 			require.NoError(t, err)
 			require.True(t, out.View.EmailVerified, "emailVerified: true")
-			require.True(t, h.store.verified[u.ID], "отметка подтверждения стоит")
+			require.Equal(t, "1", out.View.Session.AssuranceLevel, "сессия уровня «1»")
+			require.True(t, h.store.verified[u.ID], "отметка подтверждения стоит в обеих ветвях")
 
 			ended := h.store.rows[old.View.Session.ID]
 			require.NotNil(t, ended)
-			reason, cell := domain.RevokeReasonPasswordChange, humansession.RecoveryCompletionIssued
-			if !tc.verified {
-				reason, cell = domain.RevokeReasonAddressClaimed, humansession.RecoveryCompletionAddressClaimed
-			}
-			require.Equal(t, reason, ended.reason, "причина снятия прежней сессии")
-			require.Equal(t, reason, h.store.cutoffs[u.ID].reason, "причина отсечки")
-			require.Equal(t, 1, h.obs.recoveryCompletion[cell], "клетка исхода")
-			require.Equal(t, !tc.verified, len(h.store.factors[u.ID]) == 0, "второй фактор снят только переходом")
-			require.Equal(t, tc.verified, h.store.keys[u.ID], "ключи доступа сняты только переходом")
+			require.Equal(t, tc.reason, ended.reason, "причина снятия прежней сессии")
+			require.Equal(t, tc.reason, h.store.cutoffs[u.ID].reason, "причина отсечки")
+			require.Equal(t, 1, h.obs.recoveryCompletion[tc.cell], "клетка исхода")
+			_, factor := h.store.factors[u.ID][domain.LoginMethodTOTP]
+			require.Equal(t, tc.factorLeft, factor, "строка генератора после исхода")
+			require.Equal(t, tc.keyLeft, h.store.keys[u.ID], "ключ доступа после исхода")
 
 			ev := h.store.audit[len(h.store.audit)-1]
 			require.Equal(t, humansession.AuditRecoveryCompleted, ev.EventType)
-			require.Equal(t, !tc.verified, ev.Payload["address_claimed"], "поле события address_claimed")
+			require.Equal(t, tc.claimed, ev.Payload["address_claimed"], "поле события address_claimed")
 		})
 	}
+}
+
+// TestRecovery_A458_UnreadableTokenRowRollsTheOutcomeBack — чтение наличия
+// личного токена не ответило: исход откатан целиком (Ф5-33) — код годен,
+// отметки нет, прежняя сессия жива; наружу «не выполнено».
+func TestRecovery_A458_UnreadableTokenRowRollsTheOutcomeBack(t *testing.T) {
+	h := newHarness(t, nil)
+	u := h.person(t, "usr-a458t", "a458t@example.invalid", "old-password-a458t", false)
+	old := h.mustLogin(t, "a458t@example.invalid", "old-password-a458t")
+	h.clock = ucBase.Add(time.Minute)
+	h.request(t, "a458t@example.invalid")
+	letter := h.letterOf(t, u.ID)
+	h.store.failOn = "user-token-held"
+
+	_, err := h.complete("a458t@example.invalid", letter, "mailbox-owner-secret-pw")
+
+	require.ErrorIs(t, err, humansession.ErrStoreUnavailable)
+	require.Equal(t, 1, h.obs.recoveryCompletion[humansession.RecoveryCompletionStoreFailed], "клетка store-failed")
+	require.False(t, h.store.verified[u.ID], "отметки нет")
+	require.Empty(t, h.store.rows[old.View.Session.ID].reason, "прежняя сессия жива")
+	codes := h.store.codesOf(u.ID)
+	require.Len(t, codes, 1)
+	require.Nil(t, codes[0].ConsumedAt, "код годен")
 }
 
 // TestRecovery_A458_InvalidInvitationRollsTheClaimBackAndKeepsTheCode — Р6: строка

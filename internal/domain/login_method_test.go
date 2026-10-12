@@ -84,6 +84,26 @@ func TestLoginVerifier_EmptyIsRefused(t *testing.T) {
 	}
 }
 
+// TestLoginVerifier_SameMaterialRefusesTheZeroValue — «материала нет» не
+// совпадает ни с чем, и с таким же нулевым тоже (kaname#458, Р5): сверка
+// выдачи входа на строке без материала обязана дать отказ, а не совпадение.
+// Положительный контроль — тот же материал совпадает, другой — нет.
+func TestLoginVerifier_SameMaterialRefusesTheZeroValue(t *testing.T) {
+	var zero domain.LoginVerifier
+	v, err := domain.NewLoginVerifier(probeMaterial)
+	require.NoError(t, err)
+	same, err := domain.NewLoginVerifier(probeMaterial)
+	require.NoError(t, err)
+	other, err := domain.NewLoginVerifier(probeMaterial + "-другой")
+	require.NoError(t, err)
+
+	require.False(t, zero.SameMaterial(zero), "нулевое с нулевым — не совпадение")
+	require.False(t, zero.SameMaterial(v), "нулевое с материалом — не совпадение")
+	require.False(t, v.SameMaterial(zero), "материал с нулевым — не совпадение")
+	require.True(t, v.SameMaterial(same), "положительный контроль: тот же материал совпадает")
+	require.False(t, v.SameMaterial(other), "другой материал не совпадает")
+}
+
 // TestLoginVerifier_NeverPrinted — ни один общий путь печати не несёт материал.
 func TestLoginVerifier_NeverPrinted(t *testing.T) {
 	v, err := domain.NewLoginVerifier(probeMaterial)
