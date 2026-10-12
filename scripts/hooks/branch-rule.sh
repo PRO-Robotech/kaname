@@ -153,6 +153,23 @@ BR_EXEMPT=""
 BR_EXCUSED=()
 BR_EXEMPT_SEEN=""
 
+# СЕРВЕРНОЕ СЛИЯНИЕ ЗАПРОСА (PRO-Robotech/kaname#716) — тоже только у проверки
+# запроса. BR_SERVER_MERGES — полные sha по строке: коммиты слияния, которые
+# площадка назвала merge_commit_sha СВОЕГО влитого запроса (сверку делает
+# потребитель, .github/scripts/pr-rule-check.sh). Первую строку такому коммиту
+# задаёт площадка в момент вливания — заголовок запроса с « (#M)» либо тему,
+# переданную при вливании, — и коммиты самого запроса уже судились его прогоном.
+# Снимаются ровно два нарушения ФОРМЫ: «слияние не по форме» и «номер
+# ветки-номера»; первая строка «#<N> », атрибуция и подпись судятся как у любого
+# коммита. Коммит с одним родителем серверным слиянием не бывает, что бы о нём ни
+# сказал потребитель. Хуки BR_SERVER_MERGES не задают — без него суждение прежнее,
+# и это отличие копии у соседнего продукта, а не второй предикат.
+BR_SERVER_MERGES=""
+
+branch_rule_server_merge() {
+    [ -n "$BR_SERVER_MERGES" ] && [[ $'\n'"$BR_SERVER_MERGES"$'\n' == *$'\n'"$1"$'\n'* ]]
+}
+
 # branch_rule_exempt <полный sha> — записан ли sha в BR_EXEMPT строкой целиком.
 branch_rule_exempt() {
     [ -n "$BR_EXEMPT" ] && [[ $'\n'"$BR_EXEMPT"$'\n' == *$'\n'"$1"$'\n'* ]]
@@ -182,7 +199,7 @@ BR_SEEN=0
 BR_AFTER_T0=0
 BR_NO_ROOT=0
 branch_rule_judge_commits() {
-    local name="$1" owned="$2" ident="$3" log rec h at parents author committer body subj n attr np exempt
+    local name="$1" owned="$2" ident="$3" log rec h at parents author committer body subj n attr np exempt server
     shift 3
     log="$(git -c log.showSignature=false log --no-color --encoding=UTF-8 \
         --format='%H%x1f%at%x1f%P%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e' "$@")" || {
@@ -211,10 +228,12 @@ branch_rule_judge_commits() {
             branch_rule_form_finding "$exempt" "$h" "${h:0:10} первая строка не начинается с «#<N> »: «$subj»"
         else
             np="$(wc -w <<< "$parents")"
-            if [ "$np" -ge 2 ] && ! branch_rule_merge_form "$subj"; then
+            server=0
+            [ "$np" -ge 2 ] && branch_rule_server_merge "$h" && server=1
+            if [ "$np" -ge 2 ] && [ "$server" = 0 ] && ! branch_rule_merge_form "$subj"; then
                 branch_rule_form_finding "$exempt" "$h" "${h:0:10} слияние не по форме «#<N> merge #<M>: …» / «#<N> merge main: …»: «$subj»"
             fi
-            if branch_rule_is_number "$name" && [[ $'\n'"$owned"$'\n' == *$'\n'"$h"$'\n'* ]] && [ "$n" != "$name" ]; then
+            if [ "$server" = 0 ] && branch_rule_is_number "$name" && [[ $'\n'"$owned"$'\n' == *$'\n'"$h"$'\n'* ]] && [ "$n" != "$name" ]; then
                 branch_rule_form_finding "$exempt" "$h" "${h:0:10} «#$n» на ветке «$name»: первая строка ветки-номера несёт её номер"
             fi
         fi
