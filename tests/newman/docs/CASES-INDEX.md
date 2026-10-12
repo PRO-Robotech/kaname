@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 828
+Всего кейсов: 844
 
 ## Перепись по модулям
 
@@ -71,7 +71,7 @@
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
-| `cases/kaname-access-keys.py` | 27 |
+| `cases/kaname-access-keys.py` | 43 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1060,7 +1060,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 27 кейсов
+## `cases/kaname-access-keys.py` — 43 кейса
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1082,6 +1082,16 @@
 > неверному паролю. «Личность без пароля» кладёт посев стенда
 > (`seed_key_person.py`, приставка `f13Person`); код по времени — функцией набора
 > второго фактора, разбором его модуля.
+>
+> Способ уровня «2» заводится и снимается сессией «2» (kaname#747, приёмка
+> `level-two-is-enrolled-at-level-two.md`): люди набора, заводящие первый ключ,
+> сперва заводят код и входят паролем с кодом; кейсы `*-KN747-*` — сценарии
+> KN747-01…11, -13…16: регистрация и снятие ключа и заведение кода у человека с
+> ключом из сессии «1» — указание повысить уровень (`401`, код 16, вызов с
+> `acr_values="2"`), из сессии «2» — проходят; восстановление доступа обходного
+> пути к ключу не даёт; свежесть судится после уровня. «Дано» KN747-15/16
+> (сессии старше окна свежести) заводит ПЕРВЫЙ кейс модуля, исход судится в
+> конце — окно выжидает весь набор.
 
 - `IAM-ACCESSKEY-OK-REGISTRATION-CHALLENGE-NAMES-THE-CONTRACT`
 - `IAM-ACCESSKEY-OK-REGISTER-LIST-ASSERT`
@@ -1110,6 +1120,22 @@
 - `IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON`
 - `IAM-AKLOGIN-SEC-REVOKE-ENDS-OTHER-SESSIONS`
 - `IAM-AKLOGIN-OK-CLEANUP-KEYS`
+- `IAM-ACCESSKEY-NEG-KN747-04-LEVEL-ONE-WITHOUT-CODE`
+- `IAM-ACCESSKEY-NEG-KN747-02-CODE-NOT-PRESENTED`
+- `IAM-ACCESSKEY-OK-KN747-01-REGISTER-AT-LEVEL-TWO`
+- `IAM-ACCESSKEY-NEG-KN747-03-FINISH-FROM-LEVEL-ONE`
+- `IAM-ACCESSKEY-NEG-KN747-09-REVOKE-AT-LEVEL-ONE`
+- `IAM-ACCESSKEY-OK-KN747-10-REVOKE-AT-LEVEL-TWO`
+- `IAM-ACCESSKEY-OK-KN747-11-KEY-LOGIN-STILL-LEVEL-TWO`
+- `IAM-ACCESSKEY-NEG-KN747-13-RECOVERY-SESSION-LEVEL-ONE`
+- `IAM-ACCESSKEY-OK-KN747-14-RECOVERY-SESSION-WITH-CODE`
+- `IAM-ACCESSKEY-OK-KN747-05-ENROLL-WITHOUT-KEY-AT-LEVEL-ONE`
+- `IAM-ACCESSKEY-NEG-KN747-06-ENROLL-WITH-KEY-AT-LEVEL-ONE`
+- `IAM-ACCESSKEY-NEG-KN747-07-CONFIRM-FROM-LEVEL-ONE`
+- `IAM-ACCESSKEY-OK-KN747-08-CONFIRM-FROM-KEY-SESSION`
+- `IAM-ACCESSKEY-OK-KN747-15-16-GIVEN-SESSIONS`
+- `IAM-ACCESSKEY-NEG-KN747-15-STALE-LEVEL-TWO`
+- `IAM-ACCESSKEY-NEG-KN747-16-STALE-LEVEL-ONE`
 
 ## `cases/kaname-address-verification.py` — 8 кейсов
 
