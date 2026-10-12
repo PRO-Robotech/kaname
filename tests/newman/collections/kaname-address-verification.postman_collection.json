@@ -5966,7 +5966,7 @@
       ]
     },
     {
-      "name": "IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME — Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30)",
+      "name": "IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME — Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30); пароль регистрации входит — ACTIVE с паролем (AWI-08, регистрация)",
       "description": "class:CRUD | class:SEC | priority:P0",
       "item": [
         {
@@ -6631,6 +6631,197 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('EV30-NEW-CARRIER-VERIFIED (узнан в обычном положении): ответ 200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME :: ev30-awi08-login-with-registration-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('avCSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('avCFormCookie') ? 'kaname_form' + '=' + pm.environment.get('avCFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EV30-AWI08-LOGIN-WITH-REGISTRATION-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('EV30-AWI08-LOGIN-WITH-REGISTRATION-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('avCCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('avCFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME :: ev30-awi08-login-with-registration-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{avCEmail}}\", \"password\": \"{{avCPassword}}\", \"csrfToken\": \"{{avCCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('avCSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('avCFormCookie') ? 'kaname_form' + '=' + pm.environment.get('avCFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('EV30-AWI08-LOGIN-WITH-REGISTRATION-PASSWORD: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('EV30-AWI08-LOGIN-WITH-REGISTRATION-PASSWORD: emailVerified true', () => pm.expect(!!__j.session && __j.session.emailVerified === true).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('EV30-AWI08-LOGIN-WITH-REGISTRATION-PASSWORD: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('avCLoginSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('avCFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
                 ]
               }
             }
@@ -7603,7 +7794,7 @@
       ]
     },
     {
-      "name": "IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS — Ф4-27: у приглашённого после подтверждения адреса снимок «кто я» называет ровно два аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner",
+      "name": "IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS — Ф4-27: у приглашённого после подтверждения адреса снимок «кто я» называет ровно два аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner; пароль приглашённого входит — ACTIVE с паролем (AWI-08, активация приглашения)",
       "description": "class:CRUD | class:STATE | priority:P1",
       "item": [
         {
@@ -9300,6 +9491,197 @@
                   "pm.test('F427-ME: личный аккаунт — не аккаунт пригласившего', () => pm.expect(__owned.length === 1 && !!__inviter && __owned[0].accountId !== __inviter).to.eql(true));",
                   "pm.test('F427-ME: запись аккаунта пригласившего есть и одна', () => pm.expect(__theirs.length).to.eql(1));",
                   "pm.test('F427-ME: у аккаунта пригласившего owner нет', () => pm.expect(__theirs.length === 1 && !__roles(__theirs[0]).includes('owner')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS :: f427-awi08-invitee-login-with-password-csrf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=login"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('avISrc') || ''});",
+                  "const __cookie = ((pm.environment.get('avIFormCookie') ? 'kaname_form' + '=' + pm.environment.get('avIFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('F427-AWI08-INVITEE-LOGIN-WITH-PASSWORD-CSRF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('F427-AWI08-INVITEE-LOGIN-WITH-PASSWORD-CSRF: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('avICsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('avIFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS :: f427-awi08-invitee-login-with-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{avIEmail}}\", \"password\": \"{{avIPassword}}\", \"csrfToken\": \"{{avICsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/login');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('avISrc') || ''});",
+                  "const __cookie = ((pm.environment.get('avIFormCookie') ? 'kaname_form' + '=' + pm.environment.get('avIFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('F427-AWI08-INVITEE-LOGIN-WITH-PASSWORD: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('F427-AWI08-INVITEE-LOGIN-WITH-PASSWORD: emailVerified true', () => pm.expect(!!__j.session && __j.session.emailVerified === true).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('F427-AWI08-INVITEE-LOGIN-WITH-PASSWORD: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('avILoginSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('avIFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
                 ]
               }
             }

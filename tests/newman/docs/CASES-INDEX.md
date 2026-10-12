@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 824
+Всего кейсов: 825
 
 ## Перепись по модулям
 
@@ -67,7 +67,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 23 |
-| `cases/kaname-recovery-lane.py` | 17 |
+| `cases/kaname-recovery-lane.py` | 18 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
@@ -1005,7 +1005,7 @@
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 - `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
 
-## `cases/kaname-recovery-lane.py` — 17 кейсов
+## `cases/kaname-recovery-lane.py` — 18 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1020,7 +1020,7 @@
 > (Ф5-14) кейсы читают клетками слушателя метрик процесса (`standMetricsUrl`);
 > величины окон и адресата с заполненным окном приглашения кладёт посев
 > `seed_mail_pace.py`, задержку приёма — дверь `POST /hold` приёмника писем.
-> Полоса «личность без способа входа» (Ф5-29, Ф5-30, Ф5-34; AWI-12; kaname#468)
+> Полоса «личность без способа входа» (Ф5-29…32, Ф5-34; AWI-12; kaname#468)
 > идёт по личностям `ACTIVE` без единого способа входа в форме «после переноса» —
 > их кладёт посев `seed_wayless_person.py`: продукт такую личность не производит.
 
@@ -1040,6 +1040,7 @@
 - `IAM-RECOVERY-OK-WAYLESS-UNVERIFIED-GETS-CODE`
 - `IAM-RECOVERY-OK-WAYLESS-FIRST-PASSWORD-VERIFIES-ADDRESS`
 - `IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE`
+- `IAM-RECOVERY-NEG-PENDING-WITHOUT-PASSWORD-NO-CODE`
 - `IAM-RECOVERY-OK-WAYLESS-COMPLETION-CREATES-THE-ROW`
 
 ## `cases/kaname-registration.py` — 2 кейса

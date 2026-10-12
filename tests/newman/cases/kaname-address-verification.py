@@ -734,7 +734,7 @@ CASES.append(Case(
 _P30 = "avC"
 CASES.append(Case(
     id="IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME",
-    title="Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30)",
+    title="Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30); пароль регистрации входит — ACTIVE с паролем (AWI-08, регистрация)",
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
@@ -754,6 +754,9 @@ CASES.append(Case(
         ]),
         _session_probe(_P30, "ev30-old-carrier-gone", "OldSessionCookie", "gone"),
         _session_probe(_P30, "ev30-new-carrier-verified", "SessionCookie", "alive"),
+        # AWI-08 (регистрация): полоса регистрации после инварианта пары даёт ACTIVE
+        # С ПАРОЛЕМ — пароль регистрации входит, положение обычное.
+        *_login(_P30, "ev30-awi08-login-with-registration-password", "Password", verified=True),
         *_password_change(_P30, "ev30-password-change-without-relogin", "SessionCookie", [
             *_status_is(200, "EV30-PASSWORD"),
         ]),
@@ -1089,7 +1092,8 @@ _F427_ME_JS = [
 CASES.append(Case(
     id="IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS",
     title="Ф4-27: у приглашённого после подтверждения адреса снимок «кто я» называет ровно два "
-          "аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner",
+          "аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner; "
+          "пароль приглашённого входит — ACTIVE с паролем (AWI-08, активация приглашения)",
     classes=["CRUD", "STATE"],
     priority="P1",
     steps=[
@@ -1198,6 +1202,9 @@ CASES.append(Case(
             "pm.expect(__theirs.length === 1 && !__roles(__theirs[0]).includes('owner')).to.eql(true));",
         ], retry_predicate="(() => { let j; try { j = pm.response.json(); } catch (e) { return false; } "
                            "return !Array.isArray(j.accounts) || j.accounts.length < 2; })()"),
+        # AWI-08 (активация приглашения): активация в исходе подтверждения адреса даёт
+        # ACTIVE С ПАРОЛЕМ — пароль регистрации приглашённого входит, положение обычное.
+        *_login(_PI, "f427-awi08-invitee-login-with-password", "Password", verified=True),
     ],
 ))
 

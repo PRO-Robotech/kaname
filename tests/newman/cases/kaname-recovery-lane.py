@@ -110,6 +110,9 @@ Coverage:
   IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE — Ф5-31: с паролем и неподтверждённым
                                           адресом — ответ равен ответу о Z, письма нет,
                                           unverified +1, queued 0
+  IAM-RECOVERY-NEG-PENDING-WITHOUT-PASSWORD-NO-CODE — Ф5-32: приглашённая надзором (PENDING) без
+                                          пароля — ответ равен ответу о Z, письма нет,
+                                          unverified +1, queued 0, статус остаётся PENDING
   IAM-RECOVERY-OK-WAYLESS-COMPLETION-CREATES-THE-ROW — Ф5-34: без строки «пароль» завершение
                                           её заводит (не 503) — (а) N, (б) W со строкой тот же
                                           исход, (в) NB заблокирована — отказ Ф5-17, после
@@ -2096,5 +2099,124 @@ CASES.append(Case(
         # Код применён: после снятия блокировки он сессии не выдаёт — отказ Ф5-05.
         _csrf_step(_P34B, "way-nb-csrf-complete-again", "recovery-complete"),
         _complete(_P34B, "way-nb-complete-again", test_script=_refused(401, 16, _NOT_RESTORED, "WAY-NB-AGAIN")),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-32: PENDING без пароля — как прежде, кода нет. «Дано» строится глаголом
+# продукта: надзор облака приглашает адрес в свой аккаунт (`users:invite`), и
+# строка приглашения ждёт — без пароля, адрес не подтверждён. Отличающий факт
+# против Ф5-29 — один: статус.
+# ───────────────────────────────────────────────────────────────────────────
+_INVITE = "/iam/v1/users:invite"
+_ME = "/iam/v1/me"
+_P32, _S32 = "rcvWayC", "rcvWaySC"
+_GUARD_TOKEN = lambda s, label, path: [  # noqa: E731 — общий страж шагов надзора; адрес шага собирает он
+    *require_env_url("ownRestBaseUrl", path, _OWN_WHY),
+    f"if (!pm.environment.get({js_str(_v(s, 'Token'))})) {{",
+    *report_then_skip(f"{label}: токен надзора не выдан обменом выше",
+                      "обмен кода выше не выдал токен — звать глагол нечем; причина — в нём, не здесь",
+                      indent="  "),
+    "}",
+]
+CASES.append(Case(
+    id="IAM-RECOVERY-NEG-PENDING-WITHOUT-PASSWORD-NO-CODE",
+    title="Ф5-32: приглашённая (PENDING) без пароля с неподтверждённым адресом — ответ побайтово равен ответу о Z, "
+          "письма нет, unverified +1, queued не растёт; статус остаётся PENDING",
+    classes=["NEG", "SEC", "STATE"],
+    priority="P0",
+    steps=[
+        *_supervisor_bearer(_S32, "pend-supervisor"),
+        Step(name="pend-supervisor-account", method="GET", path=_ME, auth=_v(_S32, "Token"), insecure_tls=True,
+             pre_script=_GUARD_TOKEN(_S32, "PEND-SUPERVISOR-ACCOUNT", _ME),
+             test_script=[
+                 *_status_is(200, "PEND-SUPERVISOR-ACCOUNT"),
+                 "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                 "const __own = (Array.isArray(__j.accounts) ? __j.accounts : [])"
+                 ".filter((a) => Array.isArray(a.roles) && a.roles.includes('owner'));",
+                 "pm.test('PEND-SUPERVISOR-ACCOUNT: аккаунт, которым надзор владеет, ровно один (фикстура)', () => "
+                 "pm.expect(__own.length).to.eql(1));",
+                 f"if (__own.length === 1) {{ pm.environment.set({js_str(_v(_S32, 'AccountId'))}, __own[0].accountId); }}",
+             ]),
+        Step(name="pend-invite", method="POST", path=_INVITE,
+             body={"accountId": f"{{{{{_v(_S32, 'AccountId')}}}}}", "email": f"{{{{{_v(_P32, 'Email')}}}}}"},
+             auth=_v(_S32, "Token"), insecure_tls=True,
+             pre_script=[
+                 *_person_init(_P32, "pend"),
+                 *_GUARD_TOKEN(_S32, "PEND-INVITE", _INVITE),
+                 f"if (!pm.environment.get({js_str(_v(_S32, 'AccountId'))})) {{",
+                 *report_then_skip("PEND-INVITE: аккаунт надзора не назван снимком выше",
+                                   "снимок «кто я» не назвал аккаунт, которым надзор владеет, — "
+                                   "приглашать некуда; причина — в нём, не здесь", indent="  "),
+                 "}",
+                 f"pm.environment.unset({js_str(_v(_P32, 'InviteOp'))});",
+             ],
+             test_script=[
+                 *_status_is(200, "PEND-INVITE"),
+                 "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                 "pm.test('PEND-INVITE: ответ — операция с id', () => "
+                 "pm.expect(typeof __j.id === 'string' && __j.id.length > 0).to.eql(true));",
+                 f"if (typeof __j.id === 'string' && __j.id) {{ pm.environment.set({js_str(_v(_P32, 'InviteOp'))}, __j.id); }}",
+             ]),
+        Step(name="pend-invite-op", method="GET", path="/operations/{{" + _v(_P32, "InviteOp") + "}}",
+             auth=_v(_S32, "Token"), insecure_tls=True,
+             pre_script=[
+                 *require_env_url("ownRestBaseUrl", "/operations/{{" + _v(_P32, "InviteOp") + "}}", _OWN_WHY),
+                 f"if (!pm.environment.get({js_str(_v(_P32, 'InviteOp'))})) {{",
+                 *report_then_skip("PEND-INVITE-OP: операция не возвращена шагом выше",
+                                   "приглашение выше отвергнуто синхронно либо не вернуло id операции — "
+                                   "опрашивать нечего; причина — в нём, не здесь", indent="  "),
+                 "}",
+                 "if (pm.environment.get('_pendOpStarted') !== pm.info.requestName) {",
+                 "  pm.environment.set('_pendOpCount', '0');",
+                 "  pm.environment.set('_pendOpStarted', pm.info.requestName);",
+                 "}",
+             ],
+             test_script=[
+                 "const __n = parseInt(pm.environment.get('_pendOpCount') || '0', 10);",
+                 "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                 f"if (pm.response.code === 200 && !__j.done && __n < {_OP_POLL_CAP}) {{",
+                 "  pm.environment.set('_pendOpCount', String(__n + 1));",
+                 f"  const _opd = Date.now(); while (Date.now() - _opd < {_OP_POLL_MS}) {{ /* inter-poll delay: operation not done yet */ }}",
+                 "  pm.execution.setNextRequest(pm.info.requestName);",
+                 "  return;",
+                 "}",
+                 "pm.environment.unset('_pendOpCount');",
+                 "pm.environment.unset('_pendOpStarted');",
+                 *_status_is(200, "PEND-INVITE-OP"),
+                 "pm.test('PEND-INVITE-OP: операция завершена без ошибки и с ответом', () => "
+                 "pm.expect([__j.done, !!__j.error, !!__j.response], JSON.stringify(__j.error || {})).to.eql([true, false, true]));",
+                 "pm.test('PEND-INVITE-OP: строка приглашения — на адрес C и ожидает (PENDING)', () => "
+                 "pm.expect([__j.response && __j.response.email, __j.response && __j.response.inviteStatus])"
+                 f".to.eql([pm.environment.get({js_str(_v(_P32, 'Email'))}), 'PENDING']));",
+                 f"if (!__j.error && __j.response && __j.response.id) {{ pm.environment.set({js_str(_v(_P32, 'UserId'))}, __j.response.id); }}",
+             ]),
+        _metrics_step("pend-baseline", tests=[*_keep_outcomes("rcvWayC0", ("queued", "unverified"))]),
+        _csrf_step(_P32, "pend-csrf-recovery", "recovery"),
+        _request_for(_P32, "pend-request", f"{{{{{_v(_P32, 'Email')}}}}}", _v(_P32, "Src"), keep="rcvWayCBody"),
+        _request_for(_P32, "pend-z-nobody", "nobody-pend-{{runId}}@example.invalid", _v(_P32, "Src"),
+                     same_as="rcvWayCBody"),
+        _metrics_step("pend-cells", until=f"{_delta('rcvWayC0', 'unverified')} >= 1", tests=[
+            "pm.test('PEND-CELLS: unverified выросла ровно на 1, queued не выросла', () => "
+            f"pm.expect([{_delta('rcvWayC0', 'unverified')}, {_delta('rcvWayC0', 'queued')}]).to.eql([1, 0]));",
+        ]),
+        _mailbox_count(_P32, "pend-no-letter", _HEAD_RECOVERY, exactly=0),
+        Step(name="pend-still-pending", method="GET", path="/iam/v1/users/{{" + _v(_P32, "UserId") + "}}",
+             auth=_v(_S32, "Token"), insecure_tls=True,
+             pre_script=[
+                 *_GUARD_TOKEN(_S32, "PEND-STILL-PENDING", "/iam/v1/users/{{" + _v(_P32, "UserId") + "}}"),
+                 f"if (!pm.environment.get({js_str(_v(_P32, 'UserId'))})) {{",
+                 *report_then_skip("PEND-STILL-PENDING: идентификатор приглашённой не назван операцией",
+                                   "операция приглашения не вернула id строки — читать нечего; причина — "
+                                   "в шаге выше, не здесь", indent="  "),
+                 "}",
+             ],
+             test_script=[
+                 *_status_is(200, "PEND-STILL-PENDING"),
+                 "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                 "pm.test('PEND-STILL-PENDING: статус C — PENDING, как был', () => "
+                 "pm.expect(__j.inviteStatus).to.eql('PENDING'));",
+             ]),
     ],
 ))
