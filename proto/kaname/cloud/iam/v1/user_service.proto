@@ -395,11 +395,13 @@ service UserService {
   // (`identity_remover` reaches the person himself or the cloud, never the
   // Account that issued the invitation).
   //
-  // Blocking cuts off what was ALREADY issued to the person: every token,
-  // console session and session refresh that predates the block is refused
-  // from the moment the block commits, and unblocking does not revive it —
-  // after Unblock only a fresh sign-in yields working credentials. Every path
-  // that mints a NEW credential stops at the same moment.
+  // Blocking cuts off what this service has ALREADY issued to the person:
+  // every token it minted, every console session it opened and every refresh
+  // of such a session that predates the block is refused from the moment the
+  // block commits, and unblocking does not revive it. Every path of this
+  // service that mints a NEW credential stops at the same moment. The guarantee
+  // is scoped to credentials this service issues; it makes no claim about
+  // credentials minted by any other issuer.
   rpc Block (BlockUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/users/{user_id}:block" body: "*" };
     option (corelib.api.v1.operation) = {
@@ -425,8 +427,10 @@ service UserService {
   // password recovery deliberately does NOT lift a block (it proves ownership of
   // a mailbox, which is not what the administrator called into question).
   //
-  // Unblocking restores the ability to sign in; it does not restore credentials
-  // issued before the block — those stay cut off.
+  // Unblocking restores the ability to sign in and nothing else: it does NOT
+  // return credentials issued before the block. They stay cut off for good —
+  // this is a property of the call, not a delay — and after Unblock only a
+  // fresh sign-in yields working credentials.
   //
   // Same shape throughout: action not field, Operation, step-up, idempotent
   // (unblocking an active membership succeeds). A PENDING invitation is refused
