@@ -97,6 +97,7 @@ func secondFactorSideLedger() map[string]sideVerdict {
 		"refusal/already-enrolled":       caller("фактор уже заведён — повтор заведения предъявителем"),
 		"refusal/enrollment-not-pending": caller("подтверждать нечего — порядок шагов предъявителя"),
 		"refusal/session-not-fresh":      caller("сессия не свежа — предъявитель повышает уровень"),
+		"refusal/step-up-required":       caller("у личности с ключом сессия ниже «2» — предъявитель повышает уровень (kaname#747)"),
 		"refusal/unavailable": {rule: ruleLaneFailing,
 			why: "материал не открывается ни одним ключом перечня — 503 человеку с верным кодом"},
 

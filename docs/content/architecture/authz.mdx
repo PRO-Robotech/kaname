@@ -139,8 +139,13 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
 
 ## Step-up (ACR floor) {#step-up}
 
-`required_acr_min=2` — **минимальный уровень свежести аутентификации** (second-factor): если ACR
-токена ниже требуемого, запрос не исполняется независимо от наличия отношения. Ответ — **указание
+`required_acr_min=2` — **минимальный уровень аутентификации сессии**: если ACR токена ниже
+требуемого, запрос не исполняется независимо от наличия отношения. Уровень «2» читается одной
+формулой, верной на каждом пути: **два предъявления разных видов в одной сессии — либо ключ
+доступа, заведённый под тем же порогом**. Поэтому способ, чьё предъявление одно даёт «2» (ключ
+доступа), заводится и снимается только сессией «2», а код второго фактора у человека с ключом
+заводится тоже сессией «2» ([второй фактор](/api/auth-lane#second-factor)). Окно свежести у
+этих действий остаётся дополнительно: уровень не заменяет окна. Ответ — **указание
 повысить уровень**, а не отказ прав: `401` / `16`, текст, называющий шаг, и вызов
 `insufficient_user_authentication` с `acr_values` — одной формой на краю и на REST-фронте и
 gRPC службы ([форма указания](/api/rest-surface#step-up)). Service→service-вызовы
@@ -156,6 +161,7 @@ Floor стоит на **узком наборе** RPC, а не на пользо
   <thead><tr><th>Что меняется</th><th>Глаголы</th></tr></thead>
   <tbody>
     <tr><td>выдача и отзыв удостоверений</td><td><code>UserTokenService.Issue</code>, <code>UserTokenService.Revoke</code>, <code>SAKeyService.Issue</code>, <code>SAKeyService.Revoke</code></td></tr>
+    <tr><td>заведение и снятие способа, дающего «2»</td><td><code>AccessKeyService.BeginRegistration</code>, <code>AccessKeyService.FinishRegistration</code>, <code>AccessKeyService.Revoke</code></td></tr>
     <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>, <code>AccessBindingService.Update</code>, <code>AccessBindingService.Delete</code>, <code>AccessBindingService.Revoke</code>, <code>RoleService.Update</code>, <code>GroupService.AddMember</code>, <code>GroupService.RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>, <code>InternalClusterService.RevokeAdmin</code>, <code>ClusterService.GrantAdmin</code>, <code>ClusterService.RevokeAdmin</code></td></tr>
     <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>UserService.ResetAccessKeys</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
     <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>, <code>InternalInteractiveClientService.Update</code>, <code>InternalInteractiveClientService.Delete</code></td></tr>
@@ -167,7 +173,12 @@ Floor стоит на **узком наборе** RPC, а не на пользо
 Приглашение и повторная отправка письма стоят в перечне по той же причине, что и
 `AccessBindingService.Create`: `projectId` + `roleId` заводят привязку атомарно с членством, и
 порог ниже порога привязки был бы обходом step-up через более дешёвую дверь; сброс второго
-фактора и сброс ключей доступа — надзор облака над способами входа человека.
+фактора и сброс ключей доступа — надзор облака над способами входа человека. Регистрация и
+снятие ключа доступа стоят не ниже выпуска личного токена: ключ открывает этот выпуск, и
+заведение способа дешевле открываемого им действия было бы той же дешёвой дверью; пол стоит на
+обоих глаголах церемонии, потому что испытание привязано к человеку, а не к сессии. Потерявший
+единственный способ «2» при живом пароле возвращает его через надзор облака
+(`UserService.ResetAccessKeys`), после чего заводит второй фактор свежей сессией «1».
 
 Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
 повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.

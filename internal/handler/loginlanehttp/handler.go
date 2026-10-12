@@ -1361,6 +1361,7 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	var (
 		fe  *humansession.FieldError
 		tma *humansession.TooManyAttemptsError
+		sur *humansession.StepUpRequiredError
 	)
 	switch {
 	case errors.As(err, &fe):
@@ -1369,6 +1370,13 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(tma.RetryAfter))))
 		writeRefusal(w, http.StatusTooManyRequests, codeResourceExhausted, humansession.TextTooManyAttempts,
 			&errorInfo{Reason: humansession.ReasonTooManyAttempts, Domain: h.cfg.RefusalDomain})
+	case errors.As(err, &sur):
+		// Указание повысить уровень (Ф11 Р11; kaname#747, Р4): та же пара, тот
+		// же текст и тот же вызов, что у публичного слушателя, — одно
+		// объявление на все поверхности. Об объекте не говорит ничего: какой
+		// уровень нужен, несёт вызов.
+		w.Header().Set("WWW-Authenticate", sur.Challenge())
+		writeRefusal(w, http.StatusUnauthorized, codeUnauthenticated, sur.Error(), nil)
 	case errors.Is(err, humansession.ErrAuthenticationFailed):
 		writeRefusal(w, http.StatusUnauthorized, codeUnauthenticated, humansession.TextAuthenticationFailed, nil)
 	case errors.Is(err, humansession.ErrAccessNotRestored):

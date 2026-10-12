@@ -389,11 +389,24 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 `SESSION_NOT_FRESH`; тем же окном ограничен срок неподтверждённого заведения (`pendingUntil`).
 Заведённый фактор — `409` `SECOND_FACTOR_ALREADY_ENROLLED`.
 
+**У человека с ключом доступа** заведение и подтверждение требуют сессии уровня `2`: уровень
+«2» — это два предъявления разных видов в одной сессии либо ключ доступа, заведённый под тем
+же порогом, и код, заведённый сессией без ключа, дал бы «2» тому, кто ключ не предъявлял. Сессия
+ниже `2` получает **указание повысить уровень** — `401`, тело
+`{"code":16,"message":"authentication level is insufficient: step up with a second factor, or present a credential of another kind","details":[]}`
+и `WWW-Authenticate` с `error="insufficient_user_authentication"` и `acr_values="2"`, та же
+форма, что у края ([форма указания](/api/rest-surface#step-up)); путь, который у такого
+человека есть, — войти ключом. Уровень судится **раньше** свежести, и отказ по уровню ничего не
+меняет: заведение не начинается, ожидающее не снимается и не продлевается. Если перечень ключей
+человека не прочитан, глагол не выполняется — `503` `request not performed; try again later`, а
+не «ключа нет». У человека без ключа условие не действует: свежая сессия `1` заводит код.
+
 `POST …/confirm` (`{ "code", "csrfToken" }`) — первым кодом с приложения; ответ
 `{ "backupCodes": [десять кодов], "session", "assurance" }` и **новый** `kaname_session`:
 подтверждение — предъявление, сессия получает уровень `2`. Запасные коды показываются один раз.
 Требует **свежего** предъявления, как и заведение: иначе `403` `SESSION_NOT_FRESH`, и при
-истёкших обоих окнах — свежести и заведения — первой отвечает свежесть. Без начатого либо
+истёкших обоих окнах — свежести и заведения — первой отвечает свежесть. Условие уровня у
+человека с ключом — то же, что у заведения, и судится раньше свежести. Без начатого либо
 истёкшего заведения — `400` `ENROLLMENT_NOT_PENDING`; неверный код — `401`.
 
 `POST …/remove` и `POST …/backup-codes` подтверждаются кодом — `{ "method", "code",
@@ -505,7 +518,10 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 Утраченный единственный ключ у человека без пароля возвращается **восстановлением по
 подтверждённому адресу** (`POST /iam/v1/auth/recovery`, затем `…/recovery/complete` с новым
-паролем); после входа паролем человек заводит новый ключ и снимает утраченный.
+паролем). Сессия одним паролем — уровень `1`, а регистрация и снятие ключа требуют `2`; у
+человека с ключом сессия `1` не заводит и код. Утраченный ключ поэтому снимает надзор облака
+([`UserService.ResetAccessKeys`](/api/user#reset-access-keys)), после чего человек заводит код
+свежей сессией `1`, входит паролем и кодом и заводит новый ключ.
 
 ### Ключи доступа (WebAuthn) — `AccessKeyService`
 
@@ -518,14 +534,22 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 <table>
   <thead><tr><th>Метод и путь</th><th>Что делает</th><th>Право</th><th>Сессия</th></tr></thead>
   <tbody>
-    <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «2»</td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys</code></td><td>приём результата церемонии — <code>Operation</code>, ответ несёт <code>AccessKey</code></td><td>то же</td><td>да, свежая</td></tr>
     <tr><td><code>GET /iam/v1/users/&#123;user_id&#125;/accessKeys</code></td><td>перечень ключей человека, курсором</td><td><code>token_reader</code>, уровень «1»</td><td>да</td></tr>
-    <tr><td><code>DELETE /iam/v1/users/&#123;user_id&#125;/accessKeys/&#123;access_key_id&#125;</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>DELETE /iam/v1/users/&#123;user_id&#125;/accessKeys/&#123;access_key_id&#125;</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «2»</td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/accessKeys:beginAssertion</code></td><td>испытание предъявления вызывающему — <code>PublicKeyCredentialRequestOptions</code></td><td>освобождён (самообслуживание)</td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/accessKeys:finishAssertion</code></td><td>проверка утверждения: человек, ключ, флаги предъявления</td><td>освобождён (самообслуживание)</td><td>да</td></tr>
   </tbody>
 </table>
+
+Регистрация (оба глагола церемонии) и снятие ключа требуют сессии уровня «2» — того же, что
+выпуск личного токена: ключ даёт «2» одним предъявлением, и потому сам заводится и снимается
+только под тем же порогом. Первый ключ человек заводит, войдя паролем и кодом второго фактора.
+Сессия ниже «2» получает указание повысить уровень ([форма указания](/api/rest-surface#step-up)),
+и пол судится раньше окна свежести: несвежая сессия `1` получает указание, а не
+`SESSION_NOT_FRESH`. Отказ по уровню испытания не гасит — результат, присланный затем из сессии
+«2» в срок испытания, ключ заводит.
 
 Испытание регистрации несёт литералы контракта, одинаковые у всех установок: имя доверяющей
 стороны показывается как `Kacho Cloud`, проверка пользователя `preferred` (на обеих
@@ -661,6 +685,7 @@ with the current password`: пароль меняют через `POST /iam/v1/a
     <tr><td>400</td><td>9</td><td><code>invite is no longer valid; ask an account administrator to invite again</code></td><td><code>INVITE_NOT_VALID</code></td><td>код подошёл — подтверждения адреса либо завершения восстановления, переводящего запись к владельцу ящика, — а приглашение приглашённого истекло либо снято: отметки нет, попытка кода не истрачена, у завершения восстановления ничего не меняется и код остаётся годным; выход — повторное приглашение</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована · способа входа нет (приглашённый не зарегистрировался) · код не тот · код истёк или применён · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
     <tr><td>401</td><td>16</td><td><code>access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator</code></td><td>—</td><td>завершение восстановления (<code>POST /iam/v1/auth/recovery/complete</code>): <strong>один</strong> отказ на все причины глагола — адреса нет · код не тот, истёк, применён · личность заблокирована; шаг верен для каждой и не называет ни одной</td></tr>
+    <tr><td>401</td><td>16</td><td><code>authentication level is insufficient: step up with a second factor, or present a credential of another kind</code></td><td>—</td><td>указание повысить уровень: заведение либо подтверждение кода у человека с ключом доступа из сессии ниже <code>2</code>; <code>WWW-Authenticate</code> несёт <code>error="insufficient_user_authentication"</code> и <code>acr_values="2"</code>; состояние не изменено</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled</code></td><td>—</td><td>вход <strong>с полем</strong> <code>secondFactor</code>: <strong>один</strong> отказ на все причины этой формы — адреса нет · пароль не тот · личность заблокирована · код не тот, повторён или потреблён · фактор не заведён; называет шаг, не называя причины</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
     <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора, заведение пароля, запрос смены адреса, регистрация (выдача испытания и приём результата), снятие ключа доступа, выход из выбранной сессии либо из всех, кроме текущей, — при предъявлении старше окна свежести; ответ у всех одинаков</td></tr>
