@@ -1322,12 +1322,88 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
+# IAM-USR-DL-NEG-LEVEL-1 — снятие личности сессией уровня «1» (Р12 приёмки
+# `own-account-and-identity-are-removed-in-order.md`, редакция 5).
+# Тот же человек церемонии и тот же вызов, что в IAM-USR-DL-NEG-OWNS-ACCOUNTS;
+# отличается ОДИН факт — уровень сессии («1» вместо «2»). Порог «2» у
+# `UserService.Delete` стоит раньше гварда владения, поэтому ответ — указание
+# повысить уровень (§4, «отказ по уровню»): `401`, код 16, текст Р11 дословно
+# (его производит публичный фронт службы, `internal/restfront/stepup.go`) и
+# вызов `WWW-Authenticate`, разобранный по параметрам; операция не заведена, и
+# человек на месте.
+# Это не KN664-44: у того «Дано» — аккаунт уже снят; здесь аккаунт есть, и кейс
+# держит именно порядок «порог раньше содержимого».
+# Техники: таблица решений (уровень × владение), угадывание ошибок (отказ по
+# уровню, подменённый отказом по содержимому, — текст утверждается целиком).
+# ---------------------------------------------------------------------------
+
+# Текст указания Р11 — дословно, как его объявляет служба
+# (`internal/errors/step_up.go`, `TextStepUpRequired`).
+_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                 "or present a credential of another kind")
+
+CASES.append(Case(
+    id="IAM-USR-DL-NEG-LEVEL-1",
+    title="Delete self at session level 1 → 401 / 16 step-up indication (acr_values=\"2\"), "
+          "no Operation, the user is still there (Р12: the level floor precedes ownership)",
+    classes=["AUTHZ", "NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="delete-self-level-1",
+            method="DELETE",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(401),
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                "pm.test('Р12: grpc code 16 (UNAUTHENTICATED)', () =>",
+                "  pm.expect(j && j.code, pm.response.text()).to.eql(16));",
+                "pm.test('Р12: текст указания повысить уровень дословно', () =>",
+                f"  pm.expect(j && j.message, pm.response.text()).to.eql({_STEP_UP_TEXT!r}));",
+                "pm.test('Р12: операция не заведена', () =>",
+                "  pm.expect(j && j.id, pm.response.text()).to.not.exist);",
+                "pm.test('Р12: вызов Bearer называет шаг и уровни', () => {",
+                "  const h = pm.response.headers.get('WWW-Authenticate') || '';",
+                r"  pm.expect(h, 'WWW-Authenticate').to.match(/^Bearer\s/);",
+                "  const params = {};",
+                r"""  h.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { params[k] = v; return m; });""",
+                "  pm.expect(params.error, h).to.eql('insufficient_user_authentication');",
+                "  pm.expect(params.acr_values, h).to.eql('2');",
+                "  pm.expect(params.error_description, h).to.include('Required ACR 2');",
+                "  pm.expect(params.error_description, h).to.include('presented ACR 1');",
+                "});",
+            ],
+        ),
+        # Отказ ничего не снял: человек на месте.
+        Step(
+            name="self-still-present-after-level-refusal",
+            method="GET",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('user still present after the level refusal', () =>",
+                "  pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('ceremonyUserId')));",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
 # IAM-USR-DL-NEG-OWNS-ACCOUNTS — близнец KN664-31: человек ещё владеет аккаунтом.
 # Человек церемонии владеет аккаунтом посева (`ceremonyAccountId`, этап 8б) и
 # держит на нём собственническую выдачу; гвард владения стоит ПЕРВЫМ, поэтому
 # отказ называет шаг — снять аккаунт, — а не выдачу. Самоснятие: authz-ворота
 # пропускают самого человека, и отказ приходит от гварда, а не от ворот.
 # Человек после отказа остаётся — кейс ничего не снимает и убирать нечего.
+# Вызов идёт сессией уровня «2» (`jwtHumanCeremonyStepUp` — тот же человек
+# `ceremonyUserId`, другой уровень входа): с редакции 4 приёмки снятие личности
+# стоит на пороге «2» (Р12), и общие предусловия §4 дают сценарию этот уровень.
+# Сессией уровня «1» вызов до гварда владения не доходит — это предмет
+# соседнего кейса IAM-USR-DL-NEG-LEVEL-1, у которого этот кейс — близнец.
 # Техники: таблица решений (владение × выдача), переход состояний (снятие
 # личности до снятия аккаунта).
 # ---------------------------------------------------------------------------
@@ -1343,14 +1419,15 @@ CASES.append(Case(
             name="delete-owner-user",
             method="DELETE",
             path="/iam/v1/users/{{ceremonyUserId}}",
-            auth="jwtHumanCeremony",
+            auth="jwtHumanCeremonyStepUp",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "ownerDelOpId"),
             ],
         ),
-        # Polls as jwtHumanCeremony — inherited from the step that minted the operation.
+        # Опрос идёт тем же предъявителем `jwtHumanCeremonyStepUp` — он наследуется
+        # от шага, заведшего операцию.
         assert_op_error(9, "FAILED_PRECONDITION",
                         msg_text="User {{ceremonyUserId}} owns accounts and cannot be deleted",
                         op_var="ownerDelOpId"),

@@ -675,7 +675,7 @@ const file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc = "" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\xb2\xd2*.\n" +
 	"\x1cUpdateServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x021:\x01*2,/iam/v1/serviceAccounts/{service_account_id}\x12\xa5\x02\n" +
 	"\x06Delete\x120.kaname.cloud.iam.v1.DeleteServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xca\x01\x8a\xb5\x18\x1biam.service_accounts.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18)\n" +
-	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\xb2\xd2*5\n" +
+	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x012\xb2\xd2*5\n" +
 	"\x1cDeleteServiceAccountMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02.*,/iam/v1/serviceAccounts/{service_account_id}\x12\xad\x02\n" +
 	"\aDisable\x121.kaname.cloud.iam.v1.DisableServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xd0\x01\x8a\xb5\x18\x1ciam.service_accounts.disable\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x012\xb2\xd2*/\n" +
