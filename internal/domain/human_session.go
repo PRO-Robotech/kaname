@@ -329,6 +329,12 @@ const (
 	// причина отсечки: записи сессии уходят каскадом той же транзакции и
 	// причиной снятия не помечаются.
 	RevokeReasonIdentityRemoved = "identity-removed"
+	// RevokeReasonAddressClaimed — запись с неподтверждённым адресом перешла к
+	// владельцу ящика, предъявившему код восстановления (kaname#458, Р3 п. 3,
+	// Р7): все сессии записи сняты, выданное до перехода отсечено. Журнал
+	// отличает это от смены пароля самим человеком — у оператора это разные
+	// вопросы. Причина снятия записи сессии и причина отсечки.
+	RevokeReasonAddressClaimed = "address-claimed"
 )
 
 // CutoffBelowFirstAuthentication — момент отсечки, которой глагол снимает
@@ -362,6 +368,7 @@ func HumanSessionEndReasons() []string {
 		RevokeReasonEmailChanged,
 		RevokeReasonEndedFromAnotherSession,
 		RevokeReasonAccessKeyRevoked,
+		RevokeReasonAddressClaimed,
 	}
 }
 

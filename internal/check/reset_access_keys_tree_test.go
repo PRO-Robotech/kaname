@@ -16,8 +16,11 @@ package check_test
 //   - причина `access-keys-reset` объявлена ОДНОЙ строковой константой вне проб
 //     (узел-литерал разбора Go, не подстрока);
 //   - операторы снятия строк способа входа (`"DELETE FROM " + loginMethodsTable`)
-//     вне проб — по-прежнему три, и ни один не новый: сброс строку пароля не
-//     снимает (Р8, П-х);
+//     вне проб — четыре, каждый в названной функции хранилища способов: три,
+//     как на 8b0379e2a (снятие второго фактора — два, уборка заведений — один),
+//     и снятие начатого заведения генератора переходом записи без
+//     удостоверений (kaname#458, `retireStartedEnrolmentTx`); ни один не
+//     снимает строку пароля, и сброс её не снимает (Р8, П-х);
 //   - прежних имён глагола в дереве нет вне приёмок и записей ревью.
 //
 // Перепись печатается всегда; пустой обход — отказ, а не «чисто».
@@ -111,7 +114,18 @@ func nonTestGoFiles(t *testing.T) (map[string]*ast.File, *token.FileSet) {
 func TestResetAccessKeys_LMR08_ReasonIsDeclaredOnceAndNoPasswordRemover(t *testing.T) {
 	files, fset := nonTestGoFiles(t)
 	var reasonAt, controlAt, deleteAt []string
+	deleteIn := map[string]int{}
 	for rel, f := range files {
+		// Функция, в теле которой стоит оператор снятия: перечень функций
+		// закрыт, и новый оператор в новой функции — находка, а не прибавка числа.
+		funcOf := func(pos token.Pos) string {
+			for _, d := range f.Decls {
+				if fd, ok := d.(*ast.FuncDecl); ok && fd.Body != nil && fd.Body.Pos() <= pos && pos <= fd.Body.End() {
+					return fd.Name.Name
+				}
+			}
+			return ""
+		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.BasicLit:
@@ -150,6 +164,7 @@ func TestResetAccessKeys_LMR08_ReasonIsDeclaredOnceAndNoPasswordRemover(t *testi
 				}
 				if v, err := strconv.Unquote(lit.Value); err == nil && strings.HasSuffix(strings.TrimRight(v, " \t\n"), "DELETE FROM") {
 					deleteAt = append(deleteAt, rel+":"+strconv.Itoa(fset.Position(lit.End()).Line))
+					deleteIn[funcOf(lit.Pos())]++
 				}
 			}
 			return true
@@ -160,7 +175,12 @@ func TestResetAccessKeys_LMR08_ReasonIsDeclaredOnceAndNoPasswordRemover(t *testi
 	require.Len(t, controlAt, 1, "КОНТРОЛЬ: распознаватель находит константу соседней причины ровно однажды")
 	require.Len(t, reasonAt, 1, "LMR-08: причина `access-keys-reset` объявлена одной константой у носителя")
 	require.Contains(t, reasonAt[0], "internal/domain/", "LMR-08: константа — у носителя (домен сессии)")
-	require.Len(t, deleteAt, 3, "LMR-08: операторов снятия строк способа входа — три, как на 8b0379e2a (П-х)")
+	require.Len(t, deleteAt, 4, "LMR-08: операторов снятия строк способа входа — четыре: три, как на 8b0379e2a (П-х), и снятие начатого заведения переходом записи (kaname#458)")
+	require.Equal(t, map[string]int{
+		"removeSecondFactorTx":     2, // фактор и набор резервных кодов (Ф12-28, Ф12-30)
+		"SweepExpiredEnrollments":  1, // уборка неподтверждённых заведений (Ф12-44)
+		"retireStartedEnrolmentTx": 1, // начатое заведение у перехода записи без удостоверений (kaname#458, Р3 п. 2)
+	}, deleteIn, "LMR-08: операторы снятия строк способа входа — только в названных функциях; ни одна не снимает строку пароля")
 	for _, at := range deleteAt {
 		require.Contains(t, at, "internal/repo/kaname/pg/login_method_repo.go", "оператор снятия строк способа вне хранилища способов")
 	}

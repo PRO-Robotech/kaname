@@ -124,6 +124,8 @@ func loginVerifierSpec() check.LoginVerifierSpec {
 			"recordAcceptedStepTx → tx.Exec": absorbing("условная запись принятого шага: запрос с именем таблицы и число шага — аргументы"),
 			"removeSecondFactorTx → tx.QueryRow": absorbing("снятие строк `totp` и `lookup_secret` одним оператором: запрос с именем " +
 				"таблицы — аргумент, наружу уходит число снятых"),
+			"retireStartedEnrolmentTx → tx.Exec": absorbing("снятие начатого заведения `totp` (строка `pending`) переходом записи " +
+				"без удостоверений (kaname#458): запрос с именем таблицы — аргумент, наружу уходит число снятых"),
 			"LoginMethodRepo.SweepExpiredEnrollments → r.pool.Exec": absorbing("уборка истёкших заведений (`pending` старше окна): запрос " +
 				"с именем таблицы, окно и партия — аргументы, наружу уходит число снятых"),
 

@@ -91,6 +91,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -205,9 +206,11 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 		Now:       time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
+	completion, err := kanamepg.NewRecoveryCompletionStore(s.pool, userapp.ActivateInviteForLane)
+	require.NoError(t, err)
 	l.complete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		CutoffClock: momentclock.Func(time.Now),
-		Store:       s.sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: 24 * time.Hour, Observer: nop,
+		CutoffClock: momentclock.Func(time.Now), Completion: completion,
+		Store: s.sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: 24 * time.Hour, Observer: nop,
 		Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)

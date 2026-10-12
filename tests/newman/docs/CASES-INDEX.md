@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 820
+Всего кейсов: 821
 
 ## Перепись по модулям
 
@@ -67,7 +67,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 23 |
-| `cases/kaname-recovery-lane.py` | 13 |
+| `cases/kaname-recovery-lane.py` | 14 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
@@ -1005,7 +1005,7 @@
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 - `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
 
-## `cases/kaname-recovery-lane.py` — 13 кейсов
+## `cases/kaname-recovery-lane.py` — 14 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1034,6 +1034,7 @@
 - `IAM-RECOVERY-OK-UNDELIVERED-AGE-VISIBLE`
 - `IAM-RECOVERY-NEG-PACED-PER-RECIPIENT`
 - `IAM-RECOVERY-NEG-PACED-PER-SOURCE`
+- `IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED`
 
 ## `cases/kaname-registration.py` — 2 кейса
 
