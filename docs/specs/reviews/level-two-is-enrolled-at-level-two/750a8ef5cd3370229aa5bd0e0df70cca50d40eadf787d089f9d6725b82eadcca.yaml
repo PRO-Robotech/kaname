@@ -22,6 +22,23 @@ subject:
 verdict: CHANGES_REQUESTED
 reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-12T19:24:10Z'
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main
+    в PRO-Robotech/kacho-workspace вернул 0 (origin/main 6f10d7e21); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+  added_note: >-
+    Блок дописан после круга (kaname#747, красный шаг «записи ревью не молчат об опубликованном
+    событии»): запись не называла учётку события, и гейт не мог спросить трекер. Вердикт,
+    отпечаток предмета и блок event не тронуты.
 event:
   type: none
   status: not_performed
