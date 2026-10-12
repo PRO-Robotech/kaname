@@ -159,6 +159,26 @@ var minimalOperatorCoordinates = append([]string{
 	"db.passwordSecretKey=password",
 }, operatorOverlay...)
 
+// installDomainForRender — ДОМЕН УСТАНОВКИ, которым рендер боевой цепочки
+// заменяет заглушку профиля (kaname#762). Профиль несёт на месте
+// `authn.domain` имя в зоне `.invalid`, и установка с ним отвергается — так
+// же, как отверглась бы у оператора, забывшего его заменить. Пробы рендера
+// судят не этот отказ, а прочие свойства профиля, поэтому подают домен так же,
+// как его подаёт стенд (`.github/scripts/stand-chart.sh`, накладка координат);
+// сам отказ судит `domain_placeholder_refused_test.go`.
+const installDomainForRender = "kaname.local"
+
+// installCoordinateSets — `--set` координат установки для цепочки, в которой
+// стоит боевой профиль; ставятся ПЕРВЫМИ, и `--set` вызывающего их перекрывает.
+func installCoordinateSets(valueFiles []string) []string {
+	for _, f := range valueFiles {
+		if filepath.Base(f) == "values.prod.yaml" {
+			return []string{"authn.domain=" + installDomainForRender}
+		}
+	}
+	return nil
+}
+
 // renderStandaloneChart зовёт `helm template` на ЭТОМ чарте с названной
 // цепочкой профилей.
 func renderStandaloneChart(t *testing.T, valueFiles []string, sets ...string) string {
@@ -177,7 +197,7 @@ func renderStandaloneChart(t *testing.T, valueFiles []string, sets ...string) st
 	for _, f := range valueFiles {
 		args = append(args, "-f", f)
 	}
-	for _, kv := range sets {
+	for _, kv := range append(installCoordinateSets(valueFiles), sets...) {
 		args = append(args, "--set", kv)
 	}
 	out, err := exec.Command("helm", args...).CombinedOutput() // #nosec G204 -- фиксированный бинарь, аргументы из дерева
