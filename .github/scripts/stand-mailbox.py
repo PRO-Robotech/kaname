@@ -47,6 +47,15 @@
     из очереди без доставки — проба увидела бы «возраст вернулся к нулю» там,
     где письмо потеряно. Число отказов — положительный контроль: служба
     ПЫТАЛАСЬ сдать письмо и получила отказ, а не молчала.
+  · МОЛЧАНИЕ УЗЛА — `POST /silence` и `POST /speak`, состояние — `GET /silence`:
+    `{"silence": <bool>, "silencedConnections": <число>}`. Пока узел молчит, он
+    принимает соединение и рукопожатие TLS, но приветствия НЕ шлёт и ничего не
+    отвечает, пока отправитель не закроет соединение сам (либо до предела простоя
+    соединения). Это «Дано» позиции Ф5-12 приёмки восстановления (kaname#468):
+    узел, который не отвечает, — не тот, что отвечает временным отказом сразу
+    (задержка выше): предел времени попытки испытывает только молчание. Число
+    молча удержанных соединений — положительный контроль: служба пыталась сдать
+    письмо.
 
   Удостоверения у узла нет, и отправителю службы его не задают: подделывать
   чужое письмо на стенде некому, а половина настройки удостоверения была бы
@@ -111,6 +120,8 @@ class Store:
         self._msgs: list[dict] = []
         self._held = False
         self._refused = 0
+        self._silent = False
+        self._silenced = 0
 
     def set_hold(self, held: bool) -> dict:
         with self._lock:
@@ -127,6 +138,22 @@ class Store:
             if self._held:
                 self._refused += 1
             return self._held
+
+    def set_silence(self, silent: bool) -> dict:
+        with self._lock:
+            self._silent = silent
+            return {"silence": self._silent, "silencedConnections": self._silenced}
+
+    def silence_state(self) -> dict:
+        with self._lock:
+            return {"silence": self._silent, "silencedConnections": self._silenced}
+
+    def silent_now(self) -> bool:
+        """True — узел молчит, и соединение сосчитано."""
+        with self._lock:
+            if self._silent:
+                self._silenced += 1
+            return self._silent
 
     def add(self, sender: str, rcpts: list[str], data: str) -> None:
         now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -199,6 +226,13 @@ def make_smtp_handler(store: Store, ctx: ssl.SSLContext):
                 return
             sender, rcpts = "", []
             try:
+                if store.silent_now():
+                    # Молчание: ни приветствия, ни ответа — соединение держится,
+                    # пока отправитель не закроет его сам либо не истечёт предел
+                    # простоя соединения.
+                    while self.rfile.read(1):
+                        pass
+                    return
                 if store.refuse_if_held():
                     self._say(HOLD_REPLY)
                     return
@@ -305,6 +339,9 @@ def make_http_handler(store: Store):
             if u.path == "/hold":
                 self._send(200, store.hold_state())
                 return
+            if u.path == "/silence":
+                self._send(200, store.silence_state())
+                return
             self._send(404, {"message": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802 — имя задаёт http.server
@@ -319,6 +356,12 @@ def make_http_handler(store: Store):
                 return
             if path == "/release":
                 self._send(200, store.set_hold(False))
+                return
+            if path == "/silence":
+                self._send(200, store.set_silence(True))
+                return
+            if path == "/speak":
+                self._send(200, store.set_silence(False))
                 return
             self._send(404, {"message": "not found"})
 
@@ -405,6 +448,17 @@ def _hold(port: int, verb: str) -> tuple[int, dict]:
     import urllib.request
     method = "GET" if verb == "state" else "POST"
     path = "/hold" if verb in ("state", "hold") else "/release"
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
+                                 data=b"" if method == "POST" else None, method=method)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+
+def _silence(port: int, verb: str) -> tuple[int, dict]:
+    """`GET /silence` (verb `state`), `POST /silence` либо `POST /speak`."""
+    import urllib.request
+    method = "GET" if verb == "state" else "POST"
+    path = "/speak" if verb == "speak" else "/silence"
     req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
                                  data=b"" if method == "POST" else None, method=method)
     with urllib.request.urlopen(req, timeout=10) as r:
@@ -516,6 +570,41 @@ def self_test() -> int:
             after = f"{type(e).__name__}: {e}"
         _c("ЗАКОННЫЙ БЛИЗНЕЦ: то же письмо после снятия задержки принимается",
            after == "принято" and len(_read(hport, "h@stand.invalid")) == before + 1, after)
+
+        # МОЛЧАНИЕ УЗЛА: один изменённый факт против законного приёма — узел
+        # приветствия не шлёт, пока отправитель не закроет соединение.
+        sil0 = _silence(hport, "state")
+        _c("молчания нет до первого вызова, удержанных соединений ноль",
+           sil0 == (200, {"silence": False, "silencedConnections": 0}), f"{sil0}")
+        _c("POST /silence включает молчание",
+           _silence(hport, "silence") == (200, {"silence": True, "silencedConnections": 0}), "")
+        quiet = "ответил"
+        try:
+            with socket.create_connection(("127.0.0.1", sport), timeout=5) as raw:
+                with client_ctx.wrap_socket(raw, server_hostname="localhost") as tls:
+                    tls.settimeout(1.5)
+                    try:
+                        greet = tls.recv(64)
+                        quiet = f"ответил {greet[:20]!r}" if greet else "закрыл соединение"
+                    except (socket.timeout, TimeoutError):
+                        quiet = "молчит"
+        except (OSError, ssl.SSLError) as e:
+            quiet = f"{type(e).__name__}: {e}"
+        _c("молчащий узел принимает TLS, но приветствия не шлёт", quiet == "молчит", quiet)
+        sil1 = _silence(hport, "state")
+        _c("молча удержанное соединение сосчитано — отправитель пытался сдать",
+           sil1 == (200, {"silence": True, "silencedConnections": 1}), f"{sil1}")
+        _c("POST /speak снимает молчание, счёт сохранён",
+           _silence(hport, "speak") == (200, {"silence": False, "silencedConnections": 1}), "")
+        spoke = "не принято"
+        try:
+            with smtplib.SMTP_SSL("localhost", sport, context=client_ctx, timeout=10) as s:
+                s.sendmail("kaname@kaname.local", ["q@stand.invalid"], b"Subject: quiet\r\n\r\nQ\r\n")
+            spoke = "принято"
+        except (OSError, smtplib.SMTPException, ssl.SSLError) as e:
+            spoke = f"{type(e).__name__}: {e}"
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: после снятия молчания письмо принимается",
+           spoke == "принято" and len(_read(hport, "q@stand.invalid")) == 1, spoke)
         smtp.shutdown()
         http.shutdown()
     print()
@@ -526,7 +615,8 @@ def self_test() -> int:
           "точку, тело в 8 битах доезжает дословно, чтение отдаёт письма адресата по "
           "порядку и не отдаёт чужих, а чтение кодов — код после названной строки по "
           "письму на элемент; задержанный приём отвечает временным отказом, считает "
-          "его и после снятия принимает то же письмо.")
+          "его и после снятия принимает то же письмо; молчащий узел приветствия не шлёт, "
+          "считает удержанное соединение и после снятия принимает письмо.")
     return 0
 
 

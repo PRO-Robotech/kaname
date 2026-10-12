@@ -46,9 +46,7 @@
 копят счёт по адресу и по источнику, и человек посева, которого читают соседние
 наборы (церемония, второй фактор), не должен ни того, ни другого получить.
 
-ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ. Ответ и предел времени попытки при МОЛЧАЩЕМ почтовом
-узле (задержка приёма у приёмника стенда отвечает временным отказом сразу и
-предела времени не испытывает); время ответа двух полос запроса; состав ответа
+ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ. Время ответа двух полос запроса; состав ответа
 службы краю о сессии (глагол внутреннего слушателя без HTTP-привязки). Почему и
 кто держит каждое — ведомость долга позиций `.github/scripts/newman-suite-debt.py`.
 
@@ -110,6 +108,9 @@ Coverage:
   IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE — Ф5-31: с паролем и неподтверждённым
                                           адресом — ответ равен ответу о Z, письма нет,
                                           unverified +1, queued 0
+  IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER — Ф5-12: почтовый узел молчит — ответ тот же,
+                                          попытка кончается пределом времени (transient),
+                                          узел ответил — письмо дошло, код годен
   IAM-RECOVERY-NEG-PENDING-WITHOUT-PASSWORD-NO-CODE — Ф5-32: приглашённая надзором (PENDING) без
                                           пароля — ответ равен ответу о Z, письма нет,
                                           unverified +1, queued 0, статус остаётся PENDING
@@ -2218,5 +2219,78 @@ CASES.append(Case(
                  "pm.test('PEND-STILL-PENDING: статус C — PENDING, как был', () => "
                  "pm.expect(__j.inviteStatus).to.eql('PENDING'));",
              ]),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-12: почтовый узел НЕ ОТВЕЧАЕТ — ответ вызывающему не меняется, исход попытки —
+# клетка «лечится временем», и попытка кончается своим пределом времени, а не висит.
+# «Дано» — молчание приёмника писем стенда (`POST /silence`, `.github/scripts/
+# stand-mailbox.py`, kaname#468): соединение и TLS приняты, приветствия нет. Это
+# не задержка Ф5-14 (временный отказ сразу): предел времени попытки испытывает
+# только молчание. Положительный контроль — число молча удержанных соединений:
+# служба пыталась сдать письмо. Близнец — молчание снято, письмо дошло, код годен.
+# Техники: угадывание ошибок (висящий узел), переход состояния узла (молчит →
+# отвечает), близнец по одному факту — молчание.
+# ───────────────────────────────────────────────────────────────────────────
+_P12 = "rcvSilent"
+_SERIES_MAIL_TRANSIENT = 'kaname_invite_mail_outcomes_total{outcome="transient"}'
+
+
+def _mailbox_silence(name, verb, tests=()):
+    """Молчание приёмника писем стенда: `silence`, `speak` либо `state`."""
+    path = "/speak" if verb == "speak" else "/silence"
+    return Step(
+        name=name, method="GET" if verb == "state" else "POST", path=path, auth="anonymous", cookie_jar=False,
+        pre_script=[*require_env_url("standMailboxUrl", path, _MAILBOX_WHY)],
+        test_script=[
+            *_status_is(200, name.upper()),
+            "let __h = {}; try { __h = pm.response.json(); } catch (e) { __h = {}; }",
+            *tests,
+        ],
+    )
+
+
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER",
+    title="Ф5-12: почтовый узел не отвечает — ответ запроса кода тот же, что в Ф5-01; попытка отправки кончается "
+          "своим пределом времени в клетке transient; узел ответил — письмо дошло, код годен",
+    classes=["SEC", "STATE"],
+    priority="P1",
+    steps=[
+        *_person(_P12, "silent"),
+        _metrics_step("silent-baseline", tests=[
+            "pm.test('SILENT-BASELINE: клетка transient исходов отправки публикуется до события кейса', () => "
+            f"pm.expect(__m({js_str(_SERIES_MAIL_TRANSIENT)})).to.be.a('number'));",
+            f"pm.environment.set('rcvSilentTransient0', String(__m({js_str(_SERIES_MAIL_TRANSIENT)})));",
+            *_keep_outcomes("rcvSilent0", ("queued",)),
+        ]),
+        _mailbox_silence("silent-on", "silence", tests=[
+            "pm.test('SILENT-ON: узел молчит', () => pm.expect(__h.silence).to.eql(true));",
+            "pm.environment.set('rcvSilentConnsBefore', String(__h.silencedConnections));",
+        ]),
+        _csrf_step(_P12, "silent-csrf-recovery", "recovery"),
+        _request_for(_P12, "silent-request", f"{{{{{_v(_P12, 'Email')}}}}}", _v(_P12, "Src"), keep="rcvSilentBody"),
+        _request_for(_P12, "silent-z-nobody", "nobody-silent-{{runId}}@example.invalid", _v(_P12, "Src"),
+                     same_as="rcvSilentBody"),
+        _metrics_step("silent-transient",
+                      until=f"__m({js_str(_SERIES_MAIL_TRANSIENT)}) - __num('rcvSilentTransient0') >= 1", tests=[
+            "pm.test('SILENT-TRANSIENT: письмо поставлено — queued выросла на 1', () => "
+            f"pm.expect({_delta('rcvSilent0', 'queued')}).to.eql(1));",
+            "pm.test('SILENT-TRANSIENT: попытка к молчащему узлу кончилась своим пределом — клетка transient выросла', () => "
+            f"pm.expect(__m({js_str(_SERIES_MAIL_TRANSIENT)}) - __num('rcvSilentTransient0') >= 1).to.eql(true));",
+        ]),
+        _mailbox_silence("silent-state", "state", tests=[
+            "pm.test('SILENT-STATE: служба пыталась сдать письмо — молча удержанных соединений прибавилось', () => "
+            "pm.expect(__h.silencedConnections > Number(pm.environment.get('rcvSilentConnsBefore'))).to.eql(true));",
+        ]),
+        _mailbox_count(_P12, "silent-not-delivered", _HEAD_RECOVERY, exactly=0),
+        _mailbox_silence("silent-off", "speak", tests=[
+            "pm.test('SILENT-OFF: молчание снято', () => pm.expect(__h.silence).to.eql(false));",
+        ]),
+        _await_code(_P12, "silent-letter-arrives", _HEAD_RECOVERY, "MailCode"),
+        _csrf_step(_P12, "silent-csrf-complete", "recovery-complete"),
+        _complete(_P12, "silent-complete", test_script=_issued(_P12, "SILENT-COMPLETE")),
     ],
 ))

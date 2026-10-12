@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 825
+Всего кейсов: 826
 
 ## Перепись по модулям
 
@@ -67,7 +67,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 23 |
-| `cases/kaname-recovery-lane.py` | 18 |
+| `cases/kaname-recovery-lane.py` | 19 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
@@ -1005,7 +1005,7 @@
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 - `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
 
-## `cases/kaname-recovery-lane.py` — 18 кейсов
+## `cases/kaname-recovery-lane.py` — 19 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1023,6 +1023,7 @@
 > Полоса «личность без способа входа» (Ф5-29…32, Ф5-34; AWI-12; kaname#468)
 > идёт по личностям `ACTIVE` без единого способа входа в форме «после переноса» —
 > их кладёт посев `seed_wayless_person.py`: продукт такую личность не производит.
+> Молчащий почтовый узел (Ф5-12) — дверь `POST /silence` приёмника писем стенда.
 
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
@@ -1037,6 +1038,7 @@
 - `IAM-RECOVERY-OK-UNDELIVERED-AGE-VISIBLE`
 - `IAM-RECOVERY-NEG-PACED-PER-RECIPIENT`
 - `IAM-RECOVERY-NEG-PACED-PER-SOURCE`
+- `IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER`
 - `IAM-RECOVERY-OK-WAYLESS-UNVERIFIED-GETS-CODE`
 - `IAM-RECOVERY-OK-WAYLESS-FIRST-PASSWORD-VERIFIES-ADDRESS`
 - `IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE`

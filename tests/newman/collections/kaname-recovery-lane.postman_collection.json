@@ -32721,6 +32721,1569 @@
           ]
         }
       ]
+    },
+    {
+      "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER — Ф5-12: почтовый узел не отвечает — ответ запроса кода тот же, что в Ф5-01; попытка отправки кончается своим пределом времени в клетке transient; узел ответил — письмо дошло, код годен",
+      "description": "class:SEC | class:STATE | priority:P1",
+      "item": [
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-csrf-register",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=register"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "{",
+                  "  const __nonce = () => Math.floor(Math.random() * 2176782336).toString(36);",
+                  "  pm.environment.set('rcvSilentEmail', 'silent-' + pm.environment.get('runId') + '-' + __nonce() + '@kaname.local');",
+                  "  pm.environment.set('rcvSilentPassword', 'Pw-' + __nonce() + __nonce() + '-first');",
+                  "  pm.environment.set('rcvSilentNewPassword', 'Pw-' + __nonce() + __nonce() + '-renewed');",
+                  "  pm.environment.set('rcvSilentSrc', '198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+                  "  pm.environment.set('rcvSilentMailSeenVerifyCode', '0');",
+                  "  pm.environment.set('rcvSilentMailSeenMailCode', '0');",
+                  "  pm.environment.unset('rcvSilentFormCookie');",
+                  "  pm.environment.unset('rcvSilentSessionCookie');",
+                  "  pm.environment.unset('rcvSilentCsrf');",
+                  "  pm.environment.unset('rcvSilentVerifyCode');",
+                  "  pm.environment.unset('rcvSilentMailCode');",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=register');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-CSRF-REGISTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('SILENT-CSRF-REGISTER: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvSilentCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvSilentEmail}}\", \"password\": \"{{rcvSilentPassword}}\", \"csrfToken\": \"{{rcvSilentCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/register');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-REGISTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('SILENT-REGISTER: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-verify-letter",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%BF%D0%BE%D0%B4%D1%82%D0%B2%D0%B5%D1%80%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F%3A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%BF%D0%BE%D0%B4%D1%82%D0%B2%D0%B5%D1%80%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F%3A"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%BF%D0%BE%D0%B4%D1%82%D0%B2%D0%B5%D1%80%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F%3A');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mbs_rcvSilent_silent_verify_letter') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mb_rcvSilent_silent_verify_letter', '0');",
+                  "  pm.environment.set('_mbs_rcvSilent_silent_verify_letter', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_mb_rcvSilent_silent_verify_letter') || '0', 10);",
+                  "const __seen = parseInt(pm.environment.get('rcvSilentMailSeenVerifyCode') || '0', 10);",
+                  "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                  "const __got = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
+                  "if (pm.response.code === 200 && __got.length <= __seen && __n < 90) {",
+                  "  pm.environment.set('_mb_rcvSilent_silent_verify_letter', String(__n + 1));",
+                  "  const _mbd = Date.now(); while (Date.now() - _mbd < 1000) { /* inter-poll delay: letter not yet at the stand mailbox */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mb_rcvSilent_silent_verify_letter');",
+                  "pm.environment.unset('_mbs_rcvSilent_silent_verify_letter');",
+                  "pm.test('SILENT-VERIFY-LETTER: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('SILENT-VERIFY-LETTER: письмо с кодом дошло до приёмника стенда в пределе ожидания', () => pm.expect(__got.length > __seen).to.eql(true));",
+                  "if (__got.length > __seen) {",
+                  "  pm.environment.set('rcvSilentVerifyCode', __got[__got.length - 1]);",
+                  "  pm.environment.set('rcvSilentMailSeenVerifyCode', String(__got.length));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-csrf-verify",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=verify-email-confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=verify-email-confirm"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=verify-email-confirm');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '') + (pm.environment.get('rcvSilentSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvSilentSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-CSRF-VERIFY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('SILENT-CSRF-VERIFY: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvSilentCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/verify-email/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "verify-email",
+                "confirm"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"code\": \"{{rcvSilentVerifyCode}}\", \"csrfToken\": \"{{rcvSilentCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/verify-email/confirm');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '') + (pm.environment.get('rcvSilentSessionCookie') ? 'kaname_session' + '=' + pm.environment.get('rcvSilentSessionCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-VERIFY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('SILENT-VERIFY: адрес подтверждён', () => pm.expect(!!(__j.session && __j.session.emailVerified === true)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentSessionCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-baseline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_silent_baseline') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_silent_baseline', '0');",
+                  "  pm.environment.set('_mts_silent_baseline', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "pm.test('SILENT-BASELINE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('SILENT-BASELINE: клетка transient исходов отправки публикуется до события кейса', () => pm.expect(__m('kaname_invite_mail_outcomes_total{outcome=\"transient\"}')).to.be.a('number'));",
+                  "pm.environment.set('rcvSilentTransient0', String(__m('kaname_invite_mail_outcomes_total{outcome=\"transient\"}')));",
+                  "pm.test('RCVSILENT0: клетка queued публикуется до события кейса', () => pm.expect(__out('queued')).to.be.a('number'));",
+                  "pm.environment.set('rcvSilent0_queued', String(__out('queued')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-on",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/silence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "silence"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/silence');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-ON: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __h = {}; try { __h = pm.response.json(); } catch (e) { __h = {}; }",
+                  "pm.test('SILENT-ON: узел молчит', () => pm.expect(__h.silence).to.eql(true));",
+                  "pm.environment.set('rcvSilentConnsBefore', String(__h.silencedConnections));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-csrf-recovery",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=recovery"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-CSRF-RECOVERY: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('SILENT-CSRF-RECOVERY: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvSilentCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvSilentEmail}}\", \"csrfToken\": \"{{rcvSilentCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (pm.environment.get('_rqs_rcvSilent_silent_request') !== pm.info.requestName) {",
+                  "  pm.environment.set('_rq_rcvSilent_silent_request', '0');",
+                  "  pm.environment.set('_rq_rcvSilent_silent_request_bad', '0');",
+                  "  pm.environment.set('_rqs_rcvSilent_silent_request', pm.info.requestName);",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-REQUEST: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
+                  "pm.environment.set('rcvSilentBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-z-nobody",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"nobody-silent-{{runId}}@example.invalid\", \"csrfToken\": \"{{rcvSilentCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "if (pm.environment.get('_rqs_rcvSilent_silent_z_nobody') !== pm.info.requestName) {",
+                  "  pm.environment.set('_rq_rcvSilent_silent_z_nobody', '0');",
+                  "  pm.environment.set('_rq_rcvSilent_silent_z_nobody_bad', '0');",
+                  "  pm.environment.set('_rqs_rcvSilent_silent_z_nobody', pm.info.requestName);",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-Z-NOBODY: ответ 200 и тело называет шаг (Р10 п. 1)', () => pm.expect([pm.response.code, pm.response.text()]).to.eql([200, '{\"nextStep\":\"a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods\"}']));",
+                  "pm.test('SILENT-Z-NOBODY: тело побайтово равно запомненному ответу', () => pm.expect(pm.response.text() === pm.environment.get('rcvSilentBody')).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-transient",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMetricsUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMetricsUrl') || pm.variables.get('standMetricsUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/metrics');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMetricsUrl is set — слушатель метрик процесса службы; адрес пишет посев частоты запроса кода (`stand-chart.sh seed-stored-value` → `seed_mail_pace.py`) — вне стенда `own` его нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMetricsUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mts_silent_transient') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mt_silent_transient', '0');",
+                  "  pm.environment.set('_mts_silent_transient', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __mtext = pm.response.code === 200 ? pm.response.text() : '';",
+                  "const __m = (series) => { const ln = __mtext.split('\\n').filter((l) => l.startsWith(series + ' '))[0];",
+                  "  return ln === undefined ? null : Number(ln.slice(series.length + 1)); };",
+                  "const __out = (o) => __m('kaname_recovery_request_outcomes_total' + '{outcome=\"' + o + '\"}');",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "const __n = parseInt(pm.environment.get('_mt_silent_transient') || '0', 10);",
+                  "if (!(__m('kaname_invite_mail_outcomes_total{outcome=\"transient\"}') - __num('rcvSilentTransient0') >= 1) && __n < 120) {",
+                  "  pm.environment.set('_mt_silent_transient', String(__n + 1));",
+                  "  const _mtd = Date.now(); while (Date.now() - _mtd < 1000) { /* inter-poll delay: condition on the metrics not reached yet */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mt_silent_transient');",
+                  "pm.environment.unset('_mts_silent_transient');",
+                  "pm.test('SILENT-TRANSIENT: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('SILENT-TRANSIENT: письмо поставлено — queued выросла на 1', () => pm.expect((__out('queued') - __num('rcvSilent0_queued'))).to.eql(1));",
+                  "pm.test('SILENT-TRANSIENT: попытка к молчащему узлу кончилась своим пределом — клетка transient выросла', () => pm.expect(__m('kaname_invite_mail_outcomes_total{outcome=\"transient\"}') - __num('rcvSilentTransient0') >= 1).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-state",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/silence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "silence"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/silence');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-STATE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __h = {}; try { __h = pm.response.json(); } catch (e) { __h = {}; }",
+                  "pm.test('SILENT-STATE: служба пыталась сдать письмо — молча удержанных соединений прибавилось', () => pm.expect(__h.silencedConnections > Number(pm.environment.get('rcvSilentConnsBefore'))).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-not-delivered",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mcs_rcvSilent_silent_not_delivered') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mc_rcvSilent_silent_not_delivered', '0');",
+                  "  pm.environment.set('_mcs_rcvSilent_silent_not_delivered', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-NOT-DELIVERED: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const __num = (k) => parseInt(pm.environment.get(k) || 'NaN', 10);",
+                  "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                  "const __got = Array.isArray(__codes) ? __codes.filter((c) => typeof c === 'string' && c.length > 0) : [];",
+                  "pm.test('SILENT-NOT-DELIVERED: писем ровно столько, сколько окно пропустило', () => pm.expect(__got.length).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-off",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/speak",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "speak"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/speak');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-OFF: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __h = {}; try { __h = pm.response.json(); } catch (e) { __h = {}; }",
+                  "pm.test('SILENT-OFF: молчание снято', () => pm.expect(__h.silence).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-letter-arrives",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — standMailboxUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('standMailboxUrl') || pm.variables.get('standMailboxUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/codes?to={{rcvSilentEmail}}&after=%D0%9A%D0%BE%D0%B4%20%D0%B2%D0%BE%D1%81%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F%3A');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: standMailboxUrl is set — чтение приёмника писем стенда посадки `own`; адрес пишет посев полосы входа — вне стенда `own` приёмника нет, и это условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('standMailboxUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('_mbs_rcvSilent_silent_letter_arrives') !== pm.info.requestName) {",
+                  "  pm.environment.set('_mb_rcvSilent_silent_letter_arrives', '0');",
+                  "  pm.environment.set('_mbs_rcvSilent_silent_letter_arrives', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const __n = parseInt(pm.environment.get('_mb_rcvSilent_silent_letter_arrives') || '0', 10);",
+                  "const __seen = parseInt(pm.environment.get('rcvSilentMailSeenMailCode') || '0', 10);",
+                  "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                  "const __got = Array.isArray(__codes) ? __codes.filter(c => typeof c === 'string' && c.length > 0) : [];",
+                  "if (pm.response.code === 200 && __got.length <= __seen && __n < 90) {",
+                  "  pm.environment.set('_mb_rcvSilent_silent_letter_arrives', String(__n + 1));",
+                  "  const _mbd = Date.now(); while (Date.now() - _mbd < 1000) { /* inter-poll delay: letter not yet at the stand mailbox */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_mb_rcvSilent_silent_letter_arrives');",
+                  "pm.environment.unset('_mbs_rcvSilent_silent_letter_arrives');",
+                  "pm.test('SILENT-LETTER-ARRIVES: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('SILENT-LETTER-ARRIVES: письмо с кодом дошло до приёмника стенда в пределе ожидания', () => pm.expect(__got.length > __seen).to.eql(true));",
+                  "if (__got.length > __seen) {",
+                  "  pm.environment.set('rcvSilentMailCode', __got[__got.length - 1]);",
+                  "  pm.environment.set('rcvSilentMailSeenMailCode', String(__got.length));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-csrf-complete",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/csrf?form=recovery-complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "csrf?form=recovery-complete"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/csrf?form=recovery-complete');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-CSRF-COMPLETE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('SILENT-CSRF-COMPLETE: признак формы выдан строкой', () => pm.expect(typeof __j.csrfToken === 'string' && __j.csrfToken.length > 0).to.eql(true));",
+                  "pm.environment.set('rcvSilentCsrf', __j.csrfToken || '');",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER :: silent-complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/auth/recovery/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "auth",
+                "recovery",
+                "complete"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"{{rcvSilentEmail}}\", \"code\": \"{{rcvSilentMailCode}}\", \"newPassword\": \"{{rcvSilentNewPassword}}\", \"csrfToken\": \"{{rcvSilentCsrf}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "protocolProfileBehavior": {
+            "strictSSL": false,
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: anonymous step",
+                  "pm.request.headers.remove('Authorization');",
+                  "// HARNESS-CONFIG GUARD — loginLaneBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('loginLaneBaseUrl') || pm.variables.get('loginLaneBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/auth/recovery/complete');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: loginLaneBaseUrl is set — слушатель полосы формы службы; поднимается только посадкой `own` — на посадке `external` его нет, и это не отказ продукта, а условие, которого стенд не создал', () => {",
+                  "    pm.expect.fail('loginLaneBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "pm.request.headers.upsert({key: 'X-Forwarded-For', value: pm.environment.get('rcvSilentSrc') || ''});",
+                  "const __cookie = ((pm.environment.get('rcvSilentFormCookie') ? 'kaname_form' + '=' + pm.environment.get('rcvSilentFormCookie') + '; ' : '')).replace(/; $/, '');",
+                  "if (__cookie) { pm.request.headers.upsert({key: 'Cookie', value: __cookie}); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SILENT-COMPLETE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('SILENT-COMPLETE: тело несёт человека и сессию', () => pm.expect(!!(__j.user && __j.user.id && __j.session && __j.session.expiresAt)).to.eql(true));",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session='));",
+                  "  pm.test('SILENT-COMPLETE: ответ ставит печенье kaname_session', () => pm.expect(__sc.length).to.eql(1));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentRecoveredCookie', __sc[0].value.split(';')[0].slice(15)); }",
+                  "}",
+                  "{",
+                  "  const __sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_form='));",
+                  "  if (__sc.length === 1) { pm.environment.set('rcvSilentFormCookie', __sc[0].value.split(';')[0].slice(12)); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

@@ -376,7 +376,12 @@ def _mail_path(p):
 def _await_letter(p, name, into="Code"):
     """Письмо подтверждения СВЕРХ уже прочитанных: петля с настоящей паузой.
 
-    Код последнего письма — в `<p><into>`, число писем человеку — в `<p>MailSeen`."""
+    Код последнего письма — в `<p><into>`, число писем человеку — в `<p>MailSeen`.
+
+    Ждём письмо С КОДОМ, а не любое новое: приглашённому до письма подтверждения
+    приходит письмо приглашения, в котором строки кода нет (элемент `null`), и оно
+    само по себе условием ожидания не служит (kaname#468, разбор F427). Письмо
+    подтверждения без кода по-прежнему краснит кейс — по исчерпании ожидания."""
     path = _mail_path(p)
     counter, started = f"_avmb_{p}_{name}".replace("-", "_"), f"_avmbs_{p}_{name}".replace("-", "_")
     seen, label = _v(p, "MailSeen"), name.upper()
@@ -394,7 +399,8 @@ def _await_letter(p, name, into="Code"):
             f"const __seen = parseInt(pm.environment.get({js_str(seen)}) || '0', 10);",
             "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
             "const __all = Array.isArray(__codes) ? __codes : [];",
-            f"if (pm.response.code === 200 && __all.length <= __seen && __n < {_MAIL_WAIT_CAP}) {{",
+            "const __fresh = __all.slice(__seen).filter((c) => typeof c === 'string');",
+            f"if (pm.response.code === 200 && __fresh.length === 0 && __n < {_MAIL_WAIT_CAP}) {{",
             f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
             f"  const _avd = Date.now(); while (Date.now() - _avd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
             "  pm.execution.setNextRequest(pm.info.requestName);",
@@ -405,7 +411,7 @@ def _await_letter(p, name, into="Code"):
             *_status_is(200, label),
             f"pm.test({js_str(label + ': письмо дошло до приёмника стенда в пределе ожидания')}, () => "
             "pm.expect(__all.length > __seen).to.eql(true));",
-            "const __last = __all.length > __seen ? __all[__all.length - 1] : null;",
+            "const __last = __fresh.length > 0 ? __fresh[__fresh.length - 1] : (__all.length > __seen ? __all[__all.length - 1] : null);",
             f"pm.test({js_str(label + ': письмо — подтверждения адреса и несёт код формы XXXXX-XXXXX')}, () => "
             "pm.expect(typeof __last === 'string' && /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/.test(__last)).to.eql(true));",
             "if (__all.length > __seen) {",
