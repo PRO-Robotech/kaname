@@ -303,10 +303,11 @@ type UserServiceClient interface {
 	// (`identity_remover` reaches the person himself or the cloud, never the
 	// Account that issued the invitation).
 	//
-	// Already-issued access tokens are NOT invalidated by this call; they expire
-	// on their own schedule. What stops immediately is every path that mints a
-	// NEW one (token hook, refresh hook, personal-token issuance, subject
-	// resolution at the edge).
+	// Blocking cuts off what was ALREADY issued to the person: every token,
+	// console session and session refresh that predates the block is refused
+	// from the moment the block commits, and unblocking does not revive it —
+	// after Unblock only a fresh sign-in yields working credentials. Every path
+	// that mints a NEW credential stops at the same moment.
 	Block(ctx context.Context, in *BlockUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Unblocks the specified User membership: it may authenticate into that
 	// Account again.
@@ -317,6 +318,9 @@ type UserServiceClient interface {
 	// person with no administrative way back is locked out permanently: self-serve
 	// password recovery deliberately does NOT lift a block (it proves ownership of
 	// a mailbox, which is not what the administrator called into question).
+	//
+	// Unblocking restores the ability to sign in; it does not restore credentials
+	// issued before the block — those stay cut off.
 	//
 	// Same shape throughout: action not field, Operation, step-up, idempotent
 	// (unblocking an active membership succeeds). A PENDING invitation is refused
@@ -792,10 +796,11 @@ type UserServiceServer interface {
 	// (`identity_remover` reaches the person himself or the cloud, never the
 	// Account that issued the invitation).
 	//
-	// Already-issued access tokens are NOT invalidated by this call; they expire
-	// on their own schedule. What stops immediately is every path that mints a
-	// NEW one (token hook, refresh hook, personal-token issuance, subject
-	// resolution at the edge).
+	// Blocking cuts off what was ALREADY issued to the person: every token,
+	// console session and session refresh that predates the block is refused
+	// from the moment the block commits, and unblocking does not revive it —
+	// after Unblock only a fresh sign-in yields working credentials. Every path
+	// that mints a NEW credential stops at the same moment.
 	Block(context.Context, *BlockUserRequest) (*operation.Operation, error)
 	// Unblocks the specified User membership: it may authenticate into that
 	// Account again.
@@ -806,6 +811,9 @@ type UserServiceServer interface {
 	// person with no administrative way back is locked out permanently: self-serve
 	// password recovery deliberately does NOT lift a block (it proves ownership of
 	// a mailbox, which is not what the administrator called into question).
+	//
+	// Unblocking restores the ability to sign in; it does not restore credentials
+	// issued before the block — those stay cut off.
 	//
 	// Same shape throughout: action not field, Operation, step-up, idempotent
 	// (unblocking an active membership succeeds). A PENDING invitation is refused

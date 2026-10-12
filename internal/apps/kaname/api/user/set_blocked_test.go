@@ -210,3 +210,33 @@ func TestSetInviteStatus_EachDirectionWritesItsOwnState(t *testing.T) {
 		assert.Equal(t, domain.InviteStatusActive, repo.user.InviteStatus)
 	})
 }
+
+// Блокировка отсекает ранее выданное (kaname#717): в той же транзакции, что
+// состояние, ложится ровно одна отсечка личности — на того, кого блокируют,
+// с причиной блокировки, с проверенным вызывающим в роли решившего и с
+// непустым моментом. Снятие блокировки отсечки не пишет: оно возвращает
+// участие, а не отнимает выданное после него. Что отсечка доходит до
+// читателей, закреплено на настоящей базе
+// (`audit/user_block_cuts_off_issued_integration_test.go`).
+func TestSetInviteStatus_BlockCutsOffTheIdentity_UnblockDoesNot(t *testing.T) {
+	t.Run("block", func(t *testing.T) {
+		repo := newUpdUserRepo()
+		_, err := NewBlockUserUseCase(repo, newUpdOpsRepo()).Execute(ownerCtx(), domain.UserID(updUserID))
+		require.NoError(t, err)
+		require.NoError(t, operations.Wait(context.Background()))
+		require.Len(t, repo.cutoffs, 1, "блокировка обязана записать отсечку личности")
+		c := repo.cutoffs[0]
+		assert.Equal(t, domain.UserID(updUserID), c.UserID)
+		assert.Equal(t, domain.RevokeReasonIdentityBlocked, c.Reason)
+		assert.Equal(t, domain.UserID(updOwnerID), c.RevokedBy)
+		assert.False(t, c.RevokeBefore.IsZero(), "нулевая отсечка не отсекла бы ничего")
+	})
+	t.Run("unblock", func(t *testing.T) {
+		repo := newUpdUserRepo()
+		repo.user.InviteStatus = domain.InviteStatusBlocked
+		_, err := NewUnblockUserUseCase(repo, newUpdOpsRepo()).Execute(ownerCtx(), domain.UserID(updUserID))
+		require.NoError(t, err)
+		require.NoError(t, operations.Wait(context.Background()))
+		assert.Empty(t, repo.cutoffs, "снятие блокировки не отсекает ничего")
+	})
+}

@@ -71,6 +71,10 @@ type updUserRepo struct {
 	// ТОЛЬКО из writer-tx, поэтому список пуст, если запись не состоялась.
 	stateCalls int
 	audits     []service.AuditEvent
+	// cutoffs — отсечки личности, записанные писателем (kaname#717): блокировка
+	// обязана положить ровно одну в той же транзакции, снятие блокировки — ни
+	// одной.
+	cutoffs []domain.UserTokenRevocation
 	// getErr — подменяет ответ читателя по id. Нужен, чтобы синхронная полоса
 	// «строки нет» проверялась ТЕМ ЖЕ сентинелом, который отдаёт боевой
 	// репозиторий: подставив сюда обычную ошибку, проба увидела бы INTERNAL и
@@ -242,7 +246,10 @@ func (*updUserWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.Acco
 	return nil, nil
 }
 func (*updUserWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
-func (*updUserWtr) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+func (w *updUserWtr) CutOffIdentity(_ context.Context, u domain.UserTokenRevocation, _ domain.UserID) error {
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	w.parent.cutoffs = append(w.parent.cutoffs, u)
 	return nil
 }
 func (w *updUserWtr) UpdateLabels(_ context.Context, id domain.UserID, labels domain.Labels) (domain.User, error) {

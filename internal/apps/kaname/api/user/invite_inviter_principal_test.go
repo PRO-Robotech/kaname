@@ -290,7 +290,7 @@ func (*invPrincUserWtr) LockForRemoval(context.Context, domain.UserID) ([]domain
 	return nil, nil
 }
 func (*invPrincUserWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
-func (*invPrincUserWtr) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+func (*invPrincUserWtr) CutOffIdentity(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
 func (w *invPrincUserWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {

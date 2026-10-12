@@ -329,6 +329,11 @@ const (
 	// причина отсечки: записи сессии уходят каскадом той же транзакции и
 	// причиной снятия не помечаются.
 	RevokeReasonIdentityRemoved = "identity-removed"
+	// RevokeReasonIdentityBlocked — блокировка личности (`UserService.Block`)
+	// обрывает всё, выданное ей до момента блокировки, и снятие блокировки
+	// выданного до неё не возвращает (kaname#717). Только причина отсечки:
+	// записи сессии блокировка не снимает, а отсекает.
+	RevokeReasonIdentityBlocked = "identity-blocked"
 )
 
 // CutoffBelowFirstAuthentication — момент отсечки, которой глагол снимает
