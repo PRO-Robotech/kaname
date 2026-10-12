@@ -94,6 +94,38 @@ const (
 	publicBatchCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 )
 
+// Три глагола ключа доступа, у которых пол уровня держит ВТОРОЙ ЗАМОК службы
+// на ветви края (задача kaname#747, Р1, Р3).
+const (
+	publicKeyBeginRegistrationMethod  = "/kaname.cloud.iam.v1.AccessKeyService/BeginRegistration"
+	publicKeyFinishRegistrationMethod = "/kaname.cloud.iam.v1.AccessKeyService/FinishRegistration"
+	publicKeyRevokeMethod             = "/kaname.cloud.iam.v1.AccessKeyService/Revoke"
+)
+
+// PublicGatewayFlooredRPCs — публичные глаголы, на которых пол уровня из
+// каталога службы судит САМА служба и тогда, когда вызывающий — край.
+//
+// # Зачем второй замок там, где пол уже судит край
+//
+// Край судит пол по СВОЕЙ копии каталога, и копия отстаёт от контракта службы
+// на время между вливанием контракта и пересборкой края: так было с этими
+// тремя глаголами, у которых копия края несла «1» при «2» в контракте. Пока
+// ветвь края пропускала всё, пол таких глаголов держал только край — и держал
+// не тот. Здесь пол читается у встроенного каталога службы, то есть у того же
+// производителя, что объявляет его в контракте.
+//
+// # Почему эти три
+//
+// Они заводят и снимают способ, чьё предъявление ОДНО даёт уровень «2»
+// (приёмка `level-two-is-enrolled-at-level-two.md`, Р1): заведённый сессией
+// «1», такой способ поднимает её держателя до «2», не предъявившего второго
+// фактора. Ошибка пола здесь — повышение уровня, а не лишний доступ к записи.
+// Перечень статичен и живёт в коде, как таблица соседей выше: расширяет его
+// изменение с ревью, а не настройка посадки.
+func PublicGatewayFlooredRPCs() []string {
+	return []string{publicKeyBeginRegistrationMethod, publicKeyFinishRegistrationMethod, publicKeyRevokeMethod}
+}
+
 // UnnamedCallerMessage — ЕДИНСТВЕННЫЙ текст отказа тому, кто не назвался ничем.
 //
 // # Почему отдельный текст, а не «permission denied»
@@ -171,6 +203,9 @@ type PublicCallerPolicy struct {
 	// peerCallable — full-method → the set of non-gateway module service
 	// short-names permitted to call it.
 	peerCallable map[string]map[string]struct{}
+	// gatewayFloored — глаголы, чей пол служба судит и на ветви края
+	// ([PublicGatewayFlooredRPCs]).
+	gatewayFloored map[string]struct{}
 	// presented — ПОРТ: приложил ли вызывающий удостоверение к этому запросу.
 	//
 	// Порт, а не прямой вызов читателя, и это НЕ оформление. Носитель
@@ -210,7 +245,14 @@ func NewPublicCallerPolicy(
 		}
 		m[method] = set
 	}
-	return &PublicCallerPolicy{prodMode: prodMode, peerCallable: m, acrCatalog: acrCatalog, presented: presented}
+	floored := make(map[string]struct{})
+	for _, method := range PublicGatewayFlooredRPCs() {
+		floored[method] = struct{}{}
+	}
+	return &PublicCallerPolicy{
+		prodMode: prodMode, peerCallable: m, gatewayFloored: floored,
+		acrCatalog: acrCatalog, presented: presented,
+	}
 }
 
 // allow returns nil iff the call may proceed past the policy for fullMethod:
@@ -227,7 +269,9 @@ func NewPublicCallerPolicy(
 //     «назовись». Всякий, кто назвался и не подошёл, получает прежний
 //     `PermissionDenied`. Разница — про следующий шаг вызывающего, а не про
 //     строгость: просить прав некому там, где края нет (kacho#2103).
-//   - api-gateway → nil (the front door, where per-user ReBAC happens).
+//   - api-gateway → nil (the front door, where per-user ReBAC happens) —
+//     кроме глаголов [PublicGatewayFlooredRPCs]: там пол уровня из каталога
+//     службы судит второй замок ([PublicCallerPolicy.gatewayFloor]).
 //   - another module on an RPC that names it in the peer-callable table → nil.
 //   - any other module: prod → PermissionDenied; dev → nil.
 //
@@ -359,7 +403,7 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	if svc == gatewayServiceName {
-		return nil
+		return p.gatewayFloor(ctx, fullMethod)
 	}
 	if _, listed := p.peerCallable[fullMethod][svc]; listed {
 		return nil
@@ -371,6 +415,48 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		return nil
 	}
 	return status.Error(codes.PermissionDenied, "permission denied")
+}
+
+// gatewayFloor — ВТОРОЙ ЗАМОК пола уровня на ветви края (kaname#747, Р3).
+//
+// Решает ОБЩЕЕ правило платформы (`grpcsrv.EvaluateStepUp`) — то же, что у края
+// и у пола внутреннего слушателя; ранжирование и освобождение машинного
+// принципала здесь не перевыводятся. Входы — только под доверием: уровень и вид
+// принципала засчитываются, лишь когда их передал отправитель из круга
+// доверенных (`authn.trusted-forwarder-sans`); иначе уровень пуст и вид пуст —
+// отказ, и подделанный «service_account» освобождения не покупает.
+//
+// Отказ — указание повысить уровень (Р11), та же форма, что у полосы
+// предъявленного на этом же слушателе: у одного слушателя один ответ на
+// недостаток уровня, какой бы путь ни привёл вызывающего.
+//
+// dev-посадка — проход, как у прочих ветвей политики: без mTLS ветви края на
+// стенде нет вовсе.
+func (p *PublicCallerPolicy) gatewayFloor(ctx context.Context, fullMethod string) error {
+	if _, floored := p.gatewayFloored[fullMethod]; !floored || !p.prodMode {
+		return nil
+	}
+	required := p.requiredACRMin(fullMethod)
+	if acrlevel.Rank(required) == 0 {
+		return nil
+	}
+	acr, trusted := grpcsrv.TrustedACRFromContext(ctx)
+	if !trusted {
+		acr = ""
+	}
+	principalType := ""
+	if pr, trustedPrincipal := grpcsrv.TrustedPrincipalFromContext(ctx); trustedPrincipal {
+		principalType = pr.Type
+	}
+	if grpcsrv.EvaluateStepUp(grpcsrv.StepUpInput{
+		PrincipalType: principalType,
+		PresentedACR:  acr,
+		RequiredACR:   required,
+	}) == grpcsrv.StepUpAllow {
+		return nil
+	}
+	return &stepUpRequired{challenge: iamerr.StepUpChallenge(
+		strconv.Itoa(acrlevel.Rank(required)), strconv.Itoa(acrlevel.Rank(acr)))}
 }
 
 // presentedCredential — вердикт порта. Неподставленный порт означает «не знаем»,
