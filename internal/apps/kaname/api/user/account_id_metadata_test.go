@@ -241,7 +241,7 @@ func (w *fakeUsrWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.Ac
 }
 
 func (w *fakeUsrWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
-func (w *fakeUsrWtr) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+func (w *fakeUsrWtr) CutOffIdentity(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	if w.parent != nil {
 		w.parent.record("cutoff")
 	}

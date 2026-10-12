@@ -183,7 +183,7 @@ func (uc *DeleteUserUseCase) doDelete(ctx context.Context, id domain.UserID, act
 				return status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
 			}
 			revokedBy := domain.UserID(actor)
-			if cerr := w.UsersW().CutOffForRemoval(ctx, domain.UserTokenRevocation{
+			if cerr := w.UsersW().CutOffIdentity(ctx, domain.UserTokenRevocation{
 				UserID: id, RevokeBefore: at, Reason: domain.RevokeReasonIdentityRemoved, RevokedBy: revokedBy,
 			}, revokedBy); cerr != nil {
 				return cerr
