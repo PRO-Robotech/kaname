@@ -28,8 +28,10 @@
 // отметки нет, статус прежний, выдана сессия. Статус переносом не менялся.
 //
 // Близнец — соседняя строка в том же нынешнем виде, но СО строкой пароля
-// (единственный отличающий факт): перенос её не отмечает, код на
-// неподтверждённый адрес ей не выдаётся (Ф5-31), письма нет.
+// (единственный отличающий факт): перенос её не отмечает. Код на её
+// неподтверждённый адрес выдаётся по правилу kaname#458 (Р2: запись с паролем
+// в состоянии `ACTIVE` код получает, и предъявление передаёт её владельцу
+// ящика); прежнее «письма нет» (Ф5-31 до kaname#458) этим правилом заменено.
 //
 // Журнал выхода не несёт адреса (hard-no-pii-in-logs).
 //
@@ -55,6 +57,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -163,17 +166,20 @@ func TestIntegration_StandFormRowGetsInByTheProductPathAfterTransfer(t *testing.
 	require.NoError(t, err)
 	rule, err := humansession.NewPasswordRule(12, nil, nop, logger)
 	require.NoError(t, err)
+	completion, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		CutoffClock: momentclock.Func(time.Now),
-		Store:       sessions, Hasher: hasher, Rule: rule,
+		CutoffClock: momentclock.Func(time.Now), Completion: completion,
+		Store: sessions, Hasher: hasher, Rule: rule,
 		Limits: humansession.Limits{AddressAttempts: 50, AddressWindow: 10 * time.Minute, SourceAttempts: 500, SourceWindow: 10 * time.Minute},
 		TTL:    24 * time.Hour, Observer: nop, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 
-	// Близнец Ф5-31: строка с паролем и неподтверждённым адресом кода не получает.
+	// Близнец со строкой пароля: по правилу kaname#458 (Р2) запись `ACTIVE` с
+	// паролем и неподтверждённым адресом код получает — письмо одно.
 	require.NoError(t, request.Execute(ctx, humansession.RequestRecoveryInput{Email: emailB, Source: standFormSource}))
-	require.Zero(t, recoveryLetters(t, db, idB), "Ф5-31: письма для близнеца со строкой пароля нет")
+	require.Equal(t, 1, recoveryLetters(t, db, idB), "kaname#458 Р2: письмо для близнеца со строкой пароля в очереди")
 
 	// Ф5-29: код выдаётся на неподтверждённый адрес перенесённой строки.
 	require.NoError(t, request.Execute(ctx, humansession.RequestRecoveryInput{Email: emailA, Source: standFormSource}))

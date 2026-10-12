@@ -276,9 +276,13 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	require.NoError(t, err)
 	// Завершение восстановления — НАСТОЯЩИЙ глагол (EC-23 предъявляет код
 	// восстановления после смены адреса).
+	// Транзакция исхода — тем же составом, что в композиционном корне
+	// (kaname#458): адаптер базы и та же функция активации приглашения.
+	completion, err := kanamepg.NewRecoveryCompletionStore(pool, user.ActivateInviteForLane)
+	require.NoError(t, err)
 	completeR, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		CutoffClock: momentclock.Func(clock.Now),
-		Store:       sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
+		CutoffClock: momentclock.Func(clock.Now), Completion: completion,
+		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
 		Observer: observerOr(opts.completionObserver, nop), Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)

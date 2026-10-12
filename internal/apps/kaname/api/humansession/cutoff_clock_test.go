@@ -107,7 +107,7 @@ func TestCutoffClock_RecoveryStampsCutoffAndSessionFromTheSharedSource(t *testin
 			h.clock = ucBase.Add(time.Minute)
 			replica := func() time.Time { return h.clock }
 			complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-				Store: h.store, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
+				Store: h.store, Completion: h.store, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
 				Observer: h.obs, Now: replica, Logger: slog.New(slog.DiscardHandler),
 				CutoffClock: w.source(replica),
 			})
@@ -224,7 +224,7 @@ func TestCutoffClock_EveryWriterRefusesToBuildWithoutTheSource(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "shared clock required")
 	_, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: h.store, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL, Logger: logger,
+		Store: h.store, Completion: h.store, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL, Logger: logger,
 	})
 	require.ErrorContains(t, err, "shared clock required")
 	_, err = humansession.NewAccessKeyLoginUseCase(humansession.AccessKeyLoginDeps{

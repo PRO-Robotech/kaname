@@ -105,6 +105,9 @@ type fakeStore struct {
 	accessKeyRows map[domain.AccessKeyID]domain.UserID
 	// inserted — счётчик вставок записей сессии (`fakeRow.seq`).
 	inserted int64
+	// inviteGone — приглашения, истёкшие либо снятые так, как их судит оператор
+	// активации адаптера (kaname#458, Р6).
+	inviteGone map[domain.UserID]bool
 }
 
 // trip — один оператор базы: обращение, дошедшее до неё.

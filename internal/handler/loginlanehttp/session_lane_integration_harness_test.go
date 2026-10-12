@@ -66,6 +66,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
@@ -368,9 +369,13 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	if opts.completionObserver != nil {
 		completeObserver = opts.completionObserver
 	}
+	// Транзакция исхода — тем же составом, что в композиционном корне
+	// (kaname#458): адаптер базы и та же функция активации приглашения.
+	completion, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		CutoffClock: momentclock.Func(time.Now),
-		Store:       completeStore, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: completeObserver, Now: time.Now, Logger: logger,
+		CutoffClock: momentclock.Func(time.Now), Completion: completion,
+		Store: completeStore, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: completeObserver, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	resolveUC, err := humansession.NewResolveUseCase(sessions, nop, time.Now)

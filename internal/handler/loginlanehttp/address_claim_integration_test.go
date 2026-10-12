@@ -75,9 +75,13 @@ const (
 	a458EventField       = "address_claimed"
 	a458NewPassword      = "a-mailbox-owner-password-458"
 	a458InviteNotValidTx = "invite is no longer valid; ask an account administrator to invite again"
-	a458AuthFailedBody   = `{"code":16,"message":"authentication failed"}`
 	a458Source           = "198.51.100.158"
 )
+
+// a458AuthFailedBody — отказ входа на проводе полосы формы побайтово: та же
+// форма тела, что у всякого отказа полосы (`refusalWire`: код, текст,
+// `details`), — «401 / 16 authentication failed» приёмки.
+var a458AuthFailedBody = refusalWire(16, "authentication failed")
 
 // a458Cells — счётчик исходов запроса кода и завершения восстановления
 // (клетки `observer.go`), ключом — слово клетки.
@@ -949,6 +953,8 @@ func TestA458_04_TheRightsOfTheRecordPassWithItAndStartToWork(t *testing.T) {
 	_, _, prj := h.inviter(t)
 	holder := h.register(t, freshAddress("a458-04"))
 	binding := h.grantProject(t, holder.user, prj)
+	before := h.liveBindingsOf(t, holder.user)
+	require.Contains(t, before, string(binding), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): выдача на проект прочитана обратно")
 
 	// Близнец: под S-old право не действует (`#456` Р3).
 	require.False(t, h.allowed(t, holder.user, prj), "A458-04 близнец: до перехода дверь отказывает неподтверждённой записи")
@@ -958,16 +964,44 @@ func TestA458_04_TheRightsOfTheRecordPassWithItAndStartToWork(t *testing.T) {
 	require.Equal(t, http.StatusOK, done.status, "A458-04: завершение — 200: %s", done.body)
 
 	require.True(t, h.allowed(t, holder.user, prj), "A458-04: после перехода право на проект действует")
-	var bound []string
-	rows, err := h.pool.Query(h.ctx, `SELECT id FROM kaname.access_bindings WHERE subject_id = $1 AND revoked_at IS NULL`, string(holder.user))
+	require.Equal(t, before, h.liveBindingsOf(t, holder.user),
+		"A458-04: привязки записи те же (в том числе выдача на проект), повторной выдачи не было")
+}
+
+// liveBindingsOf — живые выдачи, где запись — субъект, по идентификатору. У
+// записи, заведённой регистрацией, кроме выдачи пробы есть выдачи её личного
+// аккаунта: судится равенство множества до и после перехода.
+func (h *avLane) liveBindingsOf(t *testing.T, user domain.UserID) []string {
+	t.Helper()
+	rows, err := h.pool.Query(h.ctx, `SELECT id FROM kaname.access_bindings WHERE subject_id = $1 AND revoked_at IS NULL ORDER BY id`, string(user))
 	require.NoError(t, err)
 	defer rows.Close()
+	var out []string
 	for rows.Next() {
 		var id string
 		require.NoError(t, rows.Scan(&id))
-		bound = append(bound, id)
+		out = append(out, id)
 	}
-	require.Equal(t, []string{string(binding)}, bound, "A458-04: привязка та же, повторной выдачи не было")
+	require.NoError(t, rows.Err())
+	return out
+}
+
+// extendInvite — повторное приглашение того же адреса в тот же аккаунт, когда
+// выдача роли под приглашением жива (ветвь «истекло»): срок строки продлён
+// тем же оператором, что пишет `invite` (A198 Р5), выдача не дублируется.
+func (h *avLane) extendInvite(t *testing.T, iv avInvite, ttl time.Duration) avInvite {
+	t.Helper()
+	w, err := h.users.Writer(h.ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(h.ctx) }()
+	row, _, err := w.UsersW().InsertPending(h.ctx, domain.User{
+		ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: iv.account, Email: domain.Email(iv.email),
+		DisplayName: "invitee", InviteStatus: domain.InviteStatusPending, InvitedBy: iv.inviter.user,
+	}, time.Now().UTC().Add(ttl))
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): повторное приглашение")
+	require.NoError(t, w.Commit(h.ctx))
+	iv.user = row.ID
+	return iv
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1051,7 +1085,14 @@ func TestA458_06_InvalidInvitationRefusesTheOutcomeAndChangesNothing(t *testing.
 			require.Equal(t, http.StatusOK, h.loginReply(t, iv.email, integrationPassword).status, "A458-06 %s: пароль записи — P-old", branch)
 
 			// Продолжение: повторное приглашение — тот же код переводит запись.
-			again := h.invite(t, inv, acc, prj, iv.email, 24*time.Hour)
+			// (а): выдача под приглашением снята исключением — повторное
+			// приглашение пишет её заново; (б): выдача жива — продлевается срок.
+			var again avInvite
+			if branch == "(а) снято" {
+				again = h.invite(t, inv, acc, prj, iv.email, 24*time.Hour)
+			} else {
+				again = h.extendInvite(t, iv, 24*time.Hour)
+			}
 			require.Equal(t, iv.user, again.user, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): повторное приглашение — та же строка")
 			r2 := h.complete(t, iv.email, code, ctxCk)
 			require.Equal(t, http.StatusOK, r2.status, "A458-06 %s продолжение: исход A458-05: %s", branch, r2.body)

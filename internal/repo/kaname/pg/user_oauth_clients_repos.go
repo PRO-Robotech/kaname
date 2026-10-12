@@ -209,6 +209,22 @@ func (r *UserOAuthClientRepo) DeleteOwnedByID(
 	return out, true, nil
 }
 
+// deleteUserTokensOfTx снимает ВСЕ личные токены человека одним оператором,
+// суженным владельцем (kaname#458, Р3 п. 2): ключи утверждения клиента и
+// базовые секреты. Отсечку отчеканенного каждым живым удостоверением ставит
+// триггер удаления строки (`user_oauth_client_removal_cuts_minted_tokens`) той
+// же транзакцией — так же, как при снятии одного. Отвечает числом снятых.
+func deleteUserTokensOfTx(ctx context.Context, tx pgx.Tx, ownerID domain.UserID) (int64, error) {
+	if ownerID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM user_oauth_clients WHERE user_id = $1`, string(ownerID))
+	if err != nil {
+		return 0, mapErr(err, "UserOAuthClient.DeleteAllOf", "")
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ExistsOwnedByID — есть ли у человека ownerID удостоверение id. Предикат тот
 // же, что у оператора снятия выше (`id AND user_id`): строка чужого владельца
 // отсюда неотличима от отсутствующей BY CONSTRUCTION, ветки, на которой они

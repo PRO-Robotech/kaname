@@ -73,10 +73,28 @@ package humansession
 // Отказ — ОДИН на все причины предъявления (Ф1 Р3, Ф1-59): «адреса нет», «код
 // не тот», «истёк», «применён», «заблокирована» — наружу уходит
 // ErrAccessNotRestored, свой у глагола и называющий шаг (Ф5 Р10 п. 2, Д22);
-// причина различима только клеткой.
+// причина различима только клеткой. Исключение одно — приглашение под строкой
+// `PENDING` негодно после ГОДНОГО кода (kaname#458, Р6): ErrInviteNotValid
+// называется только тому, кто доказал владение ящиком.
+//
+// # Переход записи к владельцу ящика (kaname#458, Р3, Р4)
+//
+// Ветвь исхода решает отметка подтверждения, прочитанная ЭТОЙ транзакцией
+// после захвата строки личности (`AddressVerified`), а не чтение адреса до
+// транзакции (запрет #10): запись, подтверждённая между выдачей кода и его
+// предъявлением, — обычное восстановление (подтвердить её мог только владелец
+// ящика). Отметки нет, а строка пароля у записи была — исход ПЕРЕХОДА той же
+// транзакцией: отметка на значение адреса · снятие второго фактора, ключей
+// доступа с испытаниями и личных токенов · снятие всех сессий и отсечка
+// причиной `address-claimed` · активация строки `PENDING` той же функцией, что
+// исход подтверждения · сессия владельцу ящика · событие с `address_claimed`.
+// Отметки нет и пароль заведён впервые — Ф5 Р9 без перехода: прежнего
+// держателя с паролем у такой записи не было. Отказ любого шага откатывает
+// исход целиком: код годен, ничего не снято (Ф5-33).
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -111,12 +129,14 @@ type CompleteRecoveryOutput struct {
 
 // CompleteRecoveryUseCase — предъявление кода.
 type CompleteRecoveryUseCase struct {
-	store    Store
-	hasher   Hasher
-	rule     *PasswordRule
-	ttl      time.Duration
-	observer Observer
-	now      func() time.Time
+	store      Store
+	completion RecoveryCompletionStore
+	reconciler OwnerBindingReconciler
+	hasher     Hasher
+	rule       *PasswordRule
+	ttl        time.Duration
+	observer   Observer
+	now        func() time.Time
 	// clock — ОБЩИЙ для всех реплик источник момента отсечки и момента
 	// выдаваемой сессии (kaname#589); now — часы процесса для срока кода и
 	// счёта попыток.
@@ -129,13 +149,22 @@ type CompleteRecoveryUseCase struct {
 // ось «заведено» места решения о счёте по адресу читается транзакцией записи
 // (`Writer.LoginMethod`), после применения кода.
 type CompleteRecoveryDeps struct {
-	Store    Store
-	Hasher   Hasher
-	Rule     *PasswordRule
-	Limits   Limits
-	TTL      time.Duration
-	Observer Observer
-	Now      func() time.Time
+	Store Store
+	// Completion — транзакция исхода (kaname#458): операторы обычного
+	// восстановления и перехода записи над одной транзакцией. Обязательна:
+	// глагол без неё перехода не исполнил бы и молча не деградирует.
+	Completion RecoveryCompletionStore
+	// Reconciler — пост-коммитная материализация собственнической выдачи
+	// личного аккаунта, заведённой активацией приглашения в исходе перехода; nil
+	// — материализацию доводит уборка по намерениям (как у глагола
+	// подтверждения).
+	Reconciler OwnerBindingReconciler
+	Hasher     Hasher
+	Rule       *PasswordRule
+	Limits     Limits
+	TTL        time.Duration
+	Observer   Observer
+	Now        func() time.Time
 	// CutoffClock — источник момента отсечки и момента сессии: тот же, что у
 	// всех писателей моментов, сравниваемых с отсечкой (kaname#589). Обязателен.
 	CutoffClock revocationpolicy.Clock
@@ -147,6 +176,8 @@ func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCas
 	switch {
 	case d.Store == nil:
 		return nil, fmt.Errorf("recovery completion: session store required")
+	case d.Completion == nil:
+		return nil, fmt.Errorf("recovery completion: completion transaction store required")
 	case d.Hasher == nil:
 		return nil, fmt.Errorf("recovery completion: password hasher required")
 	case d.Rule == nil:
@@ -169,7 +200,7 @@ func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCas
 		d.Logger = slog.Default()
 	}
 	return &CompleteRecoveryUseCase{
-		store: d.Store, hasher: d.Hasher, rule: d.Rule, ttl: d.TTL, observer: d.Observer, now: d.Now,
+		store: d.Store, completion: d.Completion, reconciler: d.Reconciler, hasher: d.Hasher, rule: d.Rule, ttl: d.TTL, observer: d.Observer, now: d.Now,
 		clock: d.CutoffClock, logger: d.Logger,
 		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer},
 	}, nil
@@ -237,7 +268,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	// способа входа (`SessionSetWriter`, kaname#340). У адреса без личности
 	// строки нет, а оператор замка исполняется так же: до точки решения обе
 	// полосы делают одну и ту же работу хранилища (шапка).
-	w, err := uc.store.SessionSetWriter(ctx, user.ID)
+	w, err := uc.completion.RecoveryCompletionWriter(ctx, user.ID)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
@@ -257,21 +288,78 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, outcome, addressKey, in.Source, now)
 	}
 
-	// Код применён: учётные данные сменяются у ЛЮБОЙ личности, включая
-	// заблокированную (Ф5-17); сессия выдаётся только действующей (Ф1-59).
-	blocked := user.InviteStatus != domain.InviteStatusActive
-	out, err := uc.complete(ctx, w, user, code, fresh, now, at, blocked, target.EmailVerified, in.Client)
+	// Код применён. Ветвь исхода — по отметке подтверждения, прочитанной этой
+	// транзакцией после захвата строки личности (kaname#458, Р4).
+	verified, err := w.AddressVerified(ctx, user.ID)
 	if err != nil {
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
 		return CompleteRecoveryOutput{}, ErrStoreUnavailable
 	}
-	if blocked {
+	// Учётные данные сменяются у ЛЮБОЙ личности, включая заблокированную
+	// (Ф5-17); сессия выдаётся только действующей (Ф1-59).
+	res, err := uc.complete(ctx, w, user, code, fresh, now, at, verified, in.Client)
+	switch {
+	case errors.Is(err, ErrInviteNotValid):
+		// Приглашение под строкой `PENDING` негодно (Р6): исход откатан целиком
+		// — код годен, пароль прежний, сессии прежнего держателя живы, отметки
+		// нет. Попыткой не считается: код предъявлен верно.
+		_ = w.Rollback(ctx)
+		uc.observer.RecoveryCompletionObserved(RecoveryCompletionInviteNotValid)
+		return CompleteRecoveryOutput{}, ErrInviteNotValid
+	case errors.Is(err, errClaimAddressMoved):
+		// Адрес строки сменился после выдачи кода (Р3 п. 1): исход откатан
+		// целиком, наружу — единый отказ завершения.
+		_ = w.Rollback(ctx)
+		return CompleteRecoveryOutput{}, uc.refuse(ctx, RecoveryCompletionCodeRejected, addressKey, in.Source, now)
+	case err != nil:
+		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
+		return CompleteRecoveryOutput{}, ErrStoreUnavailable
+	}
+	uc.reconcileOwnerBinding(ctx, res)
+	if res.blocked {
 		// Тот же отказ, что на входе заблокированной (Ф1-05, Ф1-59); попытка
 		// считается, как у входа.
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, RecoveryCompletionBlocked, addressKey, in.Source, now)
 	}
-	uc.observer.RecoveryCompletionObserved(RecoveryCompletionIssued)
-	return out, nil
+	if res.claimed {
+		uc.observer.RecoveryCompletionObserved(RecoveryCompletionAddressClaimed)
+	} else {
+		uc.observer.RecoveryCompletionObserved(RecoveryCompletionIssued)
+	}
+	return res.out, nil
+}
+
+// errClaimAddressMoved — отметка перехода не легла: адрес строки уже не то
+// значение, на которое выдан код (Р3 п. 1). Наружу не выходит.
+var errClaimAddressMoved = errors.New("recovery completion: address of the record changed after the code was issued")
+
+// completion — исход записей завершения после фиксации.
+type completion struct {
+	out CompleteRecoveryOutput
+	// blocked — сессии нет: личность не `ACTIVE` после исхода.
+	blocked bool
+	// claimed — исход перехода записи к владельцу ящика (kaname#458, Р3).
+	claimed bool
+	// user — личность после исхода (у строки `PENDING`, переведённой
+	// переходом, — уже `ACTIVE`).
+	user domain.User
+	// ownerBinding — собственническая выдача личного аккаунта, заведённая
+	// активацией приглашения; пусто — активации не было.
+	ownerBinding domain.AccessBindingID
+}
+
+// reconcileOwnerBinding — пост-коммитная материализация собственнической
+// выдачи, заведённой активацией приглашения в исходе перехода: тем же
+// согласователем, что у глагола подтверждения. Отказ — в журнал; доводит
+// уборка по намерениям.
+func (uc *CompleteRecoveryUseCase) reconcileOwnerBinding(ctx context.Context, res completion) {
+	if uc.reconciler == nil || res.ownerBinding == "" {
+		return
+	}
+	if rerr := uc.reconciler.ReconcileBinding(ctx, res.ownerBinding); rerr != nil {
+		uc.logger.Error("recovery completion: owner-binding reconcile failed (sweep will retry)",
+			"user_id", string(res.user.ID), "binding_id", string(res.ownerBinding), "err", rerr.Error())
+	}
 }
 
 // complete — записи завершения ОДНИМ исходом на открытой транзакции, после точки
@@ -283,47 +371,68 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 // выдаваемой сессии, то есть всё, что сравнивается с отсечкой. now — часы
 // процесса для отметок, которые с ней не сравниваются.
 func (uc *CompleteRecoveryUseCase) complete(
-	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
-	now, at time.Time, blocked, emailVerified bool, client domain.ClientDescription,
-) (CompleteRecoveryOutput, error) {
+	ctx context.Context, w RecoveryCompletionWriter, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
+	now, at time.Time, emailVerified bool, client domain.ClientDescription,
+) (completion, error) {
 	// Материал — «заменить либо завести» одним оператором (Р5 ветвь «строки
 	// нет», Ф5-34): у личности без строки пароля завершение заводит первый
 	// пароль, а не откатывается (`kacho#2698`, Р9 п. 3).
 	created, err := w.PutLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	if err != nil {
-		return CompleteRecoveryOutput{}, err
+		return completion{}, err
+	}
+	// Переход (kaname#458, Р3): отметки нет, а строка пароля была — запись
+	// заводил кто-то, и чем он мог войти, неизвестно.
+	claimed := !emailVerified && !created
+	reason := domain.RevokeReasonPasswordChange
+	var ownerBinding domain.AccessBindingID
+	if !emailVerified {
+		// Код дошёл до ящика, и предъявивший доказал владение адресом: отметка
+		// подтверждения ставится на значение адреса, на которое выдан код, тем
+		// же оператором, что у глагола подтверждения (Ф6) — и у первого пароля
+		// (Ф5 Р9 п. 3), и у перехода записи (kaname#458, Р3 п. 1). Всё — той же
+		// транзакцией: отказ любого шага откатывает исход целиком, код остаётся
+		// годным (Ф5-33).
+		marked, err := w.MarkEmailVerified(ctx, user.ID, user.Email, now)
+		if err != nil {
+			return completion{}, err
+		}
+		if !marked {
+			// Адрес строки сменился между чтением и записью: подтверждать
+			// нечего — код доставлен на прежнее значение.
+			if claimed {
+				return completion{}, errClaimAddressMoved
+			}
+			return completion{}, fmt.Errorf("recovery completion: address of user %s changed before the first password was set", user.ID)
+		}
+		emailVerified = true
 	}
 	if created {
-		// Первый пароль (Р9 п. 3): код дошёл до ящика, и предъявивший доказал
-		// владение адресом — отметка подтверждения ставится тем же оператором,
-		// что у глагола подтверждения (Ф6), если её не было; отметка открытого
-		// пути снимается. Всё — той же транзакцией: отказ любого шага
-		// откатывает исход целиком, код остаётся годным (Ф5-33).
-		if !emailVerified {
-			marked, err := w.MarkEmailVerified(ctx, user.ID, user.Email, now)
-			if err != nil {
-				return CompleteRecoveryOutput{}, err
-			}
-			if !marked {
-				// Адрес строки сменился между чтением и записью: подтверждать
-				// нечего — код доставлен на прежнее значение.
-				return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: address of user %s changed before the first password was set", user.ID)
-			}
-			emailVerified = true
-		}
+		// Первый пароль (Р9 п. 3): отметка открытого пути снимается.
 		if err := w.CloseRecoveryPath(ctx, user.ID); err != nil {
-			return CompleteRecoveryOutput{}, err
+			return completion{}, err
 		}
 	}
+	if claimed {
+		activated, binding, err := uc.claim(ctx, w, user)
+		if err != nil {
+			return completion{}, err
+		}
+		user, ownerBinding, reason = activated, binding, domain.RevokeReasonAddressClaimed
+	}
+	// Сессия выдаётся только действующей (Ф1-59); строка `PENDING`, переведённая
+	// переходом, к этому месту уже `ACTIVE`.
+	blocked := user.InviteStatus != domain.InviteStatusActive
 	// Все прежние сессии — снятием записей (в нашей посадке) и отсечкой (её
-	// читает край на предъявлении, Ф3 Р7): Ф1 Р4, Ф5-19.
-	if _, err := w.EndOtherSessions(ctx, user.ID, "", now, domain.RevokeReasonPasswordChange); err != nil {
-		return CompleteRecoveryOutput{}, err
+	// читает край на предъявлении, Ф3 Р7): Ф1 Р4, Ф5-19. У перехода — своей
+	// причиной (Р7).
+	if _, err := w.EndOtherSessions(ctx, user.ID, "", now, reason); err != nil {
+		return completion{}, err
 	}
 	if err := w.UpsertCutoff(ctx, domain.UserTokenRevocation{
-		UserID: user.ID, RevokeBefore: at, Reason: domain.RevokeReasonPasswordChange,
+		UserID: user.ID, RevokeBefore: at, Reason: reason,
 	}, user.ID); err != nil {
-		return CompleteRecoveryOutput{}, err
+		return completion{}, err
 	}
 	// Журнал по ключу потока (Р4): ключ, уже стоящий при впервые применённом
 	// коде, — наша несогласованность, а не повтор; исход откатывается целиком.
@@ -331,12 +440,12 @@ func (uc *CompleteRecoveryUseCase) complete(
 		RecoveryJTI: string(code.ID), UserID: user.ID, RevokedSessionCount: 1,
 	})
 	if err != nil {
-		return CompleteRecoveryOutput{}, err
+		return completion{}, err
 	}
 	if !inserted {
 		uc.logger.Error("recovery completion: ledger already holds the flow key of a code consumed just now — our data, not the caller's input",
 			"user_id", string(user.ID), "recovery_jti", string(code.ID))
-		return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: flow key %s already in the ledger", code.ID)
+		return completion{}, fmt.Errorf("recovery completion: flow key %s already in the ledger", code.ID)
 	}
 	payload := map[string]any{
 		"actor":                 "self",
@@ -344,6 +453,9 @@ func (uc *CompleteRecoveryUseCase) complete(
 		"recovery_jti":          string(code.ID),
 		"revoked_session_count": int32(1),
 		"session_issued":        !blocked,
+		// Переход записи к владельцу ящика (kaname#458, Р3 п. 6): адресов и
+		// имён в событии нет.
+		"address_claimed": claimed,
 	}
 	var out CompleteRecoveryOutput
 	if !blocked {
@@ -358,7 +470,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 			Client:    client,
 		})
 		if err != nil {
-			return CompleteRecoveryOutput{}, err
+			return completion{}, err
 		}
 		payload["session_id"] = string(s.ID)
 		out = CompleteRecoveryOutput{View: SessionView{User: user, Session: s, EmailVerified: emailVerified}, Bearer: bearer}
@@ -371,24 +483,53 @@ func (uc *CompleteRecoveryUseCase) complete(
 		if err != nil {
 			uc.logger.ErrorContext(ctx, "recovery completion: enrolled login methods unreadable — the outcome is rolled back, the code stays usable",
 				"user_id", string(user.ID), "err", err.Error())
-			return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: enrolled login methods unreadable: %w", err)
+			return completion{}, fmt.Errorf("recovery completion: enrolled login methods unreadable: %w", err)
 		}
 		if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 			Enrolled: enrolled, EnrolledKnown: true,
 			AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 		}); err != nil {
-			return CompleteRecoveryOutput{}, err
+			return completion{}, err
 		}
 	}
 	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 		EventType: AuditRecoveryCompleted, TenantAccountID: string(user.AccountID), Payload: payload,
 	}); err != nil {
-		return CompleteRecoveryOutput{}, err
+		return completion{}, err
 	}
 	if err := w.Commit(ctx); err != nil {
-		return CompleteRecoveryOutput{}, err
+		return completion{}, err
 	}
-	return out, nil
+	return completion{out: out, blocked: blocked, claimed: claimed, user: user, ownerBinding: ownerBinding}, nil
+}
+
+// claim — операторы перехода записи к владельцу ящика на открытой транзакции
+// исхода (kaname#458, Р3 пп. 2, 4), после отметки подтверждения (п. 1, её
+// ставит вызывающий): снятие всего, чем мог войти прежний держатель;
+// активация строки `PENDING` той же функцией, что в исходе подтверждения, —
+// после отметки: оператор активации судит её в своём условии. Отвечает
+// личностью после исхода и собственнической выдачей, если активация её завела.
+//
+// Отказы: ErrInviteNotValid — приглашение негодно (Р6); прочие — отказ
+// хранилища. Вызывающий откатывает исход целиком.
+func (uc *CompleteRecoveryUseCase) claim(ctx context.Context, w RecoveryCompletionWriter, user domain.User) (domain.User, domain.AccessBindingID, error) {
+	retired, err := w.RetireCredentialsOf(ctx, user.ID)
+	if err != nil {
+		return domain.User{}, "", err
+	}
+	var binding domain.AccessBindingID
+	if user.InviteStatus == domain.InviteStatusPending {
+		act, err := w.ActivateInviteOnVerification(ctx, user)
+		if err != nil {
+			return domain.User{}, "", err
+		}
+		user, binding = act.User, act.OwnerBindingID
+	}
+	uc.logger.InfoContext(ctx, "recovery completion: the record passes to the owner of the mailbox — credentials of the previous holder retired",
+		"user_id", string(user.ID),
+		"second_factor_rows", retired.SecondFactorRows, "access_key_challenge_rows", retired.AccessKeyChallengeRows,
+		"access_key_rows", retired.AccessKeyRows, "user_token_rows", retired.UserTokenRows)
+	return user, binding, nil
 }
 
 // refuse — один отказ на все причины предъявления; попытка считается по обеим
