@@ -113,7 +113,7 @@ func loadProfileWithoutPostureKey(t *testing.T, mode, omitPrefix string) config.
 		if s.Key == retiredPostureKey || (omitPrefix != "" && strings.HasPrefix(s.Key, omitPrefix)) {
 			continue
 		}
-		t.Setenv(s.Env, s.Sample)
+		t.Setenv(s.Env, suppliedValue(s))
 		supplied++
 	}
 	if supplied == 0 {

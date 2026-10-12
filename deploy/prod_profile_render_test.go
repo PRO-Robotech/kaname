@@ -159,8 +159,6 @@ var minimalOperatorCoordinates = append([]string{
 	"db.passwordSecretKey=password",
 }, operatorOverlay...)
 
-// renderStandaloneChart зовёт `helm template` на ЭТОМ чарте с названной
-// цепочкой профилей.
 // installDomainForRender — ДОМЕН УСТАНОВКИ, которым рендер боевой цепочки
 // заменяет заглушку профиля (kaname#762). Профиль несёт на месте
 // `authn.domain` имя в зоне `.invalid`, и установка с ним отвергается — так
@@ -181,6 +179,8 @@ func installCoordinateSets(valueFiles []string) []string {
 	return nil
 }
 
+// renderStandaloneChart зовёт `helm template` на ЭТОМ чарте с названной
+// цепочкой профилей.
 func renderStandaloneChart(t *testing.T, valueFiles []string, sets ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
