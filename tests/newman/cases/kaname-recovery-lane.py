@@ -392,8 +392,17 @@ _REGISTER = "/iam/v1/auth/register"
 _LOGIN = "/iam/v1/auth/login"
 _VERIFY_CONFIRM = "/iam/v1/auth/verify-email/confirm"
 # Чтение, требующее живой сессии и ничего не меняющее: состояние второго
-# фактора. Живая сессия — 200, отозванная — 401 `authentication failed`.
+# фактора. Три ответа — три ответа `Resolve`: живая с подтверждённым адресом —
+# 200; живая в положении подтверждения — 403 EMAIL_NOT_VERIFIED (путь объявлен
+# отказом положения, `pathPositions` полосы); отозванная — 401
+# `authentication failed`.
 _SESSION_PROBE = "/iam/v1/auth/second-factor"
+_NOT_VERIFIED = ("email address is not verified: confirm it with the code from the letter "
+                 "(POST /iam/v1/auth/verify-email/confirm)")
+_NOT_VERIFIED_REASON = "EMAIL_NOT_VERIFIED"
+# Домен отказов службы — константа продукта (`internal/refusaldomain`), а не
+# величина посадки.
+_REFUSAL_DOMAIN = "iam.kaname.cloud"
 
 _MAILBOX_WHY = ("чтение приёмника писем стенда посадки `own`; адрес пишет посев "
                 "полосы входа — вне стенда `own` приёмника нет, и это условие, "
@@ -624,9 +633,36 @@ def _issued(p, label, store="RecoveredCookie"):
     ]
 
 
+def _position_refused(label):
+    """Отказ положения дословно: 403, код 7, текст, ErrorInfo с доменом службы.
+
+    Выносится только носителю, которого служба УЗНАЛА живым: неузнанный идёт
+    дальше, к глаголу, и получает 401."""
+    return [
+        *_refused(403, 7, _NOT_VERIFIED, label),
+        "const __info = (Array.isArray(__r.details) ? __r.details : [])"
+        ".filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
+        f"pm.test({js_str(label + ': признак отказа ' + _NOT_VERIFIED_REASON)}, () => "
+        f"pm.expect(__info.reason).to.eql({js_str(_NOT_VERIFIED_REASON)}));",
+        f"pm.test({js_str(label + ': домен признака — домен отказов службы')}, () => "
+        f"pm.expect(__info.domain).to.eql({js_str(_REFUSAL_DOMAIN)}));",
+    ]
+
+
 def _session_probe(p, name, cookie_var, alive):
-    """Жива ли сессия: чтение, требующее сессии; ничего не меняет."""
+    """Жива ли сессия: чтение, требующее сессии; ничего не меняет.
+
+    `alive`: True — узнана в обычном положении (200); "position" — узнана живой
+    в положении подтверждения (403 EMAIL_NOT_VERIFIED); False — не узнана (401)."""
     label = name.upper()
+    if alive == "position":
+        tests = _position_refused(label + " (сессия жива, адрес не подтверждён)")
+    elif alive is True:
+        tests = _status_is(200, label + " (сессия жива)")
+    elif alive is False:
+        tests = _refused(401, 16, "authentication failed", label + " (сессия отозвана)")
+    else:
+        raise ValueError(f"_session_probe: исход {alive!r} не объявлен")
     return Step(
         name=name, method="GET", path=_SESSION_PROBE,
         pre_script=[*require_env_url("loginLaneBaseUrl", _SESSION_PROBE, _LANE_WHY), *_src_pre(p),
@@ -634,8 +670,7 @@ def _session_probe(p, name, cookie_var, alive):
                     f"pm.expect(!!pm.environment.get({js_str(_v(p, cookie_var))})).to.eql(true));",
                     *_with_cookies(("kaname_session", _v(p, cookie_var)))],
         insecure_tls=True, auth="anonymous", cookie_jar=False,
-        test_script=(_status_is(200, label + " (сессия жива)") if alive
-                     else _refused(401, 16, "authentication failed", label + " (сессия отозвана)")),
+        test_script=tests,
     )
 
 
@@ -1882,7 +1917,10 @@ CASES.append(Case(
     steps=[
         # (а) адрес не подтверждён.
         *_unverified_person(_PCL, "claim"),
-        _session_probe(_PCL, "claim-registration-session-alive-before", "SessionCookie", alive=True),
+        # Сессия регистрации жива ДО перехода: адрес не подтверждён, поэтому живая
+        # сессия узнаётся отказом положения (403 EMAIL_NOT_VERIFIED), а не 200;
+        # после перехода та же сессия не узнаётся — 401 (шаг `claim-registration-session`).
+        _session_probe(_PCL, "claim-registration-session-alive-before", "SessionCookie", alive="position"),
         *_claim_path(_PCL, "claim", unverified_delta=0),
         # (б) близнец: адрес подтверждён кодом письма регистрации до запроса.
         *_person(_PCV, "claim-verified"),
