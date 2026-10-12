@@ -253,6 +253,11 @@ const markEmailVerifiedSQL = `
 		       RETURNING 1)
 		SELECT EXISTS (SELECT 1 FROM person), EXISTS (SELECT 1 FROM marked)`
 
+// emailVerifiedAtSQL — отметка подтверждения адреса строки человека: одно
+// чтение у порта `loginmethod.Store` (пулом) и у транзакции исхода
+// завершения восстановления (соединением транзакции, kaname#458).
+const emailVerifiedAtSQL = `SELECT email_verified_at FROM users WHERE id = $1`
+
 // MarkEmailVerified записывает момент подтверждения ТОЛЬКО на подтверждённое
 // значение: сверка адреса и запись отметки — один оператор, поэтому смена
 // адреса, зафиксированная раньше, делает запись пустой, а зафиксированная позже
@@ -289,7 +294,7 @@ func (r *LoginMethodRepo) EmailVerification(ctx context.Context, userID domain.U
 		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
 	var at *time.Time
-	err := r.pool.QueryRow(ctx, `SELECT email_verified_at FROM users WHERE id = $1`, string(userID)).Scan(&at)
+	err := r.pool.QueryRow(ctx, emailVerifiedAtSQL, string(userID)).Scan(&at)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
 	}
@@ -536,6 +541,23 @@ func removeSecondFactorTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) 
 		return false, mapErr(err, "LoginMethod.RemoveSecondFactor", loginMethodHint(userID, domain.LoginMethodTOTP))
 	}
 	return removed == 1, nil
+}
+
+// retireStartedEnrolmentTx — начатое и не завершённое заведение генератора
+// человека (строка `totp` в состоянии `pending`) одним оператором (kaname#458,
+// Р3 п. 2, ветвь перехода записи без удостоверений). Заведённую строку и набор
+// `lookup_secret` оператор не касается по построению: условие на состоянии —
+// часть оператора, а не чтение перед ним. Отвечает числом снятых строк.
+func retireStartedEnrolmentTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method.user_id: required")
+	}
+	q := `DELETE FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2 AND state = $3`
+	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodTOTP), string(domain.LoginMethodStatePending))
+	if err != nil {
+		return 0, mapErr(err, "LoginMethod.RetireStartedEnrolment", loginMethodHint(userID, domain.LoginMethodTOTP))
+	}
+	return tag.RowsAffected(), nil
 }
 
 // SweepExpiredEnrollments — уборка неподтверждённых заведений (Ф12-44, порт

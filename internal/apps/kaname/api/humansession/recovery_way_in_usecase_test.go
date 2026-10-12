@@ -52,17 +52,29 @@ func TestRecovery_F5_29_UnverifiedAddressOfAnIdentityWithoutAWayInGetsACode(t *t
 	require.Zero(t, h.obs.recoveryRequest[humansession.RecoveryRequestUnverified], "клетка unverified не выросла")
 }
 
-// Ф5-31 — близнец Ф5-29 строкой пароля: неподтверждённый адрес с паролем кода
-// не получает, как прежде.
+// Ф5-31 в редакции kaname#458 (Р2): близнец Ф5-29 строкой пароля. Запись
+// `ACTIVE` с паролем и неподтверждённым адресом код ПОЛУЧАЕТ — предъявление
+// передаст её владельцу ящика; строка `BLOCKED` с паролем и неподтверждённым
+// адресом — нет, как прежде (Ф5-32: блокировку снимает распорядитель).
 func TestRecovery_F5_31_UnverifiedAddressWithAPasswordStillGetsNoCode(t *testing.T) {
 	h := newHarness(t, nil)
 	b := h.person(t, "usr-r31", "r31@example.invalid", "old-password-31", false)
+	b.InviteStatus = domain.InviteStatusBlocked
+	h.store.users[b.ID] = b
+	a := h.person(t, "usr-r31a", "r31a@example.invalid", "old-password-31", false)
 
 	h.request(t, "r31@example.invalid")
 
-	require.Empty(t, h.store.mail, "Ф5-31: письма нет")
-	require.Empty(t, h.store.codesOf(b.ID), "Ф5-31: кода нет")
+	require.Empty(t, h.store.mail, "Ф5-31: у строки BLOCKED письма нет")
+	require.Empty(t, h.store.codesOf(b.ID), "Ф5-31: у строки BLOCKED кода нет")
 	require.Equal(t, 1, h.obs.recoveryRequest[humansession.RecoveryRequestUnverified])
+
+	h.request(t, "r31a@example.invalid")
+
+	require.Len(t, h.store.codesOf(a.ID), 1, "A458-01: запись ACTIVE с паролем получает код")
+	require.Len(t, h.store.mail, 1, "A458-01: письмо вида восстановления в очереди")
+	require.Equal(t, 1, h.obs.recoveryRequest[humansession.RecoveryRequestQueued], "A458-01: клетка queued")
+	require.Equal(t, 1, h.obs.recoveryRequest[humansession.RecoveryRequestUnverified], "A458-01: клетка unverified не выросла")
 }
 
 // Ф5-32 — близнец Ф5-29 статусом: PENDING без пароля кода не получает.

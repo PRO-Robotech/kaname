@@ -60,7 +60,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -613,8 +612,17 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Транзакция исхода завершения (kaname#458): писатель сессии, писатель
+	// зеркала и операторы перехода записи к владельцу ящика над одной
+	// транзакцией; активацию приглашения исполняет та же функция, что исход
+	// подтверждения адреса.
+	completionStore, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
+		Store: sessions, Completion: completionStore, Reconciler: ownerReconcilerOrNone(reconciler),
+		Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
 		Observer: rec, Now: time.Now, Logger: logger, CutoffClock: sharedClock,
 	})
 	if err != nil {
@@ -807,16 +815,10 @@ type verificationWriter struct{ *kanamepg.RegistrationWriter }
 
 // ActivateInviteOnVerification — см. порт: срок и снятие приглашения — один
 // исход «не активируется» (Р11 п. 3); строка, уже не PENDING, — тот же исход:
-// активировать нечего.
+// активировать нечего. Функция одна с переходом записи к владельцу ящика
+// (kaname#458): `userapp.ActivateInviteForLane`.
 func (w verificationWriter) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {
-	res, err := userapp.ActivateInviteOnVerificationTx(ctx, w.MirrorWriter(), pending, string(pending.ID))
-	if err != nil {
-		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
-			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
-		}
-		return humansession.InviteActivation{}, err
-	}
-	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
+	return userapp.ActivateInviteForLane(ctx, w.MirrorWriter(), pending)
 }
 
 // emailChangeStore — адаптер хранилища глаголов смены адреса к порту: сессия —

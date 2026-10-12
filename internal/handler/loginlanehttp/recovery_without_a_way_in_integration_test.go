@@ -13,8 +13,10 @@
 // строку не производит (Ф5 §5.6 (8)); её производил прежний путь, и перенос
 // пары привёл лежащие строки ровно к этой форме.
 //
-// Близнецы: Ф5-31 — личность с паролем и неподтверждённым адресом (отличие —
-// строка пароля); адрес `Z`, не принадлежащий никому, — ответ Ф5-02.
+// Близнецы: Ф5-31 в редакции kaname#458 (Р2) — строка `BLOCKED` с паролем и
+// неподтверждённым адресом (запись `ACTIVE` с паролем код теперь получает —
+// это A458-01, `address_claim_integration_test.go`); адрес `Z`, не
+// принадлежащий никому, — ответ Ф5-02.
 //
 // Run: `go test ./internal/handler/loginlanehttp/ -run F5_29 -count=1` (Docker).
 // Skipped under -short.
@@ -29,6 +31,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 )
 
@@ -78,11 +81,18 @@ func TestLaneIntegration_F5_29_IdentityWithoutAWayInRecoversByMail(t *testing.T)
 	require.Equal(t, 1, h.recoveryLetters(t, h.user.ID), "Ф5-29: письмо вида восстановления для A в очереди")
 	code := h.lastRecoveryCode(t, h.user.ID)
 
-	// Ф5-31 близнец строкой пароля: личность с паролем и неподтверждённым
-	// адресом кода не получает, как прежде.
+	// Ф5-31 близнец строкой пароля в редакции kaname#458 (Р2): строка
+	// `BLOCKED` с паролем и неподтверждённым адресом кода не получает.
 	emailB := "b-" + ids.NewID("tst")[3:11] + "@example.invalid"
 	regB, err := h.register.Execute(h.ctx, registration.Input{Email: emailB, Password: integrationPassword, Source: "192.0.2.251"})
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): регистрация B")
+	{
+		w, err := h.users.Writer(h.ctx)
+		require.NoError(t, err)
+		_, err = w.UsersW().SetInviteStatus(h.ctx, regB.View.User.ID, domain.InviteStatusBlocked)
+		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): блокировка B писателем продукта")
+		require.NoError(t, w.Commit(h.ctx))
+	}
 	rb, _ := h.requestCodeFrom(t, emailB, src)
 	require.Equal(t, rz.body, rb.body, "Ф5-31: ответ для B равен ответу для Z")
 	require.Zero(t, h.recoveryLetters(t, regB.View.User.ID), "Ф5-31: письма для B нет")
