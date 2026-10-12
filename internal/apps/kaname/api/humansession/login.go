@@ -13,7 +13,9 @@ package humansession
 //	второго фактора (всегда, когда предъявлен — Ф12) → блокировка → исход
 //	поля `secondFactor` → выдача одним исходом (первой её операцией — захват
 //	строки личности и отсечка, прочитанная после него: вход, накрытый
-//	отсечкой, сессии не выдаёт — kaname#385) → переписывание материала
+//	отсечкой, сессии не выдаёт — kaname#385; затем сверка проверенного
+//	материала с хранимым: материал, заменённый либо снятый к моменту захвата,
+//	сессии не выдаёт — kaname#458, Р5) → переписывание материала
 //	отдельной записью (не смена пароля — ID-PW-1 Р5) → [ожидание потолка
 //	огибающей]
 //
@@ -346,9 +348,14 @@ func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey 
 	// (5) Выдача — одним исходом: захват строки личности и её отсечка, запись,
 	// память, сброс счёта, событие. Отказы транзакции выдачи уходят отсюда —
 	// под огибающей и до переписывания материала.
-	out, settled, outcome := uc.issue(ctx, user, factor, in.Client)
+	out, settled, outcome := uc.issue(ctx, user, stored, factor, in.Client)
 	switch outcome {
 	case issueDone:
+	case issueMaterialReplaced:
+		// Проверенный материал заменён либо снят к моменту захвата строки
+		// личности (kaname#458, Р5): тот же отказ, что неверный материал, и та
+		// же попытка — предъявленное больше не материал этой записи.
+		return LoginOutput{}, uc.refuseWith(ctx, LoginOutcomeMismatched, addressKey, in.Source, now, factor)
 	case issueBeforeCutoff:
 		// Накрыт отсечкой (Р3): тот же один отказ, попыткой не считается —
 		// удостоверение предъявлено верно; своя клетка; следа нет.
@@ -495,6 +502,10 @@ const (
 	// issueNoRow — строки личности нет при захвате: личность удалена между
 	// чтением адреса и захватом (Р4, исход 3).
 	issueNoRow
+	// issueMaterialReplaced — материал, сверенный проверяющим до транзакции,
+	// к моменту захвата строки личности заменён либо снят (kaname#458, Р5):
+	// смена пароля, завершение восстановления, переход записи к владельцу ящика.
+	issueMaterialReplaced
 )
 
 // issue — выдача одним исходом; с кодом второго фактора — его запись (Р5:
@@ -518,10 +529,24 @@ const (
 // сравнивается с отсечкой и уходит в выдачу. Вход накрыт ⟺ m не позже
 // отсечки — граница включающая, как у края («годна ⟺ строго позже»).
 //
+// # Материал — сверяется с хранимым ПОСЛЕ захвата (kaname#458, Р5)
+//
+// Проверяющий сверил пароль с материалом, прочитанным до транзакции. Между
+// этим чтением и захватом строки личности материал мог смениться: смена
+// пароля, завершение восстановления, переход записи к владельцу ящика — все
+// они пишут материал транзакцией, держащей строку личности замком писателя
+// нескольких сессий. Захват выдачи с этим замком конфликтует, поэтому строка
+// способа входа, прочитанная после захвата соединением этой транзакции, — то,
+// что зафиксировано к моменту выдачи. Материал не тот (сверка постоянного
+// времени, `LoginVerifier.SameMaterial`) либо строки нет — тот же отказ, что
+// неверный материал, и сессии нет. Отсечка этого не заменяет: она судит МОМЕНТ
+// входа, и вход, прочитавший момент позже отсечки, она не накрывает.
+//
 // Ни один отказ транзакцию выдачи не фиксирует: `defer Rollback` откатывает её
 // целиком, вместе с записью второго фактора, если она уже сделана (отказ
-// хранилища после неё). Отказ по отсечке и «строки нет» приходят раньше неё.
-func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, factor *preparedPresentation,
+// хранилища после неё). Отказ по отсечке, «строки нет» и замена материала
+// приходят раньше неё.
+func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, stored domain.LoginVerifier, factor *preparedPresentation,
 	client domain.ClientDescription,
 ) (LoginOutput, settledPresentation, issueOutcome) {
 	var settled settledPresentation
@@ -555,6 +580,15 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, factor *pre
 		return LoginOutput{}, settled, issueFailed
 	case hasCutoff && !m.After(cutoff):
 		return LoginOutput{}, settled, issueBeforeCutoff
+	}
+	current, err := w.LoginMethod(ctx, user.ID, domain.LoginMethodPassword)
+	switch {
+	case errors.Is(err, iamerr.ErrNotFound):
+		return LoginOutput{}, settled, issueMaterialReplaced
+	case err != nil:
+		return LoginOutput{}, settled, issueFailed
+	case !current.Verifier.SameMaterial(stored):
+		return LoginOutput{}, settled, issueMaterialReplaced
 	}
 	methods := []string{assurance.MethodPassword.String()}
 	if factor != nil {

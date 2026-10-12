@@ -28,6 +28,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/ids"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -534,4 +535,22 @@ func ActivateInviteOnVerificationTx(ctx context.Context, w Writer, pending domai
 		CandidateUserID: string(activated.ID), ExternalID: externalID, Email: activated.Email,
 		DisplayName: activated.DisplayName, Actor: actor, NewIdentity: false,
 	})
+}
+
+// ActivateInviteForLane — активация приглашения на полосе формы одним writer'ом
+// вызывающего, в форме порта полосы (`humansession.InviteActivation`): исход
+// подтверждения адреса (kaname#456, Р11 п. 2) и переход записи к владельцу
+// ящика (kaname#458, Р3 п. 4) зовут ОДНУ функцию. Актор — сам человек строки.
+// Срок и снятие приглашения, как и строка, уже не PENDING, — один исход «не
+// активируется»: humansession.ErrInviteNotValid (Р11 п. 3, Р6 kaname#458).
+// Прочие отказы — как есть. Функция НЕ коммитит и НЕ откатывает.
+func ActivateInviteForLane(ctx context.Context, w Writer, pending domain.User) (humansession.InviteActivation, error) {
+	res, err := ActivateInviteOnVerificationTx(ctx, w, pending, string(pending.ID))
+	if err != nil {
+		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
+			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
+		}
+		return humansession.InviteActivation{}, err
+	}
+	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
