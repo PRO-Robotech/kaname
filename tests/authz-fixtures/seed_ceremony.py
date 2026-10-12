@@ -798,6 +798,17 @@ def enroll_second_factor(lane, session: str) -> tuple[str, str]:
 
     Секрет нужен тому, кто входит этим человеком позже со вторым фактором
     (надзор облака стенда чарта); волне — только носитель (`level2_session`)."""
+    raised, secret, _ = enroll_second_factor_with_codes(lane, session)
+    return raised, secret
+
+
+def enroll_second_factor_with_codes(lane, session: str) -> tuple[str, str, list[str]]:
+    """То же заведение, и сверх того — запасные коды, которые подтверждение
+    показывает один раз (Ф12-02): (носитель сессии «2», секрет, коды).
+
+    Коды нужны тому, кто снимает фактор глаголом продукта (Ф12-28) без второго
+    шага кода по времени: код подтверждения того же шага повтором не годится.
+    Пустой перечень здесь не находка — её называет тот, кому коды нужны."""
     token, ctx = form_token(lane, SECOND_FACTOR_FORM, {"kaname_session": session})
     cookies = {"kaname_form": ctx, "kaname_session": session}
     code, _, text = lane.ask("POST", ENROLL, body={"csrfToken": token}, cookies=cookies)
@@ -827,7 +838,11 @@ def enroll_second_factor(lane, session: str) -> tuple[str, str]:
         raise Finding(f"подтверждение второго фактора: уровень сессии {level!r} и "
                       f"носитель {'перевыпущен' if raised else 'НЕ перевыпущен'} — "
                       f"уровня «2» подтверждение не дало (Ф12-02)")
-    return raised, secret
+    try:
+        codes = json.loads(text or "{}").get("backupCodes") or []
+    except (json.JSONDecodeError, AttributeError):
+        codes = []
+    return raised, secret, [c for c in codes if isinstance(c, str) and c] if isinstance(codes, list) else []
 
 
 def ceremony_bearer(stand, client: tuple[str, str], session: str, user: str,

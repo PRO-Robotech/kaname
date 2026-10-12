@@ -34,16 +34,26 @@ FP-12 заводит ей пароль, и после прогона полос�
 
   1. человек заводится регистрацией и подтверждает адрес кодом письма
      (посев полосы входа, `seed_login_lane.seed`);
-  2. входит паролем и куёт токен НАШЕЙ церемонией (точка авторизации → обмен
-     кода секретом клиента, которого завёл посев церемонии); окно свежести
-     открыто этим входом;
+  2. входит паролем (сессия «1»), заводит второй фактор и подтверждает его
+     кодом по времени — подтверждение перевыпускает сессию уровнем «2»
+     (Ф12-02); под ней куёт токен НАШЕЙ церемонией (точка авторизации → обмен
+     кода секретом клиента, которого завёл посев церемонии), уровень токена
+     утверждается по его составу. Ключ доступа — способ, чьё предъявление ОДНО
+     даёт «2», и заводится он только сессией «2» (приёмка
+     `level-two-is-enrolled-at-level-two.md`, Р1, Р3; там же Р2 — путь
+     человека, заводящего первый ключ: сперва код, затем ключ). Окно свежести
+     открыто этим же входом;
   3. регистрирует ключ доступа на собственном фронте: испытание →
      результат церемонии подставного аутентификатора (аттестация `none`) →
      операция без ошибки. Материал ключа — тот же, что у подставного
      аутентификатора набора (`tests/newman/cases/kaname-access-keys.py`,
      `_KEYS`): кейс подписывает утверждение тем же ключом, и второй копии
      материала в дереве нет — посев читает литерал оттуда разбором;
-  4. строка способа «пароль» снимается записью; утверждение — следующий вход
+  4. снимает второй фактор глаголом полосы (Ф12-28) запасным кодом, который
+     показало подтверждение: «Дано» обоих наборов — личность, у которой
+     остаётся ОДИН ключ, а код по времени перевёл бы её вход паролем и
+     восстановление на ветвь второго фактора;
+  5. строка способа «пароль» снимается записью; утверждение — следующий вход
      прежним паролем отвергнут (`401`): у человека остался только ключ.
 
 Порядок несущий: ключ заводится ДО снятия пароля — иначе у живой личности не
@@ -106,8 +116,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 sys.path.insert(0, str(HERE))
-from seed_ceremony import authorize, exchange, human_session  # noqa: E402
-from seed_login_lane import Finding, LaneHttp, login, message_of, seed as seed_person  # noqa: E402
+from seed_ceremony import (  # noqa: E402
+    SECOND_FACTOR_FORM, authorize, enroll_second_factor_with_codes, exchange, human_session, token_claims)
+from seed_login_lane import Finding, LaneHttp, form_token, login, message_of, seed as seed_person  # noqa: E402
 from seed_own_stand import Mailbox, Unmet, write_env  # noqa: E402
 from seed_stored_value import EMAIL_RE, PsqlStore  # noqa: E402
 
@@ -384,6 +395,29 @@ def register_key(doors, token: str, user: str, key: dict, rp_id: str, origin: st
     return cred_id, handle
 
 
+# ─────────────────────────── снятие второго фактора ──────────────────────────
+
+SECOND_FACTOR_REMOVE = "/iam/v1/auth/second-factor/remove"
+# Способ предъявления при снятии — запасной код (`assurance.MethodLookupSecret`).
+LOOKUP_SECRET = "lookup_secret"
+
+
+def remove_second_factor(lane, session: str, code: str) -> None:
+    """Снятие второго фактора глаголом полосы (Ф12-28) под сессией «2»,
+    подтверждённое запасным кодом. Утверждается ответ: `200` и остаток
+    запасных кодов `0` (фактор снят целиком, Р4 ред. 10)."""
+    token, ctx = form_token(lane, SECOND_FACTOR_FORM, {"kaname_session": session})
+    status, _, text = lane.ask("POST", SECOND_FACTOR_REMOVE,
+                               body={"method": LOOKUP_SECRET, "code": code, "csrfToken": token},
+                               cookies={"kaname_form": ctx, "kaname_session": session})
+    if status != 200:
+        raise Finding(f"снятие второго фактора запасным кодом: ждали 200, получили {status} "
+                      f"({message_of(text)!r})")
+    if _json(text).get("backupCodesRemaining") != 0:
+        raise Finding("снятие второго фактора ответило 200, а запасные коды остались — фактор снят "
+                      "не целиком")
+
+
 # ─────────────────────────── снятие строки пароля ────────────────────────────
 
 
@@ -436,12 +470,22 @@ def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None
     password = "Key-" + secrets.token_hex(12)
     seed_person(lane, mailbox, email, password, sleep)
     session, user = human_session(lane, email, password)
+    raised, _, backup = enroll_second_factor_with_codes(lane, session)
+    if not backup:
+        raise Finding("подтверждение второго фактора не показало запасных кодов — снять фактор "
+                      "глаголом полосы нечем (Ф12-02)")
     cid, sec, redirect = client
-    code, verifier = authorize(doors, cid, redirect, session)
+    code, verifier = authorize(doors, cid, redirect, raised)
     token = exchange(doors, cid, sec, code, verifier, redirect)
-    say("  ok   человек заведён и подтверждён глаголами полосы, токен выкован нашей церемонией")
+    if str(token_claims(token).get("acr")) != "2":
+        raise Finding(f"церемония под сессией «2» выдала токен уровня {token_claims(token).get('acr')!r} — "
+                      "уровень токена обязан быть уровнем сессии")
+    say("  ok   человек заведён глаголами полосы, второй фактор поднял сессию до «2», токен уровня «2» "
+        "выкован нашей церемонией")
     cred_id, handle = register_key(doors, token, user, key, rp_id, origin, sleep)
     say("  ok   ключ доступа заведён глаголом собственного фронта (операция без ошибки)")
+    remove_second_factor(lane, raised, backup[0])
+    say("  ok   второй фактор снят глаголом полосы запасным кодом — из способов «2» остался ключ")
     drop_password(store, email)
     if login(lane, email, password) is not None:
         raise Finding("строка способа «пароль» снята, а вход прежним паролем проходит — у человека "
@@ -493,6 +537,20 @@ def _c(label: str, ok: bool, detail: str = "") -> None:
         _SELF.append(label)
 
 
+# Текст указания повысить уровень — дословно продуктовый (`internal/errors/step_up.go`,
+# `TextStepUpRequired`): двойник отказывает тем же текстом, что служба.
+_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                 "or present a credential of another kind")
+
+
+def _fake_token(session: str) -> str:
+    """Токен двойника выдачи: уровень токена — уровень сессии, под которой шла
+    церемония (как у продукта, `ceremony_bearer`). Сессия «2» двойника — `s2`."""
+    claims = {"sub": "usr-x", "acr": "2" if session == "s2" else "1"}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return "e30." + payload + ".sig"
+
+
 class _FakeDoors:
     issuance, own = "https://iss", "https://own"
 
@@ -501,6 +559,18 @@ class _FakeDoors:
         self.finished: list[dict] = []
 
     def http(self, url, *, method="GET", headers=None, form=None, body=None):
+        if url.endswith(":beginRegistration") or url.endswith("/accessKeys"):
+            # Пол «2» трёх глаголов ключа (kaname#747, Р3): двойник держит его тем
+            # же исходом, что служба, — иначе он глотал бы то, на чём настоящий
+            # отказывает.
+            bearer = (headers or {}).get("Authorization", "").removeprefix("Bearer ")
+            parts = bearer.split(".")
+            try:
+                acr = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))).get("acr")
+            except (IndexError, ValueError):
+                acr = None
+            if acr != "2":
+                return 401, {}, json.dumps({"code": 16, "message": _STEP_UP_TEXT})
         if url.endswith(":beginRegistration"):
             ch = {"challenge": b64(b"c" * 32), "rp": {"id": self.rp}}
             if self.handle:
@@ -514,6 +584,29 @@ class _FakeDoors:
                 return 200, {}, json.dumps({"id": "iopx", "done": True, "error": self.op_error})
             return 200, {}, json.dumps({"id": "iopx", "done": True, "response": {"accessKey": {"id": "ak-x"}}})
         return 404, {}, "{}"
+
+
+class _FakeLane:
+    """Двойник полосы для снятия второго фактора: признак формы и сам глагол.
+    Отказ и остаток кодов — изменяемые факты."""
+
+    def __init__(self, remove_status=200, remaining=0):
+        self.remove_status, self.remaining = remove_status, remaining
+        self.removed: list[dict] = []
+
+    def ask(self, method, path, body=None, cookies=None):
+        if method == "GET" and path.startswith("/iam/v1/auth/csrf"):
+            return 200, ["kaname_form=ctx; Path=/"], json.dumps({"csrfToken": "t"})
+        if method == "POST" and path == SECOND_FACTOR_REMOVE:
+            # Снятие судится под сессией «2» с запасным кодом, который показало подтверждение.
+            if (cookies or {}).get("kaname_session") != "s2" or body.get("method") != LOOKUP_SECRET \
+                    or body.get("code") != "backup-1":
+                return 403, [], json.dumps({"message": "refused"})
+            self.removed.append(body)
+            if self.remove_status != 200:
+                return self.remove_status, [], json.dumps({"message": "refused"})
+            return 200, ["kaname_session=s3; Path=/"], json.dumps({"backupCodesRemaining": self.remaining})
+        return 404, [], "{}"
 
 
 class _FakeStore:
@@ -550,13 +643,16 @@ def _census_surface() -> str | None:
 def self_test() -> int:
     import tempfile
 
-    global seed_person, human_session, authorize, exchange, login
-    saved = (seed_person, human_session, authorize, exchange, login)
+    global seed_person, human_session, authorize, exchange, login, enroll_second_factor_with_codes
+    saved = (seed_person, human_session, authorize, exchange, login, enroll_second_factor_with_codes)
     login_answer = {"value": None}
+    codes_answer = {"value": ["backup-1", "backup-2"]}
+    enroll_second_factor_with_codes = lambda lane, s: ("s2" if s == "s1" else s, "secret",  # noqa: E731
+                                                       codes_answer["value"])
     seed_person = lambda *a, **k: "заведён"  # noqa: E731
-    human_session = lambda lane, e, p: ("s", "usr-x")  # noqa: E731
-    authorize = lambda d, c, r, s: ("code", "verifier")  # noqa: E731
-    exchange = lambda d, c, s, code, v, r: "tok"  # noqa: E731
+    human_session = lambda lane, e, p: ("s1", "usr-x")  # noqa: E731
+    authorize = lambda d, c, r, s: (s, "verifier")  # noqa: E731
+    exchange = lambda d, c, s, code, v, r: _fake_token(code)  # noqa: E731
     login = lambda lane, e, p: login_answer["value"]  # noqa: E731
     try:
         print("=== посев личности с ключом: различение исходов ===")
@@ -627,17 +723,19 @@ def self_test() -> int:
            cd == {"type": "webauthn.create", "challenge": "AQEBAQ", "origin": "https://kaname.local",
                   "crossOrigin": False}, f"{cd}")
 
-        def sow(doors=None, store=None, after_login=None):
-            login_answer["value"] = after_login
+        def sow(doors=None, store=None, after_login=None, lane=None, codes=("backup-1", "backup-2")):
+            login_answer["value"], codes_answer["value"] = after_login, list(codes)
             d, s = doors or _FakeDoors(rp=rp), store or _FakeStore()
-            return _outcome(lambda: seed_all(None, None, d, s, ("c", "s", "r"), binding=(rp, origin),
-                                             sleep=lambda _: None)), d, s
+            ln = lane or _FakeLane()
+            return _outcome(lambda: seed_all(ln, None, d, s, ("c", "s", "r"), binding=(rp, origin),
+                                             sleep=lambda _: None)), d, s, ln
 
-        (kind, text), d, s = sow()
-        _c("законный мир — у каждой из двух личностей ключ заведён, затем строка пароля снята, вход "
-           "паролем отвергнут",
-           kind == "ok" and len(d.finished) == len(PREFIXES) == 2 and len(s.sql) == 2
-           and all("DELETE" in q for q in s.sql) and s.sql[0] != s.sql[1], f"{kind}: {text}")
+        (kind, text), d, s, ln = sow()
+        _c("законный мир — у каждой из двух личностей ключ заведён сессией «2», второй фактор снят "
+           "запасным кодом, затем строка пароля снята, вход паролем отвергнут",
+           kind == "ok" and len(d.finished) == len(PREFIXES) == 2 and len(ln.removed) == 2
+           and len(s.sql) == 2 and all("DELETE" in q for q in s.sql) and s.sql[0] != s.sql[1],
+           f"{kind}: {text}")
         patch = json.loads(text.replace("'", '"')) if kind == "ok" else {}
         _c("объявленные ключи = записываемые (в обе стороны)", set(patch) == set(MINTED_KEYS), f"{patch}")
         _c("рукоятка и удостоверение — base64url без выравнивания (форма полосы входа ключом) у обеих",
@@ -650,7 +748,7 @@ def self_test() -> int:
            kind == "ok" and (patch["accessKeysRpId"], patch["accessKeysOrigin"]) == (rp, origin), f"{patch}")
         _c("потолок уезжает в окружение тем же посевом",
            kind == "ok" and patch.get(CEILING_KEY) == str(stand_ceiling(os.environ)), f"{patch}")
-        kind_c, text_c = _outcome(lambda: seed_all(None, None, _FakeDoors(rp=rp), _FakeStore(), ("c", "s", "r"),
+        kind_c, text_c = _outcome(lambda: seed_all(_FakeLane(), None, _FakeDoors(rp=rp), _FakeStore(), ("c", "s", "r"),
                                                    binding=(rp, origin), ceiling=stand_ceiling({ENV_CEILING: "8"}),
                                                    sleep=lambda _: None))
         patch_c = json.loads(text_c.replace("'", '"')) if kind_c == "ok" else {}
@@ -659,7 +757,7 @@ def self_test() -> int:
 
         login_answer["value"] = None
         d_st = _FakeDoors(rp=stand_rp)
-        kind_st, text_st = _outcome(lambda: seed_all(None, None, d_st, _FakeStore(), ("c", "s", "r"),
+        kind_st, text_st = _outcome(lambda: seed_all(_FakeLane(), None, d_st, _FakeStore(), ("c", "s", "r"),
                                                      binding=stand_binding({ENV_RP_ID: stand_rp,
                                                                             ENV_ORIGIN: stand_origin}),
                                                      sleep=lambda _: None))
@@ -680,9 +778,32 @@ def self_test() -> int:
             ("отметка открытого пути не легла — находка", {"store": _FakeStore(rows=("password",))}, "finding"),
             ("вход прежним паролем после снятия проходит — находка",
              {"after_login": {"bearer": "b", "verified": True}}, "finding"),
+            ("подтверждение второго фактора без запасных кодов — находка", {"codes": ()}, "finding"),
+            ("снятие второго фактора отвергнуто — находка", {"lane": _FakeLane(remove_status=409)}, "finding"),
+            ("снятие второго фактора оставило запасные коды — находка", {"lane": _FakeLane(remaining=10)},
+             "finding"),
         ]:
-            (kind, text), _, _ = sow(**kw)
+            (kind, text), _, _, _ = sow(**kw)
             _c(label, kind == want, f"{kind}: {text}")
+        # Близнецы красного kaname#768, по одному изменённому факту. (а) Сессия не
+        # поднята до «2» — посев называет причину сам, до глагола ключа. (б) Глагол
+        # ключа под токеном «1» — двойник отказывает дословным текстом службы (пол
+        # «2», kaname#747 Р3), и посев несёт этот текст в находке; под токеном «2»
+        # тот же вызов проходит.
+        enroll_second_factor_with_codes = lambda lane, s: (s, "secret", ["backup-1"])  # noqa: E731
+        (kind, text), _, _, _ = sow()
+        _c("сессия не поднята до «2» — находка называет уровень токена",
+           kind == "finding" and "уровня '1'" in text, f"{kind}: {text}")
+        enroll_second_factor_with_codes = lambda lane, s: ("s2" if s == "s1" else s, "secret",  # noqa: E731
+                                                           codes_answer["value"])
+        key0 = authenticator_keys()[KEY_SLOT]
+        for label, tok, want in [
+            ("ключ под токеном «1» — указание повысить уровень дословно", _fake_token("s1"), "finding"),
+            ("ключ под токеном «2» — заведён", _fake_token("s2"), "ok"),
+        ]:
+            got = _outcome(lambda tok=tok: register_key(_FakeDoors(rp=rp), tok, "usr-x", key0, rp, origin,
+                                                        lambda _: None))
+            _c(label, got[0] == want and (want == "ok" or _STEP_UP_TEXT in got[1]), f"{got}")
         got = _outcome(lambda: drop_password_sql("x'; DROP TABLE x; --@a"))
         _c("почта вне алфавита оператора — отказ писать", got[0] == "unmet", f"{got}")
         with tempfile.TemporaryDirectory() as tmp:
@@ -693,7 +814,7 @@ def self_test() -> int:
             got = _outcome(lambda: Doors(pathlib.Path(tmp), "https://a", "https://b"))
             _c("якоря стенда нет — условие не создано", got[0] == "unmet", f"{got}")
     finally:
-        seed_person, human_session, authorize, exchange, login = saved
+        seed_person, human_session, authorize, exchange, login, enroll_second_factor_with_codes = saved
 
     try:
         census = _census_surface()
