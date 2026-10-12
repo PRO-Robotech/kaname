@@ -72,11 +72,20 @@ func presentedCredentialCtx(principalType, acr string) context.Context {
 	return operations.WithPrincipal(ctx, operations.Principal{Type: principalType, ID: "sub-kn747"})
 }
 
-// requireStepUpToTwo — отказ — указание повысить уровень до «2», с вызовом.
+// requireStepUpToTwo — отказ — указание повысить уровень до «2» с уровня «1»,
+// с вызовом.
 func requireStepUpToTwo(t *testing.T, err error, what string) {
 	t.Helper()
+	requireStepUpToTwoFrom(t, err, what, "1")
+}
+
+// requireStepUpToTwoFrom — отказ — указание повысить уровень до «2», и вызов
+// называет засчитанный службой уровень presented: по нему видно, какой уровень
+// служба ПРИНЯЛА, а не только то, что она отказала.
+func requireStepUpToTwoFrom(t *testing.T, err error, what, presented string) {
+	t.Helper()
 	if err == nil {
-		t.Fatalf("%s: служба пропустила уровень «1» на полу «2» — пол держит только край", what)
+		t.Fatalf("%s: служба пропустила вызов на полу «2» — пол держит только край", what)
 	}
 	st := status.Convert(err)
 	if st.Code() != codes.Unauthenticated || st.Message() != iamerr.TextStepUpRequired {
@@ -86,7 +95,7 @@ func requireStepUpToTwo(t *testing.T, err error, what string) {
 	if !errors.As(err, &su) {
 		t.Fatalf("%s: отказ не несёт вызова повышения: %v", what, err)
 	}
-	if want := iamerr.StepUpChallenge("2", "1"); su.challenge != want {
+	if want := iamerr.StepUpChallenge("2", presented); su.challenge != want {
 		t.Fatalf("%s: вызов %q, ожидался %q", what, su.challenge, want)
 	}
 }
@@ -121,9 +130,9 @@ func TestKN747_ForwardedLevelCountsOnlyFromATrustedForwarder(t *testing.T) {
 		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, true)
 		ctx = grpcsrv.WithTrustedPrincipal(ctx, operations.Principal{Type: "user", ID: "sub-kn747"}, false)
 		ctx = grpcsrv.WithTrustedACR(ctx, "2", false)
-		if err := p.allow(ctx, verb); err == nil {
-			t.Fatalf("%s: уровень «2» от недоверенного отправителя засчитан", verb)
-		}
+		// Уровень от недоверенного отправителя не засчитан вовсе: указание
+		// называет засчитанным «0», а не «2» и не «1».
+		requireStepUpToTwoFrom(t, p.allow(ctx, verb), verb+": недоверенный отправитель", "0")
 	}
 }
 
