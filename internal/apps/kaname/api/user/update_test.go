@@ -71,10 +71,13 @@ type updUserRepo struct {
 	// ТОЛЬКО из writer-tx, поэтому список пуст, если запись не состоялась.
 	stateCalls int
 	audits     []service.AuditEvent
-	// cutoffs — отсечки личности, записанные писателем (kaname#717): блокировка
+	// cutoffs — отсечки личности, зафиксированные писателем (kaname#717): блокировка
 	// обязана положить ровно одну в той же транзакции, снятие блокировки — ни
 	// одной.
 	cutoffs []domain.UserTokenRevocation
+	// cutoffErr — подменяет ответ записи отсечки: проба отката (kaname#717)
+	// роняет отсечку и смотрит, что состояние и след не легли.
+	cutoffErr error
 	// getErr — подменяет ответ читателя по id. Нужен, чтобы синхронная полоса
 	// «строки нет» проверялась ТЕМ ЖЕ сентинелом, который отдаёт боевой
 	// репозиторий: подставив сюда обычную ошибку, проба увидела бы INTERNAL и
@@ -100,7 +103,7 @@ func (f *updUserRepo) Reader(context.Context) (kanamerepo.Reader, error) {
 	return &updUserReader{parent: f}, nil
 }
 func (f *updUserRepo) Writer(context.Context) (kanamerepo.Writer, error) {
-	return &updUserWriter{updUserReader: updUserReader{parent: f}}, nil
+	return &updUserWriter{updUserReader: updUserReader{parent: f}, tx: &updTx{}}, nil
 }
 func (f *updUserRepo) Close() {}
 
@@ -196,13 +199,27 @@ func (r *updAccountRdr) ExistsByName(context.Context, domain.AccountName) (bool,
 	return false, nil
 }
 
+// updUserWriter — писатель-транзакция дублёра. Состояние участия и след
+// копятся в транзакции и ложатся в родителя только на Commit: Rollback их
+// выбрасывает, как настоящая база. Без этого дублёр показывал бы записанным то,
+// что откатилось, и проба отката была бы нефальсифицируемой.
 type updUserWriter struct {
 	updUserReader
+	tx *updTx
 }
 
-func (w *updUserWriter) AccountsW() account.WriterIface                { return nil }
-func (w *updUserWriter) ProjectsW() project.WriterIface                { return nil }
-func (w *updUserWriter) UsersW() user.WriterIface                      { return &updUserWtr{parent: w.parent} }
+// updTx — то, что транзакция записала, но ещё не зафиксировала.
+type updTx struct {
+	status  *domain.InviteStatus
+	audits  []service.AuditEvent
+	cutoffs []domain.UserTokenRevocation
+}
+
+func (w *updUserWriter) AccountsW() account.WriterIface { return nil }
+func (w *updUserWriter) ProjectsW() project.WriterIface { return nil }
+func (w *updUserWriter) UsersW() user.WriterIface {
+	return &updUserWtr{parent: w.parent, tx: w.tx}
+}
 func (w *updUserWriter) ServiceAccountsW() service_account.WriterIface { return nil }
 func (w *updUserWriter) GroupsW() group.WriterIface                    { return nil }
 func (w *updUserWriter) RolesW() role.WriterIface                      { return nil }
@@ -211,7 +228,7 @@ func (w *updUserWriter) AccessBindingsW() access_binding.WriterIface   { return 
 func (w *updUserWriter) EmitAuditEvent(_ context.Context, e service.AuditEvent) error {
 	w.parent.mu.Lock()
 	defer w.parent.mu.Unlock()
-	w.parent.audits = append(w.parent.audits, e)
+	w.tx.audits = append(w.tx.audits, e)
 	return nil
 }
 func (w *updUserWriter) EmitFGARelationWrite(context.Context, []service.RelationTuple) error {
@@ -227,10 +244,26 @@ func (w *updUserWriter) EmitReconcileEvent(_ context.Context, _, _, objectID str
 	return nil
 }
 func (w *updUserWriter) AdvisoryXactLock(context.Context, string) error { return nil }
-func (w *updUserWriter) Commit(context.Context) error                   { return nil }
-func (w *updUserWriter) Rollback(context.Context) error                 { return nil }
+func (w *updUserWriter) Commit(context.Context) error {
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	if w.tx.status != nil {
+		w.parent.user.InviteStatus = *w.tx.status
+	}
+	w.parent.audits = append(w.parent.audits, w.tx.audits...)
+	w.parent.cutoffs = append(w.parent.cutoffs, w.tx.cutoffs...)
+	w.tx = &updTx{}
+	return nil
+}
+func (w *updUserWriter) Rollback(context.Context) error {
+	w.tx = &updTx{}
+	return nil
+}
 
-type updUserWtr struct{ parent *updUserRepo }
+type updUserWtr struct {
+	parent *updUserRepo
+	tx     *updTx
+}
 
 func (w *updUserWtr) InsertPending(context.Context, domain.User, time.Time) (domain.User, bool, error) {
 	return domain.User{}, false, nil
@@ -249,7 +282,10 @@ func (*updUserWtr) Now(context.Context) (time.Time, error) { return time.Now().U
 func (w *updUserWtr) CutOffIdentity(_ context.Context, u domain.UserTokenRevocation, _ domain.UserID) error {
 	w.parent.mu.Lock()
 	defer w.parent.mu.Unlock()
-	w.parent.cutoffs = append(w.parent.cutoffs, u)
+	if w.parent.cutoffErr != nil {
+		return w.parent.cutoffErr
+	}
+	w.tx.cutoffs = append(w.tx.cutoffs, u)
 	return nil
 }
 func (w *updUserWtr) UpdateLabels(_ context.Context, id domain.UserID, labels domain.Labels) (domain.User, error) {
@@ -492,7 +528,7 @@ func (w *updUserWtr) SetInviteStatus(_ context.Context, id domain.UserID, st dom
 	}
 	out := w.parent.user
 	out.InviteStatus = st
-	w.parent.user = out
+	w.tx.status = &st
 	return out, nil
 }
 

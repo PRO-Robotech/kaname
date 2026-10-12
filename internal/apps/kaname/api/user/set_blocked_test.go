@@ -19,6 +19,7 @@ package user
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -239,4 +240,34 @@ func TestSetInviteStatus_BlockCutsOffTheIdentity_UnblockDoesNot(t *testing.T) {
 		require.NoError(t, operations.Wait(context.Background()))
 		assert.Empty(t, repo.cutoffs, "снятие блокировки не отсекает ничего")
 	})
+}
+
+// Отсечка и состояние — одно решение (kaname#717): сбой записи отсечки
+// откатывает блокировку целиком. Состояние остаётся прежним, отсечки и следа
+// нет, Operation завершена отказом без сырого текста сбоя. Зафиксированная
+// блокировка без отсечки оставила бы ранее выданное живым после снятия
+// блокировки — ровно то, что блокировка обязана исключить. Близнец — та же
+// блокировка без сбоя (`TestSetInviteStatus_BlockCutsOffTheIdentity_UnblockDoesNot`).
+func TestSetInviteStatus_BlockCutoffFailureRollsTheBlockBack(t *testing.T) {
+	const raw = "cutoff write failed: relation user_token_revocations"
+	repo := newUpdUserRepo()
+	repo.cutoffErr = stderrors.New(raw)
+	ops := newUpdOpsRepo()
+
+	op, err := NewBlockUserUseCase(repo, ops).Execute(ownerCtx(), domain.UserID(updUserID))
+	require.NoError(t, err, "синхронная полоса принимает запрос; сбой — в Operation")
+	require.NoError(t, operations.Wait(context.Background()))
+
+	assert.Equal(t, 1, repo.stateWrites(), "запись состояния была предпринята")
+	assert.Equal(t, domain.InviteStatusActive, repo.user.InviteStatus,
+		"блокировка без отсечки не фиксируется: состояние обязано остаться прежним")
+	assert.Empty(t, repo.cutoffs, "отсечки нет")
+	assert.Empty(t, repo.auditSnapshot(), "след откатился вместе с записью")
+
+	got, err := ops.Get(context.Background(), op.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Done, "Operation обязана завершиться")
+	assert.NotNil(t, got.Error, "сбой отсечки обязан завершить Operation отказом")
+	assert.NotEqual(t, int32(codes.OK), got.Error.GetCode())
+	assert.NotContains(t, got.Error.GetMessage(), raw, "сырой текст сбоя наружу не выходит")
 }
