@@ -47,6 +47,17 @@ func blockProbeClaims(uid domain.UserID, issued time.Time) jwt.MapClaims {
 	}
 }
 
+// confirmAddress — подтверждает текущий адрес названным личностям.
+func confirmAddress(t *testing.T, ctx context.Context, env *testEnv, uids ...domain.UserID) {
+	t.Helper()
+	for _, uid := range uids {
+		tag, err := env.pool.Exec(ctx,
+			`UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(uid))
+		require.NoError(t, err)
+		require.EqualValues(t, 1, tag.RowsAffected(), "личность фикстуры не найдена: %s", uid)
+	}
+}
+
 // TestUserBlock_CutsOffCredentialsIssuedBeforeIt — выданное до блокировки
 // после неё предъявлением не проходит; соседнее и выданное после снятия —
 // проходит.
@@ -56,6 +67,10 @@ func TestUserBlock_CutsOffCredentialsIssuedBeforeIt(t *testing.T) {
 	admin, accID := seedUserAccount(t, ctx, env.pool, "blkcut")
 	target := seedExtraUser(t, ctx, env.pool, accID, "blkcuttarget")
 	bystander := seedExtraUser(t, ctx, env.pool, accID, "blkcutother")
+	// Адрес подтверждён: токен человека с неподтверждённым текущим адресом
+	// поверхность отвергает и без всякой отсечки (`admission`), и такая фикстура
+	// зеленила бы отрицание ниже на чужой причине.
+	confirmAddress(t, ctx, env, target, bystander)
 
 	authority := kanamepg.NewMintedTokenRevocationRepo(env.pool)
 	cutoffs := kanamepg.NewUserTokenRevocationRepo(env.pool)
