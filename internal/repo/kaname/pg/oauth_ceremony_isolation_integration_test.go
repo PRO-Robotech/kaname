@@ -90,6 +90,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/pgtest"
 
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -1014,6 +1015,24 @@ var sessionEnderDoors = []sessionEnderDoor{
 				return 0, err
 			}
 			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonPasswordChange)
+		},
+	},
+	{
+		// Завершение восстановления и переход записи к владельцу ящика
+		// (kaname#458): транзакция исхода — та же дверь писателя нескольких
+		// сессий, собранная с писателем зеркала; снимает все сессии записи
+		// своей причиной.
+		name: "RecoveryCompletionStore.RecoveryCompletionWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			store, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+			if err != nil {
+				return 0, err
+			}
+			w, err := store.RecoveryCompletionWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonAddressClaimed)
 		},
 	},
 	{
