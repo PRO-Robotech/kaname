@@ -4,7 +4,8 @@
 """Самопроверки посевов-соседей подкоманды `seed-stored-value` исполняются в конвейере.
 
 ПРЕДМЕТ. Посевы `tests/authz-fixtures/seed_mail_pace.py` (Ф5-14, Ф5-26, Ф5-27) и
-`tests/authz-fixtures/seed_key_person.py` (FP-12) зовёт подкоманда стенда
+`tests/authz-fixtures/seed_key_person.py` (FP-12) и
+`tests/authz-fixtures/seed_wayless_person.py` (Ф5-29, Ф5-30, Ф5-34) зовёт подкоманда стенда
 `seed-stored-value` задания `chart-own`, а их способность упасть доказывает форма
 `--self-test`. Отдельного шага конвейера у этих самопроверок нет: пробы набора
 (`tests/newman/scripts/*_test.py`) исполняет `run-python-probes.py` задания
@@ -17,7 +18,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-SEEDS = ("seed_mail_pace.py", "seed_key_person.py")
+SEEDS = ("seed_mail_pace.py", "seed_key_person.py", "seed_wayless_person.py")
 
 
 def _self_test(name: str) -> subprocess.CompletedProcess:
@@ -37,8 +38,14 @@ def test_seed_key_person_self_test_is_green():
     assert "ДОКАЗАНО" in proc.stdout
 
 
+def test_seed_wayless_person_self_test_is_green():
+    proc = _self_test(SEEDS[2])
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+    assert "ДОКАЗАНО" in proc.stdout
+
+
 def test_both_companions_are_called_by_the_stand_subcommand():
-    """Самопроверка без провязки ничего не держит: стенд обязан звать оба посева."""
+    """Самопроверка без провязки ничего не держит: стенд обязан звать каждый посев."""
     script = (ROOT / ".github" / "scripts" / "stand-chart.sh").read_text(encoding="utf-8")
     calls = [ln for ln in script.splitlines()
              if not ln.lstrip().startswith("#") and "tests/authz-fixtures/" in ln]
