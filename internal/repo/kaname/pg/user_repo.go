@@ -881,11 +881,12 @@ func (w *userWriter) Now(ctx context.Context) (time.Time, error) {
 	return momentInTx(ctx, w.tx)
 }
 
-// CutOffForRemoval — см. порт. Запись — единственной дверью отсечки
-// (`upsertSubjectCutoff`). Первая запись уходит каскадом снятия строки той же
-// транзакцией, вторая (`minted_token_revocations`) ключом на людей не связана и
-// судит предъявление до уборки по горизонту.
-func (w *userWriter) CutOffForRemoval(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+// CutOffIdentity — см. порт. Запись — единственной дверью отсечки
+// (`upsertSubjectCutoff`). При снятии личности первая запись уходит каскадом
+// снятия строки той же транзакцией, вторая (`minted_token_revocations`) ключом
+// на людей не связана и судит предъявление до уборки по горизонту; при
+// блокировке остаются обе.
+func (w *userWriter) CutOffIdentity(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	if err := u.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
