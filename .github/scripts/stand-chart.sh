@@ -1355,6 +1355,11 @@ seed_stored_value() {
 #     и без строки пароля. Ключ заводится глаголом собственного фронта под токеном
 #     нашей церемонии (клиента завёл посев церемонии — он идёт раньше), строка
 #     пароля снимается записью.
+#   · `seed_wayless_person.py` — Ф5-29, Ф5-30, Ф5-34 и AWI-12 набора
+#     восстановления (kaname#468): действующие личности без единого способа входа
+#     в форме «после переноса», с подтверждённым и с неподтверждённым адресом.
+#     Заводятся регистрацией полосы, строка пароля снимается той же записью, что
+#     у личности с ключом.
 seed_store_companions() {
 	local store_exec="$1" rc=0 mailbox metrics issuance own cfg="$WORK/process-config.yaml"
 	ensure_forward mailbox "$MAIL_SVC" http; mailbox="http://127.0.0.1:$FORWARD_PORT"
@@ -1370,6 +1375,9 @@ seed_store_companions() {
 	python3 "$ROOT/tests/authz-fixtures/seed_key_person.py" \
 		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" \
 		--issuance-url "$issuance" --own-url "$own" --store-exec "$store_exec" || rc=$?
+	[ "$rc" -eq 0 ] || return "$rc"
+	python3 "$ROOT/tests/authz-fixtures/seed_wayless_person.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" --store-exec "$store_exec" || rc=$?
 	return "$rc"
 }
 

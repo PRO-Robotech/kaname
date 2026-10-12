@@ -98,6 +98,22 @@ Coverage:
   IAM-RECOVERY-NEG-PACED-PER-SOURCE     — Ф5-27: M запросов о Z с источника S — запрос для P с
                                           S тот же ответ, письма нет, source-paced +1, no-row +M;
                                           (б) с S′ — письмо поставлено
+  IAM-RECOVERY-OK-WAYLESS-UNVERIFIED-GETS-CODE — Ф5-29: неподтверждённый адрес личности ACTIVE
+                                          без способа входа (посев) получает код — ответ
+                                          побайтово равен ответу о Z, queued +1, unverified 0;
+                                          ещё N запросов — писем ровно N, recipient-paced +1
+  IAM-RECOVERY-OK-WAYLESS-FIRST-PASSWORD-VERIFIES-ADDRESS — Ф5-30, AWI-12: негодный пароль
+                                          называет поле и код не тратит; годный — сессия,
+                                          emailVerified true, действие подтверждённого открыто,
+                                          новый пароль входит, повтор кода — отказ; (б)
+                                          подтверждённый адрес без пароля — emailVerified true
+  IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE — Ф5-31: с паролем и неподтверждённым
+                                          адресом — ответ равен ответу о Z, письма нет,
+                                          unverified +1, queued 0
+  IAM-RECOVERY-OK-WAYLESS-COMPLETION-CREATES-THE-ROW — Ф5-34: без строки «пароль» завершение
+                                          её заводит (не 503) — (а) N, (б) W со строкой тот же
+                                          исход, (в) NB заблокирована — отказ Ф5-17, после
+                                          снятия блокировки новый пароль входит, код применён
 
 Техники: классы эквивалентности (годный / негодный пароль; свой / чужой /
 применённый код), граница счёта по адресу (N−1 · N · N+1), угадывание ошибок
@@ -1798,5 +1814,287 @@ CASES.append(Case(
             "pm.test('SRC-CELLS-S2: письмо с S′ поставлено — queued выросла на 1 от базы перед S′, source-paced не выросла', () => "
             f"pm.expect([{_delta('rcvSrcS20', 'queued')}, {_delta('rcvSrcS20', 'source-paced')}]).to.eql([1, 0]));",
         ]),
+    ],
+))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ЛИЧНОСТЬ БЕЗ СПОСОБА ВХОДА (Ф5-29, Ф5-30, Ф5-31, Ф5-34; AWI-12) — kaname#468.
+#
+# ПРИЁМКА — `docs/engineering/acceptance/recovery-of-access.md`, редакция 9
+# (`be4dfb5a…`, APPROVED, kaname#608): полоса «личность без способа входа» (§6) и
+# Ф5-34 (полоса «завершение»); AWI-12 — `active-identity-has-a-way-in.md`, где
+# позиция утверждается ссылкой на Ф5-29 и Ф5-30. Кейсы написаны по тексту
+# сценариев, а не по коду глаголов.
+#
+# «ДАНО» — ПОСЕВОМ, И ЭТО ВЫНУЖДЕНО. Действующую личность без единого способа входа
+# продукт не производит ни одним глаголом (Ф5 §5.6 (8)); приёмка строит её
+# регистрацией и одной транзакцией прямой записи в форме «после переноса» (§5.5
+# (6)). Её кладёт посев стенда `tests/authz-fixtures/seed_wayless_person.py`
+# (подкоманда `seed-stored-value` стенда чарта) — пять личностей, по одной на кейс:
+# завершение тратит личность (после него у неё есть пароль). Пустой ключ посева —
+# «условие не создано» помеченным утверждением, а не красное.
+#
+# ЧЕГО ЭТИ КЕЙСЫ НЕ УТВЕРЖДАЮТ, И КТО ДЕРЖИТ:
+#   · неразличимость по времени полос «A» и «Z» (Ф5-29, последнее «И») — той же
+#     пробой, что Ф5-20, измерительная форма Ф1-48; на kind общего ранера размах выше
+#     потолка годности by construction — позиция Ф5-20 в ведомости долга;
+#   · отметку открытого пути и число строк «пароль» в хранилище (Ф5-30 (б),
+#     Ф5-34 (г), (д)) — уровень I: кейс newman ходит только HTTP; держатель —
+#     `internal/handler/loginlanehttp/recovery_without_a_way_in_integration_test.go`.
+#
+# Техники: классы эквивалентности личности по двум входам (строка пароля есть /
+# нет × адрес подтверждён / нет) с близнецом по одному факту у каждого исхода;
+# переходы состояния (неподтверждён → подтверждён; действующая → заблокирована →
+# действующая); граница окна писем адресату (N · N + 1); повтор применённого кода.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_WAYLESS_WHY = ("личности без способа входа кладёт посев стенда чарта "
+                "(`stand-chart.sh seed-stored-value` → `seed_wayless_person.py`); продукт такую "
+                "личность не производит ни одним глаголом (Ф5 §5.6 (8)), и без посева мира кейса нет")
+
+
+def _wayless_init(p, key):
+    """Личность кейса — из посева; пароль только новый, источник свой."""
+    return [
+        f"if (!pm.environment.get({js_str(key)})) {{",
+        *precondition_not_met(f"посев стенда: {key} задан", _WAYLESS_WHY, indent="  "),
+        "}",
+        "{",
+        "  const __nonce = () => Math.floor(Math.random() * 2176782336).toString(36);",
+        f"  pm.environment.set({js_str(_v(p, 'Email'))}, pm.environment.get({js_str(key)}) || '');",
+        f"  pm.environment.set({js_str(_v(p, 'NewPassword'))}, 'Pw-' + __nonce() + __nonce() + '-first');",
+        f"  pm.environment.set({js_str(_v(p, 'Src'))}, '198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+        *(f"  pm.environment.set({js_str(_v(p, 'MailSeen' + store))}, '0');" for store in _MAIL_STORES),
+        *(f"  pm.environment.unset({js_str(_v(p, n))});" for n in (
+            "FormCookie", "SessionCookie", "Csrf", "VerifyCode", "MailCode", "RecoveredCookie")),
+        "}",
+    ]
+
+
+def _verified_in_answer(label, want):
+    return [
+        "let __vj = {}; try { __vj = pm.response.json(); } catch (e) { __vj = {}; }",
+        f"pm.test({js_str(label + f': поле emailVerified сессии в ответе — {str(want).lower()}')}, () => "
+        f"pm.expect(__vj.session && __vj.session.emailVerified).to.eql({str(want).lower()}));",
+    ]
+
+
+def _not_503(label):
+    return [f"pm.test({js_str(label + ': не UNAVAILABLE / 503 — ветвь «строки нет» исполнена, а не откачена')}, () => "
+            "pm.expect(pm.response.code).to.not.eql(503));"]
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-29: код выдаётся и на неподтверждённый адрес личности ACTIVE без способа входа.
+# ───────────────────────────────────────────────────────────────────────────
+_P29 = "rcvWayA"
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-WAYLESS-UNVERIFIED-GETS-CODE",
+    title="Ф5-29: неподтверждённый адрес личности ACTIVE без способа входа получает код — ответ побайтово "
+          "равен ответу о Z, письмо восстановления поставлено, queued +1, unverified не растёт; "
+          "окно писем адресата действует, как у Ф5-26",
+    classes=["SEC", "STATE", "BVA"],
+    priority="P0",
+    steps=[
+        _metrics_step("way-a-baseline", pre=[*_wayless_init(_P29, "wayAEmail"), *_pace_given()], tests=[
+            "const __N = __num('recoveryLettersPerRecipient'), __M = __num('recoverySourceAttempts');",
+            "pm.test('WAY-A-GIVEN: окно писем адресату N=' + __N + ' за ' + pm.environment.get('recoveryLetterWindow') "
+            "+ ', окно источника M=' + __M + ' за ' + pm.environment.get('recoverySourceWindow') "
+            "+ '; окно источника больше обращений пробы (N + 2)', () => pm.expect([__N >= 1, __M > __N + 2]).to.eql([true, true]));",
+            "pm.environment.set('rcvWayATimes', String(__N));",
+            *_keep_outcomes("rcvWayA0", ("queued", "unverified", "recipient-paced")),
+        ]),
+        _csrf_step(_P29, "way-a-csrf-recovery", "recovery"),
+        _request_for(_P29, "way-a-request", f"{{{{{_v(_P29, 'Email')}}}}}", _v(_P29, "Src"), keep="rcvWayABody"),
+        # Тот же запрос о Z, которого нет ни у кого (Ф5-02): ответ побайтово равен.
+        _request_for(_P29, "way-a-z-nobody", "nobody-way-a-{{runId}}@example.invalid", _v(_P29, "Src"),
+                     same_as="rcvWayABody"),
+        _await_code(_P29, "way-a-letter", _HEAD_RECOVERY, "MailCode"),
+        _metrics_step("way-a-cells", until=f"{_delta('rcvWayA0', 'queued')} >= 1", tests=[
+            "pm.test('WAY-A-CELLS: queued выросла ровно на 1, unverified не выросла', () => "
+            f"pm.expect([{_delta('rcvWayA0', 'queued')}, {_delta('rcvWayA0', 'unverified')}]).to.eql([1, 0]));",
+        ]),
+        # Окно Р8 действует, как у Ф5-26: ещё N запросов — писем ровно N, (N + 1)-й
+        # отвечает тем же телом, recipient-paced +1.
+        _request_for(_P29, "way-a-n-more", f"{{{{{_v(_P29, 'Email')}}}}}", _v(_P29, "Src"),
+                     times_var="rcvWayATimes", same_as="rcvWayABody"),
+        _metrics_step("way-a-paced", until=f"{_delta('rcvWayA0', 'recipient-paced')} >= 1 && "
+                                           f"{_delta('rcvWayA0', 'queued')} >= __num('recoveryLettersPerRecipient')",
+                      tests=[
+            "pm.test('WAY-A-PACED: recipient-paced выросла ровно на 1, queued — ровно на N', () => "
+            f"pm.expect([{_delta('rcvWayA0', 'recipient-paced')}, {_delta('rcvWayA0', 'queued')}])"
+            ".to.eql([1, __num('recoveryLettersPerRecipient')]));",
+            "pm.test('WAY-A-PACED: unverified не выросла и после серии', () => "
+            f"pm.expect({_delta('rcvWayA0', 'unverified')}).to.eql(0));",
+        ]),
+        _mailbox_count(_P29, "way-a-letters-exactly", _HEAD_RECOVERY,
+                       at_least="__num('recoveryLettersPerRecipient')",
+                       exactly="__num('recoveryLettersPerRecipient')"),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-30 и AWI-12: предъявление кода подтверждает адрес и той же транзакцией
+# заводит первый пароль. (в) негодный пароль код не тратит; (б) близнец —
+# подтверждённый адрес без пароля (мир Ф5-34 (а)).
+# ───────────────────────────────────────────────────────────────────────────
+_P30, _P30B = "rcvWayA30", "rcvWayN30"
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-WAYLESS-FIRST-PASSWORD-VERIFIES-ADDRESS",
+    title="Ф5-30 (AWI-12): код неподтверждённого адреса без пароля — негодный пароль отвергнут с именем поля и "
+          "код не тратит; годный — сессия выдана, emailVerified true, адрес открывает действия, новый пароль "
+          "входит, повтор кода — отказ Ф5-05; близнец (б) — подтверждённый адрес, emailVerified true",
+    classes=["CRUD", "STATE", "VAL", "SEC"],
+    priority="P0",
+    steps=[
+        _csrf_step(_P30, "way-a30-csrf-recovery", "recovery", init=_wayless_init(_P30, "wayA30Email")),
+        _post(_P30, "way-a30-request-code", _RECOVERY,
+              {"email": f"{{{{{_v(_P30, 'Email')}}}}}", "csrfToken": f"{{{{{_v(_P30, 'Csrf')}}}}}"},
+              test_script=[
+                  *_status_is(200, "WAY-A30-REQUEST"),
+                  "pm.test('WAY-A30-REQUEST: тело называет шаг (Р10 п. 1)', () => "
+                  f"pm.expect(pm.response.text()).to.eql({js_str(_NEXT_STEP_BODY)}));",
+              ]),
+        _await_code(_P30, "way-a30-letter", _HEAD_RECOVERY, "MailCode"),
+        # (в) негодный новый пароль — отказ правила с именем поля; код не тратится.
+        _csrf_step(_P30, "way-a30-csrf-complete-weak", "recovery-complete"),
+        _complete(_P30, "way-a30-complete-weak", password_literal="Short7x",
+                  test_script=_refused(400, 3, "Illegal argument newPassword: shorter than the declared minimum length",
+                                       "WAY-A30-WEAK")),
+        # Пароля после отказа нет: вход годным паролем, которым завершения ещё не было, — единый отказ.
+        *_login(_P30, "way-a30-login-before-complete", "NewPassword", ok=False),
+        _csrf_step(_P30, "way-a30-csrf-complete", "recovery-complete"),
+        _complete(_P30, "way-a30-complete", test_script=[
+            *_not_503("WAY-A30-COMPLETE"),
+            *_issued(_P30, "WAY-A30-COMPLETE"),
+            *_verified_in_answer("WAY-A30-COMPLETE", True),
+        ]),
+        # Действие, требующее подтверждённого адреса (положение подтверждения отвечает
+        # на нём 403 EMAIL_NOT_VERIFIED, kaname#456), под выданной сессией проходит.
+        _session_probe(_P30, "way-a30-verified-action", "RecoveredCookie", alive=True),
+        *_login(_P30, "way-a30-login-new", "NewPassword", ok=True),
+        _csrf_step(_P30, "way-a30-csrf-complete-again", "recovery-complete"),
+        _complete(_P30, "way-a30-complete-again", test_script=_refused(401, 16, _NOT_RESTORED, "WAY-A30-AGAIN")),
+        # (б) близнец: адрес подтверждён, пароля нет — отличающий факт один.
+        _csrf_step(_P30B, "way-n30-csrf-recovery", "recovery", init=_wayless_init(_P30B, "wayN30Email")),
+        _post(_P30B, "way-n30-request-code", _RECOVERY,
+              {"email": f"{{{{{_v(_P30B, 'Email')}}}}}", "csrfToken": f"{{{{{_v(_P30B, 'Csrf')}}}}}"},
+              test_script=[*_status_is(200, "WAY-N30-REQUEST")]),
+        _await_code(_P30B, "way-n30-letter", _HEAD_RECOVERY, "MailCode"),
+        _csrf_step(_P30B, "way-n30-csrf-complete", "recovery-complete"),
+        _complete(_P30B, "way-n30-complete", test_script=[
+            *_not_503("WAY-N30-COMPLETE"),
+            *_issued(_P30B, "WAY-N30-COMPLETE"),
+            *_verified_in_answer("WAY-N30-COMPLETE", True),
+        ]),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-31: личность С ПАРОЛЕМ и неподтверждённым адресом — как прежде, кода нет.
+# Отличающий факт против Ф5-29 — один: строка пароля. Личность заводится
+# регистрацией без подтверждения — глаголом продукта, без посева.
+# ───────────────────────────────────────────────────────────────────────────
+_P31 = "rcvWayB"
+CASES.append(Case(
+    id="IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE",
+    title="Ф5-31: личность с паролем и неподтверждённым адресом — ответ побайтово равен ответу о Z, письма нет, "
+          "unverified +1, queued не растёт",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _csrf_step(_P31, "way-b-csrf-register", "register", init=_person_init(_P31, "way-b")),
+        _post(_P31, "way-b-register", _REGISTER,
+              {"email": f"{{{{{_v(_P31, 'Email')}}}}}", "password": f"{{{{{_v(_P31, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(_P31, 'Csrf')}}}}}"},
+              test_script=[
+                  *_status_is(200, "WAY-B-REGISTER"),
+                  *_verified_in_answer("WAY-B-REGISTER", False),
+                  *_capture(_P31, "kaname_form", "FormCookie", "WAY-B-REGISTER", required=False),
+              ]),
+        # Письмо регистрации дожидается кейс: оно не должно прийти посреди счёта ниже.
+        _await_code(_P31, "way-b-verify-letter", _HEAD_VERIFY, "VerifyCode"),
+        _metrics_step("way-b-baseline", tests=[*_keep_outcomes("rcvWayB0", ("queued", "unverified"))]),
+        _csrf_step(_P31, "way-b-csrf-recovery", "recovery"),
+        _request_for(_P31, "way-b-request", f"{{{{{_v(_P31, 'Email')}}}}}", _v(_P31, "Src"), keep="rcvWayBBody"),
+        _request_for(_P31, "way-b-z-nobody", "nobody-way-b-{{runId}}@example.invalid", _v(_P31, "Src"),
+                     same_as="rcvWayBBody"),
+        _metrics_step("way-b-cells", until=f"{_delta('rcvWayB0', 'unverified')} >= 1", tests=[
+            "pm.test('WAY-B-CELLS: unverified выросла ровно на 1, queued не выросла', () => "
+            f"pm.expect([{_delta('rcvWayB0', 'unverified')}, {_delta('rcvWayB0', 'queued')}]).to.eql([1, 0]));",
+        ]),
+        _mailbox_count(_P31, "way-b-no-letter", _HEAD_RECOVERY, exactly=0),
+        # Положительный контроль мира: пароль у личности есть и входит.
+        *_login(_P31, "way-b-login-own-password", "Password", ok=True),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф5-34: у личности без строки «пароль» завершение строку заводит; исход тот же,
+# что у личности со строкой. N — подтверждена, строк нет; W — со строкой (как
+# Ф5-03); NB — как N, но заблокирована надзором облака (как Ф5-17).
+# ───────────────────────────────────────────────────────────────────────────
+_P34N, _P34W, _P34B, _S34 = "rcvWayN", "rcvWayW", "rcvWayNB", "rcvWaySB"
+CASES.append(Case(
+    id="IAM-RECOVERY-OK-WAYLESS-COMPLETION-CREATES-THE-ROW",
+    title="Ф5-34: без строки «пароль» завершение её заводит — (а) N: сессия выдана (не 503), новый пароль входит, "
+          "повтор кода — Ф5-05; (б) W со строкой — тот же исход; (в) NB заблокирована — отказ Ф5-17 (не 503), "
+          "после снятия блокировки новый пароль входит, а код применён",
+    classes=["CRUD", "STATE", "NEG", "SEC"],
+    priority="P0",
+    steps=[
+        # (а) N
+        _csrf_step(_P34N, "way-n-csrf-recovery", "recovery", init=_wayless_init(_P34N, "wayNEmail")),
+        _post(_P34N, "way-n-request-code", _RECOVERY,
+              {"email": f"{{{{{_v(_P34N, 'Email')}}}}}", "csrfToken": f"{{{{{_v(_P34N, 'Csrf')}}}}}"},
+              test_script=[*_status_is(200, "WAY-N-REQUEST")]),
+        _await_code(_P34N, "way-n-letter", _HEAD_RECOVERY, "MailCode"),
+        _csrf_step(_P34N, "way-n-csrf-complete", "recovery-complete"),
+        _complete(_P34N, "way-n-complete", test_script=[*_not_503("WAY-N-COMPLETE"),
+                                                        *_issued(_P34N, "WAY-N-COMPLETE")]),
+        *_login(_P34N, "way-n-login-new", "NewPassword", ok=True),
+        _csrf_step(_P34N, "way-n-csrf-complete-again", "recovery-complete"),
+        _complete(_P34N, "way-n-complete-again", test_script=_refused(401, 16, _NOT_RESTORED, "WAY-N-AGAIN")),
+        # (б) W — строка «пароль» есть: тот же исход; отличающий факт — один.
+        *_person(_P34W, "way-w"),
+        *_recovery_code(_P34W, "way-w"),
+        _csrf_step(_P34W, "way-w-csrf-complete", "recovery-complete"),
+        _complete(_P34W, "way-w-complete", test_script=[*_not_503("WAY-W-COMPLETE"),
+                                                        *_issued(_P34W, "WAY-W-COMPLETE")]),
+        *_login(_P34W, "way-w-login-new", "NewPassword", ok=True),
+        _csrf_step(_P34W, "way-w-csrf-complete-again", "recovery-complete"),
+        _complete(_P34W, "way-w-complete-again", test_script=_refused(401, 16, _NOT_RESTORED, "WAY-W-AGAIN")),
+        # (в) NB — блокирует надзор облака; код выдан до завершения.
+        _csrf_step(_P34B, "way-nb-csrf-recovery", "recovery", init=[
+            *_wayless_init(_P34B, "wayNBEmail"),
+            "if (!pm.environment.get('wayNBUserId')) {",
+            *precondition_not_met("посев стенда: wayNBUserId задан", _WAYLESS_WHY, indent="  "),
+            "}",
+            f"pm.environment.set({js_str(_v(_P34B, 'UserId'))}, pm.environment.get('wayNBUserId') || '');",
+        ]),
+        *_supervisor_bearer(_S34, "way-nb-supervisor"),
+        _admin_verb(_S34, _P34B, "way-nb-block", "block"),
+        _admin_op(_S34, _P34B, "way-nb-block-op", "block", "BLOCKED"),
+        _csrf_step(_P34B, "way-nb-csrf-recovery-blocked", "recovery"),
+        _post(_P34B, "way-nb-request-code", _RECOVERY,
+              {"email": f"{{{{{_v(_P34B, 'Email')}}}}}", "csrfToken": f"{{{{{_v(_P34B, 'Csrf')}}}}}"},
+              test_script=[*_status_is(200, "WAY-NB-REQUEST")]),
+        _await_code(_P34B, "way-nb-letter", _HEAD_RECOVERY, "MailCode"),
+        _csrf_step(_P34B, "way-nb-csrf-complete", "recovery-complete"),
+        # Ответ завершения — отказ Ф5-17 (Р10 п. 2), не 503: учётные данные заведены, сессии нет.
+        _complete(_P34B, "way-nb-complete", test_script=[*_not_503("WAY-NB-COMPLETE"),
+                                                         *_refused(401, 16, _NOT_RESTORED, "WAY-NB-COMPLETE")]),
+        *_login(_P34B, "way-nb-login-new-while-blocked", "NewPassword", ok=False),
+        _admin_verb(_S34, _P34B, "way-nb-unblock", "unblock"),
+        _admin_op(_S34, _P34B, "way-nb-unblock-op", "unblock", "ACTIVE"),
+        # Строка заведена ТЕМ завершением: после снятия блокировки новый пароль входит.
+        *_login(_P34B, "way-nb-login-new-after-unblock", "NewPassword", ok=True),
+        # Код применён: после снятия блокировки он сессии не выдаёт — отказ Ф5-05.
+        _csrf_step(_P34B, "way-nb-csrf-complete-again", "recovery-complete"),
+        _complete(_P34B, "way-nb-complete-again", test_script=_refused(401, 16, _NOT_RESTORED, "WAY-NB-AGAIN")),
     ],
 ))
