@@ -180,7 +180,8 @@ Coverage (техники: классы эквивалентности резул
   Ф13-13 — IAM-AKLOGIN-OK-LEVEL-COPIES-READ-THE-RECORD;
   Ф13-16, Ф13-17 — IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS;
   Ф13-19, Ф13-22, Ф13-23 — IAM-AKLOGIN-OK-PASSWORDLESS-PERSON;
-  Ф13-25 — IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON.
+  Ф13-25 — IAM-AKLOGIN-SEC-RECOVERY-OF-PASSWORDLESS-PERSON-LEVEL-ONE (шаги (4)–(5) — по Р5
+           приёмки kaname#747).
 Позиции, которые блок не утверждает, названы комментарием в его шапке.
 
 СПОСОБ УРОВНЯ «2» ЗАВОДИТСЯ И СНИМАЕТСЯ СЕССИЕЙ «2» (kaname#747, приёмка
@@ -2975,15 +2976,63 @@ CASES.append(Case(
     ],
 ))
 
+# Указание повысить уровень (Ф11 Р11) — общее для Ф13-25 и блока KN747 ниже:
+# пол «2» у глаголов ключа (kaname#747 Р3) судят оба.
+_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                 "or present a credential of another kind")
+_STEP_UP_BODY = {"code": 16, "message": _STEP_UP_TEXT, "details": []}
+
+
+def _level_hint(label, *, presented=None):
+    """Указание повысить уровень (Ф11 Р11): пара 401/16, тело дословно, вызов — по параметрам.
+
+    Предмет каждого утверждения — булево: отказ полосы второго фактора при дефекте
+    получил бы тело с секретом, и значение не попадает в текст утверждения."""
+    out = [
+        *_status_is(401, label),
+        *_parse_body(),
+        f"pm.test({js_str(label + ': тело — указание повысить уровень: код 16, текст шага, details пуст')}, () => "
+        f"pm.expect(JSON.stringify(__j) === {js_str(_json.dumps(_STEP_UP_BODY, ensure_ascii=False, separators=(',', ':')))}).to.eql(true));",
+        "const __wa = String(pm.response.headers.get('WWW-Authenticate') || '');",
+        "const __wp = {};",
+        r"""__wa.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { __wp[k] = v; return m; });""",
+        f"pm.test({js_str(label + ': вызов Bearer insufficient_user_authentication с acr_values 2')}, () => "
+        r"pm.expect([/^Bearer\s/.test(__wa), __wp.error === 'insufficient_user_authentication', __wp.acr_values === '2']).to.eql([true, true, true]));",
+    ]
+    if presented is not None:
+        out.append(f"pm.test({js_str(label + ': вызов называет предъявленный уровень ' + presented)}, () => "
+                   f"pm.expect(String(__wp.error_description || '').indexOf({js_str('presented ACR ' + presented)}) >= 0).to.eql(true));")
+    return out
+
+
+def _begin_registration_refused(p, name, *, presented):
+    return _own(p, name, "POST", _keys_path(p) + ":beginRegistration", body={},
+                tests=_level_hint(name.upper(), presented=presented))
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Ф13-25: личность без пароля, утратившая ключ, возвращает доступ
-# восстановлением и заводит новый ключ. Ключ F1 «утерян»: проба им больше не
-# входит, кроме последнего шага — снятый ключ отвергнут.
+# восстановлением — шаги (1)–(3) Ф13 без правки: пароль заведён, вход им —
+# сессия «1». Шаги (4)–(5) судит приёмка kaname#747
+# (`level-two-is-enrolled-at-level-two.md`): ключ заводится и снимается только
+# сессией «2» (Р1, Р3), а у человека с паролем и единственным утраченным ключом
+# сессии «2» нет — путь возврата ключа идёт через администратора (Р5,
+# `ResetAccessKeys`). Поэтому из сессии восстановленного пароля и регистрация
+# нового ключа, и снятие утраченного получают указание повысить уровень
+# (Ф11 Р11) и состояние не меняют: в перечне по-прежнему один ключ F1. Тот же
+# исход у человека с кодом, не предъявленным в сессии восстановления, — KN747-13.
+# Ключ F1 «утерян»: проба им не входит.
+#
+# ЧЕГО КЕЙС НЕ УТВЕРЖДАЕТ — КОММЕНТАРИЕМ: сброс ключей администратором (Р5) —
+# «Дано» требует распорядителя с отношением `identity_suspender` в сессии «2»,
+# стенд такого человека не заводит; держит integration службы
+# (`internal/service/resetting_access_keys_authz_integration_test.go`), как и
+# KN747-12 в блоке KN747 ниже.
 # ───────────────────────────────────────────────────────────────────────────
 CASES.append(Case(
-    id="IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON",
-    title="Ф13-25: восстановление заводит пароль, вход им «1», новый ключ, снятие утраченного — им единый отказ, новым вход",
-    classes=["CRUD", "SEC"],
+    id="IAM-AKLOGIN-SEC-RECOVERY-OF-PASSWORDLESS-PERSON-LEVEL-ONE",
+    title="Ф13-25 по kaname#747 Р5: восстановление заводит пароль, вход им «1»; регистрация нового ключа и снятие утраченного — указание повысить уровень, в перечне один ключ",
+    classes=["SEC", "AUTHZ", "NEG"],
     priority="P1",
     steps=[
         _tok(_F, "f13-25-recovery-tok", "recovery", "f13Rec", fresh=True, init=[*_f13_person_present(), *_fresh_src(_F)]),
@@ -3006,15 +3055,9 @@ CASES.append(Case(
                         tests=_password_signed_in(_F, "F13-25-PASSWORD-LOGIN", _F + "SessionCookie")),
         _authorize(_F, "f13-25-authorize"),
         _exchange(_F, "f13-25-exchange"),
-        *_register_key(_F, "f13-25-new-key", "F3", key=_MAT_SECOND),
-        _revoke(_F, "f13-25-revoke-lost-key", "F1", tests=_registration_accepted("F1R", "F13-25-REVOKE-LOST-KEY")),
-        _await_op(_F, "f13-25-revoke-lost-key-op", "F1R"),
-        _tok(_F, "f13-25-begin-tok", "access-key-begin", "f1325B", fresh=True, init=_fresh_src(_F)),
-        _begin(_F, "f13-25-begin", "akLf1325", "f1325B"),
-        _tok(_F, "f13-25-key-tok", "access-key-login", "f1325K"),
-        _key_login(_F, "f13-25-lost-key-refused", slot="F1", ch="akLf1325", tok="f1325K", handle=_F + "Handle",
-                   tests=_signin_refused("F13-25-LOST-KEY-REFUSED")),
-        *_f13_sign_in("f13-25-new-key-login", "F3", "f13AfterRecovery"),
+        _begin_registration_refused(_F, "f13-25-new-key-begin", presented="1"),
+        _revoke(_F, "f13-25-revoke-lost-key", "F1", tests=_level_hint("F13-25-REVOKE-LOST-KEY", presented="1")),
+        _list(_F, "f13-25-one-key-left", count=1, extra=_key_listed("F1", "F13-25-ONE-KEY-LEFT")),
     ],
 ))
 
@@ -3073,8 +3116,8 @@ CASES.append(Case(
 
 # ───────────────────────────────────────────────────────────────────────────
 # Уборка блока Ф13: ключи, заведённые набором, сняты; у личности посева
-# остаётся только ключ, заведённый Ф13-25 (без него у неё не было бы способа
-# входа ключом, а пароль ей завело восстановление).
+# остаётся ключ посева F1 — сессией «1» восстановленного пароля Ф13-25 его не
+# снять (kaname#747 Р5), а пароль ей завело восстановление.
 # ───────────────────────────────────────────────────────────────────────────
 CASES.append(Case(
     id="IAM-AKLOGIN-OK-CLEANUP-KEYS",
@@ -3128,37 +3171,7 @@ CASES.append(Case(
 #     человека не заводит; держит integration службы;
 #   · нечитаемый перечень ключей (§3.7) — край условия не создаёт, держит use-case.
 # ═══════════════════════════════════════════════════════════════════════════
-_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
-                 "or present a credential of another kind")
-_STEP_UP_BODY = {"code": 16, "message": _STEP_UP_TEXT, "details": []}
 _G, _H, _HB = "akG", "akH", "akHb"
-
-
-def _level_hint(label, *, presented=None):
-    """Указание повысить уровень (Ф11 Р11): пара 401/16, тело дословно, вызов — по параметрам.
-
-    Предмет каждого утверждения — булево: отказ полосы второго фактора при дефекте
-    получил бы тело с секретом, и значение не попадает в текст утверждения."""
-    out = [
-        *_status_is(401, label),
-        *_parse_body(),
-        f"pm.test({js_str(label + ': тело — указание повысить уровень: код 16, текст шага, details пуст')}, () => "
-        f"pm.expect(JSON.stringify(__j) === {js_str(_json.dumps(_STEP_UP_BODY, ensure_ascii=False, separators=(',', ':')))}).to.eql(true));",
-        "const __wa = String(pm.response.headers.get('WWW-Authenticate') || '');",
-        "const __wp = {};",
-        r"""__wa.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { __wp[k] = v; return m; });""",
-        f"pm.test({js_str(label + ': вызов Bearer insufficient_user_authentication с acr_values 2')}, () => "
-        r"pm.expect([/^Bearer\s/.test(__wa), __wp.error === 'insufficient_user_authentication', __wp.acr_values === '2']).to.eql([true, true, true]));",
-    ]
-    if presented is not None:
-        out.append(f"pm.test({js_str(label + ': вызов называет предъявленный уровень ' + presented)}, () => "
-                   f"pm.expect(String(__wp.error_description || '').indexOf({js_str('presented ACR ' + presented)}) >= 0).to.eql(true));")
-    return out
-
-
-def _begin_registration_refused(p, name, *, presented):
-    return _own(p, name, "POST", _keys_path(p) + ":beginRegistration", body={},
-                tests=_level_hint(name.upper(), presented=presented))
 
 
 def _same_person(src, dst):
