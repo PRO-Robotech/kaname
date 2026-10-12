@@ -116,6 +116,14 @@ type sessionVerbs struct {
 	// объявленным исходом, и утверждение о сессии зеленело бы при любом коде.
 	akBegin *humansession.BeginAccessKeyLoginUseCase
 	akLogin *humansession.AccessKeyLoginUseCase
+	// status — чтение состояния второго фактора (Ф12 Р4): пробы перехода
+	// записи (kaname#458, A458-03, A458-11) читают «заведён ли» под новой
+	// сессией настоящим глаголом.
+	status *humansession.SecondFactorStatusUseCase
+}
+
+func (v sessionVerbs) SecondFactorStatus(ctx context.Context, in humansession.StatusInput) (humansession.StatusOutput, error) {
+	return v.status.Execute(ctx, in)
 }
 
 func (v sessionVerbs) BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
@@ -340,6 +348,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	}
 	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
 	require.NoError(t, err)
+	status, err := humansession.NewSecondFactorStatusUseCase(secondFactor)
+	require.NoError(t, err)
 	var (
 		recoveryMail                           = laneMailLimit
 		recoverySource                         = laneSourcePace
@@ -401,7 +411,7 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	require.NoError(t, err)
 
 	l := newLaneOver(t, sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
-		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin}, "")
+		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin, status: status}, "")
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),

@@ -4,15 +4,15 @@
 // address_claim_integration_test.go — АДРЕС, ЗАНЯТЫЙ НЕПОДТВЕРЖДЁННОЙ ЗАПИСЬЮ,
 // ПЕРЕХОДИТ К ВЛАДЕЛЬЦУ ЯЩИКА (задача PRO-Robotech/kaname#458; приёмка
 // `docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md`,
-// редакция 3, сценарии A458-01…A458-09, DoD п. 2 (в) и п. 3).
+// редакция 4, сценарии A458-01…A458-09 и A458-11…A458-13, DoD п. 2 (в) и п. 3).
 //
 // # Стенд
 //
 // Пробы идут на ПРОВОДЕ полосы формы: слушатель над настоящими глаголами и
 // настоящими адаптерами базы (`sessionLane`, `avLane`). Код восстановления
 // берётся ИЗ СТРОКИ ОЧЕРЕДИ письма этого человека до её дренажа (§5 приёмки):
-// проба судит производителя письма, а не выдумывает код. Удостоверения
-// прежнего держателя (второй фактор, ключ доступа, личные токены) кладутся
+// проба судит производителя письма, а не выдумывает код. Удостоверения записи
+// (второй фактор, ключ доступа, личные токены) и начатые заведения кладутся
 // посевом писателями хранилища продукта: после посадки kaname#456
 // неподтверждённая запись завести их сама не может, а записи до посадки могли.
 //
@@ -26,7 +26,8 @@
 //     поломкой фикстуры, потому что мир к этому шагу уже проверен.
 //
 // Слова клеток, причины конца сессии и поля события (`address-claimed`,
-// `invite-not-valid`, `address_claimed`) проба называет ЛИТЕРАЛАМИ из приёмки,
+// `address-verified`, `invite-not-valid`, `address_claimed`) проба называет
+// ЛИТЕРАЛАМИ из приёмки,
 // а не константами продукта: её предмет и есть то, что продукт их завёл, и
 // ссылка на несуществующую константу не собралась бы — «не выполнилось», а не
 // красный.
@@ -39,7 +40,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -55,14 +55,15 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user_tokens"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
+	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -71,6 +72,7 @@ import (
 const (
 	a458ReasonClaimed    = "address-claimed"
 	a458CellClaimed      = "address-claimed"
+	a458CellVerified     = "address-verified"
 	a458CellInviteNot    = "invite-not-valid"
 	a458EventField       = "address_claimed"
 	a458NewPassword      = "a-mailbox-owner-password-458"
@@ -432,8 +434,8 @@ func (s *a458VerifyBetween) RecoveryTarget(ctx context.Context, email domain.Ema
 // TestA458_02_Race_VerifiedInFlightIsOrdinaryRecovery — проба гонки DoD п. 2
 // (в), близнец A458-02 при подтверждении в полёте: запись подтверждена между
 // выдачей кода и предъявлением, ПОСЛЕ чтения адреса завершением — ветвь
-// решает отметка под замком, и исход — обычное восстановление, а удостоверения
-// владельца ящика не снимаются.
+// решает отметка под замком, и исход — обычное восстановление: у записи без
+// удостоверений переход снял бы начатые заведения, здесь они на месте.
 func TestA458_02_Race_VerifiedInFlightIsOrdinaryRecovery(t *testing.T) {
 	cells := newA458Cells()
 	var seam *a458VerifyBetween
@@ -444,7 +446,7 @@ func TestA458_02_Race_VerifiedInFlightIsOrdinaryRecovery(t *testing.T) {
 		}})
 	holder := h.holder(t)
 	seam.mark = func() { h.markVerified(t, holder) }
-	h.seedEnrolledSecondFactor(t)
+	h.seedStartedEnrolments(t, holder)
 	sOld := h.sessionOf(t, holder)
 	code, ctxCk := h.claimCode(t, "A458-02 гонка", holder)
 
@@ -455,9 +457,8 @@ func TestA458_02_Race_VerifiedInFlightIsOrdinaryRecovery(t *testing.T) {
 	require.Equal(t, http.StatusOK, done.status, "A458-02 гонка: 200: %s", done.body)
 	require.Equal(t, string(domain.RevokeReasonPasswordChange), h.endedReason(t, sOld.Value),
 		"A458-02 гонка: подтверждённая в полёте запись — обычное восстановление: S-old — password-change")
-	row, err := kanamepg.NewLoginMethodRepo(h.pool).Get(h.ctx, holder.id, domain.LoginMethodTOTP)
-	require.NoError(t, err, "A458-02 гонка: второй фактор владельца ящика на месте")
-	require.True(t, row.Enrolled(), "A458-02 гонка: второй фактор заведён")
+	require.Equal(t, a458Rows{started: 1, challenges: 1}, h.credentialRows(t, holder),
+		"A458-02 гонка: начатые заведения владельца ящика на месте")
 	events := h.recoveryAudit(t, holder)
 	require.Len(t, events, 1)
 	require.Equal(t, false, events[0][a458EventField], "A458-02 гонка: address_claimed: false: %v", events[0])
@@ -465,40 +466,54 @@ func TestA458_02_Race_VerifiedInFlightIsOrdinaryRecovery(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A458-03: переход снимает все удостоверения прежнего держателя.
+// Посев удостоверений «Дано» (§5 приёмки): писатели хранилища продукта, посев
+// читается обратно до «Когда»; не лёг — «НЕ-ВЫПОЛНИЛОСЬ(фикстура)».
 // ─────────────────────────────────────────────────────────────────────────────
 
-// a458Credentials — посеянные удостоверения прежнего держателя.
-type a458Credentials struct {
-	key       akKey
-	keypairID domain.UserOAuthClientID
-	secretID  string
-	secret    string
+// a458Rows — строки удостоверений и начатых заведений человека: factor —
+// заведённый второй фактор (генератор не в состоянии «начато» и набор
+// резервных кодов), started — начатое заведение генератора, keys — ключи
+// доступа, challenges — неиспользованные испытания регистрации ключа, tokens —
+// личные токены.
+type a458Rows struct{ factor, started, keys, challenges, tokens int }
+
+func (h *sessionLane) credentialRows(t *testing.T, p a458Person) a458Rows {
+	t.Helper()
+	var r a458Rows
+	require.NoError(t, h.pool.QueryRow(h.ctx, `
+		SELECT (SELECT count(*) FROM user_login_methods
+		         WHERE user_id = $1 AND ((kind = $2 AND state <> $4) OR kind = $3)),
+		       (SELECT count(*) FROM user_login_methods WHERE user_id = $1 AND kind = $2 AND state = $4),
+		       (SELECT count(*) FROM user_access_keys WHERE user_id = $1),
+		       (SELECT count(*) FROM access_key_challenges WHERE user_id = $1 AND purpose = 'registration' AND consumed_at IS NULL),
+		       (SELECT count(*) FROM user_oauth_clients WHERE user_id = $1)`,
+		string(p.id), string(domain.LoginMethodTOTP), string(domain.LoginMethodLookupSecret), string(domain.LoginMethodStatePending)).
+		Scan(&r.factor, &r.started, &r.keys, &r.challenges, &r.tokens))
+	return r
 }
 
-// seedCredentials — второй фактор (генератор и резервные коды), ключ доступа и
-// начатое испытание регистрации второго ключа, личный токен-ключевая пара и
-// личный токен с базовым секретом — писателями хранилища продукта.
-func (h *sessionLane) seedCredentials(t *testing.T, p a458Person) a458Credentials {
+// seedStartedEnrolments — начатое заведение генератора (строка в состоянии
+// «начато») и начатое испытание регистрации ключа доступа.
+func (h *sessionLane) seedStartedEnrolments(t *testing.T, p a458Person) {
 	t.Helper()
-	h.seedEnrolledSecondFactor(t)
-	backup, err := passwordverify.NewBackupCodes()
-	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): чеканка резервных кодов")
-	set, err := h.secondFactor.SetHasher.HashSet(backup)
-	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): набор резервных кодов")
+	secret, err := totpverify.NewSecret()
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): секрет генератора")
+	material, err := h.secondFactor.TOTP.Wrap(secret)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): материал генератора")
 	{
 		w, err := h.sessions.Writer(h.ctx)
 		require.NoError(t, err)
-		require.NoError(t, w.ReplaceLookupSet(h.ctx, domain.LoginMethod{UserID: p.id, Kind: domain.LoginMethodLookupSecret,
-			Verifier: set, State: domain.LoginMethodStateActive, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}),
-			"НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев набора резервных кодов")
+		defer func() { _ = w.Rollback(h.ctx) }()
+		accepted, err := w.UpsertPendingTOTP(h.ctx, domain.LoginMethod{UserID: p.id, Kind: domain.LoginMethodTOTP,
+			Verifier: material, State: domain.LoginMethodStatePending, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)})
+		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): начатое заведение генератора")
+		require.True(t, accepted, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): начатое заведение генератора легло")
 		require.NoError(t, w.Commit(h.ctx))
 	}
-	var c a458Credentials
-	c.key = givenAcceptedKey(t, h, p.id)
 	{
 		w, err := kanamepg.NewAccessKeyRepo(h.pool).Writer(h.ctx)
 		require.NoError(t, err)
+		defer func() { _ = w.Rollback(h.ctx) }()
 		challenge := make([]byte, 32)
 		_, err = rand.Read(challenge)
 		require.NoError(t, err)
@@ -508,6 +523,53 @@ func (h *sessionLane) seedCredentials(t *testing.T, p a458Person) a458Credential
 			"НЕ-ВЫПОЛНИЛОСЬ(фикстура): начатое испытание регистрации ключа")
 		require.NoError(t, w.Commit(h.ctx))
 	}
+	require.Equal(t, a458Rows{started: 1, challenges: 1}, h.credentialRows(t, p), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев прочитан обратно")
+}
+
+// seedEnrolledFactor — заведённый второй фактор: генератор в состоянии
+// «заведён» и набор резервных кодов. Пробе достаются секрет генератора и
+// ступень, принятая заведением.
+func (h *sessionLane) seedEnrolledFactor(t *testing.T, p a458Person) (totpverify.Secret, int64) {
+	t.Helper()
+	secret, err := totpverify.NewSecret()
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): секрет генератора")
+	material, err := h.secondFactor.TOTP.Wrap(secret)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): материал генератора")
+	backup, err := passwordverify.NewBackupCodes()
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): чеканка резервных кодов")
+	set, err := h.secondFactor.SetHasher.HashSet(backup)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): набор резервных кодов")
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	step := totpverify.StepAt(at)
+	w, err := h.sessions.Writer(h.ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(h.ctx) }()
+	accepted, err := w.UpsertPendingTOTP(h.ctx, domain.LoginMethod{UserID: p.id, Kind: domain.LoginMethodTOTP,
+		Verifier: material, State: domain.LoginMethodStatePending, CreatedAt: at})
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): заведение генератора")
+	require.True(t, accepted, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): заведение генератора легло")
+	activated, err := w.ActivateTOTP(h.ctx, p.id, at, step, at)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): подтверждение генератора")
+	require.True(t, activated, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): генератор в состоянии «заведён»")
+	require.NoError(t, w.ReplaceLookupSet(h.ctx, domain.LoginMethod{UserID: p.id, Kind: domain.LoginMethodLookupSecret,
+		Verifier: set, State: domain.LoginMethodStateActive, CreatedAt: at}), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев набора резервных кодов")
+	require.NoError(t, w.Commit(h.ctx))
+	require.Equal(t, a458Rows{factor: 2}, h.credentialRows(t, p), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев прочитан обратно")
+	return secret, step
+}
+
+// a458Tokens — посеянные личные токены: ключ утверждения клиента и базовый секрет.
+type a458Tokens struct {
+	keypairID domain.UserOAuthClientID
+	secretID  string
+	secret    string
+}
+
+// seedUserTokens — личный токен с ключом утверждения клиента (писатель
+// реестра) и личный токен с базовым секретом (глагол выдачи).
+func (h *sessionLane) seedUserTokens(t *testing.T, p a458Person) a458Tokens {
+	t.Helper()
+	var c a458Tokens
 	{
 		m, err := signingkeygen.Generate(domain.SigningAlgES256)
 		require.NoError(t, err)
@@ -519,7 +581,7 @@ func (h *sessionLane) seedCredentials(t *testing.T, p a458Person) a458Credential
 			CreatedAt: time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond), PublicKeyPEM: m.PublicKeyPEM,
 			KeyAlgorithm: string(domain.SigningAlgES256), CredentialKind: domain.CredentialKindKeypair,
 		})
-		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): личный токен-ключевая пара")
+		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): личный токен с ключом утверждения")
 		require.NoError(t, tx.Commit(h.ctx))
 		c.keypairID = row.ID
 	}
@@ -537,25 +599,51 @@ func (h *sessionLane) seedCredentials(t *testing.T, p a458Person) a458Credential
 		c.secretID, c.secret = resp.GetToken().GetId(), resp.GetSecret()
 		require.NotEmpty(t, c.secret, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): базовый секрет выдан")
 	}
-	n := h.credentialRows(t, p)
-	require.Equal(t, a458Rows{factor: 2, keys: 1, challenges: 1, tokens: 2}, n, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев прочитан обратно")
+	require.Equal(t, a458Rows{tokens: 2}, h.credentialRows(t, p), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев прочитан обратно")
 	return c
 }
 
-// a458Rows — строки удостоверений человека.
-type a458Rows struct{ factor, keys, challenges, tokens int }
-
-func (h *sessionLane) credentialRows(t *testing.T, p a458Person) a458Rows {
+// tokenIDs — идентификаторы личных токенов человека по порядку.
+func (h *sessionLane) tokenIDs(t *testing.T, p a458Person) []string {
 	t.Helper()
-	var r a458Rows
-	require.NoError(t, h.pool.QueryRow(h.ctx, `
-		SELECT (SELECT count(*) FROM user_login_methods WHERE user_id = $1 AND kind IN ($2, $3)),
-		       (SELECT count(*) FROM user_access_keys WHERE user_id = $1),
-		       (SELECT count(*) FROM access_key_challenges WHERE user_id = $1 AND purpose = 'registration' AND consumed_at IS NULL),
-		       (SELECT count(*) FROM user_oauth_clients WHERE user_id = $1)`,
-		string(p.id), string(domain.LoginMethodTOTP), string(domain.LoginMethodLookupSecret)).
-		Scan(&r.factor, &r.keys, &r.challenges, &r.tokens))
-	return r
+	rows, err := h.pool.Query(h.ctx, `SELECT id FROM user_oauth_clients WHERE user_id = $1 ORDER BY id`, string(p.id))
+	require.NoError(t, err)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		require.NoError(t, rows.Scan(&id))
+		out = append(out, id)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
+// a458TokenVerdict — исход полос личных токенов: правило выдачи токен-эндпоинта
+// (`revocationpolicy.AtIssuance` с якорем выдачи ключа, как его ставит объявление
+// состава) и полоса базового секрета (`ResolveBasic`: `accepted` либо причина отказа).
+type a458TokenVerdict struct {
+	assertion revocationpolicy.Verdict
+	basic     string
+}
+
+func (h *sessionLane) tokenVerdict(t *testing.T, p a458Person, c a458Tokens) a458TokenVerdict {
+	t.Helper()
+	row, err := kanamepg.NewUserOAuthClientRepo(h.pool).Get(h.ctx, c.keypairID)
+	require.NoError(t, err, "строка личного токена с ключом утверждения читается")
+	issued := row.CreatedAt
+	verdict, _, err := revocationpolicy.AtIssuance(h.ctx, kanamepg.NewSessionRevocationsAdapter(h.pool),
+		service.ResolvedPrincipal{Kind: service.PrincipalUser, UserID: string(p.id), StandingCredentialIssuedAt: &issued}, time.Time{})
+	require.NoError(t, err, "правило выдачи ответило")
+	basic, err := kanamepg.NewBasicCredentialRepo(h.pool, 5*time.Second)
+	require.NoError(t, err)
+	out := a458TokenVerdict{assertion: verdict, basic: "accepted"}
+	if _, err := basic.ResolveBasic(h.ctx, c.secret); err != nil {
+		reason, ok := domain.BasicCredentialRefusalReasonOf(err)
+		require.True(t, ok, "полоса базового секрета ответила отказом полосы, а не сбоем: %v", err)
+		out.basic = string(reason)
+	}
+	return out
 }
 
 // keyLogin — вход ключом доступа k; ответ как есть.
@@ -565,43 +653,262 @@ func (h *sessionLane) keyLogin(t *testing.T, k akKey) reply {
 	return akLoginWith(t, h, f, k, givenChallenge(t, h, f), webauthntest.AssertionOptions{})
 }
 
-// TestA458_03_TheClaimRemovesEveryCredentialOfThePreviousHolder — A458-03.
-func TestA458_03_TheClaimRemovesEveryCredentialOfThePreviousHolder(t *testing.T) {
-	h := newSessionLane(t)
+// completedSession — сессия, выданная завершением: носитель и контекст формы.
+func completedSession(t *testing.T, r reply) laneSession {
+	t.Helper()
+	s := laneSession{bearer: cookieNamed(r.cookies, loginlanehttp.CookieSession), form: cookieNamed(r.cookies, loginlanehttp.CookieForm)}
+	require.NotNil(t, s.bearer, "завершение пишет носитель")
+	require.NotNil(t, s.form, "завершение сменяет контекст формы")
+	return s
+}
+
+// assuranceLevelOf — `session.assuranceLevel` тела ответа.
+func assuranceLevelOf(t *testing.T, body string) string {
+	t.Helper()
+	var out struct {
+		Session struct {
+			AssuranceLevel string `json:"assuranceLevel"`
+		} `json:"session"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &out), body)
+	return out.Session.AssuranceLevel
+}
+
+// secondFactorEnrolled — `GET /iam/v1/auth/second-factor` под сессией s:
+// заведён ли генератор и начато ли заведение (`pendingUntil`).
+func (h *sessionLane) secondFactorEnrolled(t *testing.T, s laneSession) (enrolled, pending bool) {
+	t.Helper()
+	r := h.lane.do(t, h.c, http.MethodGet, loginlanehttp.PathSecondFactor, nil, fwd(), s.bearer, s.form)
+	require.Equal(t, http.StatusOK, r.status, "чтение состояния второго фактора — 200: %s", r.body)
+	var out struct {
+		TOTP struct {
+			Enrolled     bool   `json:"enrolled"`
+			PendingUntil string `json:"pendingUntil"`
+		} `json:"totp"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(r.body), &out), r.body)
+	return out.TOTP.Enrolled, out.TOTP.PendingUntil != ""
+}
+
+// a458StepAhead — часы церемонии повышения впереди часов процесса на две
+// ступени генератора: код повышения берётся на ступени строго позже ступени,
+// принятой заведением при посеве (часы глаголов управляемые, A458-11).
+const a458StepAhead = 2 * totpverify.Period
+
+func a458CeremonyNow() time.Time { return time.Now().Add(a458StepAhead) }
+
+// stepUpWithSeededFactor — повышение под сессией s кодом генератора посева на
+// ступени часов церемонии; уровень после повышения.
+func (h *sessionLane) stepUpWithSeededFactor(t *testing.T, id string, s laneSession, secret totpverify.Secret, accepted int64) string {
+	t.Helper()
+	step := totpverify.StepAt(a458CeremonyNow())
+	require.Greater(t, step, accepted, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): ступень повышения позже ступени заведения")
+	r := h.stepUpCode(t, s, "totp", laneTOTP(t, secret, step), h.csrfFor(t, domain.FormStepUp, s.form))
+	require.Equal(t, http.StatusOK, r.status, "%s: повышение генератором посева проходит: %s", id, r.body)
+	return assuranceLevelOf(t, r.body)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A458-03: переход записи без удостоверений снимает начатые заведения.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestA458_03_TheClaimRemovesStartedEnrolments — A458-03.
+func TestA458_03_TheClaimRemovesStartedEnrolments(t *testing.T) {
+	cells := newA458Cells()
+	h := newSessionLaneWith(t, sessionLaneOptions{completionObserver: cells})
 	holder := h.holder(t)
-	c := h.seedCredentials(t, holder)
-	require.Equal(t, http.StatusOK, h.keyLogin(t, c.key).status, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): ключ прежнего держателя входит до перехода")
+	h.seedStartedEnrolments(t, holder)
+	sOld := h.sessionOf(t, holder)
+	claimedBefore := cells.done(a458CellClaimed)
 
 	done := h.claim(t, "A458-03", holder)
 	require.Equal(t, http.StatusOK, done.status, "A458-03: завершение — 200: %s", done.body)
 
+	require.Equal(t, a458ReasonClaimed, h.endedReason(t, sOld.Value), "A458-03: исход — переход: S-old закрыта причиной address-claimed")
+	events := h.recoveryAudit(t, holder)
+	require.Len(t, events, 1, "A458-03: одно событие")
+	require.Equal(t, true, events[0][a458EventField], "A458-03: address_claimed: true: %v", events[0])
+	require.Equal(t, claimedBefore+1, cells.done(a458CellClaimed), "A458-03: клетка address-claimed прибавила 1")
 	require.Equal(t, a458Rows{}, h.credentialRows(t, holder),
-		"A458-03: ноль строк второго фактора, ключей доступа, начатых испытаний и личных токенов")
-	_, err := kanamepg.NewUserOAuthClientRepo(h.pool).Get(h.ctx, c.keypairID)
-	require.Truef(t, errors.Is(err, iamerr.ErrNotFound),
-		"A458-03: строки личного токена-ключевой пары нет — утверждение клиента её ключом отказ полосы; получено %v", err)
-	basic, err := kanamepg.NewBasicCredentialRepo(h.pool, 5*time.Second)
-	require.NoError(t, err)
-	_, err = basic.ResolveBasic(h.ctx, c.secret)
-	require.Error(t, err, "A458-03: базовый секрет снятого личного токена — отказ полосы")
-	r := h.keyLogin(t, c.key)
-	require.NotEqual(t, http.StatusOK, r.status, "A458-03: вход ключом доступа прежнего держателя — отказ входа: %s", r.body)
+		"A458-03: ноль строк второго фактора и ноль неиспользованных испытаний регистрации ключа")
+	enrolled, pending := h.secondFactorEnrolled(t, completedSession(t, done))
+	require.False(t, enrolled, "A458-03: второй фактор под новой сессией — «не заведён»")
+	require.False(t, pending, "A458-03: начатого заведения под новой сессией нет")
+	require.Equal(t, "1", assuranceLevelOf(t, done.body), "A458-03: session.assuranceLevel — \"1\"")
 }
 
-// TestA458_03_Twin_VerifiedRecordKeepsItsCredentials — близнец A458-03 (адрес
-// подтверждён до выдачи кода): удостоверения на месте.
-func TestA458_03_Twin_VerifiedRecordKeepsItsCredentials(t *testing.T) {
+// TestA458_03_Twin_EnrolledFactorIsTheOutcomeOfA458_11 — близнец A458-03
+// (заведение второго фактора завершено): исход A458-11 — ничего не снято,
+// причина password-change, address_claimed: false.
+func TestA458_03_Twin_EnrolledFactorIsTheOutcomeOfA458_11(t *testing.T) {
+	h := newSessionLane(t)
+	holder := h.holder(t)
+	h.seedEnrolledFactor(t, holder)
+	sOld := h.sessionOf(t, holder)
+
+	done := h.claim(t, "A458-03 близнец (фактор заведён)", holder)
+	require.Equal(t, http.StatusOK, done.status, "A458-03 близнец: 200: %s", done.body)
+	require.Equal(t, a458Rows{factor: 2}, h.credentialRows(t, holder), "A458-03 близнец: заведённый второй фактор на месте")
+	require.Equal(t, string(domain.RevokeReasonPasswordChange), h.endedReason(t, sOld.Value), "A458-03 близнец: S-old — password-change")
+	events := h.recoveryAudit(t, holder)
+	require.Len(t, events, 1)
+	require.Equal(t, false, events[0][a458EventField], "A458-03 близнец: address_claimed: false: %v", events[0])
+}
+
+// TestA458_03_Twin_VerifiedRecordKeepsItsStartedEnrolments — близнец A458-03
+// (адрес подтверждён до выдачи кода): начатое на месте, причина password-change.
+func TestA458_03_Twin_VerifiedRecordKeepsItsStartedEnrolments(t *testing.T) {
 	h := newSessionLane(t)
 	holder := h.holder(t)
 	h.markVerified(t, holder)
-	c := h.seedCredentials(t, holder)
+	h.seedStartedEnrolments(t, holder)
+	sOld := h.sessionOf(t, holder)
 
-	done := h.claim(t, "A458-03 близнец", holder)
+	done := h.claim(t, "A458-03 близнец (подтверждён)", holder)
 	require.Equal(t, http.StatusOK, done.status, "A458-03 близнец: 200: %s", done.body)
+	require.Equal(t, a458Rows{started: 1, challenges: 1}, h.credentialRows(t, holder),
+		"A458-03 близнец: начатые строка второго фактора и испытание на месте")
+	require.Equal(t, string(domain.RevokeReasonPasswordChange), h.endedReason(t, sOld.Value), "A458-03 близнец: S-old — password-change")
+}
 
-	require.Equal(t, a458Rows{factor: 2, keys: 1, challenges: 1, tokens: 2}, h.credentialRows(t, holder),
-		"A458-03 близнец: второй фактор, ключ доступа, испытание и оба личных токена на месте")
-	require.Equal(t, http.StatusOK, h.keyLogin(t, c.key).status, "A458-03 близнец: ключ доступа входит")
+// ─────────────────────────────────────────────────────────────────────────────
+// A458-11…A458-13: удостоверения, заведённые на записи, переходом не снимаются.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// a458KeptOutcome — общее «Тогда» восстановления записи с удостоверениями:
+// ответ, отметка, уровень, вход прежним паролем, причина S-old и отсечки,
+// событие и клетки. cell — клетка, которая обязана прибавить 1.
+func (h *sessionLane) a458KeptOutcome(t *testing.T, id string, cells *a458Cells, holder a458Person, sOld *http.Cookie, done reply, before map[string]int, cell string) {
+	t.Helper()
+	require.Equal(t, http.StatusOK, done.status, "%s: завершение — 200: %s", id, done.body)
+	_, verified := claimedSession(t, done.body)
+	require.True(t, verified, "%s: session.emailVerified = true", id)
+	require.True(t, h.verifiedNow(t, holder), "%s: у записи стоит отметка подтверждения", id)
+	require.Equal(t, "1", assuranceLevelOf(t, done.body), "%s: session.assuranceLevel — \"1\"", id)
+	old := h.loginAs(t, holder.email, integrationPassword)
+	require.Equal(t, http.StatusUnauthorized, old.status, "%s: вход прежним паролем — 401: %s", id, old.body)
+	require.Equal(t, a458AuthFailedBody, old.body, "%s: 16 authentication failed", id)
+	require.Equal(t, string(domain.RevokeReasonPasswordChange), h.endedReason(t, sOld.Value), "%s: S-old закрыта причиной password-change", id)
+	require.Equal(t, string(domain.RevokeReasonPasswordChange), h.cutoffReason(t, holder.id), "%s: отсечка — причиной password-change", id)
+	events := h.recoveryAudit(t, holder)
+	require.Len(t, events, 1, "%s: одно событие iam.user.recovery_completed", id)
+	require.Equal(t, false, events[0][a458EventField], "%s: событие несёт address_claimed: false: %v", id, events[0])
+	for k, v := range events[0] {
+		require.NotContains(t, toString(v), holder.email, "%s: адреса в событии нет (поле %s)", id, k)
+	}
+	for _, c := range []string{a458CellClaimed, a458CellVerified, string(humansession.RecoveryCompletionIssued)} {
+		want := before[c]
+		if c == cell {
+			want++
+		}
+		require.Equal(t, want, cells.done(c), "%s: клетка %s", id, c)
+	}
+}
+
+func a458CellsNow(cells *a458Cells) map[string]int {
+	out := map[string]int{}
+	for _, c := range []string{a458CellClaimed, a458CellVerified, string(humansession.RecoveryCompletionIssued)} {
+		out[c] = cells.done(c)
+	}
+	return out
+}
+
+// a458FactorRun — один прогон A458-11 на своём стенде: verified — адрес
+// подтверждён до выдачи кода (близнец). Уровень после повышения — наружу.
+func a458FactorRun(t *testing.T, id string, verified bool) string {
+	cells := newA458Cells()
+	h := newSessionLaneWith(t, sessionLaneOptions{completionObserver: cells, ceremonyNow: a458CeremonyNow})
+	holder := h.holder(t)
+	if verified {
+		h.markVerified(t, holder)
+	}
+	secret, accepted := h.seedEnrolledFactor(t, holder)
+	sOld := h.sessionOf(t, holder)
+	before := a458CellsNow(cells)
+
+	done := h.claim(t, id, holder)
+
+	cell := a458CellVerified
+	if verified {
+		cell = string(humansession.RecoveryCompletionIssued)
+	}
+	h.a458KeptOutcome(t, id, cells, holder, sOld, done, before, cell)
+	require.Equal(t, a458Rows{factor: 2}, h.credentialRows(t, holder), "%s: строки второго фактора те же (генератор и набор резервных кодов)", id)
+	s := completedSession(t, done)
+	enrolled, _ := h.secondFactorEnrolled(t, s)
+	require.True(t, enrolled, "%s: второй фактор под новой сессией — «заведён»", id)
+	return h.stepUpWithSeededFactor(t, id, s, secret, accepted)
+}
+
+// TestA458_11_RecordWithASecondFactorKeepsIt — A458-11 и близнец «адрес
+// подтверждён до выдачи кода»: тот же исход, то же повышение, клетка `issued`.
+// Близнец «второго фактора нет» — A458-02.
+func TestA458_11_RecordWithASecondFactorKeepsIt(t *testing.T) {
+	level := a458FactorRun(t, "A458-11", false)
+	twin := a458FactorRun(t, "A458-11 близнец (подтверждён)", true)
+	require.Equal(t, twin, level, "A458-11: уровень после повышения равен уровню на восстановлении подтверждённой записи")
+}
+
+// TestA458_12_RecordWithAnAccessKeyKeepsIt — A458-12. Близнец «ключа нет» — A458-02.
+func TestA458_12_RecordWithAnAccessKeyKeepsIt(t *testing.T) {
+	cells := newA458Cells()
+	h := newSessionLaneWith(t, sessionLaneOptions{completionObserver: cells})
+	holder := h.holder(t)
+	key := givenAcceptedKey(t, h, holder.id)
+	require.Equal(t, a458Rows{keys: 1}, h.credentialRows(t, holder), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев прочитан обратно")
+	require.Equal(t, http.StatusOK, h.keyLogin(t, key).status, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вход ключом до исхода — посев годен")
+	sOld := h.sessionOf(t, holder)
+	before := a458CellsNow(cells)
+
+	done := h.claim(t, "A458-12", holder)
+
+	h.a458KeptOutcome(t, "A458-12", cells, holder, sOld, done, before, a458CellVerified)
+	require.Equal(t, a458Rows{keys: 1}, h.credentialRows(t, holder), "A458-12: строка ключа доступа на месте")
+	_, same, err := kanamepg.NewAccessKeyRepo(h.pool).KeyOwnedByID(h.ctx, holder.id, key.id)
+	require.NoError(t, err)
+	require.True(t, same, "A458-12: строка ключа доступа та же")
+	r := h.keyLogin(t, key)
+	require.Equal(t, http.StatusOK, r.status, "A458-12: вход ключом после исхода — 200: %s", r.body)
+	require.NotNil(t, cookieNamed(r.cookies, loginlanehttp.CookieSession), "A458-12: сессия выдана")
+}
+
+// a458TokenRun — один прогон A458-13 на своём стенде: verified — адрес
+// подтверждён до выдачи кода (восстановление подтверждённой записи, Ф5).
+func a458TokenRun(t *testing.T, id string, verified bool) a458TokenVerdict {
+	cells := newA458Cells()
+	h := newSessionLaneWith(t, sessionLaneOptions{completionObserver: cells})
+	holder := h.holder(t)
+	if verified {
+		h.markVerified(t, holder)
+	}
+	tokens := h.seedUserTokens(t, holder)
+	ids := h.tokenIDs(t, holder)
+	sOld := h.sessionOf(t, holder)
+	before := a458CellsNow(cells)
+
+	done := h.claim(t, id, holder)
+
+	cell := a458CellVerified
+	if verified {
+		cell = string(humansession.RecoveryCompletionIssued)
+	}
+	h.a458KeptOutcome(t, id, cells, holder, sOld, done, before, cell)
+	require.Equal(t, ids, h.tokenIDs(t, holder), "%s: у записи те же две строки личных токенов", id)
+	_, err := kanamepg.NewAssertionClientRepo(h.pool).ResolveAssertionClient(h.ctx, string(tokens.keypairID))
+	require.NoError(t, err, "%s: токен-эндпоинт находит ключ утверждения первого токена", id)
+	return h.tokenVerdict(t, holder, tokens)
+}
+
+// TestA458_13_RecordWithPersonalTokensKeepsThem — A458-13. Строки личных
+// токенов те же; полосы личных токенов (правило выдачи токен-эндпоинта и полоса
+// базового секрета) отвечают тем же исходом, что после восстановления
+// подтверждённой записи с тем же посевом (Р3 п. 2: исход тот же, что у Ф5).
+// Близнец «личных токенов нет» — A458-02.
+func TestA458_13_RecordWithPersonalTokensKeepsThem(t *testing.T) {
+	got := a458TokenRun(t, "A458-13", false)
+	twin := a458TokenRun(t, "A458-13 близнец (подтверждён)", true)
+	t.Logf("A458-13: полосы личных токенов после исхода — %+v; после восстановления подтверждённой записи — %+v", got, twin)
+	require.Equal(t, twin, got, "A458-13: полосы личных токенов отвечают так же, как после восстановления подтверждённой записи")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
