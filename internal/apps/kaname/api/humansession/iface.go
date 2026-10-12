@@ -418,7 +418,8 @@ type RetiredEnrolments struct {
 // часами: испытание выдаёт одна реплика, предъявляют другой.
 type AccessKeyLoginStore interface {
 	// IssueChallenge кладёт выданное испытание сроком ttl, ЗАМЕЩАЯ живое
-	// испытание того же контекста одной транзакцией (Ф13-03).
+	// испытание того же контекста одним оператором (Ф13-03): отказа под
+	// одновременной выдачей на том же контексте нет — живым остаётся позднее.
 	IssueChallenge(ctx context.Context, c domain.AccessKeyLoginChallenge, ttl time.Duration) error
 	// ConsumeChallenge — ОДИН оператор однократности (Ф13-08): строка этого
 	// контекста, не потреблённая и не истёкшая, получает отметку.
