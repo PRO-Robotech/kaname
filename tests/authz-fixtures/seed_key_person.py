@@ -537,10 +537,15 @@ def _c(label: str, ok: bool, detail: str = "") -> None:
         _SELF.append(label)
 
 
-# Текст указания повысить уровень — дословно продуктовый (`internal/errors/step_up.go`,
-# `TextStepUpRequired`): двойник отказывает тем же текстом, что служба.
-_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
-                 "or present a credential of another kind")
+def _step_up_text(path: pathlib.Path = ROOT / "internal" / "errors" / "step_up.go") -> str:
+    """Текст указания повысить уровень — у производителя (`TextStepUpRequired`),
+    а не копией: двойник отказывает тем же текстом, что служба, и правка текста
+    в службе доезжает до двойника без второй записи."""
+    m = re.search(r'^const TextStepUpRequired = "([^"\\]+)"$', path.read_text(encoding="utf-8"), re.M)
+    if not m:
+        raise SystemExit(f"seed_key_person: в {path} нет константы TextStepUpRequired строкой — сверить разбор")
+    return m.group(1)
+
 
 
 def _fake_token(session: str) -> str:
@@ -570,7 +575,7 @@ class _FakeDoors:
             except (IndexError, ValueError):
                 acr = None
             if acr != "2":
-                return 401, {}, json.dumps({"code": 16, "message": _STEP_UP_TEXT})
+                return 401, {}, json.dumps({"code": 16, "message": _step_up_text()})
         if url.endswith(":beginRegistration"):
             ch = {"challenge": b64(b"c" * 32), "rp": {"id": self.rp}}
             if self.handle:
@@ -803,7 +808,7 @@ def self_test() -> int:
         ]:
             got = _outcome(lambda tok=tok: register_key(_FakeDoors(rp=rp), tok, "usr-x", key0, rp, origin,
                                                         lambda _: None))
-            _c(label, got[0] == want and (want == "ok" or _STEP_UP_TEXT in got[1]), f"{got}")
+            _c(label, got[0] == want and (want == "ok" or _step_up_text() in got[1]), f"{got}")
         got = _outcome(lambda: drop_password_sql("x'; DROP TABLE x; --@a"))
         _c("почта вне алфавита оператора — отказ писать", got[0] == "unmet", f"{got}")
         with tempfile.TemporaryDirectory() as tmp:
