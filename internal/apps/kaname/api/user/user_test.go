@@ -522,7 +522,7 @@ func (*fakeUserUW) LockForRemoval(context.Context, domain.UserID) ([]domain.Acco
 	return nil, nil
 }
 func (*fakeUserUW) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
-func (*fakeUserUW) CutOffForRemoval(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+func (*fakeUserUW) CutOffIdentity(context.Context, domain.UserTokenRevocation, domain.UserID) error {
 	return nil
 }
 func (w *fakeUserUW) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {

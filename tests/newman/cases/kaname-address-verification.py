@@ -376,7 +376,12 @@ def _mail_path(p):
 def _await_letter(p, name, into="Code"):
     """Письмо подтверждения СВЕРХ уже прочитанных: петля с настоящей паузой.
 
-    Код последнего письма — в `<p><into>`, число писем человеку — в `<p>MailSeen`."""
+    Код последнего письма — в `<p><into>`, число писем человеку — в `<p>MailSeen`.
+
+    Ждём письмо С КОДОМ, а не любое новое: приглашённому до письма подтверждения
+    приходит письмо приглашения, в котором строки кода нет (элемент `null`), и оно
+    само по себе условием ожидания не служит (kaname#468, разбор F427). Письмо
+    подтверждения без кода по-прежнему краснит кейс — по исчерпании ожидания."""
     path = _mail_path(p)
     counter, started = f"_avmb_{p}_{name}".replace("-", "_"), f"_avmbs_{p}_{name}".replace("-", "_")
     seen, label = _v(p, "MailSeen"), name.upper()
@@ -394,7 +399,8 @@ def _await_letter(p, name, into="Code"):
             f"const __seen = parseInt(pm.environment.get({js_str(seen)}) || '0', 10);",
             "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
             "const __all = Array.isArray(__codes) ? __codes : [];",
-            f"if (pm.response.code === 200 && __all.length <= __seen && __n < {_MAIL_WAIT_CAP}) {{",
+            "const __fresh = __all.slice(__seen).filter((c) => typeof c === 'string');",
+            f"if (pm.response.code === 200 && __fresh.length === 0 && __n < {_MAIL_WAIT_CAP}) {{",
             f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
             f"  const _avd = Date.now(); while (Date.now() - _avd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
             "  pm.execution.setNextRequest(pm.info.requestName);",
@@ -405,7 +411,7 @@ def _await_letter(p, name, into="Code"):
             *_status_is(200, label),
             f"pm.test({js_str(label + ': письмо дошло до приёмника стенда в пределе ожидания')}, () => "
             "pm.expect(__all.length > __seen).to.eql(true));",
-            "const __last = __all.length > __seen ? __all[__all.length - 1] : null;",
+            "const __last = __fresh.length > 0 ? __fresh[__fresh.length - 1] : (__all.length > __seen ? __all[__all.length - 1] : null);",
             f"pm.test({js_str(label + ': письмо — подтверждения адреса и несёт код формы XXXXX-XXXXX')}, () => "
             "pm.expect(typeof __last === 'string' && /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/.test(__last)).to.eql(true));",
             "if (__all.length > __seen) {",
@@ -734,7 +740,7 @@ CASES.append(Case(
 _P30 = "avC"
 CASES.append(Case(
     id="IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME",
-    title="Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30)",
+    title="Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30); пароль регистрации входит — ACTIVE с паролем (AWI-08, регистрация)",
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
@@ -754,6 +760,9 @@ CASES.append(Case(
         ]),
         _session_probe(_P30, "ev30-old-carrier-gone", "OldSessionCookie", "gone"),
         _session_probe(_P30, "ev30-new-carrier-verified", "SessionCookie", "alive"),
+        # AWI-08 (регистрация): полоса регистрации после инварианта пары даёт ACTIVE
+        # С ПАРОЛЕМ — пароль регистрации входит, положение обычное.
+        *_login(_P30, "ev30-awi08-login-with-registration-password", "Password", verified=True),
         *_password_change(_P30, "ev30-password-change-without-relogin", "SessionCookie", [
             *_status_is(200, "EV30-PASSWORD"),
         ]),
@@ -1089,7 +1098,8 @@ _F427_ME_JS = [
 CASES.append(Case(
     id="IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS",
     title="Ф4-27: у приглашённого после подтверждения адреса снимок «кто я» называет ровно два "
-          "аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner",
+          "аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner; "
+          "пароль приглашённого входит — ACTIVE с паролем (AWI-08, активация приглашения)",
     classes=["CRUD", "STATE"],
     priority="P1",
     steps=[
@@ -1198,6 +1208,9 @@ CASES.append(Case(
             "pm.expect(__theirs.length === 1 && !__roles(__theirs[0]).includes('owner')).to.eql(true));",
         ], retry_predicate="(() => { let j; try { j = pm.response.json(); } catch (e) { return false; } "
                            "return !Array.isArray(j.accounts) || j.accounts.length < 2; })()"),
+        # AWI-08 (активация приглашения): активация в исходе подтверждения адреса даёт
+        # ACTIVE С ПАРОЛЕМ — пароль регистрации приглашённого входит, положение обычное.
+        *_login(_PI, "f427-awi08-invitee-login-with-password", "Password", verified=True),
     ],
 ))
 

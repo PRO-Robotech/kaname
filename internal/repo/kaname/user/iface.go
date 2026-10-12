@@ -128,10 +128,11 @@ type WriterIface interface {
 	// источник, что у сбросов ключей и второго фактора.
 	Now(ctx context.Context) (time.Time, error)
 
-	// CutOffForRemoval — отсечка субъекта снимаемой личности (kaname#664, Р5)
+	// CutOffIdentity — отсечка субъекта личности в транзакции вызывающего
 	// единственной дверью записи отсечки: обе записи, один замок. Всё выданное
-	// личности не позже `u.RevokeBefore` на предъявлении отвергается.
-	CutOffForRemoval(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
+	// личности не позже `u.RevokeBefore` на предъявлении отвергается. Пишут её
+	// снятие личности (kaname#664, Р5) и её блокировка (kaname#717).
+	CutOffIdentity(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
 
 	// UpdateLabels — атомарный UPDATE tenant-facing меток (единственное mutable
 	// поле User через публичный UpdateUser RPC). Single-statement

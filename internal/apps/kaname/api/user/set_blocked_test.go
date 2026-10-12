@@ -19,6 +19,7 @@ package user
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -209,4 +210,64 @@ func TestSetInviteStatus_EachDirectionWritesItsOwnState(t *testing.T) {
 		require.NoError(t, operations.Wait(context.Background()))
 		assert.Equal(t, domain.InviteStatusActive, repo.user.InviteStatus)
 	})
+}
+
+// Блокировка отсекает ранее выданное (kaname#717): в той же транзакции, что
+// состояние, ложится ровно одна отсечка личности — на того, кого блокируют,
+// с причиной блокировки, с проверенным вызывающим в роли решившего и с
+// непустым моментом. Снятие блокировки отсечки не пишет: оно возвращает
+// участие, а не отнимает выданное после него. Что отсечка доходит до
+// читателей, закреплено на настоящей базе
+// (`audit/user_block_cuts_off_issued_integration_test.go`).
+func TestSetInviteStatus_BlockCutsOffTheIdentity_UnblockDoesNot(t *testing.T) {
+	t.Run("block", func(t *testing.T) {
+		repo := newUpdUserRepo()
+		_, err := NewBlockUserUseCase(repo, newUpdOpsRepo()).Execute(ownerCtx(), domain.UserID(updUserID))
+		require.NoError(t, err)
+		require.NoError(t, operations.Wait(context.Background()))
+		require.Len(t, repo.cutoffs, 1, "блокировка обязана записать отсечку личности")
+		c := repo.cutoffs[0]
+		assert.Equal(t, domain.UserID(updUserID), c.UserID)
+		assert.Equal(t, domain.RevokeReasonIdentityBlocked, c.Reason)
+		assert.Equal(t, domain.UserID(updOwnerID), c.RevokedBy)
+		assert.False(t, c.RevokeBefore.IsZero(), "нулевая отсечка не отсекла бы ничего")
+	})
+	t.Run("unblock", func(t *testing.T) {
+		repo := newUpdUserRepo()
+		repo.user.InviteStatus = domain.InviteStatusBlocked
+		_, err := NewUnblockUserUseCase(repo, newUpdOpsRepo()).Execute(ownerCtx(), domain.UserID(updUserID))
+		require.NoError(t, err)
+		require.NoError(t, operations.Wait(context.Background()))
+		assert.Empty(t, repo.cutoffs, "снятие блокировки не отсекает ничего")
+	})
+}
+
+// Отсечка и состояние — одно решение (kaname#717): сбой записи отсечки
+// откатывает блокировку целиком. Состояние остаётся прежним, отсечки и следа
+// нет, Operation завершена отказом без сырого текста сбоя. Зафиксированная
+// блокировка без отсечки оставила бы ранее выданное живым после снятия
+// блокировки — ровно то, что блокировка обязана исключить. Близнец — та же
+// блокировка без сбоя (`TestSetInviteStatus_BlockCutsOffTheIdentity_UnblockDoesNot`).
+func TestSetInviteStatus_BlockCutoffFailureRollsTheBlockBack(t *testing.T) {
+	const raw = "cutoff write failed: relation user_token_revocations"
+	repo := newUpdUserRepo()
+	repo.cutoffErr = stderrors.New(raw)
+	ops := newUpdOpsRepo()
+
+	op, err := NewBlockUserUseCase(repo, ops).Execute(ownerCtx(), domain.UserID(updUserID))
+	require.NoError(t, err, "синхронная полоса принимает запрос; сбой — в Operation")
+	require.NoError(t, operations.Wait(context.Background()))
+
+	assert.Equal(t, 1, repo.stateWrites(), "запись состояния была предпринята")
+	assert.Equal(t, domain.InviteStatusActive, repo.user.InviteStatus,
+		"блокировка без отсечки не фиксируется: состояние обязано остаться прежним")
+	assert.Empty(t, repo.cutoffs, "отсечки нет")
+	assert.Empty(t, repo.auditSnapshot(), "след откатился вместе с записью")
+
+	got, err := ops.Get(context.Background(), op.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Done, "Operation обязана завершиться")
+	assert.NotNil(t, got.Error, "сбой отсечки обязан завершить Operation отказом")
+	assert.NotEqual(t, int32(codes.OK), got.Error.GetCode())
+	assert.NotContains(t, got.Error.GetMessage(), raw, "сырой текст сбоя наружу не выходит")
 }
