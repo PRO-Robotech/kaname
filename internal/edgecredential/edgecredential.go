@@ -25,7 +25,11 @@
 // отправителей (`authn.trusted-forwarder-sans`), на слушателе без TLS — режим
 // разработки, как и для самой личности. Своего решения о доверии здесь нет:
 // второе решение разошлось бы с первым молча. Вердикт пары читается
-// `grpcsrv.TrustedPrincipalFromContext`.
+// `grpcsrv.TrustedPrincipalFromContext`, а номер записи — не из метаданных, а
+// из носителя фундамента `grpcsrv.TrustedSessionRecordFromContext`: пара
+// извлечения кладёт его тем же решением, и номер, дописанный в метаданные после
+// решения либо при личности, положенной в обход пары, сюда не доезжает
+// (kaname#711).
 //
 // Сверх доверия — три сужения, каждое на ОДИН факт:
 //
@@ -93,14 +97,18 @@ func From(ctx context.Context) context.Context {
 	if !trusted || p.Type != principalTypeUser || p.ID == "" || p.IsAnonymous() {
 		return ctx
 	}
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ctx
-	}
-	if v, ok := single(md, MetaSessionID); ok {
+	// Номер записи — из носителя фундамента: пара извлечения положила его тем
+	// же решением о доверии, что личность (одно значение ключа каталога, от
+	// доверенного пересылающего, при пересланной личности). Форму судит служба
+	// — хозяйка записи.
+	if v, trusted := grpcsrv.TrustedSessionRecordFromContext(ctx); trusted && v != "" {
 		if id, ok := domain.ParseHumanSessionID(v); ok {
 			ctx = callerorigin.WithSessionID(ctx, string(id))
 		}
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx
 	}
 	if v, ok := single(md, principalwire.MetaTokenJti); ok {
 		ctx = callerorigin.WithCredentialID(ctx, v)

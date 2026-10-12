@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/principalwire"
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
@@ -182,4 +183,80 @@ func TestForwardedSessionIsReadUnderTheCatalogueName(t *testing.T) {
 	got := through(t, md, nil)
 	require.True(t, got.hasSession, "номер записи под именем каталога (%s) не прочитан", name)
 	require.Equal(t, sessionOfAlice, got.session)
+}
+
+// TestSessionRecordComesFromTheFoundationsVerdict — номер записи берётся из
+// носителя фундамента (`grpcsrv.TrustedSessionRecordFromContext`), который
+// пара извлечения заполняет ТЕМ ЖЕ решением о доверии, что личность; второго
+// чтения метаданных у читателя нет (kaname#711). Отрицательные кейсы отличаются
+// от близнеца ОДНИМ фактом — откуда взялся номер:
+//
+//   - номер появился в метаданных ПОСЛЕ решения о доверии (звено между парой
+//     извлечения и читателем дописало его): фундамент его не видел, и читатель
+//     его не принимает;
+//   - доверенная личность положена в контекст в обход пары извлечения
+//     (`grpcsrv.WithTrustedPrincipal`), номер лежит в метаданных: фундамент
+//     номера не нёс — номера нет.
+//
+// Близнец — тот же номер, тем же ключом, ДО пары извлечения: он доезжает.
+func TestSessionRecordComesFromTheFoundationsVerdict(t *testing.T) {
+	withoutSession := func() metadata.MD {
+		md := edgeForwarded()
+		md.Delete(edgecredential.MetaSessionID)
+		return md
+	}
+	t.Run("twin-before-the-verdict", func(t *testing.T) {
+		got := throughWithMiddle(t, edgeForwarded(), nil)
+		require.True(t, got.hasSession, "близнец: номер, поставленный до решения о доверии, доезжает")
+		require.Equal(t, sessionOfAlice, got.session)
+	})
+
+	t.Run("appended-after-the-verdict", func(t *testing.T) {
+		middle := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+			md, _ := metadata.FromIncomingContext(ctx)
+			md = md.Copy()
+			md.Set(edgecredential.MetaSessionID, sessionOfAlice)
+			return next(metadata.NewIncomingContext(ctx, md), req)
+		}
+		got := throughWithMiddle(t, withoutSession(), middle)
+		require.False(t, got.hasSession, "номер, дописанный после решения о доверии, принят: %+v", got)
+		require.True(t, got.hasCredential, "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: личность доверена, номер выпуска доезжает")
+	})
+
+	t.Run("trusted-principal-bypassing-the-extract", func(t *testing.T) {
+		ctx := grpcsrv.WithTrustedPrincipal(
+			metadata.NewIncomingContext(context.Background(), edgeForwarded()),
+			operations.Principal{Type: "user", ID: "usr-alice"}, true)
+		ctx = edgecredential.From(ctx)
+		_, has := callerorigin.SessionIDFrom(ctx)
+		require.False(t, has, "номер, которого фундамент не нёс, принят из метаданных напрямую")
+		_, hasCred := callerorigin.CredentialIDFrom(ctx)
+		require.True(t, hasCred, "ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: доверенная личность — человек, читатель не молчит целиком")
+	})
+}
+
+// throughWithMiddle — как through, но между парой извлечения и читателем этого
+// пакета стоит звено middle (nil — звена нет).
+func throughWithMiddle(t *testing.T, md metadata.MD, middle grpc.UnaryServerInterceptor) seen {
+	t.Helper()
+	chain := grpcsrv.PrincipalExtractUnary(grpcsrv.NewTrustDomain(""), grpcsrv.NewTrustedForwarders())
+	if middle != nil {
+		chain = append(chain, middle)
+	}
+	chain = append(chain, edgecredential.Unary())
+	var got seen
+	invoke := func(ctx context.Context, _ any) (any, error) {
+		got.session, got.hasSession = callerorigin.SessionIDFrom(ctx)
+		got.credential, got.hasCredential = callerorigin.CredentialIDFrom(ctx)
+		return nil, nil
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		ic, next := chain[i], invoke
+		invoke = func(ctx context.Context, req any) (any, error) {
+			return ic(ctx, req, &grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AccessKeyService/Revoke"}, next)
+		}
+	}
+	_, err := invoke(metadata.NewIncomingContext(context.Background(), md), nil)
+	require.NoError(t, err)
+	return got
 }

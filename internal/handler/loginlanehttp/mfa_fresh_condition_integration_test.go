@@ -13,7 +13,8 @@ package loginlanehttp_test
 // `ssh` либо `console`, ресурс — машина X), заданный на границе службы так, как
 // его задаёт край от имени сессии: доверенная личность, доверенный уровень и
 // номер записи сессии ключом каталога фундамента (`x-kacho-token-session-id`),
-// пропущенным через читатель края (`edgecredential.From`). Утверждается поле
+// пропущенным через пару извлечения фундамента и читатель края (`edgeChain`,
+// kaname#711). Утверждается поле
 // `allowed`; текст отказа контрактом здесь не является.
 //
 // # Как строится «Дано»
@@ -43,10 +44,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
-	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/principalwire"
 
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
@@ -155,13 +156,15 @@ func (w *mfaWorld) ask(t *testing.T, at time.Time, user domain.UserID, acr, ref,
 	body map[string]any) bool {
 	t.Helper()
 	w.clk.set(at)
-	ctx := grpcsrv.WithTrustedPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: string(user)}, true)
-	ctx = grpcsrv.WithTrustedACR(ctx, acr, true)
+	md := metadata.Pairs(
+		principalwire.MetaPrincipalType, "user",
+		principalwire.MetaPrincipalID, string(user),
+		principalwire.MetaTokenACR, acr,
+	)
 	if ref != "" {
-		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(principalwire.MetaTokenSessionID, ref))
+		md.Set(principalwire.MetaTokenSessionID, ref)
 	}
-	ctx = edgecredential.From(ctx)
+	ctx := edgeChain(t, metadata.NewIncomingContext(context.Background(), md))
 	res, err := w.authz.Check(ctx, service.CheckRequest{
 		Subject:          "user:" + string(user),
 		Resource:         service.ResourceRef{Type: "compute_instance", ID: instance},
@@ -320,4 +323,30 @@ func TestF11_48_QuestionWithoutAReferenceGetsNoEvidence(t *testing.T) {
 		"близнец Ф11-48: со ссылкой — допуск")
 	require.False(t, w.ask(t, at, w.h.user.ID, "3", "", "ssh", "ins-mfa-48", nil),
 		"Ф11-48: за вопросом нет нашей сессии — доводов способов и момента нет")
+}
+
+// edgeChain — контекст глагола за цепочкой публичного слушателя: пара
+// извлечения фундамента (личность, уровень и номер записи — одним решением о
+// доверии) и читатель края (`edgecredential`). Номер записи доезжает до службы
+// только через носитель фундамента (kaname#711), поэтому вопрос задаётся
+// метаданными, а не готовым контекстом.
+func edgeChain(t *testing.T, ctx context.Context) context.Context {
+	t.Helper()
+	chain := append(grpcsrv.PrincipalExtractUnary(grpcsrv.NewTrustDomain(""), grpcsrv.NewTrustedForwarders()),
+		edgecredential.Unary())
+	var out context.Context
+	invoke := func(c context.Context, _ any) (any, error) {
+		out = c
+		return nil, nil
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		ic, next := chain[i], invoke
+		invoke = func(c context.Context, req any) (any, error) {
+			return ic(c, req, &grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AuthorizeService/Check"}, next)
+		}
+	}
+	_, err := invoke(ctx, nil)
+	require.NoError(t, err, "цепочка публичного слушателя отвергла вопрос")
+	require.NotNil(t, out)
+	return out
 }
