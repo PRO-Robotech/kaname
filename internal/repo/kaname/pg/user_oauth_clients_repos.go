@@ -209,6 +209,21 @@ func (r *UserOAuthClientRepo) DeleteOwnedByID(
 	return out, true, nil
 }
 
+// userTokenHeldTx — есть ли у человека хоть одна строка личного токена
+// (kaname#458, Р3 п. 2, Р4): ключ утверждения клиента либо базовый секрет,
+// независимо от срока, — одним чтением соединением открытой транзакции.
+// Ошибка чтения — не «нет»: она уходит вызывающему, и исход откатывается.
+func userTokenHeldTx(ctx context.Context, tx pgx.Tx, ownerID domain.UserID) (bool, error) {
+	if ownerID == "" {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	var held bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_oauth_clients WHERE user_id = $1)`, string(ownerID)).Scan(&held); err != nil {
+		return false, mapErr(err, "UserOAuthClient.HeldBy", "")
+	}
+	return held, nil
+}
+
 // ExistsOwnedByID — есть ли у человека ownerID удостоверение id. Предикат тот
 // же, что у оператора снятия выше (`id AND user_id`): строка чужого владельца
 // отсюда неотличима от отсутствующей BY CONSTRUCTION, ветки, на которой они

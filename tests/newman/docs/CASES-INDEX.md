@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 826
+Всего кейсов: 827
 
 ## Перепись по модулям
 
@@ -67,7 +67,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
 | `cases/kaname-login-lane.py` | 23 |
-| `cases/kaname-recovery-lane.py` | 19 |
+| `cases/kaname-recovery-lane.py` | 20 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 3 |
@@ -1005,7 +1005,7 @@
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 - `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
 
-## `cases/kaname-recovery-lane.py` — 19 кейсов
+## `cases/kaname-recovery-lane.py` — 20 кейсов
 
 > Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
 > слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
@@ -1041,9 +1041,10 @@
 - `IAM-RECOVERY-OK-SILENT-MAIL-NODE-SAME-ANSWER`
 - `IAM-RECOVERY-OK-WAYLESS-UNVERIFIED-GETS-CODE`
 - `IAM-RECOVERY-OK-WAYLESS-FIRST-PASSWORD-VERIFIES-ADDRESS`
-- `IAM-RECOVERY-NEG-UNVERIFIED-WITH-PASSWORD-NO-CODE`
+- `IAM-RECOVERY-NEG-BLOCKED-UNVERIFIED-WITH-PASSWORD-NO-CODE`
 - `IAM-RECOVERY-NEG-PENDING-WITHOUT-PASSWORD-NO-CODE`
 - `IAM-RECOVERY-OK-WAYLESS-COMPLETION-CREATES-THE-ROW`
+- `IAM-RECOVERY-OK-UNVERIFIED-ADDRESS-CLAIMED`
 
 ## `cases/kaname-registration.py` — 2 кейса
 

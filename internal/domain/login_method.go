@@ -27,6 +27,7 @@ package domain
 // старше него отвергается повтором.
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -174,6 +175,18 @@ func (v LoginVerifier) Reveal() string {
 		return ""
 	}
 	return v.box.material
+}
+
+// SameMaterial — тот же ли материал у двух значений, сверкой постоянного
+// времени и без выхода материала наружу (kaname#458, Р5): выдача входа
+// сверяет материал, проверенный до транзакции, с хранимым после захвата строки
+// личности. Нулевое значение не совпадает ни с чем, и с нулевым тоже:
+// «материала нет» — не материал.
+func (v LoginVerifier) SameMaterial(other LoginVerifier) bool {
+	if v.IsZero() || other.IsZero() {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(v.box.material), []byte(other.box.material)) == 1
 }
 
 // String — заглушка.

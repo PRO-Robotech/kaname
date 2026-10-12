@@ -140,6 +140,12 @@ type avOptions struct {
 	// recoveryLettersPerRecipient — окно писем восстановления адресату; 0 —
 	// величина стенда по умолчанию.
 	recoveryLettersPerRecipient int
+	// recoveryObserver — приёмник исходов запроса кода восстановления; nil —
+	// молчащий.
+	recoveryObserver humansession.Observer
+	// completionObserver — приёмник исходов завершения восстановления (клетки
+	// kaname#458: `address-claimed`, `invite-not-valid`); nil — молчащий.
+	completionObserver humansession.Observer
 }
 
 // Величины стенда по умолчанию для окон условий аудита: столько обращений ни
@@ -265,15 +271,19 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{},
 		Sources: sessions, SourcePace: humansession.SourcePace{Limit: avDefaultPerSource, Window: time.Hour},
 		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: perRecipient, Window: time.Hour},
-		Observer:  nop, Now: clock.Now, Logger: logger,
+		Observer:  observerOr(opts.recoveryObserver, nop), Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	// Завершение восстановления — НАСТОЯЩИЙ глагол (EC-23 предъявляет код
 	// восстановления после смены адреса).
+	// Транзакция исхода — тем же составом, что в композиционном корне
+	// (kaname#458): адаптер базы и та же функция активации приглашения.
+	completion, err := kanamepg.NewRecoveryCompletionStore(pool, user.ActivateInviteForLane)
+	require.NoError(t, err)
 	completeR, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		CutoffClock: momentclock.Func(clock.Now),
-		Store:       sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
-		Observer: nop, Now: clock.Now, Logger: logger,
+		CutoffClock: momentclock.Func(clock.Now), Completion: completion,
+		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
+		Observer: observerOr(opts.completionObserver, nop), Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	failApply := &atomic.Bool{}
@@ -324,6 +334,14 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		failApply: failApply,
 		door:      authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)),
 	}
+}
+
+// observerOr — приёмник опций стенда, а без него — молчащий.
+func observerOr(o, nop humansession.Observer) humansession.Observer {
+	if o != nil {
+		return o
+	}
+	return nop
 }
 
 // avVerificationStore — хранилище глагола подтверждения тем же составом, что в

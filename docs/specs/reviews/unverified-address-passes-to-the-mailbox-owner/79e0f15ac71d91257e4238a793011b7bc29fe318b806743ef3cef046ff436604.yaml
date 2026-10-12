@@ -1,0 +1,183 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md
+  sha256: 79e0f15ac71d91257e4238a793011b7bc29fe318b806743ef3cef046ff436604
+  revision: 4
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: e21f1222656d
+  content_commit: c6ae79cc5e44492215bedcd8b29e3799f420528c
+  branch: '458'
+  task: PRO-Robotech/kaname#458
+  related_tasks: [PRO-Robotech/kaname#456]
+  lines: 872
+  round: 1
+  round_scope: >-
+    Круг 1 редакции 4 по дельте к одобренной редакции 3 (b52c2960…87076a5): предмет — решение
+    Р3 п. 2 (удостоверения законного владельца переходом не снимаются) и всё, что из него
+    следует: §0, Р1–Р7, §3, §4.1, §4.2 (П2, П3, П6, П7, П8), §5 (общее «Дано», A458-03,
+    A458-11…A458-13), §6, §7, §8 пп. 1, 2, 6, 10, §11. Неизменённое и принятое кругами 1–3 не
+    переоткрывается.
+  predecessor_record: docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md
+    в копии kacho-workspace/tmp/w7-458/kaname @ c6ae79cc5 → 79e0f15a…46ff436604;
+    `git show HEAD:<путь> | sha256sum` — то же; `git show HEAD~1:<путь> | sha256sum` →
+    b52c2960…87076a5 (редакция 3, одобрена)
+  measurement_revisions: >-
+    Код — `git show e21f1222656d:<путь>` / `git grep <образец> e21f1222656d` в той же копии.
+    e21f12226..c6ae79cc5 меняет только документ приёмки (1 файл, +251 −84, git diff --numstat).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-12T00:00:00Z'
+
+delta_check:
+  outcome: decision_changed_consistently
+  touched:
+    - Р3 п. 2 — ветвь по одному факту «есть ли на записи удостоверения» (заведённый второй фактор, ключ доступа, личный токен любого вида и срока); начатое заведение удостоверением не считается
+    - Р3 пп. 3, 5, 6, 7 — причина, сессия, поле события и клетка у каждой ветви названы
+    - Р4 — признак читается в транзакции исхода после захвата строки человека (запрет #10)
+    - Р2 формулировка для всех домов, Р5, Р6, Р7 (почему `password-change` у ветви с удостоверениями), §3 новая строка вне объёма
+    - §4.1 новые производители (enrolledForCompletion, PathStepUp, фикстуры посева); §4.2 П3 — чтение наличия строки личного токена вместо оператора снятия
+    - §5 A458-03 переписан; A458-11, -12, -13 добавлены; §6 строки на каждый
+    - §8 п. 1 (красный A458-11…13 на e21f12226), п. 2 инъекции (д)–(ж), п. 6 второй предикат, п. 10 — почему A458-03, -11…-13 не на стенде
+  untouched: A458-01, -02, -04…-10 и их производители; Р8, Р9; DoD пп. 3–5, 7–9
+  internal_consistency: >-
+    Ветвь, причина, клетка, поле события и сессия согласованы между §0, Р3, Р7, §5, §6 и §7;
+    формулировка Р2 совпадает с Р3. Инъекции (д)–(ж) различают ветви: (е) — по одной на вид,
+    краснеет ровно один из A458-11…13.
+
+checklist:
+  scope: ok — решение остаётся в границе §3.2 `#456`; новых путей, видов письма, текстов нет
+  coverage: >-
+    ok — каждый вид признака (второй фактор, ключ доступа, личный токен) — свой сценарий
+    A458-11/-12/-13; ветвь без удостоверений с начатыми заведениями — A458-03
+  negative: ok — отрицательные сценарии прежние; новые сценарии положительные с близнецами
+  producer: 13 из 13 «Тогда» с производителем (§6)
+  twin: >-
+    ok — A458-03: два близнеца (заведённый фактор → A458-11; подтверждённая запись);
+    A458-11: два близнеца (фактора нет → A458-02; подтверждённая запись); A458-12, -13 —
+    близнец «удостоверения нет» → A458-02
+  format: ok с замечаниями (minor)
+  conventions: ok — `.proto` не тронут (DoD п. 5); миграция новая; инвариант ветви — чтение под замком в транзакции исхода
+  dod: ok — измеримо, ссылается на ID, финальная сквозная проба на стенде посадки `own` (п. 10)
+  open_questions: нет
+  disclosure: >-
+    ok — решение сформулировано свойством; пути, которым свойство нарушалось бы, текст не
+    описывает (§11).
+
+blocking: []
+
+minor:
+  - kind: CONSTRUCTIBILITY
+    note: >-
+      §6 строка A458-11 называет «`seedEnrolledSecondFactor` с секретом, доступным пробе — есть».
+      На e21f1222656d фикстура (recovery_failure_count_integration_test.go:174–) чеканит секрет
+      локально и его не возвращает; секрет даёт `enrolledSecondFactor`
+      (step_up_journal_integration_test.go:310), но она идёт глаголами церемонии под сессией.
+      «Дано» конструируемо — писатель тот же, секрет у пробы в момент посева, — но фикстуре нужен
+      возврат секрета; автору проб учесть, не читать «есть» буквально.
+  - kind: FORMAT
+    note: >-
+      A458-11 «уровень после повышения равен уровню, который та же проба получает … на
+      восстановлении подтверждённой записи» — относительное утверждение; конкретное значение
+      уровня было бы точнее. Измеримо и в паре с близнецом падает, поэтому не блокирует.
+  - kind: DISCLOSURE
+    note: >-
+      Свойство решения названо (§0, Р3, §3): удостоверения, оставшиеся на записи, после отметки
+      действуют так же, как на подтверждённой, и снимаются администратором облака либо
+      владельцем. Фраза «Отметка удостоверений не касается» верна о строках удостоверений;
+      при правке соседних документов формулировку держать именно так, свойством, без
+      расширения в сторону описания последствий.
+  - kind: FORMAT
+    note: >-
+      §3 строка «личные токены человек снимает сам … без фактора, своей сессией» — утверждение
+      о дереве без предиката; на исход сценариев не влияет.
+  - kind: FORMAT
+    note: >-
+      Неблокирующие кругов 2–3 (положительный контроль A458-09 «предшествует» вместо «не
+      превосходит»; форма сравнения клеток DoD п. 10 и пр.) правкой не тронуты — остаются к учёту.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 79e0f15ac71d91257e4238a793011b7bc29fe318b806743ef3cef046ff436604
+    - git show HEAD~1:<док> | sha256sum → b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5
+    - git diff --numstat HEAD~1 HEAD → 251 84 <док> (единственный файл)
+    - git grep -n 'claimed :=\|RetireCredentialsOf' e21f1222656d -- …/recovery_complete.go → :386 `claimed := !emailVerified && !created`, :516 RetireCredentialsOf
+    - git grep -n 'func enrolledForCompletion' e21f1222656d → completed_login.go:195
+    - git grep -n 'PathStepUp ' e21f1222656d -- …/handler.go → :95; :168 PathRefusedInVerification (после отметки запись подтверждена — путь открыт)
+    - git grep -n 'func givenAcceptedKey\|seedCredentials\|seedEnrolledSecondFactor' e21f1222656d → access_key_login_harness_integration_test.go:80, address_claim_integration_test.go:482, recovery_failure_count_integration_test.go:174
+    - git show e21f1222656d:…/recovery_complete.go → :429 EndOtherSessions(…, reason), :433 RevokeBefore с той же reason во всех ветвях
+    - git show e21f1222656d:internal/admission/admission.go → неподтверждённый не допущен ни к выдаче удостоверения, ни к предъявлению выданного (#456 Р5, Р5а) — довод «после #456 неподтверждённая запись удостоверений завести не может» держится
+    - git grep -c 'снимая способы входа' e21f1222656d -- . ':!docs/engineering/acceptance' ':!docs/specs' → 5 файлов (совпало с DoD п. 6)
+
+constructibility:
+  method: >-
+    Названные фикстуры на e21f1222656d: seedCredentials (посев фактора, набора кодов, ключа,
+    начатого испытания, двух личных токенов писателями хранилища и обратное чтение
+    a458Rows{2,1,1,2} с «НЕ-ВЫПОЛНИЛОСЬ(фикстура)»), UpsertPendingTOTP / InsertChallenge для
+    начатых заведений A458-03, givenAcceptedKey + keyLogin для A458-12, stepUpCode для
+    повышения A458-11. Посев в этом круге не исполнялся.
+  seeded: 0
+  of: 4
+  named_fixture: 4
+  not_executed: 0
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Действующее одобрение возникает после публикации внешнего события в subject.task этой
+    учёткой; до него запись — объявление вердикта рецензента.
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_on: publication of event_body to PRO-Robotech/kaname#458 by pointpu
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+
+event_body: "acceptance-reviewer · APPROVED · sha256 79e0f15ac71d91257e4238a793011b7bc29fe318b806743ef3cef046ff436604"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#458
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/26a03b0efadcf99601b819ff0d5d1ec180db04fa77bcc7349ff57f4e680a8d96.yaml
+    - docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/7b48ab28d072f12ffaf519e02fbb6b15da64e4850ae8960707550b23a75d9d0c.yaml
+    - docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5.yaml
