@@ -87,6 +87,7 @@ var deliveryRoster = []string{
 	"defaultless_keys_injection_test.go",
 	"defaultless_keys_test.go",
 	"delivery_roster_test.go",
+	"domain_placeholder_refused_test.go",
 	"foreign_object_defaults_test.go",
 	"foreign_operator_declared_injection_test.go",
 	"foreign_operator_declared_test.go",
