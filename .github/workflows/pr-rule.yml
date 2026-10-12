@@ -14,8 +14,12 @@
 # Сообщение коммита серверного слияния задаётся в момент вливания, после этой
 # проверки. Слияние волны в ветку эпика судится следующим прогоном запроса эпика
 # (коммит попадает в его диапазон); слияние эпика в `main` не судит никто.
-# Такой коммит, уже лежащий в истории, прощается только записью ведомости
-# известных нарушений по полному sha — .github/scripts/pr-rule-known-violations.tsv
+# Там серверное слияние запроса узнаётся признаком площадки (kaname#716): GET
+# commits/<sha>/pulls называет влитой запрос с этим merge_commit_sha, — и с него
+# снимаются два нарушения формы; отсюда `pull-requests: read` и GH_TOKEN ниже.
+# Прочий коммит, уже лежащий в истории (локальное слияние не по форме, слияние
+# API /merges без «#<N> »), прощается только записью ведомости известных
+# нарушений по полному sha — .github/scripts/pr-rule-known-violations.tsv
 # (#482); её доставляет каталог `.github/scripts` в выборке ниже.
 name: правило запроса
 
@@ -28,6 +32,8 @@ on:
 
 permissions:
   contents: read
+  # Только чтение: GET commits/<sha>/pulls — признак серверного слияния (kaname#716).
+  pull-requests: read
 
 concurrency:
   group: pr-rule-${{ github.event.pull_request.number }}
@@ -57,4 +63,5 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/pr-rule-check.sh
