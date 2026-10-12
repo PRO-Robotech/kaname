@@ -4,24 +4,30 @@
 package audit_test
 
 // user_block_cuts_off_issued_integration_test.go — блокировка личности отсекает
-// РАНЕЕ ВЫДАННОЕ, а не только новую выдачу (задача kaname#717).
+// РАНЕЕ ВЫДАННОЕ, и снятие блокировки выданного до неё не возвращает (задача
+// kaname#717).
 //
-// ПРЕДМЕТ. Блокировка — свойство личности целиком (`set_blocked.go`, шапка). До
-// этой задачи она закрывала только двери ВЫДАЧИ: удостоверение, выданное до
-// блокировки, предъявлением принималось до своего истечения. Край судит такое
-// удостоверение по авторитету отзыва, а не по состоянию строки, поэтому
-// наблюдаемый уровень здесь — тот же авторитет (`tokenrevocation.Revoked` над
-// `MintedTokenRevocationRepo`), которым судит поверхность предъявления, и тот же
-// читатель отсечки, которым судят полосы выдачи и сессия консоли
-// (`UserTokenRevocationRepo.RevokedBefore`).
+// ПРЕДМЕТ. Блокировка — свойство личности целиком (`set_blocked.go`, шапка).
+// Записей отсечки у личности две, и судят по ним разные читатели:
+//
+//   - запись по субъекту выпуска (`minted_token_revocations`) — авторитет отзыва
+//     на пути запроса, которым край судит токены нашей чеканки;
+//   - запись личности (`user_token_revocations`) — полосы выдачи (обновление
+//     сессии, личный токен) и отсечка сессии консоли (`SessionCutoffOf`).
+//
+// Пока личность заблокирована, сессию и выдачу закрывает и само состояние
+// строки. Разница видна ПОСЛЕ снятия блокировки: полномочие, возникшее до неё,
+// не должно ожить. Проба судит это ТЕМИ ЖЕ функциями решения, что и читатели
+// (`tokenrevocation.Revoked`, `revocationpolicy.AtIssuance`,
+// `revocationpolicy.Forbids`), а не своим пересказом правила.
 //
 // БЛИЗНЕЦЫ, без которых отрицание ничего не значит:
-//   - тот же токен ДО блокировки принимается — иначе «после отвергнут» зеленело
-//     бы на правиле, отвергающем что угодно;
-//   - токен ДРУГОГО человека того же аккаунта после блокировки принимается —
-//     отсечка стоит на названной личности, а не на аккаунте;
-//   - после снятия блокировки токен нового входа принимается — блокировка не
-//     вечная отсечка принципала.
+//   - то же полномочие ДО блокировки принимается — иначе «после отвергнуто»
+//     зеленело бы на правиле, отвергающем что угодно;
+//   - полномочие ДРУГОГО человека того же аккаунта после блокировки
+//     принимается — отсечка стоит на названной личности, а не на аккаунте;
+//   - после снятия блокировки новый вход даёт рабочее полномочие — блокировка
+//     не вечная отсечка принципала.
 
 import (
 	"context"
@@ -34,6 +40,8 @@ import (
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
@@ -58,78 +66,112 @@ func confirmAddress(t *testing.T, ctx context.Context, env *testEnv, uids ...dom
 	}
 }
 
+// blockProbe — три вопроса о полномочии, возникшем в момент at, по трём
+// читателям отсечки.
+type blockProbe struct {
+	authority *kanamepg.MintedTokenRevocationRepo
+	issuance  *kanamepg.SessionRevocationsAdapter
+	console   *kanamepg.UserTokenRevocationRepo
+}
+
+// tokenRevoked — отвергает ли авторитет отзыва токен, выпущенный в at.
+func (p blockProbe) tokenRevoked(t *testing.T, ctx context.Context, uid domain.UserID, at time.Time) bool {
+	t.Helper()
+	revoked, err := tokenrevocation.Revoked(ctx, p.authority, blockProbeClaims(uid, at))
+	require.NoError(t, err)
+	return revoked
+}
+
+// issuanceVerdict — вердикт выдачи для сессии, аутентифицированной в at.
+func (p blockProbe) issuanceVerdict(t *testing.T, ctx context.Context, uid domain.UserID, at time.Time) revocationpolicy.Verdict {
+	t.Helper()
+	v, _, err := revocationpolicy.AtIssuance(ctx, p.issuance,
+		service.ResolvedPrincipal{Kind: service.PrincipalUser, UserID: string(uid)}, at)
+	require.NoError(t, err)
+	return v
+}
+
+// consoleSessionCut — отсечена ли сессия консоли, аутентифицированная в at:
+// край сравнивает ответ `SessionCutoffOf` (этот читатель) с моментом сессии.
+func (p blockProbe) consoleSessionCut(t *testing.T, ctx context.Context, uid domain.UserID, at time.Time) bool {
+	t.Helper()
+	cutoff, found, err := p.console.RevokedBefore(ctx, string(uid))
+	require.NoError(t, err)
+	return found && revocationpolicy.Forbids(cutoff, at)
+}
+
 // TestUserBlock_CutsOffCredentialsIssuedBeforeIt — выданное до блокировки
-// после неё предъявлением не проходит; соседнее и выданное после снятия —
-// проходит.
+// после неё не проходит ни у одного читателя отсечки и после снятия блокировки
+// не оживает; соседнее и выданное после снятия — проходит.
 func TestUserBlock_CutsOffCredentialsIssuedBeforeIt(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 	admin, accID := seedUserAccount(t, ctx, env.pool, "blkcut")
 	target := seedExtraUser(t, ctx, env.pool, accID, "blkcuttarget")
 	bystander := seedExtraUser(t, ctx, env.pool, accID, "blkcutother")
-	// Адрес подтверждён: токен человека с неподтверждённым текущим адресом
-	// поверхность отвергает и без всякой отсечки (`admission`), и такая фикстура
-	// зеленила бы отрицание ниже на чужой причине.
+	// Адрес подтверждён: полномочие человека с неподтверждённым текущим адресом
+	// отвергается и без всякой отсечки (`admission`), и такая фикстура зеленила
+	// бы отрицание ниже на чужой причине. Её поймал близнец.
 	confirmAddress(t, ctx, env, target, bystander)
 
-	authority := kanamepg.NewMintedTokenRevocationRepo(env.pool)
-	cutoffs := kanamepg.NewUserTokenRevocationRepo(env.pool)
+	p := blockProbe{
+		authority: kanamepg.NewMintedTokenRevocationRepo(env.pool),
+		issuance:  kanamepg.NewSessionRevocationsAdapter(env.pool),
+		console:   kanamepg.NewUserTokenRevocationRepo(env.pool),
+	}
+	before := time.Now().UTC().Add(-time.Minute)
 
-	issued := time.Now().UTC().Add(-time.Minute)
-	targetTok := blockProbeClaims(target, issued)
-	bystanderTok := blockProbeClaims(bystander, issued)
-
-	// ── Близнец: до блокировки оба токена принимаются ───────────────────────
-	revoked, err := tokenrevocation.Revoked(ctx, authority, targetTok)
-	require.NoError(t, err)
-	require.False(t, revoked, "токен отозван ДО блокировки — отрицание ниже ничего бы не доказало")
-	revoked, err = tokenrevocation.Revoked(ctx, authority, bystanderTok)
-	require.NoError(t, err)
-	require.False(t, revoked, "токен соседа отозван ДО блокировки — фикстура негодна")
+	// ── Близнец: до блокировки всё принимается ──────────────────────────────
+	for _, uid := range []domain.UserID{target, bystander} {
+		require.False(t, p.tokenRevoked(t, ctx, uid, before), "токен отозван ДО блокировки — фикстура негодна")
+		require.Equal(t, revocationpolicy.Allowed, p.issuanceVerdict(t, ctx, uid, before),
+			"выдача отказывает ДО блокировки — фикстура негодна")
+		require.False(t, p.consoleSessionCut(t, ctx, uid, before), "сессия отсечена ДО блокировки — фикстура негодна")
+	}
 
 	// ── Блокировка ──────────────────────────────────────────────────────────
 	block := userapp.NewBlockUserUseCase(env.repo, env.opsRepo)
-	_, err = block.Execute(withPrincipal(admin), target)
+	_, err := block.Execute(withPrincipal(admin), target)
 	require.NoError(t, err)
 	awaitWorkers(t)
 	require.Equal(t, "BLOCKED", userInviteStatus(ctx, t, env, target))
 
-	// ── Предмет: выданное до блокировки отсечено на предъявлении ────────────
-	revoked, err = tokenrevocation.Revoked(ctx, authority, targetTok)
-	require.NoError(t, err)
-	require.True(t, revoked,
-		"блокировка личности не отсекла ранее выданное: состояние записано, а "+
-			"предъявление того же токена по-прежнему принимается")
-
-	// И у читателя отсечки, которым судят выдача и сессия консоли.
-	_, found, err := cutoffs.RevokedBefore(ctx, string(target))
-	require.NoError(t, err)
-	require.True(t, found, "отсечка личности не записана — сессия консоли блокировкой не задета")
+	// ── Предмет: выданное до блокировки отсечено у каждого читателя ─────────
+	require.True(t, p.tokenRevoked(t, ctx, target, before),
+		"блокировка не отсекла ранее выданный токен: предъявление его принимается")
+	require.Equal(t, revocationpolicy.Revoked, p.issuanceVerdict(t, ctx, target, before),
+		"блокировка не отсекла сессию, аутентифицированную до неё, у полосы выдачи")
+	require.True(t, p.consoleSessionCut(t, ctx, target, before),
+		"блокировка не отсекла сессию консоли, аутентифицированную до неё")
 
 	// ── Соседа отсечка не задевает ──────────────────────────────────────────
-	revoked, err = tokenrevocation.Revoked(ctx, authority, bystanderTok)
-	require.NoError(t, err)
-	require.False(t, revoked, "блокировка одного человека отсекла токен другого")
-	_, found, err = cutoffs.RevokedBefore(ctx, string(bystander))
-	require.NoError(t, err)
-	require.False(t, found, "отсечка легла на личность, которую никто не блокировал")
+	require.False(t, p.tokenRevoked(t, ctx, bystander, before), "блокировка одного человека отсекла токен другого")
+	require.Equal(t, revocationpolicy.Allowed, p.issuanceVerdict(t, ctx, bystander, before),
+		"блокировка одного человека отсекла выдачу другому")
+	require.False(t, p.consoleSessionCut(t, ctx, bystander, before),
+		"блокировка одного человека отсекла сессию другого")
 
-	// ── Снятие блокировки: новый вход даёт рабочий токен ────────────────────
+	// ── Снятие блокировки ───────────────────────────────────────────────────
 	unblock := userapp.NewUnblockUserUseCase(env.repo, env.opsRepo)
 	_, err = unblock.Execute(withPrincipal(admin), target)
 	require.NoError(t, err)
 	awaitWorkers(t)
 	require.Equal(t, "ACTIVE", userInviteStatus(ctx, t, env, target))
 
-	fresh := blockProbeClaims(target, time.Now().UTC().Add(time.Minute))
-	revoked, err = tokenrevocation.Revoked(ctx, authority, fresh)
-	require.NoError(t, err)
-	require.False(t, revoked,
-		"после снятия блокировки токен нового входа отвергнут — это вечная "+
-			"отсечка принципала, а не снятие выданного")
+	// Выданное до блокировки не оживает ни у одного читателя.
+	require.True(t, p.tokenRevoked(t, ctx, target, before),
+		"снятие блокировки вернуло силу токену, выданному до неё")
+	require.Equal(t, revocationpolicy.Revoked, p.issuanceVerdict(t, ctx, target, before),
+		"снятие блокировки вернуло выдачу сессии, аутентифицированной до неё")
+	require.True(t, p.consoleSessionCut(t, ctx, target, before),
+		"снятие блокировки вернуло силу сессии консоли, аутентифицированной до неё")
 
-	// Снятие блокировки выданное до неё не возвращает.
-	revoked, err = tokenrevocation.Revoked(ctx, authority, targetTok)
-	require.NoError(t, err)
-	require.True(t, revoked, "снятие блокировки вернуло силу токену, выданному до неё")
+	// Новый вход после снятия даёт рабочее полномочие.
+	after := time.Now().UTC().Add(time.Minute)
+	require.False(t, p.tokenRevoked(t, ctx, target, after),
+		"после снятия блокировки токен нового входа отвергнут — это вечная отсечка, а не снятие выданного")
+	require.Equal(t, revocationpolicy.Allowed, p.issuanceVerdict(t, ctx, target, after),
+		"после снятия блокировки выдача новому входу отвергнута")
+	require.False(t, p.consoleSessionCut(t, ctx, target, after),
+		"после снятия блокировки сессия нового входа отсечена")
 }
