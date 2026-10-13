@@ -729,7 +729,7 @@ CASES.append(Case(
                   "pm.test('EC35-CONFIRM-ENROLL: код заведён — сессия «2»', () => "
                   "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
                   f"if (pm.response.code === 200) {{ pm.environment.set({js_str(_v(_PL, 'EnrolledStep'))}, "
-                  f"pm.environment.get({js_str(_v(_PL, 'PresentedStep'))}); }}",
+                  f"pm.environment.get({js_str(_v(_PL, 'PresentedStep'))})); }}",
               ]),
         # Вход одним паролем ПОСЛЕ заведения: сессия «1», свежая.
         *_login(_PL, "ec35-login-password-only", "Email", test_script=[
