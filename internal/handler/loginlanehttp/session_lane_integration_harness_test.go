@@ -229,6 +229,10 @@ type sessionLaneOptions struct {
 	// поверх часов входа; nil — часы входа. Положительный контроль A458-09
 	// ставит барьер ПОСЛЕ чтения момента.
 	loginMoments func(revocationpolicy.Clock) revocationpolicy.Clock
+	// verbs — глаголы слушателя поверх глаголов стенда и зависимостей второго
+	// фактора: пробы заведения способа (kaname#747) ставят НАСТОЯЩИЕ `enroll` и
+	// `confirm` над швом хранилища способов; nil — глаголы стенда как есть.
+	verbs func(sessionVerbs, humansession.SecondFactorDeps) loginlanehttp.Lane
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -410,8 +414,13 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	akLogin, err := humansession.NewAccessKeyLoginUseCase(akDeps)
 	require.NoError(t, err)
 
-	l := newLaneOver(t, sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
-		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin, status: status}, "")
+	verbs := sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
+		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin, status: status}
+	var laneVerbs loginlanehttp.Lane = verbs
+	if opts.verbs != nil {
+		laneVerbs = opts.verbs(verbs, secondFactor)
+	}
+	l := newLaneOver(t, laneVerbs, "")
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),

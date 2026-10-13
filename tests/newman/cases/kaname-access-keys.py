@@ -180,17 +180,46 @@ Coverage (техники: классы эквивалентности резул
   Ф13-13 — IAM-AKLOGIN-OK-LEVEL-COPIES-READ-THE-RECORD;
   Ф13-16, Ф13-17 — IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS;
   Ф13-19, Ф13-22, Ф13-23 — IAM-AKLOGIN-OK-PASSWORDLESS-PERSON;
-  Ф13-25 — IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON.
+  Ф13-25 — IAM-AKLOGIN-SEC-RECOVERY-OF-PASSWORDLESS-PERSON-LEVEL-ONE (шаги (4)–(5) — по Р5
+           приёмки kaname#747).
 Позиции, которые блок не утверждает, названы комментарием в его шапке.
+
+СПОСОБ УРОВНЯ «2» ЗАВОДИТСЯ И СНИМАЕТСЯ СЕССИЕЙ «2» (kaname#747, приёмка
+`level-two-is-enrolled-at-level-two.md`). Пол «2» у регистрации и снятия ключа
+меняет «Дано» кейсов Ф7 (§4 приёмки): люди A и B заводят код по времени и входят
+паролем с кодом, C и D заводят код ради первого ключа и снимают его им же, а
+снятие и заведение кода у человека с ключом идут сессией ключа. Блок кейсов
+`*-KN747-*` в конце модуля; трасса «позиция — кейс» (verifies):
+  KN747-04 — IAM-ACCESSKEY-NEG-KN747-04-LEVEL-ONE-WITHOUT-CODE;
+  KN747-02 — IAM-ACCESSKEY-NEG-KN747-02-CODE-NOT-PRESENTED;
+  KN747-01 — IAM-ACCESSKEY-OK-KN747-01-REGISTER-AT-LEVEL-TWO;
+  KN747-03 — IAM-ACCESSKEY-NEG-KN747-03-FINISH-FROM-LEVEL-ONE;
+  KN747-09 — IAM-ACCESSKEY-NEG-KN747-09-REVOKE-AT-LEVEL-ONE;
+  KN747-10 — IAM-ACCESSKEY-OK-KN747-10-REVOKE-AT-LEVEL-TWO;
+  KN747-11 — IAM-ACCESSKEY-OK-KN747-11-KEY-LOGIN-STILL-LEVEL-TWO;
+  KN747-13 — IAM-ACCESSKEY-NEG-KN747-13-RECOVERY-SESSION-LEVEL-ONE;
+  KN747-14 — IAM-ACCESSKEY-OK-KN747-14-RECOVERY-SESSION-WITH-CODE;
+  KN747-05 — IAM-ACCESSKEY-OK-KN747-05-ENROLL-WITHOUT-KEY-AT-LEVEL-ONE;
+  KN747-06 — IAM-ACCESSKEY-NEG-KN747-06-ENROLL-WITH-KEY-AT-LEVEL-ONE;
+  KN747-07 — IAM-ACCESSKEY-NEG-KN747-07-CONFIRM-FROM-LEVEL-ONE;
+  KN747-08 — IAM-ACCESSKEY-OK-KN747-08-CONFIRM-FROM-KEY-SESSION;
+  KN747-15 — IAM-ACCESSKEY-NEG-KN747-15-STALE-LEVEL-TWO («Дано» —
+             IAM-ACCESSKEY-OK-KN747-15-16-GIVEN-SESSIONS, ПЕРВЫЙ кейс модуля:
+             сессии старше окна свежести выжидает весь набор);
+  KN747-16 — IAM-ACCESSKEY-NEG-KN747-16-STALE-LEVEL-ONE.
+Сценарии §3.2 (заведение кода) стоят здесь, а не в наборе второго фактора: им
+нужны ключ, вход ключом и токен человека, а подставной аутентификатор и
+церемония токена живут в этом модуле в одном экземпляре.
 """
 
 # ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — и почему; идентификаторы здесь КОММЕНТАРИЕМ, а не
 # строкой (перепись долга считает позицию несомой по строковому литералу модуля).
-#   · Ф7-04 и Ф7-36 (окно свежести ИСТЕКЛО) — «Дано» требует 15 минут без
-#     предъявления; набор этой двери уже ждёт окно профиля в наборе второго
-#     фактора, второе такое ожидание удвоило бы предел шага задания. Отказ
-#     `SESSION_NOT_FRESH` держит уровень I (`internal/apps/kaname/api/access_keys/usecase_test.go`);
-#     положительная сторона — повторный вход перед снятием — здесь;
+#   · Ф7-36 (окно свежести ИСТЕКЛО у снятия) — отказ `SESSION_NOT_FRESH` держит
+#     уровень I (`internal/apps/kaname/api/access_keys/usecase_test.go`);
+#     положительная сторона — повторный вход перед снятием — здесь. Отказ
+#     свежести у ЗАВЕДЕНИЯ (Ф7-04, «Дано» сессией «2» по §4 приёмки kaname#747)
+#     несёт кейс KN747-15: сессии старше окна выжидает весь набор, а не отдельное
+#     ожидание;
 #   · Ф7-12 в собственной форме («служба объявляет имя B» и возврат к A) — смена
 #     ручки посадки посреди прогона, стенд её не делает; полосу хэша чужого имени на
 #     утверждении набор судит тем же единым отказом (кейс единого отказа), а
@@ -530,6 +559,43 @@ def _parse_body():
     return ["let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }"]
 
 
+# ── второй фактор человека (kaname#747) ──────────────────────────────────────
+#
+# Заведение ключа требует сессии «2» (приёмка `level-two-is-enrolled-at-level-two.md`,
+# Р3), а у человека без ключа «2» дают пароль и код по времени в одной сессии.
+# Поэтому человек набора, заводящий первый ключ, сперва заводит код (свежая «1»,
+# Ф12) и входит паролем с кодом. Код вычисляется функцией набора второго фактора —
+# разбором его модуля, а не копией; счёт принятой ступени — свой у каждого человека.
+import ast as _ast_f13
+
+_SF_STATUS = "/iam/v1/auth/second-factor"
+_SF_ENROLL = "/iam/v1/auth/second-factor/enroll"
+_SF_CONFIRM = "/iam/v1/auth/second-factor/confirm"
+_SF_REMOVE = "/iam/v1/auth/second-factor/remove"
+
+
+def _borrowed_totp():
+    """Код по времени — функцией набора второго фактора, разбором модуля, а не копией.
+
+    `_TOTP_JS` читается литералом; счёт принятой ступени переименован в свой,
+    чтобы два набора не делили переменную окружения."""
+    path = _pathlib.Path(__file__).resolve().parent / "kaname-second-factor.py"
+    tree = _ast_f13.parse(path.read_text(encoding="utf-8"))
+    nodes = {t.id: n.value for n in tree.body if isinstance(n, _ast_f13.Assign)
+             for t in n.targets if isinstance(t, _ast_f13.Name)}
+    if "_TOTP_JS" not in nodes:
+        raise SystemExit("kaname-access-keys: в kaname-second-factor.py нет _TOTP_JS — кода по времени нет")
+    lines = _ast_f13.literal_eval(nodes["_TOTP_JS"])
+    if not (isinstance(lines, list) and all(isinstance(x, str) for x in lines)
+            and sum("sfLastStep" in x for x in lines) == 1):
+        raise SystemExit("kaname-access-keys: _TOTP_JS сменил форму (ждали список строк с одним "
+                         "чтением sfLastStep) — сверить разбор")
+    return [x.replace("sfLastStep", "akCLastStep") for x in lines]
+
+
+_TOTP = _borrowed_totp()
+
+
 # ── человек: регистрация, подтверждение адреса, вход, токен ─────────────────
 
 def _src_pre(p):
@@ -570,7 +636,8 @@ def _person_init(p, tag):
         "  " + _set(p + "Src", "'198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254))"),
         "  " + _set(p + "MailSeen", "'0'"),
         *(f"  pm.environment.unset({js_str(p + n)});" for n in (
-            "FormCookie", "SessionCookie", "Csrf", "Code", "UserId", "Token", "OauthCode")),
+            "FormCookie", "SessionCookie", "Csrf", "Code", "UserId", "Token", "OauthCode",
+            "TotpSecret", "TotpCode", "LastStep", "PresentedStep")),
         "}",
     ]
 
@@ -738,28 +805,136 @@ def _exchange(p, name):
     )
 
 
-def _login(p, tag):
-    """Вход паролем → код → токен: окно свежести открывается этим предъявлением (Р5)."""
+def _totp_of(p):
+    """Функция кода по времени со счётом принятой ступени человека `p` (`<p>LastStep`)."""
+    return [x.replace("akCLastStep", p + "LastStep") for x in _TOTP]
+
+
+def _totp_code_of(p):
+    """Pre-script: код свежей ступени человека `p` в `<p>TotpCode`, ступень — в `<p>PresentedStep`."""
+    return [*_totp_of(p), "const __s = __freshStep();", _set(p + "PresentedStep", "String(__s)"),
+            _set(p + "TotpCode", f"__totp({_env(p + 'TotpSecret')}, __s)")]
+
+
+def _totp_accepted(p):
+    """На `200` принятая ступень строки — предъявленная."""
+    return [f"if (pm.response.code === 200) {{ {_set(p + 'LastStep', _env(p + 'PresentedStep'))} }}"]
+
+
+def _await_code_step(p, name, form, *, with_session=False):
+    """Признак формы `form` в `<p>Csrf`, когда ступень, старше принятой, лежит в окне ±1.
+
+    Код ступени `max(принятая + 1, текущая)` годен, когда часы не младше принятой
+    ступени; иначе шаг ждёт её опросом с настоящей паузой и конечным пределом."""
+    path = f"{_CSRF}?form={form}"
+    cookies = [("kaname_form", p + "FormCookie")]
+    if with_session:
+        cookies.append(("kaname_session", p + "SessionCookie"))
+    polls = f"_akStep_{p}_{name}".replace("-", "_")
+    label = name.upper()
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[*require_env_url(_LANE, path, _LANE_WHY), *_src_pre(p), *_with_cookies(*cookies)],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            *_status_is(200, label),
+            *_parse_body(),
+            _set(p + "Csrf", "__j.csrfToken || ''"),
+            *_capture_cookie(p, "kaname_form", "FormCookie", label, required=False),
+            f"const __last = parseInt({_env(p + 'LastStep')} || '0', 10);",
+            f"const __n = parseInt({_env(polls)} || '0', 10);",
+            "const __ready = Math.floor(Date.now() / 30000) >= __last;",
+            f"pm.test({js_str(label + ': ступень кода в окне либо ожидание в пределе')}, () => pm.expect(__ready || __n < 140).to.eql(true));",
+            "if (!__ready && __n < 140) {",
+            "  " + _set(polls, "String(__n + 1)"),
+            "  const _aks = Date.now(); while (Date.now() - _aks < 500) { /* ступень кода по времени ещё не сменилась */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(polls)});",
+        ])
+
+
+def _second_factor(p, tag):
+    """Код по времени заведён из сессии `<p>SessionCookie`: заведение → подтверждение → «2».
+
+    Секрет — в `<p>TotpSecret`; носитель подтверждения (сессия «2») — в
+    `<p>SessionCookie`. Человек без ключа заводит код свежей «1» (Ф12 Р8)."""
+    up = tag.upper()
     return [
-        _csrf(p, f"{tag}-login-csrf", "login"),
-        _lane_post(p, f"{tag}-login", _LOGIN,
-                   {"email": "{{" + p + "Email}}", "password": "{{" + p + "Password}}", "csrfToken": "{{" + p + "Csrf}}"},
+        _csrf(p, f"{tag}-sf-csrf", "second-factor", with_session=True),
+        _lane_post(p, f"{tag}-sf-enroll", _SF_ENROLL, {"csrfToken": "{{" + p + "Csrf}}"}, with_session=True,
                    test_script=[
-                       *_status_is(200, f"{tag.upper()}-LOGIN"),
+                       *_status_is(200, f"{up}-SF-ENROLL"),
                        *_parse_body(),
-                       f"pm.test({js_str(tag.upper() + '-LOGIN: тело называет человека, адрес подтверждён, уровень 1')}, () => "
+                       f"pm.test({js_str(up + '-SF-ENROLL: секрет base32 выдан')}, () => "
+                       "pm.expect(/^[A-Z2-7]{16,}$/.test(String(__j.secret || ''))).to.eql(true));",
+                       _set(p + "TotpSecret", "__j.secret || ''"),
+                       f"pm.environment.unset({js_str(p + 'LastStep')});",
+                   ]),
+        _lane_post(p, f"{tag}-sf-confirm", _SF_CONFIRM, {"code": "{{" + p + "TotpCode}}", "csrfToken": "{{" + p + "Csrf}}"},
+                   with_session=True, extra_pre=_totp_code_of(p),
+                   test_script=[
+                       *_status_is(200, f"{up}-SF-CONFIRM"),
+                       *_totp_accepted(p),
+                       *_parse_body(),
+                       f"pm.test({js_str(up + '-SF-CONFIRM: фактор заведён — сессия «2»')}, () => "
+                       "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+                       *_capture_cookie(p, "kaname_session", "SessionCookie", f"{up}-SF-CONFIRM"),
+                   ]),
+    ]
+
+
+def _remove_factor(p, tag):
+    """Код по времени снят самим человеком предъявлением кода (Ф12 Р9)."""
+    up = tag.upper()
+    return [
+        _await_code_step(p, f"{tag}-sf-remove-csrf", "second-factor", with_session=True),
+        _lane_post(p, f"{tag}-sf-remove", _SF_REMOVE,
+                   {"method": "totp", "code": "{{" + p + "TotpCode}}", "csrfToken": "{{" + p + "Csrf}}"},
+                   with_session=True, extra_pre=_totp_code_of(p),
+                   test_script=[
+                       *_status_is(200, f"{up}-SF-REMOVE"),
+                       *_totp_accepted(p),
+                       *_capture_cookie(p, "kaname_session", "SessionCookie", f"{up}-SF-REMOVE", required=False),
+                   ]),
+    ]
+
+
+def _login(p, tag, *, code=False, init=()):
+    """Вход паролем (с кодом по времени — `code`) → код → токен: окно свежести открывается этим предъявлением (Р5).
+
+    Без кода сессия «1», с кодом — «2»: два предъявления разных видов в одной сессии."""
+    level = "2" if code else "1"
+    body = {"email": "{{" + p + "Email}}", "password": "{{" + p + "Password}}", "csrfToken": "{{" + p + "Csrf}}"}
+    if code:
+        body["secondFactor"] = {"method": "totp", "code": "{{" + p + "TotpCode}}"}
+    up = tag.upper()
+    return [
+        (_await_code_step(p, f"{tag}-login-csrf", "login") if code
+         else _csrf(p, f"{tag}-login-csrf", "login", init=list(init))),
+        _lane_post(p, f"{tag}-login", _LOGIN, body,
+                   extra_pre=_totp_code_of(p) if code else (),
+                   test_script=[
+                       *_status_is(200, f"{up}-LOGIN"),
+                       *(_totp_accepted(p) if code else []),
+                       *_parse_body(),
+                       f"pm.test({js_str(up + '-LOGIN: тело называет человека, адрес подтверждён, уровень ' + level)}, () => "
                        "pm.expect([typeof (__j.user && __j.user.id), !!__j.session && __j.session.emailVerified, "
-                       "__j.session && __j.session.assuranceLevel]).to.eql(['string', true, '1']));",
+                       f"__j.session && __j.session.assuranceLevel]).to.eql(['string', true, {js_str(level)}]));",
                        f"if (__j.user && __j.user.id) {{ {_set(p + 'UserId', '__j.user.id')} }}",
-                       *_capture_cookie(p, "kaname_session", "SessionCookie", f"{tag.upper()}-LOGIN"),
+                       *_capture_cookie(p, "kaname_session", "SessionCookie", f"{up}-LOGIN"),
                    ]),
         _authorize(p, f"{tag}-authorize"),
         _exchange(p, f"{tag}-exchange"),
     ]
 
 
-def _human(p, tag):
-    """Свой человек: регистрация → код письма → подтверждение → вход → токен."""
+def _human(p, tag, *, factor=False):
+    """Свой человек: регистрация → код письма → подтверждение → (код по времени) → вход → токен.
+
+    `factor` — человек заводит код по времени и входит паролем с кодом: его токен
+    уровня «2», и ключ он заводит (kaname#747, Р3)."""
     up = tag.upper()
     return [
         _csrf(p, f"{tag}-register-csrf", "register", init=_person_init(p, tag)),
@@ -781,7 +956,8 @@ def _human(p, tag):
                        "pm.expect(!!__j.session && __j.session.emailVerified === true).to.eql(true));",
                        *_capture_cookie(p, "kaname_session", "SessionCookie", f"{up}-VERIFY"),
                    ]),
-        *_login(p, tag),
+        *(_second_factor(p, tag) if factor else []),
+        *_login(p, tag, code=factor),
     ]
 
 
@@ -1238,7 +1414,7 @@ CASES.append(Case(
     classes=["CONF"],
     priority="P0",
     steps=[
-        *_human(_A, "ak-a"),
+        *_human(_A, "ak-a", factor=True),
         _list(_A, "ak40-list-empty", count=0),
         _begin_registration(_A, "ak40-begin", "40", tests=_challenge_named("AK40-BEGIN")),
         _begin_registration(_A, "ak40-begin-again", "40r",
@@ -1393,7 +1569,7 @@ CASES.append(Case(
     classes=["NEG", "SEC"],
     priority="P0",
     steps=[
-        *_human(_B, "ak-b"),
+        *_human(_B, "ak-b", factor=True),
         *_register_ok(_B, "akb", "KB", key=_MAT_SECOND),
         # Ф7-05: идентификатор удостоверения K1 уже принят; ветвь б — другой человек,
         # ветвь а — владелец. Отказы равны, ни у кого ключ не переназначен.
@@ -1538,7 +1714,7 @@ CASES.append(Case(
                    ]),
         # Вход НОВЫМ паролем — смена попала в строку пароля; токен — заново (смена
         # снимает прочие сессии человека).
-        *_login(_B, "ak16-login-new-password"),
+        *_login(_B, "ak16-login-new-password", code=True),
         _list(_B, "ak16-list-after-change", count=2, extra=[
             "pm.test('AK16-LIST-AFTER-CHANGE: строки обоих ключей побайтово те же, что до смены пароля', () => "
             f"pm.expect(!!{_env('ak16Rows')} && {_ROWS_16} === {_env('ak16Rows')}).to.eql(true));",
@@ -1552,7 +1728,7 @@ CASES.append(Case(
         # Обратно: третий ключ заводится, строка пароля не тронута — вход ею проходит.
         *_register_ok(_B, "ak16-third-key", "KB3", key=_MAT_SECOND),
         _list(_B, "ak16-list-three", count=3, extra=_key_listed("KB3", "AK16-LIST-THREE")),
-        *_login(_B, "ak16-login-after-third-key"),
+        *_login(_B, "ak16-login-after-third-key", code=True),
     ],
 ))
 
@@ -1601,7 +1777,7 @@ CASES.append(Case(
         _begin_assertion(_A, "ak54-begin", "54"),
         _clock_until(_A, "ak34-wait-expiry", "akRegExp34"),
         _clock_until(_A, "ak54-wait-expiry", "akAsExp54"),
-        *_login(_A, "ak-a-relogin"),
+        *_login(_A, "ak-a-relogin", code=True),
         _finish_registration(_A, "ak34-expired", slot="X34", ch="akRegCh34",
                              tests=_ceremony_refused(_CHALLENGE_EXPIRED, "AK34-EXPIRED")),
         _finish_assertion(_A, "ak54-expired", slot="K1", ch="akAsCh54",
@@ -1757,13 +1933,8 @@ CASES.append(Case(
 #     на каждом входе;
 #   · Ф13-28 — ретрансляция краем, дом пробы — платформа.
 
-import ast as _ast_f13
-
 _AK_BEGIN = "/iam/v1/auth/access-key/begin"
 _AK_LOGIN = "/iam/v1/auth/access-key/login"
-_SF_STATUS = "/iam/v1/auth/second-factor"
-_SF_ENROLL = "/iam/v1/auth/second-factor/enroll"
-_SF_CONFIRM = "/iam/v1/auth/second-factor/confirm"
 _SESSIONS = "/iam/v1/auth/sessions"
 _STEP_UP = "/iam/v1/auth/step-up"
 _LOGOUT = "/iam/v1/auth/logout"
@@ -1813,26 +1984,6 @@ if _N_ADDRESS < 2 or _N_SOURCE < 2 * _N_ADDRESS:
                      "N_источник ≥ 2·N_адрес)")
 
 
-def _borrowed_totp():
-    """Код по времени — функцией набора второго фактора, разбором модуля, а не копией.
-
-    `_TOTP_JS` читается литералом; счёт принятой ступени переименован в свой,
-    чтобы два набора не делили переменную окружения."""
-    path = _pathlib.Path(__file__).resolve().parent / "kaname-second-factor.py"
-    tree = _ast_f13.parse(path.read_text(encoding="utf-8"))
-    nodes = {t.id: n.value for n in tree.body if isinstance(n, _ast_f13.Assign)
-             for t in n.targets if isinstance(t, _ast_f13.Name)}
-    if "_TOTP_JS" not in nodes:
-        raise SystemExit("kaname-access-keys: в kaname-second-factor.py нет _TOTP_JS — кода по времени нет")
-    lines = _ast_f13.literal_eval(nodes["_TOTP_JS"])
-    if not (isinstance(lines, list) and all(isinstance(x, str) for x in lines)
-            and sum("sfLastStep" in x for x in lines) == 1):
-        raise SystemExit("kaname-access-keys: _TOTP_JS сменил форму (ждали список строк с одним "
-                         "чтением sfLastStep) — сверить разбор")
-    return [x.replace("sfLastStep", "akCLastStep") for x in lines]
-
-
-_TOTP = _borrowed_totp()
 _AKU = "const _akU = (s) => String(s || '').split('+').join('-').split('/').join('_').split('=').join('');"
 _C, _D, _E, _F = "akC", "akD", "akE", "f13"
 # Второй «браузер» человека C: свой контекст формы и свой источник, человек тот же.
@@ -2250,7 +2401,15 @@ CASES.append(Case(
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
+        # kaname#747 (Р3): ключ заводится сессией «2». Ключа у C ещё нет, и «2» дают
+        # пароль и код в одной сессии: C заводит код, токен — из сессии подтверждения;
+        # заведя ключ, C снимает код им же (Ф12 Р9) — «Дано» блока Ф13 (пароль и ключ
+        # без второго фактора) прежнее.
+        *_second_factor(_C, "f13-05"),
+        _authorize(_C, "f13-05-sf-authorize"),
+        _exchange(_C, "f13-05-sf-exchange"),
         *_register_key(_C, "f13-05-key", "C1", handle_var=_C + "Handle"),
+        *_remove_factor(_C, "f13-05"),
         _tok(_C, "f13-05-begin-tok", "access-key-begin", "akC05Begin", fresh=True, init=_fresh_src(_C)),
         _begin(_C, "f13-05-begin", "akLc05", "akC05Begin", extra_tests=[
             _NO_PASSWORD_FIELD.format(label=js_str("F13-05-BEGIN: в теле запроса нет поля password"))]),
@@ -2464,7 +2623,12 @@ CASES.append(Case(
     priority="P1",
     steps=[
         *_human(_D, "ak-d"),
+        # kaname#747 (Р3): ключ — сессией «2»; код заведён и снят, как у C (Ф13-05).
+        *_second_factor(_D, "f13-32"),
+        _authorize(_D, "f13-32-sf-authorize"),
+        _exchange(_D, "f13-32-sf-exchange"),
         *_register_key(_D, "f13-32-key", "D1", handle_var=_D + "Handle"),
+        *_remove_factor(_D, "f13-32"),
         _tok(_D, "f13-32-login-tok", "login", "akD32Pw", fresh=True, init=_fresh_src(_D)),
         *_wrong_passwords(_D, "f13-32a", _D, "akD32Pw", _N_ADDRESS, 1, True),
         _tok(_D, "f13-32a-begin-tok", "access-key-begin", "akD32Begin"),
@@ -2518,6 +2682,24 @@ CASES.append(Case(
 # Ф13-13: копии уровня читают запись. S3 — вход ключом с проверкой («3»), S2 —
 # без неё («2»): церемония и смена пароля называют уровень записи.
 # ───────────────────────────────────────────────────────────────────────────
+def _key_token(p, tag, slot):
+    """Токен человека `p` из сессии, выданной его ключом `slot`: вход ключом → код → обмен.
+
+    Сессия ключа — «3» (проверка пользователя без резерва), носитель — в
+    `<p>SessionCookie`; ей заводятся и снимаются способы уровня «2» (kaname#747)."""
+    t = tag.replace("-", "")
+    up = tag.upper()
+    return [
+        _tok(p, f"{tag}-begin-tok", "access-key-begin", f"{p}{t}B", fresh=True, init=_fresh_src(p)),
+        _begin(p, f"{tag}-begin", f"akL{p}{t}", f"{p}{t}B"),
+        _tok(p, f"{tag}-key-tok", "access-key-login", f"{p}{t}K"),
+        _key_login(p, f"{tag}-key-login", slot=slot, ch=f"akL{p}{t}", tok=f"{p}{t}K", handle=p + "Handle",
+                   tests=_signed_in(p, f"{up}-KEY-LOGIN", slot, p + "SessionCookie", "3", user_var=p + "UserId")),
+        _authorize(p, f"{tag}-authorize"),
+        _exchange(p, f"{tag}-exchange"),
+    ]
+
+
 def _key_session(p, tag, session_var, level, flags):
     up = tag.upper()
     return [
@@ -2665,7 +2847,9 @@ CASES.append(Case(
     classes=["NEG", "SEC", "CRUD"],
     priority="P1",
     steps=[
-        *_login(_C, "f13-17-relogin"),
+        # kaname#747 (Р4): у человека с ключом заведение кода требует сессии «2» —
+        # C заводит код в сессии, выданной его ключом, а не входом паролем.
+        *_key_token(_C, "f13-17-relogin", "C1"),
         _tok(_C, "f13-17-enroll-tok", "second-factor", "akC17Sf", session=_C + "SessionCookie", init=_fresh_src(_C)),
         _lane(_C, "f13-17-enroll", "POST", _SF_ENROLL, body={"csrfToken": "{{akC17Sf}}"}, session=_C + "SessionCookie", tests=[
             *_status_is(200, "F13-17-ENROLL"),
@@ -2792,15 +2976,63 @@ CASES.append(Case(
     ],
 ))
 
+# Указание повысить уровень (Ф11 Р11) — общее для Ф13-25 и блока KN747 ниже:
+# пол «2» у глаголов ключа (kaname#747 Р3) судят оба.
+_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                 "or present a credential of another kind")
+_STEP_UP_BODY = {"code": 16, "message": _STEP_UP_TEXT, "details": []}
+
+
+def _level_hint(label, *, presented=None):
+    """Указание повысить уровень (Ф11 Р11): пара 401/16, тело дословно, вызов — по параметрам.
+
+    Предмет каждого утверждения — булево: отказ полосы второго фактора при дефекте
+    получил бы тело с секретом, и значение не попадает в текст утверждения."""
+    out = [
+        *_status_is(401, label),
+        *_parse_body(),
+        f"pm.test({js_str(label + ': тело — указание повысить уровень: код 16, текст шага, details пуст')}, () => "
+        f"pm.expect(JSON.stringify(__j) === {js_str(_json.dumps(_STEP_UP_BODY, ensure_ascii=False, separators=(',', ':')))}).to.eql(true));",
+        "const __wa = String(pm.response.headers.get('WWW-Authenticate') || '');",
+        "const __wp = {};",
+        r"""__wa.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { __wp[k] = v; return m; });""",
+        f"pm.test({js_str(label + ': вызов Bearer insufficient_user_authentication с acr_values 2')}, () => "
+        r"pm.expect([/^Bearer\s/.test(__wa), __wp.error === 'insufficient_user_authentication', __wp.acr_values === '2']).to.eql([true, true, true]));",
+    ]
+    if presented is not None:
+        out.append(f"pm.test({js_str(label + ': вызов называет предъявленный уровень ' + presented)}, () => "
+                   f"pm.expect(String(__wp.error_description || '').indexOf({js_str('presented ACR ' + presented)}) >= 0).to.eql(true));")
+    return out
+
+
+def _begin_registration_refused(p, name, *, presented):
+    return _own(p, name, "POST", _keys_path(p) + ":beginRegistration", body={},
+                tests=_level_hint(name.upper(), presented=presented))
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Ф13-25: личность без пароля, утратившая ключ, возвращает доступ
-# восстановлением и заводит новый ключ. Ключ F1 «утерян»: проба им больше не
-# входит, кроме последнего шага — снятый ключ отвергнут.
+# восстановлением — шаги (1)–(3) Ф13 без правки: пароль заведён, вход им —
+# сессия «1». Шаги (4)–(5) судит приёмка kaname#747
+# (`level-two-is-enrolled-at-level-two.md`): ключ заводится и снимается только
+# сессией «2» (Р1, Р3), а у человека с паролем и единственным утраченным ключом
+# сессии «2» нет — путь возврата ключа идёт через администратора (Р5,
+# `ResetAccessKeys`). Поэтому из сессии восстановленного пароля и регистрация
+# нового ключа, и снятие утраченного получают указание повысить уровень
+# (Ф11 Р11) и состояние не меняют: в перечне по-прежнему один ключ F1. Тот же
+# исход у человека с кодом, не предъявленным в сессии восстановления, — KN747-13.
+# Ключ F1 «утерян»: проба им не входит.
+#
+# ЧЕГО КЕЙС НЕ УТВЕРЖДАЕТ — КОММЕНТАРИЕМ: сброс ключей администратором (Р5) —
+# «Дано» требует распорядителя с отношением `identity_suspender` в сессии «2»,
+# стенд такого человека не заводит; держит integration службы
+# (`internal/service/resetting_access_keys_authz_integration_test.go`), как и
+# KN747-12 в блоке KN747 ниже.
 # ───────────────────────────────────────────────────────────────────────────
 CASES.append(Case(
-    id="IAM-AKLOGIN-OK-RECOVERY-OF-PASSWORDLESS-PERSON",
-    title="Ф13-25: восстановление заводит пароль, вход им «1», новый ключ, снятие утраченного — им единый отказ, новым вход",
-    classes=["CRUD", "SEC"],
+    id="IAM-AKLOGIN-SEC-RECOVERY-OF-PASSWORDLESS-PERSON-LEVEL-ONE",
+    title="Ф13-25 по kaname#747 Р5: восстановление заводит пароль, вход им «1»; регистрация нового ключа и снятие утраченного — указание повысить уровень, в перечне один ключ",
+    classes=["SEC", "AUTHZ", "NEG"],
     priority="P1",
     steps=[
         _tok(_F, "f13-25-recovery-tok", "recovery", "f13Rec", fresh=True, init=[*_f13_person_present(), *_fresh_src(_F)]),
@@ -2823,15 +3055,9 @@ CASES.append(Case(
                         tests=_password_signed_in(_F, "F13-25-PASSWORD-LOGIN", _F + "SessionCookie")),
         _authorize(_F, "f13-25-authorize"),
         _exchange(_F, "f13-25-exchange"),
-        *_register_key(_F, "f13-25-new-key", "F3", key=_MAT_SECOND),
-        _revoke(_F, "f13-25-revoke-lost-key", "F1", tests=_registration_accepted("F1R", "F13-25-REVOKE-LOST-KEY")),
-        _await_op(_F, "f13-25-revoke-lost-key-op", "F1R"),
-        _tok(_F, "f13-25-begin-tok", "access-key-begin", "f1325B", fresh=True, init=_fresh_src(_F)),
-        _begin(_F, "f13-25-begin", "akLf1325", "f1325B"),
-        _tok(_F, "f13-25-key-tok", "access-key-login", "f1325K"),
-        _key_login(_F, "f13-25-lost-key-refused", slot="F1", ch="akLf1325", tok="f1325K", handle=_F + "Handle",
-                   tests=_signin_refused("F13-25-LOST-KEY-REFUSED")),
-        *_f13_sign_in("f13-25-new-key-login", "F3", "f13AfterRecovery"),
+        _begin_registration_refused(_F, "f13-25-new-key-begin", presented="1"),
+        _revoke(_F, "f13-25-revoke-lost-key", "F1", tests=_level_hint("F13-25-REVOKE-LOST-KEY", presented="1")),
+        _list(_F, "f13-25-one-key-left", count=1, extra=_key_listed("F1", "F13-25-ONE-KEY-LEFT")),
     ],
 ))
 
@@ -2862,7 +3088,7 @@ CASES.append(Case(
     classes=["SEC", "CRUD"],
     priority="P0",
     steps=[
-        *_login(_C, "f13-21"),
+        *_login(_C, "f13-21", code=True),
         *_register_key(_C, "f13-21-a", "C21"),
         *_key_session_of(_CB, "f13-21-s1", "C21", "akC21S1"),
         # Положительный контроль: до снятия оба носителя годны.
@@ -2890,8 +3116,8 @@ CASES.append(Case(
 
 # ───────────────────────────────────────────────────────────────────────────
 # Уборка блока Ф13: ключи, заведённые набором, сняты; у личности посева
-# остаётся только ключ, заведённый Ф13-25 (без него у неё не было бы способа
-# входа ключом, а пароль ей завело восстановление).
+# остаётся ключ посева F1 — сессией «1» восстановленного пароля Ф13-25 его не
+# снять (kaname#747 Р5), а пароль ей завело восстановление.
 # ───────────────────────────────────────────────────────────────────────────
 CASES.append(Case(
     id="IAM-AKLOGIN-OK-CLEANUP-KEYS",
@@ -2899,16 +3125,529 @@ CASES.append(Case(
     classes=["CRUD"],
     priority="P2",
     steps=[
-        *_login(_C, "f13-cleanup-c-login"),
+        *_login(_C, "f13-cleanup-c-login", code=True),
         _revoke(_C, "f13-cleanup-c1", "C1", tests=_registration_accepted("C1C", "F13-CLEANUP-C1")),
         _await_op(_C, "f13-cleanup-c1-op", "C1C"),
         _list(_C, "f13-cleanup-list-c", count=0),
-        *_login(_D, "f13-cleanup-d-login"),
+        # Снятие ключа — сессией «2» (kaname#747, Р3); кода у D нет — токен из сессии ключа.
+        *_key_token(_D, "f13-cleanup-d", "D1"),
         _revoke(_D, "f13-cleanup-d1", "D1", tests=_registration_accepted("D1C", "F13-CLEANUP-D1")),
         _await_op(_D, "f13-cleanup-d1-op", "D1C"),
         _list(_D, "f13-cleanup-list-d", count=0),
     ],
 ))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KN747 — СПОСОБ, ДАЮЩИЙ «2», ЗАВОДИТСЯ И СНИМАЕТСЯ СЕССИЕЙ «2» (kaname#747,
+# приёмка `docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md`).
+#
+# Пол «2» у `BeginRegistration`, `FinishRegistration` и `Revoke` (Р3): сессия «1» —
+# указание повысить уровень (Ф11 Р11) — `401`, тело с кодом 16 и текстом шага,
+# вызов `Bearer` с `error="insufficient_user_authentication"` и `acr_values="2"`;
+# состояние не меняется. Сессия «2» — пароль и код в одной сессии либо вход
+# ключом. Заведение кода по времени у человека с ключом — тоже сессией «2»
+# (Р4), у человека без ключа — свежей «1»; свежесть судится после уровня.
+# Люди свои на прогон: G (пароль; затем код и ключи; затем восстановление),
+# H (пароль и код; второй «браузер» Hb — та же личность, сессия одним паролем),
+# P (только пароль), Q (пароль и ключ; Qb — сессия его ключа), S (пароль и код;
+# Sb — сессия одним паролем; обе старше окна свежести). Каждый отрицательный
+# кейс отличается от положительного близнеца ОДНИМ фактом — уровнем сессии,
+# наличием ключа либо давностью предъявления.
+#
+# Ключ, вход ключом и токен человека нужны и сценариям заведения кода (§3.2) и
+# свежести (§3.6), поэтому они здесь, а не в наборе второго фактора: подставной
+# аутентификатор и церемония токена живут в этом модуле в одном экземпляре.
+#
+# Техники: таблица решений «уровень сессии × глагол» (регистрация — начало и
+# приём результата, снятие, заведение и подтверждение кода); переходы
+# состояния испытания (выдано · отказ по уровню · принято) и заведения кода
+# (нет · ожидает · заведён); граница окна свежести (свежая · старше окна); пары
+# близнецов с одним изменённым фактом; положительный контроль на каждом отказе.
+#
+# ЧЕГО БЛОК НЕ УТВЕРЖДАЕТ — КОММЕНТАРИЕМ, не строкой:
+#   · сброс администратором (§3.4, сценарий двенадцатый) — «Дано» требует
+#     распорядителя с отношением `identity_suspender` в сессии «2», стенд такого
+#     человека не заводит; держит integration службы;
+#   · нечитаемый перечень ключей (§3.7) — край условия не создаёт, держит use-case.
+# ═══════════════════════════════════════════════════════════════════════════
+_G, _H, _HB = "akG", "akH", "akHb"
+
+
+def _same_person(src, dst):
+    """Второй «браузер» той же личности: адрес, пароль и id — её, контекст и источник — свои."""
+    return [
+        "{",
+        "  " + _set(dst + "Email", _env(src + "Email")),
+        "  " + _set(dst + "Password", _env(src + "Password")),
+        "  " + _set(dst + "UserId", _env(src + "UserId")),
+        "  " + _set(dst + "Src", "'198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254))"),
+        *(f"  pm.environment.unset({js_str(dst + n)});" for n in ("FormCookie", "SessionCookie", "Csrf", "Token", "OauthCode")),
+        "}",
+    ]
+
+
+def _stepped_to(p, label, level):
+    """Церемония повышения в сессии `<p>SessionCookie`: уровень записи и перевыпущенный носитель."""
+    return [
+        *_status_is(200, label),
+        *_parse_body(),
+        f"pm.test({js_str(label + f': уровень сессии «{level}»')}, () => "
+        f"pm.expect(__j.session && __j.session.assuranceLevel).to.eql({js_str(level)}));",
+        *_capture_cookie(p, "kaname_session", "SessionCookie", label),
+    ]
+
+
+def _issue_user_token(p, tag, slot):
+    """Глагол с полом «2» — выпуск личного токена — проходит; выпущенное снимается тут же."""
+    up = tag.upper()
+    tokens = "/iam/v1/users/{{" + p + "UserId}}/tokens"
+    token_id = "ak" + slot + "IssuedId"
+    return [
+        _own(p, f"{tag}-issue", "POST", tokens, body={"description": "kn747 level two"},
+             tests=_registration_accepted(slot, f"{up}-ISSUE")),
+        _await_op(p, f"{tag}-issue-op", slot, tests=[
+            "const _akT = (__j.response && __j.response.token) || {};",
+            f"pm.test({js_str(up + '-ISSUE-OP: выпущенный токен назван id')}, () => "
+            "pm.expect(typeof _akT.id === 'string' && _akT.id.length > 0).to.eql(true));",
+            f"if (_akT.id) {{ {_set(token_id, '_akT.id')} }}",
+        ]),
+        _own(p, f"{tag}-issued-revoke", "DELETE", tokens + "/{{" + token_id + "}}",
+             pre=_need(token_id, f"{up}-ISSUED-REVOKE: выпущенный токен не назван",
+                       "операция выпуска выше не вернула id — снимать нечего; причина — в ней"),
+             tests=_registration_accepted(slot + "R", f"{up}-ISSUED-REVOKE")),
+        _await_op(p, f"{tag}-issued-revoke-op", slot + "R"),
+    ]
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# KN747-04, KN747-02: регистрация ключа из сессии «1» — указание повысить
+# уровень на первом шаге. G без кода (04), затем G с кодом, не предъявленным в
+# сессии (02).
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-04-LEVEL-ONE-WITHOUT-CODE",
+    title="verifies KN747-04: человек только с паролем, сессия «1» — запрос испытания регистрации ключа — указание повысить уровень; ключей ноль",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        *_human(_G, "kn747-g"),
+        _begin_registration_refused(_G, "kn747-04-begin", presented="1"),
+        _list(_G, "kn747-04-list", count=0),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-02-CODE-NOT-PRESENTED",
+    title="verifies KN747-02: код заведён, но в сессии не предъявлен — сессия «1»: запрос испытания — указание повысить уровень; ключей ноль",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        *_second_factor(_G, "kn747-02"),
+        *_login(_G, "kn747-02"),
+        _begin_registration_refused(_G, "kn747-02-begin", presented="1"),
+        _list(_G, "kn747-02-list", count=0),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# KN747-01: близнец KN747-02 — тот же человек вошёл паролем И кодом.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-KN747-01-REGISTER-AT-LEVEL-TWO",
+    title="verifies KN747-01: сессия «2» (пароль и код) — ключ заведён и виден в перечне; вход им выдаёт сессию, проходящую выпуск личного токена",
+    classes=["CRUD", "AUTHZ"],
+    priority="P0",
+    steps=[
+        *_login(_G, "kn747-01", code=True),
+        _list(_G, "kn747-01-list-empty", count=0),
+        *_register_key(_G, "kn747-01-key", "G1", handle_var=_G + "Handle"),
+        _list(_G, "kn747-01-list", count=1, extra=_key_listed("G1", "KN747-01-LIST")),
+        *_key_token(_G, "kn747-01-key-login", "G1"),
+        *_issue_user_token(_G, "kn747-01", "G01T"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# KN747-03: испытание выдано в сессии «2», результат прислан из второй живой
+# сессии того же человека уровня «1» — указание; испытание не погашено, и
+# результат из сессии «2» заводит ключ.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-03-FINISH-FROM-LEVEL-ONE",
+    title="verifies KN747-03: результат церемонии из сессии «1» того же человека — указание повысить уровень; ключа нет; тот же результат из сессии «2» заводит ключ",
+    classes=["AUTHZ", "NEG", "STATE"],
+    priority="P0",
+    steps=[
+        *_human(_H, "kn747-h", factor=True),
+        _begin_registration(_H, "kn747-03-begin", "H03"),
+        *_login(_HB, "kn747-03-s1", init=_same_person(_H, _HB)),
+        _finish_registration(_HB, "kn747-03-finish-from-one", slot="H1", ch="akRegChH03",
+                             tests=_level_hint("KN747-03-FINISH-FROM-ONE", presented="1")),
+        _list(_H, "kn747-03-list-empty", count=0),
+        _finish_registration(_H, "kn747-03-finish-from-two", slot="H1", ch="akRegChH03",
+                             tests=_registration_accepted("H1", "KN747-03-FINISH-FROM-TWO")),
+        _await_op(_H, "kn747-03-op", "H1", tests=_key_registered("H1", "KN747-03-OP")),
+        _list(_H, "kn747-03-list", count=1, extra=_key_listed("H1", "KN747-03-LIST")),
+        # Уборка: ключ H снят (сессия «2»), перечень пуст.
+        _revoke(_H, "kn747-03-cleanup", "H1", tests=_registration_accepted("H1C", "KN747-03-CLEANUP")),
+        _await_op(_H, "kn747-03-cleanup-op", "H1C"),
+        _list(_H, "kn747-03-cleanup-list", count=0),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# KN747-09, KN747-10: снятие ключа — сессией «2». У G пароль, код и два ключа.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-09-REVOKE-AT-LEVEL-ONE",
+    title="verifies KN747-09: сессия «1» снимает один из двух ключей — указание повысить уровень; оба ключа в перечне",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        *_register_key(_G, "kn747-09-second-key", "G2", key=_MAT_SECOND),
+        *_login(_G, "kn747-09"),
+        _revoke(_G, "kn747-09-revoke", "G2", tests=_level_hint("KN747-09-REVOKE", presented="1")),
+        _list(_G, "kn747-09-list", count=2, extra=[*_key_listed("G1", "KN747-09-LIST"),
+                                                    *_key_listed("G2", "KN747-09-LIST")]),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-KN747-10-REVOKE-AT-LEVEL-TWO",
+    title="verifies KN747-10: тот же человек в сессии «2» (пароль и код) снимает тот же ключ — операция без ошибки; в перечне один ключ",
+    classes=["CRUD", "AUTHZ"],
+    priority="P0",
+    steps=[
+        *_login(_G, "kn747-10", code=True),
+        _revoke(_G, "kn747-10-revoke", "G2", tests=_registration_accepted("G2R", "KN747-10-REVOKE")),
+        _await_op(_G, "kn747-10-revoke-op", "G2R"),
+        _list(_G, "kn747-10-list", count=1, extra=_key_listed("G1", "KN747-10-LIST")),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# KN747-11: положительный контроль — вход ключом по-прежнему даёт «2».
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-KN747-11-KEY-LOGIN-STILL-LEVEL-TWO",
+    title="verifies KN747-11: вход ключом, заведённым в сессии «2», выдаёт сессию, в которой выпуск личного токена завершается без ошибки",
+    classes=["CRUD", "AUTHZ"],
+    priority="P1",
+    steps=[
+        *_key_token(_G, "kn747-11-key-login", "G1"),
+        *_issue_user_token(_G, "kn747-11", "G11T"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# KN747-13, KN747-14: восстановление доступа не открывает обходного пути к
+# ключу. У G пароль, код и один ключ. Сессия восстановления с заданным и
+# предъявленным паролем — «1» (13); с кодом сверх него — «2» (14, Ф11-29).
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-13-RECOVERY-SESSION-LEVEL-ONE",
+    title="verifies KN747-13: сессия восстановления с предъявленным новым паролем — «1»: запрос испытания — указание повысить уровень; ключей один",
+    classes=["AUTHZ", "NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _tok(_G, "kn747-13-recovery-tok", "recovery", "akG13Rec", fresh=True,
+             init=[_set(_G + "RecoverySeen", "'0'"), *_fresh_src(_G)]),
+        _lane(_G, "kn747-13-recovery", "POST", _RECOVERY, body={"email": "{{akGEmail}}", "csrfToken": "{{akG13Rec}}"},
+              tests=_status_is(200, "KN747-13-RECOVERY")),
+        _await_letter(_G, "kn747-13-letter", head=_HEAD_RECOVERY, seen="RecoverySeen", code="RecoveryCode",
+                      kind="восстановления"),
+        _tok(_G, "kn747-13-complete-tok", "recovery-complete", "akG13Done"),
+        _lane(_G, "kn747-13-complete", "POST", _RECOVERY_COMPLETE,
+              body={"email": "{{akGEmail}}", "code": "{{akGRecoveryCode}}", "newPassword": "{{akGPassword}}",
+                    "csrfToken": "{{akG13Done}}"},
+              pre=[_set(_G + "Password", f"'Rec-' + Math.floor(Math.random() * 2176782336).toString(36) + '-' + {_env('runId')} + '-pw'")],
+              tests=[*_status_is(200, "KN747-13-COMPLETE"),
+                     *_capture_cookie(_G, "kaname_session", "SessionCookie", "KN747-13-COMPLETE")]),
+        _tok(_G, "kn747-13-step-up-tok", "step-up", "akG13Up", session=_G + "SessionCookie"),
+        _step_up(_G, "kn747-13-password", _G + "SessionCookie",
+                 {"method": "password", "password": "{{akGPassword}}", "csrfToken": "{{akG13Up}}"},
+                 tests=_stepped_to(_G, "KN747-13-PASSWORD", "1")),
+        _authorize(_G, "kn747-13-authorize"),
+        _exchange(_G, "kn747-13-exchange"),
+        _begin_registration_refused(_G, "kn747-13-begin", presented="1"),
+        _list(_G, "kn747-13-list", count=1, extra=_key_listed("G1", "KN747-13-LIST")),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-KN747-14-RECOVERY-SESSION-WITH-CODE",
+    title="verifies KN747-14: в той же сессии восстановления предъявлен код — «2»: ключ заведён, ключей два; уборка — ключи G сняты",
+    classes=["CRUD", "AUTHZ", "SEC"],
+    priority="P0",
+    steps=[
+        _await_code_step(_G, "kn747-14-step-up-tok", "step-up", with_session=True),
+        _step_up(_G, "kn747-14-totp", _G + "SessionCookie",
+                 {"method": "totp", "code": "{{akGTotpCode}}", "csrfToken": "{{akGCsrf}}"},
+                 pre=_totp_code_of(_G), tests=[*_stepped_to(_G, "KN747-14-TOTP", "2"), *_totp_accepted(_G)]),
+        _authorize(_G, "kn747-14-authorize"),
+        _exchange(_G, "kn747-14-exchange"),
+        *_register_key(_G, "kn747-14-key", "G3"),
+        _list(_G, "kn747-14-list", count=2, extra=[*_key_listed("G1", "KN747-14-LIST"),
+                                                    *_key_listed("G3", "KN747-14-LIST")]),
+        # Уборка: ключи G сняты той же сессией «2», перечень пуст.
+        _revoke(_G, "kn747-cleanup-g1", "G1", tests=_registration_accepted("G1C", "KN747-CLEANUP-G1")),
+        _await_op(_G, "kn747-cleanup-g1-op", "G1C"),
+        _revoke(_G, "kn747-cleanup-g3", "G3", tests=_registration_accepted("G3C", "KN747-CLEANUP-G3")),
+        _await_op(_G, "kn747-cleanup-g3-op", "G3C"),
+        _list(_G, "kn747-cleanup-list-g", count=0),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# §3.2 — заведение кода у человека с ключом — сессией «2» (Р4). `…/enroll` и
+# `…/confirm` отвечают указанием повысить уровень той же формы, что край;
+# состояние не меняется. У человека без ключа свежая «1» заводит код (Ф12 Р8).
+# Люди: P (только пароль), Q (пароль и ключ; второй «браузер» Qb — сессия ключа).
+# ───────────────────────────────────────────────────────────────────────────
+_P, _Q, _QB = "akP", "akQ", "akQb"
+
+
+def _sf_enroll(p, name, *, secret_of, tests):
+    """`…/enroll` из сессии `<p>SessionCookie`; на `200` секрет — в `<secret_of>TotpSecret`."""
+    return _lane_post(p, name, _SF_ENROLL, {"csrfToken": "{{" + p + "Csrf}}"}, with_session=True, test_script=[
+        *tests,
+        "if (pm.response.code === 200) { let __e = {}; try { __e = pm.response.json(); } catch (e) { __e = {}; }",
+        "  " + _set(secret_of + "TotpSecret", "__e.secret || ''"),
+        f"  pm.environment.unset({js_str(secret_of + 'LastStep')}); }}",
+    ])
+
+
+def _sf_confirm(p, name, *, code_of, fresh_code, tests):
+    """`…/confirm` из сессии `<p>SessionCookie` кодом `<code_of>TotpCode` (`fresh_code` — вычислить заново)."""
+    return _lane_post(p, name, _SF_CONFIRM, {"code": "{{" + code_of + "TotpCode}}", "csrfToken": "{{" + p + "Csrf}}"},
+                      with_session=True, extra_pre=_totp_code_of(code_of) if fresh_code else (), test_script=list(tests))
+
+
+def _sf_state(p, name, tests):
+    """Состояние второго фактора под носителем `<p>SessionCookie`; тело — в `__j`."""
+    return _lane(p, name, "GET", _SF_STATUS, session=p + "SessionCookie",
+                 tests=[*_status_is(200, name.upper()), *_parse_body(), *tests])
+
+
+def _secret_shown(label):
+    return [*_status_is(200, label), *_parse_body(),
+            f"pm.test({js_str(label + ': секрет base32 выдан')}, () => "
+            "pm.expect(/^[A-Z2-7]{16,}$/.test(String(__j.secret || ''))).to.eql(true));"]
+
+
+def _key_session_in(owner, browser, tag, slot):
+    """Сессия, выданная ключом `slot` личности `owner`, во втором «браузере» `browser` — «3»."""
+    t = tag.replace("-", "")
+    up = tag.upper()
+    return [
+        _tok(browser, f"{tag}-begin-tok", "access-key-begin", f"{browser}{t}B", fresh=True,
+             init=_same_person(owner, browser)),
+        _begin(browser, f"{tag}-begin", f"akL{browser}{t}", f"{browser}{t}B"),
+        _tok(browser, f"{tag}-key-tok", "access-key-login", f"{browser}{t}K"),
+        _key_login(browser, f"{tag}-key-login", slot=slot, ch=f"akL{browser}{t}", tok=f"{browser}{t}K",
+                   handle=owner + "Handle",
+                   tests=_signed_in(browser, f"{up}-KEY-LOGIN", slot, browser + "SessionCookie", "3",
+                                    user_var=owner + "UserId")),
+    ]
+
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-KN747-05-ENROLL-WITHOUT-KEY-AT-LEVEL-ONE",
+    title="verifies KN747-05: человек только с паролем, сессия «1» — заведение 200, подтверждение 200 с новым носителем; эта сессия проходит глагол с полом «2»",
+    classes=["CRUD", "AUTHZ"],
+    priority="P0",
+    steps=[
+        *_human(_P, "kn747-05-p"),
+        _csrf(_P, "kn747-05-sf-csrf", "second-factor", with_session=True,
+              init=[_set(_P + "SessionBefore", _env(_P + "SessionCookie"))]),
+        _sf_enroll(_P, "kn747-05-enroll", secret_of=_P, tests=[*_secret_shown("KN747-05-ENROLL"),
+                                                               *_no_cookies("KN747-05-ENROLL")]),
+        _sf_confirm(_P, "kn747-05-confirm", code_of=_P, fresh_code=True, tests=[
+            *_status_is(200, "KN747-05-CONFIRM"),
+            *_totp_accepted(_P),
+            *_parse_body(),
+            "pm.test('KN747-05-CONFIRM: фактор заведён — сессия «2»', () => "
+            "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+            *_capture_cookie(_P, "kaname_session", "SessionCookie", "KN747-05-CONFIRM"),
+            "pm.test('KN747-05-CONFIRM: носитель сессии новый', () => "
+            f"pm.expect(!!{_env(_P + 'SessionBefore')} && {_env(_P + 'SessionCookie')} !== {_env(_P + 'SessionBefore')}).to.eql(true));",
+        ]),
+        _authorize(_P, "kn747-05-authorize"),
+        _exchange(_P, "kn747-05-exchange"),
+        _begin_registration(_P, "kn747-05-level-two-verb", "P05"),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-06-ENROLL-WITH-KEY-AT-LEVEL-ONE",
+    title="verifies KN747-06: человек с паролем и ключом, сессия «1» — заведение кода: указание повысить уровень; заведение не начато",
+    classes=["AUTHZ", "NEG", "STATE"],
+    priority="P0",
+    steps=[
+        *_human(_Q, "kn747-06-q", factor=True),
+        *_register_key(_Q, "kn747-06-key", "Q1", handle_var=_Q + "Handle"),
+        *_remove_factor(_Q, "kn747-06"),
+        *_login(_Q, "kn747-06"),
+        _csrf(_Q, "kn747-06-sf-csrf", "second-factor", with_session=True),
+        _sf_enroll(_Q, "kn747-06-enroll", secret_of=_Q + "Refused",
+                   tests=[*_level_hint("KN747-06-ENROLL"), *_no_cookies("KN747-06-ENROLL")]),
+        _sf_state(_Q, "kn747-06-state", [
+            "pm.test('KN747-06-STATE: заведение не начато — totp.enrolled false без pendingUntil', () => "
+            """pm.expect(JSON.stringify(__j) === '{"totp":{"enrolled":false}}').to.eql(true));""",
+        ]),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-07-CONFIRM-FROM-LEVEL-ONE",
+    title="verifies KN747-07: заведение начато в сессии ключа; подтверждение верным кодом из сессии «1» — указание повысить уровень; ожидание с прежним сроком",
+    classes=["AUTHZ", "NEG", "STATE"],
+    priority="P0",
+    steps=[
+        *_key_session_in(_Q, _QB, "kn747-07-key-session", "Q1"),
+        _csrf(_QB, "kn747-07-sf-csrf-two", "second-factor", with_session=True),
+        _sf_enroll(_QB, "kn747-07-enroll-in-key-session", secret_of=_Q, tests=_secret_shown("KN747-07-ENROLL")),
+        _sf_state(_QB, "kn747-07-state-pending", [
+            "pm.test('KN747-07-STATE-PENDING: заведение ожидает подтверждения', () => "
+            "pm.expect(!!__j.totp && __j.totp.enrolled === false && typeof __j.totp.pendingUntil === 'string').to.eql(true));",
+            _set(_Q + "PendingUntil", "(__j.totp && __j.totp.pendingUntil) || ''"),
+        ]),
+        _csrf(_Q, "kn747-07-sf-csrf-one", "second-factor", with_session=True),
+        _sf_confirm(_Q, "kn747-07-confirm-from-one", code_of=_Q, fresh_code=True,
+                    tests=[*_level_hint("KN747-07-CONFIRM-FROM-ONE"), *_no_cookies("KN747-07-CONFIRM-FROM-ONE")]),
+        _sf_state(_QB, "kn747-07-state-kept", [
+            "pm.test('KN747-07-STATE-KEPT: фактор не заведён, срок ожидания прежний', () => "
+            f"pm.expect(!!__j.totp && __j.totp.enrolled === false && !!{_env(_Q + 'PendingUntil')} "
+            f"&& __j.totp.pendingUntil === {_env(_Q + 'PendingUntil')}).to.eql(true));",
+        ]),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-KN747-08-CONFIRM-FROM-KEY-SESSION",
+    title="verifies KN747-08: тот же верный код из сессии ключа — 200, фактор заведён, запасные коды показаны один раз; уборка — ключ снят",
+    classes=["CRUD", "AUTHZ", "STATE"],
+    priority="P0",
+    steps=[
+        _csrf(_QB, "kn747-08-sf-csrf", "second-factor", with_session=True),
+        _sf_confirm(_QB, "kn747-08-confirm-from-two", code_of=_Q, fresh_code=False, tests=[
+            *_status_is(200, "KN747-08-CONFIRM"),
+            *_totp_accepted(_Q),
+            *_parse_body(),
+            "pm.test('KN747-08-CONFIRM: десять запасных кодов показаны', () => "
+            "pm.expect(Array.isArray(__j.backupCodes) && __j.backupCodes.length === 10).to.eql(true));",
+            *_capture_cookie(_QB, "kaname_session", "SessionCookie", "KN747-08-CONFIRM"),
+        ]),
+        _sf_state(_QB, "kn747-08-state", [
+            "pm.test('KN747-08-STATE: фактор заведён', () => "
+            "pm.expect(!!__j.totp && __j.totp.enrolled === true).to.eql(true));",
+        ]),
+        # Уборка: ключ Q снят сессией ключа, перечень пуст.
+        _authorize(_QB, "kn747-08-cleanup-authorize"),
+        _exchange(_QB, "kn747-08-cleanup-exchange"),
+        _revoke(_QB, "kn747-08-cleanup-revoke", "Q1", tests=_registration_accepted("Q1C", "KN747-08-CLEANUP-REVOKE")),
+        _await_op(_QB, "kn747-08-cleanup-revoke-op", "Q1C"),
+        _list(_QB, "kn747-08-cleanup-list", count=0),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# §3.6 — свежесть остаётся и судится после уровня. «Дано» — сессии старше окна
+# свежести: человек S (пароль и код) заводит сессию «2» и вторую сессию «1»
+# ПЕРВЫМ кейсом модуля, исход судится в его конце — окно выжидает весь набор, а
+# шаг ожидания сверяет свой срок сам и добирает остаток, если набор короче окна.
+# ───────────────────────────────────────────────────────────────────────────
+_S, _SB = "akS", "akSb"
+_STALE_AT = "akSStaleAt"
+
+
+def _authn_profile(key):
+    found = _re.findall(rf"^  {key}: (\S+)\s*$", _profile_text(), _re.M)
+    if len(found) != 1:
+        raise SystemExit(f"kaname-access-keys: ключ профиля authn.{key} найден {len(found)} раз "
+                         f"в {_PROFILE} — ждали ровно один")
+    return found[0]
+
+
+_T_FRESH = _seconds(_authn_profile("selfServiceFreshness"))
+_STALE_EPS_MS = 5000
+_STALE_POLL_MS = 10000
+_STALE_CAP = -(-((_T_FRESH + 300) * 1000) // _STALE_POLL_MS)
+
+_GIVEN_STALE = Case(
+    id="IAM-ACCESSKEY-OK-KN747-15-16-GIVEN-SESSIONS",
+    title="verifies KN747-15, KN747-16 («Дано»): человек с кодом — сессия «2» и сессия «1», ключей ноль; срок окна свежести взведён",
+    classes=["STATE"],
+    priority="P1",
+    steps=[
+        *_human(_S, "kn747-15-s", factor=True),
+        *_login(_SB, "kn747-16-s1", init=_same_person(_S, _SB)),
+        _list(_SB, "kn747-15-16-given-list", count=0, extra=[
+            f"if (pm.response.code === 200) {{ {_set(_STALE_AT, f'String(Date.now() + {_T_FRESH * 1000 + _STALE_EPS_MS})')} }}",
+        ]),
+    ],
+)
+
+
+def _wait_stale(name):
+    """Ожидание срока «старше окна свежести» обеих сессий S: опрос с настоящей паузой."""
+    path = f"{_CSRF}?form=login"
+    polls = "_akStalePolls"
+    label = name.upper()
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[*require_env_url(_LANE, path, _LANE_WHY), *_src_pre(_S)],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            *_status_is(200, label),
+            f"const __at = parseInt({_env(_STALE_AT)} || '0', 10);",
+            f"const __polls = parseInt({_env(polls)} || '0', 10);",
+            "const __ready = __at > 0 && Date.now() >= __at;",
+            f"pm.test({js_str(label + ': срок взведён кейсом «Дано»')}, () => pm.expect(__at > 0).to.eql(true));",
+            f"pm.test({js_str(label + f': окно свежести прошло либо ожидание в пределе {_STALE_CAP} опросов')}, () => "
+            f"pm.expect(__ready || __polls < {_STALE_CAP}).to.eql(true));",
+            f"if (__at > 0 && !__ready && __polls < {_STALE_CAP}) {{",
+            "  " + _set(polls, "String(__polls + 1)"),
+            f"  const __pause = Math.min({_STALE_POLL_MS}, Math.max(0, __at - Date.now()));",
+            "  const _akw = Date.now(); while (Date.now() - _akw < __pause) { /* окно свежести ещё не прошло */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(polls)});",
+        ],
+    )
+
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-15-STALE-LEVEL-TWO",
+    title="verifies KN747-15: сессия «2» старше окна свежести — запрос испытания регистрации ключа: 403 SESSION_NOT_FRESH; ключей ноль",
+    classes=["STATE", "NEG"],
+    priority="P1",
+    steps=[
+        _wait_stale("kn747-15-wait"),
+        _authorize(_S, "kn747-15-authorize"),
+        _exchange(_S, "kn747-15-exchange"),
+        _own(_S, "kn747-15-begin", "POST", _keys_path(_S) + ":beginRegistration", body={},
+             tests=_refused(403, 7, "KN747-15-BEGIN", reason="SESSION_NOT_FRESH")),
+        _list(_S, "kn747-15-list", count=0),
+    ],
+))
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-KN747-16-STALE-LEVEL-ONE",
+    title="verifies KN747-16: сессия «1» старше окна свежести — запрос испытания: указание повысить уровень, а не отказ свежести",
+    classes=["AUTHZ", "NEG"],
+    priority="P1",
+    steps=[
+        _authorize(_SB, "kn747-16-authorize"),
+        _exchange(_SB, "kn747-16-exchange"),
+        _begin_registration_refused(_SB, "kn747-16-begin", presented="1"),
+    ],
+))
+
+CASES.insert(0, _GIVEN_STALE)
 
 
 CASES = address_own_front(CASES, _OWN_WHY)

@@ -406,6 +406,10 @@ type CatalogRevisedEntry struct {
 // ровно значением этого поля в двух записях. Край увидит смену после подъёма
 // пина службы и перегенерации каталога; тогда сверка объявит записи находкой
 // сама, и они снимаются отдельным изменением службы.
+//
+// Ещё три записи заведены 2026-10-12 (kaname#747, приёмка
+// `level-two-is-enrolled-at-level-two.md`, Р3): пол уровня у обоих глаголов
+// регистрации ключа доступа и у его снятия поднят контрактом службы до «2».
 var catalogRevisedEntries = []CatalogRevisedEntry{
 	{
 		FQN:       "kaname.cloud.iam.v1.ServiceAccountService/Delete",
@@ -436,6 +440,51 @@ var catalogRevisedEntries = []CatalogRevisedEntry{
 			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
 			"снимается отдельным изменением службы",
 		Refs: "PRO-Robotech/kaname#720",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.AccessKeyService/BeginRegistration",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у выдачи испытания регистрации ключа доступа поднят контрактом службы (kaname#747, приёмка " +
+			"`level-two-is-enrolled-at-level-two.md`, Р3); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт службы этой " +
+			"ревизии: общие записи совпадают с нашей копией побайтово; у края на дереве платформы fd9f1793 значение " +
+			"прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.AccessKeyService/BeginRegistration` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#747",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.AccessKeyService/FinishRegistration",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у приёма результата регистрации ключа доступа поднят контрактом службы (kaname#747, приёмка " +
+			"`level-two-is-enrolled-at-level-two.md`, Р3); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт службы этой " +
+			"ревизии: общие записи совпадают с нашей копией побайтово; у края на дереве платформы fd9f1793 значение " +
+			"прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.AccessKeyService/FinishRegistration` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#747",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.AccessKeyService/Revoke",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у снятия ключа доступа поднят контрактом службы (kaname#747, приёмка " +
+			"`level-two-is-enrolled-at-level-two.md`, Р3); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт службы этой " +
+			"ревизии: общие записи совпадают с нашей копией побайтово; у края на дереве платформы fd9f1793 значение " +
+			"прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.AccessKeyService/Revoke` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#747",
 	},
 }
 

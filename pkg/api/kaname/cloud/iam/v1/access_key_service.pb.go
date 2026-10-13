@@ -1539,14 +1539,14 @@ const file_kaname_cloud_iam_v1_access_key_service_proto_rawDesc = "" +
 	"\fbackup_state\x18\x04 \x01(\bR\vbackupState2\xba\v\n" +
 	"\x10AccessKeyService\x12\x94\x02\n" +
 	"\x11BeginRegistration\x126.kaname.cloud.iam.v1.BeginAccessKeyRegistrationRequest\x1a3.kaname.cloud.iam.v1.AccessKeyRegistrationChallenge\"\x91\x01\x8a\xb5\x18\"iam.access_keys.begin_registration\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
-	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x029:\x01*\"4/iam/v1/users/{user_id}/accessKeys:beginRegistration\x12\x9d\x02\n" +
+	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\x82\xd3\xe4\x93\x029:\x01*\"4/iam/v1/users/{user_id}/accessKeys:beginRegistration\x12\x9d\x02\n" +
 	"\x12FinishRegistration\x127.kaname.cloud.iam.v1.FinishAccessKeyRegistrationRequest\x1a\x1c.corelib.operation.Operation\"\xaf\x01\x8a\xb5\x18\x18iam.access_keys.register\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
-	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\xb2\xd2*6\n" +
+	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*6\n" +
 	"\x19RegisterAccessKeyMetadata\x12\x19RegisterAccessKeyResponse\x82\xd3\xe4\x93\x02':\x01*\"\"/iam/v1/users/{user_id}/accessKeys\x12\xcf\x01\n" +
 	"\x04List\x12*.kaname.cloud.iam.v1.ListAccessKeysRequest\x1a+.kaname.cloud.iam.v1.ListAccessKeysResponse\"n\x8a\xb5\x18\x14iam.access_keys.list\x92\xb5\x18\ftoken_reader\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02$\x12\"/iam/v1/users/{user_id}/accessKeys\x12\x8c\x02\n" +
 	"\x06Revoke\x12+.kaname.cloud.iam.v1.RevokeAccessKeyRequest\x1a\x1c.corelib.operation.Operation\"\xb6\x01\x8a\xb5\x18\x16iam.access_keys.revoke\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
-	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\xb2\xd2*2\n" +
+	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*2\n" +
 	"\x17RevokeAccessKeyMetadata\x12\x17RevokeAccessKeyResponse\x82\xd3\xe4\x93\x024*2/iam/v1/users/{user_id}/accessKeys/{access_key_id}\x12\xc1\x01\n" +
 	"\x0eBeginAssertion\x123.kaname.cloud.iam.v1.BeginAccessKeyAssertionRequest\x1a0.kaname.cloud.iam.v1.AccessKeyAssertionChallenge\"H\x8a\xb5\x18\b<exempt>\xba\xb5\x18\fSELF_SERVICE\x82\xd3\xe4\x93\x02&:\x01*\"!/iam/v1/accessKeys:beginAssertion\x12\xc9\x01\n" +
 	"\x0fFinishAssertion\x124.kaname.cloud.iam.v1.FinishAccessKeyAssertionRequest\x1a5.kaname.cloud.iam.v1.FinishAccessKeyAssertionResponse\"I\x8a\xb5\x18\b<exempt>\xba\xb5\x18\fSELF_SERVICE\x82\xd3\xe4\x93\x02':\x01*\"\"/iam/v1/accessKeys:finishAssertionBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
