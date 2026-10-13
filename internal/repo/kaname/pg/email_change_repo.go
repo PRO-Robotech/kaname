@@ -14,8 +14,19 @@ package pg
 // Строка принятого запроса вставляется оператором, условие которого и есть
 // предел: нет запроса моложе интервала и запросов в окне меньше предела.
 // Решение — число вставленных строк, а не чтение перед записью. Транзакция
-// открыта замком писателя нескольких сессий на строке человека: одновременные
-// запросы одного человека сериализованы им.
+// открыта замком строки человека (`holdPersonAgainstEnrollment`): одновременные
+// запросы одного человека и исход смены сериализованы им, и счёт строк
+// оператора темпа верен только под этим замком — снимать его нельзя.
+//
+// # «Отличен от текущего» решает тот же оператор (Р3, kaname#780)
+//
+// Тот же оператор несёт условие на адрес строки человека: запрошенный адрес не
+// совпадает с текущим тем же выражением, что ключ `users_identity_email_uniq`
+// (`lower(email)`). Раннее суждение глагола читает адрес ДО транзакции и
+// ничего не разрешает: исход смены, зафиксированный, пока запрос ждал замка,
+// меняет адрес, и решает только оператор, читающий строку под замком. Отказ
+// условия — `humansession.ErrNewEmailIsCurrent`; чем отказ объясняется, читает
+// запрос после оператора под тем же замком.
 //
 // # Предъявление — ОДИН оператор (Р5)
 //
@@ -80,17 +91,28 @@ func (w *humanSessionWriter) SupersedeEmailChangeCodes(ctx context.Context, user
 	return int(tag.RowsAffected()), nil
 }
 
-// insertEmailChangeCodePacedSQL — строка принятого запроса ПОД темпом человека:
-// $7 — интервал, $8 — окно, $9 — число запросов за окно. Свёртка ($4) пуста у
-// запроса на занятый адрес.
+// insertEmailChangeCodePacedSQL — строка принятого запроса ПОД темпом человека
+// и ПОД условием адреса: $7 — интервал, $8 — окно, $9 — число запросов за
+// окно; запрошенный адрес ($3) не совпадает с текущим адресом строки человека.
+// Свёртка ($4) пуста у запроса на занятый адрес.
 const insertEmailChangeCodePacedSQL = `
 	INSERT INTO email_change_codes (id, user_id, new_email, code_digest, issued_at, expires_at)
 	SELECT $1, $2, $3, NULLIF($4, ''), $5, $6
-	 WHERE NOT EXISTS (
+	 WHERE EXISTS (
+	         SELECT 1 FROM users
+	          WHERE id = $2 AND lower(email) <> lower($3))
+	   AND NOT EXISTS (
 	         SELECT 1 FROM email_change_codes
 	          WHERE user_id = $2 AND issued_at > $5::timestamptz - $7::interval)
 	   AND (SELECT count(*) FROM email_change_codes
 	         WHERE user_id = $2 AND issued_at > $5::timestamptz - $8::interval) < $9`
+
+// emailChangeAddressIsCurrentSQL — отказ оператора записи объясняется адресом:
+// запрошенный совпал с текущим. Читается ПОСЛЕ отказа под тем же замком строки
+// и выбирает только, какой отказ назвать; совпадение адреса названо раньше
+// темпа — тем же порядком, что у раннего суждения глагола.
+const emailChangeAddressIsCurrentSQL = `
+	SELECT lower(email) = lower($2) FROM users WHERE id = $1`
 
 // emailChangePaceSQL — чем отказ темпа объясняется: момент последнего запроса и
 // самый старый запрос окна с их числом. Читается ПОСЛЕ отказа оператора и
@@ -118,6 +140,16 @@ func (w *humanSessionWriter) InsertEmailChangeCodePaced(ctx context.Context, c d
 	}
 	if tag.RowsAffected() == 1 {
 		return humansession.LetterRefusal{}, nil
+	}
+	var current bool
+	if err := w.tx.QueryRow(ctx, emailChangeAddressIsCurrentSQL, string(c.UserID), string(c.NewEmail)).Scan(&current); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return humansession.LetterRefusal{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", c.UserID)
+		}
+		return humansession.LetterRefusal{}, mapErr(err, "EmailChange.Address", string(c.UserID))
+	}
+	if current {
+		return humansession.LetterRefusal{}, humansession.ErrNewEmailIsCurrent
 	}
 	var (
 		last, oldest *time.Time
