@@ -19,8 +19,13 @@ package humansession
 // # Порядок суждения запроса — несущий
 //
 //	сессия · положение (адрес подтверждён) · уровень · свежесть · форма адреса ·
-//	«отличен от текущего» · уровень чтением транзакции · темп человека · окно
-//	адресата · запись
+//	«отличен от текущего» · уровень чтением транзакции · «отличен от текущего»
+//	и темп человека оператором записи · окно адресата · запись
+//
+// «Отличен от текущего» до транзакции судит адрес, прочитанный вместе с
+// сессией, — это ранний отказ, и он ничего не разрешает: решает условие
+// оператора записи принятого запроса, читающего строку человека под замком
+// транзакции (kaname#780).
 //
 // Уровень — `email_change_level.go` (Р2, редакция 3): у человека с заведённым
 // способом, дающим «2», оба глагола требуют сессии «2»; решает чтение
@@ -138,7 +143,9 @@ type EmailChangeWriter interface {
 	// (Р5); строка остаётся — по строкам считается темп.
 	SupersedeEmailChangeCodes(ctx context.Context, userID domain.UserID, at time.Time) (int, error)
 	// InsertEmailChangeCodePaced — строка принятого запроса, ЕСЛИ темп человека
-	// это позволяет: решение и запись — один условный оператор (Р6).
+	// это позволяет и запрошенный адрес не совпадает с текущим адресом строки
+	// человека: решение и запись — один условный оператор (Р3, Р6,
+	// kaname#780). Совпавший адрес — ErrNewEmailIsCurrent, строки нет.
 	InsertEmailChangeCodePaced(ctx context.Context, c domain.EmailChangeCode, pace VerificationPace) (LetterRefusal, error)
 	// ChargeEmailChangeWindow — списание окна писем пары «email-change, адрес»
 	// одним оператором (Р6); окно полно — LetterRefusal.Refused со сроком.
@@ -377,7 +384,13 @@ func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmai
 		return RequestEmailChangeOutput{}, uc.storeFailed("earlier change not superseded", user.ID, err)
 	}
 	refusal, err := w.InsertEmailChangeCodePaced(ctx, code, uc.d.Pace)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrNewEmailIsCurrent):
+		// Адрес стал текущим чужим исходом смены, зафиксированным после раннего
+		// суждения: решает оператор записи под замком строки (kaname#780).
+		uc.d.Observer.EmailChangeObserved(EmailChangeFieldRefused)
+		return RequestEmailChangeOutput{}, &FieldError{Field: fieldNewEmail, Rule: RuleMustDiffer}
+	case err != nil:
 		return RequestEmailChangeOutput{}, uc.storeFailed("request not recorded", user.ID, err)
 	}
 	if refusal.Refused {
