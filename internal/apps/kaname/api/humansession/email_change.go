@@ -18,8 +18,11 @@ package humansession
 //
 // # Порядок суждения запроса — несущий
 //
-//	сессия · положение (адрес подтверждён) · свежесть · форма адреса ·
+//	сессия · положение (адрес подтверждён) · уровень · свежесть · форма адреса ·
 //	«отличен от текущего» · темп человека · окно адресата · запись
+//
+// Уровень — `email_change_level.go` (Р2, редакция 3): у человека с заведённым
+// способом, дающим «2», оба глагола требуют сессии «2».
 //
 // Ни одна ступень до записи не ставит письма и не расходует темп (Р3). Отказ
 // темпа откатывает транзакцию целиком: запрос не записан, прежний код не
@@ -168,6 +171,7 @@ const (
 	EmailChangeNoSession        EmailChangeOutcome = "no-session"
 	EmailChangeNotVerified      EmailChangeOutcome = "not-verified"
 	EmailChangeNotFresh         EmailChangeOutcome = "not-fresh"
+	EmailChangeStepUpRequired   EmailChangeOutcome = "step-up-required"
 	EmailChangeFieldRefused     EmailChangeOutcome = "field-refused"
 	EmailChangeConfirmed        EmailChangeOutcome = "confirmed"
 	EmailChangeCodeMismatched   EmailChangeOutcome = "code-mismatched"
@@ -182,7 +186,7 @@ const (
 func EmailChangeOutcomes() []EmailChangeOutcome {
 	return []EmailChangeOutcome{
 		EmailChangeLetterQueued, EmailChangeAddressTaken, EmailChangePersonPaced, EmailChangeRecipientPaced,
-		EmailChangeNoSession, EmailChangeNotVerified, EmailChangeNotFresh, EmailChangeFieldRefused,
+		EmailChangeNoSession, EmailChangeNotVerified, EmailChangeStepUpRequired, EmailChangeNotFresh, EmailChangeFieldRefused,
 		EmailChangeConfirmed, EmailChangeCodeMismatched, EmailChangeCodeNotFound, EmailChangeCodeExhausted,
 		EmailChangeInUse, EmailChangeStoreFailed, EmailChangeMarkNotReapplied,
 	}
@@ -200,6 +204,9 @@ func (NopObserver) EmailChangeObserved(EmailChangeOutcome) {}
 // EmailChangeDeps — зависимости глаголов смены.
 type EmailChangeDeps struct {
 	Store EmailChangeStore
+	// Methods — чтение заведённого у личности для условия уровня (Р2): строки
+	// способов входа и наличие ключа доступа, вне транзакции записи.
+	Methods EnrolledMethodsReader
 	// Pace — значения пяти ручек F6b Р9 (Р5, Р6): срок кода, попытки,
 	// интервал, предел и окно. Своих ручек у смены нет.
 	Pace VerificationPace
@@ -217,6 +224,8 @@ func (d EmailChangeDeps) complete() (EmailChangeDeps, error) {
 	switch {
 	case d.Store == nil:
 		return d, fmt.Errorf("email change: store required")
+	case d.Methods == nil:
+		return d, fmt.Errorf("email change: enrolled login methods reader required")
 	case d.Freshness <= 0:
 		return d, fmt.Errorf("email change: freshness window must be positive")
 	case d.MailLimit.MaxPerWindow <= 0 || d.MailLimit.Window <= 0:
@@ -300,6 +309,9 @@ func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmai
 	now := uc.d.Now().UTC()
 	resolved, err := resolveForEmailChange(ctx, uc.d, in.Bearer, now)
 	if err != nil {
+		return RequestEmailChangeOutput{}, err
+	}
+	if err := requireEmailChangeLevel(ctx, uc.d, resolved); err != nil {
 		return RequestEmailChangeOutput{}, err
 	}
 	if !sessionIsFresh(resolved.Session, now, uc.d.Freshness) {
@@ -430,13 +442,18 @@ func NewConfirmEmailChangeUseCase(d EmailChangeDeps) (*ConfirmEmailChangeUseCase
 	return &ConfirmEmailChangeUseCase{d: d}, nil
 }
 
-// Execute — предъявление кода: сессия · положение · форма (`code: required`)
-// · код · исход одной транзакцией. Свежести предъявление не требует (Р2):
-// решение принято на запросе, владение ящиком доказывает код.
+// Execute — предъявление кода: сессия · положение · уровень · форма
+// (`code: required`) · код · исход одной транзакцией. Свежести предъявление не
+// требует (Р2): решение принято на запросе, владение ящиком доказывает код.
+// Уровня требует: адрес меняет предъявление, и порог судит ту сессию, которая
+// его меняет.
 func (uc *ConfirmEmailChangeUseCase) Execute(ctx context.Context, in ConfirmEmailChangeInput) (ConfirmEmailChangeOutput, error) {
 	now := uc.d.Now().UTC()
 	resolved, err := resolveForEmailChange(ctx, uc.d, in.Bearer, now)
 	if err != nil {
+		return ConfirmEmailChangeOutput{}, err
+	}
+	if err := requireEmailChangeLevel(ctx, uc.d, resolved); err != nil {
 		return ConfirmEmailChangeOutput{}, err
 	}
 	presented := domain.PresentedVerificationCode(in.Code)
