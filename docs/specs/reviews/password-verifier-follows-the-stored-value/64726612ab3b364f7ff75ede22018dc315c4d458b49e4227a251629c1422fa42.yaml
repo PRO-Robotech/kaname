@@ -130,16 +130,29 @@ event_body: >-
   acceptance-reviewer · APPROVED · 64726612ab3b364f7ff75ede22018dc315c4d458b49e4227a251629c1422fa42
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-13T16:50:25Z"
   ban1_lifted: false
   why: 'санкция действует после публикации внешнего события курьером; до неё — not_performed'
 
 event:
-  status: not_performed
-  note: >-
-    публикует курьер; до публикации блок честно not_performed. Роль в записи — координата, а не
-    доказательство личности (change-graph.md §3).
-
+  type: issue_comment
+  target: PRO-Robotech/kaname#782
+  status: performed
+  published: true
+  database_id: 6150629182
+  node_id: "IC_kwDOUO26pM8AAAABbpsnPg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/782#issuecomment-6150629182"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6150629182"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T16:50:25Z"
+  body_sha256: "74655350e185b7efae7f2a6dbe825d4f03190552f92dd1c0c26e1084191380b6"
+  subject_sha256: "64726612ab3b364f7ff75ede22018dc315c4d458b49e4227a251629c1422fa42"
+  subject_revision_commit: "8e79072332646db4ebdf5fee2cb71d11c32ca7b1"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 authority:
   repository: PRO-Robotech/kacho-workspace
   policy_document: docs/changes/policy.yaml
