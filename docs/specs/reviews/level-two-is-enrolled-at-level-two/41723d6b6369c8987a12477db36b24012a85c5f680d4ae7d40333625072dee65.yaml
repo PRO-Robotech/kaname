@@ -33,17 +33,29 @@ authority:
   authorized_actors: [pointpu]
   allowlisted_for_role: false
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-13T03:47:43Z"
   publication_pending:
     expected_actor: pointpu
     target: PRO-Robotech/kaname#747
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#747
-  status: not_performed
-  published: false
-  publication_mode: courier_of_agent_verdict
-  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md · sha256 41723d6b6369c8987a12477db36b24012a85c5f680d4ae7d40333625072dee65
+  status: performed
+  published: true
+  database_id: 6137782559
+  node_id: "IC_kwDOUO26pM8AAAABbdchHw"
+  url: "https://github.com/PRO-Robotech/kaname/issues/747#issuecomment-6137782559"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6137782559"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T03:47:43Z"
+  body_sha256: "01d21cf2c75e46d551a4d77608c9fcb196e370eca8bebe068cdb79fae3c14c04"
+  subject_sha256: "41723d6b6369c8987a12477db36b24012a85c5f680d4ae7d40333625072dee65"
+  subject_revision_commit: "7cd6cf2514a23341daf2f36c73308e3c5a53111a"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
