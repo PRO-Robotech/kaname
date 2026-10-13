@@ -447,6 +447,18 @@ func parityCases() []parityCase {
 			return said(err, "открыта")
 		}})
 
+	// Транзакция глагола, решающего по заведённому (kaname#770): строка
+	// личности замком первым оператором; у «адреса нет» личность пуста, и
+	// оператор замка исполняется так же — строки нет.
+	cs = append(cs, parityCase{method: "Store.EnrollmentWriter", form: "её личность",
+		store: func(ctx context.Context, s humansession.Store, p parityPerson, later func(func())) string {
+			w, err := s.EnrollmentWriter(ctx, p.user.ID)
+			if err == nil {
+				later(func() { _ = w.Rollback(ctx) })
+			}
+			return said(err, "открыта")
+		}})
+
 	// --- Writer: захват строки личности входа (kaname#385) ---
 	// У «адреса нет» личность пуста: отказ аргументом без обхода базы; у
 	// прочих — оператор захвата и оператор чтения отсечки.
