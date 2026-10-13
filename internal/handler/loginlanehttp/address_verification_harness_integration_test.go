@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -302,10 +303,14 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	// (EC-19: ручка задаёт ограничение нашего отправителя, и окно смены берёт
 	// то же значение).
 	cdeps := humansession.EmailChangeDeps{
-		Store: avEmailChangeStore{sessions: sessions, inner: registrationPG}, Pace: pace, Freshness: laneFreshness,
+		Store: avEmailChangeStore{sessions: sessions, inner: registrationPG, methods: methods}, Pace: pace, Freshness: laneFreshness,
 		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: perRecipient, Window: time.Hour},
 		Now:       clock.Now, Logger: logger,
 	}
+	// Чтение заведённого у личности (редакция 3, Р2) — тем же адаптером способов
+	// входа, что у второго фактора: в любое незаполненное поле-интерфейс
+	// зависимостей, которое он удовлетворяет (`wireEnrolledReaderAV`).
+	wireEnrolledReaderAV(&cdeps, methods)
 	requestC, err := humansession.NewRequestEmailChangeUseCase(cdeps)
 	require.NoError(t, err)
 	confirmC, err := humansession.NewConfirmEmailChangeUseCase(cdeps)
@@ -393,6 +398,40 @@ func (w avVerificationWriter) ActivateInviteOnVerification(ctx context.Context, 
 type avEmailChangeStore struct {
 	sessions *kanamepg.HumanSessionRepo
 	inner    *kanamepg.RegistrationStore
+	// methods — чтение заведённого у личности (редакция 3, Р2), если его
+	// носитель — хранилище глаголов, а не поле зависимостей и не транзакция.
+	methods *kanamepg.LoginMethodRepo
+}
+
+func (s avEmailChangeStore) Get(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return s.methods.Get(ctx, userID, kind)
+}
+
+func (s avEmailChangeStore) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return s.methods.Get(ctx, userID, kind)
+}
+
+func (s avEmailChangeStore) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return s.methods.AccessKeyEnrolled(ctx, userID)
+}
+
+// wireEnrolledReaderAV — провязка читателя заведённого в КАЖДОЕ незаполненное
+// экспортируемое поле-интерфейс зависимостей глаголов смены, которое он
+// удовлетворяет; пустой интерфейс не считается. Полей ноль — законный исход:
+// тогда носитель чтения — хранилище либо транзакция глаголов. Стенд не диктует
+// реализации форму провязки (приёмка заказывает чтение, а не его носитель).
+func wireEnrolledReaderAV(deps *humansession.EmailChangeDeps, reader any) {
+	v := reflect.ValueOf(deps).Elem()
+	rt := reflect.TypeOf(reader)
+	for i := 0; i < v.NumField(); i++ {
+		f, ft := v.Field(i), v.Type().Field(i)
+		if !ft.IsExported() || ft.Type.Kind() != reflect.Interface || ft.Type.NumMethod() == 0 || !f.IsNil() {
+			continue
+		}
+		if rt.Implements(ft.Type) {
+			f.Set(reflect.ValueOf(reader))
+		}
+	}
 }
 
 func (s avEmailChangeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {

@@ -40,8 +40,8 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/verify-email/confirm</code></td><td>предъявление кода подтверждения; новый носитель той же сессии</td><td><code>verify-email-confirm</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/access-key/begin</code></td><td>испытание входа ключом доступа; человека запрос не называет</td><td><code>access-key-begin</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/access-key/login</code></td><td>вход ключом доступа без пароля; отвечает как вход паролем</td><td><code>access-key-login</code></td><td>нет</td></tr>
-    <tr><td><code>POST /iam/v1/auth/email-change</code></td><td>запрос смены адреса почты: письмо с кодом уходит на новый адрес, адрес пока прежний</td><td><code>email-change</code></td><td>да, свежая</td></tr>
-    <tr><td><code>POST /iam/v1/auth/email-change/confirm</code></td><td>предъявление кода с нового адреса: адрес сменён, новый носитель той же сессии, прочие сессии завершены</td><td><code>email-change-confirm</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/email-change</code></td><td>запрос смены адреса почты: письмо с кодом уходит на новый адрес, адрес пока прежний</td><td><code>email-change</code></td><td>да, свежая; уровня <code>2</code> — у человека с кодом по времени либо ключом доступа</td></tr>
+    <tr><td><code>POST /iam/v1/auth/email-change/confirm</code></td><td>предъявление кода с нового адреса: адрес сменён, новый носитель той же сессии, прочие сессии завершены</td><td><code>email-change-confirm</code></td><td>да; уровня <code>2</code> — у человека с кодом по времени либо ключом доступа</td></tr>
     <tr><td><code>GET /iam/v1/auth/sessions</code></td><td>перечень своих живых сессий постранично, текущая помечена</td><td>—</td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/sessions/end</code></td><td>выход из выбранной своей сессии, кроме текущей</td><td><code>session-end</code></td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/auth/sessions/end-others</code></td><td>выход из всех своих сессий, кроме текущей</td><td><code>session-end</code></td><td>да, свежая</td></tr>
@@ -88,6 +88,17 @@ gRPC-слушателей службы, права человека не дей�
 Адрес меняет только **второе** обращение, и только кодом, пришедшим на **новый** адрес. Оба
 пути — правка своих данных: в положении подтверждения они отвечают отказом положения, без
 сессии — `401` `authentication failed`.
+
+У человека, заведшего код по времени либо ключ доступа, **оба** пути требуют сессии уровня не
+ниже `2` — того, что гарантирует заведённое им. Сессия ниже получает указание повысить уровень:
+`401`, код `16`, `authentication level is insufficient: step up with a second factor, or present
+a credential of another kind`, `WWW-Authenticate` с `error="insufficient_user_authentication"` и
+`acr_values="2"` ([форма указания](/api/rest-surface#step-up)); следующий шаг —
+`POST /iam/v1/auth/step-up` кодом в той же сессии либо вход ключом.
+Уровень судится раньше свежести, отказ ничего не записывает: письмо не ставится, темп не
+расходуется, попытка кода не засчитывается. Если заведённое прочитать не удалось — `503`
+`request not performed; try again later`, а не проход. У человека без второго фактора и ключа
+условия уровня нет.
 
 `POST /iam/v1/auth/email-change` с `{ "newEmail", "csrfToken" }` требует **свежей** сессии
 (момент последнего предъявления не старше окна правки своих данных; ровно окно — свежая), иначе
@@ -688,7 +699,7 @@ with the current password`: пароль меняют через `POST /iam/v1/a
     <tr><td>400</td><td>9</td><td><code>invite is no longer valid; ask an account administrator to invite again</code></td><td><code>INVITE_NOT_VALID</code></td><td>код подошёл — подтверждения адреса либо завершения восстановления, переводящего запись к владельцу ящика, — а приглашение приглашённого истекло либо снято: отметки нет, попытка кода не истрачена, у завершения восстановления ничего не меняется и код остаётся годным; выход — повторное приглашение</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована · способа входа нет (приглашённый не зарегистрировался) · код не тот · код истёк или применён · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
     <tr><td>401</td><td>16</td><td><code>access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator</code></td><td>—</td><td>завершение восстановления (<code>POST /iam/v1/auth/recovery/complete</code>): <strong>один</strong> отказ на все причины глагола — адреса нет · код не тот, истёк, применён · личность заблокирована; шаг верен для каждой и не называет ни одной</td></tr>
-    <tr><td>401</td><td>16</td><td><code>authentication level is insufficient: step up with a second factor, or present a credential of another kind</code></td><td>—</td><td>указание повысить уровень: заведение либо подтверждение кода у человека с ключом доступа из сессии ниже <code>2</code>; <code>WWW-Authenticate</code> несёт <code>error="insufficient_user_authentication"</code> и <code>acr_values="2"</code>; состояние не изменено</td></tr>
+    <tr><td>401</td><td>16</td><td><code>authentication level is insufficient: step up with a second factor, or present a credential of another kind</code></td><td>—</td><td>указание повысить уровень: заведение либо подтверждение кода у человека с ключом доступа, запрос смены адреса либо предъявление его кода у человека с кодом по времени либо ключом доступа — из сессии ниже <code>2</code>; <code>WWW-Authenticate</code> несёт <code>error="insufficient_user_authentication"</code> и <code>acr_values="2"</code>; состояние не изменено</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled</code></td><td>—</td><td>вход <strong>с полем</strong> <code>secondFactor</code>: <strong>один</strong> отказ на все причины этой формы — адреса нет · пароль не тот · личность заблокирована · код не тот, повторён или потреблён · фактор не заведён; называет шаг, не называя причины</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
     <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора, заведение пароля, запрос смены адреса, регистрация (выдача испытания и приём результата), снятие ключа доступа, выход из выбранной сессии либо из всех, кроме текущей, — при предъявлении старше окна свежести; ответ у всех одинаков</td></tr>

@@ -305,6 +305,21 @@ func (f *fakeStore) PersonWriter(_ context.Context, userID domain.UserID) (human
 	return w, nil
 }
 
+// EnrollmentWriter — транзакция глагола, решающего по заведённому
+// (kaname#770): строка личности замком сильнее писателя нескольких сессий.
+// Замков дублёр не моделирует; он повторяет РАБОТУ адаптера — открытие и
+// оператор замка строки личности — и запоминает, чью строку транзакция держит.
+func (f *fakeStore) EnrollmentWriter(_ context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := f.open(userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.holdPerson(userID); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
 	f.trip()
 	if f.failsAt("writer") {

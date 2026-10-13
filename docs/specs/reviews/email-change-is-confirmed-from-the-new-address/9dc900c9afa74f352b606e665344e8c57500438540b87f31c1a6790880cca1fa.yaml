@@ -1,0 +1,84 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
+  sha256: 9dc900c9afa74f352b606e665344e8c57500438540b87f31c1a6790880cca1fa
+  revision: 5
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке описывает документ и вердиктом не является; шапку намеренно не правили
+    (change-graph.md §2). Действующий вердикт о редакции 5 — эта запись плюс внешнее событие.
+  base_commit: 77bac7f70 (редакция 4, f14ea4f8…)
+  content_commit: 50824bece6a8096aa816b6034ba711fde2b8a124
+  task: https://github.com/PRO-Robotech/kaname/issues/770
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
+  lines: 1063
+verdict: APPROVED
+round: 1
+round_note: >-
+  Короткий круг по дельте редакции 5 к одобренной редакции 4 (fa-b1: судится только дельта).
+  Спора нет, третьим кругом цикла 3–4 не является: редакция 4 закрыта вердиктом APPROVED,
+  редакция 5 — новая редакция с собственным отпечатком.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-13T00:00:00Z'
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#770
+  status: performed
+  published: true
+  database_id: 6136400417
+  node_id: "IC_kwDOUO26pM8AAAABbcIKIQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/770#issuecomment-6136400417"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6136400417"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T01:57:20Z"
+  body_sha256: "5e11aa5e860b33813e059504f0a67de3844b3d11da17e83664e6f1e302295a45"
+  subject_sha256: "9dc900c9afa74f352b606e665344e8c57500438540b87f31c1a6790880cca1fa"
+  subject_revision_commit: "6c2cf46832d12b84f6fc62804320bd33c680cb4e"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - cad0d55bb5db27ce95c1d35a64eb3f6667a6a5a9bb6a7de31c358ce7a5edc6b2.yaml (ред. 1, круг 1, CHANGES_REQUESTED)
+    - 92d7c35d30218e418221a052ca76c257f5c3c649de8337495bdf9941ab248613.yaml (ред. 2, круг 2, APPROVED)
+    - f9100263a0cb3b240c65c6c470919b235b64f449bbc1a6db68d211fa4f326e07.yaml (ред. 3, круг 1, CHANGES_REQUESTED)
+    - f14ea4f8983dbef35102eba929d6dcd75d57e45fc72f823e64a118dc3d79f24f.yaml (ред. 4, круг 2, APPROVED; к ред. 5 не переносится)
+
+premise:
+  task_premise: >-
+    Автор утверждает, что дельта редакции 5 к редакции 4 — только две строки истории. Посылка
+    подтверждена: в дельте меняется блок истории и строка «Дата», сценарии, решения, объём и DoD
+    не тронуты.
+  commands:
+    - sha256sum <документ> → 9dc900c9…1fa (совпадает с заданием), рабочая копия = HEAD 50824bece
+    - git show 77bac7f70:<документ> | sha256sum → f14ea4f8…f24f (это одобренная редакция 4)
+    - git diff 77bac7f70 50824bece -- <документ> → один ханк @@ -19,7 +19,9 @@, +3/−1 строки
+    - "добавлено: строка истории «редакция 4 — 2026-10-12T23:55Z — круг 2 — APPROVED — f14ea4f8…» (совпадает с reviewed_at и verdict записи f14ea4f8….yaml); строка истории «редакция 5 — запись о правке ПОСЛЕ вердикта»"
+    - "изменено: строка «Дата» дописана «; редакция 5 — 2026-10-13» — третья строка дельты, автор назвал две; на сценарии не влияет"
+
+blockers: {}
+
+important:
+  - >-
+    Автор говорит о «двух строках истории», но дельта трогает ещё строку «Дата» (дописана редакция 5).
+    Это неточность пересказа, а не изменение контракта. Не блокирует.
+  - >-
+    Замечания круга 2 редакции 4 (f14ea4f8….yaml, раздел important) остаются в силе без изменений:
+    §1.7 садится тем же вливанием, что дифф Р2; положительный близнец EC-34 (а) — повышение одним паролем;
+    у шага EC-35 на стенде запас до 30 с.
+
+constructibility:
+  seeded: 0
+  carried_from: >-
+    Сценарии и Given не менялись (дельта вне них), поэтому конструируемость, показанная кодом в записи
+    f14ea4f8….yaml, относится к той же редакции сценариев.
+  not_performed: "1 — посев не ставился: задание не назвало ни изоляцию, ни слот; сценарии не менялись"

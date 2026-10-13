@@ -23,6 +23,9 @@ package humansession
 // проигравший получает «уже заведён», как и опоздавший), набор запасных кодов,
 // предъявление внутри сессии (множество, уровень, носитель, момент), событие
 // аудита и запись журнала повышения.
+//
+// Оба глагола пишут транзакцией `Store.EnrollmentWriter` и решают условие
+// уровня ещё раз её чтением (kaname#770, `sf_enroll_level.go`).
 
 import (
 	"context"
@@ -100,7 +103,7 @@ func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput
 	if err != nil {
 		return EnrollOutput{}, err
 	}
-	if err := requireEnrollmentLevel(ctx, uc.deps, resolved); err != nil {
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, uc.deps.Methods.AccessKeyEnrolled); err != nil {
 		return EnrollOutput{}, err
 	}
 	if err := requireFresh(uc.deps, resolved.Session, now); err != nil {
@@ -118,11 +121,16 @@ func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput
 		uc.deps.Logger.Error("second factor enroll: secret not wrapped", "err", err.Error())
 		return EnrollOutput{}, ErrStoreUnavailable
 	}
-	w, err := uc.deps.Store.Writer(ctx)
+	w, err := uc.deps.Store.EnrollmentWriter(ctx, resolved.User.ID)
 	if err != nil {
 		return EnrollOutput{}, ErrStoreUnavailable
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	// Уровень решает чтение ЭТОЙ транзакции под замком строки личности
+	// (`sf_enroll_level.go`, kaname#770) — до записи.
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, w.AccessKeyEnrolled); err != nil {
+		return EnrollOutput{}, err
+	}
 	accepted, err := w.UpsertPendingTOTP(ctx, domain.LoginMethod{
 		UserID: resolved.User.ID, Kind: domain.LoginMethodTOTP, Verifier: wrapped,
 		State: domain.LoginMethodStatePending, CreatedAt: now,
@@ -192,7 +200,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	if err != nil {
 		return ConfirmOutput{}, err
 	}
-	if err := requireEnrollmentLevel(ctx, uc.deps, resolved); err != nil {
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, uc.deps.Methods.AccessKeyEnrolled); err != nil {
 		return ConfirmOutput{}, err
 	}
 	if err := requireFresh(uc.deps, resolved.Session, now); err != nil {
@@ -257,12 +265,17 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	// Строка личности — ПЕРВОЙ, до строки фактора (kaname#382): подтверждение
 	// берёт строку `totp`, а вставка набора — личность проверкой внешнего
-	// ключа; в обратном порядке оно шло навстречу удалению личности.
-	w, err := uc.deps.Store.PersonWriter(ctx, user.ID)
+	// ключа; в обратном порядке оно шло навстречу удалению личности. Сила
+	// замка — глагола, решающего по заведённому (kaname#770): вставка строки
+	// ключа с ним несовместима, и уровень решает чтение этой транзакции.
+	w, err := uc.deps.Store.EnrollmentWriter(ctx, user.ID)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, w.AccessKeyEnrolled); err != nil {
+		return ConfirmOutput{}, err
+	}
 	activated, err := w.ActivateTOTP(ctx, user.ID, row.CreatedAt, res.Step, now)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
