@@ -14,6 +14,9 @@ package pg_test
 //     чтением кода;
 //   - пачка одновременных выдач на одном контексте: все успешны, живое
 //     испытание после них ровно одно и оно — одно из выданных;
+//   - соперник ПОТРЕБЛЯЕТ живую строку, пока выдача ждёт её замок: после
+//     фиксации строка уходит из-под ключа, выдача вставляет новую, а
+//     потреблённая остаётся нетронутой (её не переписывают и не снимают);
 //   - близнец: выдачи на РАЗНЫХ контекстах друг друга не замещают.
 
 import (
@@ -96,6 +99,63 @@ func TestF13_03_IssueReplacesALiveChallengeCommittedByAConcurrentTransaction(t *
 	live := lcLive(t, pool, formContext)
 	require.Len(t, live, 1, "живое испытание на контекст — ровно одно")
 	require.Equal(t, second, live[0], "живым осталось ПОЗДНЕЕ испытание: первое замещено")
+}
+
+// Живое испытание контекста зафиксировано; чужая транзакция предъявляет его
+// (отметка потребления) и держит строку незафиксированной. Выдача того же
+// контекста ждёт её замок; после фиксации потреблённая строка из-под ключа
+// уходит, и выдача обязана ВСТАВИТЬ новое испытание, не тронув потреблённое:
+// переписать его значило бы оживить предъявленное, снять — стереть след
+// предъявления до уборки.
+func TestF13_03_IssueInsertsAfterAConcurrentTransactionConsumedTheLiveChallenge(t *testing.T) {
+	pool := akPool(t)
+	repo := pg.NewAccessKeyLoginRepo(pool, pg.NewAccessKeyRepo(pool))
+	ctx := context.Background()
+	const formContext = "race-consumed-by-a-peer"
+
+	first := lcChallenge(t)
+	require.NoError(t, repo.IssueChallenge(ctx, domain.AccessKeyLoginChallenge{Challenge: first, FormContext: formContext}, 5*time.Minute))
+
+	peer, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = peer.Rollback(ctx) }()
+	tag, err := peer.Exec(ctx, `
+		UPDATE access_key_login_challenges SET consumed_at = now()
+		 WHERE challenge = $1 AND form_context = $2 AND consumed_at IS NULL`, first, formContext)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected(), "фикстура: соперник не потребил живую строку")
+
+	second := lcChallenge(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- repo.IssueChallenge(ctx, domain.AccessKeyLoginChallenge{Challenge: second, FormContext: formContext}, 5*time.Minute)
+	}()
+
+	// Выдача обязана ЖДАТЬ замок потребляемой строки: иначе соперник не успел
+	// бы вмешаться, и зелёное ничего не говорило бы о гонке.
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			 WHERE datname = current_database() AND wait_event_type = 'Lock'
+			   AND query LIKE '%access_key_login_challenges%'`).Scan(&waiting)
+		return err == nil && waiting == 1
+	}, 10*time.Second, 20*time.Millisecond, "выдача не встала в ожидание замка потребляемой строки — условие гонки не создано")
+
+	require.NoError(t, peer.Commit(ctx))
+	select {
+	case err := <-done:
+		require.NoError(t, err, "выдача после потребления соперником отказала (Ф13-03)")
+	case <-time.After(10 * time.Second):
+		t.Fatal("выдача не завершилась после фиксации соперника")
+	}
+
+	require.Equal(t, [][]byte{second}, lcLive(t, pool, formContext), "живым стало НОВОЕ испытание")
+	var consumed int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM access_key_login_challenges
+		 WHERE form_context = $1 AND challenge = $2 AND consumed_at IS NOT NULL`, formContext, first).Scan(&consumed))
+	require.Equal(t, 1, consumed, "потреблённое испытание сохраняется нетронутым до уборки")
 }
 
 // Пачка одновременных выдач на одном контексте: ни одного отказа, живое
