@@ -991,12 +991,25 @@ var sessionEnderDoors = []sessionEnderDoor{
 		},
 	},
 	{
-		// Собственный выход человека, вход, повышение, подтверждение второго
-		// фактора, перечеканка запасных кодов — транзакция, открытая ключевым
-		// замком строки личности (kaname#382).
+		// Собственный выход человека, вход, повышение, перечеканка запасных
+		// кодов — транзакция, открытая ключевым замком строки личности
+		// (kaname#382).
 		name: "HumanSessionRepo.PersonWriter",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).PersonWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+	{
+		// Заведение и подтверждение второго фактора (kaname#770): транзакция,
+		// открытая замком строки личности против заведения способа; подтверждение
+		// пишет свою запись сессии, и снятие записи ей представимо.
+		name: "HumanSessionRepo.EnrollmentWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).EnrollmentWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {
 				return 0, err
 			}

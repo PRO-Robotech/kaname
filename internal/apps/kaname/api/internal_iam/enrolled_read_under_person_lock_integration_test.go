@@ -15,8 +15,8 @@ package internal_iam_test
 // Заведение способа, дающего «2», идёт СВОЕЙ транзакцией и не зафиксировано:
 // строка ключа доступа вставлена писателем продукта (`AccessKeyRepo.Writer`,
 // `InsertKey`) либо ожидающий код по времени переведён в `active` оператором
-// подтверждения (`PersonWriter`, `ActivateTOTP`). Глагол сессии «1» пущен
-// параллельно.
+// подтверждения под дверью продукта (`EnrollmentWriter`, `ActivateTOTP`).
+// Глагол сессии «1» пущен параллельно.
 //
 //   - глагол ОБЯЗАН ждать заведение: проба видит процесс, ждущий замка этой
 //     транзакции (`pg_blocking_pids`). Глагол, вернувшийся раньше, —
@@ -90,7 +90,7 @@ func beginKeyEnrollment(t *testing.T, ctx context.Context, pool *pgxpool.Pool, u
 }
 
 // beginTOTPActivation — ожидающий код по времени переведён в `active`
-// оператором подтверждения под дверью продукта (`PersonWriter`) и НЕ
+// оператором подтверждения под дверью продукта (`EnrollmentWriter`) и НЕ
 // зафиксирован.
 func beginTOTPActivation(t *testing.T, ctx context.Context, l *sessionWriterLane, p writerPerson) pendingEnrollment {
 	t.Helper()
@@ -100,7 +100,7 @@ func beginTOTPActivation(t *testing.T, ctx context.Context, l *sessionWriterLane
 	require.NoError(t, l.s.pool.QueryRow(ctx,
 		`SELECT created_at FROM kaname.user_login_methods WHERE user_id = $1 AND kind = 'totp' AND state = 'pending'`,
 		string(p.id)).Scan(&since), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка ожидающего кода")
-	w, err := l.s.sessions.PersonWriter(ctx, p.id)
+	w, err := l.s.sessions.EnrollmentWriter(ctx, p.id)
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): транзакция подтверждения кода")
 	t.Cleanup(func() { _ = w.Rollback(context.Background()) })
 	now := time.Now().UTC()
