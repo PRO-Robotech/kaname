@@ -154,7 +154,8 @@ publication_pending:
     учёткой; до него запись — объявление вердикта рецензента.
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-13T14:20:53Z"
   ban1_lifted: false
   pending_on: publication of event_body to PRO-Robotech/kaname#458 by pointpu
   publication_pending:
@@ -167,9 +168,21 @@ event_body: "acceptance-reviewer · APPROVED · sha256 79e0f15ac71d91257e4238a79
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#458
-  status: not_performed
-  published: false
-
+  status: performed
+  published: true
+  database_id: 6147705066
+  node_id: "IC_kwDOUO26pM8AAAABbm6I6g"
+  url: "https://github.com/PRO-Robotech/kaname/issues/458#issuecomment-6147705066"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6147705066"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T14:20:53Z"
+  body_sha256: "2af03ec7e4a1072bdfd2e7db04f29f5c8cbef7bd01bfc33bfe6bff37f9d8478c"
+  subject_sha256: "79e0f15ac71d91257e4238a793011b7bc29fe318b806743ef3cef046ff436604"
+  subject_revision_commit: "aaa5c3b94f78af68fc4eaee28d94269473d4cc80"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer

@@ -106,6 +106,18 @@ event_body: "acceptance-reviewer · APPROVED · sha256 f10f3e8693f26763b1658b351
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#720
-  status: not_performed
-  published: false
-  note: публикует курьер (git-operator, scripts/rituals/approval-event.sh) и тем же заходом приводит блок к факту.
+  status: performed
+  published: true
+  database_id: 6147586442
+  node_id: "IC_kwDOUO26pM8AAAABbmy5ig"
+  url: "https://github.com/PRO-Robotech/kaname/issues/720#issuecomment-6147586442"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6147586442"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T14:15:32Z"
+  body_sha256: "eeb6ad26694c9f3a17750337d3eec74753cfdfcb25267c4bd0021aa078a83a6c"
+  subject_sha256: "f10f3e8693f26763b1658b351c1fa3891922ae9b987e1a62f6c125bde05a31b4"
+  subject_revision_commit: "3066c7b6a266f640b367a82df21996f022a9a039"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
