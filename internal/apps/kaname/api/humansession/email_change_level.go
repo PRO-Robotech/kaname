@@ -26,13 +26,28 @@ package humansession
 // Сессия, чей уровень уже не ниже того, что может потребовать ЛЮБОЕ
 // заведённое, заведённого не читает: исход от прочитанного не зависит.
 //
+// # Решает чтение транзакции записи (kaname#770, ban #10)
+//
+// Условие судится ДВАЖДЫ одной функцией над разными читателями заведённого.
+// Первое суждение — до транзакции, читателем пула (`EmailChangeDeps.Methods`):
+// оно держит порядок отказов (ниже) и отказывает, не открывая транзакции.
+// Второе — ПЕРВЫМ шагом транзакции записи, её же соединением (`LoginMethod`,
+// `AccessKeyEnrolled` порта `Writer`), после замка строки личности, с которым
+// несовместима любая запись, заводящая способ (`EmailChangeWriter` адаптера):
+// оно и решает. Заведение способа «2», зафиксированное между суждениями, первое
+// не видит, а второе видит; заведение, пришедшее позже, ждёт фиксации глагола.
+// Снятие способа между суждениями даёт исход строже нужного — отказ, который
+// повышение уровня снимает.
+//
 // # Порядок
 //
 // Сессия → положение подтверждения → уровень → свежесть (только запрос) → поля
-// тела. Уровень раньше свежести: несвежая «1» человека с кодом получает
-// указание повысить уровень, а повышение кодом снимает оба недостатка одним
-// предъявлением. Отказ по уровню ничего не пишет: транзакция не открыта, темп,
-// окно адресата и попытки кода не расходуются.
+// тела → транзакция: уровень ещё раз её чтением. Уровень раньше свежести:
+// несвежая «1» человека с кодом получает указание повысить уровень, а
+// повышение кодом снимает оба недостатка одним предъявлением. Отказ по уровню
+// ничего не пишет: первое суждение транзакции не открывает, второе стоит до
+// первой записи и откатывает её; темп, окно адресата и попытки кода не
+// расходуются.
 
 import (
 	"context"
@@ -43,9 +58,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// EnrolledMethodsReader — чтение заведённого у личности вне транзакции записи:
-// строки способов входа и наличие ключа доступа. Удовлетворяет
-// `loginmethod.Store`.
+// EnrolledMethodsReader — чтение заведённого у личности вне транзакции записи
+// (первое суждение, шапка файла): строки способов входа и наличие ключа
+// доступа. Удовлетворяет `loginmethod.Store`.
 type EnrolledMethodsReader interface {
 	// Get — строка способа данного вида; NOT_FOUND — способа нет.
 	Get(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error)
@@ -53,8 +68,10 @@ type EnrolledMethodsReader interface {
 	AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error)
 }
 
-// requireEmailChangeLevel — условие уровня Р2 у обоих глаголов смены.
-func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Resolved) error {
+// requireEmailChangeLevel — условие уровня Р2 у обоих глаголов смены над
+// читателем заведённого read/keys: пулом до транзакции либо транзакцией записи
+// (шапка файла).
+func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Resolved, read loginMethodRead, keys accessKeyRead) error {
 	ceiling := guaranteedRank(assurance.Methods())
 	if ceiling == 0 {
 		// Правило не назвало уровня ни одному способу — сравнение было бы
@@ -68,7 +85,7 @@ func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Re
 	if presented >= ceiling {
 		return nil
 	}
-	enrolled, err := enrolledForCompletion(ctx, d.Methods.Get, d.Methods.AccessKeyEnrolled, resolved.User.ID)
+	enrolled, err := enrolledForCompletion(ctx, read, keys, resolved.User.ID)
 	if err != nil {
 		// Причина — в журнал, наружу — отказ хранилища фиксированным текстом.
 		d.Observer.EmailChangeObserved(EmailChangeStoreFailed)

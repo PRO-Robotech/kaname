@@ -36,7 +36,9 @@ package humansession_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -193,6 +195,93 @@ func TestKN747_ConfirmCells(t *testing.T) {
 			}
 			require.Equal(t, domain.LoginMethodStatePending, after.State, "%s: фактор не заведён", c.id)
 			require.True(t, after.CreatedAt.Equal(before.CreatedAt), "%s: ожидающее заведение не тронуто (§7 п. 4)", c.id)
+		})
+	}
+}
+
+// staleKeyList — чтение перечня ключей ВНЕ транзакции записи, сделанное до
+// того, как заведение ключа зафиксировано: «ключа нет» при ключе, уже лежащем
+// в хранилище. Прочие чтения — те же, что у дублёра способов.
+type staleKeyList struct{ fakeMethods }
+
+func (staleKeyList) AccessKeyEnrolled(context.Context, domain.UserID) (bool, error) {
+	return false, nil
+}
+
+// staleKeyVerbs — глаголы заведения над тем же дублёром, но с устаревшим
+// чтением перечня ключей вне транзакции: решить по заведённому они вправе
+// только чтением транзакции записи (kaname#770, находка ревью безопасности).
+func (h *sfHarness) staleKeyVerbs(t *testing.T) (*humansession.EnrollSecondFactorUseCase, *humansession.ConfirmSecondFactorUseCase) {
+	t.Helper()
+	deps := humansession.SecondFactorDeps{
+		Store: h.store, Methods: staleKeyList{fakeMethods{h.store}}, TOTP: h.totp, Sets: h.verifier, SetHasher: h.hasher,
+		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain,
+		Observer: h.obs, Now: func() time.Time { return h.clock }, Logger: slog.New(slog.DiscardHandler),
+	}
+	enroll, err := humansession.NewEnrollSecondFactorUseCase(deps)
+	require.NoError(t, err)
+	confirm, err := humansession.NewConfirmSecondFactorUseCase(deps)
+	require.NoError(t, err)
+	return enroll, confirm
+}
+
+// TestKN747_EnrollDecidesOnTheKeyListReadInsideItsWriter — `enroll`: ключ
+// лежит в хранилище, чтение вне транзакции его не видит. Близнец отличается
+// одним фактом — ключа в хранилище нет.
+func TestKN747_EnrollDecidesOnTheKeyListReadInsideItsWriter(t *testing.T) {
+	for _, withKey := range []bool{true, false} {
+		t.Run(map[bool]string{true: "ключ в хранилище", false: "близнец: ключа нет"}[withKey], func(t *testing.T) {
+			h := newSFHarness(t)
+			u, login := h.kn747Person(t, "usr-st1", withKey, "1")
+			enroll, _ := h.staleKeyVerbs(t)
+			stale, err := staleKeyList{fakeMethods{h.store}}.AccessKeyEnrolled(context.Background(), u.ID)
+			require.NoError(t, err)
+			require.False(t, stale, "Дано: чтение вне транзакции ключа не видит")
+
+			_, err = enroll.Execute(context.Background(), humansession.EnrollInput{Bearer: login.Bearer})
+			_, pending := h.sfRow(u.ID, domain.LoginMethodTOTP)
+			if !withKey {
+				require.NoError(t, err, "близнец: заведение начато")
+				require.True(t, pending, "близнец: строка ожидающего заведения есть")
+				return
+			}
+			kn747RequireLevelRefusal(t, err, "ЧЕСТНЫЙ-КРАСНЫЙ: решено чтением вне транзакции записи")
+			require.False(t, pending, "заведение не начато")
+		})
+	}
+}
+
+// TestKN747_ConfirmDecidesOnTheKeyListReadInsideItsWriter — `confirm`:
+// заведение начато без ключа, ключ зафиксирован между началом и
+// подтверждением, чтение вне транзакции его не видит.
+func TestKN747_ConfirmDecidesOnTheKeyListReadInsideItsWriter(t *testing.T) {
+	for _, keyArrives := range []bool{true, false} {
+		t.Run(map[bool]string{true: "ключ заведён до подтверждения", false: "близнец: ключа нет"}[keyArrives], func(t *testing.T) {
+			h := newSFHarness(t)
+			u, login := h.kn747Person(t, "usr-st2", false, "1")
+			enroll, confirm := h.staleKeyVerbs(t)
+			en, err := enroll.Execute(context.Background(), humansession.EnrollInput{Bearer: login.Bearer})
+			require.NoError(t, err, "Дано: заведение начато сессией «1» без ключа")
+			before, ok := h.sfRow(u.ID, domain.LoginMethodTOTP)
+			require.True(t, ok, "Дано: строка ожидающего заведения есть")
+			if keyArrives {
+				h.store.mu.Lock()
+				h.store.keys[u.ID] = true
+				h.store.mu.Unlock()
+			}
+
+			_, err = confirm.Execute(context.Background(), humansession.ConfirmInput{
+				Bearer: login.Bearer, Code: probeTOTP(t, en.Secret, h.step()), Source: "203.0.113.7",
+			})
+			after, _ := h.sfRow(u.ID, domain.LoginMethodTOTP)
+			if !keyArrives {
+				require.NoError(t, err, "близнец: подтверждение проходит")
+				require.Equal(t, domain.LoginMethodStateActive, after.State, "близнец: фактор заведён")
+				return
+			}
+			kn747RequireLevelRefusal(t, err, "ЧЕСТНЫЙ-КРАСНЫЙ: решено чтением вне транзакции записи")
+			require.Equal(t, domain.LoginMethodStatePending, after.State, "фактор не заведён")
+			require.True(t, after.CreatedAt.Equal(before.CreatedAt), "ожидающее заведение не тронуто")
 		})
 	}
 }

@@ -370,6 +370,21 @@ func (r *HumanSessionRepo) PersonWriter(ctx context.Context, userID domain.UserI
 	return w, nil
 }
 
+// EnrollmentWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята
+// строка личности замком глагола, решающего по заведённому
+// (`holdPersonAgainstEnrollment`, kaname#770).
+func (r *HumanSessionRepo) EnrollmentWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.EnrollmentWriter", "")
+	}
+	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return w, nil
+}
+
 // sweepUnservableSessionsSQL — оператор уборки записей сессии, которые
 // `Resolve` уже не обслужит: истёкшие и снятые старше порога ($1), партией не
 // больше $2.
@@ -453,7 +468,8 @@ type humanSessionWriter struct {
 	// личностями не задаёт никто.
 	person domain.UserID
 	// sessionSet — строка личности взята замком писателя нескольких сессий
-	// (`FOR NO KEY UPDATE`), а не только ключевым (`FOR KEY SHARE`).
+	// (`FOR NO KEY UPDATE`) либо сильнее (`FOR UPDATE`,
+	// `holdPersonAgainstEnrollment`), а не только ключевым (`FOR KEY SHARE`).
 	sessionSet bool
 }
 
@@ -555,6 +571,58 @@ func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID
 		return nil
 	}
 	if _, err := w.tx.Exec(ctx, lockPersonForSessionSetSQL, string(userID)); err != nil {
+		return mapErr(err, "User", string(userID))
+	}
+	if userID != "" {
+		w.person, w.sessionSet = userID, true
+	}
+	return nil
+}
+
+// lockPersonAgainstEnrollmentSQL — строка личности замком ГЛАГОЛА, РЕШАЮЩЕГО
+// ПО ЗАВЕДЁННОМУ (kaname#770, находка ревью безопасности; ban #10).
+//
+// # ПРЕДМЕТ
+//
+// Смена адреса и заведение второго фактора решают по тому, что у личности
+// заведено (уровень сессии против способов «2»). Решение верно, только если
+// заведённое не меняется между чтением и фиксацией глагола. Способ, дающий
+// «2», появляется у личности двумя путями записи: вставкой строки ключа
+// доступа (её проверка внешнего ключа берёт строку личности `FOR KEY SHARE`) и
+// подтверждением кода по времени (его транзакция открыта ключевым замком
+// `PersonWriter`, `FOR KEY SHARE`). Замок писателя нескольких сессий
+// (`FOR NO KEY UPDATE`) с `FOR KEY SHARE` СОВМЕСТИМ — и заведение, идущее
+// одновременно с глаголом, глаголом не замечалось.
+//
+// # ПОЧЕМУ ЭТА СИЛА
+//
+// `FOR UPDATE` — единственная сила, конфликтующая с `FOR KEY SHARE`. Заведение,
+// взявшее личность раньше, фиксируется до того, как глагол получит строку, и
+// чтение заведённого ПОСЛЕ замка его видит (чтение уровня изоляции READ
+// COMMITTED берёт снимок на операторе); заведение, пришедшее позже, ждёт
+// фиксации глагола. Сила включает конфликты замка писателя нескольких сессий,
+// поэтому сериализация, которую тот давал глаголу, сохраняется целиком.
+//
+// Цена — остановка проверок внешнего ключа на этой строке на время глагола:
+// вставки строк-детей личности (запись сессии, выдача кода) ждут его
+// фиксации. Глаголов два, и оба — редкие правки своих данных одним человеком.
+// Порядок «личность → всё прочее» прежний: замок берётся ПЕРВЫМ оператором, до
+// него транзакция ничего не держит, и встречного ожидания с ним нет.
+const lockPersonAgainstEnrollmentSQL = `
+SELECT 1 FROM kaname.users WHERE id = $1 FOR UPDATE`
+
+// holdPersonAgainstEnrollment — строка личности замком
+// `lockPersonAgainstEnrollmentSQL` ПЕРВЫМ оператором транзакции. Транзакция,
+// уже держащая строку какой-либо личности, отказывает: подъём силы замка
+// посреди транзакции встречался бы с держателями `FOR KEY SHARE`, ждущими
+// этой же транзакции. Пустая личность — строки нет: оператор исполняется, но
+// держать нечего, и отметка не ставится.
+func (w *humanSessionWriter) holdPersonAgainstEnrollment(ctx context.Context, userID domain.UserID) error {
+	if w.person != "" {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the person row is taken against enrollment only as the first statement")
+	}
+	if _, err := w.tx.Exec(ctx, lockPersonAgainstEnrollmentSQL, string(userID)); err != nil {
 		return mapErr(err, "User", string(userID))
 	}
 	if userID != "" {

@@ -314,6 +314,10 @@ func (s *overlapStore) PersonWriter(ctx context.Context, userID domain.UserID) (
 	return s.open(func() (humansession.Writer, error) { return s.Store.PersonWriter(ctx, userID) })
 }
 
+func (s *overlapStore) EnrollmentWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	return s.open(func() (humansession.Writer, error) { return s.Store.EnrollmentWriter(ctx, userID) })
+}
+
 // open — точка З1 до открытия транзакции настоящей дверью, затем обёртка
 // транзакции над открытой.
 func (s *overlapStore) open(inner func() (humansession.Writer, error)) (humansession.Writer, error) {

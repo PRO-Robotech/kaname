@@ -242,3 +242,44 @@ func TestEC33_UnreadableEnrolledIsAStoreRefusalNotNothingEnrolled(t *testing.T) 
 		require.Equal(t, ec2AcceptedCalls, st.w.calls, "EC-33 (в): исход EC-01")
 	})
 }
+
+// TestEC_LevelIsDecidedByTheReadInsideTheWriter — заведённое, прочитанное ВНЕ
+// транзакции записи, устарело: ключ уже лежит в хранилище, и его видит только
+// чтение транзакции глагола (kaname#770, находка ревью безопасности; ban #10).
+// Близнец отличается одним фактом — ключа нет и в транзакции.
+func TestEC_LevelIsDecidedByTheReadInsideTheWriter(t *testing.T) {
+	cell := func(t *testing.T, keyInWriter bool) (*ecStore, humansession.EmailChangeDeps, domain.SessionBearer) {
+		t.Helper()
+		s, d, b := ec2Cell(t, "1", &ec2Methods{})
+		s.w.methods = &ec2Methods{key: keyInWriter}
+		got, err := s.methods.AccessKeyEnrolled(context.Background(), "usr-1")
+		require.NoError(t, err)
+		require.False(t, got, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): чтение вне транзакции ключа не видит")
+		return s, d, b
+	}
+	t.Run("запрос: ключ виден только транзакции — указание повысить", func(t *testing.T) {
+		st, d, b := cell(t, true)
+		uc, err := humansession.NewRequestEmailChangeUseCase(d)
+		require.NoError(t, err)
+		_, err = uc.Execute(context.Background(), humansession.RequestEmailChangeInput{Bearer: b, NewEmail: "new@example.test"})
+		requireStepUpRefusal(t, err, "запрос, чтение вне транзакции устарело")
+		requireNothingWritten(t, st.w, "запрос, чтение вне транзакции устарело")
+	})
+	t.Run("предъявление: ключ виден только транзакции — указание повысить", func(t *testing.T) {
+		st, d, b := cell(t, true)
+		st.w.presented, st.w.newEmail = humansession.CodeMatched, "new@example.test"
+		uc, err := humansession.NewConfirmEmailChangeUseCase(d)
+		require.NoError(t, err)
+		_, err = uc.Execute(context.Background(), humansession.ConfirmEmailChangeInput{Bearer: b, Code: "ABCDE-FGHJK"})
+		requireStepUpRefusal(t, err, "предъявление, чтение вне транзакции устарело")
+		requireNothingWritten(t, st.w, "предъявление, чтение вне транзакции устарело")
+	})
+	t.Run("близнец: ключа нет и в транзакции — запрос принят", func(t *testing.T) {
+		st, d, b := cell(t, false)
+		uc, err := humansession.NewRequestEmailChangeUseCase(d)
+		require.NoError(t, err)
+		_, err = uc.Execute(context.Background(), humansession.RequestEmailChangeInput{Bearer: b, NewEmail: "new@example.test"})
+		require.NoError(t, err)
+		require.Equal(t, ec2AcceptedCalls, st.w.calls)
+	})
+}
