@@ -563,6 +563,9 @@ func helmTemplateArgs(t *testing.T, dir string, args ...string) (string, error) 
 	for _, f := range chartProfiles {
 		full = append(full, "-f", filepath.Join(dir, f))
 	}
+	for _, kv := range installCoordinateSets(chartProfiles) {
+		full = append(full, "--set", kv)
+	}
 	full = append(full, args...)
 	out, err := exec.Command("helm", full...).CombinedOutput() // #nosec G204 -- фиксированный бинарь, аргументы из дерева и t.TempDir
 	return string(out), err

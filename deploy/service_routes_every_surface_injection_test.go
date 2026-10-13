@@ -129,7 +129,7 @@ func renderChartAtAllowingFailure(t *testing.T, dir string, valueFiles []string,
 	for _, f := range valueFiles {
 		args = append(args, "-f", filepath.Join(dir, f))
 	}
-	for _, kv := range sets {
+	for _, kv := range append(installCoordinateSets(valueFiles), sets...) {
 		args = append(args, "--set", kv)
 	}
 	out, err := exec.Command("helm", args...).CombinedOutput() // #nosec G204 -- фиксированный бинарь, путь из дерева/t.TempDir

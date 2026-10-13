@@ -1259,8 +1259,17 @@ func readChartProfile(t *testing.T, name string) map[string]any {
 func mergeChartProfiles(t *testing.T, chain []string) map[string]any {
 	t.Helper()
 	merged := map[string]any{}
+	prod := false
 	for _, name := range chain {
 		merged = mergeInto(merged, readChartProfile(t, name))
+		prod = prod || filepath.Base(name) == "values.prod.yaml"
+	}
+	// Домен установки вместо заглушки профиля — так же, как его подаёт стенд:
+	// заглушку в зоне `.invalid` отвергают и чарт, и страж старта (kaname#762),
+	// а предмет этих проб — не она. Сам отказ судят
+	// `domain_placeholder_refused_test.go` и пробы стража в пакете настроек.
+	if prod && at(merged, "authn", "domain") != nil {
+		setAt(merged, []string{"authn", "domain"}, installDomainForRender)
 	}
 	return merged
 }

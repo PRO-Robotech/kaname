@@ -260,8 +260,23 @@ func (c Config) Validate() error {
 // Отказ называет ПОЛЕ и ПЕРЕМЕННУЮ: оператору иначе нечего искать, а отказ, не
 // восстанавливающий следующий шаг, отправляет его в цикл. Значение доменного
 // имени в тексте не скрывается — оно не секрет и его же оператор и задаёт.
+//
+// Объявленным не считается и имя в зарезервированной зоне `.invalid` (RFC 2606,
+// RFC 6761, kaname#762): его несёт образец боевого профиля, и такое имя не
+// разрешается ни у одной установки. Чарт отказывает в установке с ним сам, но
+// величина доезжает до процесса и мимо чарта — переменной окружения, поэтому
+// отказ стоит и здесь. Признак — ЗОНА, а не строка образца: сравнение со
+// строкой пропустило бы ту же заглушку с другой первой меткой.
 func (c Config) validateDeclaredDomain() error {
-	if strings.TrimSpace(c.AuthN.Domain) != "" {
+	domain := strings.TrimSpace(c.AuthN.Domain)
+	if domain != "" && isReservedInvalidName(domain) {
+		return fmt.Errorf(
+			"authn.domain=%q is in the reserved .invalid zone (RFC 2606): no deployment resolves "+
+				"such a name, and the audience claim of every issued token is derived from it; "+
+				"set the domain name of this deployment in the chart profile or via ENV "+
+				"KANAME_AUTHN__DOMAIN", domain)
+	}
+	if domain != "" {
 		return nil
 	}
 	return fmt.Errorf(
@@ -270,6 +285,15 @@ func (c Config) validateDeclaredDomain() error {
 			"from it, and a value the build substitutes silently would make this check " +
 			"vacuous — the deployment would look configured while addressing its " +
 			"credentials at a domain nobody chose")
+}
+
+// isReservedInvalidName — лежит ли имя в зарезервированной зоне `.invalid`.
+// Регистр и завершающая точка формы имени не меняют и потому отбрасываются —
+// тем же правилом, что у стража установки (`kaname-svc.requireOperatorDomain`
+// чарта).
+func isReservedInvalidName(name string) bool {
+	n := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
+	return n == "invalid" || strings.HasSuffix(n, ".invalid")
 }
 
 // validateProductionBootstrapMint refuses to start a production binary whose

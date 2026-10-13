@@ -307,12 +307,15 @@ const (
 	RefusalEnrollmentNotPending SecondFactorRefusal = "enrollment-not-pending"
 	RefusalSessionNotFresh      SecondFactorRefusal = "session-not-fresh"
 	RefusalUnavailable          SecondFactorRefusal = "unavailable"
+	// RefusalStepUpRequired — заведение кода у личности с ключом доступа из
+	// сессии ниже «2» (kaname#747, Р4): предъявитель повышает уровень.
+	RefusalStepUpRequired SecondFactorRefusal = "step-up-required"
 )
 
 // SecondFactorRefusals — закрытый перечень.
 func SecondFactorRefusals() []SecondFactorRefusal {
 	return []SecondFactorRefusal{RefusalNotEnrolled, RefusalAlreadyEnrolled, RefusalEnrollmentNotPending,
-		RefusalSessionNotFresh, RefusalUnavailable}
+		RefusalSessionNotFresh, RefusalUnavailable, RefusalStepUpRequired}
 }
 
 // SecondFactorEvent — событие второго фактора.

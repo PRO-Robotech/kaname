@@ -99,6 +99,11 @@ type fakeStore struct {
 	openPath map[domain.UserID]bool
 	// keys — у кого заведена строка ключа доступа (ось «заведено», Ф13).
 	keys map[domain.UserID]bool
+	// keyListUnreadable — чтение перечня ключей портом `loginmethod.Store`
+	// отвечает ошибкой при исправных прочих чтениях и записях (kaname#747,
+	// §3.7 приёмки: фикстура KN747-17, -18). Отдельный переключатель, а не
+	// точка `failOn`: та роняет и чтение писателя, чей отказ судят другие пробы.
+	keyListUnreadable bool
 	// accessKeyRows — строки ключей доступа: чья строка (kaname#669). Держит их
 	// замок выдачи входа ключом `HoldAccessKeyForLogin` — той же семантикой,
 	// что адаптер: строка чужой личности и снятая неразличимы.
@@ -620,6 +625,9 @@ func (w *fakeWriter) AccessKeyEnrolled(_ context.Context, userID domain.UserID) 
 	if err := w.fail("access-key-enrolled"); err != nil {
 		return false, err
 	}
+	if w.store.keyListUnreadable {
+		return false, errFakePort
+	}
 	return w.store.keys[userID], nil
 }
 
@@ -1087,6 +1095,9 @@ func (m fakeMethods) MarkEmailVerified(_ context.Context, userID domain.UserID, 
 func (m fakeMethods) AccessKeyEnrolled(_ context.Context, userID domain.UserID) (bool, error) {
 	m.store.mu.Lock()
 	defer m.store.mu.Unlock()
+	if m.store.keyListUnreadable {
+		return false, errFakePort
+	}
 	return m.store.keys[userID], nil
 }
 

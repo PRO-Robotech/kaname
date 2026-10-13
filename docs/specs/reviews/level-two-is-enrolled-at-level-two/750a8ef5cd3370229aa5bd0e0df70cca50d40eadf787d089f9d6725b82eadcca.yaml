@@ -1,0 +1,104 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md
+  sha256: 750a8ef5cd3370229aa5bd0e0df70cca50d40eadf787d089f9d6725b82eadcca
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке документа — статическая форма объявления; шапка не правлена намеренно
+    (change-graph.md §2). Действующий вердикт о редакции 750a8ef5… — эта запись.
+  base_commit: 400493cf0f3450ee6dd6dd6a649f32bb906491db
+  content_commit: null
+  branch: '747'
+  task: PRO-Robotech/kaname#747
+  lines: 476
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md
+  fingerprint_note: >-
+    Файл не закоммичен (git status → `??`), отпечаток снят по файлу рабочего дерева на голове
+    400493cf0 и совпал с названным заданием.
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-12T19:24:10Z'
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main
+    в PRO-Robotech/kacho-workspace вернул 0 (origin/main 6f10d7e21); docs/changes/policy.yaml:41
+    `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+  added_note: >-
+    Блок дописан после круга (kaname#747, красный шаг «записи ревью не молчат об опубликованном
+    событии»): запись не называла учётку события, и гейт не мог спросить трекер. Вердикт,
+    отпечаток предмета и блок event не тронуты.
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body: "acceptance-reviewer · CHANGES_REQUESTED · 750a8ef5cd3370229aa5bd0e0df70cca50d40eadf787d089f9d6725b82eadcca"
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    note: Записей ревью этого документа до этой нет — документ новый.
+blocking:
+  - kind: NEGATIVE
+    where: "Р4; §5 строка KN747-06/-07; Р2 вопрос 1"
+    finding: >-
+      Исход условия Р4 при НЕЧИТАЕМОЙ оси «заведено» не назван, а документ указывает на её
+      читателя, который при отказе чтения продолжает полосу: completed_login.go:134-145
+      (`enrollmentBeforeWrite` возвращает nil,false, комментарий «полоса продолжается»).
+      Условие, построенное на нём, читает «ключа нет» при сбое хранилища ключей, и сессия «1»
+      у личности с ключом заводит код — Р4 открыт отказом хранилища.
+    predicate: >-
+      sed -n 120,145p internal/apps/kaname/api/humansession/completed_login.go @400493cf0;
+      grep -n enrollmentBeforeWrite internal/apps/kaname/api/humansession/sf_enroll.go → только :249 (confirm)
+    required: >-
+      Сценарий fail-closed: ось «заведено» нечитаема → отказ (код и форма названы, как у прочих
+      отказов хранилища полосы) у enroll и confirm; ожидающее заведение не начато / не подтверждено.
+      Близнец — тот же запрос при читаемой оси. В Р4 — фраза «нечитаемое заведённое = отказ, не
+      «ключа нет»».
+  - kind: DISCLOSURE
+    where: "§0 абз.1 («Сегодня это не так: …» до «держится другим»); §1.2 таблица (столбцы «что требует сегодня», «производит ли «2» потом») и абзац «П1 нарушает свойство прямо … П3 снимает способ «2» решением сессии «1»»"
+    finding: >-
+      Документ публичного репозитория собирает в одном месте координату (глагол, пол «1»),
+      условие (свежая сессия «1») и следствие (способ, дающий «2», → глаголы с полом «2») для
+      дефекта, живого на публичной ветке эпика 296 и её стендах (§1.3), — до посадки фикса.
+      Утверждение §0 «механика … не описывается» при этом вводит в заблуждение.
+    predicate: "sed -n 30,37p; sed -n 91,113p docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md"
+    required: >-
+      Оставить свойство (Р1) и новые полы (Р3, Р4) без нарратива «как сегодня обходится»;
+      адрес разбора — дифф фикса (`disc-diff-is-the-address`). Посадку приёмки в публичную
+      ветку — одним заходом с фиксом, не раньше.
+non_blocking:
+  - "[TWIN] KN747-04 ↔ KN747-05: различаются глаголом и формой исхода, а не одним фактом; близнец KN747-04 по одному факту — KN747-01 (уровень) уже есть, ссылку перенести."
+  - "[DoD] §9 п.5: консоль — «своей задачей той же волны» без номера; назвать задачу PRO-Robotech/kacho."
+  - "[FORMAT] KN747-15 близнец KN747-01, но When разное (испытание против полной церемонии) — выровнять When."
+constructibility:
+  seeded: 0
+  of: 16
+  not_performed: 16
+  reason: стенд и изоляция посева заданием не названы
+  by_code_reading: >-
+    KN747-06 — снятие кода требует только кода, уровня не требует (sf_remove.go:60-117);
+    KN747-07 — ожидающее заведение принадлежит человеку, не сессии (sf_enroll.go:208 factorState по user.ID);
+    KN747-13 — завершение восстановления у подтверждённой записи с кодом даёт сессию «1» без кода (recovery_complete.go:496-499);
+    KN747-12 — администратор посева назван.
+verified_coordinates:
+  - "access_key_service.proto:78/104/118/141 = \"1\" — git grep @400493cf0"
+  - "каталог службы 2509/2516, 2529/2536, 2549/2556 — sed @рабочее дерево"
+  - "копия края kacho@fd9f1793 2569/2576, 2589/2596, 2609/2616, пол «1» — git show"
+  - "производителей предъявления 9 строк — git grep §1.1"
