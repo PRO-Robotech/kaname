@@ -82,6 +82,26 @@ func TestRecovery_F5_01_RequestForAVerifiedAddressMintsACodeAndQueuesTheLetter(t
 	require.Equal(t, 1, h.obs.recoveryRequest[humansession.RecoveryRequestQueued])
 }
 
+// TestRecovery_RequestTransactionHoldsThePersonBeforeItsCodes — транзакция
+// запроса кода держит строку личности с открытия, раньше снятия прежних кодов
+// и вставки нового (kaname#770): исход смены адреса и удаление личности берут
+// личность первой и коды после неё, и обратный порядок у запроса давал с ними
+// взаимную блокировку (`recovery_request_lock_order_integration_test.go`).
+func TestRecovery_RequestTransactionHoldsThePersonBeforeItsCodes(t *testing.T) {
+	h := newHarness(t, nil)
+	u := h.person(t, "usr-r00", "r00@example.invalid", "old-password-0", true)
+	opened := len(h.store.opened)
+
+	h.request(t, "r00@example.invalid")
+
+	require.Len(t, h.store.codesOf(u.ID), 1, "код выдан")
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	require.Len(t, h.store.opened, opened+1, "запрос открывает одну транзакцию записи")
+	w := h.store.opened[opened]
+	assert.Equal(t, u.ID, w.holds, "транзакция запроса держит строку личности, чьи коды она снимает и пишет")
+}
+
 // TestRecovery_F5_02_RequestForNobodyOrUnverifiedQueuesNothingAndAnswersTheSame —
 // Ф5-02 (Ф1-26): адреса нет ни у кого — в очередь не поставлено ничего, ответ
 // тот же; неподтверждённый адрес строки `BLOCKED` — то же (kaname#458, Р2:

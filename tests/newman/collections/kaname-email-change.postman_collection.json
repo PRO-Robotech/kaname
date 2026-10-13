@@ -5941,7 +5941,7 @@
                   "pm.test('EC35-CONFIRM-ENROLL: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('EC35-CONFIRM-ENROLL: код заведён — сессия «2»', () => pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
-                  "if (pm.response.code === 200) { pm.environment.set('ecLEnrolledStep', pm.environment.get('ecLPresentedStep'); }"
+                  "if (pm.response.code === 200) { pm.environment.set('ecLEnrolledStep', pm.environment.get('ecLPresentedStep')); }"
                 ]
               }
             }
