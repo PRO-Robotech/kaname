@@ -1,0 +1,180 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 93515d23a58bf0a1e533abf6f247d4452c8e431d181d9637b630664d85af60eb
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает. Действующий вердикт о
+    ЭТОЙ редакции — эта запись вместе с внешним событием; прежние записи остаются вердиктами о
+    своём содержимом.
+  content_commit: ca61aebe4ef08d356ffa9df16f2edada244ec160
+  judged_on: origin/296 @ 3066c7b6a266f640b367a82df21996f022a9a039
+  base_commit: e0f2d1a7e96d817f69807aaf3e57a3d6fc951c25
+  base_sha256: 23d9e649471b6a27e5fa40466f0326b5da46ddc6bc57026ca1045999a1fa47f8
+  revision: 7
+  lines: 2538
+  round: 7
+  round_note: >-
+    круг 7 — следующий за записью 23d9e649… (круг 6, APPROVED редакции 6 после догона). Редакция 7
+    — правка одобренного документа, прежний вердикт на неё не переносится. Предел двух кругов
+    (flow-acceleration fa-b8) — к диспетчеру: это первый круг редакции 7.
+  fingerprint_predicate: >-
+    git show origin/296:<путь> | sha256sum → 93515d23…f60eb; тот же отпечаток у ca61aebe4 (git log
+    по файлу на origin/296: ca61aebe4 — последняя правка файла).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-13'
+publication_mode: courier_of_agent_verdict
+
+premise_check:
+  premise: 'у отпечатка 93515d23… нет ни записи ревью, ни события'
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git ls-tree origin/296 -- docs/specs/reviews/password-verifier-follows-the-stored-value → 8
+    записей, имени 93515d23… среди них нет; последняя по кругу — 23d9e649… (круг 6).
+
+delta_judged: >-
+  git diff e0f2d1a7e ca61aebe4 -- <путь>: +98 −19. Шапка (пункт «Редакция 7»), Р9 (оговорка Ф5 Р9 в
+  основании и в «Условиях»), §4.3.1 строки 23.1…23.3 и итог 10/11, Ось 2 Д-23 (отметка открытого
+  пути) и Д-27 (новый мир), абзац уровня полосы, сценарий PWV-23, строка PWV-23 §6, новый §17.
+  Прочее побайтово равно редакции 6.
+
+predicates_run:
+  doc_counts: >-
+    awk предиката §17 на файле редакции → «всего 118», «23: 3»; grep -c '^\*\*PWV-[0-9][0-9] — '
+    → 25. Совпадает с заявленным.
+  totals: '10 + 11 = 21 — равно числу новых «Тогда» §4.3.1.'
+  cited_revisions: >-
+    git cat-file -t 3aac88fddc0c / 36fce61d8280 → commit, оба в origin/296.
+  cited_code_at_doc_revision: >-
+    git grep -n withoutWayIn 3aac88fddc0c -- …/recovery_request.go → 141, 204, 207 (документ пишет
+    «141, 208»); git grep 'func TestRecovery_F5_31' 3aac88fddc0c → recovery_way_in_usecase_test.go:57;
+    'func TestRecovery_F5_03' 36fce61d8280 → recovery_usecase_test.go:111. Совпадает, кроме 208.
+  remeasured_on_judged_revision: >-
+    origin/296 @3066c7b6a: withoutWayIn в recovery_request.go нет (git grep → 0); ветвь — 147
+    `!target.EmailVerified && !unverifiedMayRecover(target)`, unverifiedMayRecover (232) для ACTIVE
+    возвращает true безусловно. TestRecovery_F5_31_… (recovery_way_in_usecase_test.go:59)
+    утверждает «A458-01: запись ACTIVE с паролем получает код» и письмо в очереди. Внесено
+    e21f12226 / cf3b4c26f (#458, 2026-10-12) — после редакции 7 (ca61aebe4, 2026-10-05).
+  fixtures_on_judged_revision: >-
+    seedAccountMember (force_logout_identity_deletion_race_integration_test.go:57–68) на origin/296
+    исполняет вставку через withWayIn (active_way_in_fixture_test.go:56–61): тем же оператором
+    ложится строка пароля 'fixture-password-row-without-a-known-password' для ACTIVE. То же на
+    3aac88fddc0c (ревизия измерения редакции 7, строка 60). seedPerson — 231 (документ: 225),
+    вставка строки — 237–241 (документ: 231–233), отметка адреса — 243 (документ: 235).
+  login_not_gated_by_verified: >-
+    login.go на origin/296: подтверждённость читается только для вида ответа (627–634), вход не
+    гейтит — «вход прежним паролем проходит» при неподтверждённом адресе конструктивно.
+
+blocking:
+  - id: B1
+    kind: PRODUCER
+    where: 'PWV-23 (Then, And-1), §4.3.1 строки 23.1 и 23.2, абзац уровня полосы, §17'
+    summary: >-
+      PWV-23 редакции 7 утверждает: личности ACTIVE с паролем и неподтверждённым адресом кода нет,
+      письма нет — «как Ф5-31», производитель 23.1 — ветвь withoutWayIn ветки 608. На ревизии, где
+      лежит документ (origin/296 @3066c7b6a), продукт и одобренный сосед утверждают обратное:
+      unverifiedMayRecover выдаёт код любой ACTIVE (recovery_request.go 147, 232), а держатель,
+      на который ссылается документ, — TestRecovery_F5_31_… — требует кода и письма (A458-01,
+      приёмка unverified-address-passes-to-the-mailbox-owner.md, запись 79e0f15a… APPROVED).
+      Названного производителя нет, а «Тогда» противоречит одобренной соседней приёмке — та же
+      ситуация, ради которой написана сама редакция 7 (сменился мир соседа).
+    failure_scenario: >-
+      проба PWV-23 по тексту на origin/296: запрос восстановления для Д-27 → в очереди письмо с
+      кодом (A458-01) → «письма с кодом в очереди нет» красное, и красное честно не исправить: код
+      судит одобренный сосед; предъявление кода дальше идёт ветвью перехода записи владельцу ящика
+      (recovery_complete.go 393–420), а не «отказом формы Ф5-04».
+    fix: >-
+      перепривязать PWV-23 к соседу (fa-b7: путь и отпечаток одобренной редакции
+      unverified-address-passes-to-the-mailbox-owner.md): либо мир, где кода нет и после #458
+      (например BLOCKED с паролем и неподтверждённым адресом — первая половина Ф5-31 на 296; либо
+      PENDING без пароля — Ф5-32), либо снять PWV-23 надгробием, как PWV-12, назвав держателя
+      мира у соседа (A458-01/02). Строки 23.1…23.3, итог §4.3.1, строку §6 и §17 — под выбранное.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    where: '§4.3.1 Ось 2, Д-23 (PWV-20, 21, 22, 24, 25)'
+    summary: >-
+      Д-23 («ACTIVE, адрес подтверждён, строки способа «пароль» нет», плюс отметка открытого пути)
+      строится, по документу, через seedAccountMember без вставки 231–233. Но seedAccountMember на
+      ревизии измерения редакции 7 (3aac88fddc0c:60) и на origin/296 оборачивает вставку в
+      withWayIn и тем же оператором кладёт строку пароля. Названная фикстура строит Д-24, а не
+      Д-23; seedOpenPath потом ничего не ставит (его WHERE требует отсутствия строки пароля).
+    failure_scenario: >-
+      проба PWV-20 по тексту: посев → у личности строка 'fixture-password-row-…' → завершение идёт
+      замещением, а не заведением → 20.1/20.2 зелёные до кода; отрицание PWV-21/22 и близнец
+      «отличие одно — строка» сливаются (Д-23 ≡ Д-24), сценарии теряют предмет. Правка редакции 7
+      о Д-23 была именно про посев под C1 — и названа неверной фикстурой.
+    fix: >-
+      назвать производителя Д-23 формой, которая его строит на настоящей базе: вставка строки
+      личности без withWayIn и seedOpenPath (active_way_in_fixture_test.go:46–53, 73) той же
+      транзакцией — либо снятие строки пароля фикстуры и отметка в одной транзакции (ключ
+      отложенный); номера строк посева — перемерить на ревизии, где документ лежит.
+
+non_blocking:
+  - id: N1
+    summary: >-
+      §17: предикат git grep -n withoutWayIn на 3aac88fddc0c печатает 141, 204, 207, документ пишет
+      «141, 208». После B1 строка, вероятно, уйдёт; если останется — исправить вывод.
+  - id: N2
+    summary: >-
+      §4.3.1 итог: фраза «Все двенадцать становятся производимыми… 23.3» осталась от редакции 6
+      рядом с новым счётом 10/11; переписать перечень, а не дописывать оговорку.
+  - id: N3
+    summary: >-
+      Номера строк посевов (225–245, 231–233, 235, 241) на origin/296 сдвинулись на +6…+8 —
+      предикатом, а не номерами, либо перемерить на ревизии документа (fa-b5).
+  - id: N4
+    summary: >-
+      PWV-20 на Д-23 с отметкой: завершение снимает отметку (recovery_complete.go 442–446,
+      CloseRecoveryPath при created). «Тогда» PWV-20 этого не утверждают — допустимо (держит AWI-05
+      соседа), но назвать в 20.2 одной строкой, что отметка снята, дешевле, чем потом искать.
+
+constructibility: >-
+  Посева не было (без стенда и без слота — не нужно: дефект B2 читается из SQL фикстуры
+  детерминированно). Д-27 строится: seedPerson (строка пароля сцены + отметка адреса 243) без
+  строки 243 — форма есть; ключ C1 личность с паролем не судит. Д-23 названной фикстурой НЕ
+  строится (B2); строящая форма в пакете есть — seedOpenPath. Д-24, Д-25, Д-26, Д-28, Д-29 дельтой
+  не тронуты. Посеяно 0 из 2 тронутых, «не выполнилось» 0, прочтено фикстурами 2 из 2.
+
+coverage:
+  scope: 'дельтой scope не расширен; предмет один — заказ Ф5 Д19'
+  producers: >-
+    «Тогда» без производителя на ревизии суда: 23.1 (названная ветвь снята #458, держатель
+    утверждает обратное); 23.2 вслед за 23.1
+  twins: >-
+    PWV-23 — близнец Д-24 отличается одним фактом (отметка адреса), форма верна; PWV-20…22, 24, 25
+    — близнец формально верен, но по B2 субъект совпадает с близнецом
+
+event_body: >-
+  acceptance-reviewer · CHANGES_REQUESTED · 93515d23a58bf0a1e533abf6f247d4452c8e431d181d9637b630664d85af60eb
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: 'вердикт CHANGES_REQUESTED; санкции на эту редакцию нет'
+
+event:
+  status: not_performed
+  note: >-
+    публикует курьер; до публикации блок честно not_performed. Роль в записи — координата, а не
+    доказательство личности (change-graph.md §3).
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+  security_surface_note: >-
+    восстановление доступа и выдача кода на неподтверждённый адрес — поверхность захвата
+    учётной записи; в публичный текст события путь дефекта не выносится
