@@ -158,10 +158,13 @@ effective_approval:
   why: 'вердикт CHANGES_REQUESTED; санкции на эту редакцию нет'
 
 event:
+  type: none
   status: not_performed
-  note: >-
-    публикует курьер; до публикации блок честно not_performed. Роль в записи — координата, а не
-    доказательство личности (change-graph.md §3).
+  reason: >-
+    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да» и не «нет». Внешнего события, связывающего
+    отпечаток, роль и вердикт, не создавалось: вердикт CHANGES_REQUESTED событием не публикуется,
+    отказ полномочия не требует. Роль в записи — координата, а не доказательство личности
+    (change-graph.md §3).
 
 authority:
   repository: PRO-Robotech/kacho-workspace
