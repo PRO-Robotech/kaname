@@ -91,6 +91,12 @@ const emailChangeCodeIDPrefix = "ecc"
 // ErrEmailInUse — новый адрес занят на исходе смены (Р4).
 var ErrEmailInUse = errors.New(TextEmailInUse)
 
+// ErrNewEmailIsCurrent — запрошенный адрес совпал с текущим адресом строки
+// человека, который прочитал оператор записи принятого запроса под замком
+// транзакции (kaname#780). Глагол отвечает тем же отказом поля, что и раннее
+// суждение до транзакции (RuleMustDiffer): наружу это один отказ.
+var ErrNewEmailIsCurrent = errors.New("email change: requested address is the current address")
+
 // EmailChangeMailIntent — намерение письма с кодом на НОВЫЙ адрес (Р7): пишется
 // той же транзакцией, что строка отложенной смены.
 type EmailChangeMailIntent struct {

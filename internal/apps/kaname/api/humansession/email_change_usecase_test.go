@@ -28,8 +28,13 @@ import (
 // не переопределены: вызов такого метода — паника пробы, а не тихий успех.
 type ecWriter struct {
 	humansession.Writer
-	calls     []string
-	taken     bool
+	calls []string
+	taken bool
+	// current — текущий адрес строки человека, каким его видит оператор записи
+	// принятого запроса под замком транзакции; пусто — совпадения нет. Дублёр
+	// исполняет контракт адаптера: совпавший адрес — ErrNewEmailIsCurrent, и
+	// строки нет.
+	current   domain.Email
 	paced     humansession.LetterRefusal
 	window    humansession.LetterRefusal
 	inserted  domain.EmailChangeCode
@@ -65,6 +70,9 @@ func (w *ecWriter) SupersedeEmailChangeCodes(context.Context, domain.UserID, tim
 
 func (w *ecWriter) InsertEmailChangeCodePaced(_ context.Context, c domain.EmailChangeCode, _ humansession.VerificationPace) (humansession.LetterRefusal, error) {
 	w.rec("InsertPaced")
+	if w.current != "" && humansession.AddressKey(string(w.current)) == humansession.AddressKey(string(c.NewEmail)) {
+		return humansession.LetterRefusal{}, humansession.ErrNewEmailIsCurrent
+	}
 	w.inserted = c
 	return w.paced, nil
 }
@@ -290,6 +298,24 @@ func TestEmailChangeRequest_PaceRefusalsLeaveNothing(t *testing.T) {
 	require.Equal(t, 7*time.Second, tma.RetryAfter)
 	require.False(t, s2.w.committed, "окно адресата: запрос не записан, прежний код не вытеснен")
 	require.NotContains(t, s2.w.calls, "EmitChangeMail")
+}
+
+// TestEmailChangeRequest_AddressThatBecameCurrentIsAFieldRefusal — адрес,
+// ставший текущим после раннего суждения (чужой исход смены зафиксирован, пока
+// запрос ждал замка), судит оператор записи (kaname#780): отказ поля тем же
+// текстом, что раннее суждение, без окна адресата, письма и фиксации.
+func TestEmailChangeRequest_AddressThatBecameCurrentIsAFieldRefusal(t *testing.T) {
+	s, b := newECStore(t)
+	s.w.current = "new@example.test"
+	uc, err := humansession.NewRequestEmailChangeUseCase(ecDeps(s))
+	require.NoError(t, err)
+	_, err = uc.Execute(context.Background(), humansession.RequestEmailChangeInput{Bearer: b, NewEmail: "New@Example.Test"})
+	require.EqualError(t, err, "Illegal argument newEmail: must differ from the current address")
+	var fe *humansession.FieldError
+	require.ErrorAs(t, err, &fe)
+	require.Equal(t, []string{"AddressTaken", "Supersede", "InsertPaced"}, s.w.calls,
+		"окно адресата не списано, письма нет")
+	require.False(t, s.w.committed, "запрос не записан, прежний код не вытеснен")
 }
 
 func TestEmailChangeConfirm_OutcomeIsOneTransactionInOrder(t *testing.T) {
