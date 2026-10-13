@@ -536,7 +536,11 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 
 - alert: KanameIdentityLedgerUnsampled
   # Ноль личностей законен. Незаконно НЕ ЗНАТЬ, ноль это или неснятый замер.
-  expr: increase(kaname_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
+  # Ряда нет вовсе (цель не собирается) — не знать тем более: `absent` звонит
+  # и там, где `increase` от пустоты пуст и молчал бы.
+  expr: |
+    increase(kaname_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
+      or absent(kaname_identity_ledger_samples_total{outcome="ok"})
   for: 10m
   annotations:
     summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
@@ -549,16 +553,22 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 
 - alert: KanameReadinessUnprobed
   # Ноль неготовых законен. Незаконно НЕ ЗНАТЬ, ноль это или неспрошенная проба.
-  expr: sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+  # Ряда нет вовсе — проба тем более не оценена: сумма пустоты пуста и молчала бы.
+  expr: |
+    sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+      or absent(kaname_readiness_dependency_checks_total)
   for: 15m
   annotations:
     summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
 
 - alert: KanameExpiredCredentialReclaimStalled
   # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
+  # Выключатель служба объявляет величиной всегда; нет и её — неизвестно,
+  # включена ли уборка, и неизвестное звонит.
   expr: |
     sum(increase(kaname_expired_credential_reclaim_passes_total[2h])) == 0
       and on() kaname_expired_credential_reclaim_enabled == 1
+      or absent(kaname_expired_credential_reclaim_enabled)
   for: 10m
   annotations:
     summary: "снятие истёкших удостоверений включено и не делает проходов — места под потолком не возвращаются"
@@ -571,7 +581,11 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 
 - alert: KanameSigningKeySweeperSilent
   # Звонит на ОТСУТСТВИЕ прохода: ряд есть только при поднятой своей чеканке, выключенная не звонит.
-  expr: increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+  # Отличить выключенную чеканку от несобранной цели может только постоянный
+  # ряд `kaname_build_info`: нет и его — цели нет, и это звонит.
+  expr: |
+    increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+      or absent(kaname_build_info)
   for: 30m
   annotations:
     summary: "сметатель выведенных ключей подписи не делает проходов — выведенные ключи остаются в наборе дольше отсрочки"
@@ -671,6 +685,9 @@ kubectl exec deploy/kaname -- wget -qO- --no-check-certificate https://127.0.0.1
 ```
 
 Эти правила **везёт сам чарт** — объектом `PrometheusRule`, поэтому переносить их руками не нужно.
+Рядом тот же оператор получает объект сбора `PodMonitor`: без него правила стояли бы, а рядов у
+них не было. Правила о тишине звонят и тогда, когда ряда нет вовсе (`absent`): несобранная цель
+неотличима от остановленного замера, и молчать о ней правило не вправе.
 Выключается объект ручкой `alertRules.enabled=false`: там, где оператора Prometheus нет, его вид
 неизвестен кластеру, и установка была бы отвергнута целиком.
 
