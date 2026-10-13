@@ -186,8 +186,20 @@ func (uc *RequestRecoveryUseCase) mintAndEnqueue(ctx context.Context, user domai
 	uc.observer.RecoveryRequestObserved(RecoveryRequestQueued)
 }
 
+// write — одна транзакция записи (Ф5-09), открытая ключевым замком строки
+// личности (`Store.PersonWriter`, kaname#770): строка личности берётся РАНЬШЕ
+// строк кода. Строки кода личности снимают и писатели, держащие её строку
+// замком `FOR UPDATE`, — исход смены адреса (`EmailChangeWriter`) и удаление
+// личности (каскадом); вставка кода берёт личность проверкой внешнего ключа
+// (`FOR KEY SHARE`), с этим замком несовместимой. Запрос, снявший коды до
+// личности, держал бы их и ждал личность навстречу им — взаимная блокировка в
+// 3 прогонах из 3 у каждой пары (`recovery_request_lock_order_integration_test.go`
+// в `internal_iam`). Ключевой замок — та сила, что взяла бы сама проверка
+// внешнего ключа: с выдачей входа и писателями нескольких сессий он
+// совместим, а ждёт только держателей строки личности `FOR UPDATE` — удаление
+// и глаголы, решающие по заведённому, — и ждёт их, ещё ничего не держа.
 func (uc *RequestRecoveryUseCase) write(ctx context.Context, user domain.User, code domain.RecoveryCode, value domain.RecoveryCodeValue) error {
-	w, err := uc.store.Writer(ctx)
+	w, err := uc.store.PersonWriter(ctx, user.ID)
 	if err != nil {
 		return err
 	}

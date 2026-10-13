@@ -38,6 +38,17 @@ type ecWriter struct {
 	changeErr error
 	marked    bool
 	committed bool
+	// methods — заведённое у личности, прочитанное ЭТОЙ транзакцией (редакция
+	// 3, Р2; дублёр — `email_change_level_usecase_test.go`).
+	methods *ec2Methods
+}
+
+func (w *ecWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return w.methods.Get(ctx, userID, kind)
+}
+
+func (w *ecWriter) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return w.methods.AccessKeyEnrolled(ctx, userID)
 }
 
 func (w *ecWriter) rec(c string) { w.calls = append(w.calls, c) }
@@ -121,13 +132,29 @@ func (w *ecWriter) Commit(context.Context) error {
 
 func (w *ecWriter) Rollback(context.Context) error { return nil }
 
-// ecStore — дублёр хранилища: сессия свежая и подтверждённая, если не сказано
-// иначе; открытия транзакции считаются.
+// ecStore — дублёр хранилища: сессия свежая, подтверждённая, уровня «1», у
+// личности заведён только пароль, если не сказано иначе; открытия транзакции
+// считаются.
 type ecStore struct {
 	resolved humansession.Resolved
 	reason   humansession.NoSessionReason
 	w        *ecWriter
 	opened   int
+	// methods — заведённое у личности (редакция 3, Р2): тем же дублёром, что
+	// транзакция и поле зависимостей, — носителя чтения проба не диктует.
+	methods *ec2Methods
+}
+
+func (s *ecStore) Get(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return s.methods.Get(ctx, userID, kind)
+}
+
+func (s *ecStore) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return s.methods.Get(ctx, userID, kind)
+}
+
+func (s *ecStore) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return s.methods.AccessKeyEnrolled(ctx, userID)
 }
 
 func (s *ecStore) Resolve(context.Context, domain.BearerDigest, time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
@@ -145,24 +172,28 @@ func newECStore(t *testing.T) (*ecStore, domain.SessionBearer) {
 	t.Helper()
 	bearer, err := domain.NewSessionBearer()
 	require.NoError(t, err)
+	methods := &ec2Methods{}
 	return &ecStore{
 		resolved: humansession.Resolved{
-			Session:       domain.HumanSession{ID: "hs-1", LastPresentedAt: ecNow.Add(-time.Minute)},
+			Session:       domain.HumanSession{ID: "hs-1", LastPresentedAt: ecNow.Add(-time.Minute), AssuranceLevel: "1"},
 			User:          domain.User{ID: "usr-1", AccountID: "acc-1", Email: "old@example.test"},
 			EmailVerified: true,
 		},
-		w: &ecWriter{marked: true},
+		w:       &ecWriter{marked: true, methods: methods},
+		methods: methods,
 	}, bearer
 }
 
 func ecDeps(s *ecStore) humansession.EmailChangeDeps {
-	return humansession.EmailChangeDeps{
+	d := humansession.EmailChangeDeps{
 		Store:     s,
 		Pace:      humansession.VerificationPace{CodeTTL: 30 * time.Minute, Attempts: 5, Interval: time.Minute, Limit: 5, Window: 24 * time.Hour},
 		Freshness: 15 * time.Minute,
 		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 3, Window: time.Hour},
 		Now:       func() time.Time { return ecNow },
 	}
+	wireEnrolledReader(&d, s.methods)
+	return d
 }
 
 func TestEmailChangeRequest_FieldAndFreshnessRefusalsOpenNoTransaction(t *testing.T) {

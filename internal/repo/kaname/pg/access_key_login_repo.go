@@ -11,8 +11,8 @@ package pg
 // # Что держит база, а не адаптер
 //
 //   - одно ЖИВОЕ испытание на контекст формы — частичный ключ уникальности по
-//     непотреблённым строкам (Ф13-03): замещение — снятие и вставка одной
-//     транзакцией, а не «посмотреть и решить» (ban #10);
+//     непотреблённым строкам (Ф13-03): замещение — один оператор вставки с
+//     этим ключом арбитром, а не «посмотреть и решить» (ban #10);
 //   - однократность — ОДИН условный оператор с отметкой потребления (Ф13-08);
 //   - моменты выдачи, предела и предъявления — часы БАЗЫ: реплик службы
 //     больше одной, и граница срока не вправе быть расхождением их часов;
@@ -27,7 +27,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -48,8 +47,16 @@ func NewAccessKeyLoginRepo(pool *pgxpool.Pool, keys *AccessKeyRepo) *AccessKeyLo
 }
 
 // IssueChallenge — выдача, ЗАМЕЩАЮЩАЯ живое испытание того же контекста
-// (Ф13-03), одной транзакцией. Момент выдачи и предел ставит база: предел —
+// (Ф13-03), ОДНИМ оператором. Момент выдачи и предел ставит база: предел —
 // её `now()` плюс срок ttl.
+//
+// Замещение держит частичный ключ уникальности `(form_context) WHERE
+// consumed_at IS NULL` арбитром вставки, а не пара «снять, затем вставить»:
+// при двух одновременных выдачах снятие второй не видит незафиксированной
+// строки первой, и вставка второй упиралась в ключ отказом (kaname#769).
+// Арбитр ждёт фиксации соперника и переписывает его строку — живым
+// остаётся позднее испытание, отказа нет. Строка, потреблённая соперником
+// за время ожидания, из-под ключа уходит, и оператор вставляет новую.
 func (r *AccessKeyLoginRepo) IssueChallenge(ctx context.Context, c domain.AccessKeyLoginChallenge, ttl time.Duration) error {
 	if err := c.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%v", err)
@@ -57,23 +64,14 @@ func (r *AccessKeyLoginRepo) IssueChallenge(ctx context.Context, c domain.Access
 	if ttl <= 0 {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument ttl: must be positive")
 	}
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return mapErr(err, "AccessKeyLogin.IssueChallenge", "")
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM access_key_login_challenges
-		 WHERE form_context = $1 AND consumed_at IS NULL`, c.FormContext); err != nil {
-		return mapErr(err, "AccessKeyLogin.IssueChallenge", "")
-	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := r.pool.Exec(ctx, `
 		INSERT INTO access_key_login_challenges (challenge, form_context, issued_at, expires_at)
-		VALUES ($1, $2, now(), now() + make_interval(secs => $3))`,
+		VALUES ($1, $2, now(), now() + make_interval(secs => $3))
+		ON CONFLICT (form_context) WHERE consumed_at IS NULL
+		DO UPDATE SET challenge  = EXCLUDED.challenge,
+		              issued_at  = EXCLUDED.issued_at,
+		              expires_at = EXCLUDED.expires_at`,
 		c.Challenge, c.FormContext, ttl.Seconds()); err != nil {
-		return mapErr(err, "AccessKeyLogin.IssueChallenge", "")
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return mapErr(err, "AccessKeyLogin.IssueChallenge", "")
 	}
 	return nil

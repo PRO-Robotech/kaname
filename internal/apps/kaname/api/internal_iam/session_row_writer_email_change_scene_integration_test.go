@@ -49,6 +49,7 @@ func TestIntegration_SessionWriterEmailChangeAndIdentityDeletionDoNotDeadlock(t 
 	l := newSessionWriterLane(t)
 	deps := humansession.EmailChangeDeps{
 		Store:     sceneEmailChangeStore{sessions: l.s.sessions, inner: kanamepg.NewRegistrationStore(l.s.pool)},
+		Methods:   kanamepg.NewLoginMethodRepo(l.s.pool),
 		Pace:      humansession.VerificationPace{CodeTTL: 30 * time.Minute, Attempts: 5, Interval: time.Minute, Limit: 5, Window: 24 * time.Hour},
 		Freshness: 15 * time.Minute,
 		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 10000, Window: time.Hour},

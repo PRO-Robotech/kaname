@@ -681,9 +681,10 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	// Смена адреса почты (kaname#635, Р1–Р8): два глагола под сессией над тем
 	// же составом транзакции, что подтверждение; величины — ручки кода
 	// подтверждения (Р5, Р6), окно свежести правки своих данных (Р2) и окно
-	// писем адресата нашего отправителя (Р6).
+	// писем адресата нашего отправителя (Р6). Заведённое у личности читает
+	// хранилище способов входа: условие уровня Р2 (kaname#770).
 	emailChangeDeps := humansession.EmailChangeDeps{
-		Store: emailChangeStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
+		Store: emailChangeStore{sessions: sessions, inner: registrationPG}, Methods: methods, Pace: letterPace,
 		Freshness: cfg.AuthN.SelfServiceFreshness, MailLimit: inviteMailRateLimit(cfg),
 		Observer: rec, Now: time.Now, Logger: logger,
 	}

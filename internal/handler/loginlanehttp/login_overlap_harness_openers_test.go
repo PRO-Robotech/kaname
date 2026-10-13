@@ -63,6 +63,10 @@ func (s openerStubStore) PersonWriter(context.Context, domain.UserID) (humansess
 	return s.w, nil
 }
 
+func (s openerStubStore) EnrollmentWriter(context.Context, domain.UserID) (humansession.Writer, error) {
+	return s.w, nil
+}
+
 // forgetfulOverlapStore — ВНЕСЁННЫЙ дефект: обёртка, у которой `PersonWriter`
 // идёт к настоящему хранилищу мимо обёртки, как было до kaname#382.
 type forgetfulOverlapStore struct{ *overlapStore }
