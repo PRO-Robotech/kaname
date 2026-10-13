@@ -11,7 +11,7 @@ subject:
     (change-graph.md §2). Действующий вердикт о редакции 4 — эта запись плюс внешнее событие.
   base_commit: 9a78fc2183c8669dde415cb3c12e637e593d52b9
   content_commit: none (файл не закоммичен в ветке 770)
-  task: https://github.com/PRO-Robotech/kaname/issues/770
+  task: PRO-Robotech/kaname#770
   fingerprint_predicate: sha256sum docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md
   lines: 1061
 verdict: APPROVED
@@ -20,6 +20,25 @@ round_note: >-
   Это второй круг цикла редакций 3–4, круг 1 — запись f9100263….yaml. По fa-b8 он последний.
 reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-12T23:55:00Z'
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+  added_note: >-
+    Блок и форма subject.task (`<владелец>/<репозиторий>#<номер>`, была URL задачи) дописаны после
+    записи: гейт «записи ревью не молчат об опубликованном событии» ищет событие в задаче
+    subject.task от учётки authority.authorized_actors. Вердикт, отпечаток предмета и блок event
+    не тронуты.
+effective_approval:
+  issued: false
+  publication_pending:
+    expected_actor: pointpu
+    target: PRO-Robotech/kaname#770
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#770
