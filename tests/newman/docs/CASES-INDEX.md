@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 828
+Всего кейсов: 829
 
 ## Перепись по модулям
 
@@ -70,7 +70,7 @@
 | `cases/kaname-recovery-lane.py` | 20 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
-| `cases/kaname-email-change.py` | 3 |
+| `cases/kaname-email-change.py` | 4 |
 | `cases/kaname-access-keys.py` | 27 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 18 |
@@ -1138,22 +1138,25 @@
 - `IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS`
 - `IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED`
 
-## `cases/kaname-email-change.py` — 3 кейса
+## `cases/kaname-email-change.py` — 4 кейса
 
 > Смена адреса почты с подтверждением с нового адреса (kaname#635, приёмка
-> `email-change-is-confirmed-from-the-new-address.md`, позиции уровня E EC-25…EC-27):
+> `email-change-is-confirmed-from-the-new-address.md`, позиции уровня E EC-25…EC-27 и EC-35):
 > запрос смены и предъявление кода на том же слушателе формы, что вход. Адресуется
 > `loginLaneBaseUrl`, коды писем читает у приёмника писем стенда (`standMailboxUrl`,
 > `GET /codes`); людей набор заводит сам регистрацией и подтверждением адреса.
 > Отсутствие письма на занятый адрес судит барьер — письмо, законно запрошенное тем
 > же человеком позже; интервал ждёт по `Retry-After` ответа службы, несвежесть сессии —
-> по окну свежести профиля. Без посадки `own` либо приёмника писем — «условие не
-> создано». Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
+> по окну свежести профиля. EC-35 (редакция 3, kaname#770): у человека с кодом по
+> времени сессия «1» получает указание повысить уровень, после повышения кодом
+> следующей ступени тот же запрос проходит. Без посадки `own` либо приёмника писем —
+> «условие не создано». Гоняет набор задание `chart-own` процесса `e2e-newman.yml` тем же вызовом
 > прогонщика.
 
 - `IAM-EMAILCHANGE-OK-CHANGE-END-TO-END`
 - `IAM-EMAILCHANGE-NEG-TAKEN-ADDRESS-INDISTINGUISHABLE`
 - `IAM-EMAILCHANGE-NEG-STALE-SESSION-STEP-UP`
+- `IAM-EMAILCHANGE-NEG-LEVEL-TWO-HOLDER-STEP-UP`
 
 ## `cases/kaname-second-factor.py` — 18 кейсов
 

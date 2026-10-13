@@ -4,7 +4,7 @@
 """Case-set смены адреса почты с подтверждением с нового адреса (kaname#635).
 
 Предмет — приёмка `docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md`,
-позиции уровня E — EC-25, EC-26, EC-27: два глагола смены на СОБСТВЕННОМ слушателе
+позиции уровня E — EC-25, EC-26, EC-27 и EC-35 (редакция 3, kaname#770): два глагола смены на СОБСТВЕННОМ слушателе
 формы службы, той же полосе, что вход (Ф3): поднимается только посадкой
 `authn.identityProvider: own` и допускает РОВНО край по SAN клиентского сертификата.
 Переменные:
@@ -55,6 +55,15 @@ Coverage (техники: классы эквивалентности адрес
                                           профиля — 403 SESSION_NOT_FRESH дословно,
                                           писем нет; повышение паролем — 200; тот же
                                           запрос — 200
+  IAM-EMAILCHANGE-NEG-LEVEL-TWO-HOLDER-STEP-UP — EC-35: человек с заведённым кодом по
+                                          времени, вход одним паролем — сессия «1»,
+                                          свежая; запрос смены — 401, code 16, текст
+                                          указания повысить уровень, вызов с
+                                          insufficient_user_authentication и
+                                          acr_values="2", писем нет; повышение кодом
+                                          ступени, следующей за ступенью заведения, —
+                                          200 и «2»; тот же запрос — 200; по N в
+                                          приёмнике ровно одно письмо с кодом
 """
 
 # ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — идентификаторы КОММЕНТАРИЕМ, а не строкой:
@@ -173,7 +182,7 @@ def _person_init(p, tag):
         f"  pm.environment.set({js_str(_v(p, 'NewMailSeen'))}, '0');",
         *(f"  pm.environment.unset({js_str(_v(p, n))});" for n in (
             "FormCookie", "SessionCookie", "LoginSessionCookie", "Csrf", "Code", "ChangeCode", "IntervalUntil",
-            "FreshUntil")),
+            "FreshUntil", "TotpSecret", "TotpCode", "EnrolledStep", "PresentedStep")),
         "}",
     ]
 
@@ -590,6 +599,180 @@ CASES.append(Case(
                 *_status_is(200, "EC27-LETTERS"),
                 "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
                 "pm.test('EC27-LETTERS: писем на новый адрес ровно одно — отказ свежести письма не поставил', () => "
+                "pm.expect(Array.isArray(__codes) ? __codes.length : -1).to.eql(1));",
+            ],
+        ),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# EC-35: условие уровня на стенде (редакция 3, kaname#770, решение Р2).
+# ───────────────────────────────────────────────────────────────────────────
+_PL = "ecL"
+_SECOND_FACTOR_ENROLL = "/iam/v1/auth/second-factor/enroll"
+_SECOND_FACTOR_CONFIRM = "/iam/v1/auth/second-factor/confirm"
+# Текст указания повысить уровень — одно объявление (`internal/errors/step_up.go`,
+# `TextStepUpRequired`), дословно.
+_STEP_UP_REQUIRED = ("authentication level is insufficient: step up with a second factor, "
+                     "or present a credential of another kind")
+
+# Код по времени в песочнице прогонщика: base32 (RFC 4648, без дополнения) →
+# HMAC-SHA1 (crypto-js) → динамическое усечение → шесть цифр. Объявляется в
+# pre-script каждого шага, которому нужен код: песочница между шагами функции не
+# хранит. Алфавит — двумя строками: одной строкой он есть пробег формы секрета.
+_TOTP_JS = [
+    "const __totp = (secretB32, step) => {",
+    "  const CryptoJS = require('crypto-js');",
+    "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
+    "  let bits = 0, value = 0; const bytes = [];",
+    "  for (const ch of String(secretB32 || '').toUpperCase()) {",
+    "    const idx = alphabet.indexOf(ch); if (idx < 0) { continue; }",
+    "    value = (value << 5) | idx; bits += 5;",
+    "    if (bits >= 8) { bytes.push((value >>> (bits - 8)) & 0xff); bits -= 8; }",
+    "  }",
+    "  const toHex = arr => arr.map(b => b.toString(16).padStart(2, '0')).join('');",
+    "  const msg = []; let s = step;",
+    "  for (let i = 7; i >= 0; i--) { msg[i] = s % 256; s = Math.floor(s / 256); }",
+    "  const mac = CryptoJS.HmacSHA1(CryptoJS.enc.Hex.parse(toHex(msg)), CryptoJS.enc.Hex.parse(toHex(bytes)));",
+    "  const h = CryptoJS.enc.Hex.stringify(mac);",
+    "  const off = parseInt(h.slice(-1), 16);",
+    "  const bin = (parseInt(h.slice(off * 2, off * 2 + 8), 16) & 0x7fffffff) % 1000000;",
+    "  return String(bin).padStart(6, '0');",
+    "};",
+    "const __stepNow = () => Math.floor(Date.now() / 1000 / 30);",
+]
+# Предел опросов ожидания следующей ступени: до двух ступеней по 30 с при паузе
+# около полусекунды на опрос.
+_STEP_POLL_CAP = 140
+
+
+def _step_up_required(label):
+    """Указание повысить уровень формой Ф11 Р11 дословно: 401, code 16, текст
+    одного объявления, вызов с `insufficient_user_authentication` и
+    `acr_values="2"`; носителя не пишет."""
+    return [
+        *_refused(401, 16, _STEP_UP_REQUIRED, label),
+        "const __ch = String(pm.response.headers.get('WWW-Authenticate') || '');",
+        "const __params = {}; (__ch.match(/[a-z_]+=\"[^\"]*\"/g) || []).forEach(kv => {"
+        " const i = kv.indexOf('='); __params[kv.slice(0, i)] = kv.slice(i + 2, -1); });",
+        f"pm.test({js_str(label + ': вызов несёт error=insufficient_user_authentication')}, () => "
+        "pm.expect(__params.error).to.eql('insufficient_user_authentication'));",
+        f"pm.test({js_str(label + ': вызов несёт acr_values=2')}, () => pm.expect(__params.acr_values).to.eql('2'));",
+    ]
+
+
+def _await_next_step(p, name):
+    """Ожидание ступени часов, следующей за ступенью подтверждения заведения
+    (код ступени заведения сверка отвергает как повтор): повтор признака формы
+    `step-up` с настоящей паузой и конечным пределом."""
+    path = f"{_CSRF}?form=step-up"
+    label, polls = name.upper(), f"_ecsp_{p}".replace("-", "_")
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[*require_env_url("loginLaneBaseUrl", path, _LANE_WHY), *_src_pre(p),
+                    *_with_cookies(("kaname_form", _v(p, "FormCookie")), ("kaname_session", _v(p, "SessionCookie")))],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            *_status_is(200, label),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.environment.set({js_str(_v(p, 'Csrf'))}, __j.csrfToken || '');",
+            f"const __enrolled = parseInt(pm.environment.get({js_str(_v(p, 'EnrolledStep'))}) || '0', 10);",
+            f"const __polls = parseInt(pm.environment.get({js_str(polls)}) || '0', 10);",
+            "const __ready = __enrolled > 0 && Math.floor(Date.now() / 30000) > __enrolled;",
+            f"pm.test({js_str(label + ': ступень заведения записана шагом подтверждения')}, () => pm.expect(__enrolled > 0).to.eql(true));",
+            f"pm.test({js_str(label + f': часы дошли до следующей ступени либо ожидание в пределе {_STEP_POLL_CAP} опросов')}, () => "
+            f"pm.expect(__ready || __polls < {_STEP_POLL_CAP}).to.eql(true));",
+            f"if (__enrolled > 0 && !__ready && __polls < {_STEP_POLL_CAP}) {{",
+            f"  pm.environment.set({js_str(polls)}, String(__polls + 1));",
+            "  const _ecs = Date.now(); while (Date.now() - _ecs < 500) void 0;",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "} else {",
+            f"  pm.environment.unset({js_str(polls)});",
+            "}",
+        ],
+    )
+
+
+CASES.append(Case(
+    id="IAM-EMAILCHANGE-NEG-LEVEL-TWO-HOLDER-STEP-UP",
+    title="Условие уровня на стенде (EC-35): у человека с кодом по времени сессия «1» получает на запрос смены "
+          "указание повысить уровень (401, code 16, acr_values=2), письма нет; после повышения кодом тот же запрос — 200",
+    classes=["SEC", "NEG", "AUTHN"],
+    priority="P0",
+    steps=[
+        *_verified_person(_PL, "ec35"),
+        # Заведение кода по времени глаголами Ф12 в сессии подтверждения адреса
+        # (свежая «1» личности без ключа).
+        _csrf_step(_PL, "ec35-csrf-enroll", "second-factor"),
+        _post(_PL, "ec35-enroll", _SECOND_FACTOR_ENROLL, {"csrfToken": f"{{{{{_v(_PL, 'Csrf')}}}}}"},
+              with_session="SessionCookie",
+              test_script=[
+                  *_status_is(200, "EC35-ENROLL"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('EC35-ENROLL: ответ несёт секрет формы base32', () => "
+                  "pm.expect(typeof __j.secret === 'string' && /^[A-Z2-7]{16,}$/.test(__j.secret)).to.eql(true));",
+                  f"pm.environment.set({js_str(_v(_PL, 'TotpSecret'))}, __j.secret || '');",
+              ]),
+        _csrf_step(_PL, "ec35-csrf-confirm-enroll", "second-factor"),
+        _post(_PL, "ec35-confirm-enroll", _SECOND_FACTOR_CONFIRM,
+              {"code": f"{{{{{_v(_PL, 'TotpCode')}}}}}", "csrfToken": f"{{{{{_v(_PL, 'Csrf')}}}}}"},
+              with_session="SessionCookie",
+              extra_pre=[
+                  *_TOTP_JS,
+                  "const __s = __stepNow();",
+                  f"pm.environment.set({js_str(_v(_PL, 'PresentedStep'))}, String(__s));",
+                  f"pm.environment.set({js_str(_v(_PL, 'TotpCode'))}, __totp(pm.environment.get({js_str(_v(_PL, 'TotpSecret'))}), __s));",
+              ],
+              test_script=[
+                  *_status_is(200, "EC35-CONFIRM-ENROLL"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('EC35-CONFIRM-ENROLL: код заведён — сессия «2»', () => "
+                  "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+                  f"if (pm.response.code === 200) {{ pm.environment.set({js_str(_v(_PL, 'EnrolledStep'))}, "
+                  f"pm.environment.get({js_str(_v(_PL, 'PresentedStep'))}); }}",
+              ]),
+        # Вход одним паролем ПОСЛЕ заведения: сессия «1», свежая.
+        *_login(_PL, "ec35-login-password-only", "Email", test_script=[
+            *_status_is(200, "EC35-LOGIN"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "pm.test('EC35-LOGIN: вход одним паролем — сессия «1»', () => "
+            "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('1'));",
+            *_capture(_PL, "kaname_session", "SessionCookie", "EC35-LOGIN"),
+            *_capture(_PL, "kaname_form", "FormCookie", "EC35-LOGIN", required=False),
+        ]),
+        # (а) запрос смены из «1» — указание повысить уровень.
+        *_request_change(_PL, "ec35-request-level-one", _v(_PL, "NewEmail"),
+                         test_script=_step_up_required("EC35-LEVEL-ONE")),
+        # (б) повышение кодом ступени, следующей за ступенью заведения.
+        _await_next_step(_PL, "ec35-await-next-step"),
+        _post(_PL, "ec35-step-up-totp", _STEP_UP,
+              {"method": "totp", "code": f"{{{{{_v(_PL, 'TotpCode')}}}}}", "csrfToken": f"{{{{{_v(_PL, 'Csrf')}}}}}"},
+              with_session="SessionCookie",
+              extra_pre=[
+                  *_TOTP_JS,
+                  f"const __s = Math.max(parseInt(pm.environment.get({js_str(_v(_PL, 'EnrolledStep'))}) || '0', 10) + 1, __stepNow());",
+                  f"pm.environment.set({js_str(_v(_PL, 'TotpCode'))}, __totp(pm.environment.get({js_str(_v(_PL, 'TotpSecret'))}), __s));",
+              ],
+              test_script=[
+                  *_status_is(200, "EC35-STEP-UP"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('EC35-STEP-UP: после повышения кодом — «2»', () => "
+                  "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+                  *_capture(_PL, "kaname_session", "SessionCookie", "EC35-STEP-UP"),
+              ]),
+        # (в) тот же запрос из «2» — принят.
+        *_request_change(_PL, "ec35-request-level-two", _v(_PL, "NewEmail"),
+                         test_script=_accepted("EC35-LEVEL-TWO")),
+        # По N письмо с кодом есть, и оно одно: отказ (а) письма не поставил.
+        _await_mail(_PL, "ec35-change-letter", to="NewEmail", seen="NewMailSeen", heading=_HEAD_CHANGE, into="ChangeCode"),
+        Step(
+            name="ec35-one-letter", method="GET", path=_mail_path(_v(_PL, "NewEmail"), _HEAD_CHANGE),
+            auth="anonymous", cookie_jar=False,
+            pre_script=[*require_env_url("standMailboxUrl", _mail_path(_v(_PL, "NewEmail"), _HEAD_CHANGE), _MAILBOX_WHY)],
+            test_script=[
+                *_status_is(200, "EC35-LETTERS"),
+                "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                "pm.test('EC35-LETTERS: писем на новый адрес ровно одно — указание повысить уровень письма не поставило', () => "
                 "pm.expect(Array.isArray(__codes) ? __codes.length : -1).to.eql(1));",
             ],
         ),
