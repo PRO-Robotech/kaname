@@ -62,6 +62,11 @@ const keyLifetimeSetting = "authn.token-signing.key-lifetime"
 func overlayWithout(t *testing.T, path []string) string {
 	t.Helper()
 	overlay := readChartProfile(t, "values.prod.yaml")
+	// Домен установки вместо заглушки профиля — так же, как его подаёт
+	// стенд: заглушку чарт отвергает (kaname#762), а предмет этих проб — не она.
+	// Накладка лежит под своим именем, и подставить домен за неё по имени файла
+	// рендер не может.
+	setAt(overlay, []string{"authn", "domain"}, installDomainForRender)
 	if len(path) > 0 {
 		require.NotNilf(t, at(overlay, path...),
 			"фикстура беспредметна: боевая накладка не объявляет %s — снимать нечего",

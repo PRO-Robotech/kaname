@@ -240,13 +240,16 @@ func TestForeignOperatorInjection_OperatorMissingFromDependenciesIsAFinding(t *t
 // операторе.
 func TestForeignOperatorInjection_RemedyThatDoesNotRemoveIsAFinding(t *testing.T) {
 	rows := realPageRows(t)
+	// Строка — того вида, чей шаблон ломает инъекция: чужих видов у чарта
+	// больше одного (`PodMonitor` рядом с правилами, kaname#759), и строка
+	// другого вида судила бы объект, которого инъекция не касалась.
 	var row pageRow
 	for _, r := range rows {
-		if r.Foreign {
+		if r.Foreign && r.Kind == "PrometheusRule" {
 			row = r
 		}
 	}
-	require.NotEmpty(t, row.Knob, "фикстура беспредметна: у страницы нет строки чужого вида")
+	require.NotEmpty(t, row.Knob, "фикстура беспредметна: у страницы нет строки PrometheusRule")
 
 	dir := chartCopy(t)
 	patchInCopy(t, dir, filepath.Join("templates", "prometheusrule.yaml"),

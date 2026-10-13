@@ -2513,7 +2513,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessKeyService/FinishAssertion",
@@ -2533,7 +2533,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessKeyService/List",
@@ -2553,7 +2553,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccountService/Create",

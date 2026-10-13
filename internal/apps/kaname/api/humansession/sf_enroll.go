@@ -10,7 +10,9 @@ package humansession
 // Оба глагола — правка своих данных (Ф1 §4.1): требуют, чтобы с момента
 // последнего предъявления прошло не больше окна свежести (Р8); иначе — отказ
 // `SESSION_NOT_FRESH`, называющий следующий шаг (церемонию). Срок
-// неподтверждённого заведения — то же окно от момента `enroll`.
+// неподтверждённого заведения — то же окно от момента `enroll`. У личности с
+// ключом доступа оба глагола требуют ещё и сессии «2», и уровень судится РАНЬШЕ
+// свежести (kaname#747, Р4; `sf_enroll_level.go`).
 //
 // `enroll` — ОДИН оператор под ключом «человек, вид»: при `active` — 409, при
 // `pending` — замена секрета (человек, потерявший экран, не ждёт истечения),
@@ -98,6 +100,9 @@ func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput
 	if err != nil {
 		return EnrollOutput{}, err
 	}
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved); err != nil {
+		return EnrollOutput{}, err
+	}
 	if err := requireFresh(uc.deps, resolved.Session, now); err != nil {
 		return EnrollOutput{}, err
 	}
@@ -170,8 +175,8 @@ func NewConfirmSecondFactorUseCase(d SecondFactorDeps) (*ConfirmSecondFactorUseC
 	return &ConfirmSecondFactorUseCase{deps: d, gate: d.gate()}, nil
 }
 
-// Execute — подтверждение. Порядок: сессия → свежесть → частота → состояние
-// (матрица) → срок → сверка → четыре записи одним исходом.
+// Execute — подтверждение. Порядок: сессия → уровень → свежесть → частота →
+// состояние (матрица) → срок → сверка → четыре записи одним исходом.
 func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInput) (_ ConfirmOutput, err error) {
 	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
 	// глагола, а не каждый возврат по отдельности.
@@ -185,6 +190,9 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)
 	if err != nil {
+		return ConfirmOutput{}, err
+	}
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved); err != nil {
 		return ConfirmOutput{}, err
 	}
 	if err := requireFresh(uc.deps, resolved.Session, now); err != nil {

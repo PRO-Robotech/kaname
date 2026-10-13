@@ -1,61 +1,66 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// public_caller_policy.go — the per-RPC CALLER policy for the PUBLIC listener
-// (:9090). Sibling of caller_policy.go (:9091), same shape, different table.
+// public_caller_policy.go — политика ВЫЗЫВАЮЩЕГО по глаголам для ПУБЛИЧНОГО
+// слушателя (:9090). Сестра caller_policy.go (:9091): та же форма, другая
+// таблица.
 //
-// Why the public listener needs one at all. iam deliberately does NOT re-ReBAC
-// the end user on its own listeners — the api-gateway is the platform's single
-// authZ front door: it validates the JWT, runs per-user ReBAC via iam.Check with
-// the permission catalogue, and only then forwards the resolved identity in
-// x-kacho-principal-* metadata. Everything downstream of that decision therefore
-// acts with WHATEVER identity arrives in those headers.
+// Зачем она публичному слушателю вообще. iam намеренно НЕ задаёт конечному
+// пользователю повторный вопрос к модели доступа на своих слушателях: край
+// (api-gateway) — единственная парадная дверь авторизации платформы. Он
+// проверяет токен, задаёт пообъектный вопрос через iam.Check по каталогу прав и
+// только после этого передаёт установленную личность метаданными
+// x-kacho-principal-*. Всё, что стоит после этого решения, действует от имени
+// ЛЮБОЙ личности, приехавшей в этих заголовках.
 //
-// :9090 is not gateway-only, though. Five consumer services dial it on their
-// request path (ProjectService.Get — project existence + owning account before a
-// Create) and four of them ask it the per-page visibility question behind their
-// own List (AuthorizeService.BatchCheck). All of them present a client
-// certificate from the same
-// internal authority as the gateway, and the port is an ordinary Service inside
-// the namespace with no NetworkPolicy of its own. So before this policy, ANY
-// pod holding an internal-CA certificate could reach ANY public RPC and — since
-// the trust-aware extract believed any verified peer while the forwarder
-// allow-list was empty — do it in a named victim's name: read and mutate that
-// tenant's accounts, projects, groups, roles and grants, and mint personal
-// tokens and service-account keys.
+// Но :9090 — не только для края. Пять служб-потребителей зовут его на пути
+// своего запроса (ProjectService.Get — существование проекта и владеющий
+// аккаунт перед Create), а четыре из них задают ему вопрос видимости страницы
+// за своим List (AuthorizeService.BatchCheck). Все они предъявляют клиентский
+// сертификат того же внутреннего удостоверяющего центра, что и край, а порт —
+// обычный Service внутри пространства имён без своей NetworkPolicy. Значит, до
+// этой политики ЛЮБОЙ под с сертификатом внутреннего центра доставал ЛЮБОЙ
+// публичный глагол и — раз доверяющее извлечение верило всякому проверенному
+// соседу при пустом перечне доверенных отправителей — делал это от имени
+// названной жертвы: читал и правил её аккаунты, проекты, группы, роли и выдачи
+// прав, выпускал личные токены и ключи служебных учёток.
 //
-// Two layers, and both are needed:
-//   - the forwarder allow-list (authn.trusted-forwarder-sans → corelib
-//     WithTrustedForwarders) decides WHO MAY SPEAK FOR A USER at all. It narrows
-//     "anyone with a certificate" down to "our modules" — but a module in that
-//     list could still speak for a user on EVERY public RPC.
-//   - this policy decides WHO MAY CALL WHICH RPC. It narrows the peers down to
-//     the query edges they actually use, so a compromised neighbour cannot reach
-//     the credential-issuing and grant-writing surface at all.
+// Слоёв два, и нужны оба:
+//   - перечень доверенных отправителей (authn.trusted-forwarder-sans → corelib
+//     WithTrustedForwarders) решает, КТО ВООБЩЕ ВПРАВЕ ГОВОРИТЬ ЗА ЧЕЛОВЕКА. Он
+//     сужает «всякого с сертификатом» до «наших модулей», но модуль из этого
+//     перечня всё ещё мог бы говорить за человека на КАЖДОМ публичном глаголе;
+//   - эта политика решает, КТО ВПРАВЕ ЗВАТЬ КАКОЙ ГЛАГОЛ. Она сужает соседей до
+//     тех рёбер запроса, которыми они действительно пользуются, и
+//     скомпрометированный сосед не достаёт до выпуска удостоверений и записи
+//     выдач прав вовсе.
 //
-// Arms (evaluated in order):
-//  1. Floor — every public RPC requires a VERIFIED mTLS module certificate
-//     (SPIFFE SAN spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) in production.
-//     dev (no verified cert) → no-op, mirroring CallerPolicy / RelationWriteGate.
-//  2. Gateway — the api-gateway SA may call everything: it is the front door, and
-//     the per-user ReBAC decision the whole design rests on happens there.
-//  3. Peer-callable — a small, static, MUTATION-FREE table naming, per RPC, which
-//     other module SAs may call it. Anything not in it is gateway-only.
-//     prod → PermissionDenied; dev → no-op.
+// Ветви (по порядку):
+//  1. Пол — всякий публичный глагол в боевой посадке требует ПРОВЕРЕННОГО
+//     модульного сертификата mTLS (SAN SPIFFE
+//     spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>). dev (проверенного
+//     сертификата нет) — проход, как у CallerPolicy и RelationWriteGate.
+//  2. Край — служебная учётка края зовёт всё: это парадная дверь, и
+//     пообъектное решение модели доступа, на котором стоит весь замысел,
+//     принимается там. Исключение — глаголы [PublicGatewayFlooredRPCs]: их пол
+//     уровня служба судит и на этой ветви (второй замок, kaname#747).
+//  3. Вызываемые соседями — малая статичная таблица БЕЗ МУТАЦИЙ, называющая для
+//     каждого глагола, какие служебные учётки модулей вправе его звать. Всё, чего
+//     в ней нет, — только для края: prod — PermissionDenied, dev — проход.
 //
-// The table is STATIC and lives in code, exactly like GatewayFrontedInternalRPCs:
-// membership is a property of the runtime edge (recorded in the polyrepo edge
-// list), not of what an operator happened to configure. A new service that needs
-// a public iam RPC adds itself here, in a reviewed change — a config omission
-// must never widen this.
+// Таблица СТАТИЧНА и живёт в коде, ровно как GatewayFrontedInternalRPCs:
+// членство — свойство ребра во время работы (записанного в перечне рёбер
+// полирепо), а не того, что оператор случайно настроил. Новая служба, которой
+// нужен публичный глагол iam, вписывает себя сюда изменением под ревью —
+// пропуск в настройке не должен расширять эту таблицу никогда.
 //
-// And membership is a property of an edge that EXISTS. An entry naming a caller
-// with no module in the tree has the same shape as a live one, yet it admits
-// nobody today and admits everything it names on the day someone issues a
-// certificate with that SAN — an open surface reserved for a name.
-// TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree derives the
-// admissible callers from `services/*` and fails on the difference; the
-// allowance for a module returns by itself once the module does.
+// И членство — свойство ребра, которое СУЩЕСТВУЕТ. Запись, называющая
+// вызывающего, у которого в дереве нет модуля, по форме не отличима от живой,
+// но сегодня не пускает никого, а в день, когда кто-то выпустит сертификат с
+// этим SAN, пускает всё, что называет, — открытая поверхность, забронированная
+// за именем. TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree выводит
+// допустимых вызывающих из `services/*` и падает на разнице; допуск модуля
+// возвращается сам, когда возвращается модуль.
 package authzguard
 
 import (
@@ -77,22 +82,55 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
-// Public RPC full-methods that a non-gateway module legitimately calls. Named
-// constants so the table below reads as the edge list it mirrors.
+// Публичные глаголы, которые законно зовёт модуль, не являющийся краем.
+// Именованные константы — чтобы таблица ниже читалась как перечень рёбер,
+// который она отражает.
 const (
-	// publicProjectGetMethod — the request-path project validation every
-	// consumer performs before creating a placement-scoped resource
+	// publicProjectGetMethod — проверка проекта на пути запроса, которую делает
+	// каждый потребитель перед созданием ресурса с размещением
 	// (services/*/internal/clients/iam*: ProjectServiceClient.Get).
 	publicProjectGetMethod = "/kaname.cloud.iam.v1.ProjectService/Get"
-	// publicBatchCheckMethod — the per-object visibility filter every List
-	// handler in vpc/compute/nlb/storage runs (internal/authzfilter): it asks,
-	// for the ids of ONE page, which the end user may see. The service→service
-	// edge is meant to live on the internal listener, and most profiles put it
-	// there — but at least one deployment profile points it at the public
-	// address, so the public listener must admit it or the filter fails closed
-	// and tenants lose their own List results.
+	// publicBatchCheckMethod — пообъектный фильтр видимости, который запускает
+	// каждый обработчик List в vpc/compute/nlb/storage (internal/authzfilter):
+	// он спрашивает, какие идентификаторы ОДНОЙ страницы видит человек. Ребру
+	// служба→служба место на внутреннем слушателе, и большинство профилей его
+	// туда и ставят, — но хотя бы один профиль посадки направляет его на
+	// публичный адрес, поэтому публичный слушатель обязан его пускать, иначе
+	// фильтр закрывается отказом и арендаторы теряют выдачу собственного List.
 	publicBatchCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 )
+
+// Три глагола ключа доступа, у которых пол уровня держит ВТОРОЙ ЗАМОК службы
+// на ветви края (задача kaname#747, Р1, Р3).
+const (
+	publicKeyBeginRegistrationMethod  = "/kaname.cloud.iam.v1.AccessKeyService/BeginRegistration"
+	publicKeyFinishRegistrationMethod = "/kaname.cloud.iam.v1.AccessKeyService/FinishRegistration"
+	publicKeyRevokeMethod             = "/kaname.cloud.iam.v1.AccessKeyService/Revoke"
+)
+
+// PublicGatewayFlooredRPCs — публичные глаголы, на которых пол уровня из
+// каталога службы судит САМА служба и тогда, когда вызывающий — край.
+//
+// # Зачем второй замок там, где пол уже судит край
+//
+// Край судит пол по СВОЕЙ копии каталога, и копия отстаёт от контракта службы
+// на время между вливанием контракта и пересборкой края: так было с этими
+// тремя глаголами, у которых копия края несла «1» при «2» в контракте. Пока
+// ветвь края пропускала всё, пол таких глаголов держал только край — и держал
+// не тот. Здесь пол читается у встроенного каталога службы, то есть у того же
+// производителя, что объявляет его в контракте.
+//
+// # Почему эти три
+//
+// Они заводят и снимают способ, чьё предъявление ОДНО даёт уровень «2»
+// (приёмка `level-two-is-enrolled-at-level-two.md`, Р1): заведённый сессией
+// «1», такой способ поднимает её держателя до «2», не предъявившего второго
+// фактора. Ошибка пола здесь — повышение уровня, а не лишний доступ к записи.
+// Перечень статичен и живёт в коде, как таблица соседей выше: расширяет его
+// изменение с ревью, а не настройка посадки.
+func PublicGatewayFlooredRPCs() []string {
+	return []string{publicKeyBeginRegistrationMethod, publicKeyFinishRegistrationMethod, publicKeyRevokeMethod}
+}
 
 // UnnamedCallerMessage — ЕДИНСТВЕННЫЙ текст отказа тому, кто не назвался ничем.
 //
@@ -116,8 +154,8 @@ const (
 // а не свою копию.
 const UnnamedCallerMessage = "no credential presented; authenticate with authorization: Bearer <token>"
 
-// Module service short-names (as ServiceNameFromSAN resolves them) that appear in
-// the peer-callable table.
+// Короткие имена служб-модулей (как их разбирает ServiceNameFromSAN),
+// встречающиеся в таблице вызываемых соседями.
 const (
 	svcVPC      = "vpc"
 	svcCompute  = "compute"
@@ -126,29 +164,30 @@ const (
 	svcRegistry = "registry"
 )
 
-// PublicPeerCallableRPCs returns the public RPCs a NON-gateway module may call,
-// mapped to the exact module service short-names permitted to call each.
+// PublicPeerCallableRPCs возвращает публичные глаголы, которые вправе звать
+// модуль, НЕ являющийся краем, — с точными короткими именами служб, которым
+// каждый из них разрешён.
 //
-// Every entry is a QUERY, and that is a rule rather than a coincidence: a mutating
-// RPC here would hand a neighbouring service the ability to change tenant data in
-// a forwarded user's name, which is the very hole this policy closes. The lock
-// TestPublicPeerCallableRPCs_CarryNoMutation enforces it against the proto
-// itself — in Kachō a mutation is exactly an RPC that returns an Operation, so the
-// check reads the contract rather than a naming habit.
+// Каждая запись — ЗАПРОС, и это правило, а не совпадение: мутирующий глагол
+// здесь дал бы соседней службе возможность менять данные арендатора от имени
+// переданного человека — ровно ту дыру, которую эта политика закрывает. Замок
+// TestPublicPeerCallableRPCs_CarryNoMutation держит это по самому контракту: в
+// Kachō мутация — это ровно глагол, возвращающий Operation, поэтому проверка
+// читает контракт, а не привычку именования.
 //
-// The api-gateway is deliberately absent — it is admitted by its own arm, and
-// naming it here too would create a second source of truth that drifts.
+// Края здесь намеренно нет — его пускает собственная ветвь, и назвать его ещё и
+// здесь значило бы завести второй источник правды, который разъедется.
 //
-// Membership is derived from the runtime edges, not from a name search:
-//   - ProjectService/Get — vpc, compute, nlb, storage and registry each hold a
-//     ProjectServiceClient pointed at iam's PUBLIC address and call Get on the
-//     request path of their own Create (project existence + owning account).
-//   - AuthorizeService/BatchCheck — the per-page visibility filter in
-//     vpc/compute/nlb/storage (internal/authzfilter, the sole AuthorizeService
-//     method any of them calls). Its edge belongs on the internal listener and
-//     most profiles put it there, but a profile pointing it at the public address
-//     exists, and a denial there would fail the filter closed and empty a
-//     tenant's own List.
+// Членство выведено из рёбер во время работы, а не из поиска по имени:
+//   - ProjectService/Get — vpc, compute, nlb, storage и registry держат по
+//     ProjectServiceClient, направленному на ПУБЛИЧНЫЙ адрес iam, и зовут Get на
+//     пути своего Create (существование проекта и владеющий аккаунт);
+//   - AuthorizeService/BatchCheck — фильтр видимости страницы в
+//     vpc/compute/nlb/storage (internal/authzfilter — единственный метод
+//     AuthorizeService, который зовёт любой из них). Его ребру место на
+//     внутреннем слушателе, и большинство профилей его туда ставят, но профиль,
+//     направляющий его на публичный адрес, существует, и отказ там закрыл бы
+//     фильтр и опустошил собственный List арендатора.
 func PublicPeerCallableRPCs() map[string][]string {
 	return map[string][]string{
 		publicProjectGetMethod: {svcVPC, svcCompute, svcNLB, svcStorage, svcRegistry},
@@ -156,21 +195,25 @@ func PublicPeerCallableRPCs() map[string][]string {
 	}
 }
 
-// PublicCallerPolicy enforces the per-RPC caller policy on the public listener.
-// Construct via NewPublicCallerPolicy.
+// PublicCallerPolicy держит политику вызывающего по глаголам на публичном
+// слушателе. Строится через NewPublicCallerPolicy.
 type PublicCallerPolicy struct {
 	// acrCatalog — FQN → объявленный порог доверия. Читается ТОЛЬКО полосой
 	// предъявленного удостоверения: на ней порог не производит никто, и
 	// признать вызывающего законным, не спросив каталог, значило бы снять
 	// требование, которое каталог продолжает объявлять.
 	acrCatalog ACRRequirementLookup
-	// prodMode = cfg.AuthN.Mode.IsProduction(). dev (false) is a pass-through
-	// (insecure back-compat: the newman stand has no mTLS at all, so there is no
-	// verified certificate to decide on); production is fail-closed.
+	// prodMode = cfg.AuthN.Mode.IsProduction(). dev (false) — проход
+	// (небезопасная совместимость: у стенда newman mTLS нет вовсе, и решать не
+	// по чему — проверенного сертификата нет); боевая посадка — отказ по
+	// умолчанию.
 	prodMode bool
-	// peerCallable — full-method → the set of non-gateway module service
-	// short-names permitted to call it.
+	// peerCallable — полное имя глагола → множество коротких имён служб-модулей
+	// (не края), которым его разрешено звать.
 	peerCallable map[string]map[string]struct{}
+	// gatewayFloored — глаголы, чей пол служба судит и на ветви края
+	// ([PublicGatewayFlooredRPCs]).
+	gatewayFloored map[string]struct{}
 	// presented — ПОРТ: приложил ли вызывающий удостоверение к этому запросу.
 	//
 	// Порт, а не прямой вызов читателя, и это НЕ оформление. Носитель
@@ -189,8 +232,8 @@ type PublicCallerPolicy struct {
 // ровно затем, чтобы не советовать назваться тому, кто уже назвался.
 type CredentialPresence func(ctx context.Context) bool
 
-// NewPublicCallerPolicy builds the policy. peerCallable is the per-RPC table of
-// non-gateway callers (see PublicPeerCallableRPCs); prodMode comes from
+// NewPublicCallerPolicy строит политику. peerCallable — таблица вызывающих
+// глагол, не являющихся краем (см. PublicPeerCallableRPCs); prodMode берётся из
 // cfg.AuthN.Mode.IsProduction().
 //
 // presented — реализация порта [CredentialPresence]. Параметр ОБЯЗАТЕЛЕН и
@@ -210,26 +253,40 @@ func NewPublicCallerPolicy(
 		}
 		m[method] = set
 	}
-	return &PublicCallerPolicy{prodMode: prodMode, peerCallable: m, acrCatalog: acrCatalog, presented: presented}
+	floored := make(map[string]struct{})
+	for _, method := range PublicGatewayFlooredRPCs() {
+		floored[method] = struct{}{}
+	}
+	return &PublicCallerPolicy{
+		prodMode: prodMode, peerCallable: m, gatewayFloored: floored,
+		acrCatalog: acrCatalog, presented: presented,
+	}
 }
 
-// allow returns nil iff the call may proceed past the policy for fullMethod:
-//   - the caller was named by a credential it PRESENTED and we verified in full
-//     → nil (a tenant of a foreign cloud has no module certificate by
-//     construction; see the branch itself for why this is not a widening) —
-//     unless the catalog declares an assurance floor the credential does not
-//     meet: then the STEP-UP INDICATION (`Unauthenticated` with
-//     [iamerr.TextStepUpRequired], Р11, kaname#511), not a permission refusal.
-//   - no verified module cert: dev → nil (insecure back-compat); prod →
-//     fail-closed, и КОД ЗДЕСЬ РАЗНЫЙ. Вызывающий, не назвавшийся ничем —
+// allow возвращает nil тогда и только тогда, когда вызов fullMethod проходит
+// политику:
+//   - вызывающего назвало удостоверение, которое он ПРЕДЪЯВИЛ и которое мы
+//     проверили целиком, → nil (у арендатора чужого облака модульного
+//     сертификата нет по построению; почему это не расширение — у самой
+//     ветви), — если только каталог не объявил пола уровня, до которого
+//     удостоверение не дотягивает: тогда УКАЗАНИЕ ПОВЫСИТЬ УРОВЕНЬ
+//     (`Unauthenticated` с [iamerr.TextStepUpRequired], Р11, kaname#511), а не
+//     отказ прав.
+//   - проверенного модульного сертификата нет: dev → nil (небезопасная
+//     совместимость); prod → отказ по умолчанию, и КОД ЗДЕСЬ РАЗНЫЙ.
+//     Вызывающий, не назвавшийся ничем —
 //     ни сертификатом, ни предъявленным удостоверением, ни переданной
 //     личностью, — получает `Unauthenticated` с [UnnamedCallerMessage]:
 //     «назовись». Всякий, кто назвался и не подошёл, получает прежний
 //     `PermissionDenied`. Разница — про следующий шаг вызывающего, а не про
 //     строгость: просить прав некому там, где края нет (kacho#2103).
-//   - api-gateway → nil (the front door, where per-user ReBAC happens).
-//   - another module on an RPC that names it in the peer-callable table → nil.
-//   - any other module: prod → PermissionDenied; dev → nil.
+//   - край (api-gateway) → nil: это парадная дверь, где идёт пообъектный
+//     вопрос к модели доступа от имени человека, — кроме глаголов
+//     [PublicGatewayFlooredRPCs]: там пол уровня из каталога службы судит
+//     второй замок ([PublicCallerPolicy.gatewayFloor]).
+//   - другой модуль на глаголе, который называет его в таблице вызываемых
+//     соседями, → nil.
+//   - любой иной модуль: prod → PermissionDenied; dev → nil.
 //
 // Отказ НАЗВАВШЕМУСЯ — дословный, не текущий "permission denied", тот же, что у
 // внутренней политики: по нему не узнать, какая из ветвей его произвела. Ветвь
@@ -315,7 +372,8 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
 	}
 	if !ok {
-		// No verified module cert. Dev → no-op; prod → fail-closed.
+		// Проверенного модульного сертификата нет: dev — проход, prod — отказ
+		// по умолчанию.
 		if !p.prodMode {
 			return nil
 		}
@@ -359,18 +417,61 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	if svc == gatewayServiceName {
-		return nil
+		return p.gatewayFloor(ctx, fullMethod)
 	}
 	if _, listed := p.peerCallable[fullMethod][svc]; listed {
 		return nil
 	}
-	// A verified module that this RPC does not name. Dev → no-op; prod →
-	// fail-closed (a data-plane module cannot reach the tenant CRUD, grant and
-	// credential-issuing surface, in a forwarded user's name or otherwise).
+	// Проверенный модуль, которого этот глагол не называет. dev — проход;
+	// prod — отказ по умолчанию: модуль плоскости данных не достаёт до правки
+	// ресурсов арендатора, выдачи прав и выпуска удостоверений ни от имени
+	// переданного человека, ни от своего.
 	if !p.prodMode {
 		return nil
 	}
 	return status.Error(codes.PermissionDenied, "permission denied")
+}
+
+// gatewayFloor — ВТОРОЙ ЗАМОК пола уровня на ветви края (kaname#747, Р3).
+//
+// Решает ОБЩЕЕ правило платформы (`grpcsrv.EvaluateStepUp`) — то же, что у края
+// и у пола внутреннего слушателя; ранжирование и освобождение машинного
+// принципала здесь не перевыводятся. Входы — только под доверием: уровень и вид
+// принципала засчитываются, лишь когда их передал отправитель из круга
+// доверенных (`authn.trusted-forwarder-sans`); иначе уровень пуст и вид пуст —
+// отказ, и подделанный «service_account» освобождения не покупает.
+//
+// Отказ — указание повысить уровень (Р11), та же форма, что у полосы
+// предъявленного на этом же слушателе: у одного слушателя один ответ на
+// недостаток уровня, какой бы путь ни привёл вызывающего.
+//
+// dev-посадка — проход, как у прочих ветвей политики: без mTLS ветви края на
+// стенде нет вовсе.
+func (p *PublicCallerPolicy) gatewayFloor(ctx context.Context, fullMethod string) error {
+	if _, floored := p.gatewayFloored[fullMethod]; !floored || !p.prodMode {
+		return nil
+	}
+	required := p.requiredACRMin(fullMethod)
+	if acrlevel.Rank(required) == 0 {
+		return nil
+	}
+	acr, trusted := grpcsrv.TrustedACRFromContext(ctx)
+	if !trusted {
+		acr = ""
+	}
+	principalType := ""
+	if pr, trustedPrincipal := grpcsrv.TrustedPrincipalFromContext(ctx); trustedPrincipal {
+		principalType = pr.Type
+	}
+	if grpcsrv.EvaluateStepUp(grpcsrv.StepUpInput{
+		PrincipalType: principalType,
+		PresentedACR:  acr,
+		RequiredACR:   required,
+	}) == grpcsrv.StepUpAllow {
+		return nil
+	}
+	return &stepUpRequired{challenge: iamerr.StepUpChallenge(
+		strconv.Itoa(acrlevel.Rank(required)), strconv.Itoa(acrlevel.Rank(acr)))}
 }
 
 // presentedCredential — вердикт порта. Неподставленный порт означает «не знаем»,
@@ -432,7 +533,8 @@ func stepUpTrailer(err error) (metadata.MD, bool) {
 	return metadata.Pairs(iamerr.StepUpChallengeTrailer, su.challenge), true
 }
 
-// Unary returns the unary interceptor enforcing the public caller policy.
+// Unary возвращает унарный перехватчик, держащий политику вызывающего публичного
+// слушателя.
 //
 // Хвост с вызовом ставится ДО возврата отказа. Отказ его установки (контекст
 // без потока — так бывает лишь вне настоящего слушателя) вердикта не меняет:
@@ -450,7 +552,8 @@ func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 	}
 }
 
-// Stream returns the stream interceptor enforcing the public caller policy.
+// Stream возвращает потоковый перехватчик, держащий политику вызывающего
+// публичного слушателя.
 func (p *PublicCallerPolicy) Stream() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if err := p.allow(ss.Context(), info.FullMethod); err != nil {

@@ -1,0 +1,89 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md
+  sha256: 711609ce71653511ab0bc0ab511095148b1edbcfc5326258d47ae1c00f2adbd6
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке документа — статическая форма объявления; шапка не правлена намеренно (change-graph.md §2). Действующий вердикт о редакции 711609ce… — эта запись.
+  base_commit: 400493cf0f3450ee6dd6dd6a649f32bb906491db
+  content_commit: 5674e4037b03d1857258d4b5e36938b8f6b846a8
+  branch: '747'
+  task: PRO-Robotech/kaname#747
+  lines: 538
+  round: 2
+  predecessor_record: docs/specs/reviews/level-two-is-enrolled-at-level-two/750a8ef5cd3370229aa5bd0e0df70cca50d40eadf787d089f9d6725b82eadcca.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md
+  fingerprint_note: >-
+    Файл не закоммичен (git status → `??`), отпечаток снят по файлу рабочего дерева на голове 400493cf0 и совпал с названным заданием.
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-12T19:30:42Z'
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#747
+  status: performed
+  published: true
+  database_id: 6131218464
+  node_id: IC_kwDOUO26pM8AAAABbXL4IA
+  url: https://github.com/PRO-Robotech/kaname/issues/747#issuecomment-6131218464
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6131218464
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-12T19:32:23Z"
+  body_sha256: 45c8f0bc1bfee68964d1c29bbded9829aa539f3b34f09b60151f29d739db4a26
+  subject_sha256: 711609ce71653511ab0bc0ab511095148b1edbcfc5326258d47ae1c00f2adbd6
+  subject_revision_commit: 5674e4037b03d1857258d4b5e36938b8f6b846a8
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md @5674e4037 · sha256 711609ce71653511ab0bc0ab511095148b1edbcfc5326258d47ae1c00f2adbd6
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/level-two-is-enrolled-at-level-two/750a8ef5cd3370229aa5bd0e0df70cca50d40eadf787d089f9d6725b82eadcca.yaml
+scope_of_round: >-
+  Круг 2 — дельта к 750a8ef5… (fa-b1): закрытие двух блокирующих (NEGATIVE, DISCLOSURE) и трёх неблокирующих круга 1; новые места — Р4 абз.2, §3.7 (KN747-17, -18), §5 строка KN747-17/-18, §7 п.6, §8 пятая клетка, §9 пп.3, 5, шапка «Порядок посадки».
+closed_from_round_1:
+  - kind: NEGATIVE
+    how: >-
+      Р4 — формула «сессия «2» либо перечень ключей ПРОЧИТАН и пуст», «нечитаемый перечень — отказ», запрет строить условие на enrollmentBeforeWrite; KN747-17 (enroll) и KN747-18 (confirm) с близнецами KN747-06/-07; §7 п.6; §8 пятая клетка.
+    verified: >-
+      completed_login.go:133-145 — enrollmentBeforeWrite при ошибке отдаёт nil,false; handler.go:1434-1435 — ErrStoreUnavailable → 503, codeUnavailable, unavailableText; enroll/confirm передают humansession.TextRequestNotPerformed (handler.go writeError); refusals.go:30 — "request not performed; try again later"; store.go:68 — AccessKeyEnrolled; fake_store_test.go:1058/1087 — fakeMethods и его AccessKeyEnrolled (переключателя отказа нет — заказан документом, §5).
+  - kind: DISCLOSURE
+    how: >-
+      §0 — нарратив «как сегодня» снят, фраза «не описывает» теперь верна; §1.2 — перепись требований ПОСЛЕ правки; «было» в Р2/Р3/Р6 снято; шапка — посадка в публичную ветку только вместе с диффом исправления.
+    verified: >-
+      grep -n 'сегодня\|обход\|нарушает' по документу — остатки: §1.3 заголовок (совместимость), Р2 в.1 (число чтений), §5 KN747-06 (производителя формы нет), §6 (восстановление не открывает пути), §9 п.6 (число на странице) — ни одно не называет путь к дефекту. §4 «было» цитирует одобренный публичный Ф7 и нужен как поимённая замена.
+  - kind: TWIN
+    how: KN747-04 → близнец KN747-01, отличие — уровень сессии.
+  - kind: FORMAT
+    how: When KN747-02, -04, -13, -15, -16 — «как в KN747-01», отказ на первом шаге.
+  - kind: DoD
+    how: §9 п.5 называет PRO-Robotech/kacho#1266.
+blocking: []
+non_blocking:
+  - "[FORMAT] §3.7 ссылается на `fake_store_test.go:1087` как на «вариант fakeMethods»; тип объявлен на :1058, :1087 — его метод AccessKeyEnrolled. Координата верна по предмету, не по написанию."
+  - "[DoD] Вопрос автора §9 п.5 (эпик kacho#1266 или подзадача) — решение диспетчера; при каскадном закрытии подзадача даёт точный Closes."
+coverage:
+  scenarios: 18
+  positive: 7
+  negative: 11
+  producer_named: "18 из 18 (§5)"
+  twin_named: "11 из 11 отрицаний"
+constructibility:
+  seeded: 0
+  of: 18
+  not_performed: 18
+  reason: стенд и изоляция посева заданием не названы
+  by_code_reading_and_fixture: >-
+    KN747-01…16 — исходные условия строятся глаголами продукта в «Дано» (KN747-12 — администратор посева), разбор круга 1 в силе для неизменённых «Дано»; KN747-17, -18 — названная фикстура use-case (вариант fakeMethods с переключателем отказа чтения AccessKeyEnrolled), заказана документом; чтение перечня у fakeMethods — один метод порта, отказ выразим.
+verified_coordinates:
+  - "access_key_service.proto:78/104/141 = \"1\" (118 — List, без правки) — git grep @400493cf0"
+  - "KN747-сценариев 18 — grep -c '^\\*\\*ID: KN747'"

@@ -79,12 +79,14 @@ type verbDecision struct {
 	permission, relation, objectType, field, acr, exemptReason string
 }
 
-// decidedVerbs — Р11 дословно.
+// decidedVerbs — Р11 дословно; пол регистрации и снятия — «2» по приёмке
+// `level-two-is-enrolled-at-level-two.md`, Р3 (kaname#747), заменившей три
+// строки пола Р11 поимённо (её §4).
 var decidedVerbs = map[string]verbDecision{
-	"BeginRegistration":  {"iam.access_keys.begin_registration", "token_issuer", "iam_user", "user_id", "1", ""},
-	"FinishRegistration": {"iam.access_keys.register", "token_issuer", "iam_user", "user_id", "1", ""},
+	"BeginRegistration":  {"iam.access_keys.begin_registration", "token_issuer", "iam_user", "user_id", "2", ""},
+	"FinishRegistration": {"iam.access_keys.register", "token_issuer", "iam_user", "user_id", "2", ""},
 	"List":               {"iam.access_keys.list", "token_reader", "iam_user", "user_id", "1", ""},
-	"Revoke":             {"iam.access_keys.revoke", "token_issuer", "iam_user", "user_id", "1", ""},
+	"Revoke":             {"iam.access_keys.revoke", "token_issuer", "iam_user", "user_id", "2", ""},
 	"BeginAssertion":     {"<exempt>", "", "", "", "", "SELF_SERVICE"},
 	"FinishAssertion":    {"<exempt>", "", "", "", "", "SELF_SERVICE"},
 }
