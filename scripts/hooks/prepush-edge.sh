@@ -131,7 +131,7 @@ if [ -z "$rev" ]; then
     echo "$MARK: у клона «$clone» нет origin/main (fetch: код $frc) — сверки НЕ исполнялись"
     exit "$UNMET"
 fi
-when="$(git -C "$clone" log -1 --format=%cI "$rev" 2>/dev/null)"
+when="$(git -C "$clone" log -1 --format=%cI origin/main 2>/dev/null)"
 if [ "$frc" -ne 0 ]; then
     axis "свежесть ствола платформы: git fetch origin main не удался (код $frc, предел ${FETCH_TIMEOUT} с) — судится прежний origin/main от $when"
     fetched="fetch НЕ удался"
