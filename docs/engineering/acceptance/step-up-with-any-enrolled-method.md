@@ -5,10 +5,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Приёмка: повышение внутри живой сессии — любым заведённым способом: код по времени, запасной код, ключ доступа (kaname#827)
 
-- **Статус:** DRAFT — редакция 1; кругов ревью не было
+- **Статус:** DRAFT — редакция 2 (правка по кругу 1)
 - **Статическая форма:** DRAFT; действующий вердикт выводится из внешнего события и записи ревью
   на отпечаток редакции (`change-graph.md` §3 «Вердикт относится к ОТПЕЧАТКУ, а не к документу»)
-- **История review:** (только дописывается) — записей нет
+- **История review:** (только дописывается)
+  - 2026-10-14 · круг 1 · ⛔ CHANGES_REQUESTED · редакция 1 `3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9` · запись `kacho-workspace:docs/specs/reviews/step-up-with-any-enrolled-method/3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9.yaml` (блокирующих 2: SUA-15, Р7/SUA-22)
 - **Дата:** 2026-10-14
 - **Задача:** `PRO-Robotech/kaname#827` (P1), эпик `PRO-Robotech/kaname#746`, линия
   `release:identity-own-2`; зеркало у платформы — `PRO-Robotech/kacho#3230` (эпик
@@ -221,7 +222,21 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
   `POST /iam/v1/auth/step-up/access-key/begin` (Р2) — отвечают **до выдачи испытания**:
   `code` 9 `FAILED_PRECONDITION` (REST — 400), `ACCESS_KEYS_DISABLED`,
   `access keys are turned off on this installation`; попыткой не считается;
-- перечень ключей (`List`) и снятие (`Revoke`) работают: человек видит и убирает свои ключи.
+- перечень ключей (`List`) работает без изменения: человек видит свои ключи из сессии «1»;
+- снятие (`Revoke`) — **без изменения**, на полу «2» и в окне свежести (level-two Р3, Р5).
+  Выключенные ключи «2» не дают: ни повышением ключом (выдача отвечает `ACCESS_KEYS_DISABLED`),
+  ни входом ключом (SUA-24). Поэтому снимает свой ключ на такой установке только человек с
+  заведённым кодом — повышением кодом до «2» (SUA-22, близнец). Человек с паролем и ключом **без
+  кода** «2» здесь не достигает: код он не заведёт (level-two Р4 — личность с ключом заводит код
+  сессией «2»), ключ не снимет; его путь — сброс ключей администратором
+  `UserService/ResetAccessKeys` (level-two Р5, KN747-12), после которого код заводится свежей
+  сессией «1» (Ф12). Своё снятие ключа у такого человека отвечает формой Ф11 Р11 — указанием
+  повысить уровень (SUA-22);
+- человек **только с ключом** на такой установке не входит вовсе: выдача испытания входа отвечает
+  `ACCESS_KEYS_DISABLED` (SUA-24). Это не новое сужение — и сегодня его вход отказывает при пустом
+  перечне на приёме результата (`ORIGIN_NOT_ALLOWED`, Ф7); новое только то, что отказ приходит
+  до выдачи и называет причину. Путь возврата — тот же, что у утратившего ключ: восстановление
+  доступа по адресу (Ф13-25 в редакции level-two §4).
 
 Перечень непуст — поведение Ф7 прежнее: происхождение вне перечня на приёме результата
 регистрации — `ORIGIN_NOT_ALLOWED` (Ф7, без изменения). Это пункт 4 `kacho#3229` на стороне
@@ -276,6 +291,7 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 | **П-к** | П-п + код по времени `active` + набор 10 кодов; секрет и коды — в окружении пробы | П-п, затем `enroll` → `confirm` полосой Ф12 (код — RFC 6238 от секрета ответа `enroll`) |
 | **П-кл** | пароль + один ключ, кода нет | `tests/authz-fixtures/seed_key_person.py` шаги 1–4 (без снятия пароля); материал ключа — `_KEYS` подставного аутентификатора `tests/newman/cases/kaname-access-keys.py` |
 | **П-ккл** | пароль + код + ключ | П-к, затем регистрация ключа из сессии «2», выданной подтверждением (Ф12-02) |
+| **П-ккл2** | П-ккл + второй ключ того же человека | П-ккл, затем регистрация второго ключа из свежей сессии «2» (повышение кодом, SUA-01); материал — `_KEYS[1]`, тем же путём, что Ф7-08 |
 | **П-л** | только ключ | `seed_key_person.py` целиком (шаги 1–5) |
 | **Б** | второй человек со своим ключом | П-кл со своим адресом |
 | **выкл** | установка с пустым перечнем происхождений | integration-проба: лента собирается с `Binding.Origins = []` над той же базой, где ключ П-кл заведён лентой с непустым перечнем; на стенде — своё пространство имён проб с этой величиной профиля |
@@ -290,7 +306,7 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 **Given** П-к; сессия «1» — вход паролем без `secondFactor`
 **When** `POST /iam/v1/auth/step-up` `{method: "totp", code: <текущий код>, csrfToken}`
 **Then** 200; `session.assuranceLevel` = `"2"`; `assurance` = `{level: "2", level2Reachable: true, missingForLevel2: []}`
-**And** новый носитель в `Set-Cookie`; прежний носитель следующим запросом — отказ «сессии нет» (Ф11 Р5)
+**And** новый носитель в `Set-Cookie`; прежний носитель следующим запросом `GET /iam/v1/auth/second-factor` — 401, `code` 16, `authentication failed` — тот же отказ, что у несуществующей сессии (Ф11 Р5; `resolveLiveSession`, `sf_enroll.go:73,81` @bbbe33524)
 **And** `GET /iam/v1/auth/second-factor` несёт `totp.lastUsedAt` = момент предъявления (до секунды)
 
 **ID: SUA-02** — запасной код
@@ -312,11 +328,11 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 **Then** 200; `session.assuranceLevel` = `"3"`; `assurance.level` = `"3"`
 
 **ID: SUA-05** — ключ освежает сессию человека только с ключом (`kaname#729`)
-**Given** П-л; сессия, выданная входом ключом, последнее предъявление старше 15 мин (часы пробы)
+**Given** П-л — ключ заведён посевом с флагами `UP|UV|BE`, вход ключом даёт «2»; сессия, выданная входом ключом, последнее предъявление старше 15 мин (часы пробы)
 **When** `POST /iam/v1/auth/sessions/end-others` (глагол своих сессий с требованием свежести)
 **Then** 403, `SESSION_NOT_FRESH`, `re-authentication required: present a credential again`
 **When** испытание повышения ключом, затем `POST /iam/v1/auth/step-up` `{method: "webauthn", …}`
-**Then** 200; уровень прежний (`"2"` либо `"3"` по флагам — монотонность)
+**Then** 200; `session.assuranceLevel` = `"2"` — прежний (утверждение с теми же флагами `UP|UV|BE`; уровень монотонен)
 **When** тот же `POST /iam/v1/auth/sessions/end-others`
 **Then** 200; тело `{ended: <число>}` (приёмка `own-sessions-are-listed-and-ended-by-their-owner.md`)
 
@@ -350,15 +366,19 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 **When** `step-up` с утверждением ключом Б над этим испытанием
 **Then** 401; `code` 16; `authentication failed`; `lastUsedAt` ключа Б не изменился
 
-**ID: SUA-15** — снятый ключ; близнец SUA-03
-**Given** П-ккл; ключ снят глаголом `Revoke` (операция `done` без ошибки); сессия «1»
-**When** испытание повышения, затем утверждение снятым ключом
-**Then** `allowCredentials` снятого удостоверения не содержит; `step-up` — 401, `code` 16, `authentication failed`
+**ID: SUA-15** — снятый ключ; близнец SUA-03 (утверждение годным ключом над тем же испытанием)
+**Given** П-ккл2 (ключи K1 — `_KEYS[0]`, K2 — `_KEYS[1]`); из свежей сессии «2» (повышение кодом) K1 снят глаголом `Revoke` (операция `done` без ошибки); затем новая сессия «1»
+**When** `POST /iam/v1/auth/step-up/access-key/begin`
+**Then** 200; `publicKey.allowCredentials` — ровно `[{type: "public-key", id: <удостоверение K2>}]`: снятого K1 нет, выдача держится годным K2
+**When** `step-up` `{method: "webauthn", credential: <утверждение ключом K1 над выданным испытанием>}`
+**Then** 401; `code` 16; `authentication failed`; уровень «1»; журнал — `outcome: refused`
+**And** то же испытание повторно — 400, `code` 9, `CHALLENGE_ALREADY_PRESENTED`; новое испытание и утверждение ключом K2 — 200, уровень «2» (близнец: отличающий факт один — снят ли ключ)
 
 **ID: SUA-16** — испытание другой сессии; близнец SUA-03
 **Given** П-кл; сессии S1 и S2 «1»; испытание выдано S1
 **When** в S2 `step-up` с утверждением над испытанием S1
 **Then** 400; `code` 9; `CHALLENGE_NOT_ISSUED`; `step-up challenge was not issued: begin step-up again`; попытки нет
+**And** испытание S1 не тронуто — его в S2 не нашли, и сгорать нечему (Р3: сгорает испытание **этой** сессии): в S1 утверждение над ним — 200, уровень «2» (близнец по сессии)
 
 **ID: SUA-17** — испытание сменено новой выдачей; положительный близнец внутри
 **Given** П-кл; сессия «1»; испытание E1, затем испытание E2 той же сессии
@@ -398,7 +418,10 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 **Then** `accessKeys.available` = `false`; `stepUpMethods` = `[]`
 **When** `POST /iam/v1/auth/step-up/access-key/begin`
 **Then** 400; `code` 9; `ACCESS_KEYS_DISABLED`; `access keys are turned off on this installation`
-**And** перечень ключей Ф7 по-прежнему несёт ключ П-кл; `Revoke` его — операция `done` без ошибки
+**And** перечень ключей Ф7 (`List`, сессия «1») по-прежнему несёт ключ П-кл
+**When** `Revoke` этого ключа из той же сессии «1»
+**Then** указание повысить уровень — форма Ф11 Р11 дословно: через край `401`, тело `{"code":16,"message":"authentication level is insufficient: step up with a second factor, or present a credential of another kind","details":[]}`, `WWW-Authenticate` с `error="insufficient_user_authentication"` и `acr_values="2"`; ключ в перечне (пол «2», level-two Р3 — без изменения; путь этого человека — `ResetAccessKeys` администратором, Р7)
+**And** положительный близнец — П-ккл на той же установке «выкл»: повышение кодом (`totp`) до «2», свежая; `Revoke` его ключа — операция `done` без ошибки; отличающий факт один — уровень сессии
 
 **ID: SUA-23** — регистрация при выключенных; близнец Ф7-01 (перечень непуст — испытание выдано)
 **Given** выкл; П-к; сессия «2», свежая
@@ -529,6 +552,8 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 | SUA-05 | предъявление внутри сессии сдвигает момент последнего предъявления | `session_level.go` (`presentInSession`) | существует; ветвь ключа — заказ |
 | SUA-19 | разбор формы церемонии | `second_factor.go` (`ParseStepUpMethod`, `JudgeStepUpForm`) | существует; тексты с `webauthn` и «not accepted with method» — заказ |
 | SUA-21…24 | отказы `ACCESS_KEY_NOT_REGISTERED`, `ACCESS_KEYS_DISABLED` | — | `git grep -n 'ACCESS_KEYS_DISABLED'` → 0: заказ |
+| SUA-22 (отказ `Revoke` из «1», близнец) | пол «2» глагола `Revoke` и форма Ф11 Р11 | `proto/kaname/cloud/iam/v1/access_key_service.proto:157` (`required_acr_min = "2"` у `Revoke`, @bbbe33524); форма — край `kacho:gateway/internal/middleware/auth_stepup.go` (Ф11 Р11, `grep -c "step up with a second factor"` → 1 @kacho 8514270c4) | существует |
+| SUA-15 (перечень без снятого) | выдача испытания повышения из годных ключей | — | заказ этой задачи (тот же, что SUA-03); снятие — `Revoke` Ф7, существует |
 | SUA-30…33 | `stepUpMethods`, `assurance` с `webauthn` | `sf_status.go`, `second_factor.go` (`assuranceViewOf`, `enrolledMethods`) | существует без `webauthn`; дописывается — заказ |
 | SUA-40, 41, 60, 61 | моменты набора и кода | `sf_status.go`, `sf_backup_codes.go`, `handler.go` (`secondFactorStatus`) | `grep -c 'lastUsedAt\|issuedAt'` → 0: заказ |
 | SUA-50 | условие level-two Р4 | `humansession/sf_enroll_level.go` | существует; путь исполним с SUA-03 |
