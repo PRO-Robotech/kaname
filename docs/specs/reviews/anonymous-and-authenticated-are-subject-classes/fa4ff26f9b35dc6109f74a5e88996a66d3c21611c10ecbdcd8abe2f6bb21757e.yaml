@@ -104,7 +104,8 @@ authority:
   expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: '2026-10-14T23:29:24Z'
   ban1_lifted: false
   reason: одобрение вступает в силу внешним событием; до публикации — not_performed
 
@@ -113,8 +114,21 @@ event_body: "acceptance-reviewer · APPROVED · sha256 fa4ff26f9b35dc6109f74a5e8
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#829
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6180766780
+  node_id: IC_kwDOUO26pM8AAAABcGcEPA
+  url: https://github.com/PRO-Robotech/kaname/issues/829#issuecomment-6180766780
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6180766780
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/829
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-14T23:29:24Z'
+  body_sha256: 7fd4058cd8b23dfd3bf8f505404ec8ed0f6315e05204b03f2df4e5f45ef47bfd
+  subject_sha256: fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e
+  subject_revision: fb2abe283b4a86a3a67885cbd598681c3ef23ffa
+  verdict: APPROVED
 
 attribution:
   reviewer_kind: claude_agent
