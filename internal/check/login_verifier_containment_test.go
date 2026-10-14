@@ -259,12 +259,17 @@ func TestLoginVerifierStaysInside(t *testing.T) {
 	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не найден")
 	tree, err := treecorpus.NewTree(root)
 	require.NoErrorf(t, err, "состав дерева не установлен — «ноль находок» здесь означало бы «ноль прочитанного»")
-	corpus, err := check.CorpusFrom(tree, check.ProductionGoFile)
+	// Оснастка проб (`internal/testsupport/`) — не прод-сборка: фикстура
+	// называет таблицу так же, как называл её `*_test.go` до выноса
+	// (kaname#816). Предпосылку держит TestProbeToolingIsImportedOnlyByProbes.
+	corpus, err := check.CorpusFrom(tree, check.ShippedGoFile)
 	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: корпус не собран")
+	tooling, err := check.CorpusFrom(tree, check.ProbeToolingGoFile)
+	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: оснастка проб не собрана")
 
 	findings, census, err := check.AuditLoginVerifierContainment(corpus, loginVerifierSpec())
 	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
-	t.Logf("%s; находок %d", census, len(findings))
+	t.Logf("%s; оснастки проб снято с суда %d; находок %d", census, len(tooling), len(findings))
 
 	for _, f := range findings {
 		t.Error(f)

@@ -26,6 +26,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // setupTestDB hands the calling test its OWN database, with kaname on the
@@ -77,7 +78,7 @@ func mustSeedUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix 
 	)
 	require.NoError(t, err, "seed user account INSERT")
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit seed user TX")
 	return uid
 }

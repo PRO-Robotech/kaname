@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedNativeRole inserts a custom (account-scoped) role row directly. Returns id.
@@ -87,7 +88,7 @@ func seedNativeSA(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc dom
 func seedNativeUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc domain.AccountID, suffix string) string {
 	t.Helper()
 	uid := ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		uid, string(acc), "ext-"+suffix+"-"+uid, "u-"+suffix+"@example.com", "U "+suffix)

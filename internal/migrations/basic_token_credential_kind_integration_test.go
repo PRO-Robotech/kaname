@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedCredentialOwners заводит владельцев, без которых внешние ключи обеих
@@ -73,7 +74,7 @@ VALUES ('sva00000000000000bat', 'acc00000000000000bat', 'bat-one-sa')
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err, "посев служебной учётки")
 
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit(), "посев владельцев удостоверений")
 }
 

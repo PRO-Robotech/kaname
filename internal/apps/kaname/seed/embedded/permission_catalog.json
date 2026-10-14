@@ -481,6 +481,26 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.geo.v1.RegionService/Create",
+    "permission": "geo.regions.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.geo.v1.RegionService/Delete",
+    "permission": "geo.regions.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.geo.v1.RegionService/Get",
     "permission": "geo.regions.get",
     "required_relation": "viewer",
@@ -501,6 +521,36 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kacho.cloud.geo.v1.RegionService/Update",
+    "permission": "geo.regions.update",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.geo.v1.ZoneService/Create",
+    "permission": "geo.zones.create",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.geo.v1.ZoneService/Delete",
+    "permission": "geo.zones.delete",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.geo.v1.ZoneService/Get",
     "permission": "geo.zones.get",
     "required_relation": "viewer",
@@ -514,6 +564,16 @@
     "fqn": "kacho.cloud.geo.v1.ZoneService/List",
     "permission": "geo.zones.list",
     "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.geo.v1.ZoneService/Update",
+    "permission": "geo.zones.update",
+    "required_relation": "system_admin",
     "scope_extractor": {
       "object_type": "cluster",
       "from_request_field": "*"

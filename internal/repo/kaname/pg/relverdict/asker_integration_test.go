@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // withCommittedPool сеет данные и ОТДАЁТ пул: адаптер открывает свою транзакцию
@@ -47,7 +48,7 @@ func withCommittedPool(t *testing.T, seed func(ctx context.Context, tx pgx.Tx)) 
 		t.Fatalf("транзакция посева: %v", err)
 	}
 	seed(ctx, tx)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("коммит посева: %v", err)
 	}

@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // allowRelationStore — fake clients.RelationStore that grants every Check.
@@ -102,7 +103,7 @@ func mustSeedUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix 
 		string(uid))
 	require.NoError(t, err)
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }

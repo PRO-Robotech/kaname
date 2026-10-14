@@ -50,6 +50,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // authCodeMigration — файл, заводящий предмет этих проб. Имя стоит одним
@@ -134,7 +135,7 @@ func acScene(t *testing.T, db *sql.DB, tag string) (clientID, userID, sessionID,
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, userID)
 	require.NoError(t, err, "посев аккаунта %s", tag)
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 
 	_, err = db.Exec(`
