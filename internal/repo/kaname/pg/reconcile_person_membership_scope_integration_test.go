@@ -62,6 +62,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedLabeledPerson кладёт строку человека, чья КОЛОНКА называет `columnAccount`,
@@ -77,7 +78,7 @@ func seedLabeledPerson(
 ) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, labels)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6::jsonb)`),
 		string(uid), string(columnAccount),

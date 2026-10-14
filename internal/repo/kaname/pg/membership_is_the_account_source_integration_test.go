@@ -68,6 +68,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedMembership кладёт строку членства НАПРЯМУЮ — тем же выражением
@@ -175,7 +176,7 @@ func TestMembershipIsTheAccountSource(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
-	seedWayIn(t, ctx, kanamepg.WriterTx(w))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 
 	// РАСХОЖДЕНИЕ, ради которого написана проба: второе членство, которого нет
@@ -267,7 +268,7 @@ func TestBlockedIdentityGainsNoAccountThroughMembership(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
-	seedWayIn(t, ctx, kanamepg.WriterTx(w))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 
 	read := func() []string {

@@ -41,6 +41,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // membersBoundLimit — предел, объявленный репозиторием. Здесь он воспроизведён
@@ -103,7 +104,7 @@ func TestIntegration_R914_MembersOfGroupsIsBoundedAndNamesTheTruncation(t *testi
 	// существования, поэтому учётки обязаны быть настоящими.
 	seedMembers := func(group, idPrefix string, n int) {
 		t.Helper()
-		_, err := pool.Exec(ctx, withWayIn(`
+		_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 			INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 			SELECT $1 || lpad(i::text, 6, '0'), $2, $1 || lpad(i::text, 6, '0'),
 			       $1 || lpad(i::text, 6, '0') || '@kacho.local', 'm', 'ACTIVE'

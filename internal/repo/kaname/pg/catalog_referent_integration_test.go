@@ -50,6 +50,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // catalogPool — своя база на пробу, БЕЗ отмены немедленности (см. шапку).
@@ -89,7 +90,7 @@ func catalogRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix s
 		VALUES ($1, $2, $3, $4, '["iam.users.*.read"]'::jsonb)`,
 		string(rid), string(accID), "ct1_"+suffix, "catalog referent "+suffix)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return rid
 }

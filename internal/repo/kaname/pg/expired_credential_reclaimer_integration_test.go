@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // reclaimFixture — принципалы и пул одной пробы.
@@ -69,7 +70,7 @@ func newReclaimFixture(t *testing.T) *reclaimFixture {
 		_, err = tx.Exec(ctx, q)
 		require.NoError(t, err, "посев владельцев удостоверений")
 	}
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return &reclaimFixture{pool: pool}
 }
