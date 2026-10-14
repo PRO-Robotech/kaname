@@ -149,6 +149,11 @@ const (
 // материала не касаются; инъекция «чужое ограничение» ниже прогнана заново на
 // расширенном наборе — зелёный гейт значит «чужих ноль при объявленных шести»,
 // а не «набор не менялся».
+//
+// Седьмое — решение приёмки SUA (kaname#827, Р6; миграция
+// `20261015100100_second_factor_method_carries_its_last_use.sql`): момент
+// последнего использования допустим только у способов второго фактора. Судит
+// `last_used_at`/`kind` и материала не касается.
 var lmDeclaredConstraints = []string{
 	"user_login_methods_pkey",
 	"user_login_methods_user_fk",
@@ -156,6 +161,7 @@ var lmDeclaredConstraints = []string{
 	"user_login_methods_verifier_check",
 	"user_login_methods_state_check",
 	"user_login_methods_pending_only_totp_check",
+	"user_login_methods_last_used_kind_check",
 }
 
 // lmVerifierDependent — единственный законный зависимый от колонки материала.
