@@ -1,0 +1,177 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: be4dfb5a4f367514919d9ae5324537b6535acc9eab1d690266936c5b80ad1bb0
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (девять, обеих
+    линий 608 и 213) не трогаются — редакция 9 получает соседнюю запись по своему отпечатку.
+  content_commit: c7ff3ed91cbb064679ed789b9353158db1537bcd
+  branch: '608'
+  task: PRO-Robotech/kaname#608
+  lines: 2411
+  round: 8
+  round_note: >-
+    Круг 8 линии 608 (круги 5…7 этой линии — 87e67fc2…, df062223…, d7c4ae52…). Линия 213 своими
+    кругами 5а/6а (6ac82b2a…, 17b2d02c… APPROVED) сведена в эту редакцию слиянием ветки эпика 296
+    (d10f46844) и переименованием меток (6d1c152f5).
+  predecessor_record: docs/specs/reviews/recovery-of-access/d7c4ae528d6696cbc5c4a101da34589c0551045232a7b6d57e88b018afe801db.yaml
+  predecessor_note: >-
+    Круг 7 вернул редакцию 8 (d7c4ae52…) с одним блокирующим COVERAGE: не обойдено второе свойство
+    Р9 («неподтверждённый адрес кода не получает»). Вердикт ни одной прежней записи на этот
+    отпечаток не переносится.
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 608 @ c7ff3ed91 → be4dfb5a…; git show HEAD:<путь> | sha256sum —
+    то же; git ls-remote origin 608 → c7ff3ed91; wc -l → 2411; git diff --stat origin/296
+    c7ff3ed91 → два файла приёмок (этот и active-identity-has-a-way-in.md), кода ветка не меняет.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-05T01:33:50Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Событие опубликовано курьером в kaname#608 (задача subject.task) в форме
+    `publication_pending.expected_form`; запись приведена к факту события отдельным коммитом,
+    вердикт и разбор не тронуты.
+  what_the_event_would_lift: >-
+    ban #1 для Ф5-29…33 (kaname#608: выдача кода неподтверждённому адресу личности ACTIVE без
+    способа входа, подтверждение адреса и первый пароль в транзакции завершения) и Ф5-34
+    (kacho#2698) — в порядке §10 пп. 7, 8, вместе с парой active-identity-has-a-way-in.md.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#608 с полями role, verdict, subject, subject_revision
+      c7ff3ed91cbb064679ed789b9353158db1537bcd, subject_sha256 дословно; блок `event`
+      дописывается по факту публикации тем же заходом.
+    body: >-
+      role: acceptance-reviewer · verdict: APPROVED · subject: PRO-Robotech/kaname
+      docs/engineering/acceptance/recovery-of-access.md · subject_revision:
+      c7ff3ed91cbb064679ed789b9353158db1537bcd · subject_sha256:
+      be4dfb5a4f367514919d9ae5324537b6535acc9eab1d690266936c5b80ad1bb0
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5986607653
+    event_url: https://github.com/PRO-Robotech/kaname/issues/608#issuecomment-5986607653
+    remeasured: >-
+      `git show origin/608:docs/engineering/acceptance/recovery-of-access.md | sha256sum` на
+      origin/608 @d94589e88 → be4dfb5a…b0, совпал с именем записи и строкой `subject_sha256`
+      события; содержимое документа на d94589e88 и на content_commit c7ff3ed91 одно (тот же
+      sha256); `gh api repos/PRO-Robotech/kaname/issues/comments/5986607653` → issue_url
+      kaname#608, автор pointpu, author_association MEMBER; пять
+      обязательных строк заголовка дословно.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5986607653
+  node_id: IC_kwDOUO26pM8AAAABZNRiJQ
+  url: https://github.com/PRO-Robotech/kaname/issues/608#issuecomment-5986607653
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5986607653
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/608
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-05T01:33:50Z'
+  body_sha256: ae12f3e965a46009ba4c7a8a7082a604cf5de5692ac03ee33baed8ad2c0ca2e4
+  subject_sha256: be4dfb5a4f367514919d9ae5324537b6535acc9eab1d690266936c5b80ad1bb0
+  subject_revision: c7ff3ed91cbb064679ed789b9353158db1537bcd
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Событие в задаче `subject.task` (kaname#608). Отпечаток тела снят с сырого ответа API
+    (`gh api … | jq -j .body | sha256sum`).
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакции 9 (строка редакции; §0.2; Р5 абзац «Личность без строки „пароль“»; Р9 пп. 3, 4,
+    6; §3 Д16 (б)/(г), Д19…Д21, «Обход редакции 9» с таблицами свойств, счёта и исходов; §5.5;
+    Ф5-30 (б); §7; §8 инв. 11, 12; §10 пп. 7, 8; §20) и стыки со сведённой линией 213 (Ф5-34, §5.6,
+    §18, §19, Д17, Д18).
+  counts: >-
+    Меток сценариев 34 (grep '^\*\*Ф5-[0-9]+' → 34; строк ведомости §7 → 34), живых 33 (Ф5-23 снят
+    редакцией 3). Производитель у каждой строки §7 назван. Близнецы отрицаний полосы Р9: Ф5-31
+    (строка пароля), Ф5-32 (статус), Ф5-33 (инъекция), Ф5-30 (б) (подтверждённость), Ф5-34 (б)/(в)
+    — по одному отличающему факту.
+
+measured:
+  round7_blocker_closed: >-
+    Д21 называет места круга 7 (auth-lane.mdx :231–233, :244–248, observability.mdx :207,
+    registry.go :106–107) с исходом «правится» изменением реализации kaname#608 и §10 п. 7 их
+    заказывает; формулировка для публичного текста описывает поведение без сценария злоупотребления.
+  line_walk_reproduced: >-
+    Предикаты С1…С7 исполнены дословно (LC_ALL=C.UTF-8 git grep -n -I [-i] -P, исключения X):
+    платформа PRO-Robotech/kacho @ ffbe930dbefb (= origin/main) → 3/6/4/0/0/0/0; служба @ c7ff3ed91
+    → 43/9/51/16/4/5/3; воркспейс @ b64bbb5e7 (= origin/main) → 23/6/17/4/0/0/0. Все 21 число
+    построчного счёта совпали с таблицей документа.
+  line_walk_outcomes: >-
+    Каждое построчное попадание (50 + 131 + 13) сверено с таблицами исходов по файлу и строке:
+    без исхода — ноль; несовпадения строк объяснены диапазонами документа (:244–248, :619–621,
+    :85–98 и т. п.), краткими именами (F8, R7-3, 0.2, XC-7, 2.0, Ф12) и группой «11 посевов
+    отметки» обхода редакции 8 (address_admission_ceremony_integration_test.go:33,
+    recovery_request_windows_integration_test.go:82).
+  paragraph_walk_independent: >-
+    Абзацный проход своей реализацией (строки между пустыми склеены пробелом, засчитано совпадение,
+    не лежащее целиком ни в одной строке): платформа С1 15 (документ 19), прочие 0; служба
+    48/3/0/22/15/0/2 (документ 51/5/2/22/16/0/2); воркспейс 13/2/0/5/3/0/0 (документ 15/2/2/5/3/0/0).
+    Счёт не тождествен — алгоритм абзацного прохода в документе описан словами, а не командой. Все
+    мои абзацные попадания лежат в местах, которым документ дал исход, кроме одного:
+    second-factor-totp-and-recovery-codes.md, абзац с :2287 (таблица §6.2 Ф12, строка «требование
+    фактора в восстановлении») — склейка строк таблицы, иной предмет; та же приёмка названа в С4
+    («Иной предмет», Ф12 :370).
+  seed_constructibility: >-
+    Своя изоляция: postgres:16 (контейнер rev608seed8, слот heavy-slots/slot3 через flock), Up-секции
+    всех 49 миграций службы @ c7ff3ed91 (миграции с cf317baa9 не менялись) применены пофайлово
+    одной транзакцией каждая — 49 из 49. Одной транзакцией посеяны A (ACTIVE, без пароля, не
+    подтверждён), B (ACTIVE, пароль, не подтверждён), C (PENDING, без пароля), N (ACTIVE, без
+    пароля), NB (BLOCKED, без пароля), W (ACTIVE, пароль, подтверждён) — COMMIT прошёл; отметки N и
+    NB поставлены оператором markEmailVerifiedSQL дословно (exists, marked → t, t); Z — count 0.
+    Посеяно 7 из 7 «Дано» Ф5-29…32, Ф5-30 (б), Ф5-34 (а)–(в); Ф5-33 — инъекция в хранилище пробы.
+    Форма «после переноса» (отметка открытого пути) не посеяна: миграции пары в дереве нет, §10 п. 7
+    ставит её до выдачи и записи завершения. «Не выполнилось» 0. Контейнер снят.
+  owner_decision_conformance: >-
+    Р9: выдача кода и неподтверждённому адресу личности ACTIVE без способа входа, подтверждение и
+    первый пароль одной транзакцией, без PENDING и без шага администратора (п. 5); единый отказ
+    регистрации не правится (Отвергнуто (в); Ф4 Р3); ответ запроса побайтово равен ответу для
+    чужого адреса и проверяется по времени (Ф5-29, Ф5-31, Ф5-32; Р9 п. 2).
+
+blocking: []
+
+non_blocking:
+  - kind: FORMAT
+    text: >-
+      Абзацный проход «Обхода редакции 9» записан словами, а не командой, и его числа («+ N»)
+      независимой реализацией воспроизводятся не тождественно (см. paragraph_walk_independent).
+      Исходов это не меняет; при следующей правке документа — дать исполняемую форму абзацного
+      прохода рядом с построчной, иначе держатель инв. 12 перед слиянием кода не воспроизводим.
+
+open_questions: []
+
+route_signs:
+  proto: no
+  schema: yes
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes

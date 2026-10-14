@@ -14,6 +14,17 @@
                            сам человек посева набором не трогается
   {{standMailboxUrl}}    — чтение приёмника писем стенда (`stand-mailbox.py`; посев)
 
+Кейс Ф4-27 сверх того ходит на две поверхности службы и читает ключи посева
+церемонии стенда чарта (`seed_ceremony.py`):
+
+  {{iamRegistryTokenBaseUrl}} — поверхность выдачи: точка авторизации и обмен кода
+  {{ownRestBaseUrl}}          — собственный публичный фронт: приглашение, опрос его
+                                операции, снимок «кто я» (`GET /iam/v1/me`)
+  {{oauthClientId}} {{oauthClientSecret}} {{oauthRedirectUri}} — клиент церемонии
+  {{cloudSupervisorEmail}} {{cloudSupervisorPassword}} {{cloudSupervisorTotpSecret}}
+                              — надзор облака: единственный человек стенда с
+                                уровнем «2», которого требует приглашение
+
 ТРЕТЬЯ КАТЕГОРИЯ НАЗВАНА ВСЛУХ — та же, что у набора входа: на автономном стенде
 службы посадка `own` не поднята, `loginLaneBaseUrl` пуст, и каждый шаг уходит в
 «условие не создано» помеченным утверждением, а не в зелёное и не в красное.
@@ -92,6 +103,30 @@ Coverage (техники: классы эквивалентности сесси
                                           алфавита — 401 одним текстом, details
                                           пусты, без печений; положение прежнее,
                                           носитель жив; близнец — верный код: 200
+  IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS — Ф4-27 (приёмка Ф4,
+                                          `registration-and-its-three-consequences.md`,
+                                          редакция 7): приглашённый без выдачи роли
+                                          регистрируется той же полосой и подтверждает
+                                          адрес; снимок «кто я» под токеном его
+                                          церемонии — ровно две записи: личный
+                                          аккаунт с owner (заведён активацией) и
+                                          аккаунт пригласившего без owner; отрицание
+                                          стоит в паре с положительным близнецом в
+                                          том же ответе. Пригласивший — надзор облака
+                                          (уровень «2» глагола приглашения), адреса
+                                          выдачи и фронта, клиент церемонии и ключи
+                                          надзора пишет посев церемонии стенда чарта
+  IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED — OS-16 (приёмка kaname#634,
+                                          `own-sessions-are-listed-and-ended-by-their-owner.md`):
+                                          свежий человек с подтверждённым адресом
+                                          входит трижды; перечень носителем N1 —
+                                          200, ≥ 3 записей, current ровно у N1;
+                                          выход из выбранной (N2) — 200, перечень
+                                          носителем N2 — 401; выход из всех, кроме
+                                          текущей, — 200, ended ≥ 1; последний
+                                          перечень — одна запись, текущая. Служба
+                                          стенда без путей своих сессий (404 на
+                                          перечень) — «условие не создано»
 """
 
 # ЧЕГО НАБОР НЕ УТВЕРЖДАЕТ — идентификаторы КОММЕНТАРИЕМ, а не строкой: перепись
@@ -136,13 +171,16 @@ _PROBE = "/iam/v1/auth/second-factor"
 
 _HEAD_VERIFY = "Код подтверждения:"
 _REFUSED = "authentication failed"
-_NOT_VERIFIED = "email address is not verified"
+_NOT_VERIFIED = "email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)"
 _NOT_VERIFIED_REASON = "EMAIL_NOT_VERIFIED"
 # Домен отказов службы — константа продукта (`internal/refusaldomain`,
 # `ProductSuffix` и `ServiceIAM`), а не величина посадки.
 _REFUSAL_DOMAIN = "iam.kaname.cloud"
 _TOO_MANY = "too many attempts; try again later"
-_REG_REFUSED = "registration refused"
+# Единый отказ регистрации — текст Ф4 Р3, редакция 8 (kaname#211): называет шаг,
+# не называя причины.
+_REG_REFUSED = ("registration refused; if this address is already yours, sign in or recover access; "
+                "if you were invited, ask an account administrator to invite again; otherwise try again later")
 
 # Величины профиля, с которыми стенд поднят: стенд `chart-own` ставит
 # `deploy/values.prod.yaml` как есть (накладка несёт координаты и посадку, не
@@ -338,7 +376,12 @@ def _mail_path(p):
 def _await_letter(p, name, into="Code"):
     """Письмо подтверждения СВЕРХ уже прочитанных: петля с настоящей паузой.
 
-    Код последнего письма — в `<p><into>`, число писем человеку — в `<p>MailSeen`."""
+    Код последнего письма — в `<p><into>`, число писем человеку — в `<p>MailSeen`.
+
+    Ждём письмо С КОДОМ, а не любое новое: приглашённому до письма подтверждения
+    приходит письмо приглашения, в котором строки кода нет (элемент `null`), и оно
+    само по себе условием ожидания не служит (kaname#468, разбор F427). Письмо
+    подтверждения без кода по-прежнему краснит кейс — по исчерпании ожидания."""
     path = _mail_path(p)
     counter, started = f"_avmb_{p}_{name}".replace("-", "_"), f"_avmbs_{p}_{name}".replace("-", "_")
     seen, label = _v(p, "MailSeen"), name.upper()
@@ -356,7 +399,8 @@ def _await_letter(p, name, into="Code"):
             f"const __seen = parseInt(pm.environment.get({js_str(seen)}) || '0', 10);",
             "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
             "const __all = Array.isArray(__codes) ? __codes : [];",
-            f"if (pm.response.code === 200 && __all.length <= __seen && __n < {_MAIL_WAIT_CAP}) {{",
+            "const __fresh = __all.slice(__seen).filter((c) => typeof c === 'string');",
+            f"if (pm.response.code === 200 && __fresh.length === 0 && __n < {_MAIL_WAIT_CAP}) {{",
             f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
             f"  const _avd = Date.now(); while (Date.now() - _avd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
             "  pm.execution.setNextRequest(pm.info.requestName);",
@@ -367,7 +411,7 @@ def _await_letter(p, name, into="Code"):
             *_status_is(200, label),
             f"pm.test({js_str(label + ': письмо дошло до приёмника стенда в пределе ожидания')}, () => "
             "pm.expect(__all.length > __seen).to.eql(true));",
-            "const __last = __all.length > __seen ? __all[__all.length - 1] : null;",
+            "const __last = __fresh.length > 0 ? __fresh[__fresh.length - 1] : (__all.length > __seen ? __all[__all.length - 1] : null);",
             f"pm.test({js_str(label + ': письмо — подтверждения адреса и несёт код формы XXXXX-XXXXX')}, () => "
             "pm.expect(typeof __last === 'string' && /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/.test(__last)).to.eql(true));",
             "if (__all.length > __seen) {",
@@ -696,7 +740,7 @@ CASES.append(Case(
 _P30 = "avC"
 CASES.append(Case(
     id="IAM-ADDRVERIFY-OK-CORRECT-CODE-IN-TIME",
-    title="Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30)",
+    title="Верный код в срок: 200, тело session с emailVerified true, новый носитель; прежний не узнаётся, новый — в обычном положении без повторного входа (EV-30); пароль регистрации входит — ACTIVE с паролем (AWI-08, регистрация)",
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
@@ -716,6 +760,9 @@ CASES.append(Case(
         ]),
         _session_probe(_P30, "ev30-old-carrier-gone", "OldSessionCookie", "gone"),
         _session_probe(_P30, "ev30-new-carrier-verified", "SessionCookie", "alive"),
+        # AWI-08 (регистрация): полоса регистрации после инварианта пары даёт ACTIVE
+        # С ПАРОЛЕМ — пароль регистрации входит, положение обычное.
+        *_login(_P30, "ev30-awi08-login-with-registration-password", "Password", verified=True),
         *_password_change(_P30, "ev30-password-change-without-relogin", "SessionCookie", [
             *_status_is(200, "EV30-PASSWORD"),
         ]),
@@ -757,5 +804,540 @@ CASES.append(Case(
               test_script=[*_refused(401, 16, _REFUSED, "EV32", empty_details=True), *_no_cookies("EV32")]),
         _session_probe(_P32, "ev32-carrier-alive-still-in-position", "SessionCookie", "position"),
         *_confirm(_P32, "ev32-twin-right-code", "Code", test_script=_confirmed(_P32, "EV32-TWIN")),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф4-27 (приёмка Ф4 `registration-and-its-three-consequences.md`, редакция 7):
+# у приглашённого после подтверждения адреса снимок «кто я» называет ДВА
+# аккаунта, и личный из них — один.
+#
+# «ДАНО» СТРОИТСЯ ГЛАГОЛАМИ ПРОДУКТА, а не посевом хранилища. Приглашение без
+# выдачи роли (`POST /iam/v1/users:invite` без `projectId`/`roleId`) — тот же
+# производитель строки приглашения, что у посева, только снаружи; глагол требует
+# уровня «2» (`required_acr_min`), и единственный человек стенда `chart-own`, у
+# которого он есть, — надзор облака (его адрес, пароль и секрет фактора пишет
+# посев церемонии). Пригласивший — сам надзор, аккаунт — его личный: аккаунт,
+# которым он владеет, у него один, и это утверждается шагом фикстуры.
+#
+# СНИМОК — `AuthorizeService.WhoAmI` (`GET /iam/v1/me`) на собственном публичном
+# фронте службы. Печенья фронт не разрешает, поэтому сессия, выданная
+# подтверждением, предъявляется точке авторизации нашей церемонии, и снимок
+# читается токеном, выданным по ней, — тем же путём, каким посев церемонии
+# выковывает предъявителя человека (`seed_ceremony.py`, `ceremony_bearer`).
+# Функция снимка у Ф4-26 и Ф4-27 одна (приёмка §12 п. 10).
+#
+# БЛИЗНЕЦ «ДО ПОДТВЕРЖДЕНИЯ» здесь не переутверждается — по приёмке он стоит
+# координатой: аккаунтов у приглашённого до подтверждения ноль (Ф4-23), снимок
+# той же сессией — отказ положения (EV-60 приёмки `kaname#456`).
+#
+# СТРАЖ ПРЕДМЕТА. Без производителя (личный аккаунт не заводится активацией)
+# снимок называет одну запись — аккаунт пригласившего — и кейс краснеет на
+# числе записей и на записи с `owner`; без активации приглашения — на записи
+# аккаунта пригласившего. Несозданное «Дано» (ключей надзора либо клиента
+# церемонии нет) — третья категория помеченным утверждением, а не зелёное.
+# ───────────────────────────────────────────────────────────────────────────
+_OWN_WHY = ("собственный публичный фронт службы: приглашение, опрос его операции и "
+            "снимок «кто я»; адрес пишет посев церемонии стенда посадки `own`")
+_ISSUANCE_WHY = ("поверхность выдачи службы: точка авторизации и обмен кода на токен; "
+                 "адрес пишет посев церемонии стенда посадки `own`")
+_AUTHORIZE = "/iam/v1/authorize"
+_EXCHANGE_PATH = "/iam/v1/token"
+_ME = "/iam/v1/me"
+_INVITE = "/iam/v1/users:invite"
+_SUPERVISOR_KEYS = ("cloudSupervisorEmail", "cloudSupervisorPassword", "cloudSupervisorTotpSecret")
+_SUPERVISOR_WHY = ("надзор облака стенда — единственный человек стенда `chart-own` с уровнем "
+                   "«2», которого требует глагол приглашения; его адрес, пароль и секрет фактора "
+                   "пишет посев церемонии стенда чарта (`stand-chart.sh seed-ceremony`)")
+_CLIENT_KEYS = ("oauthClientId", "oauthClientSecret", "oauthRedirectUri")
+_CLIENT_WHY = ("посев церемонии стенда посадки own (`stand-chart.sh seed-ceremony`) не завёл "
+               "конфиденциального клиента — выковать токен человека нечем")
+# Предел опроса операции приглашения и пауза (мс): операция — одна запись строки
+# приглашения и членства; предел покрывает загруженный раннер с запасом.
+_OP_POLL_CAP = 60
+_OP_POLL_MS = 500
+
+# Код по времени в песочнице прогонщика: base32 → HMAC-SHA1 (crypto-js) →
+# динамическое усечение → шесть цифр (RFC 6238); то же тело, что у набора
+# восстановления, где надзор облака входит тем же способом.
+_TOTP_JS = [
+    "const __totp = (secretB32, step) => {",
+    "  const CryptoJS = require('crypto-js');",
+    "  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '234567';",
+    "  let bits = 0, value = 0; const bytes = [];",
+    "  for (const ch of String(secretB32 || '').toUpperCase()) {",
+    "    const idx = alphabet.indexOf(ch); if (idx < 0) { continue; }",
+    "    value = (value << 5) | idx; bits += 5;",
+    "    if (bits >= 8) { bytes.push((value >>> (bits - 8)) & 0xff); bits -= 8; }",
+    "  }",
+    "  const toHex = arr => arr.map(b => b.toString(16).padStart(2, '0')).join('');",
+    "  const msg = []; let s = step;",
+    "  for (let i = 7; i >= 0; i--) { msg[i] = s % 256; s = Math.floor(s / 256); }",
+    "  const mac = CryptoJS.HmacSHA1(CryptoJS.enc.Hex.parse(toHex(msg)), CryptoJS.enc.Hex.parse(toHex(bytes)));",
+    "  const h = CryptoJS.enc.Hex.stringify(mac);",
+    "  const off = parseInt(h.slice(-1), 16);",
+    "  const bin = (parseInt(h.slice(off * 2, off * 2 + 8), 16) & 0x7fffffff) % 1000000;",
+    "  return String(bin).padStart(6, '0');",
+    "};",
+]
+
+
+def _env_ref(key):
+    """Подстановка переменной окружения прогона в тело шага: `{{<key>}}`."""
+    return "{{" + key + "}}"
+
+
+def _require_keys(keys, why):
+    """Ключи посева заданы — иначе третий исход помеченным утверждением, а не красное."""
+    missing = " || ".join(f"!pm.environment.get({js_str(k)})" for k in keys)
+    return [
+        f"if ({missing}) {{",
+        *precondition_not_met("посев стенда: " + ", ".join(keys) + " заданы", why, indent="  "),
+        "}",
+    ]
+
+
+def _authorize(p, name):
+    """Код церемонии: точка авторизации под сессией `<p>SessionCookie`, PKCE S256."""
+    label = name.upper()
+    query = _v(p, "Query")
+    return Step(
+        name=name, method="GET", path=_AUTHORIZE + "?{{" + query + "}}",
+        pre_script=[
+            *_require_keys(_CLIENT_KEYS, _CLIENT_WHY),
+            "const __b64u = (wa) => { let x = CryptoJS.enc.Base64.stringify(wa).split('+').join('-')"
+            ".split('/').join('_'); while (x.endsWith('=')) { x = x.slice(0, -1); } return x; };",
+            "const __ver = __b64u(CryptoJS.lib.WordArray.random(32));",
+            "const __st = __b64u(CryptoJS.lib.WordArray.random(32));",
+            f"pm.environment.set({js_str(_v(p, 'Verifier'))}, __ver);",
+            f"pm.environment.set({js_str(_v(p, 'State'))}, __st);",
+            f"pm.environment.unset({js_str(_v(p, 'OauthCode'))});",
+            "const __q = [['response_type', 'code'], ['client_id', pm.environment.get('oauthClientId')],",
+            "  ['redirect_uri', pm.environment.get('oauthRedirectUri')], ['scope', 'openid'], ['state', __st],",
+            "  ['code_challenge', __b64u(CryptoJS.SHA256(__ver))], ['code_challenge_method', 'S256']]",
+            "  .map((kv) => encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1])).join('&');",
+            f"pm.environment.set({js_str(query)}, __q);",
+            *require_env_url("iamRegistryTokenBaseUrl", _AUTHORIZE + "?{{" + query + "}}", _ISSUANCE_WHY),
+            f"if (!pm.environment.get({js_str(_v(p, 'SessionCookie'))})) {{",
+            *report_then_skip(f"{label}: сессия не захвачена шагом выше",
+                              "вход либо подтверждение выше не выдали kaname_session — точке "
+                              "авторизации нечего предъявить; причина — в том шаге, не здесь",
+                              indent="  "),
+            "} else {",
+            f"  pm.request.headers.upsert({{key: 'Cookie', value: 'kaname_session=' + pm.environment.get({js_str(_v(p, 'SessionCookie'))})}});",
+            "}",
+        ],
+        insecure_tls=True, auth="anonymous", cookie_jar=False, follow_redirects=False,
+        test_script=[
+            *_status_is(302, label),
+            "const __loc = String(pm.response.headers.get('Location') || '');",
+            "const __qs = {}; (__loc.split('?')[1] || '').split('#')[0].split('&').forEach((kv) => { const i = kv.indexOf('=');",
+            "  if (i > 0) { __qs[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); } });",
+            f"pm.test({js_str(label + ': перенаправление несёт код и state запроса')}, () => "
+            f"pm.expect([typeof __qs.code === 'string' && __qs.code.length > 0, __qs.state === pm.environment.get({js_str(_v(p, 'State'))})]).to.eql([true, true]));",
+            f"if (__qs.code) {{ pm.environment.set({js_str(_v(p, 'OauthCode'))}, __qs.code); }}",
+        ],
+    )
+
+
+def _exchange(p, name):
+    """Обмен кода на токен доступа: `<p>Token`."""
+    label = name.upper()
+    code_v, redirect_v, verifier_v = f"_{p}FCode", f"_{p}FRedirect", f"_{p}FVerifier"
+    return Step(
+        name=name, method="POST", path=_EXCHANGE_PATH,
+        form=[("grant_type", "authorization_code"), ("code", "{{" + code_v + "}}"),
+              ("redirect_uri", "{{" + redirect_v + "}}"), ("code_verifier", "{{" + verifier_v + "}}")],
+        pre_script=[
+            f"if (!pm.environment.get({js_str(_v(p, 'OauthCode'))})) {{",
+            *report_then_skip(f"{label}: код не выдан точкой авторизации",
+                              "шаг авторизации выше не выдал code — обменивать нечего; "
+                              "причина — в нём, не здесь", indent="  "),
+            "}",
+            f"pm.variables.set({js_str(code_v)}, encodeURIComponent(pm.environment.get({js_str(_v(p, 'OauthCode'))}) || ''));",
+            f"pm.variables.set({js_str(redirect_v)}, encodeURIComponent(pm.environment.get('oauthRedirectUri') || ''));",
+            f"pm.variables.set({js_str(verifier_v)}, encodeURIComponent(pm.environment.get({js_str(_v(p, 'Verifier'))}) || ''));",
+            *require_env_url("iamRegistryTokenBaseUrl", _EXCHANGE_PATH, _ISSUANCE_WHY),
+            "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' + "
+            "CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
+            "  encodeURIComponent(pm.environment.get('oauthClientId') || '') + ':' + "
+            "encodeURIComponent(pm.environment.get('oauthClientSecret') || '')))});",
+        ],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            f"pm.environment.unset({js_str(_v(p, 'Token'))});",
+            *_status_is(200, label),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.test({js_str(label + ': выдан токен доступа')}, () => "
+            "pm.expect(typeof __j.access_token === 'string' && __j.access_token.length > 0).to.eql(true));",
+            f"if (__j.access_token) {{ pm.environment.set({js_str(_v(p, 'Token'))}, __j.access_token); }}",
+        ],
+    )
+
+
+def _fresh_totp_step(s, name):
+    """Ждёт начала ступени кода по времени, начавшейся ПОСЛЕ входа в шаг.
+
+    Надзор облака входит и в другом наборе того же прогона (восстановление), а
+    принятую ступень служба второй раз не принимает (Ф12-15). Коллекции идут одна
+    за другой, поэтому ступень, начавшаяся позже первого исполнения этого шага,
+    не была предъявлена никем. Ожидание — опросом признака формы входа (чтение,
+    ничего не меняющее) с настоящей паузой: одной паузой ждать нельзя, песочница
+    прогонщика обрывает скрипт на 30 с. Предел — две ступени."""
+    label = name.upper()
+    path = f"{_CSRF}?form=login"
+    start, count = f"_{s}TotpFrom", f"_{s}TotpWait"
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[
+            *_require_keys(_SUPERVISOR_KEYS, _SUPERVISOR_WHY),
+            *require_env_url("loginLaneBaseUrl", path, _LANE_WHY),
+            f"if (pm.environment.get({js_str(start + 'Req')}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(start)}, String(Math.floor(Date.now() / 1000 / 30)));",
+            f"  pm.environment.set({js_str(count)}, '0');",
+            f"  pm.environment.set({js_str(start + 'Req')}, pm.info.requestName);",
+            "}",
+        ],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            f"const __from = parseInt(pm.environment.get({js_str(start)}) || '0', 10);",
+            f"const __n = parseInt(pm.environment.get({js_str(count)}) || '0', 10);",
+            "if (pm.response.code === 200 && Math.floor(Date.now() / 1000 / 30) <= __from && __n < 70) {",
+            f"  pm.environment.set({js_str(count)}, String(__n + 1));",
+            "  const _tsd = Date.now(); while (Date.now() - _tsd < 1000) { /* inter-poll delay: next TOTP step not started yet */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(count)});",
+            f"pm.environment.unset({js_str(start + 'Req')});",
+            *_status_is(200, label),
+            f"pm.test({js_str(label + ': началась ступень кода, которой до этого набора не было')}, () => "
+            "pm.expect(Math.floor(Date.now() / 1000 / 30) > __from).to.eql(true));",
+        ],
+    )
+
+
+def _supervisor_bearer(s, tag, *, init=()):
+    """Токен надзора облака уровнем «2»: вход со вторым фактором → код → обмен."""
+    up = tag.upper()
+    return [
+        _fresh_totp_step(s, f"{tag}-totp-step-fresh"),
+        _csrf_step(s, f"{tag}-csrf-login", "login", with_session=None, init=[
+            *_require_keys(_SUPERVISOR_KEYS, _SUPERVISOR_WHY),
+            *init,
+            f"pm.environment.set({js_str(_v(s, 'Src'))}, '198.18.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254)));",
+            *(f"pm.environment.unset({js_str(_v(s, n))});" for n in (
+                "FormCookie", "SessionCookie", "Csrf", "OauthCode", "Token", "Verifier", "State")),
+        ]),
+        Step(
+            name=f"{tag}-login", method="POST", path=_LOGIN,
+            body={"email": _env_ref("cloudSupervisorEmail"), "password": _env_ref("cloudSupervisorPassword"),
+                  "secondFactor": {"method": "totp", "code": f"{{{{{_v(s, 'TotpCode')}}}}}"},
+                  "csrfToken": f"{{{{{_v(s, 'Csrf')}}}}}"},
+            pre_script=[
+                *_require_keys(_SUPERVISOR_KEYS, _SUPERVISOR_WHY),
+                *_TOTP_JS,
+                f"pm.environment.set({js_str(_v(s, 'TotpCode'))}, __totp(pm.environment.get('cloudSupervisorTotpSecret'), Math.floor(Date.now() / 1000 / 30)));",
+                *require_env_url("loginLaneBaseUrl", _LOGIN, _LANE_WHY), *_src_pre(s),
+                *_with_cookies(("kaname_form", _v(s, "FormCookie"))),
+            ],
+            insecure_tls=True, auth="anonymous", cookie_jar=False,
+            test_script=[
+                *_status_is(200, f"{up}-LOGIN"),
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                f"pm.test({js_str(up + '-LOGIN: сессия уровня «2» — вход со вторым фактором')}, () => "
+                "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));",
+                *_capture(s, "kaname_session", "SessionCookie", f"{up}-LOGIN"),
+            ],
+        ),
+        _authorize(s, f"{tag}-authorize"),
+        _exchange(s, f"{tag}-exchange"),
+    ]
+
+
+def _me(p, name, test_script, *, retry_predicate=None):
+    """Снимок «кто я» под токеном `<p>Token` на собственном публичном фронте.
+
+    `retry_predicate` — только для ПЕРВОГО чтения своего свежего состояния
+    (снимок сразу после подтверждения): опрос того же запроса с настоящей паузой,
+    предел конечен (`poll_request_until_status`), а по исчерпании исполняются
+    настоящие утверждения — ожидание не маскирует отсутствия записи, а лишь не
+    принимает за него задержку чтения. Коды отказа не повторяются (`retry_on`
+    пуст): отказ на собственном свежем токене — находка, а не окно."""
+    label = name.upper()
+    guard = [
+        *require_env_url("ownRestBaseUrl", _ME, _OWN_WHY),
+        f"if (!pm.environment.get({js_str(_v(p, 'Token'))})) {{",
+        *report_then_skip(f"{label}: токен не выдан обменом выше",
+                          "обмен кода выше не выдал токен — снимок читать нечем; причина — "
+                          "в нём, не здесь", indent="  "),
+        "}",
+    ]
+    if retry_predicate is None:
+        return Step(name=name, method="GET", path=_ME, auth=_v(p, "Token"), insecure_tls=True,
+                    pre_script=guard, test_script=list(test_script))
+    step = poll_request_until_status(name, "GET", _ME, list(test_script), auth=_v(p, "Token"),
+                                     expect_code=200, retry_on=(), retry_predicate=retry_predicate,
+                                     pre_script=guard)
+    step.insecure_tls = True
+    return step
+
+
+_PS, _PI = "avS", "avI"
+# Записи снимка приглашённого: личная — та, где `roles` содержит `owner`;
+# пригласившего — та, чей `accountId` равен аккаунту пригласившего. Пустой
+# `roles` в JSON не печатается — его отсутствие читается как пустой перечень.
+_F427_ME_JS = [
+    "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+    "const __acc = Array.isArray(__j.accounts) ? __j.accounts : [];",
+    "const __roles = (a) => Array.isArray(a && a.roles) ? a.roles : [];",
+    f"const __inviter = pm.environment.get({js_str(_v(_PS, 'AccountId'))});",
+    "const __owned = __acc.filter((a) => __roles(a).includes('owner'));",
+    "const __theirs = __acc.filter((a) => a.accountId === __inviter);",
+]
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS",
+    title="Ф4-27: у приглашённого после подтверждения адреса снимок «кто я» называет ровно два "
+          "аккаунта — личный с owner, заведённый активацией, и аккаунт пригласившего без owner; "
+          "пароль приглашённого входит — ACTIVE с паролем (AWI-08, активация приглашения)",
+    classes=["CRUD", "STATE"],
+    priority="P1",
+    steps=[
+        # Пригласивший: надзор облака уровнем «2». Адрес приглашённого назначается
+        # здесь же — приглашение заводится раньше его регистрации.
+        *_supervisor_bearer(_PS, "f427-inviter", init=_person_init(_PI, "f427")),
+        _me(_PS, "f427-inviter-owned-account", [
+            *_status_is(200, "F427-INVITER-ME"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "const __own = (Array.isArray(__j.accounts) ? __j.accounts : [])"
+            ".filter((a) => Array.isArray(a.roles) && a.roles.includes('owner'));",
+            "pm.test('F427-INVITER-ME: аккаунт, которым пригласивший владеет, ровно один (фикстура)', () => "
+            "pm.expect(__own.length).to.eql(1));",
+            f"if (__own.length === 1) {{ pm.environment.set({js_str(_v(_PS, 'AccountId'))}, __own[0].accountId); }}",
+        ]),
+        # Приглашение в его аккаунт без выдачи роли.
+        Step(
+            name="f427-invite", method="POST", path=_INVITE,
+            body={"accountId": f"{{{{{_v(_PS, 'AccountId')}}}}}", "email": f"{{{{{_v(_PI, 'Email')}}}}}"},
+            auth=_v(_PS, "Token"), insecure_tls=True,
+            pre_script=[
+                *require_env_url("ownRestBaseUrl", _INVITE, _OWN_WHY),
+                f"if (!pm.environment.get({js_str(_v(_PS, 'AccountId'))}) || !pm.environment.get({js_str(_v(_PS, 'Token'))})) {{",
+                *report_then_skip("F427-INVITE: аккаунт либо токен пригласившего не захвачен",
+                                  "шаги выше не назвали аккаунт пригласившего либо не выдали его "
+                                  "токен — приглашать некуда; причина — в них, не здесь", indent="  "),
+                "}",
+                f"pm.environment.unset({js_str(_v(_PI, 'InviteOp'))});",
+            ],
+            test_script=[
+                *_status_is(200, "F427-INVITE"),
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                "pm.test('F427-INVITE: ответ — операция с id', () => "
+                "pm.expect(typeof __j.id === 'string' && __j.id.length > 0).to.eql(true));",
+                f"if (typeof __j.id === 'string' && __j.id) {{ pm.environment.set({js_str(_v(_PI, 'InviteOp'))}, __j.id); }}",
+            ],
+        ),
+        Step(
+            name="f427-invite-op", method="GET", path="/operations/{{" + _v(_PI, "InviteOp") + "}}",
+            auth=_v(_PS, "Token"), insecure_tls=True,
+            pre_script=[
+                *require_env_url("ownRestBaseUrl", "/operations/{{" + _v(_PI, "InviteOp") + "}}", _OWN_WHY),
+                f"if (!pm.environment.get({js_str(_v(_PI, 'InviteOp'))})) {{",
+                *report_then_skip("F427-INVITE-OP: операция не возвращена шагом выше",
+                                  "приглашение выше отвергнуто синхронно либо не вернуло id "
+                                  "операции — опрашивать нечего; причина — в нём, не здесь",
+                                  indent="  "),
+                "}",
+                "if (pm.environment.get('_f427opStarted') !== pm.info.requestName) {",
+                "  pm.environment.set('_f427opCount', '0');",
+                "  pm.environment.set('_f427opStarted', pm.info.requestName);",
+                "}",
+            ],
+            test_script=[
+                "const __n = parseInt(pm.environment.get('_f427opCount') || '0', 10);",
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                f"if (pm.response.code === 200 && !__j.done && __n < {_OP_POLL_CAP}) {{",
+                "  pm.environment.set('_f427opCount', String(__n + 1));",
+                f"  const _opd = Date.now(); while (Date.now() - _opd < {_OP_POLL_MS}) {{ /* inter-poll delay: operation not done yet */ }}",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_f427opCount');",
+                "pm.environment.unset('_f427opStarted');",
+                *_status_is(200, "F427-INVITE-OP"),
+                "pm.test('F427-INVITE-OP: операция завершена', () => pm.expect(__j.done).to.eql(true));",
+                "pm.test('F427-INVITE-OP: операция без ошибки и с ответом', () => "
+                "pm.expect([!!__j.error, !!__j.response], JSON.stringify(__j.error || {})).to.eql([false, true]));",
+                "pm.test('F427-INVITE-OP: строка приглашения — на адрес приглашённого и ожидает', () => "
+                f"pm.expect([__j.response && __j.response.email, __j.response && __j.response.inviteStatus])"
+                f".to.eql([pm.environment.get({js_str(_v(_PI, 'Email'))}), 'PENDING']));",
+                "if (!__j.error && __j.response && __j.response.id) {",
+                f"  pm.environment.set({js_str(_v(_PI, 'InvitedUserId'))}, __j.response.id);",
+                "}",
+            ],
+        ),
+        # Приглашённый регистрируется той же полосой, что человек с улицы, и
+        # подтверждает адрес выданной регистрацией сессией.
+        _csrf_step(_PI, "f427-csrf-register", "register", with_session=None),
+        _post(_PI, "f427-register", _REGISTER,
+              {"email": f"{{{{{_v(_PI, 'Email')}}}}}", "password": f"{{{{{_v(_PI, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(_PI, 'Csrf')}}}}}"},
+              test_script=[
+                  *_status_is(200, "F427-REGISTER"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('F427-REGISTER: сессия в положении подтверждения — emailVerified false', () => "
+                  "pm.expect(!!__j.session && __j.session.emailVerified === false).to.eql(true));",
+                  *_capture(_PI, "kaname_session", "SessionCookie", "F427-REGISTER"),
+                  *_capture(_PI, "kaname_form", "FormCookie", "F427-REGISTER", required=False),
+              ]),
+        _await_letter(_PI, "f427-letter"),
+        *_confirm(_PI, "f427-verify", "Code", test_script=_confirmed(_PI, "F427-VERIFY")),
+        _authorize(_PI, "f427-invitee-authorize"),
+        _exchange(_PI, "f427-invitee-exchange"),
+        _me(_PI, "f427-invitee-snapshot", [
+            *_status_is(200, "F427-ME"),
+            *_F427_ME_JS,
+            "pm.test('F427-ME: снимок — того, кого приглашали (строка приглашения, контроль)', () => "
+            f"pm.expect(!!__j.userId && __j.userId === pm.environment.get({js_str(_v(_PI, 'InvitedUserId'))})).to.eql(true));",
+            "pm.test('F427-ME: записей accounts ровно две', () => pm.expect(__acc.length).to.eql(2));",
+            "pm.test('F427-ME: запись с owner ровно одна — личный аккаунт', () => pm.expect(__owned.length).to.eql(1));",
+            "pm.test('F427-ME: личный аккаунт — не аккаунт пригласившего', () => "
+            "pm.expect(__owned.length === 1 && !!__inviter && __owned[0].accountId !== __inviter).to.eql(true));",
+            "pm.test('F427-ME: запись аккаунта пригласившего есть и одна', () => pm.expect(__theirs.length).to.eql(1));",
+            "pm.test('F427-ME: у аккаунта пригласившего owner нет', () => "
+            "pm.expect(__theirs.length === 1 && !__roles(__theirs[0]).includes('owner')).to.eql(true));",
+        ], retry_predicate="(() => { let j; try { j = pm.response.json(); } catch (e) { return false; } "
+                           "return !Array.isArray(j.accounts) || j.accounts.length < 2; })()"),
+        # AWI-08 (активация приглашения): активация в исходе подтверждения адреса даёт
+        # ACTIVE С ПАРОЛЕМ — пароль регистрации приглашённого входит, положение обычное.
+        *_login(_PI, "f427-awi08-invitee-login-with-password", "Password", verified=True),
+    ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# OS-16 (kaname#634): свои сессии сквозь стенд — две и более сессии, перечень,
+# выход из выбранной и из всех, кроме текущей. Человек — свой, свежий:
+# `end-others` по человеку посева сняло бы сессии кейсов соседних наборов.
+# Запись N2 находится в перечне по описанию клиента, которым её назвал вход
+# (`User-Agent` запроса выдачи, Р3): так кейс заодно судит, что описание
+# доходит до перечня.
+# ───────────────────────────────────────────────────────────────────────────
+_POS = "avS"
+_SESSIONS = "/iam/v1/auth/sessions"
+_SESSIONS_END = "/iam/v1/auth/sessions/end"
+_SESSIONS_END_OTHERS = "/iam/v1/auth/sessions/end-others"
+_OS_AGENT = "kaname-newman-os16-"
+_OS_WHY = ("слушатель полосы формы стенда не обслуживает путей своих сессий (перечень отвечает "
+           "404): образ службы на стенде старше kaname#634 либо пути не ретранслированы краем — "
+           "это условие, которого стенд не создал, а не ответ продукта")
+
+
+def _os_guard(p):
+    """Пути своих сессий есть на стенде — иначе «условие не создано» и шаг не идёт."""
+    return [
+        f"if (pm.environment.get({js_str(_v(p, 'NoOwnSessions'))}) === '1') {{",
+        *precondition_not_met("пути своих сессий обслуживаются слушателем полосы стенда", _OS_WHY, indent="  "),
+        "}",
+    ]
+
+
+def _os_login(p, n):
+    """Вход той же личности с описанием клиента `<_OS_AGENT><n>`; носитель — в `<p>N<n>Cookie`."""
+    name = f"os16-login-{n}"
+    label = name.upper()
+    return [
+        _csrf_step(p, f"{name}-csrf", "login", with_session=None),
+        _post(p, name, _LOGIN,
+              {"email": f"{{{{{_v(p, 'Email')}}}}}", "password": f"{{{{{_v(p, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              extra_pre=[f"pm.request.headers.upsert({{key: 'User-Agent', value: {js_str(_OS_AGENT + str(n))}}});"],
+              test_script=[
+                  *_status_is(200, label),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  f"pm.test({js_str(label + ': emailVerified true')}, () => "
+                  "pm.expect(!!__j.session && __j.session.emailVerified === true).to.eql(true));",
+                  *_capture(p, "kaname_session", f"N{n}Cookie", label),
+                  *_capture(p, "kaname_form", "FormCookie", label, required=False),
+              ]),
+    ]
+
+
+def _os_list(p, name, cookie_var, test_script, *, first=False):
+    label = name.upper()
+    guard = [] if first else _os_guard(p)
+    return Step(
+        name=name, method="GET", path=_SESSIONS,
+        pre_script=[*guard, *require_env_url("loginLaneBaseUrl", _SESSIONS, _LANE_WHY), *_src_pre(p),
+                    f"pm.test({js_str(label + ': предъявляемый носитель был выдан (контроль непустоты)')}, () => "
+                    f"pm.expect(!!pm.environment.get({js_str(_v(p, cookie_var))})).to.eql(true));",
+                    *_with_cookies(("kaname_session", _v(p, cookie_var)))],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=list(test_script),
+    )
+
+
+_OS_PARSE = [
+    "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+    "const __s = Array.isArray(__j.sessions) ? __j.sessions : [];",
+    "const __cur = __s.filter(x => x.current === true);",
+]
+
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED",
+    title="Свои сессии сквозь стенд: перечень — текущая помечена, выход из выбранной снимает её (её носитель — 401), выход из всех, кроме текущей, оставляет одну (OS-16)",
+    classes=["CRUD", "SEC"],
+    priority="P0",
+    steps=[
+        *_verified_person(_POS, "os16"),
+        *_os_login(_POS, 1),
+        *_os_login(_POS, 2),
+        *_os_login(_POS, 3),
+        _os_list(_POS, "os16-list-n1", "N1Cookie", [
+            f"if (pm.response.code === 404) {{ pm.environment.set({js_str(_v(_POS, 'NoOwnSessions'))}, '1'); }} else {{",
+            f"  pm.environment.unset({js_str(_v(_POS, 'NoOwnSessions'))});",
+            *("  " + x for x in _status_is(200, "OS16-LIST-N1")),
+            *("  " + x for x in _OS_PARSE),
+            "  pm.test('OS16-LIST-N1: записей не меньше трёх', () => pm.expect(__s.length >= 3).to.eql(true));",
+            "  pm.test('OS16-LIST-N1: current ровно у одной записи', () => pm.expect(__cur.length).to.eql(1));",
+            f"  pm.test('OS16-LIST-N1: текущая — запись N1 (её описание клиента)', () => "
+            f"pm.expect(__cur.length === 1 && __cur[0].userAgent === {js_str(_OS_AGENT + '1')}).to.eql(true));",
+            f"  const __n2 = __s.filter(x => x.userAgent === {js_str(_OS_AGENT + '2')});",
+            "  pm.test('OS16-LIST-N1: запись N2 названа своим описанием клиента ровно один раз', () => "
+            "pm.expect(__n2.length).to.eql(1));",
+            "  pm.test('OS16-LIST-N1: запись N2 — не текущая', () => "
+            "pm.expect(__n2.length === 1 && __n2[0].current === false).to.eql(true));",
+            f"  pm.environment.set({js_str(_v(_POS, 'N2Id'))}, __n2.length === 1 ? String(__n2[0].id) : '');",
+            "  pm.test('OS16-LIST-N1: nextPageToken — строка', () => pm.expect(typeof __j.nextPageToken).to.eql('string'));",
+            "}",
+        ], first=True),
+        _csrf_step(_POS, "os16-end-csrf", "session-end", init=_os_guard(_POS), with_session="N1Cookie"),
+        _post(_POS, "os16-end-n2", _SESSIONS_END,
+              {"sessionId": f"{{{{{_v(_POS, 'N2Id')}}}}}", "csrfToken": f"{{{{{_v(_POS, 'Csrf')}}}}}"},
+              with_session="N1Cookie", extra_pre=_os_guard(_POS),
+              test_script=[
+                  *_status_is(200, "OS16-END-N2"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('OS16-END-N2: тело — {\"ended\": true}', () => pm.expect(__j.ended).to.eql(true));",
+                  *_no_cookies("OS16-END-N2"),
+              ]),
+        _os_list(_POS, "os16-list-n2-gone", "N2Cookie", _refused(401, 16, _REFUSED, "OS16-LIST-N2", empty_details=True)),
+        _csrf_step(_POS, "os16-end-others-csrf", "session-end", init=_os_guard(_POS), with_session="N1Cookie"),
+        _post(_POS, "os16-end-others", _SESSIONS_END_OTHERS,
+              {"csrfToken": f"{{{{{_v(_POS, 'Csrf')}}}}}"},
+              with_session="N1Cookie", extra_pre=_os_guard(_POS),
+              test_script=[
+                  *_status_is(200, "OS16-END-OTHERS"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('OS16-END-OTHERS: ended — число не меньше одного', () => "
+                  "pm.expect(typeof __j.ended === 'number' && __j.ended >= 1).to.eql(true));",
+                  *_no_cookies("OS16-END-OTHERS"),
+              ]),
+        _os_list(_POS, "os16-list-n1-alone", "N1Cookie", [
+            *_status_is(200, "OS16-LIST-ALONE"),
+            *_OS_PARSE,
+            "pm.test('OS16-LIST-ALONE: запись ровно одна', () => pm.expect(__s.length).to.eql(1));",
+            "pm.test('OS16-LIST-ALONE: и она текущая', () => pm.expect(__cur.length).to.eql(1));",
+        ]),
     ],
 ))

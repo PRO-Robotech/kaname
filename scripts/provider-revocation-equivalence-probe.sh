@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # provider-revocation-equivalence-probe.sh
 #
-# ВОПРОС (#797). Делает ли снятие СЕССИИ ВХОДА у провайдера уже выданный ТОКЕН
+# ВОПРОС (kacho#797). Делает ли снятие СЕССИИ ВХОДА у провайдера уже выданный ТОКЕН
 # ДОСТУПА неактивным в интроспекции? Это свойство ПРОВАЙДЕРА; в нашем дереве оно
 # не выражено, поэтому его нельзя вывести чтением кода — только спросить.
 #
@@ -35,7 +35,7 @@ PUB=http://127.0.0.1:${PUB_PORT:-14444}
 ADMIN=http://127.0.0.1:${ADMIN_PORT:-14445}
 SUBJ=usr-probe-subject
 JAR=$(mktemp)
-cleanup(){ docker rm -f "$NAME" >/dev/null 2>&1; rm -f "$JAR"; }
+cleanup(){ docker rm -fv "$NAME" >/dev/null 2>&1; rm -f "$JAR"; }
 trap cleanup EXIT
 
 say(){ printf '%s\n' "$*"; }
@@ -43,7 +43,7 @@ die(){ say "ПРОБА НЕ ВЫПОЛНЕНА: $*"; exit 2; }
 intro(){ curl -s -X POST "$ADMIN/admin/oauth2/introspect" -d "token=$1" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin).get("active"))' 2>/dev/null; }
 
-docker rm -f "$NAME" >/dev/null 2>&1
+docker rm -fv "$NAME" >/dev/null 2>&1
 docker run -d --name "$NAME" -e DSN=memory -e URLS_SELF_ISSUER="$PUB" \
   -e SECRETS_SYSTEM=probe-secret-probe-secret-32chars \
   -e STRATEGIES_ACCESS_TOKEN=opaque -e TTL_ACCESS_TOKEN=1h \

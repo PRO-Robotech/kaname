@@ -36,7 +36,20 @@
 Где искать событие, запись называет сама: задача — `subject.task`
 (`<владелец>/<репозиторий>#<номер>`), учётка —
 `effective_approval.publication_pending.expected_actor`, а без неё —
-`authority.authorized_actors`. Событие опознаётся ЗАГОЛОВКОМ комментария (строки
+`authority.authorized_actors`.
+
+Но событие публикуется и НЕ там, куда указывает `subject.task` (kaname#587):
+на ревизии `115db769` у пяти из 62 записей с исполненным событием адрес события
+лежит в иной задаче, чем их `subject.task` (у одной задача названа, у четырёх
+не названа вовсе), — например, задача записи PRO-Robotech/kaname#195, а событие
+в PRO-Robotech/kacho#1280. Гейт, читавший одну задачу, такое событие не видел и
+печатал «расхождений 0». Поэтому осмотр РАСШИРЕН до задач, названных ДЕРЕВОМ:
+`subject.task` каждой записи каталога и задача из адреса каждого записанного
+события (`event.url`, `event.issue_api_url`). Сначала читается своя задача, затем
+расширение; каждая — один раз. Перечень выводится из дерева, а не выписан, и его
+объём печатается отдельно: «subject.task судимых: N · расширение по дереву: M».
+Событие в задаче, которую не называет ни одна запись, этим осмотром не видно —
+это граница предмета, и она названа здесь, а не умолчана. Событие опознаётся ЗАГОЛОВКОМ комментария (строки
 `ключ: значение` до первой `---`), где есть все пять обязательных полей и
 `subject_sha256` равен `subject.sha256` записи. Отпечаток, упомянутый в прозе
 обсуждения, событием не является — это законный близнец самопробы.
@@ -78,6 +91,32 @@ REVIEWS = "docs/specs/reviews"
 REQUIRED_EVENT_FIELDS = ("role", "verdict", "subject", "subject_revision", "subject_sha256")
 TASK_RE = re.compile(r"^([\w.-]+)/([\w.-]+)#(\d+)$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+# Адрес события в записи: страница комментария либо API-адрес задачи.
+EVENT_ISSUE_RES = (
+    re.compile(r"^https://github\.com/([\w.-]+)/([\w.-]+)/issues/(\d+)(?:#.*)?$"),
+    re.compile(r"^https://api\.github\.com/repos/([\w.-]+)/([\w.-]+)/issues/(\d+)$"),
+)
+
+
+def tasks_named_by(doc: dict) -> set:
+    """Задачи трекера, которые называет запись: subject.task и адрес её события."""
+    named = set()
+    subject = doc.get("subject") if isinstance(doc.get("subject"), dict) else {}
+    task = subject.get("task")
+    m = TASK_RE.match(task) if isinstance(task, str) else None
+    if m:
+        named.add(m.groups())
+    ev = doc.get("event") if isinstance(doc.get("event"), dict) else {}
+    for field in ("url", "issue_api_url"):
+        value = ev.get(field)
+        if not isinstance(value, str):
+            continue
+        for rx in EVENT_ISSUE_RES:
+            m = rx.match(value.strip())
+            if m:
+                named.add(m.groups())
+                break
+    return named
 
 GREEN, RED, UNMET = 0, 1, 2
 
@@ -169,6 +208,7 @@ def judge(root: str, rev: str, fixture: str | None):
 
     performed = 0
     judged = []
+    named_by_tree: set = set()
     untasked_approved, untasked_other = [], []
     for path, text in records:
         try:
@@ -177,6 +217,7 @@ def judge(root: str, rev: str, fixture: str | None):
             raise Unmet("%s не разбирается как YAML: %s" % (path, e)) from e
         if not isinstance(doc, dict):
             raise Unmet("%s — не отображение верхнего уровня" % path)
+        named_by_tree |= tasks_named_by(doc)
         ev = doc.get("event")
         if isinstance(ev, dict) and ev.get("status") == "performed":
             performed += 1
@@ -211,7 +252,11 @@ def judge(root: str, rev: str, fixture: str | None):
     # счёт по записям печатал бы событий больше, чем прочитано комментариев.
     events_seen: set = set()
     findings = []
-    for path, (owner, repo, number), subj_sha, actors, state, issued in judged:
+    own_tasks = {task for _, task, _, _, _, _ in judged}
+    extension = sorted(named_by_tree - own_tasks)
+
+    def matching_event(task, subj_sha, actors):
+        owner, repo, number = task
         for c in tracker.comments(owner, repo, number):
             if not isinstance(c, dict):
                 continue
@@ -220,16 +265,29 @@ def judge(root: str, rev: str, fixture: str | None):
             if not all(k in hdr for k in REQUIRED_EVENT_FIELDS):
                 continue
             events_seen.add((owner, repo, number, c.get("id")))
-            if login not in actors or hdr["subject_sha256"] != subj_sha:
+            if login in actors and hdr["subject_sha256"] == subj_sha:
+                return c, login, hdr
+        return None
+
+    # Своя задача — первой: событие там, где запись его обещает, называется
+    # без оговорки. Иные задачи дерева — следом; читается каждая ровно раз (кэш).
+    for path, task, subj_sha, actors, state, issued in judged:
+        for where in [task] + [t for t in sorted(own_tasks | set(extension)) if t != task]:
+            hit = matching_event(where, subj_sha, actors)
+            if hit is None:
                 continue
+            c, login, hdr = hit
+            place = "" if where == task else " в иной задаче, чем subject.task %s/%s#%s" % task
             findings.append(
-                "%s: событие полномочия опубликовано — %s (%s, %s, verdict %s), а запись %s, "
+                "%s: событие полномочия опубликовано%s — %s (%s, %s, verdict %s), а запись %s, "
                 "effective_approval.issued: %s" % (
-                    path, c.get("html_url") or c.get("id"), login, c.get("created_at"),
+                    path, place, c.get("html_url") or c.get("id"), login, c.get("created_at"),
                     hdr.get("verdict"), state, issued))
             break
 
     tasks = len(tracker.cache)
+    own_read = len(own_tasks)
+    extension_read = tasks - own_read
     out.append("%s: ревизия %s" % (NAME, sha[:12]))
     out.append("осмотрено записей        : %d  (прочих файлов под %s: %d)" % (len(records), REVIEWS, other))
     out.append("  с исполненным событием : %d  (event.status: performed — вне предмета: "
@@ -238,8 +296,9 @@ def judge(root: str, rev: str, fixture: str | None):
     out.append("    судимо               : %d  (названы задача и учётка)" % len(judged))
     out.append("    задача не названа    : %d  (вердикт без санкции; в вердикт не входит)" % len(untasked_other))
     out.append("    задача не названа, APPROVED: %d" % len(untasked_approved))
-    out.append("задач трекера прочитано  : %d · комментариев : %d · событий полномочия распознано : %d"
-               % (tasks, tracker.comments_read, len(events_seen)))
+    out.append("задач трекера прочитано  : %d  (subject.task судимых: %d · расширение по дереву: %d из "
+               "названных записями %d) · комментариев : %d · событий полномочия распознано : %d"
+               % (tasks, own_read, extension_read, len(named_by_tree), tracker.comments_read, len(events_seen)))
     out.append("расхождений              : %d" % len(findings))
     out.extend("  " + f for f in findings)
     if findings:
@@ -339,13 +398,19 @@ def self_test() -> int:
             subprocess.run(["git", "-C", d, "commit", "-q", "--allow-empty", "-m", "#1 фикстура"], check=True, env=env)
             return d
 
-        def fixture(name: str, comments) -> str:
-            d = os.path.join(work, name, "PRO-Robotech", "kacho")
-            os.makedirs(d)
-            if comments is not None:
-                with open(os.path.join(d, "1271.json"), "w", encoding="utf-8") as fh:
-                    json.dump(comments, fh, ensure_ascii=False)
+        def fixture_issues(name: str, issues: dict) -> str:
+            """Захваченные ответы по задачам: {"<владелец>/<репозиторий>#<номер>": [комментарии]}."""
+            for key, comments in issues.items():
+                m = TASK_RE.match(key)
+                d = os.path.join(work, name, m.group(1), m.group(2))
+                os.makedirs(d, exist_ok=True)
+                if comments is not None:
+                    with open(os.path.join(d, m.group(3) + ".json"), "w", encoding="utf-8") as fh:
+                        json.dump(comments, fh, ensure_ascii=False)
             return os.path.join(work, name)
+
+        def fixture(name: str, comments) -> str:
+            return fixture_issues(name, {"PRO-Robotech/kacho#1271": comments})
 
         def case(label, root, fx, want, must=()):
             nonlocal checks, failed
@@ -426,6 +491,60 @@ def self_test() -> int:
         untasked_cr = repo("untasked-cr", {RECORD_PATH: silent_record(task="", verdict="CHANGES_REQUESTED")})
         case("без задачи и без санкции — строка переписи, не находка", untasked_cr, with_event, GREEN,
              ("задача не названа    : 1", "судимо               : 0"))
+
+        # ── СОБЫТИЕ В ИНОЙ ЗАДАЧЕ, ЧЕМ subject.task (kaname#587) ──────────────
+        # В дереве такое есть: запись assurance-level-is-declared-by-our-session
+        # называет задачей PRO-Robotech/kaname#195, а её событие опубликовано в
+        # PRO-Robotech/kacho#1280. Задачу события гейт берёт из ДЕРЕВА — её
+        # называет соседняя запись (subject.task либо адрес своего события), — и
+        # каждый близнец ниже отличается от инъекции ОДНИМ фактом.
+        elsewhere = dict(CAPTURED_EVENT, id=6,
+                         html_url="https://github.com/PRO-Robotech/kacho/issues/1280#issuecomment-6")
+        other_issue = "PRO-Robotech/kacho#1280"
+        neighbour_path = "%s/neighbour-document/%s.yaml" % (REVIEWS, SIBLING_SHA)
+
+        def neighbour(task: str, event_url: str) -> str:
+            """Соседняя запись с исполненным событием: в предмет не входит, задачу называет."""
+            return (
+                "schema_version: 1\nkind: acceptance_review\nsubject:\n"
+                "  repository: PRO-Robotech/kaname\n  path: docs/engineering/acceptance/neighbour.md\n"
+                "  sha256: %s\n%sverdict: APPROVED\nreviewer_role: acceptance-reviewer\n"
+                "effective_approval:\n  issued: true\n"
+                "authority:\n  authorized_actors: [pointpu]\n"
+                "event:\n  type: issue_comment\n  status: performed\n%s" % (
+                    SIBLING_SHA, "  task: %s\n" % task if task else "",
+                    "  url: %s\n" % event_url if event_url else ""))
+
+        via_url = repo("elsewhere-url", {
+            RECORD_PATH: silent_record("event:\n  type: issue_comment\n  status: not_performed\n"),
+            neighbour_path: neighbour("", "https://github.com/PRO-Robotech/kacho/issues/1280#issuecomment-5"),
+        })
+        via_task = repo("elsewhere-task", {
+            RECORD_PATH: silent_record(),
+            neighbour_path: neighbour(other_issue, ""),
+        })
+        found_elsewhere = fixture_issues("fx-elsewhere", {
+            "PRO-Robotech/kacho#1271": [CAPTURED_OTHER], other_issue: [CAPTURED_OTHER, elsewhere]})
+        nowhere = fixture_issues("fx-nowhere", {
+            "PRO-Robotech/kacho#1271": [CAPTURED_OTHER], other_issue: [CAPTURED_OTHER]})
+        sibling_elsewhere = fixture_issues("fx-sibling-elsewhere", {
+            "PRO-Robotech/kacho#1271": [CAPTURED_OTHER],
+            other_issue: [CAPTURED_OTHER, dict(elsewhere, body=sibling["body"])]})
+        case("инъекция: not_performed, событие в иной задаче — её называет адрес события соседней записи",
+             via_url, found_elsewhere, RED,
+             (RECORD_PATH, elsewhere["html_url"], "в иной задаче, чем subject.task PRO-Robotech/kacho#1271",
+              "event.status: not_performed", "расхождений              : 1"))
+        case("инъекция: без блока event, событие в иной задаче — её называет subject.task соседней записи",
+             via_task, found_elsewhere, RED,
+             (RECORD_PATH, elsewhere["html_url"], "без блока event", "расхождений              : 1"))
+        case("законный близнец: те же записи, события нет ни в одной задаче — осмотр расширен и назван числом",
+             via_url, nowhere, GREEN,
+             ("расхождений              : 0", "задач трекера прочитано  : 2",
+              "subject.task судимых: 1 · расширение по дереву: 1"))
+        case("законный близнец: в иной задаче событие о СОСЕДНЕЙ редакции", via_task, sibling_elsewhere, GREEN,
+             ("расхождений              : 0", "расширение по дереву: 1"))
+        case("иная задача названа деревом, а ответа о ней нет — не выполнилось",
+             via_task, fixture("fx-only-own", [CAPTURED_OTHER]), UNMET, ("трекер недоступен", other_issue))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

@@ -1,0 +1,86 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+  sha256: 5a86c0fabd1083a5df8eae11bccd14f1158411e9a2cdfec91376166e2962177c
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8f6b890e1
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена (рабочее дерево копии kaname-661-accept); запись судит
+    содержимое по отпечатку.
+  branch: '661'
+  task: PRO-Robotech/kaname#661
+  round: 4 (подтверждение формы предикатов после CHANGES_REQUESTED круга 3)
+  predecessor_record: docs/specs/reviews/cluster-admins-on-the-public-surface/d9610bd22991c50cddb02ca6097ad94ac11f0ab34bd8a46ccda9ebd1c7e8736b.yaml
+  fingerprint_predicate: >-
+    sha256sum документа @ 8f6b890e1 рабочее дерево → 5a86c0fa…2962177c (совпал с заданием).
+  publication_mode: запись в дереве; внешнее событие публикует курьер
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+scope_of_diff:
+  predicate: git diff -- <док> @ 8f6b890e1 (HEAD несёт одобренную кругом 2 редакцию a2efb0ac)
+  observed: >-
+    Против a2efb0ac изменены только: журнал правок в шапке, предикат снятия в §«Что НЕ входит»,
+    координата пробы края в CAP-26, предикат DoD S3 п.1. Сценарии, коды, payload, DoD по
+    существу не тронуты. Посылка задания подтверждена.
+
+blocking_of_round_3_resolved:
+  - where: §«Что НЕ входит» (предикат снятия InternalClusterService)
+    predicate: >-
+      `git -C <копия PRO-Robotech/kacho> grep -n 'internal/cluster' -- tests ui-future gateway/tests`
+      на копии платформы @ ffbe930db → 63 строки, exit 0 (сегодня честно не ноль — снимать рано);
+      pathspec голый, дом назван текстом «в платформе (`PRO-Robotech/kacho`)» и аргументом -C.
+      Служебная половина `git grep -n 'InternalClusterService' -- tests` в kaname → 3 строки.
+  - where: DoD S3 п.1
+    predicate: >-
+      `git -C <копия> grep -c '"/iam/v1/internal/cluster' -- ui-future/shared/src/api/cluster.ts`
+      @ ffbe930db → `cluster.ts:2`, exit 0 (красно до S3); инъекция — тот же файл с литералом,
+      заменённым на публичный путь, в отдельном дереве → вывода нет, exit 1. Предикат способен
+      и упасть, и пройти.
+  - hook: >-
+      `go test ./internal/check -run TestAcceptancePathCoordinateResolves -count=1` → ok.
+
+non_blocking:
+  - >-
+    CAP-26: префикс дома теперь стоит и у пути файла, и у имени функции
+    (`PRO-Robotech/kacho:TestExternalListener_RejectsInternalPaths`); имени функции дом не
+    нужен — достаточно пути. Проба существует: external_isolation_test.go:140 в копии платформы.
+  - >-
+    DoD S3 п.1 «→ 0»: `git grep -c` при нуле совпадений ничего не печатает и выходит с 1;
+    «0» читать как «нет вывода / exit 1». Форма унаследована от одобренной редакции.
+
+constructibility: >-
+  Посев не требовался: сценарии и Given не менялись (дельта сверена). Посевы круга 2 — в его записи.
+
+semantic_carryover: >-
+  Смысл одобрен кругом 2 (a2efb0ac); этот круг одобряет содержимое 5a86c0fa целиком,
+  проверив, что дельта — только форма предикатов и координат.
+
+event_body: acceptance-reviewer · APPROVED · 5a86c0fabd1083a5df8eae11bccd14f1158411e9a2cdfec91376166e2962177c
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#661
+  status: performed
+  published: true
+  database_id: 6046095620
+  node_id: "IC_kwDOUO26pM8AAAABaGAZBA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/661#issuecomment-6046095620"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6046095620"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-07T20:19:56Z"
+  body_sha256: "c8e735ce1f3bb2fcea2225be65f4da59e9e64631d1da715a041e4ce22824f2e2"
+  subject_sha256: "5a86c0fabd1083a5df8eae11bccd14f1158411e9a2cdfec91376166e2962177c"
+  subject_revision_commit: "f8f53e63a7bbea068cc3b69649fd59b78457bd50"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh

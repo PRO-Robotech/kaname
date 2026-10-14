@@ -72,6 +72,7 @@ func newAssertionFixture(t *testing.T) assertionFixture {
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 		VALUES ($1,$2,'ext-assertion','assert@example.com','Assert','ACTIVE', now())`, f.user, f.account)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ($1,$2,'assertion-sva')`,
 		f.sva, f.account)

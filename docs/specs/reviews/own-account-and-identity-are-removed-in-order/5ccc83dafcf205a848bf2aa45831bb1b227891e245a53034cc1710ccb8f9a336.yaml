@@ -1,0 +1,163 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md
+  sha256: 5ccc83dafcf205a848bf2aa45831bb1b227891e245a53034cc1710ccb8f9a336
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 110db7535
+  content_commit: c8fb5c27e
+  branch: '720'
+  task: PRO-Robotech/kaname#720
+  related_tasks: [PRO-Robotech/kaname#664, PRO-Robotech/kaname#511, PRO-Robotech/kacho#3162]
+  round: 1
+  round_kind: delta
+  round_note: >-
+    Первый круг на редакцию 4 (задача kaname#720). Судится дельта к одобренной редакции
+    6d5b9ef6… (круг 3, APPROVED): шапка, §0.3 (номера строк), §0.8 (две строки), §0.11, §1 п.3,
+    «Что не входит», Р12, общие предусловия §4 (определение «отказ по уровню»), KN664-18, 44, 45,
+    49, §5 (три строки), DoD 7 и 11, §7. Дельта получена `git diff 110db7535 c8fb5c27e` — единственный
+    путь, документ; на 110db7535 документ равен 6d5b9ef6… (sha256sum `git show`).
+  previous_record: docs/specs/reviews/own-account-and-identity-are-removed-in-order/6d5b9ef672c041d613ebbad511b1b391f18a3542dfae9c478c74c6fa4d7ce754.yaml
+  fingerprint_predicate: sha256sum <док> на c8fb5c27e → 5ccc83da…a336 (совпал с заданием; рабочее дерево чистое)
+publication_mode: courier_of_agent_verdict
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-12'
+
+delta_checks:
+  - item: посылка §0.11 (пороги сегодня)
+    outcome: confirmed
+    note: >-
+      @110db7535: UserService.Delete :225/:237 "1"; ServiceAccountService.Delete :94/:106 "1";
+      Block/Unblock/RemoveFromAccount/ResetSecondFactor/ResetAccessKeys "2"; SA Disable/Enable "2";
+      Account/Group/Role.Delete "2"; AccountService.Delete :118/:130. Каталог службы и копия края
+      (kacho @bac26316c4) — обе записи "1".
+  - item: DoD 11 — предикат в обе стороны
+    outcome: confirmed
+    note: на 110db7535 с "2" → 0, с "1" → 2; -A13 покрывает строку опции (+12 у обоих глаголов).
+  - item: Р12 — администратор облака не освобождён
+    outcome: confirmed
+    note: >-
+      corelib@v1.14.0 grpcsrv/acr.go EvaluateStepUp освобождает только PrincipalTypeServiceAccount;
+      край (stepup_gate.go CheckAssurance) и второй замок службы (authzguard/acr_floor.go) зовут его же.
+  - item: форма отказа по уровню на крае
+    outcome: confirmed
+    note: >-
+      kacho @bac26316c4 gateway/internal/middleware/auth_stepup.go enforceStepUpHTTP: 401, тело
+      code 16, WWW-Authenticate из BuildStepUpChallenge (error="insufficient_user_authentication",
+      acr_values). Прежний «Тогда» KN664-18 (403/7, authz.step_up) — форма второго замка
+      (acr_floor.go acrStepUpDenied); замена на одну форму в документе верна.
+  - item: близнецы
+    outcome: confirmed
+    note: KN664-44 ↔ тот же «Дано» уровня 2; KN664-45 ↔ KN664-39; KN664-49 ↔ KN664-48 (часть SA); отличие — один факт, уровень.
+  - item: REST-пути сценариев
+    outcome: confirmed
+    note: delete /iam/v1/users/{user_id} (user_service.proto:226), /iam/v1/serviceAccounts/{service_account_id} (:95), /iam/v1/auth/sessions (loginlanehttp/handler.go:114).
+  - item: соседние приёмки
+    outcome: confirmed
+    note: >-
+      git grep -l '(UserService|ServiceAccountService)[./]Delete' docs/engineering/acceptance @110db7535 →
+      этот документ + три названных (cloud-administrator-resets-login-methods, expired-invitation…, retention-sweep-has-a-caller).
+  - item: счёт сценариев
+    outcome: confirmed
+    note: grep -o 'KN664-[0-9]*' | sort -u | wc -l → 39.
+
+new_contradictions: none
+
+blocking: []
+
+important:
+  - kind: PRODUCER
+    scenarios: [KN664-44, KN664-45, KN664-49]
+    note: >-
+      §5 называет производителем отказа только край («до пересылки службе»), а держатели DoD 7
+      (newman службы, baseUrl — фронт службы) и DoD 11 (интеграционная) исполняются на поверхности
+      службы. Там отказ производят internal/authzguard/public_caller_policy.go (stepUpRequired →
+      Unauthenticated + iamerr.TextStepUpRequired, порог из копии каталога службы) и
+      internal/restfront/stepup.go (401 + вызов), а на полосе пересланной краем личности — второй
+      замок acr_floor.go с 403/7 authz.step_up. Рекомендую назвать эти производители в §5 и сказать,
+      что интеграционная проба идёт полосой предъявленного удостоверения, иначе она утвердит форму
+      второго замка, которую документ отверг. Не блокирует: форма на фронте службы та же
+      (401/16/вызов), а производитель её существует и краснеет до правки каталога.
+  - kind: FORMAT
+    scenarios: [KN664-18, KN664-44, KN664-45, KN664-49]
+    note: >-
+      «Текст — по Р11» производится сегодня только службой (TextStepUpRequired); край @bac26316c4
+      отдаёт message "insufficient_user_authentication" (auth_stepup.go stepUpDenyMessage), текст
+      края — сторона края kaname#511. Стоит сказать, на какой поверхности утверждается текст, либо что
+      на крае до kaname#511 утверждаются пара и параметры вызова без текста.
+  - kind: CONSTRUCTIBILITY
+    scenarios: [KN664-44]
+    note: >-
+      Образец интеграционного посева назван неверно: Ф11-16 — сквозная проба стенда (уровень сессии
+      читает край из хранилища службы), в интеграции службы края нет. Действующая фикстура
+      интеграционного уровня — cmd/kaname/step_up_indication_test.go (s.mint(jwt.MapClaims{"acr":"1"}),
+      TestF11_49 / TestF11_50, близнец acr "2"); сквозной образец — CAP-08 в
+      tests/newman/cases/kaname-cluster-admins.py (держатель уровня 1 на стенде).
+  - kind: CONVENTION
+    note: >-
+      fa-b7: соседняя приёмка assurance-level-is-declared-by-our-session.md цитируется (Р11, Ф11-01,
+      Ф11-16) без отпечатка; её текущая шапка — DRAFT без вердикта, одобрена была редакция 9
+      (tests/newman/cases/kaname-cluster-admins.py:28). Закрепить ссылку на одобренную редакцию и
+      её отпечаток.
+
+minor:
+  - kind: DoD
+    note: >-
+      DoD 11 говорит, что строку «необратимое удаление» держит TestStepUpPageMatchesTheContract;
+      гейт судит СОСТАВ раздела Step-up (client_page_step_up_verbs_test.go, шапка «ГРАНИЦА»), а не
+      строку — глагол в любой строке раздела его удовлетворит.
+  - kind: COVERAGE
+    note: >-
+      Радиус: существующие шаги снятия этих глаголов в наборах (iam-user.py:1195, 1288, 1315, 1345;
+      iam-service-account.py:791, 1207, 1370; iam-token-facade-conformance.py:690;
+      kaname-cluster-admins.py:555, 559) после подъёма порога обязаны остаться зелёными —
+      перепрогон набора на голове исполнителя, а не допущение об уровне фикстурных токенов.
+
+constructibility:
+  method: >-
+    Круг дельты: новых состояний базы редакция 4 не вводит (Given KN664-44/45/49 — Given KN664-10/17,
+    39, 48, посеянные кругом 2). Новое предусловие — вызывающий уровня 1 — показано названными
+    действующими фикстурами: интеграционная cmd/kaname/step_up_indication_test.go (s.mint acr "1"/"2"),
+    сквозная — CAP-08 kaname-cluster-admins.py; на крае уровень своей сессии — own_session_assurance.go
+    (kacho @bac26316c4).
+  seeded: 0
+  of: 0
+  named_fixture: 2
+  not_executed: 0
+
+consistency_with_approved:
+  - assurance-level-is-declared-by-our-session.md Р11 (ред. 9) / KA1-15 — форма 401/16/вызов совпадает
+  - expired-invitation-keeps-the-address-until-the-inviter-acts.md A198-03, cloud-administrator-resets-login-methods.md — уровень вызывающего не утверждают, исход при «2» тот же
+  - retention-sweep-has-a-caller.md — глагол судится по содержимому, не по уровню
+
+route_signs:
+  proto: yes (значение опции)
+  schema: no
+  public_rpc: yes (порог двух глаголов; каталог края)
+  ui: no
+  new_domain: no
+  security_surface: yes
+
+effective_approval:
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Действующее одобрение возникает после публикации внешнего события в subject.task этой
+      учёткой; до него запись — объявление вердикта рецензента.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 5ccc83dafcf205a848bf2aa45831bb1b227891e245a53034cc1710ccb8f9a336"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#720
+  status: not_performed
+  published: false
+  note: публикует курьер (git-operator, scripts/rituals/approval-event.sh) и тем же заходом приводит блок к факту.

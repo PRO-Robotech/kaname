@@ -6,7 +6,7 @@
 //
 // Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4), §2.1 и §2.3; сценарии IAM-RW-1-02, IAM-RW-1-03,
-// IAM-RW-1-12, IAM-RW-1-13. Задача продукта #1913.
+// IAM-RW-1-12, IAM-RW-1-13. Задача продукта kacho#1913.
 //
 // # Почему проба по ЖИВОЙ схеме, а не по тексту миграции
 //
@@ -266,6 +266,7 @@ func seedTargetMemberFixture(db *sql.DB) error {
 		VALUES ('acc_rw_probe', 'rw-probe', 'usr_rw_probe');
 		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ('usr_rw_probe', 'ext-rw-probe', 'rw-probe@example.test', 'acc_rw_probe');
+		` + wayInGuardedSQL + `;
 		COMMIT;`); err != nil {
 		return err
 	}

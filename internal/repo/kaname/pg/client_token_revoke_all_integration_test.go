@@ -119,6 +119,27 @@ func revokeAllWritersUnderTest() []revokeAllWriter {
 					}, ""))
 			},
 		},
+		{
+			// Отсечка личности в транзакции вызывающего: снятие личности
+			// (kaname#664, Р5; `UserService.Delete`, ДО снятия строки) и её
+			// блокировка (kaname#717; `UserService.Block`). Строка человека в
+			// пробе не снимается: судится запись отсечки этим путём, а не каскад.
+			name: "отсечка личности",
+			path: "userWriter.CutOffIdentity",
+			write: func(t *testing.T, f assertionFixture, before time.Time) {
+				t.Helper()
+				ctx := context.Background()
+				w, err := kanamepg.New(f.pool, nil).Writer(ctx)
+				require.NoError(t, err)
+				defer func() { _ = w.Rollback(ctx) }()
+				require.NoError(t, w.UsersW().CutOffIdentity(ctx, domain.UserTokenRevocation{
+					UserID:       domain.UserID(f.user),
+					RevokeBefore: before,
+					Reason:       domain.RevokeReasonIdentityRemoved,
+				}, ""))
+				require.NoError(t, w.Commit(ctx))
+			},
+		},
 	}
 }
 

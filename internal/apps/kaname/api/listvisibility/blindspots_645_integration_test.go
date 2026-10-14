@@ -3,7 +3,7 @@
 
 package listvisibility_test
 
-// blindspots_645_integration_test.go — the states the class analysis of #645
+// blindspots_645_integration_test.go — the states the class analysis of kacho#645
 // named as places where a repair could look finished and not be.
 //
 // Each of them shares one property: it CANNOT be reached by asking the product
@@ -251,7 +251,7 @@ func TestList645_16b_SubjectQuestionFailureIsUnavailableNotANarrowedPage(t *test
 // very outcome this whole change exists to remove.
 //
 // Which decoder refuses matters, and that is what this probe pins. The format of
-// the token is written down in THREE places today (task #652), and the one that
+// the token is written down in THREE places today (task kacho#652), and the one that
 // runs first is the app-boundary check, not the repository. Only the first one is
 // reached by an ANONYMOUS caller: that path short-circuits to an empty page
 // before the repository is touched at all. So an old token presented

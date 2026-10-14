@@ -61,7 +61,7 @@ func (s stubOwnClients) GetSAKey(_ context.Context, _ domain.SAOAuthClientID) (d
 func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 	fixed := time.Unix(1_700_000_000, 0).UTC()
 	own := stubOwnClients{soc: domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             domain.SAOAuthClientID(bootstrapSocID),

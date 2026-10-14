@@ -3,10 +3,11 @@
 
 package pg_test
 
-// own_ceiling_source_integration_test.go — ВЕЛИЧИНА ТРЁХ СОБСТВЕННЫХ ПОТОЛКОВ
-// БЕРЁТСЯ ИЗ ПРОЕКЦИИ ПОСАДКИ, а не у авторитета величин.
+// own_ceiling_source_integration_test.go — ВЕЛИЧИНА СОБСТВЕННЫХ ПОТОЛКОВ
+// БЕРЁТСЯ ИЗ ПРОЕКЦИИ ПОСАДКИ, а не у авторитета величин (перечень потолков —
+// таблица `config.OwnCeilingKnobs`).
 //
-// Задача продукта #2117, приёмка `KAN-QUOTA-1`, `П25`, сценарии `KAN-Q3-01`,
+// Задача продукта kacho#2117, приёмка `KAN-QUOTA-1`, `П25`, сценарии `KAN-Q3-01`,
 // `KAN-Q3-02`, `KAN-Q3-06`; условие готовности `DoD S3` пп. 1-2.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -245,10 +246,10 @@ func TestOwnCeiling_IdentityWithoutACountingRowStillReadsItsCeiling(t *testing.T
 	setOwnCeiling(t, ctx, pool, "iam.account", stated)
 
 	// ЛИЧНОСТЬ, НЕ ЗАВОДИВШАЯ НИ ОДНОГО АККАУНТА, — и такая бывает не в теории:
-	// это приглашённый участник чужого аккаунта. Строка пользователя есть
-	// ЧЛЕНСТВО в одном аккаунте, поэтому личность без членства в схеме
-	// невыразима вовсе (внешний ключ `users_account_fk`), а вот членство без
-	// СВОЕГО аккаунта — обычное состояние.
+	// это приглашённый участник чужого аккаунта — членство без СВОЕГО аккаунта,
+	// обычное состояние. (Личность и вовсе без дома тоже законна с kaname#664:
+	// снятие аккаунта пустит колонку дома его участников; предмет этой пробы —
+	// не она.)
 	//
 	// Прежняя редакция этой фикстуры заводила пользователя с несуществующим
 	// аккаунтом и падала на внешнем ключе. Мир, которого не бывает, — негодная
@@ -259,9 +260,9 @@ func TestOwnCeiling_IdentityWithoutACountingRowStillReadsItsCeiling(t *testing.T
 		`SELECT account_id FROM users WHERE id = $1`, ownerID).Scan(&hostAccount))
 
 	external := "ext-quota-no-row-" + ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		ids.NewID(domain.PrefixUser), hostAccount, external,
 		"quota-no-row@example.com", "Quota No Row")
 	require.NoError(t, err, "seed invited member")

@@ -66,7 +66,7 @@ deprecatedVerbs:
 // TestMODRC09StageOneJudgesTheClassesKey — пустой класс по-прежнему
 // отвергается, и отказ приходит по НОВОМУ ключу.
 //
-// Пара `(network, create)` взята у MOD-RL-05 приёмки #1090 ДОСЛОВНО, а не
+// Пара `(network, create)` взята у MOD-RL-05 приёмки kacho#1090 ДОСЛОВНО, а не
 // выведена заново: второй вывод той же величины разошёлся бы с первым молча —
 // у типа `vpc_network` отношения `v_create` нет.
 func TestMODRC09StageOneJudgesTheClassesKey(t *testing.T) {

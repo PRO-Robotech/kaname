@@ -4,19 +4,19 @@
 // Package registry_token — the IAM Docker Registry v2 auth-server use-case:
 // authenticate the presented Basic credential and issue a registry token.
 //
-// # Принимаемый вид удостоверения ОДИН (задача #1143)
+// # Принимаемый вид удостоверения ОДИН (задача kacho#1143)
 //
 // Полоса принимает БАЗОВЫЙ ТОКЕН ДОСТУПА Kachō — однострочный секрет с маркой
-// продукта (`pkg/credsecret`, задача #1142). Ключевой материал — приватную
+// продукта (`pkg/credsecret`, задача kacho#1142). Ключевой материал — приватную
 // половину пары ключей служебной учётки — она принимала до этой работы и не
 // принимает больше: приватная половина не должна ходить по сети и оседать в
 // конфигурации клиента, где живёт `docker login`.
 //
 // Порядок снятия был обязателен и исполнен именно в нём: ввести новый вид
-// (#1142) → перевести клиентов и документацию → снять приём (#1143). Обратный
+// (kacho#1142) → перевести клиентов и документацию → снять приём (kacho#1143). Обратный
 // порядок сломал бы работающий вход раньше, чем появилась замена.
 //
-// Сужение адресатов, ОБЪЯВЛЕННОЕ ключом при выдаче (#1136/#1184), уходит с той
+// Сужение адресатов, ОБЪЯВЛЕННОЕ ключом при выдаче (kacho#1136/#1184), уходит с той
 // полосой, на которой оно жило: у базового токена поля адресатов нет — оно
 // отвергается на выдаче. Внешняя граница посадки (`Config.AllowedAudiences`)
 // остаётся и остаётся обязательной.
@@ -60,7 +60,7 @@ var ErrUnauthenticated = errors.New("registry token: unauthenticated")
 
 // ErrAudienceNotAllowed — заказанный `?service=` вне того, чему эта полоса
 // вправе чеканить: либо посадка такого адресата не объявляла, либо ключ
-// выдавался не под него (задача #1184).
+// выдавался не под него (задача kacho#1184).
 //
 // Отдельный от ErrUnauthenticated исход, потому что чинится в другом месте, и
 // отдельный от ErrIssuerUnavailable, потому что повтор его не исправит: издатель
@@ -71,7 +71,7 @@ var ErrAudienceNotAllowed = errors.New("registry token: requested audience is no
 
 // Credential — личность, проверенная ПРЕЖНЕЙ полосой (ключевой материал).
 //
-// Живёт только ради окна перехода #1143 и уходит вместе с ним: предикат снятия
+// Живёт только ради окна перехода kacho#1143 и уходит вместе с ним: предикат снятия
 // — снятие ручки `api-server.registry-token.key-material-window-until`.
 type Credential struct {
 	// ClientID — идентификатор ключа служебной учётки, которым назвался
@@ -83,7 +83,7 @@ type Credential struct {
 	// Subject — the owning ServiceAccount id (informational / audit).
 	Subject string
 	// DeclaredAudiences — сужение адресатов, ОБЪЯВЛЕННОЕ заказчиком при выдаче
-	// ключа (`IssueSAKeyRequest.audience`, задача #1136). Внутренняя граница
+	// ключа (`IssueSAKeyRequest.audience`, задача kacho#1136). Внутренняя граница
 	// выдачи: она говорит, для чего заведён ЭТОТ ключ.
 	//
 	// Пустой перечень означает «сужения не объявлено», а НЕ «любой адресат»:
@@ -97,14 +97,14 @@ type Credential struct {
 // invalid credential MUST return ErrInvalidCredentials (never a partial-detail
 // error that leaks which half was wrong).
 //
-// Зовётся ТОЛЬКО при открытом окне перехода (#1143); разбор — key_material_window.go.
+// Зовётся ТОЛЬКО при открытом окне перехода (kacho#1143); разбор — key_material_window.go.
 type CredentialValidator interface {
 	Validate(ctx context.Context, clientID, privateKeyPEM string) (Credential, error)
 }
 
 // ErrCredentialKindNotAccepted — предъявлен вид удостоверения, которого эта
 // полоса не принимает: в поле пароля приехал не базовый токен доступа, а
-// что-то другое — прежде всего ключевой материал (задача #1143).
+// что-то другое — прежде всего ключевой материал (задача kacho#1143).
 //
 // Отдельный от ErrUnauthenticated исход нужен ЖУРНАЛУ и только ему: «клиент
 // настроен по-старому» и «секрет неверен» чинятся в разных местах и разными
@@ -133,7 +133,7 @@ var ErrOwnMinterRequired = errors.New("registry token: our own minter is require
 // Config — политика выдачи.
 type Config struct {
 	// AllowedAudiences — адресаты, которым ЭТА полоса вправе чеканить, —
-	// внешняя граница выдачи, объявленная посадкой (задача #1184).
+	// внешняя граница выдачи, объявленная посадкой (задача kacho#1184).
 	//
 	// Пустой перечень означал бы «любой адресат», поэтому сборка полосы его
 	// отвергает: предъявитель называл бы себе аудиторию сам.
@@ -188,12 +188,12 @@ type IssueInput struct {
 	Username string
 	// Password — Basic-auth pass. ЕДИНСТВЕННЫЙ принимаемый вид — базовый токен
 	// доступа Kachō (строка с маркой `credsecret.Mark`). Ключевой материал
-	// здесь больше не принимается (#1143).
+	// здесь больше не принимается (kacho#1143).
 	Password string
 	Service  string // ?service= — the registry service name (→ requested aud).
 
 	// ConfirmationX5TS256 — отпечаток ПРОВЕРЕННОГО клиентского сертификата,
-	// предъявленного на хопе выдачи (RFC 8705, Ф1б #926).
+	// предъявленного на хопе выдачи (RFC 8705, Ф1б kacho#926).
 	//
 	// Это МАТЕРИАЛ, а не пожелание вызывающего: значение выводит транспорт из
 	// проверенной цепочки, и предъявитель его не выбирает. Пусто означает
@@ -216,10 +216,10 @@ type IssueRegistryTokenUseCase struct {
 	// minter — НАШ подписант, единственный издатель полосы. Не бывает nil:
 	// конструктор без него отказывает.
 	minter LocalMinter
-	// basicResolver — авторитет о предъявленном базовом секрете (#1142).
+	// basicResolver — авторитет о предъявленном базовом секрете (kacho#1142).
 	// nil → полосы нет.
 	basicResolver basicCredentialResolver
-	// kmValidator/kmWindowUntil — ОКНО ПЕРЕХОДА #1143: проверяющий прежней
+	// kmValidator/kmWindowUntil — ОКНО ПЕРЕХОДА kacho#1143: проверяющий прежней
 	// полосы и мгновение, до которого она принимается. Разбор, цена обоих
 	// умолчаний и предикат снятия — key_material_window.go. Порознь не
 	// заполняются: их ставит один вызов WithKeyMaterialWindow.
@@ -260,7 +260,7 @@ func (u *IssueRegistryTokenUseCase) WithClock(now func() time.Time) *IssueRegist
 //
 // Принимаемый вид ОДИН — базовый токен доступа Kachō. Всё прочее в поле пароля
 // отвергается ЯВНО и до любого обращения к авторитету: ключевой материал,
-// который эта полоса принимала до задачи #1143, среди прочего.
+// который эта полоса принимала до задачи kacho#1143, среди прочего.
 //
 // Отсутствие удостоверения даёт ErrUnauthenticated (fail-closed); недоступный
 // издатель — ErrIssuerUnavailable (503, без токена).
@@ -273,14 +273,14 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 	// другого: путь, срабатывающий на неудаче, превратил бы всякий негодный
 	// вход во вход соседней полосы, а снятый приём — в тихий запасной путь.
 	if !credsecret.HasMark(in.Password) {
-		// ОКНО ПЕРЕХОДА (#1143). Открыто — прежний вид принимается, пока
+		// ОКНО ПЕРЕХОДА (kacho#1143). Открыто — прежний вид принимается, пока
 		// оператор переводит клиентов; закрыто либо истекло — отвергается.
 		// Спрашивается на КАЖДОМ запросе: окно закрывает время, а не
 		// перезапуск. Разбор и цена умолчания — key_material_window.go.
 		if u.keyMaterialWindowOpen() {
 			return u.executeKeyMaterialInWindow(ctx, in)
 		}
-		// ЛОМАЮЩЕЕ ИЗМЕНЕНИЕ, объявленное задачей #1143: клиент, настроенный на
+		// ЛОМАЮЩЕЕ ИЗМЕНЕНИЕ, объявленное задачей kacho#1143: клиент, настроенный на
 		// прежний вход, получает отказ. Причина уходит в журнал; наружу —
 		// единый 401-вызов с фиксированным телом, называющим годный вид.
 		//
@@ -313,7 +313,7 @@ type basicCredentialResolver interface {
 // сборки осмыслен. Это посадка ДО появления авторитета, а не мягкий проход.
 //
 // (Здесь стояло «строка с нашей маркой уходит валидатору ключевого материала,
-// где отвергается как негодный PEM» — верно до задачи #1143 и неверно после:
+// где отвергается как негодный PEM» — верно до задачи kacho#1143 и неверно после:
 // того запасного пути в Execute нет, и комментарий про безопасность,
 // противоречащий коду, провоцирует «починку» кода под себя.)
 func (u *IssueRegistryTokenUseCase) WithBasicCredentialResolver(r basicCredentialResolver) *IssueRegistryTokenUseCase {
@@ -346,13 +346,16 @@ func (u *IssueRegistryTokenUseCase) WithBasicCredentialResolver(r basicCredentia
 func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueInput) (IssueOutput, error) {
 	p, perr := credsecret.Parse(in.Password)
 	if perr != nil || p.CredentialID != in.Username {
-		return IssueOutput{}, ErrUnauthenticated
+		// Предъявленное не называет удостоверения, которое называет имя: отказ
+		// формы, решённый до авторитета, — той же причиной словаря, что отказ
+		// формы у авторитета (kaname#390).
+		return IssueOutput{}, u.refuseBasic(domain.RefuseBasicCredential(domain.BasicRefusalMalformed))
 	}
 
 	cred, rerr := u.basicResolver.ResolveBasic(ctx, in.Password)
 	if rerr != nil {
 		if errors.Is(rerr, domain.ErrBasicCredentialRefused) {
-			return IssueOutput{}, ErrUnauthenticated
+			return IssueOutput{}, u.refuseBasic(rerr)
 		}
 		// Недоступность авторитета — НЕ отказ в удостоверении: предъявитель ни
 		// при чём, и повтор осмыслен.
@@ -361,7 +364,8 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 	if cred.PrincipalType != "service_account" || cred.PrincipalID == "" {
 		// Докерная полоса выдаёт удостоверение реестра машинному принципалу.
 		// Вид, не принимаемый ЭТОЙ поверхностью, отвергается ТЕМ ЖЕ отказом.
-		return IssueOutput{}, ErrUnauthenticated
+		u.observeKind(OutcomeBasicPrincipalKindRefused)
+		return IssueOutput{}, fmt.Errorf("%w: %w", ErrUnauthenticated, ErrBasicPrincipalKindNotAccepted)
 	}
 
 	// Адресат решается ПОСЛЕ проверки: перечень адресатов — сведение о посадке,
@@ -389,8 +393,17 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 	return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: u.now().Unix()}, nil
 }
 
+// refuseBasic — отказ базового секрета: клетка переписи по причине и ошибка,
+// которая наружу есть [ErrUnauthenticated], а внутрь несёт причину — по ней
+// журналит обработчик (kaname#390). Текст причины на провод не уходит:
+// обработчик отвечает фиксированным телом.
+func (u *IssueRegistryTokenUseCase) refuseBasic(refusal error) error {
+	u.observeKind(basicRefusalOutcome(refusal))
+	return fmt.Errorf("%w: %w", ErrUnauthenticated, refusal)
+}
+
 // executeKeyMaterialInWindow — ПРЕЖНЯЯ полоса, доступная только через открытое
-// окно перехода (#1143). Тело восстановлено ДОСЛОВНО из ревизии до снятия:
+// окно перехода (kacho#1143). Тело восстановлено ДОСЛОВНО из ревизии до снятия:
 // окно обязано принимать ровно то, что принимала прежняя полоса, а не
 // «похожее». Уходит вместе с ручкой окна одним изменением.
 func (u *IssueRegistryTokenUseCase) executeKeyMaterialInWindow(ctx context.Context, in IssueInput) (IssueOutput, error) {
@@ -408,7 +421,7 @@ func (u *IssueRegistryTokenUseCase) executeKeyMaterialInWindow(ctx context.Conte
 	}
 
 	// Адресат — ИЗ ЗАПРОСА, в пределах объявленного ПОСАДКОЙ перечня,
-	// сужённого тем, что объявил при выдаче сам КЛЮЧ (#1136/#1184).
+	// сужённого тем, что объявил при выдаче сам КЛЮЧ (kacho#1136/#1184).
 	// Решается ПОСЛЕ проверки учётных данных: перечень адресатов — сведение о
 	// посадке, и отвечать им неаутентифицированному незачем.
 	service, err := u.resolveAudienceDeclared(cred.Subject, cred.DeclaredAudiences, in.Service)
@@ -482,7 +495,7 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 //
 // # Почему предикат общий, а не свой
 //
-// Полос выдачи по ключу служебной учётки ДВЕ, и до задачи #1184 сверка
+// Полос выдачи по ключу служебной учётки ДВЕ, и до задачи kacho#1184 сверка
 // действовала на одной: эта писалась под фиксированный адресат реестра, и
 // значение `?service=` уезжало в адресат токена как есть — то есть предъявитель
 // называл себе аудиторию сам. Расхождение никто не решал.
@@ -494,7 +507,7 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 // # Сужения, объявленного удостоверением, здесь больше нет
 //
 // Внутренняя граница (`Declared`) жила на ключе служебной учётки и уехала
-// вместе с полосой, которая ключи принимала (#1143): у базового токена поля
+// вместе с полосой, которая ключи принимала (kacho#1143): у базового токена поля
 // адресатов нет — оно отвергается на выдаче, — а анонимный поток удостоверения
 // не предъявляет вовсе. Остаётся внешняя граница посадки, и она обязательна:
 // сборка полосы без неё отвергается.
@@ -513,7 +526,7 @@ func (u *IssueRegistryTokenUseCase) resolveAudience(subject, requested string) (
 }
 
 // resolveAudienceDeclared — тот же резолв, но с сужением, ОБЪЯВЛЕННЫМ ключом
-// при выдаче (#1136). Зовётся прежней полосой из окна перехода #1143: сужение
+// при выдаче (kacho#1136). Зовётся прежней полосой из окна перехода kacho#1143: сужение
 // приезжает той же строкой реестра, что и ключевой материал, и уронить его
 // значило бы задним числом снять то, что объявил заказчик.
 //

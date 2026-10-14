@@ -60,7 +60,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -119,6 +118,9 @@ type loginLane struct {
 	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
 	// читатель того же хранилища сессий, что и полоса.
 	keyFreshness *kanamepg.HumanSessionFreshness
+	// loginChallenges — испытания полосы входа ключом (Ф13, kaname#613): своя
+	// таблица со своим уборщиком; есть — полоса входа ключом провязана.
+	loginChallenges *kanamepg.AccessKeyLoginRepo
 	// verifier — проверяющий паролей полосы с приманкой объявленного класса.
 	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
 	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
@@ -151,11 +153,17 @@ func (l *loginLane) wired() bool { return l != nil && l.sessions != nil && l.met
 // signInMethods — способы входа человека, чьи проверяющие собраны ЭТИМ корнем:
 // пароль, код по времени и запасной код (Ф12): проверяющие обоих кодов
 // собираются вместе с полосой, поэтому пока полоса поднята — собраны все три.
+// Ключ доступа — четвёртым, когда собрана полоса входа ключом (Ф13 Р14): её
+// глаголы зовут проверяющего Ф7, и без неё ключ уровня сессии не производит.
 func (l *loginLane) signInMethods() []assurance.Method {
 	if !l.wired() {
 		return nil
 	}
-	return []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}
+	methods := []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}
+	if l.loginChallenges != nil {
+		methods = append(methods, assurance.MethodWebAuthn)
+	}
+	return methods
 }
 
 // laneWiringOf — вклад полосы в наблюдение провязки.
@@ -163,9 +171,10 @@ func laneWiringOf(l *loginLane) config.LaneWiring {
 	return config.LaneWiring{HumanCredentialsWired: l.wired(), HumanSessionsWired: l.wired()}
 }
 
-// resetSecondFactorUseCase — сброс второго фактора распорядителем (Ф12 Р10)
+// resetSecondFactorUseCase — сброс второго фактора администратором облака (Ф12 Р10)
 // теми же хранилищами, что полоса: чтение строки способа — хранилище способов,
-// снятие/отсечка/событие — писатель хранилища сессий; nil — полосы нет.
+// момент/снятие/отсечка/событие — писатель хранилища сессий под замком строки
+// личности (kaname#680); nil — полосы нет.
 func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetSecondFactorUseCase {
 	if !l.wired() {
 		return nil
@@ -173,12 +182,39 @@ func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo
 	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions})
 }
 
-// secondFactorResetStore — адаптер хранилища сессий к порту сброса: писатель
-// сессии несёт все четыре операции порта, соответствие закрепляется здесь.
+// secondFactorResetStore — адаптер хранилища сессий к порту сброса: соответствие
+// писателя сброса порту закрепляется здесь.
 type secondFactorResetStore struct{ sessions *kanamepg.HumanSessionRepo }
 
-func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.SecondFactorResetWriter, error) {
-	return s.sessions.Writer(ctx)
+func (s secondFactorResetStore) ResetWriter(ctx context.Context, userID domain.UserID) (userapp.SecondFactorResetWriter, error) {
+	w, err := s.sessions.SecondFactorResetWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// resetAccessKeysUseCase — сброс ключей доступа администратором облака
+// (kaname#638) теми же хранилищами, что полоса: есть ли ключи — хранилище
+// способов, снятие испытаний и ключей, отсечка и событие — писатель хранилища
+// ключей под замком строки личности; nil — полосы нет.
+func (l *loginLane) resetAccessKeysUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetAccessKeysUseCase {
+	if !l.wired() {
+		return nil
+	}
+	return userapp.NewResetAccessKeysUseCase(repo, opsRepo, l.methods, accessKeysResetStore{keys: l.keys})
+}
+
+// accessKeysResetStore — адаптер хранилища ключей к порту сброса: соответствие
+// писателя порту закрепляется здесь.
+type accessKeysResetStore struct{ keys *kanamepg.AccessKeyRepo }
+
+func (s accessKeysResetStore) ResetWriter(ctx context.Context, userID domain.UserID) (userapp.AccessKeysResetWriter, error) {
+	w, err := s.keys.AccessKeysResetWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
 }
 
 // resolveHandler — `Resolve` для внутреннего слушателя; nil — полосы нет.
@@ -194,13 +230,20 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	if !l.wired() {
 		return retention.HumanSessionReapers{}
 	}
-	return retention.HumanSessionReapers{
+	r := retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
-		Challenges:        l.keys,
+		Challenges: l.keys, ChallengeTTL: access_keys.ChallengeTTL,
 		VerificationCodes: l.sessions, SourceWindows: l.sessions, BearerLetters: l.sessions,
 		LetterWindow: l.letterWindow, SourceWindow: l.limits.SourceWindow,
+		EmailChangeCodes: l.sessions,
 	}
+	// Нулевой указатель НЕ становится ненулевым интерфейсом: реестр читает
+	// «полоса входа ключом не провязана» по nil интерфейса.
+	if l.loginChallenges != nil {
+		r.LoginChallenges = l.loginChallenges
+	}
+	return r
 }
 
 // accessKeyHandler — шесть глаголов ключа доступа (Ф7, kacho#1273) теми же
@@ -492,10 +535,17 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: totp verifier: %w", err)
 	}
+	// Моменты, сравниваемые с отсечкой (сессия, отсечка), — общим источником на
+	// все реплики (kaname#589); часы процесса остаются полосе для окон частоты
+	// и сроков, с отсечкой не сравниваемых.
+	sharedClock, err := buildSharedClock(pool)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	loginUC, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: sessions, Users: kanamepg.NewUserDirectory(repo), Methods: methods, Verifier: verifier,
 		Hasher: hasher, Limits: limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
-		Envelope: envelope, TOTP: totp, Sets: verifier,
+		Envelope: envelope, TOTP: totp, Sets: verifier, CutoffClock: sharedClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -507,6 +557,15 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	changeUC, err := humansession.NewChangePasswordUseCase(humansession.ChangePasswordDeps{
 		Store: sessions, Methods: methods, Verifier: verifier, Hasher: hasher, Rule: rule,
 		Limits: limits, Observer: rec, Now: time.Now, Logger: logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	// Заведение первого пароля из живой сессии (kaname#213): то же правило и тот
+	// же хешер, что у смены (A7 Р4), окно свежести — правки своих данных.
+	enrollPasswordUC, err := humansession.NewEnrollPasswordUseCase(humansession.EnrollPasswordDeps{
+		Store: sessions, Hasher: hasher, Rule: rule, Freshness: cfg.AuthN.SelfServiceFreshness,
+		Observer: rec, Now: time.Now, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -536,6 +595,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
 		Letter: letterPace, Sources: sessions, SourcePace: sourcePace, Now: time.Now, Logger: logger,
+		CutoffClock: sharedClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -552,9 +612,18 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Транзакция исхода завершения (kaname#458): писатель сессии, писатель
+	// зеркала и операторы перехода записи к владельцу ящика над одной
+	// транзакцией; активацию приглашения исполняет та же функция, что исход
+	// подтверждения адреса.
+	completionStore, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
-		Observer: rec, Now: time.Now, Logger: logger,
+		Store: sessions, Completion: completionStore, Reconciler: ownerReconcilerOrNone(reconciler),
+		Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
+		Observer: rec, Now: time.Now, Logger: logger, CutoffClock: sharedClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -609,7 +678,64 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Смена адреса почты (kaname#635, Р1–Р8): два глагола под сессией над тем
+	// же составом транзакции, что подтверждение; величины — ручки кода
+	// подтверждения (Р5, Р6), окно свежести правки своих данных (Р2) и окно
+	// писем адресата нашего отправителя (Р6). Заведённое у личности читает
+	// хранилище способов входа: условие уровня Р2 (kaname#770).
+	emailChangeDeps := humansession.EmailChangeDeps{
+		Store: emailChangeStore{sessions: sessions, inner: registrationPG}, Methods: methods, Pace: letterPace,
+		Freshness: cfg.AuthN.SelfServiceFreshness, MailLimit: inviteMailRateLimit(cfg),
+		Observer: rec, Now: time.Now, Logger: logger,
+	}
+	requestEmailChangeUC, err := humansession.NewRequestEmailChangeUseCase(emailChangeDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	confirmEmailChangeUC, err := humansession.NewConfirmEmailChangeUseCase(emailChangeDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	positionUC, err := humansession.NewPositionUseCase(sessions, time.Now)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	// Вход ключом доступа (Ф13, kaname#613): два глагола формы над ТЕМИ ЖЕ
+	// примитивами, что полоса сессии, — проверяющий утверждений Ф7, правило
+	// уровня Ф11, выдача Ф3, единый отказ и счёт по источнику. Своих ручек
+	// посадки полоса не заводит (Р9): привязка — ручки Ф7, срок испытания —
+	// величина контракта Ф7.
+	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	loginChallenges := kanamepg.NewAccessKeyLoginRepo(pool, accessKeys)
+	akDeps := humansession.AccessKeyLoginDeps{
+		Store: sessions, Keys: loginChallenges, Methods: methods,
+		Binding: cfg.AuthN.AccessKeys.Binding(), ChallengeTTL: access_keys.ChallengeTTL,
+		UserVerification: access_keys.UserVerificationAssertion,
+		Limits:           limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
+		CutoffClock: sharedClock,
+	}
+	akBeginUC, err := humansession.NewBeginAccessKeyLoginUseCase(akDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	akLoginUC, err := humansession.NewAccessKeyLoginUseCase(akDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	// Свои сессии (kaname#634): три глагола над хранилищем сессии; окно свежести
+	// снятия — величина правки своих данных (Р8), та же, что у второго фактора.
+	ownDeps := humansession.OwnSessionsDeps{
+		Store: sessions, Freshness: cfg.AuthN.SelfServiceFreshness, Observer: rec, Now: time.Now, Logger: logger,
+	}
+	ownListUC, err := humansession.NewListOwnSessionsUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	ownEndUC, err := humansession.NewEndOwnSessionUseCase(ownDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	ownEndOthersUC, err := humansession.NewEndOtherOwnSessionsUseCase(ownDeps)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -625,6 +751,9 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
 		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
+		akBegin: akBeginUC, akLogin: akLoginUC, enrollPassword: enrollPasswordUC,
+		requestEmailChange: requestEmailChangeUC, confirmEmailChange: confirmEmailChangeUC,
+		ownList: ownListUC, ownEnd: ownEndUC, ownEndOthers: ownEndOthersUC,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -633,8 +762,9 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
-		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
-		verifier: verifier, letterWindow: login.VerificationResendWindow,
+		keys:      accessKeys, keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
+		loginChallenges: loginChallenges,
+		verifier:        verifier, letterWindow: login.VerificationResendWindow,
 	}, nil
 }
 
@@ -686,16 +816,30 @@ type verificationWriter struct{ *kanamepg.RegistrationWriter }
 
 // ActivateInviteOnVerification — см. порт: срок и снятие приглашения — один
 // исход «не активируется» (Р11 п. 3); строка, уже не PENDING, — тот же исход:
-// активировать нечего.
+// активировать нечего. Функция одна с переходом записи к владельцу ящика
+// (kaname#458): `userapp.ActivateInviteForLane`.
 func (w verificationWriter) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {
-	res, err := userapp.ActivateInviteOnVerificationTx(ctx, w.MirrorWriter(), pending, string(pending.ID))
+	return userapp.ActivateInviteForLane(ctx, w.MirrorWriter(), pending)
+}
+
+// emailChangeStore — адаптер хранилища глаголов смены адреса к порту: сессия —
+// читатель записи сессии, транзакция — писатель регистрации, открытый замком
+// писателя нескольких сессий на строке человека (kaname#635).
+type emailChangeStore struct {
+	sessions *kanamepg.HumanSessionRepo
+	inner    *kanamepg.RegistrationStore
+}
+
+func (s emailChangeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s emailChangeStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (humansession.EmailChangeWriter, error) {
+	w, err := s.inner.EmailChangeWriter(ctx, userID)
 	if err != nil {
-		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
-			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
-		}
-		return humansession.InviteActivation{}, err
+		return nil, err
 	}
-	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
+	return w, nil
 }
 
 // ownerReconcilerOrNone — nil указателя НЕ становится ненулевым интерфейсом:
@@ -727,6 +871,50 @@ type laneVerbs struct {
 	requestVerification *humansession.RequestVerificationUseCase
 	confirmVerification *humansession.ConfirmVerificationUseCase
 	position            *humansession.PositionUseCase
+	// Вход ключом доступа (Ф13).
+	akBegin *humansession.BeginAccessKeyLoginUseCase
+	akLogin *humansession.AccessKeyLoginUseCase
+	// Заведение первого пароля из живой сессии (kaname#213).
+	enrollPassword *humansession.EnrollPasswordUseCase
+	// Смена адреса почты (kaname#635).
+	requestEmailChange *humansession.RequestEmailChangeUseCase
+	confirmEmailChange *humansession.ConfirmEmailChangeUseCase
+	// Свои сессии (kaname#634).
+	ownList      *humansession.ListOwnSessionsUseCase
+	ownEnd       *humansession.EndOwnSessionUseCase
+	ownEndOthers *humansession.EndOtherOwnSessionsUseCase
+}
+
+func (v laneVerbs) RequestEmailChange(ctx context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error) {
+	return v.requestEmailChange.Execute(ctx, in)
+}
+
+func (v laneVerbs) ConfirmEmailChange(ctx context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error) {
+	return v.confirmEmailChange.Execute(ctx, in)
+}
+
+func (v laneVerbs) ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	return v.ownList.Execute(ctx, in)
+}
+
+func (v laneVerbs) EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	return v.ownEnd.Execute(ctx, in)
+}
+
+func (v laneVerbs) EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	return v.ownEndOthers.Execute(ctx, in)
+}
+
+func (v laneVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {
+	return v.enrollPassword.Execute(ctx, in)
+}
+
+func (v laneVerbs) BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	return v.akBegin.Execute(ctx, in)
+}
+
+func (v laneVerbs) AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	return v.akLogin.Execute(ctx, in)
 }
 
 func (v laneVerbs) RequestEmailVerification(ctx context.Context, bearer domain.SessionBearer) (humansession.RequestVerificationOutput, error) {

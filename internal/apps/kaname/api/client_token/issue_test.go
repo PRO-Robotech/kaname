@@ -24,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -44,6 +45,12 @@ func (s stubKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial
 
 func newSigner(t *testing.T) *tokensigner.Signer {
 	t.Helper()
+	return newSignerOn(t, func() time.Time { return now })
+}
+
+// newSignerOn — тот же подписант над названными часами.
+func newSignerOn(t *testing.T, clock func() time.Time) *tokensigner.Signer {
+	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	der, err := x509.MarshalPKCS8PrivateKey(k)
@@ -52,7 +59,7 @@ func newSigner(t *testing.T) *tokensigner.Signer {
 	require.NoError(t, err)
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      issuerID,
-		Clock:       func() time.Time { return now },
+		Clock:       momentclock.Func(clock),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, stubKeys{mat: tokensigner.SigningMaterial{
 		KID:           "kacho-test",
@@ -182,7 +189,7 @@ func newUseCaseWithCutoffs(t *testing.T, mutate ...func(*client_token.Config)) (
 		AllowedAudiences: []string{audResource, audRegistry},
 		DefaultAudience:  audResource,
 		TokenTTL:         15 * time.Minute,
-		Clock:            func() time.Time { return now },
+		Clock:            momentclock.Func(func() time.Time { return now }),
 	}
 	for _, m := range mutate {
 		m(&cfg)
@@ -354,7 +361,7 @@ func TestF2_37_AssertionAudienceIsNotCarriedIntoTheIssuedToken(t *testing.T) {
 // ПЛАТФОРМЫ есть ВНЕШНЯЯ граница выдачи, и расширить её нечем.
 //
 // Здесь стояло «а перечня у клиента нет, колонки в схеме не существует» — это
-// перестало быть верным с задачей #1136: сужение ключа есть, оно действует
+// перестало быть верным с задачей kacho#1136: сужение ключа есть, оно действует
 // (`issue_audience_narrowing_test.go`) и работает ВНУТРИ этой границы. Фикстура
 // клиента сужения не объявляет, поэтому проба измеряет ровно внешнюю границу.
 func TestF2_38_RequestedAudienceMustBeInTheDeclaredPlatformList(t *testing.T) {
@@ -461,7 +468,7 @@ func TestUseCaseRefusesToBuildOnDegenerateConfiguration(t *testing.T) {
 		AllowedAudiences: []string{audResource},
 		DefaultAudience:  audResource,
 		TokenTTL:         15 * time.Minute,
-		Clock:            func() time.Time { return now },
+		Clock:            momentclock.Func(func() time.Time { return now }),
 	}
 	for name, brk := range map[string]func(*client_token.Config){
 		"перечень адресатов пуст":          func(c *client_token.Config) { c.AllowedAudiences = nil },
@@ -523,7 +530,8 @@ func audienceStrings(v any) []string {
 }
 
 // PersonMarks — строк людей в мире дублёра нет: предмет этих проб — отсечка и
-// предел, а не отметка адреса (kaname#456; её держат пробы полос над базой).
+// предел, а не отметка адреса (kaname#456). Отметку на этой полосе держит
+// issue_owner_address_test.go (EV-65, kaname#472).
 func (*stubCutoffs) PersonMarks(context.Context, []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }

@@ -8,7 +8,7 @@ package pg_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4); сценарии IAM-RW-1-26, IAM-RW-1-27, IAM-RW-1-28. Задача
-// продукта #1913. Требование `data-integrity.md` §«Чек-лист нового ссылочного
+// продукта kacho#1913. Требование `data-integrity.md` §«Чек-лист нового ссылочного
 // поля», п. 5: спорный путь без пробы под конкуренцией не мёржится — гонку
 // юнит-тестом не поймать.
 //
@@ -76,6 +76,7 @@ func raceRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix stri
 		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 		"acc_rwrace"+suffix, "rwrace-"+strings.ToLower(suffix), "usr_rwrace"+suffix)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	_, err = pool.Exec(ctx, `

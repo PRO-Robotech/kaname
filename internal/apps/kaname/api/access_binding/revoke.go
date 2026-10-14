@@ -26,7 +26,7 @@ package access_binding
 // Отзыв действует С КОММИТА: строка снятия, положенная в журнал намерений ТОЙ ЖЕ
 // writer-tx, снимает прямой факт триггером журнала. Прежде здесь был синхронный
 // пост-коммитный вызов в чужое хранилище — он закрывал окно до дренажа; хранилища
-// нет (стадия S6, эпик #747), окна нет, догоняющего пути нет.
+// нет (стадия S6, эпик kacho#747), окна нет, догоняющего пути нет.
 // Because revoked rows carry revoked_at, the partial active-grant UNIQUE
 // (access_bindings_active_grant_uniq WHERE revoked_at IS NULL) frees the slot, so
 // an identical re-grant Create afterwards is a NEW ACTIVE row (IAM-1-29).
@@ -60,7 +60,7 @@ type RevokeAccessBindingUseCase struct {
 	//
 	// Синхронного снятия кортежей через неё больше нет: чужого хранилища не
 	// существует, а строка журнала снимает прямой факт в том же коммите, что и
-	// отзыв (стадия S6, эпик #747).
+	// отзыв (стадия S6, эпик kacho#747).
 	relations clients.RelationStore
 	logger    *slog.Logger
 }

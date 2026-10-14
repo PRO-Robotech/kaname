@@ -23,9 +23,15 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
-// sessionIDPrefix — приставка идентификатора записи в дефисном каноне. Наружу
-// не адресуется (Р1), поэтому в платформенный каталог приставок не входит.
-const sessionIDPrefix = "hss"
+// sessionIDPrefix — приставка идентификатора записи в дефисном каноне. Запись
+// адресуется своим `id` ровно одним внешним путём — её владельцем на полосе
+// формы (перечень своих сессий и выход из выбранной, kaname#634, Р4, Р5), и
+// поэтому приставка входит в каталог приставок фундамента тем же классом, что
+// `ak` и `tfm` (приёмка §0.2, DoD п.7): в фундаменте это
+// `ids.PrefixHumanSessionHyphen` (corelib v1.12.0, corelib#101). В службе
+// объявление одно, в домене; что выданный идентификатор принимает валидатор
+// фундамента на выпуске пина, держит TestSessionIDPrefixIsInTheFoundationCanon.
+const sessionIDPrefix = domain.HumanSessionIDPrefix
 
 // Событие аудита выдачи сессии (Р14). Регистрация и восстановление своего
 // события входа не дублируют — их различают их события (Ф3-47).
@@ -44,6 +50,15 @@ type IssueInput struct {
 	// EmitAudit — писать ли событие выдачи здесь; выдающий глагол, у которого
 	// своё событие (регистрация, восстановление), выключает.
 	EmitAudit bool
+	// AccessKeyID — ключ, утверждением которого выдана сессия (Ф13 Р10);
+	// пусто — выдача не ключом. Поле идёт ТОЛЬКО в событие выдачи: состав
+	// ЗАПИСИ сессии им не расширяется (Ф13 §7 инв. 11) — ключ есть факт о
+	// том, ЧЕМ вошли, а не свойство сессии, и читателя в записи у него нет.
+	AccessKeyID domain.AccessKeyID
+	// Client — описание клиента, каким его назвал выдающий запрос (kaname#634,
+	// Р3), уже приведённое типом домена. Отсутствие — нулевое значение. Пишется
+	// ТОЛЬКО здесь, в запись; в событие выдачи не идёт.
+	Client domain.ClientDescription
 }
 
 // IssueSession — запись, память первой аутентификации и (если просили)
@@ -80,6 +95,7 @@ func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSes
 		ExpiresAt:        at.Add(in.TTL),
 		AssuranceLevel:   level.String(),
 		PresentedMethods: methods,
+		Client:           in.Client,
 	}
 	if err := w.InsertSession(ctx, s, bearer.Digest()); err != nil {
 		return domain.HumanSession{}, domain.SessionBearer{}, err
@@ -88,16 +104,21 @@ func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSes
 		return domain.HumanSession{}, domain.SessionBearer{}, err
 	}
 	if in.EmitAudit {
+		// Без адреса и без имени (гейт `audit_payload_pii`): субъект назван
+		// неизменяемым идентификатором, сессия — своим, ключ — адресом `ak-…`
+		// (Ф7 Р10); идентификатор удостоверения в событие не выходит.
+		payload := map[string]any{
+			"user_id":    string(in.User.ID),
+			"session_id": string(s.ID),
+			"methods":    methods,
+		}
+		if in.AccessKeyID != "" {
+			payload["access_key_id"] = string(in.AccessKeyID)
+		}
 		if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 			EventType:       AuditSessionIssued,
 			TenantAccountID: string(in.User.AccountID),
-			// Без адреса и без имени (гейт `audit_payload_pii`): субъект назван
-			// неизменяемым идентификатором, сессия — своим.
-			Payload: map[string]any{
-				"user_id":    string(in.User.ID),
-				"session_id": string(s.ID),
-				"methods":    methods,
-			},
+			Payload:         payload,
 		}); err != nil {
 			return domain.HumanSession{}, domain.SessionBearer{}, err
 		}

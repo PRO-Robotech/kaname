@@ -10,7 +10,9 @@ package humansession
 // Оба глагола — правка своих данных (Ф1 §4.1): требуют, чтобы с момента
 // последнего предъявления прошло не больше окна свежести (Р8); иначе — отказ
 // `SESSION_NOT_FRESH`, называющий следующий шаг (церемонию). Срок
-// неподтверждённого заведения — то же окно от момента `enroll`.
+// неподтверждённого заведения — то же окно от момента `enroll`. У личности с
+// ключом доступа оба глагола требуют ещё и сессии «2», и уровень судится РАНЬШЕ
+// свежести (kaname#747, Р4; `sf_enroll_level.go`).
 //
 // `enroll` — ОДИН оператор под ключом «человек, вид»: при `active` — 409, при
 // `pending` — замена секрета (человек, потерявший экран, не ждёт истечения),
@@ -21,6 +23,9 @@ package humansession
 // проигравший получает «уже заведён», как и опоздавший), набор запасных кодов,
 // предъявление внутри сессии (множество, уровень, носитель, момент), событие
 // аудита и запись журнала повышения.
+//
+// Оба глагола пишут транзакцией `Store.EnrollmentWriter` и решают условие
+// уровня ещё раз её чтением (kaname#770, `sf_enroll_level.go`).
 
 import (
 	"context"
@@ -81,7 +86,7 @@ func resolveLiveSession(ctx context.Context, d SecondFactorDeps, bearer domain.S
 // requireFresh — окно свежести правки своих данных от момента последнего
 // предъявления (Ф11 Р6, Р8).
 func requireFresh(d SecondFactorDeps, s domain.HumanSession, now time.Time) error {
-	if now.Sub(s.LastPresentedAt) > d.Freshness {
+	if !sessionIsFresh(s, now, d.Freshness) {
 		d.Observer.SecondFactorRefusalObserved(RefusalSessionNotFresh)
 		return ErrSessionNotFresh
 	}
@@ -89,10 +94,16 @@ func requireFresh(d SecondFactorDeps, s domain.HumanSession, now time.Time) erro
 }
 
 // Execute — заведение.
-func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput) (EnrollOutput, error) {
+func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput) (_ EnrollOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorEnroll, err) }()
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)
 	if err != nil {
+		return EnrollOutput{}, err
+	}
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, uc.deps.Methods.AccessKeyEnrolled); err != nil {
 		return EnrollOutput{}, err
 	}
 	if err := requireFresh(uc.deps, resolved.Session, now); err != nil {
@@ -110,11 +121,16 @@ func (uc *EnrollSecondFactorUseCase) Execute(ctx context.Context, in EnrollInput
 		uc.deps.Logger.Error("second factor enroll: secret not wrapped", "err", err.Error())
 		return EnrollOutput{}, ErrStoreUnavailable
 	}
-	w, err := uc.deps.Store.Writer(ctx)
+	w, err := uc.deps.Store.EnrollmentWriter(ctx, resolved.User.ID)
 	if err != nil {
 		return EnrollOutput{}, ErrStoreUnavailable
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	// Уровень решает чтение ЭТОЙ транзакции под замком строки личности
+	// (`sf_enroll_level.go`, kaname#770) — до записи.
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, w.AccessKeyEnrolled); err != nil {
+		return EnrollOutput{}, err
+	}
 	accepted, err := w.UpsertPendingTOTP(ctx, domain.LoginMethod{
 		UserID: resolved.User.ID, Kind: domain.LoginMethodTOTP, Verifier: wrapped,
 		State: domain.LoginMethodStatePending, CreatedAt: now,
@@ -167,9 +183,12 @@ func NewConfirmSecondFactorUseCase(d SecondFactorDeps) (*ConfirmSecondFactorUseC
 	return &ConfirmSecondFactorUseCase{deps: d, gate: d.gate()}, nil
 }
 
-// Execute — подтверждение. Порядок: сессия → свежесть → частота → состояние
-// (матрица) → срок → сверка → четыре записи одним исходом.
-func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInput) (ConfirmOutput, error) {
+// Execute — подтверждение. Порядок: сессия → уровень → свежесть → частота →
+// состояние (матрица) → срок → сверка → четыре записи одним исходом.
+func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInput) (_ ConfirmOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureSecondFactorConfirm, err) }()
 	if in.Code == "" {
 		return ConfirmOutput{}, FieldRequired("code")
 	}
@@ -179,6 +198,9 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)
 	if err != nil {
+		return ConfirmOutput{}, err
+	}
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, uc.deps.Methods.AccessKeyEnrolled); err != nil {
 		return ConfirmOutput{}, err
 	}
 	if err := requireFresh(uc.deps, resolved.Session, now); err != nil {
@@ -237,24 +259,23 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	methods := withMethod(resolved.Session.PresentedMethods, assurance.MethodTOTP)
-	level, err := levelOf(methods)
-	if err != nil {
-		uc.deps.Logger.Error("second factor confirm: level not derived", "err", err.Error())
-		return ConfirmOutput{}, ErrStoreUnavailable
-	}
 
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
 	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	// Строка личности — ПЕРВОЙ, до строки фактора (kaname#382): подтверждение
 	// берёт строку `totp`, а вставка набора — личность проверкой внешнего
-	// ключа; в обратном порядке оно шло навстречу удалению личности.
-	w, err := uc.deps.Store.PersonWriter(ctx, user.ID)
+	// ключа; в обратном порядке оно шло навстречу удалению личности. Сила
+	// замка — глагола, решающего по заведённому (kaname#770): вставка строки
+	// ключа с ним несовместима, и уровень решает чтение этой транзакции.
+	w, err := uc.deps.Store.EnrollmentWriter(ctx, user.ID)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	if err := requireEnrollmentLevel(ctx, uc.deps, resolved, w.AccessKeyEnrolled); err != nil {
+		return ConfirmOutput{}, err
+	}
 	activated, err := w.ActivateTOTP(ctx, user.ID, row.CreatedAt, res.Step, now)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
@@ -280,7 +301,8 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
+	rec, err := presentInSession(ctx, w, resolved.Session, assurance.MethodTOTP, bearer.Digest(), now)
+	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
@@ -289,14 +311,14 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	// единственный писатель, а не эта полоса.
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
-		AddressKey: addressKey, Presented: methods,
+		AddressKey: addressKey, Level: rec.Level,
 	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	if err := emitSecondFactorAudit(ctx, w, AuditSecondFactorEnrolled, user, resolved.Session.ID, assurance.MethodTOTP); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	if err := emitStepUpJournal(ctx, w, user, resolved.Session, assurance.MethodTOTP, level); err != nil {
+	if err := emitStepUpJournal(ctx, w, user, resolved.Session, assurance.MethodTOTP, rec.Level); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
 	if err := w.Commit(ctx); err != nil {
@@ -306,24 +328,24 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	uc.deps.Observer.SecondFactorEventObserved(SecondFactorEnrollmentConfirmed)
 
 	s := resolved.Session
-	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = methods, level, now
+	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	return ConfirmOutput{
 		View:        SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer:      bearer,
 		BackupCodes: codes,
-		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, methods),
+		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}, nil
 }
 
 // assuranceAfter — вид `assurance` после зафиксированного предъявления:
 // заведённые способы читаются заново. Отказ чтения — журнал и вид без пути к
 // «2»: ответ уже выдан, лгать о достижимости нельзя, честнее назвать неизвестное.
-func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, presented []string) AssuranceView {
+func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, rec PresentedRecord) AssuranceView {
 	enrolled, err := enrolledMethods(ctx, d.Methods.Get, userID)
 	if err != nil {
 		d.Logger.Error("second factor: enrolled methods unreadable after commit", "err", err.Error())
 	}
-	return assuranceViewOf(presented, enrolled)
+	return assuranceViewOf(rec, enrolled)
 }
 
 func (uc *ConfirmSecondFactorUseCase) recordFailure(ctx context.Context, addressKey, source string, at time.Time) error {

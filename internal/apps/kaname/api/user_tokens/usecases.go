@@ -4,7 +4,7 @@
 // Package user_tokens — use-cases UserTokenService (персональные access-токены
 // пользователя, поток private_key_jwt).
 //
-// # Регистрации у внешнего поставщика здесь НЕТ (задачи #1121, kaname#362)
+// # Регистрации у внешнего поставщика здесь НЕТ (задачи kacho#1121, kaname#362)
 //
 // Выдача не заводит клиента у внешнего поставщика, а отзыв его не снимает.
 // Клиентом это удостоверение называется по идентификатору СВОЕЙ строки
@@ -60,6 +60,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -71,6 +72,11 @@ import (
 // pgx-драйвера.
 type UserClientRepo interface {
 	Insert(ctx context.Context, tx service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error)
+	// ExistsOwnedByID — есть ли у человека удостоверение с этим
+	// идентификатором. Предикат тот же, что у DeleteOwnedByID: чужая строка
+	// неотличима от отсутствующей by construction. Ошибка — неполученный ответ,
+	// а не «нет».
+	ExistsOwnedByID(ctx context.Context, ownerID domain.UserID, id domain.UserOAuthClientID) (bool, error)
 	// DeleteOwnedByID снимает строку удостоверения ОДНИМ оператором, суженным
 	// владельцем, и возвращает снятую строку. found=false — законный исход:
 	// строки нет ЛИБО она чужая, и эти случаи здесь неразличимы by construction
@@ -108,12 +114,43 @@ type IssueUserTokenUseCase struct {
 	redactor OpsResponseRedactor
 	// audit — durable audit_outbox emitter. nil → без audit-строки.
 	audit auditEmitter
-	now   func() time.Time
+	// clock — ОБЩИЙ для всех реплик источник момента выдачи (kaname#589): тот
+	// же, что ставит отсечку отзыва-всех. Не подан — выдача отказывает, а не
+	// берёт часы процесса.
+	clock revocationpolicy.Clock
 	// logger — поверхность для сбоев detached redaction-goroutine.
 	logger *slog.Logger
 	// redactGrace — задержка между тем как Operation стал Done, и затиранием
 	// одноразового private_key_pem. Даёт поллящему клиенту окно. 0 → без окна.
 	redactGrace time.Duration
+	// ownIssuance — посадка обменивает ключевую пару своим токен-эндпоинтом
+	// (`authn.client-token.enabled`). Без него ключевая пара не выдаётся:
+	// обменять её негде (задача kaname#547). Объявляет композиционный корень
+	// тем же условием, что сборка ключей служебных учёток. Умолчание — отказ:
+	// полусобранная сборка не выдаёт ключ, который нечем обменять.
+	ownIssuance bool
+}
+
+// WithIssuanceClock провязывает источник момента выдачи. Composition-root only.
+//
+// Корень подаёт сюда тот же источник, что писателям отсечки отзыва-всех:
+// момент выдачи сравнивается с отсечкой, и два источника сделали бы границу
+// правила их расхождением (kaname#589). Непровязанный источник — отказ выдачи
+// ([shared.MomentUnavailableMessage]), а не часы процесса.
+func (u *IssueUserTokenUseCase) WithIssuanceClock(c revocationpolicy.Clock) *IssueUserTokenUseCase {
+	u.clock = c
+	return u
+}
+
+// WithOwnIssuance объявляет, что у посадки есть токен-эндпоинт
+// (`authn.client-token.enabled`).
+//
+// Composition-root only: есть ли у посадки эндпоинт — её свойство, а не
+// запроса. Условие объявления то же, что у выдачи ключей служебной учётки
+// (`Config.SAKeyIssuanceIsOurs`); копии условия здесь нет.
+func (u *IssueUserTokenUseCase) WithOwnIssuance() *IssueUserTokenUseCase {
+	u.ownIssuance = true
+	return u
 }
 
 // WithResponseRedactor проводит post-Issue секрет-редактор.
@@ -148,7 +185,6 @@ func NewIssueUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, ops opera
 		repo:    r,
 		tx:      tx,
 		opsRepo: ops,
-		now:     time.Now,
 	}
 }
 
@@ -175,7 +211,7 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 		return nil, status.Error(codes.InvalidArgument, "user_id required")
 	}
 	// Формат СВОЕГО идентификатора судит общая проверка, а не копия рядом
-	// (задача #1791). Копия сверяла только префикс и потому принимала
+	// (задача kacho#1791). Копия сверяла только префикс и потому принимала
 	// обрезанный идентификатор, производя при этом ПОБАЙТОВО ТОТ ЖЕ отказ, —
 	// расхождение было невидимо всякой пробе, сверяющей сообщение.
 	if err := shared.ValidateResourceID(string(in.UserID), domain.PrefixUser, "user"); err != nil {
@@ -221,12 +257,24 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	// Форма имени на пути СОЗДАНИЯ: пустая строка законна и означает «назови
 	// сам» — до записи её заменит умолчание, производное от идентификатора
 	// (`commitMapping`). Судить её здесь доменным типом значило бы отвергнуть
-	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (#1279).
+	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (kacho#1279).
 	if err := corevalidate.NameOnCreate("name", in.Name); err != nil {
 		return nil, err
 	}
 	if err := in.Labels.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Ключевая пара предъявляется ОБМЕНОМ, и обменивает её только
+	// токен-эндпоинт платформы. Посадка без него выдала бы ключ, который
+	// обменять негде, — объявленную возможность, не исполнимую ни при каком
+	// входе. Отказ тот же, что у ключа служебной учётки (приёмка
+	// credential-verbs-refusal-outcomes, Р4): синхронный, ПОСЛЕ разбора запроса
+	// (сформированный неверно запрос получает свой отказ с именем поля на любой
+	// посадке) и ДО всякого чтения и записи. Неназванный вид уже разрешён в
+	// KEYPAIR выше; секрет обмена не требует.
+	if kind != domain.CredentialKindSecret && !u.ownIssuance {
+		return nil, shared.ExchangeEndpointAbsent(kind)
 	}
 
 	// Резолвим account владельца, чтобы Operation-метаданные несли account_id —
@@ -340,7 +388,11 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 			// предсказуемого вида: угадываемое удостоверение хуже отсутствующего.
 			return nil, status.Error(codes.Internal, "credential minting failed")
 		}
-		expires := u.now().UTC().Add(ttl)
+		issued, err := u.issuanceMoment(ctx)
+		if err != nil {
+			return nil, err
+		}
+		expires := issued.Add(ttl)
 		row := domain.UserOAuthClient{
 			ID:              tokenID,
 			UserID:          in.UserID,
@@ -350,6 +402,7 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 			Labels:          in.Labels,
 			CredentialKind:  domain.CredentialKindSecret,
 			SecretHash:      hash,
+			CreatedAt:       issued,
 			ExpiresAt:       &expires,
 		}
 		persisted, err := u.commitMapping(ctx, row, actor, "")
@@ -476,7 +529,7 @@ func (u *IssueUserTokenUseCase) redactSecretFields(ctx context.Context, opID str
 // doIssue — чеканит пару ключей ECDSA P-256, персистит строку удостоверения с
 // PublicKeyPEM + KeyAlgorithm, возвращает PrivateKeyPEM ровно один раз.
 //
-// Клиента у внешнего поставщика здесь НЕ заводится (#1121): удостоверение
+// Клиента у внешнего поставщика здесь НЕ заводится (kacho#1121): удостоверение
 // предъявляется НАШЕМУ издателю, а он разрешает клиента по идентификатору этой
 // строки. Отсюда же следует, что у выдачи больше нет полусделанного состояния,
 // компенсировать которое было бы нечем: единственный след — своя строка, и она
@@ -489,8 +542,15 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		return nil, fmt.Errorf("generate user token keypair: %w", err)
 	}
 
-	// 2. Персистим строку удостоверения в TX.
+	// 2. Персистим строку удостоверения в TX. Момент выдачи и срок — от ОДНОГО
+	//    источника, того же, что ставит отсечку отзыва-всех (kaname#388,
+	//    kaname#589), и до открытия транзакции.
+	issued, err := u.issuanceMoment(ctx)
+	if err != nil {
+		return nil, err
+	}
 	row := domain.UserOAuthClient{
+		CreatedAt:       issued,
 		ID:              tokenID,
 		UserID:          in.UserID,
 		Description:     domain.Description(in.Description),
@@ -503,7 +563,7 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		CredentialKind: domain.CredentialKindKeypair,
 	}
 	if in.TTLSeconds > 0 {
-		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
+		t := issued.Add(time.Duration(in.TTLSeconds) * time.Second)
 		row.ExpiresAt = &t
 	}
 	persisted, err := u.commitMapping(ctx, row, actor, key.Algorithm)
@@ -533,10 +593,19 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 // (атомарно, запрет #10): audit-строка коммитится iff строка коммитится.
 func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, actor, keyAlgorithm string) (domain.UserOAuthClient, error) {
 	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
-	// идентификатор уже назначен, его заменяет имя, производное от него (#1279).
+	// идентификатор уже назначен, его заменяет имя, производное от него (kacho#1279).
 	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
 	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
 	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
+
+	// Момент выдачи ставит ВЫДАЮЩИЙ — общим источником, тем же, что пишет
+	// отсечку отзыва-всех (kaname#388, kaname#589). Строка без момента ушла бы
+	// в умолчание столбца, то есть к часам базы, — ко второму источнику
+	// времени, и граница правила отсечки стала бы разницей двух часов.
+	// Непроставленный момент — наш дефект, а не вход вызывающего.
+	if row.CreatedAt.IsZero() {
+		return domain.UserOAuthClient{}, status.Error(codes.Internal, "credential issuance moment is not stamped")
+	}
 
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
@@ -569,6 +638,25 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 	}
 	committed = true
 	return persisted, nil
+}
+
+// issuanceMoment — момент выдачи из общего источника.
+//
+// Не ответил — отказ выдачи фиксированным текстом, называющим шаг; класс
+// причины уходит в журнал, текст причины — нет: ошибка драйвера несёт
+// координаты соединения.
+func (u *IssueUserTokenUseCase) issuanceMoment(ctx context.Context) (time.Time, error) {
+	at, err := revocationpolicy.Moment(ctx, u.clock)
+	if err != nil {
+		logger := u.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.ErrorContext(ctx, "user_tokens.Issue: issuance moment unavailable",
+			"step", "issuance-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return time.Time{}, status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
+	return at, nil
 }
 
 // ───────────────── Revoke use-case ─────────────────
@@ -622,6 +710,18 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 	if err != nil {
 		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.accountForUser", err)
 	}
+	// Полоса отсутствия судится ДО операции (приёмка credential-verbs-refusal-
+	// outcomes, Р1, Р2): клиент получает синхронный NOT_FOUND, а не операцию.
+	// Чужое удостоверение идёт этой же полосой — предикат чтения сужен
+	// владельцем, и отказ побайтово равен отказу по несуществующему. Ошибка
+	// чтения — не «нет»: неполученный ответ уходит своим отказом (CVR-12).
+	exists, err := u.repo.ExistsOwnedByID(ctx, in.UserID, in.TokenID)
+	if err != nil {
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.existsOwnedByID", err)
+	}
+	if !exists {
+		return nil, userTokenNotFound(in.TokenID)
+	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Revoke user token %s", in.TokenID),
@@ -644,23 +744,18 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 	return &op, nil
 }
 
-// doRevoke снимает удостоверение и ИДЕМПОТЕНТЕН: повторный отзыв, отзыв
-// никогда не существовавшего и отзыв ЧУЖОГО удостоверения дают один и тот же
-// исход — успех, при котором ничего не снято.
+// doRevoke снимает удостоверение. Исход отзыва того, чего у названного
+// человека нет, — `NOT_FOUND` (приёмка credential-verbs-refusal-outcomes, Р1,
+// Р2): никогда не существовавшее, уже снятое и ЧУЖОЕ неразличимы — кодом,
+// текстом (кроме эха идентификатора) и деталями. Синхронная сверка в Execute
+// отвечает на это до операции; здесь — проигравший гонку двух отзывов: строку
+// снял другой, и операция завершается ТЕМ ЖЕ отказом. Успеха на строке,
+// которую снял другой, не бывает (CVR-11).
 //
-// Почему это ОДИН исход, а не три. Приёмка базового токена (BAT-1-44) требует,
-// чтобы повторный отзыв отвечал успехом. Скрытие существования
-// (§Hardening #6) требует, чтобы отказ по чужому удостоверению был неотличим от
-// промаха. Эти два требования тянут в разные стороны ровно до тех пор, пока
-// исходов больше одного: как только «уже отозвано» отвечает успехом, а «чужое»
-// отказом, вызывающий узнаёт по различию, существует ли ЧУЖОЕ удостоверение —
-// то есть добивавшись идемпотентности, мы бы завели оракул.
-//
-// Разрешено это не подгонкой текстов друг под друга, а снятием ветки: владение
-// стоит в самом операторе снятия (`WHERE id AND user_id`), поэтому места, где
-// «чужое» и «нет такого» могли бы разойтись, в коде НЕТ. Строка чужого
-// владельца при этом переживает вызов — успех означает «в пространстве
-// вызывающего такого удостоверения нет», а не право снять чужое.
+// Скрытие существования (§Hardening #6) держит сам оператор снятия: владение
+// стоит в нём (`WHERE id AND user_id`), поэтому места, где «чужое» и «нет
+// такого» могли бы разойтись, в коде НЕТ. Строка чужого владельца переживает
+// вызов.
 //
 // Право распоряжаться удостоверениями ИМЕННО ЭТОГО человека проверено на крае
 // до вызова: `scope_extractor` берёт объект `iam_user` из поля `user_id`
@@ -682,10 +777,11 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.deleteOwnedByID", err)
 	}
 	if !found {
-		// Снимать было нечего. Транзакция откатывается (снятого нет, писать
-		// нечего), audit не эмитится — события без изменения состояния не
-		// бывает, — и ответ ниже собирается тот же, что на успешном снятии.
-		return revokeUserTokenResponse(in.TokenID)
+		// Строку снял конкурирующий отзыв между сверкой и снятием. Транзакция
+		// откатывается, audit не эмитится — события без изменения состояния не
+		// бывает, — и операция завершается тем же отказом, что синхронная
+		// сверка.
+		return nil, userTokenNotFound(in.TokenID)
 	}
 	// Durable iam.user_token.revoked audit-строка в ТОЙ ЖЕ tx, что маппинг-delete
 	// (атомарно, запрет #10): нет key material в payload.
@@ -719,19 +815,22 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 	return revokeUserTokenResponse(in.TokenID)
 }
 
-// revokeUserTokenResponse — ЕДИНСТВЕННЫЙ производитель тела успешного отзыва.
-//
-// Производитель один намеренно. Два места, собирающих ответ, разошлись бы на
-// первой же правке — и разошлись бы ровно там, где расхождение и опасно: по
-// различию тел вызывающий узнавал бы, сняли ли что-нибудь на самом деле, то
-// есть существует ли удостоверение. Отметка времени проставляется ВСЕГДА по
-// той же причине: пустая отметка на безрезультатном отзыве читается прямо из
-// тела как «снимать было нечего».
+// revokeUserTokenResponse — ЕДИНСТВЕННЫЙ производитель тела успешного отзыва:
+// его получает только отзыв, снявший строку.
 func revokeUserTokenResponse(tokenID domain.UserOAuthClientID) (*anypb.Any, error) {
 	return anypb.New(&iamv1.RevokeUserTokenResponse{
 		TokenId:   string(tokenID),
 		RevokedAt: timestamppb.Now(),
 	})
+}
+
+// userTokenNotFound — ЕДИНСТВЕННЫЙ производитель отказа «удостоверения нет»
+// (приёмка credential-verbs-refusal-outcomes, Р2): синхронная сверка и
+// проигравший гонку отвечают им одним. Текст называет ресурс контракта,
+// `UserToken`, и эхо названного идентификатора; деталей нет — набор деталей
+// на проводе тот же, что у ключа доступа.
+func userTokenNotFound(id domain.UserOAuthClientID) error {
+	return status.Errorf(codes.NotFound, "UserToken %s not found", id)
 }
 
 // ───────────────── List use-case ─────────────────
@@ -861,7 +960,7 @@ func CredentialKindFromProto(k iamv1.CredentialKind) (domain.CredentialKind, err
 // значило бы сменить контракт мимо приёмки. Читателя даёт
 // `shared.LogMappedErr`, у которого решение «какие исходы называть журналу»
 // живёт в единственном экземпляре: разойдясь в нём, домены разошлись бы в том,
-// что считается заметным (задача #2507).
+// что считается заметным (задача kacho#2507).
 //
 // Логгер берётся у вызывающего, а если у того его нет — у умолчания процесса.
 // Умолчание ЗАДАНО композиционным корнем (`slog.SetDefault`, cmd/kaname), так
@@ -925,13 +1024,13 @@ func mapPGErr(err error) error {
 		// цепочки, то есть обёртка вызывающего доезжала до провода дословно;
 		// утечки не случалось лишь потому, что производители этого признака в
 		// службе опаковы сами — «by construction» на деле означало «пока никто не
-		// обернул» (задача #2464).
+		// обернул» (задача kacho#2464).
 		//
 		// Текст берётся у канонического переводчика: свой литерал здесь был бы
 		// вторым местом об одном контракте.
 		//
 		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
-		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
+		// `mapPGErrLogged`, который называет причину журналу (задача kacho#2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		// Конец контекста — повторяемый отказ, а не поломка (kaname#383); текст —

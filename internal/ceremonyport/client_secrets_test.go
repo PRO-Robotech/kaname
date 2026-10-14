@@ -141,7 +141,7 @@ func newSecretsRig(t *testing.T) *secretsRig {
 		publicClientID: {},
 	}}
 	outcomes := &outcomeCounter{cells: map[passwordverify.Outcome]int{}}
-	port, err := ceremonyport.NewClientSecrets(store, alignedVerifier(t, hasher, outcomes))
+	port, err := ceremonyport.NewClientSecrets(store, alignedVerifier(t, hasher, outcomes), &shareCounter{})
 	require.NoError(t, err)
 	return &secretsRig{store: store, outcomes: outcomes, port: port}
 }
@@ -290,7 +290,7 @@ func TestClientSecrets_EveryVerifierOutcomeHasAnAnswer(t *testing.T) {
 			expected, known := want[outcome]
 			require.Truef(t, known, "у исхода %q нет ответа порта — словарь проверяющего вырос", outcome)
 			store := &secretStore{verifiers: map[string]domain.LoginVerifier{testClientID: stored}}
-			port, err := ceremonyport.NewClientSecrets(store, stubChecker{outcome: outcome})
+			port, err := ceremonyport.NewClientSecrets(store, stubChecker{outcome: outcome}, &shareCounter{})
 			require.NoError(t, err)
 
 			verdict, err := port.VerifyClientSecret(context.Background(), testClientID,
@@ -327,14 +327,16 @@ func TestNewClientSecrets_RefusesWhatCannotHonourTheContract(t *testing.T) {
 		name    string
 		store   ceremonyport.SecretVerifierStore
 		checker ceremonyport.SecretChecker
+		share   ceremonyport.ShareObserver
 		says    string
 	}{
-		{"справочника нет", nil, aligned, "store"},
-		{"проверяющего нет", &secretStore{}, nil, "checker"},
-		{"проверяющий не выровнен", &secretStore{}, bare, "decoy"},
+		{"справочника нет", nil, aligned, &shareCounter{}, "store"},
+		{"проверяющего нет", &secretStore{}, nil, &shareCounter{}, "checker"},
+		{"проверяющий не выровнен", &secretStore{}, bare, &shareCounter{}, "decoy"},
+		{"приёмника доли нет", &secretStore{}, aligned, nil, "share"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			port, err := ceremonyport.NewClientSecrets(tc.store, tc.checker)
+			port, err := ceremonyport.NewClientSecrets(tc.store, tc.checker, tc.share)
 			require.Error(t, err)
 			require.Nil(t, port)
 			require.True(t, strings.Contains(err.Error(), tc.says), "отказ сборки не называет причину: %v", err)
@@ -342,7 +344,7 @@ func TestNewClientSecrets_RefusesWhatCannotHonourTheContract(t *testing.T) {
 	}
 
 	t.Run("близнец: справочник и выровненный проверяющий собираются", func(t *testing.T) {
-		port, err := ceremonyport.NewClientSecrets(&secretStore{}, aligned)
+		port, err := ceremonyport.NewClientSecrets(&secretStore{}, aligned, &shareCounter{})
 		require.NoError(t, err)
 		require.NotNil(t, port)
 	})

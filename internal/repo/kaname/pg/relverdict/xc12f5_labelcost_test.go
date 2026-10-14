@@ -623,6 +623,7 @@ func seedCommon(t *testing.T, ctx context.Context, w *f5World, sc bench.LabelSce
 		        'stranger@kacho.local', $1) ON CONFLICT DO NOTHING`, f5Account)
 	txExec(t, ctx, tx, `INSERT INTO kaname.projects (id, account_id, name)
 		VALUES ($1, $2, 'authzformbench-f5') ON CONFLICT DO NOTHING`, f5Project, f5Account)
+	seedWayIn(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("коммит посева обвязки: %v", err)
 	}

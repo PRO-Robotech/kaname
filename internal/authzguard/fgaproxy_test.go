@@ -89,7 +89,7 @@ func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 	require.Equal(t, "vpc", dom, "Authorize returns the caller module domain for object-type binding")
 	require.Equal(t, "service_account:"+sva("vpc"), chk.gotSubject, "SAN mapped to deterministic sva-id")
 	require.Equal(t, "fga_writer", chk.gotRelation)
-	// Объект вопроса — платформенный синглтон кластера (#914). Утверждение
+	// Объект вопроса — платформенный синглтон кластера (kacho#914). Утверждение
 	// стоит дословно: гейт, спросивший про ДРУГОЙ объект, задаёт вопрос, на
 	// который системная выдача не отвечает, — и отказ выглядел бы честным.
 	require.Equal(t, "cluster:cluster_root", chk.gotObject)

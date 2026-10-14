@@ -85,6 +85,11 @@ var governingRPCs = []string{
 	// Block/Unblock (каталог), — у него источников уровня аккаунта нет; запись
 	// закрепляет, что каталожное отношение этого RPC останется без них.
 	"kaname.cloud.iam.v1.UserService/ResetSecondFactor",
+	// ResetAccessKeys — сброс ключей доступа администратором облака (kaname#638;
+	// приёмка `cloud-administrator-resets-login-methods.md`, Р1–Р2): снимает все
+	// ключи и гасит все сессии ГЛОБАЛЬНОЙ личности — то же распоряжение строкой,
+	// что сброс второго фактора, тем же `identity_suspender`.
+	"kaname.cloud.iam.v1.UserService/ResetAccessKeys",
 }
 
 // accountScopedReadRPC — чтение записи. Положительный контроль: именно у него
@@ -162,6 +167,9 @@ func TestGoverningTheIdentityHasNoAccountLevelSource(t *testing.T) {
 			fqn, e.objectType, e.relation, cloudSource, sortedKeys(got))
 		checked++
 	}
+	// Число сверенных — предмет приёмки (LMR-08: 5), а не следствие длины
+	// перечня: выпавшая запись иначе молча уменьшила бы счёт.
+	require.Equalf(t, 5, checked, "RPC «распоряжение строкой» сверено %d, ожидалось 5 (LMR-08)", checked)
 
 	t.Logf("перепись: записей каталога прочитано %d · RPC «распоряжение строкой» сверено %d · "+
 		"контроль чтения записи %s.%s (источников %d)",

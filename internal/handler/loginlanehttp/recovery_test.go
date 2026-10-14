@@ -35,7 +35,8 @@ func (s *stubLane) CompleteRecovery(_ context.Context, in humansession.CompleteR
 }
 
 // TestLane_F5_Paths_AreInTheOneDeclarationOnce — оба глагола восстановления
-// стоят в ЕДИНСТВЕННОМ перечне путей, который край читает для ретрансляции,
+// стоят в перечне путей полосы `Paths()` (край держит своё объявление и
+// переносит пути правкой, kaname#280),
 // ровно по одному разу, и перечень целиком дублей не несёт. Полный состав
 // перечня здесь НЕ закрепляется: он складывается из Ф3, Ф4 и Ф5, и точный
 // список зеленел бы только у той фазы, что пришла последней.
@@ -46,14 +47,14 @@ func TestLane_F5_Paths_AreInTheOneDeclarationOnce(t *testing.T) {
 		seen[p]++
 	}
 	require.Len(t, seen, len(paths), "перечень путей полосы несёт дубль: %v", paths)
-	require.Equal(t, 1, seen[loginlanehttp.PathRecovery], "край читает тот же перечень для ретрансляции")
-	require.Equal(t, 1, seen[loginlanehttp.PathRecoveryComplete], "край читает тот же перечень для ретрансляции")
+	require.Equal(t, 1, seen[loginlanehttp.PathRecovery], "путь восстановления в перечне полосы ровно один раз")
+	require.Equal(t, 1, seen[loginlanehttp.PathRecoveryComplete], "путь восстановления в перечне полосы ровно один раз")
 	require.Equal(t, "/iam/v1/auth/recovery", loginlanehttp.PathRecovery)
 	require.Equal(t, "/iam/v1/auth/recovery/complete", loginlanehttp.PathRecoveryComplete)
 }
 
 // TestLane_F5_01_02_RequestAnswersTheSameBodyWhateverTheOutcome — ответ на
-// запрос кода один: 200 с пустым объектом, без Set-Cookie, — и для адреса,
+// запрос кода один: 200 с телом `{"nextStep"}` (Ф5 Р10 п. 1), без Set-Cookie, — и для адреса,
 // который есть, и для адреса, которого нет: исход глагол не сообщает вовсе.
 func TestLane_F5_01_02_RequestAnswersTheSameBodyWhateverTheOutcome(t *testing.T) {
 	stub := &stubLane{}
@@ -65,7 +66,7 @@ func TestLane_F5_01_02_RequestAnswersTheSameBodyWhateverTheOutcome(t *testing.T)
 		map[string]string{"email": "a@example.invalid", "csrfToken": tok},
 		map[string]string{"X-Forwarded-For": "203.0.113.7"}, ctxCk)
 	require.Equal(t, http.StatusOK, r.status, r.body)
-	require.JSONEq(t, `{}`, r.body)
+	require.JSONEq(t, `{"nextStep":"`+stepRecoveryRequest+`"}`, r.body, "Ф5-01 (редакция 10): тело называет шаг")
 	require.Empty(t, r.cookies, "запрос кода печений не пишет: сессии нет, контекст формы прежний")
 	require.Len(t, stub.requestIn, 1)
 	require.Equal(t, "a@example.invalid", stub.requestIn[0].Email)

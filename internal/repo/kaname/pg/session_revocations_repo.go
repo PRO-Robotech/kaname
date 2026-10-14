@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/corelib/safeconv"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
@@ -89,11 +91,6 @@ func (r *SessionRevocationRepo) ListRecent(ctx context.Context, window time.Dura
 	return out, rows.Err()
 }
 
-// sessionRevocationDefaultPageSize — the documented default of
-// InternalSessionRevocationsService.ListByUser (proto: "default 100, max 1000").
-// The upper bound is the platform-wide maxListPageSize.
-const sessionRevocationDefaultPageSize int32 = 100
-
 // ListByUser — one CURSOR-PAGED page of the user's active (not-yet-expired)
 // revocations, newest first.
 //
@@ -113,15 +110,13 @@ const sessionRevocationDefaultPageSize int32 = 100
 // page_token that does not decode is rejected the same way — an ignored cursor
 // re-serves page one under a token the caller believes advances.
 func (r *SessionRevocationRepo) ListByUser(ctx context.Context, userID string, pageSize int32, pageToken string) ([]domain.SessionRevocation, string, error) {
-	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
-		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
-			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
+	limit, err := effectivePageSize(pageSize)
+	if err != nil {
+		return nil, "", err
 	}
-	if pageSize == 0 {
-		pageSize = sessionRevocationDefaultPageSize
-	}
+	pageSize = safeconv.ClampInt32(limit) // already bounded to [1..maxListPageSize]: no clamp happens
 
-	args := []any{userID, int64(pageSize) + 1} // +1 row probes for a next page
+	args := []any{userID, limit + 1} // +1 row probes for a next page
 	cursor := ""
 	if pageToken != "" {
 		ts, jti, err := decodePageToken(pageToken)

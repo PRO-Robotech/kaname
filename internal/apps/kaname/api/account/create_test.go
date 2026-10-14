@@ -49,7 +49,7 @@ import (
 
 // ── invalid name → sync InvalidArgument ─────────────────────────────────────
 //
-// ДВА СЛУЧАЯ ОТСЮДА СНЯТЫ, И ЭТО СМЕНА КОНТРАКТА, А НЕ ОСЛАБЛЕНИЕ (#1279).
+// ДВА СЛУЧАЯ ОТСЮДА СНЯТЫ, И ЭТО СМЕНА КОНТРАКТА, А НЕ ОСЛАБЛЕНИЕ (kacho#1279).
 // Пустое имя перестало быть отказом: оно означает «назови сам», и до записи его
 // заменяет имя, производное от идентификатора, — это утверждается отдельно и с
 // обеих сторон в `name_canon_test.go`. Имя из двух символов перестало быть
@@ -488,6 +488,10 @@ func (w *fakeAcctWriter) Update(context.Context, domain.Account, []string) (doma
 func (w *fakeAcctWriter) Delete(context.Context, domain.AccountID) error {
 	return stderrors.New("fakeAcctWriter.Delete not stubbed")
 }
+func (*fakeAcctWriter) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (*fakeAcctWriter) LockOwner(context.Context, domain.UserID) error { return nil }
 
 // fakeAccountABWriter — minimal access_binding.WriterIface for the owner
 // auto-binding co-commit. Only Insert / InsertSubjects / EmitAuditEvent are

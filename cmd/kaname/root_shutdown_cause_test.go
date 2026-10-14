@@ -312,7 +312,7 @@ func bodyMentions(body *ast.BlockStmt, name string) bool {
 	return found
 }
 
-// TestIAM2506_NoRootTaskWaitsOnTheSignalContextAlone — гейт задачи #2506.
+// TestIAM2506_NoRootTaskWaitsOnTheSignalContextAlone — гейт задачи kacho#2506.
 func TestIAM2506_NoRootTaskWaitsOnTheSignalContextAlone(t *testing.T) {
 	root := iamServiceRoot(t)
 	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, "cmd"), ".go")

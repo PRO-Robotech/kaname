@@ -111,10 +111,12 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -423,6 +425,7 @@ func (w *ceremonyWorld) seedPerson() {
 		account, "acc-"+strings.ToLower(account[3:9]), string(w.user)); err != nil {
 		w.fixture("посев аккаунта: %v", err)
 	}
+	seedWayIn(w.t, w.ctx, tx)
 	if err := tx.Commit(w.ctx); err != nil {
 		w.fixture("коммит посева человека: %v", err)
 	}
@@ -572,7 +575,7 @@ func (w *ceremonyWorld) buildSurface() {
 	}
 	w.priv, w.kid = priv, "kaname-line-a-1"
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: lineA1Issuer, Clock: time.Now, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: lineA1Issuer, Clock: momentclock.Func(time.Now), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ceremonyKeys{store: kanamepg.NewSigningKeyRepo(w.pool), mat: tokensigner.SigningMaterial{
 		KID:           domain.KeyID(w.kid),
 		Algorithm:     domain.SigningAlgES256,
@@ -621,7 +624,8 @@ func (w *ceremonyWorld) buildSurface() {
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
 	source := issuingsource.New(cfg.AuthN.TrustDomain())
-	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w), source, logger)
+	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w),
+		metrics.NewRegistry().LoginLaneRecorder(), source, logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
 	}

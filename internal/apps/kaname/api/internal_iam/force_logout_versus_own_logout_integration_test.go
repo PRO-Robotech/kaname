@@ -59,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 const (
@@ -501,7 +502,7 @@ func TestLogoutVersusForceLogout_KN_SER_05_3_ContestedRoundsAgreeWithTheRecord(t
 		h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 			WithAdminChecker(allowAdmin{}).
 			WithOperations(ops).
-			WithOwnSessions(serForceSide{inner: kanamepg.NewHumanSessionRepo(sc.pool), barrier: barrier, steps: steps})
+			WithOwnSessions(serForceSide{inner: kanamepg.NewHumanSessionRepo(sc.pool), barrier: barrier, steps: steps}).WithCutoffClock(momentclock.Func(time.Now))
 		cutoffs := &atomic.Int32{}
 		store := serLogoutStore{Store: sc.sessions, cutoffs: cutoffs, atEnd: barrier.logoutArrives}
 

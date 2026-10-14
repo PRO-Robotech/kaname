@@ -14,6 +14,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -43,7 +44,7 @@ func newMaterial(t *testing.T, kid string) tokensigner.SigningMaterial {
 	}
 }
 
-func fixedClock(at time.Time) tokensigner.Clock { return func() time.Time { return at } }
+func fixedClock(at time.Time) tokensigner.Clock { return momentclock.At(at) }
 
 func mustSigner(t *testing.T, keys tokensigner.KeyProvider, clock tokensigner.Clock) *tokensigner.Signer {
 	t.Helper()

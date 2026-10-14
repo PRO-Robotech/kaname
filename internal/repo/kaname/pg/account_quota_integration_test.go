@@ -73,6 +73,7 @@ func accountQuotaFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		accountID, "quota-acc-"+suffix, userID)
 	require.NoError(t, err, "seed account")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit account quota fixture")
 	return externalID, userID
 }
@@ -105,7 +106,7 @@ func newAccountQuotaDB(t *testing.T) (*pgxpool.Pool, context.Context) {
 // что у прочих видов: код `KQ001` единственного производителя отказа.
 func TestAccountQuota_SixthAccountOfOneIdentityIsRefused(t *testing.T) {
 	pool, ctx := newAccountQuotaDB(t)
-	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача #618) по умолчанию
+	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача kacho#618) по умолчанию
 	// бьёт раньше — три заведения в час против пяти аккаунтов, — поэтому он
 	// поднимается из-под ног: иначе проба судила бы не свою полосу.
 	liftRateCeilingOutOfTheWay(t, ctx, pool)
@@ -139,7 +140,7 @@ func TestAccountQuota_SixthAccountOfOneIdentityIsRefused(t *testing.T) {
 // здесь — два создателя видят одно и то же свободное место и оба его занимают.
 func TestAccountQuota_ConcurrentCreationAtTheLastSlotAdmitsExactlyOne(t *testing.T) {
 	pool, ctx := newAccountQuotaDB(t)
-	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача #618) по умолчанию
+	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача kacho#618) по умолчанию
 	// бьёт раньше — три заведения в час против пяти аккаунтов, — поэтому он
 	// поднимается из-под ног: иначе проба судила бы не свою полосу.
 	liftRateCeilingOutOfTheWay(t, ctx, pool)
@@ -199,7 +200,7 @@ func TestAccountQuota_ConcurrentCreationAtTheLastSlotAdmitsExactlyOne(t *testing
 // только растёт.
 func TestAccountQuota_DeletingAnAccountReturnsTheSlot(t *testing.T) {
 	pool, ctx := newAccountQuotaDB(t)
-	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача #618) по умолчанию
+	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача kacho#618) по умолчанию
 	// бьёт раньше — три заведения в час против пяти аккаунтов, — поэтому он
 	// поднимается из-под ног: иначе проба судила бы не свою полосу.
 	liftRateCeilingOutOfTheWay(t, ctx, pool)
@@ -225,7 +226,7 @@ func TestAccountQuota_DeletingAnAccountReturnsTheSlot(t *testing.T) {
 // приходит следующему честному человеку, а не тому, кто исчерпал.
 func TestAccountQuota_AnotherIdentityHasItsOwnCeiling(t *testing.T) {
 	pool, ctx := newAccountQuotaDB(t)
-	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача #618) по умолчанию
+	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача kacho#618) по умолчанию
 	// бьёт раньше — три заведения в час против пяти аккаунтов, — поэтому он
 	// поднимается из-под ног: иначе проба судила бы не свою полосу.
 	liftRateCeilingOutOfTheWay(t, ctx, pool)
@@ -256,7 +257,7 @@ func TestAccountQuota_AnotherIdentityHasItsOwnCeiling(t *testing.T) {
 // ни освободить свой.
 func TestAccountQuota_AnOwnerWithoutALoginIdentityIsNotCounted(t *testing.T) {
 	pool, ctx := newAccountQuotaDB(t)
-	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача #618) по умолчанию
+	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача kacho#618) по умолчанию
 	// бьёт раньше — три заведения в час против пяти аккаунтов, — поэтому он
 	// поднимается из-под ног: иначе проба судила бы не свою полосу.
 	liftRateCeilingOutOfTheWay(t, ctx, pool)

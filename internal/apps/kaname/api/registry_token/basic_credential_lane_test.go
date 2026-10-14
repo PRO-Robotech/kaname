@@ -3,12 +3,13 @@
 
 // basic_credential_lane_test.go — ПОЛОСА ДОКЕРА ДЛЯ БАЗОВОГО СЕКРЕТА.
 //
-// Задача #1142, приёмка BAT-1 §5.5; сценарии BAT-1-37, 38, 39, 40, 41.
+// Задача kacho#1142, приёмка BAT-1 §5.5; сценарии BAT-1-37, 38, 39, 40, 41.
 
 package registry_token
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -153,9 +154,9 @@ func TestBAT1_38_UsernameMustNameTheCredentialAndTheRefusalIsNoOracle(t *testing
 
 // BAT-1-39 СНЯТ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ.
 //
-// Он был зеркальным контролём фазы #1142: «ключевой материал по-прежнему
+// Он был зеркальным контролём фазы kacho#1142: «ключевой материал по-прежнему
 // принимается», и нёс предикат снятия прямо в тексте — «его снятие принадлежит
-// #1143». Предикат сработал: приём снят, и проба, утверждавшая обратное, стала
+// kacho#1143». Предикат сработал: приём снят, и проба, утверждавшая обратное, стала
 // бы утверждением о несуществующем. Обратное свойство утверждается там, где
 // живёт его предмет, — key_material_refused_test.go.
 
@@ -185,7 +186,16 @@ func TestBAT1_40_RevokedOrExpiredIsRefusedByTheSameRefusal(t *testing.T) {
 	if err == nil {
 		t.Fatal("отозванное удостоверение прошло вход в реестр")
 	}
-	if err != ErrUnauthenticated {
+	// Единый отказ полосы — класс ErrUnauthenticated; внутрь он несёт причину
+	// авторитета (kaname#390), а его ТЕКСТ от причины не зависит: тот же, что
+	// у отказа формы, решённого до авторитета.
+	if !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("отказ = %v, ожидался единый отказ полосы", err)
+	}
+	_, formErr := ucRevoked.Execute(context.Background(), IssueInput{
+		Username: "soc_other00000000bat1", Password: secret, Service: "registry",
+	})
+	if formErr == nil || formErr.Error() != err.Error() {
+		t.Errorf("текст отказа зависит от причины: %q против %q", err, formErr)
 	}
 }

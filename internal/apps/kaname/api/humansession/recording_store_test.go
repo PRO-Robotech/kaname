@@ -126,6 +126,11 @@ func (s recordingStore) RecoveryTarget(ctx context.Context, email domain.Email) 
 	return s.inner.RecoveryTarget(ctx, email)
 }
 
+func (s recordingStore) SessionsOf(ctx context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
+	defer s.rec("SessionsOf")()
+	return s.inner.SessionsOf(ctx, userID, now, size, token)
+}
+
 func (s recordingStore) Writer(ctx context.Context) (humansession.Writer, error) {
 	defer s.rec("Writer")()
 	w, err := s.inner.Writer(ctx)
@@ -153,6 +158,15 @@ func (s recordingStore) PersonWriter(ctx context.Context, userID domain.UserID) 
 	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
 }
 
+func (s recordingStore) EnrollmentWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	defer s.rec("EnrollmentWriter")()
+	w, err := s.inner.EnrollmentWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return recordingWriter{inner: w, j: s.j, meter: s.meter}, nil
+}
+
 // recordingWriter — humansession.Writer с журналом.
 type recordingWriter struct {
 	inner humansession.Writer
@@ -169,6 +183,11 @@ func (w recordingWriter) rec(name string) func() {
 func (w recordingWriter) LockPersonForLogin(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
 	defer w.rec("LockPersonForLogin")()
 	return w.inner.LockPersonForLogin(ctx, userID)
+}
+
+func (w recordingWriter) HoldAccessKeyForLogin(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	defer w.rec("HoldAccessKeyForLogin")()
+	return w.inner.HoldAccessKeyForLogin(ctx, userID, keyID)
 }
 
 func (w recordingWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
@@ -196,14 +215,34 @@ func (w recordingWriter) EndOtherSessions(ctx context.Context, userID domain.Use
 	return w.inner.EndOtherSessions(ctx, userID, keep, at, reason)
 }
 
+func (w recordingWriter) EndOwnSession(ctx context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (bool, error) {
+	defer w.rec("EndOwnSession")()
+	return w.inner.EndOwnSession(ctx, userID, target, now, reason)
+}
+
+func (w recordingWriter) EndOtherLiveSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error) {
+	defer w.rec("EndOtherLiveSessions")()
+	return w.inner.EndOtherLiveSessions(ctx, userID, keep, now, reason)
+}
+
+func (w recordingWriter) SessionLive(ctx context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error) {
+	defer w.rec("SessionLive")()
+	return w.inner.SessionLive(ctx, userID, id, now)
+}
+
 func (w recordingWriter) RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error {
 	defer w.rec("RotateBearer")()
 	return w.inner.RotateBearer(ctx, id, digest, presentedAt)
 }
 
-func (w recordingWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+func (w recordingWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (humansession.PresentedRecord, error) {
 	defer w.rec("PresentInSession")()
-	return w.inner.PresentInSession(ctx, id, methods, level, digest, presentedAt)
+	return w.inner.PresentInSession(ctx, id, methods, candidate, digest, presentedAt)
+}
+
+func (w recordingWriter) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	defer record(w.j, w.meter, storeOp{Port: "writer", Name: "AccessKeyEnrolled", LoginMethodRead: true})()
+	return w.inner.AccessKeyEnrolled(ctx, userID)
 }
 
 func (w recordingWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
@@ -214,6 +253,26 @@ func (w recordingWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRev
 func (w recordingWriter) ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
 	defer w.rec("ReplaceLoginVerifier")()
 	return w.inner.ReplaceLoginVerifier(ctx, m)
+}
+
+func (w recordingWriter) PutLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	defer w.rec("PutLoginVerifier")()
+	return w.inner.PutLoginVerifier(ctx, m)
+}
+
+func (w recordingWriter) MarkEmailVerified(ctx context.Context, userID domain.UserID, email domain.Email, at time.Time) (bool, error) {
+	defer w.rec("MarkEmailVerified")()
+	return w.inner.MarkEmailVerified(ctx, userID, email, at)
+}
+
+func (w recordingWriter) CloseRecoveryPath(ctx context.Context, userID domain.UserID) error {
+	defer w.rec("CloseRecoveryPath")()
+	return w.inner.CloseRecoveryPath(ctx, userID)
+}
+
+func (w recordingWriter) EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	defer w.rec("EnrollLoginMethod")()
+	return w.inner.EnrollLoginMethod(ctx, m)
 }
 
 func (w recordingWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {

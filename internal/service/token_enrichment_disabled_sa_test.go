@@ -50,7 +50,7 @@ const (
 func saLaneWithState(kind domain.CredentialKind, enabled bool) *TokenEnrichmentService {
 	return NewTokenEnrichmentService(TokenEnrichmentConfig{Domain: "api.kacho.cloud"}).
 		WithOwnClientPort(stubOwnClients{soc: domain.ServiceAccountOAuthClient{
-			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 			// словарь таблицы отвергает строку, вида не назвавшую.
 			CredentialKind: kind,
 			ID:             domain.SAOAuthClientID(disabledSocID),

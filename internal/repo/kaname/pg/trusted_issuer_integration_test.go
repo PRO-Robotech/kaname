@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // trusted_issuer_integration_test.go — НАШ перечень доверенных издателей
-// (задача #1124).
+// (задача kacho#1124).
 //
 // # На какой НЕВЕРНОЙ реализации эти пробы зелены — и чем это закрыто
 //
@@ -69,6 +69,7 @@ func newTrustFixture(t *testing.T) trustFixture {
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1,$2,'ext-trust','trust@example.com','Trust','ACTIVE')`, f.user, f.account)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ($1,$2,'trust-sva')`,
 		f.sva, f.account)

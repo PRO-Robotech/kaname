@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -58,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -80,7 +82,7 @@ const (
 )
 
 // avRefusalBody — значение отказа положения на полосе формы (Р3) побайтово.
-const avRefusalBody = `{"code":7,"message":"email address is not verified","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"EMAIL_NOT_VERIFIED","domain":"iam.kaname.cloud"}]}`
+const avRefusalBody = `{"code":7,"message":"email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"EMAIL_NOT_VERIFIED","domain":"iam.kaname.cloud"}]}`
 
 // avClock — управляемые часы глаголов стенда.
 type avClock struct {
@@ -139,6 +141,12 @@ type avOptions struct {
 	// recoveryLettersPerRecipient — окно писем восстановления адресату; 0 —
 	// величина стенда по умолчанию.
 	recoveryLettersPerRecipient int
+	// recoveryObserver — приёмник исходов запроса кода восстановления; nil —
+	// молчащий.
+	recoveryObserver humansession.Observer
+	// completionObserver — приёмник исходов завершения восстановления (клетки
+	// kaname#458: `address-claimed`, `invite-not-valid`); nil — молчащий.
+	completionObserver humansession.Observer
 }
 
 // Величины стенда по умолчанию для окон условий аудита: столько обращений ни
@@ -221,14 +229,16 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: pgRegistrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
+		CutoffClock: momentclock.Func(clock.Now),
+		Store:       pgRegistrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Letter: pace,
 		Sources: sessions, SourcePace: humansession.SourcePace{Limit: perSource, Window: time.Hour},
 		Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		CutoffClock: momentclock.Func(clock.Now),
+		Store:       sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
 		Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: clock.Now, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})
@@ -262,7 +272,19 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{},
 		Sources: sessions, SourcePace: humansession.SourcePace{Limit: avDefaultPerSource, Window: time.Hour},
 		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: perRecipient, Window: time.Hour},
-		Observer:  nop, Now: clock.Now, Logger: logger,
+		Observer:  observerOr(opts.recoveryObserver, nop), Now: clock.Now, Logger: logger,
+	})
+	require.NoError(t, err)
+	// Завершение восстановления — НАСТОЯЩИЙ глагол (EC-23 предъявляет код
+	// восстановления после смены адреса).
+	// Транзакция исхода — тем же составом, что в композиционном корне
+	// (kaname#458): адаптер базы и та же функция активации приглашения.
+	completion, err := kanamepg.NewRecoveryCompletionStore(pool, user.ActivateInviteForLane)
+	require.NoError(t, err)
+	completeR, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
+		CutoffClock: momentclock.Func(clock.Now), Completion: completion,
+		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL,
+		Observer: observerOr(opts.completionObserver, nop), Now: clock.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	failApply := &atomic.Bool{}
@@ -276,10 +298,40 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	require.NoError(t, err)
 	position, err := humansession.NewPositionUseCase(sessions, clock.Now)
 	require.NoError(t, err)
+	// Смена адреса почты (kaname#635): тот же состав, что в композиционном
+	// корне; окно писем адресата — величина окна писем восстановления стенда
+	// (EC-19: ручка задаёт ограничение нашего отправителя, и окно смены берёт
+	// то же значение).
+	cdeps := humansession.EmailChangeDeps{
+		Store: avEmailChangeStore{sessions: sessions, inner: registrationPG, methods: methods}, Pace: pace, Freshness: laneFreshness,
+		MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: perRecipient, Window: time.Hour},
+		Now:       clock.Now, Logger: logger,
+	}
+	// Чтение заведённого у личности (редакция 3, Р2) — тем же адаптером способов
+	// входа, что у второго фактора: в любое незаполненное поле-интерфейс
+	// зависимостей, которое он удовлетворяет (`wireEnrolledReaderAV`).
+	wireEnrolledReaderAV(&cdeps, methods)
+	requestC, err := humansession.NewRequestEmailChangeUseCase(cdeps)
+	require.NoError(t, err)
+	confirmC, err := humansession.NewConfirmEmailChangeUseCase(cdeps)
+	require.NoError(t, err)
 
-	verbs := avVerbs{stubLane: &stubLane{}, register: register, login: login, logout: logout, change: change,
+	enrollPw, err := humansession.NewEnrollPasswordUseCase(humansession.EnrollPasswordDeps{
+		Store: sessions, Hasher: hasher, Rule: rule, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger,
+	})
+	require.NoError(t, err)
+	// Свои сессии (kaname#634) — НАСТОЯЩИЕ глаголы над тем же хранилищем, окно
+	// свежести — величина стенда (Ф1 §4.1).
+	ownDeps := humansession.OwnSessionsDeps{Store: sessions, Freshness: laneFreshness, Observer: nop, Now: clock.Now, Logger: logger}
+	ownList, err := humansession.NewListOwnSessionsUseCase(ownDeps)
+	require.NoError(t, err)
+	ownEnd, err := humansession.NewEndOwnSessionUseCase(ownDeps)
+	require.NoError(t, err)
+	ownEndOthers, err := humansession.NewEndOtherOwnSessionsUseCase(ownDeps)
+	require.NoError(t, err)
+	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, ownList: ownList, ownEnd: ownEnd, ownEndOthers: ownEndOthers, register: register, login: login, logout: logout, change: change,
 		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery,
-		requestV: requestV, confirmV: confirmV, position: position}
+		requestV: requestV, confirmV: confirmV, position: position, requestC: requestC, confirmC: confirmC, completeR: completeR}
 	l := newLaneOver(t, verbs, "")
 	return &avLane{
 		ctx: ctx, pool: pool, lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
@@ -287,6 +339,14 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 		failApply: failApply,
 		door:      authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool)),
 	}
+}
+
+// observerOr — приёмник опций стенда, а без него — молчащий.
+func observerOr(o, nop humansession.Observer) humansession.Observer {
+	if o != nil {
+		return o
+	}
+	return nop
 }
 
 // avVerificationStore — хранилище глагола подтверждения тем же составом, что в
@@ -333,6 +393,59 @@ func (w avVerificationWriter) ActivateInviteOnVerification(ctx context.Context, 
 	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
+// avEmailChangeStore — хранилище глаголов смены тем же составом, что в
+// композиционном корне (`emailChangeStore`).
+type avEmailChangeStore struct {
+	sessions *kanamepg.HumanSessionRepo
+	inner    *kanamepg.RegistrationStore
+	// methods — чтение заведённого у личности (редакция 3, Р2), если его
+	// носитель — хранилище глаголов, а не поле зависимостей и не транзакция.
+	methods *kanamepg.LoginMethodRepo
+}
+
+func (s avEmailChangeStore) Get(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return s.methods.Get(ctx, userID, kind)
+}
+
+func (s avEmailChangeStore) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	return s.methods.Get(ctx, userID, kind)
+}
+
+func (s avEmailChangeStore) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return s.methods.AccessKeyEnrolled(ctx, userID)
+}
+
+// wireEnrolledReaderAV — провязка читателя заведённого в КАЖДОЕ незаполненное
+// экспортируемое поле-интерфейс зависимостей глаголов смены, которое он
+// удовлетворяет; пустой интерфейс не считается. Полей ноль — законный исход:
+// тогда носитель чтения — хранилище либо транзакция глаголов. Стенд не диктует
+// реализации форму провязки (приёмка заказывает чтение, а не его носитель).
+func wireEnrolledReaderAV(deps *humansession.EmailChangeDeps, reader any) {
+	v := reflect.ValueOf(deps).Elem()
+	rt := reflect.TypeOf(reader)
+	for i := 0; i < v.NumField(); i++ {
+		f, ft := v.Field(i), v.Type().Field(i)
+		if !ft.IsExported() || ft.Type.Kind() != reflect.Interface || ft.Type.NumMethod() == 0 || !f.IsNil() {
+			continue
+		}
+		if rt.Implements(ft.Type) {
+			f.Set(reflect.ValueOf(reader))
+		}
+	}
+}
+
+func (s avEmailChangeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
+	return s.sessions.Resolve(ctx, digest, now)
+}
+
+func (s avEmailChangeStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (humansession.EmailChangeWriter, error) {
+	w, err := s.inner.EmailChangeWriter(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 // avVerbs — глаголы слушателя стенда: настоящие варианты использования.
 type avVerbs struct {
 	*stubLane
@@ -350,6 +463,45 @@ type avVerbs struct {
 	requestV  *humansession.RequestVerificationUseCase
 	confirmV  *humansession.ConfirmVerificationUseCase
 	position  *humansession.PositionUseCase
+	// Заведение первого пароля (kaname#213) — НАСТОЯЩИЙ глагол.
+	enrollPw *humansession.EnrollPasswordUseCase
+	// Смена адреса почты (kaname#635) — НАСТОЯЩИЕ глаголы.
+	requestC *humansession.RequestEmailChangeUseCase
+	confirmC *humansession.ConfirmEmailChangeUseCase
+	// Завершение восстановления (EC-23) — НАСТОЯЩИЙ глагол.
+	completeR *humansession.CompleteRecoveryUseCase
+	// Свои сессии (kaname#634) — НАСТОЯЩИЕ глаголы.
+	ownList      *humansession.ListOwnSessionsUseCase
+	ownEnd       *humansession.EndOwnSessionUseCase
+	ownEndOthers *humansession.EndOtherOwnSessionsUseCase
+}
+
+func (v avVerbs) CompleteRecovery(ctx context.Context, in humansession.CompleteRecoveryInput) (humansession.CompleteRecoveryOutput, error) {
+	return v.completeR.Execute(ctx, in)
+}
+
+func (v avVerbs) RequestEmailChange(ctx context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error) {
+	return v.requestC.Execute(ctx, in)
+}
+
+func (v avVerbs) ConfirmEmailChange(ctx context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error) {
+	return v.confirmC.Execute(ctx, in)
+}
+
+func (v avVerbs) ListOwnSessions(ctx context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	return v.ownList.Execute(ctx, in)
+}
+
+func (v avVerbs) EndOwnSession(ctx context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	return v.ownEnd.Execute(ctx, in)
+}
+
+func (v avVerbs) EndOtherOwnSessions(ctx context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	return v.ownEndOthers.Execute(ctx, in)
+}
+
+func (v avVerbs) EnrollPassword(ctx context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {
+	return v.enrollPw.Execute(ctx, in)
 }
 
 func (v avVerbs) RequestEmailVerification(ctx context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {

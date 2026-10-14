@@ -17,6 +17,14 @@ import (
 	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto"
 )
 
+// reservedAccountNameRefusal — текст отказа резерва пространства личных аккаунтов
+// (Ф4 Р9 п.3). Часть контракта — сверяется побайтово (пробы Ф4-29/30). Собран из
+// ЕДИНСТВЕННОГО источника написания префикса (`domain.PersonalAccountNamePrefix`),
+// чтобы текст и проверка не разошлись с генератором имени зеркала.
+var reservedAccountNameRefusal = fmt.Sprintf(
+	"Illegal argument name: prefix '%s' is reserved for personal accounts",
+	domain.PersonalAccountNamePrefix)
+
 // marshalAccount конвертирует domain.Account в *anypb.Any через DTO-реестр.
 // Используется worker'ами Create/Update для запихивания результата в Operation.response.
 func marshalAccount(a domain.Account) (*anypb.Any, error) {

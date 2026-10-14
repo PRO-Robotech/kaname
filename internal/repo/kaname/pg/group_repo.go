@@ -37,7 +37,7 @@ type groupReader struct {
 const groupCols = "id, account_id, name, description, labels, created_at"
 
 // groupUpdateQ — оператор записи группы. СТАТИЧЕСКИЙ: набор колонок известен
-// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
 // `mutable_triplet_update.go`). `account_id` неизменяем и в перечень не входит —
 // вызывающий отвергает его до записи.
 const groupUpdateQ = `UPDATE groups SET` + mutableTripletSetSQL +
@@ -71,7 +71,7 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 	}
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
 		// expression, so the column follows the whitelist instead of being
 		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
@@ -103,7 +103,7 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякую группу, перед которой
 	// лежит больше `page_size` невидимых предшественников — она до фильтра просто
 	// не доезжает.
@@ -376,20 +376,26 @@ func (w *groupWriter) Update(ctx context.Context, g domain.Group, updateMask []s
 // hard-rule #10). The concurrent delete-vs-add-subject window is closed at the DB
 // level by the BEFORE DELETE trigger (migration 0050); this software guard is the
 // fast common-case reject + canonical error text.
+//
+// Считаются только ДЕЙСТВУЮЩИЕ выдачи (`revoked_at IS NULL`) — то же условие, что
+// у человека, сервисного аккаунта и функции триггера (kaname#664, Р10):
+// отозванная выдача — история, и текст «active» обязан быть правдой.
 func (w *groupWriter) Delete(ctx context.Context, id domain.GroupID) error {
 	const q = `
 		WITH del AS (
 			DELETE FROM groups g
 			WHERE g.id = $1
-			  AND NOT EXISTS (SELECT 1 FROM access_bindings         WHERE subject_type = 'group' AND subject_id = $1)
-			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects WHERE subject_type = 'group' AND subject_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM access_bindings b WHERE b.subject_type = 'group' AND b.subject_id = $1 AND b.revoked_at IS NULL)
+			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id WHERE s.subject_type = 'group' AND s.subject_id = $1 AND b.revoked_at IS NULL)
 			RETURNING 1
 		)
 		SELECT
-		  (SELECT count(*) FROM del)::int                                                                    AS deleted,
-		  EXISTS(SELECT 1 FROM groups WHERE id = $1)                                                         AS group_exists,
-		  (EXISTS(SELECT 1 FROM access_bindings         WHERE subject_type='group' AND subject_id = $1)
-		   OR EXISTS(SELECT 1 FROM access_binding_subjects WHERE subject_type='group' AND subject_id = $1))  AS has_bindings
+		  (SELECT count(*) FROM del)::int                                                    AS deleted,
+		  EXISTS(SELECT 1 FROM groups WHERE id = $1)                                         AS group_exists,
+		  (EXISTS(SELECT 1 FROM access_bindings b
+		           WHERE b.subject_type = 'group' AND b.subject_id = $1 AND b.revoked_at IS NULL)
+		   OR EXISTS(SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id
+		              WHERE s.subject_type = 'group' AND s.subject_id = $1 AND b.revoked_at IS NULL)) AS has_bindings
 	`
 	var (
 		deleted                  int

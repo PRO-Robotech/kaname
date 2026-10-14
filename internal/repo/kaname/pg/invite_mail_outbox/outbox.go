@@ -51,12 +51,23 @@ const (
 	// (kaname#456, Р8); заведён миграцией
 	// `20260927190000_address_verification_is_our_verb`.
 	EventVerificationSend = "mail.verification.send"
+	// EventEmailChangeSend — вид события письма с кодом смены адреса на НОВЫЙ
+	// адрес (kaname#635, Р7); заведён миграцией
+	// `20261007150000_email_change_is_confirmed_from_the_new_address`.
+	EventEmailChangeSend = "mail.email-change.send"
+	// EventEmailChangedSend — вид события уведомления о смене адреса на
+	// ПРЕЖНИЙ адрес (kaname#635, Р7); заведён той же миграцией.
+	EventEmailChangedSend = "mail.email-changed.send"
 	// kind — resource_kind денормализованной колонки приглашения.
 	kind = "InviteMail"
 	// recoveryKind — resource_kind письма восстановления.
 	recoveryKind = "RecoveryMail"
 	// verificationKind — resource_kind письма подтверждения адреса.
 	verificationKind = "VerificationMail"
+	// emailChangeKind — resource_kind письма с кодом смены адреса.
+	emailChangeKind = "EmailChangeMail"
+	// emailChangedKind — resource_kind уведомления о смене адреса.
+	emailChangedKind = "EmailChangedMail"
 )
 
 // EmitTx кладёт намерение отправить письмо приглашения на транзакцию
@@ -170,6 +181,77 @@ func EmitVerificationTx(ctx context.Context, tx pgx.Tx, userID, accountID, to, c
 	}
 	if err := outbox.Emit(ctx, tx, Table, verificationKind, userID, EventVerificationSend, payload); err != nil {
 		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventVerificationSend, err)
+	}
+	return nil
+}
+
+// EmitEmailChangeTx кладёт намерение отправить письмо с кодом смены адреса на
+// НОВЫЙ адрес на транзакцию вызывающего — ту же, что пишет строку отложенной
+// смены (kaname#635, Р7).
+//
+// Письмо НЕСЁТ предъявителя — код в форме для человека: предъявитель и есть его
+// предмет (тот же размен, что у подтверждения адреса). Адрес экрана параметров
+// консоли собирает применитель из адреса консоли, объявленного настройкой
+// установки; ссылки-предъявителя нет по построению.
+//
+// userID — ключ партиции порядка, как у прочих видов.
+func EmitEmailChangeTx(ctx context.Context, tx pgx.Tx, userID, accountID, to, code string, validFor time.Duration) error {
+	if tx == nil {
+		return fmt.Errorf("invite_mail_outbox: tx must not be nil")
+	}
+	if strings.TrimSpace(to) == "" {
+		return fmt.Errorf("invite_mail_outbox: recipient required — a letter to nobody has no subject")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("invite_mail_outbox: user id required — it is the ordering partition key")
+	}
+	if strings.TrimSpace(code) == "" {
+		return fmt.Errorf("invite_mail_outbox: email change code required — a change letter without a code confirms nothing")
+	}
+	minutes := int(validFor / time.Minute)
+	if minutes <= 0 && validFor > 0 {
+		minutes = 1
+	}
+	payload := map[string]any{
+		"to":                 to,
+		"account_id":         accountID,
+		"user_id":            userID,
+		"code":               code,
+		"code_valid_minutes": minutes,
+	}
+	if err := outbox.Emit(ctx, tx, Table, emailChangeKind, userID, EventEmailChangeSend, payload); err != nil {
+		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventEmailChangeSend, err)
+	}
+	return nil
+}
+
+// EmitEmailChangedTx кладёт намерение уведомить ПРЕЖНИЙ адрес о смене на
+// транзакцию исхода смены (kaname#635, Р7, Р8 п. 6).
+//
+// Уведомление несёт момент смены — и ничего сверх: ни нового адреса (прежний
+// ящик мог оказаться в чужих руках, и новый адрес выдал бы, где теперь учётная
+// запись), ни кода, ни ссылки.
+func EmitEmailChangedTx(ctx context.Context, tx pgx.Tx, userID, accountID, to string, changedAt time.Time) error {
+	if tx == nil {
+		return fmt.Errorf("invite_mail_outbox: tx must not be nil")
+	}
+	if strings.TrimSpace(to) == "" {
+		return fmt.Errorf("invite_mail_outbox: recipient required — a letter to nobody has no subject")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("invite_mail_outbox: user id required — it is the ordering partition key")
+	}
+	if changedAt.IsZero() {
+		return fmt.Errorf("invite_mail_outbox: change moment required — the notice names when the address changed")
+	}
+	payload := map[string]any{
+		"to":         to,
+		"account_id": accountID,
+		"user_id":    userID,
+		"changed_at": changedAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+	}
+	if err := outbox.Emit(ctx, tx, Table, emailChangedKind, userID, EventEmailChangedSend, payload); err != nil {
+		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventEmailChangedSend, err)
 	}
 	return nil
 }

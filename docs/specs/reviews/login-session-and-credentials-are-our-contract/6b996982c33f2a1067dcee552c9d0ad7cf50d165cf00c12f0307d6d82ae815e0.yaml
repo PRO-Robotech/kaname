@@ -1,0 +1,74 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+  sha256: 6b996982c33f2a1067dcee552c9d0ad7cf50d165cf00c12f0307d6d82ae815e0
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 01442f1a1fb68956ebd1a4ad739e0488e92c4a63
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 4058
+  round: 13
+  round_note: >-
+    круг 13 — следующий за записями этого документа; в этом заходе прошлый круг — 12
+  predecessor_record: >-
+    docs/specs/reviews/login-session-and-credentials-are-our-contract/e24ee90a34bb1f2919280d987ed7dd532f01545cb72ef5c742e6d30b7172a705.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md на tmp/535-na3a @ 01442f1a1 → 6b996982c33f2a1067dcee552c9d0ad7cf50d165cf00c12f0307d6d82ae815e0; совпал с отпечатком задания
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: PRODUCER
+    summary: >-
+      §5, строка Ф3 (строка 1512): столбец меток приведён (Ф1-53…58, Ф1-63…65, Ф1-67), а столбец
+      предмета по-прежнему обязывает Ф3 производить свойства четырёх снятых сценариев —
+      «печенье прежнего поставщика после перевода — отсутствие сессии на обоих читателях края,
+      пока посадка наша (Ф1-52), его оживание при откате посадки до своего срока (Ф1-60) и отказ
+      ему после отката (Ф1-61, Ф1-66; после отката отсечку читает внешняя полоса — F4d §1.5)», а
+      запись отсечки выходом и сменой пароля подписана метками Ф1-61 и Ф1-66. Предмет снят
+      самой редакцией 16 (§3.10), заголовок которой объявляет §5 (строка Ф3) правленым.
+    why_blocking: >-
+      Ведомость производителей — единственное место, где фаза получает заказ; живая строка
+      заказывает Ф3 откат и оживание печенья, которых нет (kaname#363, kacho#2792). Предикат
+      сверки Ф3 §7.1 читает только столбец меток (cut -f4) и этого не видит — пусто при 43 из 43.
+    fix: >-
+      В столбце предмета строки Ф3 снять три пункта о печенье поставщика и откате; пункты о
+      записи отсечки выходом и сменой пароля переадресовать на замок момента записи §8 и живые
+      Ф1-63, Ф1-64, Ф1-67, без меток Ф1-61 и Ф1-66.
+non_blocking:
+  - id: N1
+    summary: >-
+      «Тогда» Ф1-67 (строка 954) заканчивается словами «её держит второй замок Ф1-66»; после
+      редакции 16 это вторая половина замка момента записи §8. Утверждение не меняется — поправить
+      имя держателя той же правкой.
+  - id: N2
+    summary: >-
+      Замечание N1 круга 12 о kacho#2703 в силе: событие одобрения не публиковать, пока решение
+      не опубликовано комментарием в задаче.
+accepted_parts: >-
+  Снятие Ф1-52, Ф1-60, Ф1-61, Ф1-66 тумбой §3.10 сверено: awk по §3 даёт 59 меток, §5 метками
+  59 из 59, Ф3 §7.1 парность пуста (43). Довод оставить запись отсечки контрактом принят: её
+  момент стоит в Тогда живых Ф1-64 и Ф1-67, монотонность — в Ф1-63; замок перенесён в §8
+  (строка 2204) без изменения величин. Прочие вхождения меток в §0…§9 помечены снятыми.
+constructibility: >-
+  Посева не было: стенда в задании нет. B1 — текст ведомости против §3.10 того же документа.
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 6b996982c33f2a1067dcee552c9d0ad7cf50d165cf00c12f0307d6d82ae815e0
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

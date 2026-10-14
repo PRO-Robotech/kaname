@@ -6,15 +6,19 @@
 //
 // # Предмет
 //
-// Видов письма в продукте три (подтверждение адреса, восстановление доступа,
-// приглашение), и все три с этого изменения отправляем МЫ. Приглашение — наше по
+// Видов письма в продукте пять (подтверждение адреса, восстановление доступа,
+// приглашение, код смены адреса и уведомление о смене адреса), и все пять
+// отправляем МЫ. Приглашение — наше по
 // решению Р23 приёмки ID-MAIL-1: его предмет — строка в НАШЕЙ базе.
 // Восстановление доступа — наше с фазы Ф5 (одобренная
 // `docs/engineering/acceptance/recovery-of-access.md`, Р3 и Д5): код чеканим мы,
 // поток поставщика истёк вместе с поставщиком. Подтверждение адреса — наше по
 // одобренной `docs/engineering/acceptance/access-beyond-login-needs-a-verified-address.md`
 // (kaname#456, Р8): приёмка назвала переезд, код подтверждения чеканим мы, и
-// без него человеку не открывается ничего дальше экрана подтверждения.
+// без него человеку не открывается ничего дальше экрана подтверждения. Код
+// смены адреса и уведомление о смене — наши по одобренной
+// `docs/engineering/acceptance/email-change-is-confirmed-from-the-new-address.md`
+// (kaname#635, Р7): глагол смены — наш с первого дня.
 //
 // Перечень НАШИХ видов — `OurMailKinds` — закрыт и объявлен один раз; вид
 // входит в него ТОЛЬКО одобренной приёмкой, назвавшей переезд, а не правкой
@@ -66,10 +70,16 @@
 // именно поэтому), под отказ формы не подпадает — её место в списке, а не в
 // предикате.
 //
-// Путь считается ФАЙЛОМ, а не объявлением: второе объявление, открывающее
-// разговор в том же файле, что и первое, вторым путём не считается. Это
-// граница формы, а не оплошность; расширится предмет — ось учится узлу
-// объявления тем же изменением.
+// Путь — ОБЪЯВЛЕНИЕ, ОТКРЫВАЮЩЕЕ РАЗГОВОР, а не файл (kaname#175). Внутри
+// файла, импортирующего транспорт, путём считается каждое объявление верхнего
+// уровня, зовущее открывающую функцию транспорта (`mailTransportOpeners`:
+// `Dial`, `NewClient`, `SendMail`, …) через имя его импорта; второе такое
+// объявление в том же файле — второй путь, и находка называет оба. Объявление,
+// упоминающее транспорт без открытия разговора (`smtp.PlainAuth`, тип
+// `smtp.Auth`), путём не является. Файл, импортирующий транспорт и не
+// открывающий разговора ни одним объявлением, остаётся одним путём на строке
+// импорта: вид и производитель у него судятся по-прежнему, молчать о нём
+// нельзя.
 //
 // Об отправителе, живущем в ЧУЖОМ процессе, гейт не утверждает НИЧЕГО (круг 6,
 // В3): его в нашем дереве нет и быть не может, а проверка, требующая
@@ -104,12 +114,19 @@ const (
 	// MailKindVerification — подтверждение адреса (kaname#456, Р8 — переезд
 	// назван одобренной приёмкой).
 	MailKindVerification = "verification"
+	// MailKindEmailChange — код смены адреса на новый адрес (kaname#635, Р7 —
+	// вид назван одобренной приёмкой
+	// `email-change-is-confirmed-from-the-new-address.md`).
+	MailKindEmailChange = "email-change"
+	// MailKindEmailChanged — уведомление о смене адреса на прежний адрес
+	// (kaname#635, Р7 — та же приёмка).
+	MailKindEmailChanged = "email-changed"
 )
 
 // OurMailKinds — ЗАКРЫТЫЙ перечень видов, которые отправляет наш код. Каждый
 // обязан иметь путь отправки (иначе вид без производителя), и ни один чужой вид
 // пути иметь не вправе.
-var OurMailKinds = []string{MailKindInvite, MailKindRecovery, MailKindVerification}
+var OurMailKinds = []string{MailKindInvite, MailKindRecovery, MailKindVerification, MailKindEmailChange, MailKindEmailChanged}
 
 // mailKindIsOurs — предикат перечня.
 func mailKindIsOurs(kind string) bool {
@@ -152,6 +169,17 @@ var mailTransportTokens = []string{
 // которой разбор не знает.
 var mailNotTransport = map[string]bool{
 	"net/mail": true,
+}
+
+// mailTransportOpeners — ЗАКРЫТЫЙ список функций транспорта, открывающих
+// разговор с почтовым узлом. Вызов `<имя импорта>.<функция>(…)` из этого
+// списка делает объявление путём отправки.
+var mailTransportOpeners = map[string]bool{
+	"Dial":         true,
+	"DialTLS":      true,
+	"DialStartTLS": true,
+	"NewClient":    true,
+	"SendMail":     true,
 }
 
 // mailishImportRe — путь импорта, говорящий о почте словом. Это НЕ признак
@@ -305,6 +333,7 @@ func ScanMailSendFile(rel string, src []byte, ownModule string) (paths []MailSen
 
 	var transportLine int
 	var transportImport string
+	transportNames := map[string]bool{}
 	var unknown []MailSendPath
 	for _, imp := range f.Imports {
 		census.Imports++
@@ -315,9 +344,12 @@ func ScanMailSendFile(rel string, src []byte, ownModule string) (paths []MailSen
 		if p == mailTransportAnchor {
 			census.TransportAnchorHits++
 		}
-		if MailImportIsTransport(p) && transportImport == "" {
-			transportImport = p
-			transportLine = fset.Position(imp.Pos()).Line
+		if MailImportIsTransport(p) {
+			if transportImport == "" {
+				transportImport = p
+				transportLine = fset.Position(imp.Pos()).Line
+			}
+			transportNames[mailImportLocalName(imp, p)] = true
 		}
 		if MailImportFormIsUnknown(p, ownModule) {
 			unknown = append(unknown, MailSendPath{
@@ -356,14 +388,62 @@ func ScanMailSendFile(rel string, src []byte, ownModule string) (paths []MailSen
 			}
 		}
 		sort.Strings(own)
-		paths = append(paths, MailSendPath{
-			File: rel, Line: transportLine, Import: transportImport, Kinds: own,
-		})
-		census.Paths = 1
+		openers := mailOpenerLines(f, fset, transportNames)
+		if len(openers) == 0 {
+			openers = []int{transportLine}
+		}
+		for _, line := range openers {
+			paths = append(paths, MailSendPath{
+				File: rel, Line: line, Import: transportImport, Kinds: append([]string(nil), own...),
+			})
+		}
+		census.Paths = len(openers)
 	}
 	// Отказ формы — не путь: он идёт в вердикт, но не в перепись путей.
 	paths = append(paths, unknown...)
 	return paths, kinds, census, nil
+}
+
+// mailImportLocalName — имя, под которым файл зовёт импортированный пакет:
+// явное имя импорта либо последний сегмент пути без окантовки библиотеки.
+func mailImportLocalName(imp *ast.ImportSpec, path string) string {
+	if imp.Name != nil {
+		return imp.Name.Name
+	}
+	seg := path[strings.LastIndexByte(path, '/')+1:]
+	return strings.ReplaceAll(mailTrimLibraryTrappings(seg), "-", "")
+}
+
+// mailOpenerLines — строки ПЕРВОГО открывающего вызова в каждом объявлении
+// верхнего уровня, открывающем разговор с узлом. Одно объявление — один путь,
+// сколько бы открывающих вызовов в нём ни стояло.
+func mailOpenerLines(f *ast.File, fset *token.FileSet, transportNames map[string]bool) []int {
+	var lines []int
+	for _, decl := range f.Decls {
+		at := token.NoPos
+		ast.Inspect(decl, func(n ast.Node) bool {
+			if at != token.NoPos {
+				return false
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || !mailTransportOpeners[sel.Sel.Name] {
+				return true
+			}
+			if pkg, ok := sel.X.(*ast.Ident); ok && transportNames[pkg.Name] {
+				at = call.Pos()
+				return false
+			}
+			return true
+		})
+		if at != token.NoPos {
+			lines = append(lines, fset.Position(at).Line)
+		}
+	}
+	return lines
 }
 
 // AdjudicateMailSendPaths — ВЕРДИКТ по обеим осям. Отделён от обхода намеренно:

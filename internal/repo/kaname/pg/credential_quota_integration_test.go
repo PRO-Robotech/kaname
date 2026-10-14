@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // credential_quota_integration_test.go — потолок числа удостоверений на
-// принципала (задача #1191, приёмка
+// принципала (задача kacho#1191, приёмка
 // `services/iam/docs/engineering/acceptance/credential-ceiling-per-principal.md`).
 //
 // # Почему это свойство базы, а не use-case'а
@@ -108,6 +108,7 @@ func credQuotaFixtureWithVictim(t *testing.T, ctx context.Context, pool *pgxpool
 		"victim-"+suffix+"-"+victimID+"@example.invalid", "Cred Victim "+suffix)
 	require.NoError(t, err, "посев второго человека")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "фиксация фикстуры")
 	return userID, svaID, accountID, victimID
 }
@@ -210,7 +211,7 @@ func insertSACredential(ctx context.Context, pool *pgxpool.Pool, svaID, createdB
 // же оператором, каким её пишет пуск процесса.
 //
 // ЗДЕСЬ БЫЛА ПРАВКА АВТОРИТЕТА, и предмет сменился (приёмка `KAN-QUOTA-1`, `П25`;
-// задача #2117): величину этих видов больше не назначает администратор облака —
+// задача kacho#2117): величину этих видов больше не назначает администратор облака —
 // её объявляет посадка службы доступа, потому что внешнего авторитета в
 // самостоятельной установке нет by construction.
 //
@@ -257,7 +258,7 @@ func requireQuotaRefusal(t *testing.T, err error, wantCode, wantText string) {
 // defaultUserCredentialCeiling / defaultSACredentialCeiling — действующие
 // величины умолчания.
 //
-// Были 10 и 20; стали 12 и 24 задачей #1264 вместе с автоснятием истёкших.
+// Были 10 и 20; стали 12 и 24 задачей kacho#1264 вместе с автоснятием истёкших.
 // Прежние числа закладывали запас под неотозванные истёкшие удостоверения —
 // разбор показал, что запаса в них не было ВОВСЕ: `5 назначений × 2` есть сам
 // модельный пик правильной ротации, а не модель с запасом. Разложение и цена —

@@ -6,7 +6,7 @@
 //
 // Distinct from the existing `ClusterAdminGrantRepo.Get` (iam_core_repos.go,
 // id-based read used by bootstrap_admin / BG flows). This Reader supports
-// the InternalClusterService.ListAdmins RPC — active
+// the ListAdmins RPC of both twins (InternalClusterService, ClusterService) — active
 // grants only, with users-row JOIN for denormalised email / display_name /
 // granted_by_email.
 package pg
@@ -23,8 +23,10 @@ import (
 )
 
 // ClusterAdminGrantReader — read-only port adapter. ListActive returns
-// only `granted_until IS NULL` rows ordered by `granted_at ASC` (stable
-// across re-renders).
+// only `granted_until IS NULL` rows ordered by `granted_at`, then by `id`, both
+// ascending. The second key is not decoration: grants written in one
+// transaction share `now()`, and with `granted_at` alone their order was
+// unspecified (finding Н3, acceptance ADM-CA).
 type ClusterAdminGrantReader struct {
 	pool *pgxpool.Pool
 }
@@ -60,7 +62,7 @@ func (r *ClusterAdminGrantReader) ListActive(ctx context.Context) ([]domain.Clus
 		  LEFT JOIN kaname.users u_subj ON u_subj.id = g.subject_id
 		  LEFT JOIN kaname.users u_by   ON u_by.id   = g.granted_by
 		 WHERE g.granted_until IS NULL
-		 ORDER BY g.granted_at ASC`
+		 ORDER BY g.granted_at ASC, g.id ASC`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("cluster_admin_grants list: %w", err)

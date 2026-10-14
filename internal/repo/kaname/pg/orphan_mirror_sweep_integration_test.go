@@ -114,6 +114,7 @@ func seedAccountProjectForMirror(t *testing.T, ctx context.Context, pool *pgxpoo
 	      VALUES ($1, $2, $3, '{}'::jsonb)`, accID, "acc-"+suffix, userID)
 	exec(`INSERT INTO projects (id, account_id, name, labels)
 	      VALUES ($1, $2, $3, '{}'::jsonb)`, prjID, accID, "prj-"+suffix)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return accID, prjID
 }

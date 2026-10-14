@@ -21,12 +21,14 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/ids"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -189,20 +191,45 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 		}
 	}
 
-	// 2. INSERT account. Name = "personal-cloud-<6-char tail>"
-	// ("Personal cloud"). Имя ВЫБРАНО, а не подставлено умолчанием:
-	// личный аккаунт заводится без участия арендатора, и «personal-cloud-…»
-	// он прочтёт, а идентификатор — нет. Форме дерева оно отвечает как
-	// есть (`pkg/validate/nameform`): строчные, дефис в середине, хвост —
-	// крокфордово тело идентификатора.
-	tail := strings.ToLower(string(accID[len(accID)-6:]))
-	if _, err := w.AccountsW().Insert(ctx, domain.Account{
-		ID:          accID,
-		Name:        domain.AccountName("personal-cloud-" + tail),
-		OwnerUserID: userID,
-		Labels:      domain.Labels{},
-	}); err != nil {
-		return BootstrapResult{}, err
+	// 2. INSERT account. Имя — `personal-cloud-<хвост>` из зарезервированного
+	// пространства (`domain.PersonalAccountNamePrefix`): его ВЫБИРАЕТ система, не
+	// арендатор, и «personal-cloud-…» человек прочтёт, а идентификатор — нет. Форме
+	// дерева оно отвечает как есть (`pkg/validate/nameform`): строчные, дефис в
+	// середине.
+	//
+	// Столкновение по accounts_name_unique разрешается ПЕРЕБОРОМ СВОБОДНОГО имени
+	// ТОЙ ЖЕ транзакцией через само ограничение базы (ban #10 — не проверка-перед-
+	// вставкой): адаптер отвечает на занятое имя нолём строк (ON CONFLICT), не
+	// обрывая транзакцию, поэтому следующая попытка берёт свежий хвост.
+	// Идентификатор аккаунта между попытками НЕ меняется — на него уже ссылается
+	// строка человека отложенным ключом; меняется только имя.
+	//
+	// Исчерпание попыток — НЕВЫПОЛНЕНИЕ (`ErrPersonalAccountNameUnavailable`), а не
+	// занятость: имя выбирает система, зарегистрированный адрес свободен, и отказ
+	// занятости солгал бы о нём (Ф4 Р9, Р3). Занятое имя личного аккаунта
+	// регистрацию свободного адреса НЕ заканчивает.
+	allocated := false
+	for attempt := 0; attempt < personalAccountNameAttempts; attempt++ {
+		_, insErr := w.AccountsW().Insert(ctx, domain.Account{
+			ID:          accID,
+			Name:        personalAccountName(accID, attempt),
+			OwnerUserID: userID,
+			Labels:      domain.Labels{},
+		})
+		if insErr == nil {
+			allocated = true
+			break
+		}
+		if !errors.Is(insErr, iamerr.ErrAlreadyExists) {
+			return BootstrapResult{}, insErr
+		}
+	}
+	if !allocated {
+		// Текст клиент-безопасен: на провизион-полосе (провайдер-хук →
+		// UpsertFromIdentity) он может доехать до провода, поэтому детали перебора
+		// (число попыток) в него не выносятся.
+		return BootstrapResult{}, iamerr.Wrapf(iamerr.ErrPersonalAccountNameUnavailable,
+			"personal account name could not be allocated")
 	}
 
 	// 3. INSERT default project.
@@ -263,6 +290,15 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 		[]domain.Subject{{Type: projectAB.SubjectType, ID: projectAB.SubjectID}}); serr != nil {
 		return BootstrapResult{}, serr
 	}
+	// Ведомость выпущенных кортежей проектной самовыдачи — тем же источником,
+	// что их эмиссия ниже (projectBindingTuples), и в той же транзакции. Без неё
+	// снятие выдачи (штатное и дренажом области при удалении проекта) снимало
+	// строку, а оба кортежа оставались фактами модели прав на снятый проект
+	// (kaname#665): снятие симметрично ВЕДОМОСТИ, а ведомость была пуста.
+	if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, createdProjectAB.ID,
+		ledgerTuples(projectBindingTuples(userID, prjID, createdProjectAB.ID))); lerr != nil {
+		return BootstrapResult{}, lerr
+	}
 
 	// 5. Durable audit_outbox iam.user.created in the SAME bootstrap tx
 	// (запрет #10) — atomic with the user INSERT. ТОЛЬКО для genuinely-new
@@ -308,6 +344,43 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 	}
 
 	return BootstrapResult{User: user, AccountID: accID, ProjectID: prjID, OwnerBindingID: ownerBindingID}, nil
+}
+
+// ledgerTuples — те же кортежи в форме строки ведомости выдачи.
+func ledgerTuples(in []service.RelationTuple) []abrepo.RelationTuple {
+	out := make([]abrepo.RelationTuple, 0, len(in))
+	for _, tp := range in {
+		out = append(out, abrepo.RelationTuple{User: tp.User, Relation: tp.Relation, Object: tp.Object})
+	}
+	return out
+}
+
+// personalAccountNameAttempts — сколько имён личного аккаунта перебрать против
+// accounts_name_unique, прежде чем признать пространство имён недоступным.
+// Столкновение системно-выбранного имени крайне маловероятно (хвост нулевой
+// попытки берётся у идентификатора, последующих — свежий крокфордов), поэтому
+// одной повторной попытки со свежим хвостом достаточно; исчерпание есть системная
+// аномалия (`ErrPersonalAccountNameUnavailable` → 503, вызывающий повторит с новым
+// идентификатором). Перебор держим коротким намеренно: длинный маскировал бы такую
+// аномалию видимостью нормальной работы.
+//
+// Важно для наблюдаемости: столкнувшаяся попытка НЕ вставляет строки (ON CONFLICT
+// DO NOTHING), поэтому перебор не расходует потолок темпа заведения (Р5) — его
+// заряжает лишь СОСТОЯВШАЯСЯ вставка.
+const personalAccountNameAttempts = 2
+
+// personalAccountName — имя личного аккаунта на попытке attempt. Нулевая попытка
+// берёт хвост у идентификатора аккаунта (детерминизм в норме); последующие берут
+// свежий крокфордов хвост, чтобы уйти со столкнувшегося имени. Идентификатор
+// аккаунта при этом НЕ меняется — меняется только имя. Форме имени дерева
+// (`pkg/validate/nameform`) отвечает как есть: строчные, дефис в середине.
+func personalAccountName(accID domain.AccountID, attempt int) domain.AccountName {
+	tail := string(accID[len(accID)-6:])
+	if attempt > 0 {
+		fresh := ids.NewID(domain.PrefixAccount)
+		tail = string(fresh[len(fresh)-6:])
+	}
+	return domain.AccountName(domain.PersonalAccountNamePrefix + strings.ToLower(tail))
 }
 
 // ActivateInviteTx — активация ОДНОЙ строки приглашения writer'ом вызывающего:
@@ -462,4 +535,22 @@ func ActivateInviteOnVerificationTx(ctx context.Context, w Writer, pending domai
 		CandidateUserID: string(activated.ID), ExternalID: externalID, Email: activated.Email,
 		DisplayName: activated.DisplayName, Actor: actor, NewIdentity: false,
 	})
+}
+
+// ActivateInviteForLane — активация приглашения на полосе формы одним writer'ом
+// вызывающего, в форме порта полосы (`humansession.InviteActivation`): исход
+// подтверждения адреса (kaname#456, Р11 п. 2) и переход записи к владельцу
+// ящика (kaname#458, Р3 п. 4) зовут ОДНУ функцию. Актор — сам человек строки.
+// Срок и снятие приглашения, как и строка, уже не PENDING, — один исход «не
+// активируется»: humansession.ErrInviteNotValid (Р11 п. 3, Р6 kaname#458).
+// Прочие отказы — как есть. Функция НЕ коммитит и НЕ откатывает.
+func ActivateInviteForLane(ctx context.Context, w Writer, pending domain.User) (humansession.InviteActivation, error) {
+	res, err := ActivateInviteOnVerificationTx(ctx, w, pending, string(pending.ID))
+	if err != nil {
+		if errors.Is(err, iamerr.ErrInviteExpired) || errors.Is(err, iamerr.ErrNotFound) {
+			return humansession.InviteActivation{}, humansession.ErrInviteNotValid
+		}
+		return humansession.InviteActivation{}, err
+	}
+	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }

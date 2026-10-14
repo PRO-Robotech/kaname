@@ -3,7 +3,7 @@
 
 package relverdict_test
 
-// scopedistinct_integration_test.go — #811: ПРЕДОК, ДОСТИГНУТЫЙ ДВУМЯ ПУТЯМИ,
+// scopedistinct_integration_test.go — kacho#811: ПРЕДОК, ДОСТИГНУТЫЙ ДВУМЯ ПУТЯМИ,
 // ЧИТАЕТСЯ ОДИН РАЗ.
 //
 // ─────────────────────────────────────────────────────────────────────────────

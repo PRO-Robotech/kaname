@@ -73,6 +73,13 @@ service SAKeyService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
+  // Revoke removes a service account key. Revoking what the named service
+  // account does not hold is a synchronous `NOT_FOUND` with the text `SAKey
+  // <key_id> not found`, and no operation: a key that never existed, one
+  // already revoked and one of another service account are indistinguishable —
+  // by code, by text (but for the echo of the id) and by details. The loser of
+  // two concurrent revokes gets an operation ending with the same refusal;
+  // only the revoke that removed the key succeeds with `revoked_at`.
   rpc Revoke (RevokeSAKeyRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/serviceAccounts/{service_account_id}/keys/{key_id}"
@@ -97,7 +104,11 @@ message IssueSAKeyRequest {
   // Description of the SAKey.
   string description = 2;
   // Optional ISO duration in seconds. Смысл ЗНАЧЕНИЯ 0 ЗАВИСИТ ОТ ВИДА:
-  //   * KEYPAIR / FEDERATED — 0 означает БЕССРОЧНО (прежнее поведение);
+  //   * KEYPAIR / FEDERATED — 0 означает «срок не назван», и применяется
+  //     умолчание УСТАНОВКИ (`authn.sakey-default-ttl`, умолчание процесса —
+  //     90 суток). Ключ без срока выдаётся лишь установкой, обнулившей это
+  //     умолчание. Названный срок сверх потолка установки
+  //     (`authn.sakey-max-ttl`, умолчание процесса — 365 суток) ОТВЕРГАЕТСЯ;
   //   * SECRET — 0 означает «срок не назван», применяется умолчание политики;
   //     БЕССРОЧНОГО СЕКРЕТА НЕ БЫВАЕТ НИ В КАКОМ НАПИСАНИИ, и срок сверх
   //     потолка политики ОТВЕРГАЕТСЯ, а не урезается молча.
@@ -127,13 +138,13 @@ message IssueSAKeyRequest {
   // видом выдачи `urn:ietf:params:oauth:grant-type:jwt-bearer` (RFC 7523 §2.1).
   // Мы принимаем его тогда и только тогда, когда пара `(iss, sub)` есть в
   // НАШЕМ перечне доверенных издателей и подпись сошлась с записанным там
-  // ключом издателя (задача #1124).
+  // ключом издателя (задача kacho#1124).
   //
   // Каждый элемент сужает, какая внешняя пара вправе выступать за этот ключ.
   // Пустой перечень — обычный вид с ключевым материалом.
   repeated TrustedSubject trusted_subjects = 5;
 
-  // Federation OUT — и СУЖЕНИЕ адресатов этого ключа (задача #1136).
+  // Federation OUT — и СУЖЕНИЕ адресатов этого ключа (задача kacho#1136).
   //
   // Непустой перечень называет, для чего заведён ключ: токен по нему выдаётся
   // ТОЛЬКО тем адресатам, которые здесь названы. Это нужно внешней федерации —
@@ -198,7 +209,7 @@ message TrustedSubject {
   string subject_pattern = 2;
 
   // Открытый ключ ИЗДАТЕЛЯ в форме SPKI PEM — тот, которым подписано внешнее
-  // утверждение (задача #1124).
+  // утверждение (задача kacho#1124).
   //
   // ПОЧЕМУ КЛЮЧ, А НЕ АДРЕС НАБОРА КЛЮЧЕЙ. Перечень доверенных издателей — наша
   // таблица, и читает её наша проверка утверждения на пути запроса. Адрес
@@ -249,7 +260,7 @@ message IssueSAKeyResponse {
   // JWK `kid` of the registered public key; the same value as `client_id`.
   string key_id = 7;
   // Перечень адресатов, которые этот ключ вправе заказать, — сужение,
-  // записанное на ключе при выдаче (`audience` запроса, задача #1136).
+  // записанное на ключе при выдаче (`audience` запроса, задача kacho#1136).
   // Токен-эндпоинт платформы выдаёт адресата только из этого перечня и только
   // внутри перечня посадки (`authn.client-token.allowed-audiences`).
   //
@@ -279,8 +290,9 @@ message IssueSAKeyMetadata {
 message ListSAKeysRequest {
   // ID of the ServiceAccount.
   string service_account_id = 1;
-  // Maximum number of results per page. 0 selects the service default (50);
-  // a value above 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+  // Maximum number of results per page. 0 selects the platform default (50),
+  // the same one every List of the service applies; a value outside [0..1000]
+  // is rejected with INVALID_ARGUMENT rather than clamped.
   int64  page_size           = 2;
   // Page token. To get the next page of results, set [page_token] to the
   // [ListSAKeysResponse.next_page_token] returned by a previous list request.

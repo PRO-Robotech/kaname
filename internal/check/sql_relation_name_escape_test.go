@@ -53,4 +53,35 @@ func TestSQLEscape_RangeEdgeHasANamedOutcome(t *testing.T) {
 			require.Equal(t, want, sqlUnicodeUnescape(in, '\\'), "%q", in)
 		}
 	})
+	t.Run("E-строка, суррогаты — пару база склеивает, одиночный и короткую форму отвергает (kaname#174)", func(t *testing.T) {
+		// Сверено с postgres:16-alpine (16.15) 2026-10-04: пара склеивается и через
+		// смешение \u и \U; одиночный старший, одиночный младший и \u с неполными
+		// цифрами — отказ константы. Отказ — тот же названный исход, что у края
+		// диапазона: экранирование остаётся как написано, коса граничит имя.
+		for in, want := range map[string]string{
+			`a\uD83D\uDE00`:         "a\U0001F600",     // пара — один знак: иначе ПРОПУСК имени вне BMP
+			`a\U0000D83D\U0000DE00`: "a\U0001F600",     // та же пара восьмизначной формой
+			`a\uD83D\U0000DE00`:     "a\U0001F600",     // и смешанной
+			`a\uD83D`:               `a\uD83D`,         // база: invalid Unicode surrogate pair
+			`a\uD83Dx`:              `a\uD83Dx`,        // старший, за которым не младший
+			`a\uDE00`:               `a\uDE00`,         // одиночный младший
+			`a\uD83D\\uDE00`:        "a\\uD83D\\uDE00", // за старшим экранированная коса: старший как написано, коса раскрыта
+			`a\u12`:                 `a\u12`,           // база: invalid Unicode escape — не «как \c»
+			`a\U0041`:               `a\U0041`,         // неполная восьмизначная форма — так же
+		} {
+			require.Equal(t, want, sqlUnbackslash(in), "%q", in)
+		}
+	})
+	t.Run("U&-константа, суррогаты — старший без младшего не отбрасывается молча (kaname#174)", func(t *testing.T) {
+		for in, want := range map[string]string{
+			`a\D83D\DE00`:       "a\U0001F600", // контроль: пара склеивается
+			`a\+00D83D\+00DE00`: "a\U0001F600", // шестизначной формой
+			`a\D83D\+00DE00`:    "a\U0001F600", // смешанной
+			`a\D83Dx`:           `a\D83Dx`,     // база: invalid Unicode surrogate pair — прежде старший пропадал
+			`a\D83D`:            `a\D83D`,      // старший в конце
+			`a\DE00`:            `a\DE00`,      // одиночный младший — прежде U+FFFD
+		} {
+			require.Equal(t, want, sqlUnicodeUnescape(in, '\\'), "%q", in)
+		}
+	})
 }

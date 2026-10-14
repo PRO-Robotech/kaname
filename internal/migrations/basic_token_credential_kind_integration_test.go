@@ -73,6 +73,7 @@ VALUES ('sva00000000000000bat', 'acc00000000000000bat', 'bat-one-sa')
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err, "посев служебной учётки")
 
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit(), "посев владельцев удостоверений")
 }
 

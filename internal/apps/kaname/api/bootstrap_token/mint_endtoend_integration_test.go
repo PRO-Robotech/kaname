@@ -3,7 +3,7 @@
 
 // mint_endtoend_integration_test.go — бутстрап-удостоверение выпускается НА
 // ПОДНЯТОЙ С НУЛЯ базе, без внешней стороны, и оно того вида, который принимает
-// край (задача #1119, предикаты снятия п.2 и п.3).
+// край (задача kacho#1119, предикаты снятия п.2 и п.3).
 //
 // # Почему пакет ВНЕШНИЙ (`bootstrap_token_test`)
 //
@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -119,7 +120,7 @@ func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) 
 	keys := newMemKeys(t)
 	signer, err := tokensigner.New(tokensigner.Config{
 		Issuer:      testIssuer,
-		Clock:       time.Now,
+		Clock:       momentclock.Func(time.Now),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, keys)
 	require.NoError(t, err)

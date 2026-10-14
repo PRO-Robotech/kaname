@@ -79,9 +79,13 @@ func withReason(code codes.Code, reason, text string) error {
 	return st.Err()
 }
 
-// sessionNotFresh — отказ окна свежести, называющий следующий шаг (Ф7-04, Ф7-36).
+// sessionNotFresh — отказ окна свежести, называющий следующий шаг (Ф7-04,
+// Ф7-36). Пара — `PERMISSION_DENIED` / 403, та же, что у полосы второго фактора
+// (Ф11-33 отдаёт код приёмке действия; Ф12 §1.3 и Р8 его называют): клиент,
+// ветвящийся по коду, обязан идти предъявлять удостоверение заново, а не
+// «чинить форму или состояние» — а это и говорит 400/9 (kaname#523).
 func sessionNotFresh() error {
-	return withReason(codes.FailedPrecondition, ReasonSessionNotFresh, TextSessionNotFresh)
+	return withReason(codes.PermissionDenied, ReasonSessionNotFresh, TextSessionNotFresh)
 }
 
 // fieldRequired / fieldRule — отказ формы с именем поля.

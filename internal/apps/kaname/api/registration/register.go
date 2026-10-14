@@ -3,7 +3,7 @@
 
 package registration
 
-// register.go — РЕГИСТРАЦИЯ ПАРОЛЕМ: три следствия одним исходом (Ф4-01…05),
+// register.go — РЕГИСТРАЦИЯ ПАРОЛЕМ: четыре следствия одним исходом (Ф4-01…05, Р8),
 // единый отказ (Ф4-11…13), приглашённый той же полосой (Ф4-23, Ф4-24).
 //
 // # Порядок внутри глагола — несущий
@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // actorSelfService — актор аудита: человек заводит себя сам, субъекта у него
@@ -51,6 +52,9 @@ type Input struct {
 	Password string
 	// Source — адрес источника, как его прислал допущенный вызывающий.
 	Source string
+	// Client — описание клиента запроса регистрации (kaname#634, Р3): идёт в
+	// запись выдаваемой сессии и больше никуда.
+	Client domain.ClientDescription
 }
 
 // Output — исход успешной регистрации: состав ответа, носитель, лёг ли способ
@@ -81,7 +85,11 @@ type Deps struct {
 	Sources    humansession.SourcePacer
 	SourcePace humansession.SourcePace
 	Now        func() time.Time
-	Logger     *slog.Logger
+	// CutoffClock — источник момента аутентификации выдаваемой сессии: тот
+	// же, что ставит отсечку отзыва-всех (kaname#589). Обязателен: полоса без
+	// выдачи сессии не собирается (Р4), значит и без источника её момента.
+	CutoffClock revocationpolicy.Clock
+	Logger      *slog.Logger
 }
 
 // RegisterUseCase — регистрация паролем.
@@ -97,6 +105,7 @@ type RegisterUseCase struct {
 	sources    humansession.SourcePacer
 	sourcePace humansession.SourcePace
 	now        func() time.Time
+	clock      revocationpolicy.Clock
 	logger     *slog.Logger
 }
 
@@ -117,6 +126,8 @@ func NewRegisterUseCase(d Deps) (*RegisterUseCase, error) {
 		return nil, fmt.Errorf("registration: lane must be named")
 	case d.Sources == nil:
 		return nil, fmt.Errorf("registration: source pacer required — registration sends a letter, and its pace per source is not optional")
+	case d.CutoffClock == nil:
+		return nil, fmt.Errorf("registration: shared clock required — the session it issues is judged against the revoke-all cutoff")
 	}
 	if err := d.Letter.Validate(); err != nil {
 		return nil, fmt.Errorf("registration: %w", err)
@@ -142,7 +153,7 @@ func NewRegisterUseCase(d Deps) (*RegisterUseCase, error) {
 	return &RegisterUseCase{
 		store: d.Store, rule: d.Rule, hasher: d.Hasher, lane: d.Lane, ttl: d.TTL,
 		observer: d.Observer, reconciler: d.Reconciler, letter: d.Letter, sources: d.Sources,
-		sourcePace: d.SourcePace, now: d.Now, logger: d.Logger,
+		sourcePace: d.SourcePace, now: d.Now, clock: d.CutoffClock, logger: d.Logger,
 	}, nil
 }
 
@@ -195,6 +206,17 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 		}
 	}
 
+	// Момент выдаваемой сессии — из общего источника (kaname#589), до
+	// транзакции: источник читается своим соединением.
+	at, err := revocationpolicy.Moment(ctx, uc.clock)
+	if err != nil {
+		uc.logger.ErrorContext(ctx, "registration: shared moment unavailable",
+			"step", "shared-moment", "class", revocationpolicy.MomentFailureClass(err))
+		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
+		return Output{}, humansession.ErrStoreUnavailable
+	}
+	at = at.Truncate(time.Microsecond)
+
 	// (3) Одна транзакция трёх следствий — в объявленном порядке полосы.
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
@@ -227,10 +249,11 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 			session, bearer, err = humansession.IssueSession(ctx, w, humansession.IssueInput{
 				User:      mirror.User,
 				Presented: []assurance.Presentation{assurance.PasswordPresented()},
-				At:        now,
+				At:        at,
 				TTL:       uc.ttl,
 				// Своё событие — ниже; выдача его не дублирует (Ф3-47).
 				EmitAudit: false,
+				Client:    in.Client,
 			})
 			if err == nil {
 				err = w.EmitAudit(ctx, outboxtypes.AuditEvent{
@@ -304,8 +327,20 @@ func namedByThisForm(err error) error {
 
 // refuse — отказ по сентинелу адаптера: единый отказ регистрации (Р3) либо
 // недоступность. Причина — только в клетке счётчика.
+//
+// Классификация идёт ПО МЕСТУ, а не по одному сентинелу: нарушение уникальности
+// из записи ЛИЧНОГО аккаунта (`ErrPersonalAccountNameUnavailable`, вложено в
+// `ErrAlreadyExists`) — НЕВЫПОЛНЕНИЕ, а не занятость адреса, поэтому проверяется
+// ПЕРВЫМ, до общего `ErrAlreadyExists`. Иначе тот же 23505 из системно-выбранного
+// имени ушёл бы в единый отказ занятости (400) и солгал бы о свободном адресе (Р9,
+// Р3).
 func (uc *RegisterUseCase) refuse(err error) error {
 	switch {
+	case errors.Is(err, iamerr.ErrPersonalAccountNameUnavailable):
+		uc.logger.Error("registration: not performed — personal account name could not be allocated; state unchanged",
+			"err", err.Error())
+		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
+		return humansession.ErrStoreUnavailable
 	case errors.Is(err, iamerr.ErrAlreadyExists):
 		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeRefusedOccupied)
 		return ErrRefused

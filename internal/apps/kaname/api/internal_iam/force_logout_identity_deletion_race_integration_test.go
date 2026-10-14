@@ -57,10 +57,10 @@ import (
 func seedAccountMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool, owner domain.UserID) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1, account_id, $2, $3, 'Deletion Race Target', 'ACTIVE'
-		  FROM kaname.users WHERE id = $4`,
+		  FROM kaname.users WHERE id = $4`),
 		string(uid), "ext-"+string(uid), fmt.Sprintf("m-%s@example.com", uid), string(owner))
 	require.NoError(t, err, "личность в аккаунте владельца")
 	return uid

@@ -76,6 +76,7 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,
 		domain.ExternalSubject(ext), domain.DisplayName("Bootstrap Concurrent"))
 	require.NoError(t, err)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 
 	require.Equal(t, 0, ownedAccountCount(t, ctx, pool, string(inviteeID)),

@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// key_material_window_wiring_test.go — ОКНО ПЕРЕХОДА #1143 ДОЕЗЖАЕТ ДО ПОЛОСЫ.
+// key_material_window_wiring_test.go — ОКНО ПЕРЕХОДА kacho#1143 ДОЕЗЖАЕТ ДО ПОЛОСЫ.
 //
 // Ручка, объявленная и не провязанная, — мёртвый контроль: оператор считает,
 // что принимает оба вида, а полоса отвергает прежний, и узнаёт он об этом от
@@ -38,7 +38,7 @@ type countingObserver struct{ seen map[string]int }
 
 func (o *countingObserver) ObserveCredentialKind(outcome string) { o.seen[outcome]++ }
 
-// keyMaterialLogin — вход в том виде, в каком его слал клиент до #1143.
+// keyMaterialLogin — вход в том виде, в каком его слал клиент до kacho#1143.
 const keyMaterialLogin = "-----BEGIN PRIVATE KEY-----\nnot-a-real-key-1143\n-----END PRIVATE KEY-----"
 
 func dockerLogin(t *testing.T, h http.Handler, user, pass string) int {

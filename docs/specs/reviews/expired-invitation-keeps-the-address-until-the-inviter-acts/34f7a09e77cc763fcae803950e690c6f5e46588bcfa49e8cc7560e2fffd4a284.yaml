@@ -1,0 +1,97 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md
+  sha256: 34f7a09e77cc763fcae803950e690c6f5e46588bcfa49e8cc7560e2fffd4a284
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_commit_note: >-
+    Редакция 2 рассмотрена незакоммиченной в рабочей копии ветки 198 (от origin/296 @8b0379e2a);
+    отпечаток — с файла рабочего дерева. Коммит, несущий ровно этот отпечаток, обязан дать тот же
+    sha256 (git show <коммит>:<путь> | sha256sum).
+  branch: '198'
+  task: PRO-Robotech/kaname#198
+  related_tasks: [PRO-Robotech/kacho#1266, PRO-Robotech/kaname#540]
+  lines: 428
+  round: 1
+  revision: 2
+  predecessor_record: docs/specs/reviews/expired-invitation-keeps-the-address-until-the-inviter-acts/826d25f5161aa06a156bac421af13148d545640ad8ac1e8de60da2d7b256e2c8.yaml
+  predecessor_note: >-
+    Одобрение редакции 1 (826d25f5…) на эту редакцию не переносится; эта запись — соседняя, прежняя
+    не тронута.
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md
+    в копии kacho-workspace/tmp/kaname-198-acc (ветка 198, HEAD 8b0379e2a, файл изменён) → 34f7a09e…a4284 (перемерено)
+  measurement_revisions: >-
+    Все замеры и посев — в отдельной копии рецензента kacho-workspace/tmp/kaname-198-rev @ 8b0379e2a
+    (detached), разовая проба в дерево не внесена.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-08T03:41:46Z"
+  ban1_lifted: false
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  why: "Блокирующих 0. Санкцию выдаёт внешнее событие допущенной учётки (пять полей)."
+
+blocking: []
+
+important_nonblocking:
+  - "A198-07: «Дано» (выкупленная строка, ACTIVE + членство ACTIVE) §1.4 не строит. Посев рецензента показал: голый ActivateInvite после отметки адреса отвергается отложенным ключом users_active_has_a_way_in_fk (23503 → INTERNAL); строится так — InsertPending (срок в будущем) → отметка подтверждения адреса → строка пароля приглашённого (как inviteePasswordSQL в pg-фикстуре) → ActivateInvite. Назвать эту фикстуру в харнессе §3 (её нет в пакете registration_test)."
+  - "A198-07: близнец «A198-02» отличается двумя фактами (состояние строки и истёкший срок). Строже — близнец с PENDING и тем же живым сроком: меняется ровно состояние, письмо прибавляется."
+  - "Р5 называет BLOCKED (срок не пишется, письма нет), сценария на BLOCKED нет — ветвь та же CASE, что у ACTIVE; держит A198-07 частично."
+  - "§1.1: «(и др.)» — вхождение OutcomeRefusedInviteExpired в *_test.go одно (register_expired_invite_integration_test.go)."
+  - "DoD п.3: <база> — назвать ревизию (origin/296 на момент посадки), иначе предикат не исполним как есть."
+
+confirmed:
+  - "Производитель у «Тогда»: 7 из 7 + §4 (§5); заказанные — правка run в invite.go, допустимость показана: InsertPending на ветви того же аккаунта возвращает прежний id, inserted=false, срок продлён ≥ now+23ч, членство PENDING→PENDING, регистрация после — Invited=true, клетка issued-invited 1."
+  - "Близнец у отрицаний/позитивов: 7 из 7 назван (A198-07 — с оговоркой выше)."
+  - "Конструируемость посевом: 7 из 7 «Дано» построены (A198-01/03/04 — пробы в дереве PASS; A198-02/05/06/07 — разовая проба рецензента), «не выполнилось» 0."
+  - "Посылка §1.5 подтверждена исполнением @8b0379e2a: UserService.Invite и MembershipService.Create в тот же аккаунт на истёкшей строке — done без ошибки, срок побайтово прежний, письмо +1, регистрация — registration refused. A198-06 (30 сут) и A198-07 сегодня зелёные — совпадает с DoD п.1."
+  - "Прогон §10: TestA198_01/03/04, TestInviteDeadline_ExpiredRowDoesNotActivate, _ReInvitingExtendsAnExpiredRow, _ReInvitingNeverShortensALongerDeadline — 6 из 6 PASS @8b0379e2a."
+  - "Предикат §1.2: уборки нет (пусто); DELETE FROM users — одно место (user_repo.go:766)."
+  - "Статика §1.5/§10: existing, exErr / if exErr == nil — 2 строки (527, 550); inviteDeadline() — 2 (571 вызов, 810 определение); uc.run(ctx, adm — 2 (239, 283)."
+  - "Согласие с соседями: ID-MAIL-1 MAIL-23 и MAIL-36 (идемпотентность по id сохраняется, письмо в пределах частоты), Ф4 Р3/Р6 — расхождений нет; docs/content/api/user.mdx уже говорит «повтор письма срок не двигает», membership.mdx — таблица «что заводится» без срока (DoD п.6 закрывает)."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#198
+  status: performed
+  published: true
+  database_id: 6051703817
+  node_id: "IC_kwDOUO26pM8AAAABaLWsCQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/198#issuecomment-6051703817"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051703817"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T03:41:46Z"
+  body_sha256: "2e3600f48c1eb0e4a8e5382b067b857f4fb893e5b14d1d6cfc86006d021d1210"
+  subject_sha256: "34f7a09e77cc763fcae803950e690c6f5e46588bcfa49e8cc7560e2fffd4a284"
+  subject_revision_commit: "b7d6ccd22fc2245e02a853e4bf76ee4942eca763"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

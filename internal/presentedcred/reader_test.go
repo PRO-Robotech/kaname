@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // reader_test.go — семейства VER, FWD, REV и DENY приёмки KAN-AUTHN-1
-// (задача продукта #2077).
+// (задача продукта kacho#2077).
 //
 // Единица наблюдения — АРЕНДАТОР ЧУЖОГО ОБЛАКА: у него нет ни нашего края,
 // чтобы передать личность, ни модульного сертификата. Всё, чего он не может
@@ -930,4 +930,40 @@ func TestPresented_MoreThanOneCredentialIsRefused(t *testing.T) {
 		t.Fatal("два предъявленных удостоверения приняты — победил порядок метаданных")
 	}
 	assertSingleRefusal(t, err)
+}
+
+// TestPresented_KN_SCL_18_CutoffEqualToIatIsRefused — читатель предъявленного судит
+// отсечку тем же правилом, что прочие её читатели (kaname#171, S3): отсечка
+// ровно в `iat` — отказ тем же единственным отказом, что у отзыва; близнец —
+// отсечка секундой раньше, предъявление проходит. Поверхностная проба того же
+// решения, а не второе правило (одно правило держит
+// `TestFamilyVerdictHasOneReaderAndEverySurfaceAsksTheRule`).
+func TestPresented_KN_SCL_18_CutoffEqualToIatIsRefused(t *testing.T) {
+	t.Run("равенство", func(t *testing.T) {
+		s := newStand(t, withCacheTTL(30*time.Second))
+		raw := s.good(t)
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("исходное предъявление обязано пройти: %v", err)
+		}
+		s.revs.revoke(testSubject, s.now)
+		s.clock.advance(31 * time.Second)
+		_, _, err := s.present(t, raw)
+		if err == nil {
+			t.Fatal("токен с iat, РАВНЫМ отсечке, принят на предъявлении: граница правила " +
+				"строже, чем у прочих читателей той же отсечки")
+		}
+		assertSingleRefusal(t, err)
+	})
+	t.Run("близнец: секундой раньше", func(t *testing.T) {
+		s := newStand(t, withCacheTTL(30*time.Second))
+		raw := s.good(t)
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("исходное предъявление обязано пройти: %v", err)
+		}
+		s.revs.revoke(testSubject, s.now.Add(-time.Second))
+		s.clock.advance(31 * time.Second)
+		if _, _, err := s.present(t, raw); err != nil {
+			t.Fatalf("токен, выпущенный после отсечки, отвергнут: %v", err)
+		}
+	})
 }

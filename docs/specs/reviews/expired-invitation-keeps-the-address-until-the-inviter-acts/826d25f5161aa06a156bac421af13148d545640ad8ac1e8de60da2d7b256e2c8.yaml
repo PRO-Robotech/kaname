@@ -1,0 +1,90 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md
+  sha256: 826d25f5161aa06a156bac421af13148d545640ad8ac1e8de60da2d7b256e2c8
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 36fce61d
+  content_commit: 3827cbfccaf5fa968e0e80bc79f64678d472b0f0
+  branch: '197'
+  task: PRO-Robotech/kaname#198
+  related_tasks: [PRO-Robotech/kacho#1266]
+  lines: 269
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md
+    в копии kacho-workspace/tmp/kaname-197-198-acc @ 3827cbfcc → 826d25f5…7b256e2c8 (перемерено)
+  measurement_revisions: >-
+    Все замеры — в копии kaname-197-198-acc @ 3827cbfcc.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  why: "Блокирующих 0. Санкцию выдаёт внешнее событие допущенной учётки (пять полей)."
+
+blocking: []
+
+important_nonblocking:
+  - "A198-01: посев InsertPending обязан нести непустой invited_by — иначе RegisterMirrorTx отвечает ErrAlreadyExists и клетка будет refused-occupied, а не refused-invite-expired (mirror_tx.go, ветвь InvitedBy == \"\")."
+  - "A198-02: Given называет UserService.Invite; в харнессе регистрации достаточно оператора приглашения хранилища (как TestInviteDeadline_ReInvitingExtendsAnExpiredRow) — назвать фикстуру."
+  - "A198-04: харнесс ResendInvite в §3 не назван (resend_invite_test.go — модульный)."
+  - "DoD п.1: пробы зелены сразу; способность упасть показывает близнец — желательна одна инъекция (refuse отвечает успехом) с красным."
+
+confirmed:
+  - "Производитель у «Тогда»: 4 из 4 + §4 (§5)."
+  - "Близнец у отрицаний: 4 из 4."
+  - "Посылки §1 перемерены: проб OutcomeRefusedInviteExpired 0; уборки нет; DELETE FROM users — одно место (user_repo.go:766); FK users→accounts RESTRICT; приглашение без project/role не заводит привязки — A198-03 конструируем."
+  - "Прогон §10: TestInviteDeadline_ExpiredRowDoesNotActivate, _ReInvitingExtendsAnExpiredRow, F4_23, F4_11_24, TestUserDelete_ReferencedAsSubjectN_Blocked — PASS @3827cbfcc (через слот)."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#198
+  status: performed
+  published: true
+  database_id: 5993396593
+  node_id: IC_kwDOUO26pM8AAAABZTv5cQ
+  url: https://github.com/PRO-Robotech/kaname/issues/198#issuecomment-5993396593
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5993396593
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/198
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-05T11:20:10Z'
+  body_sha256: 4fe53a3a7e04e56b33809bdca6d193462d827b6874f023430616392488548d3b
+  subject_sha256: 826d25f5161aa06a156bac421af13148d545640ad8ac1e8de60da2d7b256e2c8
+  subject_revision: 3827cbfccaf5fa968e0e80bc79f64678d472b0f0
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; заключение рецензента не правилось.
+    Отпечаток предмета сверен: git show 3827cbfcc:<путь> | sha256sum даёт 826d25f5161aa06a…,
+    совпал с объявленным. Отпечаток тела снят с сырого ответа API
+    (gh api repos/PRO-Robotech/kaname/issues/comments/5993396593).
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

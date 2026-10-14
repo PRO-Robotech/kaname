@@ -30,7 +30,7 @@ type fakeStore struct {
 	rows  map[domain.RoleID]domain.Role
 	refs  map[domain.RoleID][]domain.RoleRuleRef
 	calls int // вызовов писателя строки
-	// retired — идентификаторы снятых ролей в порядке снятия (#1913).
+	// retired — идентификаторы снятых ролей в порядке снятия (kacho#1913).
 	retired []domain.RoleID
 }
 
@@ -48,7 +48,7 @@ func newStore() *fakeStore {
 // отказе действия, и цепочка `%w` в этом месте ТЕРЯЕТСЯ. Дублёр, отдающий отказ
 // сырым, СОХРАНЯЛ бы цепочку, которую продукт теряет, — то есть был бы
 // снисходительнее продукта ровно на той оси, которую пробы полосы и измеряют
-// (задача #1880). Границы транзакции у дублёра нет, и он её не изображает:
+// (задача kacho#1880). Границы транзакции у дублёра нет, и он её не изображает:
 // границу проверяет интеграционная проба на настоящей базе.
 func (s *fakeStore) RunInWriteTx(ctx context.Context, fn func(context.Context, moduleroles.RoleWriter) error) error {
 	return shared.MapRepoErr(fn(ctx, s))
@@ -268,7 +268,7 @@ func TestApplierRefusesARoleThatTheDomainRejects(t *testing.T) {
 	}
 }
 
-// LiveSystemRoles / RetireRole / ReviveRole — дублёр ОТЗЫВА (#1913).
+// LiveSystemRoles / RetireRole / ReviveRole — дублёр ОТЗЫВА (kacho#1913).
 //
 // Он держит ровно то, что и оператор: живость строки, её пометку и снятие
 // проекции сегментов. Порядок «проекции → пометка» дублёр НЕ изображает — его

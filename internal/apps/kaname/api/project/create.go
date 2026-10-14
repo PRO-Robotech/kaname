@@ -29,7 +29,7 @@ import (
 )
 
 // ObjectReconciler — narrow post-commit port (rbac-contract-a-fix, C-01b /
-// issue #232): SYNCHRONOUSLY materialize the per-object access on a freshly-created
+// issue kacho-iam#232): SYNCHRONOUSLY materialize the per-object access on a freshly-created
 // iam-native object right after the create writer-tx commits. Under the flat rights
 // model (Contract-A) the `<rel> from account` ACCESS cascade on iam leaf types is
 // gone, so the owner's / account-admin's per-object admin/v_* tuple on project:<id>
@@ -68,7 +68,7 @@ type CreateProjectUseCase struct {
 	// the api-gateway per-RPC authz middleware can never authorise a
 	// project-scoped Get/Update/Delete.
 	relations  clients.RelationStore
-	reconciler ObjectReconciler // rbac-contract-a-fix / #232 — optional, nil-safe
+	reconciler ObjectReconciler // rbac-contract-a-fix / kacho-iam#232 — optional, nil-safe
 	logger     *slog.Logger
 }
 
@@ -84,7 +84,7 @@ func (u *CreateProjectUseCase) WithRelationStore(relations clients.RelationStore
 }
 
 // WithObjectReconciler wires the post-commit synchronous per-object materializer
-// (rbac-contract-a-fix, C-01b / issue #232). nil-safe.
+// (rbac-contract-a-fix, C-01b / issue kacho-iam#232). nil-safe.
 func (u *CreateProjectUseCase) WithObjectReconciler(r ObjectReconciler) *CreateProjectUseCase {
 	u.reconciler = r
 	return u
@@ -103,7 +103,7 @@ func (u *CreateProjectUseCase) Execute(ctx context.Context, p domain.Project) (*
 	}
 	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
 	// вход создания и означает «назови сам», а умолчание производится ОТ
-	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279). Проверка формы
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (kacho#1279). Проверка формы
 	// после подстановки судит ровно то, что будет записано.
 	projID := ids.NewID(domain.PrefixProject)
 	p.Name = domain.ProjectName(corevalidate.NameOrDefault(string(p.Name), projID))
@@ -188,7 +188,7 @@ func (u *CreateProjectUseCase) doCreate(ctx context.Context, p domain.Project, a
 		return nil, err
 	}
 
-	// rbac-contract-a-fix (forward-mat, C-01b / issue #232): SYNCHRONOUSLY materialize
+	// rbac-contract-a-fix (forward-mat, C-01b / issue kacho-iam#232): SYNCHRONOUSLY materialize
 	// the per-object access on the just-committed project so the owner / account-admin
 	// per-object admin/v_* tuple is observable when the Operation reports done — closing
 	// the GET-after-create race the async event drain would otherwise lose under the flat

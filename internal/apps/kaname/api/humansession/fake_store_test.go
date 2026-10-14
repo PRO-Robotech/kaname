@@ -23,10 +23,13 @@ package humansession_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/PRO-Robotech/corelib/pagetoken"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -40,6 +43,9 @@ type fakeRow struct {
 	digest domain.BearerDigest
 	ended  *time.Time
 	reason string
+	// seq — порядок вставки: у адаптера порядок выдачи несёт `created_at`
+	// базы, у дублёра — счётчик (`SessionsOf` сортирует по нему, затем по id).
+	seq int64
 }
 
 type fakeFailure struct {
@@ -75,6 +81,12 @@ type fakeStore struct {
 	// порта); "" — не отказывает. "writer" — отказ открыть транзакцию;
 	// "resolve" — отказ чтения.
 	failOn string
+	// touched — точки отказа, которые прогон СПРОСИЛ (`failsAt`): глагол,
+	// не спросивший точку, отказать на ней не может, и проба сбоя хранилища
+	// (store_unavailable_cells_test.go) судит только спрошенные. Свой замок —
+	// точки спрашиваются и под f.mu, и без него.
+	touchedMu sync.Mutex
+	touched   map[string]bool
 	// opened — каждая открытая транзакция, в порядке открытия: чем она открыта
 	// и чьи записи сессии в ней сняты — часть утверждений о порядке замков.
 	opened []*fakeWriter
@@ -82,10 +94,39 @@ type fakeStore struct {
 	trips atomic.Int64
 	// mailWindow — окна писем восстановления по адресату (kaname#456).
 	mailWindow map[string]int
+	// openPath — отметка открытого пути восстановления (kaname#608): ставит
+	// её только перенос, снимает только завершение восстановления.
+	openPath map[domain.UserID]bool
+	// keys — у кого заведена строка ключа доступа (ось «заведено», Ф13).
+	keys map[domain.UserID]bool
+	// keyListUnreadable — чтение перечня ключей портом `loginmethod.Store`
+	// отвечает ошибкой при исправных прочих чтениях и записях (kaname#747,
+	// §3.7 приёмки: фикстура KN747-17, -18). Отдельный переключатель, а не
+	// точка `failOn`: та роняет и чтение писателя, чей отказ судят другие пробы.
+	keyListUnreadable bool
+	// accessKeyRows — строки ключей доступа: чья строка (kaname#669). Держит их
+	// замок выдачи входа ключом `HoldAccessKeyForLogin` — той же семантикой,
+	// что адаптер: строка чужой личности и снятая неразличимы.
+	accessKeyRows map[domain.AccessKeyID]domain.UserID
+	// inserted — счётчик вставок записей сессии (`fakeRow.seq`).
+	inserted int64
+	// inviteGone — приглашения, истёкшие либо снятые так, как их судит оператор
+	// активации адаптера (kaname#458, Р6).
+	inviteGone map[domain.UserID]bool
+	// userTokens — у кого есть строка личного токена (kaname#458, Р3 п. 2).
+	userTokens map[domain.UserID]bool
 }
 
 // trip — один оператор базы: обращение, дошедшее до неё.
 func (f *fakeStore) trip() { f.trips.Add(1) }
+
+// cutBySubjectCutoff — запись отсечена отсечкой своей личности правилом края и
+// адаптера (`sessionCutOffBySubjectSQL`): момент аутентификации НЕ позже
+// отсечки. Вызывается под f.mu.
+func (f *fakeStore) cutBySubjectCutoff(s domain.HumanSession) bool {
+	c, ok := f.cutoffs[s.UserID]
+	return ok && !s.AuthenticatedAt.After(c.at)
+}
 
 // tripCount — операторов базы с начала жизни дублёра.
 func (f *fakeStore) tripCount() int64 { return f.trips.Load() }
@@ -103,6 +144,10 @@ func newFakeStore() *fakeStore {
 		cutoffs: map[domain.UserID]fakeCutoff{}, verifiers: map[domain.UserID]domain.LoginVerifier{},
 		factors: map[domain.UserID]map[domain.LoginMethodKind]*domain.LoginMethod{},
 		codes:   map[domain.RecoveryCodeID]*domain.RecoveryCode{}, completions: map[string]domain.RecoveryCompletion{},
+		openPath:      map[domain.UserID]bool{},
+		keys:          map[domain.UserID]bool{},
+		accessKeyRows: map[domain.AccessKeyID]domain.UserID{},
+		userTokens:    map[domain.UserID]bool{},
 	}
 }
 
@@ -114,7 +159,7 @@ func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now t
 	f.trip()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.failOn == "resolve" {
+	if f.failsAt("resolve") {
 		return humansession.Resolved{}, "", errFakePort
 	}
 	for _, r := range f.rows {
@@ -132,6 +177,52 @@ func (f *fakeStore) Resolve(_ context.Context, digest domain.BearerDigest, now t
 		return humansession.Resolved{Session: r.s, User: f.users[r.s.UserID], EmailVerified: f.verified[r.s.UserID]}, humansession.SessionFound, nil
 	}
 	return humansession.Resolved{}, humansession.NoSessionUnknown, nil
+}
+
+// SessionsOf — живые записи личности страницей (kaname#634): отказы
+// аргументом адаптера — до оператора; порядок — вставка (seq), затем id.
+// Отсечку личности судит, как адаптер (kaname#681): запись, аутентифицированная
+// НЕ позже отсечки, живой не показывается — до предела страницы.
+func (f *fakeStore) SessionsOf(_ context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
+	if size < 0 || size > 1000 {
+		return nil, "", errFakeArg("page_size must be in [0..1000] (0 means default)")
+	}
+	limit := int(size)
+	if limit == 0 {
+		limit = 50
+	}
+	after := int64(0)
+	if token != "" {
+		c, ok := pagetoken.Decode(token)
+		if !ok || c == nil {
+			return nil, "", errFakeArg("Illegal argument pageToken: malformed")
+		}
+		after = c.CreatedAt.UnixMicro()
+	}
+	f.trip()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failsAt("list") {
+		return nil, "", errFakePort
+	}
+	var rows []*fakeRow
+	for _, r := range f.rows {
+		if r.s.UserID == userID && r.ended == nil && !r.s.Expired(now) && r.seq > after && !f.cutBySubjectCutoff(r.s) {
+			rows = append(rows, r)
+		}
+	}
+	slices.SortFunc(rows, func(a, b *fakeRow) int { return int(a.seq - b.seq) })
+	next := ""
+	if len(rows) > limit {
+		last := rows[limit-1]
+		next = pagetoken.Encode(pagetoken.Cursor{CreatedAt: time.UnixMicro(last.seq).UTC(), ID: string(last.s.ID)})
+		rows = rows[:limit]
+	}
+	out := make([]domain.HumanSession, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.s)
+	}
+	return out, next, nil
 }
 
 func (f *fakeStore) CountFailures(_ context.Context, scope humansession.FailureScope, key string, since time.Time) (int, error) {
@@ -214,9 +305,24 @@ func (f *fakeStore) PersonWriter(_ context.Context, userID domain.UserID) (human
 	return w, nil
 }
 
+// EnrollmentWriter — транзакция глагола, решающего по заведённому
+// (kaname#770): строка личности замком сильнее писателя нескольких сессий.
+// Замков дублёр не моделирует; он повторяет РАБОТУ адаптера — открытие и
+// оператор замка строки личности — и запоминает, чью строку транзакция держит.
+func (f *fakeStore) EnrollmentWriter(_ context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := f.open(userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.holdPerson(userID); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
 func (f *fakeStore) open(lockedFor domain.UserID) (*fakeWriter, error) {
 	f.trip()
-	if f.failOn == "writer" {
+	if f.failsAt("writer") {
 		return nil, errFakePort
 	}
 	w := &fakeWriter{store: f, lockedFor: lockedFor}
@@ -288,10 +394,40 @@ func (w *fakeWriter) holdPersonForKey(userID domain.UserID) error {
 }
 
 func (w *fakeWriter) fail(op string) error {
-	if w.store.failOn == op {
+	if w.store.failsAt(op) {
 		return errFakePort
 	}
 	return nil
+}
+
+// failsAt — отказывает ли дублёр на точке op; точка отмечается спрошенной.
+func (f *fakeStore) failsAt(op string) bool {
+	f.touchedMu.Lock()
+	if f.touched == nil {
+		f.touched = map[string]bool{}
+	}
+	f.touched[op] = true
+	f.touchedMu.Unlock()
+	return f.failOn == op
+}
+
+// touchedPoints — спрошенные точки отказа с начала жизни дублёра (либо с
+// последнего сброса).
+func (f *fakeStore) touchedPoints() map[string]bool {
+	f.touchedMu.Lock()
+	defer f.touchedMu.Unlock()
+	out := make(map[string]bool, len(f.touched))
+	for k := range f.touched {
+		out[k] = true
+	}
+	return out
+}
+
+// resetTouched — забыть спрошенные точки: прогон судится отдельно от подготовки.
+func (f *fakeStore) resetTouched() {
+	f.touchedMu.Lock()
+	defer f.touchedMu.Unlock()
+	f.touched = nil
 }
 
 func (w *fakeWriter) InsertSession(_ context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
@@ -305,7 +441,10 @@ func (w *fakeWriter) InsertSession(_ context.Context, s domain.HumanSession, dig
 	if err := w.fail("insert"); err != nil {
 		return err
 	}
-	w.ops = append(w.ops, func() { w.store.rows[s.ID] = &fakeRow{s: s, digest: digest} })
+	w.ops = append(w.ops, func() {
+		w.store.inserted++
+		w.store.rows[s.ID] = &fakeRow{s: s, digest: digest, seq: w.store.inserted}
+	})
 	return nil
 }
 
@@ -372,6 +511,64 @@ func (w *fakeWriter) EndOtherSessions(_ context.Context, userID domain.UserID, k
 	return n, nil
 }
 
+// EndOwnSession — снятие ОДНОЙ живой записи личности (kaname#634): условие на
+// субъекта, живость и срок — у оператора, как у адаптера; снята — второй
+// оператор (отзыв выданного в ней).
+func (w *fakeWriter) EndOwnSession(_ context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (bool, error) {
+	if target == "" {
+		return false, errFakeArg("Illegal argument human_session.id: required")
+	}
+	if err := w.holdPerson(userID); err != nil {
+		return false, err
+	}
+	w.store.trip()
+	if err := w.fail("end-own"); err != nil {
+		return false, err
+	}
+	r, ok := w.store.rows[target]
+	if !ok || r.s.UserID != userID || r.ended != nil || r.s.Expired(now) {
+		return false, nil
+	}
+	w.store.trip()
+	w.ops = append(w.ops, func() { r.ended = &now; r.reason = reason })
+	return true, nil
+}
+
+// EndOtherLiveSessions — прочие ЖИВЫЕ записи личности, кроме keep (kaname#634);
+// снятые идентификаторы — в порядке id.
+func (w *fakeWriter) EndOtherLiveSessions(_ context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error) {
+	if err := w.holdPerson(userID); err != nil {
+		return nil, err
+	}
+	w.store.trip()
+	if err := w.fail("end-others-live"); err != nil {
+		return nil, err
+	}
+	var ended []domain.HumanSessionID
+	for id, r := range w.store.rows {
+		if r.s.UserID == userID && id != keep && r.ended == nil && !r.s.Expired(now) {
+			ended = append(ended, id)
+			row := r
+			w.ops = append(w.ops, func() { row.ended = &now; row.reason = reason })
+		}
+	}
+	slices.Sort(ended)
+	if len(ended) > 0 {
+		w.store.trip()
+	}
+	return ended, nil
+}
+
+// SessionLive — жива ли запись личности на now (kaname#634): чтение после замка.
+func (w *fakeWriter) SessionLive(_ context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error) {
+	w.store.trip()
+	if err := w.fail("live"); err != nil {
+		return false, err
+	}
+	r, ok := w.store.rows[id]
+	return ok && r.s.UserID == userID && r.ended == nil && !r.s.Expired(now), nil
+}
+
 func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error {
 	if digest == "" {
 		return errFakeArg("Illegal argument human_session.bearer_digest: required")
@@ -389,33 +586,64 @@ func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, d
 }
 
 // PresentInSession — предъявление способа внутри сессии (Ф12): множество,
-// уровень, носитель и момент — одной записью на живой строке.
-func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+// уровень, носитель и момент — одной записью на живой строке. Контракт
+// адаптера исполняется ТЕМ ЖЕ правилом: условие на прежний уровень (кандидат
+// ниже записанного запись не понижает — kaname#343), множество накапливается,
+// ответ — то, что легло.
+func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (humansession.PresentedRecord, error) {
 	if digest == "" {
-		return errFakeArg("Illegal argument human_session.bearer_digest: required")
+		return humansession.PresentedRecord{}, errFakeArg("Illegal argument human_session.bearer_digest: required")
 	}
 	if len(methods) == 0 {
-		return errFakeArg("Illegal argument human_session.presented_methods: required")
+		return humansession.PresentedRecord{}, errFakeArg("Illegal argument human_session.presented_methods: required")
 	}
 	w.store.trip()
 	if err := w.fail("present"); err != nil {
-		return err
+		return humansession.PresentedRecord{}, err
 	}
 	w.store.mu.Lock()
 	defer w.store.mu.Unlock()
 	r, ok := w.store.rows[id]
 	if !ok || r.ended != nil {
-		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+	}
+	merged := append([]string(nil), r.s.PresentedMethods...)
+	for _, m := range methods {
+		if !slices.Contains(merged, m) {
+			merged = append(merged, m)
+		}
+	}
+	level := r.s.AssuranceLevel
+	if fakeLevelRank(candidate) > fakeLevelRank(level) {
+		level = candidate
 	}
 	w.ops = append(w.ops, func() {
 		if cur, ok := w.store.rows[id]; ok && cur.ended == nil {
-			cur.s.PresentedMethods = append([]string(nil), methods...)
+			cur.s.PresentedMethods = merged
 			cur.s.AssuranceLevel = level
 			cur.s.LastPresentedAt = presentedAt
 			cur.digest = digest
 		}
 	})
-	return nil
+	return humansession.PresentedRecord{Methods: merged, Level: level}, nil
+}
+
+// fakeLevelRank — позиция ступени в перечне оси, как у оператора адаптера.
+func fakeLevelRank(l string) int { return slices.Index([]string{"1", "2", "3"}, l) }
+
+// AccessKeyEnrolled — строка ключа у личности (ось «заведено», Ф13).
+func (w *fakeWriter) AccessKeyEnrolled(_ context.Context, userID domain.UserID) (bool, error) {
+	if userID == "" {
+		return false, errFakeArg("Illegal argument user_id: required")
+	}
+	w.store.trip()
+	if err := w.fail("access-key-enrolled"); err != nil {
+		return false, err
+	}
+	if w.store.keyListUnreadable {
+		return false, errFakePort
+	}
+	return w.store.keys[userID], nil
 }
 
 func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
@@ -458,12 +686,40 @@ func (w *fakeWriter) LockPersonForLogin(_ context.Context, userID domain.UserID)
 	if _, ok := w.store.users[userID]; !ok {
 		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
 	}
+	// У адаптера захват отмечает личность транзакции (`person`): строку
+	// ключа после него берёт `HoldAccessKeyForLogin`, без него — отказ.
+	w.holds = userID
 	w.store.trip()
 	c, ok := w.store.cutoffs[userID]
 	if !ok {
 		return time.Time{}, false, nil
 	}
 	return c.at, true, nil
+}
+
+// HoldAccessKeyForLogin — строка ключа под замком выдачи входа (kaname#669):
+// без захвата этой личности в той же транзакции — отказ без обхода базы, как у
+// адаптера; строки нет либо она чужая — NOT_FOUND.
+func (w *fakeWriter) HoldAccessKeyForLogin(_ context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	switch {
+	case userID == "":
+		return errFakeArg("Illegal argument user_id: required")
+	case keyID == "":
+		return errFakeArg("Illegal argument access_key_id: required")
+	case w.holds != userID:
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the access key is held only after the person row of the same transaction")
+	}
+	w.store.trip()
+	if err := w.fail("hold-access-key"); err != nil {
+		return err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	if owner, ok := w.store.accessKeyRows[keyID]; !ok || owner != userID {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "AccessKey %s not found", keyID)
+	}
+	return nil
 }
 
 func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {
@@ -479,6 +735,80 @@ func (w *fakeWriter) ReplaceLoginVerifier(_ context.Context, m domain.LoginMetho
 	}
 	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
 	return true, nil
+}
+
+// EnrollLoginMethod — заведение строки «пароль» (A7 Р3): строка есть —
+// enrolled=false, как нарушение ключа «человек, вид» у адаптера.
+func (w *fakeWriter) EnrollLoginMethod(_ context.Context, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, errFakeArg(err.Error())
+	}
+	w.store.trip()
+	if err := w.fail("enroll-method"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	_, exists := w.store.verifiers[m.UserID]
+	w.store.mu.Unlock()
+	if m.Kind != domain.LoginMethodPassword {
+		return false, errFakeArg("Illegal argument login_method: the double enrolls only the password row")
+	}
+	if exists {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
+	return true, nil
+}
+
+// PutLoginVerifier — «заменить либо завести» одним оператором (Ф5-34), как у
+// адаптера: вид — только пароль, отказ по имени "put-verifier".
+func (w *fakeWriter) PutLoginVerifier(_ context.Context, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, errFakeArg(err.Error())
+	}
+	if m.Kind != domain.LoginMethodPassword || m.State != domain.LoginMethodStateActive {
+		return false, errFakeArg("Illegal argument login_method: only an active password row is put by recovery")
+	}
+	w.store.trip()
+	if err := w.fail("put-verifier"); err != nil {
+		return false, err
+	}
+	_, exists := w.store.verifiers[m.UserID]
+	w.ops = append(w.ops, func() { w.store.verifiers[m.UserID] = m.Verifier })
+	return !exists, nil
+}
+
+// MarkEmailVerified — сверка адреса и отметка одним оператором, как у адаптера
+// (`markEmailVerifiedSQL`): адрес не тот либо личности нет — marked=false;
+// отказ по имени "mark-verified".
+func (w *fakeWriter) MarkEmailVerified(_ context.Context, userID domain.UserID, email domain.Email, at time.Time) (bool, error) {
+	if userID == "" || at.IsZero() {
+		return false, errFakeArg("Illegal argument email_verified_at: user and moment required")
+	}
+	w.store.trip()
+	if err := w.fail("mark-verified"); err != nil {
+		return false, err
+	}
+	u, ok := w.store.users[userID]
+	if !ok || humansession.AddressKey(string(u.Email)) != humansession.AddressKey(string(email)) {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() { w.store.verified[userID] = true })
+	return true, nil
+}
+
+// CloseRecoveryPath — снятие отметки открытого пути одним оператором; отказ
+// по имени "close-path".
+func (w *fakeWriter) CloseRecoveryPath(_ context.Context, userID domain.UserID) error {
+	if userID == "" {
+		return errFakeArg("Illegal argument user_id: required")
+	}
+	w.store.trip()
+	if err := w.fail("close-path"); err != nil {
+		return err
+	}
+	w.ops = append(w.ops, func() { delete(w.store.openPath, userID) })
+	return nil
 }
 
 // LoginMethod — то же чтение, что `fakeMethods.Get`, транзакцией дублёра;
@@ -745,7 +1075,7 @@ func (d fakeUsers) UserByEmail(_ context.Context, email domain.Email) (domain.Us
 			return u, nil
 		}
 	}
-	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with email %s not found", email)
+	return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User with this email not found")
 }
 
 type fakeMethods struct{ store *fakeStore }
@@ -776,6 +1106,16 @@ func (m fakeMethods) MarkEmailVerified(_ context.Context, userID domain.UserID, 
 	return nil
 }
 
+// AccessKeyEnrolled — порт `loginmethod.Store` (ось «заведено», Ф13).
+func (m fakeMethods) AccessKeyEnrolled(_ context.Context, userID domain.UserID) (bool, error) {
+	m.store.mu.Lock()
+	defer m.store.mu.Unlock()
+	if m.store.keyListUnreadable {
+		return false, errFakePort
+	}
+	return m.store.keys[userID], nil
+}
+
 func (m fakeMethods) EmailVerification(_ context.Context, userID domain.UserID) (time.Time, bool, error) {
 	if m.store.verified[userID] {
 		return time.Unix(1, 0), true, nil
@@ -803,6 +1143,10 @@ type countingObserver struct {
 	sfPresent  map[string]int
 	sfRefusals map[humansession.SecondFactorRefusal]int
 	sfEvents   map[humansession.SecondFactorEvent]int
+	// Вход ключом (Ф13): исходы по причине.
+	akLogin map[humansession.AccessKeyLoginOutcome]int
+	// storeFailures — сбои хранилища у глаголов своих данных (kaname#691).
+	storeFailures map[humansession.StoreFailureVerb]int
 }
 
 func newCountingObserver() *countingObserver {
@@ -815,7 +1159,15 @@ func newCountingObserver() *countingObserver {
 		sfPresent:          map[string]int{},
 		sfRefusals:         map[humansession.SecondFactorRefusal]int{},
 		sfEvents:           map[humansession.SecondFactorEvent]int{},
+		akLogin:            map[humansession.AccessKeyLoginOutcome]int{},
+		storeFailures:      map[humansession.StoreFailureVerb]int{},
 	}
+}
+
+func (o *countingObserver) StoreFailureObserved(x humansession.StoreFailureVerb) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.storeFailures[x]++
 }
 
 func (o *countingObserver) SecondFactorPresentationObserved(m assurance.Method, x humansession.PresentationOutcome) {
@@ -828,6 +1180,12 @@ func (o *countingObserver) SecondFactorRefusalObserved(x humansession.SecondFact
 	defer o.mu.Unlock()
 	o.sfRefusals[x]++
 }
+func (o *countingObserver) AccessKeyLoginObserved(x humansession.AccessKeyLoginOutcome) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.akLogin[x]++
+}
+
 func (o *countingObserver) SecondFactorEventObserved(x humansession.SecondFactorEvent) {
 	o.mu.Lock()
 	defer o.mu.Unlock()

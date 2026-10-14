@@ -44,7 +44,8 @@ func (f *fakeStore) RecoveryTarget(_ context.Context, email domain.Email) (human
 	}
 	for _, u := range f.users {
 		if humansession.AddressKey(string(u.Email)) == humansession.AddressKey(string(email)) {
-			return humansession.RecoveryTarget{User: u, EmailVerified: f.verified[u.ID]}, true, nil
+			_, hasPassword := f.verifiers[u.ID]
+			return humansession.RecoveryTarget{User: u, EmailVerified: f.verified[u.ID], HasPassword: hasPassword}, true, nil
 		}
 	}
 	return humansession.RecoveryTarget{}, false, nil

@@ -98,6 +98,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // TestSecondLockIntegration_F11_20_ForwardedSessionLevelPassesAndABypassingOneIsRefused — Ф11-20.
@@ -228,7 +229,8 @@ func registerSecondLockPerson(t *testing.T, ctx context.Context, pool *pgxpool.P
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: 24 * time.Hour, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
 		Letter:  humansession.VerificationPace{CodeTTL: 30 * time.Minute, Attempts: 5, Interval: time.Minute, Limit: 5, Window: 24 * time.Hour},
 		Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour},

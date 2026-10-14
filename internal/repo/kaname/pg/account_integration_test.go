@@ -91,6 +91,7 @@ func mustSeedUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix 
 	)
 	require.NoError(t, err, "seed user account INSERT")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit seed user TX")
 	return uid
 }
@@ -421,7 +422,7 @@ func TestAccount_List_Pagination(t *testing.T) {
 	// Предмет этой пробы — страница списка, а не потолки. Она заводит ЧЕТЫРЕ
 	// аккаунта одной личности: один приходит с фикстурой пользователя, три —
 	// циклом ниже. Потолок ТЕМПА умолчанием допускает три заведения в час
-	// (задача #618), поэтому четвёртое отвергается, и проба краснеет по полосе,
+	// (задача kacho#618), поэтому четвёртое отвергается, и проба краснеет по полосе,
 	// о которой ничего не утверждает. Потолок поднимается из-под ног — ровно как
 	// это делают пробы потолка ОБЪЁМА.
 	liftRateCeilingOutOfTheWay(t, ctx, pool)

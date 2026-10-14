@@ -174,7 +174,8 @@ func postureValuePaths(tree map[string]any) [][]string {
 
 var configBridge = []bridged{
 	{configKey: "logger.level", valuePath: []string{"logger", "level"}},
-	// ТРИ СОБСТВЕННЫХ ПОТОЛКА (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
+	// СОБСТВЕННЫЕ ПОТОЛКИ (приёмка `KAN-QUOTA-1`, `П25`; задача kacho#2117; перечень —
+	// таблица `config.OwnCeilingKnobs`).
 	//
 	// `omitEmpty` НЕ СТАВИТСЯ, и это несущее: ноль здесь законная величина
 	// («ресурсов этого вида не заводить»), и вычет пустого выбросил бы её —
@@ -204,9 +205,13 @@ var configBridge = []bridged{
 	{configKey: "repository.postgres.password-from-env", derive: func(*valueReader) any { return "KANAME_DB_PASSWORD" }},
 	{configKey: "authn.mode", valuePath: []string{"authMode"}},
 	// Доменное имя установки: из него выводится клеймо адресата, уезжающее в
-	// каждом выпущенном токене. Умолчания у ключа нет (задача #2127), поэтому
+	// каждом выпущенном токене. Умолчания у ключа нет (задача kacho#2127), поэтому
 	// профиль обязан его назвать, а страж — отказать без него.
 	{configKey: "authn.domain", valuePath: []string{"authn", "domain"}, omitEmpty: true},
+	// Почтовый узел — условие боевого старта (kaname#475); шаблон отдаёт
+	// секцию ветвью, поэтому пустое не подставляется.
+	{configKey: "invite-mail.relay", valuePath: []string{"inviteMail", "relay"}, omitEmpty: true},
+	{configKey: "invite-mail.from", valuePath: []string{"inviteMail", "from"}, omitEmpty: true},
 	{configKey: "authn.trusted-forwarder-sans", valuePath: []string{"authn", "trustedForwarderSANs"}, omitEmpty: true},
 	{configKey: "authn.trust-domain", valuePath: []string{"authn", "trustDomain"}, omitEmpty: true},
 	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Умолчания у адресов нет намеренно: адрес,
@@ -216,7 +221,7 @@ var configBridge = []bridged{
 	// Обеих записей здесь НЕ БЫЛО, и вход переложения был уже чарта ровно на
 	// них; первая при этом несёт отказ стража старта, поэтому проба боевого
 	// профиля оставалась зелёной при профиле, который не поднимается
-	// (задача #2334). Класс держит `TestConfigBridge_CoversEveryKeyTheChartRenders`.
+	// (задача kacho#2334). Класс держит `TestConfigBridge_CoversEveryKeyTheChartRenders`.
 	{configKey: "api-server.rest-endpoint", valuePath: []string{"apiServer", "restEndpoint"}, omitEmpty: true},
 	{configKey: "api-server.internal-rest-endpoint", valuePath: []string{"apiServer", "internalRestEndpoint"}, omitEmpty: true},
 	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269). Адрес слушателя — та же форма, что у
@@ -452,14 +457,14 @@ var restatedDeliberately = map[string]string{
 	// Довод публичного фронта был перенесён на внутренний целиком, и обе его
 	// половины здесь неверны: вызывающие внутренней поверхности — модули,
 	// называющиеся сертификатом, а предъявленное удостоверение внутренний
-	// слушатель не читает вовсе. Ребро переведено во взаимный режим (#2335).
+	// слушатель не читает вовсе. Ребро переведено во взаимный режим (kacho#2335).
 	"env.KANAME_INTERNALREST_SERVER_MTLS_CLIENTAUTHMODE": "ручка НЕСУЩАЯ, но её страж " +
 		"живёт в композиционном корне (requireInternalRESTMutualClientAuth в cmd/kaname) " +
 		"и отсюда недостижим — как и у соседней ручки транспорта этого же ребра. Снятие " +
 		"роняет СТАРТ: пустое значение процесс читает как server-tls-only, а на нём " +
 		"вызывающий не назван ничем — рубеж у этой поверхности бывает только транспортный. " +
 		"Держит это TestProductionProfileSatisfiesTheStartupGuards",
-	// Ручка ЗАВЕДЕНА задачей #2476: профиль включает свою чеканку, а вместе с ней
+	// Ручка ЗАВЕДЕНА задачей kacho#2476: профиль включает свою чеканку, а вместе с ней
 	// на слушателе публикатора ключей поднимается АВТОРИТЕТ ОТЗЫВА. Без неё боевая
 	// посадка не стартовала НИ ПРИ КАКОМ входе — и проба профиля этого не видела,
 	// потому что условие жило встроенной ветвью подъёма, а не именованным стражем.
@@ -477,7 +482,7 @@ var restatedDeliberately = map[string]string{
 		"только у двустороннего. Объявлен затем, чтобы перевод ребра в mutual был правкой " +
 		"одного значения",
 	// Записи про env.KANAME_INTERNALREST_SERVER_MTLS_CLIENTCAFILES здесь БОЛЬШЕ
-	// НЕТ, и это не пропуск: ребро переведено во взаимный режим (#2335), а он
+	// НЕТ, и это не пропуск: ребро переведено во взаимный режим (kacho#2335), а он
 	// набор корней клиента ТРЕБУЕТ — снятие ручки роняет посадку, и послабление
 	// истекло вместе со своим предметом. Раньше профиль объявлял корни рядом с
 	// односторонним режимом, который их не читает, — то есть ВЫГЛЯДЕЛ взаимным,
@@ -784,7 +789,7 @@ func TestConfigBridge_MirrorsTheChartTemplate(t *testing.T) {
 	require.NotEmpty(t, derived,
 		"ни одна запись переложения не потребляет путей значений — либо склейки не "+
 			"осталось, либо читатель перестал их запоминать; поверхность посадки "+
-			"собралась бы из одних `valuePath`, то есть вернулась бы к пробелу задачи #2095")
+			"собралась бы из одних `valuePath`, то есть вернулась бы к пробелу задачи kacho#2095")
 
 	named := make([]string, 0, len(derived))
 	for _, path := range derived {
@@ -810,7 +815,7 @@ func TestConfigBridge_MirrorsTheChartTemplate(t *testing.T) {
 // и настоящий рендер чарта (`prod_profile_render_test.go`). Вердикт при этом
 // обязан быть ОДИН: два места об одном предмете разошлись бы молча, и тогда
 // сравнивать производителей было бы не с чем — а именно расхождение
-// производителей и есть предмет задачи #2334.
+// производителей и есть предмет задачи kacho#2334.
 //
 // Три стража, и каждый зовётся САМ, а не пересказывается:
 //   - `config.Config.Validate` — страж старта службы;
@@ -880,7 +885,7 @@ func bootGuardVerdict(t *testing.T, cfgPath string, envs map[string]string) erro
 // Переложение — не рендер. Оно повторяет шаблон на Go, поэтому о ключе, который
 // шаблон рендерит, а переложение не несёт, эта проба не утверждает НИЧЕГО.
 // Ровно так вход оказался уже чарта на два ключа, и один из них нёс отказ
-// стража (#2334). Авторитетный вердикт даёт `prod_profile_render_test.go`,
+// стража (kacho#2334). Авторитетный вердикт даёт `prod_profile_render_test.go`,
 // собирающий вход настоящим `helm template`; здесь переложение остаётся ради
 // шестидесяти прогонов «снятой ручки», которым рендер на каждую итерацию стоил
 // бы helm в PATH и десятка секунд.
@@ -989,7 +994,7 @@ func materialPathsNamed(envs map[string]string) []string {
 
 // namesAMaterialPath — называет ли ручка ПУТЬ К ФАЙЛУ материала.
 //
-// # ПЕРЕЧЕНЬ ФОРМ ВЫВОДИТСЯ, А НЕ ВЫПИСЫВАЕТСЯ (задача #2479)
+// # ПЕРЕЧЕНЬ ФОРМ ВЫВОДИТСЯ, А НЕ ВЫПИСЫВАЕТСЯ (задача kacho#2479)
 //
 // Здесь стоял выписанный перечень окончаний. Он был верен для форм, которые
 // автор помнил, и МОЛЧАЛ о прочих: форма, о которой распознаватель не знает, не
@@ -1093,7 +1098,7 @@ func collectMaterialPathSuffixes(t reflect.Type, spell func(reflect.StructField)
 // возможность: процесс отказывает в пуске на нечитаемом файле, а профиль
 // читается как настроенный.
 //
-// # ПРЕДПОСЫЛКА ПЕРЕСМОТРЕНА ПРИ РАСШИРЕНИИ ПОПУЛЯЦИИ (задача #2186)
+// # ПРЕДПОСЫЛКА ПЕРЕСМОТРЕНА ПРИ РАСШИРЕНИИ ПОПУЛЯЦИИ (задача kacho#2186)
 //
 // Проверка писалась, когда у службы был ОДИН лист. На такой популяции «путь
 // начинается с tls.mountPath» и «секрет объявлен» совпадали, и допущение было
@@ -1113,7 +1118,7 @@ func filesAreMountable(merged map[string]any, envs map[string]string) error {
 		"server": "secretName",
 		"client": "clientSecretName",
 		// ТРЕТЬЕГО ЛИСТА — якоря доверия к серверным сертификатам поставщика
-		// личности (задача #2487) — БОЛЬШЕ НЕТ: он служил единственной дороге к
+		// личности (задача kacho#2487) — БОЛЬШЕ НЕТ: он служил единственной дороге к
 		// прежнему издателю и снят вместе с ней (kaname#494). Запись снята ТЕМ
 		// ЖЕ изменением, что подкаталог шаблона: эта карта — второе место об
 		// одном предмете, и путь под снятым подкаталогом теперь находка
@@ -1254,8 +1259,17 @@ func readChartProfile(t *testing.T, name string) map[string]any {
 func mergeChartProfiles(t *testing.T, chain []string) map[string]any {
 	t.Helper()
 	merged := map[string]any{}
+	prod := false
 	for _, name := range chain {
 		merged = mergeInto(merged, readChartProfile(t, name))
+		prod = prod || filepath.Base(name) == "values.prod.yaml"
+	}
+	// Домен установки вместо заглушки профиля — так же, как его подаёт стенд:
+	// заглушку в зоне `.invalid` отвергают и чарт, и страж старта (kaname#762),
+	// а предмет этих проб — не она. Сам отказ судят
+	// `domain_placeholder_refused_test.go` и пробы стража в пакете настроек.
+	if prod && at(merged, "authn", "domain") != nil {
+		setAt(merged, []string{"authn", "domain"}, installDomainForRender)
 	}
 	return merged
 }

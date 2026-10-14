@@ -13,11 +13,13 @@
 # настоящим `git push` в голый репозиторий, запрос — синтетическим диапазоном.
 #
 # Проба доказывает и свою способность упасть: тот же набор гоняется против
-# восьми воссозданных дефектов — слепой атрибуции, старой формы ветки
+# десяти воссозданных дефектов — слепой атрибуции, старой формы ветки
 # `issue-<N>`, потерянного T0, хука отправки без стража, обхода проверок,
-# поставленного раньше стража, и трёх дефектов ведомости известных нарушений
-# (#482): прощение не применено, прощение шире записи, причина не судится, —
-# и от каждого требует хотя бы одного провала.
+# поставленного раньше стража, трёх дефектов ведомости известных нарушений
+# (#482): прощение не применено, прощение шире записи, причина не судится, — и
+# двух дефектов узнавания серверного слияния (kaname#716): подтверждённое не снято,
+# слияние объявлено серверным без ответа площадки, — и от каждого требует хотя
+# бы одного провала.
 #
 # T0 выводится из истории (коммит, заведший scripts/hooks/commit-msg), поэтому в
 # каждой фикстуре он ЗАКОММИЧЕН: история до правила — коммиты с датой автора
@@ -26,8 +28,8 @@
 # Песочница: корневая учётная запись — её собственный ~/.gitconfig (HOME
 # временный), а не переопределение; переопределения здесь — предмет проверки.
 #
-# КОПИЯ ПРОБЫ СОСЕДНЕГО ПРОДУКТА (PRO-Robotech/kacho#2793), И ЭТО ПРИЗНАНО — тем
-# же долгом, что у предиката (шапка branch-rule.sh). Отличия — от устройства
+# КОПИИ В KACHO НЕТ: перенос пробы вместе с предикатом заведён задачей
+# PRO-Robotech/kacho#2793, она открыта (шапка branch-rule.sh). Особенности — от устройства
 # здешнего хука отправки. Он не делит прогон на группы по диффу и не спрашивает конвейер,
 # поэтому «зелёная отправка» через настоящий pre-push снимается объявленным
 # обходом проверок `KANAME_SKIP_PREPUSH=1` — страж им НЕ снимается, и это
@@ -43,7 +45,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
       GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
       GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE \
       GIT_CONFIG_GLOBAL GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
-unset KANAME_SKIP_PREPUSH
+unset KANAME_SKIP_PREPUSH GITHUB_REPOSITORY
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -208,7 +210,7 @@ commit_msg_cases() { # $1 — набор
     expect "коммит: «#8» на ветке 7" refuse "«#8» на ветке «7»" "$rc" "$out"
 
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Co-authored-by: Ivan <ivan@example.invalid>"
-    expect "коммит: соавтор-человек — запрещён ключ, а не значение (#861)" refuse "атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
+    expect "коммит: соавтор-человек — запрещён ключ, а не значение (kacho-workspace#861)" refuse "атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Снята строка шаблона Co-authored-by: Ivan <ivan@example.invalid> — подставлялась"
     expect "коммит: ключ Co-Authored-By в середине строки прозы — упоминание" pass - "$rc" "$out"
     at 7; run git commit -q --allow-empty -m "#7 правка" -m "Снята строка шаблона Claude-Session: https://example.invalid/s — подставлялась"
@@ -304,7 +306,7 @@ push_fixture() { # $1 — набор
     "${G[@]}" checkout -q -b 23 20; "${G[@]}" commit -q --allow-empty -m "#24 чужой номер"
     "${G[@]}" checkout -q -b 25 20; "${G[@]}" commit -q --allow-empty --author="Other <other@example.invalid>" -m "#25 чужой автор"
     "${G[@]}" checkout -q -b 26 20; GIT_COMMITTER_EMAIL=other@example.invalid "${G[@]}" commit -q --allow-empty -m "#26 чужой коммиттер"
-    # #861: коммиты записаны мимо хука коммита (в этой фикстуре его нет вовсе).
+    # kacho-workspace#861: коммиты записаны мимо хука коммита (в этой фикстуре его нет вовсе).
     "${G[@]}" checkout -q -b 2840 20; "${G[@]}" commit -q --allow-empty -F "$tmp/real-1.msg"
     "${G[@]}" checkout -q -b 2840t 20; "${G[@]}" commit -q --allow-empty -F "$tmp/real-1.twin"
     "${G[@]}" checkout -q -b 27 20; "${G[@]}" commit -q --allow-empty -m "#27 задача" -m "Co-authored-by: Ivan <ivan@example.invalid>"
@@ -315,6 +317,7 @@ push_fixture() { # $1 — набор
     "${G[@]}" checkout -q -b old-trailer main
     "${G[@]}" commit -q --allow-empty --date="$PRE" -m "старая работа" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     ledger_fixture
+    server_fixture
     "${G[@]}" checkout -q main
     "${G[@]}" fetch -q origin
     equip "$PP" "$1"
@@ -412,7 +415,7 @@ push_rule_cases() {
     rule_run "$(line 2840t 2840)"
     expect "отправка: близнец настоящего входа без блока трейлеров" pass - "$rc" "$out"
     rule_run "$(line 27)"
-    expect "отправка: соавтор-человек — назван sha (#861)" refuse "$(git -C "$PP" rev-parse --short=10 27) атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
+    expect "отправка: соавтор-человек — назван sha (kacho-workspace#861)" refuse "$(git -C "$PP" rev-parse --short=10 27) атрибуция в сообщении: «Co-authored-by: Ivan <ivan@example.invalid>»" "$rc" "$out"
     rule_run "$(line 28)"
     expect "отправка: ключ в середине строки прозы — упоминание" pass - "$rc" "$out"
     rule_run "$(line old-trailer)"
@@ -467,7 +470,7 @@ pr_cases() {
     pr_run 21 origin/20 21 "#21 задача, Generated with [Claude Code](https://example.invalid)" "обычное тело"
     expect "запрос: атрибуция в заголовке" refuse "заголовок: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"Co-authored-by: Ivan <ivan@example.invalid>"
-    expect "запрос: соавтор-человек в теле — запрещён ключ (#861)" refuse "тело: атрибуция" "$rc" "$out"
+    expect "запрос: соавтор-человек в теле — запрещён ключ (kacho-workspace#861)" refuse "тело: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
     expect "запрос: тело с трейлером Claude" refuse "тело: атрибуция" "$rc" "$out"
     pr_run 21 origin/20 21 "#21 задача" "тело"$'\n\n'"🤖 Generated with [Claude Code](https://example.invalid)"
@@ -507,6 +510,147 @@ pr_cases() {
         if t="$(branch_rule_t0 HEAD)"; then echo "T0 $t"; exit 0; fi
         echo "T0 не выведен"; exit 2' 2>&1)"; rc=$?
     expect "мелкий клон: T0 не берётся с границы" cannot "T0 не выведен" "$rc" "$out"
+}
+
+# ── Серверное слияние запроса (kaname#716): НАСТОЯЩИЙ ВХОД ─────────────────────────
+# Формы — у PRO-Robotech/kaname, ветка 296: d33a3b86 «#678 волна 7, партия 2
+# (kaname) (#704)» (тема — заголовок запроса и « (#M)», merge_commit_title=
+# PR_TITLE), 2952ea7f «kaname#712 edgecredential: …» (тема задана при вливании, ссылки
+# на запрос нет), eb79ba81 «Merge 685 into 296» (API /merges). Коммиттер у всех —
+# площадка. Номера — фикстуры: волна 20, задача 41, запросы 77…86.
+#
+# Площадку изображает подставной `gh` в PATH: он отвечает на тот же вызов
+# `gh api repos/<репозиторий>/commits/<sha>/pulls`, что и в конвейере, строками
+# из $tmp/gh-pulls.tsv (sha · номер · влит · merge_commit_sha · база). Решение
+# «подтверждено» принимает проверка запроса, а не заглушка: заглушка отдаёт
+# сырые поля.
+SM_BIN="$tmp/gh-bin"
+SM_MAP="$tmp/gh-pulls.tsv"
+SM_REPO=PRO-Robotech/probe
+server_fixture() {
+    local G=(git -C "$PP") t
+    t="$(date +%s)"
+    sm_merge() { # $1 — ветка, $2 — смещение времени, $3 — источник, дальше — -m …
+        local b="$1" dt="$2" src="$3"; shift 3
+        "${G[@]}" checkout -q -b "$b" 20
+        env "${LV_SERVER[@]}" GIT_AUTHOR_DATE="@$((t + dt))" GIT_COMMITTER_DATE="@$((t + dt))" \
+            "${G[@]}" merge -q --no-ff "$src" "$@"
+    }
+    sm_merge 20s  510 41 -m "#41 приёмка client-revoke (#77)"
+    sm_merge 20b  520 41 -m "#41 приёмка client-revoke"
+    sm_merge 20u  530 41 -m "#41 приёмка client-revoke (#80)"
+    sm_merge 20r  540 41 -m "#41 приёмка client-revoke (#79)"
+    sm_merge 20x  550 41 -m "#41 приёмка client-revoke (#81)"
+    sm_merge 20q  560 41 -m "#41 приёмка client-revoke (#82)"
+    sm_merge 20c  570 41 -m "#41 приёмка client-revoke (#83)"
+    sm_merge 20n  580 41 -m "Merge 41 into 20"
+    sm_merge 20a2 590 41 -m "#41 приёмка client-revoke (#85)" -m "Co-authored-by: Ivan <ivan@example.invalid>"
+    sm_merge 20e  600 41 -m "#41 приёмка client-revoke (#87)"
+    s() { "${G[@]}" rev-parse "$1"; }
+    local when=2026-10-11T22:41:56Z
+    {
+        printf '%s\t77\t%s\t%s\t20\n' "$(s 20s)" "$when" "$(s 20s)"
+        printf '%s\t78\t%s\t%s\t20\n' "$(s 20b)" "$when" "$(s 20b)"
+        printf '%s\t77\t%s\t%s\t20\n' "$(s 20r)" "$when" "$(s 20r)"
+        printf '%s\t81\t%s\t%s\t30\n' "$(s 20x)" "$when" "$(s 20x)"
+        printf '%s\t82\t\t%s\t20\n'   "$(s 20q)" "$(s 20q)"
+        printf '%s\t83\t%s\t%s\t20\n' "$(s 20c)" "$when" "$(s 20s)"
+        printf '%s\t84\t%s\t%s\t20\n' "$(s 20n)" "$when" "$(s 20n)"
+        printf '%s\t85\t%s\t%s\t20\n' "$(s 20a2)" "$when" "$(s 20a2)"
+        printf '%s\t86\t%s\t%s\t20\n' "$(s 22)" "$when" "$(s 22)"
+        printf '%s\t86\t%s\t%s\t20\n' "$(s 23)" "$when" "$(s 23)"
+        printf '%s\tFAIL\n' "$(s 20e)"
+    } > "$SM_MAP"
+    mkdir -p "$SM_BIN"
+    cat > "$SM_BIN/gh" <<'GH'
+#!/usr/bin/env bash
+# Подставная площадка: только GET commits/<sha>/pulls своего репозитория.
+printf '%s\n' "$*" >> "$SM_LOG"
+[ "${1:-}" = api ] || { echo "gh-заглушка: ждали «api», получили «$*»" >&2; exit 64; }
+want="repos/$SM_REPO/commits/"
+path=""
+for a in "$@"; do case "$a" in repos/*) path="$a" ;; esac; done
+case "$path" in "$want"*/pulls) ;; *) echo "gh-заглушка: путь «$path» не «${want}<sha>/pulls»" >&2; exit 64 ;; esac
+for a in "$@"; do case "$a" in -X|--method|-f|-F|--field|--raw-field|--input) echo "gh-заглушка: не GET ($a)" >&2; exit 64 ;; esac; done
+sha="${path#"$want"}"; sha="${sha%/pulls}"
+while IFS=$'\t' read -r h rest; do
+    [ "$h" = "$sha" ] || continue
+    [ "$rest" = FAIL ] && { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+    printf '%s\n' "$rest"
+done < "$SM_MAP"
+exit 0
+GH
+    chmod +x "$SM_BIN/gh"
+}
+
+# pr_run_srv — pr_run с площадкой: GITHUB_REPOSITORY задан, `gh` подставной.
+pr_run_srv() {
+    : > "$tmp/gh.log"
+    out="$(cd "$PP" && env PATH="$SM_BIN:$PATH" GITHUB_REPOSITORY="$SM_REPO" SM_REPO="$SM_REPO" \
+        SM_MAP="$SM_MAP" SM_LOG="$tmp/gh.log" PR_TITLE="$4" PR_BODY="$5" HEAD_REF="$1" \
+        BASE_SHA="$(git rev-parse "$2")" HEAD_SHA="$(git rev-parse "$3")" \
+        bash .github/scripts/pr-rule-check.sh 2>&1)"; rc=$?
+}
+
+expect_no_text() {
+    if [[ "$3" != *"$2"* ]]; then ok "$1"
+    else fail "$1: в выводе есть «$2»: $(printf '%s' "$3" | tr '\n' '|' | cut -c1-300)"; fi
+}
+
+# Каждое утверждение меняет ОДИН факт против законного «20s»: ответ площадки
+# (нет запроса, не влит, другой merge_commit_sha, другая база, другой номер),
+# форму (без «#<N> »), число родителей (обычный коммит), окружение (без
+# GITHUB_REPOSITORY), исход вызова (площадка не ответила).
+server_cases() {
+    local W=(20 origin/main) h
+    pr_run_srv "${W[@]}" 20s "#20 волна" "обычное тело"
+    expect "серверное слияние: тема из заголовка и « (#M)», площадка подтвердила" pass - "$rc" "$out"
+    expect_text "серверное слияние: сверка названа числом" "подтверждено площадкой 1" "$out"
+    pr_run_srv "${W[@]}" 20b "#20 волна" "обычное тело"
+    expect "серверное слияние: тема задана при вливании, ссылки нет, площадка подтвердила" pass - "$rc" "$out"
+
+    h="$(git -C "$PP" rev-parse 20s)"
+    pr_run "${W[@]}" 20s "#20 волна" "обычное тело"
+    expect "серверное слияние: без GITHUB_REPOSITORY — судится по форме" refuse "${h:0:10} слияние не по форме" "$rc" "$out"
+    expect_text "серверное слияние: несверенное названо" "не сверялись" "$out"
+
+    h="$(git -C "$PP" rev-parse 20u)"
+    pr_run_srv "${W[@]}" 20u "#20 волна" "обычное тело"
+    expect "серверное слияние: площадка запроса не знает — отказ" refuse "${h:0:10} слияние не по форме" "$rc" "$out"
+    expect_text "серверное слияние: не знает — и номер ветки-номера" "${h:0:10} «#41» на ветке «20»" "$out"
+    h="$(git -C "$PP" rev-parse 20r)"
+    pr_run_srv "${W[@]}" 20r "#20 волна" "обычное тело"
+    expect "серверное слияние: « (#79)» в теме, влит запрос 77 — отказ" refuse "${h:0:10} слияние не по форме" "$rc" "$out"
+    h="$(git -C "$PP" rev-parse 20x)"
+    pr_run_srv "${W[@]}" 20x "#20 волна" "обычное тело"
+    expect "серверное слияние: база запроса 30, голова 20 — отказ" refuse "${h:0:10} «#41» на ветке «20»" "$rc" "$out"
+    h="$(git -C "$PP" rev-parse 20q)"
+    pr_run_srv "${W[@]}" 20q "#20 волна" "обычное тело"
+    expect "серверное слияние: запрос не влит — отказ" refuse "${h:0:10} слияние не по форме" "$rc" "$out"
+    h="$(git -C "$PP" rev-parse 20c)"
+    pr_run_srv "${W[@]}" 20c "#20 волна" "обычное тело"
+    expect "серверное слияние: merge_commit_sha запроса другой — отказ" refuse "${h:0:10} слияние не по форме" "$rc" "$out"
+    h="$(git -C "$PP" rev-parse 20n)"
+    pr_run_srv "${W[@]}" 20n "#20 волна" "обычное тело"
+    expect "серверное слияние: «Merge 41 into 20» (API /merges) — отказ первой строкой" refuse "${h:0:10} первая строка не начинается" "$rc" "$out"
+    h="$(git -C "$PP" rev-parse 20a2)"
+    pr_run_srv "${W[@]}" 20a2 "#20 волна" "обычное тело"
+    expect "серверное слияние: атрибуция не снимается" refuse "${h:0:10} атрибуция в сообщении" "$rc" "$out"
+    expect_no_text "серверное слияние: у подтверждённого с атрибуцией форма снята" "${h:0:10} слияние не по форме" "$out"
+    h="$(git -C "$PP" rev-parse 20e)"
+    pr_run_srv "${W[@]}" 20e "#20 волна" "обычное тело"
+    expect "серверное слияние: площадка не ответила — отказ" refuse "${h:0:10} слияние не по форме" "$rc" "$out"
+    expect_text "серверное слияние: неответ назван" "площадка не ответила" "$out"
+
+    # Близнецы «обычный коммит»: один родитель — признака слияния нет, даже если
+    # площадка называет коммит merge_commit_sha влитого запроса.
+    h="$(git -C "$PP" rev-parse 22)"
+    pr_run_srv 22 origin/20 22 "#22 задача" "обычное тело"
+    expect "обычный коммит без номера задачи — отказ и при ответе площадки" refuse "${h:0:10} первая строка не начинается" "$rc" "$out"
+    h="$(git -C "$PP" rev-parse 23)"
+    pr_run_srv 23 origin/20 23 "#23 задача" "обычное тело"
+    expect "обычный коммит с чужим номером — отказ и при ответе площадки" refuse "${h:0:10} «#24» на ветке «23»" "$rc" "$out"
+    expect_text "обычный коммит: площадку не спрашивали" "спрошено 0" "$out"
 }
 
 # expect_text <метка> <текст> <вывод> — вывод НАЗЫВАЕТ предмет, а не только краснеет.
@@ -600,6 +744,7 @@ suite() { # $1 — набор, $2 — метка
     push_rule_cases
     pr_cases
     ledger_cases
+    server_cases
     hook_cases
     printf '%s %s\n' "$FAILS" "$CASES" > "$tmp/result.$2"
 }
@@ -628,6 +773,12 @@ defect() { # $1 — метка, $2 — описание; правит копию
         ledgerloose) grep -q 'причина пуста' "$k/.github/scripts/pr-rule-check.sh" || return 1
                 sed -i '/причина пуста/d' "$k/.github/scripts/pr-rule-check.sh"
                 ! grep -q 'причина пуста' "$k/.github/scripts/pr-rule-check.sh" || return 1 ;;
+        # Серверное слияние (kaname#716): подтверждено площадкой, но снятие не применено.
+        serverblind) sed -i 's|^BR_SERVER_MERGES="$server"$|BR_SERVER_MERGES=""|' "$k/.github/scripts/pr-rule-check.sh"
+                grep -q '^BR_SERVER_MERGES=""$' "$k/.github/scripts/pr-rule-check.sh" || return 1 ;;
+        # Узнавание шире признака: любое слияние объявлено серверным без ответа площадки.
+        serverwide) grep -q '^server_merge_confirmed() {$' "$k/.github/scripts/pr-rule-check.sh" || return 1
+                sed -i 's|^server_merge_confirmed() {$|server_merge_confirmed() { SM_PR=0; return 0;|' "$k/.github/scripts/pr-rule-check.sh" ;;
     esac
 }
 
@@ -636,7 +787,7 @@ suite "$tmp/kit-real" настоящий
 read -r real_fails real_cases < "$tmp/result.настоящий"
 
 declare -A dfails
-for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
+for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose serverblind serverwide; do
     if defect "$d"; then
         echo
         echo "── проба против дефекта «$d» (ждём хотя бы один провал)"
@@ -656,7 +807,7 @@ printf '  утверждений у настоящего: %s, провалов %
 rc=0
 [ "$real_fails" = 0 ] || { echo "ОТКАЗ: настоящая оснастка нарушает свои утверждения" >&2; rc=1; }
 [ "${real_cases:-0}" -gt 0 ] || { echo "ОТКАЗ: ни одного утверждения не исполнено" >&2; rc=1; }
-for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose; do
+for d in blind issue t0 noguard skipfirst ledgerblind ledgerwide ledgerloose serverblind serverwide; do
     printf '  дефект %-11s провалов %s (норма ≥1)\n' "$d" "${dfails[$d]}"
     if [ "${dfails[$d]}" = "н/д" ]; then
         echo "ОТКАЗ: дефект «$d» не воссоздан — форма оснастки изменилась" >&2; rc=1

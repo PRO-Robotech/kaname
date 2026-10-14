@@ -339,6 +339,10 @@ func (fakeAccW) Update(_ context.Context, a domain.Account, _ []string) (domain.
 	return a, nil
 }
 func (fakeAccW) Delete(context.Context, domain.AccountID) error { return nil }
+func (fakeAccW) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (fakeAccW) LockOwner(context.Context, domain.UserID) error { return nil }
 
 type fakePrjW struct{}
 
@@ -514,6 +518,13 @@ func (w *fakeUserUW) InsertActive(_ context.Context, u domain.User) (domain.User
 	return u, nil
 }
 func (w *fakeUserUW) Delete(context.Context, domain.UserID) error { return nil }
+func (*fakeUserUW) LockForRemoval(context.Context, domain.UserID) ([]domain.AccountID, error) {
+	return nil, nil
+}
+func (*fakeUserUW) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
+func (*fakeUserUW) CutOffIdentity(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+	return nil
+}
 func (w *fakeUserUW) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }
@@ -615,7 +626,7 @@ func (fakeUserUR) Membership(context.Context, domain.UserID, domain.AccountID) (
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: снятие членства
-// проверяется своими пробами (#1127).
+// проверяется своими пробами (kacho#1127).
 func (*fakeUserUW) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

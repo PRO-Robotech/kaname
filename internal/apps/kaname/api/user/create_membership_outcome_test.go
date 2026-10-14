@@ -88,7 +88,7 @@ func TestIntegration_KAN181_CreateMembershipThenInviteIsOneRow(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	admin, acc := seedUserWithAccount(t, ctx, repo, "cm1")
+	admin, acc := seedUserWithAccount(t, ctx, pool, "cm1")
 	ops := newFakeUsrOps()
 	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(admin)})
@@ -139,7 +139,7 @@ func TestIntegration_KAN181_InviteThenCreateMembershipIsOneRow(t *testing.T) {
 	pgtest.ClosePoolAtEnd(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	admin, acc := seedUserWithAccount(t, ctx, repo, "cm2")
+	admin, acc := seedUserWithAccount(t, ctx, pool, "cm2")
 	ops := newFakeUsrOps()
 	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(admin)})
@@ -179,12 +179,12 @@ func TestIntegration_KAN181_KnownEmailIntoSecondAccountKeepsOneUserRow(t *testin
 	repo := kanamepg.New(pool, nil)
 
 	// Человек ДЕЙСТВУЕТ в аккаунте A: строка со внешним субъектом, вошедший.
-	activeID, accA := seedUserWithAccount(t, ctx, repo, "cm3a")
+	activeID, accA := seedUserWithAccount(t, ctx, pool, "cm3a")
 	var email string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT email FROM kaname.users WHERE id = $1`, string(activeID)).Scan(&email))
-	adminB, accB := seedUserWithAccount(t, ctx, repo, "cm3b")
+	adminB, accB := seedUserWithAccount(t, ctx, pool, "cm3b")
 	// Контроль: третий аккаунт, куда человека никто не звал.
-	_, accC := seedUserWithAccount(t, ctx, repo, "cm3c")
+	_, accC := seedUserWithAccount(t, ctx, pool, "cm3c")
 
 	ops := newFakeUsrOps()
 	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)

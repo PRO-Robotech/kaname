@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expired_credential_reclaimer_integration_test.go — ПЕРВАЯ ПОЛОВИНА задачи
-// #1264: истёкшее удостоверение перестаёт занимать место под потолком без
+// kacho#1264: истёкшее удостоверение перестаёт занимать место под потолком без
 // действия арендатора.
 //
 // # Что утверждается — ИСХОД, а не факт вызова
@@ -69,6 +69,7 @@ func newReclaimFixture(t *testing.T) *reclaimFixture {
 		_, err = tx.Exec(ctx, q)
 		require.NoError(t, err, "посев владельцев удостоверений")
 	}
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return &reclaimFixture{pool: pool}
 }

@@ -12,6 +12,7 @@ package ceremonyport_test
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -80,7 +82,7 @@ func (k *keyRing) PublishedSet(context.Context) ([]domain.PublishedKey, error) {
 func newSigner(t *testing.T, ring tokensigner.KeyProvider, clock func() time.Time) *tokensigner.Signer {
 	t.Helper()
 	s, err := tokensigner.New(tokensigner.Config{
-		Issuer: testIssuer, Clock: clock, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: testIssuer, Clock: momentclock.Func(clock), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ring)
 	require.NoError(t, err)
 	return s
@@ -171,3 +173,10 @@ func (admitAll) UserRevokedBefore(context.Context, string) (time.Time, bool, err
 func (admitAll) PersonMarks(context.Context, []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }
+
+// shareCounter — приёмник отказов по доле церемонии, считающий их (kaname#693).
+type shareCounter struct{ n atomic.Int64 }
+
+func (c *shareCounter) CeremonyShareExhaustedObserved() { c.n.Add(1) }
+
+func (c *shareCounter) count() int64 { return c.n.Load() }

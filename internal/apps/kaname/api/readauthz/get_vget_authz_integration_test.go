@@ -505,6 +505,7 @@ func seedUserWithAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(accID), "acc-"+suffix+"-"+string(accID)[len(accID)-6:], string(uid))
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }
@@ -520,9 +521,9 @@ func accountOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, owner doma
 func seedUserInAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID domain.AccountID, suffix string) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`),
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),
 		"u-"+suffix+"-"+string(uid)[len(uid)-6:]+"@example.com", "User "+suffix)
 	require.NoError(t, err)

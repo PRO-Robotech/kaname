@@ -33,6 +33,7 @@ const (
 	UserService_Block_FullMethodName             = "/kaname.cloud.iam.v1.UserService/Block"
 	UserService_Unblock_FullMethodName           = "/kaname.cloud.iam.v1.UserService/Unblock"
 	UserService_ResetSecondFactor_FullMethodName = "/kaname.cloud.iam.v1.UserService/ResetSecondFactor"
+	UserService_ResetAccessKeys_FullMethodName   = "/kaname.cloud.iam.v1.UserService/ResetAccessKeys"
 	UserService_ListOperations_FullMethodName    = "/kaname.cloud.iam.v1.UserService/ListOperations"
 )
 
@@ -65,6 +66,16 @@ type UserServiceClient interface {
 	// поток): уходит, пока приглашение не активировано (`invite_status =
 	// PENDING`), на первом и на повторном приглашении той же пары, в пределах
 	// ограничения частоты на адрес.
+	//
+	// СВЕРХ НОРМЫ ИСХОД НЕОТЛИЧИМ — ЭТО РЕШЕНИЕ, А НЕ УПУЩЕНИЕ (Р22, Р9, MAIL-25).
+	// Писем на один адрес за окно уходит не больше объявленного
+	// (`invite.mailRateLimit`), сверхнормативное не отправляется, а ответ вызова
+	// тот же, что в норме. Норма считается на АДРЕС, а не на пригласившего:
+	// различимый исход сказал бы вызывающему, что этот адрес недавно получал
+	// письма по чужим приглашениям, — отказ по частоте не вправе становиться
+	// оракулом. Сверхнормативное видит оператор: счётчик
+	// `kaname_invite_mail_intents_total{outcome="rate_limited"}`. То же правило —
+	// у `ResendInvite`.
 	Invite(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
 	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
@@ -97,11 +108,11 @@ type UserServiceClient interface {
 	// Async — возвращает Operation (как Update всех iam-ресурсов).
 	//
 	// WHO may call it is `record_writer` on `iam_user`, and it carries NO
-	// account-level source (#1102). The row is a GLOBAL identity — one per person
+	// account-level source (kacho#1102). The row is a GLOBAL identity — one per person
 	// for the whole platform — so `labels`, its only mutable field, decides which
 	// selector grants match the person in EVERY Account, not just the one the label
 	// was set from. A label being per-Account in meaning while living on a global
-	// row is its own subject (#1126); the right to write it stopped being an
+	// row is its own subject (kacho#1126); the right to write it stopped being an
 	// account-level one already.
 	//
 	// Reading the record keeps its account-level sources on purpose: seeing the
@@ -121,14 +132,14 @@ type UserServiceClient interface {
 	// the cloud, and nobody else. It used to be `v_delete`, which carried THREE
 	// account-level sources: the per-object grant the reconciler materializes on
 	// an invitee's row, the delegated Account administrator, and the Account
-	// owner. That is strictly worse than the block #1102 already took out of the
-	// Account's hands — a block is reversible, a deletion is not (#1131).
+	// owner. That is strictly worse than the block kacho#1102 already took out of the
+	// Account's hands — a block is reversible, a deletion is not (kacho#1131).
 	//
 	// WHAT THE PERSON WHO INVITED HIM KEEPS is what the owner's directive names —
 	// adding and removing rights in his own Account (`iam_access_binding`), seeing
 	// his people (`v_get` / `v_list` keep their account-level sources
 	// deliberately), and now REMOVING A PERSON FROM HIS ACCOUNT
-	// (`RemoveFromAccount` below, #1127). The last one is what he actually wanted
+	// (`RemoveFromAccount` below, kacho#1127). The last one is what he actually wanted
 	// when he reached for Delete: it drops the membership and leaves the identity
 	// alone.
 	//
@@ -136,9 +147,25 @@ type UserServiceClient interface {
 	// The narrowing takes away the right to erase SOMEONE ELSE, never one's own
 	// row.
 	//
-	// Deleting an identity that still owns Accounts is refused by the database
-	// (`accounts_owner_fk`) → FAILED_PRECONDITION "User <id> owns accounts and
-	// cannot be deleted"; that is unchanged.
+	// THE ORDER IS ACCOUNT, THEN IDENTITY. Deleting an identity that still owns
+	// Accounts is refused → FAILED_PRECONDITION "User <id> owns accounts and
+	// cannot be deleted": delete the Account first (`AccountService.Delete`).
+	// Only ACTIVE grants hold a person: "User <id> has active access bindings and
+	// cannot be deleted" names a grant that still gives rights; a revoked grant is
+	// history and does not stand in the way.
+	//
+	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
+	// access keys, recovery codes, personal tokens and memberships go in the same
+	// transaction, and every credential issued to it up to that moment is refused
+	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
+	// the declared revocation window after the deletion commits. Records that
+	// only attribute an act to the person (who issued a service-account key, who
+	// granted a binding) keep the identifier; it is never issued again.
+	//
+	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
+	// irreversible removal is never cheaper than the reversible operations on the
+	// same subject (`Block`, `Unblock`, `ResetSecondFactor` already ask for it),
+	// and the floor is the same whoever calls — the person himself or the cloud.
 	Delete(ctx context.Context, in *DeleteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Removes the specified person from the specified Account: the MEMBERSHIP
 	// goes, the identity stays.
@@ -151,7 +178,7 @@ type UserServiceClient interface {
 	// Account" could only be expressed by withdrawing the grants. That is NOT an
 	// exclusion, and the difference is observable: the membership stayed, the
 	// person stayed in the Account's people list, and `account_admission_rate` kept
-	// counting him (#1127).
+	// counting him (kacho#1127).
 	//
 	// WHAT IT MUST NOT TOUCH, stated as a boundary rather than a hope: not one
 	// field of the `iam_user` row. A person removed from Account A goes on working
@@ -232,7 +259,7 @@ type UserServiceClient interface {
 	//
 	// WHO may call it is `identity_suspender` on `iam_user` — a relation of its
 	// own, with NO account-level source: neither a per-object grant, nor the
-	// delegated Account administrator, nor the Account owner (#1102).
+	// delegated Account administrator, nor the Account owner (kacho#1102).
 	//
 	// It used to be `v_update`, shared with Update, and the argument for sharing
 	// was that whoever may rename a membership may also suspend it. That argument
@@ -250,7 +277,7 @@ type UserServiceClient interface {
 	// Per-account exclusion as an ACTION now EXISTS, and that changes who this
 	// paragraph points at. It used to say that no such action existed and that
 	// "block within my Account" therefore had to be expressed by withdrawing the
-	// grants. `RemoveFromAccount` (above, #1127) is that action: it drops the
+	// grants. `RemoveFromAccount` (above, kacho#1127) is that action: it drops the
 	// membership row, leaves the identity untouched, and is gated by
 	// `member_remover` on the ACCOUNT — the same circle that may invite into it.
 	// The sentence is rewritten rather than deleted because the reason it gave is
@@ -281,10 +308,13 @@ type UserServiceClient interface {
 	// (`identity_remover` reaches the person himself or the cloud, never the
 	// Account that issued the invitation).
 	//
-	// Already-issued access tokens are NOT invalidated by this call; they expire
-	// on their own schedule. What stops immediately is every path that mints a
-	// NEW one (token hook, refresh hook, personal-token issuance, subject
-	// resolution at the edge).
+	// Blocking cuts off what this service has ALREADY issued to the person:
+	// every token it minted, every console session it opened and every refresh
+	// of such a session that predates the block is refused from the moment the
+	// block commits, and unblocking does not revive it. Every path of this
+	// service that mints a NEW credential stops at the same moment. The guarantee
+	// is scoped to credentials this service issues; it makes no claim about
+	// credentials minted by any other issuer.
 	Block(ctx context.Context, in *BlockUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Unblocks the specified User membership: it may authenticate into that
 	// Account again.
@@ -295,6 +325,11 @@ type UserServiceClient interface {
 	// person with no administrative way back is locked out permanently: self-serve
 	// password recovery deliberately does NOT lift a block (it proves ownership of
 	// a mailbox, which is not what the administrator called into question).
+	//
+	// Unblocking restores the ability to sign in and nothing else: it does NOT
+	// return credentials issued before the block. They stay cut off for good —
+	// this is a property of the call, not a delay — and after Unblock only a
+	// fresh sign-in yields working credentials.
 	//
 	// Same shape throughout: action not field, Operation, step-up, idempotent
 	// (unblocking an active membership succeeds). A PENDING invitation is refused
@@ -307,10 +342,19 @@ type UserServiceClient interface {
 	//
 	// Without it such a person signs in with the password and stays at
 	// assurance level "1" with no way up: self-service removal of the factor
-	// asks for a code (the very thing that was lost). So the administrator of
-	// the person's Account — `identity_suspender`, the same relation and the
-	// same step-up floor as Block/Unblock — removes it here, and the person
-	// enrolls a new one himself.
+	// asks for a code (the very thing that was lost). So the cloud
+	// administrator — `identity_suspender`, the same relation and the same
+	// step-up floor as Block/Unblock — removes it here, and the person enrolls
+	// a new one himself.
+	//
+	// WHO MAY: the person himself (his own factor, with a code, through the
+	// sign-in lane's `remove`) or the cloud administrator (this method). An
+	// administrator or owner of an Account the person belongs to may not: the
+	// person is one identity across all his Accounts, and the reset ends every
+	// session of his. Anyone who is not a cloud administrator — the person
+	// himself included — gets PERMISSION_DENIED, the same on an existing and on
+	// a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+	// administrator only.
 	//
 	// ONE TRANSACTION: the time-based code row (active) and the backup-code set
 	// are removed; EVERY session of the person is covered by a cutoff at `now`
@@ -328,6 +372,41 @@ type UserServiceClient interface {
 	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
 	// factor on the person's behalf, and does not lift a block.
 	ResetSecondFactor(ctx context.Context, in *ResetSecondFactorRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// Resets the access keys of the specified User: the cloud administrator's
+	// path for a person whose authenticator was lost or taken.
+	//
+	// WHO MAY: the cloud administrator only — `identity_suspender`, the same
+	// relation and the same step-up floor as ResetSecondFactor and Block. An
+	// administrator or owner of an Account the person belongs to may not: the
+	// person is one identity across all his Accounts, and the reset ends every
+	// session of his. Anyone who is not a cloud administrator — the person
+	// himself included — gets PERMISSION_DENIED, the same on an existing and on
+	// a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+	// administrator only. The person removes a single key of his own with
+	// `AccessKeyService.Revoke`.
+	//
+	// ONE TRANSACTION: EVERY access key row of the person is removed (the
+	// ceiling slots return with them); registration challenges issued before
+	// the reset stop being usable, so a registration finished from a session the
+	// reset ended leaves no key behind; EVERY session of the person is covered
+	// by a cutoff at `now` with reason `access-keys-reset` and the administrator
+	// as the actor — whoever holds the lost device may hold a session too; the
+	// audit event `iam.user.access_keys_reset` names both actors.
+	//
+	// A person WITHOUT an access key is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = ACCESS_KEYS_NOT_ENROLLED` and
+	// the text `user has no access key to reset`; nothing is ended. Whether the
+	// person has a password does not change that answer. Of two resets racing on
+	// one person exactly one is applied; the other finishes its Operation with
+	// the same refusal and ends nothing.
+	//
+	// WHAT IT DOES NOT DO: it does not remove, replace or devalue the password
+	// and does not open the recovery path — a person resets the password by
+	// recovering access with a code sent to the address; it does not reset the
+	// second factor (ResetSecondFactor), does not change the state of the person
+	// and does not lift or set a block. To stop sign-in with the password at
+	// once the administrator blocks the person (Block).
+	ResetAccessKeys(ctx context.Context, in *ResetAccessKeysRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(ctx context.Context, in *ListUserOperationsRequest, opts ...grpc.CallOption) (*ListUserOperationsResponse, error)
 }
@@ -440,6 +519,16 @@ func (c *userServiceClient) ResetSecondFactor(ctx context.Context, in *ResetSeco
 	return out, nil
 }
 
+func (c *userServiceClient) ResetAccessKeys(ctx context.Context, in *ResetAccessKeysRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, UserService_ResetAccessKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *userServiceClient) ListOperations(ctx context.Context, in *ListUserOperationsRequest, opts ...grpc.CallOption) (*ListUserOperationsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListUserOperationsResponse)
@@ -479,6 +568,16 @@ type UserServiceServer interface {
 	// поток): уходит, пока приглашение не активировано (`invite_status =
 	// PENDING`), на первом и на повторном приглашении той же пары, в пределах
 	// ограничения частоты на адрес.
+	//
+	// СВЕРХ НОРМЫ ИСХОД НЕОТЛИЧИМ — ЭТО РЕШЕНИЕ, А НЕ УПУЩЕНИЕ (Р22, Р9, MAIL-25).
+	// Писем на один адрес за окно уходит не больше объявленного
+	// (`invite.mailRateLimit`), сверхнормативное не отправляется, а ответ вызова
+	// тот же, что в норме. Норма считается на АДРЕС, а не на пригласившего:
+	// различимый исход сказал бы вызывающему, что этот адрес недавно получал
+	// письма по чужим приглашениям, — отказ по частоте не вправе становиться
+	// оракулом. Сверхнормативное видит оператор: счётчик
+	// `kaname_invite_mail_intents_total{outcome="rate_limited"}`. То же правило —
+	// у `ResendInvite`.
 	Invite(context.Context, *InviteUserRequest) (*operation.Operation, error)
 	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
 	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
@@ -511,11 +610,11 @@ type UserServiceServer interface {
 	// Async — возвращает Operation (как Update всех iam-ресурсов).
 	//
 	// WHO may call it is `record_writer` on `iam_user`, and it carries NO
-	// account-level source (#1102). The row is a GLOBAL identity — one per person
+	// account-level source (kacho#1102). The row is a GLOBAL identity — one per person
 	// for the whole platform — so `labels`, its only mutable field, decides which
 	// selector grants match the person in EVERY Account, not just the one the label
 	// was set from. A label being per-Account in meaning while living on a global
-	// row is its own subject (#1126); the right to write it stopped being an
+	// row is its own subject (kacho#1126); the right to write it stopped being an
 	// account-level one already.
 	//
 	// Reading the record keeps its account-level sources on purpose: seeing the
@@ -535,14 +634,14 @@ type UserServiceServer interface {
 	// the cloud, and nobody else. It used to be `v_delete`, which carried THREE
 	// account-level sources: the per-object grant the reconciler materializes on
 	// an invitee's row, the delegated Account administrator, and the Account
-	// owner. That is strictly worse than the block #1102 already took out of the
-	// Account's hands — a block is reversible, a deletion is not (#1131).
+	// owner. That is strictly worse than the block kacho#1102 already took out of the
+	// Account's hands — a block is reversible, a deletion is not (kacho#1131).
 	//
 	// WHAT THE PERSON WHO INVITED HIM KEEPS is what the owner's directive names —
 	// adding and removing rights in his own Account (`iam_access_binding`), seeing
 	// his people (`v_get` / `v_list` keep their account-level sources
 	// deliberately), and now REMOVING A PERSON FROM HIS ACCOUNT
-	// (`RemoveFromAccount` below, #1127). The last one is what he actually wanted
+	// (`RemoveFromAccount` below, kacho#1127). The last one is what he actually wanted
 	// when he reached for Delete: it drops the membership and leaves the identity
 	// alone.
 	//
@@ -550,9 +649,25 @@ type UserServiceServer interface {
 	// The narrowing takes away the right to erase SOMEONE ELSE, never one's own
 	// row.
 	//
-	// Deleting an identity that still owns Accounts is refused by the database
-	// (`accounts_owner_fk`) → FAILED_PRECONDITION "User <id> owns accounts and
-	// cannot be deleted"; that is unchanged.
+	// THE ORDER IS ACCOUNT, THEN IDENTITY. Deleting an identity that still owns
+	// Accounts is refused → FAILED_PRECONDITION "User <id> owns accounts and
+	// cannot be deleted": delete the Account first (`AccountService.Delete`).
+	// Only ACTIVE grants hold a person: "User <id> has active access bindings and
+	// cannot be deleted" names a grant that still gives rights; a revoked grant is
+	// history and does not stand in the way.
+	//
+	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
+	// access keys, recovery codes, personal tokens and memberships go in the same
+	// transaction, and every credential issued to it up to that moment is refused
+	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
+	// the declared revocation window after the deletion commits. Records that
+	// only attribute an act to the person (who issued a service-account key, who
+	// granted a binding) keep the identifier; it is never issued again.
+	//
+	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
+	// irreversible removal is never cheaper than the reversible operations on the
+	// same subject (`Block`, `Unblock`, `ResetSecondFactor` already ask for it),
+	// and the floor is the same whoever calls — the person himself or the cloud.
 	Delete(context.Context, *DeleteUserRequest) (*operation.Operation, error)
 	// Removes the specified person from the specified Account: the MEMBERSHIP
 	// goes, the identity stays.
@@ -565,7 +680,7 @@ type UserServiceServer interface {
 	// Account" could only be expressed by withdrawing the grants. That is NOT an
 	// exclusion, and the difference is observable: the membership stayed, the
 	// person stayed in the Account's people list, and `account_admission_rate` kept
-	// counting him (#1127).
+	// counting him (kacho#1127).
 	//
 	// WHAT IT MUST NOT TOUCH, stated as a boundary rather than a hope: not one
 	// field of the `iam_user` row. A person removed from Account A goes on working
@@ -646,7 +761,7 @@ type UserServiceServer interface {
 	//
 	// WHO may call it is `identity_suspender` on `iam_user` — a relation of its
 	// own, with NO account-level source: neither a per-object grant, nor the
-	// delegated Account administrator, nor the Account owner (#1102).
+	// delegated Account administrator, nor the Account owner (kacho#1102).
 	//
 	// It used to be `v_update`, shared with Update, and the argument for sharing
 	// was that whoever may rename a membership may also suspend it. That argument
@@ -664,7 +779,7 @@ type UserServiceServer interface {
 	// Per-account exclusion as an ACTION now EXISTS, and that changes who this
 	// paragraph points at. It used to say that no such action existed and that
 	// "block within my Account" therefore had to be expressed by withdrawing the
-	// grants. `RemoveFromAccount` (above, #1127) is that action: it drops the
+	// grants. `RemoveFromAccount` (above, kacho#1127) is that action: it drops the
 	// membership row, leaves the identity untouched, and is gated by
 	// `member_remover` on the ACCOUNT — the same circle that may invite into it.
 	// The sentence is rewritten rather than deleted because the reason it gave is
@@ -695,10 +810,13 @@ type UserServiceServer interface {
 	// (`identity_remover` reaches the person himself or the cloud, never the
 	// Account that issued the invitation).
 	//
-	// Already-issued access tokens are NOT invalidated by this call; they expire
-	// on their own schedule. What stops immediately is every path that mints a
-	// NEW one (token hook, refresh hook, personal-token issuance, subject
-	// resolution at the edge).
+	// Blocking cuts off what this service has ALREADY issued to the person:
+	// every token it minted, every console session it opened and every refresh
+	// of such a session that predates the block is refused from the moment the
+	// block commits, and unblocking does not revive it. Every path of this
+	// service that mints a NEW credential stops at the same moment. The guarantee
+	// is scoped to credentials this service issues; it makes no claim about
+	// credentials minted by any other issuer.
 	Block(context.Context, *BlockUserRequest) (*operation.Operation, error)
 	// Unblocks the specified User membership: it may authenticate into that
 	// Account again.
@@ -709,6 +827,11 @@ type UserServiceServer interface {
 	// person with no administrative way back is locked out permanently: self-serve
 	// password recovery deliberately does NOT lift a block (it proves ownership of
 	// a mailbox, which is not what the administrator called into question).
+	//
+	// Unblocking restores the ability to sign in and nothing else: it does NOT
+	// return credentials issued before the block. They stay cut off for good —
+	// this is a property of the call, not a delay — and after Unblock only a
+	// fresh sign-in yields working credentials.
 	//
 	// Same shape throughout: action not field, Operation, step-up, idempotent
 	// (unblocking an active membership succeeds). A PENDING invitation is refused
@@ -721,10 +844,19 @@ type UserServiceServer interface {
 	//
 	// Without it such a person signs in with the password and stays at
 	// assurance level "1" with no way up: self-service removal of the factor
-	// asks for a code (the very thing that was lost). So the administrator of
-	// the person's Account — `identity_suspender`, the same relation and the
-	// same step-up floor as Block/Unblock — removes it here, and the person
-	// enrolls a new one himself.
+	// asks for a code (the very thing that was lost). So the cloud
+	// administrator — `identity_suspender`, the same relation and the same
+	// step-up floor as Block/Unblock — removes it here, and the person enrolls
+	// a new one himself.
+	//
+	// WHO MAY: the person himself (his own factor, with a code, through the
+	// sign-in lane's `remove`) or the cloud administrator (this method). An
+	// administrator or owner of an Account the person belongs to may not: the
+	// person is one identity across all his Accounts, and the reset ends every
+	// session of his. Anyone who is not a cloud administrator — the person
+	// himself included — gets PERMISSION_DENIED, the same on an existing and on
+	// a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+	// administrator only.
 	//
 	// ONE TRANSACTION: the time-based code row (active) and the backup-code set
 	// are removed; EVERY session of the person is covered by a cutoff at `now`
@@ -742,6 +874,41 @@ type UserServiceServer interface {
 	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
 	// factor on the person's behalf, and does not lift a block.
 	ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error)
+	// Resets the access keys of the specified User: the cloud administrator's
+	// path for a person whose authenticator was lost or taken.
+	//
+	// WHO MAY: the cloud administrator only — `identity_suspender`, the same
+	// relation and the same step-up floor as ResetSecondFactor and Block. An
+	// administrator or owner of an Account the person belongs to may not: the
+	// person is one identity across all his Accounts, and the reset ends every
+	// session of his. Anyone who is not a cloud administrator — the person
+	// himself included — gets PERMISSION_DENIED, the same on an existing and on
+	// a well-formed absent `user_id`; NOT_FOUND is answered to the cloud
+	// administrator only. The person removes a single key of his own with
+	// `AccessKeyService.Revoke`.
+	//
+	// ONE TRANSACTION: EVERY access key row of the person is removed (the
+	// ceiling slots return with them); registration challenges issued before
+	// the reset stop being usable, so a registration finished from a session the
+	// reset ended leaves no key behind; EVERY session of the person is covered
+	// by a cutoff at `now` with reason `access-keys-reset` and the administrator
+	// as the actor — whoever holds the lost device may hold a session too; the
+	// audit event `iam.user.access_keys_reset` names both actors.
+	//
+	// A person WITHOUT an access key is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = ACCESS_KEYS_NOT_ENROLLED` and
+	// the text `user has no access key to reset`; nothing is ended. Whether the
+	// person has a password does not change that answer. Of two resets racing on
+	// one person exactly one is applied; the other finishes its Operation with
+	// the same refusal and ends nothing.
+	//
+	// WHAT IT DOES NOT DO: it does not remove, replace or devalue the password
+	// and does not open the recovery path — a person resets the password by
+	// recovering access with a code sent to the address; it does not reset the
+	// second factor (ResetSecondFactor), does not change the state of the person
+	// and does not lift or set a block. To stop sign-in with the password at
+	// once the administrator blocks the person (Block).
+	ResetAccessKeys(context.Context, *ResetAccessKeysRequest) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
@@ -783,6 +950,9 @@ func (UnimplementedUserServiceServer) Unblock(context.Context, *UnblockUserReque
 }
 func (UnimplementedUserServiceServer) ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetSecondFactor not implemented")
+}
+func (UnimplementedUserServiceServer) ResetAccessKeys(context.Context, *ResetAccessKeysRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetAccessKeys not implemented")
 }
 func (UnimplementedUserServiceServer) ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOperations not implemented")
@@ -988,6 +1158,24 @@ func _UserService_ResetSecondFactor_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ResetAccessKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetAccessKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetAccessKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetAccessKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetAccessKeys(ctx, req.(*ResetAccessKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _UserService_ListOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListUserOperationsRequest)
 	if err := dec(in); err != nil {
@@ -1052,6 +1240,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetSecondFactor",
 			Handler:    _UserService_ResetSecondFactor_Handler,
+		},
+		{
+			MethodName: "ResetAccessKeys",
+			Handler:    _UserService_ResetAccessKeys_Handler,
 		},
 		{
 			MethodName: "ListOperations",

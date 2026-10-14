@@ -12,12 +12,13 @@
 // under `/iam/v1/internal/cluster/...`; never on the external TLS endpoint.
 //
 // Manages cluster-RBAC admin grants on the singleton `cluster:cluster_root`
-// FGA object. Replaces the prior `kubectl exec`-into-openfga workflow for
-// granting / revoking `system_admin` to humans. All mutations follow the
-// `Operation` async envelope: the handler
-// inserts `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a
-// single transaction, then the existing `FGAOutboxDrainer` worker pushes the
-// tuple as a journal intent and flips the Operation to `done=true` within ≤2s.
+// FGA object, for users and service accounts. All mutations return an
+// `Operation`: it is persisted before the mutation, the handler inserts
+// `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a single
+// transaction, and the same request completes the Operation (`done=true`). The
+// relation tuple itself reaches the model asynchronously, through the
+// `fga_outbox` drainer. The public twin `ClusterService`
+// (`cluster_service.proto`) executes the same use-cases.
 //
 // Read RPCs (`Get`, `ListAdmins`) are synchronous; they hit the local
 // `kaname` schema only.
@@ -91,14 +92,22 @@ func (*GetClusterRequest) Descriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_internal_cluster_service_proto_rawDescGZIP(), []int{0}
 }
 
-// GrantClusterAdminRequest — payload for `GrantAdmin`.
+// GrantClusterAdminRequest — payload for `GrantAdmin` (both twins:
+// `InternalClusterService` and `ClusterService`).
 type GrantClusterAdminRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Subject type. Only `USER` is accepted in this version; other values
-	// return InvalidArgument `"Illegal argument subject_type: only 'user' supported in this version"`.
+	// Subject kind: `USER` or `SERVICE_ACCOUNT`. UNSPECIFIED is treated as
+	// `USER` by the transport (REST callers usually omit the field). Any other
+	// value returns InvalidArgument on `subject_type` with
+	// `"must be 'user' or 'service_account'"`.
 	SubjectType ClusterGrantSubjectType `protobuf:"varint,1,opt,name=subject_type,json=subjectType,proto3,enum=kaname.cloud.iam.v1.ClusterGrantSubjectType" json:"subject_type,omitempty"`
-	// User id of the new admin. Must match `^usr[0-9a-hjkmnp-tv-z]{17}$` and
-	// exist in `kaname.users` (missing user returns InvalidArgument).
+	// Id of the new admin; its form follows the kind: `^usr[0-9a-hjkmnp-tv-z]{17}$`
+	// for `USER`, `^sva[0-9a-hjkmnp-tv-z]{17}$` for `SERVICE_ACCOUNT`. Empty →
+	// InvalidArgument `"required"`; a form mismatch → InvalidArgument on
+	// `subject_id`. A well-formed id with no row → InvalidArgument
+	// `"<User|ServiceAccount> <id> not found"`; a subject barred from signing in →
+	// FailedPrecondition `"User <id> is blocked"`, `"User <id> is not active"`
+	// or `"ServiceAccount <id> is disabled"`.
 	SubjectId     string `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -206,16 +215,18 @@ func (x *GrantClusterAdminMetadata) GetSubjectId() string {
 	return ""
 }
 
-// RevokeClusterAdminRequest — payload for `RevokeAdmin`.
+// RevokeClusterAdminRequest — payload for `RevokeAdmin` (both twins).
 type RevokeClusterAdminRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Subject type. Only `USER` is accepted in this version.
+	// Subject kind: `USER` or `SERVICE_ACCOUNT`; UNSPECIFIED is treated as
+	// `USER` (the REST path carries only the id — the kind is the `subjectType`
+	// query parameter). Other values → InvalidArgument on `subject_type`.
 	SubjectType ClusterGrantSubjectType `protobuf:"varint,1,opt,name=subject_type,json=subjectType,proto3,enum=kaname.cloud.iam.v1.ClusterGrantSubjectType" json:"subject_type,omitempty"`
-	// User id of the admin being revoked. Must match
-	// `^usr[0-9a-hjkmnp-tv-z]{17}$`. Self-revoke is rejected
-	// (FailedPrecondition); last-admin revoke is rejected
-	// (FailedPrecondition); non-existent / already-revoked admin returns
-	// NotFound.
+	// Id of the admin being revoked; its form follows the kind, as in
+	// `GrantClusterAdminRequest.subject_id`. Self-revoke → FailedPrecondition
+	// `"cannot revoke own cluster admin grant"`; the last active grant →
+	// FailedPrecondition `"cannot revoke last active cluster admin"`; no active
+	// grant → NotFound `"<User|ServiceAccount> <id> is not an active cluster admin"`.
 	SubjectId     string `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -322,7 +333,8 @@ func (x *RevokeClusterAdminMetadata) GetSubjectId() string {
 }
 
 // ListClusterAdminsRequest — no fields. The list is filtered server-side to
-// active grants (`granted_until IS NULL`) and ordered by `granted_at ASC`.
+// active grants (`granted_until IS NULL`) and ordered by `granted_at`, then by
+// `cluster_admin_grant_id`, both ascending.
 type ListClusterAdminsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -363,7 +375,8 @@ func (*ListClusterAdminsRequest) Descriptor() ([]byte, []int) {
 // admins, ready for direct UI rendering.
 type ListClusterAdminsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Active admins, ordered by `granted_at ASC`.
+	// Active admins. Ordered: by `granted_at`, then by `cluster_admin_grant_id`,
+	// both ascending — equal timestamps never yield an unspecified order.
 	Admins        []*ClusterAdminEntry `protobuf:"bytes,1,rep,name=admins,proto3" json:"admins,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -413,20 +426,23 @@ func (x *ListClusterAdminsResponse) GetAdmins() []*ClusterAdminEntry {
 //
 // `subject_email` / `subject_display_name` / `granted_by_email` are mirror
 // fields kept in sync via the join at read time; they are output-only
-// (clients must not echo them back as inputs).
+// (clients must not echo them back as inputs). The subject mirrors are read
+// from `kaname.users`, so they are filled for a `USER` subject and stay empty
+// for a `SERVICE_ACCOUNT` subject.
 type ClusterAdminEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the underlying `cluster_admin_grants` row (`cag_<17>`).
 	ClusterAdminGrantId string `protobuf:"bytes,1,opt,name=cluster_admin_grant_id,json=clusterAdminGrantId,proto3" json:"cluster_admin_grant_id,omitempty"`
-	// Subject type (`USER` only in this version).
+	// Subject kind as stored: `USER` or `SERVICE_ACCOUNT`.
 	SubjectType ClusterGrantSubjectType `protobuf:"varint,2,opt,name=subject_type,json=subjectType,proto3,enum=kaname.cloud.iam.v1.ClusterGrantSubjectType" json:"subject_type,omitempty"`
-	// User id of the admin (`usr<17>`).
+	// Id of the admin: `usr<17>` for `USER`, `sva<17>` for `SERVICE_ACCOUNT`.
 	SubjectId string `protobuf:"bytes,3,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
-	// Subject email enriched from `kaname.users`. Empty string when the
-	// user row is absent (dangling reference; should not happen, surfaced as
-	// empty for graceful UI degradation).
+	// Subject email enriched from `kaname.users`. Filled for `USER`; empty for
+	// `SERVICE_ACCOUNT` (no users row) and when the user row is absent
+	// (dangling reference, surfaced as empty for graceful UI degradation).
 	SubjectEmail string `protobuf:"bytes,4,opt,name=subject_email,json=subjectEmail,proto3" json:"subject_email,omitempty"`
-	// Subject display name enriched from `kaname.users`. Empty string when
+	// Subject display name enriched from `kaname.users`. Filled for `USER`
+	// (empty when that user has none); empty for `SERVICE_ACCOUNT` and when
 	// the user row is absent.
 	SubjectDisplayName string `protobuf:"bytes,5,opt,name=subject_display_name,json=subjectDisplayName,proto3" json:"subject_display_name,omitempty"`
 	// User id of the granter (`usr<17>` for a regular admin, or the literal

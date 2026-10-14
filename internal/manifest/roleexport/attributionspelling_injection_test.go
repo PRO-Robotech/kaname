@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // attributionspelling_injection_test.go — доказательство способности проб
-// написания падать И молчать (задача #1884).
+// написания падать И молчать (задача kacho#1884).
 //
 // Инъекция подаёт синтетический вход ТЕМ ЖЕ функциям, которые судят настоящий
 // (judgeSpellingReach, judgeSpellingDivergences), — не их похожей копии: копия,

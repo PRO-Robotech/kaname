@@ -55,6 +55,10 @@ var subjectChangeProducerRoster = map[string]int{
 	"internal/apps/kaname/api/access_binding/revoke.go": 1,
 	"internal/apps/kaname/api/group/add_member.go":      1,
 	"internal/apps/kaname/api/group/remove_member.go":   1,
+	// Исход смены адреса (kaname#635, приёмка email-change-is-confirmed-from-the-new-address.md,
+	// Р8 п. 8, Р9): строка о человеке, `op` = `user_email_change`. Самосброс
+	// реплики края, обслужившей смену, — сторона края (приёмка F8-S5).
+	"internal/apps/kaname/api/humansession/email_change.go": 1,
 }
 
 // TestSelfFlushCoversEveryProducerOfTheSubjectChangeQueue — имя сохранено

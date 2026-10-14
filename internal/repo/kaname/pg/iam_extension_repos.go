@@ -255,14 +255,13 @@ func unmarshalTrustedSubjects(body []byte) ([]domain.TrustedSubject, error) {
 // List returns OAuth clients owned by the given SA, paged by id ASC.
 func (r *SAOAuthClientRepo) List(ctx context.Context, svaID domain.ServiceAccountID, pageToken string, pageSize int32) ([]domain.ServiceAccountOAuthClient, string, error) {
 	// page_size outside [0..maxListPageSize] is REJECTED, never clamped (a clamp
-	// returns a short page indistinguishable from a complete one). 0 → default.
-	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
-		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
-			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
+	// returns a short page indistinguishable from a complete one). 0 → the
+	// platform default, the same one every other List of the service applies.
+	limit, err := effectivePageSize(pageSize)
+	if err != nil {
+		return nil, "", err
 	}
-	if pageSize == 0 {
-		pageSize = 100
-	}
+	pageSize = safeconv.ClampInt32(limit) // already bounded to [1..maxListPageSize]: no clamp happens
 	q := `SELECT ` + socCols + `
 	        FROM service_account_oauth_clients
 	       WHERE sva_id = $1 AND id > $2
@@ -322,6 +321,25 @@ func (r *SAOAuthClientRepo) DeleteOwnedByID(
 		return domain.ServiceAccountOAuthClient{}, false, mapErr(err, "SAOAuthClient.DeleteOwnedByID", string(id))
 	}
 	return out, true, nil
+}
+
+// ExistsOwnedByID — whether service account ownerID holds key id. The predicate
+// is the removal statement's own (`id AND sva_id`): a row of another owner is
+// indistinguishable from an absent one BY CONSTRUCTION.
+//
+// The answer classifies, it does not decide: removal decides under its own row
+// lock, and the loser of a race gets the same "absent" there. A read error is
+// NOT "absent" — it reaches the caller as is, so an unanswered read is never
+// taken for a missing row.
+func (r *SAOAuthClientRepo) ExistsOwnedByID(ctx context.Context, ownerID domain.ServiceAccountID, id domain.SAOAuthClientID) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM service_account_oauth_clients WHERE id = $1 AND sva_id = $2)`,
+		string(id), string(ownerID)).Scan(&exists)
+	if err != nil {
+		return false, mapErr(err, "SAOAuthClient.ExistsOwnedByID", string(id))
+	}
+	return exists, nil
 }
 
 // TouchLastUsed — atomic update last_used_at (RETURNING для проверки exists).

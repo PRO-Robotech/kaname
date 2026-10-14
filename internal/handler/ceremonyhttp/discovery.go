@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/oauthceremony"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 )
 
 // DiscoveryConfig — что публикуют метаданные. Все поля — публичный материал
@@ -83,8 +84,8 @@ func NewDiscovery(cfg DiscoveryConfig) (*Discovery, error) {
 // ServeHTTP — только GET.
 func (d *Discovery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		writeJSON(w, http.StatusMethodNotAllowed, errorBody("invalid_request"))
+		// Форма решения R36 п. 3 (Р12, kaname#524).
+		methodrefusal.Write(w, http.MethodGet)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

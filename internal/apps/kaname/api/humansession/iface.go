@@ -14,7 +14,9 @@
 // (операция выдачи, зовомая ИЗНУТРИ транзакции выдающего глагола — Д10),
 // `login.go`, `logout.go`, `change_password.go`, `form_token.go`, `resolve.go`,
 // `recovery_request.go` (запрос кода), `recovery_complete.go` (предъявление
-// кода с новым паролем), `dispatch.go` (работа вне пути ответа — Ф5 Р2).
+// кода с новым паролем), `dispatch.go` (работа вне пути ответа — Ф5 Р2),
+// `own_sessions.go` (свои сессии: перечень, выход из выбранной и из всех, кроме
+// текущей — kaname#634).
 // Транспорт (HTTP-обработчик полосы формы и gRPC-обработчик `Resolve`) живёт в
 // `internal/handler/loginlanehttp` и в `handler.go`; сюда транспорт не течёт.
 //
@@ -66,10 +68,22 @@ type Resolved struct {
 }
 
 // RecoveryTarget — человек, которому адресован запрос восстановления, вместе с
-// подтверждённостью его адреса (Ф1-25: код — для подтверждённого адреса).
+// подтверждённостью его адреса и наличием строки пароля. Правило выдачи кода
+// (kaname#458, Р2): «Код восстановления выдаётся на подтверждённый адрес; на
+// неподтверждённый — личности `ACTIVE` без способа входа (предъявление кода
+// подтверждает адрес и заводит первый пароль) и записи с паролем в состоянии
+// `ACTIVE` либо `PENDING` (предъявление кода подтверждает адрес и заменяет
+// пароль; второй фактор, ключи доступа и личные токены записи остаются на ней,
+// а запись без них переходит к владельцу ящика со снятием всего, чем в неё
+// входили прежде); строке `BLOCKED` и приглашению без пароля неподтверждённый
+// адрес кода не даёт».
 type RecoveryTarget struct {
 	User          domain.User
 	EmailVerified bool
+	// HasPassword — у личности есть строка способа входа «пароль». Читается
+	// ТЕМ ЖЕ чтением, что личность и подтверждённость (Ф5 Р9 п. 2): лишнее
+	// чтение на одной полосе стало бы различием по времени (Р7).
+	HasPassword bool
 }
 
 // RecoveryMailIntent — намерение отправить письмо восстановления: пишется той же
@@ -110,10 +124,18 @@ type Store interface {
 	// FirstAuthentication — момент первой аутентификации личности нашей
 	// посадкой (Р5). found=false — посадка эту личность ещё не аутентифицировала.
 	FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error)
-	// RecoveryTarget — человек по адресу вместе с подтверждённостью адреса
-	// ОДНИМ чтением: обе полосы запроса восстановления (адрес есть · адреса
+	// RecoveryTarget — человек по адресу вместе с подтверждённостью адреса и
+	// наличием строки пароля ОДНИМ чтением (Ф5 Р9 п. 2): обе полосы запроса восстановления (адрес есть · адреса
 	// нет) стоят одинаково (Ф5 Р2, Р7). found=false — адреса нет ни у кого.
 	RecoveryTarget(ctx context.Context, email domain.Email) (RecoveryTarget, bool, error)
+	// SessionsOf — ЖИВЫЕ записи личности на now (без отметки снятия, срок не
+	// вышел, момент аутентификации строго позже отсечки личности — kaname#681,
+	// правило края) страницей курсора `(created_at, id)` по возрастанию (kaname#634,
+	// Р4): size в [0..1000], 0 — умолчание; token — непрозрачный курсор кодека
+	// списков службы, пустой — первая страница. Ответ — записи и курсор
+	// следующей страницы; пустой ⇔ страница последняя. Негодный курсор либо
+	// величина — отказ аргументом (INVALID_ARGUMENT).
+	SessionsOf(ctx context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error)
 	// Writer открывает транзакцию записи. Вызывающий обязан Commit либо Rollback.
 	Writer(ctx context.Context) (Writer, error)
 	// SessionSetWriter открывает транзакцию записи, ПЕРВЫМ оператором которой
@@ -134,8 +156,12 @@ type Store interface {
 	// силой, что взяла бы сама проверка внешнего ключа, но РАНЬШЕ любой
 	// строки-ребёнка личности (kaname#382). Так открывает свою транзакцию
 	// каждый вариант использования, пишущий строки сессии одной личности и не
-	// снимающий прочих её записей: выход, повышение, подтверждение второго
-	// фактора, перечеканка запасных кодов. Выдача входа — не этой дверью (ниже).
+	// снимающий прочих её записей: выход, повышение, перечеканка запасных
+	// кодов. Ею же открывается запрос кода восстановления (kaname#770): он
+	// снимает и пишет коды личности, которые снимают и держатели её строки
+	// `FOR UPDATE` (исход смены адреса, удаление). Выдача входа — не этой
+	// дверью (ниже); заведение и подтверждение второго фактора — дверью
+	// `EnrollmentWriter`.
 	//
 	// Удаление личности идёт «личность → дети»: строка `users`, затем каскадом
 	// записи сессии, способы входа, отсечки. Писатель, взявший ребёнка раньше
@@ -156,6 +182,17 @@ type Store interface {
 	// Ключевой замок совместим с остальными писателями личности и конфликтует
 	// ровно с её удалением. Пустая личность — строки нет, держать нечего.
 	PersonWriter(ctx context.Context, userID domain.UserID) (Writer, error)
+	// EnrollmentWriter открывает транзакцию записи глагола, РЕШАЮЩЕГО ПО
+	// ЗАВЕДЁННОМУ у личности (заведение второго фактора, kaname#747 Р4;
+	// kaname#770): ПЕРВЫМ оператором строка личности userID взята замком,
+	// несовместимым с любой записью, заводящей способ, — и со вставкой строки
+	// ключа (проверка её внешнего ключа `FOR KEY SHARE`), и с подтверждением
+	// кода по времени (оно само идёт этой дверью). Заведённое, прочитанное ЭТОЙ
+	// транзакцией после замка
+	// (`LoginMethod`, `AccessKeyEnrolled`), до её фиксации не меняется. Замок
+	// включает конфликты писателя нескольких сессий и удаления личности.
+	// Пустая личность — строки нет, держать нечего.
+	EnrollmentWriter(ctx context.Context, userID domain.UserID) (Writer, error)
 }
 
 // Writer — одна транзакция записи. Всё, что глагол делает «одним исходом»
@@ -174,6 +211,21 @@ type Writer interface {
 	// отсечки нет; `NOT_FOUND` — строки нет; прочая ошибка — операция не
 	// ответила. Пустая личность — отказ аргументом без обхода базы.
 	LockPersonForLogin(ctx context.Context, userID domain.UserID) (revokeBefore time.Time, hasCutoff bool, err error)
+	// HoldAccessKeyForLogin — строка ключа keyID личности userID, взятая
+	// транзакцией выдачи входа ключом ПОСЛЕ захвата личности (kaname#669, Р8,
+	// Р15) ключевым замком (`FOR KEY SHARE`). Вход читает строку ключа и
+	// сдвигает счётчик своими транзакциями раньше выдачи; снятие ключа,
+	// зафиксированное между ними, гасит записи сессии человека, но запись,
+	// выданную после него, не задело бы. Поэтому существование ключа судит сама
+	// выдача, и судит его база: замок конфликтует с удалением строки, а
+	// оператор, читающий после захвата личности, видит снятие, зафиксированное
+	// за ожидание захвата (снятие держит личность первым оператором).
+	//
+	// Исходов три: nil — строка взята; `NOT_FOUND` — строки нет (снята либо
+	// принадлежит другому); прочая ошибка — операция не ответила. Позванная без
+	// захвата этой личности в той же транзакции — отказ без обхода базы:
+	// порядок «личность → ключ» общий со снятием, и обратный дал бы встречный.
+	HoldAccessKeyForLogin(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error
 	// InsertSession кладёт запись; дайджест носителя уникален (23505 →
 	// ALREADY_EXISTS; при 256 битах случайности это наша ошибка, а не гонка).
 	InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error
@@ -188,26 +240,73 @@ type Writer interface {
 	// EndOtherSessions снимает ВСЕ прочие живые записи личности, кроме keep
 	// (Ф1-15, Ф1-65); отвечает числом снятых.
 	EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error)
+	// EndOwnSession снимает ОДНУ запись target, если она — живая (не снята, срок
+	// на now не вышел) запись личности userID (kaname#634, Р5): владение,
+	// живость и срок решает ТОТ ЖЕ оператор, что снимает (ban #10), и выданное
+	// в записи отзывается той же транзакцией (kaname#313). ended=false — такой
+	// живой записи у личности нет (чужая, неизвестная, снятая, истёкшая).
+	EndOwnSession(ctx context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (ended bool, err error)
+	// EndOtherLiveSessions снимает все прочие ЖИВЫЕ записи личности, кроме keep
+	// (kaname#634, Р7), и отзывает выданное в них (kaname#313); истёкшие не
+	// снятые записи не трогает — они не «сессии», которые человек видит в
+	// перечне. Отвечает идентификаторами снятых.
+	EndOtherLiveSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error)
+	// SessionLive — жива ли запись id личности userID на now. Читается ПОСЛЕ
+	// замка писателя нескольких сессий (`SessionSetWriter`): запись, снятая
+	// встречным писателем за ожидание замка, видна снятой (Р7).
+	SessionLive(ctx context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error)
 	// RotateBearer перевыпускает носитель записи (Ф11 Р5): прежний дайджест
 	// перестаёт находить запись, момент аутентификации и срок прежние, момент
 	// последнего предъявления сдвигается на presentedAt.
 	RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error
 	// PresentInSession — предъявление способа ВНУТРИ сессии (Ф11 Р5, Ф12):
-	// множество предъявленного, уровень (по правилу, вычислен вызывающим),
-	// новый дайджест носителя и момент последнего предъявления — одной записью
-	// на живой строке; момент аутентификации и срок не трогаются.
-	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error
+	// множество предъявленного, уровень, новый дайджест носителя и момент
+	// последнего предъявления — одной записью на живой строке; момент
+	// аутентификации и срок не трогаются.
+	//
+	// candidate — уровень, который правило выводит из множества вызывающего;
+	// ЗАПИСЬ уровня решает оператор, с условием на прежнее значение
+	// (kaname#343): кандидат ниже записанного запись не понижает (Ф11 Р2), выше
+	// — поднимает. Множество предъявленного накапливается тем же оператором:
+	// способ, предъявленный конкурентом между чтением и записью, не теряется.
+	// Ответ — то, что ЛЕГЛО, и копии уровня читают его, а не кандидата.
+	// Кардинальность судит тот же оператор: строки нет либо она снята —
+	// NOT_FOUND.
+	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (PresentedRecord, error)
 	// UpsertCutoff — операция записи отсечки (§4.1 п.17): момент монотонен;
 	// причина и актор идут за ПРИНЯТЫМ моментом, на равных стоит последняя.
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
 	// ReplaceLoginVerifier замещает материал способа входа одним оператором
 	// (ID-PW-1 PWV-10): replaced=false — строки способа нет.
 	ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (replaced bool, err error)
+	// PutLoginVerifier — «заменить материал либо завести строку» одним
+	// оператором (Ф5 Р5 ветвь «строки нет», Ф5-34; Р9 п. 4): created=true —
+	// строки пароля не было, и её завёл этот оператор.
+	PutLoginVerifier(ctx context.Context, m domain.LoginMethod) (created bool, err error)
+	// MarkEmailVerified — отметка на подтверждённое значение адреса: сверка
+	// адреса и запись — один оператор. marked=false — адрес строки уже не тот.
+	// Вызывающих два: глагол подтверждения (Ф6) и завершение восстановления,
+	// заводящее первый пароль (Ф5 Р9 п. 3).
+	MarkEmailVerified(ctx context.Context, userID domain.UserID, email domain.Email, at time.Time) (marked bool, err error)
+	// CloseRecoveryPath снимает отметку открытого пути восстановления — тем же
+	// исходом, что заводит первый пароль (пара `active-identity-has-a-way-in.md`
+	// AWI-10, Ф5-30). Единственный снимающий оператор.
+	CloseRecoveryPath(ctx context.Context, userID domain.UserID) error
+	// EnrollLoginMethod — ЗАВЕДЕНИЕ строки способа входа существующим
+	// оператором вставки (приёмка A7 Р3, Р4; kaname#213): enrolled=false —
+	// строка этого вида у человека уже есть. Решает ключ строки хранилища
+	// («человек, вид»), а не проверка перед вставкой: из двух одновременных
+	// заведений проходит одно.
+	EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (enrolled bool, err error)
 	// LoginMethod — строка способа входа человека данного вида, прочитанная
 	// ЭТОЙ транзакцией: то же чтение, что `loginmethod.Store.Get` (NOT_FOUND —
 	// строки нет), но соединением открытой транзакции, а не вторым из пула —
 	// вложенного захвата соединения у него нет (шапка `completed_login.go`).
 	LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error)
+	// AccessKeyEnrolled — есть ли у человека хоть одна строка ключа доступа,
+	// прочитанная ЭТОЙ транзакцией (то же чтение, что
+	// `loginmethod.Store.AccessKeyEnrolled`, без второго соединения).
+	AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error)
 	// RecordFailure — одно неверное предъявление по оси и ключу.
 	RecordFailure(ctx context.Context, scope FailureScope, key string, at time.Time) error
 	// ResetFailures снимает счёт по оси и ключу (успешный вход обнуляет счёт по
@@ -275,6 +374,85 @@ type Writer interface {
 	Rollback(ctx context.Context) error
 }
 
+// RecoveryCompletionStore — хранилище транзакции исхода завершения
+// восстановления (kaname#458, Р3, Р4).
+type RecoveryCompletionStore interface {
+	// RecoveryCompletionWriter открывает транзакцию исхода, ПЕРВЫМ оператором
+	// которой взята строка личности userID замком писателя нескольких сессий —
+	// той же дверью, что `Store.SessionSetWriter`, и той же ценой у пустой
+	// личности: до точки решения полосы «адрес есть» и «адреса нет» делают одну
+	// работу хранилища.
+	RecoveryCompletionWriter(ctx context.Context, userID domain.UserID) (RecoveryCompletionWriter, error)
+}
+
+// RecoveryCompletionWriter — транзакция исхода завершения восстановления:
+// операторы обычного восстановления (`Writer`) и операторы перехода записи к
+// владельцу ящика (kaname#458, Р3) над ОДНОЙ транзакцией. Отказ любого из них
+// откатывает исход целиком, и код остаётся годным (Ф5-33).
+type RecoveryCompletionWriter interface {
+	Writer
+	// AddressVerified — стоит ли у личности отметка подтверждения адреса,
+	// прочитанная ЭТОЙ транзакцией ПОСЛЕ захвата строки личности (Р4): ветвь
+	// исхода решает она, а не чтение адреса до транзакции (запрет #10).
+	// Пустая личность — отказ аргументом без обхода базы.
+	AddressVerified(ctx context.Context, userID domain.UserID) (bool, error)
+	// UserTokenHeld — есть ли у личности хоть одна строка личного токена
+	// (удостоверение человека любого вида: ключ утверждения клиента либо
+	// базовый секрет, независимо от срока), прочитанная ЭТОЙ транзакцией после
+	// захвата строки личности (Р3 п. 2, Р4). Вместе с заведёнными вторым
+	// фактором и ключом доступа (`LoginMethod`, `AccessKeyEnrolled` того же
+	// писателя) она решает ветвь исхода неподтверждённой записи.
+	UserTokenHeld(ctx context.Context, userID domain.UserID) (bool, error)
+	// RetireStartedEnrolmentsOf снимает начатые и не завершённые заведения
+	// записи без удостоверений (Р3 п. 2, ветвь перехода): строку генератора в
+	// состоянии «начато» и неиспользованные испытания регистрации ключа
+	// доступа. Заведённых удостоверений оператор не касается по построению:
+	// каждое снятие — один оператор, суженный личностью и состоянием «начато».
+	RetireStartedEnrolmentsOf(ctx context.Context, userID domain.UserID) (RetiredEnrolments, error)
+	// ActivateInviteOnVerification — активация приглашения той же функцией, что
+	// в исходе подтверждения (`#456` Р11 п. 2), и только живого: срок и снятие
+	// судятся в условии оператора активации. ErrInviteNotValid — приглашение
+	// истекло, снято либо строка уже не `PENDING`.
+	ActivateInviteOnVerification(ctx context.Context, pending domain.User) (InviteActivation, error)
+}
+
+// RetiredEnrolments — сколько начатых заведений снял переход записи, по видам.
+// Наружу не выходит: число идёт в журнал службы.
+type RetiredEnrolments struct {
+	SecondFactorRows       int64
+	AccessKeyChallengeRows int64
+}
+
+// AccessKeyLoginStore — хранилище ПОЛОСЫ ВХОДА ключом (Ф13 Р2, Р3, Р13).
+//
+// ГРАНИЦА НАЗВАНА. Полоса входа человека не знает: она обнаруживает его по
+// предъявленному удостоверению. Поэтому испытание здесь привязано к КОНТЕКСТУ
+// ФОРМЫ, а не к человеку, и живёт в своей таблице — инвариант испытаний
+// церемоний Ф7 («строка принадлежит вызывающему») этим не ослабляется.
+// Моменты выдачи, срока и предъявления испытания ставит хранилище своими
+// часами: испытание выдаёт одна реплика, предъявляют другой.
+type AccessKeyLoginStore interface {
+	// IssueChallenge кладёт выданное испытание сроком ttl, ЗАМЕЩАЯ живое
+	// испытание того же контекста одним оператором (Ф13-03): отказа под
+	// одновременной выдачей на том же контексте нет — живым остаётся позднее.
+	IssueChallenge(ctx context.Context, c domain.AccessKeyLoginChallenge, ttl time.Duration) error
+	// ConsumeChallenge — ОДИН оператор однократности (Ф13-08): строка этого
+	// контекста, не потреблённая и не истёкшая, получает отметку.
+	// consumed=false — её нет, она потреблена, истекла либо выдана другому
+	// контексту; различать это вызывающему незачем — отказ один (Р7).
+	ConsumeChallenge(ctx context.Context, challenge []byte, formContext string) (consumed bool, err error)
+	// KeyByCredentialID — строка ключа по идентификатору удостоверения;
+	// found=false — строки нет. Снятый ключ и «удостоверения не было» суть
+	// одно состояние (Р15).
+	KeyByCredentialID(ctx context.Context, credentialID []byte) (domain.AccessKey, bool, error)
+	// AdvanceSignCount — атомарный сдвиг счётчика и момента предъявления с
+	// условием на прежнее значение (Ф7 Р6): advanced=false — проигравший.
+	AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (advanced bool, err error)
+	// UserOf — человек, которому принадлежит найденная строка ключа: ему и
+	// выдаётся сессия (Р3). Нет человека — NOT_FOUND.
+	UserOf(ctx context.Context, id domain.UserID) (domain.User, error)
+}
+
 // EnrollmentSweeper — порт уборки неподтверждённых заведений второго фактора
 // (Ф12-44): строки `pending`, чей срок (окно Р8 от момента заведения) истёк,
 // — `confirm` их уже не примет ни при каком коде.
@@ -297,4 +475,12 @@ type FailureSweeper interface {
 // истёкшие строки, которые оператор применения уже не обслужит.
 type RecoveryCodeSweeper interface {
 	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// PresentedRecord — то, что легло в запись сессии предъявлением внутри неё
+// (`Writer.PresentInSession`): накопленное множество предъявленного и уровень
+// после условия на прежнее значение.
+type PresentedRecord struct {
+	Methods []string
+	Level   string
 }

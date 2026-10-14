@@ -4,7 +4,7 @@
 package manifest_test
 
 // relationoraclereferent_test.go — модель ВНОСИТСЯ вызывающим, и обе полосы
-// названы (задача продукта #2002, сценарий `IAM-MB-1-17` приёмки
+// названы (задача продукта kacho#2002, сценарий `IAM-MB-1-17` приёмки
 // `model-composes-at-boot-from-delivered-manifests.md`).
 //
 // # Что здесь доказывается

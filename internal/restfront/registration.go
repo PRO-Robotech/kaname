@@ -124,6 +124,9 @@ func registerPublicRESTServices(
 		// Ключи доступа (Ф7, kacho#1273): шесть глаголов на публичном
 		// слушателе. Служба поднимается вместе с полосой входа на каждом старте.
 		{"AccessKeyService", iamv1.RegisterAccessKeyServiceHandlerFromEndpoint},
+		// Администраторы кластера (приёмка ADM-CA): публичный близнец
+		// внутренней службы, канонические пути без сегмента `/internal/`.
+		{"ClusterService", iamv1.RegisterClusterServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {

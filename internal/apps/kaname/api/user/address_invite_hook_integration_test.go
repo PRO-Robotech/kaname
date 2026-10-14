@@ -44,6 +44,7 @@ func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
 		_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 			VALUES ($1, $2, 'ext-ev74-inviter', 'ev74-inviter@example.test', 'Inviter', 'ACTIVE', now())`, string(inviter), string(acc))
 		require.NoError(t, err)
+		seedWayIn(t, ctx, tx)
 		require.NoError(t, tx.Commit(ctx))
 
 		// Приглашение адреса V.
@@ -56,6 +57,11 @@ func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
 		}, time.Now().Add(7*24*time.Hour))
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
+		// Пароль приглашённого — регистрацией раньше активации (kaname#456,
+		// Р11 п. 1): активация не производит ACTIVE без способа входа (kaname#608).
+		_, err = pool.Exec(ctx, `INSERT INTO kaname.user_login_methods (user_id, kind, verifier)
+			VALUES ($1, 'password', 'fixture-password-row-without-a-known-password')`, string(row.ID))
+		require.NoError(t, err)
 		if verified {
 			_, err = pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(row.ID))
 			require.NoError(t, err)

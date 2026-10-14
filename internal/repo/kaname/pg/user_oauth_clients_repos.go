@@ -58,10 +58,23 @@ func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClient
 	return out, nil
 }
 
+// ErrIssuanceMomentRequired — строка удостоверения без момента выдачи. Отказ
+// записи, а не подстановка часов базы (kaname#589).
+var ErrIssuanceMomentRequired = errors.New("user oauth client: issuance moment is required")
+
 // Insert персистит новую строку токена в writer-tx вызывающего. Принимает
 // непрозрачный service.Tx (порт use-case), восстанавливает конкретный pgx.Tx
 // через txAsPgx, чтобы pgx оставался внутри repo/kaname/pg.
+//
+// Момент выдачи — ОБЯЗАТЕЛЬНЫЙ вход ([ErrIssuanceMomentRequired]), а не
+// подстановка часов базы: момент сравнивается с отсечкой отзыва-всех, и его
+// ставит один общий источник (kaname#589). Прежний запасной путь к `now()`
+// оставлял второй источник достижимым — строка без момента молча получала
+// чужие часы.
 func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error) {
+	if c.CreatedAt.IsZero() {
+		return domain.UserOAuthClient{}, fmt.Errorf("%w: credential %s", ErrIssuanceMomentRequired, c.ID)
+	}
 	tx := txAsPgx(txh)
 	const q = `
 		INSERT INTO user_oauth_clients (
@@ -69,7 +82,7 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 		    created_at, expires_at, last_used_at,
 		    public_key_pem, key_algorithm, name, labels,
 		    credential_kind, secret_hash
-		) VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11::jsonb,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
 		          $12, COALESCE($13, ''::bytea))
 		RETURNING ` + uocCols
 	labelsJSON, err := marshalLabels(c.Labels)
@@ -79,7 +92,7 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 	row := tx.QueryRow(ctx, q,
 		string(c.ID), string(c.UserID),
 		string(c.Description), string(c.CreatedByUserID),
-		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
+		c.CreatedAt.UTC(), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, string(c.Name), labelsJSON,
 		// Вид ЗАПИСЫВАЕТСЯ. Пустой вид сюда доехать не может — глагол выдачи
 		// разрешает его синхронно, до вставки, — но ограничение таблицы всё
@@ -104,10 +117,14 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 // пустой результат, не отличит его от несуществующего. Состояние возвращается,
 // чтобы его судили, а не выводили из отсутствия.
 //
+// Человек без дома (его аккаунт снят, колонка пуста — kaname#664, Р3) — пустой
+// аккаунт и состояние, а не отказ: выдача личного токена ему не зависит от
+// судьбы аккаунта, а метаданные операции без аккаунта законны.
+//
 // Нет User → ErrNotFound.
 func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
 	var (
-		accountID    string
+		accountID    *string
 		inviteStatus string
 	)
 	err := r.pool.QueryRow(ctx,
@@ -118,20 +135,19 @@ func (r *UserOAuthClientRepo) AccountForUser(ctx context.Context, id domain.User
 	if err != nil {
 		return "", false, mapErr(err, "UserOAuthClient.AccountForUser", string(id))
 	}
-	return domain.AccountID(accountID), domain.InviteStatus(inviteStatus).MayAuthenticate(), nil
+	return homeAccount(accountID), domain.InviteStatus(inviteStatus).MayAuthenticate(), nil
 }
 
 // List возвращает токены владельца-User, страница по id ASC (cursor-based).
 func (r *UserOAuthClientRepo) List(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.UserOAuthClient, string, error) {
 	// page_size outside [0..maxListPageSize] is REJECTED, never clamped (a clamp
-	// returns a short page indistinguishable from a complete one). 0 → default.
-	if int64(pageSize) < 0 || int64(pageSize) > maxListPageSize {
-		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
-			"page_size must be in [0..%d] (0 means default)", maxListPageSize)
+	// returns a short page indistinguishable from a complete one). 0 → the
+	// platform default, the same one every other List of the service applies.
+	limit, err := effectivePageSize(pageSize)
+	if err != nil {
+		return nil, "", err
 	}
-	if pageSize == 0 {
-		pageSize = 100
-	}
+	pageSize = safeconv.ClampInt32(limit) // already bounded to [1..maxListPageSize]: no clamp happens
 	q := `SELECT ` + uocCols + `
 	        FROM user_oauth_clients
 	       WHERE user_id = $1 AND id > $2
@@ -191,6 +207,41 @@ func (r *UserOAuthClientRepo) DeleteOwnedByID(
 		return domain.UserOAuthClient{}, false, mapErr(err, "UserOAuthClient.DeleteOwnedByID", string(id))
 	}
 	return out, true, nil
+}
+
+// userTokenHeldTx — есть ли у человека хоть одна строка личного токена
+// (kaname#458, Р3 п. 2, Р4): ключ утверждения клиента либо базовый секрет,
+// независимо от срока, — одним чтением соединением открытой транзакции.
+// Ошибка чтения — не «нет»: она уходит вызывающему, и исход откатывается.
+func userTokenHeldTx(ctx context.Context, tx pgx.Tx, ownerID domain.UserID) (bool, error) {
+	if ownerID == "" {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	var held bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_oauth_clients WHERE user_id = $1)`, string(ownerID)).Scan(&held); err != nil {
+		return false, mapErr(err, "UserOAuthClient.HeldBy", "")
+	}
+	return held, nil
+}
+
+// ExistsOwnedByID — есть ли у человека ownerID удостоверение id. Предикат тот
+// же, что у оператора снятия выше (`id AND user_id`): строка чужого владельца
+// отсюда неотличима от отсутствующей BY CONSTRUCTION, ветки, на которой они
+// могли бы разойтись, нет.
+//
+// Ответ классифицирующий, а не решающий: снятие решает оператор снятия под
+// своим замком, и проигравший гонку получает там тот же исход «нет». Ошибка
+// чтения — НЕ «нет»: она уходит вызывающему как есть, чтобы неполученный ответ
+// не был прочитан отсутствием строки.
+func (r *UserOAuthClientRepo) ExistsOwnedByID(ctx context.Context, ownerID domain.UserID, id domain.UserOAuthClientID) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM user_oauth_clients WHERE id = $1 AND user_id = $2)`,
+		string(id), string(ownerID)).Scan(&exists)
+	if err != nil {
+		return false, mapErr(err, "UserOAuthClient.ExistsOwnedByID", string(id))
+	}
+	return exists, nil
 }
 
 // TouchLastUsed — атомарное обновление last_used_at (RETURNING для проверки exists).

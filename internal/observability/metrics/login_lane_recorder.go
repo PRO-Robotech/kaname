@@ -16,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
@@ -45,9 +46,23 @@ const (
 	SecondFactorPresentationsMetric = Namespace + "_second_factor_presentations_total"
 	SecondFactorRefusalsMetric      = Namespace + "_second_factor_refusals_total"
 	SecondFactorEventsMetric        = Namespace + "_second_factor_events_total"
+	// AccessKeyLoginOutcomesMetric — исходы полосы входа ключом (Ф13 Р10,
+	// Ф13-30): наружу отказы неразличимы, и это единственное место, где
+	// причина видна.
+	AccessKeyLoginOutcomesMetric = Namespace + "_access_key_login_outcomes_total"
 	// Подтверждение адреса (kaname#456, П13): исходы глаголов подтверждения и
 	// отказы положения на путях полосы.
 	AddressVerificationOutcomesMetric = Namespace + "_address_verification_outcomes_total"
+	// Смена адреса почты (kaname#635): исходы запроса смены и предъявления
+	// кода. Занятый адрес на запросе — своя клетка: вызывающему он не
+	// отличим от свободного, и различие живёт только здесь.
+	EmailChangeOutcomesMetric = Namespace + "_email_change_outcomes_total"
+	// Сбой хранилища у глаголов своих данных под живой сессией (kaname#691):
+	// наружу один отказ без причины, глагол — только здесь.
+	SelfServiceStoreFailuresMetric = Namespace + "_self_service_store_failures_total"
+	// Отказ сверки секрета клиента сверх доли церемонии в ёмкости проверяющего
+	// (kaname#693): рождается до проверяющего, и его клетка исчерпания не растёт.
+	CeremonyShareExhaustedMetric = Namespace + "_password_verifier_ceremony_share_exhausted_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -72,7 +87,11 @@ type LoginLaneRecorder struct {
 	sfPresent    *prometheus.CounterVec
 	sfRefuse     *prometheus.CounterVec
 	sfEvent      *prometheus.CounterVec
+	akLogin      *prometheus.CounterVec
 	addrVerify   *prometheus.CounterVec
+	emailChange  *prometheus.CounterVec
+	storeFailure *prometheus.CounterVec
+	shareFull    prometheus.Counter
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -126,7 +145,7 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 			register: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: RegistrationOutcomesMetric,
 				Help: "Outcomes of registration by lane and cause. The caller always sees ONE refusal " +
-					"(registration refused) for an occupied address and for the admission-rate ceiling; " +
+					"(reason REGISTRATION_REFUSED) for an occupied address and for the admission-rate ceiling; " +
 					"the cause is visible only here and in the journal (Ф4 Р3).",
 			}, []string{"lane", "outcome"}),
 			recReq: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -176,16 +195,41 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Help: "Second-factor lifecycle events: enrollment started/confirmed, factor removed, backup codes " +
 					"regenerated, a backup code consumed.",
 			}, []string{"event"}),
+			akLogin: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: AccessKeyLoginOutcomesMetric,
+				Help: "Access-key sign-in lane outcomes by reason: the caller sees one refusal for all of them, " +
+					"so this is where the reason lives. Revoked keys and keys that never existed share one cell.",
+			}, []string{"outcome"}),
 			addrVerify: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: AddressVerificationOutcomesMetric,
 				Help: "Outcomes of the address-verification verbs and position refusals: letter queued or paced, " +
 					"already verified, no session, confirmed, code mismatched or not found, invite not valid, store " +
 					"failed, and refusals of lane paths while the address is not verified. No address and no code.",
 			}, []string{"outcome"}),
+			emailChange: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: EmailChangeOutcomesMetric,
+				Help: "Outcomes of the email-change verbs: letter queued, request to a taken address (answered " +
+					"like a free one), person or recipient paced, no session, not verified, not fresh, field " +
+					"refused, confirmed, code mismatched, not found or exhausted, address in use at confirmation, " +
+					"store failed. No address and no code.",
+			}, []string{"outcome"}),
+			storeFailure: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SelfServiceStoreFailuresMetric,
+				Help: "Self-service verbs under a live session refused because the store did not answer, by verb: " +
+					"step-up, second-factor enroll/confirm/status/remove, backup-codes regenerate, password change " +
+					"and enroll. The caller sees one UNAVAILABLE without a cause; the verb lives only here.",
+			}, []string{"verb"}),
+			shareFull: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: CeremonyShareExhaustedMetric,
+				Help: "Client-secret checks of the sign-in ceremony refused because the ceremony share of the " +
+					"password verifier capacity was taken: refused before the verifier, so its own " +
+					"capacity-exhausted outcome does not grow. The half of the capacity left to people's sign-in " +
+					"is untouched by this refusal.",
+			}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
 			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
-			rec.addrVerify)
+			rec.addrVerify, rec.akLogin, rec.emailChange, rec.storeFailure, rec.shareFull)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -230,11 +274,20 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		for _, o := range humansession.SecondFactorRefusals() {
 			rec.sfRefuse.WithLabelValues(string(o)).Add(0)
 		}
+		for _, o := range humansession.AccessKeyLoginOutcomes() {
+			rec.akLogin.WithLabelValues(string(o)).Add(0)
+		}
 		for _, o := range humansession.SecondFactorEvents() {
 			rec.sfEvent.WithLabelValues(string(o)).Add(0)
 		}
 		for _, o := range humansession.VerificationOutcomes() {
 			rec.addrVerify.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.EmailChangeOutcomes() {
+			rec.emailChange.WithLabelValues(string(o)).Add(0)
+		}
+		for _, v := range humansession.StoreFailureVerbs() {
+			rec.storeFailure.WithLabelValues(string(v)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -305,6 +358,11 @@ func (l *LoginLaneRecorder) SecondFactorRefusalObserved(o humansession.SecondFac
 	l.sfRefuse.WithLabelValues(string(o)).Inc()
 }
 
+// AccessKeyLoginObserved — клетка исхода полосы входа ключом.
+func (l *LoginLaneRecorder) AccessKeyLoginObserved(o humansession.AccessKeyLoginOutcome) {
+	l.akLogin.WithLabelValues(string(o)).Inc()
+}
+
 func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFactorEvent) {
 	l.sfEvent.WithLabelValues(string(o)).Inc()
 }
@@ -314,7 +372,22 @@ func (l *LoginLaneRecorder) AddressVerificationObserved(o humansession.Verificat
 	l.addrVerify.WithLabelValues(string(o)).Inc()
 }
 
+// EmailChangeObserved — исход глаголов смены адреса (kaname#635).
+func (l *LoginLaneRecorder) EmailChangeObserved(o humansession.EmailChangeOutcome) {
+	l.emailChange.WithLabelValues(string(o)).Inc()
+}
+
+// StoreFailureObserved — сбой хранилища у глагола своих данных (kaname#691).
+func (l *LoginLaneRecorder) StoreFailureObserved(v humansession.StoreFailureVerb) {
+	l.storeFailure.WithLabelValues(string(v)).Inc()
+}
+
+// CeremonyShareExhaustedObserved — отказ сверх доли церемонии (kaname#693).
+func (l *LoginLaneRecorder) CeremonyShareExhaustedObserved() { l.shareFull.Inc() }
+
 var (
+	_ ceremonyport.ShareObserver               = (*LoginLaneRecorder)(nil)
+	_ humansession.EmailChangeObserver         = (*LoginLaneRecorder)(nil)
 	_ humansession.Observer                    = (*LoginLaneRecorder)(nil)
 	_ humansession.AddressVerificationObserver = (*LoginLaneRecorder)(nil)
 	_ passwordverify.Observer                  = (*LoginLaneRecorder)(nil)

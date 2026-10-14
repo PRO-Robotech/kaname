@@ -133,6 +133,36 @@ Coverage:
   IAM-LOGINLANE-OK-NOT-COUNTED          — N − 1 неверных, отказ формы и отказ признака чужого
                                           контекста счёта не растят: верный пароль проходит
                                           без 429 (Ф3-30, Ф3-36 б; исчерпание ёмкости — I)
+
+Позиции приёмки ID-PW-1 (`password-verifier-follows-the-stored-value.md`, редакция
+5), заведённые kaname#467. «Дано» кладёт посев хранимых значений
+(`tests/authz-fixtures/seed_stored_value.py`, подкоманда `seed-stored-value`
+стенда чарта) и пишет четыре переменные `storedValue{A,B}{Email,Password}`; без
+него каждый шаг уходит в «условие не создано» помеченным утверждением.
+
+  IAM-LOGINLANE-OK-STORED-FORMAT-A      — значение формата A (bcrypt `2a`, стоимость 12),
+                                          положенное посевом: прежний пароль входит, тело —
+                                          ровно `session` и `user`; неверный пароль первым —
+                                          401 тем же текстом (PWV-01)
+  IAM-LOGINLANE-OK-STORED-FORMAT-B      — то же на формате B (argon2id, проходов больше
+                                          ручки — проверяющий читает параметры значения)
+                                          (PWV-02)
+
+Позиция FP-12 приёмки заведения первого пароля
+(`first-password-from-a-live-session.md`, kaname#213). «Дано» — личность без
+строки пароля с ключом доступа — кладёт посев `tests/authz-fixtures/seed_key_person.py`
+(та же подкоманда `seed-stored-value`): ключ заводится глаголом собственного
+фронта, строка пароля снимается записью (§4.0 приёмки: такой личности продукт не
+производит). Утверждение входа ключом кейс собирает подставным аутентификатором
+набора ключей доступа (`cases/kaname-access-keys.py`, `_KEYS` и `_LIB` читаются
+разбором — второй копии материала нет). Без посева — «условие не создано».
+
+  IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD — FP-12: вошедшая ключом
+                                          личность без пароля заводит пароль (`200`,
+                                          тело `session`, носитель не перевыпущен), выходит
+                                          и входит этим паролем (`200`); иной пароль — `401`;
+                                          повтор заведения из новой сессии — `409` код 6
+                                          `PASSWORD_ALREADY_SET` (отказ FP-02)
 """
 
 import pathlib as _pathlib
@@ -1161,3 +1191,251 @@ CASES.append(Case(
                _login_ok("F30-RIGHT", "ll30Session", "ll30Form", verified=False)),
     ],
 ))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ID-PW-1 PWV-01 и PWV-02 (kaname#467): Ф1-04 на КАЖДОМ формате перечня.
+#
+# «Дано» — человек, чьё проверочное значение положено ПОСЕВОМ и несёт признак
+# формата A (bcrypt `2a`) либо B (argon2id), пароль с посева не менялся (Д-01,
+# Д-02). Значения строит сторонняя библиотека, кладёт посев
+# `tests/authz-fixtures/seed_stored_value.py` (подкоманда `seed-stored-value`
+# стенда посадки `own`) и утверждает его ЗНАЧЕНИЕМ В ХРАНИЛИЩЕ, а не входом:
+# успешный вход переписывает формат A (Р5), и посев, доказавший себя входом,
+# отдал бы кейсу уже не «Дано». Поэтому первый успешный вход этого человека —
+# шаг кейса ниже, и только он.
+#
+# Близнец каждого положительного — НЕВЕРНЫЙ пароль тому же человеку, и он стоит
+# ПЕРВЫМ: отказ значение не переписывает (PWV-08.7), а успешный вход — да, и
+# близнец после него судил бы уже другое значение. Различие с положительным одно —
+# пароль.
+#
+# «Требования сменить или сбросить пароль ответ не несёт» (Ф1 Р1, Р8) утверждается
+# составом тела: ключей ровно два — `session` и `user`. Ключ требования не назван
+# ни одной приёмкой, и проверка «нет ключа с таким-то именем» зеленела бы на любом
+# другом.
+#
+# Повторный прогон набора на том же стенде без нового посева встретит у человека
+# формата A уже переписанное значение, и «на формате A» станет неправдой при
+# зелёном кейсе. Посев поэтому стоит в конвейере перед каждым прогоном набора
+# (`chart-own`), а люди у него свежие на каждый посев.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_STORED_WHY = ("посев хранимых значений (`stand-chart.sh seed-stored-value`) не исполнялся на "
+               "этом стенде — человека с положенным значением формата нет")
+
+
+def _stored_given(letter):
+    """Условие кейса: посев положил человека формата `letter` — иначе третий исход."""
+    email, pw = f"storedValue{letter}Email", f"storedValue{letter}Password"
+    return [
+        f"if (!pm.environment.get({js_str(email)}) || !pm.environment.get({js_str(pw)})) {{",
+        *precondition_not_met(f"«Дано» PWV формата {letter}: {email} и {pw} заданы",
+                              f"{email}/{pw} пусты — {_STORED_WHY}", indent="  "),
+        "}",
+    ]
+
+
+def _body_is_session_and_user(label):
+    return [
+        f"pm.test({js_str(label + ': тело — ровно session и user, требования сменить пароль нет')}, () => {{",
+        "  const j = pm.response.json();",
+        "  pm.expect(Object.keys(j).sort(), JSON.stringify(Object.keys(j))).to.eql(['session', 'user']);",
+        "});",
+    ]
+
+
+def _stored_format_case(letter, position, fmt, sid):
+    src, tok, form, ses = f"llSv{letter}Src", f"llSv{letter}Tok", f"llSv{letter}Form", f"llSv{letter}Session"
+    email, pw = "{{storedValue" + letter + "Email}}", "{{storedValue" + letter + "Password}}"
+    given = _stored_given(letter)
+    return Case(
+        id=f"IAM-LOGINLANE-OK-STORED-FORMAT-{letter}",
+        title=f"Значение формата {letter} ({fmt}), положенное посевом: прежний пароль входит без требования "
+              f"смены; неверный отвергнут тем же отказом ({position})",
+        classes=["CRUD", "NEG", "SEC"],
+        priority="P0",
+        steps=[
+            _csrf(f"{sid}-csrf", "login", tok, form, src, fresh_context=True, first=True),
+            _login(f"{sid}-wrong-password-first", email, "not-the-password-{{runId}}", tok, form, src,
+                   _refused_401(f"{sid.upper()}-WRONG"), extra_pre=given),
+            _login(f"{sid}-right-password", email, pw, tok, form, src,
+                   [*_login_ok(f"{sid.upper()}-RIGHT", ses, form, verified=False),
+                    *_body_is_session_and_user(f"{sid.upper()}-RIGHT")],
+                   extra_pre=given),
+        ],
+    )
+
+
+CASES.append(_stored_format_case("A", "PWV-01", "bcrypt 2a, стоимость 12", "pwv01"))
+CASES.append(_stored_format_case("B", "PWV-02", "argon2id, проходов больше ручки", "pwv02"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FP-12 (kaname#213): вошедшая ключом личность без пароля заводит первый пароль
+# из живой сессии и входит им.
+#
+# Техники: переход состояния способов входа (только ключ → ключ и пароль),
+# положительный и отрицательный исход одного глагола на одной личности
+# (заведение → повтор заведения — FP-02), классы эквивалентности пароля при
+# входе (заведённый — иной). Различие повтора против заведения — одно: у
+# субъекта появилась строка «пароль».
+# ═══════════════════════════════════════════════════════════════════════════
+
+import ast as _ast
+import json as _json
+
+_ACCESS_KEY_BEGIN = "/iam/v1/auth/access-key/begin"
+_ACCESS_KEY_LOGIN = "/iam/v1/auth/access-key/login"
+_PASSWORD_ENROLL = "/iam/v1/auth/password/enroll"
+_ALREADY_SET = "password is already set; change it with the current password"
+_KEY_PERSON_WHY = ("посев личности с ключом (`stand-chart.sh seed-stored-value` → "
+                   "`tests/authz-fixtures/seed_key_person.py`) не исполнялся на этом стенде — "
+                   "личности без пароля с ключом нет")
+# Флаги утверждения: присутствие и проверка пользователя (WebAuthn L2 §6.1).
+_FLAGS_UP_UV = 0x01 | 0x04
+
+
+def _authenticator_lib():
+    """`_LIB` подставного аутентификатора набора ключей доступа — разбором модуля.
+
+    Материал (`_KEYS`) читается литералом; первая строка `_LIB` — объявление
+    материала в JS — собирается тем же выражением, что в модуле, и форма этого
+    выражения сверяется: модуль, сменивший её, роняет генерацию, а не уезжает
+    второй копией."""
+    path = _pathlib.Path(__file__).resolve().parent / "kaname-access-keys.py"
+    tree = _ast.parse(path.read_text(encoding="utf-8"))
+    nodes = {t.id: n.value for n in tree.body if isinstance(n, _ast.Assign)
+             for t in n.targets if isinstance(t, _ast.Name)}
+    if "_KEYS" not in nodes or "_LIB" not in nodes or not isinstance(nodes["_LIB"], _ast.List):
+        raise SystemExit("kaname-login-lane: в kaname-access-keys.py нет _KEYS либо _LIB списком — "
+                         "подставного аутентификатора для FP-12 нет")
+    keys = _ast.literal_eval(nodes["_KEYS"])
+    head = _ast.unparse(nodes["_LIB"].elts[0])
+    if head != "'const _akKeys = ' + _json.dumps(_KEYS, separators=(',', ':')) + ';'":
+        raise SystemExit(f"kaname-login-lane: первая строка _LIB сменила форму ({head}) — сверить разбор")
+    lib = ["const _akKeys = " + _json.dumps(keys, separators=(",", ":")) + ";"]
+    for elt in nodes["_LIB"].elts[1:]:
+        if not (isinstance(elt, _ast.Constant) and isinstance(elt.value, str)):
+            raise SystemExit("kaname-login-lane: _LIB несёт не строку — сверить разбор")
+        lib.append(elt.value)
+    return lib
+
+
+_AK_LIB = _authenticator_lib()
+
+
+def _key_person_given():
+    return [
+        "if (!pm.environment.get('keyPersonEmail') || !pm.environment.get('keyPersonCredentialId') "
+        "|| !pm.environment.get('keyPersonUserHandle') || !pm.environment.get('keyPersonOrigin')) {",
+        *precondition_not_met("«Дано» FP-12: keyPersonEmail, keyPersonCredentialId, keyPersonUserHandle, "
+                              "keyPersonOrigin заданы", "ключи пусты — " + _KEY_PERSON_WHY, indent="  "),
+        "}",
+    ]
+
+
+def _no_session_reissued(label):
+    return [
+        f"pm.test({js_str(label + ': носитель сессии НЕ перевыпущен')}, () => "
+        "pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' "
+        "&& h.value.startsWith('kaname_session=')).length, JSON.stringify(pm.response.headers.all())).to.eql(0));",
+    ]
+
+
+def _enroll(name, session_var, form_var, tok_var, test):
+    return _post(name, _PASSWORD_ENROLL, {"newPassword": "{{llFpPassword}}", "csrfToken": "{{" + tok_var + "}}"},
+                 "llFpSrc", [("kaname_session", session_var), ("kaname_form", form_var)], test)
+
+
+def _csrf_with_session(name, form, session_var):
+    step = _csrf(name, form, "llFpTok", "llFpForm", "llFpSrc")
+    step.pre_script = [*_lane_via(_CSRF + "?form=" + form, "llFpSrc"),
+                       *_with_cookies(("kaname_form", "llFpForm"), ("kaname_session", session_var))]
+    return step
+
+
+def _fp12_first_csrf():
+    """Первый шаг кейса: свой источник и свой пароль на прогон — пароль уходит
+    в переменную со словом `Password`, и чистка отчёта режет её именем."""
+    step = _csrf("fp12-csrf-key-begin", "access-key-begin", "llFpTok", "llFpForm", "llFpSrc",
+                 fresh_context=True, first=True)
+    step.pre_script = [
+        "pm.environment.set('llFpPassword', 'Fp12-' + Math.floor(Math.random() * 2176782336).toString(36) "
+        "+ Math.floor(Math.random() * 2176782336).toString(36) + '-first');",
+        *step.pre_script,
+    ]
+    return step
+
+
+CASES.append(Case(
+    id="IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD",
+    title="FP-12: вошедшая ключом личность без пароля заводит пароль и входит им; повтор заведения — 409",
+    classes=["CRUD", "NEG", "SEC"],
+    priority="P0",
+    steps=[
+        _fp12_first_csrf(),
+        Step(name="fp12-key-begin", method="POST", path=_ACCESS_KEY_BEGIN, body={"csrfToken": "{{llFpTok}}"},
+             pre_script=[*_key_person_given(), *_lane_via(_ACCESS_KEY_BEGIN, "llFpSrc"),
+                         *_with_cookies(("kaname_form", "llFpForm"))],
+             insecure_tls=True, auth="anonymous", cookie_jar=False,
+             test_script=[
+                 *assert_status(200),
+                 "const j = pm.response.json();",
+                 "const pk = j.publicKey || {};",
+                 "pm.test('FP12-BEGIN: испытание выдано, круг удостоверений не ограничен', () => "
+                 "pm.expect([typeof pk.challenge === 'string' && pk.challenge.length > 0, typeof pk.rpId, "
+                 "Array.isArray(pk.allowCredentials) && pk.allowCredentials.length === 0])"
+                 ".to.eql([true, 'string', true]));",
+                 "pm.environment.set('llFpChallenge', pk.challenge || '');",
+                 "pm.environment.set('llFpRpId', pk.rpId || '');",
+             ]),
+        _csrf("fp12-csrf-key-login", "access-key-login", "llFpTok", "llFpForm", "llFpSrc"),
+        Step(name="fp12-key-login", method="POST", path=_ACCESS_KEY_LOGIN, body={},
+             pre_script=[
+                 *_key_person_given(),
+                 *_AK_LIB,
+                 "const _fpU = (s) => s.split('+').join('-').split('/').join('_').split('=').join('');",
+                 "const _fpA = _ak.assert({ challenge: _ak.unb64(pm.environment.get('llFpChallenge') || ''), "
+                 "rpId: pm.environment.get('llFpRpId') || '', origin: pm.environment.get('keyPersonOrigin') || '', "
+                 f"flags: {_FLAGS_UP_UV}, count: 1, credId: _ak.unb64(pm.environment.get('keyPersonCredentialId') || ''), "
+                 "key: 0, tamper: false });",
+                 "const _fpBody = JSON.stringify({ csrfToken: pm.environment.get('llFpTok'), credential: { "
+                 "id: _fpU(_fpA.id), rawId: _fpU(_fpA.id), type: 'public-key', response: { "
+                 "clientDataJSON: _fpU(_fpA.clientDataJson), authenticatorData: _fpU(_fpA.authenticatorData), "
+                 "signature: _fpU(_fpA.signature), userHandle: pm.environment.get('keyPersonUserHandle') } } });",
+                 "pm.request.body = { mode: 'raw', raw: _fpBody, options: { raw: { language: 'json' } } };",
+                 *_lane_via(_ACCESS_KEY_LOGIN, "llFpSrc"),
+                 *_with_cookies(("kaname_form", "llFpForm")),
+             ],
+             insecure_tls=True, auth="anonymous", cookie_jar=False,
+             test_script=[*_login_ok("FP12-KEY-LOGIN", "llFpKeySession", "llFpForm", verified=True)]),
+        _csrf_with_session("fp12-csrf-enroll", "password-enroll", "llFpKeySession"),
+        _enroll("fp12-enroll", "llFpKeySession", "llFpForm", "llFpTok", [
+            *assert_status(200),
+            "const j = pm.response.json();",
+            "pm.test('FP12-ENROLL: тело — сессия формы Ф3-01', () => "
+            "pm.expect([Object.keys(j), typeof (j.session && j.session.expiresAt)])"
+            ".to.eql([['session'], 'string']));",
+            *_no_session_reissued("FP12-ENROLL"),
+        ]),
+        _csrf_with_session("fp12-csrf-logout", "logout", "llFpKeySession"),
+        _post("fp12-logout", _LOGOUT, {"csrfToken": "{{llFpTok}}"}, "llFpSrc",
+              [("kaname_session", "llFpKeySession"), ("kaname_form", "llFpForm")],
+              [*assert_status(200)]),
+        _csrf("fp12-csrf-login", "login", "llFpTok", "llFpForm", "llFpSrc"),
+        _login("fp12-login-other-password", "{{keyPersonEmail}}", "not-the-password-{{runId}}", "llFpTok",
+               "llFpForm", "llFpSrc", _refused_401("FP12-OTHER-PASSWORD")),
+        _login("fp12-login-enrolled-password", "{{keyPersonEmail}}", "{{llFpPassword}}", "llFpTok", "llFpForm",
+               "llFpSrc", _login_ok("FP12-PASSWORD-LOGIN", "llFpPwSession", "llFpForm", verified=True)),
+        _csrf_with_session("fp12-csrf-enroll-again", "password-enroll", "llFpPwSession"),
+        _enroll("fp12-enroll-again", "llFpPwSession", "llFpForm", "llFpTok", [
+            *assert_status(409),
+            *assert_grpc_code(6, "ALREADY_EXISTS"),
+            *_message(_ALREADY_SET, "FP12-ENROLL-AGAIN"),
+            *_reason("PASSWORD_ALREADY_SET", "FP12-ENROLL-AGAIN"),
+            *_no_session("FP12-ENROLL-AGAIN"),
+        ]),
+    ],
+))
+

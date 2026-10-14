@@ -90,6 +90,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/pgtest"
 
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -990,9 +991,9 @@ var sessionEnderDoors = []sessionEnderDoor{
 		},
 	},
 	{
-		// Собственный выход человека, вход, повышение, подтверждение второго
-		// фактора, перечеканка запасных кодов — транзакция, открытая ключевым
-		// замком строки личности (kaname#382).
+		// Собственный выход человека, вход, повышение, перечеканка запасных
+		// кодов — транзакция, открытая ключевым замком строки личности
+		// (kaname#382).
 		name: "HumanSessionRepo.PersonWriter",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).PersonWriter(ctx, domain.UserID(sc.UserID))
@@ -1003,14 +1004,48 @@ var sessionEnderDoors = []sessionEnderDoor{
 		},
 	},
 	{
+		// Заведение и подтверждение второго фактора (kaname#770): транзакция,
+		// открытая замком строки личности против заведения способа; подтверждение
+		// пишет свою запись сессии, и снятие записи ей представимо.
+		name: "HumanSessionRepo.EnrollmentWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewHumanSessionRepo(pool).EnrollmentWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endOneSession(ctx, w, sc)
+		},
+	},
+	{
 		// Смена пароля, снятие второго фактора, завершение восстановления.
-		name: "HumanSessionRepo.SessionSetWriter",
+		// Дверь — `openSessionSetWriter`: её же открывает сброс второго
+		// фактора (kaname#680), который записей сессии не снимает, а
+		// отсекает, — сцена идёт через `SessionSetWriter`.
+		name: "HumanSessionRepo.openSessionSetWriter",
 		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
 			w, err := kanamepg.NewHumanSessionRepo(pool).SessionSetWriter(ctx, domain.UserID(sc.UserID))
 			if err != nil {
 				return 0, err
 			}
 			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonPasswordChange)
+		},
+	},
+	{
+		// Завершение восстановления и переход записи к владельцу ящика
+		// (kaname#458): транзакция исхода — та же дверь писателя нескольких
+		// сессий, собранная с писателем зеркала; снимает все сессии записи
+		// своей причиной.
+		name: "RecoveryCompletionStore.RecoveryCompletionWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			store, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+			if err != nil {
+				return 0, err
+			}
+			w, err := store.RecoveryCompletionWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonAddressClaimed)
 		},
 	},
 	{
@@ -1047,6 +1082,40 @@ var sessionEnderDoors = []sessionEnderDoor{
 				return 0, err
 			}
 			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailVerified)
+		},
+	},
+	{
+		// Смена своего адреса (kaname#635): транзакция, открытая замком строки
+		// личности, исходом смены снимает прочие сессии человека.
+		name: "RegistrationStore.EmailChangeWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewRegistrationStore(pool).EmailChangeWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			return endAllSessionsOf(ctx, w, sc, domain.RevokeReasonEmailChanged)
+		},
+	},
+	{
+		// Снятие ключа доступа (kaname#669, Ф13 Р8): транзакция, открытая
+		// замком строки личности, снимает записи сессии человека. Дверь —
+		// `openRevokeWriter`: её же открывает сброс ключей (kaname#638), который
+		// записей сессии не снимает, а отсекает, — сцена идёт через снятие ключа.
+		name: "AccessKeyRepo.openRevokeWriter",
+		end: func(ctx context.Context, pool *pgxpool.Pool, sc domain.CeremonyContext) (int, error) {
+			w, err := kanamepg.NewAccessKeyRepo(pool).RevokeWriter(ctx, domain.UserID(sc.UserID))
+			if err != nil {
+				return 0, err
+			}
+			defer func() { _ = w.Rollback(ctx) }()
+			n, err := w.EndOtherSessions(ctx, domain.UserID(sc.UserID), "", time.Now(), domain.RevokeReasonAccessKeyRevoked)
+			if err != nil {
+				return 0, err
+			}
+			if err = w.Commit(ctx); err != nil {
+				return 0, err
+			}
+			return n, nil
 		},
 	},
 }

@@ -7,7 +7,7 @@
 # Предмет
 
 Во всём сквозном прогоне не было НИ ОДНОГО зелёного утверждения, читающего
-секрет из успешного ответа (задача #1253). Пока положительного прохода нет,
+секрет из успешного ответа (задача kacho#1253). Пока положительного прохода нет,
 утверждения кейса не проверены ничем: то, которое не совпало бы ни при каком
 ответе, выглядит точно так же, как исправное. Ровно так и случилось — образец
 формы ждал разделитель после префикса, которого продукт не чеканит.
@@ -165,7 +165,8 @@ class Stand:
                  reject_live: bool = False,
                  accept_tampered: bool = False,
                  operation_carries_secret: bool = False,
-                 revoke_reaches_presentation: bool = True):
+                 revoke_reaches_presentation: bool = True,
+                 repeat_revoke_succeeds: bool = False):
         self.credential_id = credential_id
         self.secret = secret
         # Что край КЛАДЁТ в ответ. По умолчанию — то же, что принимает; ось
@@ -178,6 +179,9 @@ class Stand:
         self.accept_tampered = accept_tampered
         self.operation_carries_secret = operation_carries_secret
         self.revoke_reaches_presentation = revoke_reaches_presentation
+        # Повторный отзыв: законный край отвечает синхронным 404 с текстом
+        # владельца (CVR-03); инъекция — прежний исход, вторая операция с успехом.
+        self.repeat_revoke_succeeds = repeat_revoke_succeeds
         self.revoked = False
         outer = self
 
@@ -215,6 +219,10 @@ class Stand:
 
             def do_DELETE(self):
                 if "/tokens/" in self.path:
+                    if outer.revoked and not outer.repeat_revoke_succeeds:
+                        named = self.path.split("?")[0].rsplit("/", 1)[-1]
+                        return self._send(404, {"code": 5, "message": f"UserToken {named} not found",
+                                                "details": []})
                     outer.revoked = True
                     return self._send(200, {"id": REVOKE_OP_ID, "done": True, "metadata": {}})
                 return self._send(404, {"code": 5, "message": "Not Found"})
@@ -314,7 +322,7 @@ class Outcome:
         """Законный вход ПРОШЁЛ: исполнилось, ответило и не упало.
 
         Пол обязателен. Без него «упавших 0» приходит и от полосы, где нечего
-        было исполнять, — а предикат задачи #1253 требует ЗЕЛЁНОГО утверждения,
+        было исполнять, — а предикат задачи kacho#1253 требует ЗЕЛЁНОГО утверждения,
         то есть исполненного и совпавшего, а не отсутствия красного.
         """
         return (self.report and self.assertions > 0 and self.failed == 0
@@ -475,7 +483,7 @@ def main() -> int:
     # что-то значит: «упавших ноль» приходит и от полосы, где нечего было
     # исполнять. Отдельной строкой в конвейере она была бы вторым местом об
     # одном предмете и снималась бы молча — ровно тот класс, ради которого
-    # заведена задача #1253: проверка, которую никто не зовёт, ничего не
+    # заведена задача kacho#1253: проверка, которую никто не зовёт, ничего не
     # производит, и её зелёное существует только в чужой голове.
     #
     # Здесь у неё вызывающий ПО ПОСТРОЕНИЮ: снять его нельзя, не сняв сам
@@ -514,7 +522,7 @@ def main() -> int:
     # нечего было исполнять. Измерено на синтетической коллекции с ПУСТОЙ
     # папкой того же имени — прежняя редакция печатала «зелёных утверждений 0 —
     # форма совпала, предъявление прошло, отзыв дошёл», то есть утверждала
-    # ровно то, чего не проверяла. Предикат задачи #1253 требует ЗЕЛЁНОГО
+    # ровно то, чего не проверяла. Предикат задачи kacho#1253 требует ЗЕЛЁНОГО
     # утверждения, а не отсутствия красного, поэтому здесь пол: отчёт получен,
     # утверждения исполнены, запросы отвечены, скрипт не отказал.
     with Stand(credential_id=cred_id, secret=secret) as st:
@@ -556,6 +564,8 @@ def main() -> int:
          dict(operation_carries_secret=True)),
         ("отзыв не доходит до предъявления — контроль действует только на выдаче",
          dict(revoke_reaches_presentation=False)),
+        ("повторный отзыв отвечает успехом — опечатка неотличима от отзыва",
+         dict(repeat_revoke_succeeds=True)),
     ]
     for name, kw in injections:
         with Stand(credential_id=cred_id, secret=secret, **kw) as st:

@@ -21,8 +21,9 @@ package pg
 //
 // # Что этот файл НЕ называет
 //
-// Таблицу способа входа — её называет только её адаптер; замещение материала
-// делегируется `replaceLoginVerifierTx` (см. `human_session_repo.go`). Журнал
+// Таблицу способа входа — её называет только её адаптер; запись материала
+// делегируется `putLoginVerifierTx` (см. `human_session_repo.go`), чтение цели
+// запроса вместе с наличием строки пароля — `recoveryTargetRow`. Журнал
 // завершений пишется функцией `insertRecoveryCompletionTx`
 // (`recovery_completions_repo.go`); источник события у журнала один — наша
 // полоса восстановления (kaname#564).
@@ -30,7 +31,6 @@ package pg
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,31 +41,35 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/invite_mail_outbox"
 )
 
-// recoveryTargetSQL — человек по адресу ВМЕСТЕ с подтверждённостью адреса: одно
-// чтение на обеих полосах запроса (Р2, Р7). Порядок тот же, что у чтения
-// человека по адресу.
-var recoveryTargetSQL = fmt.Sprintf(`
-	SELECT %s, (email_verified_at IS NOT NULL) AS verified
-	  FROM users
-	 WHERE lower(email) = lower($1)
-	 ORDER BY created_at ASC, id ASC
-	 LIMIT 1`, userCols)
-
-// RecoveryTarget — см. порт. Порядок назначений под userCols объявлен один раз
-// (`scanUserInto`); подтверждённость — приёмник, дописанный после проекции.
+// RecoveryTarget — см. порт. Чтение одно на обеих полосах запроса (Р2, Р7):
+// человек по адресу, подтверждённость адреса и наличие строки пароля — одним
+// оператором. Оператор называет таблицу секрета и потому живёт в её адаптере
+// (`recoveryTargetRow`, `login_method_repo.go`); сюда возвращаются только
+// личность и два признака.
 func (r *HumanSessionRepo) RecoveryTarget(ctx context.Context, email domain.Email) (humansession.RecoveryTarget, bool, error) {
-	var (
-		u        domain.User
-		verified bool
-	)
-	err := scanUserInto(r.pool.QueryRow(ctx, recoveryTargetSQL, string(email)), &u, &verified)
+	u, verified, hasPassword, err := recoveryTargetRow(ctx, r.pool, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return humansession.RecoveryTarget{}, false, nil
 		}
 		return humansession.RecoveryTarget{}, false, mapErr(err, "RecoveryTarget", "")
 	}
-	return humansession.RecoveryTarget{User: u, EmailVerified: verified}, true, nil
+	return humansession.RecoveryTarget{User: u, EmailVerified: verified, HasPassword: hasPassword}, true, nil
+}
+
+// CloseRecoveryPath — см. порт: ЕДИНСТВЕННЫЙ оператор, снимающий отметку
+// открытого пути восстановления (пара `active-identity-has-a-way-in.md`
+// AWI-10; держит гейт `TestTheRecoveryPathMarkHasTwoNamedWriters`). Ставит
+// отметку только миграция переноса. Снятие без первого пароля той же
+// транзакцией отвергает база на фиксации (`users_active_has_a_way_in_fk`).
+func (w *humanSessionWriter) CloseRecoveryPath(ctx context.Context, userID domain.UserID) error {
+	if userID == "" {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	if _, err := w.tx.Exec(ctx, `UPDATE users SET recovery_path_opened_at = NULL WHERE id = $1 AND recovery_path_opened_at IS NOT NULL`, string(userID)); err != nil {
+		return mapErr(err, "User.CloseRecoveryPath", string(userID))
+	}
+	return nil
 }
 
 // SweepUnservableRecoveryCodes — уборка (форма Ф-ж): строки, которые оператор

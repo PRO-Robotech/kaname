@@ -69,19 +69,34 @@ package user
 // in this platform — read the state back (`Get` reports `inviteStatus`) rather
 // than assume the last request sent is the last one applied.
 //
-// WHAT IT DOES NOT DO. Access tokens already minted are not invalidated here;
-// they run out on their own schedule. What stops at once is every path that mints
-// a NEW one — the token hook, the refresh hook, personal-token issuance and
-// subject resolution at the edge. The identity-wide session cutoff
-// (`user_token_revocations`) is deliberately NOT used: its scope is the whole
-// identity, so applying it here would cut the sessions of someone who is legally
-// active in another Account. Ending every session of a person is a different act
-// with a different tool (`ForceLogout`).
+// ЧТО БЛОКИРОВКА ДЕЛАЕТ С РАНЕЕ ВЫДАННЫМ (kaname#717). Она отсекает его: в той
+// же транзакции, что и состояние строки, ложится отсечка личности
+// (`user_token_revocations` и `minted_token_revocations`) единственной дверью
+// записи отсечки — тем же механизмом, что у принудительного выхода
+// (`ForceLogout`) и снятия личности. Всё, выданное личности ЭТОЙ службой не
+// позже момента блокировки, — её токены, её сессии консоли, обновление таких
+// сессий — отвергается на предъявлении и на выдаче. Обещание сужено до
+// выданного службой: про удостоверения иных издателей оно ничего не утверждает.
+//
+// Снятие блокировки выданного до неё НЕ возвращает — это свойство, а не
+// задержка: `Unblock` возвращает только возможность войти, и после него
+// действует лишь полномочие нового входа.
+//
+// Здесь стояло обратное: «уже выданное здесь не отзывается, отсечка личности
+// намеренно не используется — её область вся личность, и она оборвала бы
+// сессии человека, законно действующего в другом аккаунте». Довод пережил свой
+// предмет: блокировка сама действует на личность целиком (шапка выше), и
+// человека, «законно действующего в другом аккаунте», при блокировке нет.
+// Вторую запись схема пишет и сама (`user_deactivation_cuts_minted_tokens`);
+// дверь пишет обе, и свойство не держится на одном рубеже.
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -92,6 +107,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -141,7 +157,7 @@ func (u *setInviteStatusUseCase) Execute(ctx context.Context, id domain.UserID) 
 	// the MODEL: the api-gateway Checks `identity_suspender@iam_user:<user_id>`
 	// (plus the step-up floor) before iam is dialed — каталог прав,
 	// `UserService/Block` и `/Unblock`. Здесь стояло `v_update`, отношение,
-	// СНЯТОЕ с этого типа вместе со своим читателем (#1102, #1128, #1258) — §«Авторизация живёт в
+	// СНЯТОЕ с этого типа вместе со своим читателем (kacho#1102, kacho#1128, kacho#1258) — §«Авторизация живёт в
 	// МОДЕЛИ, а не в самодельных проверках». A second, hand-rolled rule here
 	// would not be grantable, scopable, revocable or auditable, and it would lock
 	// machine principals out of a control they are entitled to operate.
@@ -217,6 +233,10 @@ func (u *setInviteStatusUseCase) metadata(id domain.UserID, accountID domain.Acc
 // than no state change, and an audit row for a write that rolled back is a lie in
 // the opposite direction. Either both land or neither does.
 //
+// Блокировка в той же транзакции пишет отсечку личности (`cutOffBlockedIdentity`):
+// состояние без отсечки оставило бы ранее выданное живым после снятия
+// блокировки, отсечка без состояния — заблокировала бы, не сказав об этом.
+//
 // The audit row is emitted on every accepted call, including one that finds the
 // membership already in the requested state. Someone with the authority to do
 // this asked for it, and «who tried, and when» is precisely what the trail is for
@@ -227,6 +247,11 @@ func (u *setInviteStatusUseCase) doSetInviteStatus(ctx context.Context, id domai
 			row, serr := w.UsersW().SetInviteStatus(ctx, id, u.target)
 			if serr != nil {
 				return domain.User{}, serr
+			}
+			if u.target == domain.InviteStatusBlocked {
+				if cerr := cutOffBlockedIdentity(ctx, w, id, actor); cerr != nil {
+					return domain.User{}, cerr
+				}
 			}
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       eventType,
@@ -253,4 +278,28 @@ func (u *setInviteStatusUseCase) doSetInviteStatus(ctx context.Context, id domai
 		return nil, err
 	}
 	return marshalUser(updated)
+}
+
+// cutOffBlockedIdentity — отсечка личности на момент блокировки (kaname#717).
+//
+// Момент — часы базы ЭТОЙ транзакции после замка строки, взятого записью
+// состояния: тот же источник, что у снятия личности и сбросов. Неустановленный
+// момент — отказ UNAVAILABLE с фиксированным текстом, а не нулевая отсечка
+// (нулевая не отсекла бы ничего), и он откатывает запись состояния вместе с
+// собой: блокировка, не отсёкшая выданного, не фиксируется.
+//
+// Повтор блокировки двигает отсечку вперёд (`GREATEST`): пока личность
+// заблокирована, новой выдачи у неё нет, и отсекать между двумя блокировками
+// нечего.
+func cutOffBlockedIdentity(ctx context.Context, w Writer, id domain.UserID, actor string) error {
+	at, err := revocationpolicy.Moment(ctx, w.UsersW())
+	if err != nil {
+		slog.ErrorContext(ctx, "BlockUser: cutoff moment unavailable",
+			"step", "cutoff-moment", "class", revocationpolicy.MomentFailureClass(err))
+		return status.Error(codes.Unavailable, shared.MomentUnavailableMessage)
+	}
+	revokedBy := domain.UserID(actor)
+	return w.UsersW().CutOffIdentity(ctx, domain.UserTokenRevocation{
+		UserID: id, RevokeBefore: at, Reason: domain.RevokeReasonIdentityBlocked, RevokedBy: revokedBy,
+	}, revokedBy)
 }

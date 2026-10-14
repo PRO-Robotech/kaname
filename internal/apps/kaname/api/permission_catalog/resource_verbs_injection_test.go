@@ -164,7 +164,7 @@ func TestResourceVerbsGate_FallsOnEachAxis(t *testing.T) {
 		//
 		// Возвращается ИМЕННО ТО, ЧЕГО НЕ ХВАТАЕТ, а не выписанный глагол: здесь
 		// стояло дописывание одного `update`, и оно перестало восстанавливать полный
-		// набор, как только у того же типа сняли второй глагол (#1189) — порча
+		// набор, как только у того же типа сняли второй глагол (kacho#1189) — порча
 		// «вносилась», а предмета не создавала, то есть опыт молча перестал бы
 		// доказывать что-либо. Дополнение до `previouslyOfferedToEveryResource`
 		// переживёт и следующее сужение.
@@ -184,7 +184,7 @@ func TestResourceVerbsGate_FallsOnEachAxis(t *testing.T) {
 	})
 
 	t.Run("ось 3: расширенный тип не предлагает своего глагола", func(t *testing.T) {
-		// Состояние ДО #1128 для этого типа: глагол объявлен и энфорсится, а
+		// Состояние ДО kacho#1128 для этого типа: глагол объявлен и энфорсится, а
 		// редактору не предлагается.
 		got, ok := withOffering(base, widerResource, func(o resourceOffering) resourceOffering {
 			o.Offered = without(without(o.Offered, "addtargets"), "removetargets")

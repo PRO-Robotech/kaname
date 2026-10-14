@@ -423,9 +423,9 @@ func seedIdentity(t *testing.T, ctx context.Context, env *testEnv,
 	accID domain.AccountID, ext domain.ExternalSubject, email domain.Email, status string) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := env.pool.Exec(ctx, `
+	_, err := env.pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+		VALUES ($1, $2, $3, $4, $5, $6)`),
 		string(uid), string(accID), string(ext), string(email), "Identity", status)
 	require.NoError(t, err, "seed %s identity in %s", status, accID)
 	return uid
@@ -508,14 +508,23 @@ func countIdentityRowsByExternalID(ctx context.Context, t *testing.T, env *testE
 // клиента, а проба про утечку обязана смотреть на провод. Успех коммитится,
 // отказ откатывается: положительный контроль обязан оставить строку, иначе он
 // не отличает «писатель работает» от «писатель молча ничего не сделал».
+//
+// Писатель — тот же оператор `InsertActive`, но транзакцией писателя регистрации:
+// она же кладёт строку пароля (kaname#608 — действующую личность без способа
+// входа база не фиксирует), а отказ ключа личности приходит от вставки строки
+// раньше, чем дело доходит до пароля.
 func insertActiveIdentityRow(ctx context.Context, t *testing.T, env *testEnv, u domain.User) error {
 	t.Helper()
-	w, err := env.repo.Writer(ctx)
+	w, err := kanamepg.NewRegistrationStore(env.pool).Writer(ctx)
 	require.NoError(t, err)
-	if _, ierr := w.UsersW().InsertActive(ctx, u); ierr != nil {
+	if _, ierr := w.MirrorWriter().UsersW().InsertActive(ctx, u); ierr != nil {
 		_ = w.Rollback(ctx)
 		return shared.MapRepoErr(ierr)
 	}
+	v, err := domain.NewLoginVerifier("fixture-password-row-without-a-known-password")
+	require.NoError(t, err)
+	require.NoError(t, w.InsertLoginMethod(ctx, domain.LoginMethod{UserID: u.ID, Kind: domain.LoginMethodPassword,
+		Verifier: v, State: domain.LoginMethodStateActive}))
 	require.NoError(t, w.Commit(ctx))
 	return nil
 }

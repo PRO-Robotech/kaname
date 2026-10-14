@@ -1,0 +1,144 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+  sha256: f957e4511b261df71338db98105dd7b5ad553e9c3bba54eaa41b75cf17367ac0
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 76ca2c8aa
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена автором (рабочее дерево ветки 661); запись судит содержимое
+    по отпечатку, а не коммит.
+  branch: '661'
+  task: PRO-Robotech/kaname#661
+  related_tasks: [PRO-Robotech/kacho#3093, PRO-Robotech/kacho#3094, PRO-Robotech/kacho#3091, PRO-Robotech/kaname#540]
+  lines: 763
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+    в копии kacho-workspace/tmp/kaname-661-accept @ 76ca2c8aa → f957e451…f17367ac0 (совпал с заданием)
+  measurement_revisions: >-
+    Служба — копия kaname-661-accept @ 76ca2c8aa. Платформа — `git show/grep ffbe930dbe`
+    в project/kacho (только чтение объектов). Фундамент — corelib@v1.11.0 из кэша модулей.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-07'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих четыре (CONSTRUCTIBILITY ×2, FORMAT ×2). Санкции на код по этой редакции нет.
+
+blocking:
+  - kind: CONSTRUCTIBILITY
+    scenario: CAP-03
+    claim: >-
+      Единственный чёрный ящик, держащий Н1, утверждает `subjectDisplayName` равным
+      отображаемому имени `target`. Ни «Дано», ни §4 не требуют у `target` НЕПУСТОГО
+      имени и не называют его производителя. Умолчание колонки — пустая строка, посев
+      имени не задаёт: на засеянном `target` обе стороны равенства пусты, и утверждение
+      зелено без правки Н1 — неотличимо от «поле не заполняется».
+    measured: >-
+      `internal/migrations/0001_initial.sql:3102` — `display_name text DEFAULT ''::text NOT NULL`;
+      `git grep -c display -- tests/authz-fixtures/seed_ceremony.py` → 0 совпадений;
+      транспорт `handler.go` `clusterAdminEntryToProto` поле не переносит (Н1 подтверждена).
+    fix: >-
+      В «Дано» CAP-03 и §4: `target` несёт непустое отображаемое имя с `{{runId}}`,
+      названо, каким глаголом посева оно задаётся; утверждать `subjectDisplayName` ==
+      это значение И непусто.
+  - kind: CONSTRUCTIBILITY
+    scenario: CAP-24
+    claim: >-
+      Отрицание «`h-plain/2` либо иной арендатор без права → 403». На крае платформы
+      человека уровня «2» нет (документ сам, CAP-25, `prodseed_matrix.py`), а человек без
+      `acr` получает от `StepUpGate` 401 раньше пообъектного вопроса (порог «1» у чтения,
+      «2» у назначения) — заявленного 403 не производится. 403 достижим только для
+      машинного субъекта без права (освобождён от порога). Дизъюнкция «либо» оставляет
+      выбор, при одной ветви которого «Тогда» ложно.
+    measured: >-
+      corelib@v1.11.0 `grpcsrv/acr.go:171` EvaluateStepUp: освобождён только
+      PrincipalTypeServiceAccount, иначе `acrlevel.Satisfies(presented, required)`;
+      платформа ffbe930dbe `prodseed_matrix.py:352-357` — обменянный токен человека `acr`
+      не несёт, край отвечает отказом порога.
+    fix: >-
+      Назвать один субъект отрицания — машинного арендатора без кортежей на `cluster`
+      (слот платформы назвать), утверждать 403/PERMISSION_DENIED и отсутствие цели в
+      перечне; различающий факт против `m-admin` — наличие кортежа `system_admin`.
+  - kind: FORMAT
+    scenario: CAP-26, CAP-28
+    claim: >-
+      CAP-26 «Тогда»: «отказ формы, которую проба изоляции края утверждает…, не 200» —
+      ни кода, ни тела; «не 200» проходит на любом отказе, включая 403 владельца.
+      CAP-28: «кнопок не видит ЛИБО получает отказ словами» — исход по неопределённости;
+      у сценария нет Дано/Когда (только «Тогда»), субъект «пользователь без права» не назван.
+    measured: >-
+      ffbe930dbe `gateway/internal/restmux/external_isolation_test.go` — проба судит
+      код 404 (строки 210, 238); конкретный статус в CAP-26 не назван.
+    fix: >-
+      CAP-26: конкретный HTTP-статус и тело промаха внешнего края. CAP-28: разбить на
+      Дано/Когда/Тогда, назвать субъект, выбрать ОДИН исход (кнопок нет) либо два
+      сценария с названными условиями.
+  - kind: FORMAT
+    scenario: CAP-14
+    claim: >-
+      Положительный близнец «`h-admin/2` снимает другого активного администратора —
+      успех» не называет, кого. На стенде службы активны машинная выдача `m-admin`
+      (миграция) и выдачи соседних слотов `ADMIN_SLOTS`; снятие любой из них ломает
+      остальные кейсы набора и соседние наборы. Предпосылка «не менее двух активных
+      выдач, одна — h-admin» тоже не называет вторую.
+    measured: >-
+      `0001_initial.sql:3418` — посеянная выдача служебной учётки; `seed_ceremony.py:175`
+      ADMIN_SLOTS — восемь соседних людей с выдачей.
+    fix: >-
+      Назвать: вторая выдача — `target`, назначенная в «Дано» этим же кейсом; близнец
+      снимает `target`.
+
+important_nonblocking:
+  - "CAP-09: близнец «под m-admin — не 401» — утверждение-отрицание; заменить положительным (чтения 200, мутации Operation без error)."
+  - "CAP-04/05/06/17: строки аудита не наблюдаемы с публичной поверхности, а DoD S1.8 включает эти кейсы в newman — пометить аудит-утверждения уровнем интеграционной пробы."
+  - "CAP-21: «голое Not Found» — `restfront/mux.go:60` отдаёт промах через runtime.DefaultRoutingErrorHandler (тело `{code:5, message:\"Not Found\"}`); записать тело дословно."
+  - "S3.1 (`git grep -c '/internal/'` по всему cluster.ts → 0) и CAP-29 («→ 0 для путей перечня и мутаций») — разные предикаты; cluster.ts ffbe930dbe несёт `/internal/` и в комментариях (строки 3–8). Свести к одному."
+  - "CAP-23: назвать фикстуру равного granted_at (две вставки одной транзакцией дают равный now())."
+  - "CAP-02, 09, 10, 11, 13, 17: явное «Дано» (субъект и состояние) отсутствует."
+  - "CAP-25: контроль под m-admin отличается двумя фактами (род и личность); документ это называет и отсылает к CAP-27 — принято."
+
+confirmed:
+  - "Р2: `git grep -n '\"/iam/v1/cluster' -- proto` @ 76ca2c8aa → 0; UNSPECIFIED→USER — handler.go GrantAdmin/RevokeAdmin; `resolveSubject` проверяет форму id по роду (CAP-10а, CAP-17 близнец верны)."
+  - "З9/З10: diagnoseRevokeMiss — порядок self → not-admin (NOT_FOUND `<Род> <id> is not an active cluster admin`) → last-admin; revoke_admin.go:210-215 маппит self/last в FAILED_PRECONDITION; пробы Concurrent/WriteSkew существуют (:418, :532)."
+  - "З11: subject_state_reader.go — `User %s not found` / `ServiceAccount %s not found` → ErrInvalidArg; блок/не активен/выключена → FailedPrecondition с дословным текстом."
+  - "CAP-06: Reactivate обновляет строку на месте — id сохраняется; CAP-04: повтор активной не пишет аудит (`changed`)."
+  - "CAP-08: PublicCallerPolicy.allow на полосе предъявленного — EvaluateStepUp → PermissionDenied «permission denied»; порог из своей копии каталога."
+  - "Н2 (`audit.go` subject_type \"user\"), Н3 (`ORDER BY g.granted_at ASC`, reader.go:63), Н4 (`usr_aaaaaaaaaaaaaaaaa`, handler_integration_test.go:542) подтверждены."
+  - "Р5: механизм catalogPendingEntries существует, перечень пуст @ 76ca2c8aa; З15 `cluster.ListAdmins` edgeGate (profile.go:298)."
+  - "CAP-20/21: `ownInternalRestBaseUrl` уже читается кейсами службы (iam-rbac-subjects.py:1158)."
+  - "Производитель назван у каждого «Тогда» (§3, 29 из 29); близнец назван текстом у каждого отрицания CAP-07…18, 21, 24, 26; у CAP-24 отрицание недостижимо, у CAP-14 субъект близнеца не назван."
+
+constructibility:
+  seeded: 0
+  named_fixtures_confirmed: 9
+  not_executed: >-
+    Посев на стенде не выполнялся: стенд и разрешение на посев заданием не названы —
+    «не выполнилось», третий исход. Конструируемость судима чтением названных фикстур
+    и схемы.
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · CHANGES_REQUESTED · sha256 f957e4511b261df71338db98105dd7b5ad553e9c3bba54eaa41b75cf17367ac0

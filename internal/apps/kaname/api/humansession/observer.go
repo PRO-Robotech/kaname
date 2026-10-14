@@ -7,7 +7,11 @@ package humansession
 // до первого события (форма Ф-е) — перечни исходов закрыты и отдаются
 // приёмнику словарями ниже; приёмник ими и засевает клетки.
 
-import "github.com/PRO-Robotech/kaname/internal/assurance"
+import (
+	"errors"
+
+	"github.com/PRO-Robotech/kaname/internal/assurance"
+)
 
 // LoginOutcome — исход входа по причине. Перечень закрыт: исходы проверяющего
 // — из его словаря (`passwordverify.OutcomeNames`), плюс исходы полосы.
@@ -36,7 +40,7 @@ const (
 	LoginOutcomeSecondFactorNotEnrolled LoginOutcome = "second-factor-not-enrolled"
 	// LoginOutcomeBeforeCutoff — пароль сошёлся, а момент входа не позже
 	// стоящей отсечки личности (принудительный выход, завершение
-	// восстановления, сброс второго фактора распорядителем): вход накрыт ею, и
+	// восстановления, сброс второго фактора администратором облака): вход накрыт ею, и
 	// сессии не выдаёт (kaname#385, Р1, Р3). Наружу — тот же один отказ, что на
 	// неверный пароль, попыткой не считается: удостоверение предъявлено верно,
 	// и принудительный выход иначе приближал бы человека к отказу по частоте.
@@ -50,6 +54,51 @@ func LoginOutcomes() []LoginOutcome {
 		LoginOutcomeStoreFailed, LoginOutcomeVerifierIssue, LoginOutcomeMismatched,
 		LoginOutcomeMaterialNone, LoginOutcomeCapacity, LoginOutcomeSecondFactorRefused,
 		LoginOutcomeSecondFactorNotEnrolled, LoginOutcomeBeforeCutoff,
+	}
+}
+
+// AccessKeyLoginOutcome — исход полосы входа КЛЮЧОМ (Ф13 Р10, Ф13-30).
+// Наружу все отказы уходят одним ответом (Р7); причина различима только этой
+// клеткой и журналом службы.
+//
+// Перечень клеток единого отказа — ровно тот, что объявлен приёмкой (Ф13-30):
+// подпись · удостоверение неизвестно · происхождение · хэш имени · присутствие
+// · счётчик · испытание · рукоятка · блокировка. У каждой есть исход, который
+// её увеличивает; клетки «ключ снят» НЕТ — снятие удаляет строку, и у
+// проверяющего это то же состояние, что «удостоверения не было» (Р15).
+// Отказы проверяющего, у которых своей клетки нет (негодная форма данных
+// утверждения, тип клиентских данных, алгоритм вне перечня), считает клетка
+// «подпись»: утверждение не сверено открытым ключом строки — это и есть её
+// предмет. Проигравший конкуренции за сдвиг счётчика — клетка «счётчик».
+type AccessKeyLoginOutcome string
+
+const (
+	AccessKeyLoginIssued          AccessKeyLoginOutcome = "issued"
+	AccessKeyLoginChallengeIssued AccessKeyLoginOutcome = "challenge-issued"
+	AccessKeyLoginSignature       AccessKeyLoginOutcome = "signature"
+	// #nosec G101 -- имя клетки счётчика отказов («удостоверение неизвестно»),
+	// а не секрет: значение уходит в метку счётчика, ответ предъявителю у всех
+	// клеток единого отказа один.
+	AccessKeyLoginCredentialUnknown AccessKeyLoginOutcome = "credential-unknown"
+	AccessKeyLoginOrigin            AccessKeyLoginOutcome = "origin"
+	AccessKeyLoginRPIDHash          AccessKeyLoginOutcome = "rp-id-hash"
+	AccessKeyLoginPresence          AccessKeyLoginOutcome = "presence"
+	AccessKeyLoginCounter           AccessKeyLoginOutcome = "counter"
+	AccessKeyLoginChallenge         AccessKeyLoginOutcome = "challenge"
+	AccessKeyLoginUserHandle        AccessKeyLoginOutcome = "user-handle"
+	AccessKeyLoginBlocked           AccessKeyLoginOutcome = "blocked"
+	AccessKeyLoginRateLimited       AccessKeyLoginOutcome = "rate-limited"
+	AccessKeyLoginStoreFailed       AccessKeyLoginOutcome = "store-failed"
+)
+
+// AccessKeyLoginOutcomes — закрытый перечень: приёмник засевает им клетки
+// нулём до первого события (Ф3 Р14).
+func AccessKeyLoginOutcomes() []AccessKeyLoginOutcome {
+	return []AccessKeyLoginOutcome{
+		AccessKeyLoginIssued, AccessKeyLoginChallengeIssued,
+		AccessKeyLoginSignature, AccessKeyLoginCredentialUnknown, AccessKeyLoginOrigin, AccessKeyLoginRPIDHash,
+		AccessKeyLoginPresence, AccessKeyLoginCounter, AccessKeyLoginChallenge, AccessKeyLoginUserHandle,
+		AccessKeyLoginBlocked, AccessKeyLoginRateLimited, AccessKeyLoginStoreFailed,
 	}
 }
 
@@ -107,7 +156,7 @@ type RecoveryRequestOutcome string
 const (
 	RecoveryRequestQueued      RecoveryRequestOutcome = "queued"       // код выдан, письмо в очереди
 	RecoveryRequestNoRow       RecoveryRequestOutcome = "no-row"       // адреса нет ни у кого
-	RecoveryRequestUnverified  RecoveryRequestOutcome = "unverified"   // адрес не подтверждён (Ф1-25)
+	RecoveryRequestUnverified  RecoveryRequestOutcome = "unverified"   // адрес не подтверждён, и строка — `BLOCKED` либо приглашение без пароля (kaname#458, Р2)
 	RecoveryRequestStoreFailed RecoveryRequestOutcome = "store-failed" // хранилище не ответило
 	// Пределы запроса (kaname#456): окно обращений источника полно · окно писем
 	// адресата полно · работа вне пути ответа не принята — предел одновременных
@@ -134,6 +183,14 @@ const (
 	RecoveryCompletionRateLimited      RecoveryCompletionOutcome = "rate-limited"      // отказ по частоте
 	RecoveryCompletionPasswordRejected RecoveryCompletionOutcome = "password-rejected" // новый пароль негоден по правилу
 	RecoveryCompletionStoreFailed      RecoveryCompletionOutcome = "store-failed"      // хранилище не ответило
+	// Неподтверждённая запись с паролем (kaname#458, Р3 п. 7): переход записи
+	// без удостоверений к владельцу ящика, сессия выдана · восстановление
+	// записи с удостоверениями (отметка поставлена, удостоверения на месте),
+	// сессия выдана · приглашение под строкой `PENDING` негодно — исход
+	// откатан, код годен (Р6).
+	RecoveryCompletionAddressClaimed  RecoveryCompletionOutcome = "address-claimed"
+	RecoveryCompletionAddressVerified RecoveryCompletionOutcome = "address-verified"
+	RecoveryCompletionInviteNotValid  RecoveryCompletionOutcome = "invite-not-valid"
 )
 
 // RecoveryCompletionOutcomes — закрытый перечень.
@@ -141,7 +198,51 @@ func RecoveryCompletionOutcomes() []RecoveryCompletionOutcome {
 	return []RecoveryCompletionOutcome{
 		RecoveryCompletionIssued, RecoveryCompletionNoRow, RecoveryCompletionCodeRejected, RecoveryCompletionBlocked,
 		RecoveryCompletionRateLimited, RecoveryCompletionPasswordRejected, RecoveryCompletionStoreFailed,
+		RecoveryCompletionAddressClaimed, RecoveryCompletionAddressVerified, RecoveryCompletionInviteNotValid,
 	}
+}
+
+// StoreFailureVerb — глагол своих данных под живой сессией, которому хранилище
+// не ответило (kaname#691). Наружу такой отказ один — `UNAVAILABLE` без
+// причины; без клетки оператор узнавал о нём от людей, а не от тревоги.
+//
+// Перечень закрыт и называет ГЛАГОЛЫ, а не шаги внутри них: клетку ставит
+// единственная точка на выходе глагола ([observeStoreFailure]), и новый
+// возврат `ErrStoreUnavailable` в его теле считается без отдельной правки.
+// Помощники, общие со входом (сверка кода, разрешение сессии), клетку не
+// ставят: вход пишет свой исход `store-failed`, и один сбой не считается
+// дважды под разными именами.
+type StoreFailureVerb string
+
+const (
+	StoreFailureStepUp                StoreFailureVerb = "step-up"
+	StoreFailureSecondFactorEnroll    StoreFailureVerb = "second-factor-enroll"
+	StoreFailureSecondFactorConfirm   StoreFailureVerb = "second-factor-confirm"
+	StoreFailureSecondFactorStatus    StoreFailureVerb = "second-factor-status"
+	StoreFailureSecondFactorRemove    StoreFailureVerb = "second-factor-remove"
+	StoreFailureBackupCodesRegenerate StoreFailureVerb = "backup-codes-regenerate"
+	StoreFailurePasswordChange        StoreFailureVerb = "password-change"
+	StoreFailurePasswordEnroll        StoreFailureVerb = "password-enroll"
+)
+
+// StoreFailureVerbs — закрытый перечень: приёмник засевает им клетки нулём до
+// первого события (Ф3 Р14).
+func StoreFailureVerbs() []StoreFailureVerb {
+	return []StoreFailureVerb{
+		StoreFailureStepUp, StoreFailureSecondFactorEnroll, StoreFailureSecondFactorConfirm,
+		StoreFailureSecondFactorStatus, StoreFailureSecondFactorRemove, StoreFailureBackupCodesRegenerate,
+		StoreFailurePasswordChange, StoreFailurePasswordEnroll,
+	}
+}
+
+// observeStoreFailure — классификатор на выходе глагола: сбой хранилища
+// (`ErrStoreUnavailable`, в том числе обёрнутый) растит клетку глагола, всякий
+// иной исход — нет. Ошибку возвращает как есть: наблюдение исхода не меняет.
+func observeStoreFailure(o Observer, verb StoreFailureVerb, err error) error {
+	if errors.Is(err, ErrStoreUnavailable) {
+		o.StoreFailureObserved(verb)
+	}
+	return err
 }
 
 // Observer — приёмник событий полосы. Все методы обязаны быть дёшевы и не
@@ -165,6 +266,12 @@ type Observer interface {
 	SecondFactorPresentationObserved(method assurance.Method, outcome PresentationOutcome)
 	SecondFactorRefusalObserved(refusal SecondFactorRefusal)
 	SecondFactorEventObserved(event SecondFactorEvent)
+	// AccessKeyLoginObserved — исход полосы входа ключом (Ф13 Р10): наружу
+	// отказы неразличимы, поэтому причина живёт только здесь.
+	AccessKeyLoginObserved(outcome AccessKeyLoginOutcome)
+	// StoreFailureObserved — глагол своих данных отказал, потому что хранилище
+	// не ответило (kaname#691).
+	StoreFailureObserved(verb StoreFailureVerb)
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
@@ -183,3 +290,5 @@ func (NopObserver) RecoveryCompletionObserved(RecoveryCompletionOutcome)        
 func (NopObserver) SecondFactorPresentationObserved(assurance.Method, PresentationOutcome) {}
 func (NopObserver) SecondFactorRefusalObserved(SecondFactorRefusal)                        {}
 func (NopObserver) SecondFactorEventObserved(SecondFactorEvent)                            {}
+func (NopObserver) AccessKeyLoginObserved(AccessKeyLoginOutcome)                           {}
+func (NopObserver) StoreFailureObserved(StoreFailureVerb)                                  {}

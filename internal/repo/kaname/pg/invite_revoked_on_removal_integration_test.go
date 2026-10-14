@@ -137,6 +137,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 	activated, aerr := w4.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail46b"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "исключение из ОДНОГО аккаунта отняло приглашение в остальные")
+	seedWayIn(t, ctx, kanamepg.WriterTx(w4))
 	require.NoError(t, w4.Commit(ctx))
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
 }

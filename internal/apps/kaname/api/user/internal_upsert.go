@@ -575,17 +575,20 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 //	project:<prj>#cluster       @cluster:root  — SEC-L cluster pointer (project)
 //	iam_access_binding:<ab>#project@project:<prj> — project-scoped AB hierarchy
 //
+// Две строки проектной самовыдачи (admin@project и указатель её объекта) берутся
+// из projectBindingTuples — того же источника, что ведомость этой выдачи.
+//
 // Account-scoped AccessBinding (accountAB) НЕ получает iam_access_binding
 // hierarchy-tuple: FGA-тип `iam_access_binding` имеет только `project`-parent —
 // account-scoped binding'и per-resource Get авторизуются через grant-tuples выше.
 // ЗДЕСЬ СТОЯЛО «без `iam_user`-hierarchy-tuple per-resource UserService.Get/
 // Update/Delete никогда не авторизуется» — И ЭТО НЕВЕРНО СО ДНЯ СНЯТИЯ ВНЕШНЕГО
 // ДВИЖКА. Предка личности называет не этот кортеж, а цепь областей
-// (`kaname.resource_scope_edge`), и берёт она его из таблицы членств (#944;
+// (`kaname.resource_scope_edge`), и берёт она его из таблицы членств (kacho#944;
 // прежде — из колонки строки). Читателя у самого кортежа на пути решения нет:
 // атом плана ищет `admin`/`owner` НА ОБЪЕКТЕ-ПРЕДКЕ, а не отношение `account` на
 // личности. Кортеж пишется тремя местами и не читается ни одним — предмет
-// заведён отдельно (#946), здесь он назван, а не снят: уборка и отрыв — разные
+// заведён отдельно (kacho#946), здесь он назван, а не снят: уборка и отрыв — разные
 // изменения.
 //
 // rbac-contract-a-flat-fallout: the `admin@account` self-grant tuple is DROPPED —
@@ -600,7 +603,7 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 //     ЧИТАЮЩИЙ ГЛАГОЛ НАЗВАН ТОЧНО, и это не педантизм: здесь стояло `viewer`,
 //     а гейт чтения — `v_get`, и `subject` в нём отсутствовал. Кортеж писался,
 //     проверкой не читался, самочтение не работало ни у кого. Восстановлено
-//     в модели (#715-follow-up); комментарий обязан называть то отношение, от
+//     в модели (kacho#715-follow-up); комментарий обязан называть то отношение, от
 //     которого зависит исход, иначе следующий читатель снова сверит не с тем.
 //   - account:<acc>#account @ iam_access_binding:<ownerBindingID> — the owner-
 //     binding OBJECT hierarchy parent-pointer (parity with account/create.go
@@ -612,12 +615,11 @@ func bootstrapTuples(
 	userID domain.UserID, accID domain.AccountID, prjID domain.ProjectID,
 	ownerBindingID domain.AccessBindingID, projectAB domain.AccessBinding,
 ) []service.RelationTuple {
-	return []service.RelationTuple{
+	out := []service.RelationTuple{
 		// Grant-tuples. owner@account is the D-4 owner standing (зеркалит CreateAccount
 		// ownerTuples); admin@account is DROPPED (owner-binding reconcile materializes
 		// the tier). project admin@project kept as the explicit project-admin self-grant.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "owner", Object: fmt.Sprintf("account:%s", accID)},
-		{User: fmt.Sprintf("user:%s", userID), Relation: "admin", Object: fmt.Sprintf("project:%s", prjID)},
 		// Self-tuple (flat-model get-self, D-4): iam_user.v_get включает `subject`.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "subject", Object: fmt.Sprintf("iam_user:%s", userID)},
 		// Hierarchy parent-pointer tuples (та же форма, что на пути приглашения).
@@ -628,7 +630,29 @@ func bootstrapTuples(
 		// SEC-L cluster parent-pointer tuples (зеркалит account.Create / project.Create).
 		{User: "cluster:" + domain.ClusterSingletonID, Relation: "cluster", Object: fmt.Sprintf("account:%s", accID)},
 		{User: "cluster:" + domain.ClusterSingletonID, Relation: "cluster", Object: fmt.Sprintf("project:%s", prjID)},
-		// Project-scoped AB hierarchy (iam_access_binding имеет лишь project-parent).
-		{User: fmt.Sprintf("project:%s", prjID), Relation: "project", Object: fmt.Sprintf("iam_access_binding:%s", projectAB.ID)},
+	}
+	// Самовыдача на проект и указатель объекта её выдачи на предка — ТЕ ЖЕ
+	// кортежи, что пишутся в ведомость этой выдачи (projectBindingTuples):
+	// эмитируемое и записанное выпущенным — одно значение, а не два списка.
+	return append(out, projectBindingTuples(userID, prjID, projectAB.ID)...)
+}
+
+// projectBindingTuples — кортежи ЖИЗНЕННОГО ЦИКЛА проектной самовыдачи
+// заведения: явное право администратора проекта и указатель объекта выдачи на
+// предка (`iam_access_binding` имеет лишь project-parent).
+//
+//	user:<usr>#admin            @project:<prj>
+//	project:<prj>#project       @iam_access_binding:<ab>
+//
+// Источник ОДИН для эмиссии (bootstrapTuples) и для ведомости выпущенных
+// кортежей выдачи (`access_binding_emitted_tuples`, BootstrapPersonalResourcesTx).
+// Ведомость обязательна: снятие выдачи — и штатное (`AccessBinding.Delete`), и
+// дренажом области при удалении проекта (`shared.RevokeBindingsInScope`) — снимает
+// РОВНО записанное в ней. Выдача без ведомости уходила строкой, а оба кортежа
+// оставались фактами модели прав на объект, которого больше нет (kaname#665).
+func projectBindingTuples(userID domain.UserID, prjID domain.ProjectID, abID domain.AccessBindingID) []service.RelationTuple {
+	return []service.RelationTuple{
+		{User: fmt.Sprintf("user:%s", userID), Relation: "admin", Object: fmt.Sprintf("project:%s", prjID)},
+		{User: fmt.Sprintf("project:%s", prjID), Relation: "project", Object: fmt.Sprintf("iam_access_binding:%s", abID)},
 	}
 }

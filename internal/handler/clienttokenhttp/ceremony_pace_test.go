@@ -436,7 +436,7 @@ func TestKNPACE10_CeilingDoesNotHideRequestFormRefusals(t *testing.T) {
 	}{
 		{"а GET", func(s *seedT) *httptest.ResponseRecorder { return s.send(addrP, http.MethodGet, nil) },
 			func(t *testing.T, rec *httptest.ResponseRecorder) {
-				requireJSONError(t, rec, http.StatusMethodNotAllowed, "invalid_request")
+				requireMethodRefusal(t, rec)
 				require.Equal(t, http.MethodPost, rec.Header().Get("Allow"))
 			}, false},
 		{"б тело сверх потолка", func(s *seedT) *httptest.ResponseRecorder {
@@ -640,7 +640,7 @@ func TestKNPACE25_FormAndPaceRefusalsAreNotCounted(t *testing.T) {
 	}{
 		{name: "а GET", send: func(s *seedT) *httptest.ResponseRecorder { return s.send(addrP, http.MethodGet, nil) },
 			expect: func(t *testing.T, rec *httptest.ResponseRecorder) {
-				requireJSONError(t, rec, http.StatusMethodNotAllowed, "invalid_request")
+				requireMethodRefusal(t, rec)
 			}},
 		{name: "б тело сверх потолка", send: func(s *seedT) *httptest.ResponseRecorder {
 			return s.send(addrP, http.MethodPost, strings.NewReader("grant_type="+big))

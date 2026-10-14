@@ -97,6 +97,7 @@ func newScopeCarrierFixture(t *testing.T, ctx context.Context) *scopeCarrierFixt
 	exec(`INSERT INTO kaname.access_bindings
 	        (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 	      VALUES ('acb-1', 'user', 'usr-1', 'rol-1', 'project', 'prj-home', 'ACTIVE')`)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return &scopeCarrierFixture{pool: pool}
 }

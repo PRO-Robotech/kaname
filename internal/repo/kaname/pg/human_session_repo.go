@@ -76,12 +76,13 @@ func (r *HumanSessionRepo) Resolve(ctx context.Context, digest domain.BearerDige
 		emailVerAt  *time.Time
 		methods     []string
 		inviteState string
+		home        *string
 	)
 	err := r.pool.QueryRow(ctx, resolveSQL, string(digest)).Scan(
 		&out.Session.ID, &out.Session.UserID, &out.Session.AuthenticatedAt, &out.Session.LastPresentedAt,
 		&out.Session.ExpiresAt, &out.Session.AssuranceLevel, &methods,
 		&endedAt, &out.Session.CreatedAt,
-		&out.User.AccountID, &out.User.ExternalID, &out.User.Email, &out.User.DisplayName, &inviteState,
+		&home, &out.User.ExternalID, &out.User.Email, &out.User.DisplayName, &inviteState,
 		&invitedBy, &out.User.CreatedAt, &labels, &emailVerAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -104,6 +105,7 @@ func (r *HumanSessionRepo) Resolve(ctx context.Context, digest domain.BearerDige
 	}
 	out.Session.PresentedMethods = methods
 	out.User.ID = out.Session.UserID
+	out.User.AccountID = homeAccount(home)
 	out.User.InviteStatus = domain.InviteStatus(inviteState)
 	if invitedBy != nil {
 		out.User.InvitedBy = domain.UserID(*invitedBy)
@@ -144,6 +146,85 @@ func (r *HumanSessionRepo) OldestFailureSince(ctx context.Context, scope humanse
 		return time.Time{}, false, nil
 	}
 	return *at, true, nil
+}
+
+// sessionsOfSQL — живые записи личности на момент $2 (без отметки снятия, срок
+// позже $2, не отсечены отсечкой личности) после курсора ($3, $4) в порядке
+// выдачи (kaname#634, Р4). Срок судится переданным моментом, а не `now()` базы:
+// часы — у вызывающего (форма Ф-д), как у `Resolve`. Порядок `(created_at, id)`
+// — порядок курсора службы; строки одной личности ищет индекс
+// `human_sessions_user_id_idx`.
+//
+// # Отсечка — в операторе, до предела страницы (kaname#681)
+//
+// Сбросы распорядителем (ключей, второго фактора), принудительный выход и
+// смена пароля записей сессии не снимают — отсекают: край отвергает носителя
+// записи, аутентифицированной НЕ позже отсечки личности. Перечень, не судящий
+// отсечку, показывал бы такую запись живой. Предикат — ТОТ ЖЕ текст, что у
+// выдачи церемонии (`sessionCutOffBySubjectSQL`, алиас `s`, сравнение
+// включающее, как у края): второго написания сравнения нет. Он стоит в
+// условии выборки, а не фильтром после чтения: иначе страница была бы короче
+// предела при непустом курсоре, и курсор указывал бы на скрытую строку.
+const sessionsOfSQL = `
+	SELECT s.id, s.user_id, s.authenticated_at, s.last_presented_at, s.expires_at,
+	       s.assurance_level, s.presented_methods, s.user_agent, s.created_at
+	  FROM human_sessions s
+	 WHERE s.user_id = $1 AND s.ended_at IS NULL AND s.expires_at > $2
+	   AND NOT ` + sessionCutOffBySubjectSQL + `
+	   AND (s.created_at, s.id) > ($3::timestamptz, $4::text)
+	 ORDER BY s.created_at, s.id
+	 LIMIT $5`
+
+// SessionsOf — см. порт. Курсор и величина страницы судятся здесь ещё раз
+// (авторитетный повтор проверки на границе приложения): мусор — отказ
+// аргументом, а не молчаливая обрезка.
+func (r *HumanSessionRepo) SessionsOf(ctx context.Context, userID domain.UserID, now time.Time, size int32, token string) ([]domain.HumanSession, string, error) {
+	limit, err := effectivePageSize(size)
+	if err != nil {
+		return nil, "", err
+	}
+	var (
+		afterTS time.Time
+		afterID string
+	)
+	if token != "" {
+		afterTS, afterID, err = decodePageToken(token)
+		if err != nil {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument pageToken: malformed")
+		}
+	}
+	rows, err := r.pool.Query(ctx, sessionsOfSQL, string(userID), now, afterTS, afterID, limit+1)
+	if err != nil {
+		return nil, "", mapErr(err, "HumanSession.SessionsOf", string(userID))
+	}
+	defer rows.Close()
+	var out []domain.HumanSession
+	for rows.Next() {
+		var (
+			s       domain.HumanSession
+			methods []string
+			client  *string
+		)
+		if err := rows.Scan(&s.ID, &s.UserID, &s.AuthenticatedAt, &s.LastPresentedAt, &s.ExpiresAt,
+			&s.AssuranceLevel, &methods, &client, &s.CreatedAt); err != nil {
+			return nil, "", mapErr(err, "HumanSession.SessionsOf", string(userID))
+		}
+		s.PresentedMethods = methods
+		if client != nil {
+			s.Client = domain.NewClientDescription(*client)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", mapErr(err, "HumanSession.SessionsOf", string(userID))
+	}
+	next := ""
+	if int64(len(out)) > limit {
+		last := out[limit-1]
+		next = encodePageToken(last.CreatedAt, string(last.ID))
+		out = out[:limit]
+	}
+	return out, next, nil
 }
 
 // FirstAuthentication — см. порт.
@@ -204,15 +285,75 @@ func (r *HumanSessionRepo) Writer(ctx context.Context) (humansession.Writer, err
 // SessionSetWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята
 // строка личности замком писателя нескольких сессий (`lockPersonForSessionSetSQL`).
 func (r *HumanSessionRepo) SessionSetWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := r.openSessionSetWriter(ctx, userID, "HumanSession.SessionSetWriter")
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// openSessionSetWriter — открытие транзакции под замком писателя нескольких
+// сессий, общее у `SessionSetWriter` и сброса второго фактора
+// (`SecondFactorResetWriter`): одна дверь, один порядок «личность → дети».
+func (r *HumanSessionRepo) openSessionSetWriter(ctx context.Context, userID domain.UserID, site string) (*humanSessionWriter, error) {
 	w, err := beginHumanSessionWriter(ctx, r.pool)
 	if err != nil {
-		return nil, mapErr(err, "HumanSession.SessionSetWriter", "")
+		return nil, mapErr(err, site, "")
 	}
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
 		_ = w.tx.Rollback(ctx)
 		return nil, err
 	}
 	return w, nil
+}
+
+// SecondFactorResetTx — транзакция СБРОСА второго фактора человека
+// администратором облака (kaname#680; приёмка
+// `second-factor-totp-and-recovery-codes.md`, Р10): дверь писателя нескольких
+// сессий — строка личности под замком `FOR NO KEY UPDATE` ПЕРВЫМ оператором, —
+// и момент отсечки, прочитанный соединением этой транзакции после захвата.
+// Исполняет порт `user.SecondFactorResetWriter` (соответствие закрепляет корень
+// композиции): снятие строк фактора, отсечка и событие — операторы писателя
+// сессии.
+//
+// Замок конфликтует с захватом выдачи входа (`lockPersonForLoginSQL`, `FOR
+// SHARE`): выдача, взявшая личность раньше, фиксируется до момента сброса и
+// отсечкой покрыта; выдача, пришедшая позже, ждёт фиксации сброса и читает его
+// отсечку.
+type SecondFactorResetTx struct{ *humanSessionWriter }
+
+// SecondFactorResetWriter — см. [SecondFactorResetTx].
+func (r *HumanSessionRepo) SecondFactorResetWriter(ctx context.Context, userID domain.UserID) (*SecondFactorResetTx, error) {
+	if userID == "" {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	w, err := r.openSessionSetWriter(ctx, userID, "HumanSession.SecondFactorResetWriter")
+	if err != nil {
+		return nil, err
+	}
+	return &SecondFactorResetTx{humanSessionWriter: w}, nil
+}
+
+// Now — момент отсечки сброса: часы первичной базы соединением ЭТОЙ
+// транзакции после захвата строки личности (`momentInTx`).
+func (w *SecondFactorResetTx) Now(ctx context.Context) (time.Time, error) {
+	return momentInTx(ctx, w.tx)
+}
+
+// momentInTx — момент отсечки, читаемый писателем сброса (ключей, второго
+// фактора): часы первичной базы (источник kaname#589, `SharedClock`),
+// прочитанные соединением ОТКРЫТОЙ транзакции после захвата строки личности.
+// `clock_timestamp()`, а не `now()`: `now()` в транзакции — момент её начала,
+// то есть до ожидания замка, и выдача, зафиксированная за это ожидание, его
+// опередила бы. Своё соединение, а не пул: чтение из пула изнутри открытой
+// транзакции брало бы второе соединение на запрос (довод `SharedClock`).
+// Ошибка — как есть: класс для журнала выделяет вызывающий.
+func momentInTx(ctx context.Context, q rowQuerier) (time.Time, error) {
+	var at time.Time
+	if err := q.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		return time.Time{}, err
+	}
+	return at.UTC(), nil
 }
 
 // PersonWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята строка
@@ -223,6 +364,21 @@ func (r *HumanSessionRepo) PersonWriter(ctx context.Context, userID domain.UserI
 		return nil, mapErr(err, "HumanSession.PersonWriter", "")
 	}
 	if err := w.holdPersonForKey(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return w, nil
+}
+
+// EnrollmentWriter — см. порт: транзакция, ПЕРВЫМ оператором которой взята
+// строка личности замком глагола, решающего по заведённому
+// (`holdPersonAgainstEnrollment`, kaname#770).
+func (r *HumanSessionRepo) EnrollmentWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	w, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, "HumanSession.EnrollmentWriter", "")
+	}
+	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
 		_ = w.tx.Rollback(ctx)
 		return nil, err
 	}
@@ -312,7 +468,8 @@ type humanSessionWriter struct {
 	// личностями не задаёт никто.
 	person domain.UserID
 	// sessionSet — строка личности взята замком писателя нескольких сессий
-	// (`FOR NO KEY UPDATE`), а не только ключевым (`FOR KEY SHARE`).
+	// (`FOR NO KEY UPDATE`) либо сильнее (`FOR UPDATE`,
+	// `holdPersonAgainstEnrollment`), а не только ключевым (`FOR KEY SHARE`).
 	sessionSet bool
 }
 
@@ -422,6 +579,91 @@ func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID
 	return nil
 }
 
+// lockPersonAgainstEnrollmentSQL — строка личности замком ГЛАГОЛА, РЕШАЮЩЕГО
+// ПО ЗАВЕДЁННОМУ (kaname#770, находка ревью безопасности; ban #10).
+//
+// # ПРЕДМЕТ
+//
+// Смена адреса и заведение второго фактора решают по тому, что у личности
+// заведено (уровень сессии против способов «2»). Решение верно, только если
+// заведённое не меняется между чтением и фиксацией глагола. Способ, дающий
+// «2», появляется у личности двумя путями записи: вставкой строки ключа
+// доступа (её проверка внешнего ключа берёт строку личности `FOR KEY SHARE`) и
+// подтверждением кода по времени. Подтверждение кода открывалось ключевым
+// замком (`PersonWriter`, `FOR KEY SHARE`), а смена адреса — замком писателя
+// нескольких сессий (`FOR NO KEY UPDATE`), с `FOR KEY SHARE` СОВМЕСТИМЫМ: и
+// заведение, идущее одновременно с глаголом, глаголом не замечалось. Теперь
+// подтверждение кода — сам такой глагол и открывается этим же замком
+// (`EnrollmentWriter`): оно конфликтует со сменой адреса и с собой.
+//
+// # ПОЧЕМУ ЭТА СИЛА
+//
+// `FOR UPDATE` — единственная сила, конфликтующая с `FOR KEY SHARE`. Заведение,
+// взявшее личность раньше, фиксируется до того, как глагол получит строку, и
+// чтение заведённого ПОСЛЕ замка его видит (чтение уровня изоляции READ
+// COMMITTED берёт снимок на операторе); заведение, пришедшее позже, ждёт
+// фиксации глагола. Сила включает конфликты замка писателя нескольких сессий,
+// поэтому сериализация, которую тот давал глаголу, сохраняется целиком.
+//
+// Цена — остановка проверок внешнего ключа на этой строке на время глагола:
+// вставки строк-детей личности (запись сессии, выдача кода) ждут его
+// фиксации. Глаголов два, и оба — редкие правки своих данных одним человеком.
+//
+// # ВСТРЕЧНОЕ ОЖИДАНИЕ И КТО ЕГО НЕ ДАЁТ
+//
+// Замок берётся ПЕРВЫМ оператором, и сам этот глагол встречного порядка не
+// вносит. Встречный порядок даёт ДРУГОЙ писатель, если он берёт строку-ребёнка
+// личности, которую глагол пишет после замка, и лишь потом — личность
+// (проверкой внешнего ключа своей вставки): он держит ребёнка и ждёт
+// личность, глагол держит личность и ждёт ребёнка. С ключевым замком
+// писателя нескольких сессий (`FOR NO KEY UPDATE`) проверка внешнего ключа
+// совместима, и до kaname#770 этой встречи не было; с `FOR UPDATE` она
+// есть. Поэтому каждый писатель строк, которые пишут глаголы этой двери,
+// берёт строку личности РАНЬШЕ них. Перепись (kaname#770) — по строкам,
+// которые пишут глаголы двери:
+//
+//	git grep -nE '(INSERT INTO|UPDATE|DELETE FROM) +(kaname\.)?(email_change_codes|recovery_codes|human_sessions)\b' -- '*.go' ':!*_test.go'
+//	git grep -nE '\.(UpsertPendingTOTP|ActivateTOTP|ReplaceLookupSet|ConsumeLookupElement|RemoveSecondFactor)\(ctx' -- '*.go' ':!*_test.go'
+//
+//	строки смены адреса        — только глаголы смены (эта дверь)
+//	коды восстановления        — запрос кода: `PersonWriter` (kaname#770;
+//	                             брал коды раньше личности — 3 блокировки из 3
+//	                             с исходом смены и с удалением личности,
+//	                             `recovery_request_lock_order_integration_test.go`);
+//	                             завершение: `RecoveryCompletionWriter`
+//	записи сессии              — выдача входа: `LockPersonForLogin` первым;
+//	                             выход, повышение, перечеканка: `PersonWriter`;
+//	                             писатели нескольких сессий: `SessionSetWriter`
+//	                             и двери снятия и сброса ключей
+//	строки второго фактора     — вход и повышение с запасным кодом,
+//	                             перечеканка, снятие, сброс администратором:
+//	                             каждый — строкой личности первым
+//
+// Уборки (кодов, записей сессии, строк смены) строку личности не берут и
+// личности не ждут: удаление строк-детей проверки внешнего ключа не делает.
+const lockPersonAgainstEnrollmentSQL = `
+SELECT 1 FROM kaname.users WHERE id = $1 FOR UPDATE`
+
+// holdPersonAgainstEnrollment — строка личности замком
+// `lockPersonAgainstEnrollmentSQL` ПЕРВЫМ оператором транзакции. Транзакция,
+// уже держащая строку какой-либо личности, отказывает: подъём силы замка
+// посреди транзакции встречался бы с держателями `FOR KEY SHARE`, ждущими
+// этой же транзакции. Пустая личность — строки нет: оператор исполняется, но
+// держать нечего, и отметка не ставится.
+func (w *humanSessionWriter) holdPersonAgainstEnrollment(ctx context.Context, userID domain.UserID) error {
+	if w.person != "" {
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the person row is taken against enrollment only as the first statement")
+	}
+	if _, err := w.tx.Exec(ctx, lockPersonAgainstEnrollmentSQL, string(userID)); err != nil {
+		return mapErr(err, "User", string(userID))
+	}
+	if userID != "" {
+		w.person, w.sessionSet = userID, true
+	}
+	return nil
+}
+
 // lockPersonForLoginSQL — строка личности замком ВЫДАЧИ ВХОДА (kaname#385, Р4).
 //
 // # ПОЧЕМУ ЭТА СИЛА
@@ -483,6 +725,45 @@ func (w *humanSessionWriter) LockPersonForLogin(ctx context.Context, userID doma
 	return revokedBeforeQ(ctx, w.tx, string(userID))
 }
 
+// holdAccessKeyForLoginSQL — строка ключа личности ключевым замком. Сила —
+// ровно та, что конфликтует с удалением строки (`DELETE` берёт `FOR UPDATE`) и
+// с замком строк снятия (`LockKeysOf`, `FOR UPDATE`), и совместима со сдвигом
+// счётчика (`UPDATE` неключевых колонок берёт `FOR NO KEY UPDATE`): вход не ждёт
+// чужого входа тем же ключом. Сужение владельцем — в самом операторе: ключ
+// другой личности даёт ноль строк так же, как снятый.
+const holdAccessKeyForLoginSQL = `
+SELECT 1 FROM kaname.user_access_keys WHERE id = $1 AND user_id = $2 FOR KEY SHARE`
+
+// HoldAccessKeyForLogin — см. порт: строка ключа под замком транзакцией выдачи
+// входа, ПОСЛЕ захвата личности.
+//
+// Порядок «личность → ключ» здесь не совет, а условие оператора: строка
+// личности этой транзакции уже взята (`person`), иначе отказ без обхода базы.
+// Тот же порядок у снятия ключа (`AccessKeyRepo.RevokeWriter`: личность
+// `FOR NO KEY UPDATE` первым оператором, затем ключи) и у удаления личности
+// (личность, затем каскадом ключи) — встречного нет. Уровень `read committed`
+// писателя сессии: оператор, исполненный после ожидания захвата личности,
+// видит удаление строки ключа, зафиксированное за это ожидание.
+func (w *humanSessionWriter) HoldAccessKeyForLogin(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
+	switch {
+	case userID == "":
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	case keyID == "":
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument access_key_id: required")
+	case w.person != userID:
+		return iamerr.Wrapf(iamerr.ErrInternal,
+			"human session writer: the access key is held only after the person row of the same transaction")
+	}
+	tag, err := w.tx.Exec(ctx, holdAccessKeyForLoginSQL, string(keyID), string(userID))
+	if err != nil {
+		return mapErr(err, "AccessKey.HoldForLogin", string(keyID))
+	}
+	if tag.RowsAffected() == 0 {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "AccessKey %s not found", keyID)
+	}
+	return nil
+}
+
 func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSession, digest domain.BearerDigest) error {
 	if err := s.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
@@ -490,13 +771,20 @@ func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSe
 	if digest == "" {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
 	}
+	// Описание клиента (kaname#634, Р3): отсутствие — NULL, а не пустая строка;
+	// значение приведено типом домена и пишется только здесь — операцией выдачи.
+	var client *string
+	if !s.Client.IsZero() {
+		v := s.Client.Value()
+		client = &v
+	}
 	_, err := w.tx.Exec(ctx, `
 		INSERT INTO human_sessions
 		    (id, user_id, bearer_digest, authenticated_at, last_presented_at, expires_at,
-		     assurance_level, presented_methods)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		     assurance_level, presented_methods, user_agent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		string(s.ID), string(s.UserID), string(digest), s.AuthenticatedAt, s.LastPresentedAt, s.ExpiresAt,
-		s.AssuranceLevel, s.PresentedMethods)
+		s.AssuranceLevel, s.PresentedMethods, client)
 	if err != nil {
 		return mapErr(err, "HumanSession.Insert", string(s.ID))
 	}
@@ -580,6 +868,49 @@ const endSessionsOfSQL = `
 		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL
 		 RETURNING id`
 
+// endLiveSessionsOfSQL — та же операция над ЖИВЫМИ записями: срок позже момента
+// снятия $3 (kaname#634, Р7). Истёкшая не снятая запись не «сессия» человека —
+// перечень её не показывает, и снятие «всех, кроме текущей» её не считает.
+const endLiveSessionsOfSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id <> $2 AND ended_at IS NULL AND expires_at > $3
+		 RETURNING id`
+
+// endOwnLiveSessionSQL — ровно одна запись $2, если она — живая запись личности
+// $1 на момент $3 (kaname#634, Р5): субъект, живость и срок — условие ЭТОГО
+// оператора, а не чтение перед ним.
+const endOwnLiveSessionSQL = `
+		UPDATE human_sessions SET ended_at = $3, ended_reason = $4
+		 WHERE user_id = $1 AND id = $2 AND ended_at IS NULL AND expires_at > $3
+		 RETURNING id`
+
+// sessionEndKind — форма набора, который снимает дверь. Перечень закрыт;
+// нулевое значение — «не названо», и дверь его отвергает.
+type sessionEndKind int
+
+const (
+	// endUnendedExcept — все не снятые записи личности, кроме keep (истёкшие —
+	// тоже): смена пароля, снятие фактора, восстановление, подтверждение
+	// адреса, принудительный выход.
+	endUnendedExcept sessionEndKind = iota + 1
+	// endLiveExcept — все ЖИВЫЕ на at записи личности, кроме keep: «все, кроме
+	// текущей» (kaname#634).
+	endLiveExcept
+	// endLiveTarget — ровно target, если она — живая на at запись личности:
+	// выход из выбранной (kaname#634).
+	endLiveTarget
+)
+
+// sessionEndSet — что снимает дверь: форма, личность, исключаемая либо
+// названная запись, момент снятия (он же момент суждения о сроке).
+type sessionEndSet struct {
+	kind   sessionEndKind
+	userID domain.UserID
+	keep   domain.HumanSessionID
+	target domain.HumanSessionID
+	at     time.Time
+}
+
 // EndOtherSessions — все прочие живые записи личности, кроме keep. Истёкшие
 // строки тоже помечаются: «сессии нет» у них уже есть, а уборка снимет обе
 // формы одинаково.
@@ -593,7 +924,62 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
 		return 0, err
 	}
-	return endSessionsAndRevokeWhatTheyHold(ctx, w.tx, userID, keep, at, reason)
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, w.tx,
+		sessionEndSet{kind: endUnendedExcept, userID: userID, keep: keep, at: at}, reason)
+	return len(ended), err
+}
+
+// EndOtherLiveSessions — см. порт: прочие ЖИВЫЕ записи личности на now, кроме
+// keep (kaname#634, Р7), той же дверью снятия. Строку личности дверь берёт сама,
+// как у EndOtherSessions.
+func (w *humanSessionWriter) EndOtherLiveSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, now time.Time, reason string) ([]domain.HumanSessionID, error) {
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		return nil, err
+	}
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, w.tx,
+		sessionEndSet{kind: endLiveExcept, userID: userID, keep: keep, at: now}, reason)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.HumanSessionID, 0, len(ended))
+	for _, id := range ended {
+		out = append(out, domain.HumanSessionID(id))
+	}
+	return out, nil
+}
+
+// EndOwnSession — см. порт: ровно target, если она — живая запись личности на
+// now (kaname#634, Р5). Владение, живость и срок — в операторе той же двери
+// снятия (ban #10); ноль строк — «такой живой записи у личности нет».
+func (w *humanSessionWriter) EndOwnSession(ctx context.Context, userID domain.UserID, target domain.HumanSessionID, now time.Time, reason string) (bool, error) {
+	if target == "" {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.id: required")
+	}
+	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
+		return false, err
+	}
+	ended, err := endSessionsAndRevokeWhatTheyHold(ctx, w.tx,
+		sessionEndSet{kind: endLiveTarget, userID: userID, target: target, at: now}, reason)
+	if err != nil {
+		return false, err
+	}
+	return len(ended) == 1, nil
+}
+
+// sessionLiveSQL — жива ли запись личности на момент $3.
+const sessionLiveSQL = `
+	SELECT EXISTS (SELECT 1 FROM human_sessions
+	                WHERE id = $1 AND user_id = $2 AND ended_at IS NULL AND expires_at > $3)`
+
+// SessionLive — см. порт. Оператор транзакции писателя на уровне `read
+// committed` (`ceremonyWriterTx`): его снимок взят ПОСЛЕ замка личности, и
+// снятие, зафиксированное за ожидание замка, он видит.
+func (w *humanSessionWriter) SessionLive(ctx context.Context, userID domain.UserID, id domain.HumanSessionID, now time.Time) (bool, error) {
+	var live bool
+	if err := w.tx.QueryRow(ctx, sessionLiveSQL, string(id), string(userID), now).Scan(&live); err != nil {
+		return false, mapErr(err, "HumanSession.Live", string(id))
+	}
+	return live, nil
 }
 
 // endSessionsAndRevokeWhatTheyHold — ЕДИНСТВЕННЫЙ способ снять сессии: снимает
@@ -637,9 +1023,16 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context, userID domain
 // Отзыв адресуется снятым записям поимённо. Второй запрос «а какие это были»
 // вернул бы уже снятые строки вперемешку с теми, что сняли до нас, — и отозвал
 // бы выданное в чужих сессиях.
-func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID domain.UserID,
-	keep domain.HumanSessionID, at time.Time, reason string,
-) (int, error) {
+//
+// # ФОРМ НАБОРА ТРИ, ДВЕРЬ ОДНА (kaname#634)
+//
+// Свои сессии снимают «все живые, кроме текущей» и «ровно выбранную, если она
+// живая и своя». Это другие ПРЕДИКАТЫ набора, а не другое действие, и операторы
+// каждой формы исполняет ЭТА функция: заведи их отдельным помощником — он снимал
+// бы записи и не отзывал выданного, то есть был бы ровно той половиной действия,
+// которую дверь делает непредставимой. Форма выбирается закрытым перечнем
+// (`sessionEndKind`), не строкой оператора от вызывающего.
+func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, set sessionEndSet, reason string) ([]string, error) {
 	// Оператор снятия исполняется ЗДЕСЬ, а не в отдельном помощнике, и это
 	// решение: помощник, снимающий записи и не отзывающий выданного, был бы
 	// функцией, делающей ПОЛОВИНУ действия, — то есть ровно тем состоянием,
@@ -650,28 +1043,42 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, userID dom
 	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
 	// соединением, пока курсор открыт. Отложенное закрытие сработало бы ПОСЛЕ
 	// них — то есть слишком поздно.
-	rows, err := tx.Query(ctx, endSessionsOfSQL, string(userID), string(keep), at, reason)
+	userID := string(set.userID)
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	switch set.kind {
+	case endUnendedExcept:
+		rows, err = tx.Query(ctx, endSessionsOfSQL, userID, string(set.keep), set.at, reason)
+	case endLiveExcept:
+		rows, err = tx.Query(ctx, endLiveSessionsOfSQL, userID, string(set.keep), set.at, reason)
+	case endLiveTarget:
+		rows, err = tx.Query(ctx, endOwnLiveSessionSQL, userID, string(set.target), set.at, reason)
+	default:
+		return nil, iamerr.Wrapf(iamerr.ErrInternal, "session end: set kind %d is not declared", set.kind)
+	}
 	if err != nil {
-		return 0, mapErr(err, "HumanSession.End", string(userID))
+		return nil, mapErr(err, "HumanSession.End", userID)
 	}
 	var ended []string
 	for rows.Next() {
 		var id string
 		if serr := rows.Scan(&id); serr != nil {
 			rows.Close()
-			return 0, mapErr(serr, "HumanSession.End", string(userID))
+			return nil, mapErr(serr, "HumanSession.End", userID)
 		}
 		ended = append(ended, id)
 	}
 	rows.Close()
 	if rerr := rows.Err(); rerr != nil {
-		return 0, mapErr(rerr, "HumanSession.End", string(userID))
+		return nil, mapErr(rerr, "HumanSession.End", userID)
 	}
 	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
 		domain.FamilyRevokedBySessionEnd); rerr != nil {
-		return 0, rerr
+		return nil, rerr
 	}
-	return len(ended), nil
+	return ended, nil
 }
 
 // ForceLogoutWriter — транзакция записи для административного принудительного
@@ -778,24 +1185,49 @@ func (w *humanSessionWriter) RotateBearer(ctx context.Context, id domain.HumanSe
 // записью множество предъявленного, уровень, новый дайджест и момент; момент
 // аутентификации и срок не трогаются by construction (их нет в SET). Словарь
 // способов и ось уровня судит CHECK строки, а не эта функция.
-func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+//
+// УСЛОВИЕ НА ПРЕЖНЕЕ ЗНАЧЕНИЕ — В ОПЕРАТОРЕ (kaname#343). Кандидат уровня
+// приносит вызывающий, ЗАПИСЬ решает оператор: кандидат ниже записанного
+// запись не понижает (Ф11 Р2 — понижение в пределах сессии невыразимо), выше —
+// поднимает. Порядок ступеней назван явно — позицией в перечне оси, а не
+// сравнением текста; кандидат вне оси пишется как есть и отвергается CHECK
+// строки — условие не глотает негодное значение. Множество накапливается тем же оператором: способ,
+// предъявленный конкурентом между чтением сессии и этой записью, не теряется,
+// и уровень, поднятый конкурентом, не откатывается. Ответ — то, что ЛЕГЛО
+// (`RETURNING`), кардинальность — тот же оператор: строки нет либо она снята —
+// NOT_FOUND.
+func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, candidate string, digest domain.BearerDigest, presentedAt time.Time) (humansession.PresentedRecord, error) {
 	if digest == "" {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
 	}
 	if len(methods) == 0 {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.presented_methods: required")
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.presented_methods: required")
 	}
-	tag, err := w.tx.Exec(ctx, `
+	var rec humansession.PresentedRecord
+	err := w.tx.QueryRow(ctx, `
 		UPDATE human_sessions
-		   SET presented_methods = $2, assurance_level = $3, bearer_digest = $4, last_presented_at = $5
-		 WHERE id = $1 AND ended_at IS NULL`, string(id), methods, level, string(digest), presentedAt)
+		   SET presented_methods = presented_methods
+		                           || ARRAY(SELECT m FROM unnest($2::text[]) WITH ORDINALITY AS p(m, n)
+		                                     WHERE m <> ALL (presented_methods) ORDER BY n),
+		       assurance_level   = CASE
+		                             WHEN array_position(ARRAY['1','2','3'], $3::text) IS NULL
+		                               OR array_position(ARRAY['1','2','3'], $3::text)
+		                                > array_position(ARRAY['1','2','3'], assurance_level)
+		                             THEN $3::text
+		                             ELSE assurance_level
+		                           END,
+		       bearer_digest     = $4,
+		       last_presented_at = $5
+		 WHERE id = $1 AND ended_at IS NULL
+		RETURNING presented_methods, assurance_level`,
+		string(id), methods, candidate, string(digest), presentedAt).Scan(&rec.Methods, &rec.Level)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return humansession.PresentedRecord{}, iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+	}
 	if err != nil {
-		return mapErr(err, "HumanSession.Present", string(id))
+		return humansession.PresentedRecord{}, mapErr(err, "HumanSession.Present", string(id))
 	}
-	if tag.RowsAffected() != 1 {
-		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
-	}
-	return nil
+	return rec, nil
 }
 
 // UpsertCutoff — ТА ЖЕ дверь, что у прочих писателей отсечки: кладёт ОБЕ
@@ -818,10 +1250,22 @@ func (w *humanSessionWriter) ReplaceLoginVerifier(ctx context.Context, m domain.
 	return replaceLoginVerifierTx(ctx, w.tx, m)
 }
 
+// PutLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку):
+// завершение восстановления кладёт пароль и тогда, когда строки ещё нет
+// (Ф5-34, Р9 п. 4).
+func (w *humanSessionWriter) PutLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	return putLoginVerifierTx(ctx, w.tx, m)
+}
+
 // LoginMethod — чтение строки способа входа тем же соединением транзакции;
 // оператор — адаптера таблицы секрета (`getLoginMethod`), как и у `Get` пулом.
 func (w *humanSessionWriter) LoginMethod(ctx context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
 	return getLoginMethod(ctx, w.tx, userID, kind)
+}
+
+// AccessKeyEnrolled — тем же соединением транзакции (ось «заведено»).
+func (w *humanSessionWriter) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return accessKeyEnrolled(ctx, w.tx, userID)
 }
 
 // Операторы второго фактора (Ф12) — те же делегации: таблицу секрета называет

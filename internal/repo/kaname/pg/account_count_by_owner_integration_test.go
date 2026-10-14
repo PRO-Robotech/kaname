@@ -64,6 +64,7 @@ func TestAccountCountByOwner_RC5(t *testing.T) {
 			Labels:      domain.Labels{},
 		})
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

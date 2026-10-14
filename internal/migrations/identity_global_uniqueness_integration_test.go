@@ -80,6 +80,7 @@ func seedUserInAccount(t *testing.T, db *sql.DB, tag, email, externalID, inviteS
 		accountID, "acc-"+tag, userID)
 	require.NoError(t, err, "посев аккаунта для %s", tag)
 
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit())
 	return userID, accountID
 }

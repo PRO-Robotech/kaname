@@ -21,7 +21,7 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
   <tbody>
     <tr><td><strong>PostgreSQL</strong></td><td>Хранилище <code>kaname</code> — обязательно</td></tr>
     <tr><td><strong>api-gateway</strong></td><td>Edge для tenant-трафика (TLS + JWT) — для внешнего доступа</td></tr>
-    <tr><td><strong>Prometheus Operator</strong></td><td>Определение вида <code>PrometheusRule</code>, которым чарт везёт правила тревоги — <strong>обязателен, пока включена ручка <code>alertRules.enabled</code></strong> (умолчание — включена). Без него <code>helm install</code> отвергает установку целиком; что делать — в разделе «Что чарт создаёт в вашем кластере» ниже</td></tr>
+    <tr><td><strong>Prometheus Operator</strong></td><td>Определения видов <code>PrometheusRule</code> и <code>PodMonitor</code>, которыми чарт везёт правила тревоги и объявляет сбор величин — <strong>обязателен, пока включена ручка <code>alertRules.enabled</code></strong> (умолчание — включена). Без него <code>helm install</code> отвергает установку целиком; что делать — в разделе «Что чарт создаёт в вашем кластере» ниже</td></tr>
   </tbody>
 </table>
 
@@ -37,14 +37,24 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
 | `Deployment` | `apps/v1` | кластер сам | — |
 | `Service` | `v1` | кластер сам | — |
 | `PrometheusRule` | `monitoring.coreos.com/v1` | **Prometheus Operator** | `alertRules.enabled=false` (умолчание — `true`) |
+| `PodMonitor` | `monitoring.coreos.com/v1` | **Prometheus Operator** | `alertRules.enabled=false` (умолчание — `true`) |
 
 Три первых вида кластер служит сам: чтобы их создать, ставить заранее ничего не нужно.
-Четвёртый — не служит.
+Два последних — не служит.
+
+`PodMonitor` — объявление сбора величин тем же механизмом, что и правила: Prometheus оператора
+собирает только то, что названо его объектами, и аннотаций `prometheus.io/*` на поде не читает.
+Без этого объекта правила стоят, а рядов у них нет — и правила о тишине звонят уже на отсутствие
+цели (страница [Наблюдаемость](/advanced/observability#alert-rules)). Объект снимается той же
+ручкой, что и правила, а также выключением сбора (`metricsScrape.enabled=false`): объявлять сбор,
+от которого установка отказалась, он не должен. Аннотации на поде остаются для собирателя без
+оператора. Под TLS объект доверяет листу из секрета `tls.secretName` (ключ `ca.crt`) и сверяет
+имя `<релиз>.<пространство>.svc.cluster.local`, на которое лист выписан.
 
 ### Если Prometheus Operator в кластере нет
 
-Вид `PrometheusRule` заводит не Kubernetes, а Prometheus Operator. Пока определения этого вида
-в кластере нет, установка отвергается **целиком** — не одна тревога, а весь релиз, — и отвечает
+Виды `PrometheusRule` и `PodMonitor` заводит не Kubernetes, а Prometheus Operator. Пока
+определений этих видов в кластере нет, установка отвергается **целиком** — не одна тревога, а весь релиз, — и отвечает
 так:
 
 ```text
@@ -58,7 +68,7 @@ ensure CRDs are installed first
 поставить. Проверить заранее — одной командой, до `helm install`:
 
 ```bash
-kubectl get crd prometheusrules.monitoring.coreos.com
+kubectl get crd prometheusrules.monitoring.coreos.com podmonitors.monitoring.coreos.com
 ```
 
 Ответ `NotFound` означает выбор из двух, и оба законны:
@@ -66,8 +76,9 @@ kubectl get crd prometheusrules.monitoring.coreos.com
 1. **поставить Prometheus Operator** — тогда правила тревоги приедут вместе со службой, и
    переносить их в свою систему мониторинга руками не придётся;
 2. **отказаться от правил тревоги** — `helm install ... --set alertRules.enabled=false`.
-   Установка пройдёт, служба заработает полностью: ручка снимает только доставку правил.
-   Их текст остаётся на странице [Наблюдаемость](/advanced/observability) — перенесите
+   Установка пройдёт, служба заработает полностью: ручка снимает только доставку правил и
+   объект сбора оператора; аннотации сбора на поде остаются.
+   Текст правил остаётся на странице [Наблюдаемость](/advanced/observability) — перенесите
    оттуда сами.
 
 :::warning У второго пути есть цена, и она тихая
@@ -149,9 +160,12 @@ gateway. После деплоя обязателен E2E-прогон: логи
 
 ## Production-профиль
 
-В production-профиле включены mTLS на всех listener'ах, production-strict AuthN и `sslmode=require`
-для БД. Сервис откажется стартовать без mTLS на публичном/internal listener'ах (fail-closed).
-Детали ключей — [Конфигурация](/install/configuration).
+В production-профиле каждый слушатель поднимается по TLS, AuthN — production-strict, у БД —
+`sslmode=require`. Сервис откажется стартовать без mTLS на публичном/internal listener'ах и без
+TLS на остальных (fail-closed). Клиентский сертификат требуется не везде: режим проверки клиента
+у каждого слушателя свой — взаимный, запрашивающий или односторонний, и кто обязан предъявлять
+сертификат, названо по каждому слушателю в разделе
+[Listener'ы и mTLS](/install/configuration#listeners-tls).
 
 ## Откат выкатки
 

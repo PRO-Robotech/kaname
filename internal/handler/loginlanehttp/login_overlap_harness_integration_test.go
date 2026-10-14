@@ -90,6 +90,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -311,6 +312,10 @@ func (s *overlapStore) SessionSetWriter(ctx context.Context, userID domain.UserI
 
 func (s *overlapStore) PersonWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
 	return s.open(func() (humansession.Writer, error) { return s.Store.PersonWriter(ctx, userID) })
+}
+
+func (s *overlapStore) EnrollmentWriter(ctx context.Context, userID domain.UserID) (humansession.Writer, error) {
+	return s.open(func() (humansession.Writer, error) { return s.Store.EnrollmentWriter(ctx, userID) })
 }
 
 // open — точка З1 до открытия транзакции настоящей дверью, затем обёртка
@@ -604,7 +609,7 @@ func newOverlapLane(t *testing.T) *overlapLane {
 	h.force = internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 		WithAdminChecker(overlapAllowAdmin{}).
 		WithOperations(operations.NewRepo(h.pool, "kaname")).
-		WithOwnSessions(overlapForceSide{inner: kanamepg.NewHumanSessionRepo(h.pool), exit: h.exit})
+		WithOwnSessions(overlapForceSide{inner: kanamepg.NewHumanSessionRepo(h.pool), exit: h.exit}).WithCutoffClock(momentclock.Func(time.Now))
 	h.cutoffs = sessionrev.NewHandler(nil, nil).WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(h.pool))
 	status, err := humansession.NewSecondFactorStatusUseCase(h.secondFactor)
 	require.NoError(t, err)
@@ -649,10 +654,14 @@ func (h *overlapLane) seedMember(t *testing.T) overlapPerson {
 	t.Helper()
 	q := overlapPerson{id: domain.UserID(ids.NewID(domain.PrefixUser)), email: "ovq-" + ids.NewID("tst")[3:11] + "@example.invalid"}
 	_, err := h.pool.Exec(h.ctx, `
-		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		SELECT $1, account_id, $2, $3, 'Login Overlap Member', 'ACTIVE'
+		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, recovery_path_opened_at)
+		SELECT $1, account_id, $2, $3, 'Login Overlap Member', 'ACTIVE', now()
 		  FROM kaname.users WHERE id = $4`,
 		string(q.id), "ext-"+string(q.id), q.email, string(h.user.ID))
+	// Отметка открытого пути — до строки пароля: строка пароля кладётся
+	// писателем продукта своим соединением, и без отметки строку личности
+	// отверг бы инвариант kaname#608 раньше, чем пароль появится. Снимается
+	// сразу после пароля — Q остаётся ACTIVE с паролем и без отметки.
 	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: строка личности Q")
 	v, err := h.hasher.Hash(integrationPassword)
 	require.NoError(t, err)
@@ -661,6 +670,8 @@ func (h *overlapLane) seedMember(t *testing.T) overlapPerson {
 		CreatedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: строка пароля Q")
+	_, err = h.pool.Exec(h.ctx, `UPDATE kaname.users SET recovery_path_opened_at = NULL WHERE id = $1`, string(q.id))
+	require.NoError(t, err, "НЕ ВЫПОЛНИЛОСЬ: снятие отметки пути у Q")
 	var owned, bindings, memberships int
 	require.NoError(t, h.pool.QueryRow(h.ctx, `
 		SELECT (SELECT count(*) FROM kaname.accounts WHERE owner_user_id = $1),
@@ -731,6 +742,9 @@ type overlapLoginReply struct {
 	bearer string
 	err    error
 	seq    int64
+	// withCode — запрос нёс поле `secondFactor`: форма запроса выбирает текст
+	// отказа (Ф12 Р4, редакция 17; Д30).
+	withCode bool
 }
 
 type overlapLoginCall struct {
@@ -749,7 +763,7 @@ func (h *overlapLane) startLogin(t *testing.T, p overlapPerson, password, code s
 	}
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
-	call := &overlapLoginCall{done: make(chan struct{})}
+	call := &overlapLoginCall{done: make(chan struct{}), res: overlapLoginReply{withCode: code != ""}}
 	go func() {
 		defer close(call.done)
 		req, rerr := http.NewRequest(http.MethodPost, h.lane.srv.URL+loginlanehttp.PathLogin, bytes.NewReader(raw))
@@ -1183,13 +1197,19 @@ func refusalOf(body string) (overlapRefusal, bool) {
 }
 
 // oneRefusal — «тот же один отказ» (§4): 401, `UNAUTHENTICATED` (16), текст
-// `authentication failed` — статус, код и текст вместе. "" — он.
+// отказа входа ЭТОЙ формы запроса — `authentication failed` без поля
+// `secondFactor` и текст с шагом при поле (Ф12 Р4, редакция 17) — статус, код и
+// текст вместе. "" — он.
 func oneRefusal(r overlapLoginReply) string {
+	want := humansession.TextAuthenticationFailed
+	if r.withCode {
+		want = humansession.TextLoginWithSecondFactorFailed
+	}
 	ref, ok := refusalOf(r.body)
-	if r.status == http.StatusUnauthorized && ok && ref.Code == 16 && ref.Message == humansession.TextAuthenticationFailed {
+	if r.status == http.StatusUnauthorized && ok && ref.Code == 16 && ref.Message == want {
 		return ""
 	}
-	return fmt.Sprintf("вход ответил %d %s, а не 401 UNAUTHENTICATED `authentication failed`", r.status, r.body)
+	return fmt.Sprintf("вход ответил %d %s, а не 401 UNAUTHENTICATED `%s`", r.status, r.body, want)
 }
 
 // notPerformed — ответ «не выполнено» (Р4 исход 4): 503, `UNAVAILABLE` (14),

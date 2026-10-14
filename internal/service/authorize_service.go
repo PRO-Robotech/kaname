@@ -60,8 +60,8 @@ import (
 var serverAuthoritativeCondKeys = []string{
 	"current_time",       // server clock (always forced below)
 	"acr_value",          // authentication assurance level (overlaid from trusted ctx)
-	"amr_claims",         // authentication methods
-	"mfa_at",             // last MFA timestamp
+	"amr_claims",         // authentication methods (derived from the session record, session_record_check.go)
+	"mfa_at",             // authentication moment of the session (same source)
 	"client_ip",          // connection source address
 	"source_ip",          // connection source address (alias)
 	"valid_until",        // grant expiry
@@ -73,11 +73,15 @@ var serverAuthoritativeCondKeys = []string{
 // server-authoritative attribute (a client cannot forge principal/connection
 // facts) and then overlays only values the server actually trusts: the server
 // clock as current_time, and the FD-4-trusted acr from the request ctx (the same
-// trusted acr the ACR-floor interceptor enforces). Attributes the server cannot
-// yet derive from a trusted source (amr_claims / mfa_at / client_ip /
-// device_attestation) are left ABSENT so the dependent condition fails CLOSED
-// rather than being satisfiable by a forged value. Genuinely request-scoped,
-// non-security attributes pass through unchanged.
+// trusted acr the ACR-floor interceptor enforces). amr_claims / mfa_at are NOT
+// taken from here either: they are derived from the record of the question's
+// own session, found by the edge-forwarded session reference, and only for a
+// question that reaches a conditioned direct list (session_record_check.go,
+// kaname#133). Attributes the server cannot derive from a trusted source
+// (client_ip / device_attestation, and amr_claims / mfa_at of a question
+// without a fit session record) are left ABSENT so the dependent condition
+// fails CLOSED rather than being satisfiable by a forged value. Genuinely
+// request-scoped, non-security attributes pass through unchanged.
 func buildCondContext(ctx context.Context, reqContext map[string]any, now time.Time) map[string]any {
 	condCtx := make(map[string]any, len(reqContext)+1)
 	for k, v := range reqContext {
@@ -154,6 +158,13 @@ type AuthorizeService struct {
 	// предиката (проба с дублёром): отказ по отметке тогда выносит сама дверь, а
 	// причину `email_not_verified` назвать нечем.
 	admission SubjectAdmission
+	// sessions — записи сессий человека: доводы способов и момента условия
+	// `mfa_fresh` берутся из записи сессии вопроса (kaname#133, исход (а); см.
+	// session_record_check.go). nil — доводов нет нигде, и условие ложно, как
+	// до исхода (а).
+	sessions SessionRecords
+	// now — часы службы: «сейчас» условий и живости записи сессии.
+	now func() time.Time
 }
 
 // SubjectAdmission — допуск субъекта к решению: false — человек с
@@ -182,15 +193,26 @@ type AuthorizeServiceConfig struct {
 	// вопрос об объекте, — обе стороны спрашивают одно значение, поэтому «два
 	// действующих источника ответа» перестало быть возможным by construction.
 	ClusterAdminChecker authzguard.RelationChecker
+	// SessionRecords — записи сессий человека, из которых выводятся доводы
+	// способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
+	SessionRecords SessionRecords
+	// Now — часы службы; nil — часы процесса.
+	Now func() time.Time
 }
 
 // NewAuthorizeService — builder.
 func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
 	adm, _ := cfg.Relations.(SubjectAdmission)
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &AuthorizeService{
 		relations:    cfg.Relations,
 		clusterAdmin: cfg.ClusterAdminChecker,
 		admission:    adm,
+		sessions:     cfg.SessionRecords,
+		now:          now,
 	}
 }
 
@@ -318,7 +340,7 @@ type clusterAdminVerdict struct {
 // subsequent calls for the SAME subject reuse it. Different subjects resolve
 // independently and in parallel.
 //
-// ВОЗВРАЩАЕТ ТРИ ИСХОДА, А НЕ ДВА (задача #1045). `(false, nil)` — хранилище
+// ВОЗВРАЩАЕТ ТРИ ИСХОДА, А НЕ ДВА (задача kacho#1045). `(false, nil)` — хранилище
 // ответило «не администратор»; `(false, err)` — хранилище не ответило вовсе.
 // Прежде булева обёртка сводила второе к первому, и это была ОБЩАЯ ДВЕРЬ: сюда
 // приходит интерсептор каждой службы платформы и фильтр списка каждого соседа.
@@ -372,7 +394,14 @@ func (s *AuthorizeService) Check(ctx context.Context, req CheckRequest) (*CheckR
 // принято дёшево. Заодно это покрывает и `BatchCheck`: он отвечает каждый свой
 // пункт этой же функцией.
 func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *clusterAdminMemo) (result *CheckResult, err error) {
-	now := time.Now().UTC().Truncate(time.Second)
+	return s.checkInPass(ctx, req, caMemo, &evidencePass{})
+}
+
+// checkInPass — `check` внутри прохода: доводы записи сессии вопроса читаются
+// не больше одного раза на проход.
+func (s *AuthorizeService) checkInPass(ctx context.Context, req CheckRequest, caMemo *clusterAdminMemo,
+	pass *evidencePass) (result *CheckResult, err error) {
+	now := s.now().UTC().Truncate(time.Second)
 	result = &CheckResult{CheckedAt: now}
 
 	p := planCheck(ctx, req, now)
@@ -406,6 +435,9 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		return result, nil
 	}
 
+	if err := s.withSessionEvidence(ctx, pass, &p, now); err != nil {
+		return result, err
+	}
 	allowed, err := s.verdict(ctx, p.subject, caMemo, p.relation, p.object, p.condCtx)
 	if err != nil {
 		return result, err
@@ -587,7 +619,7 @@ func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relati
 // нет»: записи о выдаче неподтверждённому, существующие у него, спросившему о
 // нём наружу не называются.
 func (s *AuthorizeService) NeutralDenyReasons(ctx context.Context, req CheckRequest) []string {
-	p := planCheck(ctx, req, time.Now().UTC())
+	p := planCheck(ctx, req, s.now().UTC())
 	if p.invalid != nil {
 		return []string{p.invalid.Error()}
 	}
@@ -706,7 +738,7 @@ func splitFGAObject(object string) (objectType, objectID string, ok bool) {
 // `Check`, but skips the action→relation resolution step because the caller
 // already supplies the resolved relation.
 func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationRequest) (result *CheckResult, err error) {
-	now := time.Now().UTC().Truncate(time.Second)
+	now := s.now().UTC().Truncate(time.Second)
 	result = &CheckResult{CheckedAt: now}
 
 	if req.Subject == "" {
@@ -839,7 +871,9 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	if len(reqs) == 0 {
 		return out, nil
 	}
-	now := time.Now().UTC().Truncate(time.Second)
+	now := s.now().UTC().Truncate(time.Second)
+	// Доводы записи сессии вопроса — один вопрос к хранилищу на проход.
+	pass := &evidencePass{}
 	// Share ONE cluster-admin memo across the batch: a same-subject batch (the
 	// common shape) resolves the cluster:…#system_admin question at most once on
 	// the deny path instead of once per item. The memo re-resolves when the
@@ -878,6 +912,14 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 		if d {
 			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{DenyReasonEmailNotVerified}, CheckedAt: now}
 			continue
+		}
+		// Доводы — ДО ключа прогона: ключ несёт условный контекст, и пункт с
+		// доводами не должен отвечаться прогоном без них.
+		if !p.superGateDecides {
+			if err := s.withSessionEvidence(ctx, pass, &p, now); err != nil {
+				return nil, err
+			}
+			plans[i] = p
 		}
 		key := runKeyOf(p)
 		run := runs[key]

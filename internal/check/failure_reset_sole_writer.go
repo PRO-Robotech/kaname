@@ -92,9 +92,11 @@ const (
 )
 
 // sessionLevelWriters — вызовы, которыми полоса ПИШЕТ уровень сессии: выдача
-// новой сессии и предъявление внутри живой. Ими выводится ПОПУЛЯЦИЯ гейта —
-// полосы, завершающие вход, — вместо перечня, выписанного по памяти.
-var sessionLevelWriters = map[string]bool{"IssueSession": true, "PresentInSession": true}
+// новой сессии и предъявление внутри живой — оператором хранилища либо его
+// единственным вызывающим `presentInSession` (kaname#343). Ими выводится
+// ПОПУЛЯЦИЯ гейта — полосы, завершающие вход, — вместо перечня, выписанного по
+// памяти.
+var sessionLevelWriters = map[string]bool{"IssueSession": true, "PresentInSession": true, "presentInSession": true}
 
 // FailureResetUseKind — род обращения к порту обнуления.
 type FailureResetUseKind string

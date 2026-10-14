@@ -48,6 +48,7 @@ func seedAccountAndUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, e
 		string(accID), fmt.Sprintf("rec-acc-%s", accID[len(accID)-6:]), string(uid))
 	require.NoError(t, err, "seed account")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

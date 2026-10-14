@@ -62,6 +62,10 @@ import (
 // adapter via txAsPgx) so this use-case package stays free of the pgx driver.
 type SAClientRepo interface {
 	Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error)
+	// ExistsOwnedByID — whether the service account holds the key. Same predicate
+	// as DeleteOwnedByID: a foreign row is indistinguishable from an absent one
+	// by construction. An error is an unanswered read, not "absent".
+	ExistsOwnedByID(ctx context.Context, ownerID domain.ServiceAccountID, id domain.SAOAuthClientID) (bool, error)
 	// DeleteOwnedByID removes the credential row with ONE statement narrowed by
 	// its owning service account, and returns the row it removed. found=false is
 	// a legal outcome: the row is absent OR it belongs to another owner, and the
@@ -83,7 +87,7 @@ type SAClientRepo interface {
 	OwnerUserForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.UserID, error)
 }
 
-// TrustedIssuerWriter — запись НАШЕГО перечня доверенных издателей (#1124).
+// TrustedIssuerWriter — запись НАШЕГО перечня доверенных издателей (kacho#1124).
 //
 // # Почему запись идёт в транзакции вызывающего, а не своим обращением
 //
@@ -259,10 +263,10 @@ type IssueInput struct {
 	// of the listed `(issuer, subject_pattern)` tuples; наш проверяющий
 	// принимает утверждение тогда и только тогда, когда пара (iss, sub) есть
 	// в НАШЕМ перечне доверенных издателей и подпись сошлась с записанным там
-	// ключом издателя (#1124). Empty slice = private_key_jwt mode.
+	// ключом издателя (kacho#1124). Empty slice = private_key_jwt mode.
 	TrustedSubjects []domain.TrustedSubject
 
-	// Audience — сужение адресатов, объявленное заказчиком (#1136): ключ
+	// Audience — сужение адресатов, объявленное заказчиком (kacho#1136): ключ
 	// сможет заказать только адресатов из этого перечня и только внутри
 	// перечня посадки (`authn.client-token.allowed-audiences`). Порядок
 	// сохраняется, пустые элементы снимаются, повторы схлопываются. Пустой
@@ -276,7 +280,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 		return nil, status.Error(codes.InvalidArgument, "service_account_id required")
 	}
 	// Формат СВОЕГО идентификатора судит общая проверка, а не копия рядом
-	// (задача #1791). Копия сверяла только префикс и потому принимала
+	// (задача kacho#1791). Копия сверяла только префикс и потому принимала
 	// обрезанный идентификатор, производя при этом ПОБАЙТОВО ТОТ ЖЕ отказ, —
 	// расхождение было невидимо всякой пробе, сверяющей сообщение.
 	if err := shared.ValidateResourceID(string(in.ServiceAccountID), domain.PrefixServiceAccount, "service account"); err != nil {
@@ -331,7 +335,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	// Форма имени на пути СОЗДАНИЯ: пустая строка законна и означает «назови
 	// сам» — до записи её заменит умолчание, производное от идентификатора
 	// (`commitMapping`). Судить её здесь доменным типом значило бы отвергнуть
-	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (#1279).
+	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (kacho#1279).
 	if err := corevalidate.NameOnCreate("name", in.Name); err != nil {
 		return nil, err
 	}
@@ -347,9 +351,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	// верный — ответ, известный до всякого чтения и записи. Секрет обмена не
 	// требует — его предъявляют как есть.
 	if kind != domain.CredentialKindSecret && !u.ownIssuance {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"credential_kind %s: authn.client-token.enabled is false — this key is exchanged for a "+
-				"token on the platform token endpoint, and this landing does not run one", kind)
+		return nil, shared.ExchangeEndpointAbsent(kind)
 	}
 
 	// Resolve the owning account so the Operation metadata carries account_id —
@@ -659,7 +661,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		KeyAlgorithm:    key.Algorithm,
 		Name:            domain.OAuthClientName(in.Name),
 		Labels:          in.Labels,
-		// Сужение адресатов — то, что назвал ЗАКАЗЧИК, и ничего сверх (#1136).
+		// Сужение адресатов — то, что назвал ЗАКАЗЧИК, и ничего сверх (kacho#1136).
 		DeclaredAudiences: declaredAudiences(in),
 		// Вид ЗАПИСЫВАЕТСЯ, а не вычисляется читателем.
 		CredentialKind: domain.CredentialKindKeypair,
@@ -683,7 +685,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		PublicKeyPem:  key.PublicPEM,
 		Algorithm:     key.Algorithm,
 		KeyId:         string(keyID),
-		// Перечень адресатов ключа — ЗАПИСАННОЕ сужение (#1136). Пустой перечень
+		// Перечень адресатов ключа — ЗАПИСАННОЕ сужение (kacho#1136). Пустой перечень
 		// — утверждение, а не умолчание: «сужения нет, действует перечень
 		// посадки».
 		Audiences: persisted.DeclaredAudiences,
@@ -726,7 +728,7 @@ func declaredAudiences(in IssueInput) []string {
 
 // doIssueFederated — выдача федеративного ключа: ключевого материала у него нет,
 // а его перечень доверенных издателей пишется НАШЕЙ таблицей в той же
-// транзакции, что и строка ключа (задача #1124).
+// транзакции, что и строка ключа (задача kacho#1124).
 //
 // Утверждение внешней нагрузки проверяет наш проверяющий
 // (`internal/clientassertion`, федеративная полоса) по нашему перечню, а
@@ -780,7 +782,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		PublicKeyPem:  "",
 		Algorithm:     "",
 		KeyId:         string(keyID),
-		// Перечень адресатов ключа — записанное сужение (#1136).
+		// Перечень адресатов ключа — записанное сужение (kacho#1136).
 		Audiences: persisted.DeclaredAudiences,
 	}
 	return anypb.New(resp)
@@ -817,7 +819,7 @@ func (u *IssueSAKeyUseCase) resolveExpiry(in IssueInput) *time.Time {
 // nothing to compensate.
 func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
 	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
-	// идентификатор уже назначен, его заменяет имя, производное от него (#1279).
+	// идентификатор уже назначен, его заменяет имя, производное от него (kacho#1279).
 	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
 	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
 	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
@@ -837,7 +839,7 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 		return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.insert", err)
 	}
 	// Перечень доверенных издателей — в ТОЙ ЖЕ транзакции, что строка ключа
-	// (#1124). Ключ без перечня не примет никого; перечень без ключа ручался бы
+	// (kacho#1124). Ключ без перечня не примет никого; перечень без ключа ручался бы
 	// за постороннего от имени того, кого нет. Записанные двумя обращениями, они
 	// разъезжаются на отказе между ними — и разъезжаются в сторону, которую
 	// никто не увидит, потому что выдача ответит успехом.
@@ -925,6 +927,19 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 	if err != nil {
 		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.accountForServiceAccount", err)
 	}
+	// The absence lane is judged BEFORE the operation (acceptance
+	// credential-verbs-refusal-outcomes, Р1, Р2): the client gets a synchronous
+	// NOT_FOUND, not an operation. A foreign key takes the same lane — the read
+	// is narrowed by its owner, and the refusal is byte-equal to the one for an
+	// absent key. A read error is not "absent": an unanswered read gets its own
+	// refusal (CVR-12).
+	exists, err := u.repo.ExistsOwnedByID(ctx, in.ServiceAccountID, in.KeyID)
+	if err != nil {
+		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.existsOwnedByID", err)
+	}
+	if !exists {
+		return nil, saKeyNotFound(in.KeyID)
+	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Revoke SA key %s", in.KeyID),
@@ -949,24 +964,19 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 	return &op, nil
 }
 
-// doRevoke removes the key and is IDEMPOTENT: revoking twice, revoking an id
-// that never existed, and revoking SOMEONE ELSE'S key all produce the same
-// outcome — success with nothing removed.
+// doRevoke removes the key. Revoking what the named service account does not
+// hold answers `NOT_FOUND` (acceptance credential-verbs-refusal-outcomes, Р1,
+// Р2): a key that never existed, one already removed and SOMEONE ELSE'S are
+// indistinguishable — by code, by text (but for the echo of the id) and by
+// details. The synchronous check in Execute answers that before any operation;
+// here it is the loser of two concurrent revokes: another revoke removed the
+// row, and the operation ends with THE SAME refusal. There is no success on a
+// row someone else removed (CVR-11).
 //
-// Why one outcome and not three. The basic-access-token acceptance (BAT-1-44)
-// requires a repeat revoke to answer success. Hide-existence
-// (§Hardening #6) requires a refusal on a foreign credential to be
-// indistinguishable from a genuine miss. The two pull apart only while there is
-// more than one outcome: the moment "already revoked" answers success and
-// "foreign" answers a refusal, the caller learns from the difference whether
-// SOMEONE ELSE'S credential exists — chasing idempotency would have installed
-// an oracle.
-//
-// This is settled by removing the branch, not by matching two texts to each
-// other: ownership sits inside the removal statement itself (`WHERE id AND
-// sva_id`), so the place where "foreign" and "absent" could diverge does not
-// exist in the code. The foreign row survives the call — success means "no such
-// credential in the caller's namespace", never a licence to remove another's.
+// Hide-existence (§Hardening #6) is held by the removal statement itself:
+// ownership sits inside it (`WHERE id AND sva_id`), so the place where
+// "foreign" and "absent" could diverge does not exist in the code. The foreign
+// row survives the call.
 //
 // The right to manage THIS service account's keys is checked at the edge before
 // the call: `scope_extractor` takes the `iam_service_account` object out of the
@@ -1016,10 +1026,11 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.deleteOwnedByID", err)
 	}
 	if !found {
-		// Nothing to remove. The tx rolls back (there is no removal to persist)
-		// and no audit row is emitted — there is no event without a state
-		// change.
-		return revokeSAKeyResponse(in.KeyID)
+		// A concurrent revoke removed the row between the check and the removal.
+		// The tx rolls back and no audit row is emitted — there is no event
+		// without a state change — and the operation ends with the refusal the
+		// synchronous check gives.
+		return nil, saKeyNotFound(in.KeyID)
 	}
 	// Emit the durable iam.sa_key.revoked audit row in the SAME tx as the
 	// mapping delete (atomic, запрет #10): no key material in payload (5.2-36).
@@ -1040,19 +1051,23 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 	return revokeSAKeyResponse(in.KeyID)
 }
 
-// revokeSAKeyResponse is the SINGLE producer of a successful revoke body.
-//
-// One producer on purpose. Two assembly sites would drift on the first edit —
-// and drift exactly where drift is dangerous: from the difference in bodies the
-// caller would learn whether anything was actually removed, i.e. whether the
-// credential exists. The timestamp is stamped ALWAYS for the same reason: an
-// empty timestamp on a no-op revoke reads straight off the body as "there was
-// nothing to remove".
+// revokeSAKeyResponse is the SINGLE producer of a successful revoke body: only
+// a revoke that removed the row gets it.
 func revokeSAKeyResponse(keyID domain.SAOAuthClientID) (*anypb.Any, error) {
 	return anypb.New(&iamv1.RevokeSAKeyResponse{
 		KeyId:     string(keyID),
 		RevokedAt: timestamppb.Now(),
 	})
+}
+
+// saKeyNotFound is the SINGLE producer of the "no such key" refusal
+// (acceptance credential-verbs-refusal-outcomes, Р2): the synchronous check and
+// the loser of a race answer with it alike. The text names the contract
+// resource, `SAKey`, and echoes the named id — not the storage row type the
+// repository speaks of; no details are attached, so the set of details on the
+// wire is the access key's.
+func saKeyNotFound(id domain.SAOAuthClientID) error {
+	return status.Errorf(codes.NotFound, "SAKey %s not found", id)
 }
 
 // ───────────────── List use-case ─────────────────
@@ -1179,7 +1194,7 @@ func CredentialKindFromProto(k iamv1.CredentialKind) (domain.CredentialKind, err
 // значило бы сменить контракт мимо приёмки. Читателя даёт
 // `shared.LogMappedErr`, у которого решение «какие исходы называть журналу»
 // живёт в единственном экземпляре: разойдясь в нём, домены разошлись бы в том,
-// что считается заметным (задача #2507).
+// что считается заметным (задача kacho#2507).
 //
 // Логгер берётся у вызывающего, а если у того его нет — у умолчания процесса.
 // Умолчание ЗАДАНО композиционным корнем (`slog.SetDefault`, cmd/kaname), так
@@ -1241,14 +1256,14 @@ func mapPGErr(err error) error {
 		// цепочки, то есть обёртка вызывающего доезжала до провода дословно;
 		// утечки не случалось лишь потому, что производители этого признака в
 		// службе опаковы сами — «by construction» на деле означало «пока никто не
-		// обернул» (задача #2464).
+		// обернул» (задача kacho#2464).
 		//
 		// Текст — тот же, что у канонического переводчика, и берётся У НЕГО:
 		// свой литерал здесь был бы вторым местом об одном контракте, и разошлись
 		// бы они ровно так, как разошлись эти переводчики.
 		//
 		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
-		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
+		// `mapPGErrLogged`, который называет причину журналу (задача kacho#2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		// Конец контекста — повторяемый отказ, а не поломка (kaname#383); текст —

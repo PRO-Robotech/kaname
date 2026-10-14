@@ -62,6 +62,7 @@ on:
     branches:
       - main
       - '[0-9]+'
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -76,6 +77,34 @@ defaults:
     shell: bash
 
 jobs:
+  # Выбор затронутого (kaname#707): на черновике запроса в ветку эпика задания ниже
+  # исполняются, только если их выбрала карта `.github/ci-paths.json`; на ready, на
+  # запросе в main, на push и ручном запуске — полный прогон. Пропуск даёт `skipped`,
+  # а сводный вердикт `prverdict` на черновике красный по построению.
+  changes:
+    name: выбор затронутого (e2e-newman)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.pick.outputs.full }}
+      jobs: ${{ steps.pick.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: выбор затронутого по карте путей
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/affected.py --github-output e2e-newman.yml
+
   # ── НАБОР БЕЗ СТЕНДА: его собственная оснастка и её вердикт ─────────────────
   #
   # Это задание не поднимает ничего и потому дёшево. Оно судит то, что можно
@@ -83,6 +112,8 @@ jobs:
   # каталог кейсов, исполняются ли пробы самого набора, измеряется ли покрытие
   # RPC и не правили ли вендоренный слой молча.
   suite:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'suite') }}
+    needs: [changes]
     name: набор — оснастка, пробы, покрытие, долг
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -166,6 +197,13 @@ jobs:
       # включая законных близнецов и третий исход.
       - name: прогонщик проб способен упасть (самопроба инъекцией)
         run: python3 .github/scripts/run-python-probes.py --self-test
+
+      # Выбор затронутого (kaname#707): пробы карты, детектора и сводного вердикта
+      # запроса, и сверка проводки процессов с картой в обе стороны.
+      - name: выбор затронутого — пробы и проводка
+        run: |
+          python3 .github/scripts/affected_test.py
+          python3 .github/scripts/affected.py --check-wiring .github/workflows
 
       # ── ВЕНДОРЕННЫЙ СЛОЙ, ПОЛОВИНА ПЕРВАЯ: КОПИЯ СХОДИТСЯ С ЗАПИСЬЮ ─────────
       #
@@ -295,15 +333,19 @@ jobs:
       # третий исход: без разборщика либо без объявлений величина «гоняется» НЕ
       # ИЗМЕРЕНА, и печатать ноль значило бы выдать несозданное условие за вердикт.
       # Умолчание `run:` — `bash -e`, поэтому код 75 оборвал бы шаг МОЛЧА.
+      # Живость держателей (kaname#468) спрашивается у трекера: держатель записи —
+      # открытая задача. Токен задания читает задачи публичных репозиториев.
       - name: ДОЛГ сквозного набора — числом и по каждой позиции
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           rc=0
           python3 .github/scripts/newman-suite-debt.py || rc=$?
           case "$rc" in
             0) : ;;
             75)
-              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::перепись не прочитала объявление конвейера (нет разборщика YAML либо нет файлов) — величина «гоняется» НЕ ИЗМЕРЕНА"
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::перепись не прочитала объявление конвейера (нет разборщика YAML либо нет файлов) либо трекер не ответил о держателях — величина НЕ ИЗМЕРЕНА"
               exit 1 ;;
             *) exit "$rc" ;;
           esac
@@ -403,6 +445,8 @@ jobs:
   # поставщика удостоверений нет вовсе. Предмет задания — свойства, чей
   # производитель САМА служба.
   stand:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'stand') }}
+    needs: [changes]
     name: автономный стенд — служба без платформы
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -727,13 +771,15 @@ jobs:
       # читается шире сделанного.
       - name: "ДОЛГ — чего автономный стенд не проверяет"
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           rc=0
           python3 .github/scripts/newman-suite-debt.py || rc=$?
           case "$rc" in
             0) : ;;
             75)
-              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::перепись не прочитала объявление конвейера — величина «гоняется» НЕ ИЗМЕРЕНА"
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::перепись не прочитала объявление конвейера либо трекер не ответил о держателях — величина НЕ ИЗМЕРЕНА"
               exit 1 ;;
             *) exit "$rc" ;;
           esac
@@ -814,6 +860,8 @@ jobs:
   # автономном стенде 2026-09-30: машинный посев 64 с, посев церемонии 14 с, прогон
   # четырнадцати коллекций — 8 мин 50 с.
   stand-ceremony:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'stand-ceremony') }}
+    needs: [changes]
     name: автономный стенд — волна церемонии и распорядители аккаунта (второй шард)
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -943,6 +991,7 @@ jobs:
             --service iam-access-binding-include-revoked \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
+            --service kaname-cluster-admins \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
@@ -1038,6 +1087,8 @@ jobs:
   # читается ОТДЕЛЬНО. Одна строка с тремя вызовами через `&&` схлопнула бы три
   # вердикта в один и остановилась бы на первой находке.
   edgeselftests:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'edgeselftests') }}
+    needs: [changes]
     name: самопроверки против подставного края (стенда не нужно)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1131,9 +1182,11 @@ jobs:
   # конфиденциальные клиенты церемонии заводятся глаголом `Create` (kaname#405).
   # Им гоняется набор `kaname-authorization-code` (LINE-A-1, kaname#423).
   chart-own:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'chart-own') }}
+    needs: [changes]
     name: стенд посадки own (kind) — полоса входа паролем и своя церемония
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 80
     # Вид PrometheusRule на голом kind не заводится ничем, поэтому правила
     # тревоги выключены ручкой: их предмет — объект мониторинга, а не подъём.
     env:
@@ -1194,6 +1247,10 @@ jobs:
       - name: посев церемонии способен упасть (самопроба инъекцией)
         timeout-minutes: 5
         run: python3 tests/authz-fixtures/seed_ceremony.py --self-test
+
+      - name: посев хранимых значений способен упасть (самопроба инъекцией)
+        timeout-minutes: 5
+        run: python3 tests/authz-fixtures/seed_stored_value.py --self-test
 
       - name: чистка отчёта способна упасть (самопроба по каждой форме)
         timeout-minutes: 5
@@ -1271,6 +1328,28 @@ jobs:
               exit "$rc" ;;
           esac
 
+      # ТРЕТЬЕ УСЛОВИЕ — «ДАНО» PWV-01 И PWV-02 (kaname#467): люди, чьи значения
+      # формата A (bcrypt) и B (argon2id) положены ПОСЕВОМ, а не написаны
+      # продуктом. Человек заводится регистрацией на полосе, материал его строки
+      # способа входа замещается значением, которое построила сторонняя
+      # библиотека (`tests/newman/scripts/storedvaluemint`); утверждение — само
+      # значение в хранилище, а не вход: вход переписал бы формат A (Р5). Люди
+      # свежие на каждый посев, поэтому посев стоит перед прогоном набора.
+      - name: условие создано — значения форматов A и B положены посевом
+        timeout-minutes: 15
+        run: |
+          rc=0
+          .github/scripts/stand-chart.sh seed-stored-value || rc=$?
+          case "$rc" in
+            0) echo "условие создано: storedValueAEmail, storedValueAPassword, storedValueBEmail, storedValueBPassword записаны" ;;
+            75)
+              echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::полоса, база стенда либо построитель значений недоступны — вердикта о продукте нет"
+              exit 1 ;;
+            *)
+              echo "::error title=Посев хранимых значений отвергнут продуктом::регистрация либо строка способа входа не по контракту — это вердикт о дереве"
+              exit "$rc" ;;
+          esac
+
       # ЧИСЛОВОЙ ВЕРДИКТ даёт прогонщик набора: исполненные и неотвеченные
       # запросы, упавшие утверждения, строка на коллекцию. Лист края и УЦ стенда
       # — те, что посев вынес из Secret стенда и по которым доказал способность.
@@ -1292,7 +1371,13 @@ jobs:
       # всех: людей они заводят сами, своих на прогон, и человека посева не
       # трогают; подтверждение читает код письма у приёмника стенда
       # (`standMailboxUrl`), как восстановление и кейсы второго фактора со своим
-      # человеком.
+      # человеком. Ключи доступа (`kaname-access-keys`, Ф7, kaname#268) —
+      # последними: двух своих людей набор заводит регистрацией и подтверждает
+      # адрес кодом письма, токен человека выковывает церемонией с клиентом
+      # посева церемонии, а ключи свои снимает последним кейсом. Смена адреса
+      # (`kaname-email-change`, kaname#635) — после ключей доступа: людей набор
+      # заводит сам и подтверждает их адрес кодом письма, коды смены и
+      # уведомление читает у того же приёмника.
       # Выход второго фактора готов к публикации (kaname#417): срез ниже знает виды
       # его удостоверений, а утверждения набора значений не печатают.
       #
@@ -1301,11 +1386,18 @@ jobs:
       # второго фактора (kaname#480) ждёт самого позднего из сроков своих ветвей —
       # окна профиля `addressWindow` и `selfServiceFreshness`, по 15 мин
       # (`deploy/values.prod.yaml`), — плюс заведение четырёх своих людей до
-      # ожидания, около 2 мин. Отсюда 10 + 15 + 2 = 27, и предел 35: зависание
-      # по-прежнему снимается шагом, а не заданием, а окно, выросшее в профиле,
-      # видно здесь, потому что число выведено из него.
-      - name: наборы посадки own гоняются — вход, восстановление, церемония, второй фактор, регистрация, подтверждение адреса (числовой вердикт)
-        timeout-minutes: 35
+      # ожидания, около 2 мин. Набор ключей доступа ждёт срок испытания —
+      # литерал контракта, 5 мин (`ChallengeTTL`, Ф7-34 и Ф7-54), — плюс свои
+      # запросы и двух своих людей, около 2 мин. Набор смены адреса ждёт окна
+      # свежести профиля (`selfServiceFreshness`, 15 мин, EC-27) и интервала
+      # писем (`verificationResendInterval`, 1 мин, барьер EC-26) плюс заведение
+      # шести своих людей и ожидание следующей ступени кода по времени (EC-35,
+      # не дольше одной ступени, 30 с), около 1,5 мин. Отсюда
+      # 10 + 15 + 2 + 5 + 2 + 15 + 1 + 1,5 = 51,5, и предел 65: зависание по-прежнему снимается шагом, а не заданием, а
+      # окно, выросшее в профиле либо в контракте, видно здесь, потому что число
+      # выведено из него. Предел задания поднят на те же 20 мин (60 → 80).
+      - name: наборы посадки own гоняются — вход, восстановление, церемония, второй фактор, регистрация, подтверждение адреса, ключи доступа, смена адреса (числовой вердикт)
+        timeout-minutes: 65
         run: |
           cd tests/newman
           rc=0
@@ -1315,11 +1407,13 @@ jobs:
             --service kaname-second-factor \
             --service kaname-registration \
             --service kaname-address-verification \
+            --service kaname-access-keys \
+            --service kaname-email-change \
             --ssl-client-cert "$KANAME_STAND_WORKDIR/edge/edge.crt" \
             --ssl-client-key "$KANAME_STAND_WORKDIR/edge/edge.key" \
             --ssl-extra-ca-certs "$KANAME_STAND_WORKDIR/edge/ca.crt" || rc=$?
           case "$rc" in
-            0) echo "наборы посадки own зелены: вход паролем, восстановление, церемония authorization_code, второй фактор, регистрация, подтверждение адреса" ;;
+            0) echo "наборы посадки own зелены: вход паролем, восстановление, церемония authorization_code, второй фактор, регистрация, подтверждение адреса, ключи доступа, смена адреса" ;;
             75)
               echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::предполёт снял этот прогон до первого запроса — вердикта о наборе нет"
               exit 1 ;;
@@ -1406,6 +1500,8 @@ jobs:
       - stand-ceremony
       - edgeselftests
       - chart-own
+      - changes
+      - prverdict
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
@@ -1435,9 +1531,35 @@ jobs:
             "${{ needs.stand.result }}" \
             "${{ needs.stand-ceremony.result }}" \
             "${{ needs.edgeselftests.result }}" \
+            "${{ needs.changes.result }}" \
+            "${{ needs.prverdict.result }}" \
             "${{ needs.chart-own.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
             1) echo "::error title=СТВОЛ КРАСЕН::держатель заведён либо дополнен в трекере. Пока он открыт, ствол считается красным; закрывать — с артефактом починки"; exit 1 ;;
             *) echo "::error title=НЕ ИСПОЛНЯЛАСЬ::событие НЕ произведено — либо исходы не разобраны, либо производитель отказал. Читателя у красного НЕ появилось"; exit 1 ;;
           esac
+
+  # Сводный вердикт запроса (kaname#707). На черновике — КРАСНЫЙ по построению:
+  # исполнены только задания, выбранные картой `.github/ci-paths.json`, а пропуск
+  # защита ветки засчитала бы за успех. На полном прогоне (ready, запрос в main,
+  # ручной запуск) — зелёный, только если каждое задание процесса завершилось успехом.
+  # Вливание держит этот контекст, когда он внесён в защиту ветки.
+  prverdict:
+    name: сводный вердикт запроса (e2e-newman)
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    needs: [changes, chart-own, edgeselftests, stand, stand-ceremony, suite]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+      - name: целевой или полный — и исход
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/affected.py --pr-aggregate e2e-newman.yml

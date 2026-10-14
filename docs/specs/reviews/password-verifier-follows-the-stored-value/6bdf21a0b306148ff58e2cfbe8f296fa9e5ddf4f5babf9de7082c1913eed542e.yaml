@@ -1,0 +1,119 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 6bdf21a0b306148ff58e2cfbe8f296fa9e5ddf4f5babf9de7082c1913eed542e
+  static_status_note: >-
+    Слово «Статус» в шапке документа — то, что туда вписали; шапка рецензентом не правлена
+    намеренно (change-graph.md §2). Действующий вердикт о ЭТОЙ редакции — эта запись вместе с
+    внешним событием. Прежние записи остаются вердиктами о своём содержимом.
+  base_commit: 9bac42bdcbc5f125ee8d45d7a7df12436dd4b8c6
+  base_sha256: 2554fb6f46fa7f5768f746b5d620843fc045e53d7778919d9829f1b9467070cb
+  content_commit: 978510ca291db50f91d2fe15d215e9441f6dd449
+  branch: '172'
+  branch_on_origin: 'git ls-remote origin refs/heads/172 → 978510ca291db50f91d2fe15d215e9441f6dd449'
+  trunk: 8a84dcff6eb1ccde68113353ba28d1e1e399f0e6
+  pull_request: none
+  task: PRO-Robotech/kaname#172
+  lines: 2141
+  round: 1
+  round_numbering: 'первый круг по этой редакции; прошлых кругов этого захода нет'
+  predecessor_record: >-
+    docs/specs/reviews/password-verifier-follows-the-stored-value/2554fb6f46fa7f5768f746b5d620843fc045e53d7778919d9829f1b9467070cb.yaml (APPROVED, круг 3; база правки побайтово равна её предмету)
+  fingerprint_predicate: >-
+    git show 978510ca291db50f91d2fe15d215e9441f6dd449:docs/engineering/acceptance/password-verifier-follows-the-stored-value.md | sha256sum
+    (снят и с файла рабочей копии tmp/172-dating — совпал с заданием)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-03T13:17:46Z'
+  ban1_lifted: true
+  pending_external_event: false
+  why: >-
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 5969539603 учётки
+    pointpu на PRO-Robotech/kaname#172 несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision 978510ca291d опубликована на origin раньше события
+    (git branch -r --contains 978510ca291d даёт origin/172); запрет #1 по этому
+    отпечатку снят. Дописано отдельной правкой поверх записи, вердикт и разбор задним числом
+    не правились.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#172
+  status: performed
+  published: true
+  database_id: 5969539603
+  node_id: IC_kwDOUO26pM8AAAABY8_yEw
+  url: https://github.com/PRO-Robotech/kaname/issues/172#issuecomment-5969539603
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969539603
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T13:17:46Z'
+  body_sha256: 1642c2797995b59a21f2e5eeda7ba187cf57998d3b0b37b4c19fd80e457f3db8
+  subject_sha256: 6bdf21a0b306148ff58e2cfbe8f296fa9e5ddf4f5babf9de7082c1913eed542e
+  subject_revision_commit: 978510ca291db50f91d2fe15d215e9441f6dd449
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · APPROVED · 6bdf21a0b306148ff58e2cfbe8f296fa9e5ddf4f5babf9de7082c1913eed542e'
+
+premise_check:
+  premise: 'отпечаток 6bdf21a0…, ветка 172 @978510ca2 от origin/536 9bac42bdc, правка только датировки'
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    sha256sum совпал с заданием; git diff --numstat origin/main...978510ca2 трогает 4 файла, только шапки
+    (строк снято 2 на файл, все в пункте «Ревизии измерения»); ствол origin/main @8a84dcff6 — предок
+    978510ca2, состав и числа равны диапазону от базы ветки origin/536 (догнана до ствола в 9bac42bdc).
+
+delta_judged: >-
+  1 запись: PRO-Robotech/kaname@37ee850953 → 37ee850953 (эта история) + пункт «Правка ПОСЛЕ вердикта». Сценарии, их ID, «Дано/Когда/Тогда», производители, DoD, решения и строки «Статус»
+  побайтово те же, что в базе.
+
+predicates_run:
+  sibling_pair_gate: |
+    Гейт TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory с четвёртой формой
+    «Ревизии измерения», внесённой локально в отдельной копии (tmp/172-review-probe, снята):
+      на 978510ca2 (эта редакция) → находок 2: access-keys-are-ours, recovery-of-access;
+      близнец — те же файлы, docs/engineering/acceptance из 9bac42bdc → находок 6, среди них
+      НЕОБЪЯВЛЕННАЯ ИСТОРИЯ по password-verifier-follows-the-stored-value.md.
+    Отличие ровно одно (тело четырёх документов) — правка снимает находку, а не немоту гейта.
+  revisions_resolve: |
+    git merge-base --is-ancestor <r> origin/main → 0 для 37ee850953, 83ddd08a84, 39628487, a69c79d6;
+    git merge-base --is-ancestor 5dcefe679b0dcdfb66580161bf7ae57493f6f800 origin/main в клоне службы → 128 (объекта нет),
+    в project/kacho (origin/main @ba01514b98b) → 1: коммит есть, стволу не предок — лежит на release/modules-4, lane/1863, lane/1864, lane/line-green;
+    851df30ef, 9d005e6c2c6 → commit в project/kacho; 65ea29400, 8a70d56f6, d09e42782, f0d1dae63 → не резолвятся;
+    git -C project/kacho ls-remote origin refs/heads/lane/1089 → пусто.
+  constructibility: |
+    go test ./internal/modelrender -run TestAcceptanceScenarioCanonValuesAreTodays → PASS,
+    «внутриблочных 724», находок 0 (держатель «Дано» B-07 model-generated-from-manifest);
+    git grep -n 'func ResolveCanonicalModel' → internal/authzplan/canonical.go:158 (производитель A-01).
+
+blocking:
+  count: 0
+  genera: []
+
+non_blocking: []
+
+coverage:
+  scope: 'правкой не тронут; ведомость scope — предмет записи-предшественника'
+  producers: 'правкой не тронуты; «Тогда» без производителя правкой не создано'
+  twins: 'правкой не тронуты'
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false

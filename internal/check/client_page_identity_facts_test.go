@@ -1,0 +1,458 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package check_test
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
+
+	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+)
+
+// Клиентские страницы службы обязаны СХОДИТЬСЯ с теми объявлениями дерева, из
+// которых их факты выводятся (задачи kaname#233, kaname#504, kaname#513,
+// kaname#514, kacho#2957). Каждое утверждение ниже уже однажды пережило свой
+// предмет, и ни одно не стало красным само:
+//
+//   - врезка обзора объявляла, что журнала подписки у службы «нет и не будет»,
+//     когда служба уже была владельцем журнала (kaname#233). Виды журнала
+//     страница называет ПОИМЁННО — и поэтому сверяются они с объявлением
+//     владельца (`subscriptionjournal.Journal`) в обе стороны;
+//   - число путей полосы входа на двух страницах отстало от перечня слушателя
+//     (kaname#504), а затем — на странице самой полосы, которую гейт не читал,
+//     и формами записи, которых его образец «N пут…» не знал (NA8 волны 4:
+//     «Путей у полосы **N**», «из N-и путей», «все N (`…Paths()`)»).
+//     Сверяется с `loginlanehttp.Paths()`;
+//   - умолчание размера страницы на обзоре расходилось с общим валидатором
+//     (kaname#513). Сверяется с `corevalidate.DefaultPageSize`;
+//   - форма идентификатора клиента в `iss`/`sub` на странице токенов шла через
+//     подчёркивание, тогда как выпуск чеканит слитную форму (kaname#514);
+//   - раздел обзора, на который ссылается страница края о первом вызове после
+//     выдачи, отсутствовал, а на его месте стояло «невыразимо by construction»
+//     (kacho#2957);
+//   - раздел введения о раскладке описывал каталоги монорепо платформы, которых
+//     в этом дереве нет (kaname#234). Сверяется с каталогами верхнего уровня.
+//
+// # ГРАНИЦА
+//
+// Гейт судит СОСТАВ, ЧИСЛО и ФОРМУ, а не верность прозы вокруг: описать
+// предмет неверно он не помешает. Тот же предел, что у гейта страницы полосы
+// входа.
+const (
+	idFactsOverviewRel     = "docs/content/api/overview.mdx"
+	idFactsRestSurfaceRel  = "docs/content/api/rest-surface.mdx"
+	idFactsArchOverviewRel = "docs/content/architecture/overview.mdx"
+	idFactsAuthLaneRel     = "docs/content/api/auth-lane.mdx"
+	idFactsTokensRel       = "docs/content/api/tokens.mdx"
+	idFactsIntroRel        = "docs/content/intro.mdx"
+)
+
+// idFactsLayoutHead — раздел введения с раскладкой дерева (kaname#234).
+const idFactsLayoutHead = "## Структура репозитория"
+
+// idFactsLayoutRow — строка таблицы раскладки: каталог в первой ячейке.
+var idFactsLayoutRow = regexp.MustCompile(`<tr><td><strong>([A-Za-z0-9_.-]+)/</strong></td>`)
+
+// idFactsJournalMarker — то, по чему врезка о журнале службы находится на
+// странице: имя владельца в той форме, которую принимает ручка края.
+const idFactsJournalMarker = "`owner=iam`"
+
+// idFactsFirstCallHead — заголовок раздела, на который ссылается страница края.
+// Имя раздела — адрес чужой ссылки, поэтому оно сверяется дословно.
+const idFactsFirstCallHead = "### Первый вызов сразу после выдачи стоит повторить"
+
+// idFactsCodeSpan — код-форматирование страницы: обратные кавычки либо <code>.
+// Спан не пересекает перевод строки: тройная кавычка блока кода иначе сдвигает
+// пары, и спанами читается проза между ними.
+var idFactsCodeSpan = regexp.MustCompile("`([^`\\n]+)`|<code>([^<\\n]+)</code>")
+
+// idFactsKindWord — слово вида журнала: латиница, цифры и подчёркивание, без
+// пробела и знаков пути.
+var idFactsKindWord = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// idFactsNumerals — числительные, которыми страницы называют число путей.
+var idFactsNumerals = map[int]string{
+	10: "десять", 11: "одиннадцать", 12: "двенадцать", 13: "тринадцать",
+	14: "четырнадцать", 15: "пятнадцать", 16: "шестнадцать", 17: "семнадцать",
+	18: "восемнадцать", 19: "девятнадцать", 20: "двадцать",
+	// Составное — двумя словами (kaname#634 довёл перечень до 21, kaname#635 —
+	// до 23): формы падежей у него свои, они — в idFactsCompoundForms.
+	21: "двадцать один", 22: "двадцать два", 23: "двадцать три",
+}
+
+// idFactsCompoundForms — составные числительные словаря всеми падежными
+// формами, которые страницы употребляют: «двадцать один путь», «из двадцати
+// одного», «двадцатью одним». Составное читается ДВУМЯ словами подряд и
+// поглощает второе: без этого «двадцать» в «двадцать один» читалось бы числом
+// 20 — устаревшим, — а «один» вне составного не числительное словаря.
+var idFactsCompoundForms = map[string]int{
+	"двадцать один": 21, "двадцати одного": 21, "двадцати одному": 21,
+	"двадцатью одним": 21, "двадцати одном": 21,
+	"двадцать два": 22, "двадцати двух": 22, "двадцати двум": 22, "двадцатью двумя": 22,
+	"двадцать три": 23, "двадцати трёх": 23, "двадцати трём": 23, "двадцатью тремя": 23,
+}
+
+// idFactsCensus — объём осмотренного. Печатается всегда.
+type idFactsCensus struct {
+	journalKinds    int // видов у владельца журнала
+	calloutSpans    int // код-спанов во врезке о журнале
+	calloutKinds    int // из них — слов вида
+	lanePages       int // страниц, судимых по числу путей полосы
+	laneCountClaims int // числительных у слова «пут…» либо `Paths()` на них
+	tokenIDSpans    int // код-спанов страницы токенов с идентификатором клиента
+	paginationRead  bool
+	firstCallRead   bool
+	layoutDirs      int // каталогов верхнего уровня в дереве
+	layoutRows      int // строк таблицы раскладки
+}
+
+func idFactsSpans(text string) []string {
+	var out []string
+	for _, m := range idFactsCodeSpan.FindAllStringSubmatch(text, -1) {
+		s := m[1]
+		if s == "" {
+			s = m[2]
+		}
+		out = append(out, strings.TrimSpace(s))
+	}
+	return out
+}
+
+// idFactsCallout — врезка (`:::` … `:::`), внутри которой стоит marker.
+func idFactsCallout(page, marker string) string {
+	at := strings.Index(page, marker)
+	if at < 0 {
+		return ""
+	}
+	start := strings.LastIndex(page[:at], "\n:::")
+	if start < 0 {
+		return ""
+	}
+	rest := page[start+1:]
+	end := strings.Index(rest[3:], "\n:::")
+	if end < 0 {
+		return ""
+	}
+	return rest[:end+3]
+}
+
+// auditJournalCallout — виды журнала, названные врезкой, против объявления
+// владельца: в обе стороны.
+func auditJournalCallout(page string, kinds []string, c *idFactsCensus) []string {
+	c.journalKinds = len(kinds)
+	if len(kinds) == 0 {
+		return []string{"объявление владельца журнала пусто — сверять не с чем; это отказ, а не «ноль находок»"}
+	}
+	callout := idFactsCallout(page, idFactsJournalMarker)
+	if callout == "" {
+		return []string{fmt.Sprintf("врезки о журнале службы (маркер %s) на странице нет — "+
+			"клиент не узнает, что поток у службы есть", idFactsJournalMarker)}
+	}
+	var findings []string
+	if strings.Contains(callout, "нет и **не будет**") || strings.Contains(callout, "нет и не будет") {
+		findings = append(findings, "врезка о журнале обещает его отсутствие «навсегда» — "+
+			"утверждение пережило свой предмет")
+	}
+	declared := map[string]bool{}
+	for _, k := range kinds {
+		declared[k] = true
+	}
+	named := map[string]bool{}
+	for _, s := range idFactsSpans(callout) {
+		c.calloutSpans++
+		if !idFactsKindWord.MatchString(s) {
+			continue
+		}
+		if s == "account" || s == "project" || strings.HasPrefix(s, "iam_") {
+			c.calloutKinds++
+			named[s] = true
+		}
+	}
+	for _, k := range sortedKeys(declared) {
+		if !named[k] {
+			findings = append(findings, fmt.Sprintf(
+				"вид журнала %q объявлен владельцем, а врезка его НЕ называет", k))
+		}
+	}
+	for _, k := range sortedKeys(named) {
+		if !declared[k] {
+			findings = append(findings, fmt.Sprintf(
+				"врезка называет вид %q, которого у владельца журнала нет", k))
+		}
+	}
+	return findings
+}
+
+// idFactsCountWindow — сколько слов между числительным и якорем ещё связывают
+// их: «Путей у полосы **N**» — три слова между якорем и числом.
+const idFactsCountWindow = 3
+
+// idFactsCountToken — слово страницы либо имя перечня `Paths()` целиком.
+var idFactsCountToken = regexp.MustCompile(`Paths\(\)|\p{L}+`)
+
+// idFactsNumeralForms — каждая форма числительного словаря и его значение:
+// именительный («пятнадцать»), родительный/дательный/предложный («пятнадцати»),
+// творительный («пятнадцатью»). Слово сверяется ЦЕЛЫМ: «семнадцать» — хвост
+// «восемнадцать», и поиск подстроки читал бы второе первым.
+var idFactsNumeralForms = func() map[string]int {
+	out := map[string]int{}
+	for n, w := range idFactsNumerals {
+		if strings.Contains(w, " ") {
+			continue // составное — idFactsCompoundForms
+		}
+		out[w] = n
+		out[strings.TrimSuffix(w, "ь")+"и"] = n
+		out[w+"ю"] = n
+	}
+	return out
+}()
+
+// pathCountClaim — числительное, связанное с путями полосы, и его строка.
+type pathCountClaim struct {
+	word string
+	n    int
+	line int
+}
+
+// pathCountClaims — все числительные словаря страницы в окне
+// `idFactsCountWindow` слов от якоря: слова на «пут» либо `Paths()`. Формы
+// записи, которые страницы полосы употребляют (kaname#504, NA8 волны 4):
+// «N путей», «Путей у полосы **N**», «из N-и путей», «все N (`…Paths()`)».
+func pathCountClaims(page string) []pathCountClaim {
+	idx := idFactsCountToken.FindAllStringIndex(page, -1)
+	anchor := func(i int) bool {
+		w := page[idx[i][0]:idx[i][1]]
+		return w == "Paths()" || strings.HasPrefix(strings.ToLower(w), "пут")
+	}
+	var out []pathCountClaim
+	for i := 0; i < len(idx); i++ {
+		span := idx[i]
+		word := page[span[0]:span[1]]
+		last := i
+		n, ok := 0, false
+		if i+1 < len(idx) {
+			next := page[idx[i+1][0]:idx[i+1][1]]
+			if cn, cok := idFactsCompoundForms[strings.ToLower(word+" "+next)]; cok {
+				n, ok, last, word = cn, true, i+1, word+" "+next
+			}
+		}
+		if !ok {
+			n, ok = idFactsNumeralForms[strings.ToLower(word)]
+		}
+		if !ok {
+			continue
+		}
+		for j := max(0, i-idFactsCountWindow); j <= min(len(idx)-1, last+idFactsCountWindow); j++ {
+			if (j < i || j > last) && anchor(j) {
+				out = append(out, pathCountClaim{word: word, n: n, line: strings.Count(page[:span[0]], "\n") + 1})
+				break
+			}
+		}
+		i = last
+	}
+	return out
+}
+
+// auditLanePathCount — каждая страница называет число путей полосы числом
+// перечня слушателя и никаким другим.
+func auditLanePathCount(pages map[string]string, n int, c *idFactsCensus) []string {
+	want, ok := idFactsNumerals[n]
+	if !ok {
+		return []string{fmt.Sprintf("у числа путей полосы %d нет числительного в словаре гейта — "+
+			"расширьте словарь, а не снимайте проверку", n)}
+	}
+	var findings []string
+	for _, rel := range sortedKeys(boolKeys(pages)) {
+		c.lanePages++
+		named := false
+		for _, claim := range pathCountClaims(pages[rel]) {
+			c.laneCountClaims++
+			if claim.n == n {
+				named = true
+				continue
+			}
+			findings = append(findings, fmt.Sprintf(
+				"%s:%d называет «%s» числом путей полосы, а у слушателя путей %s (`loginlanehttp.Paths()`)",
+				rel, claim.line, claim.word, want))
+		}
+		if !named {
+			findings = append(findings, fmt.Sprintf(
+				"%s не называет число путей полосы входа (%s, по `loginlanehttp.Paths()`)", rel, want))
+		}
+	}
+	sort.Strings(findings)
+	return findings
+}
+
+// auditClientIDForm — идентификатор клиента на странице токенов пишется той
+// формой, которую чеканит выпуск: слитно, без подчёркивания.
+func auditClientIDForm(page string, c *idFactsCensus) []string {
+	var findings []string
+	sawUOC, sawSOC := false, false
+	for _, s := range idFactsSpans(page) {
+		if !strings.Contains(s, "uoc") && !strings.Contains(s, "soc") {
+			continue
+		}
+		c.tokenIDSpans++
+		if strings.Contains(s, "uoc_") || strings.Contains(s, "soc_") {
+			findings = append(findings, fmt.Sprintf(
+				"идентификатор клиента %q записан через подчёркивание — выпуск чеканит слитную форму", s))
+		}
+		if strings.HasPrefix(s, "uoc…") || strings.HasPrefix(s, "uoc&lt;17&gt;") || strings.HasPrefix(s, "uoc<17>") {
+			sawUOC = true
+		}
+		if strings.HasPrefix(s, "soc…") || strings.HasPrefix(s, "soc&lt;17&gt;") || strings.HasPrefix(s, "soc<17>") {
+			sawSOC = true
+		}
+	}
+	if !sawUOC || !sawSOC {
+		findings = append(findings, "страница не называет слитную форму идентификатора клиента "+
+			"(`uoc…` и `soc…`) — сверять форму не с чем")
+	}
+	return findings
+}
+
+// auditPaginationDefault — раздел пагинации обзора называет умолчание общего
+// валидатора.
+func auditPaginationDefault(page string, def int64, c *idFactsCensus) []string {
+	const head = "## Пагинация"
+	start := strings.Index(page, head)
+	if start < 0 {
+		return []string{"раздела пагинации на обзоре нет"}
+	}
+	c.paginationRead = true
+	rest := page[start+len(head):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		rest = rest[:end]
+	}
+	if !strings.Contains(rest, fmt.Sprintf("по умолчанию %d", def)) {
+		return []string{fmt.Sprintf("раздел пагинации не называет умолчание общего валидатора "+
+			"(«по умолчанию %d», `corevalidate.DefaultPageSize`)", def)}
+	}
+	return nil
+}
+
+// auditFirstCallSection — раздел, на который ссылается край, на месте, и
+// «невыразимо» на странице не осталось.
+func auditFirstCallSection(page string, c *idFactsCensus) []string {
+	var findings []string
+	if strings.Contains(page, idFactsFirstCallHead+"\n") {
+		c.firstCallRead = true
+	} else {
+		findings = append(findings, fmt.Sprintf("раздела %q на обзоре нет — "+
+			"страница края ссылается на него по имени", strings.TrimPrefix(idFactsFirstCallHead, "### ")))
+	}
+	if strings.Contains(page, "ещё не действует» невыразимо") {
+		findings = append(findings, "обзор называет «право ещё не действует» невыразимым, "+
+			"а производная выдача материализуется после `done`")
+	}
+	return findings
+}
+
+// auditTreeLayout — таблица раскладки введения против каталогов верхнего уровня
+// дерева, в обе стороны. Каталоги с точкой в начале (служебные) не судятся.
+func auditTreeLayout(page string, dirs []string, c *idFactsCensus) []string {
+	if len(dirs) == 0 {
+		return []string{"каталогов верхнего уровня не прочитано — сверять не с чем"}
+	}
+	start := strings.Index(page, idFactsLayoutHead)
+	if start < 0 {
+		return []string{fmt.Sprintf("раздела %q во введении нет", strings.TrimPrefix(idFactsLayoutHead, "## "))}
+	}
+	rest := page[start+len(idFactsLayoutHead):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		rest = rest[:end]
+	}
+	inTree := map[string]bool{}
+	for _, d := range dirs {
+		if !strings.HasPrefix(d, ".") {
+			inTree[d] = true
+		}
+	}
+	c.layoutDirs = len(inTree)
+	onPage := map[string]bool{}
+	for _, m := range idFactsLayoutRow.FindAllStringSubmatch(rest, -1) {
+		onPage[m[1]] = true
+	}
+	c.layoutRows = len(onPage)
+	var findings []string
+	for _, d := range sortedKeys(inTree) {
+		if !onPage[d] {
+			findings = append(findings, fmt.Sprintf("каталог %s/ есть в дереве, а таблица раскладки его не называет", d))
+		}
+	}
+	for _, d := range sortedKeys(onPage) {
+		if !inTree[d] {
+			findings = append(findings, fmt.Sprintf("таблица раскладки называет %s/, которого в дереве нет", d))
+		}
+	}
+	return findings
+}
+
+// idFactsTopDirs — каталоги верхнего уровня модуля по ОТСЛЕЖИВАЕМЫМ файлам.
+// Чтение диска взяло бы и игнорируемое (каталоги сборки), и таблица краснела бы
+// у того, кто собрал, — индекс git называет ровно раскладку дерева.
+func idFactsTopDirs(t *testing.T) []string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", platformtree.Require(t), "ls-files").Output()
+	require.NoError(t, err, "индекс git не прочитан — раскладку выводить не из чего")
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if i := strings.IndexByte(line, '/'); i > 0 {
+			seen[line[:i]] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
+func idFactsRead(t *testing.T, rel string) string {
+	t.Helper()
+	body, err := os.ReadFile(platformtree.RequirePath(t, rel)) // #nosec G304 -- путь собран из корня собственного модуля
+	require.NoError(t, err)
+	return string(body)
+}
+
+// TestClientPagesAgreeWithTheirProducers — несущее утверждение.
+func TestClientPagesAgreeWithTheirProducers(t *testing.T) {
+	overview := idFactsRead(t, idFactsOverviewRel)
+
+	kinds := make([]string, 0)
+	for k := range subscriptionjournal.Journal().Mapping.Kinds {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+
+	var c idFactsCensus
+	var findings []string
+	findings = append(findings, auditJournalCallout(overview, kinds, &c)...)
+	findings = append(findings, auditLanePathCount(map[string]string{
+		idFactsRestSurfaceRel:  idFactsRead(t, idFactsRestSurfaceRel),
+		idFactsArchOverviewRel: idFactsRead(t, idFactsArchOverviewRel),
+		idFactsAuthLaneRel:     idFactsRead(t, idFactsAuthLaneRel),
+	}, len(loginlanehttp.Paths()), &c)...)
+	findings = append(findings, auditClientIDForm(idFactsRead(t, idFactsTokensRel), &c)...)
+	findings = append(findings, auditPaginationDefault(overview, corevalidate.DefaultPageSize, &c)...)
+	findings = append(findings, auditFirstCallSection(overview, &c)...)
+	findings = append(findings, auditTreeLayout(idFactsRead(t, idFactsIntroRel), idFactsTopDirs(t), &c)...)
+
+	t.Logf("осмотрено: видов журнала %d, код-спанов врезки %d (слов вида %d), страниц полосы %d (числительных у путей %d), "+
+		"спанов идентификатора клиента %d, раздел пагинации прочитан %v, раздел первого вызова найден %v, "+
+		"каталогов дерева %d, строк раскладки %d",
+		c.journalKinds, c.calloutSpans, c.calloutKinds, c.lanePages, c.laneCountClaims, c.tokenIDSpans,
+		c.paginationRead, c.firstCallRead, c.layoutDirs, c.layoutRows)
+	require.NotZero(t, c.journalKinds, "объявление владельца журнала не прочитано")
+	require.NotZero(t, c.lanePages, "страницы полосы не прочитаны")
+	require.Empty(t, findings, strings.Join(findings, "\n"))
+}

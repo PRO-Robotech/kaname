@@ -103,7 +103,7 @@ func TestDatingGateRedsOnSelfReference(t *testing.T) {
 }
 
 // TestDatingGateRedsOnAForeignLineRevision — ось «резолвится, но не предок».
-// Это и есть предмет находки B задачи #1805.
+// Это и есть предмет находки B задачи kacho#1805.
 func TestDatingGateRedsOnAForeignLineRevision(t *testing.T) {
 	docs := synthDocs()
 	docs["architecture/known-divergences.md"] = synthForeign
@@ -224,7 +224,7 @@ func TestDatingGateIsSilentOnProseInsideACallout(t *testing.T) {
 
 // --- Историй ДВЕ: своя и предшественника -------------------------------------
 //
-// Ось заведена задачей #2554. Прежняя редакция знала два положения хеша вместо
+// Ось заведена задачей kacho#2554. Прежняя редакция знала два положения хеша вместо
 // четырёх и сваливала «не резолвится вовсе» в «резолвится, но не предок», печатая
 // про первое текст второго. Ниже — контроль, инъекция по каждому новому положению
 // и законный близнец на каждой оси.
@@ -341,6 +341,7 @@ type synthRepo struct {
 	middle string // коммит внутри истории HEAD
 	head   string // вершина `main`
 	aside  string // резолвится, предком HEAD НЕ является
+	stray  string // только у buildSynthRepoWithLaneMergedIntoHead: вне истории и ствола, и головы
 }
 
 // absentRevision — правильной формы хеш, которого нет ни в одном дереве.
@@ -460,7 +461,7 @@ func TestDeclaredServiceHistoryRootIsCarriedByThisTree(t *testing.T) {
 // Расширение, доказанное только на ОДНОЙ форме, оставляет остальные
 // непроверенными: распознаватель мог узнать их «почти» — например, поймать
 // оборот и потерять хеш, — и разница между «не нашёл» и «нечего искать» снова
-// стала бы невидимой. Поэтому каждая из трёх форм получает свою пару: дефект
+// стала бы невидимой. Поэтому каждая из объявленных форм получает свою пару: дефект
 // находится с координатой, законный близнец молчит.
 //
 // ЗАЧЕМ ЕЩЁ ОСЬ ПЕРЕПИСИ. Числа по формам печатаются ПО ОТДЕЛЬНОСТИ, и это
@@ -515,8 +516,56 @@ func TestDatingCensusNamesEveryDeclaredFormEvenWhenAbsent(t *testing.T) {
 			"форма %q исчезла из переписи — её ноль неотличим от «не искали»", phrase)
 	}
 	require.Equal(t, 1, c.byForm[datingPhrases[0]])
-	require.Zero(t, c.byForm[datingPhrases[1]])
-	require.Zero(t, c.byForm[datingPhrases[2]])
+	for _, phrase := range datingPhrases[1:] {
+		require.Zerof(t, c.byForm[phrase], "форма %q сосчитана на входе, где её нет", phrase)
+	}
+}
+
+// pluralDatingPhrase — ЧЕТВЁРТАЯ форма объявления, множественное число второй.
+//
+// Выписана здесь ЛИТЕРАЛОМ, а не взята из `datingPhrases`, и это несущее: проба
+// по перечню (`...SeesEachDeclaredFormAndCountsItApart`) проходит ВСЕГДА — она
+// судит те формы, о которых распознаватель уже знает, и о забытой молчит. Форма,
+// которой корпус пишет, а перечень не несёт, ловится только пробой, называющей
+// её от корпуса (kaname#172: восемь приёмок открывают ею строку датировки).
+const pluralDatingPhrase = "Ревизии измерения"
+
+// TestDatingGateSeesThePluralForm — ИНЪЕКЦИЯ формы, которую пишет корпус.
+//
+// Дефект и законный близнец отличаются РОВНО ОДНИМ фактом — именем дома у
+// ревизии. Без формы в перечне распознаватель не видит ни того, ни другого:
+// не красное и не зелёное, а отсутствие вопроса.
+func TestDatingGateSeesThePluralForm(t *testing.T) {
+	// ДЕФЕКТ: необъявленный дом — находка с координатой и формой в переписи.
+	docs := map[string]string{
+		"acceptance/plural.md": declOfForm(pluralDatingPhrase+" — по дому",
+			"`Some-Other/repo@deadbee` (замер оттуда)"),
+	}
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1,
+		"форма %q оставила гейт зелёным — всё записанное ею вне наблюдения", pluralDatingPhrase)
+	require.Contains(t, findings[0], "НЕОБЪЯВЛЕННАЯ ИСТОРИЯ")
+	require.Contains(t, findings[0], "acceptance/plural.md", "находка обязана НАЗВАТЬ координату")
+	require.Equal(t, 1, c.byForm[pluralDatingPhrase],
+		"перепись не отнесла объявление к его форме: %v", c.byForm)
+	require.Zero(t, c.byForm["Ревизия измерения"],
+		"множественная форма засчитана единственной — полоса прежней формы сдвинулась")
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: тот же текст, дом объявлен — молчание, форма сосчитана.
+	docs["acceptance/plural.md"] = declOfForm(pluralDatingPhrase+" — по дому",
+		"`PRO-Robotech/kacho@deadbee` (замер оттуда)")
+	findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Empty(t, findings, "гейт краснеет на законной датировке формой %q", pluralDatingPhrase)
+	require.Equal(t, 1, c.inherited, "унаследованная датировка не сосчитана")
+	require.Equal(t, 1, c.byForm[pluralDatingPhrase], "перепись потеряла форму на законном входе")
+
+	// ВТОРОЙ ДЕФЕКТ той же формы: ревизия своей истории, которой в ней нет.
+	docs["acceptance/plural.md"] = declOfForm(pluralDatingPhrase+" — по дому",
+		"дом службы — эта история, ревизия `deadbee`")
+	findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1, "отсутствующая ревизия формой %q не найдена", pluralDatingPhrase)
+	require.Contains(t, findings[0], "РЕВИЗИИ НЕТ В ЭТОЙ ИСТОРИИ")
+	require.Equal(t, 1, c.absent)
 }
 
 // TestDatingGateAcceptsBothDeclaredPredecessors — ИНЪЕКЦИЯ по каждому дому.
@@ -547,6 +596,39 @@ func TestDatingGateAcceptsBothDeclaredPredecessors(t *testing.T) {
 	findings, _ := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
 	require.Len(t, findings, 1, "необъявленный дом принят — форма стала способом сослаться куда угодно")
 	require.Contains(t, findings[0], "НЕОБЪЯВЛЕННАЯ ИСТОРИЯ")
+}
+
+// TestDatingGateJudgesItsOwnQualifiedHistoryByAncestry — ИНЪЕКЦИЯ формы, которой
+// корпус называет СВОЙ дом вместе с репозиторием (`PRO-Robotech/kaname@<хеш>`).
+//
+// Прежде такая цитата шла в ветку «чужой истории» и получала находку «перемерить
+// число негде» — диагноз ложный: дом назван, и он здесь. Хуже того, ревизия своей
+// истории под этой формой НЕ СУДИЛАСЬ на вхождение в ствол вовсе. Поэтому пара:
+// своя ревизия, которой в истории нет, — находка о ревизии; та же форма с
+// ревизией ствола — молчание и счёт в половине «предок», а не «предшественник».
+func TestDatingGateJudgesItsOwnQualifiedHistoryByAncestry(t *testing.T) {
+	require.NotContains(t, predecessorRepos, serviceRepo,
+		"дом службы объявлен собственным предшественником — две истории слились в одну")
+
+	docs := map[string]string{
+		"acceptance/own.md": declOfForm(pluralDatingPhrase+" — по дому",
+			"дом службы `"+serviceRepo+"@deadbee` (ствол)"),
+	}
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1, "своя ревизия, которой в истории нет, прошла под формой с домом")
+	require.Contains(t, findings[0], "РЕВИЗИИ НЕТ В ЭТОЙ ИСТОРИИ",
+		"находка назвала не ту причину: дом службы — не необъявленная история")
+	require.Contains(t, findings[0], "acceptance/own.md")
+	require.Equal(t, 1, c.absent)
+	require.Zero(t, c.inherited, "своя история засчитана историей предшественника")
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: та же форма, ревизия ствола — молчание.
+	docs["acceptance/own.md"] = declOfForm(pluralDatingPhrase+" — по дому",
+		"дом службы `"+serviceRepo+"@1234abc` (ствол)")
+	findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Empty(t, findings, "гейт краснеет на законной датировке своим домом")
+	require.Equal(t, 1, c.dated, "своя ревизия не попала в половину «предок»")
+	require.Zero(t, c.inherited)
 }
 
 // TestDatingDeclarationSurvivesALineWrap — ИНЪЕКЦИЯ единицы счёта.
@@ -585,39 +667,74 @@ func TestDatingDeclarationSurvivesALineWrap(t *testing.T) {
 		"продолжение затянуло соседний пункт списка — находка цитирует чужую ревизию")
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ВЕРШИНА СУДА — СТВОЛ, А НЕ `HEAD`
+// ВЕРШИНА СУДА — ИСТОРИЯ ОТПРАВЛЯЕМОЙ ГОЛОВЫ ВМЕСТЕ СО СТВОЛОМ (kaname#639)
 //
-// Пара ниже отличается РОВНО ОДНИМ фактом — какая вершина названа, — и на одном
-// и том же дереве даёт ПРОТИВОПОЛОЖНЫЕ вердикты о ТОМ ЖЕ коммите. Это и есть
-// класс, ради которого вершина стала параметром: работа едет в ствол
-// схлопыванием, поэтому коммит ветки, предок рабочей вершины, предком ствола не
-// станет никогда, и вердикт «по HEAD» описывает дерево, которого после посадки
-// не будет.
+// Здесь вливают КОММИТОМ СЛИЯНИЯ, и на каждом уровне каскада: полоса → волна →
+// ветка эпика → ствол. Коммит, предок отправляемой головы, предком ствола
+// становится ровно в момент её вливания и уже не перестаёт им быть: ответ «да»
+// о вхождении монотонен по вливанию. Прежняя редакция судила один ствол и
+// потому отказывала приёмке, датированной головой ветки эпика, — посадка этой
+// ветки сделала бы находку ложной, а до посадки её нечем было снять.
+//
+// Ослаблением до «любая резолвящаяся ревизия» это не становится: коммит, который
+// резолвится, но в историю отправляемой головы НЕ входит, — по-прежнему чужая
+// линия (близнец ниже). Пара отличается РОВНО ОДНИМ фактом: входит ли коммит в
+// историю головы.
 
-// TestGitAncestry_JudgesAgainstTheTrunkNotTheWorkingHead — ИНЪЕКЦИЯ.
-func TestGitAncestry_JudgesAgainstTheTrunkNotTheWorkingHead(t *testing.T) {
+// TestGitAncestry_ACommitCarriedByTheHeadIsAncestryBeforeTheTrunkHasIt — ИНЪЕКЦИЯ
+// той ложной находки, ради которой заведена задача: коммит полосы, влитый в
+// голову, но не в ствол.
+func TestGitAncestry_ACommitCarriedByTheHeadIsAncestryBeforeTheTrunkHasIt(t *testing.T) {
 	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
 
-	require.Equal(t, ancestryNo, gitAncestry(t, r.dir, r.root, "main")(r.aside),
-		"коммит полосы, в ствол НЕ влитый, признан входящим в его историю: "+
-			"вердикт описывает рабочую вершину, а не дерево, в которое работа едет")
+	require.Equal(t, ancestryYes, gitAncestry(t, r.dir, r.root, "main")(r.aside),
+		"коммит, который несёт отправляемая голова, объявлен чужой линией: вливание "+
+			"коммитом слияния сделает его предком ствола, и находка окажется ложной")
 }
 
-// TestGitAncestry_ByWorkingHeadTheSameCommitLooksLanded — ЗАКОННЫЙ БЛИЗНЕЦ.
-// Тот же репозиторий, тот же коммит; различие одно — названа рабочая вершина.
-// Прохождение здесь доказывает, что инъекция выше ловит ИМЕННО подмену вершины,
-// а не поломку предиката.
-func TestGitAncestry_ByWorkingHeadTheSameCommitLooksLanded(t *testing.T) {
+// TestGitAncestry_ACommitOutsideTheHeadIsStillAForeignLine — ЗАКОННЫЙ БЛИЗНЕЦ:
+// то же дерево, тот же ствол; различие одно — коммит в историю головы не входит.
+// Прохождение здесь доказывает, что правка выше не ослабила предикат до резолва.
+func TestGitAncestry_ACommitOutsideTheHeadIsStillAForeignLine(t *testing.T) {
 	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
 
-	require.Equal(t, ancestryYes, gitAncestry(t, r.dir, r.root, "HEAD")(r.aside),
-		"по рабочей вершине коммит, в неё влитый, обязан быть предком — "+
-			"иначе пара выше ничего не различает")
+	require.Equal(t, ancestryNo, gitAncestry(t, r.dir, r.root, "main")(r.stray),
+		"коммит вне истории и ствола, и головы признан предком — предикат "+
+			"«резолвится» подменил предикат «входит в историю»")
+}
+
+// TestDatingGate_HeadCarriedRevisionIsCreditedForeignAndUndatedStayFindings —
+// СКВОЗНАЯ проба: от синтетического репозитория до текста находки гейта. Три
+// документа, три положения: ревизия из истории головы — засчитана; ревизия вне
+// её — ЧУЖАЯ ЛИНИЯ; форма без хеша — САМОССЫЛКА.
+func TestDatingGate_HeadCarriedRevisionIsCreditedForeignAndUndatedStayFindings(t *testing.T) {
+	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
+	ancestry := gitAncestry(t, r.dir, r.root, "main")
+	declare := func(hash string) string {
+		return "**Замер на ревизии `" + hash + "`** (единица счёта — вызовы): таких мест **2**.\n"
+	}
+
+	lane, laneCensus := auditMeasurementDating(
+		map[string]string{"acceptance/epic.md": declare(r.aside[:12])}, map[string]string{}, ancestry)
+	require.Empty(t, lane, "приёмка, датированная коммитом из истории головы, дала находку")
+	require.Equal(t, 1, laneCensus.dated)
+
+	stray, strayCensus := auditMeasurementDating(
+		map[string]string{"acceptance/epic.md": declare(r.stray[:12])}, map[string]string{}, ancestry)
+	require.Len(t, stray, 1, "ревизия вне истории головы оставила гейт зелёным")
+	require.Contains(t, stray[0], "ЧУЖАЯ ЛИНИЯ")
+	require.Equal(t, 1, strayCensus.foreign)
+
+	undated, undatedCensus := auditMeasurementDating(
+		map[string]string{"acceptance/epic.md": synthUndated}, map[string]string{}, ancestry)
+	require.Len(t, undated, 1, "замер без хеша оставил гейт зелёным")
+	require.Contains(t, undated[0], "САМОССЫЛКА")
+	require.Equal(t, 1, undatedCensus.undated)
 }
 
 // buildSynthRepoWithLaneMergedIntoHead — дерево, повторяющее наш порядок работ:
-// ствол `main` стоит на месте, полоса влита в рабочую вершину.
+// ствол `main` стоит на месте, полоса влита в отправляемую голову (`aside`), и
+// рядом лежит коммит, который не влит никуда (`stray`).
 func buildSynthRepoWithLaneMergedIntoHead(t *testing.T, dir string) synthRepo {
 	t.Helper()
 	r := buildSynthRepo(t, dir)
@@ -626,17 +743,27 @@ func buildSynthRepoWithLaneMergedIntoHead(t *testing.T, dir string) synthRepo {
 	env := append(gitenv.Env(),
 		"GIT_AUTHOR_NAME=probe", "GIT_AUTHOR_EMAIL=probe@invalid",
 		"GIT_COMMITTER_NAME=probe", "GIT_COMMITTER_EMAIL=probe@invalid")
-	git := func(args ...string) {
+	git := func(args ...string) string {
 		t.Helper()
 		c := gitenv.Command(dir, args...)
 		c.Env = env
-		if out, err := c.CombinedOutput(); err != nil {
+		out, err := c.CombinedOutput()
+		if err != nil {
 			t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: git %v: %v\n%s", args, err, out)
 		}
+		return strings.TrimSpace(string(out))
 	}
-	// Рабочая вершина отвязывается от ствола и вбирает полосу: `main` остаётся
-	// там, где был, ровно как ствол остаётся до схлопывания.
+	// Коммит, не влитый никуда: ответвлён от ствола и в голову не попадает.
+	git("checkout", "--quiet", "-b", "stray", "main")
+	if err := os.WriteFile(filepath.Join(dir, "c.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+	git("add", "c.txt")
+	git("commit", "--quiet", "-m", "c.txt:x")
+	r.stray = git("rev-parse", "HEAD")
+	// Отправляемая голова отвязывается от ствола и вбирает полосу: `main`
+	// остаётся там, где был, ровно как ствол остаётся до вливания ветки эпика.
 	git("checkout", "--quiet", "--detach", "main")
-	git("merge", "--quiet", "--no-ff", "-m", "слияние полосы в рабочую вершину", r.aside)
+	git("merge", "--quiet", "--no-ff", "-m", "слияние полосы в отправляемую голову", r.aside)
 	return r
 }

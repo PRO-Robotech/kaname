@@ -62,6 +62,7 @@ func ownLaneFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffi
 		INSERT INTO accounts (id, name, owner_user_id, labels)
 		VALUES ($1, $2, $3, '{}'::jsonb)`, accountID, "own-acc-"+suffix, userID)
 	require.NoError(t, err, "seed own-lane account")
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return email, userID
 }

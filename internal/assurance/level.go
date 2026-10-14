@@ -261,6 +261,28 @@ func levelOf(table []row, presentations []Presentation) (Level, bool) {
 // Пустой перечень означает «ни одного»: так у провязанного только второго
 // фактора — без первого сессии не бывает.
 func PresentableLevels(wired []Method) Levels {
+	return levelsOver(wired, bestPresentation)
+}
+
+// GuaranteedLevels — уровни, которые названные способы дают ПРИ ЛЮБОМ исходе
+// своих флагов: ключ — в худшем (без проверки пользователя, допускающий
+// резервное копирование). Это то же правило над теми же сочетаниями, что у
+// PresentableLevels, и отличается оно ровно одним — исходом флагов ключа.
+//
+// Читатель — ось «заведено» единственного писателя обнуления счёта по адресу
+// (`humansession/completed_login.go`): вопрос там «до какого уровня обязан
+// дойти вход, чтобы считаться завершённым», и ответ на него не вправе зависеть
+// от того, какие флаги сообщит ключ в будущем утверждении. Лучший исход дал бы
+// «3» у каждого заведённого ключа — и вход ключом без проверки пользователя
+// («2») перестал бы обнулять счёт (против Ф13 Р9); худший даёт «2» — уровень,
+// который ключ производит всегда (строка «утверждение ключа доступа (любое)»).
+func GuaranteedLevels(enrolled []Method) Levels {
+	return levelsOver(enrolled, worstPresentation)
+}
+
+// levelsOver — уровни правила по всем непустым сочетаниям названных способов,
+// каждый способ — предъявлением, которое назначает present.
+func levelsOver(wired []Method, present func(Method) Presentation) Levels {
 	var known []Method
 	for _, m := range Methods() {
 		for _, w := range wired {
@@ -277,7 +299,7 @@ func PresentableLevels(wired []Method) Levels {
 			if mask&(1<<i) == 0 {
 				continue
 			}
-			ps = append(ps, bestPresentation(m))
+			ps = append(ps, present(m))
 		}
 		if l, ok := LevelOf(ps); ok {
 			seen[l] = true
@@ -296,6 +318,15 @@ func PresentableLevels(wired []Method) Levels {
 func bestPresentation(m Method) Presentation {
 	if m == MethodWebAuthn {
 		return KeyAssertion(true, false)
+	}
+	return Presentation{method: m}
+}
+
+// worstPresentation — предъявление способа в худшем исходе его флагов: ключ
+// без проверки пользователя, допускающий резервное копирование.
+func worstPresentation(m Method) Presentation {
+	if m == MethodWebAuthn {
+		return KeyAssertion(false, true)
 	}
 	return Presentation{method: m}
 }

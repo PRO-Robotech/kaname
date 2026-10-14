@@ -253,6 +253,11 @@ const markEmailVerifiedSQL = `
 		       RETURNING 1)
 		SELECT EXISTS (SELECT 1 FROM person), EXISTS (SELECT 1 FROM marked)`
 
+// emailVerifiedAtSQL — отметка подтверждения адреса строки человека: одно
+// чтение у порта `loginmethod.Store` (пулом) и у транзакции исхода
+// завершения восстановления (соединением транзакции, kaname#458).
+const emailVerifiedAtSQL = `SELECT email_verified_at FROM users WHERE id = $1`
+
 // MarkEmailVerified записывает момент подтверждения ТОЛЬКО на подтверждённое
 // значение: сверка адреса и запись отметки — один оператор, поэтому смена
 // адреса, зафиксированная раньше, делает запись пустой, а зафиксированная позже
@@ -289,7 +294,7 @@ func (r *LoginMethodRepo) EmailVerification(ctx context.Context, userID domain.U
 		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
 	var at *time.Time
-	err := r.pool.QueryRow(ctx, `SELECT email_verified_at FROM users WHERE id = $1`, string(userID)).Scan(&at)
+	err := r.pool.QueryRow(ctx, emailVerifiedAtSQL, string(userID)).Scan(&at)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", userID)
 	}
@@ -300,6 +305,11 @@ func (r *LoginMethodRepo) EmailVerification(ctx context.Context, userID domain.U
 		return time.Time{}, false, nil
 	}
 	return *at, true, nil
+}
+
+// AccessKeyEnrolled — порт `loginmethod.Store` (ось «заведено», ключ доступа).
+func (r *LoginMethodRepo) AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error) {
+	return accessKeyEnrolled(ctx, r.pool, userID)
 }
 
 // replaceLoginVerifierTx — ЗАМЕЩЕНИЕ материала одним оператором (ID-PW-1
@@ -322,6 +332,76 @@ func replaceLoginVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod
 		return false, mapErr(err, "LoginMethod.Replace", loginMethodHint(m.UserID, m.Kind))
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// putLoginVerifierTx — «заменить материал либо завести строку» ОДНИМ оператором
+// (Ф5 Р5 ветвь «строки нет», Ф5-34, `kacho#2698`; Р9 п. 4, `kaname#608`):
+// завершение восстановления кладёт новый пароль личности, у которой строки
+// пароля может не быть. Строка есть — материал замещается, как у
+// `replaceLoginVerifierTx`; строки нет — заводится. Проверки перед вставкой
+// нет: «не больше одной строки вида» держит ключ (user_id, kind), а
+// конкурирующие предъявления одного кода разводит оператор применения кода
+// раньше этого оператора (Ф5-34 (г)). created=true — строка заведена этим
+// оператором.
+//
+// Вид — только пароль: второй фактор заводится своими операторами ниже.
+func putLoginVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	if m.Kind != domain.LoginMethodPassword || m.State != domain.LoginMethodStateActive {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method: only an active password row is put by recovery")
+	}
+	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier, state)
+	      VALUES ($1, $2, $3, $4)
+	      ON CONFLICT (user_id, kind) DO UPDATE SET verifier = EXCLUDED.verifier
+	      RETURNING (xmax = 0)`
+	var created bool
+	if err := tx.QueryRow(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal(), string(m.State)).Scan(&created); err != nil {
+		return false, mapErr(err, "LoginMethod.Put", loginMethodHint(m.UserID, m.Kind))
+	}
+	return created, nil
+}
+
+// recoveryTargetSQL — человек по адресу ВМЕСТЕ с подтверждённостью адреса и
+// наличием строки пароля: одно чтение на обеих полосах запроса восстановления
+// (Ф5 Р2, Р7, Р9 п. 2). Порядок тот же, что у чтения человека по адресу.
+// Материал не читается: подзапрос спрашивает только существование строки.
+const recoveryTargetSQL = `
+	SELECT ` + userCols + `, (email_verified_at IS NOT NULL) AS verified,
+	       EXISTS (SELECT 1 FROM ` + loginMethodsTable + ` m
+	                WHERE m.user_id = users.id AND m.kind = 'password') AS has_password
+	  FROM users
+	 WHERE lower(email) = lower($1)
+	 ORDER BY created_at ASC, id ASC
+	 LIMIT 1`
+
+// recoveryTargetRow — исполнитель чтения цели (пул). Живёт в этом файле, потому
+// что запрос называет таблицу секрета; наружу уходят личность и два признака.
+func recoveryTargetRow(ctx context.Context, q loginMethodQuerier, email domain.Email) (domain.User, bool, bool, error) {
+	var (
+		u                     domain.User
+		verified, hasPassword bool
+	)
+	if err := scanUserInto(q.QueryRow(ctx, recoveryTargetSQL, string(email)), &u, &verified, &hasPassword); err != nil {
+		return domain.User{}, false, false, err
+	}
+	return u, verified, hasPassword, nil
+}
+
+// EnrollLoginMethod — заведение строки способа входа в транзакции писателя
+// сессии (приёмка A7 Р3, Р4; kaname#213): ЕДИНСТВЕННЫЙ оператор вставки
+// (`insertLoginMethod`), нарушение ключа «человек, вид» — enrolled=false.
+// Метод писателя сессии объявлен ЗДЕСЬ: право назвать таблицу секрета дано
+// этому файлу.
+func (w *humanSessionWriter) EnrollLoginMethod(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	if _, err := insertLoginMethod(ctx, w.tx, m); err != nil {
+		if stderrors.Is(err, iamerr.ErrAlreadyExists) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // --- второй фактор (Ф12, kacho#1281): операторы над таблицей секрета ---
@@ -461,6 +541,23 @@ func removeSecondFactorTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) 
 		return false, mapErr(err, "LoginMethod.RemoveSecondFactor", loginMethodHint(userID, domain.LoginMethodTOTP))
 	}
 	return removed == 1, nil
+}
+
+// retireStartedEnrolmentTx — начатое и не завершённое заведение генератора
+// человека (строка `totp` в состоянии `pending`) одним оператором (kaname#458,
+// Р3 п. 2, ветвь перехода записи без удостоверений). Заведённую строку и набор
+// `lookup_secret` оператор не касается по построению: условие на состоянии —
+// часть оператора, а не чтение перед ним. Отвечает числом снятых строк.
+func retireStartedEnrolmentTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method.user_id: required")
+	}
+	q := `DELETE FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2 AND state = $3`
+	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodTOTP), string(domain.LoginMethodStatePending))
+	if err != nil {
+		return 0, mapErr(err, "LoginMethod.RetireStartedEnrolment", loginMethodHint(userID, domain.LoginMethodTOTP))
+	}
+	return tag.RowsAffected(), nil
 }
 
 // SweepExpiredEnrollments — уборка неподтверждённых заведений (Ф12-44, порт

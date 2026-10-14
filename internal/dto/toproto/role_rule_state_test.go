@@ -26,7 +26,7 @@ func roleWithStates(states []domain.RuleState) domain.Role {
 		Name:  "проба",
 		Rules: domain.Rules{{Module: "vpc", Resources: []string{"gateway"}, Verbs: []string{"delete"}}},
 		// Набор глаголов типа провязан — иначе проекция ОТКАЗЫВАЕТ, и отказ съел бы
-		// предмет этих проб (#1994). Дублёр отвечает ровно тем, что объявляет живая
+		// предмет этих проб (kacho#1994). Дублёр отвечает ровно тем, что объявляет живая
 		// строка каталога, и ничем сверх.
 		TypeVerbs: func(module, resource string) ([]string, bool) {
 			if module == "vpc" && resource == "gateway" {

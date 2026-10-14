@@ -132,6 +132,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 		_, err = w.UsersW().ActivateInvite(ctx, pendingID,
 			domain.ExternalSubject("ext-mir1-activated"), domain.DisplayName("Pending"))
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 	act := membershipsOf(t, ctx, pool, pendingID)
@@ -248,6 +249,11 @@ func TestIntegration_MembershipMirrorUnderConcurrentWriters(t *testing.T) {
 				errs[i] = ierr
 				return
 			}
+			if _, xerr := kanamepg.WriterTx(w).Exec(ctx, wayInFixtureSQL); xerr != nil {
+				_ = w.Rollback(ctx)
+				errs[i] = xerr
+				return
+			}
 			errs[i] = w.Commit(ctx)
 		}()
 	}
@@ -302,6 +308,7 @@ func TestIntegration_PersonalAccountGateCountsOwnershipNotMembership(t *testing.
 			InviteStatus: domain.InviteStatusActive,
 		})
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

@@ -55,7 +55,7 @@ func (a *LocalMintAdapter) MintToken(ctx context.Context, in registrytokenuc.Min
 		TTL:       a.ttl,
 		Claims:    claims,
 	}
-	// Привязка токена к ключу владельца (Ф1б, задача #926).
+	// Привязка токена к ключу владельца (Ф1б, задача kacho#926).
 	//
 	// Материал берётся ИЗ ПРЕДЪЯВЛЕННОГО при выдаче и никогда не выдумывается:
 	// переходник его только переносит. Не предъявлен ⇒ указатель остаётся nil, и
@@ -78,6 +78,9 @@ func (a *LocalMintAdapter) MintToken(ctx context.Context, in registrytokenuc.Min
 	}
 	return registrytokenuc.MintOutput{
 		AccessToken: tok.Token,
-		ExpiresIn:   int(time.Until(tok.ExpiresAt).Seconds()),
+		// Срок — от отметки выпуска, а не от часов этой реплики: отметку
+		// ставит общий источник (kaname#589), и разница с часами процесса
+		// легла бы в ответ.
+		ExpiresIn: int(tok.ExpiresAt.Sub(tok.IssuedAt).Seconds()),
 	}, nil
 }

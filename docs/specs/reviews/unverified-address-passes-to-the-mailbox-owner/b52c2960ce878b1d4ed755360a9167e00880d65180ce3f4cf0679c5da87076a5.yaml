@@ -1,0 +1,175 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md
+  sha256: b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: d33a3b866abc
+  content_commit: dece897acda86fdd75e770e8aee0f1e50e2913dc
+  branch: '458'
+  task: PRO-Robotech/kaname#458
+  related_tasks: [PRO-Robotech/kaname#456]
+  lines: 705
+  round: 3
+  round_scope: >-
+    Круг по дельте, решение диспетчера: судится только снятие блокирующего B5 круга 2 и то,
+    что ничего другого не изменилось. Принятое кругами 1–2 не переоткрывается.
+  predecessor_record: docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/7b48ab28d072f12ffaf519e02fbb6b15da64e4850ae8960707550b23a75d9d0c.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md
+    в копии kacho-workspace/tmp/kaname-458-acc @ dece897ac → b52c2960…87076a5;
+    `git show HEAD:<путь> | sha256sum` — то же; origin/458 = dece897ac;
+    `git show HEAD~1:<путь> | sha256sum` → 7b48ab28…a75d9d0c (редакция 2)
+  measurement_revisions: >-
+    Код — `git show d33a3b866abc:<путь>` / `git grep <образец> d33a3b866abc` в той же копии.
+    c9a8d45b3..dece897ac меняет только документ приёмки (1 файл, +27 −8, git diff --numstat).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-11T15:30:00Z'
+
+previous_blocking_disposition:
+  - id: B5
+    kind: CONSTRUCTIBILITY
+    scenarios: [A458-09, DoD п. 2 (г), DoD п. 3]
+    outcome: closed
+    note: >-
+      «Дано» A458-09: переход фиксирует отсечку своим моментом T, затем источник моментов выдачи
+      сдвигается строго позже (управляемые часы, ≥ 1 мкс), затем снимается барьер; дописано
+      предложение о стоящих часах. DoD п. 2 (г) и п. 3 — та же постановка; п. 2 (г) прямо
+      говорит, что без сдвига инъекция доказательством не считается. Конструируемость
+      показана названной фикстурой: avClock харнесса полосы формы имеет Advance
+      (address_verification_harness_integration_test.go:87–101, :179 старт в разрешении 1 мкс),
+      источник отсечки — momentclock.Func(clock.Now) (:225, :233, :274). Момент выдачи и
+      отсечка оба идут через sharedMoment с Truncate(time.Microsecond) (shared_moment.go:30–38;
+      recovery_complete.go:219, :324 RevokeBefore: at), поэтому сдвиг ≥ 1 мкс переживает
+      усечение: m = T + 1 мкс, проверка `hasCutoff && !m.After(cutoff)` (login.go:556) вход не
+      накрывает, отказ может дать только Р5 — постановка способна покраснеть под инъекцией (г).
+      Положительный контроль (барьер после чтения момента) читает момент до сдвига, m ≤ T,
+      отвергается отсечкой при любых часах — различение Р5 и отсечки держится.
+
+delta_check:
+  outcome: only_named_item_changed
+  hunks: 4
+  touched:
+    - шапка, история ревью — дописаны две строки (круг 2 на 7b48ab28; редакция 3); прежние строки не изменены
+    - A458-09 «When» и абзац о стоящих часах; положительный контроль — «часы сдвинуты так же»
+    - DoD п. 2 (г)
+    - DoD п. 3
+  untouched: прочие сценарии, производители §6, решения Р1–Р*, «Вне объёма», DoD пп. 1, 4–10
+  disclosure: >-
+    Неблокирующее круга 2 о раскрытии соблюдено: текста о сегодняшнем исходе других путей смены
+    материала правка не добавила.
+
+new_contradictions: none
+
+blocking: []
+
+minor:
+  - kind: FORMAT
+    note: >-
+      Положительный контроль: «прочитанный момент предшествует отсечке при любых часах» — на
+      стоящих часах он ей РАВЕН (m = T), а не предшествует; исход тот же (граница включающая,
+      `!m.After(cutoff)`), поэтому не блокирует. Точнее — «не превосходит отсечку».
+  - kind: FORMAT
+    note: >-
+      Неблокирующие круга 2 (форма сравнения клеток DoD п. 10; consent_grants в Р3; харнессы
+      A458-03/-04; «кто я» A458-02) правкой не тронуты — остаются к учёту в работе.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5
+    - git show HEAD~1:<док> | sha256sum → 7b48ab28d072f12ffaf519e02fbb6b15da64e4850ae8960707550b23a75d9d0c
+    - git diff --numstat HEAD~1 HEAD → 27 8 <док> (единственный файл)
+    - git log --oneline -1 origin/458 → dece897ac
+    - git show d33a3b866abc:internal/apps/kaname/api/humansession/shared_moment.go → Truncate(time.Microsecond)
+    - git grep -n 'hasCutoff' d33a3b866abc → login.go:556 `case hasCutoff && !m.After(cutoff)`
+    - grep -n 'avClock\|Advance' address_verification_harness_integration_test.go @d33a3b866abc → :87, :98 Advance, :179, :225, :233, :274
+
+constructibility:
+  method: >-
+    Круг дельты: новое предусловие одно — сдвиг управляемых часов между фиксацией перехода и
+    снятием барьера; показано названной фикстурой (avClock.Advance, харнесс полосы формы) и
+    разрешением моментов (Truncate 1 мкс). Прочие Given не менялись; их статус — запись круга 2.
+  seeded: 0
+  of: 0
+  named_fixture: 1
+  not_executed: 0
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Действующее одобрение возникает после публикации внешнего события в subject.task этой
+    учёткой; до него запись — объявление вердикта рецензента.
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_on: publication of event_body to PRO-Robotech/kaname#458 by pointpu
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+
+event_body: "acceptance-reviewer · APPROVED · sha256 b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#458
+  status: performed
+  published: true
+  database_id: 6110377442
+  node_id: IC_kwDOUO26pM8AAAABbDT14g
+  url: https://github.com/PRO-Robotech/kaname/issues/458#issuecomment-6110377442
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6110377442
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/458
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-11T15:04:26Z'
+  body_sha256: d1a5c0210d07aeb162b9d2851e0ed1f652123a14f549fbb44e632bb07590b9c1
+  subject_sha256: b52c2960ce878b1d4ed755360a9167e00880d65180ce3f4cf0679c5da87076a5
+  subject_revision: 3c97eb99d8044515db709e04c4180a408a334240
+  verdict: APPROVED
+  publication_note: >-
+    Блок дописан отдельным коммитом поверх записи рецензента; вердикт, разбор и находки задним
+    числом не правлены. Тело события — дословно event_body. Отпечаток предмета перемерен перед
+    публикацией (`sha256sum` файла и `git show HEAD:<док> | sha256sum` на 3c97eb99d) и совпал
+    с именем записи; содержимое документа на 3c97eb99d совпадает с content_commit dece897ac.
+    Поля события — `gh api repos/PRO-Robotech/kaname/issues/comments/6110377442`
+    (created_at == updated_at); отпечаток тела — `gh api … | jq -j .body | sha256sum`.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/26a03b0efadcf99601b819ff0d5d1ec180db04fa77bcc7349ff57f4e680a8d96.yaml
+    - docs/specs/reviews/unverified-address-passes-to-the-mailbox-owner/7b48ab28d072f12ffaf519e02fbb6b15da64e4850ae8960707550b23a75d9d0c.yaml

@@ -1,0 +1,94 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/registration-and-its-three-consequences.md
+  sha256: d7d4a2fdc6e927ba72adad4701848bb5e2ed7891ac43447c4dab2bb74da48950
+  revision: 6
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  content_commit: 2c0dcc0ca
+  branch: '456'
+  worktree: tmp/a-f4-27-kaname
+  measured_at: PRO-Robotech/kaname@36fce61d8280 (голова ветки волны 538); ветка 608 @3aac88fddc0c
+  task: PRO-Robotech/kaname#256
+  wave: PRO-Robotech/kaname#538
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md
+  fingerprint_reproduced: true
+  lines: 2142
+  round: 1
+  round_note: первый круг на редакции 6; прошлых кругов этого захода нет
+  predecessor_record: docs/specs/reviews/registration-and-its-three-consequences/5f269280c866a7868b67b58727f498dc107682cc985c6eb8959d7a036f5e53d8.yaml (APPROVED, редакция 5 с правкой датировки)
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+publication_mode: courier_of_agent_verdict
+blocking_count: 1
+blocking_kinds_distinct: [PRODUCER]
+
+premise_check:
+  premise: Ф4-23, Ф4-26, Ф4-27 противоречат одобренной kaname#456 Р11 п. 1–2 и Р4б
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git show 36fce61d8:internal/apps/kaname/api/user/mirror_tx.go — RegisterMirrorTx (413) в ветви
+    строки приглашения (418-433) возвращает строку без BootstrapPersonalResourcesTx;
+    ActivateInviteOnVerificationTx (455) зовёт его с NewIdentity=false (460-461); держатель
+    TestRegisterIntegration_F4_23_InvitedPersonRegistersByTheSameLane (register_integration_test.go:372)
+    утверждает accounts: 0 и PENDING.
+
+delta_judged: git diff 36fce61d8..2c0dcc0ca -- <путь> (§0.8, §5.6, Р6, Р8, Ф4-23/26/27, §7, §8 инв. 12, §9, §10а п. 1в и 2, §12 п. 10)
+
+producers_verified:
+  - mirror_tx.go:413, :418-433, :435, :455, :461 — совпали на 36fce61d8
+  - humansession/verification.go:496-497 → cmd/kaname/loginlane.go:690-691 — совпали
+  - authzguard/address_gate_integration_test.go:166 (TestEV60), :181 (WhoAmI в переписи) — совпали
+  - authorize/whoami.go:182, :249-255; pg/user_repo.go:322, :327 (m.state='ACTIVE' AND u.invite_status='ACTIVE') — совпали
+  - loginlanehttp/address_verification_invite_integration_test.go:147 (TestEV72) — совпал; числа личных аккаунтов не утверждает, как и сказано
+
+constructibility:
+  seeded: 0
+  named_fixtures: 3
+  not_performed: 0
+  detail: >-
+    Ф4-23/27 — InsertPending (посев в TestRegisterIntegration_F4_23…), подтверждение — стенд
+    TestEV72 (код из очереди писем); Ф4-26 — свежий адрес, посева нет. Собственного посева рецензент
+    не ставил: фикстуры названы координатами и существуют на 36fce61d8.
+
+blocking:
+  - id: B1-1
+    kind: PRODUCER
+    where: Ф4-27, третья строка «Тогда» (строка 1591)
+    text: >-
+      «в одной roles содержит owner — это личный аккаунт, заведённый этой регистрацией» осталась
+      из редакции 3. По самой редакции 6 (§0.8, §5.6, Р8 п. 1, инв. 12, Ф4-23 «аккаунтов ноль»)
+      личный аккаунт приглашённому заводит активация в исходе подтверждения, а не регистрация.
+      Сценарий называет производителем то, что по Ф4-23 ничего не производит; держатель, взявший
+      «Тогда» буквально (аккаунт существует с регистрации, как Ф4-26 «совпал с аккаунтом, которым
+      владел до подтверждения»), противоречит Ф4-23 и неисполним.
+    fix: >-
+      «— это личный аккаунт, заведённый активацией в исходе подтверждения (kaname#456 Р11 п. 2;
+      §5.6)»; заодно проверить, что инв. 12 §8 называет и это место.
+
+non_blocking: []
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: CHANGES_REQUESTED; запрет #1 для правок Ф4-23/26/27 редакции 6 не снят
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#256
+  status: not_performed
+  published: false
+  body: >-
+    acceptance-reviewer · CHANGES_REQUESTED · sha256
+    d7d4a2fdc6e927ba72adad4701848bb5e2ed7891ac43447c4dab2bb74da48950

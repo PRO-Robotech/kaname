@@ -45,30 +45,40 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
-	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/ids"
 
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// bootstrapNewIdentity drives the REAL UpsertFromIdentity use-case for a
-// genuinely-new identity (no PENDING, no ACTIVE) wired with the reconciler, then
-// returns the bootstrapped user-id + personal account-id.
-func bootstrapNewIdentity(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *kanamepg.Repository, ext, email string) (domain.UserID, domain.AccountID) {
+// bootstrapNewIdentity заводит НОВУЮ личность тем телом заведения личных
+// ресурсов, которое служит живым путём, — зеркалом регистрации
+// (`userapp.RegisterMirrorTx` → `BootstrapPersonalResourcesTx`), со строкой
+// пароля той же транзакцией и материализацией собственнической выдачи после
+// фиксации, как у глагола регистрации. Прежде помощник шёл через глагол
+// заведения личности по внешнему удостоверению; с инвариантом kaname#608 ветвь
+// новой личности того глагола отвергается базой (ACTIVE без способа входа), а
+// предмет этих проб — общее тело заведения — живёт на пути регистрации.
+func bootstrapNewIdentity(t *testing.T, ctx context.Context, pool *pgxpool.Pool, _ *kanamepg.Repository, ext, email string) (domain.UserID, domain.AccountID) {
 	t.Helper()
-	opsRepo := operations.NewRepo(pool, "kaname")
 	rec, _ := newReconciler(pool)
-	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo).
-		WithReconciler(rec)
-	op, err := uc.Execute(ctx, userapp.UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject(ext),
-		Email:       domain.Email(email),
-		DisplayName: domain.DisplayName("Bootstrap User"),
-	})
+	w, err := kanamepg.NewRegistrationStore(pool).Writer(ctx)
 	require.NoError(t, err)
-	done := awaitOp(t, ctx, opsRepo, op.ID)
-	require.Nil(t, done.Error, "UpsertFromIdentity bootstrap must succeed: %v", done.Error)
+	defer func() { _ = w.Rollback(ctx) }()
+	res, err := userapp.RegisterMirrorTx(ctx, w.MirrorWriter(), userapp.MirrorInput{
+		Email:           domain.Email(email),
+		ExternalID:      domain.ExternalSubject(ext),
+		CandidateUserID: domain.UserID(ids.NewID(domain.PrefixUser)),
+		Actor:           "registration",
+	})
+	require.NoError(t, err, "заведение личных ресурсов зеркалом регистрации")
+	v, err := domain.NewLoginVerifier("fixture-password-row-without-a-known-password")
+	require.NoError(t, err)
+	require.NoError(t, w.InsertLoginMethod(ctx, domain.LoginMethod{UserID: res.User.ID, Kind: domain.LoginMethodPassword,
+		Verifier: v, State: domain.LoginMethodStateActive}))
+	require.NoError(t, w.Commit(ctx))
+	require.NoError(t, rec.ReconcileBinding(ctx, res.OwnerBindingID), "материализация собственнической выдачи после фиксации")
 
 	var uid, accID string
 	require.NoError(t, pool.QueryRow(ctx,

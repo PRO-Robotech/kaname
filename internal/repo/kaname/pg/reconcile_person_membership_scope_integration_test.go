@@ -12,7 +12,7 @@ package pg_test
 //
 // План чтения материализации (`iamDirectScanSpecs`) брал аккаунт личности из
 // колонки её строки. Колонка одна, а членств у человека может быть несколько
-// (#470/#471), поэтому она называет ОДИН аккаунт из многих — и отсюда два
+// (kacho#470/#471), поэтому она называет ОДИН аккаунт из многих — и отсюда два
 // наблюдаемых следствия у арендатора:
 //
 //	1. привязка с `matchLabels` на `iam.user`, выданная во ВТОРОМ аккаунте, не
@@ -23,7 +23,7 @@ package pg_test
 //	   привязка продолжает материализовать на нём глаголы.
 //
 // Цепь областей (`kaname.resource_scope_edge`) ту же связь берёт из
-// `kaname.memberships` с #944 — то есть об одном предмете было два места, и
+// `kaname.memberships` с kacho#944 — то есть об одном предмете было два места, и
 // они разошлись.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,9 +77,9 @@ func seedLabeledPerson(
 ) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, labels)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6::jsonb)`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6::jsonb)`),
 		string(uid), string(columnAccount),
 		fmt.Sprintf("ext-%s-%s", suffix, uid),
 		fmt.Sprintf("p-%s-%s@example.com", suffix, uid),
@@ -91,7 +91,7 @@ func seedLabeledPerson(
 }
 
 // dropMembership снимает членство — то же действие, которым исключает из
-// аккаунта распорядитель (#1127). Колонка строки при этом НЕ трогается: она
+// аккаунта распорядитель (kacho#1127). Колонка строки при этом НЕ трогается: она
 // легаси-поле перехода и снимается своим шагом.
 func dropMembership(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID domain.UserID, accountID domain.AccountID) {
 	t.Helper()

@@ -120,7 +120,7 @@ def assert_iam_operation_envelope():
 # роль» заводит членство И ЖИВУЮ ВЫДАЧУ на него, а членство, несущее живую
 # выдачу, НЕ СНИМАЕТСЯ: отложенный триггер `membership_carrying_rights_is_kept`
 # (миграция 472002) отвергает снятие НА КОММИТЕ, потому что порядок «сперва
-# права, потом участие» — конструкция базы, а не дисциплина вызывающего (#1127).
+# права, потом участие» — конструкция базы, а не дисциплина вызывающего (kacho#1127).
 #
 # Поэтому кейсу, чей предмет — само ИСКЛЮЧЕНИЕ, нужна жертва БЕЗ выдачи: иначе
 # он падает на страже, к его предмету отношения не имеющем, и называет виновником
@@ -1128,7 +1128,7 @@ CASES.append(Case(
 # PENDING user row and no AccessBinding. Run-unique email keeps it idempotent
 # across runs.
 #
-# ЗДЕСЬ УДАЛЯЛ РАСПОРЯДИТЕЛЬ АККАУНТА, И ТАКОЙ ПОЛОСЫ БОЛЬШЕ НЕТ (#1131). Абзац
+# ЗДЕСЬ УДАЛЯЛ РАСПОРЯДИТЕЛЬ АККАУНТА, И ТАКОЙ ПОЛОСЫ БОЛЬШЕ НЕТ (kacho#1131). Абзац
 # выше называл её «non-self branch of the Delete guard: owner of the target's
 # account» — на дереве этой ветви не осталось: строка `iam_user` ГЛОБАЛЬНА, одна
 # на все аккаунты человека, поэтому её снятие из аккаунта A стирает человека и в
@@ -1216,39 +1216,572 @@ CASES.append(Case(
 # exposed: a user holding active AccessBindings CANNOT be deleted. This is the
 # behaviour the old IAM-USR-DL-CRUD-OK was silently hitting; asserted here on
 # purpose, with the verbatim text so it cannot pass on an unrelated refusal.
+#
+# СУБЪЕКТ — СВОЙ, С ВЫДАЧЕЙ И БЕЗ АККАУНТА (kaname#664, KN664-31). Прежде кейс
+# снимал человека церемонии, а тот ВЛАДЕЕТ аккаунтом посева (`ceremonyAccountId`).
+# Гвард владения стоит теперь ПЕРВЫМ, и такому человеку приходит «owns accounts»
+# — это верный ответ, он утверждается близнецом IAM-USR-DL-NEG-OWNS-ACCOUNTS ниже.
+# Здесь же нужен человек, которого держит ИМЕННО выдача: кейс сеет его тем же
+# приглашением, что IAM-USR-DL-CRUD-OK (без роли — ни выдачи, ни своего
+# аккаунта), и выдаёт ему роль просмотра на аккаунте A. От положительного
+# близнеца CRUD-OK отличается ровно одним фактом — действующей выдачей.
+# Техники: таблица решений (владение × выдача), угадывание ошибок (подмена
+# отказа другим отказом того же кода).
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-DL-NEG-ACTIVE-BINDINGS",
-    title="Delete a user that holds active AccessBindings → Operation.error FAILED_PRECONDITION (9) "
-          "'has active access bindings and cannot be deleted'",
+    title="Delete a user that holds active AccessBindings and owns no account → Operation.error "
+          "FAILED_PRECONDITION (9) 'has active access bindings and cannot be deleted'",
     classes=["NEG"],
     priority="P1",
     steps=[
         Step(
+            name="seed-bound-user",
+            method="POST",
+            path="/iam/v1/users:invite",
+            # No roleId ⇒ no binding yet and no own account; the binding is granted below.
+            body={"accountId": "{{accountAId}}", "email": "dlbound-{{runId}}@kacho.local"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="capture-bound-user",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('seed invite succeeded (no op.error)', () => pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                "pm.test('seed invite returned a User', () => {",
+                "  pm.expect(j.response && j.response.id, JSON.stringify(j)).to.match(/^usr[a-z0-9]+$/);",
+                "});",
+                *save_from_response("j.response && j.response.id", "boundUserId"),
+            ],
+        ),
+        Step(
+            name="grant-bound-user",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body={"subjectType": "user", "subjectId": "{{boundUserId}}",
+                  "roleId": ROLE_VIEW, "scopeType": "iam.account", "scopeId": "{{accountAId}}",
+                  "target": {"allInScope": {}}},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", "boundUserBindingId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        retry_until_authorized(Step(
             name="delete-bound-user",
             method="DELETE",
-            # Self-delete: the ceremony human always holds bindings — the ceremony seed
-            # creates an account HE owns (`ceremonyAccountId`, stage 8б) before any
-            # collection runs — so the RESTRICT guard is reached rather than the authz
-            # gate. Deliberately not left to accumulate from other collections: that
-            # would make the precondition depend on collection order.
-            path="/iam/v1/users/{{ceremonyUserId}}",
-            auth="jwtHumanCeremony",
+            path="/iam/v1/users/{{boundUserId}}",
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "boundDelOpId"),
             ],
-        ),
-        # Polls as jwtHumanCeremony — inherited from the step that minted the operation.
+        )),
         # Текст владельца ЦЕЛИКОМ: «has active access bindings and cannot be deleted»
         # несут отказы User, Group и ServiceAccount, и утверждение об общей части не
-        # различало, ЧЕЙ отказ пришёл (#1748).
+        # различало, ЧЕЙ отказ пришёл (kacho#1748).
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_text="User {{ceremonyUserId}} has active access bindings "
+                        msg_text="User {{boundUserId}} has active access bindings "
                                  "and cannot be deleted",
                         op_var="boundDelOpId"),
+        # Уборка: отозванная выдача человека не держит (Р10), после неё снятие проходит.
+        Step(
+            name="cleanup-bound-binding",
+            method="DELETE",
+            path="/iam/v1/accessBindings/{{boundUserBindingId}}",
+            auth="jwtAccountAdminA",
+            test_script=[*save_from_response("j.id", "opId")],
+        ),
+        poll_operation_until_done(required=False),
+        Step(
+            name="cleanup-bound-user",
+            method="DELETE",
+            path="/iam/v1/users/{{boundUserId}}",
+            auth="jwtBootstrap",
+            test_script=[*save_from_response("j.id", "opId")],
+        ),
+        poll_operation_until_done(required=False),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-DL-NEG-LEVEL-1 — снятие личности сессией уровня «1» (Р12 приёмки
+# `own-account-and-identity-are-removed-in-order.md`, редакция 5).
+# Тот же человек церемонии и тот же вызов, что в IAM-USR-DL-NEG-OWNS-ACCOUNTS;
+# отличается ОДИН факт — уровень сессии («1» вместо «2»). Порог «2» у
+# `UserService.Delete` стоит раньше гварда владения, поэтому ответ — указание
+# повысить уровень (§4, «отказ по уровню»): `401`, код 16, текст Р11 дословно
+# (его производит публичный фронт службы, `internal/restfront/stepup.go`) и
+# вызов `WWW-Authenticate`, разобранный по параметрам; операция не заведена, и
+# человек на месте.
+# Это не KN664-44: у того «Дано» — аккаунт уже снят; здесь аккаунт есть, и кейс
+# держит именно порядок «порог раньше содержимого».
+# Техники: таблица решений (уровень × владение), угадывание ошибок (отказ по
+# уровню, подменённый отказом по содержимому, — текст утверждается целиком).
+# ---------------------------------------------------------------------------
+
+# Текст указания Р11 — дословно, как его объявляет служба
+# (`internal/errors/step_up.go`, `TextStepUpRequired`).
+_STEP_UP_TEXT = ("authentication level is insufficient: step up with a second factor, "
+                 "or present a credential of another kind")
+
+CASES.append(Case(
+    id="IAM-USR-DL-NEG-LEVEL-1",
+    title="Delete self at session level 1 → 401 / 16 step-up indication (acr_values=\"2\"), "
+          "no Operation, the user is still there (Р12: the level floor precedes ownership)",
+    classes=["AUTHZ", "NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="delete-self-level-1",
+            method="DELETE",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(401),
+                "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                "pm.test('Р12: grpc code 16 (UNAUTHENTICATED)', () =>",
+                "  pm.expect(j && j.code, pm.response.text()).to.eql(16));",
+                "pm.test('Р12: текст указания повысить уровень дословно', () =>",
+                f"  pm.expect(j && j.message, pm.response.text()).to.eql({_STEP_UP_TEXT!r}));",
+                "pm.test('Р12: операция не заведена', () =>",
+                "  pm.expect(j && j.id, pm.response.text()).to.not.exist);",
+                "pm.test('Р12: вызов Bearer называет шаг и уровни', () => {",
+                "  const h = pm.response.headers.get('WWW-Authenticate') || '';",
+                r"  pm.expect(h, 'WWW-Authenticate').to.match(/^Bearer\s/);",
+                "  const params = {};",
+                r"""  h.replace(/^Bearer\s+/, '').replace(/([a-z_]+)="([^"]*)"/g, (m, k, v) => { params[k] = v; return m; });""",
+                "  pm.expect(params.error, h).to.eql('insufficient_user_authentication');",
+                "  pm.expect(params.acr_values, h).to.eql('2');",
+                "  pm.expect(params.error_description, h).to.include('Required ACR 2');",
+                "  pm.expect(params.error_description, h).to.include('presented ACR 1');",
+                "});",
+            ],
+        ),
+        # Отказ ничего не снял: человек на месте.
+        Step(
+            name="self-still-present-after-level-refusal",
+            method="GET",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('user still present after the level refusal', () =>",
+                "  pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('ceremonyUserId')));",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-DL-NEG-OWNS-ACCOUNTS — близнец KN664-31: человек ещё владеет аккаунтом.
+# Человек церемонии владеет аккаунтом посева (`ceremonyAccountId`, этап 8б) и
+# держит на нём собственническую выдачу; гвард владения стоит ПЕРВЫМ, поэтому
+# отказ называет шаг — снять аккаунт, — а не выдачу. Самоснятие: authz-ворота
+# пропускают самого человека, и отказ приходит от гварда, а не от ворот.
+# Человек после отказа остаётся — кейс ничего не снимает и убирать нечего.
+# Вызов идёт сессией уровня «2» (`jwtHumanCeremonyStepUp` — тот же человек
+# `ceremonyUserId`, другой уровень входа): с редакции 4 приёмки снятие личности
+# стоит на пороге «2» (Р12), и общие предусловия §4 дают сценарию этот уровень.
+# Сессией уровня «1» вызов до гварда владения не доходит — это предмет
+# соседнего кейса IAM-USR-DL-NEG-LEVEL-1, у которого этот кейс — близнец.
+# Техники: таблица решений (владение × выдача), переход состояний (снятие
+# личности до снятия аккаунта).
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-DL-NEG-OWNS-ACCOUNTS",
+    title="Delete a user that still owns an account → Operation.error FAILED_PRECONDITION (9) "
+          "'owns accounts and cannot be deleted' (ownership is checked before bindings)",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="delete-owner-user",
+            method="DELETE",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremonyStepUp",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "ownerDelOpId"),
+            ],
+        ),
+        # Опрос идёт тем же предъявителем `jwtHumanCeremonyStepUp` — он наследуется
+        # от шага, заведшего операцию.
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="User {{ceremonyUserId}} owns accounts and cannot be deleted",
+                        op_var="ownerDelOpId"),
+        # KN664-31 «And»: отказ ничего не снял — токен человека по-прежнему принимается
+        # и строка на месте.
+        Step(
+            name="owner-still-present",
+            method="GET",
+            path="/iam/v1/users/{{ceremonyUserId}}",
+            auth="jwtHumanCeremony",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('owner user still present after refused delete', () =>",
+                "  pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('ceremonyUserId')));",
+            ],
+        ),
+    ],
+))
+
+
+# ===========================================================================
+# АРЕНДАТОР УХОДИТ ЦЕЛИКОМ (kaname#664, приёмка
+# `docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md`,
+# S4: KN664-50, KN664-51; близнецы KN664-11, KN664-36, KN664-46 на той же цепочке).
+#
+# ЛЮДИ — СЛОТЫ ВОЛНЫ ЦЕРЕМОНИИ `Kn664Leave` и `Kn664Cloud`
+# (`tests/authz-fixtures/seed_ceremony.py`, `LEAVE_SLOTS`): самостоятельно
+# зарегистрированный человек, подтверждённый адрес, предъявители уровней «1» и
+# «2». Сценарий РАСХОДУЮЩИЙ — снимает проект, аккаунт и самого человека, —
+# поэтому человек у каждого кейса свой, а не общий человек церемонии.
+#
+# АККАУНТ И ПРОЕКТ ПО УМОЛЧАНИЮ берутся у края, а не литералом
+# (`e2e-flow.md#catalog-values-from-edge`): личный аккаунт — единственная строка
+# `accounts[]` снимка «кто я» с ролью `owner`, проект — единственная строка
+# перечня проектов этого аккаунта.
+#
+# ОКНО ОТЗЫВА. Токен, которым шли три вызова, принят ДО снятия, и рубеж
+# предъявителя держит вердикт «не отозван» в кеше на объявленное окно
+# (`RevocationCacheTTL`, на стенде `stand-ceremony` — 30 с). Поэтому отказ
+# утверждается ожиданием УСЛОВИЯ (`e2e-flow.md#wait-condition-not-time`): шаг
+# повторяет предъявление с паузой 1 с, пока ответ 200, но не дольше 75 с
+# (два с половиной окна стенда), и только затем утверждает 401 / 16 / текст.
+# Ответ, не ставший отказом за этот срок, — красный.
+#
+# ЧЕГО КЕЙСЫ НЕ УТВЕРЖДАЮТ (и где держатель):
+#   · «браузерная сессия U → 401 authentication failed» — слушатель формы на
+#     стенде волны допускает только лист края, а прогон набора предъявляет лист
+#     службы; каскад сессий человека держит уровень I —
+#     `TestKN664_30_PersonRemovesSelfAfterTheAccount`
+#     (`internal/repo/kaname/pg/identity_removal_in_order_integration_test.go`);
+#   · «в очереди намерений после дренажа нет недоставленных строк» — очередь
+#     намерений краем не видна; её держит уровень I —
+#     `TestKN664_14_AccountRemovalRemovesEveryMembershipPointer`
+#     (`account_delete_cycle_integration_test.go`) и
+#     `TestKN664_37_PersonRemovalRemovesEveryMembershipPointer` (там же, где KN664-30).
+# Техники: переход состояний (аккаунт с проектом → без проекта → снят; человек с
+# выдачей → выдача отозвана → снят), таблица решений (вызывающий: сам ×
+# администратор облака), угадывание ошибок (отказ, подменённый отказом того же кода
+# — тексты утверждаются целиком).
+# ===========================================================================
+
+_KN664_WINDOW_MS = 75000
+
+
+def _kn664_find_tenant(tag: str, auth: str) -> list:
+    """Снимок «кто я» и перечень проектов: личный аккаунт и проект по умолчанию."""
+    return [
+        Step(
+            name=f"{tag}-whoami",
+            method="GET",
+            path="/iam/v1/me",
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "const own = (j.accounts || []).filter(a => (a.roles || []).includes('owner'));",
+                "pm.test('tenant owns exactly one account (the personal one of its registration)', () => "
+                "pm.expect(own.length, JSON.stringify(j)).to.eql(1));",
+                f"pm.environment.set({js_str(tag + 'AccId')}, own.length === 1 ? own[0].accountId : '');",
+                f"pm.test('personal account id has the account form', () => "
+                f"pm.expect(pm.environment.get({js_str(tag + 'AccId')})).to.match(/^acc[0-9a-z]{{17}}$/));",
+            ],
+        ),
+        Step(
+            name=f"{tag}-default-project",
+            method="GET",
+            path="/iam/v1/projects?accountId={{" + tag + "AccId}}",
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "const ps = j.projects || [];",
+                "pm.test('the personal account carries exactly one project — the default one', () => "
+                "pm.expect(ps.length, JSON.stringify(j)).to.eql(1));",
+                f"pm.test('the project belongs to the personal account', () => "
+                f"pm.expect(ps[0] && ps[0].accountId, JSON.stringify(j)).to.eql(pm.environment.get({js_str(tag + 'AccId')})));",
+                f"pm.environment.set({js_str(tag + 'PrjId')}, ps.length === 1 ? ps[0].id : '');",
+                f"pm.test('default project id has the project form', () => "
+                f"pm.expect(pm.environment.get({js_str(tag + 'PrjId')})).to.match(/^prj[0-9a-z]{{17}}$/));",
+            ],
+        ),
+    ]
+
+
+def _kn664_delete(name: str, path: str, auth: str, op_var: str) -> Step:
+    return Step(
+        name=name,
+        method="DELETE",
+        path=path,
+        auth=auth,
+        test_script=[
+            *assert_status(200),
+            *assert_iam_operation_envelope(),
+            *save_from_response("j.id", op_var),
+        ],
+    )
+
+
+def _kn664_account_refused_with_project(tag: str, auth: str) -> list:
+    """KN664-11: аккаунт с проектом не снимается, и ничего не снято."""
+    return [
+        _kn664_delete(f"{tag}-delete-account-with-project", "/iam/v1/accounts/{{" + tag + "AccId}}",
+                      auth, f"{tag}AccRefOpId"),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="Account {{" + tag + "AccId}} contains projects and cannot be deleted",
+                        op_var=f"{tag}AccRefOpId"),
+        Step(
+            name=f"{tag}-account-still-there",
+            method="GET",
+            path="/iam/v1/accounts/{{" + tag + "AccId}}",
+            auth=auth,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                f"pm.test('KN664-11: the refused account is still readable', () => "
+                f"pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get({js_str(tag + 'AccId')})));",
+            ],
+        ),
+    ]
+
+
+def _kn664_visible(tag: str, admin: str, user_var: str) -> list:
+    """Свидетель: до снятия администратор облака ВИДИТ P, A и U (200). Без него 404
+    после снятия неотличим от скрытия существования — текст у них один."""
+    out = []
+    for what, var in (("projects", tag + "PrjId"), ("accounts", tag + "AccId"),
+                      ("users", user_var)):
+        out.append(Step(
+            name=f"{tag}-{what}-visible-to-cloud-admin",
+            method="GET",
+            path=f"/iam/v1/{what}/{{{{{var}}}}}",
+            auth=admin,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                f"pm.test('the cloud admin reads the live object before removal', () => "
+                f"pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get({js_str(var)})));",
+            ],
+        ))
+    return out
+
+
+def _kn664_gone(tag: str, admin: str, user_var: str) -> list:
+    """P, A, U отвечают NOT_FOUND администратору облака — текстом владельца."""
+    out = []
+    for what, var, label in (("projects", tag + "PrjId", "Project"),
+                             ("accounts", tag + "AccId", "Account"),
+                             ("users", user_var, "User")):
+        out.append(Step(
+            name=f"{tag}-{what}-gone-for-cloud-admin",
+            method="GET",
+            path=f"/iam/v1/{what}/{{{{{var}}}}}",
+            auth=admin,
+            test_script=[
+                *assert_status(404),
+                *assert_grpc_code(5, "NOT_FOUND"),
+                *assert_refusal_message(label + " {{" + var + "}} not found"),
+            ],
+        ))
+    return out
+
+
+def _kn664_token_refused_after_window(tag: str, auth: str) -> Step:
+    """Предъявленный до снятия токен отвергается после окна отзыва (ожидание условия)."""
+    started = f"_{tag}WinStarted"
+    t0 = f"_{tag}WinT0"
+    return Step(
+        name=f"{tag}-token-refused-after-revocation-window",
+        method="GET",
+        path="/iam/v1/me",
+        auth=auth,
+        pre_script=[
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            f"  pm.environment.set({js_str(t0)}, String(Date.now()));",
+            "}",
+        ],
+        test_script=[
+            f"const _w0 = parseInt(pm.environment.get({js_str(t0)}) || '0', 10);",
+            f"if (pm.response.code === 200 && Date.now() - _w0 < {_KN664_WINDOW_MS}) {{",
+            "  // токен ещё в окне кеша вердикта «не отозван» — объявленное окно, ждём условия",
+            "  const _wd = Date.now(); while (Date.now() - _wd < 1000) { /* real inter-poll delay 1s */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(started)});",
+            f"pm.environment.unset({js_str(t0)});",
+            *assert_status(401),
+            *assert_grpc_code(16, "UNAUTHENTICATED"),
+            *assert_refusal_message("credential is not accepted"),
+        ],
+    )
+
+
+_kl1, _kl2, _klu = "jwtHumanKn664Leave", "jwtHumanKn664LeaveStepUp", "humanKn664LeaveUserId"
+
+CASES.append(Case(
+    id="IAM-USR-DL-FLOW-TENANT-LEAVES",
+    title="KN664-50 (с близнецами KN664-11, KN664-36, KN664-46): самостоятельно "
+          "зарегистрированный арендатор снимает проект по умолчанию, личный аккаунт и себя — "
+          "все три операции успешны, P/A/U → 404 администратору облака, токен трёх вызовов "
+          "после окна отзыва → 401 'credential is not accepted'",
+    classes=["STATE", "CRUD", "NEG"],
+    priority="P1",
+    steps=[
+        *_kn664_find_tenant("kn664L", _kl2),
+        # KN664-11 — близнец: проект не снят, аккаунт не снимается.
+        *_kn664_account_refused_with_project("kn664L", _kl2),
+        Step(
+            name="kn664L-membership-still-there",
+            method="GET",
+            path="/iam/v1/me",
+            auth=_kl2,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('KN664-11: the tenant is still a member (owner) of the refused account', () => "
+                "pm.expect((j.accounts || []).some(a => a.accountId === pm.environment.get('kn664LAccId') "
+                "&& (a.roles || []).includes('owner')), JSON.stringify(j)).to.eql(true));",
+            ],
+        ),
+        *_kn664_visible("kn664L", "jwtHumanAidAdmSharedStepUp", _klu),
+        # KN664-50 — первый глагол: проект.
+        _kn664_delete("kn664L-delete-project", "/iam/v1/projects/{{kn664LPrjId}}", _kl2, "kn664LPrjOpId"),
+        assert_op_success(op_var="kn664LPrjOpId"),
+        # Второй глагол: аккаунт.
+        _kn664_delete("kn664L-delete-account", "/iam/v1/accounts/{{kn664LAccId}}", _kl2, "kn664LAccOpId"),
+        assert_op_success(op_var="kn664LAccOpId"),
+        # KN664-36 — близнец третьего глагола: на человека выдал права чужой аккаунт.
+        Step(
+            name="kn664L-foreign-grant",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body={"subjectType": "user", "subjectId": "{{" + _klu + "}}",
+                  "roleId": ROLE_VIEW, "scopeType": "iam.account", "scopeId": "{{accountAId}}",
+                  "target": {"allInScope": {}}},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "kn664LGrantOpId"),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", "kn664LBindingId"),
+            ],
+        ),
+        assert_op_success(op_var="kn664LGrantOpId"),
+        _kn664_delete("kn664L-delete-self-with-foreign-grant", "/iam/v1/users/{{" + _klu + "}}",
+                      _kl2, "kn664LUsrRefOpId"),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="User {{" + _klu + "}} has active access bindings and cannot be deleted",
+                        op_var="kn664LUsrRefOpId"),
+        Step(
+            name="kn664L-self-still-there",
+            method="GET",
+            path="/iam/v1/users/{{" + _klu + "}}",
+            auth=_kl2,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('KN664-36: the refused person is still there', () => "
+                f"pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get({js_str(_klu)})));",
+            ],
+        ),
+        # KN664-46: выдача отозвана глаголом `:revoke` — строка REVOKED человека не держит.
+        Step(
+            name="kn664L-revoke-foreign-grant",
+            method="POST",
+            path="/iam/v1/accessBindings/{{kn664LBindingId}}:revoke",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "kn664LRevokeOpId"),
+            ],
+        ),
+        Step(
+            name="kn664L-revoke-committed-as-revoked",
+            method="GET",
+            path="/operations/{{kn664LRevokeOpId}}",
+            auth="jwtAccountAdminAStepUp",
+            op_var="kn664LRevokeOpId",
+            test_script=[
+                "const j = pm.response.json();",
+                "if (pm.environment.get('_kn664RvStarted') !== pm.info.requestName) { pm.environment.set('_kn664RvCount', '0'); pm.environment.set('_kn664RvStarted', pm.info.requestName); }",
+                "const rc = parseInt(pm.environment.get('_kn664RvCount') || '0', 10);",
+                f"if (!j.done && rc < {POLL_CAP}) {{",
+                "  pm.environment.set('_kn664RvCount', String(rc + 1));",
+                "  const _rv = Date.now(); while (Date.now() - _rv < 500) { /* real inter-poll delay */ }",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                "pm.environment.unset('_kn664RvCount'); pm.environment.unset('_kn664RvStarted');",
+                "pm.test('revoke operation succeeded', () => pm.expect(j.done === true && !j.error && Boolean(j.response), JSON.stringify(j)).to.eql(true));",
+                "pm.test('KN664-46: the binding row stays, in state REVOKED', () => "
+                "pm.expect(j.response && j.response.status, JSON.stringify(j)).to.eql('REVOKED'));",
+            ],
+        ),
+        # Третий глагол: человек снимает себя.
+        _kn664_delete("kn664L-delete-self", "/iam/v1/users/{{" + _klu + "}}", _kl2, "kn664LUsrOpId"),
+        assert_op_success(op_var="kn664LUsrOpId"),
+        *_kn664_gone("kn664L", "jwtHumanAidAdmSharedStepUp", _klu),
+        _kn664_token_refused_after_window("kn664L", _kl2),
+    ],
+))
+
+
+_kc1, _kc2, _kcu = "jwtHumanKn664Cloud", "jwtHumanKn664CloudStepUp", "humanKn664CloudUserId"
+_kn664_admin = "jwtHumanAidAdmSharedStepUp"
+
+CASES.append(Case(
+    id="IAM-USR-DL-FLOW-CLOUD-REMOVES-TENANT",
+    title="KN664-51 (с близнецом KN664-11 от облака): администратор облака снимает у "
+          "самостоятельно зарегистрированного арендатора проект, аккаунт и личность — все три "
+          "операции успешны, P/A/U → 404, токен арендатора после окна отзыва → 401",
+    classes=["STATE", "CRUD", "NEG", "AUTHZ"],
+    priority="P1",
+    steps=[
+        # Токен арендатора предъявлен здесь, ДО снятия, — после окна он утверждается отказом.
+        *_kn664_find_tenant("kn664C", _kc1),
+        *_kn664_visible("kn664C", _kn664_admin, _kcu),
+        # KN664-11 от облака: проект не снят — аккаунт не снимается и администратором.
+        *_kn664_account_refused_with_project("kn664C", _kn664_admin),
+        _kn664_delete("kn664C-delete-project", "/iam/v1/projects/{{kn664CPrjId}}", _kn664_admin,
+                      "kn664CPrjOpId"),
+        assert_op_success(op_var="kn664CPrjOpId"),
+        _kn664_delete("kn664C-delete-account", "/iam/v1/accounts/{{kn664CAccId}}", _kn664_admin,
+                      "kn664CAccOpId"),
+        assert_op_success(op_var="kn664CAccOpId"),
+        _kn664_delete("kn664C-delete-person", "/iam/v1/users/{{" + _kcu + "}}", _kn664_admin,
+                      "kn664CUsrOpId"),
+        assert_op_success(op_var="kn664CUsrOpId"),
+        *_kn664_gone("kn664C", _kn664_admin, _kcu),
+        _kn664_token_refused_after_window("kn664C", _kc1),
     ],
 ))
 
@@ -1334,7 +1867,7 @@ CASES.append(Case(
 # Operation done, Get confirms labels round-trip.
 # The public UpdateUser RPC: labels are the only mutable field.
 #
-# ДЕЙСТВУЮЩЕЕ ЛИЦО — АДМИНИСТРАТОР ОБЛАКА, и это изменение #1102, а не выбор
+# ДЕЙСТВУЮЩЕЕ ЛИЦО — АДМИНИСТРАТОР ОБЛАКА, и это изменение kacho#1102, а не выбор
 # удобной учётки. Строка `iam_user` — ГЛОБАЛЬНАЯ личность, одна на все аккаунты
 # человека, поэтому её метки решают состав селекторных выдач в КАЖДОМ его
 # аккаунте. Правка записи перестала быть правом уровня аккаунта: край гейтит её
@@ -1482,7 +2015,7 @@ CASES.append(Case(
             path="/iam/v1/users/{{blkPendingId}}:block",
             body={},
             # ЗДЕСЬ СТОЯЛ РАСПОРЯДИТЕЛЬ АККАУНТА, И ОН БОЛЬШЕ НЕ ДЕРЖИТ ЭТОГО
-            # ПРАВА (#1102). Запрет пишется в состояние ГЛОБАЛЬНОЙ строки и
+            # ПРАВА (kacho#1102). Запрет пишется в состояние ГЛОБАЛЬНОЙ строки и
             # останавливает выдачу удостоверений человеку ВЕЗДЕ, поэтому
             # `iam_user.identity_suspender` источников уровня аккаунта не имеет:
             # круг — надзор облака, и только он.
@@ -1570,7 +2103,7 @@ CASES.append(Case(
             path="/iam/v1/users/{{ubkPendingId}}:unblock",
             body={},
             # Надзор облака — по той же причине, что у парного кейса выше
-            # (`identity_suspender` без источников уровня аккаунта, #1102); здесь
+            # (`identity_suspender` без источников уровня аккаунта, kacho#1102); здесь
             # она не пересказывается, иначе заведутся два места об одном предмете.
             auth="jwtBootstrap",
             test_script=[
@@ -1724,7 +2257,7 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-GOV-NEG-ACCOUNT-ADMIN — пригласивший распоряжается ПРАВАМИ, но не
-# СТРОКОЙ ЛИЧНОСТИ (#1102, вторая половина директивы владельца 2026-08-23).
+# СТРОКОЙ ЛИЧНОСТИ (kacho#1102, вторая половина директивы владельца 2026-08-23).
 #
 # Директива дословно: «тот кто пригласил может только удалить/добавить права».
 #
@@ -1819,7 +2352,7 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-EXCL-CRUD-OK — распорядитель аккаунта ВЫВОДИТ человека из своего
-# аккаунта, и человек при этом остаётся человеком (#1127).
+# аккаунта, и человек при этом остаётся человеком (kacho#1127).
 #
 # ПРЕДМЕТ. Вторая строка таблицы областей директивы владельца (2026-08-23): кто
 # участвует в МОЁМ аккаунте — дело аккаунта. До этого изменения действия не было
@@ -1830,7 +2363,7 @@ CASES.append(Case(
 # (список аккаунта его не показывает) И человек по-прежнему существует как
 # личность (надзор облака читает его строку). Первое без второго зеленело бы и на
 # дереве, где исключение стирает личность целиком, — то есть на дефекте, который
-# #1131 закрывает соседним изменением.
+# kacho#1131 закрывает соседним изменением.
 #
 # СПИСОК — ИМЕННО ТОТ ПРЕДИКАТ, который менялся: `UserService.List` сужается
 # ЧЛЕНСТВАМИ, поэтому «его нет в списке аккаунта» есть наблюдаемое следствие
@@ -1952,7 +2485,7 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-EXCL-NEG-CROSS-ACCOUNT — исключать можно ИЗ СВОЕГО аккаунта, и область
-# решения не выходит за его границу (#1127).
+# решения не выходит за его границу (kacho#1127).
 #
 # Отрицание к кейсу выше и его необходимая половина: право, проверенное только
 # положительно, зеленеет и на отношении, разрешающем всё.
@@ -1984,7 +2517,7 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-EXCL-NEG-LIVE-GRANT — членство, несущее ЖИВУЮ ВЫДАЧУ, не снимается:
-# порядок «сперва права, потом участие» (#1127, миграция 472002).
+# порядок «сперва права, потом участие» (kacho#1127, миграция 472002).
 #
 # ПОЧЕМУ ЭТОТ КЕЙС ЗАВЕДЁН. До него это поведение через край не проверялось
 # НИЧЕМ. Оно закрыто пробой репозитория
@@ -2079,7 +2612,7 @@ CASES.append(Case(
         # потерянной подсказке.
         #
         # ХВОСТ ПЕРЕЧНЯ — ЧАСТЬ ОБЕЩАНИЯ, А НЕ УКРАШЕНИЕ. Контракт
-        # RemoveFromAccount обещает отказ «with the grants named»; до #1686 у
+        # RemoveFromAccount обещает отказ «with the grants named»; до kacho#1686 у
         # обещания не было исполнителя, и текст обрывался на аккаунте. Регексп
         # поэтому ТРЕБУЕТ хотя бы одного названного идентификатора выдачи:
         # снимут перечень — кейс покраснеет, и это ровно тот исход, ради
@@ -2205,19 +2738,19 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-USR-RMID-NEG-ACCOUNT-ADMIN — распорядитель аккаунта НЕ стирает строку
-# личности, а выводит человека из своего аккаунта (#1131).
+# личности, а выводит человека из своего аккаунта (kacho#1131).
 #
 # ПРЕДМЕТ. Строка `iam_user` — ГЛОБАЛЬНАЯ личность: одна на все аккаунты
 # человека. Удаление её из аккаунта A стирает человека и в аккаунте B — он теряет
 # личность целиком, а не участие в одном тенанте. Это строго тяжелее запрета,
-# который #1102 из рук аккаунта уже забрал: запрет обратим, удаление нет.
+# который kacho#1102 из рук аккаунта уже забрал: запрет обратим, удаление нет.
 #
 # ПОЛОЖИТЕЛЬНОЕ ИДЁТ ВТОРЫМ И ЗАМЫКАЕТ ПАРУ: тот же распорядитель тем же
 # предъявителем делает то, что директива ему ОСТАВЛЯЕТ, — исключает человека из
 # своего аккаунта. Без этой половины «отказано» было бы неотличимо от дерева, где
 # у распорядителя аккаунта отняли всё.
 #
-# ЗАГОЛОВОК НАЗЫВАЕТ ОБА ИСХОДА, И ЭТО НЕСУЩЕЕ, А НЕ СТИЛЬ (#1178). Гейт смешанного
+# ЗАГОЛОВОК НАЗЫВАЕТ ОБА ИСХОДА, И ЭТО НЕСУЩЕЕ, А НЕ СТИЛЬ (kacho#1178). Гейт смешанного
 # исхода (`tools/mixedoutcomeaudit/`) читает направление кейса ПО ЗАГОЛОВКУ, и кейс,
 # объявивший себя отрицательным токеном `-NEG-`, обязан читаться хоть одним словом
 # направления: пока не читается, пустая корзина REJECT означает «не умею прочитать»,
@@ -2296,7 +2829,7 @@ CASES.append(Case(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # IAM-ID-1-01 / -02 / -06 — один человек есть ОДНА строка, в скольких бы
-# аккаунтах он ни состоял (задачи kacho#470 / #981).
+# аккаунтах он ни состоял (задачи kacho#470 / kacho#981).
 #
 # ПОЧЕМУ ЭТОТ КЕЙС СУЩЕСТВУЕТ. До отрыва приглашение известной почты во второй
 # аккаунт заводило ВТОРУЮ строку: второй идентификатор, второй набор прав, и
@@ -2447,7 +2980,7 @@ CASES.append(Case(
             name="dual-cleanup",
             method="DELETE",
             path="/iam/v1/users/{{dualUserFromA}}",
-            # Снятие строки личности — не право аккаунта (#1131,
+            # Снятие строки личности — не право аккаунта (kacho#1131,
             # `iam_user.identity_remover`). Уборка за собой обязана идти тем, кто
             # это право держит, иначе она молча не убирает: отказ пришёл бы на
             # шаг, чей предмет — вовсе не модель прав.
@@ -2599,7 +3132,7 @@ CASES.append(Case(
 # распорядитель его аккаунта (задача kacho#1133).
 #
 # ПРЕДМЕТ. Третья сторона той же директивы владельца (2026-08-23), что закрыли
-# #1086 (выпуск и отзыв) и #1102 (правка строки личности): «тот кто пригласил
+# kacho#1086 (выпуск и отзыв) и kacho#1102 (правка строки личности): «тот кто пригласил
 # может только удалить/добавить права». Перечень персональных токенов — не право
 # на аккаунт, а СВЕДЕНИЯ О ЛИЧНОСТИ: сколько удостоверений живо, когда выпущены,
 # когда истекают, чем названы. Раскрытие сведений — тоже действие за человека.

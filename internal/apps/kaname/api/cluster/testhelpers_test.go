@@ -77,6 +77,7 @@ func mustSeedUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix 
 	)
 	require.NoError(t, err, "seed user account INSERT")
 
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit seed user TX")
 	return uid
 }

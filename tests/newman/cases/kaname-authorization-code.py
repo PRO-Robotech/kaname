@@ -59,8 +59,10 @@ Coverage (техники: классы эквивалентности · гра�
   IAM-AUTHCODE-BVA-STATE-AT-FLOOR           — 30: `state` ровно 22 знака → код (граница)
   IAM-AUTHCODE-NEG-STATE-BELOW-FLOOR        — 29: `state` нет либо 21 знак → только
                                               `error=invalid_request` (граница снизу)
-  IAM-AUTHCODE-NEG-NO-SESSION               — 03: сессии нет → 401 login_required;
-                                              близнец с сессией → код
+  IAM-AUTHCODE-NEG-NO-SESSION               — 03: сессии нет → 302 на адрес возврата
+                                              с error=login_required и state (Р11
+                                              ceremony-pace, kaname#525); близнец с
+                                              сессией → код
   IAM-AUTHCODE-NEG-REDIRECT-UNREGISTERED    — 04: чужой адрес возврата → 400 без
                                               перенаправления; та же страница, что у
                                               неизвестного клиента
@@ -355,6 +357,26 @@ def _redirected_refusal(tag, slot, err, label):
     ]
 
 
+def _challenge_redirect(tag, slot, err, label):
+    """03 (Р11 приёмки ceremony-pace-is-named-by-number, задача kaname#525):
+    сессии нет — отказ уходит ПРИЛОЖЕНИЮ. `302` на адрес возврата запроса, в
+    строке запроса сверх собственных параметров адреса — ровно `error` и
+    `state` дословно; ни кода, ни описания отказа, ни запрошенного уровня.
+    """
+    r, s = _v(tag, f"Redirect{slot}"), _v(tag, f"State{slot}")
+    return [
+        *assert_status(302),
+        *_parse_location(),
+        f"pm.test({js_str(label + ': перенаправление ведёт на адрес возврата запроса')}, () => "
+        f"pm.expect(_acGot.base, _acLoc).to.eql(_acParse({_env(r)}).base));",
+        f"pm.test({js_str(label + ': в перенаправлении ровно error=' + err + ' и state дословно')}, () => {{",
+        f"  const own = _acParse({_env(r)}).q; const got = Object.assign({{}}, _acGot.q);",
+        "  Object.keys(own).forEach((k) => { if (JSON.stringify(got[k]) === JSON.stringify(own[k])) { delete got[k]; } });",
+        f"  pm.expect({_env(s)}, 'state запроса не захвачен — сравнивать не с чем').to.be.a('string').and.not.empty;",
+        f"  pm.expect(got, _acLoc).to.eql({{error: [{js_str(err)}], state: [{_env(s)}]}}); }});",
+    ]
+
+
 def _basic(id_key, secret_expr):
     """Секрет клиента схемой Basic (RFC 6749 §2.3.1): обе половины кодируются."""
     return [
@@ -624,16 +646,16 @@ CASES.append(Case(
 _T = "Ns"
 CASES.append(Case(
     id="IAM-AUTHCODE-NEG-NO-SESSION",
-    title="03: запрос авторизации без сессии — 401 login_required; тот же запрос с сессией — код",
+    title=("03: запрос авторизации без сессии — 302 на адрес возврата с error=login_required и state; "
+           "тот же запрос с сессией — код"),
     classes=["NEG", "SEC"],
     priority="P0",
     steps=[
-        _authorize(_T, "1", "authorize-without-session", session=False, test_script=[
-            *assert_status(401),
-            "let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-            "pm.test('03: error — login_required', () => pm.expect(j.error, JSON.stringify(j)).to.eql('login_required'));",
-            *_no_location("03"),
-        ]),
+        # Р11 (kaname#525): ответ без перенаправления остался бы у браузера, и
+        # приложение его не получило бы. Шаг перенаправлению не следует —
+        # утверждается сам `302` и состав `Location`.
+        _authorize(_T, "1", "authorize-without-session", session=False,
+                   test_script=_challenge_redirect(_T, "1", "login_required", "03")),
         *_login(_T),
         _authorize(_T, "2", "same-request-with-session", reuse="1",
                    test_script=_code_issued(_T, "2", "03/близнец")),

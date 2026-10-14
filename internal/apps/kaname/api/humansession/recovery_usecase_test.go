@@ -82,12 +82,37 @@ func TestRecovery_F5_01_RequestForAVerifiedAddressMintsACodeAndQueuesTheLetter(t
 	require.Equal(t, 1, h.obs.recoveryRequest[humansession.RecoveryRequestQueued])
 }
 
+// TestRecovery_RequestTransactionHoldsThePersonBeforeItsCodes — транзакция
+// запроса кода держит строку личности с открытия, раньше снятия прежних кодов
+// и вставки нового (kaname#770): исход смены адреса и удаление личности берут
+// личность первой и коды после неё, и обратный порядок у запроса давал с ними
+// взаимную блокировку (`recovery_request_lock_order_integration_test.go`).
+func TestRecovery_RequestTransactionHoldsThePersonBeforeItsCodes(t *testing.T) {
+	h := newHarness(t, nil)
+	u := h.person(t, "usr-r00", "r00@example.invalid", "old-password-0", true)
+	opened := len(h.store.opened)
+
+	h.request(t, "r00@example.invalid")
+
+	require.Len(t, h.store.codesOf(u.ID), 1, "код выдан")
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	require.Len(t, h.store.opened, opened+1, "запрос открывает одну транзакцию записи")
+	w := h.store.opened[opened]
+	assert.Equal(t, u.ID, w.holds, "транзакция запроса держит строку личности, чьи коды она снимает и пишет")
+}
+
 // TestRecovery_F5_02_RequestForNobodyOrUnverifiedQueuesNothingAndAnswersTheSame —
 // Ф5-02 (Ф1-26): адреса нет ни у кого — в очередь не поставлено ничего, ответ
-// тот же; неподтверждённый адрес — то же (Ф1-25: код — для подтверждённого).
+// тот же; неподтверждённый адрес строки `BLOCKED` — то же (kaname#458, Р2:
+// строке `BLOCKED` неподтверждённый адрес кода не даёт — блокировку снимает
+// распорядитель). Мир записи `ACTIVE` с паролем этой пробе больше не
+// принадлежит: такая запись код получает (A458-01).
 func TestRecovery_F5_02_RequestForNobodyOrUnverifiedQueuesNothingAndAnswersTheSame(t *testing.T) {
 	h := newHarness(t, nil)
 	unverified := h.person(t, "usr-r02", "r02@example.invalid", "old-password-2", false)
+	unverified.InviteStatus = domain.InviteStatusBlocked
+	h.store.users[unverified.ID] = unverified
 
 	h.request(t, "nobody@example.invalid")
 	h.request(t, "r02@example.invalid")
@@ -192,10 +217,12 @@ func TestRecovery_F5_04_ExpiredCodeIsRefusedAndDoesNotRevive(t *testing.T) {
 
 	h.clock = ucBase.Add(rcCodeTTL)
 	_, err := h.complete("r04@example.invalid", letter, "brand-new-password-4")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "в момент срока кода уже нет")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "в момент срока кода уже нет")
+	require.EqualError(t, err, "access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator",
+		"Ф5-04 (редакция 10): текст Р10 п. 2 дословно")
 	h.clock = ucBase.Add(rcCodeTTL + time.Minute)
 	_, err = h.complete("r04@example.invalid", letter, "brand-new-password-4")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "повтор не оживляет")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "повтор не оживляет")
 	require.Empty(t, h.store.rows, "сессия не выдана")
 	require.Nil(t, h.store.codesOf(u.ID)[0].ConsumedAt)
 	require.Equal(t, 2, h.obs.recoveryCompletion[humansession.RecoveryCompletionCodeRejected])
@@ -213,7 +240,7 @@ func TestRecovery_F5_05_SecondPresentationIsRefused(t *testing.T) {
 	_, err := h.complete("r05@example.invalid", letter, "brand-new-password-5")
 	require.NoError(t, err)
 	_, err = h.complete("r05@example.invalid", letter, "another-new-password-5")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored)
 	require.Len(t, h.store.rows, 1, "второй сессии нет")
 	require.Len(t, h.store.completions, 1, "второй записи журнала нет (Ф5-16)")
 }
@@ -227,7 +254,7 @@ func TestRecovery_F5_07_StoredDigestIsNotAPresentation(t *testing.T) {
 	stored := string(h.store.codesOf(u.ID)[0].Digest)
 
 	_, err := h.complete("r07@example.invalid", stored, "brand-new-password-7")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored)
 	_, err = h.complete("r07@example.invalid", h.letterOf(t, u.ID), "brand-new-password-7")
 	require.NoError(t, err, "положительный контроль: настоящий код в тот же срок проходит")
 }
@@ -261,7 +288,7 @@ func TestRecovery_F5_08_TooManyWrongCodesIsARateRefusalThatRevealsNothing(t *tes
 	h2.request(t, "r08b@example.invalid")
 	for i := 0; i < n-1; i++ {
 		_, err := h2.complete("r08b@example.invalid", "AAAAA-AAAAA", "brand-new-password-8")
-		require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+		require.ErrorIs(t, err, humansession.ErrAccessNotRestored)
 	}
 	_, err := h2.complete("r08b@example.invalid", h2.letterOf(t, u2.ID), "brand-new-password-8")
 	require.NoError(t, err)
@@ -285,7 +312,7 @@ func TestRecovery_F5_17_BlockedIdentityGetsTheBlockedLoginRefusal(t *testing.T) 
 
 	h.clock = ucBase.Add(time.Minute)
 	_, err := h.complete("r17@example.invalid", letter, "brand-new-password-17")
-	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "тот же отказ, что на входе заблокированной (Ф1-05)")
+	require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "отказ завершения Р10 п. 2 — блокировка не отличима от прочих причин глагола (Ф1-59, Д22)")
 	require.Equal(t, 1, h.obs.recoveryCompletion[humansession.RecoveryCompletionBlocked])
 
 	require.Len(t, h.store.rows, 1, "новая сессия не выдана")
@@ -419,7 +446,7 @@ func TestRecovery_F5_25_CompletionResetsTheAddressCountOnlyAsALoginCompletedToEv
 			"и бюджет подбора кода второго фактора не обновлён; получено %v (счёт после завершения %d)", a.after[1], a.count)
 
 	// (в) замок: заблокирована — сессии нет, вход не завершён, отказ — попытка.
-	require.ErrorIs(t, c.err, humansession.ErrAuthenticationFailed, "(в): тот же отказ, что на входе заблокированной (Ф1-59)")
+	require.ErrorIs(t, c.err, humansession.ErrAccessNotRestored, "(в): отказ завершения Р10 п. 2 (Ф1-59 по свойству, Д22)")
 	require.True(t, c.completion.Bearer.IsZero(), "(в): сессии нет")
 	assert.True(t, isAddressRate(c.after[0]),
 		"(в): первый неверный пароль после завершения обязан упереться в частоту по адресу — отказ завершения "+
@@ -489,7 +516,7 @@ func TestRecovery_StoreRefusalLeavesTheCodeUsable(t *testing.T) {
 	// "login-method" — чтение заведённых способов входа ТОЙ ЖЕ транзакцией
 	// после применения кода: его отказ — отказ исхода, как отказ любой записи
 	// в ней (отказ оператора базы обрывает транзакцию, продолжать её нечем).
-	for _, op := range []string{"replace", "cutoff", "end-others", "login-method", "reset-failures", "audit", "insert", "commit"} {
+	for _, op := range []string{"put-verifier", "cutoff", "end-others", "login-method", "reset-failures", "audit", "insert", "commit"} {
 		h.store.failOn = op
 		_, err := h.complete("rsf@example.invalid", letter, "brand-new-password-sf")
 		require.ErrorIs(t, err, humansession.ErrStoreUnavailable, "отказ на %q", op)
@@ -512,8 +539,8 @@ func TestRecovery_WrongCodeRefusalIsTheSameForNobodyAndForSomeone(t *testing.T) 
 
 	_, errSomeone := h.complete("rwc@example.invalid", "AAAAA-AAAAA", "brand-new-password-wc")
 	_, errNobody := h.complete("nobody@example.invalid", "AAAAA-AAAAA", "brand-new-password-wc")
-	require.ErrorIs(t, errSomeone, humansession.ErrAuthenticationFailed)
-	require.ErrorIs(t, errNobody, humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, errSomeone, humansession.ErrAccessNotRestored)
+	require.ErrorIs(t, errNobody, humansession.ErrAccessNotRestored)
 	require.True(t, errors.Is(errSomeone, errNobody))
 	require.Equal(t, errSomeone.Error(), errNobody.Error())
 	require.Len(t, h.store.failures, 4)
@@ -532,7 +559,8 @@ func TestRecovery_ClosedOutcomeSetsAreDeclared(t *testing.T) {
 	require.ElementsMatch(t, []humansession.RecoveryCompletionOutcome{
 		humansession.RecoveryCompletionIssued, humansession.RecoveryCompletionNoRow, humansession.RecoveryCompletionCodeRejected,
 		humansession.RecoveryCompletionBlocked, humansession.RecoveryCompletionRateLimited, humansession.RecoveryCompletionPasswordRejected,
-		humansession.RecoveryCompletionStoreFailed,
+		humansession.RecoveryCompletionStoreFailed, humansession.RecoveryCompletionAddressClaimed,
+		humansession.RecoveryCompletionAddressVerified, humansession.RecoveryCompletionInviteNotValid,
 	}, humansession.RecoveryCompletionOutcomes())
 }
 

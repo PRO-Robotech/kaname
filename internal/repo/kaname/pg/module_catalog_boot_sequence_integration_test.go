@@ -5,7 +5,7 @@ package pg_test
 
 // module_catalog_boot_sequence_integration_test.go — ПОСЛЕДОВАТЕЛЬНОСТЬ СТАРТА
 // против живой Postgres: доставка прочитана → манифесты применены → страж
-// паритета зелен (задача продукта #1034).
+// паритета зелен (задача продукта kacho#1034).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧЕМ ЭТО ОТЛИЧАЕТСЯ ОТ СОСЕДНИХ ПРОБ ПРИМЕНИТЕЛЯ
@@ -24,7 +24,7 @@ package pg_test
 // ЧТО ЗДЕСЬ УТВЕРЖДАЕТСЯ, И ПОЧЕМУ КАЖДОЕ — ОТДЕЛЬНОЕ УТВЕРЖДЕНИЕ
 //
 //	цепочка      доставка → применение → страж проходит целиком, и каталог ПОСЛЕ
-//	             применения совпадает с манифестами (предикат #1034)
+//	             применения совпадает с манифестами (предикат kacho#1034)
 //	второй старт применение повторно ничего не меняет: перезапуск пода —
 //	             штатный режим, и он обязан быть тождественным
 //	страж жив    сверка литерала со строками остаётся ЗЕЛЁНОЙ после применения —
@@ -93,7 +93,7 @@ func catalogRowCensus(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (mo
 }
 
 // TestModuleCatalogBootSequenceConvergesTheCatalogAndKeepsTheParityGuardGreen —
-// предикат задачи #1034 против живой базы.
+// предикат задачи kacho#1034 против живой базы.
 func TestModuleCatalogBootSequenceConvergesTheCatalogAndKeepsTheParityGuardGreen(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	applier := applierOver(t, pool)

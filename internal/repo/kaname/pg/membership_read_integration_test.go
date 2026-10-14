@@ -392,10 +392,14 @@ func TestMembership_IAMID2_16_InviteTraceSurvivesTheFirstLogin(t *testing.T) {
 
 	// Первый вход: у строки появляется внешний субъект, и она перестаёт быть
 	// приглашённой.
-	_, err = pool.Exec(ctx, `
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `
 		UPDATE users SET external_id = $2, invite_status = 'ACTIVE' WHERE id = $1`,
 		string(invited), "ext-mbr16-inv")
 	require.NoError(t, err, "first login")
+	seedWayIn(t, ctx, tx) // вход заводит способ входа той же транзакцией (kaname#608)
+	require.NoError(t, tx.Commit(ctx))
 
 	rd2, done2 := membershipReaderOn(t, ctx, repo)
 	defer done2()

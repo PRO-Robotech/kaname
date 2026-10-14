@@ -390,7 +390,7 @@ CASES.append(Case(
                 # подчинены утверждению о статусе (401 и 403 роняют его первыми) и
                 # ОТДЕЛЬНО упасть не могут, а сами по себе проходят на 500 и 503.
                 # Полосы теперь названы В СООБЩЕНИИ утверждения — диагностика та же,
-                # а мёртвых строк нет. verifies #668.
+                # а мёртвых строк нет. verifies kacho#668.
                 "pm.test('the front accepted the presented Bearer: HTTP 200', () => pm.expect(pm.response.code,",
                 "  '401 here means the facade-signed token failed verification; 403 on an <exempt> RPC'",
                 "  + ' means the principal did not resolve; any other code means the front never reached'",

@@ -165,10 +165,42 @@ type DeadProbeCoordinate struct {
 	Note  string
 }
 
-// AcceptanceProbeCoordinateExemptions — ВЕДОМОСТЬ ПУСТА, и это её цель, а не
-// её поломка. Заводя запись — назови номер задачи и предикат снятия в
+// AcceptanceProbeCoordinateExemptions — ведомость послаблений; пустая — её
+// цель, а не поломка. Заводя запись — назови номер задачи и предикат снятия в
 // комментарии рядом.
-var AcceptanceProbeCoordinateExemptions []DeadProbeCoordinate
+var AcceptanceProbeCoordinateExemptions = []DeadProbeCoordinate{
+	// Проба стерегла посылку «ось «заведено» ключей не видит, и потребителя
+	// предъявления ключа нет». Полоса входа ключом (kaname#613) ввела ключи в
+	// ось тем же изменением, что и потребителя (`humansession/completed_login.go`,
+	// `enrolledForCompletion`), и проба снята вместе с предметом. Одобренная
+	// редакция Ф11 (отпечаток f3cbfaf5…) называет её строкой свидетельства
+	// круга; правка текста сменила бы отпечаток одобренного документа.
+	// ПРЕДИКАТ СНЯТИЯ: следующая редакция приёмки Ф11 не называет пробу —
+	// тогда запись истекает сама (имя больше не стоит ни в одном документе).
+	{
+		Name:  "TestAccessKeyPresentationHasNoSessionLevelConsumer",
+		Docs:  []string{"docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md"},
+		Issue: 613,
+		Note:  "проба снята вместе с предметом: ось «заведено» читает ключи (kaname#613)",
+	},
+	// Проба стерегла ведомость исключений гейта производителя условия
+	// (`unproducedConditionSites`): запись ведомости, чья оговорка `with`
+	// снята с модели, — находка. Полоса kaname#133 (исход (а)) дала обеим
+	// условным записям производителя — свёртку журнала, — гейт
+	// `TestConditionedRelationHasAProducer` сверяет модель с перечнем писателя
+	// в обе стороны, и ведомость снята вместе с пробой: исключать стало нечего.
+	// Одобренная редакция 9 Ф11 (отпечаток b39219bc…) называет пробу в §6 и в
+	// перечне расхождений строкой свидетельства круга; правка текста сменила бы
+	// отпечаток одобренного документа.
+	// ПРЕДИКАТ СНЯТИЯ: следующая редакция приёмки Ф11 не называет пробу —
+	// тогда запись истекает сама (имя больше не стоит ни в одном документе).
+	{
+		Name:  "TestNoStaleConditionExceptions",
+		Docs:  []string{"docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md"},
+		Issue: 133,
+		Note:  "проба снята вместе с ведомостью исключений: условные записи модели получили производителя (kaname#133)",
+	},
+}
 
 // ProbeCoordinatesIn разбирает документ и возвращает координаты — только их.
 func ProbeCoordinatesIn(doc, body string) []ProbeCoordinate {

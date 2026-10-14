@@ -17,7 +17,13 @@ import (
 // (Ф1 Р3, F4d-16), фиксированные тексты недоступности (форма Ф-п).
 const (
 	TextAuthenticationFailed = "authentication failed"
-	TextTooManyAttempts      = "too many attempts; try again later"
+	// TextLoginWithSecondFactorFailed — отказ входа С полем `secondFactor`
+	// (Ф12 Р4, редакция 17; kaname#520): один на все причины этой формы
+	// запроса и называет шаг, не называя причины. Форму запроса знает сам
+	// вызывающий, поэтому отличие от TextAuthenticationFailed (вход без поля,
+	// Ф3-02) различает присланное, а не найденное (Д30).
+	TextLoginWithSecondFactorFailed = "authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled"
+	TextTooManyAttempts             = "too many attempts; try again later"
 	// #nosec G101 -- ТЕКСТ ОТКАЗА, уезжающий клиенту, а не значение удостоверения.
 	TextFormTokenRejected   = "form token rejected"
 	TextLogoutNotPerformed  = "logout not performed; try again later"
@@ -36,6 +42,26 @@ const (
 // ErrAuthenticationFailed — ОДИН отказ на все причины входа и на неподошедшее
 // подтверждение смены пароля (Ф3-02, Ф3-20 б/в).
 var ErrAuthenticationFailed = errors.New(TextAuthenticationFailed)
+
+// TextAccessNotRestored — отказ ЗАВЕРШЕНИЯ восстановления (Ф5 Р10 п. 2,
+// kaname#211): ОДИН на все причины глагола — код не тот, истёк, применён,
+// прочитан из хранилища, адреса нет, личность заблокирована, — и для каждой
+// шаг в нём верен: новый код лечит неверный, истёкший и применённый, а
+// заблокированной текст называет, что делать тогда. Свой у глагола, а не
+// текст отказа входа: вызывающий знает, какой глагол звал, и различие текстов
+// между глаголами не различает ни одной причины (Д22).
+const TextAccessNotRestored = "access not restored; request a new recovery code, and if a new code does not restore access, ask an administrator"
+
+// ErrAccessNotRestored — сентинел отказа завершения восстановления; транспорт
+// отвечает на него `401` / `16` текстом [TextAccessNotRestored].
+var ErrAccessNotRestored = errors.New(TextAccessNotRestored)
+
+// TextRecoveryNextStep — тело ответа на ЗАПРОС кода восстановления (Ф5 Р10
+// п. 1, kaname#211), одно на все исходы: шаги стоят условием, которое знает сам
+// человек (письмо пришло — завершение; не пришло — повтор позже, вход и
+// подтверждение адреса, администратор). Текст не утверждает, что письмо
+// ОТПРАВЛЕНО: на половине исходов это была бы ложь, а различие — оракулом.
+const TextRecoveryNextStep = "a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods"
 
 // ErrStoreUnavailable — хранилище не ответило; глагол не выполнен, состояние
 // не изменено. Текст выбирает транспорт по глаголу (Ф3-17).

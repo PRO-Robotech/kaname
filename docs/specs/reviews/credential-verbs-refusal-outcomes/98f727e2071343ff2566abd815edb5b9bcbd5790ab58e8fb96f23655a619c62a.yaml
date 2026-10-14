@@ -1,0 +1,125 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/credential-verbs-refusal-outcomes.md
+  sha256: 98f727e2071343ff2566abd815edb5b9bcbd5790ab58e8fb96f23655a619c62a
+  static_status: DRAFT
+  base_commit: 9bac42bdcbc5f125ee8d45d7a7df12436dd4b8c6
+  content_commit: 9be3d7136410315ce2bce15febcabe3d78f7f4df
+  branch: '522'
+  task: PRO-Robotech/kaname#522
+  related_task: PRO-Robotech/kaname#547
+  wave: PRO-Robotech/kaname#536
+  lines: 463
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    git show 9be3d7136410315ce2bce15febcabe3d78f7f4df:docs/engineering/acceptance/credential-verbs-refusal-outcomes.md
+    | sha256sum
+  static_status_note: >-
+    Токен DRAFT в шапке документа — то, что туда вписали; шапка кругом не правлена. Вердикт
+    выводится из ЭТОЙ записи и внешнего события (change-graph.md §2).
+  measurement_revisions: >-
+    Копия tmp/522-na24-acc @ 9be3d713. `git diff --stat 8a84dcff6eb1 9bac42bdc` пуст (объявление
+    документа верно); 9bac42bdc..9be3d713 — только сам документ.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+expected_actor: pointpu
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-03T12:26:34Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Кругом рецензента событие не публиковалось (`event.type: none` на ccd7474ea); опубликовано
+    курьером позже, и запись приведена к факту события отдельной правкой — вердикт и разбор
+    не тронуты.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5969148055
+    event_url: https://github.com/PRO-Robotech/kaname/issues/522#issuecomment-5969148055
+    remeasured: >-
+      `git show 9be3d7136410315ce2bce15febcabe3d78f7f4df:<путь> | sha256sum` и `sha256sum <путь>`
+      на 288b1639 → 98f727e2…c62a, совпал с именем записи и строкой `subject_sha256` события;
+      ревизию несёт origin/522. `gh api repos/PRO-Robotech/kaname/issues/comments/5969148055` →
+      issue_url — kaname#522 (`subject.task`), автор pointpu, author_association MEMBER,
+      created_at == updated_at; пять обязательных строк заголовка дословно.
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5969148055
+  node_id: IC_kwDOUO26pM8AAAABY8n4lw
+  url: https://github.com/PRO-Robotech/kaname/issues/522#issuecomment-5969148055
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5969148055
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/522
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T12:26:34Z'
+  body_sha256: 8adbb9504669cb124f6abbf92a1c5706734f15d7929e6c69701c087a9a0b2667
+  subject_sha256: 98f727e2071343ff2566abd815edb5b9bcbd5790ab58e8fb96f23655a619c62a
+  subject_revision: 9be3d7136410315ce2bce15febcabe3d78f7f4df
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Блок дописан поверх записи рецензента (ccd7474ea, `event.type: none`); отпечаток тела снят с
+    сырого ответа API (`gh api … | jq -j .body | sha256sum`).
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Объём — тела задач #522 и #547 (сверены `gh issue view`): исход отзыва несуществующего у трёх
+    видов и отказ выдачи KEYPAIR человека без токен-эндпоинта. Over/under-scope нет; «Что НЕ
+    входит» явный.
+  scenarios: 18 (CVR-01…12, CVR-21…26); positive 4 (01, 05, 23, 24), negative 11, edge/race/assembly 3
+  producer_coverage: 18 из 18 (есть — 7, заказан полосой NA24 — 11)
+  twin_coverage: каждое отрицание называет близнеца, отличие в один факт
+
+checks_executed:
+  producers: >-
+    §0.1, §0.3 перемерены: `if !found {` → user_tokens:684, sa_keys:1018, access_keys:169;
+    `ownIssuance` в user_tokens → 0; SAKeyIssuanceIsOurs → sakey_binding.go:27; сборки
+    wiring.go:1120/1148/1158; mapPGErr ErrUnavailable → codes.Unavailable (usecases.go:921-935);
+    ttl_seconds < 0 → INVALID_ARGUMENT до разрешения вида (:196), AccountForUser после (:229).
+  constructibility_seed: >-
+    go test -count=1 -run 'RepeatAbsentAndForeignShareOneOutcome|TokenEndpoint|F7_25|F7_27|TestIssue_StoreUnavailable'
+    по user_tokens, sa_keys, access_keys (через heavy-slot) → 8 PASS, 0 FAIL: строят «живое»,
+    «нет/снято», «чужое» (CVR-01…08), посадку без эндпоинта и с ним + SECRET (близнецы CVR-21/23/24
+    на пути учётки), недоступное хранилище (CVR-12), Ф7-25/27 (CVR-09).
+  not_executed: >-
+    Посев на стенде (newman-шаги CVR-03/07) и гонка на настоящей базе (CVR-11) — стенд не поднимался;
+    координаты шагов `issue-basic-secret`, `revoke-basic-secret`, `_revoke_key_steps`,
+    `issue-user-token` прочитаны и существуют.
+
+non_blocking_notes:
+  - >-
+    CVR-12 / DoD п.5: сегодня Revoke синхронно зовёт AccountForUser, и `accountErr` уже даёт
+    UNAVAILABLE до всякой правки. Ошибку инжектировать в НОВОЕ чтение существования, не в
+    резолв аккаунта, — иначе проба зелена на мёртвой ветке.
+  - >-
+    Чтение для синхронной сверки не названо: порт UserClientRepo/SAClientRepo точечного Get не
+    имеет (Insert, DeleteOwnedByID, List, AccountFor*). Если полоса заведёт новый метод
+    хранилища, `internal/repo/kaname/pg/` выходит за перечень «затрагивает» шапки.
+  - >-
+    Р2 без ErrorInfo.reason — выбрано паритетом с ключом доступа; машинное различие по reason
+    у трёх видов остаётся отдельным предметом.

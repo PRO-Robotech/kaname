@@ -26,7 +26,7 @@
 //
 // КЛАСТЕРНЫЙ АДМИНИСТРАТОР живёт отдельной таблицей со своей поверхностью
 // (выдать / отозвать / перечислить), и она остаётся раздельной по решению
-// (#914, решение 2 в `docs/engineering/architecture/grant-surface-boundaries.md`):
+// (kacho#914, решение 2 в `docs/engineering/architecture/grant-surface-boundaries.md`):
 // его выдают и отзывают иначе, и это единственный доступ, обязанный работать,
 // когда сломано всё остальное. Сведено ЧТЕНИЕ — перечисление выдач возвращает и
 // его записи, называя вид, — а выдача осталась своей. Перепись его СЧИТАЕТ и
@@ -188,7 +188,7 @@ func censusOfEffectiveAccess(t *testing.T, db queryer) grantSurfaceCensus {
 }
 
 // TestIntegration_R893_NoEffectiveAccessOutsideTheGrantSurface — предикат снятия
-// #893/#895: у свежеразвёрнутой платформы нет действующего основания доступа,
+// kacho#893/#895: у свежеразвёрнутой платформы нет действующего основания доступа,
 // которого не видно перечислением выдач.
 func TestIntegration_R893_NoEffectiveAccessOutsideTheGrantSurface(t *testing.T) {
 	if testing.Short() {
@@ -207,7 +207,7 @@ func TestIntegration_R893_NoEffectiveAccessOutsideTheGrantSurface(t *testing.T) 
 	require.NotZero(t, c.SystemGrants,
 		"системных выдач ноль — встроенный доступ на поверхность не переехал. %s", c.report())
 
-	// Якорь вне иерархии — предмет решения 1 (#914,
+	// Якорь вне иерархии — предмет решения 1 (kacho#914,
 	// docs/engineering/architecture/grant-surface-boundaries.md). Решено:
 	// словарь якорей выдачи за пределы трёх ярусов НЕ растёт, а способность
 	// модуля писать кортежи выражается КЛАСТЕРНЫМ отношением и обычной
@@ -216,7 +216,7 @@ func TestIntegration_R893_NoEffectiveAccessOutsideTheGrantSurface(t *testing.T) 
 	// перечисление выдач о нём молчит.
 	require.Zero(t, c.OffHierarchy,
 		"основание доступа на якоре ВНЕ иерархии: такую выдачу некому отозвать и не видно "+
-			"перечислением. Решение 1 задачи #914 — перенести способность на кластерное "+
+			"перечислением. Решение 1 задачи kacho#914 — перенести способность на кластерное "+
 			"отношение. %s", c.report())
 
 	if len(c.Findings) > 0 {

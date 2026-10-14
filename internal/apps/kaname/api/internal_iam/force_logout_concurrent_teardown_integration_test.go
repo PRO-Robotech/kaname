@@ -76,6 +76,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,7 +189,7 @@ func newConcurrencyScene(t *testing.T) *concurrencyScene {
 	h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
 		WithAdminChecker(allowAdmin{}).
 		WithOperations(operations.NewRepo(pool, "kaname")).
-		WithOwnSessions(observedOwnSessions{inner: kanamepg.NewHumanSessionRepo(pool), log: log})
+		WithOwnSessions(observedOwnSessions{inner: kanamepg.NewHumanSessionRepo(pool), log: log}).WithCutoffClock(momentclock.Func(time.Now))
 	return &concurrencyScene{
 		dsn: dsn, pool: pool, handler: h,
 		sessions: kanamepg.NewHumanSessionRepo(pool), refusals: log,

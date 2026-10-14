@@ -1,0 +1,98 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: d32c4d69974f475e97123e433022d6346a8c6c97
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 2138
+  round: 4
+  round_note: >-
+    круг 4 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/password-verifier-follows-the-stored-
+    value/2554fb6f46fa7f5768f746b5d620843fc045e53d7778919d9829f1b9467070cb.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/password-verifier-follows-the-stored-value.md на
+    tmp/535-na3a @ 33b0f8aa9 → 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9;
+    совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      Дифф против редакции 4 большой (135+/119-) из-за перекладки строк; проверка шла по перечню
+      правок строки редакции 5 — вне перечня изменений по существу не найдено.
+accepted_parts: >-
+  Снятие переноса проверено: живых сценариев 18 (PWV-01…19 без PWV-12), строк ведомости «Тогда» 97
+  (44 · 32 · 21), grep -c -i перенос → 52 — все три числа перемерены на голове; PWV-12, Д-15,
+  12.1…12.6 — надгробиями, номера не переиспользуются; Тогда PWV-01…11, 13…19 не ослаблены.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given PWV-01…03 — значение формата A/B, положенное посевом
+  и построенное сторонней библиотекой; названная фикстура —
+  internal/passwordverify/fixture_test.go и сторона хранилища
+  internal/repo/kaname/pg/login_method_repo_integration_test.go
+  (TestLoginMethodRepo_MaterialRoundTripsVerbatim).
+event_body: acceptance-reviewer · APPROVED · 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+effective_approval:
+  issued: true
+  issued_at: '2026-10-03T19:05:25Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Кругом рецензента событие не публиковалось; опубликовано курьером позже, и запись приведена
+    к факту события отдельной правкой — вердикт и разбор не тронуты.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5972531905
+    event_url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972531905
+    remeasured: >-
+      `git show d8ddf4f1111fe316c2939de5e3bbacdf80c0a3fd:<путь> | sha256sum` на origin/536 @d8ddf4f1 → 4ddddbe6…08e9,
+      совпал с именем записи и строкой `subject_sha256` события;
+      `gh api repos/PRO-Robotech/kaname/issues/comments/5972531905` → issue_url — kaname#269
+      (`subject.task`), автор pointpu, author_association MEMBER, created_at == updated_at;
+      пять обязательных строк заголовка дословно.
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5972531905
+  node_id: IC_kwDOUO26pM8AAAABY_2awQ
+  url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972531905
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5972531905
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T19:05:25Z'
+  body_sha256: d76cf6335d7d24bd10f6af1a72aac5555b3d4ab204381f2a1e2531bc945ddb31
+  subject_sha256: 4ddddbe63e42f12fb9bdf1cc49889f5e9909dbea6f93ce54b73f98d71d4308e9
+  subject_revision: d8ddf4f1111fe316c2939de5e3bbacdf80c0a3fd
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Блок дописан поверх записи рецензента (запись молчала о событии: блока event не было);
+    отпечаток тела снят с сырого ответа API (`gh api … | jq -j .body | sha256sum`).
+    subject_revision события — ревизия ветки волны, на которой отпечаток перемерен; содержимое
+    документа на ней совпадает с content_commit d32c4d699 (тот же sha256).

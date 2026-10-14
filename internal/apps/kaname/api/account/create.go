@@ -260,7 +260,7 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	}
 	// Идентификатор назначен ДО проверки имени намеренно: пустое имя — законный
 	// вход создания и означает «назови сам», а умолчание производится ОТ
-	// ИДЕНТИФИКАТОРА (#1279); и правило имени формы идентификатора (Р6) судит
+	// ИДЕНТИФИКАТОРА (kacho#1279); и правило имени формы идентификатора (Р6) судит
 	// имя против СОБСТВЕННОГО идентификатора, которого без назначения нет.
 	accID := string(a.ID)
 	// F2: pre-allocate the default Project id so CreateAccountMetadata carries
@@ -280,6 +280,16 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	// owner° now populated from caller).
 	if err := a.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
+	}
+
+	// Резерв пространства личных аккаунтов (Ф4 Р9 п.3): имя из `personal-cloud-`
+	// отвергается синхронно, ПОСЛЕ отказа по форме (её судит Validate выше) — это
+	// вход арендатора в пространство, которое заполняет система. INVALID_ARGUMENT,
+	// а не ALREADY_EXISTS: отвергается сам ВХОД, независимо от состояния каталога;
+	// ничего с таким именем существовать не обязано (code-authoring §4.1 — форма
+	// раньше резерва).
+	if domain.IsPersonalAccountName(a.Name) {
+		return nil, shared.InvalidArg("name", reservedAccountNameRefusal)
 	}
 
 	op, err := operations.NewFromContext(ctx,
@@ -324,10 +334,19 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 		}
 	}()
 
-	// FK accounts_owner_fk (23503): пользователь не существует. Constraint —
-	// DEFERRABLE INITIALLY DEFERRED, поэтому этот INSERT НЕ падает — нарушение
-	// всплывает на COMMIT (см. writeTx.Commit), где мапится в
-	// FailedPrecondition "User <id> not found" через тот же constraint-aware bridge.
+	// ПЕРВЫЙ ОПЕРАТОР — ключевой замок строки владельца (kaname#664, KN664-40).
+	// Снятие личности берёт ту же строку на изменение первым оператором, и две
+	// транзакции сериализуются на ней: создание, пришедшее после снятия,
+	// отвечает «User <id> not found» (FailedPrecondition) здесь, одним текстом.
+	// Без замка отсутствие владельца первой находила вставка собственнической
+	// выдачи (её триггер существования субъекта) — с другим текстом.
+	//
+	// Ключ accounts_owner_fk (23503) остаётся рубежом: он DEFERRABLE INITIALLY
+	// DEFERRED, и его нарушение всплывает на COMMIT (см. writeTx.Commit), где
+	// мапится в тот же "User <id> not found" через constraint-aware bridge.
+	if lerr := w.AccountsW().LockOwner(ctx, a.OwnerUserID); lerr != nil {
+		return nil, shared.MapRepoErr(lerr)
+	}
 	inserted, ierr := w.AccountsW().Insert(ctx, a)
 	if ierr != nil {
 		return nil, shared.MapRepoErr(ierr)

@@ -10,11 +10,41 @@ package access_keys
 // форма идентификатора (синхронно, первым стейтментом — Ф7-47: пустой —
 // «обязательно», без известного префикса — `invalid access key id`; чужой
 // известный префикс форму проходит и уходит в полосу отсутствия) → свежесть
-// (Ф7-36) → человек → операция. Внутри операции ОДНОЙ транзакцией: строки
-// ключей человека под замком (сериализация «сосчитать способы — снять», ban
-// #10), последний способ входа не снимается (Ф7-26), снятие суженное
-// владельцем — чужой и несуществующий неразличимы (Ф7-27), событие аудита.
-// Слот потолка возвращает удаление строки — триггером, в той же транзакции.
+// (Ф7-36) → человек → операция. Внутри операции ОДНОЙ транзакцией: строка
+// личности под замком первой (раньше строк ключей и сессий — порядок
+// «личность → дети»), строки ключей человека под замком (сериализация
+// «сосчитать способы — снять», ban #10), последний способ входа не снимается
+// (Ф7-26), снятие суженное владельцем — чужой и несуществующий неразличимы
+// (Ф7-27), записи сессии человека сняты и отсечка поставлена причиной
+// `access-key-revoked` (Ф13 Р8), событие аудита. Слот потолка возвращает
+// удаление строки — триггером, в той же транзакции.
+//
+// # Какие сессии гаснут
+//
+// Р8 гасит все ПРОЧИЕ сессии человека, а текущую оставляет. Номера записи
+// сессии у глагола RPC нет (публичный контракт его не несёт), и текущую
+// называет то, ЧЕМ человек звонит:
+//
+//   - край передал личность из браузерной сессии — край называет и номер её
+//     записи (`RevokeInput.ActingSession`; ответ `Resolve` краю его несёт, край
+//     возвращает его службе метаданным доверенного отправителя, читатель —
+//     `internal/edgecredential`, kaname#677);
+//   - вызывающий предъявил токен нашей церемонии — сам ли, через край ли, —
+//     текущую называет выпуск: выпуск → семейство → сессия, в которой шла
+//     церемония (`RevokeInput.ActingCredential`, `SessionOfCredential`).
+//
+// Номер записи сильнее выпуска: он называет запись прямо. Текущая бережётся
+// ТОЛЬКО когда человек снимает СВОЙ ключ (`Actor == UserID`): сессия
+// вызывающего, снимающего чужой ключ, — не сессия того, чей ключ снят, и
+// поддельный номер чужой записи не бережёт ни одной записи человека; снятие
+// касается записей ЭТОГО человека и никаких иных (`EndOtherSessions` сужен
+// личностью).
+//
+// Ничем не названа — гаснут ВСЕ записи человека: у вызывающего нет текущей
+// сессии (служебный вызов, токен не нашей церемонии), и «прочие» — это все.
+// Отказ здесь не годится: он сделал бы снятие ключа недоступным полосе, у
+// которой записи сессии нет by construction, а ключ снимают как раз лишившись
+// устройства.
 
 import (
 	"context"
@@ -36,6 +66,16 @@ type RevokeInput struct {
 	UserID      domain.UserID
 	Actor       domain.UserID
 	AccessKeyID string
+	// ActingCredential — идентификатор выпуска удостоверения, которым
+	// вызывающий аутентифицирован (`jti`, проверенный целиком читателем
+	// предъявленного либо краем — доверенным отправителем); пусто — выпуска
+	// нет. По нему находится текущая сессия, которую снятие оставляет (Р8).
+	ActingCredential string
+	// ActingSession — номер записи сессии, из которой звонит человек, как его
+	// назвал край доверенным отправителем (kaname#677); пусто — не назван.
+	// Сильнее выпуска: называет запись прямо. Бережёт запись только при
+	// `Actor == UserID` (шапка файла).
+	ActingSession domain.HumanSessionID
 }
 
 // RevokeUseCase — снятие ключа.
@@ -85,8 +125,12 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// NOT_FOUND, а не операцию с ошибкой; чужой ключ этой же полосой — строка
 	// сужена владельцем и не видна (Ф7-27).
 	keyID := domain.AccessKeyID(in.AccessKeyID)
+	keys, err := uc.keysOf(ctx, in.UserID)
+	if err != nil {
+		return nil, err
+	}
 	var owned bool
-	for _, k := range uc.keysOf(ctx, in.UserID) {
+	for _, k := range keys {
 		if k.ID == keyID {
 			owned = true
 			break
@@ -105,31 +149,52 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// Последний способ входа судится синхронно, чтобы отказ назвал следующий
 	// шаг клиенту, и ещё раз под замком внутри транзакции — второе чтение
 	// держит инвариант, первое только классифицирует.
-	if err := uc.lastMethodRefusal(ctx, in.UserID, 0); err != nil {
+	if err := uc.lastMethodRefusal(ctx, in.UserID); err != nil {
 		return nil, err
 	}
 	if err := uc.ops.Create(ctx, op); err != nil {
 		return nil, err
 	}
 	actor := string(in.Actor)
+	acting := actingOf(in)
 	operations.Run(ctx, uc.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return uc.commit(ctx, in.UserID, keyID, user.AccountID, actor)
+		return uc.commit(ctx, in.UserID, keyID, user.AccountID, actor, acting)
 	})
 	return &op, nil
 }
 
-func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) []domain.AccessKey {
-	keys, _, err := uc.deps.Store.KeysOf(ctx, userID, "", 1000)
-	if err != nil {
-		uc.deps.Logger.Error("access keys: keys unreadable", "err", err.Error())
-		return nil
-	}
-	return keys
+// currentSession — чем названа текущая сессия вызывающего (шапка файла).
+type currentSession struct {
+	session    domain.HumanSessionID
+	credential string
 }
 
-// lastMethodRefusal — человек без пароля с одним ключом (сверх locked)
-// остался бы без способа входа (Ф7-26).
-func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID, lockedCount int) error {
+// actingOf — текущая сессия бережётся только у человека, снимающего СВОЙ ключ:
+// у вызывающего, снимающего чужой, она не названа вовсе.
+func actingOf(in RevokeInput) currentSession {
+	if in.Actor != in.UserID {
+		return currentSession{}
+	}
+	return currentSession{session: in.ActingSession, credential: in.ActingCredential}
+}
+
+// keysOf — ключи человека. Ошибка чтения — внутренняя ошибка (текст
+// хранилища только в журнал): пустой список вместо неё дал бы отказ о
+// предмете — «ключа нет» либо «последний способ входа», — не установленный
+// ничем (kaname#586).
+func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) ([]domain.AccessKey, error) {
+	keys, _, err := uc.deps.Store.KeysOf(ctx, userID, "", 1000)
+	if err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.keys", err)
+	}
+	return keys, nil
+}
+
+// lastMethodRefusal — синхронная сверка ДО операции, портом пула (транзакции
+// ещё нет): человек без пароля с одним ключом остался бы без способа входа
+// (Ф7-26). Она только классифицирует — инвариант держит сверка под замком
+// внутри транзакции (`lockedLastMethodRefusal`).
+func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID) error {
 	has, err := uc.deps.Methods.HasPassword(ctx, userID)
 	if err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
@@ -137,20 +202,39 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 	if has {
 		return nil
 	}
-	n := lockedCount
-	if n == 0 {
-		n = len(uc.keysOf(ctx, userID))
+	keys, err := uc.keysOf(ctx, userID)
+	if err != nil {
+		return err
 	}
-	if n <= 1 {
-		uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)
-		return lastSignInMethod()
+	return uc.judgeLastMethod(false, len(keys))
+}
+
+// lockedLastMethodRefusal — та же сверка ВНУТРИ транзакции снятия: строки
+// ключей уже под замком (locked), и пароль читается тем же соединением
+// (`RevokeWriter.HasPassword`). Ни одного чтения портом пула здесь нет: второе
+// соединение изнутри транзакции, держащей замки личности и ключей, — взаимная
+// блокировка с входами ключом, которой база не видит (kaname#669).
+func (uc *RevokeUseCase) lockedLastMethodRefusal(ctx context.Context, w RevokeWriter, userID domain.UserID, locked int) error {
+	has, err := w.HasPassword(ctx, userID)
+	if err != nil {
+		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
 	}
-	return nil
+	return uc.judgeLastMethod(has, locked)
+}
+
+// judgeLastMethod — правило Ф7-26 одно на обе сверки: без пароля ключ, который
+// снимают, обязан быть не последним.
+func (uc *RevokeUseCase) judgeLastMethod(hasPassword bool, keys int) error {
+	if hasPassword || keys > 1 {
+		return nil
+	}
+	uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)
+	return lastSignInMethod()
 }
 
 // commit — ОДНА транзакция под замком строк человека.
-func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID, account domain.AccountID, actor string) (*anypb.Any, error) {
-	w, err := uc.deps.Store.Writer(ctx)
+func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID, account domain.AccountID, actor string, acting currentSession) (*anypb.Any, error) {
+	w, err := uc.deps.Store.RevokeWriter(ctx, userID)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.writer", err)
 	}
@@ -159,7 +243,7 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.lock", err)
 	}
-	if err := uc.lastMethodRefusal(ctx, userID, len(locked)); err != nil {
+	if err := uc.lockedLastMethodRefusal(ctx, w, userID, len(locked)); err != nil {
 		return nil, err
 	}
 	removed, found, err := w.DeleteOwnedByID(ctx, userID, keyID)
@@ -170,6 +254,9 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 		uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalNotFound)
 		return nil, notFound(string(keyID))
 	}
+	if err := uc.endSessionsOf(ctx, w, userID, actor, acting); err != nil {
+		return nil, err
+	}
 	if err := emitKeyAudit(ctx, w, AuditAccessKeyRevoked, removed, account, actor); err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.audit", err)
 	}
@@ -178,4 +265,49 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 	}
 	uc.deps.Observer.AccessKeyEventObserved(EventRevoked)
 	return anypb.New(&iamv1.RevokeAccessKeyResponse{AccessKeyId: string(keyID)})
+}
+
+// endSessionsOf — снятие записей сессии человека, кроме текущей, и его
+// отсечка (Ф13 Р8) в транзакции снятия ключа. Текущая — запись, названная
+// краем, либо запись, в которой выпущено удостоверение вызывающего (шапка
+// файла); не названа — снимаются все. Момент снятия — часы глагола; момент отсечки — тот же, что у смены
+// пароля: на единицу разрешения раньше первой аутентификации личности нашей
+// посадкой (`domain.CutoffBelowFirstAuthentication`), — им снимаются носители
+// прежней посадки, а записи нашей снимает дверь снятия, и текущую отсечка не
+// задевает. Памяти первой аутентификации нет — отсечка не ставится: её момент
+// выводится только из сохранённого момента (часы процесса отсечку не датируют —
+// перепись `revocationpolicy`), а память пишет каждая выдача, и без неё у
+// личности нет ни одной выданной нами сессии; расхождение — находка о посеве,
+// и оно пишется в журнал.
+func (uc *RevokeUseCase) endSessionsOf(ctx context.Context, w RevokeWriter, userID domain.UserID, actor string, acting currentSession) error {
+	now := uc.deps.Now().UTC()
+	keep := acting.session
+	if keep == "" && acting.credential != "" {
+		current, found, err := w.SessionOfCredential(ctx, userID, acting.credential)
+		if err != nil {
+			return mapStoreErr(uc.deps, "access_keys.Revoke.current_session", err)
+		}
+		if found {
+			keep = current
+		}
+	}
+	if _, err := w.EndOtherSessions(ctx, userID, keep, now, domain.RevokeReasonAccessKeyRevoked); err != nil {
+		return mapStoreErr(uc.deps, "access_keys.Revoke.sessions", err)
+	}
+	first, found, err := w.FirstAuthentication(ctx, userID)
+	if err != nil {
+		return mapStoreErr(uc.deps, "access_keys.Revoke.first_authentication", err)
+	}
+	if !found {
+		uc.deps.Logger.WarnContext(ctx, "access key revoke: no first-authentication memory for the subject; cutoff not written",
+			"user_id", string(userID))
+		return nil
+	}
+	if err := w.UpsertCutoff(ctx, domain.UserTokenRevocation{
+		UserID: userID, RevokeBefore: domain.CutoffBelowFirstAuthentication(first),
+		Reason: domain.RevokeReasonAccessKeyRevoked, RevokedBy: domain.UserID(actor),
+	}, domain.UserID(actor)); err != nil {
+		return mapStoreErr(uc.deps, "access_keys.Revoke.cutoff", err)
+	}
+	return nil
 }

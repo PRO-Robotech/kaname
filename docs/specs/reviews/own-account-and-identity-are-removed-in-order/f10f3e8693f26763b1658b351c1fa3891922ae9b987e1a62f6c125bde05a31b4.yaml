@@ -1,0 +1,123 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md
+  sha256: f10f3e8693f26763b1658b351c1fa3891922ae9b987e1a62f6c125bde05a31b4
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 3fb538867
+  content_commit: b831ce4f8
+  branch: '720'
+  task: PRO-Robotech/kaname#720
+  related_tasks: [PRO-Robotech/kaname#664, PRO-Robotech/kaname#511, PRO-Robotech/kacho#3162]
+  round: 1
+  round_kind: delta
+  round_note: >-
+    Первый круг на редакцию 5. Судится дельта к одобренной редакции 4 (5ccc83da…a336, круг 1,
+    APPROVED): шапка (две строки истории, опора fa-b7, дата), §4 (определение «отказ по уровню»),
+    KN664-44 (конструируемость), §5 (строка KN664-44, 45, 49), DoD 11, §7 (пять строк редакции 5).
+    Дельта — `git diff 3fb538867 b831ce4f8`, единственный путь — документ. Сценарии, коды, пороги
+    не менялись: 39 уникальных ID KN664 до и после, ни одной строки сценария с ID в дельте.
+  previous_record: docs/specs/reviews/own-account-and-identity-are-removed-in-order/5ccc83dafcf205a848bf2aa45831bb1b227891e245a53034cc1710ccb8f9a336.yaml
+  fingerprint_predicate: sha256sum <док> на b831ce4f8 (рабочее дерево и git show HEAD) → f10f3e86…31b4, совпал с заданием
+publication_mode: courier_of_agent_verdict
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-12'
+
+delta_checks:
+  - item: важное PRODUCER круга 1 ред.4 — производитель на фронте службы
+    outcome: resolved
+    note: >-
+      @b831ce4f8: internal/authzguard/public_caller_policy.go — stepUpRequired, GRPCStatus
+      codes.Unauthenticated + iamerr.TextStepUpRequired; internal/restfront/stepup.go —
+      stepUpErrorHandler: 401, тело {"code":16,...}, вызов из хвоста. acr_floor.go выведен из
+      утверждаемого, проба — полосой предъявленного удостоверения (§5 и DoD 11 согласованы).
+  - item: важное FORMAT — поверхность утверждения текста
+    outcome: resolved
+    note: §4 — текст утверждается на фронте службы; на крае до kaname#511 — пара и параметры вызова.
+  - item: важное CONSTRUCTIBILITY — образец посева KN664-44
+    outcome: resolved
+    note: >-
+      cmd/kaname/step_up_indication_test.go: TestF11_49 (:140, s.mint acr "1", близнец "2" :165),
+      TestF11_50 (:183, :186/:191); CAP-08-ASSURANCE-FLOOR в tests/newman/cases/kaname-cluster-admins.py:412–427.
+  - item: важное CONVENTION (fa-b7) — опора на соседа
+    outcome: resolved
+    note: >-
+      sha256sum assurance-level-is-declared-by-our-session.md @b831ce4f8 → b39219bc…73c8 = указанный;
+      запись docs/specs/reviews/assurance-level-is-declared-by-our-session/b39219bc….yaml — round 8,
+      verdict APPROVED, event status performed.
+  - item: формула правки после вердикта
+    outcome: confirmed
+    note: >-
+      в шапке «ПОСЛЕ вердикта» для ред.4 (после круга 3) и ред.5 (после круга 1 ред.4), непереносимость
+      одобрения названа; прежние строки истории не правлены (дописаны). Строка «Статус:» (стр. 8) не тронута.
+
+new_contradictions: none
+
+blocking: []
+
+important: []
+
+minor:
+  - kind: FORMAT
+    note: >-
+      Шапка, стр. 40: «ссылка … на неё (Р11, Ф11-01, KA1-15)» — у документа есть собственная Р11
+      («Идентификатор человека выдаётся один раз», стр. 459); ссылки на соседнюю Р11 квалифицированы
+      именем файла, но перечень в опоре читается двусмысленно. Не блокирует.
+  - kind: DoD
+    note: перенесено из круга 1 ред.4 без изменений — TestStepUpPageMatchesTheContract судит состав раздела, а не строку.
+  - kind: COVERAGE
+    note: перенесено из круга 1 ред.4 — перепрогон существующих шагов снятия этих глаголов на голове исполнителя.
+
+constructibility:
+  method: >-
+    Круг дельты: новых Given редакция 5 не вводит. Предусловие «вызывающий уровня 1» показано
+    названными действующими фикстурами (прочитаны @b831ce4f8): интеграционная
+    cmd/kaname/step_up_indication_test.go (acr "1"/"2"), сквозная CAP-08.
+  seeded: 0
+  of: 0
+  named_fixture: 2
+  not_executed: 0
+
+route_signs:
+  proto: yes (значение опции)
+  schema: no
+  public_rpc: yes (порог двух глаголов; каталог края)
+  ui: no
+  new_domain: no
+  security_surface: yes
+
+effective_approval:
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Действующее одобрение возникает после публикации внешнего события в subject.task этой
+      учёткой; до него запись — объявление вердикта рецензента.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 f10f3e8693f26763b1658b351c1fa3891922ae9b987e1a62f6c125bde05a31b4"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#720
+  status: performed
+  published: true
+  database_id: 6147586442
+  node_id: "IC_kwDOUO26pM8AAAABbmy5ig"
+  url: "https://github.com/PRO-Robotech/kaname/issues/720#issuecomment-6147586442"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6147586442"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T14:15:32Z"
+  body_sha256: "eeb6ad26694c9f3a17750337d3eec74753cfdfcb25267c4bd0021aa078a83a6c"
+  subject_sha256: "f10f3e8693f26763b1658b351c1fa3891922ae9b987e1a62f6c125bde05a31b4"
+  subject_revision_commit: "3066c7b6a266f640b367a82df21996f022a9a039"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh

@@ -64,7 +64,11 @@ VALUES ($1, $2, $3, $4)`
 // признак не читает, и каждая поверхность закрылась бы ошибкой хранилища на
 // законном вопросе о снятом семействе. Допуском снятие стало бы на форме
 // `coalesce(…, false)` — её здесь нет по той же причине.
-const familyRevokedOfIssuanceSQL = `SELECT family_live IS NOT TRUE FROM kaname.access_tokens WHERE jti = $1`
+//
+// Вторая колонка — семейство выпуска: его читает снятие ключа доступа, чтобы
+// найти сессию вызывающего (kaname#669, Ф13 Р8), — тем же оператором, а не
+// вторым чтением записи выпуска.
+const familyRevokedOfIssuanceSQL = `SELECT family_live IS NOT TRUE, family_id FROM kaname.access_tokens WHERE jti = $1`
 
 // sweepExpiredIssuancesSQL — уборка записей, чей токен уже не примет ни одна
 // поверхность. Партией и по часам БАЗЫ, как у соседних уборщиков.
@@ -241,15 +245,28 @@ func (r *OAuthCeremonyRepo) SweepExpiredAccessTokens(ctx context.Context, grace 
 // выпуска не имеют и судятся отсечками по ключам. Ошибка хранилища — третий
 // исход, вызывающий закрывается сам.
 func familyRevokedOf(ctx context.Context, q rowQuerier, jti string) (bool, error) {
-	var revoked bool
-	err := q.QueryRow(ctx, familyRevokedOfIssuanceSQL, jti).Scan(&revoked)
+	iss, _, err := issuanceOf(ctx, q, jti)
+	return iss.familyRevoked, err
+}
+
+// issuance — ответ записи выпуска: отозвано ли семейство и какое оно.
+type issuance struct {
+	familyRevoked bool
+	familyID      string
+}
+
+// issuanceOf — запись выпуска единственным оператором чтения
+// (`familyRevokedOfIssuanceSQL`); found=false — записи нет.
+func issuanceOf(ctx context.Context, q rowQuerier, jti string) (issuance, bool, error) {
+	var iss issuance
+	err := q.QueryRow(ctx, familyRevokedOfIssuanceSQL, jti).Scan(&iss.familyRevoked, &iss.familyID)
 	if stderrors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return issuance{}, false, nil
 	}
 	if err != nil {
-		return false, wrapPgErr(err, "AccessToken", "")
+		return issuance{}, false, wrapPgErr(err, "AccessToken", "")
 	}
-	return revoked, nil
+	return iss, true, nil
 }
 
 // PersonMarks — второй вопрос правила предъявления (kaname#456, Р5а): тем же

@@ -28,6 +28,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // adminCtx returns a ctx carrying an authenticated admin principal — the
@@ -174,7 +175,7 @@ func forceLogoutHandlerWithOps(rec *fakeForceLogoutRecorder) (*Handler, *recordi
 		// ниже судили бы отказ провязки вместо своего предмета (kaname#313).
 		// Отсечку кладёт его транзакция (kaname#340) — поэтому это та же
 		// заглушка, что пишет отсечку.
-		WithOwnSessions(rec)
+		WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now))
 	return h, ops
 }
 
@@ -299,7 +300,7 @@ func TestForceLogout_WriteFailure_MarksOperationError(t *testing.T) {
 func TestForceLogout_NoOperationRepo_Unavailable(t *testing.T) {
 	rec := &fakeForceLogoutRecorder{}
 	h := NewHandler(NewLookupSubjectUseCase(nil), nil).
-		WithOwnSessions(rec).
+		WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now)).
 		WithAdminChecker(&fakeForceLogoutChecker{allow: true})
 
 	_, err := h.ForceLogout(adminCtx(), &iamv1.ForceLogoutRequest{UserId: "usr_victim"})

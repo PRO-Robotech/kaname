@@ -5,7 +5,7 @@ package pg_test
 
 // user_delete_owns_account_integration_test.go — зеркало
 // `account_owner_fk_commit_integration_test.go` по ВТОРОЙ стороне того же
-// ограничения (#2048).
+// ограничения (kacho#2048).
 //
 // Сосед проверяет сторону ССЫЛКИ: вставка аккаунта с несуществующим владельцем
 // срывает КОММИТ (ключ `DEFERRABLE INITIALLY DEFERRED`) и даёт
@@ -14,7 +14,7 @@ package pg_test
 // Здесь — сторона ССЫЛАЮЩИХСЯ: снятие человека, который аккаунтом ВЛАДЕЕТ.
 // `ON DELETE RESTRICT` отвергает его тем же ключом, но на СВОЁМ ОПЕРАТОРЕ
 // (немедленная проверка; отложенность ключа относится к стороне вставки), а
-// состояние при этом ПРОТИВОПОЛОЖНОЕ — «ещё ссылаются». До #2048 обе стороны
+// состояние при этом ПРОТИВОПОЛОЖНОЕ — «ещё ссылаются». До kacho#2048 обе стороны
 // отвечали одним текстом, и человек, которого только что вернул `ListUsers`,
 // получал утверждение о собственном отсутствии.
 //
@@ -108,6 +108,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w3))
 	require.NoError(t, w3.Commit(ctx))
 
 	w4, err := repo.Writer(ctx)

@@ -79,10 +79,10 @@ func GatewayServiceName() string { return gatewayServiceName }
 //     запрос края, идущий до того, как может пойти пер-пользовательская
 //     проверка (курица и яйцо). ПРЕДМЕТ У ПОСЛАБЛЕНИЯ ЕСТЬ: клиент края
 //     экспонирует `IsSessionRevoked`, и он провязан в слой аутентификации
-//     (`middleware.NewLocalThenProviderRevocation`, #1122) — то есть край
+//     (`middleware.NewLocalThenProviderRevocation`, kacho#1122) — то есть край
 //     спрашивает эту полосу на каждом предъявлении удостоверения. Здесь стояло
-//     «этого вызывающего в дереве СЕГОДНЯ НЕТ (#797)»: утверждение пережило
-//     свой предмет (#1156). Исчезнет метод у края — снимать и эту строку.
+//     «этого вызывающего в дереве СЕГОДНЯ НЕТ (kacho#797)»: утверждение пережило
+//     свой предмет (kacho#1156). Исчезнет метод у края — снимать и эту строку.
 //     Ответ метода покрывает и отзыв СЕМЕЙСТВА выпуска (kaname#319); послабление
 //     под эту возможность выведено заново, а не унаследовано, — разбор у
 //     `session_revocations.Handler.IsRevoked`.
@@ -94,7 +94,7 @@ func GatewayServiceName() string { return gatewayServiceName }
 //     retiredRPCSurface in internal/repohygiene.
 //   - the fga-proxy writes InternalIAMService/{RegisterResource,
 //     UnregisterResource} — gated in-handler by RelationWriteGate (module SAs).
-//     The third one, WriteCreatorTuple, was retired with zero callers (#788).
+//     The third one, WriteCreatorTuple, was retired with zero callers (kacho#788).
 func GatewayFrontedInternalRPCs() []string {
 	return []string{
 		// InternalClusterService — cluster admin RBAC (admin UI).
@@ -146,7 +146,7 @@ func GatewayFrontedInternalRPCs() []string {
 		"/kaname.cloud.iam.v1.InternalModuleService/Get",
 		"/kaname.cloud.iam.v1.InternalModuleService/List",
 		// Четырёх методов администрирования хранилища отношений здесь больше нет:
-		// служба снята вместе с внешним движком (стадия S6 эпика #747). Запись
+		// служба снята вместе с внешним движком (стадия S6 эпика kacho#747). Запись
 		// круга, называющая метод, которого не существует, — не безобидный
 		// остаток: она переживает свой предмет и делает вид, что круг шире, чем
 		// он есть.

@@ -8,7 +8,9 @@ package check
 // (задача PRO-Robotech/kaname#456, §9 пп. 4, 15; §8 инв. 4, 5, 11) и условий
 // аудита поверхности службы:
 //
-//   - у отметки подтверждения ОДИН писатель — глагол подтверждения
+//   - у отметки подтверждения ОДИН оператор и ДВА названных вызывающих —
+//     глагол подтверждения и завершение восстановления, заводящее первый
+//     пароль личности без способа входа (Ф5 Р9, `kaname#608`)
 //     ([MarkWriterCalls]): ни внутренний глагол заведения личности, ни зеркало,
 //     ни посев отметку не ставят, и флаг «подтверждён» чужого источника не
 //     переносится;
@@ -102,7 +104,7 @@ func funcsOf(f *ast.File) []*ast.FuncDecl {
 	return out
 }
 
-// ─── Один писатель отметки ──────────────────────────────────────────────────
+// ─── Один писатель отметки, названные вызывающие ────────────────────────────
 
 // MarkWriterCalls — координаты ВЫЗОВОВ писателя отметки подтверждения
 // (`MarkEmailVerified`) в непроверочном коде и число разобранных файлов.
@@ -273,10 +275,16 @@ type MailWriterCensus struct {
 	ChargedByCaller int
 }
 
+// mailPacedByCaller — вызовы, которыми вызывающий решает предел писем раньше
+// писателя очереди: `InsertVerificationCodePaced` — предел писем
+// подтверждения, решаемый вставкой строки кода; `InsertEmailChangeCodePaced` —
+// темп запросов смены адреса (kaname#635, Р6); `PresentEmailChangeCode` —
+// уведомление о смене, одно на применённый код, выданный под этим темпом (Р7).
+var mailPacedByCaller = []string{"InsertVerificationCodePaced", "InsertEmailChangeCodePaced", "PresentEmailChangeCode"}
+
 // MailWriterFindings — каждый писатель очереди наших писем списывает окно
 // раньше постановки: сам (`chargeInviteMailWindowTx`) либо каждый его
-// вызывающий (`InsertVerificationCodePaced` — предел писем подтверждения,
-// решаемый вставкой строки кода). Пустая перепись — находка.
+// вызывающий (`mailPacedByCaller`). Пустая перепись — находка.
 func MailWriterFindings(files map[string]string) (MailWriterCensus, []string, error) {
 	pfs, err := parseAll(files)
 	if err != nil {
@@ -328,7 +336,11 @@ func MailWriterFindings(files map[string]string) (MailWriterCensus, []string, er
 						continue
 					}
 					callers++
-					if chargedBefore(g.calls, gc.pos, "InsertVerificationCodePaced") {
+					paced := false
+					for _, by := range mailPacedByCaller {
+						paced = paced || chargedBefore(g.calls, gc.pos, by)
+					}
+					if paced {
 						charged++
 					} else {
 						findings = append(findings, fmt.Sprintf("%s:%d %s зовёт писателя очереди %s, не решив предел писем раньше",

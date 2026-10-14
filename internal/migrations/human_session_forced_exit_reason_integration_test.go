@@ -161,6 +161,7 @@ func serSeedPerson(t *testing.T, db *sql.DB, tag string) string {
 	require.NoError(t, err, "Дано: личность")
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`, acc, "acc-"+tag, id)
 	require.NoError(t, err, "Дано: аккаунт")
+	seedWayIn(t, tx)
 	require.NoError(t, tx.Commit())
 	return id
 }
@@ -459,10 +460,14 @@ func TestHumanSessionSchema_KN_SER_07_DomainListAndTheBaseAgreeBothWays(t *testi
 	assert.Empty(t, onlyBase, "значения %s, которых нет в перечне домена: %v", serEndedReasonCheck, onlyBase)
 	assert.NotContains(t, list.values, serCutoffOnlyReason,
 		"%q — причина отсечки, а не снятия сессии (§0.2): в перечне словаря снятия её быть не должно", serCutoffOnlyReason)
-	// На голове значений пять: к четырём этой миграции kaname#456 добавила
-	// `email-verified` (подтверждение адреса снимает прочие сессии).
-	assert.Len(t, list.values, 5, "на голове N = 5")
-	assert.Len(t, base, 5, "на голове M = 5")
+	// На голове значений девять: к четырём этой миграции kaname#456 добавила
+	// `email-verified` (подтверждение адреса снимает прочие сессии), kaname#634 —
+	// `ended-from-another-session` (свои сессии снимаются из другой своей),
+	// kaname#635 — `email-changed` (исход смены адреса снимает прочие сессии),
+	// kaname#669 — `access-key-revoked` (снятие ключа доступа снимает прочие),
+	// kaname#458 — `address-claimed` (переход записи владельцу ящика снимает её сессии).
+	assert.Len(t, list.values, 9, "на голове N = 9")
+	assert.Len(t, base, 9, "на голове M = 9")
 }
 
 // TestHumanSessionMigration_KN_SER_08_UpDoesNotRewriteLyingRows — накат не

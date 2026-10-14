@@ -1,0 +1,88 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
+  sha256: 9629b41491f91695effdfb098b0124be20dfbcd42cfa2054b0ed01357183191f
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 36fce61d
+  content_commit: 3827cbfccaf5fa968e0e80bc79f64678d472b0f0
+  branch: '197'
+  task: PRO-Robotech/kaname#197
+  related_tasks: [PRO-Robotech/kacho#1266]
+  lines: 313
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
+    в копии kacho-workspace/tmp/kaname-197-198-acc @ 3827cbfcc → 9629b414…7183191f (совпал с заданием)
+  measurement_revisions: >-
+    Все замеры — в копии kaname-197-198-acc @ 3827cbfcc.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: "Блокирующих 2; одобрения нет."
+
+blocking:
+  - kind: NEGATIVE
+    scenario: Р2 / новый A197-08
+    finding: >-
+      Нет сценария и инварианта базы «личность нашей полосы без носителя невозможна».
+      Функция триггера при пустом ключе делает RETURN NULL — заведение не считается вовсе
+      (20260917130000_schema_functions_leave_the_platform_brand.sql, ветвь
+      `IF v_identity IS NULL OR v_identity = ''`). Если ключ берётся из нового столбца, то любой
+      путь, отчеканивший личность нашей полосы без записи носителя (либо записавший его ПОСЛЕ
+      вставки аккаунта в той же транзакции), молча снимает рубеж. Р2 говорит «вместе с
+      личностью», но этого не держит ни сценарий, ни ограничение.
+    required: >-
+      Отрицательный сценарий: строка с идентичностью нашей полосы без носителя отвергается базой
+      (названный SQLSTATE); близнец — та же строка с носителем проходит. Для полосы активации
+      приглашения — порядок: носитель записан до вставки личного аккаунта (A197-04 утверждает
+      принято 1 после активации).
+  - kind: FORMAT
+    scenario: A197-05
+    finding: >-
+      «Тогда: база отвергает запись» — без SQLSTATE и без текста; Р2 строит на этом
+      классификацию в INTERNAL, а отображение зависит от кода.
+    required: Назвать SQLSTATE (и сообщение) отказа правки носителя.
+
+important_nonblocking:
+  - "A197-05: близнец отличается не одним фактом (INSERT против UPDATE). Законная запись носителя на активации — UPDATE пустого носителя в значение; ограничение обязано её пропускать. Ближайший близнец — UPDATE NULL→значение проходит, значение→другое отвергается."
+  - "Существующие фикстуры (`ownLaneFixture`) вставляют строку нашей полосы без носителя; DoD п.2 «без правки утверждений» правку фикстуры допускает — назвать это явно."
+
+confirmed:
+  - "Производитель у «Тогда»: 7 из 7 (§4); заказанные — kaname#197."
+  - "Близнец у отрицаний: 01, 04, 05, 06 — свой; 03, 07 — существующие пробы."
+  - "Конструируемость: посевы §1.3 и UpTo-фикстура миграций есть; прогон посылок §9 — 13 проб этого набора PASS @3827cbfcc (через слот)."
+  - "TestPeopleAddressHasNoWriterInServiceCode — PASS @3827cbfcc."
+  - "Строка посева usr1a18042d81fb438d6 (адрес переписан миграцией) — external_id пуст, не наша полоса: Р3 не опровергнут."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#197
+  status: pending
+  published: false
+  body: "role: acceptance-reviewer · verdict: CHANGES_REQUESTED · subject: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md · subject_revision: 3827cbfccaf5fa968e0e80bc79f64678d472b0f0 · subject_sha256: 9629b41491f91695effdfb098b0124be20dfbcd42cfa2054b0ed01357183191f"
+  publication_mode: courier_of_agent_verdict
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

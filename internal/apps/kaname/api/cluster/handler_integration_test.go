@@ -538,8 +538,12 @@ func TestCluster_6_12_GrantAdmin_UserNotInDB(t *testing.T) {
 	h := buildHandler(t, dsn)
 	pctx := withPrincipal(ctx, string(caller))
 
-	// Valid format but not seeded — user does not exist in users table.
-	ghost := "usr_aaaaaaaaaaaaaaaaa"
+	// Годная форма (`usr` + 17 знаков крокфордова алфавита), но человека с
+	// таким id нет. Прежде здесь стоял id с подчёркиванием: он отвергался
+	// проверкой ФОРМЫ, и ветка «человека нет» не исполнялась вовсе, а проба
+	// утверждала только код — одинаковый у обеих веток (находка Н4 приёмки
+	// ADM-CA). Теперь форма проходит, и различает ветку текст отказа.
+	ghost := "usrzzzzzzzzzzzzzzzzz"
 	_, err = h.GrantAdmin(pctx, &iamv1.GrantClusterAdminRequest{
 		SubjectType: iamv1.ClusterGrantSubjectType_USER,
 		SubjectId:   ghost,
@@ -547,6 +551,9 @@ func TestCluster_6_12_GrantAdmin_UserNotInDB(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err),
 		"subject not in users table must return InvalidArgument (D-9)")
+	require.Equal(t, "User "+ghost+" not found", status.Convert(err).Message(),
+		"the existence branch, not the format branch, must answer")
+	require.Zero(t, countGrantRows(t, ctx, pool, ghost), "no grant row for an absent subject")
 }
 
 // anypb is used via extractGrantMeta; keep the import alive.

@@ -1,35 +1,31 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// usecase_revoke_idempotent_test.go — BAT-1-44 на УРОВНЕ ГЛАГОЛА.
+// usecase_revoke_idempotent_test.go — исход отзыва на УРОВНЕ ГЛАГОЛА
+// (приёмка `docs/engineering/acceptance/credential-verbs-refusal-outcomes.md`,
+// сценарии CVR-01 … CVR-04 и CVR-12, задача kaname#522).
 //
-// Приёмка базового токена (`sub-phase-BAT-1-basic-access-token-acceptance.md`,
-// BAT-1-44) называет исход повторного отзыва ПОИМЁННО: успех, и наблюдаемое
-// состояние после него не отличается от состояния после первого отзыва. Там же
-// названо, почему исход обязан совпасть с отзывом никогда не существовавшего:
-// иначе повторный отзыв стал бы ОРАКУЛОМ СУЩЕСТВОВАНИЯ.
-//
-// Существующая проба BAT-1-42/44 (`repo/kaname/pg/basic_credential_resolve_
-// integration_test.go`) утверждает это на уровне РЕЗОЛВА и снимает строку
-// сырым `DELETE`, минуя глагол. Про исход самого глагола она не утверждает
-// ничего — этим и занята эта проба.
-//
-// ТРЕТИЙ исход, которого приёмка прямо не называет, но который решает спор
-// «идемпотентность против скрытия существования»: отзыв ЧУЖОГО удостоверения.
-// Если «уже отозванное» отвечает успехом, а «чужое» — отказом, то по коду
-// ответа узнают, существует ли чужое удостоверение, — то есть скрытие
-// существования (security.md §Hardening #6) снимается той самой правкой,
-// которой добивались идемпотентности. Поэтому проба требует, чтобы ВСЕ ТРИ
-// безрезультатных исхода были неразличимы, и сверяет их ОТПЕЧАТКОМ, а не по
+// Отзыв удостоверения, которого у названного человека нет, отвечает синхронным
+// `NOT_FOUND` с текстом `UserToken <id> not found`, без операции и без события
+// аудита (Р1, Р2). «Нет» объединяет три случая — никогда не существовало, уже
+// снято, принадлежит другому человеку, — и три случая НЕРАЗЛИЧИМЫ: иначе по
+// различию исходов вызывающий узнавал бы, существует ли ЧУЖОЕ удостоверение
+// (security.md §Hardening #6). Поэтому исходы сверяются ОТПЕЧАТКОМ, а не по
 // одному коду.
+//
+// Прежний исход — успех с отметкой отзыва при ничего не снятом — замещён (Р3):
+// опечатка в идентификаторе при реакции на утечку выглядела для вызывающего
+// как состоявшийся отзыв. Утверждение «исход у трёх случаев один» сохранено.
 package user_tokens
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -38,54 +34,72 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
-// revokeOutcome — всё, что вызывающий может наблюдать об исходе отзыва, кроме
-// показаний часов. Сводится в СТРОКУ, чтобы сравнение двух исходов было
-// сравнением одного значения, а не перечислением полей: перечисление умалчивает
-// о поле, которое забыли перечислить, и оракул заводится именно там.
-//
-// Названные вызывающим величины — идентификатор удостоверения и идентификатор
-// человека — из отпечатка ВЫЧЁРКИВАЮТСЯ. Эхо собственного ввода сведениями не
-// является: без вычёркивания два запроса с разными идентификаторами разошлись
-// бы отпечатками всегда, и проба краснела бы на своей фикстуре, а не на дефекте.
-// Всё, что остаётся в отпечатке сверх эха, — это то, что ответ СООБЩАЕТ.
-func revokeOutcome(t *testing.T, repo *stubUserClientRepo, userID domain.UserID, tokenID domain.UserOAuthClientID) (string, bool) {
+// revokeObservation — всё, что вызывающий и хранилище могут наблюдать об
+// исходе отзыва, кроме показаний часов.
+type revokeObservation struct {
+	// outcome — исход, сведённый в СТРОКУ: сравнение двух исходов есть
+	// сравнение одного значения, а не перечисление полей, умалчивающее о поле,
+	// которое забыли перечислить.
+	outcome string
+	// opCreated — операция заведена.
+	opCreated bool
+	// deleted — строка снята.
+	deleted bool
+	// audits — событий аудита записано.
+	audits int
+}
+
+// revokeOutcome исполняет отзыв и сводит исход. Названные вызывающим величины
+// — идентификатор удостоверения и идентификатор человека — из отпечатка
+// ВЫЧЁРКИВАЮТСЯ: эхо собственного ввода сведениями не является, а без
+// вычёркивания два запроса с разными идентификаторами разошлись бы всегда.
+// Детали статуса входят в отпечаток: набор деталей — часть наблюдаемого.
+func revokeOutcome(t *testing.T, repo *stubUserClientRepo, userID domain.UserID, tokenID domain.UserOAuthClientID) revokeObservation {
 	t.Helper()
 	ops := &stubOpsRepo{}
-	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, ops)
+	audit := &stubAudit{}
+	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, ops).WithAuditEmitter(audit)
 
 	redact := func(s string) string {
 		s = strings.ReplaceAll(s, string(tokenID), "<id>")
 		return strings.ReplaceAll(s, string(userID), "<user>")
 	}
+	obs := func(outcome string) revokeObservation {
+		ops.mu.Lock()
+		created := ops.created
+		ops.mu.Unlock()
+		return revokeObservation{outcome: redact(outcome), opCreated: created, deleted: repo.deleted, audits: len(audit.events)}
+	}
 
 	if _, err := uc.Execute(context.Background(), RevokeInput{UserID: userID, TokenID: tokenID}); err != nil {
 		st := grpcstatus.Convert(err)
-		return redact(fmt.Sprintf("sync-отказ code=%v msg=%q", st.Code(), st.Message())), repo.deleted
+		return obs(fmt.Sprintf("sync-отказ code=%v msg=%q details=%d", st.Code(), st.Message(), len(st.Details())))
 	}
 	waitForOp(t, ops)
 
 	ops.mu.Lock()
-	defer ops.mu.Unlock()
-	if ops.lastErr != nil {
-		return redact(fmt.Sprintf("op-отказ code=%d msg=%q", ops.lastErr.GetCode(), ops.lastErr.GetMessage())), repo.deleted
+	lastErr, lastResp := ops.lastErr, ops.lastResp
+	ops.mu.Unlock()
+	if lastErr != nil {
+		return obs(fmt.Sprintf("op-отказ code=%v msg=%q details=%d",
+			codes.Code(lastErr.GetCode()), lastErr.GetMessage(), len(lastErr.GetDetails())))
+	}
+	if lastResp == nil {
+		return obs("op-успех БЕЗ ответа")
 	}
 	var resp iamv1.RevokeUserTokenResponse
-	if ops.lastResp == nil {
-		return "op-успех БЕЗ ответа", repo.deleted
-	}
-	if err := ops.lastResp.UnmarshalTo(&resp); err != nil {
-		return fmt.Sprintf("op-успех, ответ не разбирается: %v", err), repo.deleted
+	if err := lastResp.UnmarshalTo(&resp); err != nil {
+		return obs(fmt.Sprintf("op-успех, ответ не разбирается: %v", err))
 	}
 	// Отметка времени в отпечаток не входит — она различает любые два вызова.
-	// Входит ФАКТ её наличия: пустая отметка на безрезультатном исходе и была
-	// бы оракулом («ничего не сняли» читается прямо из тела).
-	return redact(fmt.Sprintf("op-успех tokenId=%q revokedAtSet=%v",
-		resp.GetTokenId(), resp.GetRevokedAt() != nil)), repo.deleted
+	// Входит ФАКТ её наличия.
+	return obs(fmt.Sprintf("op-успех tokenId=%q revokedAtSet=%v", resp.GetTokenId(), resp.GetRevokedAt() != nil))
 }
 
-// TestRevoke_RepeatAbsentAndForeignShareOneOutcome — BAT-1-44 плюс проверка на
-// оракул. Четыре случая: один положительный контроль и три безрезультатных,
-// которые обязаны быть неразличимы.
+// TestRevoke_RepeatAbsentAndForeignShareOneOutcome — CVR-01 … CVR-04. Один
+// положительный контроль (CVR-01) и три безрезультатных случая, каждый
+// отличается от контроля ОДНИМ фактом и все три равны синхронному `NOT_FOUND`.
+// Имя функции — координата приёмки (DoD п.1).
 func TestRevoke_RepeatAbsentAndForeignShareOneOutcome(t *testing.T) {
 	const (
 		caller  = domain.UserID("usr00000000000000001")
@@ -93,65 +107,96 @@ func TestRevoke_RepeatAbsentAndForeignShareOneOutcome(t *testing.T) {
 		tokenID = domain.UserOAuthClientID("uoc00000000000000009")
 		neverID = domain.UserOAuthClientID("uoc00000000000000404")
 	)
+	const refusal = `sync-отказ code=NotFound msg="UserToken <id> not found" details=0`
 
-	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ. Без него все утверждения ниже были бы верны и
-	// о глаголе, который не делает ничего и всегда отвечает успехом.
+	// ── CVR-01, ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ. Без него утверждения ниже были бы
+	// верны и о глаголе, отказывающем всегда.
 	own := &stubUserClientRepo{getRow: domain.UserOAuthClient{
 		CredentialKind: domain.CredentialKindSecret,
 		ID:             tokenID,
 		UserID:         caller,
 	}}
-	ownOutcome, ownDeleted := revokeOutcome(t, own, caller, tokenID)
-	if !ownDeleted {
-		t.Fatalf("положительный контроль: своё живое удостоверение НЕ снято — успех ниже был бы вакуумен (исход %s)", ownOutcome)
+	ownObs := revokeOutcome(t, own, caller, tokenID)
+	if want := `op-успех tokenId="<id>" revokedAtSet=true`; ownObs.outcome != want {
+		t.Fatalf("CVR-01: своё живое — исход %s, ожидался %s", ownObs.outcome, want)
 	}
-	if want := `op-успех tokenId="<id>" revokedAtSet=true`; ownOutcome != want {
-		t.Fatalf("своё живое: исход %s, ожидался %s", ownOutcome, want)
+	if !ownObs.deleted || ownObs.audits != 1 {
+		t.Fatalf("CVR-01: своё живое — снято=%v, событий аудита %d; ожидалось снято и ровно одно событие",
+			ownObs.deleted, ownObs.audits)
 	}
 
-	// ── (1) ПОВТОРНЫЙ отзыв: строки уже нет.
-	repeated := &stubUserClientRepo{
+	// ── CVR-03: ПОВТОРНЫЙ отзыв — строки уже нет.
+	repeated := revokeOutcome(t, &stubUserClientRepo{
 		getErr: iamerr.Wrapf(iamerr.ErrNotFound, "UserToken %s not found", tokenID),
-	}
-	repeatedOutcome, repeatedDeleted := revokeOutcome(t, repeated, caller, tokenID)
-
-	// ── (2) Идентификатор, которого не было НИКОГДА.
-	never := &stubUserClientRepo{
+	}, caller, tokenID)
+	// ── CVR-02: идентификатор, которого не было НИКОГДА.
+	never := revokeOutcome(t, &stubUserClientRepo{
 		getErr: iamerr.Wrapf(iamerr.ErrNotFound, "UserToken %s not found", neverID),
-	}
-	neverOutcome, neverDeleted := revokeOutcome(t, never, caller, neverID)
-
-	// ── (3) ЧУЖОЕ удостоверение: строка есть, принадлежит другому человеку.
-	foreign := &stubUserClientRepo{getRow: domain.UserOAuthClient{
+	}, caller, neverID)
+	// ── CVR-04: ЧУЖОЕ удостоверение — строка есть, принадлежит другому человеку.
+	foreignRepo := &stubUserClientRepo{getRow: domain.UserOAuthClient{
 		CredentialKind: domain.CredentialKindSecret,
 		ID:             tokenID,
 		UserID:         other,
 	}}
-	foreignOutcome, foreignDeleted := revokeOutcome(t, foreign, caller, tokenID)
+	foreign := revokeOutcome(t, foreignRepo, caller, tokenID)
 
-	// BAT-1-44: исход повторного отзыва — УСПЕХ, названный приёмкой.
-	if want := `op-успех tokenId="<id>" revokedAtSet=true`; repeatedOutcome != want {
-		t.Errorf("повторный отзыв: исход %s, приёмка BAT-1-44 требует %s", repeatedOutcome, want)
+	for name, o := range map[string]revokeObservation{
+		"CVR-02 никогда-не-было": never,
+		"CVR-03 повторный":       repeated,
+		"CVR-04 чужое":           foreign,
+	} {
+		if o.outcome != refusal {
+			t.Errorf("%s: исход %s, приёмка (Р1, Р2) требует %s", name, o.outcome, refusal)
+		}
+		if o.opCreated {
+			t.Errorf("%s: заведена операция — отказ обязан быть синхронным, до операции", name)
+		}
+		if o.deleted {
+			t.Errorf("%s: строка снята — снимать было нечего либо строка чужая", name)
+		}
+		if o.audits != 0 {
+			t.Errorf("%s: записано событий аудита %d — события без изменения состояния не бывает", name, o.audits)
+		}
 	}
-	if repeatedDeleted {
-		t.Error("повторный отзыв не имел что снимать, а снятие произошло")
-	}
-
 	// Неразличимость — отпечатками, а не по одному коду.
-	if neverOutcome != repeatedOutcome {
-		t.Errorf("ОРАКУЛ: никогда-не-было %s ≠ повторный %s — по различию узнают, существовало ли удостоверение",
-			neverOutcome, repeatedOutcome)
+	if never.outcome != repeated.outcome || foreign.outcome != repeated.outcome {
+		t.Errorf("ОРАКУЛ: исходы различимы — никогда-не-было %s · повторный %s · чужое %s",
+			never.outcome, repeated.outcome, foreign.outcome)
 	}
-	if foreignOutcome != repeatedOutcome {
-		t.Errorf("ОРАКУЛ: чужое %s ≠ повторный %s — по различию узнают, существует ли ЧУЖОЕ удостоверение (security.md §Hardening #6)",
-			foreignOutcome, repeatedOutcome)
-	}
-	if neverDeleted {
-		t.Error("отзыв никогда не существовавшего что-то снял")
-	}
-	// Скрытие существования не ослаблено: успех по чужому — это ОТСУТСТВИЕ
-	// строки в пространстве вызывающего, а не право её снять.
-	if foreignDeleted {
-		t.Error("чужая строка СНЯТА — скрытие существования обернулось чужим удалением")
-	}
+}
+
+// TestRevoke_CVR12_UnansweredStoreIsUnavailableNotNotFound — CVR-12: хранилище
+// не ответило на синхронной сверке существования — `UNAVAILABLE`, а не
+// `NOT_FOUND`: неполученный ответ не есть «нет». Близнец — CVR-02 на том же
+// входе, где хранилище ответило «нет».
+func TestRevoke_CVR12_UnansweredStoreIsUnavailableNotNotFound(t *testing.T) {
+	const (
+		caller  = domain.UserID("usr00000000000000001")
+		tokenID = domain.UserOAuthClientID("uoc00000000000000404")
+	)
+	t.Run("близнец CVR-02: хранилище ответило «нет»", func(t *testing.T) {
+		o := revokeOutcome(t, &stubUserClientRepo{
+			getErr: iamerr.Wrapf(iamerr.ErrNotFound, "UserToken %s not found", tokenID),
+		}, caller, tokenID)
+		if want := `sync-отказ code=NotFound msg="UserToken <id> not found" details=0`; o.outcome != want {
+			t.Fatalf("исход %s, ожидался %s", o.outcome, want)
+		}
+	})
+	t.Run("CVR-12: хранилище не ответило", func(t *testing.T) {
+		repo := &stubUserClientRepo{
+			readErr: iamerr.Wrapf(iamerr.ErrUnavailable, "pool exhausted: %v", errors.New("dial tcp 10.0.0.9:5432")),
+		}
+		o := revokeOutcome(t, repo, caller, tokenID)
+		if !strings.HasPrefix(o.outcome, "sync-отказ code=Unavailable ") {
+			t.Fatalf("исход %s, ожидался синхронный UNAVAILABLE (fail-closed мутации)", o.outcome)
+		}
+		if strings.Contains(o.outcome, "10.0.0.9") {
+			t.Errorf("текст отказа несёт причину чужой стороны: %s", o.outcome)
+		}
+		if o.opCreated || o.deleted || o.audits != 0 {
+			t.Errorf("CVR-12: операция=%v снято=%v аудит=%d — ничего не должно было случиться",
+				o.opCreated, o.deleted, o.audits)
+		}
+	})
 }

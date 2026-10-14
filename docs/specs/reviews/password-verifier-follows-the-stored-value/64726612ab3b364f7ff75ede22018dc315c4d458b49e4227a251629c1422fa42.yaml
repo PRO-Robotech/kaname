@@ -1,0 +1,170 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/password-verifier-follows-the-stored-value.md
+  sha256: 64726612ab3b364f7ff75ede22018dc315c4d458b49e4227a251629c1422fa42
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает. Действующий вердикт о
+    ЭТОЙ редакции — эта запись вместе с внешним событием; прежние записи остаются вердиктами о
+    своём содержимом.
+  content_commit: null
+  content_commit_note: >-
+    редакция не закоммичена: рабочая копия tmp/idpw1-r8, ветка idpw1-r8 от origin/296 @3066c7b6a.
+    Вердикт — о содержимом по отпечатку; коммит, несущий другой отпечаток, этой записью не одобрен.
+  judged_on: origin/296 @ 3066c7b6a266f640b367a82df21996f022a9a039
+  base_sha256: 93515d23a58bf0a1e533abf6f247d4452c8e431d181d9637b630664d85af60eb
+  revision: 8
+  lines: 2620
+  round: 8
+  round_note: >-
+    круг 8 — второй круг серии правки одобренной редакции 6 (круг 7 — CHANGES_REQUESTED редакции 7).
+    Предмет задан диспетчером: только дельта к 93515d23… по блокирующим B1 и B2; новые роды не
+    открываются, кроме нарушения ban #1. Предел двух кругов (fa-b8) этим кругом исчерпан.
+  fingerprint_predicate: >-
+    sha256sum <копия>/<путь> → 64726612…fa42; git show HEAD:<путь> | sha256sum → 93515d23…f60eb
+    (база дельты = запись круга 7).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-13'
+publication_mode: courier_of_agent_verdict
+
+premise_check:
+  premise: 'дельта к 93515d23… ограничена B1 и B2 круга 7; записи на 64726612… нет'
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git diff -U0 HEAD -- <путь>: 14 ханков — шапка (пункт «Редакция 8»), §4.3.1 строки 23.1…23.3 и
+    итог, Ось 2 Д-23, Д-27, Д-28 (столбец сценариев), абзац уровня полосы, PWV-23, строка PWV-23 §6,
+    новый §18. Вне B1/B2 правок нет. Среди записей каталога ревью имени 64726612… не было.
+
+predicates_run:
+  doc_counts: >-
+    awk предиката §18 → «всего 118 23: 3»; grep -c '^\*\*PWV-[0-9][0-9] — ' → 25. Совпадает.
+  b1_branch: >-
+    git show 3066c7b6a:…/humansession/recovery_request.go — ветвь
+    `case !target.EmailVerified && !unverifiedMayRecover(target)` → наблюдатель
+    RecoveryRequestUnverified, ответ nil (тот же); unverifiedMayRecover: ACTIVE → true, PENDING →
+    HasPassword, прочее (BLOCKED) → false. Кода и письма у BLOCKED с неподтверждённым адресом нет.
+  b1_holder: >-
+    TestRecovery_F5_31_UnverifiedAddressWithAPasswordStillGetsNoCode (recovery_way_in_usecase_test.go
+    59): строка BLOCKED с паролем, адрес не подтверждён → «у строки BLOCKED письма нет» (68), кода
+    нет, клетка unverified = 1.
+  b1_neighbour: >-
+    git show 3066c7b6a:docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md |
+    sha256sum → 79e0f15a…6604; A458-01, близнец (а): «строка BLOCKED с паролем и неподтверждённым
+    адресом — ответ побайтово тот же, письма нет, кода нет, клетка unverified прибавила 1». То же,
+    что PWV-23 Then-1.
+  b1_positive_control: >-
+    login.go @3066c7b6a: Verify (296) всегда, несовпадение → refuse до блокировки; совпадение →
+    `!user.InviteStatus.MaySignInToOwnLane()` → LoginOutcomeBlocked. Клетка «заблокирована» при
+    прежнем пароле различает «материал прежний» и «материал сменён/потерян» — контроль способен упасть.
+  b1_twin: >-
+    TestRecovery_F5_17_BlockedIdentityGetsTheBlockedLoginRefusal (recovery_usecase_test.go 302):
+    BLOCKED с подтверждённым адресом — письмо есть, завершение меняет учётные данные, сессии нет,
+    блокировка остаётся, вход новым паролем — LoginOutcomeBlocked. Отличие от PWV-23 — одна отметка
+    адреса (ветвь 147 судит только EmailVerified при BLOCKED).
+  b2_fixture: >-
+    seedAccountMember (force_logout_identity_deletion_race_integration_test.go 57–66) — withWayIn,
+    строка пароля тем же оператором (active_way_in_fixture_test.go 57–61) — основание B2 верно.
+    Названная форма Д-23 — store_double_parity_integration_test.go 229–257: Begin, SET CONSTRAINTS
+    ALL DEFERRED, INSERT users (… invite_status, email_verified_at) без withWayIn, seedOpenPath (256),
+    Commit. seedOpenPathSQL (47–52) ставит recovery_path_opened_at ACTIVE-строкам транзакции без
+    строки пароля — у Д-23 условие выполнено. Ключ C1 (миграция 20261005030000, 100–101) требует
+    'password' только у ACTIVE без открытого пути — фиксация проходит. Самосверка посева до «Когда»
+    названа (строк пароля 0, отметка пути стоит, адрес подтверждён).
+  d27_fixture: >-
+    seedPerson (session_row_writers_identity_deletion_integration_test.go 231): строка пароля сцены
+    ON CONFLICT DO UPDATE (237–242), отметка адреса — UPDATE email_verified_at (243), её пропуск даёт
+    неподтверждённый адрес; блокировка — UsersW().SetInviteStatus (user_repo.go 941; форма
+    user_setblocked_integration_test.go 38). Ключ C1 у BLOCKED — NULL (101): строка не судится.
+
+blocking: []
+
+closed_from_round_7:
+  - id: B1
+    kind: PRODUCER
+    status: закрыто
+    by: 'мир PWV-23 — BLOCKED с паролем и неподтверждённым адресом; производители 23.1 — ветвь 147/232 и Ф5-31 (68), 23.2 — применение кода до записей и порядок входа (296 → 333), 23.3 — Ф5-17 (302); сосед A458-01 (а) на 79e0f15a… утверждает то же'
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    status: закрыто
+    by: 'Д-23 — явная транзакция без withWayIn + seedOpenPath до фиксации; форма в дереве store_double_parity_integration_test.go 229–257'
+
+non_blocking:
+  - id: N5
+    summary: >-
+      PWV-23 Then-3 (и 23.3): исход завершения у близнеца назван «отказом заблокированной (Ф1-05,
+      Ф1-59)», а держатель Ф5-17 утверждает ErrAccessNotRestored — отказ глагола (Ф5 Р10 п. 2), не
+      отказ входа. Производитель назван верно (Ф5-17) и решает; при следующей правке — назвать форму
+      отказа завершения словами Р10 п. 2, чтобы проба не ждала отказ входа.
+  - id: N6
+    summary: >-
+      Ось 2, Д-24 «тот же посев со строкой 231–233»: после B2 Д-23 строится не seedPerson, «тот же»
+      больше не указывает на одну форму; назвать seedPerson и перемерить строки (237–242).
+  - id: N7
+    summary: >-
+      Ось 2, Д-28: ссылка 452 устарела, setInviteStatus — 584 (автор назвал сам); Д-27 уже пишет 584.
+  - id: N8
+    summary: >-
+      Д-23 против Д-24 отличается двумя фактами — строкой пароля и отметкой открытого пути; второй
+      принуждён ключом C1 (у ACTIVE без строки пароля отметка обязательна, seedOpenPath у строки с
+      паролем ничего не ставит). Унаследовано от редакции 7, в дельту не входит; при правке —
+      назвать это «одним наблюдаемым фактом при схемой принуждённой отметке».
+  - note: 'N1…N4 круга 7 — не закрывались решением диспетчера, остаются за записью 93515d23…'
+
+constructibility: >-
+  Посева не было: обе тронутые формы читаются из SQL фикстур и схемы детерминированно (как в круге
+  7). Д-23 — названная форма есть и строит именно Д-23 (без строки пароля, отметка пути ставится,
+  ключ C1 фиксацию принимает); Д-27 — seedPerson без отметки адреса + SetInviteStatus BLOCKED, ключ C1
+  BLOCKED не судит. Посеяно 0 из 2, «не выполнилось» 0, прочтено фикстурами 2 из 2.
+
+coverage:
+  scope: 'дельтой scope не расширен'
+  producers: '«Тогда» без производителя на ревизии суда: 0 (PWV-23 — 3 из 3 с производителем)'
+  twins: 'PWV-23 — близнец Ф5-17, отличие одно (отметка адреса); у отрицаний дельты близнец есть'
+
+event_body: >-
+  acceptance-reviewer · APPROVED · 64726612ab3b364f7ff75ede22018dc315c4d458b49e4227a251629c1422fa42
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-13T16:50:25Z"
+  ban1_lifted: false
+  why: 'санкция действует после публикации внешнего события курьером; до неё — not_performed'
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#782
+  status: performed
+  published: true
+  database_id: 6150629182
+  node_id: "IC_kwDOUO26pM8AAAABbpsnPg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/782#issuecomment-6150629182"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6150629182"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-13T16:50:25Z"
+  body_sha256: "74655350e185b7efae7f2a6dbe825d4f03190552f92dd1c0c26e1084191380b6"
+  subject_sha256: "64726612ab3b364f7ff75ede22018dc315c4d458b49e4227a251629c1422fa42"
+  subject_revision_commit: "8e79072332646db4ebdf5fee2cb71d11c32ca7b1"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+  security_surface_note: >-
+    восстановление доступа: выдача кода на неподтверждённый адрес заблокированной записи; в публичный
+    текст события путь дефекта не выносится

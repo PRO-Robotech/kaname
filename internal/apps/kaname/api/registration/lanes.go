@@ -1,14 +1,14 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package registration — регистрация человека нашей полосой и её три следствия
-// одним исходом (фаза Ф4, задача PRO-Robotech/kacho#1270; приёмка
+// Package registration — регистрация человека нашей полосой и её четыре следствия
+// одним исходом (личный аккаунт — четвёртое, Р8) (фаза Ф4, задача PRO-Robotech/kacho#1270; приёмка
 // `docs/engineering/acceptance/registration-and-its-three-consequences.md`).
 //
 // # Раскладка
 //
 // `lanes.go` — ЕДИНСТВЕННОЕ объявление полос регистрации (Р4); `iface.go` —
-// порты; `register.go` — глагол регистрации: одна транзакция трёх следствий
+// порты; `register.go` — глагол регистрации: одна транзакция четырёх следствий
 // (Р1); `refusals.go` — отказы. Транспорт живёт в `internal/handler/loginlanehttp`
 // — сюда он не течёт.
 package registration

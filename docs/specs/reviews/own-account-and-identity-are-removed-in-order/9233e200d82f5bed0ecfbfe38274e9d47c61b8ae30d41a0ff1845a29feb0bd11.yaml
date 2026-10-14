@@ -1,0 +1,146 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/own-account-and-identity-are-removed-in-order.md
+  sha256: 9233e200d82f5bed0ecfbfe38274e9d47c61b8ae30d41a0ff1845a29feb0bd11
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (change-graph.md §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8b0379e2a
+  content_commit: null
+  content_commit_note: >-
+    Редакция 2 не закоммичена (git status: ?? поверх origin/296 @8b0379e2a). Отпечаток снят с
+    рабочего дерева копии tmp/kaname-664-acc.
+  branch: '664'
+  task: PRO-Robotech/kaname#664
+  related_tasks: [PRO-Robotech/kaname#540, PRO-Robotech/kacho#1266]
+  round: 2
+  round_kind: delta
+  previous_record: docs/specs/reviews/own-account-and-identity-are-removed-in-order/11f3563098b17c2aee22ca0cada55407bbda8fbf40a65ca45900821677c94918.yaml
+  fingerprint_predicate: sha256sum <док> → 9233e200…bd11 (совпал с заданием); git rev-parse origin/296 → 8b0379e2a9c5; git ls-remote origin refs/heads/664 → пусто
+publication_mode: courier_of_agent_verdict
+
+verdict: RETURN
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+
+previous_blocking_disposition:
+  - kind: PRODUCER
+    scenarios: [KN664-19]
+    outcome: closed
+    note: >-
+      Повтор — от администратора облака; дверь (checkAdapter) после отказа объекта спрашивает
+      надзор, обработчик — проверка существования → 404. Прочитано own_door.go:466-491.
+  - kind: PRODUCER
+    scenarios: [KN664-20, KN664-40, KN664-41]
+    outcome: closed
+    note: >-
+      Наборы исходов замкнуты по кодам и текстам. KN664-20 (б) — fkText ветвь projects_account_fk
+      INSERT-стороны «Account <id> not found»; (в) — дверь editor. KN664-40: Create объявлен
+      <exempt> SELF_SERVICE (account_service.proto), 403 двери там нет. KN664-41 — без роли.
+  - kind: CONSTRUCTIBILITY
+    scenarios: [KN664-34, KN664-36]
+    outcome: closed
+    note: >-
+      Выбран вариант Р10 (охрана считает только действующие выдачи); посев ниже подтверждает и
+      исходное наблюдение (§0.9), и форму после правки.
+  - kind: FORMAT
+    scenarios: [KN664-03, KN664-15, KN664-30, KN664-40, KN664-43]
+    outcome: closed
+
+constructibility:
+  method: >-
+    Postgres 16 в контейнере (снят после посева), схема накатана мигратором службы
+    (go run ./cmd/migrator up → 20261007150000). Посев: аккаунт B; люди U, N, V, W (PENDING);
+    группа G, сервисный аккаунт SA; выдачи: U — REVOKED; N — ACTIVE; V — второй субъект
+    REVOKED-выдачи; W — второй субъект ACTIVE-выдачи; G и SA — по одной REVOKED. Затем оператор
+    снятия в форме userWriter.Delete до и после условия Р10, CREATE OR REPLACE функции
+    principal_not_referenced_as_subject с условием revoked_at IS NULL, реестр issued_user_ids
+    (AFTER INSERT, без ON CONFLICT, по образцу issued_account_ids) и оператор в форме InsertPending.
+  seeded: 9
+  of: 9
+  not_executed: 0
+  observed:
+    - до Р10 снятие U (только REVOKED) и V (второй субъект REVOKED) → deleted=0 (§0.9 подтверждён)
+    - после Р10 U → deleted=1, V → deleted=1 (KN664-46, 47); N → 0, W → 0 (близнецы KN664-36, 47)
+    - функция триггера после Р10 — простое снятие W отвергнуто текстом стража; V снимается
+    - G и SA с одними REVOKED-выдачами снимаются; обе REVOKED-строки пережили субъект (KN664-48)
+    - реестр — InsertPending с id живого человека по его почте → ветвь ON CONFLICT, inserted=f, без отказа (KN664-41 (а))
+    - тот же оператор с id снятого U → 23505 issued_user_ids_pkey (KN664-41 (в))
+    - снятый U, свежий id, почта U → inserted=t (KN664-41 (б))
+  scope_note: >-
+    Посев — уровень базы. Уровень двери, предъявления и края (KN664-19, 20, 30, 35, 40, 43, 50)
+    судится чтением производителя.
+
+blocking:
+  - kind: PRODUCER
+    scenarios: [KN664-30, KN664-35, KN664-40, KN664-50]
+    decisions: [Р5]
+    defect: >-
+      Р5 утверждает: удостоверение, выпущенное личности до момента снятия, на предъявлении
+      отвергается «независимо от того, успела ли доставка». Производитель отказа —
+      presentedcred.Reader, а у него положительный вердикт об отзыве кешируется на
+      RevocationCacheTTL, и этот срок объявлен окном отзыва (presentedcred/reader.go, поле Config;
+      config/presented_credential.go:47-54, 111-116). Токен, предъявленный до снятия (его
+      принимают Given KN664-30 и близнец KN664-31), в пределах окна после снятия принимается.
+      Значит последнее «Тогда» KN664-30, «Тогда» KN664-35 и «удостоверения U отвергаются»
+      KN664-50 одним исходом сразу после снятия не производятся; проба, написанная по тексту,
+      зелена или красна в зависимости от момента предъявления. В KN664-40 набор остаётся
+      замкнут, но метка исхода (б) «пришло после фиксации — 401» неверна: в окне кеша создание
+      после фиксации проходит предъявление и даёт (в). Соседняя одобренная приёмка
+      subject-cutoff-writes-both-records-under-one-lock.md эту оговорку несёт («срок кеша истёк, и
+      токен предъявлен»), этот документ — нет.
+    evidence: >-
+      internal/presentedcred/reader.go (RevocationCacheTTL «он же объявленное окно отзыва»,
+      ErrCacheTTLRequired); internal/apps/kaname/config/presented_credential.go:47-54;
+      cmd/kaname/serve.go:911
+    fix: >-
+      В Р5 заменить «независимо…» на «не позже окна отзыва (RevocationCacheTTL) после фиксации,
+      независимо от доставки модели прав». В KN664-30, 35, 50 предъявлять после окна (управляемые
+      часы в интеграционной пробе либо ожидание окна в сквозной); в KN664-40 переименовать
+      условия (б)/(в) на «предъявление отвергнуто / принято», тексты не трогать. Строку §5
+      производителя дополнить окном.
+
+important:
+  - kind: COVERAGE
+    note: >-
+      Р11 перечисляет источники обратного заполнения как «живые строки и записи, переживающие
+      человека (записи отзыва, атрибуция Р4, отозванные выдачи)». Прочие мягкие ссылки на снятых
+      уже сегодня есть (access_bindings.granted_by_user_id, revoked_by_user_id,
+      roles.created_by_user_id, minted_token_revocations, операции, аудит). Свойству KN664-41
+      достаточно живых строк: читатель приглашения называет только живую строку. Либо назвать
+      полный набор, либо сказать, почему живых строк достаточно.
+  - kind: FORMAT
+    note: >-
+      23505 на issued_user_ids_pkey сегодня уйдёт в общий разбор (ALREADY_EXISTS); отображение в
+      «User <id> not found» code 9 — работа исполнителя, она названа в §5 «нет сегодня». Стоит
+      добавить строку разбора в DoD 5б с именем ограничения.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 9233e200…bd11
+    - git rev-parse origin/296 → 8b0379e2a9c5
+    - git ls-remote origin refs/heads/664 → пусто
+    - §0.1 предикат (awk по Up-секциям) → 25 (совпало с документом)
+    - git grep -n "NOT EXISTS (SELECT 1 FROM access_binding" -- 'internal/**/*.go' ':!*_test.go' → 6 (три пары, условия на состояние нет)
+    - посев на накатанной схеме (см. constructibility)
+
+consistency_with_approved:
+  - registration-and-its-three-consequences.md — Р8 личного аккаунта, без расхождения
+  - expired-invitation-keeps-the-address-until-the-inviter-acts.md A198-03 — «id не равен снятому» согласуется с Р11; близнец A198-03 строится действующей выдачей, Р10 его не меняет
+  - subject-cutoff-writes-both-records-under-one-lock.md — запись отсечки та же; оговорка окна кеша там есть, здесь отсутствует (блокирующее)
+  - non-empty-project-is-not-deleted.md — отказ, а не каскад; без расхождения
+
+effective_approval:
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Вердикт RETURN санкции не даёт; событие публикуется для истории круга. Учётка названа, потому
+      что гейт записей ревью ищет событие в subject.task этой учёткой.
+
+event_body: "acceptance-reviewer · RETURN · sha256 9233e200d82f5bed0ecfbfe38274e9d47c61b8ae30d41a0ff1845a29feb0bd11"

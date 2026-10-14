@@ -3,7 +3,7 @@
 
 // basic_credential_resolve_integration_test.go — ОТЗЫВ ДОХОДИТ ДО ПРЕДЪЯВЛЕНИЯ.
 //
-// Задача #1142, приёмка BAT-1 §6; сценарии BAT-1-42, 44, 45, 46, 47, 48.
+// Задача kacho#1142, приёмка BAT-1 §6; сценарии BAT-1-42, 44, 45, 46, 47, 48.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ ВОПРОС СТАВИТСЯ СКВОЗЬ ОБЕ СТОРОНЫ
@@ -68,6 +68,7 @@ ON CONFLICT DO NOTHING`)
 INSERT INTO service_accounts (id, account_id, name, enabled)
 VALUES ('sva0000000000000bat1', 'acc0000000000000bat1', 'bat-one-sa', true) ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 }
 

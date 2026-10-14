@@ -1,0 +1,85 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md
+  sha256: 118035c42395cbe02c00c8505508aebc91847a047a665af311594893397819af
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 70edd48871d6523c9282490a0eb22a2133a2bcf6
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 3938
+  round: 13
+  round_note: >-
+    круг 13 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/login-lane-issues-our-session-and-logout-ends-it-server-
+    side/ccc4e472e2f762d02f50d2df33aca90f46dc71b68fc434c989322ca7e5a78389.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-
+    side.md на tmp/535-na3a @ 33b0f8aa9 →
+    118035c42395cbe02c00c8505508aebc91847a047a665af311594893397819af; совпал с отпечатком задания
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: COVERAGE
+    summary: >-
+      Ф3-20 «Тогда» (д): смена пароля — «единственный глагол формы, где недоступность не
+      ретранслируется». Редакция 18 в Р7 сама выписала, что таких записей ДЕВЯТЬ (password, пять
+      second-factor, step-up, verify-email, verify-email-confirm) — PRO-
+      Robotech/kacho@e801c0f7844:gateway/internal/middleware/login_lane_paths.go:270-284, без
+      relayWhenUnanswered 9 из 15.
+    why_blocking: >-
+      Два места одного документа об одном предмете расходятся, и неверное стоит в «Тогда» сценария:
+      держатель Ф3-20 утверждал бы ложное «единственный», а редакция пишет «все Тогда не тронуты».
+    fix: >-
+      Сузить «Тогда» (д) Ф3-20 до четырёх глаголов Р2 («единственный из четырёх глаголов Р2») со
+      ссылкой на перечень Р7.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    summary: >-
+      Ф3-45 «край выбирает читателя сессии посадкой»: Then под external — «прежнего поставщика и
+      SessionCutoffOf, как сегодня». На ревизии края, которую называет сама редакция 18
+      (kacho@e801c0f7844, предок origin/main), читателя чужой сессии нет: gateway/cmd/api-
+      gateway/main.go:1414 «Сам читатель чужой сессии снят (#2792): край читает только нашу сессию»;
+      kacho#2792 CLOSED. Ветвь external Ф3-45 не строится и не имеет производителя.
+    why_blocking: >-
+      Круг 12 принял Ф3-45 как сторону края, где переключатель есть; переключатель остался, а
+      читатель, которого утверждает «Тогда», снят. Тот же разрыв — строка 1033 (файл края с
+      читателем сессии снятого внешнего поставщика идентичности, positiveTTL) и строки 1312, 2047,
+      2155 о читателе под external.
+    fix: >-
+      Переписать Ф3-45 под край без читателя поставщика (под external носитель не читается никем) либо
+      снять ветвь external с предметом #2792; привести строки 1033, 1312, 2047, 2155.
+non_blocking:
+  - id: N1
+    summary: >-
+      Перечень Р7 из 15 записей держится в дереве края лишь частично: регистрация и verify-email
+      (login_lane_paths_test.go:201-209); recovery, recovery-complete, second-factor и step-up
+      держателя значения relayWhenUnanswered не имеют. Не блокирует: норма записана решением с
+      производителем; держатель — предмет исполнителя.
+accepted_parts: >-
+  Перечень Р7 перемерен на kacho@e801c0f7844: записей с целью форма 15, relayWhenUnanswered: true
+  6, строки 270-284, константа текста — login_lane_relay.go:87, обработчик — :226; правки
+  kaname#237 (посев вместо переноса) сверены с ID-PW-1 редакции 5 (97 из 97).
+constructibility: >-
+  Посева не было: стенда в задании нет. B2 опровергнут деревом края без посева.
+event_body: acceptance-reviewer · CHANGES_REQUESTED · 118035c42395cbe02c00c8505508aebc91847a047a665af311594893397819af
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

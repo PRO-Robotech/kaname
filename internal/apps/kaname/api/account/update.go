@@ -175,6 +175,16 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 		return nil, shared.MapValidationErr(err)
 	}
 
+	// Резерв пространства личных аккаунтов (Ф4 Р9 п.3): переименование В
+	// `personal-cloud-` отвергается синхронно, ПОСЛЕ отказа по форме. Только когда
+	// имя ДЕЙСТВИТЕЛЬНО меняется (стоит в `changed`): смена прочих полей аккаунта,
+	// чьё имя уже несёт префикс (личный аккаунт правит владелец), и повтор текущего
+	// имени резервом не отвергаются — предмет запрета есть ВХОД в пространство, а не
+	// пребывание в нём.
+	if accountNameChanged(changed) && domain.IsPersonalAccountName(target.Name) {
+		return nil, shared.InvalidArg("name", reservedAccountNameRefusal)
+	}
+
 	// Capture the verified caller sync for the audit actor (anti-spoofing).
 	actor := authzguard.PrincipalUserID(ctx)
 
@@ -280,6 +290,18 @@ func (u *UpdateAccountUseCase) doUpdate(ctx context.Context, a domain.Account, m
 func accountLabelsChanged(changed []string) bool {
 	for _, f := range changed {
 		if f == "labels" {
+			return true
+		}
+	}
+	return false
+}
+
+// accountNameChanged reports whether "name" is among the changed fields — the
+// reserved-prefix guard (Ф4 Р9 п.3) fires only on an actual rename, never on a
+// repeat of the current name or a change to other fields of a personal account.
+func accountNameChanged(changed []string) bool {
+	for _, f := range changed {
+		if f == "name" {
 			return true
 		}
 	}

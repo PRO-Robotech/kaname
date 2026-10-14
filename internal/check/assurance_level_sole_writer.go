@@ -127,7 +127,7 @@ func (c *LevelUseCensus) Add(o LevelUseCensus) {
 var axisConstants = map[string]bool{"Level1": true, "Level2": true, "Level3": true}
 
 // ruleProducers — функции дома, которым производить уровень положено.
-var ruleProducers = map[string]bool{"LevelOf": true, "PresentableLevels": true}
+var ruleProducers = map[string]bool{"LevelOf": true, "PresentableLevels": true, "GuaranteedLevels": true}
 
 // ScanAssuranceLevelUses разбирает один Go-файл и классифицирует обращения к
 // оси уровня по родительскому узлу. homeImport — путь пакета дома правила.

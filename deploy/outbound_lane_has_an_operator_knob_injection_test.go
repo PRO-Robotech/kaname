@@ -49,7 +49,7 @@ func TestOutboundLaneInjection_LaneNamedByAProfileIsSilent(t *testing.T) {
 
 func TestOutboundLaneInjection_LaneWithNoKnobIsAFinding(t *testing.T) {
 	// ИНЪЕКЦИЯ, ОДИН ФАКТ против контроля: у полосы нет ни рендера, ни имени в
-	// профиле. Это и есть состояние почтовой полосы до фикса #2474.
+	// профиле. Это и есть состояние почтовой полосы до фикса kacho#2474.
 	f := judgeOutboundLanes([]string{"invite-mail.relay"},
 		boolSet(), boolSet(), declaredEnvNames)
 	if len(f) != 1 || !strings.Contains(f[0], "invite-mail.relay") {

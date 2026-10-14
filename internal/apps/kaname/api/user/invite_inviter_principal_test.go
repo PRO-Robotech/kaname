@@ -286,6 +286,13 @@ func (w *invPrincUserWtr) InsertActive(_ context.Context, u domain.User) (domain
 	return u, nil
 }
 func (w *invPrincUserWtr) Delete(context.Context, domain.UserID) error { return nil }
+func (*invPrincUserWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.AccountID, error) {
+	return nil, nil
+}
+func (*invPrincUserWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
+func (*invPrincUserWtr) CutOffIdentity(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+	return nil
+}
 func (w *invPrincUserWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }
@@ -310,7 +317,7 @@ func (r *invPrincWriter) Visibility() visibility.ReaderIface { return nil }
 // MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
 // пробы другой, и подставной ответ был бы утверждением, которого никто не
 // делал. Единственный прод-вызывающий — разрешение осиротевшей операции
-// исключения из аккаунта (#1127).
+// исключения из аккаунта (kacho#1127).
 func (invPrincUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }
@@ -333,7 +340,7 @@ func (r invPrincUserRdr) Membership(_ context.Context, userID domain.UserID, acc
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой
-// пробы другой. Снятие членства проверяется своими пробами (#1127).
+// пробы другой. Снятие членства проверяется своими пробами (kacho#1127).
 func (*invPrincUserWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

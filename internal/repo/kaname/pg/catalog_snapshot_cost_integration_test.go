@@ -4,7 +4,7 @@
 package pg_test
 
 // catalog_snapshot_cost_integration_test.go — ЗАМЕР, условие посадки §8 п. 1
-// приёмки `catalog-readers-move-to-the-table.md` (задача продукта #1838).
+// приёмки `catalog-readers-move-to-the-table.md` (задача продукта kacho#1838).
 //
 // # Что здесь меряется и почему именно это
 //

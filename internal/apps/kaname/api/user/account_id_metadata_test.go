@@ -226,6 +226,27 @@ func (w *fakeUsrWtr) Delete(context.Context, domain.UserID) error {
 	}
 	return nil
 }
+
+// LockForRemoval — замок строки и перечень членств; фейк держит одно членство —
+// аккаунт, которым построен (пустой — членств нет).
+func (w *fakeUsrWtr) LockForRemoval(context.Context, domain.UserID) ([]domain.AccountID, error) {
+	if w.parent == nil {
+		return nil, nil
+	}
+	w.parent.record("lock-row")
+	if w.parent.accID == "" {
+		return nil, nil
+	}
+	return []domain.AccountID{domain.AccountID(w.parent.accID)}, nil
+}
+
+func (w *fakeUsrWtr) Now(context.Context) (time.Time, error) { return time.Now().UTC(), nil }
+func (w *fakeUsrWtr) CutOffIdentity(context.Context, domain.UserTokenRevocation, domain.UserID) error {
+	if w.parent != nil {
+		w.parent.record("cutoff")
+	}
+	return nil
+}
 func (w *fakeUsrWtr) UpdateLabels(_ context.Context, id domain.UserID, _ domain.Labels) (domain.User, error) {
 	return domain.User{ID: id}, nil
 }
@@ -310,7 +331,7 @@ func (r *fakeUsrWriter) Visibility() visibility.ReaderIface { return nil }
 // MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этой
 // пробы другой, и подставной ответ был бы утверждением, которого никто не
 // делал. Единственный прод-вызывающий — разрешение осиротевшей операции
-// исключения из аккаунта (#1127).
+// исключения из аккаунта (kacho#1127).
 func (*fakeUsrRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }
@@ -322,7 +343,7 @@ func (*fakeUsrRdr) Membership(context.Context, domain.UserID, domain.AccountID) 
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой
-// пробы другой. Снятие членства проверяется своими пробами (#1127).
+// пробы другой. Снятие членства проверяется своими пробами (kacho#1127).
 func (*fakeUsrWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }

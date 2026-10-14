@@ -60,6 +60,12 @@ type Store interface {
 	// и различаются они типом: (момент, true) — подтверждён; (нуль, false) — не
 	// подтверждён; ошибка — спросить не удалось (NOT_FOUND — человека нет).
 	EmailVerification(ctx context.Context, userID domain.UserID) (at time.Time, verified bool, err error)
+
+	// AccessKeyEnrolled — есть ли у человека хоть одна строка ключа доступа.
+	// Ключ — ресурс своей таблицы, а не строка способа входа; ось «заведено»
+	// единственного писателя обнуления счёта по адресу читает его этим
+	// вопросом (`humansession/completed_login.go`).
+	AccessKeyEnrolled(ctx context.Context, userID domain.UserID) (bool, error)
 }
 
 // CostClassCount — строка переписи классов стоимости: префикс класса (значение

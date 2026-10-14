@@ -244,18 +244,21 @@ func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, kind mailWindowKin
 		           THEN 1 ELSE w.sent + 1 END <= $2`,
 		recipient, limit.MaxPerWindow, windowSeconds, string(kind))
 	if err != nil {
-		return false, mapErr(err, "", recipient)
+		return false, mapErr(err, "", "")
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
 // mailWindowKind — вид письма в ключе окна частоты: словарь ограничения
-// `invite_mail_windows_kind_check` (миграция `20260927190000`).
+// `invite_mail_windows_kind_check` (миграции `20260927190000`, `20261007150000`).
 type mailWindowKind string
 
 const (
 	mailWindowInvite   mailWindowKind = "invite"
 	mailWindowRecovery mailWindowKind = "recovery"
+	// mailWindowEmailChange — письмо с кодом смены адреса на новый адрес
+	// (kaname#635, Р6; миграция `20261007150000`).
+	mailWindowEmailChange mailWindowKind = "email-change"
 )
 
 // AdvisoryXactLock takes pg_advisory_xact_lock(hashtext($1)) on THIS writer-tx.

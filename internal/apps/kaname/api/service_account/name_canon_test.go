@@ -3,8 +3,8 @@
 
 package service_account
 
-// name_canon_test.go — канон имени на пути создания ServiceAccount (#1279,
-// канон #715).
+// name_canon_test.go — канон имени на пути создания ServiceAccount (kacho#1279,
+// канон kacho#715).
 
 import (
 	"context"

@@ -1,0 +1,65 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: dbbdb5645ee881a9b37978e4545d52c024537ac21c45302f9de825141f8794e2
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 33b0f8aa96407140e93e71aae7266e3285f5ecd9
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 2641
+  round: 10
+  round_note: >-
+    круг 10 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/second-factor-totp-and-recovery-
+    codes/194e2cf7d84c95e65ae79511410ce8c7ec33b79958b5ff2f3a882ef951458939.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md на tmp/535-na3a @
+    33b0f8aa9 → dbbdb5645ee881a9b37978e4545d52c024537ac21c45302f9de825141f8794e2; совпал с
+    отпечатком задания
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    summary: >-
+      Ф12-37 «посадка external семейства не несёт»: Given — профиль external; положительный контроль —
+      «под own все семь отвечают». Ключ посадки снят kaname#363 (коммит 69e61c563, тот самый, чью
+      правку объявляет редакция 13): служба отвергает authn.identity-provider при любом значении
+      (internal/apps/kaname/config/retired_settings.go:74). Профиля external нет, Given не строится;
+      держатель в дереве уже переписан на другой факт (cmd/kaname/loginlane_test.go:144).
+    why_blocking: >-
+      Редакция 13 объявляет правку из #363 и пишет «Не тронуты: сценарии», хотя то же изменение сняло
+      предмет Ф12-37; тот же класс круг 11 Ф3 признал блокирующим (Ф3-44, запись 0026c279…).
+    fix: >-
+      Снять Ф12-37 тумбой вместе с предметом либо переписать на одну посадку (близнец — непровязанный
+      проверяющий, а не external); привести строки 1165 и 1289 и счёт сценариев (46) к исходу.
+non_blocking: []
+accepted_parts: >-
+  Правка Ф-д сверена: git diff 11b6f723d 69e61c563 даёт одну строку; func
+  TestF4d10_EveryLaneRequirementRefusesTheProductionStart — 1 в
+  internal/apps/kaname/config/lane_requirements_test.go; прежнее имя только в комментарии
+  second_factor_knobs_test.go:10 и прозой в строке редакции.
+constructibility: >-
+  Посева не было: стенда в задании нет. Ф12-37 опровергнут деревом без посева (ключ отвергается
+  при любом значении).
+event_body: acceptance-reviewer · CHANGES_REQUESTED · dbbdb5645ee881a9b37978e4545d52c024537ac21c45302f9de825141f8794e2
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

@@ -1,0 +1,153 @@
+---
+id: cluster
+sidebar_position: 10
+title: Администраторы кластера
+---
+
+import { ApiOperation } from '@site/src/components/commonBlocks/ApiOperation'
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Администраторы кластера
+
+**Администратор кластера** — субъект, которому выдано отношение `system_admin` на единственном
+объекте уровня кластера `cluster:cluster_root`. Это высший уровень доступа: он каскадом
+действует на всё облако. Субъект — человек (`USER`) либо служебная учётная запись
+(`SERVICE_ACCOUNT`).
+
+`ClusterService` — публичная поверхность этого предмета: прочитать кластер, перечислить
+администраторов, назначить и снять администратора. Те же четыре глагола несёт внутренняя служба
+`InternalClusterService` на внутреннем фронте; обе исполняют **одни и те же** сценарии, поэтому
+назначенное одним путём видно другим, и наоборот.
+
+## Кто может вызывать
+
+Каждый глагол требует `system_admin` на `cluster:cluster_root`. Отношение не выполняется
+подстановочным знаком: его несут только явно назначенные субъекты, и справочником эти чтения
+не являются. Глаголы назначения и снятия требуют повышенного уровня входа:
+
+| глагол | разрешение | уровень входа |
+|---|---|---|
+| `Get` | `iam.cluster_admins.get` | `1` |
+| `ListAdmins` | `iam.cluster_admins.list` | `1` |
+| `GrantAdmin` | `iam.cluster_admins.grant` | `2` |
+| `RevokeAdmin` | `iam.cluster_admins.revoke` | `2` |
+
+Без права ответ — `403` / `PERMISSION_DENIED`; без удостоверения — `401` / `UNAUTHENTICATED`.
+Если проверить право не удалось, мутация **не исполняется** и отвечает `503` / `UNAVAILABLE`.
+
+## Поля записи перечня
+
+<table>
+  <thead><tr><th>Поле</th><th>Тип</th><th>Описание</th></tr></thead>
+  <tbody>
+    <tr><td><code>clusterAdminGrantId</code></td><td>string</td><td>Идентификатор выдачи, форма <code>cag_&lt;17&gt;</code>. Повторное назначение снятого субъекта возвращает <strong>тот же</strong> идентификатор</td></tr>
+    <tr><td><code>subjectType</code></td><td>enum</td><td><code>USER</code> / <code>SERVICE_ACCOUNT</code></td></tr>
+    <tr><td><code>subjectId</code></td><td>string</td><td><code>usr&lt;17&gt;</code> у человека, <code>sva&lt;17&gt;</code> у служебной учётной записи</td></tr>
+    <tr><td><code>subjectEmail</code></td><td>string</td><td><strong>Зеркало</strong> адреса человека. У служебной учётной записи пусто</td></tr>
+    <tr><td><code>subjectDisplayName</code></td><td>string</td><td><strong>Зеркало</strong> отображаемого имени человека; пусто, если имени нет. У служебной учётной записи пусто</td></tr>
+    <tr><td><code>grantedByUserId</code></td><td>string</td><td>Кто назначил; <code>bootstrap</code> у первичной выдачи установки</td></tr>
+    <tr><td><code>grantedByEmail</code></td><td>string</td><td>Адрес назначившего; пусто у первичной выдачи</td></tr>
+    <tr><td><code>grantedAt</code></td><td>timestamp</td><td>Когда выдача заведена. Усечено до секунд</td></tr>
+  </tbody>
+</table>
+
+**Порядок перечня значим**: по `grantedAt`, при равенстве — по `clusterAdminGrantId`, оба по
+возрастанию. Перечень без пагинации — администраторов кластера единицы.
+
+## Операции
+
+### Get — кластер
+
+<ApiOperation method="GET" endpoint="/iam/v1/cluster">
+
+Возвращает единственный объект кластера.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/cluster' \\
+      -H "Authorization: Bearer $TOKEN"
+  `}
+</CodeBlock>
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "id": "cluster_root",
+      "name": "root",
+      "createdAt": "2026-06-24T10:00:00Z"
+    }
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### ListAdmins — перечень администраторов
+
+<ApiOperation method="GET" endpoint="/iam/v1/cluster/admins">
+
+Возвращает активные выдачи.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl 'http://localhost:18080/iam/v1/cluster/admins' \\
+      -H "Authorization: Bearer $TOKEN"
+  `}
+</CodeBlock>
+
+</ApiOperation>
+
+### GrantAdmin — назначить администратора
+
+<ApiOperation method="POST" endpoint="/iam/v1/cluster/admins" async>
+
+Назначает субъекта администратором кластера. Ответ — `Operation` с `done = true`:
+`metadata: GrantClusterAdminMetadata` (`clusterAdminGrantId`, `subjectId`),
+`response: ClusterAdminGrant`. Повтор для уже назначенного субъекта идемпотентен и возвращает
+тот же `clusterAdminGrantId`. `subjectType` по умолчанию — `USER`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/cluster/admins' \\
+      -H "Authorization: Bearer $TOKEN" \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "subjectType": "USER", "subjectId": "usrbr69ze0ftz3jf7396" }'
+  `}
+</CodeBlock>
+
+| отказ | код | сообщение |
+|---|---|---|
+| нет `subjectId` | `400` / `INVALID_ARGUMENT` | нарушение поля `subject_id`: `required` |
+| форма id не совпадает с родом | `400` / `INVALID_ARGUMENT` | нарушение поля `subject_id` |
+| субъекта нет | `400` / `INVALID_ARGUMENT` | `User <id> not found` / `ServiceAccount <id> not found` |
+| вход субъекту запрещён | `400` / `FAILED_PRECONDITION` | `User <id> is blocked` · `User <id> is not active` · `ServiceAccount <id> is disabled` |
+
+</ApiOperation>
+
+### RevokeAdmin — снять администратора
+
+<ApiOperation method="DELETE" endpoint="/iam/v1/cluster/admins/{subject_id}" async>
+
+Снимает выдачу (история сохраняется). Род субъекта — параметр запроса `subjectType`, по
+умолчанию `USER`; служебную учётную запись снимают с `?subjectType=SERVICE_ACCOUNT`. Ответ —
+`Operation` с `done = true`: `metadata: RevokeClusterAdminMetadata`,
+`response: ClusterAdminGrant`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X DELETE 'http://localhost:18080/iam/v1/cluster/admins/sva7kd3m1qz84v0hnpxc?subjectType=SERVICE_ACCOUNT' \\
+      -H "Authorization: Bearer $TOKEN"
+  `}
+</CodeBlock>
+
+| отказ | код | сообщение |
+|---|---|---|
+| своя выдача | `400` / `FAILED_PRECONDITION` | `cannot revoke own cluster admin grant` |
+| последняя активная выдача | `400` / `FAILED_PRECONDITION` | `cannot revoke last active cluster admin` |
+| активной выдачи нет | `404` / `NOT_FOUND` | `User <id> is not an active cluster admin` |
+
+Последнего администратора не снять ни одним путём: условие проверяет база одной записью под
+замком транзакции, поэтому два встречных снятия на паре последних администраторов проходят
+ровно одно.
+
+</ApiOperation>

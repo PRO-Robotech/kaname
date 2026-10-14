@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 )
 
 // rsfMethods — дублёр хранилища способов: одна строка `totp` в заданном состоянии.
@@ -59,6 +60,13 @@ type rsfSessions struct {
 	writers  int
 	commits  int
 	failOn   string
+	// heldFor — личность, строку которой открытие писателя взяло первым
+	// оператором (у адаптера — замок писателя нескольких сессий).
+	heldFor domain.UserID
+	// clock — часы писателя (`Now`); nil — часы процесса.
+	clock revocationpolicy.Clock
+	// rollbacks — откатанных транзакций писателя.
+	rollbacks int
 }
 
 type rsfWriter struct {
@@ -70,14 +78,24 @@ type rsfWriter struct {
 	rolledBk bool
 }
 
-func (s *rsfSessions) ResetWriter(context.Context) (SecondFactorResetWriter, error) {
+func (s *rsfSessions) ResetWriter(_ context.Context, userID domain.UserID) (SecondFactorResetWriter, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.writers++
 	if s.failOn == "writer" {
 		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
 	}
+	s.heldFor = userID
 	return &rsfWriter{s: s}, nil
+}
+
+// Now — момент писателя: у адаптера — часы первичной базы соединением
+// транзакции после захвата личности; у дублёра — поданные часы.
+func (w *rsfWriter) Now(ctx context.Context) (time.Time, error) {
+	if w.s.clock != nil {
+		return w.s.clock.Now(ctx)
+	}
+	return time.Now().UTC(), nil
 }
 
 func (w *rsfWriter) RemoveSecondFactor(_ context.Context, _ domain.UserID) (bool, error) {
@@ -128,7 +146,13 @@ func (w *rsfWriter) Commit(context.Context) error {
 	return nil
 }
 
-func (w *rsfWriter) Rollback(context.Context) error { w.rolledBk = true; return nil }
+func (w *rsfWriter) Rollback(context.Context) error {
+	w.s.mu.Lock()
+	defer w.s.mu.Unlock()
+	w.rolledBk = true
+	w.s.rollbacks++
+	return nil
+}
 
 func rsfActive() *rsfMethods {
 	return &rsfMethods{row: &domain.LoginMethod{
@@ -179,7 +203,7 @@ func TestResetSecondFactor_F12_30_SyncRefusals(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, op)
 	assert.Equal(t, codes.NotFound, status.Code(err))
-	assert.Equal(t, "User usr000000000000absnt not found", status.Convert(err).Message(), "промах — контракт-тоном, байт-идентичным сокрытию существования")
+	assert.Equal(t, "User usr000000000000absnt not found", status.Convert(err).Message(), "промах держателя — линия прямого чтения его записи: `User <id> not found` (Ф12-30)")
 
 	assert.Zero(t, methods.calls, "до строки способов ни один отказ выше не доходит")
 	assert.Zero(t, sessions.writers)

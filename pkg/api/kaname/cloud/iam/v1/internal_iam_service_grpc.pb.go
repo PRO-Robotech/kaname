@@ -55,7 +55,7 @@ type InternalIAMServiceClient interface {
 	// Check — single-tuple authorization check.
 	// Вердикт о паре «субъект — отношение — объект». Складывает его реляционная
 	// форма в собственной базе iam: внешний движок отношений, поверх которого этот
-	// метод стоял прежде, снят стадией S6 эпика #747.
+	// метод стоял прежде, снят стадией S6 эпика kacho#747.
 	// Используется per-service authz-interceptor'ами kacho-vpc / kacho-compute /
 	// kacho-loadbalancer / self (kaname) для проверки прав на write/read RPC.
 	// Latency budget: ≤20ms p95. Сетевого перехода к соседу больше нет — вопрос
@@ -159,7 +159,7 @@ type InternalIAMServiceClient interface {
 	// set (all rules ARM_LABELS are not compiled). cluster-internal listener only —
 	// no google.api.http; admin-UI authz gating happens at the internal mux layer.
 	// ResolveBasicCredential — АВТОРИТЕТ О ПРЕДЪЯВЛЕННОМ БАЗОВОМ СЕКРЕТЕ
-	// (задача #1142, приёмка BAT-1 §5.3, §6).
+	// (задача kacho#1142, приёмка BAT-1 §5.3, §6).
 	//
 	// Край зовёт этот глагол на промахе своего кэша вердикта и получает ответ на
 	// ОДИН вопрос: годно ли предъявленное СЕЙЧАС и чей это принципал.
@@ -181,7 +181,7 @@ type InternalIAMServiceClient interface {
 	ResolveBasicCredential(ctx context.Context, in *ResolveBasicCredentialRequest, opts ...grpc.CallOption) (*ResolveBasicCredentialResponse, error)
 	GetRoleCompiled(ctx context.Context, in *GetRoleCompiledRequest, opts ...grpc.CallOption) (*GetRoleCompiledResponse, error)
 	// CheckBasicCredentialLive — ЖИВО ЛИ УДОСТОВЕРЕНИЕ, СПРОШЕННОЕ ПО ЕГО
-	// ИДЕНТИФИКАТОРУ, БЕЗ ПРЕДЪЯВЛЕНИЯ СЕКРЕТА (задача #1450).
+	// ИДЕНТИФИКАТОРУ, БЕЗ ПРЕДЪЯВЛЕНИЯ СЕКРЕТА (задача kacho#1450).
 	//
 	// ЗАЧЕМ ВТОРОЙ ВОПРОС, ЕСЛИ РЯДОМ ЕСТЬ `ResolveBasicCredential`. Тот отвечает
 	// ПРЕДЪЯВИТЕЛЮ и потому требует самой предъявленной строки. Спрашивающий с
@@ -330,7 +330,7 @@ type InternalIAMServiceServer interface {
 	// Check — single-tuple authorization check.
 	// Вердикт о паре «субъект — отношение — объект». Складывает его реляционная
 	// форма в собственной базе iam: внешний движок отношений, поверх которого этот
-	// метод стоял прежде, снят стадией S6 эпика #747.
+	// метод стоял прежде, снят стадией S6 эпика kacho#747.
 	// Используется per-service authz-interceptor'ами kacho-vpc / kacho-compute /
 	// kacho-loadbalancer / self (kaname) для проверки прав на write/read RPC.
 	// Latency budget: ≤20ms p95. Сетевого перехода к соседу больше нет — вопрос
@@ -434,7 +434,7 @@ type InternalIAMServiceServer interface {
 	// set (all rules ARM_LABELS are not compiled). cluster-internal listener only —
 	// no google.api.http; admin-UI authz gating happens at the internal mux layer.
 	// ResolveBasicCredential — АВТОРИТЕТ О ПРЕДЪЯВЛЕННОМ БАЗОВОМ СЕКРЕТЕ
-	// (задача #1142, приёмка BAT-1 §5.3, §6).
+	// (задача kacho#1142, приёмка BAT-1 §5.3, §6).
 	//
 	// Край зовёт этот глагол на промахе своего кэша вердикта и получает ответ на
 	// ОДИН вопрос: годно ли предъявленное СЕЙЧАС и чей это принципал.
@@ -456,7 +456,7 @@ type InternalIAMServiceServer interface {
 	ResolveBasicCredential(context.Context, *ResolveBasicCredentialRequest) (*ResolveBasicCredentialResponse, error)
 	GetRoleCompiled(context.Context, *GetRoleCompiledRequest) (*GetRoleCompiledResponse, error)
 	// CheckBasicCredentialLive — ЖИВО ЛИ УДОСТОВЕРЕНИЕ, СПРОШЕННОЕ ПО ЕГО
-	// ИДЕНТИФИКАТОРУ, БЕЗ ПРЕДЪЯВЛЕНИЯ СЕКРЕТА (задача #1450).
+	// ИДЕНТИФИКАТОРУ, БЕЗ ПРЕДЪЯВЛЕНИЯ СЕКРЕТА (задача kacho#1450).
 	//
 	// ЗАЧЕМ ВТОРОЙ ВОПРОС, ЕСЛИ РЯДОМ ЕСТЬ `ResolveBasicCredential`. Тот отвечает
 	// ПРЕДЪЯВИТЕЛЮ и потому требует самой предъявленной строки. Спрашивающий с

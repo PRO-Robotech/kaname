@@ -162,9 +162,10 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 	// действующему правилу и при неподтверждённом владельце) и ДО подписи.
 	// Субъект гранта — человек нашего входа; якорь — момент аутентификации
 	// сессии семейства.
-	switch verdict, verr := revocationpolicy.AtIssuance(ctx, a.rule, service.ResolvedPrincipal{
+	verdict, cutoff, verr := revocationpolicy.AtIssuance(ctx, a.rule, service.ResolvedPrincipal{
 		Kind: service.PrincipalUser, UserID: grant.Session.Subject,
-	}, grant.Session.AuthTime); verdict {
+	}, grant.Session.AuthTime)
+	switch verdict {
 	case revocationpolicy.Allowed:
 	case revocationpolicy.Unverified:
 		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: %w", domain.ErrGrantOwnerUnverified)
@@ -200,7 +201,11 @@ func (a *AccessTokens) IssueAccessToken(ctx context.Context, grant oauthceremony
 		// него и границы церемонии, и сравнивает их подписант по СВОИМ часам.
 		TTL:      a.signer.MaxTokenTTL(),
 		NotAfter: bound,
-		Claims:   claims,
+		// `iat` — строго позже отсечки, по которой судила выдача (kaname#684):
+		// сессия, вошедшая после отсечки в ту же секунду, иначе получила бы
+		// токен, отвергнутый первым предъявлением.
+		IssuedAfter: cutoff,
+		Claims:      claims,
 	})
 	if err != nil {
 		return oauthceremony.IssuedAccessToken{}, fmt.Errorf("ceremonyport: issue access token: %w",

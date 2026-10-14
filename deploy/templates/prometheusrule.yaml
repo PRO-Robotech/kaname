@@ -110,7 +110,11 @@ spec:
 
         - alert: KanameIdentityLedgerUnsampled
           # Ноль личностей законен. Незаконно НЕ ЗНАТЬ, ноль это или неснятый замер.
-          expr: increase(kaname_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
+          # Ряда нет вовсе (цель не собирается) — не знать тем более: `absent` звонит
+          # и там, где `increase` от пустоты пуст и молчал бы.
+          expr: |
+            increase(kaname_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
+              or absent(kaname_identity_ledger_samples_total{outcome="ok"})
           for: 10m
           annotations:
             summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
@@ -123,7 +127,10 @@ spec:
 
         - alert: KanameReadinessUnprobed
           # Ноль неготовых законен. Незаконно НЕ ЗНАТЬ, ноль это или неспрошенная проба.
-          expr: sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+          # Ряда нет вовсе — проба тем более не оценена: сумма пустоты пуста и молчала бы.
+          expr: |
+            sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+              or absent(kaname_readiness_dependency_checks_total)
           for: 15m
           annotations:
             summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
@@ -141,22 +148,34 @@ spec:
             sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
               + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
               + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
-              + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m])) > 0
+              + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
+              + sum(increase(kaname_self_service_store_failures_total[10m]))
+              + sum(increase(kaname_password_verification_outcomes_total{outcome="format-not-in-registry"}[10m]))
+              + sum(increase(kaname_password_verification_outcomes_total{outcome="body-not-parsable"}[10m]))
+              + sum(increase(kaname_password_verification_outcomes_total{outcome="params-above-ceiling"}[10m])) > 0
           for: 5m
           annotations:
-            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище либо проверяющий пароля; человек видит один отказ, причина в outcome"
+            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище). Негодное хранимое значение пароля либо секрета клиента считает ряд проверяющего — у всех, кто сверяет им: вход, повышение уровня, смена пароля, церемония; неудачный вход пишет его и в verifier-issue, это одно событие, а не два. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
 
         - alert: KanameLoginVerifierCapacityExhausted
-          expr: increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]) > 0
+          expr: |
+            sum(increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]))
+              + sum(increase(kaname_password_verification_outcomes_total{outcome="capacity-exhausted"}[10m]))
+              + sum(increase(kaname_second_factor_presentations_total{method="lookup_secret",outcome="capacity-exhausted"}[10m]))
+              + sum(increase(kaname_password_verifier_ceremony_share_exhausted_total[10m])) > 0
           for: 5m
           annotations:
-            summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке; величина authn.login.verifier-capacity"
+            summary: "ёмкость проверяющего пароля исчерпана — отказано по нагрузке. Проверяющий один: вход паролем, повышение уровня паролем, сверка секрета клиента церемонией и запасной код второго фактора; причина — в outcome и method. Величина authn.login.verifier-capacity. Если растёт только kaname_password_verifier_ceremony_share_exhausted_total — занята доля церемонии на токен-эндпоинте, людям вход сохранён: смотреть обращения за токеном церемонии, а не поднимать ёмкость входа"
 
         - alert: KanameExpiredCredentialReclaimStalled
           # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
+          # Выключатель служба объявляет величиной всегда; нет и её — неизвестно,
+          # включена ли уборка, и неизвестное звонит.
           expr: |
             sum(increase(kaname_expired_credential_reclaim_passes_total[2h])) == 0
               and on() kaname_expired_credential_reclaim_enabled == 1
+              or absent(kaname_expired_credential_reclaim_enabled)
           for: 10m
           annotations:
             summary: "снятие истёкших удостоверений включено и не делает проходов — места под потолком не возвращаются"
@@ -169,7 +188,11 @@ spec:
 
         - alert: KanameSigningKeySweeperSilent
           # Звонит на ОТСУТСТВИЕ прохода: ряд есть только при поднятой своей чеканке, выключенная не звонит.
-          expr: increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+          # Отличить выключенную чеканку от несобранной цели может только постоянный
+          # ряд `kaname_build_info`: нет и его — цели нет, и это звонит.
+          expr: |
+            increase(kaname_signing_key_events_total{event="swept"}[1h]) == 0
+              or absent(kaname_build_info)
           for: 30m
           annotations:
             summary: "сметатель выведенных ключей подписи не делает проходов — выведенные ключи остаются в наборе дольше отсрочки"

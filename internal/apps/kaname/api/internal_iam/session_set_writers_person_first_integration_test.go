@@ -73,7 +73,7 @@ func secondFactorRemovalSessionWrites(ctx context.Context, repo *kanamepg.HumanS
 	if err != nil {
 		return 0, err
 	}
-	if err := w.PresentInSession(ctx, keep, []string{"password", "lookup_secret"}, "2", rotated, now); err != nil {
+	if _, err := w.PresentInSession(ctx, keep, []string{"password", "lookup_secret"}, "2", rotated, now); err != nil {
 		return 0, err
 	}
 	if err := w.Commit(ctx); err != nil {
@@ -222,8 +222,10 @@ func seedPasswordPerson(t *testing.T, ctx context.Context, s *concurrencyScene, 
 	v, err := hasher.Hash(passwordScenePassword)
 	require.NoError(t, err)
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ($1, 'password', $2)`,
+		`INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ($1, 'password', $2)
+		 ON CONFLICT (user_id, kind) DO UPDATE SET verifier = EXCLUDED.verifier`,
 		string(uid), v.Reveal())
+	// Строку пароля фикстуры (kaname#608) заменяет пароль сцены, которым войти.
 	require.NoError(t, err, "способ входа паролем")
 	bearer, err := domain.NewSessionBearer()
 	require.NoError(t, err)

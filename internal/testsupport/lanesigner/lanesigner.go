@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -63,7 +64,7 @@ func New(t testing.TB) *tokensigner.Signer {
 	}
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      Issuer,
-		Clock:       time.Now,
+		Clock:       momentclock.Func(time.Now),
 		MaxTokenTTL: MaxTokenTTL,
 	}, keys{mat: tokensigner.SigningMaterial{
 		KID:           KeyID,

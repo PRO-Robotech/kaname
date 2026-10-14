@@ -77,9 +77,11 @@
 //     postgres:16, проба `sql_relation_name_escape_test.go`): \ooo выше \377 —
 //     младший байт (\563 → 's'); \u, \U и U& с нулём либо выше U+10FFFF база
 //     отвергает — здесь остаются как написано, и коса граничит имя (лишняя
-//     находка, не пропуск). НЕ судятся: годность байтов в кодировке и
-//     суррогаты E-строки — база пару склеивает, одиночный отвергает, здесь
-//     оба пишутся U+FFFD (в U& пара склеивается).
+//     находка, не пропуск). Суррогаты — так же, как у базы, в E-строке и в U&:
+//     пара склеивается в один знак (и через смешение \u/\U, \XXXX/\+XXXXXX);
+//     одиночный старший, одиночный младший и \u/\U с неполными цифрами база
+//     отвергает — здесь они остаются как написано (kaname#174). НЕ судится:
+//     годность байтов в кодировке.
 package check
 
 import (
@@ -501,25 +503,39 @@ func sqlUnbackslash(s string) string {
 			b.WriteByte(byte(v))
 			i += n
 		case c == 'u' || c == 'U':
-			want := 4
-			if c == 'U' {
-				want = 8
-			}
-			if sqlDigits(s[i+1:], want, 16) != want {
-				b.WriteByte(c)
-				continue
-			}
-			v, _ := strconv.ParseUint(s[i+1:i+1+want], 16, 32)
-			if v == 0 || v > sqlCodePointMax {
+			v, n, ok := sqlEUnicodeValue(s[i:])
+			if !ok || v == 0 || v > sqlCodePointMax {
 				// База отвергает константу: экранирование остаётся как
 				// написано, остаток читается дальше. Коса тем самым граничит
-				// имя — лишняя находка возможна, пропуск нет.
+				// имя — лишняя находка возможна, пропуск нет. Неполные цифры —
+				// тот же отказ базы («invalid Unicode escape»), а не `\c`.
 				b.WriteByte('\\')
 				b.WriteByte(c)
 				continue
 			}
-			b.WriteRune(rune(v))
-			i += want
+			r := rune(v)
+			if sqlSurrogateHigh(r) {
+				// Пару база склеивает в один знак, и через смешение \u и \U
+				// тоже; старший без младшего — отказ константы, как выше.
+				rest := s[i+1+n:]
+				if len(rest) > 1 && rest[0] == '\\' {
+					if lv, ln, lok := sqlEUnicodeValue(rest[1:]); lok && lv <= sqlCodePointMax && sqlSurrogateLow(rune(lv)) {
+						b.WriteRune(sqlSurrogatePair(r, rune(lv)))
+						i += n + 2 + ln // коса, буква и цифры младшего
+						continue
+					}
+				}
+				b.WriteByte('\\')
+				b.WriteByte(c)
+				continue
+			}
+			if sqlSurrogateLow(r) {
+				b.WriteByte('\\')
+				b.WriteByte(c)
+				continue
+			}
+			b.WriteRune(r)
+			i += n
 		case c >= '0' && c <= '7':
 			n := 1 + sqlDigits(s[i+1:], 2, 8)
 			v, _ := strconv.ParseUint(s[i:i+n], 8, 16)
@@ -543,7 +559,6 @@ func sqlUnicodeUnescape(s string, esc byte) string {
 		return s
 	}
 	var b strings.Builder
-	var high rune
 	for i := 0; i < len(s); i++ {
 		if s[i] != esc || i+1 == len(s) {
 			b.WriteByte(s[i])
@@ -554,34 +569,74 @@ func sqlUnicodeUnescape(s string, esc byte) string {
 			i++
 			continue
 		}
-		start, want := i+1, 4
-		if s[i+1] == '+' {
-			start, want = i+2, 6
-		}
-		if sqlDigits(s[start:], want, 16) != want {
-			b.WriteByte(s[i])
-			continue
-		}
-		v, _ := strconv.ParseUint(s[start:start+want], 16, 32)
-		if v == 0 || v > sqlCodePointMax {
+		v, n, ok := sqlUUnicodeValue(s[i+1:])
+		if !ok || v == 0 || v > sqlCodePointMax {
 			// Та же граница базы; шестизначная форма её достигает (\+110000).
 			// Экранирование остаётся как написано, знак esc граничит имя.
 			b.WriteByte(s[i])
 			continue
 		}
 		r := rune(v)
-		i = start + want - 1
 		switch {
-		case r >= 0xD800 && r <= 0xDBFF:
-			high = r
+		case sqlSurrogateHigh(r):
+			// Пара — один знак; старший без младшего база отвергает, и здесь он
+			// остаётся как написано, а не пропадает молча.
+			rest := s[i+1+n:]
+			if len(rest) > 1 && rest[0] == esc {
+				if lv, ln, lok := sqlUUnicodeValue(rest[1:]); lok && lv <= sqlCodePointMax && sqlSurrogateLow(rune(lv)) {
+					b.WriteRune(sqlSurrogatePair(r, rune(lv)))
+					i += n + 1 + ln
+					continue
+				}
+			}
+			b.WriteByte(s[i])
 			continue
-		case r >= 0xDC00 && r <= 0xDFFF && high != 0:
-			r = 0x10000 + (high-0xD800)<<10 + (r - 0xDC00)
+		case sqlSurrogateLow(r):
+			// Одиночный младший база отвергает так же: как написано, не U+FFFD.
+			b.WriteByte(s[i])
+			continue
 		}
-		high = 0
 		b.WriteRune(r)
+		i += n
 	}
 	return b.String()
+}
+
+// sqlEUnicodeValue — значение экранирования E-строки `uXXXX` либо `UXXXXXXXX`
+// (t начинается с буквы) и число цифр; ok ложно при неполных цифрах.
+func sqlEUnicodeValue(t string) (uint64, int, bool) {
+	want := 4
+	if t[0] == 'U' {
+		want = 8
+	}
+	if sqlDigits(t[1:], want, 16) != want {
+		return 0, 0, false
+	}
+	v, _ := strconv.ParseUint(t[1:1+want], 16, 32)
+	return v, want, true
+}
+
+// sqlUUnicodeValue — значение экранирования U& `XXXX` либо `+XXXXXX` (t идёт
+// сразу за знаком esc) и длина записи; ok ложно при неполных цифрах.
+func sqlUUnicodeValue(t string) (uint64, int, bool) {
+	start, want := 0, 4
+	if t != "" && t[0] == '+' {
+		start, want = 1, 6
+	}
+	if sqlDigits(t[start:], want, 16) != want {
+		return 0, 0, false
+	}
+	v, _ := strconv.ParseUint(t[start:start+want], 16, 32)
+	return v, start + want, true
+}
+
+func sqlSurrogateHigh(r rune) bool { return r >= 0xD800 && r <= 0xDBFF }
+
+func sqlSurrogateLow(r rune) bool { return r >= 0xDC00 && r <= 0xDFFF }
+
+// sqlSurrogatePair — знак, который база собирает из пары.
+func sqlSurrogatePair(high, low rune) rune {
+	return 0x10000 + (high-0xD800)<<10 + (low - 0xDC00)
 }
 
 // sqlDigits — сколько подряд цифр основания base (не больше limit) в начале s.

@@ -7,7 +7,7 @@ package pg_test
 // стоимости.
 //
 // Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
-// §2.7, §10 шаг 7; сценарий IAM-RW-1-23. Задача продукта #1913.
+// §2.7, §10 шаг 7; сценарий IAM-RW-1-23. Задача продукта kacho#1913.
 //
 // # Зачем СВОЯ полоса, а не строка в соседней сетке
 //

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // acr_floor_module_apply_test.go — ступень подтверждения личности у
-// `InternalModuleService/Apply` ДЕЙСТВУЕТ, а не объявлена (задача #1991, Д9
+// `InternalModuleService/Apply` ДЕЙСТВУЕТ, а не объявлена (задача kacho#1991, Д9
 // приёмки `plan-confirms-what-apply-withdraws.md`).
 //
 // ПРЕДМЕТ. Контракт объявляет `required_acr_min = "2"`: применение манифеста

@@ -1,8 +1,8 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// bootstrap_token.go — сборка контура бутстрап-удостоверения (задача #1119,
-// Ф4б эпика #896).
+// bootstrap_token.go — сборка контура бутстрап-удостоверения (задача kacho#1119,
+// Ф4б эпика kacho#896).
 //
 // # Почему отдельный файл композиционного корня
 //

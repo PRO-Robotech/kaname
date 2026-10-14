@@ -11,7 +11,7 @@
 //	kaname-migrator down [--target <номер>]
 //	kaname-migrator status
 //
-// # Глагола `create` здесь НЕТ — и это решение, а не пропуск (#566)
+// # Глагола `create` здесь НЕТ — и это решение, а не пропуск (kacho#566)
 //
 // Он был и выдавал `goose.Create` без `SetSequential`. Имя миграции в этом
 // дереве пишет АВТОР: форма номера — решение, а инструмент принял бы его молча
@@ -21,31 +21,32 @@
 // (`date -u +%Y%m%d%H%M%S`). Объявлена она в ОДНОМ месте и здесь НЕ
 // переписывается: docs/engineering/architecture/migration-version-namespace.md. Своей
 // редакции у справки быть не должно — две редакции об одном предмете расходятся
-// молча, и расходились (#1026).
+// молча, и расходились (kacho#1026).
 //
 // Флаги верхнего уровня:
 //
 //	--dialect postgres                    (default; единственный поддерживаемый)
-//	--dsn     <connection-string>         (или ENV KACHO_MIGRATOR_DSN)
+//	--dsn     <connection-string>         (или ENV MIGRATOR_DSN; прежнее написание KACHO_MIGRATOR_DSN — окном общего пакета)
 //
-// Приоритет источников DSN — один на семь точек наката и объявлен в общем пакете
-// (`pkg/migratorcli.ResolveDSN`): --dsn > ENV KACHO_MIGRATOR_DSN > конфигурация
-// сервиса. Запасная конфигурация здесь — `config.Load()` (viper), из неё берётся
-// `cfg.MigrateDSN()`: одно helm-values задаёт БД-параметры обоим binary, не
-// дублируя DSN. Своей редакции порядка тут быть не должно — две редакции об одном
-// предмете расходятся молча, и разошлись: тексты отказа у iam, vpc и общего
-// пакета называли РАЗНЫЕ подмножества собственных источников (#1544).
+// Источников адреса базы три — `--dsn`, переменная наката, конфигурация службы
+// (`config.Load()`, viper: одно helm-values задаёт БД-параметры обоим binary, не
+// дублируя DSN), — и объявленным может быть РОВНО ОДИН. Два объявленных разом —
+// отказ, называющий каждый: то же правило, что у службы при двух её формах адреса
+// (#532, см. resolveDSN). Старшинства между источниками нет намеренно: выбранное
+// молча, оно накатывало схему на одну базу, пока служба того же пода читала другую.
 package main
 
 import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // регистрирует "pgx" driver для sql.Open
 	"github.com/spf13/cobra"
 
 	"github.com/PRO-Robotech/corelib/dbready"
+	"github.com/PRO-Robotech/corelib/envknob"
 	"github.com/PRO-Robotech/corelib/migratorcli"
 	"github.com/PRO-Robotech/corelib/migratorcli/cobraargs"
 	"github.com/PRO-Robotech/corelib/migratorrun"
@@ -57,10 +58,10 @@ import (
 const (
 	defaultDialect       = "postgres"
 	defaultMigrationsDir = "."
-	// envDSN — имя переменной окружения второго приоритета. НЕ литерал: оно же
+	// envDSN — имя переменной окружения наката. НЕ литерал: оно же
 	// печатается в тексте отказа предусловий через общий пакет, и два места об
 	// одном имени разошлись бы молча — оператор прочитал бы в подсказке одно, а
-	// сервис читал бы другое (#1383).
+	// сервис читал бы другое (kacho#1383).
 	envDSN = migratorcli.EnvDSN
 )
 
@@ -70,7 +71,7 @@ const (
 const serviceName = "iam"
 
 // dsnExtraSources — чем ЭТА служба заполняет DSN СВЕРХ двух общих (`--dsn` и
-// KACHO_MIGRATOR_DSN), в порядке убывания приоритета. Два общих здесь НЕ
+// MIGRATOR_DSN). Два общих здесь НЕ
 // перечисляются намеренно: их печатает сам общий пакет, поэтому умолчать
 // источник, который перебивает названные, нельзя by construction. Ровно это и
 // случилось однажды — текст отказа называл третий источник и умалчивал второй.
@@ -153,7 +154,7 @@ func newRootCmd(migrationsFS fs.FS) *cobra.Command {
 			"(метка времени заведения: date -u +%Y%m%d%H%M%S).\n" +
 			"Подробности — docs/engineering/architecture/migration-version-namespace.md.",
 		SilenceUsage: true,
-		// Пустая командная строка — ОТКАЗ, а не успех (#1461). Cobra при корне без
+		// Пустая командная строка — ОТКАЗ, а не успех (kacho#1461). Cobra при корне без
 		// исполнения печатает помощь и выходит успехом; прямая форма отвечает
 		// отказом. Скрипт или init-контейнер, потерявший аргумент, объявлялся бы
 		// выполнившим накат — успех на невыполненной работе.
@@ -170,7 +171,7 @@ func newRootCmd(migrationsFS fs.FS) *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.dialect, "dialect", defaultDialect,
 		"SQL dialect (postgres)")
 	root.PersistentFlags().StringVar(&opts.dsn, "dsn", "",
-		"database DSN; if empty — read ENV "+envDSN+", then fall back to kaname config (viper)")
+		"database DSN; exactly one of --dsn, ENV "+envDSN+" or the kaname config may declare it — two at once are refused")
 
 	root.AddCommand(
 		newUpCmd(opts, migrationsFS),
@@ -189,7 +190,7 @@ func newUpCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 		Use: "up",
 		// Лишний позиционный аргумент — отказ, а не молчаливый накат: у cobra
 		// умолчание Args принимает произвольные, и `up 800001` (догадка о том, как
-		// задать цель) уезжал накатывать до головы. Версия задаётся --target (#1461).
+		// задать цель) уезжал накатывать до головы. Версия задаётся --target (kacho#1461).
 		// Текст отказа производит общий пакет — один на семь.
 		Args:  cobraargs.NoExtraArguments,
 		Short: "Apply migrations up to latest (or --target version)",
@@ -211,7 +212,7 @@ func newDownCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 		Use: "down",
 		// Лишний позиционный аргумент — отказ, а не молчаливый накат: у cobra
 		// умолчание Args принимает произвольные, и `up 800001` (догадка о том, как
-		// задать цель) уезжал накатывать до головы. Версия задаётся --target (#1461).
+		// задать цель) уезжал накатывать до головы. Версия задаётся --target (kacho#1461).
 		// Текст отказа производит общий пакет — один на семь.
 		Args:  cobraargs.NoExtraArguments,
 		Short: "Rollback the most recent migration (or down to --target)",
@@ -241,7 +242,7 @@ func newStatusCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 		Use: "status",
 		// Лишний позиционный аргумент — отказ, а не молчаливый накат: у cobra
 		// умолчание Args принимает произвольные, и `up 800001` (догадка о том, как
-		// задать цель) уезжал накатывать до головы. Версия задаётся --target (#1461).
+		// задать цель) уезжал накатывать до головы. Версия задаётся --target (kacho#1461).
 		// Текст отказа производит общий пакет — один на семь.
 		Args:  cobraargs.NoExtraArguments,
 		Short: "Show migration status (applied / pending)",
@@ -255,26 +256,65 @@ func newStatusCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 	}
 }
 
-// configDSN — запасной источник строки подключения: конфигурация самой службы.
+// resolveDSN — ЕДИНСТВЕННОЕ место, где точка наката выбирает адрес базы.
 //
-// Назван функцией, а не лямбдой внутри `buildRunner`, потому что источников у
-// строки подключения ДВА читателя — сборка наката и страж обратного хода свода, —
-// и две редакции одного порядка разошлись бы молча ровно так, как уже расходились
-// тексты отказа у iam, vpc и общего пакета (#1544).
-func configDSN() (string, error) {
-	cfg, cerr := config.Load(os.Getenv("KANAME_CONFIG_PATH"))
+// Назван функцией, а не лямбдой внутри `buildRunner`, потому что читателей у
+// строки подключения ДВА — сборка наката и страж обратного хода свода, — и две
+// редакции одного правила разошлись бы молча ровно так, как уже расходились
+// тексты отказа у iam, vpc и общего пакета (kacho#1544): `down` спросил бы голову
+// цепочки у одной базы, а откатывал бы другую.
+//
+// # Правило то же, что у службы: объявленный источник ровно один (#532)
+//
+// Источников у адреса три: `--dsn`, переменная наката (нейтральное либо прежнее
+// написание — окно общего пакета) и конфигурация службы. Служба при двух своих
+// формах разом отказывает в старте (`config.refuseAmbiguousDSN`): молчаливое
+// старшинство в любую сторону выбрасывает одну из настроек оператора. Здесь
+// старшинство прежде выбиралось — и заданная переменная наката молча побеждала
+// конфигурацию службы: схему накатывали на одну базу, служба того же пода
+// читала другую, под был Ready. Поэтому и здесь — отказ, называющий КАЖДЫЙ
+// объявленный источник, именами, а не значениями: значения несут пароль базы.
+//
+// Объявлена ли конфигурация службы, говорит её загрузка (`LoadWithAddressSources`),
+// а не непустота строки: у ключа адреса есть умолчание, и строка непуста
+// всегда. Поэтому конфигурация грузится ВСЕГДА, а не только как запасной
+// источник: не загрузив её, нельзя знать, не спорит ли она с `--dsn`. Отказ
+// загрузки при этом — отказ наката (fail-closed), а не молчаливый проход по
+// флагу.
+//
+// Когда объявлен ровно один источник, порядок общего пакета
+// (`migratorcli.ResolveDSN`) выбирать уже не из чего; он зовётся ради своих
+// текстов отказа о незаданном адресе — своей редакции их здесь не заводится.
+func resolveDSN(flagDSN string) (string, error) {
+	cfg, service, cerr := config.LoadWithAddressSources(os.Getenv("KANAME_CONFIG_PATH"))
 	if cerr != nil {
-		return "", cerr
+		return "", fmt.Errorf("service config load failed (%s): %w", dsnExtraSources[0], cerr)
 	}
-	return cfg.MigrateDSN(), nil
+
+	var declared []string
+	if strings.TrimSpace(flagDSN) != "" {
+		declared = append(declared, "--dsn")
+	}
+	if v, name, ok := envknob.Lookup(migratorcli.EnvDSN, migratorcli.LegacyEnvDSN); ok && strings.TrimSpace(v) != "" {
+		declared = append(declared, "ENV "+name)
+	}
+	if len(service) > 0 {
+		declared = append(declared, "kaname config ("+strings.Join(service, ", ")+")")
+	}
+	if len(declared) > 1 {
+		return "", fmt.Errorf(
+			"адрес базы объявлен несколькими источниками, и старшинство между ними не выбрано: %s. "+
+				"Оставьте один — точка наката и служба обязаны читать одну и ту же базу",
+			strings.Join(declared, "; "))
+	}
+
+	return migratorcli.ResolveDSN(flagDSN, func() (string, error) { return cfg.MigrateDSN(), nil })
 }
 
-// buildRunner собирает накат из persistent-флагов + ENV + config-fallback.
+// buildRunner собирает накат из persistent-флагов, ENV и конфигурации службы.
 //
-// Приоритет DSN живёт в общем пакете (`migratorcli.ResolveDSN`), а не здесь:
-// --dsn > ENV KACHO_MIGRATOR_DSN > конфигурация сервиса. Сюда принадлежит только
-// то, чем СВОЯ конфигурация читается, — имя переменной пути и способ достать из
-// неё строку подключения; общий пакет не вправе называть оператору чужое имя.
+// Адрес базы выбирает resolveDSN — одно место на оба читателя; там же правило
+// «объявленный источник ровно один».
 func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, error) {
 	// ДИАЛЕКТ СВЕРЯЕТСЯ ПЕРВЫМ, и это порядок, а не стиль. Общий накат сверяет
 	// его тоже — но уже приняв DSN, а до DSN лежит загрузка конфигурации службы.
@@ -301,7 +341,7 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	// требует секретов поставщика личности, которых init-контейнер не несёт и
 	// нести не должен. Судится ровно употребляемая величина — строка подключения,
 	// ниже по тексту.
-	dsn, err := migratorcli.ResolveDSN(opts.dsn, configDSN)
+	dsn, err := resolveDSN(opts.dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -318,9 +358,9 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	// готова. Незаконно НЕ РАЗЛИЧАТЬ «ещё не поднялась» (сходится само) и «адрес
 	// не задан» (не сойдётся никогда).
 	//
-	// Проверка стоит ПОСЛЕ разрешения приоритета источников, поэтому покрывает
+	// Проверка стоит ПОСЛЕ выбора источника (resolveDSN), поэтому покрывает
 	// все три (`--dsn`, переменная окружения, конфигурация службы) и не заводит
-	// четвёртого места, где порядок пришлось бы повторить. Предикат — ТОТ ЖЕ, что
+	// четвёртого места, где правило выбора пришлось бы повторить. Предикат — ТОТ ЖЕ, что
 	// зовёт страж службы: своя редакция разошлась бы молча.
 	//
 	// Полного `Config.Validate` здесь нет намеренно: в боевом режиме он требует

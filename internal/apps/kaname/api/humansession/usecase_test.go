@@ -23,6 +23,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -36,12 +37,15 @@ type harness struct {
 	clock    time.Time
 	hasher   *passwordverify.Hasher
 	verifier *passwordverify.Verifier
-	totp     *totpverify.Verifier
-	login    *humansession.LoginUseCase
-	logout   *humansession.LogoutUseCase
-	change   *humansession.ChangePasswordUseCase
-	resolve  *humansession.ResolveUseCase
-	rule     *humansession.PasswordRule
+	// verifyObs — исходы проверяющего по клетке: проверяющий один на все
+	// полосы харнесса, как в процессе (kaname#692).
+	verifyObs *verifyCounter
+	totp      *totpverify.Verifier
+	login     *humansession.LoginUseCase
+	logout    *humansession.LogoutUseCase
+	change    *humansession.ChangePasswordUseCase
+	resolve   *humansession.ResolveUseCase
+	rule      *humansession.PasswordRule
 	// envelope — дублёр огибающей по потолку (Ф3-31, kaname#188): потолок
 	// задаёт проба; envelopePort — то, что получает полоса: по умолчанию
 	// дублёр, измерительная проба подставляет настоящую огибающую.
@@ -61,6 +65,27 @@ const rcCodeTTL = 5 * time.Minute
 type nopVerifyObserver struct{}
 
 func (nopVerifyObserver) VerificationObserved(passwordverify.Outcome) {}
+
+// verifyCounter — приёмник исходов проверяющего, считающий клетки.
+type verifyCounter struct {
+	mu    sync.Mutex
+	cells map[passwordverify.Outcome]int
+}
+
+func (v *verifyCounter) VerificationObserved(o passwordverify.Outcome) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cells == nil {
+		v.cells = map[passwordverify.Outcome]int{}
+	}
+	v.cells[o]++
+}
+
+func (v *verifyCounter) count(o passwordverify.Outcome) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.cells[o]
+}
 
 func declared() passwordverify.Declared {
 	return passwordverify.Declared{
@@ -100,7 +125,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	var err error
 	h.hasher, err = passwordverify.NewHasher(declared())
 	require.NoError(t, err)
-	h.verifier, err = passwordverify.New(4, nopVerifyObserver{})
+	h.verifyObs = &verifyCounter{}
+	h.verifier, err = passwordverify.New(4, h.verifyObs)
 	require.NoError(t, err)
 	// Выравнивание полосы «материала нет» — как в композиционном корне.
 	decoy, err := h.hasher.Hash("decoy-of-the-harness")
@@ -111,7 +137,8 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	h.rule, err = humansession.NewPasswordRule(8, breach, h.obs, logger)
 	require.NoError(t, err)
 	h.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
+		CutoffClock: momentclock.Func(now),
+		Store:       h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
 		Envelope: h.envelopePort, TOTP: h.totp, Sets: h.verifier,
 	})
@@ -132,8 +159,10 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	})
 	require.NoError(t, err)
 	h.recoveryComplete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
-		Observer: h.obs, Now: now, Logger: logger,
+		CutoffClock: momentclock.Func(now),
+		Store:       recordingStore{inner: h.store, j: h.journal, meter: h.store.tripCount}, Hasher: h.hasher, Rule: h.rule, Limits: limits(), TTL: ucTTL,
+		Completion: recordingCompletionStore{inner: h.store, j: h.journal, meter: h.store.tripCount},
+		Observer:   h.obs, Now: now, Logger: logger,
 	})
 	require.NoError(t, err)
 	return h

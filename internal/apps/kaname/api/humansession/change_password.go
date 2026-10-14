@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
-	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -107,7 +106,10 @@ func NewChangePasswordUseCase(d ChangePasswordDeps) (*ChangePasswordUseCase, err
 }
 
 // Execute — смена пароля из сессии носителя.
-func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordInput) (ChangePasswordOutput, error) {
+func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordInput) (_ ChangePasswordOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.observer, StoreFailurePasswordChange, err) }()
 	if in.CurrentPassword == "" {
 		return ChangePasswordOutput{}, FieldRequired("currentPassword")
 	}
@@ -224,12 +226,12 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}
 
+	// Уровень в ответе — ЧТЕНИЕ записи (Ф11 Р1: копии уровня — чтения записи,
+	// а не второе состояние; kaname#208). Смена пароля уровня не меняет (Ф3 Р6),
+	// а пересчёт от имён способов терял бы флаги утверждения ключа: запись их
+	// не хранит, и сессия «3» назвалась бы «2».
 	s := resolved.Session
 	s.LastPresentedAt = now
-	// Уровень — пересчёт правилом от множества предъявленного, а не константа.
-	if level, ok := assurance.LevelOf(presentationsOf(s.PresentedMethods)); ok {
-		s.AssuranceLevel = level.String()
-	}
 	return ChangePasswordOutput{
 		View:   SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer: bearer,
@@ -246,25 +248,4 @@ func (uc *ChangePasswordUseCase) recordFailure(ctx context.Context, addressKey, 
 		return err
 	}
 	return w.Commit(ctx)
-}
-
-// presentationsOf — слова записи → предъявления правила уровня. Слова вне
-// словаря пропускаются: база их не пропускает by construction.
-func presentationsOf(methods []string) []assurance.Presentation {
-	out := make([]assurance.Presentation, 0, len(methods))
-	for _, m := range methods {
-		switch m {
-		case assurance.MethodPassword.String():
-			out = append(out, assurance.PasswordPresented())
-		case assurance.MethodTOTP.String():
-			out = append(out, assurance.TOTPPresented())
-		case assurance.MethodLookupSecret.String():
-			out = append(out, assurance.LookupSecretPresented())
-		case assurance.MethodRecoveryCode.String():
-			out = append(out, assurance.RecoveryCodePresented())
-		case assurance.MethodWebAuthn.String():
-			out = append(out, assurance.KeyAssertion(false, true))
-		}
-	}
-	return out
 }

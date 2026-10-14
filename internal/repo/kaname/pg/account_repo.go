@@ -40,7 +40,7 @@ type accountReader struct {
 const accountCols = "id, name, description, labels, owner_user_id, created_at"
 
 // accountUpdateQ — оператор записи аккаунта. СТАТИЧЕСКИЙ: набор колонок известен
-// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
 // `mutable_triplet_update.go`). `owner_user_id` неизменяем и в перечень не
 // входит — вызывающий отвергает его до записи.
 const accountUpdateQ = `UPDATE accounts SET` + mutableTripletSetSQL +
@@ -74,7 +74,7 @@ func (r *accountReader) List(ctx context.Context, f account.ListFilter) ([]domai
 	argIdx := 1
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (#445). The predicate is built from the parsed
+		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
 		// expression, so the column follows the whitelist instead of being
 		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
@@ -106,7 +106,7 @@ func (r *accountReader) List(ctx context.Context, f account.ListFilter) ([]domai
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякий аккаунт, перед которым
 	// лежит больше `page_size` невидимых предшественников — он до фильтра просто
 	// не доезжает.
@@ -224,25 +224,35 @@ func splitAccountInsertHint(hint string) (id, name string) {
 // в монорепо. Следить за таким утверждением некому дважды: приватный адаптер
 // чужого сервиса меняется своей полосой, а по коду сервисы друг от друга не
 // зависят вовсе. Довод «UTC ради детерминированности» самодостаточен и в чужом
-// подтверждении не нуждается (#1951).
+// подтверждении не нуждается (kacho#1951).
 func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Account, error) {
 	labelsJSON, err := marshalLabels(a.Labels)
 	if err != nil {
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	now := time.Now().UTC()
-	// ON CONFLICT (id) DO NOTHING — не проглатывание, а порядок ключей: у вставки
-	// два ключа, и ключ имени создан в схеме раньше первичного, поэтому база
-	// проверяет его первым. Побайтовый повтор создания (тот же id и то же имя)
-	// без этой оговорки отказывался бы текстом имени (AID-13). Арбитр
-	// проверяется до вставки, конфликт идентификатора даёт пустой RETURNING и
-	// отказ ниже; гонку одного id решает та же спекулятивная вставка (AID-14).
-	// Конфликт одного имени по-прежнему приходит отказом accounts_name_unique,
-	// конфликт с реестром выданных — отказом его ключа из триггера.
+	// ON CONFLICT DO NOTHING БЕЗ ЦЕЛИ — арбитрами служат ОБА ключа вставки
+	// (`accounts_pkey` и `accounts_name_unique`; других уникальных ключей у
+	// таблицы нет), и столкновение по любому из них возвращает НОЛЬ строк, не
+	// обрывая транзакцию. Несущих причин две, и обе — порядок, а не проглатывание:
+	//
+	//   - ключ имени создан в схеме раньше первичного, и база проверяет его
+	//     первым; побайтовый повтор создания (тот же id и то же имя) без арбитра
+	//     по id отказывался бы текстом имени (AID-13). Какой ключ занят, решает
+	//     чтение идентификатора ниже — тем же порядком «сначала id»;
+	//   - личный аккаунт регистрации перебирает свободное имя ТОЙ ЖЕ транзакцией
+	//     (`user.BootstrapPersonalResourcesTx`, Ф4 Р9): сырое 23505 сделало бы
+	//     транзакцию негодной до конца её тела, а ноль строк оставляет её годной
+	//     для следующей попытки. Занятость имени судит само ограничение (ban #10).
+	//
+	// Гонку одного id решает та же спекулятивная вставка (AID-14): конкурирующая
+	// незафиксированная строка дожидается своего исхода до решения арбитра.
+	// Конфликт с реестром выданных — по-прежнему отказ его ключа из триггера: он
+	// арбитром не является и поднимается как 23505.
 	q := fmt.Sprintf(`
 		INSERT INTO accounts (id, name, description, labels, owner_user_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO NOTHING
+		ON CONFLICT DO NOTHING
 		RETURNING %s`, accountCols)
 
 	row := w.tx.QueryRow(ctx, q,
@@ -251,15 +261,16 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 	)
 	out, err := scanAccount(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Account{}, iamerr.Wrapf(iamerr.ErrAlreadyExists, "Account %s already exists", string(a.ID))
+		return domain.Account{}, w.insertConflict(ctx, a)
 	}
 	if err != nil {
-		// На UNIQUE / FK / CHECK идем через mapErr с verbatim-text hint'ами.
+		// Прочие UNIQUE (ключ реестра выданных из триггера) / FK / CHECK — через
+		// mapErr с verbatim-text hint'ами.
 		switch pgfault.Classify(err).Class {
 		case pgfault.Unique:
-			// Подсказка несёт И идентификатор, И имя: у вставки два ключа
-			// (первичный и имени), плюс ключ реестра выданных из триггера, и текст
-			// обязан не зависеть от того, какой из них база проверила первой.
+			// Подсказка несёт И идентификатор, И имя: ключ реестра выданных
+			// поднимается триггером, и текст обязан не зависеть от того, какой
+			// ключ сработал.
 			return domain.Account{}, mapErr(err, "", accountInsertHint(a.ID, a.Name))
 		case pgfault.ForeignKey:
 			return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
@@ -275,6 +286,29 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 		*w.ownerFKHintSink = string(a.OwnerUserID)
 	}
 	return out, nil
+}
+
+// insertConflict — какой ключ занял вставку, ответившую нолём строк. Арбитров
+// два (первичный и имени), и порядок ответа — «сначала идентификатор» (AID-13):
+// занятый id называется идентификатором, иначе занятым было имя. Транзакция
+// после нуля строк годна, поэтому чтение идёт ею же и видит строку, решившую
+// арбитра: она зафиксирована к моменту решения.
+//
+// Признак — ErrAlreadyExists в обеих ветвях, текст — тот же, что у сырого
+// 23505 соответствующего ключа (`uniqueText`), так что контракт глагола
+// Create по столкновению не меняется. Если строку, решившую арбитр по id,
+// успели удалить между вставкой и чтением, ответ назовёт имя; повтор вставки
+// тем же id отвергнется ключом реестра выданных текстом идентификатора.
+func (w *accountWriter) insertConflict(ctx context.Context, a domain.Account) error {
+	var idTaken bool
+	if err := w.tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM accounts WHERE id = $1)`, string(a.ID)).Scan(&idTaken); err != nil {
+		return mapErr(err, "", string(a.ID))
+	}
+	if idTaken {
+		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "Account %s already exists", string(a.ID))
+	}
+	return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", accountNameTakenText(string(a.Name)))
 }
 
 // Update — UPDATE на mutable полях (name, description, labels). owner_user_id
@@ -379,6 +413,55 @@ func (w *accountWriter) Delete(ctx context.Context, id domain.AccountID) error {
 	return iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
 }
 
+// LockForRemoval — см. порт. Замок строки аккаунта — ПЕРВЫМ оператором
+// транзакции, перечень участников — после него: вставка членства берёт ключевой
+// замок той же строки (`memberships_account_fk`) и сериализуется со снятием
+// (kaname#664, Р6).
+func (w *accountWriter) LockForRemoval(ctx context.Context, id domain.AccountID) ([]domain.UserID, error) {
+	var one int
+	err := w.tx.QueryRow(ctx, `SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE`, string(id)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
+	}
+	if err != nil {
+		return nil, mapErr(err, "Account.Delete", string(id))
+	}
+	rows, err := w.tx.Query(ctx,
+		`SELECT user_id FROM memberships WHERE account_id = $1 ORDER BY user_id`, string(id))
+	if err != nil {
+		return nil, mapErr(err, "Account.Delete", string(id))
+	}
+	defer rows.Close()
+	var out []domain.UserID
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, mapErr(err, "Account.Delete", string(id))
+		}
+		out = append(out, domain.UserID(uid))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "Account.Delete", string(id))
+	}
+	return out, nil
+}
+
+// LockOwner — см. порт. Ключевой замок (`FOR KEY SHARE`) — тот же, что берёт
+// внешний ключ владельца при вставке аккаунта, только раньше и с текстом:
+// отсутствие строки отвечает «User <id> not found» с кодом предусловия, тем же
+// текстом, что отказ ключа `accounts_owner_fk` на фиксации.
+func (w *accountWriter) LockOwner(ctx context.Context, owner domain.UserID) error {
+	var one int
+	err := w.tx.QueryRow(ctx, `SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE`, string(owner)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s not found", owner)
+	}
+	if err != nil {
+		return mapErr(err, "", string(owner))
+	}
+	return nil
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 type scanner interface {
@@ -439,7 +522,7 @@ func unmarshalLabels(b []byte) (domain.Labels, error) {
 
 // ---- filter / page-token helpers ------------------------------------------
 
-// Форма курсора объявлена ОДИН раз — в `pkg/pagetoken` (#652). Здесь стоял
+// Форма курсора объявлена ОДИН раз — в `pkg/pagetoken` (kacho#652). Здесь стоял
 // авторитетный кодек, а на границе приложения — его рукописное зеркало, и
 // зеркало бежало ПЕРВЫМ: смена формы вносилась бы в два места, и первое же
 // пропущенное дало бы ответ, зависящий от того, какой декодер отработал раньше.

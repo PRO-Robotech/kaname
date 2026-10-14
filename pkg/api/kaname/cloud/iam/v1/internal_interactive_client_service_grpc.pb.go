@@ -85,11 +85,26 @@ type InternalInteractiveClientServiceClient interface {
 	// of this call). A refused Create (name taken, registry failure) answers
 	// synchronously, returns no operation and issues no secret.
 	//
+	// `name` IS OPTIONAL. An empty `name` means "name it yourself": before the row
+	// is written the service sets `name` to the client's own `id`, which is
+	// unique by construction, so two nameless Creates never collide. A non-empty
+	// `name` must be free: a taken one is refused synchronously (`ALREADY_EXISTS`)
+	// and leaves no client and no secret behind.
+	//
 	// A LOST ANSWER MEANS A LOST SECRET, and the secret cannot be recovered or
-	// re-read. After a timeout or a dropped connection: list clients by the
-	// `name` the request carried; if one exists, delete it and create it anew. A
-	// Create without `name` must not be repeated blindly — every such call
-	// registers another client with another secret.
+	// re-read. What survives is the registered client; it is found with `List`
+	// and removed with `Delete`, and how it is found depends on the request:
+	//
+	//   - the request carried a `name` — `List` with the filter `name=<name>`;
+	//     if a client is there, `Delete` it by its `id` and `Create` anew. A
+	//     blind repeat with the same `name` registers nothing: it is refused as
+	//     above;
+	//   - the request carried no `name` — the lost client's `name` equals its
+	//     `id`, and the caller knows neither. `List` all clients and take every
+	//     one whose `name` equals its `id` and whose `id` the caller has no record
+	//     of; `Delete` each, then `Create` anew. A blind repeat without `name` is
+	//     NOT refused: every such call registers another client with another
+	//     secret, which is why a caller that may need to recover sends a `name`.
 	//
 	// CHANGE OF THE OPERATION RESPONSE TYPE. The response used to be the bare
 	// `InteractiveClient`; it is now `CreateInteractiveClientResponse`, whose
@@ -200,11 +215,26 @@ type InternalInteractiveClientServiceServer interface {
 	// of this call). A refused Create (name taken, registry failure) answers
 	// synchronously, returns no operation and issues no secret.
 	//
+	// `name` IS OPTIONAL. An empty `name` means "name it yourself": before the row
+	// is written the service sets `name` to the client's own `id`, which is
+	// unique by construction, so two nameless Creates never collide. A non-empty
+	// `name` must be free: a taken one is refused synchronously (`ALREADY_EXISTS`)
+	// and leaves no client and no secret behind.
+	//
 	// A LOST ANSWER MEANS A LOST SECRET, and the secret cannot be recovered or
-	// re-read. After a timeout or a dropped connection: list clients by the
-	// `name` the request carried; if one exists, delete it and create it anew. A
-	// Create without `name` must not be repeated blindly — every such call
-	// registers another client with another secret.
+	// re-read. What survives is the registered client; it is found with `List`
+	// and removed with `Delete`, and how it is found depends on the request:
+	//
+	//   - the request carried a `name` — `List` with the filter `name=<name>`;
+	//     if a client is there, `Delete` it by its `id` and `Create` anew. A
+	//     blind repeat with the same `name` registers nothing: it is refused as
+	//     above;
+	//   - the request carried no `name` — the lost client's `name` equals its
+	//     `id`, and the caller knows neither. `List` all clients and take every
+	//     one whose `name` equals its `id` and whose `id` the caller has no record
+	//     of; `Delete` each, then `Create` anew. A blind repeat without `name` is
+	//     NOT refused: every such call registers another client with another
+	//     secret, which is why a caller that may need to recover sends a `name`.
 	//
 	// CHANGE OF THE OPERATION RESPONSE TYPE. The response used to be the bare
 	// `InteractiveClient`; it is now `CreateInteractiveClientResponse`, whose

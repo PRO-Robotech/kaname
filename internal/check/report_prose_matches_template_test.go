@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // report_prose_matches_template_test.go — ПРОЗА ОТЧЁТА СВЕРЯЕТСЯ С
-// ЛИТЕРАЛОМ, КОТОРЫЙ ЕЁ ПЕЧАТАЕТ (задача продукта #877).
+// ЛИТЕРАЛОМ, КОТОРЫЙ ЕЁ ПЕЧАТАЕТ (задача продукта kacho#877).
 //
 // Порт с монорепо (`internal/repohygiene/reportprosematchestemplate_test.go`,
 // снят вынесением службы — `kacho#2597`). Дословно: разбор, предикат.

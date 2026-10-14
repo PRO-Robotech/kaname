@@ -1,0 +1,118 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/registration-and-its-three-consequences.md
+  sha256: ed16317127edf8da4ca2906c7e6c6b136796d5bd490c1db01db47474ce5fe74a
+  revision: 8
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 8 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (origin/296, перемерено
+    git rev-parse origin/296 → 8b0379e2a); отпечаток снят с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a (голова эпика 296)
+  task: PRO-Robotech/kaname#211
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md
+  fingerprint_reproduced: true
+  lines: 2244
+  round: 3
+  predecessor_record: docs/specs/reviews/registration-and-its-three-consequences/24ad0b9cf5ab755fe9a6080e8f406385beef6f842e9cdd0e2c8cea24f29813b3.yaml (APPROVED, редакция 7)
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 8 к 8b0379e2a (git diff: Р3 абзац «Редакция 8», Ф4-11/12/25 «Тогда», Д12, §7 Ф4-11,
+  §9 Ф4-11…13, §10б); прочее одобрено кругом 2 и не перерассматривалось
+blocking_count: 1
+blocking_kinds_distinct: [DoD]
+
+premise_check:
+  premise: на 8b0379e2a единый отказ регистрации — `registration refused` без шага, один производитель
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git grep -n TextRegistrationRefused 8b0379e2a -- '*.go' — refusals.go:15 константа, :23 сентинел,
+    loginlanehttp/handler.go:1367 ветвь края 400/9 без Retry-After; register.go:205,346,349,352 —
+    обе причины одним ErrRefused.
+
+blocking:
+  - id: B3-1
+    kind: DoD
+    summary: >-
+      Перепись §10б и DoD редакции 8 не видят сквозного слоя: кейсы newman утверждают прежний литерал
+      дословно и краснеют на посадке. Предикат переписи берёт `*.go` без тестов и docs, мимо
+      tests/newman. На 8b0379e2a: tests/newman/cases/kaname-registration.py:252,254 (OCCUPIED,
+      OCCUPIED-CASE — _refusal(400, 9, "registration refused")), tests/newman/cases/kaname-address-verification.py:180,618
+      (EV01-TWIN), их собранные коллекции (kaname-registration.postman_collection.json:828,935;
+      kaname-address-verification.postman_collection.json:936). DoD п.1 называет только
+      интеграционную пробу и Go-пробу полосы; финального сквозного пункта нет (чек-лист 3.7).
+    fix: >-
+      Строка переписи §10б «кейсы newman, утверждающие текст» с исходом «тот же текст — тем же
+      изменением, коллекции пересобраны»; пункт DoD: newman-наборы kaname-registration и
+      kaname-address-verification зелены на новом тексте, предикат
+      `git grep -n "'registration refused'\|\"registration refused\"" -- tests/newman` → 0 точных
+      литералов прежней формы. Предикат переписи расширить на tests/.
+
+non_blocking:
+  - id: N3-1
+    summary: >-
+      Перепись §10б не называет строку, которую печатает её же второй предикат:
+      docs/content/advanced/observability.mdx:206 («один отказ … — `registration refused`»), и прозу
+      Help метрики internal/observability/metrics/login_lane_recorder.go:139. После правки обе
+      называют префикс вместо текста — добавить строкой переписи с исходом.
+  - id: N3-2
+    summary: >-
+      internal/handler/loginlanehttp/register_test.go:78 утверждает тело литералом (JSONEq), а не
+      константой — правится тем же изменением; упомянуть в переписи держателей.
+
+accepted_parts: >-
+  Текст Р3 проверен прогоном отрицательного контроля Ф4-11: ни цифры, ни in use / taken / exists /
+  registered / limit / rate / quota / seconds (0 попаданий); причина не названа, шаги условны и верны
+  для обеих причин закрытого перечня; код/признак прежние; Retry-After на ветви не ставится
+  (handler.go:1364-1367). Близнец Ф4-13 есть; Д12 с предикатом снятия корректен.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 2
+  not_performed: 0
+  detail: >-
+    «Дано» Ф4-11/12/13 редакция 8 не меняет; фикстуры — register_integration_test.go:319 (занятый
+    адрес) и register_test.go:271 (потолок темпа), обе на 8b0379e2a.
+
+event_body: acceptance-reviewer · CHANGES_REQUESTED · ed16317127edf8da4ca2906c7e6c6b136796d5bd490c1db01db47474ce5fe74a
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт — возврат; одобрение круга 2 (24ad0b9c) на редакцию 8 не переносится, санкции на код по
+    дельте редакции 8 нет.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#211
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#211
+  status: pending
+  published: false
+  verdict: CHANGES_REQUESTED
+  subject_sha256: ed16317127edf8da4ca2906c7e6c6b136796d5bd490c1db01db47474ce5fe74a
+  publication_mode: courier_of_agent_verdict
+  body_for_publication: 'acceptance-reviewer · CHANGES_REQUESTED · ed16317127edf8da4ca2906c7e6c6b136796d5bd490c1db01db47474ce5fe74a'

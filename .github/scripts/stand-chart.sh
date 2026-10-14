@@ -672,6 +672,15 @@ authn:
 # implicit, лист узла проверяется якорем серверного секрета службы. Без узла
 # письмо подтверждения адреса не уходит никуда, и человек стенда остаётся в
 # положении подтверждения (kaname#456).
+# Окно писем адресату (MAIL-25) объявлено ЯВНО, величиной умолчания процесса:
+# кейсы частоты запроса кода (Ф5-26) печатают N и окно, а посев seed_mail_pace.py
+# читает их из карты настроек процесса. Необъявленное окно процесс берёт
+# умолчанием, которого в карте нет, — и «проба печатает N» было бы числом,
+# выписанным в кейсе, а не ответом стенда.
+invite:
+  mailRateLimit:
+    maxPerWindow: 3
+    window: 1h
 inviteMail:
   relay: "$MAIL_SVC.$NS.svc.cluster.local:465"
   from: "kaname@$DOMAIN"
@@ -1131,6 +1140,43 @@ ensure_forward() {
 	say "стенд: $tag переадресована — 127.0.0.1:$port (порт службы $remote)"
 }
 
+# ensure_deploy_forward <тег> <имя порта контейнера> — переадресация порта
+# ВЫКАТА службы, которого Service не объявляет (слушатель метрик: его читает
+# собиратель изнутри кластера). Номер читается у выката по имени, местный выбирает
+# ядро; живая переадресация того же тега переиспользуется. Итог — в FORWARD_PORT.
+ensure_deploy_forward() {
+	local tag="$1" pname="$2" remote pid i port=""
+	local pidf="$WORK/forward-$tag.pid" logf="$WORK/forward-$tag.log"
+	remote="$("${KCTL[@]}" -n "$NS" get deploy "$RELEASE" \
+		-o "jsonpath={.spec.template.spec.containers[*].ports[?(@.name==\"$pname\")].containerPort}" 2>/dev/null || true)"
+	if [ -z "$remote" ]; then
+		fail "у выката $RELEASE нет порта $pname — чарт не объявил поверхность, которую читает посев"
+		exit 1
+	fi
+	if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+		port="$(forward_port_of "$logf" "$remote")"
+	fi
+	if [ -z "$port" ]; then
+		if [ -f "$pidf" ]; then kill "$(cat "$pidf")" 2>/dev/null || true; fi
+		nohup "${KCTL[@]}" -n "$NS" port-forward --address 127.0.0.1 "deploy/$RELEASE" ":$remote" \
+			> "$logf" 2>&1 < /dev/null &
+		pid=$!
+		echo "$pid" > "$pidf"
+		for i in $(seq 1 30); do
+			port="$(forward_port_of "$logf" "$remote")"
+			[ -n "$port" ] && break
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 1
+		done
+	fi
+	if [ -z "$port" ]; then
+		unmet "переадресация $tag (deploy/$RELEASE:$pname) не встала: $(tail -2 "$logf" 2>/dev/null | tr '\n' ' ')"
+		exit "$RC_UNMET"
+	fi
+	FORWARD_PORT="$port"
+	say "стенд: $tag переадресована — 127.0.0.1:$port (порт выката $remote)"
+}
+
 stop_forwards() {
 	local f
 	for f in "$WORK"/forward-*.pid; do
@@ -1245,12 +1291,94 @@ seed_ceremony() {
 	ensure_forward grpc-internal "$RELEASE-internal" grpc-internal; grpc="127.0.0.1:$FORWARD_PORT"
 	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
 	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+	# Надзор облака (kaname#468) посев заводит сам — регистрацией с подтверждением
+	# адреса кодом из письма, как посев полосы своего человека.
+	ensure_forward mailbox "$MAIL_SVC" http; local mailbox="http://127.0.0.1:$FORWARD_PORT"
 
 	local rc=0
 	KANAME_STAND_LANE_EMAIL="$email" KANAME_STAND_LANE_PASSWORD="$password" \
 		python3 "$ROOT/tests/authz-fixtures/seed_ceremony.py" \
 		--lane-url "$LANE_URL" --issuance-url "$issuance" --own-url "$own" \
-		--grpc-addr "$grpc" --pki "$cdir" || rc=$?
+		--grpc-addr "$grpc" --pki "$cdir" --mailbox-url "$mailbox" \
+		--email-domain "$DOMAIN" || rc=$?
+	return "$rc"
+}
+
+# ─── ПОСЕВ ХРАНИМЫХ ЗНАЧЕНИЙ ФОРМАТОВ A И B ─────────────────────────────────
+#
+# Отдельная подкоманда ПОСЛЕ `seed-login-lane`: лист края и полоса — её условие.
+# «Дано» позиций PWV-01 и PWV-02 (ID-PW-1 Д-01): человек заводится регистрацией
+# на полосе, а материал его строки способа входа замещается значением, которое
+# построила сторонняя библиотека, — глагола, кладущего формат A, у продукта нет
+# by construction. Запись — одним оператором через `psql` пода базы стенда;
+# оператор уходит вводом, а не аргументами. Разбор шагов и границ — шапка
+# `tests/authz-fixtures/seed_stored_value.py`. Исходы — те же три.
+seed_stored_value() {
+	need_tool python3; need_tool go
+	local f
+	for f in edge.crt edge.key ca.crt; do
+		[ -s "$EDGE_DIR/$f" ] || { unmet "листа края нет в $EDGE_DIR — сначала seed-login-lane"; exit "$RC_UNMET"; }
+	done
+	local pgpod lane
+	pgpod="$("${KCTL[@]}" -n "$NS" get pod -l "app=$RELEASE-postgres" \
+		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+	[ -n "$pgpod" ] || { unmet "пода базы нет — материал положить некуда"; exit "$RC_UNMET"; }
+	if [ -f "$LANE_FORWARD_PID" ] && kill -0 "$(cat "$LANE_FORWARD_PID")" 2>/dev/null; then
+		lane="$(forward_port_of "$LANE_FORWARD_LOG" \
+			"$("${KCTL[@]}" -n "$NS" get svc "$RELEASE-internal" \
+				-o jsonpath='{.spec.ports[?(@.name=="http-login-lane")].port}' 2>/dev/null)")"
+	fi
+	if [ -n "${lane:-}" ]; then
+		LANE_URL="https://127.0.0.1:$lane"
+		say "стенд: полоса входа — живая переадресация посева полосы, $LANE_URL"
+	else
+		start_lane_forward
+	fi
+	local rc=0 store_exec="kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname"
+	python3 "$ROOT/tests/authz-fixtures/seed_stored_value.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --store-exec "$store_exec" || rc=$?
+	[ "$rc" -eq 0 ] || return "$rc"
+	seed_store_companions "$store_exec"
+}
+
+# ─── СОСЕДИ ПОСЕВА ХРАНИЛИЩЕМ: ТЕ ЖЕ ДВЕРИ, ТОТ ЖЕ ИСПОЛНИТЕЛЬ ЗАПИСИ ───────────
+#
+# Ещё два «Дано», у которых часть строится ЗАПИСЬЮ, — и потому они стоят в той же
+# подкоманде, что посев хранимых значений: условие у них то же (полоса, лист края,
+# под базы стенда), и исходы те же три.
+#
+#   · `seed_mail_pace.py` — Ф5-26, Ф5-27, Ф5-14 набора восстановления: адрес
+#     слушателя метрик (порт выката, Service его не объявляет), величины окон из
+#     КАРТЫ НАСТРОЕК, которую читает процесс (`<релиз>-config`, `config.yaml`), и
+#     адресат с окном писем приглашения, заполненным до величины;
+#   · `seed_key_person.py` — FP-12 набора полосы входа: личность с ключом доступа
+#     и без строки пароля. Ключ заводится глаголом собственного фронта под токеном
+#     уровня «2» нашей церемонии (клиента завёл посев церемонии — он идёт раньше):
+#     сессию до «2» поднимает второй фактор, снимаемый после заведения ключа
+#     глаголом полосы (kaname#747, Р1, Р3); строка пароля снимается записью.
+#   · `seed_wayless_person.py` — Ф5-29, Ф5-30, Ф5-34 и AWI-12 набора
+#     восстановления (kaname#468): действующие личности без единого способа входа
+#     в форме «после переноса», с подтверждённым и с неподтверждённым адресом.
+#     Заводятся регистрацией полосы, строка пароля снимается той же записью, что
+#     у личности с ключом.
+seed_store_companions() {
+	local store_exec="$1" rc=0 mailbox metrics issuance own cfg="$WORK/process-config.yaml"
+	ensure_forward mailbox "$MAIL_SVC" http; mailbox="http://127.0.0.1:$FORWARD_PORT"
+	ensure_deploy_forward metrics metrics; metrics="https://127.0.0.1:$FORWARD_PORT"
+	"${KCTL[@]}" -n "$NS" get configmap "$RELEASE-config" -o 'jsonpath={.data.config\.yaml}' \
+		> "$cfg" 2>/dev/null || true
+	python3 "$ROOT/tests/authz-fixtures/seed_mail_pace.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" --metrics-url "$metrics" \
+		--config-file "$cfg" --store-exec "$store_exec" || rc=$?
+	[ "$rc" -eq 0 ] || return "$rc"
+	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
+	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+	python3 "$ROOT/tests/authz-fixtures/seed_key_person.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" \
+		--issuance-url "$issuance" --own-url "$own" --store-exec "$store_exec" || rc=$?
+	[ "$rc" -eq 0 ] || return "$rc"
+	python3 "$ROOT/tests/authz-fixtures/seed_wayless_person.py" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" --store-exec "$store_exec" || rc=$?
 	return "$rc"
 }
 
@@ -1305,12 +1433,16 @@ case "${1:-}" in
 		need_tool kubectl
 		seed_ceremony
 		;;
+	seed-stored-value)
+		need_tool kubectl
+		seed_stored_value
+		;;
 	down)
 		need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|seed-stored-value|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac

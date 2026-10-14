@@ -1,0 +1,184 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: 2e441e45ba4adae493d0e3263f629d6b6e29669c9562bb724c70f8e1438de341
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (три) не
+    трогаются — редакция 5 получает соседнюю запись по своему отпечатку.
+  base_commit: 9bac42bdc
+  content_commit: d59487ada7cf86811fa3b4374a7ee8af906dde87
+  branch: '246'
+  wave_branch: '536'
+  task: PRO-Robotech/kacho#1271
+  edition_task: PRO-Robotech/kaname#246
+  edition_tasks_also: [PRO-Robotech/kacho#2700, PRO-Robotech/kaname#172]
+  lines: 1573
+  round: 4
+  predecessor_record: docs/specs/reviews/recovery-of-access/fe558cc810e569f456e9b2da1200c4396afaf39ae52450787484e74beaced170.yaml
+  predecessor_note: >-
+    Круг 3 одобрил редакцию 4 (fe558cc8…). Между ней и этой редакцией — три коммита без записи
+    ревью (69e61c563 kaname#363, 64c66f82b и 0c597ba22 kaname#564: отпечаток 7137e50f…). Этот круг
+    судит отпечаток 2e441e45… ЦЕЛИКОМ, включая те правки снятия; вердикт круга 3 сюда не
+    переносится.
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/recovery-of-access.md в копии ветки 246 @ d59487ada
+    → 2e441e45…; `git ls-remote origin 246` → d59487ada (голова на origin та же); wc -l → 1573.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-03T12:07:21Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Событие опубликовано курьером после круга 4 в kaname#246 — в форме, которую называет
+    `publication_pending.expected_form` этой записи («kaname#246 либо kacho#1271»); запись
+    приведена к факту события отдельной правкой, вердикт и разбор не тронуты.
+  what_the_event_would_lift: >-
+    ban #1 для Ф5-26…28 — задача kaname#246 вместе с kacho#2700 (держатели окон запроса кода с
+    инъекциями §9 и вывод перечня почтовых глаголов по маршрутам полосы входа).
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#246 (либо kacho#1271) с полями role, verdict, subject,
+      subject_revision d59487ada7cf86811fa3b4374a7ee8af906dde87, subject_sha256 дословно; блок
+      `event` дописывается отдельным коммитом поверх этой записи.
+    subject_task_event:
+      task: PRO-Robotech/kacho#1271
+      status: performed
+      url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5974296206
+      why: >-
+        Гейт `.github/scripts/review-event-silence.py` ищет событие в задаче `subject.task`;
+        событие в kaname#246 ему не видно. Событие с тем же заголовком опубликовано в kacho#1271
+        со ссылкой на kaname#246; блок `event` переведён на него, событие kaname#246 — в
+        `sanction.prior_event` и не снимается.
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5969000677
+    event_url: https://github.com/PRO-Robotech/kaname/issues/246#issuecomment-5969000677
+    subject_task_event_id: 5974296206
+    prior_event:
+      database_id: 5969000677
+      url: https://github.com/PRO-Robotech/kaname/issues/246#issuecomment-5969000677
+      body_sha256: 05f564281ea35bc807a8d10c13be496f04022de380d98b58dc54756d71225a6c
+      created_at: '2026-10-03T12:07:21Z'
+    remeasured: >-
+      `sha256sum docs/engineering/acceptance/recovery-of-access.md` на origin/246 @48a7aa31 →
+      2e441e45…de341, совпал с именем записи и строкой `subject_sha256` события; содержимое
+      документа на 48a7aa31 и на content_commit d59487ada одно (тот же sha256);
+      `gh api repos/PRO-Robotech/kaname/issues/comments/5969000677` → issue_url kaname#246,
+      автор pointpu, author_association MEMBER, created_at == updated_at; пять обязательных
+      строк заголовка дословно.
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5974296206
+  node_id: IC_kwDOTZqgWM8AAAABZBiGjg
+  url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5974296206
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5974296206
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1271
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T22:47:00Z'
+  body_sha256: b6f4b277cfddae33ded23c3eab66b37378c2f1675af7d4d3889727cd9db119ba
+  subject_sha256: 2e441e45ba4adae493d0e3263f629d6b6e29669c9562bb724c70f8e1438de341
+  subject_revision: d59487ada7cf86811fa3b4374a7ee8af906dde87
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Событие в задаче `subject.task` (kacho#1271); то же событие ранее опубликовано в kaname#246
+    (`effective_approval.sanction.prior_event`), оно не снимается. Отпечаток тела снят с сырого
+    ответа API (`gh api … | jq -j .body | sha256sum`).
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Документ целиком; предмет редакции 5 — Р8, Д14, Д15, §5.4, Ф5-26…28, §4.2/§4.3/§7…§10/§12/§14,
+    датировка шапки; плюс правки снятия 7137e50f… (§5.2 Ф-а/Ф-б, ∅4, §5.2а), ранее не судимые.
+  counts: >-
+    Сценариев 28 (Ф5-23 снят, номер не переиспользован); производителей названо у 28; предикаты
+    §7 → 28 · 28 · латинская форма 0; §4.3 comm → пусто, контроль → #1268 #1270 #1272; сверка
+    §5.2↔§7 → девять форм, множества совпадают, «НЕ НАЗВАНА» нет.
+
+measured:
+  premise_6_gate_blind: >-
+    go test ./internal/apps/kaname/api/ -run TestEveryMailSendingVerbPassesTheRateLimiter -v →
+    «глаголов контракта осмотрено 115 · отправляющих письмо 2 — [Invite, ResendInvite] · мест
+    постановки 1», PASS: запроса кода в переписи нет — Ф5-28 красный до кода. ПОДТВЕРЖДЕНО.
+  producers_5_4: >-
+    recovery_request.go:120 (окно источника до чтения адреса), verification.go:587, recovery_code_repo.go:150,
+    tx.go:258, observer.go:115/116 — все координаты совпали. Ключ окна адресата —
+    `ON CONFLICT (kind, recipient)` (tx.go:232–234); окно источника — (lane, source); величины —
+    inviteMailRateLimit(cfg) и SourcePace{login.SourceAttempts, login.SourceWindow}
+    (cmd/kaname/loginlane.go:533, 549). Р8 п. 2 ПОДТВЕРЖДЕНО.
+  rule_8_p4_not_displaced: >-
+    write(): SupersedeRecoveryCodes → InsertRecoveryCode → EmitRecoveryMail (списание, затем
+    постановка) в одной транзакции с отложенным Rollback; полное окно → ErrLetterWindowFull →
+    вытеснение откатывается. Ответ формируется до Dispatch (Р2) — п. 3 построением.
+  holder_half: >-
+    awk по TestRecoveryRequestIsBoundedPerRecipient | grep -c 'recipient-paced|RecipientPaced|outcomes_total' → 0:
+    клетку не утверждает. ПОДТВЕРЖДЕНО.
+  seed_constructibility: >-
+    Временная проба в пакете pg (удалена; git status --porcelain → пусто) на живой схеме:
+    посев строки invite_mail_windows вида `invite` sent=3 для P′, затем три списания вида
+    `recovery` для P′ → [true true true] (близнец (в) Ф5-26 строится и ведёт себя как заявлено);
+    четыре списания для P → [true true true false] (замок (а)); Q → true (близнец (б));
+    контроль: invite для P′ сверх → false. Близнец Ф5-27 «другая полоса того же источника» —
+    TestSourceWindowAdmitsExactlyTheLimitUnderConcurrentCallers PASS. Посеяно 3 из 3
+    заявленных строителей «Дано» полосы, «не выполнилось» 0.
+
+blocking: []
+
+non_blocking:
+  - kind: PRODUCER
+    text: >-
+      §7 строки Ф5-16 и Ф5-19 и §9 строка Ф5-16…19 отстали от правок снятия (kaname#363, #564):
+      называют Ф-б «приёмник события» и Ф-а «существует сегодня», «источника события нашим кодом
+      нет», тогда как §5.2 объявляет обе формы снятыми. Производитель в дереве есть —
+      humansession/recovery_complete.go (журнал по коду, повтор упирается в однократность
+      Ф5-05), держатель — humansession/recovery_usecase_test.go:218. Привести две строки и «Когда»
+      Ф5-16 к форме одного обращения следующей редакцией.
+  - kind: COVERAGE
+    text: >-
+      §4.2 строка «кто называет источник»: назвать исход для обращения, в котором источник не
+      назван (recovery_request.go:119 списывает окно только при непустом), и его носителя (Ф3 В2).
+  - kind: FORMAT
+    text: >-
+      Ф5-26 (а): приращения клеток мерить на отрезке (а), до действий (б) и (в); постановка
+      асинхронна (Р2) — проба ждёт условия, а не времени.
+
+defaults_recorded:
+  - q: §12 п. 9 — отказ по частоте запроса кода тем же ответом, а не 429
+    decision: ратифицировано (MAIL-25, Р2); цена названа в Р8.
+  - q: §12 пп. 10–11 — существующие ручки, окно у пары
+    decision: ратифицировано; ключи пар подтверждены замером (measured.producers_5_4).
+
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes

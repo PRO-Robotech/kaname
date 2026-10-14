@@ -3,8 +3,8 @@
 
 package interactiveclient
 
-// name_canon_test.go — канон имени на пути создания InteractiveClient (#1279,
-// канон #715).
+// name_canon_test.go — канон имени на пути создания InteractiveClient (kacho#1279,
+// канон kacho#715).
 
 import (
 	"context"

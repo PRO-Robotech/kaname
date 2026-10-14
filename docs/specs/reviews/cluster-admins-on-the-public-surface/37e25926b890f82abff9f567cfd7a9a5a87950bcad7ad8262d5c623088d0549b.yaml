@@ -1,0 +1,127 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
+  sha256: 37e25926b890f82abff9f567cfd7a9a5a87950bcad7ad8262d5c623088d0549b
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 8b0379e2a
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена (рабочее дерево копии kaname-661b-acc, ветка 661b от origin/296,
+    один файл, +55/−10); запись судит содержимое по отпечатку.
+  branch: 661b
+  task: PRO-Robotech/kaname#661
+  round: 6 (правка по сверке волны 6b после APPROVED круга 5)
+  predecessor_record: docs/specs/reviews/cluster-admins-on-the-public-surface/686f56fc169cd960e6580a6fc05c2328dcf335a47a2206486b5be37cfdee6e8a.yaml
+  fingerprint_predicate: >-
+    sha256sum документа @ рабочее дерево → 37e25926…0549b (совпал с заданием);
+    git show origin/296:<док> | sha256sum → 686f56fc…cdfee6e8a (одобренная кругом 5 редакция);
+    git rev-parse origin/296 → 8b0379e2a9c5 (совпал с заданием).
+  publication_mode: запись в дереве; внешнее событие публикует курьер
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+
+effective_approval:
+  issued: true
+  ban1_lifted: false
+  pending_external_event: true
+  why: >-
+    Вердикт рецензента вынесен; санкция наступает внешним событием полномочия на отпечаток
+    37e25926…, а не этой записью. Одобрение круга 5 (686f56fc…) к этой редакции само не
+    переносится.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    target: PRO-Robotech/kaname#661
+
+scope_of_diff:
+  predicate: git diff origin/296 -- <док> @ 8b0379e2a
+  observed: >-
+    Журнал правок (+12 строк, строка «правка по сверке волны 6b»); §0 новая строка З22 (только
+    край зовёт внутренние глаголы администраторов кластера; хоп собственного фронта получает
+    отказ владельца); Р8 абзац о вызывающем; CAP-20 — «Дано» перенесено на уровень
+    интеграционной пробы (прямой вызов внутреннего транспорта), публичная половина остаётся
+    на стенде службы, добавлено равенство `Get` обоими транспортами; CAP-21 — близнец
+    «внутренний путь на внутреннем фронте» утверждает 403 / code 7 / AUTHZ_DENIED вместо 200,
+    добавлен различающий факт пар; §3 строки CAP-20, CAP-21; DoD S1 п.8. Коды прочих
+    сценариев, payload, область — не тронуты.
+  premise: >-
+    Посылка «Дано CAP-20 и близнеца CAP-21 на стенде службы не конструируемо» ПОДТВЕРЖДЕНА:
+    `internal/authzguard/caller_policy.go` — четыре глагола InternalClusterService в
+    GatewayFrontedInternalRPCs; хоп фронта удовлетворяет только пол (комментарий и
+    `TestOwnFrontHop_NeverSatisfiesTheGatewayOnlyArm` — PASS); отказ — PermissionDenied
+    «permission denied»; `cmd/kaname/serve.go:1047` — DenyDetailUnary стоит снаружи
+    internalCallerPolicy, строка каталога `InternalClusterService/ListAdmins` есть
+    (`permission_catalog.json:2853`) → ErrorInfo reason AUTHZ_DENIED прикладывается.
+
+checks:
+  constructibility: >-
+    CAP-20 посеяно фикстурой `buildTwins`: go test -count=1 -run
+    TestClusterPublic_CAP20_OneWritePathBothTransports ./internal/apps/kaname/api/cluster/ →
+    PASS (testcontainers, 3.09s) — назначение публичным, чтение/снятие внутренним, повтор с тем
+    же clusterAdminGrantId, равенство Get. Близнец CAP-21 (403 на хопе) — держатели
+    authzguard: go test -run 'TestOwnFrontHop|TestDeny' ./internal/authzguard/ → 30 PASS,
+    0 FAIL. Посеяно 2 из 2 изменённых «Дано»; «не выполнилось» 0.
+  stand_response_provenance: >-
+    Утверждение З22 «прогон набора волны 6b, шаг близнеца CAP-21: 403, code = 7» — со слов
+    автора: отчёта прогона в копиях tmp/ не найдено. Код-ответ выведен чтением и пробами
+    выше; вердикт на этом утверждении не стоит.
+  doc_gates: >-
+    go test ./internal/check -run 'TestAcceptancePathCoordinateResolves|TestAcceptanceProbeCoordinateResolves|TestAcceptanceEditedAfterItsVerdictSaysSo|TestNoDeferredWorkInTheTree'
+    -count=1 -v → 4 PASS; приёмок 64, координат-путей 1024, находок 0 (рабочее дерево).
+  producers: >-
+    CAP-20 — TestClusterPublic_CAP20_OneWritePathBothTransports (есть) + newman
+    CAP-20-ONE-WRITE-PATH (есть); CAP-21 — CAP-21-FRONT-SEPARATION (маршрутизация есть;
+    утверждение 403/code/reason у близнеца заказано kaname#661 — честно записано в §3).
+  twins: >-
+    CAP-21: каждая пара отличается путём при том же фронте и субъекте (404 против ответа
+    владельца); положительный близнец отказа хопа — CAP-26 (внутренний фронт края, 200) и
+    интеграционный прямой вызов CAP-20.
+
+non_blocking:
+  - >-
+    Журнал правок не несёт строки «круг 5 · APPROVED · 686f56fc… · путь записи» — отпечаток
+    назван только внутри строки правки. Дописать строку круга при следующей правке.
+  - >-
+    З22 держателем называет инклюзивную перепись `TestOwnFrontHop_ChainNeverAdmitsMoreThanAVerifiedModule`;
+    прямой держатель свойства «хоп не проходит круг края» —
+    `TestOwnFrontHop_NeverSatisfiesTheGatewayOnlyArm`. Назвать оба.
+  - >-
+    Статическая строка статуса в шапке по-прежнему «редакция 2 ко второму кругу» (замечание
+    круга 5 остаётся).
+
+event_body: acceptance-reviewer · APPROVED · 37e25926b890f82abff9f567cfd7a9a5a87950bcad7ad8262d5c623088d0549b
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#661
+  status: performed
+  published: true
+  database_id: 6051607213
+  node_id: "IC_kwDOUO26pM8AAAABaLQyrQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/661#issuecomment-6051607213"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051607213"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T03:32:24Z"
+  body_sha256: "7e8a2d1aa1df0f0e68079efb8989582266fc05cfdddb92afdab35942a2132527"
+  subject_sha256: "37e25926b890f82abff9f567cfd7a9a5a87950bcad7ad8262d5c623088d0549b"
+  subject_revision_commit: "b49e14f5a1241365147ca493a5d3b04b814a2b8b"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh

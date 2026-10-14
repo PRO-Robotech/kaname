@@ -219,7 +219,10 @@ func (x *ListInteractiveClientsResponse) GetNextPageToken() string {
 
 type CreateInteractiveClientRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Name of the client. Unique cluster-wide. 1-63 characters.
+	// Name of the client. OPTIONAL: empty means the service names the client by
+	// its own `id` (see `Create`). When set — unique cluster-wide among
+	// interactive clients, 1-63 characters of the resource-name form (lowercase
+	// letters, digits and inner hyphens).
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Optional description.
 	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
@@ -370,10 +373,13 @@ type UpdateInteractiveClientRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the InteractiveClient to update.
 	InteractiveClientId string `protobuf:"bytes,1,opt,name=interactive_client_id,json=interactiveClientId,proto3" json:"interactive_client_id,omitempty"`
-	// Fields to update. Empty mask → full-object PATCH over mutable fields;
-	// immutable fields present in the body are silently ignored. A mask naming
-	// an immutable field is rejected BY NAME; a mask naming an unknown field is
-	// rejected against the known-set.
+	// Fields to update. Empty mask → full-object PATCH over every mutable field
+	// below. The body carries ONLY mutable fields: the immutable ones (`id`,
+	// `client_id`, `audiences`, `grant_types`, `token_endpoint_auth_method`,
+	// `status`, `created_at`) are not part of this message, so a body cannot
+	// name one. A mask naming an immutable field is rejected BY NAME with
+	// INVALID_ARGUMENT `<field> is immutable after InteractiveClient.Create`; a
+	// mask naming an unknown field is rejected against the known-set.
 	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	// New name.
 	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`

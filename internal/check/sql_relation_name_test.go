@@ -55,6 +55,7 @@ func TestSQLRelationNaming_EverySpellingOfTheGrammar(t *testing.T) {
 		// бы ПРОПУСК этого имени. \U выше U+10FFFF база отвергает — экранирование
 		// остаётся как написано, и обратная коса становится границей имени.
 		{"E-строка, \\ooo выше \\377 — младший байт, как у базы", `SELECT E'user_login_method\563'::regclass`, "", true},
+		{"E-строка с суррогатной парой", `SELECT E'x\uD83D\uDE00'::regclass`, "x😀", true},
 		{"E-строка, \\U выше U+10FFFF не раскрывается — коса граничит имя", `SELECT E'user_login_methods\UFFFFFFFF'`, "", true},
 		{"E-строка, \\U00110000 — то же, первое значение вне диапазона", `SELECT E'user_login_methods\U00110000'`, "", true},
 		// Экранированная кавычка не закрывает E-строку: иначе строка кончилась бы

@@ -1,0 +1,62 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+{{/*
+СБОР ОБЪЯВЛЯЕТСЯ ТЕМ ЖЕ МЕХАНИЗМОМ, ЧТО И ПРАВИЛА ТРЕВОГИ (kaname#759).
+
+Правила чарт везёт объектом оператора мониторинга (`PrometheusRule`), а сбор
+объявлял только аннотациями `prometheus.io/*` на поде. Оператор аннотаций не
+читает: его Prometheus собирает то, что названо объектами сбора. В установке,
+где правила доехали, цель при этом не собиралась — правила стояли, рядов не
+было, и правила о тишине молчали именно там, где замера нет совсем.
+
+ПОЧЕМУ ОБЪЕКТ ПОДОВ, А НЕ Service. Диагностической поверхности на Service нет
+намеренно (`service.yaml`): порт, нужный только собирателю, был бы дверью без
+потребителя. Объект подов ходит туда же, куда объявление на поде, — порт, путь
+и схема у них одни.
+
+ДВА ВЫКЛЮЧАТЕЛЯ, И ОБА СНИМАЮТ ОБЪЕКТ. Вид принадлежит тому же чужому
+оператору, что и `PrometheusRule`: там, где правила выключены ради кластера без
+оператора, этот вид схема кластера отвергла бы так же — всей установкой. Там,
+где сбор выключен оператором установки, объект объявлял бы сбор, от которого
+отказались.
+
+АННОТАЦИИ НА ПОДЕ ОСТАЮТСЯ: их читает собиратель платформы, у которого
+оператора нет. Это два читателя одного объявления, а не два объявления: порт
+пода назван по имени, схема выводится тем же помощником `kaname-svc.edgeScheme`,
+а путь у процесса один. Расхождение их держит
+`TestCollectionIsDeclaredByTheRulesMechanism`.
+
+ДОВЕРИЕ ПОД TLS — К ЛИСТУ СЛУШАТЕЛЯ, С ПРОВЕРКОЙ ИМЕНИ. Сбор идёт по адресу пода,
+а лист выписан на имя Service, поэтому сверяемое имя называется явно — тем же
+выражением, каким фронт сверяет собственный слушатель (`deployment.yaml`,
+`KANAME_REST_UPSTREAM_MTLS_SERVERNAME`). Полоса односторонняя: клиентского
+листа собиратель не предъявляет.
+*/}}
+{{- if and (include "kaname-svc.blockEnabled" (list $ "alertRules")) (include "kaname-svc.blockEnabled" (list $ "metricsScrape")) }}
+{{- $scheme := include "kaname-svc.edgeScheme" (dict "root" $ "edge" "METRICS") | lower }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.name }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      scheme: {{ $scheme }}
+      {{- if eq $scheme "https" }}
+      {{- $tls := .Values.tls | default dict }}
+      tlsConfig:
+        ca:
+          secret:
+            name: {{ required "tls.secretName не задан при диагностике под TLS: объекту сбора нечем проверить лист слушателя, а сбор без проверки листа — открытый текст по смыслу" $tls.secretName | quote }}
+            key: ca.crt
+        serverName: {{ printf "%s.%s.svc.cluster.local" .Values.name .Release.Namespace | quote }}
+      {{- end }}
+{{- end }}

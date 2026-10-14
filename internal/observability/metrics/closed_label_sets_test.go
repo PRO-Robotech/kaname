@@ -90,7 +90,7 @@ type openLabelSet struct {
 	Reason string
 
 	// Поля `ProducerMethod` здесь больше НЕТ — снято вместе со своим
-	// единственным предметом (#2638).
+	// единственным предметом (kacho#2638).
 	//
 	// Оно делало прощение самоистекающим у семейства, которому прощали
 	// «засевать нечем, производителя нет вовсе»: появился вызывающий — набор
@@ -185,6 +185,23 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(humansession.VerificationOutcomes()),
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "отказы глаголов подтверждения и отказы положения не различимы снаружи; «ноль отказов» обязан быть отличим от «полоса не исполнялась»",
+	},
+	// ── СМЕНА АДРЕСА (kaname#635) — тот же конструктор ────────────────────
+	EmailChangeOutcomesMetric: {
+		Cells: len(humansession.EmailChangeOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "запрос на занятый адрес вызывающему неотличим от свободного (приёмка Р4): различие видно только клеткой, и «ноль смен» обязан быть отличим от «глагол не провязан»",
+	},
+	// ── СБОЙ ХРАНИЛИЩА У ГЛАГОЛОВ СВОИХ ДАННЫХ (kaname#691) ─────────────────
+	SelfServiceStoreFailuresMetric: {
+		Cells: len(humansession.StoreFailureVerbs()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "правило отказов нашей стороны читает ряд целиком: `A + пусто` в PromQL — пусто, и до первого сбоя правило оглохло бы без клеток с нулём",
+	},
+	AccessKeyLoginOutcomesMetric: {
+		Cells: len(humansession.AccessKeyLoginOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "вход ключом отвечает ОДНИМ отказом на все причины (Ф13 Р7): испытание, удостоверение, рукоятка и подпись снаружи неразличимы by construction, и клетка — единственное место, где причина видна. Ноль по ней до первого события обязан быть виден (Ф3 Р14), иначе непровязанная полоса выглядит как полоса без отказов",
 	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
@@ -520,7 +537,7 @@ func packageStringConsts(file *ast.File) map[string]string {
 	return out
 }
 
-// TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration — гейт задачи #2500.
+// TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration — гейт задачи kacho#2500.
 func TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration(t *testing.T) {
 	files, err := packageGoFiles(".")
 	if err != nil {

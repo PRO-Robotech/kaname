@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // wrapping_key_rotation_test.go — смена ключа ОБЁРТКИ не теряет ни одного
-// подписного ключа (задача #1065).
+// подписного ключа (задача kacho#1065).
 //
 // # Что именно утверждается
 //
@@ -31,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -68,7 +69,7 @@ func signerOver(t *testing.T, ks *signingkeys.Keystore, at time.Time) *tokensign
 	t.Helper()
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      "https://iam.kacho.test",
-		Clock:       func() time.Time { return at },
+		Clock:       momentclock.Func(func() time.Time { return at }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ks)
 	require.NoError(t, err)
@@ -110,7 +111,7 @@ func mintRequest() tokensigner.Request {
 }
 
 // TestTokenIssuedBeforeTheWrappingKeyChangeStillVerifiesAfterIt — предикат
-// снятия #1065: смена ключа обёртки без потери записанного.
+// снятия kacho#1065: смена ключа обёртки без потери записанного.
 func TestTokenIssuedBeforeTheWrappingKeyChangeStillVerifiesAfterIt(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)

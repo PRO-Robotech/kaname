@@ -55,6 +55,11 @@ func lmPool(t *testing.T) *pgxpool.Pool {
 }
 
 // lmPeople заводит аккаунт и n его членов; первый — владелец аккаунта.
+// Предмет проб этого файла и соседей — САМА строка способа входа: личности
+// сцены заводятся в форме «после переноса» (отметка открытого пути тем же
+// оператором вставки, kaname#608), а строку пароля проба кладёт сама. Отметка
+// стоит в самой вставке, а не отдельным оператором: внесённые пробами
+// механизмы на строке личности не должны видеть лишнего события.
 func lmPeople(t *testing.T, pool *pgxpool.Pool, tag string, n int) []domain.UserID {
 	t.Helper()
 	ctx := context.Background()
@@ -69,8 +74,8 @@ func lmPeople(t *testing.T, pool *pgxpool.Pool, tag string, n int) []domain.User
 	for i := 0; i < n; i++ {
 		id := "usr" + fmt.Sprintf("%017s", fmt.Sprintf("%s%02d", tag, i))
 		_, err = tx.Exec(ctx, `
-			INSERT INTO users (id, external_id, email, display_name, account_id, invite_status)
-			VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+			INSERT INTO users (id, external_id, email, display_name, account_id, invite_status, recovery_path_opened_at)
+			VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`,
 			id, fmt.Sprintf("ext-%s-%02d", tag, i), fmt.Sprintf("%s-%02d@example.invalid", tag, i),
 			fmt.Sprintf("person %02d", i), account)
 		require.NoError(t, err, "посев человека %d", i)

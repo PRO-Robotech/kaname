@@ -51,6 +51,7 @@ import (
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	sessionrev "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -267,7 +268,7 @@ func TestBasicLane_LogoutVerbsReachThePresentedSecret(t *testing.T) {
 		{"ForceLogout(own)", func(t *testing.T, f assertionFixture) {
 			t.Helper()
 			h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-				WithOwnSessions(kanamepg.NewHumanSessionRepo(f.pool)).
+				WithOwnSessions(kanamepg.NewHumanSessionRepo(f.pool)).WithCutoffClock(momentclock.Func(time.Now)).
 				WithAdminChecker(basicLaneAdmin{}).
 				WithOperations(operations.NewRepo(f.pool, "kaname"))
 			_, err := h.ForceLogout(basicLaneAdminCtx(), &iamv1.ForceLogoutRequest{UserId: f.user})
@@ -276,7 +277,7 @@ func TestBasicLane_LogoutVerbsReachThePresentedSecret(t *testing.T) {
 		{"Revoke(revoke_all_user_tokens)", func(t *testing.T, f assertionFixture) {
 			t.Helper()
 			adapter := kanamepg.NewSessionRevocationsAdapter(f.pool)
-			h := sessionrev.NewHandler(sessionrev.NewRevokeUseCase(adapter, operations.NewRepo(f.pool, "kaname")), adapter)
+			h := sessionrev.NewHandler(sessionrev.NewRevokeUseCase(adapter, operations.NewRepo(f.pool, "kaname"), momentclock.Func(time.Now)), adapter)
 			_, err := h.Revoke(basicLaneAdminCtx(), &iamv1.RevokeRequest{UserId: f.user, RevokeAllUserTokens: true})
 			require.NoError(t, err)
 		}},

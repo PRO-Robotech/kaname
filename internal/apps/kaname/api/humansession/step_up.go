@@ -76,7 +76,10 @@ func NewStepUpUseCase(d SecondFactorDeps) (*StepUpUseCase, error) {
 // Execute — порядок: форма → сессия → частота → (у кода) состояние → сверка →
 // предъявление одним исходом с журналом повышения; суждённый отказ — след
 // попытки одним исходом с журналом повышения.
-func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOutput, error) {
+func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpOutput, err error) {
+	// Клетка сбоя хранилища (kaname#691) — единственная точка на выходе
+	// глагола, а не каждый возврат по отдельности.
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureStepUp, err) }()
 	if err := JudgeStepUpForm(in); err != nil {
 		return StepUpOutput{}, err
 	}
@@ -133,12 +136,6 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 	if err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
-	methods := withMethod(resolved.Session.PresentedMethods, in.Method)
-	level, err := levelOf(methods)
-	if err != nil {
-		uc.deps.Logger.Error("step-up: level not derived", "err", err.Error())
-		return StepUpOutput{}, ErrStoreUnavailable
-	}
 
 	// Заведённое читается ДО открытия транзакции: оба адаптера делят один пул,
 	// и чтение изнутри открытой транзакции дало бы вложенный захват соединения.
@@ -166,7 +163,8 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 			return StepUpOutput{}, uc.refuse(ctx, st.verdict, judged)
 		}
 	}
-	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
+	rec, err := presentInSession(ctx, w, resolved.Session, in.Method, bearer.Digest(), now)
+	if err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
 	// Счёт по адресу обнуляет вход, ЗАВЕРШЁННЫЙ до уровня всех заведённых у
@@ -176,11 +174,11 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 	// завершённый вход, и счёт остаётся (kaname#287).
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
 		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
-		AddressKey: addressKey, Presented: methods,
+		AddressKey: addressKey, Level: rec.Level,
 	}); err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
-	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Method, level); err != nil {
+	if err := emitStepUpJournal(ctx, w, user, resolved.Session, in.Method, rec.Level); err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
 	if err := w.Commit(ctx); err != nil {
@@ -191,11 +189,11 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 	}
 
 	s := resolved.Session
-	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = methods, level, now
+	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	out := StepUpOutput{
 		View:      SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer:    bearer,
-		Assurance: assuranceAfter(ctx, uc.deps, user.ID, methods),
+		Assurance: assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}
 	if st.consumed {
 		remaining := st.remaining

@@ -61,9 +61,9 @@ func referenceRefusal(err error) (error, bool) {
 	st := status.New(codes.FailedPrecondition, iamerr.StripSentinel(err))
 	// Домен берётся у ЕДИНСТВЕННОГО объявления продукта, а не у константы
 	// соседнего модуля: прежняя редакция читала её у модуля учёта величин —
-	// предмета, который из службы выпиливается ЦЕЛИКОМ (#2117). Связь была
+	// предмета, который из службы выпиливается ЦЕЛИКОМ (kacho#2117). Связь была
 	// невыраженной, и отказ по ссылке перестал бы собираться вместе с чужим
-	// снятием. Задача продукта #2099.
+	// снятием. Задача продукта kacho#2099.
 	withDetails, derr := st.WithDetails(&errdetails.ErrorInfo{
 		Reason: reason,
 		Domain: refusaldomain.For(refusaldomain.ServiceIAM),

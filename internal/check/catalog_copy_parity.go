@@ -50,9 +50,10 @@
 // ЧТО СВЕРКА УТВЕРЖДАЕТ ТЕПЕРЬ
 //
 // Норма прежняя и НЕ ослаблена: копии — ОДИН порождённый артефакт. Изменилось
-// то, что у равенства появились ТРИ закрытых перечня объявленных окон —
-// переименования фундамента, записи службы, ждущие края (kaname#181), и
-// глаголы, снятые службой, которые край ещё называет (kaname#564), — и каждая
+// то, что у равенства появились ЧЕТЫРЕ закрытых перечня объявленных окон —
+// переименования фундамента, записи службы, ждущие края (kaname#181),
+// глаголы, снятые службой, которые край ещё называет (kaname#564), и записи,
+// у которых служба сменила значение одного поля (kaname#720), — и каждая
 // запись обязана держать себя САМА в обе стороны. Остаток после их
 // применения — находка с прежним текстом.
 //
@@ -142,7 +143,7 @@ type CatalogFoundationRename struct {
 // `corelib.operation`, а копия края на стволе платформы до подъёма её пинов
 // называла их по-прежнему. Окно держали две записи ведомости (#98).
 //
-// Предикат снятия наступил на стволе платформы `bdaedfd5aa` (#2659): её `go.mod` пинит
+// Предикат снятия наступил на стволе платформы `bdaedfd5aa` (kacho#2659): её `go.mod` пинит
 // `corelib v1.8.0` и службу `40bd49a3`, каталог края перерождён и называет оба
 // глагола именем фундамента. Сверка против этого ствола дала находку вида
 // `CatalogFindingLedger` («нечего исключать» по обеим записям) при побайтово
@@ -224,7 +225,80 @@ type CatalogPendingEntry struct {
 // проходит на пустом), а способность записи истечь
 // доказывается синтетикой (TestDeclaredPendingEntryExpiresOnItsOwn), не живой
 // записью.
-var catalogPendingEntries = []CatalogPendingEntry{}
+//
+// Перечень снова непуст с 2026-10-08: четыре глагола публичного близнеца
+// `ClusterService` (kaname#661) ждут края — его стадия S2 (kacho#3093) поднимает
+// пин службы и регенерирует каталог; после неё сверка объявит записи находкой
+// сама, и они снимаются отдельным изменением службы (DoD S2 п.4). Пятая запись —
+// `UserService/ResetAccessKeys` (kaname#638): ждёт того же подъёма пина службы
+// платформой и снимается так же.
+var catalogPendingEntries = []CatalogPendingEntry{
+	{
+		OwnFQN: "kaname.cloud.iam.v1.ClusterService/Get",
+		Why: "глагол чтения кластера публичного близнеца `ClusterService` заведён контрактом службы (kaname#661, " +
+			"приёмка ADM-CA, Р1/Р5); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт " +
+			"службы этой ревизии: выход побайтово равен нашей копии, 352 записи; у края на стволе платформы " +
+			"ffbe930dbe записей 348, ни одной из четырёх нет); край порождает свою копию по пину службы и " +
+			"увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.ClusterService/Get` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог " +
+			"(стадия S2 приёмки ADM-CA); тогда запись снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kacho#3093",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.ClusterService/GrantAdmin",
+		Why: "глагол назначения администратора кластера публичного близнеца `ClusterService` заведён контрактом службы (kaname#661, " +
+			"приёмка ADM-CA, Р1/Р5); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт " +
+			"службы этой ревизии: выход побайтово равен нашей копии, 352 записи; у края на стволе платформы " +
+			"ffbe930dbe записей 348, ни одной из четырёх нет); край порождает свою копию по пину службы и " +
+			"увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.ClusterService/GrantAdmin` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог " +
+			"(стадия S2 приёмки ADM-CA); тогда запись снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kacho#3093",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.ClusterService/ListAdmins",
+		Why: "глагол перечня администраторов кластера публичного близнеца `ClusterService` заведён контрактом службы (kaname#661, " +
+			"приёмка ADM-CA, Р1/Р5); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт " +
+			"службы этой ревизии: выход побайтово равен нашей копии, 352 записи; у края на стволе платформы " +
+			"ffbe930dbe записей 348, ни одной из четырёх нет); край порождает свою копию по пину службы и " +
+			"увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.ClusterService/ListAdmins` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог " +
+			"(стадия S2 приёмки ADM-CA); тогда запись снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kacho#3093",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.ClusterService/RevokeAdmin",
+		Why: "глагол снятия администратора кластера публичного близнеца `ClusterService` заведён контрактом службы (kaname#661, " +
+			"приёмка ADM-CA, Р1/Р5); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт " +
+			"службы этой ревизии: выход побайтово равен нашей копии, 352 записи; у края на стволе платформы " +
+			"ffbe930dbe записей 348, ни одной из четырёх нет); край порождает свою копию по пину службы и " +
+			"увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.ClusterService/RevokeAdmin` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог " +
+			"(стадия S2 приёмки ADM-CA); тогда запись снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kacho#3093",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.UserService/ResetAccessKeys",
+		Why: "глагол сброса ключей доступа администратором облака заведён контрактом службы (kaname#638, " +
+			"приёмка `cloud-administrator-resets-login-methods.md` ред. 5, Р1/Р2, LMR-08); запись порождена " +
+			"генератором края над этим контрактом (`gateway/scripts/gen-permission-catalog.sh` платформы над " +
+			"деревом, где `kaname/` — контракт службы этой ревизии: выход побайтово равен нашей копии, 353 " +
+			"записи; у края на стволе платформы ffbe930dbe записи нет); край порождает свою копию по пину " +
+			"службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.UserService/ResetAccessKeys` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; тогда " +
+			"запись снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kacho#2702",
+	},
+}
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
 func CatalogPendingEntries() []CatalogPendingEntry {
@@ -288,6 +362,139 @@ func CatalogRetiredEntries() []CatalogRetiredEntry {
 	return out
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧЕТВЁРТЫЙ ВИД ЗАПИСИ — СМЕНА ЗНАЧЕНИЯ ОДНОГО ПОЛЯ, КОТОРУЮ КРАЙ ЕЩЁ НЕ ВИДЕЛ (kaname#720)
+//
+// Тот же класс окна, что у записи, ждущей края, но глагол у края УЖЕ есть: служба
+// сменила в своём контракте аннотацию, из которой порождается одно поле записи,
+// а край порождает запись по пину и несёт прежнее значение до подъёма пина.
+//
+// Запись объявляет ровно ОДНУ подстановку: у края в записи `FQN` поле `Field`
+// равно `EdgeValue`, у нас — `OwnValue`. Сверка применяет подстановку к блоку
+// края и сравнивает остаток ПОБАЙТОВО, как прежде: всякое иное расхождение той
+// же записи остаётся находкой. Держит себя во все стороны: край несёт новое
+// значение либо глагола у края нет — предикат снятия наступил; у края нет
+// прежнего значения, у нас нет нового либо самой записи — ведомость утверждает
+// о дереве неправду.
+
+// CatalogRevisedEntry — объявленная смена значения одного поля записи, которую
+// край ещё не породил.
+type CatalogRevisedEntry struct {
+	// FQN — полное имя метода; у обеих копий одно.
+	FQN string
+	// Field — имя поля записи в форме генератора.
+	Field string
+	// EdgeValue — значение поля в копии края (прежнее).
+	EdgeValue string
+	// OwnValue — значение поля в нашей копии (новое, порождённое из контракта).
+	OwnValue string
+	// Why — почему расхождение не дефект.
+	Why string
+	// Removal — ПРЕДИКАТ СНЯТИЯ, внешний по отношению к этому дереву.
+	Removal string
+	// Refs — где предмет ведётся.
+	Refs string
+}
+
+// catalogRevisedEntries — ЗАКРЫТЫЙ перечень смен значения, ждущих края.
+//
+// Записи заведены 2026-10-12 (kaname#720, приёмка
+// `own-account-and-identity-are-removed-in-order.md` ред. 4, Р12): контракт
+// службы поднял порог уровня сессии у необратимого снятия личности и
+// сервисного аккаунта. Наша копия порождена генератором края над деревом, где
+// `kaname/` — контракт службы этой ревизии: выход отличается от прежней копии
+// ровно значением этого поля в двух записях. Край увидит смену после подъёма
+// пина службы и перегенерации каталога; тогда сверка объявит записи находкой
+// сама, и они снимаются отдельным изменением службы.
+//
+// Ещё три записи заведены 2026-10-12 (kaname#747, приёмка
+// `level-two-is-enrolled-at-level-two.md`, Р3): пол уровня у обоих глаголов
+// регистрации ключа доступа и у его снятия поднят контрактом службы до «2».
+var catalogRevisedEntries = []CatalogRevisedEntry{
+	{
+		FQN:       "kaname.cloud.iam.v1.ServiceAccountService/Delete",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у снятия сервисного аккаунта поднят контрактом службы (kaname#720, приёмка " +
+			"`own-account-and-identity-are-removed-in-order.md` ред. 4, Р12); запись порождена генератором края над " +
+			"этим контрактом (`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — " +
+			"контракт службы этой ревизии: 353 записи, от прежней копии отличаются ровно этим полем двух записей; " +
+			"у края на стволе платформы bac26316c4 значение прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.ServiceAccountService/Delete` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#720",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.UserService/Delete",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у снятия личности поднят контрактом службы (kaname#720, приёмка " +
+			"`own-account-and-identity-are-removed-in-order.md` ред. 4, Р12); запись порождена генератором края над " +
+			"этим контрактом (`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — " +
+			"контракт службы этой ревизии: 353 записи, от прежней копии отличаются ровно этим полем двух записей; " +
+			"у края на стволе платформы bac26316c4 значение прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.UserService/Delete` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#720",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.AccessKeyService/BeginRegistration",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у выдачи испытания регистрации ключа доступа поднят контрактом службы (kaname#747, приёмка " +
+			"`level-two-is-enrolled-at-level-two.md`, Р3); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт службы этой " +
+			"ревизии: общие записи совпадают с нашей копией побайтово; у края на дереве платформы fd9f1793 значение " +
+			"прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.AccessKeyService/BeginRegistration` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#747",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.AccessKeyService/FinishRegistration",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у приёма результата регистрации ключа доступа поднят контрактом службы (kaname#747, приёмка " +
+			"`level-two-is-enrolled-at-level-two.md`, Р3); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт службы этой " +
+			"ревизии: общие записи совпадают с нашей копией побайтово; у края на дереве платформы fd9f1793 значение " +
+			"прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.AccessKeyService/FinishRegistration` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#747",
+	},
+	{
+		FQN:       "kaname.cloud.iam.v1.AccessKeyService/Revoke",
+		Field:     "required_acr_min",
+		EdgeValue: "1",
+		OwnValue:  "2",
+		Why: "порог уровня сессии у снятия ключа доступа поднят контрактом службы (kaname#747, приёмка " +
+			"`level-two-is-enrolled-at-level-two.md`, Р3); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы над деревом, где `kaname/` — контракт службы этой " +
+			"ревизии: общие записи совпадают с нашей копией побайтово; у края на дереве платформы fd9f1793 значение " +
+			"прежнее); край порождает запись по пину службы",
+		Removal: "копия края на стволе платформы несёт у `kaname.cloud.iam.v1.AccessKeyService/Revoke` " +
+			"`required_acr_min` = \"2\" — платформа подняла пин службы и перегенерировала каталог; тогда запись " +
+			"снимается отдельным изменением службы",
+		Refs: "PRO-Robotech/kaname#747",
+	},
+}
+
+// CatalogRevisedEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
+func CatalogRevisedEntries() []CatalogRevisedEntry {
+	out := make([]CatalogRevisedEntry, len(catalogRevisedEntries))
+	copy(out, catalogRevisedEntries)
+	return out
+}
+
 // Виды находок. Разделены потому, что у них РАЗНЫЙ адресат: ведомость правят
 // здесь, а расхождение копий ведёт либо к синхронизации, либо к платформе.
 // Общий заголовок «копии разошлись» на находке ведомости лгал бы: при
@@ -325,6 +532,11 @@ type CatalogParityCensus struct {
 	// RetiredApplied — сколько из них ДЕЙСТВИТЕЛЬНО вынесены из сравнения:
 	// глагол есть у края и его уже нет у нас.
 	RetiredApplied int
+	// RevisedDeclared — записей о смене значения поля в ведомости.
+	RevisedDeclared int
+	// RevisedApplied — сколько из них ДЕЙСТВИТЕЛЬНО применены к копии края:
+	// у края прежнее значение, у нас новое.
+	RevisedApplied int
 	// BytesEqual — совпали ли копии побайтово ДО применения ведомости.
 	BytesEqual bool
 }
@@ -334,17 +546,18 @@ func (c CatalogParityCensus) String() string {
 	return fmt.Sprintf(
 		"перепись: записей у края %d · записей у нас %d · переименований объявлено %d · применено %d · "+
 			"ожидающих края объявлено %d · применено %d · снятых службой объявлено %d · применено %d · "+
-			"побайтово до ведомости %v",
+			"смен значения объявлено %d · применено %d · побайтово до ведомости %v",
 		c.EdgeEntries, c.OwnEntries, c.RenamesDeclared, c.RenamesApplied,
-		c.PendingDeclared, c.PendingApplied, c.RetiredDeclared, c.RetiredApplied, c.BytesEqual)
+		c.PendingDeclared, c.PendingApplied, c.RetiredDeclared, c.RetiredApplied,
+		c.RevisedDeclared, c.RevisedApplied, c.BytesEqual)
 }
 
 // CompareCatalogCopies — сверка против ДЕЙСТВУЮЩЕЙ ведомости дерева. Возвращает
 // перечень находок (пустой = зелёное) и перепись. Ошибка — это ТРЕТИЙ ИСХОД:
 // разобрать не удалось, вердикта о совпадении копий НЕТ (не путать с находкой).
 func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, CatalogParityCensus, error) {
-	return compareCatalogCopiesWithLedgers(catalogFoundationRenames, catalogPendingEntries, catalogRetiredEntries,
-		edgeRaw, ownRaw)
+	return compareCatalogCopiesWithAllLedgers(catalogFoundationRenames, catalogPendingEntries, catalogRetiredEntries,
+		catalogRevisedEntries, edgeRaw, ownRaw)
 }
 
 // compareCatalogCopiesWith — та же сверка с ЯВНЫМИ ведомостями.
@@ -358,16 +571,26 @@ func compareCatalogCopiesWith(
 	return compareCatalogCopiesWithLedgers(renames, pending, nil, edgeRaw, ownRaw)
 }
 
-// compareCatalogCopiesWithLedgers — та же сверка со всеми тремя ЯВНЫМИ
-// ведомостями (форма для проб третьего вида записи).
+// compareCatalogCopiesWithLedgers — та же сверка с тремя ЯВНЫМИ ведомостями
+// (форма для проб третьего вида записи).
 func compareCatalogCopiesWithLedgers(
 	renames []CatalogFoundationRename, pending []CatalogPendingEntry, retired []CatalogRetiredEntry,
 	edgeRaw, ownRaw string,
+) ([]CatalogParityFinding, CatalogParityCensus, error) {
+	return compareCatalogCopiesWithAllLedgers(renames, pending, retired, nil, edgeRaw, ownRaw)
+}
+
+// compareCatalogCopiesWithAllLedgers — та же сверка со всеми четырьмя ЯВНЫМИ
+// ведомостями. Прод-вход (`CompareCatalogCopies`) зовёт её со своими.
+func compareCatalogCopiesWithAllLedgers(
+	renames []CatalogFoundationRename, pending []CatalogPendingEntry, retired []CatalogRetiredEntry,
+	revised []CatalogRevisedEntry, edgeRaw, ownRaw string,
 ) ([]CatalogParityFinding, CatalogParityCensus, error) {
 	census := CatalogParityCensus{
 		RenamesDeclared: len(renames),
 		PendingDeclared: len(pending),
 		RetiredDeclared: len(retired),
+		RevisedDeclared: len(revised),
 		BytesEqual:      edgeRaw == ownRaw,
 	}
 
@@ -456,6 +679,45 @@ func compareCatalogCopiesWithLedgers(
 		census.RetiredApplied++
 	}
 
+	// ── СМЕНЫ ЗНАЧЕНИЯ ПОЛЯ ДЕРЖАТ СЕБЯ ВО ВСЕ СТОРОНЫ ───────────────────────
+	//
+	// Подстановка применяется к блоку края только тогда, когда у края стоит
+	// ровно одно прежнее значение, а у нас — ровно одно новое. Край уже несёт
+	// новое либо глагола у края нет → предикат снятия наступил. Прочее —
+	// ведомость утверждает о дереве неправду. Остаток сравнивается побайтово.
+	revisedEdge := make(map[string]string, len(revised))
+	for _, e := range revised {
+		edgeLit := catalogFieldLiteral(e.Field, e.EdgeValue)
+		ownLit := catalogFieldLiteral(e.Field, e.OwnValue)
+		eb, ok := edgeByFQN[e.FQN]
+		if !ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"у края нет глагола %q — смене значения нечего объяснять: снимите запись. %s", e.FQN, e.Refs)})
+			continue
+		}
+		if strings.Contains(eb.body, ownLit) && !strings.Contains(eb.body, edgeLit) {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"край уже несёт у %q новое значение %s — предикат снятия наступил: снимите запись. %s",
+				e.FQN, ownLit, e.Refs)})
+			continue
+		}
+		if strings.Count(eb.body, edgeLit) != 1 {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись называет у края %q прежнее значение %s, которого там нет ровно одного — "+
+					"она утверждает о дереве неправду. %s", e.FQN, edgeLit, e.Refs)})
+			continue
+		}
+		ob, ok := ownByFQN[e.FQN]
+		if !ok || strings.Count(ob.body, ownLit) != 1 {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись называет у НАС %q новое значение %s, которого в нашей копии нет — "+
+					"она утверждает о дереве неправду. %s", e.FQN, ownLit, e.Refs)})
+			continue
+		}
+		revisedEdge[e.FQN] = strings.Replace(eb.body, edgeLit, ownLit, 1)
+		census.RevisedApplied++
+	}
+
 	ownCompared := ownBlocks
 	if len(awaited) > 0 {
 		ownCompared = make([]catalogBlock, 0, len(ownBlocks))
@@ -474,6 +736,9 @@ func compareCatalogCopiesWithLedgers(
 	for _, b := range edgeBlocks {
 		if retiredAway[b.fqn] {
 			continue
+		}
+		if body, ok := revisedEdge[b.fqn]; ok {
+			b = catalogBlock{fqn: b.fqn, body: body}
 		}
 		if own, ok := renamed[b.fqn]; ok {
 			body := strings.Replace(b.body, catalogFQNField(b.fqn), catalogFQNField(own), 1)
@@ -502,6 +767,12 @@ func compareCatalogCopiesWithLedgers(
 				"разошлась ФОРМА файла (порядок записей, отступ либо перевод строки)"})
 	}
 	return findings, census, nil
+}
+
+// catalogFieldLiteral — строка поля записи в той форме, в какой её пишет
+// генератор: `"<поле>": "<значение>"`.
+func catalogFieldLiteral(field, value string) string {
+	return mustJSONString(field) + ": " + mustJSONString(value)
 }
 
 // catalogFQNField — поле `fqn` записи в том виде, в каком его пишет генератор.

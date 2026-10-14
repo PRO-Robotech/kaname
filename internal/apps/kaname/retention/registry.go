@@ -4,7 +4,7 @@
 // Package retention — уборка таблиц iam, чей рост задаёт внешний.
 //
 // Предмет — приёмка `docs/engineering/acceptance/
-// retention-sweep-has-a-caller.md` (задача #1292). Три таблицы росли без
+// retention-sweep-has-a-caller.md` (задача kacho#1292). Три таблицы росли без
 // ограничения: у двух уборщик был ОБЪЯВЛЕН и не имел ни одного прод-вызывающего,
 // у третьей уборщика не было вовсе. Восемь мест дерева при этом утверждали в
 // настоящем времени, что сборщик работает.
@@ -72,7 +72,7 @@ const (
 	// строка пишется в той же транзакции, что смена состояния зеркала ресурса,
 	// то есть на каждую регистрацию и снятие регистрации.
 	//
-	// До #2050 дренированные строки не снимались НИКОГДА: таблица росла
+	// До kacho#2050 дренированные строки не снимались НИКОГДА: таблица росла
 	// неограниченно под штатным потоком регистраций, при том что приём уборки в
 	// дереве уже был и применён к соседней очереди.
 	SubjectReconcileOutbox = "resource_reconcile_outbox"
@@ -80,7 +80,7 @@ const (
 	// провайдера. Темп задаёт арендатор: строка пишется в writer-транзакции
 	// мутации, снимающей клиента либо доверенную выдачу у провайдера.
 	//
-	// До #2069 доставленные строки не снимались НИКОГДА, и реестр роста таблиц
+	// До kacho#2069 доставленные строки не снимались НИКОГДА, и реестр роста таблиц
 	// объявлял таблицу ДОЛГОМ, назвав условие легализации: предикат ей нужен
 	// СВОЙ и более простой, чем у общего уборщика платформы, а послабление
 	// обязано нести гейт, который покраснеет с появлением оживителя.
@@ -104,7 +104,9 @@ const (
 	SubjectLoginFailures = "login_failures"
 	// SubjectRecoveryCodes — коды восстановления, которые оператор применения
 	// уже не обслужит: применённые и истёкшие (Ф5 Р1). Темп задаёт внешний:
-	// строку заводит запрос восстановления по любому подтверждённому адресу.
+	// строку заводит запрос восстановления по любому подтверждённому адресу,
+	// а также по неподтверждённому адресу личности `ACTIVE` без способа входа
+	// (Ф5 Р9).
 	SubjectRecoveryCodes = "recovery_codes"
 	// SubjectSecondFactorEnrollments — неподтверждённые заведения второго
 	// фактора (Ф12-44, kacho#1281): строки `pending` старше окна свежести —
@@ -116,10 +118,17 @@ const (
 	// проверка утверждения их уже не обслужат. Темп задаёт сам человек: строку
 	// заводит начало церемонии либо предъявления под живой сессией.
 	SubjectAccessKeyChallenges = "access_key_challenges"
+	// SubjectAccessKeyLoginChallenges — испытания ПОЛОСЫ ВХОДА ключом (Ф13,
+	// kaname#613): своя таблица, привязанная к контексту формы.
+	SubjectAccessKeyLoginChallenges = "access_key_login_challenges"
 	// SubjectVerificationCodes — коды подтверждения адреса (kaname#456, Р7,
 	// Р9): строки старше окна писем, которые ни предъявление, ни предел писем
 	// уже не прочтут. Темп задаёт человек: строку заводит письмо подтверждения.
 	SubjectVerificationCodes = "email_verification_codes"
+	// SubjectEmailChangeCodes — отложенные смены адреса и их коды (kaname#635,
+	// Р5, Р6): строки старше окна темпа, которые ни предъявление, ни темп уже
+	// не прочтут. Темп задаёт человек: строку заводит принятый запрос смены.
+	SubjectEmailChangeCodes = "email_change_codes"
 	// SubjectSourceRequestWindows — окна обращений без удостоверения по
 	// источнику (регистрация, запрос восстановления): строка на источник, темп
 	// задаёт внешний.
@@ -132,8 +141,8 @@ const (
 
 // HumanSessionReapers — ПЯТЬ уборщиков полосы входа (Ф3, Ф5, Ф12, Ф7): порог
 // у второго — самое длинное окно счёта, у четвёртого — окно свежести правки
-// своих данных; обе величины посадки и приходят параметром вместе с
-// уборщиком, а не выписываются длительностью.
+// своих данных, у пятого — срок испытания ключа; величины приходят
+// параметром вместе с уборщиком, а не выписываются длительностью.
 type HumanSessionReapers struct {
 	Sessions         HumanSessionReaper
 	Failures         LoginFailureReaper
@@ -142,6 +151,14 @@ type HumanSessionReapers struct {
 	Challenges       AccessKeyChallengeReaper
 	LongestWindow    time.Duration
 	EnrollmentWindow time.Duration
+	// ChallengeTTL — срок испытания ключа доступа, величина КОНТРАКТА (врезка
+	// Ф7-34); порог уборки испытаний. Нулевой порог снимал бы предъявленное
+	// испытание первым же проходом, и повтор читался бы «не выдавалось».
+	ChallengeTTL time.Duration
+	// LoginChallenges — уборщик испытаний ПОЛОСЫ ВХОДА ключом (Ф13,
+	// kaname#613); nil — полоса входа ключом не провязана, и предмета уборки
+	// у реестра нет (таблица пустует by construction).
+	LoginChallenges AccessKeyLoginChallengeReaper
 	// Подтверждение адреса (kaname#456): коды, окна источника, письма с
 	// истёкшим кодом; LetterWindow — окно писем подтверждения, SourceWindow —
 	// окно обращений источника.
@@ -150,6 +167,15 @@ type HumanSessionReapers struct {
 	BearerLetters     BearerLetterReaper
 	LetterWindow      time.Duration
 	SourceWindow      time.Duration
+	// EmailChangeCodes — уборщик отложенных смен адреса (kaname#635); порог —
+	// LetterWindow: смена считает темп теми же величинами. nil — глагол смены
+	// не провязан, и предмета уборки у реестра нет.
+	EmailChangeCodes EmailChangeCodeReaper
+}
+
+// EmailChangeCodeReaper — порт уборщика отложенных смен адреса.
+type EmailChangeCodeReaper interface {
+	SweepUnservableEmailChangeCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
 // VerificationCodeReaper — порт уборщика кодов подтверждения адреса.
@@ -193,16 +219,22 @@ type AccessKeyChallengeReaper interface {
 	SweepUnservableChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
+// AccessKeyLoginChallengeReaper — порт уборщика истёкших и предъявленных
+// испытаний полосы входа ключом.
+type AccessKeyLoginChallengeReaper interface {
+	SweepUnservableLoginChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
 // функцией, а не параметрами `Subjects`: уборщики приходят от собранной полосы,
 // и неполный их набор — отказ, а не уборщик без предмета, который выглядел бы
 // исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 ||
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 || r.ChallengeTTL <= 0 ||
 		r.VerificationCodes == nil || r.SourceWindows == nil || r.BearerLetters == nil || r.LetterWindow <= 0 || r.SourceWindow <= 0 {
 		return base
 	}
-	return append(base,
+	subjects := append(base,
 		Subject{
 			Name: SubjectHumanSessions,
 			// Порог — функция предиката читателя: запись годна к снятию, как
@@ -234,10 +266,16 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 		},
 		Subject{
 			Name: SubjectAccessKeyChallenges,
-			// Порог — предикат читателя: истёкшее испытание не примет ни
-			// приём результата церемонии, ни проверка утверждения (Ф7-34,
-			// Ф7-54), снятое — тоже (Ф7-03, Ф7-53); граница включающая у обоих.
-			Grace: 0,
+			// Порог — срок испытания, а не ноль. Истёкшее и предъявленное
+			// испытание не ПРИМЕТ ни приём результата церемонии, ни проверка
+			// утверждения, но приём результата его ЧИТАЕТ: три состояния
+			// (просрочено · не выдавалось · уже предъявлено) вызывающему
+			// различимы (Ф7-34), повтор отвергается как однократное (Ф7-03), и
+			// различимость держит только хранение строки — снятая читается
+			// как «не выдавалось». Порог в срок испытания хранит предъявленную
+			// строку не меньше, чем она прожила бы непредъявленной
+			// (consumed_at ≥ issued_at), а истёкшую — ещё один срок (kaname#590).
+			Grace: r.ChallengeTTL,
 			Sweep: r.Challenges.SweepUnservableChallenges,
 		},
 		Subject{
@@ -260,6 +298,27 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			Sweep: r.BearerLetters.SweepExpiredBearerLetters,
 		},
 	)
+	if r.EmailChangeCodes != nil {
+		subjects = append(subjects, Subject{
+			Name: SubjectEmailChangeCodes,
+			// Порог — окно темпа: строки принятых запросов считают предел за
+			// окно, и снятая раньше строка удлинила бы предел.
+			Grace: r.LetterWindow,
+			Sweep: r.EmailChangeCodes.SweepUnservableEmailChangeCodes,
+		})
+	}
+	if r.LoginChallenges != nil {
+		subjects = append(subjects, Subject{
+			Name: SubjectAccessKeyLoginChallenges,
+			// Порог — ноль: оператор однократности полосы входа не обслужит ни
+			// истёкшую, ни предъявленную строку, а три состояния испытания
+			// наружу НЕ различаются (Ф13 Р7 — один отказ), и хранить строку
+			// ради различимости незачем.
+			Grace: 0,
+			Sweep: r.LoginChallenges.SweepUnservableLoginChallenges,
+		})
+	}
+	return subjects
 }
 
 // SweepFunc — один проход уборщика по одному предмету.

@@ -6,7 +6,7 @@
 //
 // Transport only: parse the Docker token-auth request, delegate to the
 // registry_token use-case (which verifies the presented BASIC ACCESS TOKEN —
-// the only credential kind this lane accepts, задача #1143 — and issues the
+// the only credential kind this lane accepts, задача kacho#1143 — and issues the
 // registry token), format the Docker-compatible JSON. No business logic.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +45,8 @@ import (
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 )
 
 // unauthorizedBody — ЕДИНСТВЕННОЕ тело отказа этой полосы, одно на ВСЯКУЮ
@@ -55,7 +57,7 @@ import (
 // Годный вид оно называет СТАТИЧЕСКИ — так же, как называет его страница
 // документации, — а не по разбору предъявленного. Из тела нельзя узнать ничего
 // о том, что прислали; можно узнать только, что прислать следовало. Без этого
-// арендатор, настроенный на снятый вход по ключевому материалу (#1143), видит
+// арендатор, настроенный на снятый вход по ключевому материалу (kacho#1143), видит
 // отказ и не знает, чем его заменить.
 //
 // Марка берётся из `credsecret` — ЕДИНСТВЕННОГО объявленного места, где живёт
@@ -63,7 +65,7 @@ import (
 // разошлась бы молча, и разошлась бы именно в подсказке, которую читают вместо
 // документации.
 // Формулировка НЕ утверждает, отвергнут ли прежний вид НА ЭТОМ контуре: пока
-// открыто окно перехода #1143, он принимается, и текст, объявивший обратное,
+// открыто окно перехода kacho#1143, он принимается, и текст, объявивший обратное,
 // был бы ложью для одной посадки и оракулом ручки для другой (по нему
 // перебором узнают, объявлено ли окно). Поэтому тело говорит о ГОДНОМ виде и
 // только о нём — то же, что говорит страница документации.
@@ -147,8 +149,9 @@ type tokenResponse struct {
 
 func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
+		// Форма решения R36 п. 3 (Р12 приёмки темпа церемонии, kaname#524):
+		// та же, что у полосы входа; прежде — `text/plain` со своим телом.
+		methodrefusal.Write(w, http.MethodGet, http.MethodPost)
 		return
 	}
 	// Два РАЗНЫХ значения, и смешивать их нельзя.
@@ -157,7 +160,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// это выдача: ключ, объявивший при выдаче своё назначение, обязан получить
 	// адресат из СВОЕГО объявления, а не умолчание посадки. Подставив умолчание
 	// здесь, транспорт принял бы за выдачу решение, которого не знает, — и такой
-	// ключ отвергался бы собственной проверкой (задача #1184).
+	// ключ отвергался бы собственной проверкой (задача kacho#1184).
 	//
 	// `service` — то, что показывают КЛИЕНТУ в вызове на аутентификацию. Здесь
 	// умолчание уместно: вызов обязан назвать службу, даже когда запрос её не
@@ -190,7 +193,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Username: user,
 		Password: pass,
 		Service:  requested,
-		// Материал привязки токена к ключу владельца (Ф1б #926) — из
+		// Материал привязки токена к ключу владельца (Ф1б kacho#926) — из
 		// ПРОВЕРЕННОЙ цепочки, а не из того, что пир прислал.
 		ConfirmationX5TS256: verifiedClientCertThumbprint(r),
 	})
@@ -230,6 +233,7 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 		}
 		h.challenge(w, service)
 	case errors.Is(err, registrytokenuc.ErrUnauthenticated):
+		h.logBasicRefusal(err, service)
 		if errors.Is(err, registrytokenuc.ErrCredentialKindNotAccepted) && h.logger != nil {
 			// Наружу — тот же отказ, что и на всяком другом; в журнал —
 			// причина: «клиент настроен на снятый вход» и «секрет неверен»
@@ -242,6 +246,35 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 		h.challenge(w, service)
 	default:
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+	}
+}
+
+// logBasicRefusal — ОДНА запись журнала об отказе базового секрета (задача
+// kaname#390): причина, которую авторитет назвал, либо отказ полосы по виду
+// принципала. Отказ иного вида (ключевой материал) здесь не журналится — у него
+// своя строка ниже.
+//
+// Уровень — по таблице службы (`docs/engineering/components/32-observability.md`,
+// «Уровни»): отклонённое предъявление — WARN; отказ, причину которого авторитет
+// не назвал, — нарушение его контракта, дефект НАШЕЙ стороны, и он ERROR.
+//
+// Ни предъявленной строки, ни имени (оно и есть идентификатор удостоверения) в
+// записи нет: в журнал не уходит то, чего клиенту не отдают. Текст ошибки тоже
+// не пишется — он не несёт ничего сверх исхода.
+func (h *TokenHandler) logBasicRefusal(err error, service string) {
+	if h.logger == nil {
+		return
+	}
+	switch reason, named := domain.BasicCredentialRefusalReasonOf(err); {
+	case named:
+		h.logger.Warn("docker token: basic credential refused",
+			"outcome", string(reason), "service", service)
+	case errors.Is(err, domain.ErrBasicCredentialRefused):
+		h.logger.Error("docker token: basic credential refused without a named reason "+
+			"(the authority broke its contract)", "service", service)
+	case errors.Is(err, registrytokenuc.ErrBasicPrincipalKindNotAccepted):
+		h.logger.Warn("docker token: basic credential refused",
+			"outcome", registrytokenuc.OutcomeBasicPrincipalKindRefused, "service", service)
 	}
 }
 

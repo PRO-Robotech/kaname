@@ -74,6 +74,36 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 	if err != nil {
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
+	return holdPersonOf(ctx, w, userID)
+}
+
+// EmailChangeWriter — транзакция глаголов смены адреса (kaname#635, Р6, Р8):
+// тот же состав, что у подтверждения адреса. Исход смены снимает прочие сессии
+// человека, а запрос смены судит темп человека, и одновременные обращения
+// одного человека сериализованы замком строки человека, взятым первым. Сила
+// замка — глагола, решающего по заведённому (`holdPersonAgainstEnrollment`,
+// kaname#770): условие уровня (Р2) читает заведённое этой транзакцией, и
+// заведение способа «2», идущее одновременно, с ним не разминётся.
+func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
+	w, err := beginHumanSessionWriter(ctx, s.pool)
+	if err != nil {
+		return nil, mapErr(err, "EmailChange.Writer", "")
+	}
+	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
+		_ = w.tx.Rollback(ctx)
+		return nil, err
+	}
+	return &RegistrationWriter{
+		humanSessionWriter: w,
+		mirror:             &writeTx{readTx: readTx{tx: w.tx}},
+		tx:                 w.tx,
+	}, nil
+}
+
+// holdPersonOf — ПЕРВЫМ оператором открытой транзакции строка человека взята
+// замком писателя нескольких сессий; писатель сессии и писатель зеркала — над
+// той же `pgx.Tx`. Отказ замка откатывает транзакцию.
+func holdPersonOf(ctx context.Context, w *humanSessionWriter, userID domain.UserID) (*RegistrationWriter, error) {
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
 		_ = w.tx.Rollback(ctx)
 		return nil, err

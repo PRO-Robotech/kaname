@@ -35,6 +35,7 @@ type Handler struct {
 	resend  *ResendInviteUseCase
 	listOp  *shared.ListOperationsUseCase
 	reset   *ResetSecondFactorUseCase
+	keys    *ResetAccessKeysUseCase
 }
 
 func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d *DeleteUserUseCase,
@@ -52,12 +53,21 @@ func (h *Handler) WithResendInvite(uc *ResendInviteUseCase) *Handler {
 	return h
 }
 
-// WithResetSecondFactor — сброс второго фактора распорядителем (Ф12 Р10).
+// WithResetSecondFactor — сброс второго фактора администратором облака (Ф12 Р10).
 // Отдельной провязкой, а не параметром построения: исполнитель несёт полоса
 // входа, которую корень собирает после служб (Ф12-37); вызов без провязки
 // отвечает `Unimplemented` — ровно как контракт, у которого нет исполнителя.
 func (h *Handler) WithResetSecondFactor(uc *ResetSecondFactorUseCase) *Handler {
 	h.reset = uc
+	return h
+}
+
+// WithResetAccessKeys — сброс ключей доступа администратором облака (kaname#638).
+// Отдельной провязкой по той же причине, что [Handler.WithResetSecondFactor]:
+// исполнитель несёт полоса входа (хранилища ключей и сессий), которую корень
+// собирает после служб; вызов без провязки отвечает `Unimplemented`.
+func (h *Handler) WithResetAccessKeys(uc *ResetAccessKeysUseCase) *Handler {
+	h.keys = uc
 	return h
 }
 
@@ -106,7 +116,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*iamv1.Us
 // ниже насыщающее, и отрицательный page_size превратился бы в 0 («умолчание») до
 // того, как его кто-либо увидит.
 func (h *Handler) List(ctx context.Context, req *iamv1.ListUsersRequest) (*iamv1.ListUsersResponse, error) {
-	// Форма токена этого списка — граница ВИДИМОЙ последовательности (#645), а не
+	// Форма токена этого списка — граница ВИДИМОЙ последовательности (kacho#645), а не
 	// сырой страницы, поэтому и на границе транспорта судится она.
 	if err := shared.ValidateRawVisiblePagination(req.GetPageToken(), req.GetPageSize()); err != nil {
 		return nil, err
@@ -180,7 +190,7 @@ func (h *Handler) Unblock(ctx context.Context, req *iamv1.UnblockUserRequest) (*
 	return shared.OperationToProto(op), nil
 }
 
-// ResetSecondFactor — сброс второго фактора распорядителем (Ф12-30). Исполнителя
+// ResetSecondFactor — сброс второго фактора администратором облака (Ф12-30). Исполнителя
 // провязывает корень вместе с полосой входа на каждом старте; непровязанный
 // обработчик (только сборка мимо корня) отвечает как контракт без исполнителя,
 // а не паникой. Прежде так отвечала посадка внешнего поставщика; её больше нет
@@ -196,10 +206,24 @@ func (h *Handler) ResetSecondFactor(ctx context.Context, req *iamv1.ResetSecondF
 	return shared.OperationToProto(op), nil
 }
 
+// ResetAccessKeys — сброс ключей доступа администратором облака (kaname#638).
+// Тонкий транспорт: разбор → глагол → форма ответа; непровязанный обработчик
+// отвечает как контракт без исполнителя, а не паникой.
+func (h *Handler) ResetAccessKeys(ctx context.Context, req *iamv1.ResetAccessKeysRequest) (*operationpb.Operation, error) {
+	if h.keys == nil {
+		return nil, status.Error(codes.Unimplemented, "access keys reset is not wired")
+	}
+	op, err := h.keys.Execute(ctx, domain.UserID(req.GetUserId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
 // RemoveFromAccount — человек перестаёт состоять в названном аккаунте. Пара к
 // Invite: тот вводит человека в аккаунт, этот выводит. Строку личности не
-// трогает — её снятие спрашивает `identity_remover` (#1131), а это отношение
-// аккаунта `member_remover` (#1127).
+// трогает — её снятие спрашивает `identity_remover` (kacho#1131), а это отношение
+// аккаунта `member_remover` (kacho#1127).
 func (h *Handler) RemoveFromAccount(ctx context.Context, req *iamv1.RemoveUserFromAccountRequest) (*operationpb.Operation, error) {
 	op, err := h.remove.Execute(ctx,
 		domain.UserID(req.GetUserId()), domain.AccountID(req.GetAccountId()))

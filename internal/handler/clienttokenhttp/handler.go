@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package clienttokenhttp — токен-эндпоинт платформы (задача #898, приёмка F2
+// Package clienttokenhttp — токен-эндпоинт платформы (задача kacho#898, приёмка F2
 // §9.1 п. 1).
 //
 // Клиент предъявляет подписанное утверждение, мы сверяем подпись его открытым
@@ -80,6 +80,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/failurewindow"
+	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -276,8 +277,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// именно он ошибся, и будет считать эндпоинт сломанным.
 	if r.Method != http.MethodPost {
 		h.count(clientassertion.OutcomeMethodNotAllowed)
-		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, http.StatusMethodNotAllowed, errorBody("invalid_request"))
+		// Форма решения R36 п. 3 — та же, что у полосы входа (Р12 приёмки темпа
+		// церемонии, kaname#524): запрос не дошёл до разбора формы, и
+		// `invalid_request` («исправь тело») назвал бы неверным не то.
+		methodrefusal.Write(w, http.MethodPost)
 		return
 	}
 
@@ -447,11 +450,7 @@ func (h *Handler) authenticate(r *http.Request, grantType string) (clientasserti
 // восстановления хранилища. Отказы формы и темпа решены до этого места и сюда
 // не приходят.
 func countsAgainstSource(o clientassertion.Outcome) bool {
-	switch o {
-	case clientassertion.OutcomeRegistryUnavailable, clientassertion.OutcomeReplayStoreUnavailable:
-		return false
-	}
-	return true
+	return !clientassertion.OurSide(o)
 }
 
 // errFormMismatch — форма запроса не соответствует объявленному виду выдачи.
@@ -463,9 +462,20 @@ var errFormMismatch = errors.New("clienttokenhttp: request form does not match t
 // утверждение — подписанный материал, из которого восстанавливается
 // предъявление, и запись его в журнал делает журнал носителем предъявительского
 // документа.
+//
+// Запись ОДНА на отказ, уровень — по таблице службы
+// (`docs/engineering/components/32-observability.md`, «Уровни», kaname#390):
+// отклонённое предъявление — WARN; отказ НАШЕЙ стороны
+// ([clientassertion.OurSide]: реестр или хранилище однократности не ответили,
+// отсечку спросить не удалось, выпуск не состоялся) — ERROR. В одном ряду с
+// неверной подписью предъявителя наш сбой терялся бы среди штатных отказов.
 func (h *Handler) refuse(r *http.Request, outcome clientassertion.Outcome, err error) {
 	h.count(outcome)
-	h.cfg.Logger.Warn("client authentication refused",
+	level := slog.LevelWarn
+	if clientassertion.OurSide(outcome) {
+		level = slog.LevelError
+	}
+	h.cfg.Logger.LogAttrs(r.Context(), level, "client authentication refused",
 		slog.String("outcome", string(outcome)),
 		slog.String("path", r.URL.Path),
 		slog.String("err", err.Error()))

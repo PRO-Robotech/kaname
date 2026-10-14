@@ -61,7 +61,7 @@ func TestHandlerServesBlockAndUnblock(t *testing.T) {
 		_, err := srv.Unblock(context.Background(), &iamv1.UnblockUserRequest{UserId: actionsUserID})
 		requireUserHandlerAnswered(t, err, "Unblock")
 	})
-	// Исключение из аккаунта (#1127) — третье действие того же вида, и та же
+	// Исключение из аккаунта (kacho#1127) — третье действие того же вида, и та же
 	// ловушка ему грозит: RPC объявлен, маршрутизирован, стоит в каталоге, а
 	// метод не переопределяет вшитую заглушку, и каждый вызов отвечает
 	// `Unimplemented`. Ни одна проба слоёв ниже этого не увидит — они не входят

@@ -161,6 +161,19 @@ type HumanSession struct {
 	// position is derived from the current mark on every request and is not
 	// stored in the session.
 	EmailVerified bool `protobuf:"varint,7,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
+	// The id of the session RECORD behind the bearer (`hss-…`), kaname#677.
+	//
+	// Reader on the edge: the edge returns it to this service, in its own
+	// forwarded-identity metadata over the verified forwarder hop, on every
+	// request it proxies for this session — the same channel and the same trust
+	// gate as the forwarded principal. The service reads it in exactly one place:
+	// revoking an access key ends every OTHER session of the person and keeps the
+	// current one (Ф13 Р8, Ф13-21), and "current" is this record.
+	//
+	// It is an INTERNAL projection: the edge never answers a client with it, and
+	// a value a client sends in that metadata is dropped by the edge before the
+	// hop. It is not a bearer: the record id alone authenticates nothing.
+	SessionId     string `protobuf:"bytes,9,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -244,6 +257,13 @@ func (x *HumanSession) GetEmailVerified() bool {
 	return false
 }
 
+func (x *HumanSession) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 var File_kaname_cloud_iam_v1_human_session_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_human_session_service_proto_rawDesc = "" +
@@ -253,7 +273,7 @@ const file_kaname_cloud_iam_v1_human_session_service_proto_rawDesc = "" +
 	"\x06bearer\x18\x01 \x01(\tR\x06bearer\"p\n" +
 	"\x1bResolveHumanSessionResponse\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12;\n" +
-	"\asession\x18\x02 \x01(\v2!.kaname.cloud.iam.v1.HumanSessionR\asession\"\xd2\x02\n" +
+	"\asession\x18\x02 \x01(\v2!.kaname.cloud.iam.v1.HumanSessionR\asession\"\xf1\x02\n" +
 	"\fHumanSession\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
@@ -262,7 +282,9 @@ const file_kaname_cloud_iam_v1_human_session_service_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12'\n" +
 	"\x0fassurance_level\x18\x06 \x01(\tR\x0eassuranceLevel\x12%\n" +
-	"\x0eemail_verified\x18\a \x01(\bR\remailVerifiedJ\x04\b\b\x10\tR\x18password_change_required2\xaf\x01\n" +
+	"\x0eemail_verified\x18\a \x01(\bR\remailVerified\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\t \x01(\tR\tsessionIdJ\x04\b\b\x10\tR\x18password_change_required2\xaf\x01\n" +
 	"\x1bInternalHumanSessionService\x12\x8f\x01\n" +
 	"\aResolve\x12/.kaname.cloud.iam.v1.ResolveHumanSessionRequest\x1a0.kaname.cloud.iam.v1.ResolveHumanSessionResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENERBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 

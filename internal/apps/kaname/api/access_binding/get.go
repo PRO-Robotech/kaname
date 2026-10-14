@@ -80,7 +80,7 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 		// преходящую беду, и вызывающий, классифицирующий ответы соседа по полосе
 		// (дренаж, реконсайлер, клиент соседа), пометит намерение окончательно
 		// провалившимся. Паритет с правкой и удалением, где та же развилка стоит с
-		// раунда r5; асимметрия трёх глаголов снята задачей #2577.
+		// раунда r5; асимметрия трёх глаголов снята задачей kacho#2577.
 		return domain.AccessBinding{}, shared.MapRepoErr(err)
 	}
 	// RBAC rules-model 2026: AccessBinding no longer carries

@@ -133,6 +133,7 @@ func seedUserRow(
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, accountName(accID), uid)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

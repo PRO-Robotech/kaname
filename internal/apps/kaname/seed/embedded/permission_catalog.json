@@ -2513,7 +2513,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessKeyService/FinishAssertion",
@@ -2533,7 +2533,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessKeyService/List",
@@ -2553,7 +2553,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccountService/Create",
@@ -2677,6 +2677,46 @@
       "from_request_field": ""
     },
     "exempt_reason": "SELF_SERVICE"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/Get",
+    "permission": "iam.cluster_admins.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/GrantAdmin",
+    "permission": "iam.cluster_admins.grant",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/ListAdmins",
+    "permission": "iam.cluster_admins.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ClusterService/RevokeAdmin",
+    "permission": "iam.cluster_admins.revoke",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.GroupService/AddMember",
@@ -3309,7 +3349,7 @@
       "object_type": "iam_service_account",
       "from_request_field": "service_account_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.ServiceAccountService/Disable",
@@ -3389,7 +3429,7 @@
       "object_type": "iam_user",
       "from_request_field": "user_id"
     },
-    "required_acr_min": "1"
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.UserService/Get",
@@ -3448,6 +3488,16 @@
     "scope_extractor": {
       "object_type": "account",
       "from_request_field": "account_id"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.UserService/ResetAccessKeys",
+    "permission": "iam.users.resetAccessKeys",
+    "required_relation": "identity_suspender",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
     },
     "required_acr_min": "2"
   },

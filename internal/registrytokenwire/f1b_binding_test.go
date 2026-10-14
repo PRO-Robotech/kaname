@@ -35,6 +35,7 @@ import (
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -58,7 +59,7 @@ func f1bSigner(t *testing.T) *tokensigner.Signer {
 
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      "https://kaname.kacho.local",
-		Clock:       time.Now,
+		Clock:       momentclock.Func(time.Now),
 		MaxTokenTTL: 30 * time.Minute,
 	}, f1bKeys{mat: tokensigner.SigningMaterial{
 		KID: domain.KeyID("f1b-1"), Algorithm: domain.SigningAlgorithm("ES256"),

@@ -15,7 +15,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// TrustedIssuerRepo — НАШ перечень доверенных издателей утверждения (#1124).
+// TrustedIssuerRepo — НАШ перечень доверенных издателей утверждения (kacho#1124).
 //
 // # Почему разрешение идёт ОДНИМ оператором
 //

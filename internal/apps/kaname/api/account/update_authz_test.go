@@ -142,6 +142,10 @@ func (w *authzAcctWtr) Update(_ context.Context, a domain.Account, _ []string) (
 	return a, nil
 }
 func (w *authzAcctWtr) Delete(context.Context, domain.AccountID) error { return nil }
+func (*authzAcctWtr) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (*authzAcctWtr) LockOwner(context.Context, domain.UserID) error { return nil }
 
 // ── tests ──────────────────────────────────────────────────────────────────
 

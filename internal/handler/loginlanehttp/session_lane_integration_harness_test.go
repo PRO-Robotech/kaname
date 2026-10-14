@@ -63,15 +63,19 @@ import (
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -108,6 +112,26 @@ type sessionVerbs struct {
 	stepUp   *humansession.StepUpUseCase
 	request  *humansession.RequestRecoveryUseCase
 	complete *humansession.CompleteRecoveryUseCase
+	// Вход ключом доступа (Ф13): НАСТОЯЩИЕ глаголы — дублёр отвечал бы
+	// объявленным исходом, и утверждение о сессии зеленело бы при любом коде.
+	akBegin *humansession.BeginAccessKeyLoginUseCase
+	akLogin *humansession.AccessKeyLoginUseCase
+	// status — чтение состояния второго фактора (Ф12 Р4): пробы перехода
+	// записи (kaname#458, A458-03, A458-11) читают «заведён ли» под новой
+	// сессией настоящим глаголом.
+	status *humansession.SecondFactorStatusUseCase
+}
+
+func (v sessionVerbs) SecondFactorStatus(ctx context.Context, in humansession.StatusInput) (humansession.StatusOutput, error) {
+	return v.status.Execute(ctx, in)
+}
+
+func (v sessionVerbs) BeginAccessKeyLogin(ctx context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	return v.akBegin.Execute(ctx, in)
+}
+
+func (v sessionVerbs) AccessKeyLogin(ctx context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	return v.akLogin.Execute(ctx, in)
 }
 
 func (v sessionVerbs) Login(ctx context.Context, in humansession.LoginInput) (humansession.LoginOutput, error) {
@@ -172,6 +196,43 @@ type sessionLaneOptions struct {
 	loginObserver humansession.Observer
 	// loginNow — часы входа (`LoginDeps.Now`); nil — часы процесса.
 	loginNow func() time.Time
+	// recoveryMailLimit — окно писем восстановления адресату
+	// (`invite.mail-rate-limit`, Ф5 Р8 п. 2); нулевое — величина стенда.
+	recoveryMailLimit outboxtypes.InviteMailRateLimit
+	// recoverySourcePace — окно обращений источника полосы запроса кода
+	// (`authn.login.source-attempts` · `source-window`, Ф3 Р10); нулевое —
+	// величина стенда.
+	recoverySourcePace humansession.SourcePace
+	// recoveryObserver — приёмник исходов запроса кода; nil — молчащий.
+	recoveryObserver humansession.Observer
+	// ceremonyNow — часы входа ключом и церемонии повышения (`AccessKeyLoginDeps.Now`,
+	// `SecondFactorDeps.Now`); nil — часы процесса. Пробы окна свежести условия
+	// `mfa_fresh` (Ф11-37, -38) строят момент аутентификации второй сессии и
+	// момент предъявления внутри первой управляемыми часами (§3.0а приёмки Ф11).
+	ceremonyNow func() time.Time
+	// akKeys — хранилище полосы входа ключом поверх адаптера стенда: пробы
+	// чередования ставят встречное действие между операторами входа; nil — сам
+	// адаптер.
+	akKeys func(humansession.AccessKeyLoginStore) humansession.AccessKeyLoginStore
+	// completionObserver — приёмник исходов завершения восстановления (клетки
+	// `kaname_recovery_completion_outcomes_total`); nil — молчащий.
+	completionObserver humansession.Observer
+	// completeStore — хранилище глагола завершения восстановления поверх
+	// адаптера стенда: проба гонки kaname#458 ставит встречное подтверждение
+	// между чтением адреса и транзакцией исхода; nil — сам адаптер.
+	completeStore func(*kanamepg.HumanSessionRepo) humansession.Store
+	// loginVerifier — проверяющий пароля, которого получает глагол входа, поверх
+	// настоящего; nil — сам проверяющий. Пробы перехода записи (kaname#458,
+	// A458-09) ставят барьер на шов между проверкой пароля и чтением момента.
+	loginVerifier func(humansession.Verifier) humansession.Verifier
+	// loginMoments — источник моментов выдачи входа (`LoginDeps.CutoffClock`)
+	// поверх часов входа; nil — часы входа. Положительный контроль A458-09
+	// ставит барьер ПОСЛЕ чтения момента.
+	loginMoments func(revocationpolicy.Clock) revocationpolicy.Clock
+	// verbs — глаголы слушателя поверх глаголов стенда и зависимостей второго
+	// фактора: пробы заведения способа (kaname#747) ставят НАСТОЯЩИЕ `enroll` и
+	// `confirm` над швом хранилища способов; nil — глаголы стенда как есть.
+	verbs func(sessionVerbs, humansession.SecondFactorDeps) loginlanehttp.Lane
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -217,7 +278,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	regLane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
 	register, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       pgRegistrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: laneSessionTTL, Observer: registration.NopObserver{}, Now: time.Now, Logger: logger,
 		Letter: laneLetterPace, Sources: kanamepg.NewHumanSessionRepo(pool), SourcePace: laneSourcePace,
 	})
@@ -256,8 +318,23 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	if opts.loginNow != nil {
 		loginNow = opts.loginNow
 	}
+	ceremonyNow := time.Now
+	if opts.ceremonyNow != nil {
+		ceremonyNow = opts.ceremonyNow
+	}
+	var (
+		loginVerifier humansession.Verifier  = verifier
+		loginMoments  revocationpolicy.Clock = momentclock.Func(loginNow)
+	)
+	if opts.loginVerifier != nil {
+		loginVerifier = opts.loginVerifier(verifier)
+	}
+	if opts.loginMoments != nil {
+		loginMoments = opts.loginMoments(loginMoments)
+	}
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: loginStore, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		CutoffClock: loginMoments,
+		Store:       loginStore, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: loginVerifier, Hasher: hasher,
 		Limits: limits, TTL: laneSessionTTL, Observer: loginObserver, Now: loginNow, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})
@@ -271,24 +348,79 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	require.NoError(t, err)
 	secondFactor := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
-		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: time.Now, Logger: logger,
+		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: ceremonyNow, Logger: logger,
 	}
 	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
 	require.NoError(t, err)
+	status, err := humansession.NewSecondFactorStatusUseCase(secondFactor)
+	require.NoError(t, err)
+	var (
+		recoveryMail                           = laneMailLimit
+		recoverySource                         = laneSourcePace
+		recoveryObserver humansession.Observer = nop
+	)
+	if opts.recoveryMailLimit != (outboxtypes.InviteMailRateLimit{}) {
+		recoveryMail = opts.recoveryMailLimit
+	}
+	if opts.recoverySourcePace != (humansession.SourcePace{}) {
+		recoverySource = opts.recoverySourcePace
+	}
+	if opts.recoveryObserver != nil {
+		recoveryObserver = opts.recoveryObserver
+	}
 	request, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
-		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: nop, Now: time.Now, Logger: logger,
-		Sources: sessions, SourcePace: laneSourcePace, MailLimit: laneMailLimit,
+		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: recoveryObserver,
+		Now: time.Now, Logger: logger, Sources: sessions, SourcePace: recoverySource, MailLimit: recoveryMail,
 	})
 	require.NoError(t, err)
+	var (
+		completeStore    humansession.Store    = sessions
+		completeObserver humansession.Observer = nop
+	)
+	if opts.completeStore != nil {
+		completeStore = opts.completeStore(sessions)
+	}
+	if opts.completionObserver != nil {
+		completeObserver = opts.completionObserver
+	}
+	// Транзакция исхода — тем же составом, что в композиционном корне
+	// (kaname#458): адаптер базы и та же функция активации приглашения.
+	completion, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+	require.NoError(t, err)
 	complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
-		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: nop, Now: time.Now, Logger: logger,
+		CutoffClock: momentclock.Func(time.Now), Completion: completion,
+		Store: completeStore, Hasher: hasher, Rule: rule, Limits: limits, TTL: laneSessionTTL, Observer: completeObserver, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
 	resolveUC, err := humansession.NewResolveUseCase(sessions, nop, time.Now)
 	require.NoError(t, err)
 
-	l := newLaneOver(t, sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
-		stepUp: stepUp, request: request, complete: complete}, "")
+	// Полоса входа ключом (Ф13) — теми же хранилищами и той же привязкой,
+	// что корень композиции, с привязкой стенда (`laneKeyBinding`).
+	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	var akKeys humansession.AccessKeyLoginStore = kanamepg.NewAccessKeyLoginRepo(pool, accessKeys)
+	if opts.akKeys != nil {
+		akKeys = opts.akKeys(akKeys)
+	}
+	akDeps := humansession.AccessKeyLoginDeps{
+		CutoffClock: momentclock.Func(ceremonyNow),
+		Store:       sessions, Keys: akKeys, Methods: methods,
+		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
+		UserVerification: access_keys.UserVerificationAssertion,
+		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: ceremonyNow, Logger: logger,
+	}
+	akBegin, err := humansession.NewBeginAccessKeyLoginUseCase(akDeps)
+	require.NoError(t, err)
+	akLogin, err := humansession.NewAccessKeyLoginUseCase(akDeps)
+	require.NoError(t, err)
+
+	verbs := sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
+		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin, status: status}
+	var laneVerbs loginlanehttp.Lane = verbs
+	if opts.verbs != nil {
+		laneVerbs = opts.verbs(verbs, secondFactor)
+	}
+	l := newLaneOver(t, laneVerbs, "")
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),

@@ -90,6 +90,7 @@ func TestUserInvite_ExistingActiveEmail_SecondAccount(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err, "посев действующей строки в аккаунте A")
+	seedWayIn(t, ctx, kanamepg.WriterTx(w0))
 	require.NoError(t, w0.Commit(ctx))
 
 	// Второй аккаунт со своим администратором — и третий, куда человека НИКТО
@@ -241,6 +242,12 @@ func TestUserInvite_ConcurrentBootstrap_RaceSafe(t *testing.T) {
 				OwnerUserID: uid,
 				Labels:      domain.Labels{},
 			}); err != nil {
+				atomic.AddInt64(&failures, 1)
+				return
+			}
+			// Строка пароля той же транзакцией (kaname#608): без неё фиксацию
+			// отверг бы инвариант, а не ключ гонки.
+			if _, err := kanamepg.WriterTx(w).Exec(ctx, wayInFixtureSQL); err != nil {
 				atomic.AddInt64(&failures, 1)
 				return
 			}

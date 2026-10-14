@@ -4,7 +4,7 @@
 package account
 
 // delete_reconcile_test.go — Design-B (flat-authz verb-bearing complete)
-// acceptance VBC-17 (Account.Delete owner-tuple cleanup, #234). Account.Delete
+// acceptance VBC-17 (Account.Delete owner-tuple cleanup, kacho-iam#234). Account.Delete
 // MUST symmetrically revoke the owner-binding's emitted-tuple ledger (owner
 // self-grant + owner-binding hierarchy pointer, like AccessBinding.Delete) AND
 // the SEC-L cluster-pointer (cluster:cluster_root#cluster@account:<A>),
@@ -338,6 +338,10 @@ func (w delAcctWriter) Delete(_ context.Context, _ domain.AccountID) error {
 	w.repo.acctDelCnt++
 	return nil
 }
+func (delAcctWriter) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return nil, nil
+}
+func (delAcctWriter) LockOwner(context.Context, domain.UserID) error { return nil }
 
 type delABWriter struct {
 	access_binding.WriterIface

@@ -60,7 +60,7 @@ type FinishAssertionOutput struct {
 // FinishAssertionUseCase — проверка утверждения.
 type FinishAssertionUseCase struct {
 	deps  Deps
-	decoy decoyKey
+	decoy webauthnverify.DecoyKey
 }
 
 // NewFinishAssertionUseCase — построение с проверкой зависимостей и
@@ -70,7 +70,7 @@ func NewFinishAssertionUseCase(d Deps) (*FinishAssertionUseCase, error) {
 	if err != nil {
 		return nil, err
 	}
-	decoy, err := newDecoyKey(d.Binding.Algorithms[0])
+	decoy, err := webauthnverify.NewDecoyKey(d.Binding.Algorithms[0])
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (uc *FinishAssertionUseCase) Execute(ctx context.Context, in FinishAssertio
 	}
 	pub, alg := key.PublicKey, webauthnverify.Algorithm(key.Algorithm)
 	if !known {
-		pub, alg = uc.decoy.public, uc.decoy.alg
+		pub, alg = uc.decoy.Public(), uc.decoy.Algorithm()
 	}
 	res, verr := webauthnverify.VerifyAssertion(webauthnverify.AssertionInput{
 		Challenge: cd.Challenge, Binding: uc.deps.Binding,

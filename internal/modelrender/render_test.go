@@ -76,7 +76,7 @@ func TestB05TheTrailingNewlineIsAByteToo(t *testing.T) {
 //
 // Названо поимённо, потому что это ИЗМЕРЕННАЯ регрессия, а не гипотеза: черновик
 // генератора эмитил `define use` у vpc_subnet, тогда как канон несёт его НОЛЬ раз
-// (снято #1115). Черновик был зелен ровно потому, что сверялся со снимком.
+// (снято kacho#1115). Черновик был зелен ровно потому, что сверялся со снимком.
 func TestB02TheRetiredRelationDoesNotComeBack(t *testing.T) {
 	got, err := modelrender.Render(manifest.Resource{
 		Name: "subnet", ObjectType: "vpc_subnet", Parents: []manifest.Parent{{Name: "project", Type: "project"}}, Producer: "derived",
@@ -104,7 +104,7 @@ func TestB03TheNoteIsReproducedVerbatim(t *testing.T) {
 	r := gatewayResource()
 	r.Notes = []manifest.Note{{
 		Before: "project",
-		Text:   "# первая строка разбора\n#\n# третья строка, со ссылкой #1089",
+		Text:   "# первая строка разбора\n#\n# третья строка, со ссылкой kacho#1089",
 	}}
 	got, err := modelrender.Render(r)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestB03TheNoteIsReproducedVerbatim(t *testing.T) {
 	for _, want := range []string{
 		"    # первая строка разбора\n",
 		"    #\n",
-		"    # третья строка, со ссылкой #1089\n",
+		"    # третья строка, со ссылкой kacho#1089\n",
 	} {
 		if !strings.Contains(string(got), want) {
 			t.Fatalf("строка %q не воспроизведена дословно:\n%s", want, got)
@@ -127,7 +127,7 @@ func TestB03TheNoteIsReproducedVerbatim(t *testing.T) {
 // TestC04RemovingTheNoteIsSeenByTheComparison — инъекция C-04 приёмки о доме
 // прозы: снятое примечание даёт побайтовое расхождение.
 //
-// Заменяет собой инъекцию C-01 задачи #1089, снимавшую ключ `doc`. Ключа больше
+// Заменяет собой инъекцию C-01 задачи kacho#1089, снимавшую ключ `doc`. Ключа больше
 // нет, и старая инъекция ПОТЕРЯЛА БЫ СВОЙ ПРЕДМЕТ: вход, на котором она находит
 // нарушение, перестал быть представимым, а проверка при этом молчала бы и
 // выглядела исправной (`testing.md` §«Гейт на класс», п. 9). Поэтому она не

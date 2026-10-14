@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -73,7 +74,7 @@ func TestTokenContour_MintedTokenVerifiesAgainstOurPublishedSet(t *testing.T) {
 	require.NoError(t, ks.EnsureSigningKey(ctx))
 
 	signer, err := tokensigner.New(tokensigner.Config{
-		Issuer: contourIssuer, Clock: clock, MaxTokenTTL: tokenpolicy.MaxTokenTTL,
+		Issuer: contourIssuer, Clock: momentclock.Func(clock), MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, ks)
 	require.NoError(t, err)
 

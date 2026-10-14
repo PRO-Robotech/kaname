@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // membership_removal_integration_test.go — исключение человека из аккаунта
-// (#1127): что оно снимает, чего не трогает и что его не отменяет.
+// (kacho#1127): что оно снимает, чего не трогает и что его не отменяет.
 //
 // # Три утверждения, и каждое закрывает свой способ ошибиться
 //
 //  1. СНИМАЕТ РОВНО ЧЛЕНСТВО. Строка `iam_user` не меняется ни в одном поле, и
 //     членства в ДРУГИХ аккаунтах остаются. Иначе «исключить из моего аккаунта»
 //     тихо становится действием над личностью — тем самым классом, который
-//     #1102 и #1131 из рук аккаунта забрали.
+//     kacho#1102 и kacho#1131 из рук аккаунта забрали.
 //
 //  2. НЕ ОТМЕНЯЕТСЯ САМО. Зеркало членства ведёт триггер на строке человека, и в
 //     редакции 20260823053000 оно вставляло членство при КАЖДОМ срабатывании —
@@ -232,6 +232,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, err = w.UsersW().ActivateInvite(ctx, excluded,
 			domain.ExternalSubject("ext-rmres-activated"), domain.DisplayName("Excluded"))
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 
@@ -260,6 +261,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, err = w.UsersW().ActivateInvite(ctx, kept,
 			domain.ExternalSubject("ext-rmres-kept"), domain.DisplayName("Kept"))
 		require.NoError(t, err)
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 	keptAfter := membershipsOf(t, ctx, pool, kept)

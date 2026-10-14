@@ -231,7 +231,7 @@ func (uc *RevokeAdminUseCase) doRevoke(
 		if err := uc.audit.EmitTx(ctx, tx, service.AuditEvent{
 			EventType: auditEventClusterAdminRevoked,
 			Payload: clusterAdminAuditPayload(
-				principalID, string(subject), string(grant.ID)),
+				principalID, subjectType, string(subject), string(grant.ID)),
 		}); err != nil {
 			return domain.ClusterAdminGrant{}, fmt.Errorf("audit emit revoke: %w", err)
 		}

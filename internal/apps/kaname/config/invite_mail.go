@@ -61,6 +61,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/mailaddr"
 )
 
 // Умолчания ДВУХ величин отправителя. У остальных умолчаний нет (Р3).
@@ -171,10 +173,9 @@ func (c InviteMailConfig) RelayConfigured() bool {
 // Он судит СОГЛАСОВАННОСТЬ объявленных величин между собой: половину пары
 // удостоверения, отправителя без узла, непонятную посадку полосы, непозитивные
 // величины. Он НЕ требует, чтобы полоса была объявлена: «объявлена ли она
-// вообще» — предмет стража рендера профиля и шага подстановки (Р4а, места С1 и
-// С2), у которых есть то, чего нет здесь, — доступ к объявлениям профиля и к
-// фактической величине из секрета. Страж, судящий величину, которой не видит,
-// был бы зелен при любом входе.
+// вообще» в боевом режиме судит строка требований полосы «почтовый узел
+// объявлен» (lane_requirements.go, kaname#475) тем же предикатом
+// RelayConfigured; вне боевого режима пустой узел законен.
 //
 // # ПОЛОВИНА ПАРЫ ХУЖЕ ОТСУТСТВИЯ ОБЕИХ
 //
@@ -201,6 +202,17 @@ func (c InviteMailConfig) Validate() error {
 		return fmt.Errorf(
 			"invite-mail: relay %q is declared without a sender address "+
 				"(invite-mail.from) — there is no built-in default for it", redactRelay(c.Relay))
+	}
+	// ДОМЕН ОТПРАВИТЕЛЯ — тем же предикатом, что у отправителя (kaname#642).
+	// Им отправитель представляется узлу и в нём чеканит Message-ID; адрес без
+	// годного домена отправитель отвергает на КАЖДОЙ отправке, и без этой строки
+	// процесс стартовал бы здоровым, не доставляя ни одного письма. Значение в
+	// текст отказа не подставляется: отказ называет ручку и причину.
+	if _, ok := mailaddr.SenderDomain(c.From); !ok {
+		return fmt.Errorf(
+			"invite-mail: the sender address (invite-mail.from) has no usable domain part — " +
+				"the sender greets the relay and mints Message-ID in that domain, so every " +
+				"letter would be refused; declare an address of the form name@domain")
 	}
 	// ИМЯ ПОЛЬЗОВАТЕЛЯ — ОДИН ИСТОЧНИК. Адрес формы URI несёт его частью до
 	// «@», окружение — по имени переменной; оба сразу — два источника одной

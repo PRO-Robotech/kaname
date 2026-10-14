@@ -143,20 +143,35 @@ func refusalOutcome(err error) BasicCredentialOutcome {
 // refuseBasic — единый отказ наружу и его причина внутрь.
 //
 // Наружу — ОДИН код и ОДИН текст на любую причину. Внутрь — клетка переписи и
-// структурная запись журнала: глагол и исход, и больше ничего. Ни
-// предъявленной строки, ни идентификатора в записи нет: первое — секрет, второе
-// на отказе «форма негодна» есть произвольный вход предъявителя.
-func (h *Handler) refuseBasic(ctx context.Context, verb BasicCredentialVerb, err error) error {
+// ОДНА структурная запись журнала: глагол, исход и подробности ветки (detail),
+// если ветка их несёт, — и больше ничего. Ни предъявленной строки, ни
+// идентификатора в записи нет: первое — секрет, второе на отказе «форма
+// негодна» есть произвольный вход предъявителя.
+//
+// Одна запись на отказ, а не запись ветки плюс запись отказа: две записи об
+// одном событии считаются как два отказа всяким, кто считает по журналу.
+func (h *Handler) refuseBasic(ctx context.Context, verb BasicCredentialVerb, err error, detail ...slog.Attr) error {
 	outcome := refusalOutcome(err)
 	h.countBasic(verb, outcome)
 	if h.logger != nil {
-		level := slog.LevelInfo
-		if outcome == BasicOutcomeReasonUnnamed {
-			// Предъявитель тут ни при чём: авторитет нарушил свой контракт.
-			level = slog.LevelWarn
-		}
-		h.logger.Log(ctx, level, "basic credential refused",
-			slog.String("verb", string(verb)), slog.String("outcome", string(outcome)))
+		attrs := append([]slog.Attr{
+			slog.String("verb", string(verb)), slog.String("outcome", string(outcome)),
+		}, detail...)
+		h.logger.LogAttrs(ctx, basicRefusalLevel(outcome), "basic credential refused", attrs...)
 	}
 	return status.Error(codes.Unauthenticated, refusalText)
+}
+
+// basicRefusalLevel — уровень записи об отказе полосы (задача kaname#390).
+//
+// По таблице уровней службы (`docs/engineering/components/32-observability.md`,
+// «Уровни»): отклонённое предъявление — WARN; отказ, причину которого авторитет
+// не назвал, — нарушение его контракта, то есть дефект НАШЕЙ стороны, и он
+// ERROR. INFO у отказа нет: INFO в таблице — жизненный цикл процесса, и отказ
+// на нём тонул бы среди старта слушателей.
+func basicRefusalLevel(outcome BasicCredentialOutcome) slog.Level {
+	if outcome == BasicOutcomeReasonUnnamed {
+		return slog.LevelError
+	}
+	return slog.LevelWarn
 }

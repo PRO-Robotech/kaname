@@ -1,0 +1,155 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+  sha256: f3cbfaf5a8d5c3051d166eac4afbac5ac078dd178094726731041e7d3fdc3101
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: d2f6f182fab9d9727a7fab35a82a798005eb0d89
+  content_commit: 48316dfe28869e0a78f7cfb11b5b7671310fd82a
+  branch: '133'
+  worktree: tmp/133-a2-f11
+  pull_request: null
+  task: PRO-Robotech/kaname#133
+  wave: PRO-Robotech/kaname#537
+  lines: 2064
+  lines_note: >-
+    Задание называло 2058 строк; `wc -l` на этой редакции — 2064. Отпечаток равен заявленному,
+    расхождение — в посылке задания, не в предмете.
+  round: 7
+  round_note: >-
+    Круг следует за шестью записями документа (круги 1…6); последняя — круг 6, CHANGES_REQUESTED
+    на редакцию 7 (e915db3d…). Ни один прежний вердикт на редакцию 8 не переносится.
+  predecessor_record: >-
+    docs/specs/reviews/assurance-level-is-declared-by-our-session/e915db3db6ecdf2aae450120a2b3cff038725cdc741cb19c375555d4aff4a2b7.yaml
+  fingerprint_predicate: >-
+    git show 48316dfe28869e0a78f7cfb11b5b7671310fd82a:docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    | sha256sum
+  fingerprint_note: >-
+    Снят своим замером в рабочей копии и на коммите; голова ветки на origin (`git ls-remote origin
+    refs/heads/133`) — 48316dfe, равна локальной.
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-04'
+publication_mode: courier_of_agent_verdict
+scope:
+  reviewed: >-
+    Дифф f91cb95c8..48316dfe2 документа (81 вставка, 15 снятий; коммит меняет один файл): шапка
+    «редакция 8», Р7 (условный абзац), §3.4 «где наблюдается», общее «Дано» (ссылка R_S, окончание
+    сессии), Ф11-43, -44, -48 на границе службы, Ф11-45…47 на слое края, перепись «сценарий →
+    производитель», §5 (шесть строк), §5.2, §7 инв. 2, §8 (две группы с инъекциями), §9 п.2 и п.7,
+    §17. Ф11-01…42 не тронуты.
+  document_edited_by_reviewer: false
+round6_outcomes:
+  Б1: >-
+    закрыто: у правила З1 три ветви, у каждой отрицание-близнец Ф11-34 с одним изменённым фактом —
+    Ф11-43 (запись окончена выходом), Ф11-44 (ссылка на живую сессию «3» другой личности),
+    Ф11-48 (ссылки нет); инъекции §8 «живость не проверена», «личность не сверена», «подставлена
+    сессия личности» краснеют на 43, 44, 48 соответственно.
+  Б2: >-
+    закрыто: пересылку наблюдают сценарии слоя края Ф11-45 (дословно у следующего звена, в ответе
+    клиенту нет), Ф11-46 (клиентский ключ не читается — исход равен 45), Ф11-47 (полоса предъявителя
+    ключа не получает); §9 п.7 опирается на них, ложная опора на Ф11-38 снята и названа.
+  В1: >-
+    закрыто — Ф11-45.
+blocking: []
+non_blocking:
+  - id: В1
+    where: §3.4 Ф11-44
+    what: >-
+      «Единственное отличие от Ф11-34» — ссылка; но «Дано» прибавляет и живую сессию V. Различающая
+      сила не страдает (реализация без сверки личности даёт допуск по записи V и краснеет), однако
+      строгий близнец — Ф11-34 при присутствующей V. Следующей правке — уточнить формулировку либо
+      завести V в «Дано» положительной половины пробы.
+  - id: В2
+    where: §6 строка держателя Ф11-21…24 (стр. 1566)
+    what: >-
+      Перечисляет «Ф11-34…41, редакция 7 дополнила Ф11-42» — исторически верно, но о Ф11-43…48 молчит.
+      Не ложь, неполнота; вместе со следующей правкой.
+defaults_fixed: []
+open_questions_critical: 0
+accepted_parts: >-
+  Условная форма (действуют только при записанном исходе (а) в kaname#133), объём З1/З2, пары
+  34/43, 34/44, 34/48, 45/46, 46/47, разделение слоёв наблюдения (служба — 34…44, 48; край —
+  45…47), счёт §5.2 (44 = 29 + 15) и DoD Ф11 (14) — годны.
+predicates_run:
+  - command: sha256sum docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    got: f3cbfaf5…3101 — равен заявленному; строк 2064
+  - command: >-
+      awk '/^## §3 /,/^## §4 /' $F | grep -oE '\*\*Ф11-[0-9]+\*\*' | sort -u | wc -l; то же по F11
+    got: 44 и 0 — как в §5.2
+  - command: >-
+      grep -n EndSession internal/apps/kaname/api/humansession/logout.go; sed -n 545,552p
+      internal/repo/kaname/pg/human_session_repo.go; sed -n 264,272p того же
+    got: >-
+      81; `UPDATE human_sessions SET ended_at … WHERE id = $1 AND ended_at IS NULL` — запись
+      остаётся; DELETE только при `ended_at <= now() - grace` — посев «Дано» Ф11-43 конструируем
+  - command: sed -n 85,100p internal/repo/kaname/pg/human_session_repo.go
+    got: >-
+      `endedAt != nil → NoSessionEnded` — живость сегодня судится лишь при поиске по носителю;
+      поиск по ссылке её не наследует, значит Ф11-43 различает
+  - command: >-
+      git show f4c74ba1aa1:gateway/internal/middleware/auth_own_session.go | sed -n 155,170p
+      (PRO-Robotech/kacho)
+    got: пересылаются уровень и личность, ссылки нет — «заказан» верно
+  - command: >-
+      go test -count=1 ./gateway/internal/middleware -run
+      'TestAuthHTTP_StripsEntireKachoIdentityNamespace|TestOwnSessionAssurance_F11_18|TestOwnSessionAssurance_F11_20|TestAuthJWKS_REST_RS256_PrincipalFromClaims'
+      (экспорт kacho@f4c74ba1aa1 в tmp/133-a2-r7-kacho, через слот)
+    got: >-
+      4 PASS, ok — снятие всего пространства, оснастка с подставленным ответом (countingNext
+      хранит lastReq) и полоса RS256 с записью пересланного существуют: близнецы 45/46/47 строятся
+constructibility: >-
+  Стенда в задании нет — посев на стенде не выполнен («не выполнилось» 1). По видам «Дано»: окончание
+  сессии с сохранением записи — подтверждено кодом (EndSession / уборка по порогу); две живые сессии —
+  подтверждено кругом 6; сессия «3» ключом для U и V — производитель заказан (Ф13-11); оснастка края
+  для 45…47 — подтверждена прогоном (4 PASS).
+event_body: acceptance-reviewer · APPROVED · f3cbfaf5a8d5c3051d166eac4afbac5ac078dd178094726731041e7d3fdc3101
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 7 — APPROVED, блокирующих ноль. Санкция этим не выдана: роль без внешнего события
+    полномочия не даёт (change-graph.md §3). До события запрет #1 по этой редакции в силе. Сверх
+    события код по Ф11-34…48 разрешён только при записанном исходе (а) в kaname#133 (§3.4).
+  publication_pending:
+    required_for_sanction: true
+    expected_from: оркестратор волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Публикация — отдельным коммитом поверх этой записи дописывается только блок `event`;
+      вердикт, разбор и числа задним числом не правятся.
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5976013735
+  node_id: IC_kwDOUO26pM8AAAABZDK7pw
+  url: https://github.com/PRO-Robotech/kaname/issues/133#issuecomment-5976013735
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5976013735
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/133
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-04T03:04:23Z'
+  body_sha256: e74572994c70acf64e335658947e930eb130944e223a47b0f0943b2718e78774
+  subject_sha256: f3cbfaf5a8d5c3051d166eac4afbac5ac078dd178094726731041e7d3fdc3101
+  subject_revision: 48316dfe28869e0a78f7cfb11b5b7671310fd82a
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; вердикт, разбор и числа не правились.
+    Отпечаток предмета перемерен на origin (ветка 133 @48316dfe) перед публикацией и совпал с
+    объявленным. Отпечаток тела снят с сырого ответа API.
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  personal_review_by_publishing_actor_claimed: false

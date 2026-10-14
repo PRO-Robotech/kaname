@@ -162,6 +162,7 @@ sequenceDiagram
 | POST    | `/iam/v1/users/{userId}:block`    | `UserService.Block`       |
 | POST    | `/iam/v1/users/{userId}:unblock`  | `UserService.Unblock`     |
 | POST    | `/iam/v1/users/{userId}:resetSecondFactor` | `UserService.ResetSecondFactor` |
+| POST    | `/iam/v1/users/{userId}:resetAccessKeys` | `UserService.ResetAccessKeys` |
 
 ## Административный запрет участию (`:block` / `:unblock`)
 

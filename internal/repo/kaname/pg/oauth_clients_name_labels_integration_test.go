@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,7 +56,7 @@ func TestOAuthClientNameLabels_SA_PersistOnInsert_RoundTrip(t *testing.T) {
 	txb := kanamepg.NewPoolTxBeginner(pool)
 
 	row := domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
@@ -113,7 +114,7 @@ func TestOAuthClientNameLabels_SA_EmptyDefaults(t *testing.T) {
 
 	// name/labels omitted → DEFAULT '' / '{}' — round-trips as empty (not NULL).
 	row := domain.ServiceAccountOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
@@ -150,7 +151,9 @@ func TestOAuthClientNameLabels_User_PersistOnInsert_RoundTrip(t *testing.T) {
 	txb := kanamepg.NewPoolTxBeginner(pool)
 
 	row := domain.UserOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt: time.Now().UTC(),
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
@@ -204,7 +207,9 @@ func TestOAuthClientNameLabels_User_InvalidLabels_CheckViolation(t *testing.T) {
 		tooMany[domain.LabelKey(fmt.Sprintf("k%d", i))] = domain.LabelVal("v")
 	}
 	row := domain.UserOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt: time.Now().UTC(),
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),

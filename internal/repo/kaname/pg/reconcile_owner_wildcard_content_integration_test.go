@@ -4,7 +4,7 @@
 package pg_test
 
 // reconcile_owner_wildcard_content_integration_test.go — RBAC explicit-model 2026 /
-// issue #224 (contract-blocker): the OWNER `*.*.*` role bound at a BOUNDED scope
+// issue kacho-iam#224 (contract-blocker): the OWNER `*.*.*` role bound at a BOUNDED scope
 // (ACCOUNT) MUST forward-materialize per-object CONTENT.
 //
 // Before the fix domain.dottedTypes dropped wildcard module/resource for ALL scopes,
@@ -56,7 +56,7 @@ func ownerBindingFor(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accI
 
 // Test224_OwnerWildcard_BackfillMaterializesContent — D-8a backfill: an object that
 // already exists in the account when the owner-binding is reconciled gets a per-object
-// content tuple. RED before #224 fix (0 content tuples), GREEN after.
+// content tuple. RED before kacho-iam#224 fix (0 content tuples), GREEN after.
 func Test224_OwnerWildcard_BackfillMaterializesContent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -84,7 +84,7 @@ func Test224_OwnerWildcard_BackfillMaterializesContent(t *testing.T) {
 	ownerUser := "user:" + string(owner)
 	assert.True(t,
 		ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", "vpc_network:n224bf"),
-		"owner must materialize per-object content tuple on an existing account resource (#224 D-8a)")
+		"owner must materialize per-object content tuple on an existing account resource (kacho-iam#224 D-8a)")
 }
 
 // Test224_OwnerWildcard_ForwardMaterializesContent — C-01b forward: a resource
@@ -121,7 +121,7 @@ func Test224_OwnerWildcard_ForwardMaterializesContent(t *testing.T) {
 	ownerUser := "user:" + string(owner)
 	assert.True(t,
 		ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", "compute_instance:i224late"),
-		"owner must FORWARD-materialize content tuple on a resource created after the binding (#224 C-01b)")
+		"owner must FORWARD-materialize content tuple on a resource created after the binding (kacho-iam#224 C-01b)")
 }
 
 // Test224_OwnerWildcard_ScopeBoundary — D-3: the owner of account A is NOT
@@ -154,7 +154,7 @@ func Test224_OwnerWildcard_ScopeBoundary(t *testing.T) {
 	// Owner A must NOT have any content tuple on account B's network (scope boundary).
 	assert.False(t,
 		ledgerHasTuple(t, ctx, pool, ownerBIDA, "user:"+string(ownerA), "admin", "vpc_network:nB224"),
-		"owner of account A must NOT materialize on account B's resource (#224 D-3 scope boundary)")
+		"owner of account A must NOT materialize on account B's resource (kacho-iam#224 D-3 scope boundary)")
 }
 
 // Test224_OwnerWildcard_ForwardWithoutBootBackfill — review КФ-1: the forward path
@@ -190,7 +190,7 @@ func Test224_OwnerWildcard_ForwardWithoutBootBackfill(t *testing.T) {
 
 	assert.True(t,
 		ledgerHasTuple(t, ctx, pool, ownerBID, "user:"+string(owner), "admin", "vpc_network:nNbb224"),
-		"owner forward path must work from the migration-seeded selector, not the boot-backfill (#224 КФ-1)")
+		"owner forward path must work from the migration-seeded selector, not the boot-backfill (kacho-iam#224 КФ-1)")
 }
 
 // rec224ReconcileObject drives the forward fast-path (ReconcileObject) for the owner
@@ -207,7 +207,7 @@ func rec224ReconcileObject(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 // account must materialize the owner's per-object content tuple BEFORE contract. This
 // is the assertion the old gate could NOT make (КФ-БАГ-1 — owner content never
 // materialized, and the active_members-derived Verify always passed it as 0-expected).
-// RED before #224, GREEN after.
+// RED before kacho-iam#224, GREEN after.
 func Test224_VerifyGate_OwnerContentForwardSmoke(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -237,5 +237,5 @@ func Test224_VerifyGate_OwnerContentForwardSmoke(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, smoke,
-		"verify-gate forward-smoke on the OWNER binding must materialize owner content on a fresh resource (#224 КФ-4)")
+		"verify-gate forward-smoke on the OWNER binding must materialize owner content on a fresh resource (kacho-iam#224 КФ-4)")
 }

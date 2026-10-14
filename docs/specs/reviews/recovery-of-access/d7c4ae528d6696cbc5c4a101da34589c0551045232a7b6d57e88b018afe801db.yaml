@@ -1,0 +1,130 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: d7c4ae528d6696cbc5c4a101da34589c0551045232a7b6d57e88b018afe801db
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (шесть) не
+    трогаются — редакция 8 получает соседнюю запись по своему отпечатку.
+  content_commit: cf317baa95f4fce44b00e94f6ef013ba3b33c66f
+  branch: '608'
+  task: PRO-Robotech/kaname#608
+  lines: 1933
+  round: 7
+  predecessor_record: docs/specs/reviews/recovery-of-access/df0622236ba564fbbbae93a826fd53a79d4b85ad34d5f286e5cfb93a47051c1e.yaml
+  predecessor_note: >-
+    Круг 6 вернул редакцию 7 (df062223…) с одним блокирующим COVERAGE (обход Д16 не заходил в дом
+    платформы). Дельта 83716c6a4..cf317baa9 — один файл, этот документ (+85/−29).
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/recovery-of-access.md в копии ветки 608 @ cf317baa9 →
+    d7c4ae52…; git show HEAD:<путь> | sha256sum — то же; git ls-remote origin 608 → cf317baa9;
+    wc -l → 1933.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: false
+  why: возврат; санкции не выпускает.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#608 с полями role, verdict, subject, subject_revision
+      cf317baa95f4fce44b00e94f6ef013ba3b33c66f, subject_sha256 дословно; блок `event`
+      дописывается по факту публикации тем же заходом.
+    body: >-
+      role: acceptance-reviewer · verdict: CHANGES_REQUESTED · subject:
+      PRO-Robotech/kaname docs/engineering/acceptance/recovery-of-access.md · subject_revision:
+      cf317baa95f4fce44b00e94f6ef013ba3b33c66f · subject_sha256:
+      d7c4ae528d6696cbc5c4a101da34589c0551045232a7b6d57e88b018afe801db
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакции 8 целиком (строка редакции, Д16 (а)…(г), «Обход редакции 8» с таблицей исходов,
+    §8 инв. 11, §9 строка Д16, §10 п. 7, §17) и её стыки с Р9, §5.5, Ф5-29…33. Сценарии Ф5-01…33
+    дельтой не тронуты — сверено диффом.
+  counts: >-
+    Сценариев 33, производитель у 33, близнецы у отрицаний Ф5-29…33 по одному факту — как в
+    кругах 5–6, дельта их не трогает.
+
+measured:
+  round6_blocker_closed: >-
+    Предикат «Обхода редакции 8» исполнен дословно (LC_ALL=C.UTF-8 git grep -n -I -P "$P" с
+    исключениями X): платформа PRO-Robotech/kacho @ 2afc06571c77 (= origin/main) → 4;
+    служба @ 83716c6a4 → 50 (на cf317baa9 тоже 50); воркспейс @ b64bbb5e7 (= origin/main) → 17.
+    Сумма 71 — совпало с документом. Каждая из 71 строки сверена с таблицей исходов поимённо
+    (служба: 11 посевов отметки в пробах — 2/4/5, совпало; воркспейс — 17 из 17 названы).
+    Шапка гейта F6b-52 (:12, :23) теперь — Д16 (г). Блокирующее круга 6 закрыто.
+  independent_wider_predicate_same_property: >-
+    Свой предикат по свойству «писатель отметки» шире формы автора ((отметк|подтвержд адрес|
+    email_verified).{0,100}(только|единствен|ровно од|одним …|лишь) и обратный порядок) по трём
+    домам, вне проб: сверх таблицы — только строки, верные при Р9 («подтвердить адрес можно
+    только кодом из письма» — values.prod.yaml:457, required_settings.go:288; F6b :1992 о
+    платформе; ui-future fixtures.ts:373). Новых мест тезиса о ЧИСЛЕ вызывающих нет.
+  second_property_walk: >-
+    Р9 п. 1 меняет второе свойство — «неподтверждённый адрес кода восстановления не получает» —
+    и для него обхода в документе нет (§5.5 (1) называет только recovery_request.go:139).
+    Предикат ((не ?подтвержд|unverified).{0,140}(код|письм).{0,40}(не выда|не получа|…|нет)|
+    (код восстановлени|восстановлени).{0,140}(не ?подтвержд|unverified)) по трём домам вне
+    проб: служба @ 83716c6a4 — docs/content/api/auth-lane.mdx:244–248, docs/content/advanced/
+    observability.mdx:207; воркспейс — F4d :2387 (датированная перепись, верна на своей
+    ревизии); платформа — 0. Плюс internal/apps/kaname/retention/registry.go:106–107
+    («строку заводит запрос восстановления по любому подтверждённому адресу»). grep по
+    документу: 'auth-lane|docs/content/api|registry.go' → ни одной ссылки на эти места.
+  seed_constructibility: >-
+    Своя изоляция: postgres:16 (контейнер rev608seed7, слот heavy-slots/slot1 через flock), Up-секции
+    всех 49 миграций дерева (служба @ cf317baa9; миграции те же, что @ 83716c6a4) применены
+    пофайлово одной транзакцией каждая — 49 из 49. Одной транзакцией посеяны A (ACTIVE, без пароля,
+    не подтверждён), B (ACTIVE, пароль, не подтверждён), C (PENDING, без пароля), E (ACTIVE, без
+    пароля, подтверждён) и Z (адрес без владельца, count 0) — ограничения и отложенные FK при
+    COMMIT не возразили. Посеяно 4 из 4 «Дано» Ф5-29…32; Ф5-33 — инъекция в хранилище пробы.
+    «Не выполнилось» 0. Контейнер снят.
+
+blocking:
+  - kind: COVERAGE
+    text: >-
+      Р9 п. 1 выдаёт код на неподтверждённый адрес личности ACTIVE без способа входа, а публичный
+      сайт документации службы утверждает обратное без оговорки: docs/content/api/auth-lane.mdx
+      :244–248 (врезка «Восстановление для неподтверждённого адреса»: «кода не выдаёт (исход
+      unverified): сперва адрес подтверждается кодом из письма») и docs/content/advanced/
+      observability.mdx:207 (клетка `unverified` — «код для него не выдаётся»); тот же тезис —
+      комментарий internal/apps/kaname/retention/registry.go:106–107. Документ ни одно из этих мест
+      не называет (обход по свойству сделан только для «кто ставит отметку»), §10 п. 7 их правки не
+      заказывает — исполнение по букве оставит в публичной документации ложь о поведении, а
+      Ф5-29 утверждает ровно противоположное врезке. Добавить в §3 (или §5.5) обход второго
+      свойства Р9 тем же способом, что «Обход редакции 8» (один предикат, три дома, исход у каждой
+      строки), назвать правку трёх мест тем же изменением реализации kaname#608 и дописать их в
+      §10 п. 7. Формулировка в публичном тексте — без сценария злоупотребления (security-
+      disclosure.md). Род тот же, что в кругах 5 и 6 (полнота обхода дельты), но предмет новый —
+      другое свойство Р9; передать диспетчеру по §14а: в форму задания автора — «обход по КАЖДОМУ
+      свойству, которое меняет решение, а не по одному».
+
+non_blocking: []
+
+open_questions: []
+
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes

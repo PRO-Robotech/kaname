@@ -29,8 +29,9 @@ const (
 // account (Class A workload identity): a keypair the caller signs a
 // `client_assertion` with, a one-line secret, or a federated trust.
 //
-// 1:1 with ServiceAccount (`UNIQUE sva_id`). A future revision may
-// relax to N:1 via a separate migration without breaking existing rows.
+// N:1 with ServiceAccount: the schema holds no uniqueness on `sva_id`, so an
+// account may carry several keys at once, and a key is rotated with overlap —
+// issue the new one, move the workload, then revoke the old one.
 //
 // The client is named by the `id` of THIS row, and by nothing else: the
 // assertion carries it in `iss`/`sub`, and the platform's token endpoint
@@ -49,7 +50,8 @@ type ServiceAccountOAuthClient struct {
 	// legacy `soc_<body>` принимается для существующих строк (credential-id/JWK kid,
 	// неизменяем — не регенерируется). Оба формата валидны.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// ID of the ServiceAccount this client is bound to. UNIQUE — 1:1 mapping.
+	// ID of the ServiceAccount this client is bound to. Not unique: an account
+	// may hold several keys (N:1).
 	SvaId string `protobuf:"bytes,2,opt,name=sva_id,json=svaId,proto3" json:"sva_id,omitempty"`
 	// Free-form description (e.g. `CI builder key (Class A workload identity)`).
 	// 0-256 chars.

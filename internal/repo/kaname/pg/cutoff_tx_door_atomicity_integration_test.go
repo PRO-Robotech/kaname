@@ -105,10 +105,10 @@ func txDoorTwinSubject(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	t.Helper()
 	userID = scene.UserID + "-" + mark
 	sessionID = scene.SessionID + "-" + mark
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1, account_id, $2, $3, display_name, invite_status
-		  FROM kaname.users WHERE id = $4`,
+		  FROM kaname.users WHERE id = $4`),
 		userID, "ext-"+userID, userID+"@example.invalid", scene.UserID)
 	require.NoError(t, err, "посев второго человека")
 	_, err = pool.Exec(ctx, `

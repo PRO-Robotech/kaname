@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -86,7 +87,7 @@ func platformSigner(t *testing.T, key testKey) *tokensigner.Signer {
 	t.Helper()
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      testIssuerID,
-		Clock:       func() time.Time { return testNow },
+		Clock:       momentclock.Func(func() time.Time { return testNow }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, platformKeyProvider{material: tokensigner.SigningMaterial{
 		KID:           domain.KeyID("platform-1"),

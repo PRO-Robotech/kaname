@@ -1,0 +1,104 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/registration-and-its-three-consequences.md
+  sha256: c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 512b9df7ebe84ab41633117e56cde689af2cb866
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 1899
+  round: 3
+  round_note: >-
+    круг 3 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/registration-and-its-three-
+    consequences/7c81fa29d71d70f283cc15dc9cf450f2cb39fe7fa7dec4878e2c6f510e2c6293.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md на tmp/535-na3a
+    @ 33b0f8aa9 → c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745; совпал с
+    отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking: []
+non_blocking:
+  - id: N1
+    summary: >-
+      Четыре документа (Ф1, Ф4, Ф7, Ф13) ссылаются на решение kacho#2703 «полосы регистрации ключом не
+      будет» от 2026-10-03; сама задача OPEN, и последний её комментарий (2026-09-25) решения не несёт
+      — оно записано только в плане сессии (plan-final.md R1). Событие одобрения не публиковать, пока
+      решение не опубликовано комментарием в kacho#2703: иначе ссылка документа указывает на носитель,
+      которого нет.
+  - id: N2
+    summary: >-
+      Строки §3.1, §4.2 п.11 и §12 п.11 о пути первого входа под external стоят на посадке, снятой
+      kaname#363; сценарии на них не опираются — при следующей правке привести.
+accepted_parts: >-
+  Три правки сверены диффом против dd66b5bee: абзац kaname#564, пин Ф-е kacho@cd6bab6829, §1.2 и
+  Д5 приведены к одной полосе; Ф4-06 судит N = M при любом N, Ф4-07…10 не зависят от числа полос;
+  сценарии, ID и Тогда не тронуты.
+constructibility: >-
+  Посева не было: стенда в задании нет. Given редакции не менялись; Ф4-10 «прежнее объявление
+  снято» — состояние нынешнего дерева.
+event_body: acceptance-reviewer · APPROVED · c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745
+effective_approval:
+  issued: true
+  issued_at: '2026-10-03T19:28:36Z'
+  ban1_lifted: true
+  why: >-
+    Санкцию выпускает внешнее событие pointpu (courier_of_agent_verdict), а не эта запись.
+    Событие в задаче, которую называет `subject.task`, опубликовано курьером позже круга, и запись
+    приведена к факту события отдельной правкой — вердикт и разбор не тронуты.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  sanction:
+    outcome: САНКЦИЯ ДЕЙСТВУЕТ
+    issued_by_event: 5972714757
+    event_url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972714757
+    prior_event: https://github.com/PRO-Robotech/kaname/issues/256#issuecomment-5967535226
+    remeasured: >-
+      `git show 431654d662b69e062c7013616ef6ed8e2ecaedb1:<путь> | sha256sum` на origin/336 @431654d6 → c74fd81c…d745,
+      совпал с именем записи и строкой `subject_sha256` события;
+      `gh api repos/PRO-Robotech/kaname/issues/comments/5972714757` → issue_url — kaname#269
+      (`subject.task`), автор pointpu, author_association MEMBER, created_at == updated_at;
+      пять обязательных строк заголовка дословно.
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5972714757
+  node_id: IC_kwDOUO26pM8AAAABZABlBQ
+  url: https://github.com/PRO-Robotech/kaname/issues/269#issuecomment-5972714757
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5972714757
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-03T19:28:36Z'
+  body_sha256: 8be54fe8928289eabaef766c3541a85014b4f05db49eca6f28ce3b42662b1516
+  subject_sha256: c74fd81c39a4f20a496b8cf3781e76fe48e21b6d50d777a5f51b447e5416d745
+  subject_revision: 431654d662b69e062c7013616ef6ed8e2ecaedb1
+  verdict: APPROVED
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Блок дописан поверх записи рецензента (запись молчала о событии: блока event не было);
+    отпечаток тела снят с сырого ответа API (`gh api … | jq -j .body | sha256sum`).
+    Прежнее событие с тем же отпечатком — в другой задаче (https://github.com/PRO-Robotech/kaname/issues/256#issuecomment-5967535226); оно не снято.
+    subject_revision события — голова ветки PR, на которой отпечаток перемерен; содержимое
+    документа на ней совпадает с content_commit 512b9df7e (тот же sha256).

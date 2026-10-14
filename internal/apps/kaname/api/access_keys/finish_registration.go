@@ -149,7 +149,7 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 	keyID := domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen))
 	key := domain.AccessKey{
 		ID: keyID, UserID: in.UserID, CredentialID: res.CredentialID, PublicKey: res.PublicKey,
-		Algorithm: int64(res.Algorithm), SignCount: res.SignCount, UserHandle: []byte(in.UserID),
+		Algorithm: int64(res.Algorithm), SignCount: res.SignCount,
 		Name:        domain.AccessKeyName(corevalidate.NameOrDefault(in.Name, string(keyID))),
 		Description: domain.AccessKeyDescription(in.Description), CreatedAt: now,
 	}
@@ -168,18 +168,35 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 	actor := string(in.Actor)
 	challenge := ch.Challenge
 	operations.Run(ctx, uc.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return uc.commit(ctx, key, user.AccountID, challenge, actor, now)
+		return uc.commit(ctx, key, user, challenge, actor, now)
 	})
 	return &op, nil
 }
 
-// commit — ОДНА транзакция: потребление испытания, строка, событие.
-func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.AccessKey, account domain.AccountID, challenge []byte, actor string, now time.Time) (*anypb.Any, error) {
+// commit — ОДНА транзакция: рукоятка человека, потребление испытания, строка,
+// событие.
+func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.AccessKey, user domain.User, challenge []byte, actor string, now time.Time) (*anypb.Any, error) {
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.writer", err)
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	// Рукоятка строки — та, что ушла в `user.id` испытания: её завела выдача
+	// испытания, без которого сюда не доходят, и тот же оператор возвращает её
+	// значение. Чеканка здесь — не ветвь «на всякий случай», а вход того же
+	// одного оператора, поэтому недостижимой ветви в коде нет.
+	minted, err := domain.NewCeremonyHandle()
+	if err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.mint", err)
+	}
+	handle, err := w.EnsureCeremonyHandle(ctx, key.UserID, minted)
+	if err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.handle", err)
+	}
+	if err := checkCeremonyHandle(uc.deps, handle, user); err != nil {
+		return nil, err
+	}
+	key.UserHandle = handle.Bytes()
 	consumed, err := w.ConsumeChallenge(ctx, challenge, key.UserID, domain.ChallengeForRegistration, now)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.consume", err)
@@ -194,7 +211,7 @@ func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.Acce
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.insert", err)
 	}
-	if err := emitKeyAudit(ctx, w, AuditAccessKeyRegistered, persisted, account, actor); err != nil {
+	if err := emitKeyAudit(ctx, w, AuditAccessKeyRegistered, persisted, user.AccountID, actor); err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.audit", err)
 	}
 	if err := w.Commit(ctx); err != nil {

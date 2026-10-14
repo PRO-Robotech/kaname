@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // both_lanes_agree_test.go — свойство, обязательное для одной полосы выдачи,
-// утверждается СРАВНЕНИЕМ полос (задача #1184).
+// утверждается СРАВНЕНИЕМ полос (задача kacho#1184).
 //
 // # Почему сравнением, а не пробой каждой полосы отдельно
 //
@@ -20,7 +20,7 @@
 // «Полос выдачи N · сверяют адресата M». Одно число скрыло бы ровно тот случай,
 // ради которого проба заведена, — полосу, которую забыли завести в перечень.
 //
-// # Осей сравнения ДВЕ, и они охватывают разное (задача #1143)
+// # Осей сравнения ДВЕ, и они охватывают разное (задача kacho#1143)
 //
 // ВНЕШНЯЯ граница посадки есть у КАЖДОЙ полосы выдачи: она объявлена посадкой,
 // а не удостоверением. Её сличают все.
@@ -28,7 +28,7 @@
 // ВНУТРЕННЯЯ граница — сужение, объявленное при выдаче САМОГО удостоверения, —
 // есть только там, где удостоверение её несёт. Докерная полоса реестра несла
 // её, пока принимала ключ служебной учётки; приём ключевого материала снят
-// (#1143), и у базового токена доступа поля адресатов нет — оно отвергается на
+// (kacho#1143), и у базового токена доступа поля адресатов нет — оно отвергается на
 // выдаче. Полоса осталась в переписи, ось сузилась.
 //
 // Разница полос по этой оси — РЕШЕНИЕ, а не побочный эффект, и перепись
@@ -55,6 +55,7 @@ import (
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -88,7 +89,7 @@ func lanesUnderTest() []lane {
 	return []lane{
 		{name: "токен-эндпоинт платформы", issue: issueViaClientToken, carriesDeclaredNarrowing: true},
 		// Сужение удостоверения ушло вместе с приёмом ключевого материала
-		// (#1143): базовый токен доступа поля адресатов не несёт.
+		// (kacho#1143): базовый токен доступа поля адресатов не несёт.
 		{name: "докерная полоса реестра", issue: issueViaRegistryToken, carriesDeclaredNarrowing: false},
 	}
 }
@@ -174,7 +175,7 @@ func issueViaClientToken(t *testing.T, declared []string, requested string) erro
 		AllowedAudiences: []string{audRegistry},
 		DefaultAudience:  audRegistry,
 		TokenTTL:         15 * time.Minute,
-		Clock:            func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		Clock:            momentclock.Func(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }),
 	}, newSigner(t), stubClaims{}, noCutoffs{})
 	require.NoError(t, err)
 
@@ -224,7 +225,7 @@ func newSigner(t *testing.T) *tokensigner.Signer {
 	require.NoError(t, err)
 	s, err := tokensigner.New(tokensigner.Config{
 		Issuer:      "https://kaname.kacho.local",
-		Clock:       func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		Clock:       momentclock.Func(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, stubKeys{mat: tokensigner.SigningMaterial{
 		KID:           "kacho-test",
@@ -245,7 +246,7 @@ func (s stubKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial
 // ── полоса 2: докерная полоса реестра ───────────────────────────────────────
 
 // issueViaRegistryToken — докерная полоса. `declared` она не принимает и
-// принять не может: у базового токена доступа поля адресатов нет (#1143),
+// принять не может: у базового токена доступа поля адресатов нет (kacho#1143),
 // поэтому вызывающий и не подаёт ей входы оси сужения.
 func issueViaRegistryToken(t *testing.T, declared []string, requested string) error {
 	t.Helper()

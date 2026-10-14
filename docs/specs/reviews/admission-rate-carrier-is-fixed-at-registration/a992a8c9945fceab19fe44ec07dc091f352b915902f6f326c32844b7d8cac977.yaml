@@ -1,0 +1,94 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
+  sha256: a992a8c9945fceab19fe44ec07dc091f352b915902f6f326c32844b7d8cac977
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 36fce61d
+  content_commit: ab4edde6fcb445c70f972922ed6059e63d101f22
+  branch: '197'
+  task: PRO-Robotech/kaname#197
+  related_tasks: [PRO-Robotech/kacho#1266]
+  lines: 432
+  round: 2
+  predecessor_record: docs/specs/reviews/admission-rate-carrier-is-fixed-at-registration/9629b41491f91695effdfb098b0124be20dfbcd42cfa2054b0ed01357183191f.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
+    в копии kacho-workspace/tmp/kaname-197-198-acc @ ab4edde6f → a992a8c9…d8cac977 (совпал с заданием)
+  measurement_revisions: >-
+    Все замеры по дереву — в копии kaname-197-198-acc @ ab4edde6f; посев — одноразовая
+    база postgres:16-alpine (тот же образ, что у corelib pgtest v1.10.0) через слот.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: "Блокирующих 1; одобрения нет."
+
+previous_round_blockers:
+  - kind: NEGATIVE
+    outcome: closed
+    by: "Р2 п.1 (CHECK users_own_lane_admission_carrier_check, 23514) + сценарий A197-08 с тремя близнецами; порядок при активации — Р1 и A197-04."
+  - kind: FORMAT
+    outcome: closed
+    by: "A197-05 называет KQ006, сообщение сервера и INTERNAL `admission rate accounting`; близнец в один факт (то же значение)."
+
+blocking:
+  - kind: COVERAGE
+    scenario: Р2 п.2, вторая ветвь
+    finding: >-
+      Р2 п.2 объявляет второй отказ KQ006 — «вставка либо чеканка с присланным носителем,
+      отличным от адреса строки в нижнем регистре, отвергаются», — но ни один сценарий его не
+      утверждает: A197-05 судит только правку непустого носителя, A197-08 — только CHECK при
+      отключённых триггерах. Реализация, в которой триггер молча перезаписывает присланное
+      значение либо принимает его, оставляет все восемь сценариев зелёными — обещание
+      без держателя, на финале не всплывёт вовсе.
+    required: >-
+      Либо сценарий (триггеры включены): вставка строки нашей полосы с адресом
+      `own-k@example.invalid` и присланным носителем `own-z@example.invalid` → KQ006, строки
+      нет; близнец в один факт — присланный носитель равен адресу → проходит; та же пара для
+      чеканки (правка PENDING→own: с присланным чужим носителем). Либо снять ветвь из Р2 п.2
+      и назвать исход (перезапись базой) сценарием.
+
+important_nonblocking:
+  - "A197-04: «Дано» строится сценой EV-72 (`internal/handler/loginlanehttp/address_verification_invite_integration_test.go`, `newAVLane`/`registerInvitee`/`confirm`), а не фикстурами, названными в §3 — назвать её. Счёт «принято 1» конструируем: `ActivateInviteOnVerificationTx` (mirror_tx.go) вставляет личный аккаунт ПОСЛЕ `ActivateInvite` той же транзакцией."
+  - "A197-08: `session_replication_role = replica` снимает и FK-триггеры, не только триггеры строки — «аккаунт свободен» в «Дано» верен, но несущим не является; оговорить, что положительный близнец при отключённых триггерах проходит в том числе без проверки FK."
+  - "Путь активации поставщиком (`internal_upsert.go:330` → `ActivateInviteTx` с идентичностью поставщика) носителя не получает — согласно Р4; назвать в §5 одной строкой."
+
+confirmed:
+  - "Производитель у «Тогда»: 8 из 8 (§4); заказанные — kaname#197."
+  - "Близнец у отрицаний: 01, 04, 05 (два), 06, 08 (три) — свои; 03, 07 — существующие пробы."
+  - "Конструируемость A197-08 и A197-05 посеяна: под суперпользователем (rolsuper=t у POSTGRES_USER образа) replica + пустой носитель → 23514 по имени ограничения; replica + носитель → INSERT 1; поставщик с носителем → 23514; origin + пустой → база назначила lower(email); PENDING→own: правкой → носитель назначен; смена адреса проходит, носитель прежний; правка на другой и на '' → KQ006 с сообщением; то же значение → UPDATE 1."
+  - "Пользователь pgtest = POSTGRES_USER (corelib v1.10.0 pgtest.go:188,236) — суперпользователь; посылка «testcontainers-база под суперпользователем» подтверждена."
+  - "users_email_check требует длину ≥3: перенос Р3 пустого носителя у нашей полосы не даст — CHECK встанет после заполнения."
+  - "Писатель external_id в существующую строку один — ActivateInvite (PENDING→ACTIVE); пути смены полосы нет, KQ006 ни один нынешний оператор не ломает."
+  - "KQ004/KQ005/KQ003 ветви pgmaperr.go — как в §4; users в checkValueLanes — одна запись (строка 474)."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#197
+  status: pending
+  published: false
+  body: "role: acceptance-reviewer · verdict: CHANGES_REQUESTED · subject: docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md · subject_revision: ab4edde6fcb445c70f972922ed6059e63d101f22 · subject_sha256: a992a8c9945fceab19fe44ec07dc091f352b915902f6f326c32844b7d8cac977"
+  publication_mode: courier_of_agent_verdict
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

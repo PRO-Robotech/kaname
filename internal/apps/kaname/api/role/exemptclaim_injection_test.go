@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // exemptclaim_injection_test.go — доказательство того, что сверка полосы
-// СПОСОБНА упасть и способна смолчать (задача продукта #2047).
+// СПОСОБНА упасть и способна смолчать (задача продукта kacho#2047).
 //
 // Вход синтетический: настоящее дерево не трогается, поэтому доказательство не
 // истекает вместе с починкой комментариев (`testing.md` §«Гейт на класс», п. 5).
@@ -57,7 +57,7 @@ func TestExemptClaim_CanFailAndStaysSilent(t *testing.T) {
 		wantClaims   int
 	}{
 		{
-			name:         "контракт не освобождал, комментарий называет полосу — предмет #2047",
+			name:         "контракт не освобождал, комментарий называет полосу — предмет kacho#2047",
 			contract:     contractNoExempt,
 			sources:      map[string]string{"get.go": srcClaims},
 			wantFindings: 1, wantNamed: "get.go:1", wantExempts: 0, wantClaims: 1,

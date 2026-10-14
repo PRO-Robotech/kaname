@@ -81,6 +81,7 @@ func (w *gateWorld) person(t *testing.T, id string, verified bool) {
 		_, err = tx.Exec(w.ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, id)
 		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): отметка")
 	}
+	seedWayIn(t, w.ctx, tx)
 	require.NoError(t, tx.Commit(w.ctx), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): фиксация")
 }
 
@@ -101,7 +102,7 @@ func requireRefusalR3(t *testing.T, err error, what string) {
 	st, ok := status.FromError(err)
 	require.Truef(t, ok, "%s: отказ — статус gRPC: %v", what, err)
 	require.Equalf(t, codes.PermissionDenied, st.Code(), "%s: код", what)
-	require.Equalf(t, "email address is not verified", st.Message(), "%s: текст", what)
+	require.Equalf(t, "email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)", st.Message(), "%s: текст", what)
 	var infos []*errdetails.ErrorInfo
 	for _, d := range st.Details() {
 		if i, ok := d.(*errdetails.ErrorInfo); ok {

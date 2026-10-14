@@ -15,7 +15,7 @@
 // id generation uses newAuditEventID() — `evt_<22-char crockford-base32>`,
 // which satisfies audit_outbox_id_check (`^evt_…{20,30}$`). domain.NewKac127ID
 // produces only a 17-char body, which is BELOW the CHECK's 20-char floor and was
-// the latent bug #126 (hook-emit silently rejected at INSERT). This adapter is
+// the latent bug kacho-iam#126 (hook-emit silently rejected at INSERT). This adapter is
 // the single shared emit path for all cluster-admin / session audit events.
 package pg
 
@@ -52,7 +52,7 @@ func (e *AuditOutboxEmitter) EmitTx(ctx context.Context, tx service.Tx, ev servi
 
 // insertAuditEventTx — the single shared audit_outbox emit path: marshal the
 // service.AuditEvent payload, build a domain.AuditOutboxEntry with a 22-char
-// `evt_…` id (bug #126 regression-guard — NOT the 17-char NewKac127ID which
+// `evt_…` id (bug kacho-iam#126 regression-guard — NOT the 17-char NewKac127ID which
 // fails audit_outbox_id_check) and status='pending', then INSERT it on the
 // caller-owned pgx.Tx. Used by BOTH the service.AuditOutboxEmitter adapter
 // (cluster/session/SAKey emit-in-tx) and writeTx.EmitAuditEvent (CRUD writer-tx)

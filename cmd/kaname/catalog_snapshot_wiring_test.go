@@ -9,7 +9,7 @@ package main
 // # Предмет
 //
 // `catalog.Snapshot` — то, чем путь запроса отвечает на «жив ли модуль» после
-// #1927. Он наполняется однажды строками, которые на старте прочитал страж
+// kacho#1927. Он наполняется однажды строками, которые на старте прочитал страж
 // паритета, и живым его делает ТОЛЬКО периодическая петля `Run`. Не запущенная
 // петля превращает снимок в кеш без гашения: снятие модуля перестаёт доезжать до
 // пути запроса до перезапуска службы, и состояние не сходится само.
@@ -187,7 +187,7 @@ func localNameOfCatalogImport(file *ast.File) string {
 	return ""
 }
 
-// TestIAM1945_CatalogSnapshotBuiltByTheRootIsAlsoStartedByIt — гейт задачи #1945.
+// TestIAM1945_CatalogSnapshotBuiltByTheRootIsAlsoStartedByIt — гейт задачи kacho#1945.
 func TestIAM1945_CatalogSnapshotBuiltByTheRootIsAlsoStartedByIt(t *testing.T) {
 	root := iamServiceRoot(t)
 

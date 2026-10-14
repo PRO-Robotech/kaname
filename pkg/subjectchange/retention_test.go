@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: Apache-2.0
 
-// retention_test.go — УДЕРЖАНИЕ ЖУРНАЛА СВЯЗЫВАЕТ ЧИТАТЕЛЯ (задача #1758).
+// retention_test.go — УДЕРЖАНИЕ ЖУРНАЛА СВЯЗЫВАЕТ ЧИТАТЕЛЯ (задача kacho#1758).
 //
 // # Что здесь утверждается
 //

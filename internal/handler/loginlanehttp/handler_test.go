@@ -90,6 +90,19 @@ type stubLane struct {
 	regenIn    []humansession.RegenerateBackupCodesInput
 	stepUpIn   []humansession.StepUpInput
 
+	// Вход ключом доступа (Ф13).
+	akBeginOut humansession.BeginAccessKeyLoginOutput
+	akBeginErr error
+	akLoginOut humansession.LoginOutput
+	akLoginErr error
+	akBeginIn  []humansession.BeginAccessKeyLoginInput
+	akLoginIn  []humansession.AccessKeyLoginInput
+
+	// Заведение первого пароля (kaname#213).
+	enrollPwOut humansession.EnrollPasswordOutput
+	enrollPwErr error
+	enrollPwIn  []humansession.EnrollPasswordInput
+
 	// Подтверждение адреса (kaname#456).
 	verifyOut        humansession.RequestVerificationOutput
 	verifyErr        error
@@ -99,11 +112,68 @@ type stubLane struct {
 	verifyConfirmIn  []humansession.ConfirmVerificationInput
 	position         humansession.Position
 	positionErr      error
+
+	// Смена адреса почты (kaname#635).
+	changeReqOut     humansession.RequestEmailChangeOutput
+	changeReqErr     error
+	changeReqIn      []humansession.RequestEmailChangeInput
+	changeConfirmOut humansession.ConfirmEmailChangeOutput
+	changeConfirmErr error
+	changeConfirmIn  []humansession.ConfirmEmailChangeInput
+	// Свои сессии (kaname#634).
+	ownListOut      humansession.ListOwnSessionsOutput
+	ownListErr      error
+	ownListIn       []humansession.ListOwnSessionsInput
+	ownEndErr       error
+	ownEndIn        []humansession.EndOwnSessionInput
+	ownEndOthersOut humansession.EndOtherOwnSessionsOutput
+	ownEndOthersErr error
+	ownEndOthersIn  []humansession.EndOtherOwnSessionsInput
+}
+
+func (s *stubLane) RequestEmailChange(_ context.Context, in humansession.RequestEmailChangeInput) (humansession.RequestEmailChangeOutput, error) {
+	s.changeReqIn = append(s.changeReqIn, in)
+	return s.changeReqOut, s.changeReqErr
+}
+
+func (s *stubLane) ConfirmEmailChange(_ context.Context, in humansession.ConfirmEmailChangeInput) (humansession.ConfirmEmailChangeOutput, error) {
+	s.changeConfirmIn = append(s.changeConfirmIn, in)
+	return s.changeConfirmOut, s.changeConfirmErr
+}
+
+func (s *stubLane) ListOwnSessions(_ context.Context, in humansession.ListOwnSessionsInput) (humansession.ListOwnSessionsOutput, error) {
+	s.ownListIn = append(s.ownListIn, in)
+	return s.ownListOut, s.ownListErr
+}
+
+func (s *stubLane) EndOwnSession(_ context.Context, in humansession.EndOwnSessionInput) (humansession.EndOwnSessionOutput, error) {
+	s.ownEndIn = append(s.ownEndIn, in)
+	return humansession.EndOwnSessionOutput{}, s.ownEndErr
+}
+
+func (s *stubLane) EndOtherOwnSessions(_ context.Context, in humansession.EndOtherOwnSessionsInput) (humansession.EndOtherOwnSessionsOutput, error) {
+	s.ownEndOthersIn = append(s.ownEndOthersIn, in)
+	return s.ownEndOthersOut, s.ownEndOthersErr
 }
 
 // Подтверждение адреса (kaname#456): дублёр отвечает объявленным исходом;
 // положение по умолчанию — «сессии нет», и отказ положения на пути, объявленном
 // отказом, не срабатывает: предмет соседних проб — глаголы, а не положение.
+func (s *stubLane) EnrollPassword(_ context.Context, in humansession.EnrollPasswordInput) (humansession.EnrollPasswordOutput, error) {
+	s.enrollPwIn = append(s.enrollPwIn, in)
+	return s.enrollPwOut, s.enrollPwErr
+}
+
+func (s *stubLane) BeginAccessKeyLogin(_ context.Context, in humansession.BeginAccessKeyLoginInput) (humansession.BeginAccessKeyLoginOutput, error) {
+	s.akBeginIn = append(s.akBeginIn, in)
+	return s.akBeginOut, s.akBeginErr
+}
+
+func (s *stubLane) AccessKeyLogin(_ context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
+	s.akLoginIn = append(s.akLoginIn, in)
+	return s.akLoginOut, s.akLoginErr
+}
+
 func (s *stubLane) RequestEmailVerification(_ context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {
 	s.verifyIn = append(s.verifyIn, b)
 	return s.verifyOut, s.verifyErr

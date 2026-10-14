@@ -73,7 +73,7 @@ type abReader struct {
 // деревом в ОБЕ стороны: называл `DeleteGuarded`, который эту проекцию не
 // возвращает, и молчал о `RevokeGuarded` и `UpdateLabels`, которые возвращают.
 // Рукописный перечень рядом с тем, что и так держится построением, гарантии не
-// добавляет — он добавляет второе место, стареющее молча (#1951).
+// добавляет — он добавляет второе место, стареющее молча (kacho#1951).
 //
 // `role_id` читается через COALESCE: у ФОРМЫ ОТНОШЕНИЯ (системная выдача) роли
 // нет, и колонка допускает NULL. Пустая строка здесь — не подмена значения, а его
@@ -151,12 +151,12 @@ func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindin
 // привязана к самому аккаунту, либо к любому его проекту. Один placeholder,
 // названный дважды: аккаунт и его проекты сверяются с одним и тем же значением.
 //
-// ОДНО написание на двух вызывающих — `List` (поле AccountID, #1737) и
+// ОДНО написание на двух вызывающих — `List` (поле AccountID, kacho#1737) и
 // `ListByAccount`. Прежде их было два, и приёмка требует от них ОДИНАКОВОГО
 // охвата; держать это требование на двух написаниях значило бы завести два
 // ответа на вопрос «чья это привязка», которые разойдутся молча.
 //
-// Третье написание в этом файле — `membershipHoldingBindingsPredicate` (#1686) —
+// Третье написание в этом файле — `membershipHoldingBindingsPredicate` (kacho#1686) —
 // сюда НЕ сводится: копия там объявлена копией НАМЕРЕННО, чтобы правка одной
 // стороны заставляла открыть вторую, и у неё свой предмет (отказ исключения).
 //
@@ -213,7 +213,7 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 	if f.ScopeID != "" {
 		addEq("resource_id", f.ScopeID)
 	}
-	// Сужение до области ОДНОГО аккаунта (#1737): сам аккаунт плюс каждый его
+	// Сужение до области ОДНОГО аккаунта (kacho#1737): сам аккаунт плюс каждый его
 	// проект. Тот же предикат, что у ListByAccount, — одно написание на оба
 	// глагола, поэтому «одинаковый охват» есть свойство кода, а не совпадение.
 	//
@@ -249,7 +249,7 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 		argIdx += 2
 	}
 
-	// Сужение набора КАНДИДАТОВ (задача #645). Оно стоит здесь, в отборе строк, а
+	// Сужение набора КАНДИДАТОВ (задача kacho#645). Оно стоит здесь, в отборе строк, а
 	// не после него: постфильтр по видимости теряет всякую привязку, перед которой
 	// лежит больше `page_size` невидимых предшественников — она до фильтра просто
 	// не доезжает.
@@ -352,7 +352,7 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 	args := []any{string(accountID)}
 	argIdx := 2
 
-	// Тот же предикат, что у `List` с полем AccountID (#1737) — одно написание,
+	// Тот же предикат, что у `List` с полем AccountID (kacho#1737) — одно написание,
 	// поэтому охват обоих глаголов совпадает by construction.
 	conditions := []string{accountScopePredicate(1)}
 
@@ -475,6 +475,13 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	// COALESCE(r.name, '') so a LEFT JOIN miss (dangling role) scans as "" — the
 	// Go scan target is a plain string, never NULL.
 	//
+	// COALESCE(ab.role_id, '') — по той же причине, что в abCols: у ФОРМЫ
+	// ОТНОШЕНИЯ (системная выдача, access_bindings_grant_form_ck) роли нет и
+	// колонка NULL. Голый ab.role_id ронял перечень ЦЕЛИКОМ на первой такой
+	// строке («cannot scan NULL into *string»), а наружу это уходило внутренней
+	// ошибкой. Пустая строка — отсутствие роли в том виде, в каком его выражает
+	// весь домен; для такой строки LEFT JOIN не находит роли, и role_name тоже "".
+	//
 	// The last two columns attribute the row: `is_direct` is true when the binding
 	// names the subject itself; otherwise it was reached through the group named by
 	// `via_group_id`. A binding that is BOTH direct and group-carried resolves to
@@ -482,7 +489,7 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	// predicate is a disjunction on the same row, never a join, so cardinality stays
 	// one-row-per-binding and the (created_at, id) keyset cursor stays valid.
 	q := fmt.Sprintf(`
-		SELECT ab.id, ab.role_id, COALESCE(r.name, ''),
+		SELECT ab.id, COALESCE(ab.role_id, ''), COALESCE(r.name, ''),
 		       ab.resource_type, ab.resource_id, ab.scope, ab.status,
 		       ab.created_at, ab.granted_by_user_id, ab.expires_at,
 		       (ab.subject_type = $1 AND ab.subject_id = $2) AS is_direct,
@@ -523,7 +530,8 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 }
 
 // scanSubjectPrivilege — maps a ListSubjectPrivileges row into the enriched
-// domain projection. role_name is already COALESCE'd to ” (dangling role).
+// domain projection. role_id and role_name are already COALESCE'd to "" (the
+// relation form has no role; the LEFT JOIN then finds none).
 // scope is bounds-checked the same way as scanAB. The trailing
 // is_direct/via_group_id columns carry the derivation attribution (DIRECT vs
 // GROUP-derived — see the query comment).
@@ -729,7 +737,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		// Разбирает её splitBindingHint, и каждый потребитель берёт своё: текст UNIQUE —
 		// субъекта и область, ветвь FK по роли — роль. Роль добавлена, потому что без неё
 		// FK-ветвь печатала всю подсказку в слот роли и называла вызывающему сущности,
-		// о которых он не спрашивал (issue #105).
+		// о которых он не спрашивал (issue kacho#105).
 		idHint := fmt.Sprintf("%s|%s:%s|%s", b.SubjectID, b.ResourceType, b.ResourceID, b.RoleID)
 		return domain.AccessBinding{}, mapErr(err, "", idHint)
 	}
@@ -1003,7 +1011,7 @@ func scanAB(row scanner) (domain.AccessBinding, error) {
 // со своим списком уже нет — сверять стало не с чем, и утверждение о совпадении
 // пережило свой предмет. Расходиться внутри пакета этому списку теперь нечем;
 // остаточную ось «abCols против списка» держит проба арности
-// TestProjectionScanArityMatchesItsColumns (#1951).
+// TestProjectionScanArityMatchesItsColumns (kacho#1951).
 func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding, error) {
 	var (
 		ab           domain.AccessBinding
@@ -1211,14 +1219,22 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 		}
 		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
 	}
+	var err error
 	switch eventType {
 	case fga_outbox.EventTypeWrite:
-		return fga_outbox.EmitWriteTx(ctx, w.tx, out)
+		err = fga_outbox.EmitWriteTx(ctx, w.tx, out)
 	case fga_outbox.EventTypeDelete:
-		return fga_outbox.EmitDeleteTx(ctx, w.tx, out)
+		err = fga_outbox.EmitDeleteTx(ctx, w.tx, out)
 	default:
 		return fmt.Errorf("emit fga_outbox: unknown event type %q", eventType)
 	}
+	// Отказ базы на записи журнала переводится ТЕМ ЖЕ переводчиком, что у каждого
+	// другого стейтмента этой транзакции. Запись журнала — стейтмент, на котором
+	// триггер берёт строки прямого факта, то есть именно тот, где транзакция
+	// встречает взаимную блокировку; без перевода 40P01 уезжал наружу как
+	// `internal error`, а не как признак конфликта, по которому снятие выдачи
+	// повторяет свою транзакцию (kaname#679).
+	return mapErr(err, "", "")
 }
 
 // EmitAuditEvent atomically appends one durable compliance row into
@@ -1455,7 +1471,7 @@ const membershipHoldingBindingsPredicate = `
 	        OR (resource_type = 'project'
 	            AND resource_id IN (SELECT id FROM projects WHERE account_id = $2)) )`
 
-// ListActiveHoldingMembership — выдачи, держащие членство (задача #1686).
+// ListActiveHoldingMembership — выдачи, держащие членство (задача kacho#1686).
 //
 // Один запрос отдаёт и ограниченный перечень, и ПОЛНУЮ величину: два запроса
 // читали бы два разных снимка, и «названо 5 из 3» стало бы наблюдаемым исходом.

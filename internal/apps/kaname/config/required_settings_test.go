@@ -159,6 +159,30 @@ func restoreEnv(saved map[string]string) {
 	}
 }
 
+// installDomainForProfile — ДОМЕН УСТАНОВКИ, которым сборка профиля заменяет
+// образец строки `authn.domain`. Образец нарочно лежит в зоне `.invalid`, и
+// страж старта его отвергает (kaname#762) — так же, как отверг бы у оператора,
+// взявшего образец как есть. Предмет сборки — полнота таблицы и пути подачи, а
+// не этот отказ; сам отказ и то, что образец остаётся заглушкой, судит
+// `authn_domain_placeholder_test.go`.
+const installDomainForProfile = "access.example.test"
+
+// suppliedValue — величина строки, которую подаёт сборка профиля.
+func suppliedValue(s config.RequiredSetting) string {
+	if s.Key == "authn.domain" {
+		return installDomainForProfile
+	}
+	return s.Sample
+}
+
+// suppliedFileValue — та же величина в форме файла настроек.
+func suppliedFileValue(s config.RequiredSetting) any {
+	if s.Key == "authn.domain" {
+		s.Sample = installDomainForProfile
+	}
+	return s.FileValue()
+}
+
 // supplyProfile собирает профиль из строк таблицы минус одна снятая (пустое `omit` — полный профиль), подавая каждую ОБЪЯВЛЕННЫМ ей
 // путём. Возвращает загруженную конфигурацию либо ошибку сборки.
 //
@@ -185,11 +209,11 @@ func supplyProfile(dir string, table []config.RequiredSetting, lane profileUnder
 		supplied++
 		switch s.Supply {
 		case config.SupplyEnv:
-			if err := os.Setenv(s.Env, s.Sample); err != nil {
+			if err := os.Setenv(s.Env, suppliedValue(s)); err != nil {
 				return config.Config{}, err
 			}
 		case config.SupplyFile:
-			putPath(fileTree, s.Key, s.FileValue())
+			putPath(fileTree, s.Key, suppliedFileValue(s))
 		default:
 			return config.Config{}, fmt.Errorf("строка %s объявила неизвестный путь подачи %v", s.Key, s.Supply)
 		}

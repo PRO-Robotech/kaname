@@ -143,6 +143,7 @@ func (w *ciWorld) seedAccountWithOwner(t *testing.T, accountID, ownerUserID stri
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
 	                       VALUES ($1, $1, $1 || '@example.test', $2, now())`, ownerUserID, accountID)
 	require.NoErrorf(t, err, "посев владельца %s", ownerUserID)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 }
 
@@ -151,16 +152,16 @@ func (w *ciWorld) seedAccountWithOwner(t *testing.T, accountID, ownerUserID stri
 // действует, обязан это условие создать).
 func (w *ciWorld) seedUser(t *testing.T, id, accountID string) {
 	t.Helper()
-	w.exec(t, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
-	           VALUES ($1, $1, $1 || '@example.test', $2, now())`, id, accountID)
+	w.exec(t, withWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+	           VALUES ($1, $1, $1 || '@example.test', $2, now())`), id, accountID)
 }
 
 // seedUnverifiedUser — человек с неподтверждённым адресом: предмет проб полосы
 // Д приёмки kaname#456.
 func (w *ciWorld) seedUnverifiedUser(t *testing.T, id, accountID string) {
 	t.Helper()
-	w.exec(t, `INSERT INTO kaname.users (id, external_id, email, account_id)
-	           VALUES ($1, $1, $1 || '@example.test', $2)`, id, accountID)
+	w.exec(t, withWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id)
+	           VALUES ($1, $1, $1 || '@example.test', $2)`), id, accountID)
 }
 
 // seedRole — аккаунт-областная роль. `name` обязано удовлетворять

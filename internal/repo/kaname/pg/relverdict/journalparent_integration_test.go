@@ -7,7 +7,7 @@ package relverdict_test
 // ДВИЖОК.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// ПРЕДМЕТ (#781)
+// ПРЕДМЕТ (kacho#781)
 //
 // Цепь областей выводила звено «проект → аккаунт» из ТАБЛИЦЫ СОСТОЯНИЯ
 // (`kaname.projects`), тогда как тот же указатель уже лежит в ПРОЕКЦИИ
@@ -92,7 +92,7 @@ func countScalar(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, args 
 	return n
 }
 
-// TestScopeChainTakesTheParentFromTheJournalNotTheStateTable — #781.
+// TestScopeChainTakesTheParentFromTheJournalNotTheStateTable — kacho#781.
 //
 // # Что здесь утверждается
 //
@@ -196,7 +196,7 @@ func TestScopeChainTakesTheParentFromTheJournalNotTheStateTable(t *testing.T) {
 			t.Errorf("выдача на АККАУНТ не достала до объекта под «журнальным» проектом: %s. "+
 				"Предок проекта берётся из таблицы состояния, которой этот проект неизвестен, "+
 				"тогда как движок читает свёртку журнала и доступ РАЗРЕШАЕТ — форма расходится "+
-				"с действующим решателем, и отказ неотличим от честного (#781)", got)
+				"с действующим решателем, и отказ неотличим от честного (kacho#781)", got)
 		}
 
 		// ── (3) КОНТРОЛЬ ПАРЫ: без выдачи отказывают обе стороны ──────────────

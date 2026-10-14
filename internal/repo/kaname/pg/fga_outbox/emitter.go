@@ -16,7 +16,7 @@
 //	`kaname.fga_outbox` в ТОЙ ЖЕ pgx.Tx, что и доменное изменение. Откат
 //	транзакции вызывающего ⇒ ни одной осиротевшей строки.
 //
-//	ЧТО ИЗМЕНИЛОСЬ СО СНЯТИЕМ ДВИЖКА (стадия S6, эпик #747). Потребителя у
+//	ЧТО ИЗМЕНИЛОСЬ СО СНЯТИЕМ ДВИЖКА (стадия S6, эпик kacho#747). Потребителя у
 //	журнала было двое: дренаж, применявший строки к внешнему хранилищу, и
 //	триггер, складывающий из них ПРЯМОЙ ФАКТ (`relation_fact`, миграция 0098).
 //	Первого больше нет — применять некуда; второй остался и стал единственным.
@@ -52,7 +52,7 @@
 //
 // Ключа упорядочивания у строки БОЛЬШЕ НЕТ. Колонку `tuple_key` заполнял триггер
 // `BEFORE INSERT`, а читал её клейм дренажа — «только голова партиции». Дренажа
-// не стало вместе с внешним движком прав (стадия S6 эпика #747), и писатель
+// не стало вместе с внешним движком прав (стадия S6 эпика kacho#747), и писатель
 // пережил своего читателя: после снятия колонки он отвергал КАЖДУЮ вставку
 // (`record "new" has no field "tuple_key"`, 42703), то есть каждую выдачу и
 // каждый отзыв доступа. Триггер, его функция и сторож наличия ключа сняты
@@ -253,10 +253,10 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 		}
 		payloads = append(payloads, string(payload))
 	}
-	// ОДИН стейтмент на все строки вместо одного на строку. `unnest` в FROM выдаёт
-	// элементы в порядке массива, поэтому возрастающие id назначаются в том порядке,
-	// какой задал groupByGrant, — а ему порядок задан ОБЩИЙ для всех писателей (см.
-	// там). Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
+	// ОДИН стейтмент на все строки вместо одного на строку: свёртка журнала в
+	// прямой факт — операторная (kaname#568), и порядок захвата строк факта
+	// внутри оператора задаёт она сама — по (объект, субъект), строки одного ключа
+	// по id. Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
 	// коммутативны, и id второго вызова всегда больше id первого.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
@@ -280,14 +280,21 @@ type grantGroup struct {
 // one group, and returns the groups in ONE canonical order — by object, then user,
 // with the relations inside a group sorted too.
 //
-// WHY THE ORDER IS CANONICAL AND NOT THE CALLER'S. The journal trigger
-// (`kaname.relation_fact_from_journal`) locks one fact row per tuple in the order the
-// rows lie in the set. Two transactions folding overlapping tuples of one subject in
+// WHO HOLDS THE LOCK ORDER — AND HOW FAR IT REACHES. The journal trigger locks one
+// fact row per tuple. Two transactions folding overlapping tuples of one subject in
 // different orders take the same locks crosswise, and the database breaks the cycle
 // by failing one of them with 40P01. Observed on a stand: a binding delete that ran
 // while a sibling binding of the same subject was being materialized ended ABORTED,
-// and the binding the caller removed stayed alive. One order shared by every writer
-// turns the cycle into a queue.
+// and the binding the caller removed stayed alive.
+//
+// The order is held by the DATABASE, not by this function: the fold is a statement
+// trigger (`kaname.relation_fact_from_journal`, migration 20261005040457) that walks
+// the rows of one statement by (object, user) byte-wise, same-key rows by id, and
+// the relations of a set byte-wise — whoever wrote them: this emitter, the boot
+// backfill's `INSERT … SELECT`, the module seed, raw migration SQL. Its reach is ONE
+// STATEMENT: across the statements of one transaction the order is the writer's.
+// The sort here is kept because it makes the journal itself canonical (one row per
+// set, relations in one order) — not because the locks depend on it.
 //
 // Reordering is safe because nothing inside one call depends on the caller's order:
 // the rows of one set are always different (user, object) keys, and rows of different

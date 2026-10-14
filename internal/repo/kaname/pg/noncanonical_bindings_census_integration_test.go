@@ -182,6 +182,7 @@ func TestIntegration_NonCanonicalBindingCensus(t *testing.T) {
 		})
 		require.NoError(t, err,
 			"свободная почта обязана завести строку — иначе отказ выше про ключ не говорит ничего")
+		seedWayIn(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

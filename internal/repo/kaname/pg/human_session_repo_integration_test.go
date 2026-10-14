@@ -727,7 +727,9 @@ func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) 
 
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	require.NoError(t, w.PresentInSession(ctx, "hss-12p", []string{"password", "totp"}, "2", fresh.Digest(), presented))
+	rec, err := w.PresentInSession(ctx, "hss-12p", []string{"password", "totp"}, "2", fresh.Digest(), presented)
+	require.NoError(t, err)
+	require.Equal(t, "2", rec.Level, "ответ оператора — то, что легло")
 	require.NoError(t, w.Commit(ctx))
 
 	_, rOld := hsResolve(t, repo, old, presented.Add(time.Minute))
@@ -756,7 +758,7 @@ func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) 
 		require.NoError(t, err)
 		next, err := domain.NewSessionBearer()
 		require.NoError(t, err)
-		err = w.PresentInSession(ctx, "hss-12p", bad.methods, bad.level, next.Digest(), presented.Add(time.Minute))
+		_, err = w.PresentInSession(ctx, "hss-12p", bad.methods, bad.level, next.Digest(), presented.Add(time.Minute))
 		require.ErrorIs(t, err, iamerr.ErrInternal, "%s: CHECK строки значения службы → INTERNAL", bad.name)
 		require.Equal(t, iamerr.ErrInternal.Error(), err.Error(), "%s: текст отказа фиксированный", bad.name)
 		require.NotContains(t, err.Error(), "SQLSTATE", "%s: текст драйвера наружу не течёт", bad.name)
@@ -766,7 +768,8 @@ func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) 
 	require.NoError(t, err)
 	next, err := domain.NewSessionBearer()
 	require.NoError(t, err)
-	require.ErrorIs(t, w.PresentInSession(ctx, "hss-12p", nil, "2", next.Digest(), presented), iamerr.ErrInvalidArg, "пустое множество отвергается до записи")
+	_, err = w.PresentInSession(ctx, "hss-12p", nil, "2", next.Digest(), presented)
+	require.ErrorIs(t, err, iamerr.ErrInvalidArg, "пустое множество отвергается до записи")
 	_ = w.Rollback(ctx)
 
 	// Снятая сессия предъявления не принимает.
@@ -778,7 +781,84 @@ func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) 
 	require.NoError(t, w.Commit(ctx))
 	w, err = repo.Writer(ctx)
 	require.NoError(t, err)
-	err = w.PresentInSession(ctx, "hss-12p", []string{"password", "totp"}, "2", next.Digest(), presented.Add(3*time.Minute))
+	_, err = w.PresentInSession(ctx, "hss-12p", []string{"password", "totp"}, "2", next.Digest(), presented.Add(3*time.Minute))
 	require.ErrorIs(t, err, iamerr.ErrNotFound)
 	_ = w.Rollback(ctx)
+}
+
+// TestHumanSessionRepo_681_OwnSessionsListOmitsRecordsCutBySubjectCutoff —
+// перечень своих сессий (kaname#681) судит отсечку личности тем же правилом,
+// что край на предъявлении: запись, аутентифицированная НЕ позже отсечки,
+// живой не показывается. Сбросы (ключей, второго фактора), принудительный
+// выход и смена пароля записей не снимают — отсекают, и перечень без отсечки
+// показывал бы недействующие записи живыми.
+//
+// Граница — включающая: момент записи РАВНЫЙ отсечке — запись отсечена.
+// Близнец — запись, аутентифицированная позже отсечки, в выдаче есть.
+// Страница — полна при отсечённых строках вокруг живых: отсечка судится в
+// операторе выборки до предела страницы, а не после чтения.
+func TestHumanSessionRepo_681_OwnSessionsListOmitsRecordsCutBySubjectCutoff(t *testing.T) {
+	pool := hsPool(t)
+	repo := pg.NewHumanSessionRepo(pool)
+	revs := pg.NewUserTokenRevocationRepo(pool)
+	ctx := context.Background()
+	people := lmPeople(t, pool, "hs681", 2)
+	subject, admin := people[0], people[1]
+
+	cutoff := hsBase.Add(time.Minute)
+	before := hsSession(subject, "681-before", hsBase)                       // отсечена
+	atCutoff := hsSession(subject, "681-equal", cutoff)                      // граница: отсечена
+	after1 := hsSession(subject, "681-after1", cutoff.Add(time.Microsecond)) // жива
+	after2 := hsSession(subject, "681-after2", cutoff.Add(time.Second))      // жива
+	lateCut := hsSession(subject, "681-latecut", hsBase.Add(time.Second))    // заведена последней, отсечена
+	for _, s := range []domain.HumanSession{before, atCutoff, after1, after2, lateCut} {
+		hsIssue(t, repo, s)
+	}
+	now := hsBase.Add(time.Hour)
+
+	all, next, err := repo.SessionsOf(ctx, subject, now, 0, "")
+	require.NoError(t, err)
+	require.Empty(t, next)
+	require.Len(t, all, 5, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): до отсечки в перечне все пять записей")
+
+	require.NoError(t, revs.UpsertRevokeAll(ctx, domain.UserTokenRevocation{
+		UserID: subject, RevokeBefore: cutoff, Reason: domain.RevokeReasonAccessKeysReset, RevokedBy: admin,
+	}, admin))
+
+	idsOf := func(rows []domain.HumanSession) []string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, string(r.ID))
+		}
+		return out
+	}
+	got, next, err := repo.SessionsOf(ctx, subject, now, 0, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{string(after1.ID), string(after2.ID)}, idsOf(got),
+		"kaname#681: перечень после отсечки — только записи, аутентифицированные строго позже неё")
+	require.Empty(t, next, "страница последняя")
+
+	// Страница величиной 2 полна, курсор не указывает на отсечённую строку.
+	page, next, err := repo.SessionsOf(ctx, subject, now, 2, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{string(after1.ID), string(after2.ID)}, idsOf(page),
+		"страница полна живыми при отсечённых строках вокруг них")
+	require.Empty(t, next, "за живыми страницы нет: отсечённая строка курсора не порождает")
+
+	// Страница величиной 1: курсор ведёт ко второй живой, не теряя её.
+	page, next, err = repo.SessionsOf(ctx, subject, now, 1, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{string(after1.ID)}, idsOf(page))
+	require.NotEmpty(t, next)
+	page, next, err = repo.SessionsOf(ctx, subject, now, 1, next)
+	require.NoError(t, err)
+	require.Equal(t, []string{string(after2.ID)}, idsOf(page), "вторая страница — вторая живая")
+	require.Empty(t, next)
+
+	// Чужой отсечки нет: записи другого человека перечень этой не трогает.
+	other := hsSession(admin, "681-other", hsBase)
+	hsIssue(t, repo, other)
+	theirs, _, err := repo.SessionsOf(ctx, admin, now, 0, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{string(other.ID)}, idsOf(theirs), "отсечка одного человека не отсекает записи другого")
 }

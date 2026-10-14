@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package client_token — выдача токена по учётным данным клиента, чья личность
-// доказана подписанным утверждением (задача #898, приёмка F2 §9.1 п. 5, 7).
+// доказана подписанным утверждением (задача kacho#898, приёмка F2 §9.1 п. 5, 7).
 //
 // # Что здесь решается, а что уже решено выше
 //
@@ -88,7 +88,7 @@ type Config struct {
 	//
 	// Прежняя редакция этого комментария говорила, что сверка идёт с ЭТИМ
 	// перечнем «и ничем больше, потому что колонки адресатов у клиентов в схеме
-	// нет». Колонка теперь есть (задача #1136), и сужение поверх этого перечня
+	// нет». Колонка теперь есть (задача kacho#1136), и сужение поверх этого перечня
 	// действует — см. `resolveAudience`. Внешней границей перечень при этом
 	// быть не перестал: сужение работает внутри него.
 	AllowedAudiences []string
@@ -204,7 +204,7 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 	}
 
 	// (3) Адресат — ИЗ ЗАПРОСА, в пределах объявленного ПОСАДКОЙ перечня,
-	// сужённого тем, что объявил при выдаче сам КЛЮЧ (задача #1136).
+	// сужённого тем, что объявил при выдаче сам КЛЮЧ (задача kacho#1136).
 	audience, err := u.resolveAudience(in.Client, in.RequestedAudience)
 	if err != nil {
 		return Output{}, clientassertion.OutcomeAudienceNotAllowed, err
@@ -228,7 +228,8 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 	//
 	// После состава и ДО подписи: принципал известен только после состава, а
 	// подписанный и затем выброшенный токен — уже выпущенный токен.
-	if outcome, err := u.weighCutoff(ctx, in.Client, principal); err != nil {
+	cutoff, outcome, err := u.weighCutoff(ctx, in.Client, principal)
+	if err != nil {
 		return Output{}, outcome, err
 	}
 
@@ -237,11 +238,24 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 		subject = in.Client.OwnerID
 	}
 
+	// Граница срока клиента — ВХОД подписанта, а не только пересчёт в срок:
+	// момент выпуска ставит общий источник (kaname#589), а остаток выше считан
+	// часами этой реплики. Без границы токен пережил бы клиента ровно на
+	// расхождение этих двух часов.
+	var notAfter time.Time
+	if in.Client.ExpiresAt != 0 {
+		notAfter = time.Unix(in.Client.ExpiresAt, 0).UTC()
+	}
 	tok, err := u.signer.Sign(ctx, tokensigner.Request{
-		Subject:      subject,
-		Audience:     audience,
-		TokenType:    tokenpolicy.TokenTypeAccess,
-		TTL:          ttl,
+		Subject:   subject,
+		Audience:  audience,
+		TokenType: tokenpolicy.TokenTypeAccess,
+		TTL:       ttl,
+		NotAfter:  notAfter,
+		// `iat` — строго позже отсечки, по которой судила выдача (kaname#684):
+		// ключ, выданный после отсечки в ту же секунду, иначе получил бы токен,
+		// отвергнутый первым предъявлением.
+		IssuedAfter:  cutoff,
 		Confirmation: in.Confirmation,
 		Claims:       claims,
 	})
@@ -258,7 +272,8 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 }
 
 // weighCutoff отдаёт отказ, когда отсечка отзыва-всех владельца запрещает
-// выдачу, и nil — когда не запрещает.
+// выдачу, и стоящую отсечку — когда не запрещает (нулевая — отсечки нет): по
+// ней подписант кладёт `iat` строго позже неё (kaname#684).
 //
 // Исходы три и все три — значения закрытого словаря со своим счётчиком:
 // «выдавать», «владелец вышел отовсюду» и «спросить не удалось». Третий —
@@ -266,22 +281,22 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 // которого развилка не называет, — тоже отказ: словарь закрыт.
 func (u *UseCase) weighCutoff(
 	ctx context.Context, client domain.AssertionClient, principal service.ResolvedPrincipal,
-) (clientassertion.Outcome, error) {
-	verdict, err := revocationpolicy.AtIssuance(ctx, u.revocations, principal, time.Time{})
+) (time.Time, clientassertion.Outcome, error) {
+	verdict, cutoff, err := revocationpolicy.AtIssuance(ctx, u.revocations, principal, time.Time{})
 	switch verdict {
 	case revocationpolicy.Allowed:
-		return "", nil
+		return cutoff, "", nil
 	case revocationpolicy.Revoked:
-		return clientassertion.OutcomeOwnerRevoked,
+		return time.Time{}, clientassertion.OutcomeOwnerRevoked,
 			fmt.Errorf("client_token: owner of client %s is logged out of everything no earlier than the key was issued", client.ID)
 	case revocationpolicy.Unverified:
-		return clientassertion.OutcomeOwnerUnverified,
+		return time.Time{}, clientassertion.OutcomeOwnerUnverified,
 			fmt.Errorf("client_token: owner of client %s has not verified the email address", client.ID)
 	case revocationpolicy.Undecidable:
-		return clientassertion.OutcomeRevocationCheckFailed,
+		return time.Time{}, clientassertion.OutcomeRevocationCheckFailed,
 			fmt.Errorf("client_token: revoke-all cutoff of the owner of client %s: %w", client.ID, err)
 	default:
-		return clientassertion.OutcomeRevocationCheckFailed,
+		return time.Time{}, clientassertion.OutcomeRevocationCheckFailed,
 			fmt.Errorf("client_token: revoke-all verdict %q is outside the closed dictionary", verdict)
 	}
 }
@@ -291,7 +306,7 @@ func (u *UseCase) weighCutoff(
 // Решение принимает ОДИН предикат на все полосы выдачи (`audiencepolicy`), а не
 // копия здесь: полос две, и пока предикат жил копией у одной, вторая чеканила
 // адресату из запроса. Две копии разошлись бы снова и разошлись бы молча —
-// неверна не полоса, неверна их РАЗНИЦА (задача #1184).
+// неверна не полоса, неверна их РАЗНИЦА (задача kacho#1184).
 //
 // Отказы двух границ РАЗЛИЧАЮТСЯ ТЕКСТОМ — не наружу (там ответ единый), а в
 // журнале: «посадка такого адресата не объявляла» и «ключ выдавался не под этот

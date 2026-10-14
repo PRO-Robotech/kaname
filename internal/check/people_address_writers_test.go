@@ -67,7 +67,9 @@ func peopleAddressCorpus(t *testing.T) check.TreeCorpus {
 }
 
 // TestPeopleAddressHasNoWriterInServiceCode — мест записи адреса человека в
-// существующую строку в непроверочном коде службы ноль, мест записи адреса и
+// существующую строку в непроверочном коде службы сверх названных перечнем
+// законных писателей (`people_address_lawful_writers.go`, один — оператор
+// исхода смены адреса, kaname#635) ноль, мест записи адреса и
 // отметки в миграциях сверх названных ведомостью применённых ноль; места Go
 // судятся наравне с новыми, исключений по имени у Go нет.
 func TestPeopleAddressHasNoWriterInServiceCode(t *testing.T) {
@@ -110,6 +112,14 @@ func TestPeopleAddressHasNoWriterInServiceCode(t *testing.T) {
 			t.Errorf("проверка НЕ ИСПОЛНЯЛАСЬ: в миграциях %s — 0: распознаватель слеп к этой форме либо её предмет "+
 				"снят; молчание о писателях адреса и отметки в миграциях сказано ни о чём (%s)", c.name, census)
 		}
+	}
+	for _, l := range census.Lawful {
+		t.Logf("названо перечнем законных писателей Go: %s", l)
+	}
+	t.Logf("законных писателей адреса в Go: %d", len(census.Lawful))
+	if census.LawfulOutOfCorpus != 0 || len(census.Lawful) != census.LawfulEntries {
+		t.Errorf("перечень законных писателей адреса назван не по этому дереву: записей %d, сверено %d, о файлах вне корпуса %d (%s)",
+			census.LawfulEntries, len(census.Lawful), census.LawfulOutOfCorpus, census)
 	}
 	if census.LedgerOutOfCorpus != 0 || len(census.Applied) != census.LedgerEntries {
 		t.Errorf("ведомость применённых миграций названа не по этому дереву: записей %d, сверено %d, о файлах вне корпуса %d (%s)",

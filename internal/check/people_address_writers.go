@@ -22,8 +22,11 @@
 // отметку не спрашивает, кеш решений края снятием не сбрасывается. Поэтому
 // глагол смены адреса вносится только вместе со своими условиями, и держит это
 // гейт: мест, где непроверочный код службы пишет адрес в СУЩЕСТВУЮЩУЮ строку
-// человека, — ноль. Появление такого места — находка, и её текст называет, с
-// чем вместе глагол вносится (`addressWriterFinding`).
+// человека, — ровно столько, сколько называет перечень законных писателей
+// (`people_address_lawful_writers.go`): одно, оператор исхода смены адреса,
+// внесённый одобренной приёмкой, разобравшей условия (kaname#635, Р9).
+// Появление любого другого места — находка, и её текст называет, с чем вместе
+// глагол вносится (`addressWriterFinding`).
 //
 // Заведение строки (`INSERT INTO users (…, email, …)`) адреса не меняет — у
 // новой строки прежнего адреса нет — и находкой не является; оно считается в
@@ -280,15 +283,23 @@ type PeopleAddressCensus struct {
 	// LedgerEntries — записей ведомости; LedgerStale — из них без предмета
 	// (находка); LedgerOutOfCorpus — о файлах, которых в корпусе нет.
 	LedgerEntries, LedgerStale, LedgerOutOfCorpus int
+	// Lawful — законные писатели адреса в непроверочном Go, названные перечнем
+	// (`peopleLawfulGoWriters`): разобраны на этом прогоне, находкой не являются.
+	Lawful []string
+	// LawfulEntries — записей перечня; LawfulStale — из них без предмета
+	// (находка); LawfulOutOfCorpus — о файлах, которых в корпусе нет.
+	LawfulEntries, LawfulStale, LawfulOutOfCorpus int
 }
 
 // String — строка переписи для вывода проб.
 func (c PeopleAddressCensus) String() string {
 	return fmt.Sprintf("исходники Go: файлов %d · строковых значений %d · %s; "+
 		"миграции: файлов %d · %s; писателей %d · не решается разбором %d · "+
-		"названо ведомостью применённых миграций %d (записей %d, без предмета %d, о файлах вне корпуса %d)",
+		"названо ведомостью применённых миграций %d (записей %d, без предмета %d, о файлах вне корпуса %d) · "+
+		"законных писателей адреса в Go %d (записей перечня %d, без предмета %d, о файлах вне корпуса %d)",
 		c.Go.Files, c.Go.Texts, c.Go, c.Migrations.Files, c.Migrations,
-		len(c.Writers), len(c.Undecided), len(c.Applied), c.LedgerEntries, c.LedgerStale, c.LedgerOutOfCorpus)
+		len(c.Writers), len(c.Undecided), len(c.Applied), c.LedgerEntries, c.LedgerStale, c.LedgerOutOfCorpus,
+		len(c.Lawful), c.LawfulEntries, c.LawfulStale, c.LawfulOutOfCorpus)
 }
 
 // addressWriterFinding — текст отказа на месте записи адреса: называет, с чем
@@ -1097,11 +1108,18 @@ func scanPeopleTexts(ix *lvIndex, f *lvFile, half *PeopleAddressHalf, sc *people
 // инъекция подаёт синтетику в тот же вердикт, что судит дерево. Файл вне обоих
 // видов входа — ошибка, а не молчание.
 func JudgePeopleAddressWriters(corpus TreeCorpus) ([]string, PeopleAddressCensus, error) {
-	return judgePeopleAddressWriters(corpus, peopleAppliedMigrationSites)
+	return judgePeopleAddressWriters(corpus, peopleAppliedMigrationSites, peopleLawfulGoWriters)
 }
 
-func judgePeopleAddressWriters(corpus TreeCorpus, ledger []PeopleAppliedSite) ([]string, PeopleAddressCensus, error) {
-	census := PeopleAddressCensus{Go: newPeopleAddressHalf(), Migrations: newPeopleAddressHalf(), LedgerEntries: len(ledger)}
+// JudgePeopleAddressWritersWith — тот же вердикт с перечнем законных писателей
+// Go, поданным параметром: инъекция судит дерево без записи перечня и с ней.
+func JudgePeopleAddressWritersWith(corpus TreeCorpus, lawful []PeopleLawfulGoWriter) ([]string, PeopleAddressCensus, error) {
+	return judgePeopleAddressWriters(corpus, peopleAppliedMigrationSites, lawful)
+}
+
+func judgePeopleAddressWriters(corpus TreeCorpus, ledger []PeopleAppliedSite, lawful []PeopleLawfulGoWriter) ([]string, PeopleAddressCensus, error) {
+	census := PeopleAddressCensus{Go: newPeopleAddressHalf(), Migrations: newPeopleAddressHalf(),
+		LedgerEntries: len(ledger), LawfulEntries: len(lawful)}
 	goCorpus, migrations := TreeCorpus{}, TreeCorpus{}
 	for _, rel := range corpus.Rels() {
 		switch {
@@ -1131,6 +1149,9 @@ func judgePeopleAddressWriters(corpus TreeCorpus, ledger []PeopleAppliedSite) ([
 
 	sites, applied, stale, outside := matchPeopleLedger(sc.sites, ledger, migrations)
 	census.Applied, census.LedgerStale, census.LedgerOutOfCorpus = applied, len(stale), outside
+	sites, lawfulNamed, lawfulStale, lawfulOutside := matchPeopleLawful(sites, lawful, goCorpus)
+	census.Lawful, census.LawfulStale, census.LawfulOutOfCorpus = lawfulNamed, len(lawfulStale), lawfulOutside
+	stale = append(stale, lawfulStale...)
 	for _, s := range sites {
 		if s.kind == siteUndecided {
 			census.Undecided = append(census.Undecided, s.finding())

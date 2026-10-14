@@ -375,6 +375,12 @@ func TestAccountID18_EveryProducerEntersTheRegistryAndDeletionDoesNotFree(t *tes
 			Actor:           "registration",
 		})
 		require.NoError(t, err)
+		// Зеркало регистрации ложится одним исходом со строкой пароля
+		// (kaname#608): без неё ACTIVE без способа входа база не фиксирует.
+		v, err := domain.NewLoginVerifier("fixture-password-row-without-a-known-password")
+		require.NoError(t, err)
+		require.NoError(t, w.InsertLoginMethod(ctx, domain.LoginMethod{UserID: res.User.ID, Kind: domain.LoginMethodPassword,
+			Verifier: v, State: domain.LoginMethodStateActive}))
 		require.NoError(t, w.Commit(ctx))
 		personal := string(res.AccountID)
 		require.Equal(t, 1, accountRows(t, env.pool, personal), "личный аккаунт не заведён")

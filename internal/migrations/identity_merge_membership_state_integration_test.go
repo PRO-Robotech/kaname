@@ -4,7 +4,7 @@
 package migrations_test
 
 // identity_merge_membership_state_integration_test.go — ВЫХОД из состояния
-// «приглашён» утверждается, а не подразумевается (задача #1044).
+// «приглашён» утверждается, а не подразумевается (задача kacho#1044).
 //
 // # Что здесь держится
 //
@@ -144,7 +144,7 @@ func personInvitedToTwoAccounts(t *testing.T, tagA, tagB, email string) (*sql.DB
 // перестаёт быть приглашением и получает внешний субъект.
 func logIn(t *testing.T, db *sql.DB, person, externalID string) {
 	t.Helper()
-	res, err := db.Exec(`
+	res, err := execWithWayIn(t, db, `
 		UPDATE kaname.users
 		   SET invite_status = 'ACTIVE', external_id = $2
 		 WHERE id = $1`, person, externalID)

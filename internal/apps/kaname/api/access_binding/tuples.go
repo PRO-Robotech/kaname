@@ -77,7 +77,7 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) []abrepo.Relat
 	// for ALL selector arms (ARM_ANCHOR(all)+ARM_NAMES+ARM_LABELS), emitting DIRECT
 	// per-object v_*/tier tuples. At Create a rules-role binding therefore emits ONLY
 	// the binding-lifecycle hierarchy parent-pointer (so the scope owner keeps a
-	// viewer path to the binding OBJECT itself — #166, membership-write-authz cascade,
+	// viewer path to the binding OBJECT itself — kacho-iam#166, membership-write-authz cascade,
 	// D-7); the per-object access tuples are materialized post-commit by the
 	// reconciler (create.go ReconcileBinding) + forward on each resource's Create.
 	if len(role.Rules) > 0 {
@@ -233,7 +233,7 @@ func tuplesForBinding(b domain.AccessBinding, relations []authzmap.Relation) []a
 // resource scopes (project/account/cluster). It is INDEPENDENT of the target
 // arm — both the all_in_scope arm (tuplesForBinding) and the resources[] arm
 // (tuplesForTarget) MUST emit it, otherwise the scope owner holds no viewer
-// path to the binding object itself and Get/Delete 403 (issue #166: the
+// path to the binding object itself and Get/Delete 403 (issue kacho-iam#166: the
 // resources[] arm previously emitted only per-object tuples and skipped this).
 //
 // ok=false when the scope is not a hierarchy parent or the binding has no id.

@@ -241,9 +241,9 @@ func TestABSubjectExists_ConcurrentDeleteVsCreate_NoDangling(t *testing.T) {
 	// A plain member user (account_id set, NOT an account owner → deletable by
 	// the guarded delete once it carries no bindings).
 	member := ids.NewID(domain.PrefixUser)
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, 'M', 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, 'M', 'ACTIVE')`),
 		member, accID, "ext-abse7m-"+member, "m-abse7@example.com")
 	require.NoError(t, err)
 

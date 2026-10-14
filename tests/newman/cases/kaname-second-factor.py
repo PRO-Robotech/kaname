@@ -407,6 +407,11 @@ def _refusal(status, code, text, label, reason=None):
 
 _NOT_ENROLLED = ("second factor is not enrolled", "SECOND_FACTOR_NOT_ENROLLED")
 _AUTH_FAILED = "authentication failed"
+# Отказ входа С полем `secondFactor` (Ф12 Р4, редакция 17; kaname#520): один на
+# все причины этой формы запроса и называет шаг. Вход без поля и глаголы под
+# сессией отвечают прежним `_AUTH_FAILED` (Д30: текст различает присланное).
+_AUTH_FAILED_WITH_CODE = ("authentication failed; check the email, the password and the code, "
+                          "and send secondFactor only if a second factor is enrolled")
 
 
 def _not_enrolled(label):
@@ -508,7 +513,7 @@ def _refused_login(name, label, body_var_equal=None, second_factor=None, passwor
     body = {"email": "{{loginLaneEmail}}", "password": password, "csrfToken": "{{sfCsrfLogin}}"}
     if second_factor is not None:
         body["secondFactor"] = second_factor
-    tests = [*_refusal(401, 16, _AUTH_FAILED, label)]
+    tests = [*_refusal(401, 16, _AUTH_FAILED_WITH_CODE if second_factor is not None else _AUTH_FAILED, label)]
     if body_var_equal:
         tests += _body_equals(body_var_equal, label + ': тело побайтово равно отказу на неверный пароль')
     if keep:
@@ -623,7 +628,11 @@ def _backup_step_up_refused(name, index, label, set_var="sfBackupCodes"):
         name,
         {"method": "lookup_secret", "code": "{{sfBackupCode}}", "csrfToken": "{{sfCsrfStepUp}}"},
         _backup_code(label, index, set_var),
-        [*_refusal(401, 16, _AUTH_FAILED, label), *_body_equals("sfWrongPasswordRefusalBody", label + ': тело равно отказу на неверный пароль')],
+        # Эталон — общий отказ Ф3-02 (отказ глагола без сессии), а не тело входа
+        # С кодом: у формы с кодом свой текст (Д30), и равенство с ним было бы
+        # ложно по замыслу. Свойство — отказ глагола под сессией не называет
+        # причину и равен общему отказу (Ф12-16, §7 инв. 3).
+        [*_refusal(401, 16, _AUTH_FAILED, label), *_body_equals("sfNoSessionRefusalBody", label + ': тело равно общему отказу (Ф3-02)')],
     )
 
 
@@ -1016,7 +1025,7 @@ CASES.append(Case(
                  ]),
         _old_bearer_refused("su-old-bearer", "SU-OLD-BEARER"),
         _step_up("su-same-code-again", {"method": "totp", "code": "{{sfAcceptedCode}}", "csrfToken": "{{sfCsrfStepUp}}"}, [],
-                 [*_refusal(401, 16, _AUTH_FAILED, "SU-REPLAY"), *_body_equals("sfWrongPasswordRefusalBody", "SU-REPLAY: тело равно отказу неверного кода")]),
+                 [*_refusal(401, 16, _AUTH_FAILED, "SU-REPLAY"), *_body_equals("sfNoSessionRefusalBody", "SU-REPLAY: тело равно общему отказу (Ф3-02)")]),
         _step_up("su-younger-code", {"method": "totp", "code": "{{sfCode}}", "csrfToken": "{{sfCsrfStepUp}}"},
                  [*_TOTP_JS, "pm.environment.set('sfCode', __totp(pm.environment.get('sfSecret'), __lastStep() - 1));"],
                  _refusal(401, 16, _AUTH_FAILED, "SU-YOUNGER")),
@@ -1038,7 +1047,7 @@ CASES.append(Case(
         _step_up("su-s2-wrong-code", {"method": "totp", "code": "{{sfCode}}", "csrfToken": "{{sfCsrfStepUp2}}"},
                  [*_TOTP_JS, "pm.environment.set('sfCode', __wrongCode(pm.environment.get('sfSecret')));"],
                  [*_refusal(401, 16, _AUTH_FAILED, "SU-S2-WRONG"), *_no_cookies("SU-S2-WRONG"),
-                  *_body_equals("sfWrongPasswordRefusalBody", "SU-S2-WRONG: тело равно отказу на неверный пароль")],
+                  *_body_equals("sfNoSessionRefusalBody", "SU-S2-WRONG: тело равно общему отказу (Ф3-02)")],
                  session_var="sfSession2Cookie", form_var="sfForm2Cookie"),
         _status_step("su-s2-bearer-intact", [
             "pm.test('SU-S2: отказ сессию не погасил — носитель годен', () => pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(true));",
@@ -1202,9 +1211,10 @@ CASES.append(Case(
 
 # ───────────────────────────────────────────────────────────────────────────
 # Ф12-28: снятие кодом по времени; после — состояние «не заведён», вход с кодом —
-# тот же 401 «authentication failed», что на неверный пароль, тело побайтово
-# (Ф12-13 е, kaname#257: код при незаведённом факторе не называет совпавшего
-# пароля), без кода — «1». Порядок трёх входов несущий: неверный пароль + код
+# тот же 401, что на неверный пароль С ТЕМ ЖЕ полем, тело побайтово, текст формы
+# с кодом (Ф12-13 е, kaname#257: код при незаведённом факторе не называет
+# совпавшего пароля; текст называет шаг — Р4 редакции 17, kaname#520), без
+# кода — «1». Порядок трёх входов несущий: неверный пароль + код
 # → верный пароль + код (тело равно первому) → верный пароль без кода (сессия
 # «1», положительный близнец). Заодно возвращает посев в исходное: следующий
 # прогон снова заводит фактор с нуля.

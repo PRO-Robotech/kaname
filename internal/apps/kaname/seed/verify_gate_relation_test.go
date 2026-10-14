@@ -53,6 +53,10 @@ type fakeRelChecker struct {
 	calls int
 }
 
+// SubjectAdmitted — все субъекты этих проб допущены: их предмет — отношение, а
+// не допуск (допуск — verify_gate_admission_test.go).
+func (c *fakeRelChecker) SubjectAdmitted(context.Context, string) (bool, error) { return true, nil }
+
 func (c *fakeRelChecker) Check(_ context.Context, _ /*subject*/, _ /*relation*/, object string) (bool, error) {
 	c.calls++
 	return c.allow[object], nil

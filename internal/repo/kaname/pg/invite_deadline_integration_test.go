@@ -130,6 +130,7 @@ func TestInviteDeadline_RowInsideTheDeadlineActivates(t *testing.T) {
 	activated, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail23b"), domain.DisplayName("Real"))
 	require.NoError(t, aerr)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w2))
 	require.NoError(t, w2.Commit(ctx))
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
 }
@@ -170,6 +171,7 @@ func TestInviteDeadline_NoDeadlineRowStillActivates(t *testing.T) {
 	activated, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail23c"), domain.DisplayName("Real"))
 	require.NoError(t, aerr)
+	seedWayIn(t, ctx, kanamepg.WriterTx(w2))
 	require.NoError(t, w2.Commit(ctx))
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
 }
@@ -234,6 +236,15 @@ func TestInviteDeadline_ActivationHappensOnce(t *testing.T) {
 				_ = tw.Rollback(ctx)
 				mu.Lock()
 				refusals = append(refusals, aerr)
+				mu.Unlock()
+				return
+			}
+			// Строка пароля той же транзакцией (kaname#608): гонку решает
+			// ключ активации, а не инвариант способа входа.
+			if _, xerr := kanamepg.WriterTx(tw).Exec(ctx, wayInFixtureSQL); xerr != nil {
+				_ = tw.Rollback(ctx)
+				mu.Lock()
+				refusals = append(refusals, xerr)
 				mu.Unlock()
 				return
 			}
@@ -323,6 +334,7 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
 		domain.ExternalSubject("sub-mail23d"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "приглашение, выданное заново, родилось истёкшим")
+	seedWayIn(t, ctx, kanamepg.WriterTx(w3))
 	require.NoError(t, w3.Commit(ctx))
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
 }
@@ -375,6 +387,7 @@ func TestInviteDeadline_ReInvitingNeverShortensALongerDeadline(t *testing.T) {
 	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
 		domain.ExternalSubject("sub-mail23e"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "второе приглашение укоротило срок, выданный первым")
+	seedWayIn(t, ctx, kanamepg.WriterTx(w3))
 	require.NoError(t, w3.Commit(ctx))
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
 }

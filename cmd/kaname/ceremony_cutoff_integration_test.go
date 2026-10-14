@@ -48,12 +48,17 @@ func TestLINEA1Cutoff_AuthorizeAfterTheSubjectCutoff(t *testing.T) {
 			w.requireAuthorizeEndpoint()
 			w.cutSubject(w.session.authAt.Add(cell.shift))
 			_, challenge := pkcePair()
-			rec := w.get(lineA1AuthorizePath, authorizeQuery(w.ic1, lineA1R, stateOfLen(lineA1StateFloor+8), challenge), true)
-			switch {
-			case cell.refused && (rec.Code != http.StatusUnauthorized || rec.Body.String() != `{"error":"login_required"}`+"\n"):
-				w.red("выдача кода по сессии, аутентифицированной до отсечки субъекта: %d %q (Location %q), "+
-					"ожидалось 401 login_required", rec.Code, rec.Body.String(), rec.Header().Get("Location"))
-			case !cell.refused && rec.Code != http.StatusFound:
+			state := stateOfLen(lineA1StateFloor + 8)
+			rec := w.get(lineA1AuthorizePath, authorizeQuery(w.ic1, lineA1R, state, challenge), true)
+			if cell.refused {
+				// Сессия, аутентифицированная до отсечки, — не сессия: исход Р11
+				// (задача kaname#525) — login_required приложению.
+				requireNoCodeDelivered(t, w.id, "выдача кода по сессии до отсечки субъекта", rec)
+				requireErrorReachesTheApplication(t, w.id, "выдача кода по сессии до отсечки субъекта", rec,
+					lineA1R, "login_required", state)
+				return
+			}
+			if rec.Code != http.StatusFound {
 				w.red("близнец: выдача кода ответила %d, ожидалось 302; тело %q", rec.Code, rec.Body.String())
 			}
 		})

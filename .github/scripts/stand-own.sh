@@ -195,7 +195,9 @@ EOF
 # ─── База: TLS обязателен, иначе страж посадки откажет ───────────────────────
 start_pg() {
   need_tool docker
-  docker rm -f "$PG_NAME" >/dev/null 2>&1
+  # `-v`: снять и анонимный том образа (`VOLUME` базы), иначе он остаётся
+  # сиротой на каждый подъём (kaname#710).
+  docker rm -fv "$PG_NAME" >/dev/null 2>&1
   # Смена владельца ключа — одноразовым контейнером: см. врезку в шапке.
   docker run --rm -v "$PKI:/k" "$PG_IMAGE" \
     sh -c 'chown 70:70 /k/pg.key /k/pg.crt && chmod 600 /k/pg.key && chmod 644 /k/pg.crt' \
@@ -544,7 +546,7 @@ start_service() {
   for v in $(compgen -e); do
     case "$v" in KANAME_STAND_*) ;; KANAME_*) envs+=(-e "$v") ;; esac
   done
-  docker rm -f "$SERVICE_NAME" >/dev/null 2>&1
+  docker rm -fv "$SERVICE_NAME" >/dev/null 2>&1
   nohup docker run --rm --name "$SERVICE_NAME" --network host \
     --memory "$SERVICE_MEMORY" --memory-swap "$SERVICE_MEMORY" \
     --user "$(id -u):$(id -g)" -v "$BIN:$BIN:ro" -v "$PKI:$PKI:ro" "${envs[@]}" \
@@ -629,7 +631,9 @@ down() {
     kill "$(cat "$RUNDIR/mailbox.pid")" 2>/dev/null
     rm -f "$RUNDIR/mailbox.pid"
   fi
-  command -v docker >/dev/null 2>&1 && docker rm -f "$SERVICE_NAME" "$PG_NAME" >/dev/null 2>&1
+  # `-v` снимает анонимные тома контейнеров вместе с ними: без него каждый
+  # подъём-снос оставлял том базы сиротой (kaname#710, ось 8 самопроверки).
+  command -v docker >/dev/null 2>&1 && docker rm -fv "$SERVICE_NAME" "$PG_NAME" >/dev/null 2>&1
   say "стенд снесён"
 }
 
@@ -1089,6 +1093,57 @@ esac
 EOF
     chmod +x "$TMP/wave/jq" "$TMP/wave/curl" "$TMP/pg-slow/docker"
 
+    # ─── ПОДЛОЖНЫЙ КЛИЕНТ КОНТЕЙНЕРА С ТОМАМИ: СНОС НЕ ОСТАВЛЯЕТ ТОМОВ (kaname#710) ─
+    #
+    # Образ Postgres объявляет `VOLUME /var/lib/postgresql/data`: каждый контейнер
+    # базы, запущенный без `--rm`, получает АНОНИМНЫЙ том, и `docker rm -f` без
+    # `-v` оставляет его сиротой (замер 2026-10-12: `rm -f` — томов +1, `rm -fv` —
+    # +0). Подложный клиент держит это свойство в каталоге `SELFTEST_VOL_DIR`:
+    # `run` без `--rm` заводит НОВЫЙ том и привязывает его к имени контейнера
+    # (повторный подъём под тем же именем — другой том), `run --rm` не заводит
+    # (движок снимает анонимные тома такого контейнера сам), `rm` снимает том
+    # ТОЛЬКО при флаге `v`. Прочие подкоманды (`exec` для pg_isready) — успех.
+    mkdir -p "$TMP/vol"
+    cat > "$TMP/vol/docker" <<'EOF'
+#!/bin/sh
+cmd="$1"; shift
+case "$cmd" in
+  run)
+    rm_flag=0; name=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --rm) rm_flag=1 ;;
+        --name) name="$2"; shift ;;
+      esac
+      shift
+    done
+    if [ "$rm_flag" -eq 0 ] && [ -n "$name" ]; then
+      mkdir -p "$SELFTEST_VOL_DIR/live"
+      vol="vol-$(date +%s%N)"
+      : > "$SELFTEST_VOL_DIR/$vol"
+      echo "$vol" > "$SELFTEST_VOL_DIR/live/$name"
+    fi
+    exit 0 ;;
+  rm)
+    vflag=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -*v*) vflag=1 ;;
+        -*) ;;
+        *) live="$SELFTEST_VOL_DIR/live/$1"
+           if [ -f "$live" ]; then
+             [ "$vflag" -eq 1 ] && rm -f "$SELFTEST_VOL_DIR/$(cat "$live")"
+             rm -f "$live"
+           fi ;;
+      esac
+      shift
+    done
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+EOF
+    chmod +x "$TMP/vol/docker"
+
     # Порты берутся СВОБОДНЫМИ у ядра, а не выписываются: судить готовность на
     # восьми боевых номерах значило бы мерить, заняты ли они на этой машине.
     SELFTEST_FREE_PORTS="$("$PY" -c '
@@ -1197,6 +1252,24 @@ EOF
     world_wave_warm_refused()  { ( export SELFTEST_CURL_CODE=401; wave_world 0 2 ); }
     world_wave_ttl_garbage()   { ( KEY_SET_TTL=30sec; wave_world 0 2 ); }
     world_wave_no_state()      { ( WAVE_STATE="$TMP/wave-absent.state"; failclosed_judge 1 ); }
+
+    # vol_world <действие>: исполняет действие с подложным клиентом томов и
+    # печатает перепись сирот. Сирота есть — код 1: снос оставил след.
+    vol_world() {
+        ( PATH="$TMP/vol:$PATH"; export SELFTEST_VOL_DIR="$TMP/vol-state"
+          rm -rf "$SELFTEST_VOL_DIR"; mkdir -p "$SELFTEST_VOL_DIR"
+          PKI="$TMP/vol-pki"; RUNDIR="$TMP/vol-run"; mkdir -p "$PKI" "$RUNDIR"
+          "$1" >/dev/null 2>&1
+          n=$(find "$SELFTEST_VOL_DIR" -maxdepth 1 -type f | wc -l)
+          echo "томов-сирот после сноса: $n"
+          [ "$n" -eq 0 ] )
+    }
+    vol_up_down()         { start_pg; down; }
+    vol_up_up_down()      { start_pg; start_pg; down; }
+    vol_bare_rm()         { start_pg; docker rm -f "$PG_NAME"; }
+    world_vol_down()      { vol_world vol_up_down; }
+    world_vol_reup_down() { vol_world vol_up_up_down; }
+    world_vol_bare_rm()   { vol_world vol_bare_rm; }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -1317,6 +1390,15 @@ EOF
     assert 1  "(+) волна: срок не разобран — 1, коллекции нет"            world_wave_ttl_garbage "не разобран" "KEY_SET_TTL" "коллекция исполнялась"
     # (+) суд без подготовки: отметки нет — красное коллекции не вердикт.
     assert 75 "(+) волна: суд без отметки прогрева — 75"                  world_wave_no_state "отметки прогрева нет" "код 1" "НАХОДКА"
+
+    echo "--- ось 8: снос стенда не оставляет анонимных томов базы (kaname#710)"
+    # (+) ЗАКОННЫЙ БЛИЗНЕЦ первым: голый `rm -f` подложный клиент обязан увидеть
+    # сиротой, иначе ноль ниже был бы постоянной строкой, а не замером.
+    assert 1  "(+) голый rm -f оставляет том — 1, перепись называет его" world_vol_bare_rm "томов-сирот после сноса: 1" "-" "томов-сирот после сноса: 0"
+    # (−) подъём и снос: том базы снят вместе с контейнером.
+    assert 0  "(−) up → down: томов-сирот 0"                           world_vol_down    "томов-сирот после сноса: 0" "-" "томов-сирот после сноса: 1"
+    # (−) повторный подъём сносит прежний контейнер базы — тоже с его томом.
+    assert 0  "(−) up → up → down: томов-сирот 0"                      world_vol_reup_down "томов-сирот после сноса: 0" "-" "томов-сирот после сноса: 1"
 
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"

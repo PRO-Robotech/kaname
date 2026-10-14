@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // prod_profile_render_test.go — АВТОРИТЕТНЫЙ вердикт о боевом профиле: вход
-// собирается НАСТОЯЩИМ рендером чарта, а не переложением (задача #2334).
+// собирается НАСТОЯЩИМ рендером чарта, а не переложением (задача kacho#2334).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЗАЧЕМ ВТОРОЙ ПРОИЗВОДИТЕЛЬ ВХОДА, ЕСЛИ ОДИН УЖЕ ЕСТЬ
@@ -147,12 +147,37 @@ var renderedSecretStandIns = func() map[string]string {
 // режим, а не посадка (kaname#363): базовые значения стоят на боевом режиме, и
 // выключенный эндпоинт шаблон отвергает на них так же, как на профиле. Он
 // берётся накладкой оператора (`operatorOverlay`), а не выписывается второй раз.
+// Почтовый узел вошёл сюда тем же путём (kaname#475): в боевом режиме шаблон
+// отвергает пустые `inviteMail.relay` и `inviteMail.from`, а базовые значения
+// их не объявляют. Величины — те же нерезолвимые заглушки, что у профиля.
 var minimalOperatorCoordinates = append([]string{
+	"inviteMail.relay=relay.example.invalid:587",
+	"inviteMail.from=kaname@access.example.invalid",
 	"image=registry.example.invalid/pro-robotech/kaname:0.1.0",
 	"db.host=postgres.example.invalid",
 	"db.passwordSecretName=kaname-db",
 	"db.passwordSecretKey=password",
 }, operatorOverlay...)
+
+// installDomainForRender — ДОМЕН УСТАНОВКИ, которым рендер боевой цепочки
+// заменяет заглушку профиля (kaname#762). Профиль несёт на месте
+// `authn.domain` имя в зоне `.invalid`, и установка с ним отвергается — так
+// же, как отверглась бы у оператора, забывшего его заменить. Пробы рендера
+// судят не этот отказ, а прочие свойства профиля, поэтому подают домен так же,
+// как его подаёт стенд (`.github/scripts/stand-chart.sh`, накладка координат);
+// сам отказ судит `domain_placeholder_refused_test.go`.
+const installDomainForRender = "kaname.local"
+
+// installCoordinateSets — `--set` координат установки для цепочки, в которой
+// стоит боевой профиль; ставятся ПЕРВЫМИ, и `--set` вызывающего их перекрывает.
+func installCoordinateSets(valueFiles []string) []string {
+	for _, f := range valueFiles {
+		if filepath.Base(f) == "values.prod.yaml" {
+			return []string{"authn.domain=" + installDomainForRender}
+		}
+	}
+	return nil
+}
 
 // renderStandaloneChart зовёт `helm template` на ЭТОМ чарте с названной
 // цепочкой профилей.
@@ -172,7 +197,7 @@ func renderStandaloneChart(t *testing.T, valueFiles []string, sets ...string) st
 	for _, f := range valueFiles {
 		args = append(args, "-f", f)
 	}
-	for _, kv := range sets {
+	for _, kv := range append(installCoordinateSets(valueFiles), sets...) {
 		args = append(args, "--set", kv)
 	}
 	out, err := exec.Command("helm", args...).CombinedOutput() // #nosec G204 -- фиксированный бинарь, аргументы из дерева
@@ -436,7 +461,7 @@ func TestConfigBridge_CoversEveryKeyTheChartRenders(t *testing.T) {
 		"чарт рендерит ключи, которых переложение не несёт: %s\n"+
 			"    вход, собранный переложением, УЖЕ того, что увидит процесс, — и уже ровно там, "+
 			"где расхождение не видно: проба боевого профиля осталась бы зелёной при стражe, "+
-			"отвергающем настоящий рендер (задача #2334)", strings.Join(missing, ", "))
+			"отвергающем настоящий рендер (задача kacho#2334)", strings.Join(missing, ", "))
 	require.Emptyf(t, extra,
 		"переложение несёт ключи, которых в рендере боевого профиля нет: %s\n"+
 			"    вход ШИРЕ действительного: проба стережёт величину, которой процесс не получит",

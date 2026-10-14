@@ -29,6 +29,7 @@ package internal_iam
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -39,6 +40,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
 
 // subjectKeyedChecker grants `system_admin` to exactly one subject string, so the
@@ -71,7 +73,7 @@ func TestForceLogout_ServiceAccountAdminIsAskedAsServiceAccount(t *testing.T) {
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
 		// Под `own` отсечку кладёт его транзакция (kaname#340).
-		WithOwnSessions(rec)
+		WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now))
 
 	_, err := h.ForceLogout(ctxPrincipal("service_account", saID), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
@@ -100,7 +102,7 @@ func TestForceLogout_UserAdminIsAskedAsUser(t *testing.T) {
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
 		// Под `own` отсечку кладёт его транзакция (kaname#340).
-		WithOwnSessions(rec)
+		WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now))
 
 	_, err := h.ForceLogout(ctxPrincipal("user", usrID), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",
@@ -123,7 +125,7 @@ func TestForceLogout_UnnameablePrincipalIsRefusedWithoutAsking(t *testing.T) {
 		// Исполнитель снятия провязан как в корне: без него глагол отказывает
 		// закрыто, и проба судила бы отказ провязки вместо своего предмета.
 		// Под `own` отсечку кладёт его транзакция (kaname#340).
-		WithOwnSessions(rec)
+		WithOwnSessions(rec).WithCutoffClock(momentclock.Func(time.Now))
 
 	_, err := h.ForceLogout(ctxPrincipal("banana", "whatever"), &iamv1.ForceLogoutRequest{
 		UserId: "usr0000000000000victm",

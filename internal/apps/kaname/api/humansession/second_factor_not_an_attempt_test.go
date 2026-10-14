@@ -339,7 +339,7 @@ func TestF12_32_FreshnessRefusalIsNotAnAttempt(t *testing.T) {
 // TestF12_32_UnreadableMaterialIsNotAnAttempt — Ф12-32, исход «материал не
 // открывается» (Ф12-35 «в»): `N − 1` неверных кодов, затем верный код по времени
 // при материале, который не открывает ни один ключ, — 503
-// `second factor temporarily unavailable`; счёт не вырос, клетки «материал не
+// `second factor cannot be verified; ask the administrator of this installation`; счёт не вырос, клетки «материал не
 // открывается» и отказа `unavailable` выросли на единицу; материал возвращён —
 // тот же код тем же глаголом проходит без отказа по частоте.
 func TestF12_32_UnreadableMaterialIsNotAnAttempt(t *testing.T) {

@@ -211,11 +211,20 @@ func (p presenter) settle(ctx context.Context, w Writer, pr preparedPresentation
 
 // observe — клетка предъявления по способу × исходу; отказы по состоянию —
 // своей клеткой.
+//
+// «Материал не открывается» — недоступность громко (Р2, Ф12-35 «в», «г»):
+// кроме клеток — ОДНА запись журнала уровня ошибки на предъявление, здесь, а не
+// на крае: край не знает ни личности, ни способа, и вторая запись там удвоила
+// бы счёт (kaname#700). В записи — личность и способ; ни кода, ни материала, ни
+// ключа: причина (ключ снят из перечня либо строки набора нет) — на странице
+// смены ключа и в описании правила тревоги, не в журнале.
 func (p presenter) observe(pr preparedPresentation, st settledPresentation) {
 	switch st.verdict {
 	case verdictNotEnrolled:
 		p.deps.Observer.SecondFactorRefusalObserved(RefusalNotEnrolled)
 	case verdictUnavailable:
+		p.deps.Logger.Error("second factor: stored material could not be opened — our data, not the caller's input",
+			"user_id", string(pr.userID), "method", pr.method.String())
 		p.deps.Observer.SecondFactorPresentationObserved(pr.method, PresentationMaterialUnreadable)
 		p.deps.Observer.SecondFactorRefusalObserved(RefusalUnavailable)
 	default:

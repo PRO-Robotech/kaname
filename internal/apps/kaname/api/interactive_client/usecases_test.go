@@ -309,7 +309,7 @@ func createReq() *iamv1.CreateInteractiveClientRequest {
 //
 // Признак недоступности подаётся ЗДЕСЬ, своей рукой. Значит проба утверждает
 // «признак, если он есть, доезжает кодом», и НЕ утверждает, что его кто-нибудь
-// ставит. Ровно это и было предметом задачи #2481: производитель признака не
+// ставит. Ровно это и было предметом задачи kacho#2481: производитель признака не
 // ставил, отказ уходил внутренней ошибкой, а проба оставалась зелёной — по
 // подделке, а не по продукту. Производителем признака был клиент внешнего
 // поставщика; он снят вместе с посадкой этого поставщика (kaname#363), и
@@ -341,7 +341,7 @@ func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
 // Без него «признак доезжает кодом» зеленело бы и на реализации, объявляющей
 // повторяемым всякий отказ поставщика, — а это беда той же величины с другой
 // стороны: отвергнутый вход повтором не лечится, потому что одинаковый повтор
-// не меняет ни одного из входов, и вызывающий повторял бы вечно (задача #2481).
+// не меняет ни одного из входов, и вызывающий повторял бы вечно (задача kacho#2481).
 func TestCreate_ProviderRejectedTheInput_IsNotAnnouncedRetryable(t *testing.T) {
 	repo := &insertFailsRepo{}
 	prov := &failingProvider{registerErr: errors.New("provider admin api: status 400: bad redirect_uri")}
@@ -389,8 +389,8 @@ func TestCreate_InsertFails_CompensatesTheRegistration(t *testing.T) {
 }
 
 // TestUpdate_EmptyMask_AppliesEveryMutableField — scenario 07's positive half.
-// An empty mask is a full-object PATCH over the mutable fields; the immutable
-// values carried in the body are ignored rather than refused.
+// An empty mask is a full-object PATCH over the mutable fields; the stored
+// immutable values stay as they are (the request has no field to carry them).
 func TestUpdate_EmptyMask_AppliesEveryMutableField(t *testing.T) {
 	stored := validStored()
 	stored.ClientID = "provider-original"

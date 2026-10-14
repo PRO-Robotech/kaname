@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // exemptclaim_test.go — комментарий use-case не объявляет полосу `<exempt>`
-// там, где контракт объявил `scope_filtered` (задача продукта #2047).
+// там, где контракт объявил `scope_filtered` (задача продукта kacho#2047).
 //
 // # Предмет
 //

@@ -1,0 +1,72 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+  sha256: e24ee90a34bb1f2919280d987ed7dd532f01545cb72ef5c742e6d30b7172a705
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 0dd03218a61
+  content_commit: 61d7dd8fb8edc71a644532ac42d9c8e1421543c6
+  branch: '269'
+  worktree: tmp/535-na3a
+  pull_request: null
+  task: PRO-Robotech/kaname#269
+  wave: PRO-Robotech/kaname#535
+  lines: 4032
+  round: 12
+  round_note: >-
+    круг 12 — следующий за записями этого документа; прошлых кругов в этом заходе нет
+  predecessor_record: >-
+    docs/specs/reviews/login-session-and-credentials-are-our-
+    contract/7bdef28764f6dc3c78615faf75006c9639f2fbd3d828faa18f4fdc5f109bd14b.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md на
+    tmp/535-na3a @ 33b0f8aa9 → e24ee90a34bb1f2919280d987ed7dd532f01545cb72ef5c742e6d30b7172a705;
+    совпал с отпечатком задания
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+publication_mode: courier_of_agent_verdict
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    summary: >-
+      Редакция 15 переписывает «Тогда» Ф1-61 и Ф1-66 и оставляет живыми Ф1-52, Ф1-60, Ф1-61, Ф1-66,
+      чьё Given — печенье, выданное прежним поставщиком, и откат стенда на него. Компонент снят:
+      kacho#1276 (S3) CLOSED, эпик kacho#2564 CLOSED, край читает только нашу сессию
+      (kacho@e801c0f7844 gateway/cmd/api-gateway/main.go:1414, kacho#2792 CLOSED), переключатель
+      посадки службы снят kaname#363. Выдать такое печенье некому и откатывать некуда.
+    why_blocking: >-
+      Документ сам требует (§3.10, «Срок жизни этих проб»): пробы Ф1-52, Ф1-60, Ф1-61 и Ф1-66
+      снимаются тем же изменением, что снимает компонент. S3 наступил, а редакция правит их «Тогда»
+      вместо снятия; на подставном печенье Ф1-52 вакуумен по словам самого документа.
+    fix: >-
+      Снять Ф1-52, Ф1-60, Ф1-61, Ф1-66 тумбами вместе с предметом (свойство после S3 держит отсутствие
+      читателя — гейт §8), привести §4.2, §8, §10.9 и счёт сценариев; правка kaname#177 о «кто я»
+      тогда теряет предмет вместе с ними.
+non_blocking:
+  - id: N1
+    summary: >-
+      Четыре документа (Ф1, Ф4, Ф7, Ф13) ссылаются на решение kacho#2703 «полосы регистрации ключом не
+      будет» от 2026-10-03; сама задача OPEN, и последний её комментарий (2026-09-25) решения не несёт
+      — оно записано только в плане сессии (plan-final.md R1). Событие одобрения не публиковать, пока
+      решение не опубликовано комментарием в kacho#2703: иначе ссылка документа указывает на носитель,
+      которого нет.
+accepted_parts: >-
+  Правка Ф1-24 (каждая полоса нашего объявления) сверена с Ф4-06 (N = M при любом N); предикат
+  kaname#177 на голове → 0.
+constructibility: >-
+  Посева не было: стенда в задании нет. B1 опровергнут состоянием трекера и деревом края без
+  посева.
+event_body: acceptance-reviewer · CHANGES_REQUESTED · e24ee90a34bb1f2919280d987ed7dd532f01545cb72ef5c742e6d30b7172a705
+effective_approval:
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]

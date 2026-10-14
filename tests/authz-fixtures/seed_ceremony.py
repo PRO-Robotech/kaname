@@ -58,8 +58,11 @@
 умеет писать): адреса двух поверхностей, по которым шаги доказаны; два
 конфиденциальных клиента с адресами возврата (их читает набор
 `kaname-authorization-code`); предъявитель человека уровня «1», его идентификатор
-и почта. Режим стенда чарта на этом останавливается: человек стенда там один, и
-второй фактор ему заводит и снимает набор `kaname-second-factor`. Волна пишет
+и почта. Режим стенда чарта сверх того заводит НАДЗОР ОБЛАКА — своего человека с
+`system_admin` на кластере и вторым фактором — и пишет его адрес, пароль и секрет
+фактора (`MINTED_SUPERVISOR`, kaname#468): блокировку личности в наборе
+восстановления зовёт только он. Человеку стенда второй фактор заводит и снимает
+набор `kaname-second-factor`. Волна пишет
 сверх того `MINTED_WAVE`: тот же человек уровня «2» и его личный аккаунт, второй
 человек без выдач, приглашаемый человек и слоты заведения аккаунта. Чего не
 пишет ни один режим: слот повышенного уровня машинного распорядителя
@@ -71,7 +74,7 @@
     1  — НАХОДКА: продукт ответил не по контракту там, где посев предъявил всё,
          чего контракт требует. Вердикт о дереве;
    75  — УСЛОВИЕ НЕ СОЗДАНО: поверхность недостижима, листа нет, нет `grpcurl`,
-         стенд не передал человека либо (волна) не назван приёмник писем.
+         стенд не передал человека либо не назван приёмник писем.
          Вердикта о дереве нет НИ ОДНОГО.
 
 СЕКРЕТЫ НЕ ПЕЧАТАЮТСЯ НИКОГДА — ни пароль, ни секрет клиента, ни токен: журнал
@@ -154,12 +157,20 @@ MINTED_CEREMONY = ("jwtHumanCeremony", "ceremonyUserId", "ceremonyEmail")
 # кейсов в одного человека значит воспроизводить сценарий, который продукт
 # отвергает. Имена слотов — те, что читают кейсы (`cases/iam-account.py`,
 # `cases/iam-account-redesign.py`, `cases/rbac-visibility-set.py`).
-ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop",
+ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop", "AccRsv",
                    "AccRdDerive", "AccRdSaga", "AccRdRestrict", "RbacVisSet",
                    # Арендаторы полосы «идентификатор указан при создании» (kaname#549,
                    # приёмка account-id-may-be-supplied-at-create §6.2): по человеку на
                    # заводящий сценарий и один общий для незаводящих.
                    "AidTen01", "AidTen21", "AidTen23", "AidTen25", "AidTenShared")
+
+# СЛОТЫ УХОДЯЩЕГО АРЕНДАТОРА (kaname#664, приёмка
+# own-account-and-identity-are-removed-in-order, S4 и близнецы KN664-11/36).
+# Кейс снимает у человека проект, аккаунт и самого человека — это
+# РАСХОДУЮЩИЙ сценарий, и человек у него свой: общий человек церемонии после
+# такого кейса исчез бы у соседних наборов. Слотов два, по одному на
+# вызывающего: сам арендатор (KN664-50) и администратор облака (KN664-51).
+LEAVE_SLOTS = ("Kn664Leave", "Kn664Cloud")
 
 # СЛОТЫ АДМИНИСТРАТОРОВ ОБЛАКА (kaname#549, §6.2 приёмки). Тот же человек слота,
 # и посев выдаёт ему `system_admin` на кластере глаголом
@@ -170,7 +181,38 @@ ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop",
 # окружение: «выдано» не должно быть неотличимо от «выдано и не видно модели».
 # Правило слотов то же — один заводящий сценарий, один человек.
 ADMIN_SLOTS = ("AidAdm03", "AidAdm04", "AidAdm12", "AidAdm13", "AidAdm16",
-               "AidAdm19", "AidAdm22", "AidAdmShared")
+               "AidAdm19", "AidAdm22", "AidAdmShared",
+               # Администратор облака публичного набора администраторов кластера
+               # (`cases/kaname-cluster-admins.py`, kaname#661, приёмка ADM-CA §4):
+               # `h-admin/1` и `h-admin/2` — один человек двумя уровнями.
+               "CapAdmin")
+
+# ─── ПУБЛИЧНЫЙ НАБОР АДМИНИСТРАТОРОВ КЛАСТЕРА (kaname#661, приёмка ADM-CA §4) ───
+#
+# Сверх слота администратора набору нужны свои люди и своя учётка, каждый — на
+# прогон, а не общий с соседями: набор назначает и снимает, и общая цель делала
+# бы вердикт функцией порядка прогонов.
+#
+#   * `h-plain` (`CAP_PLAIN_SLOT`) — человек обоих уровней БЕЗ выдач на кластере;
+#     отсутствие выдачи утверждается ТЕМ ЖЕ вопросом, которым слоты
+#     администраторов утверждают её наличие, — и вопрос обязан ответить отказом;
+#   * `target` — человек-цель назначения с НЕПУСТЫМ отображаемым именем. Своей
+#     регистрацией имя не задать (полоса отвергает поле как лишнее), правкой
+#     человека тоже, поэтому он заводится ПРИГЛАШЕНИЕМ администратора набора в
+#     его личный аккаунт с `displayName`, а затем регистрируется тем же адресом и
+#     подтверждает его кодом письма. Имя утверждается непустым и равным заданному
+#     ДО записи ключа: на пустом имени проба транспорта (Н1) зелена без правки;
+#   * `blocked` — активный человек, которого блокирует и разблокирует сам набор
+#     (CAP-12): у приглашения без подтверждения внешней личности нет, и
+#     блокировать его продукт не даёт;
+#   * `sva-target` — включённая служебная учётка-цель в личном аккаунте
+#     администратора набора.
+CAP_PLAIN_SLOT = "CapPlain"
+CAP_TARGET_NAME = "CAP target {}"
+MINTED_CAP = ("ceremonyCapAdminEmail", "ceremonyCapAdminAccountId",
+              "ceremonyCapBlockedUserId", "ceremonyCapTargetUserId",
+              "ceremonyCapTargetEmail", "ceremonyCapTargetDisplayName",
+              "ceremonyCapSvaTargetId")
 
 # Посеянный служебный аккаунт: есть в каждой установке (миграция), и чужой ему
 # читает только администратор облака — это и есть вопрос-доказательство выдачи.
@@ -196,13 +238,39 @@ MINTED_WAVE = (
     # права не держит by construction. Предъявитель ему не нужен — доступ судит
     # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
     "ceremonyInviteeEmail", "ceremonyInviteeUserId",
-) + tuple(k for s in ADMISSION_SLOTS + ADMIN_SLOTS for k in slot_keys(s))
+) + tuple(k for s in ADMISSION_SLOTS + LEAVE_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT,)
+          for k in slot_keys(s)) + MINTED_CAP
 # Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
 # ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
 # опрашивают под другим), а машине уровень не поднимается и не нужен — его пишет
 # машинный посев (`seed_own_stand.py`, `MINTED_CREDENTIALS`).
 
-MINTED_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY + MINTED_WAVE
+# ─── НАДЗОР ОБЛАКА НА СТЕНДЕ ЧАРТА (kaname#468) ─────────────────────────────
+#
+# Позиции Ф5-17 и Ф5-25 (в) приёмки восстановления начинаются с личности,
+# заблокированной администратором. Блокировку производит `UserService.Block`:
+# отношение `identity_suspender` (надзор облака — `system_admin` на кластере) и пол
+# уровня «2». Набор восстановления гоняется на стенде чарта, и посев здесь заводит
+# такого администратора — своего человека, а не человека стенда: того читают
+# соседние наборы, и выданное ему право изменило бы их предмет.
+#
+# ПИШУТСЯ УДОСТОВЕРЕНИЯ ВХОДА, А НЕ ПРЕДЪЯВИТЕЛЬ — по двум причинам, каждой
+# достаточно. (1) Ключ предъявителя человека — ключ ЦЕРЕМОНИИ (`is_ceremony_key`
+# переписи), и коллекция, которая его читает, уходит в волну церемонии
+# автономного стенда, где полосы восстановления нет. (2) Предъявитель, выкованный
+# посевом, стареет между посевом и прогоном. Кейс поэтому куёт его сам: вход
+# паролем со вторым фактором (сессия «2») → код авторизации → обмен — той же
+# церемонией, что набор ключей доступа. Пишутся адрес, пароль и секрет фактора —
+# та же природа, что у `loginLaneEmail`/`loginLanePassword` человека стенда.
+#
+# Выдача утверждается ДО записи: предъявитель уровня «2» этого человека читает
+# посеянный служебный аккаунт (`prove_cluster_admin`). Стенд волны надзора не
+# заводит — волна этих ключей не пишет (`WAVE_KEYS`).
+MINTED_SUPERVISOR = ("cloudSupervisorEmail", "cloudSupervisorPassword",
+                     "cloudSupervisorTotpSecret")
+
+WAVE_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY + MINTED_WAVE
+MINTED_KEYS = WAVE_KEYS + MINTED_SUPERVISOR
 
 # Поверхность, которой зачитываются эти ключи: у собственных HTTP-дверей службы
 # ярлык переписи один. Самопроверка сверяет строку с выводом переписи.
@@ -422,6 +490,115 @@ def prove_cluster_admin(stand, http, token: str, user: str, sleep=time.sleep) ->
                   f"{ADMIN_PROOF_BUDGET_S:.0f} с")
 
 
+def prove_not_cluster_admin(stand, http, token: str, user: str) -> None:
+    """Выдачи НЕТ: тот же вопрос, что у `prove_cluster_admin`, обязан ответить
+    отказом. Ожидания нет — отсутствию нечего материализоваться, а `200` здесь
+    означает, что человек без выдач читает чужое как администратор облака."""
+    code, body = http.json_ask(f"{stand.own}/iam/v1/accounts/{SEEDED_SYSTEM_ACCOUNT}", token=token)
+    if code == 200:
+        raise Finding(f"человек {user} без выдач читает посеянный служебный аккаунт — "
+                      f"отрицанию набора нечем служить")
+    if code not in (403, 404):
+        raise Finding(f"вопрос-доказательство об отсутствии выдачи у {user} ответил кодом "
+                      f"{code} ({json.dumps(body, ensure_ascii=False)[:200]}) — ни отказа, "
+                      f"ни сокрытия")
+
+
+def _await_verification_code(mailbox, email: str, sleep) -> str | None:
+    """Код ПЕРВОГО письма с кодом подтверждения по адресу.
+
+    У приглашённого в приёмнике лежит ещё и письмо приглашения — оно кода не
+    несёт и может прийти раньше либо позже письма регистрации (обе очереди
+    асинхронны). Поэтому ждётся письмо С КОДОМ, а не «письмо сверх прочитанных»:
+    иначе письмо приглашения читалось бы письмом регистрации, кода в нём не
+    находилось, и посев просил бы второе письмо раньше интервала Р9 (`429`)."""
+    for _ in range(max(1, own_seed.LETTER_BUDGET_S // own_seed.LETTER_POLL_S)):
+        for letter in mailbox.letters(email):
+            code = own_seed.code_of(letter)
+            if code:
+                return code
+        sleep(own_seed.LETTER_POLL_S)
+    return None
+
+
+def _activate_invited(lane, mailbox, email: str, sleep) -> str:
+    """Приглашённый регистрируется тем же адресом и подтверждает его кодом
+    письма регистрации; возвращает id человека, названный входом."""
+    password = secrets.token_urlsafe(24)
+    lane_seed.register(lane, email, password)
+    code = _await_verification_code(mailbox, email, sleep)
+    if code is None:
+        raise Finding(f"письмо подтверждения адреса приглашённой цели не дошло до "
+                      f"приёмника писем стенда за {own_seed.LETTER_BUDGET_S} с")
+    first = lane_seed.login(lane, email, password)
+    if first is None:
+        raise Finding("вход приглашённой цели сразу после регистрации отвергнут (401)")
+    if not first["verified"]:
+        lane_seed.confirm(lane, first["bearer"], code)
+    return human_session(lane, email, password)[1]
+
+
+def seed_cap(stand, lane, http, mailbox, person, ceremony, boot: str,
+             admin: tuple[str, str, str], domain: str, suffix: str,
+             people_ids=(), sleep=time.sleep) -> dict:
+    """Условие публичного набора администраторов кластера (приёмка ADM-CA §4).
+
+    `admin` — (адрес, предъявитель уровня «2», id) человека слота `CapAdmin`.
+    `person`/`ceremony` — заводящие помощники волны; `people_ids` — уже
+    заведённые люди волны (цель обязана быть другим человеком)."""
+    email, step_up, admin_id = admin
+    out: dict[str, str] = {"ceremonyCapAdminEmail": email}
+    tenant = own_seed.resolve_tenant(http, stand.own, boot, email)
+    if tenant["userId"] != admin_id:
+        raise Finding("личный аккаунт администратора набора найден у другого человека")
+    out["ceremonyCapAdminAccountId"] = tenant["accountId"]
+
+    _, sp, plain = person(slot_slug(CAP_PLAIN_SLOT))
+    k1, k2, kid = slot_keys(CAP_PLAIN_SLOT)
+    out[k1] = ceremony(sp, plain, "1")
+    out[k2] = ceremony(level2_session(lane, sp), plain, "2")
+    out[kid] = plain
+    prove_not_cluster_admin(stand, http, out[k2], plain)
+    say("  ok   h-plain набора администраторов: уровни «1» и «2», выдачи на кластере нет")
+
+    _, _, blocked = person("cap-blocked")
+    out["ceremonyCapBlockedUserId"] = blocked
+
+    name = CAP_TARGET_NAME.format(suffix)
+    target_email = f"ceremony-cap-target-{suffix}@{domain}"
+    invited = own_seed.post_operation(http, stand.own, step_up, "/iam/v1/users:invite",
+                                      {"accountId": tenant["accountId"], "email": target_email,
+                                       "displayName": name},
+                                      "приглашение цели набора администраторов")
+    target = invited.get("id") or ""
+    if not target:
+        raise Finding("приглашение цели завершилось без идентификатора человека")
+    registered = _activate_invited(lane, mailbox, target_email, sleep)
+    if registered in people_ids:
+        raise Finding("приглашённая цель получила идентификатор уже заведённого человека")
+    if registered != target:
+        raise Finding(f"регистрация приглашённой цели дала другого человека ({registered}), "
+                      f"чем нашло приглашение ({target})")
+    code, row = http.json_ask(f"{stand.own}/iam/v1/users/{target}", token=boot)
+    shown = (row or {}).get("displayName") or ""
+    if code != 200 or not shown or shown != name:
+        raise Finding(f"отображаемое имя цели после активации {shown!r} (код {code}), ждали "
+                      f"{name!r} — на пустом имени утверждение о нём не различает правку")
+    out.update({"ceremonyCapTargetUserId": target, "ceremonyCapTargetEmail": target_email,
+                "ceremonyCapTargetDisplayName": name})
+    say("  ok   цель набора: приглашена с именем, зарегистрирована, имя сохранено активацией")
+
+    sva = own_seed.post_operation(http, stand.own, step_up, "/iam/v1/serviceAccounts",
+                                  {"accountId": tenant["accountId"],
+                                   "name": f"cap-sva-target-{suffix}"},
+                                  "служебная учётка-цель набора администраторов")
+    if not (sva.get("id") or "").startswith("sva") or sva.get("enabled") is False:
+        raise Finding(f"служебная учётка-цель заведена не включённой либо без id: {sva}")
+    out["ceremonyCapSvaTargetId"] = sva["id"]
+    say("  ok   служебная учётка-цель набора: заведена и включена")
+    return out
+
+
 def human_session(lane, email: str, password: str) -> tuple[str, str]:
     """Вход паролем через полосу: (печенье сессии, идентификатор человека)."""
     token, ctx = form_token(lane, "login")
@@ -503,8 +680,11 @@ def assert_human(stand, token: str, user: str) -> str:
     return str(me.get("email") or "")
 
 
-def seed(stand, lane, email: str, password: str, suffix: str) -> dict:
-    """Семь шагов; результат — значения ключей (секреты в журнал не уезжают)."""
+def seed(stand, lane, email: str, password: str, suffix: str, *, http, mailbox,
+         domain: str, sleep=time.sleep) -> dict:
+    """Семь шагов и надзор облака; результат — значения ключей (секреты в журнал
+    не уезжают). `http` — фронт под предъявителем (чтение доказательства выдачи),
+    `mailbox` — приёмник писем стенда, `domain` — домен адреса надзора."""
     _, principal = bootstrap(stand)
     say("  ok   машинный system_admin выкован чеканкой и принят фронтом")
     cid, csec = create_confidential(stand, principal, f"ceremony-a-{suffix}",
@@ -519,12 +699,34 @@ def seed(stand, lane, email: str, password: str, suffix: str) -> dict:
     say("  ok   код обменян секретом клиента на токен")
     shown = assert_human(stand, token, user)
     say("  ok   собственный фронт принял токен, субъект — вошедший человек")
-    return {"iamRegistryTokenBaseUrl": stand.issuance, "ownRestBaseUrl": stand.own,
-            "oauthClientId": cid, "oauthClientSecret": csec,
-            "oauthRedirectUri": REDIRECT, "oauthRedirectUriAlt": REDIRECT_ALT,
-            "oauthOtherClientId": oid, "oauthOtherClientSecret": osec,
-            "jwtHumanCeremony": token, "ceremonyUserId": user,
-            "ceremonyEmail": shown or email}
+    values = {"iamRegistryTokenBaseUrl": stand.issuance, "ownRestBaseUrl": stand.own,
+              "oauthClientId": cid, "oauthClientSecret": csec,
+              "oauthRedirectUri": REDIRECT, "oauthRedirectUriAlt": REDIRECT_ALT,
+              "oauthOtherClientId": oid, "oauthOtherClientSecret": osec,
+              "jwtHumanCeremony": token, "ceremonyUserId": user,
+              "ceremonyEmail": shown or email}
+    values.update(seed_supervisor(stand, lane, http, mailbox, principal, (cid, csec),
+                                  suffix, domain, sleep))
+    return values
+
+
+def seed_supervisor(stand, lane, http, mailbox, principal: str, client: tuple[str, str],
+                    suffix: str, domain: str, sleep=time.sleep) -> dict:
+    """Надзор облака стенда чарта: свой человек, второй фактор, `system_admin`.
+
+    Выдача утверждается предъявителем уровня «2» этого человека — тем уровнем,
+    которого требует блокировка, — прежде чем удостоверения уезжают в окружение."""
+    email = f"cloud-supervisor-{suffix}@{domain}"
+    password = secrets.token_urlsafe(24)
+    session, user = new_human(lane, mailbox, email, password, sleep)
+    raised, secret = enroll_second_factor(lane, session)
+    grant_cluster_admin(stand, principal, user)
+    bearer, _ = ceremony_bearer(stand, client, raised, user, "2")
+    prove_cluster_admin(stand, http, bearer, user, sleep)
+    say("  ok   надзор облака: свой человек, второй фактор заведён, system_admin "
+        "утверждён чтением посеянного служебного аккаунта под предъявителем уровня «2»")
+    return {"cloudSupervisorEmail": email, "cloudSupervisorPassword": password,
+            "cloudSupervisorTotpSecret": secret}
 
 
 # ─────────────────────────── волна церемонии ─────────────────────────────────
@@ -588,6 +790,25 @@ def new_human(lane, mailbox, email: str, password: str,
 def level2_session(lane, session: str) -> str:
     """Второй фактор: заведение → подтверждение кодом по времени. Подтверждение
     перевыпускает сессию уровнем «2» (Ф12-02) — её носитель и возвращается."""
+    return enroll_second_factor(lane, session)[0]
+
+
+def enroll_second_factor(lane, session: str) -> tuple[str, str]:
+    """Заведение и подтверждение второго фактора: (носитель сессии «2», секрет).
+
+    Секрет нужен тому, кто входит этим человеком позже со вторым фактором
+    (надзор облака стенда чарта); волне — только носитель (`level2_session`)."""
+    raised, secret, _ = enroll_second_factor_with_codes(lane, session)
+    return raised, secret
+
+
+def enroll_second_factor_with_codes(lane, session: str) -> tuple[str, str, list[str]]:
+    """То же заведение, и сверх того — запасные коды, которые подтверждение
+    показывает один раз (Ф12-02): (носитель сессии «2», секрет, коды).
+
+    Коды нужны тому, кто снимает фактор глаголом продукта (Ф12-28) без второго
+    шага кода по времени: код подтверждения того же шага повтором не годится.
+    Пустой перечень здесь не находка — её называет тот, кому коды нужны."""
     token, ctx = form_token(lane, SECOND_FACTOR_FORM, {"kaname_session": session})
     cookies = {"kaname_form": ctx, "kaname_session": session}
     code, _, text = lane.ask("POST", ENROLL, body={"csrfToken": token}, cookies=cookies)
@@ -617,7 +838,11 @@ def level2_session(lane, session: str) -> str:
         raise Finding(f"подтверждение второго фактора: уровень сессии {level!r} и "
                       f"носитель {'перевыпущен' if raised else 'НЕ перевыпущен'} — "
                       f"уровня «2» подтверждение не дало (Ф12-02)")
-    return raised
+    try:
+        codes = json.loads(text or "{}").get("backupCodes") or []
+    except (json.JSONDecodeError, AttributeError):
+        codes = []
+    return raised, secret, [c for c in codes if isinstance(c, str) and c] if isinstance(codes, list) else []
 
 
 def ceremony_bearer(stand, client: tuple[str, str], session: str, user: str,
@@ -663,8 +888,8 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
               "oauthOtherClientId": oid, "oauthOtherClientSecret": osec}
     people: dict[str, str] = {}
 
-    def person(tag: str) -> tuple[str, str, str]:
-        email = f"ceremony-{tag}-{suffix}@{domain}"
+    def person(tag: str, email: str = "") -> tuple[str, str, str]:
+        email = email or f"ceremony-{tag}-{suffix}@{domain}"
         session, user = new_human(lane, mailbox, email, secrets.token_urlsafe(24), sleep)
         if user in people.values():
             raise Finding(f"человек «{tag}» получил идентификатор уже заведённого — "
@@ -699,21 +924,36 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
         values[kid] = su
     say(f"  ok   слоты заведения аккаунта: {len(ADMISSION_SLOTS)} людей, у каждого "
         f"предъявители уровней «1» и «2»")
-    for slot in ADMIN_SLOTS:
+    for slot in LEAVE_SLOTS:
         _, ss, su = person(slot_slug(slot))
+        k1, k2, kid = slot_keys(slot)
+        values[k1], _ = ceremony_bearer(stand, client, ss, su, "1")
+        values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
+        values[kid] = su
+    say(f"  ok   слоты уходящего арендатора: {len(LEAVE_SLOTS)} людей, у каждого "
+        f"предъявители уровней «1» и «2»")
+    cap_admin = None
+    for slot in ADMIN_SLOTS:
+        se, ss, su = person(slot_slug(slot))
         grant_cluster_admin(stand, principal, su)
         k1, k2, kid = slot_keys(slot)
         values[k1], _ = ceremony_bearer(stand, client, ss, su, "1")
         values[k2], _ = ceremony_bearer(stand, client, level2_session(lane, ss), su, "2")
         values[kid] = su
         prove_cluster_admin(stand, http, values[k1], su, sleep)
+        if slot == "CapAdmin":
+            cap_admin = (se, values[k2], su)
     say(f"  ok   слоты администраторов облака: {len(ADMIN_SLOTS)} людей, выдача "
         f"system_admin утверждена чтением посеянного служебного аккаунта")
+    values.update(seed_cap(
+        stand, lane, http, mailbox, person,
+        lambda sess, who, level: ceremony_bearer(stand, client, sess, who, level)[0],
+        boot, cap_admin, domain, suffix, people_ids=tuple(people.values()), sleep=sleep))
     say(f"  ok   людей заведено {len(people)}, все разные")
     return values
 
 
-BASE_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY
+BASE_KEYS = MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_CEREMONY + MINTED_SUPERVISOR
 
 
 def env_patch(values: dict, keys: tuple[str, ...] = BASE_KEYS) -> dict:
@@ -733,6 +973,11 @@ def run(args: argparse.Namespace) -> int:
     for name in ("lane_url", "issuance_url", "own_url", "grpc_addr", "pki"):
         if not getattr(args, name):
             raise Unmet(f"не назван --{name.replace('_', '-')} — поверхности, которую сеять, нет")
+    # Приёмник писем — условие ОБОИХ режимов: людей, которых посев заводит сам
+    # (волна; надзор облака стенда чарта), подтверждает код из письма.
+    if not args.mailbox_url:
+        raise Unmet("не назван --mailbox-url — код подтверждения адреса заводимых "
+                    "людей читать неоткуда")
     pki = pathlib.Path(args.pki)
     env_file = pathlib.Path(args.env_file)
     stand = Surfaces(pki, args.grpc_addr, args.issuance_url, args.own_url, ROOT / "proto",
@@ -742,15 +987,14 @@ def run(args: argparse.Namespace) -> int:
     lane = LaneHttp(args.lane_url, pki)
 
     if args.wave:
-        if not args.mailbox_url:
-            raise Unmet("не назван --mailbox-url — код подтверждения адреса заводимых "
-                        "людей читать неоткуда")
         values = seed_wave(stand, lane, own_seed.Http(pki), own_seed.Mailbox(args.mailbox_url),
                            secrets.token_hex(4), args.email_domain)
-        keys = MINTED_KEYS
+        keys = WAVE_KEYS
     else:
         email, password = credentials()
-        values = seed(stand, lane, email, password, secrets.token_hex(4))
+        values = seed(stand, lane, email, password, secrets.token_hex(4),
+                      http=own_seed.Http(pki), mailbox=own_seed.Mailbox(args.mailbox_url),
+                      domain=args.email_domain)
         keys = BASE_KEYS
     patch = env_patch(values, keys)
     replaced = write_env(patch, env_file, pathlib.Path(args.env_template))
@@ -886,6 +1130,7 @@ class _WaveWorld:
         self.requests = 0
         self.codes: dict[str, tuple[str, str]] = {}
         self.admins: set[str] = set()
+        self.ops: dict[str, dict] = {}
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
 
@@ -909,8 +1154,12 @@ class _WaveWorld:
         if path.startswith("/iam/v1/auth/csrf"):
             return 200, ["kaname_form=ctx; Path=/"], '{"csrfToken":"t"}'
         if path == "/iam/v1/auth/register":
-            uid = self._uid(len(self.people) + 1)
-            self.people[body["email"]] = {"id": uid, "pw": body["password"], "verified": False}
+            # Приглашённый адрес регистрация АКТИВИРУЕТ: строка та же, имя
+            # приглашения сохраняется (пустое имя активации прежнего не трогает).
+            prior = self.people.get(body["email"])
+            uid = prior["id"] if prior else self._uid(len(self.people) + 1)
+            self.people[body["email"]] = {"id": uid, "pw": body["password"], "verified": False,
+                                          "name": (prior or {}).get("name", "")}
             self._send(body["email"])
             return 200, [f"kaname_session=s1-{uid}; Path=/"], "{}"
         if path == "/iam/v1/auth/login":
@@ -987,6 +1236,26 @@ class _WaveWorld:
 
     # фронт под бутстрапом (перечни для разрешения арендатора)
     def json_ask(self, url, **kw):
+        if kw.get("method") == "POST" and url.endswith("/iam/v1/users:invite"):
+            body = kw["body"]
+            uid = self._uid(len(self.people) + 1)
+            name = "" if self.inj.get("target_name_lost") else body.get("displayName", "")
+            self.people[body["email"]] = {"id": uid, "pw": None, "verified": False, "name": name}
+            # Письмо приглашения — БЕЗ кода и ПЕРВЫМ в приёмнике: посев, читающий
+            # «первое письмо» как письмо регистрации, спотыкался бы на нём.
+            self.letters.setdefault(body["email"], []).append(
+                (self.now, "Вас пригласили в аккаунт.\n"))
+            self.ops[f"iop{len(self.ops)}"] = {"id": uid, "displayName": name}
+            return 200, {"id": f"iop{len(self.ops) - 1}"}
+        if kw.get("method") == "POST" and url.endswith("/iam/v1/serviceAccounts"):
+            self.ops[f"iop{len(self.ops)}"] = {"id": f"sva{len(self.ops):017d}", "enabled": True}
+            return 200, {"id": f"iop{len(self.ops) - 1}"}
+        if "/operations/" in url:
+            return 200, {"done": True, "response": self.ops[url.rsplit("/", 1)[1]]}
+        if "/iam/v1/users/" in url:
+            uid = url.rsplit("/", 1)[1]
+            who = next((w for w in self.people.values() if w["id"] == uid), None)
+            return (200, {"id": uid, "displayName": who.get("name", "")}) if who else (404, {})
         # Инъекция `foreign_owner`: строка человека по адресу и её личный аккаунт —
         # у ДРУГОГО идентификатора, чем назвал вход.
         row = (lambda w: "usrforeign" if self.inj.get("foreign_owner") else w["id"])
@@ -1002,7 +1271,7 @@ class _WaveWorld:
         if url.endswith("/iam/v1/accounts/" + SEEDED_SYSTEM_ACCOUNT):
             # Чужой посеянный аккаунт читает только администратор облака.
             sub = token_claims(kw.get("token", "")).get("sub")
-            if sub in self.admins:
+            if sub in self.admins or self.inj.get("plain_is_admin"):
                 return 200, {"id": SEEDED_SYSTEM_ACCOUNT}
             return 404, {"code": 5, "message": f"Account {SEEDED_SYSTEM_ACCOUNT} not found"}
         return 404, {}
@@ -1033,13 +1302,23 @@ def self_test() -> int:
     print("=== посев церемонии: различение исходов ===")
     E, P = "h@stand.invalid", "correct-horse"
 
+    # Отказы семи шагов наступают ДО надзора облака: подставной стенд базового
+    # режима его не умеет и не обязан. Законный мир чарта — целиком, с надзором, —
+    # мир волны с человеком стенда (`chart` ниже).
     def go(stand=None, lane=None):
-        return _outcome(lambda: seed(stand or _FakeStand(), lane or _FakeLane(), E, P, "t"))
+        return _outcome(lambda: seed(stand or _FakeStand(), lane or _FakeLane(), E, P, "t",
+                                     http=None, mailbox=None, domain="stand.invalid"))
 
-    got = go()
+    def chart(**inj):
+        w = _WaveWorld(**inj)
+        w.people[E] = {"id": "usrstand", "pw": P, "verified": True}
+        return _outcome(lambda: seed(w, w, E, P, "t", http=w, mailbox=_Mail(w),
+                                     domain="stand.invalid", sleep=w.sleep)), w
+
+    got, _ = chart()
     vals = json.loads(got[1]) if got[0] == "ok" else {}
     _c("(−) законный мир — предъявитель человека выкован, клиенты разные",
-       got[0] == "ok" and vals.get("jwtHumanCeremony") == "human"
+       got[0] == "ok" and token_claims(vals.get("jwtHumanCeremony", "e30.e30.x")).get("sub") == "usrstand"
        and vals.get("oauthClientId") != vals.get("oauthOtherClientId"), f"{got}")
     for label, inj, needle in (
         ("фронт не принял бутстрап", {"boot_refused": True}, "НЕ ПРИНЯЛ бутстрап"),
@@ -1073,7 +1352,7 @@ def self_test() -> int:
                                         "https://y", ROOT / "proto"))
         _c("(+) листов нет — условие не создано", got[0] == "unmet", f"{got}")
 
-        ok = go()
+        ok, _ = chart()
         patch = env_patch(json.loads(ok[1])) if ok[0] == "ok" else {}
         _c("режим стенда чарта: объявленные ключи = записываемые (в обе стороны)",
            set(patch) == set(BASE_KEYS), f"{sorted(patch)} против {sorted(BASE_KEYS)}")
@@ -1124,8 +1403,8 @@ def self_test() -> int:
     vals = json.loads(got[1]) if got[0] == "ok" else {}
     levels = {k: token_claims(v).get("acr") for k, v in vals.items() if k.startswith("jwt")}
     _c("(−) законный мир волны — записываемые ключи = объявленные (в обе стороны)",
-       got[0] == "ok" and set(env_patch(vals, MINTED_KEYS)) == set(MINTED_KEYS)
-       and set(vals) == set(MINTED_KEYS), f"{got[0]}: {sorted(set(vals) ^ set(MINTED_KEYS))}")
+       got[0] == "ok" and set(env_patch(vals, WAVE_KEYS)) == set(WAVE_KEYS)
+       and set(vals) == set(WAVE_KEYS), f"{got[0]}: {sorted(set(vals) ^ set(WAVE_KEYS))}")
     _c("(−) уровень каждого предъявителя — по имени слота: `…StepUp` — «2», прочие — «1»",
        bool(levels) and all(lv == ("2" if k.endswith("StepUp") else "1")
                             for k, lv in levels.items()), f"{levels}")
@@ -1159,10 +1438,48 @@ def self_test() -> int:
         ("GrantAdmin отказал", {"grant_refused": True}, "GrantAdmin"),
         ("выдача system_admin принята, но модели не видна", {"grant_invisible": True},
          "не видна модели"),
+        ("человек без выдач читает чужое как администратор облака", {"plain_is_admin": True},
+         "отрицанию набора нечем служить"),
+        ("имя цели набора администраторов потеряно активацией", {"target_name_lost": True},
+         "утверждение о нём не различает правку"),
     ):
         got, _ = wave(**inj)
         _c(f"(+) {label} — находка, причина названа",
            got[0] == "finding" and needle in got[1], f"{got}")
+
+    print("=== надзор облака на стенде чарта (kaname#468): различение исходов ===")
+    got, world = chart()
+    vals = json.loads(got[1]) if got[0] == "ok" else {}
+    sup = vals.get("cloudSupervisorEmail", "")
+    sup_id = (world.people.get(sup) or {}).get("id")
+    _c("(−) законный мир чарта — записываемые ключи = объявленные (в обе стороны)",
+       got[0] == "ok" and set(env_patch(vals)) == set(BASE_KEYS) and set(vals) == set(BASE_KEYS),
+       f"{got[0]}: {sorted(set(vals) ^ set(BASE_KEYS))}")
+    _c("(−) надзор облака — свой человек: не человек стенда, адрес подтверждён, пароль входит",
+       bool(sup_id) and sup != E and world.people[sup]["verified"]
+       and world.people[sup]["pw"] == vals.get("cloudSupervisorPassword"), f"{sup!r}: {world.people}")
+    _c("(−) system_admin выдан ровно надзору облака, человеку стенда — нет",
+       world.admins == {sup_id}, f"{sorted(world.admins)}")
+    _c("(−) секрет фактора надзора — тот, которым подтверждено заведение (код по нему проходит)",
+       vals.get("cloudSupervisorTotpSecret") == _WaveWorld.SECRET, f"{vals.get('cloudSupervisorTotpSecret')!r}")
+    for label, inj, needle in (
+        ("GrantAdmin надзору отказал", {"grant_refused": True}, "GrantAdmin"),
+        ("выдача надзору принята, но модели не видна", {"grant_invisible": True}, "не видна модели"),
+        ("заведение фактора надзора без секрета", {"no_secret": True}, "без секрета"),
+        ("подтверждение фактора надзора не подняло уровень", {"confirm_level_1": True},
+         "уровня «2» подтверждение не дало"),
+        ("письмо подтверждения надзора не дошло", {"no_letter": True}, "не дошло до приёмника"),
+    ):
+        got, _ = chart(**inj)
+        _c(f"(+) {label} — находка, причина названа",
+           got[0] == "finding" and needle in got[1], f"{got}")
+    ns = argparse.Namespace(lane_url="https://x", issuance_url="https://x", own_url="https://x",
+                            grpc_addr="127.0.0.1:1", pki="/nonexistent-pki", wave=False,
+                            mailbox_url="", email_domain="stand.invalid",
+                            env_file="/nonexistent/env.json", env_template="/nonexistent/t.json")
+    got = _outcome(lambda: run(ns))
+    _c("(+) стенд чарта не назвал приёмник писем — условие не создано, и названо, чего нет",
+       got[0] == "unmet" and "--mailbox-url" in got[1], f"{got}")
 
     try:
         surface, census = _census_surface()
@@ -1173,7 +1490,8 @@ def self_test() -> int:
     if census is not None:
         _c("ключи церемонии распознаны переписью как ключи ЦЕРЕМОНИИ, прочие — нет",
            all(census.is_ceremony_key(k) for k in MINTED_CEREMONY + MINTED_WAVE)
-           and not any(census.is_ceremony_key(k) for k in MINTED_ADDRESSES + MINTED_CLIENTS),
+           and not any(census.is_ceremony_key(k)
+                       for k in MINTED_ADDRESSES + MINTED_CLIENTS + MINTED_SUPERVISOR),
            f"{[(k, census.is_ceremony_key(k)) for k in MINTED_KEYS]}")
 
     print()
@@ -1213,9 +1531,9 @@ def main() -> int:
                          "(регистрация, подтверждение адреса, второй фактор) и пишет все "
                          "ключи волны; без флага — человек стенда чарта из окружения")
     ap.add_argument("--mailbox-url", default=env("KANAME_CEREMONY_MAILBOX_URL", ""),
-                    help="адрес чтения приёмника писем стенда (для --wave)")
+                    help="адрес чтения приёмника писем стенда (люди, которых посев заводит сам)")
     ap.add_argument("--email-domain", default="kaname.local",
-                    help="домен адресов заводимых людей (для --wave)")
+                    help="домен адресов заводимых людей")
     ap.add_argument("--minted-keys", action="store_true",
                     help="напечатать ключи окружения, которые пишет посев, и выйти")
     ap.add_argument("--minted-surface", action="store_true",

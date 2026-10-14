@@ -15,7 +15,7 @@ package pg_test
 //   - повтор идентификатора строки: коллизия ключа → 23505 → ErrAlreadyExists.
 //   - USR-09(c): FK user_id → users ON DELETE CASCADE (удаление user снимает токены).
 //   - USR-13: DeleteOwnedByID идемпотентен и СУЖЕН ВЛАДЕЛЬЦЕМ — повторное
-//     снятие и снятие чужой строки дают found=false БЕЗ ошибки (#1216).
+//     снятие и снятие чужой строки дают found=false БЕЗ ошибки (kacho#1216).
 //
 // Запуск: `go test ./internal/repo/kaname/pg/... -run UserOAuthClient`. Skip с -short.
 
@@ -42,7 +42,9 @@ import (
 // newUOC — доменная строка токена под данного user, с уникальным id.
 func newUOC(userID domain.UserID, suffix string) domain.UserOAuthClient {
 	return domain.UserOAuthClient{
-		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// Момент выдачи — обязательный вход записи (kaname#589).
+		CreatedAt: time.Now().UTC(),
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (kacho#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
@@ -234,9 +236,9 @@ func TestUserOAuthClient_09c_UserDelete_CascadesTokens(t *testing.T) {
 	var accID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT account_id FROM users WHERE id = $1`, string(ownerID)).Scan(&accID))
 	memberID := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, withWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, 'Member', 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, 'Member', 'ACTIVE')`),
 		string(memberID), accID,
 		"ext-member-"+string(memberID), "member-"+string(memberID)+"@example.com")
 	require.NoError(t, err)
@@ -254,7 +256,7 @@ func TestUserOAuthClient_09c_UserDelete_CascadesTokens(t *testing.T) {
 }
 
 // TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped — USR-13 в
-// редакции #1216.
+// редакции kacho#1216.
 //
 // Прежняя редакция утверждала обратное: «повторный revoke уже удалённого токена
 // → ErrNotFound». Утверждение было верным про код, который здесь стоял, и

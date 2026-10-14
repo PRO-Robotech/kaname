@@ -66,7 +66,7 @@ func TestRegistration_F4_19_DeclaredAdmissionRatePassesTheGuard(t *testing.T) {
 }
 
 // TestRegistration_EnvVarsArmTheFields — переменные, названные текстом отказа,
-// доезжают до полей (умолчания нет, привязка явная — как у трёх потолков).
+// доезжают до полей (умолчания нет, привязка явная — как у собственных потолков).
 func TestRegistration_EnvVarsArmTheFields(t *testing.T) {
 	t.Setenv("KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW", "0")
 	t.Setenv("KANAME_AUTHN__REGISTRATION__ADMISSION_WINDOW", "45m")

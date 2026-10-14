@@ -55,8 +55,12 @@ import (
 // Значение отказа положения (Р3) — ОДНО на полосе формы и на обоих
 // слушателях; второе написание — находка (инв. 2).
 const (
-	// TextNotVerified — текст отказа положения.
-	TextNotVerified = "email address is not verified"
+	// TextNotVerified — текст отказа положения: состояние и шаг, который его
+	// снимает, — путь глагола подтверждения полосы формы, доступного в положении
+	// подтверждения (Р3, редакция 5, kaname#526). Край, судящий пути сам,
+	// произносит тот же текст своей копией; совпадение держат дословные пробы
+	// обеих сторон.
+	TextNotVerified = "email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)"
 	// ReasonNotVerified — машинный признак отказа положения (`ErrorInfo.reason`).
 	ReasonNotVerified = "EMAIL_NOT_VERIFIED"
 	// DenyReason — причина отказа в ответе двери решения (`deny_reasons`, Р4а).

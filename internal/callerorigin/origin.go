@@ -78,3 +78,48 @@ func AssuranceFrom(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(assuranceKey{}).(string)
 	return v, ok
 }
+
+type credentialIDKey struct{}
+
+// WithCredentialID кладёт ИДЕНТИФИКАТОР ВЫПУСКА предъявленного удостоверения
+// (`jti` токена доступа).
+//
+// Кладётся ТОЛЬКО после того, как удостоверение проверено целиком, — по той же
+// причине, что уровень доверия. Кладут двое: читатель предъявленного, проверив
+// токен сам, и читатель переданного краем (`internal/edgecredential`,
+// kaname#677) — номер выпуска токена, который проверил край, и только от
+// доверенного отправителя личности. Читатель — звено, которому нужна запись
+// сессии вызывающего: выпуск называет своё семейство, семейство — сессию, в
+// которой шла церемония (снятие ключа доступа, Ф13 Р8, kaname#669).
+func WithCredentialID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, credentialIDKey{}, id)
+}
+
+// CredentialIDFrom возвращает идентификатор выпуска и признак его присутствия.
+func CredentialIDFrom(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(credentialIDKey{}).(string)
+	return v, ok && v != ""
+}
+
+type sessionIDKey struct{}
+
+// WithSessionID кладёт НОМЕР ЗАПИСИ СЕССИИ, из которой человек звонит
+// (`hss-…`, kaname#677).
+//
+// Кладёт его ровно одно звено — читатель переданного краем
+// (`internal/edgecredential`), и только когда отправитель прошёл проверку
+// доверенного отправителя личности: то же решение, что пускает переданную
+// личность. Читателей два: снятие ключа доступа оставляет эту запись живой и
+// снимает прочие записи человека (Ф13 Р8); вопрос о правах выводит из неё
+// доводы способов и момента условия `mfa_fresh`, если запись жива и
+// принадлежит доверенной личности вопроса (kaname#133). Номер записи ничего не
+// аутентифицирует: им нельзя ни назваться, ни продлить сессию.
+func WithSessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, sessionIDKey{}, id)
+}
+
+// SessionIDFrom возвращает номер записи сессии и признак его присутствия.
+func SessionIDFrom(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(sessionIDKey{}).(string)
+	return v, ok && v != ""
+}

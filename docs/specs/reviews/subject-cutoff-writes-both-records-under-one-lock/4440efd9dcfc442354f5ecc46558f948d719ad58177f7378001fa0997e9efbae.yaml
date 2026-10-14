@@ -1,0 +1,95 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/subject-cutoff-writes-both-records-under-one-lock.md
+  sha256: 4440efd9dcfc442354f5ecc46558f948d719ad58177f7378001fa0997e9efbae
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 9bac42bdc
+  content_commit: 53a220b8757c9326546c62cafedcacd8d765385d
+  branch: '336'
+  task: PRO-Robotech/kaname#336
+  related_tasks: [PRO-Robotech/kaname#335, PRO-Robotech/kaname#171]
+  lines: 692
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/subject-cutoff-writes-both-records-under-one-lock.md
+    в копии kacho-workspace/tmp/kaname-336-acc @ 53a220b87 → 4440efd9…9efbae (совпал с заданием)
+  measurement_revisions: >-
+    Все замеры — в копии kaname-336-acc @ 53a220b87. Документ объявляет ревизию 8a84dcff6e;
+    9bac42bdc..53a220b87 добавляет только документ приёмки.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-03'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих два (CONSTRUCTIBILITY, TWIN). Санкции на код по этой редакции нет.
+
+blocking:
+  - kind: CONSTRUCTIBILITY
+    scenario: KN-SCL-12
+    claim: >-
+      Общее «Дано» сеет человека как `ceremonyScene` — владельцем своего аккаунта.
+      Такого человека удалить из `kaname.users` нельзя: `accounts_owner_fk` ON DELETE RESTRICT
+      (`0001_initial.sql:5402`). Шаг «строка человека W удалена» при названном посеве не
+      исполним, сценарий краснел бы не тем.
+    measured: >-
+      Временная проба посева (снята, в дерево не вошла): ceremonyScene + первая запись +
+      DELETE → `ERROR: ... violates foreign key constraint "accounts_owner_fk" (SQLSTATE 23503)`.
+      Близнец посева: второй человек того же аккаунта (не владелец) удаляется, первая запись
+      снята каскадом (count=0).
+    fix: >-
+      Назвать посев W явно: член чужого аккаунта, не владелец (вторая строка `users` в аккаунте,
+      заведённом ceremonyScene), без привязок субъекта.
+  - kind: TWIN
+    scenario: KN-SCL-06
+    claim: >-
+      У 06 (блокировка с моментом раньше стоящего не меняет вторую запись) положительный
+      близнец не назван. 05 — близнец 04 на триггере учётки; 09 отличается от 06 больше чем
+      одним фактом (стоящей записи нет вовсе). Нужен близнец на триггере человека: стоящий
+      момент `now() - 1 час` → блокировка берёт `owner is no longer active` /
+      `kaname:owner-deactivated` и момент транзакции.
+    measured: >-
+      Та же временная проба: стоящий момент now()+1h → момент сохранён, причина и решивший
+      переписаны на `owner is no longer active` / `kaname:owner-deactivated` (красное 06 до
+      наката подтверждено); now()-1h → момент транзакции и те же значения (близнец зелен до
+      наката). Пара отличается ровно стоящим моментом.
+
+important_nonblocking:
+  - "KN-SCL-11 — до наката исход недетерминирован; документ это называет и исключает из разводки §6 п.5. Принято."
+  - "DoD п.12, инъекция «одна функция без замка» — после добавления близнеца 06 назвать, что он остаётся зелёным."
+
+confirmed:
+  - "Перепись §0 перемерена: безусловная перезапись → 2 (0001_initial.sql); триггеров `minted_cutoff_on_` → 4; операторов DELETE записей отсечки → 1; сравнений Before/After(cutoff) → 3."
+  - "KN-SCL-08 до наката: первая запись с причиной 122 знака и NULL-решившим ложится одна, второй нет — красное подтверждено посевом."
+  - "S3: `rule.go:165` `issued.Time.Before(cutoff)`; `newStand` now = 2026-09-06T12:00:00Z (целая секунда); `s.good`, `revoke`, `assertSingleRefusal`, `TestKAN_REV_01_…`, `mintToken(t, sub, iat, pub)`, `newHandler(…, now)` существуют."
+  - "Производитель назван у каждого «Тогда» (§5, 18 из 18); близнец у отрицаний — 17 из 18 (без 06)."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · CHANGES_REQUESTED · sha256 4440efd9dcfc442354f5ecc46558f948d719ad58177f7378001fa0997e9efbae
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

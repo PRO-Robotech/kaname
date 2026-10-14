@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // role_scope_chain_stays_empty.go — САМОИСТЕКАЮЩИЙ гейт решения «меточную ось
-// сужать НЕ НАДО» (задача продукта #1913, приёмка
+// сужать НЕ НАДО» (задача продукта kacho#1913, приёмка
 // `docs/engineering/acceptance/role-withdrawal-has-a-producer.md` §2.8, §10
 // шаг 8).
 //

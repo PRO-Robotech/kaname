@@ -6,7 +6,7 @@ package pg_test
 // user_list_search_integration_test.go — поиск пользователя ПО ПОДСТРОКЕ на
 // стороне SQL.
 //
-// Предмет (#420). Пользователя знают по почте, и `name` у него нет вовсе.
+// Предмет (kacho#420). Пользователя знают по почте, и `name` у него нет вовсе.
 // Полное совпадение (`email="..."`) отвечает только тому, кто уже знает адрес
 // целиком; консоли нужен поиск по мере набора, а сужать список НА КЛИЕНТЕ
 // нельзя — клиент видит только загруженную страницу и врёт обо всём, что в неё
@@ -48,9 +48,9 @@ import (
 func seedUserWithEmail(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc domain.AccountID, email string) string {
 	t.Helper()
 	uid := ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, withWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		uid, string(acc), "ext-"+uid, email, email)
 	require.NoError(t, err, "seed user with email")
 	return uid

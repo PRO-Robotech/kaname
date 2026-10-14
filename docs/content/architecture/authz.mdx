@@ -139,8 +139,25 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
 
 ## Step-up (ACR floor) {#step-up}
 
-`required_acr_min=2` — **минимальный уровень свежести аутентификации** (second-factor): если ACR
-токена ниже требуемого, запрос отклоняется независимо от наличия отношения. Service→service-вызовы
+`required_acr_min=2` — **минимальный уровень уверенности аутентификации**: если ACR
+токена ниже требуемого, запрос не исполняется независимо от наличия отношения. Уровень `2` дают
+три источника — вход ключом доступа (всякое утверждение ключа, не дающее `3`, в том числе
+синхронизируемого), пароль с кодом по времени и пароль с запасным кодом; уровень `3` — только ключ доступа, выполнивший
+проверку пользователя и не допускающий резервного копирования; один пароль — `1`
+([полоса входа](/api/auth-lane#access-key-login)). Поэтому способ, чьё предъявление одно даёт
+`2` (ключ доступа), заводится и снимается только сессией `2`, а код второго фактора у человека с
+ключом заводится тоже сессией `2` ([второй фактор](/api/auth-lane#second-factor)). Так же и
+адрес почты у человека с кодом по времени либо ключом доступа меняется только сессией `2` — и
+запрос смены, и предъявление кода ([смена адреса](/api/auth-lane#email-change)). Заведённое у
+человека эти условия читают внутри своей транзакции записи, под замком, с которым несовместимо
+заведение способа: способ, заведённый одновременно с глаголом, глагол не пропускает.
+Свежесть предъявления этот порог не проверяет: он судит уровень сессии, а не давность входа.
+Окно свежести у заведения и снятия ключа доступа и у заведения второго фактора — **отдельная**
+проверка самого действия, с собственным отказом «предъявите удостоверение снова»; порог её не
+заменяет, и она не заменяет порога. Ответ — **указание
+повысить уровень**, а не отказ прав: `401` / `16`, текст, называющий шаг, и вызов
+`insufficient_user_authentication` с `acr_values` — одной формой на краю и на REST-фронте и
+gRPC службы ([форма указания](/api/rest-surface#step-up)). Service→service-вызовы
 (SA-principal) освобождены от ACR-floor.
 
 Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком. Критерий —
@@ -153,18 +170,24 @@ Floor стоит на **узком наборе** RPC, а не на пользо
   <thead><tr><th>Что меняется</th><th>Глаголы</th></tr></thead>
   <tbody>
     <tr><td>выдача и отзыв удостоверений</td><td><code>UserTokenService.Issue</code>, <code>UserTokenService.Revoke</code>, <code>SAKeyService.Issue</code>, <code>SAKeyService.Revoke</code></td></tr>
-    <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>, <code>AccessBindingService.Update</code>, <code>AccessBindingService.Delete</code>, <code>AccessBindingService.Revoke</code>, <code>RoleService.Update</code>, <code>GroupService.AddMember</code>, <code>GroupService.RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>, <code>InternalClusterService.RevokeAdmin</code></td></tr>
-    <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
+    <tr><td>заведение и снятие способа, дающего «2»</td><td><code>AccessKeyService.BeginRegistration</code>, <code>AccessKeyService.FinishRegistration</code>, <code>AccessKeyService.Revoke</code></td></tr>
+    <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>, <code>AccessBindingService.Update</code>, <code>AccessBindingService.Delete</code>, <code>AccessBindingService.Revoke</code>, <code>RoleService.Update</code>, <code>GroupService.AddMember</code>, <code>GroupService.RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>, <code>InternalClusterService.RevokeAdmin</code>, <code>ClusterService.GrantAdmin</code>, <code>ClusterService.RevokeAdmin</code></td></tr>
+    <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>UserService.ResetAccessKeys</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
     <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>, <code>InternalInteractiveClientService.Update</code>, <code>InternalInteractiveClientService.Delete</code></td></tr>
     <tr><td>применение модели доступов модуля</td><td><code>InternalModuleService.Apply</code></td></tr>
-    <tr><td>необратимое удаление</td><td><code>AccountService.Delete</code>, <code>ProjectService.Delete</code>, <code>GroupService.Delete</code>, <code>RoleService.Delete</code></td></tr>
+    <tr><td>необратимое удаление</td><td><code>AccountService.Delete</code>, <code>ProjectService.Delete</code>, <code>GroupService.Delete</code>, <code>RoleService.Delete</code>, <code>UserService.Delete</code>, <code>ServiceAccountService.Delete</code></td></tr>
   </tbody>
 </table>
 
 Приглашение и повторная отправка письма стоят в перечне по той же причине, что и
 `AccessBindingService.Create`: `projectId` + `roleId` заводят привязку атомарно с членством, и
 порог ниже порога привязки был бы обходом step-up через более дешёвую дверь; сброс второго
-фактора — надзор облака над способом входа человека.
+фактора и сброс ключей доступа — надзор облака над способами входа человека. Регистрация и
+снятие ключа доступа стоят не ниже выпуска личного токена: ключ открывает этот выпуск, и
+заведение способа дешевле открываемого им действия было бы той же дешёвой дверью; пол стоит на
+обоих глаголах церемонии, потому что испытание привязано к человеку, а не к сессии. Потерявший
+единственный способ «2» при живом пароле возвращает его через надзор облака
+(`UserService.ResetAccessKeys`), после чего заводит второй фактор свежей сессией «1».
 
 Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
 повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.
@@ -195,12 +218,12 @@ git grep -B40 'required_acr_min) = "2"' -- 'proto/kaname/cloud/iam/v1/*.proto' |
 ## Условия на кортежах
 
 Условие — предикат, который обязан быть истинным, чтобы отношение считалось действующим. Условия
-объявлены в модели прав и вычисляются при проверке по контексту запроса, собранному на краю:
+объявлены в модели прав и вычисляются при проверке по доводам, которые служба выводит сама (ниже):
 
 <table>
   <thead><tr><th>Условие</th><th>Семантика</th></tr></thead>
   <tbody>
-    <tr><td><code>mfa&#95;fresh</code></td><td>acr=3 (passkey/FIDO2) + <code>webauthn</code> в amr + MFA не старше 15 минут</td></tr>
+    <tr><td><code>mfa&#95;fresh</code></td><td>acr=3 — ключ доступа, выполнивший проверку пользователя и не допускающий резервного копирования (синхронизируемый ключ даёт <code>2</code> и условию не удовлетворяет) — + <code>webauthn</code> в amr + предъявление ключа в пределах окна, объявленного в самом условии модели</td></tr>
     <tr><td><code>non&#95;expired</code></td><td><code>now() &lt; valid&#95;until</code></td></tr>
     <tr><td><code>source&#95;ip&#95;in&#95;range</code></td><td>Source IP входит в один из настроенных CIDR</td></tr>
     <tr><td><code>jit&#95;window</code></td><td>Разрешено в течение <code>ttl&#95;seconds</code> после активации</td></tr>
@@ -210,9 +233,21 @@ git grep -B40 'required_acr_min) = "2"' -- 'proto/kaname/cloud/iam/v1/*.proto' |
 </table>
 
 **Условие задаёт сервер, а не тенант.** Оно навешивается там, где его объявляет сама модель: тип
-`cluster` принимает субъекта в отношение `console` только `with mfa_fresh`, тип
-`compute_instance` — так же для `ssh`/`console`. Ключ условия выбирает платформа при написании
-модели; в запросе на выдачу прав условие не передаётся.
+`compute_instance` принимает человека в отношения `ssh` и `console` только `with mfa_fresh`
+(служебную учётку на `ssh` — без условия). Ключ условия выбирает платформа при написании модели;
+в запросе на выдачу прав условие не передаётся. Прямой факт складывает триггер журнала, и он же
+прикладывает к факту человека на этих отношениях условие модели — факта человека на них без
+условия не бывает.
+
+**Доводы `mfa_fresh` приходят не из тела вопроса.** Тело вопроса о правах — вход вызывающего,
+поэтому служба вырезает из него всё, что описывает аутентификацию (`acr_value`, `amr_claims`,
+`mfa_at` и другие), и подставляет только то, чему доверяет сама: уровень уверенности — пересланный
+краем, а способы и момент — из **своей записи сессии вопроса**. Запись находится по номеру, который
+край узнал из ответа службы о сессии и переслал с вопросом доверенным ключом; годна она, только
+если жива на момент вопроса и принадлежит той же личности, от имени которой задан вопрос. Способы —
+множество предъявленного в этой сессии, момент — момент её аутентификации (повторное предъявление
+внутри сессии его не двигает). У вопроса без нашей сессии — токеном доступа, базовым
+удостоверением, от машинной учётки — доводов способов и момента нет, и условие ложно.
 
 :::warning Привязка условия не несёт
 `AccessBinding` **не имеет** полей условия. Теги `9`/`14` и имена `condition_id` /

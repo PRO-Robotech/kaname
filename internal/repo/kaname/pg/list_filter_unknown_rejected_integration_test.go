@@ -3,7 +3,7 @@
 
 package pg_test
 
-// list_filter_unknown_rejected_integration_test.go — #445: a List `filter`
+// list_filter_unknown_rejected_integration_test.go — kacho#445: a List `filter`
 // expression the service does not understand must be REFUSED BY NAME, never
 // accepted-and-ignored.
 //
@@ -70,7 +70,7 @@ func TestAccountList_UnknownFilter_445(t *testing.T) {
 
 	// NEGATIVE — every one of these is an expression the service cannot honour.
 	for _, expr := range []string{
-		`nam="acc-f445-kept"`, // near-miss field name — the #445 report's own example
+		`nam="acc-f445-kept"`, // near-miss field name — the kacho#445 report's own example
 		`label="x"`,           // field that exists on the resource but is not filterable
 		`acc-f445-kept`,       // bare value, no field and no operator
 		`name~"acc"`,          // known field, operator we do not implement

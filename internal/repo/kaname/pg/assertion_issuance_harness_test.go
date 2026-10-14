@@ -46,6 +46,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -140,7 +141,7 @@ func newIssuanceRig(t *testing.T, pool *pgxpool.Pool) issuanceRig {
 	}}
 	signer, err := tokensigner.New(tokensigner.Config{
 		Issuer:      assertionIssuer,
-		Clock:       func() time.Time { return issuedAt },
+		Clock:       momentclock.Func(func() time.Time { return issuedAt }),
 		MaxTokenTTL: tokenpolicy.MaxTokenTTL,
 	}, keys)
 	require.NoError(t, err)
@@ -149,7 +150,7 @@ func newIssuanceRig(t *testing.T, pool *pgxpool.Pool) issuanceRig {
 		AllowedAudiences: []string{assertionAudience},
 		DefaultAudience:  assertionAudience,
 		TokenTTL:         assertionTokenTTL,
-		Clock:            func() time.Time { return issuedAt },
+		Clock:            momentclock.Func(func() time.Time { return issuedAt }),
 	}, signer, issuanceClaims{}, kanamepg.NewSessionRevocationsAdapter(pool))
 	require.NoError(t, err)
 

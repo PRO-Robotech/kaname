@@ -7,10 +7,13 @@ package authzguard_test
 //
 // # Предмет
 //
-// Слушатель iam несёт БОЛЬШЕ, чем контракт iam: `pkg/grpcsrv.NewServer`
+// Слушатель iam несёт БОЛЬШЕ, чем контракт iam: `grpcsrv.NewServer` фундамента
 // регистрирует `grpc.health.v1.Health` каждому сервису платформы. Карта двери
 // выводится из аннотаций ПАКЕТОВ КОНТРАКТА, поэтому службы grpc-go в ней не
-// бывает by construction — и незамапленный метод дверь отвергает fail-closed.
+// бывает by construction, а незамапленный метод звено отвергает fail-closed.
+// Публичность `Health/Check` объявляет сам фундамент рядом с регистрацией
+// (`grpcsrv.PublicPlatformMethods`, corelib#90), и его звено доступа читает это
+// объявление после карты; своей разметки у двери нет (kaname#609).
 //
 // Для iam это не деталь: край объявляет `Health/Check` СВОЕЙ готовностью
 // («критичные зависимости» в gateway/internal/health/health.go — iam единственный
@@ -19,15 +22,13 @@ package authzguard_test
 // состоянии продукта, выкатка не сходится по сроку, а причина видна только в
 // журнале края.
 //
-// # Почему это не послабление, а сведение ДВУХ мест об одном предмете
+// # Почему это не послабление
 //
-// Решение об этом методе платформой уже принято и записано — единственная запись
-// круга публичных на крае (`gateway/internal/middleware/authz_public_allowlist.go`):
-// ответ КОНСТАНТЕН, одинаков для всякого вызывающего, не несёт ни арендатора, ни
-// идентификаторов, а гейтить живость вопросом о правах значит превратить перебой
-// модели в перезапуск всего кластера. Здесь та же запись доводится до
-// СЛУЖЕБНОЙ стороны того же вызова: край объявляет метод публичным, а служба
-// его отвергала — два места об одном предмете, из которых верно одно.
+// Решение об этом методе принято и записано: ответ КОНСТАНТЕН, одинаков для
+// всякого вызывающего, не несёт ни арендатора, ни идентификаторов, а гейтить
+// живость вопросом о правах значит превратить перебой модели в перезапуск всего
+// кластера. Записано оно ОДИН раз — в фундаменте; проба ниже держит, что дверь
+// службы его исполняет и не заводит второй копии.
 //
 // # Круг узок и проверяется в обе стороны
 //
@@ -37,11 +38,19 @@ package authzguard_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 // livenessProbeMethod — то, что зовёт край, опрашивая готовность бэкендов.
@@ -89,5 +98,56 @@ func TestOwnDoor_TheRestOfTheLivenessServiceStaysBehindTheDoor(t *testing.T) {
 		if got := status.Code(err); got != codes.PermissionDenied {
 			t.Fatalf("%s: код %s, ждали PermissionDenied", method, got)
 		}
+	}
+}
+
+// ОДНО МЕСТО (kaname#609): публичность `Health/Check` объявляет фундамент рядом с
+// регистрацией службы (`grpcsrv.PublicPlatformMethods`, corelib#90), и звено
+// доступа фундамента её читает. Своя разметка того же метода в двери была бы
+// вторым местом об одном предмете — и пережила бы снятие первого молча.
+//
+// Судится УЗЕЛ разбора, а не подстрока: полное имя метода строковым литералом в
+// исполняемой части пакета двери. Комментарий, объясняющий, почему разметки
+// здесь нет, находкой не является by construction. Объём осмотренного
+// печатается, пустой обход — отказ.
+func TestOwnDoor_LivenessPublicnessHasASingleHomeInTheFoundation(t *testing.T) {
+	if !grpcsrv.IsPublicPlatformMethod(livenessProbeMethod) {
+		t.Fatalf("фундамент не объявляет %s публичным: дверь, снявшая свою разметку, "+
+			"отвергала бы пробу живости", livenessProbeMethod)
+	}
+
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, found := 0, []string{}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("%s не разобрался: %v", name, err)
+		}
+		read++
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			if v, err := strconv.Unquote(lit.Value); err == nil && v == livenessProbeMethod {
+				found = append(found, fset.Position(lit.Pos()).String())
+			}
+			return true
+		})
+	}
+	t.Logf("осмотрено файлов пакета двери (без проб): %d · литералов %s: %d", read, livenessProbeMethod, len(found))
+	if read == 0 {
+		t.Fatal("проба НЕ ИСПОЛНЯЛАСЬ: ни одного файла пакета двери не прочитано")
+	}
+	if len(found) != 0 {
+		t.Fatalf("дверь сама размечает %s (%v), хотя публичность объявляет фундамент "+
+			"(grpcsrv.PublicPlatformMethods): два места об одном предмете", livenessProbeMethod, found)
 	}
 }

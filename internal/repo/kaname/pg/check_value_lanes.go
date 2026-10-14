@@ -44,7 +44,7 @@ package pg
 // отказ, как и отказ таблицы вне переписи, отвечает прежней полосой ввода.
 //
 // Решения, принятые раньше этой переписи, в ней сохранены, а не пересмотрены:
-// форму имени и имени роли служба судит сама (#718, #1279, #1903) — эти
+// форму имени и имени роли служба судит сама (kacho#718, kacho#1279, kacho#1903) — эти
 // проверки отводятся в полосу дефекта своими ветвями до общей; проекция
 // «роль → тип × глагол» отдаёт отказ пустой пары вызывающему (`ReplaceRoleVerbs`,
 // `TestIAMRV109_EmptyPairIsRefusedAndNothingIsWritten`); полосу дефекта
@@ -117,6 +117,23 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Вызов ключа доступа — вызов, назначение и срок чеканит служба.
 	"access_key_challenges": nil,
+	// Испытание полосы входа ключом (Ф13, kaname#613): контекст формы приходит
+	// печеньем `kaname_form` КАК ЕСТЬ — это значение вызывающего, и его длину
+	// судит ввод: первым — отказ формы глагола `begin` до записи, вторым —
+	// самопроверка `AccessKeyLoginChallenge.Validate` в адаптере. Проверка
+	// схемы — последний рубеж того же ввода: разойдись с ней самопроверка, до
+	// базы дошло бы присланное значение, и отказ остаётся полосой ввода, как у
+	// всякого присланного поля, которое судит и домен. Испытание чеканит
+	// служба, оба момента и предел ставит база от срока контракта, отметку
+	// потребления — оператор отбора.
+	"access_key_login_challenges": {
+		caller: []string{"access_key_login_challenges_form_context_check"},
+		service: []string{
+			"access_key_login_challenges_challenge_check",
+			"access_key_login_challenges_consumed_check",
+			"access_key_login_challenges_span_check",
+		},
+	},
 	// Запись выпуска токена доступа: идентификатор выпуска и оба момента чеканит
 	// подписант, семейство называет церемония (`RecordAccessToken`, «ИСХОДОВ
 	// ДВА»). Эта строка — единственный дом решения о полосе отказа таблицы:
@@ -125,7 +142,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 	issuanceTable: nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
 	"account_admission_rate_limits": nil,
-	// Описание и метки прислал вызывающий; форму имени служба судит сама (#718).
+	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).
 	// Правило «имя формы идентификатора — только своё» судит пару, которую
 	// прислал вызывающий (имя и, у администратора облака, идентификатор), и
 	// отвечает тем же текстом, что тип (kaname#549, Р6).
@@ -199,6 +216,11 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Корневой кластер заводится схемой; писателя у службы нет.
 	"clusters": nil,
+	// Отложенная смена адреса (kaname#635): идентификатор, дайджест, сроки и
+	// счёт попыток чеканит служба; новый адрес прислал вызывающий, но в строку
+	// он ложится уже приведённым и проверенным формой глагола (`judgeNewEmail`)
+	// — отказ ограничения на нём дефект службы, а не ввод.
+	"email_change_codes": nil,
 	// Код подтверждения адреса (kaname#456): идентификатор, дайджест, адрес
 	// строки человека, сроки и счёт попыток чеканит служба.
 	"email_verification_codes": nil,
@@ -215,7 +237,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"fga_outbox": nil,
 	// Участник группы: слово вида прислал вызывающий.
 	"group_members": {caller: []string{"group_members_type_check"}},
-	// Описание и метки прислал вызывающий; форму имени служба судит сама (#718).
+	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).
 	"groups": {
 		caller:  []string{"groups_description_check", "groups_labels_valid"},
 		service: []string{"groups_name_check"},
@@ -232,7 +254,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"issued_account_ids": nil,
 	// Клиент: перечни адресов возврата прислал вызывающий; идентификатор,
 	// состояние, способ и материал секрета — служба и производитель клиента
-	// (перечень #317), форму имени служба судит сама (#718).
+	// (перечень #317), форму имени служба судит сама (kacho#718).
 	interactiveClientsTable: {
 		caller: []string{
 			"interactive_clients_post_logout_uris_count_ck",
@@ -265,7 +287,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"own_ceilings": nil,
 	// Учёт числа ресурсов ведут схема и служба.
 	"project_resource_quotas": nil,
-	// Описание и метки прислал вызывающий; форму имени служба судит сама (#718).
+	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).
 	"projects": {
 		caller:  []string{"projects_description_check", "projects_labels_valid"},
 		service: []string{"projects_name_check"},
@@ -363,7 +385,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Роль: описание, метки, разрешения и правила прислал вызывающий, имя
 	// модульной роли и её модуль — манифест; форму имени роли служба судит сама
-	// (#1903). Якорь яруса, живость и системность роли, которой владеет модуль,
+	// (kacho#1903). Якорь яруса, живость и системность роли, которой владеет модуль,
 	// ставит служба.
 	"roles": {
 		caller: []string{
@@ -400,7 +422,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"service_account_oauth_clients_trusted_subjects_array_ck",
 		},
 	},
-	// Описание и метки прислал вызывающий; форму имени служба судит сама (#718).
+	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).
 	"service_accounts": {
 		caller:  []string{"service_accounts_description_check", "service_accounts_labels_valid"},
 		service: []string{"service_accounts_name_check"},
@@ -428,7 +450,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Ключ доступа: описание и материал удостоверения (идентификатор, ключ,
 	// алгоритм, счётчик) — из ответа аутентификатора, который прислал
 	// вызывающий. Идентификатор и дескриптор человека чеканит служба, форму
-	// имени служба судит сама (#718).
+	// имени служба судит сама (kacho#718).
 	"user_access_keys": {
 		caller: []string{
 			"user_access_keys_algorithm_check",
@@ -443,6 +465,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"user_access_keys_user_handle_check",
 		},
 	},
+	// Рукоятка церемонии человека: 64 случайных байта чеканит служба первой
+	// церемонией регистрации ключа доступа (#351); вызывающий её не присылает.
+	"user_ceremony_handles": nil,
 	// Токен человека: описание и метки прислал вызывающий, срок — от присланного
 	// ttl. Вид, форму удостоверения, ключ и идентификаторы пишет служба.
 	"user_oauth_clients": {
@@ -467,7 +492,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Человек: адрес, отображаемое имя, метки и внешний субъект прислал
 	// вызывающий (арендатор либо внутренний глагол заведения личности). Состояние
 	// приглашения ставит служба, но его согласие с внешним субъектом нарушает
-	// присланный пустой субъект — и эта проверка остаётся полосой ввода.
+	// присланный пустой субъект — и эта проверка остаётся полосой ввода. Носитель
+	// окна темпа назначает база при чеканке личности нашей полосы (kaname#197):
+	// вызывающий его не присылает, и отказ его проверки — дефект службы.
 	"users": {
 		caller: []string{
 			"users_display_name_check",
@@ -476,7 +503,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"users_invite_status_consistency",
 			"users_labels_valid",
 		},
-		service: []string{"users_invite_status_check"},
+		service: []string{"users_invite_status_check", "users_own_lane_admission_carrier_check"},
 	},
 }
 

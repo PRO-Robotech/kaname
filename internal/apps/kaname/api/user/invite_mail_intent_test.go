@@ -12,6 +12,7 @@ package user
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -238,7 +239,44 @@ func (f *inviteIdempotentRepo) Reader(context.Context) (kanamerepo.Reader, error
 // повторное приглашение на чтении членства, а не на предмете пробы.
 func (f *inviteIdempotentRepo) Writer(context.Context) (kanamerepo.Writer, error) {
 	f.seedExistingMembership()
-	return &invPrincWriter{invPrincReader: invPrincReader{parent: &f.invPrincRepo}, parent: &f.invPrincRepo}, nil
+	return &inviteIdempotentWriter{
+		invPrincWriter: &invPrincWriter{invPrincReader: invPrincReader{parent: &f.invPrincRepo}, parent: &f.invPrincRepo},
+		existing:       f.existing,
+	}, nil
+}
+
+// inviteIdempotentWriter — писатель дублёра, чей оператор вставки выполняет
+// контракт настоящего: арбитр — глобальный ключ почты, и на известной почте
+// оператор строки НЕ заводит, а возвращает существующую с признаком «не
+// заведена» (`InsertPending`, `ON CONFLICT (lower(email)) DO UPDATE`). Транзакция
+// приглашения проводит через оператор и строку, которая уже есть (приёмка A198,
+// Р5), поэтому дублёр, заводящий на ней новую строку, был бы снисходительнее
+// продукта ровно в предмете проб этого файла.
+type inviteIdempotentWriter struct {
+	*invPrincWriter
+	existing domain.User
+}
+
+func (w *inviteIdempotentWriter) UsersW() repouser.WriterIface {
+	return &inviteIdempotentUserWtr{
+		invPrincUserWtr: &invPrincUserWtr{invPrincUserRdr: invPrincUserRdr{parent: w.parent}, parent: w.parent},
+		existing:        w.existing,
+	}
+}
+
+type inviteIdempotentUserWtr struct {
+	*invPrincUserWtr
+	existing domain.User
+}
+
+func (w *inviteIdempotentUserWtr) InsertPending(ctx context.Context, u domain.User, exp time.Time) (domain.User, bool, error) {
+	if !strings.EqualFold(string(u.Email), string(w.existing.Email)) {
+		return w.invPrincUserWtr.InsertPending(ctx, u, exp)
+	}
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	w.parent.seq = append(w.parent.seq, "insert-pending")
+	return w.existing, false, nil
 }
 
 // seedExistingMembership — пара «человек × аккаунт» существующего приглашённого,

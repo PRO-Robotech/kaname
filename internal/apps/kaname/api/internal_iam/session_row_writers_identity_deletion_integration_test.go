@@ -91,6 +91,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -98,6 +99,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
@@ -174,7 +176,8 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 
 	l := &sessionWriterLane{s: s, users: users, hasher: hasher, owner: seedForceLogoutUser(t, ctx, s.pool)}
 	l.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
-		Store: s.sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
+		CutoffClock: momentclock.Func(time.Now),
+		Store:       s.sessions, Users: kanamepg.NewUserDirectory(users), Methods: methods, Verifier: verifier, Hasher: hasher,
 		Limits: limits, TTL: 24 * time.Hour, Observer: nop, Now: time.Now, Logger: logger,
 		Envelope: zeroEnvelope{}, TOTP: totp, Sets: verifier,
 	})
@@ -203,7 +206,10 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 		Now:       time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
+	completion, err := kanamepg.NewRecoveryCompletionStore(s.pool, userapp.ActivateInviteForLane)
+	require.NoError(t, err)
 	l.complete, err = humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
+		CutoffClock: momentclock.Func(time.Now), Completion: completion,
 		Store: s.sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: 24 * time.Hour, Observer: nop,
 		Now: time.Now, Logger: logger,
 	})
@@ -229,8 +235,10 @@ func (l *sessionWriterLane) seedPerson(t *testing.T) writerPerson {
 	v, err := l.hasher.Hash(writerScenePassword)
 	require.NoError(t, err)
 	_, err = l.s.pool.Exec(ctx,
-		`INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ($1, 'password', $2)`,
+		`INSERT INTO kaname.user_login_methods (user_id, kind, verifier) VALUES ($1, 'password', $2)
+		 ON CONFLICT (user_id, kind) DO UPDATE SET verifier = EXCLUDED.verifier`,
 		string(uid), v.Reveal())
+	// Строку пароля фикстуры (kaname#608) заменяет пароль сцены, которым войти.
 	require.NoError(t, err, "посев: способ входа паролем")
 	_, err = l.s.pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(uid))
 	require.NoError(t, err, "посев: подтверждённый адрес")

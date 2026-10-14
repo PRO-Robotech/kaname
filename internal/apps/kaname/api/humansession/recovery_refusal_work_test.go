@@ -91,7 +91,7 @@ func TestRecovery_WrongCodeRefusalDoesTheSameStoreWorkForNobodyAndForSomeone(t *
 			"увидел, и равенство рядов ниже было бы сказано о журнале, слепом к нему; ряд: %v", issued)
 
 	nobody, errNobody := lane("nobody-rrw@example.invalid", wrongCode, "203.0.113.160")
-	require.ErrorIs(t, errNobody, humansession.ErrAuthenticationFailed, "Дано: «адреса нет» — один отказ")
+	require.ErrorIs(t, errNobody, humansession.ErrAccessNotRestored, "Дано: «адреса нет» — один отказ")
 	require.True(t, reachesTheBase(nobody, "writer", "ConsumeRecoveryCode"),
 		"Дано: оператор применения исполняется базой и у полосы «адреса нет» (Р5); ряд: %v", nobody)
 	// Чтение способов входа «о пустой личности» законной симметричной формой НЕ
@@ -111,7 +111,7 @@ func TestRecovery_WrongCodeRefusalDoesTheSameStoreWorkForNobodyAndForSomeone(t *
 	}
 	for _, s := range someone {
 		got, err := lane(s.email, wrongCode, s.source)
-		require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "%s: код не тот — один отказ", s.label)
+		require.ErrorIs(t, err, humansession.ErrAccessNotRestored, "%s: код не тот — один отказ", s.label)
 		require.True(t, errors.Is(err, errNobody) && err.Error() == errNobody.Error(),
 			"%s: отказ тот же, что у «адреса нет»", s.label)
 		require.Equal(t, nobody, got,

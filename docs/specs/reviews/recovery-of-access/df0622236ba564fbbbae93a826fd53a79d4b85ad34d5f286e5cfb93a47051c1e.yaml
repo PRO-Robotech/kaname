@@ -1,0 +1,118 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: df0622236ba564fbbbae93a826fd53a79d4b85ad34d5f286e5cfb93a47051c1e
+  static_status: DRAFT
+  static_status_note: >-
+    Токен в шапке документа — статическая форма объявления, а не действующий вердикт
+    (change-graph.md §2). Шапка этой записью НЕ правится; прежние записи каталога (пять) не
+    трогаются — редакция 7 получает соседнюю запись по своему отпечатку.
+  content_commit: 83716c6a4398e0812d213e48ad9576ded72b0879
+  branch: '608'
+  task: PRO-Robotech/kaname#608
+  lines: 1877
+  round: 6
+  predecessor_record: docs/specs/reviews/recovery-of-access/87e67fc2c2d104ec2f0ed0328d42c884fa4a30b3b8fd14623720e64276571c6e.yaml
+  predecessor_note: >-
+    Круг 5 вернул редакцию 6 (87e67fc2…) с одним блокирующим COVERAGE. Дельта 4678dfcf7..83716c6a4
+    — один файл, этот документ (+89/−6).
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/recovery-of-access.md в копии ветки 608 @ 83716c6a4 →
+    df062223…; git show HEAD:<путь> | sha256sum — то же; git ls-remote origin 608 → 83716c6a4;
+    wc -l → 1877.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-05'
+
+effective_approval:
+  issued: false
+  why: возврат; санкции не выпускает.
+  publication_pending:
+    required_for_sanction: false
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в kaname#608 с полями role, verdict, subject, subject_revision
+      83716c6a4398e0812d213e48ad9576ded72b0879, subject_sha256 дословно; блок `event`
+      дописывается по факту публикации тем же заходом.
+    body: >-
+      role: acceptance-reviewer · verdict: CHANGES_REQUESTED · subject:
+      PRO-Robotech/kaname docs/engineering/acceptance/recovery-of-access.md · subject_revision:
+      83716c6a4398e0812d213e48ad9576ded72b0879 · subject_sha256:
+      df0622236ba564fbbbae93a826fd53a79d4b85ad34d5f286e5cfb93a47051c1e
+
+authority:
+  mode: versioned_policy_authority
+  policy_document: docs/changes/policy.yaml (воркспейс)
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дельта редакции 7 целиком (строка редакции, §0.2, Р9 п. 4, §3 Д16 и «Обход редакции 7»,
+    Ф5-30 (б), §8 инв. 11, §9 строка Д16, §10 п. 7, §16) и её стыки с Ф5-29…33, парой
+    active-identity-has-a-way-in.md и соседями, которых называет Д16. Сценарии Ф5-01…33 вне
+    названной фразы Ф5-30 (б) не менялись — сверено диффом.
+  counts: >-
+    Сценариев 33, производитель у 33, близнецы у отрицаний Ф5-29…33 по одному факту — как в круге 5,
+    дельта их не трогает.
+
+measured:
+  round5_blocker_closed_in_service_home: >-
+    LC_ALL=C.UTF-8 git grep (форма §3 «Обход редакции 7») @ 4678dfcf7 -- docs internal → 4
+    вхождения, ровно названные: access-beyond-login…:1481, address_admission_gates.go:11,
+    people_address_writers.go:34 и :311. go test ./internal/check/ -run
+    TestTheAddressMarkHasOneWriterTheConfirmVerb -count=1 → «файлов 888 · вызовов 1:
+    [verification.go:461]», PASS — совпало. Контроль people_address_writers_migrations.go:988 —
+    совпало. Шире по дому службы (-P '(писател\S* отметки|MarkEmailVerified|отметк\S* подтвержд).{0,80}(одн|только|единств)')
+    — сверх названного только login_method_repo.go:244/:256 (один ОПЕРАТОР — при Р9 верно) и
+    сам гейт address_admission_gates_test.go:38 (правится по Д16 (в)).
+  workspace_home: >-
+    F6b @ b64bbb5e7 (предок origin/main; отпечаток eae68d22… тот же на origin/main): строки 194,
+    540, 1021, 1241, 1242, 1299, 1991 — совпало с документом. Прочие docs/specs origin/main
+    воркспейса тезиса не несут.
+  superseded_neighbour: >-
+    address-verification-is-our-verb-and-not-a-presentation.md: отпечаток 87fcdd1b…, его запись —
+    verdict SUPERSEDED — утверждение документа подтверждено.
+  seed_constructibility: >-
+    Своя изоляция: postgres:16 (контейнер rev608seed, слот heavy-slots/slot1), Up-секции всех 49
+    миграций дерева 83716c6a4 применены пофайлово одной транзакцией каждая. Посевом построены
+    формы A (ACTIVE, без пароля, не подтверждён), B (ACTIVE, пароль, не подтверждён), C (PENDING,
+    без пароля), E (ACTIVE, без пароля, подтверждён) и Z — все вставлены, ограничения схемы не
+    возразили. Посеяно 4 из 4 «Дано» Ф5-29…32; Ф5-33 — инъекция в хранилище пробы, фикстура
+    recovery_fakes_test.go существует. «Не выполнилось» 0. Контейнер снят.
+
+blocking:
+  - kind: COVERAGE
+    text: >-
+      Перепись Д16 («Обход редакции 7») объявляет, что каждое вхождение тезиса адъюдицировано, и
+      §8 инв. 11 делает любое место со старым тезисом расхождением, — но обход не заходит в дом
+      платформы. Дерево PRO-Robotech/kacho @ 2afc06571c77 (origin/main):
+      internal/repohygiene/suitepeopleenrollment_test.go:22–24, шапка гейта F6b-52: «Писатель
+      отметки у службы зовётся одним местом — исходом глагола подтверждения» — та же формулировка,
+      что F6b Р18 п. 1, которую Д16 (б) правит; при этом Д16 называет гейт F6b-52 «не меняется».
+      Исполнение Д16 буквально оставит в дереве платформы ложный тезис. Добавить в Д16 строку (г):
+      дом платформы, шапка этого гейта приводится к единой формулировке своим изменением до
+      слияния кода kaname#608 (код гейта не меняется); дописать дом платформы в предикат обхода
+      и в §10 п. 7. Тот же род, что блокирующее круга 5 — передать диспетчеру по §14а.
+
+non_blocking: []
+
+open_questions: []
+
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: yes

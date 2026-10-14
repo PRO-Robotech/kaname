@@ -73,7 +73,7 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 	// existing callers).
 	//
 	// ВСЕ ЧЕТЫРЕ поля переносятся, и это не полнота ради полноты. Перечень
-	// доверенных издателей — наша таблица (#1124), и подпись внешнего утверждения
+	// доверенных издателей — наша таблица (kacho#1124), и подпись внешнего утверждения
 	// сверяется с записанным здесь ключом. Ключ и его алгоритм объявлены
 	// обязательными и на проводе, и в домене; транспорт, переносивший только пару
 	// (issuer, subject_pattern), делал федеративную выдачу неисполнимой ни при
@@ -114,7 +114,7 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		// Вид удостоверения. Не назван — прежнее поведение дословно.
 		CredentialKind: kind,
 		// Federation OUT — caller-supplied external audience(s).
-		// Пусто → адресата не назвали. Приставка не провязана (решение #2575),
+		// Пусто → адресата не назвали. Приставка не провязана (решение kacho#2575),
 		// поэтому умолчание приходит от посадки, а не отсюда.
 		Audience: req.GetAudience(),
 	})
@@ -159,7 +159,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListSAKeysRequest) (*iamv
 	})
 	if err != nil {
 		// Логгера у обработчика нет — умолчание процесса задано композиционным
-		// корнем, и запись доезжает до того же приёмника (задача #2507).
+		// корнем, и запись доезжает до того же приёмника (задача kacho#2507).
 		return nil, mapPGErrLogged(ctx, nil, "sa_keys.List", err)
 	}
 	out := make([]*iamv1.ServiceAccountOAuthClient, 0, len(rows))

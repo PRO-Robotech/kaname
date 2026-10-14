@@ -116,6 +116,7 @@ func seedUserAccountProject(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(prjID), string(accID), "pne-prj-"+suffix)
 	require.NoError(t, err)
+	seedWayIn(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID, prjID
 }

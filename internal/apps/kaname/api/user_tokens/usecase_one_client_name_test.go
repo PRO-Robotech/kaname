@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_one_client_name_test.go — у выданного персонального токена ОДНО имя
-// клиента, и это идентификатор строки нашего реестра (задачи #1121, kaname#362).
+// клиента, и это идентификатор строки нашего реестра (задачи kacho#1121, kaname#362).
 //
 // # ЧТО ЗДЕСЬ УТВЕРЖДАЕТСЯ
 //
@@ -24,7 +24,9 @@ package user_tokens
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -34,7 +36,7 @@ import (
 // изменила форму сборки, а не то, что проверяется. Красный прогон до правки
 // собирался этой же функцией с прежней сигнатурой.
 func newIssueUCForTest(repo *stubUserClientRepo, ops *stubOpsRepo) *IssueUserTokenUseCase {
-	return NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
+	return NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithIssuanceClock(momentclock.Func(time.Now)).WithOwnIssuance()
 }
 
 // TestIssue_CredentialCarriesOneName — у выданного удостоверения ОДНО имя, и

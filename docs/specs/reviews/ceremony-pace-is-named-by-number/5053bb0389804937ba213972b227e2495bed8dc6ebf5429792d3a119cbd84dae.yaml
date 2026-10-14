@@ -1,0 +1,107 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/ceremony-pace-is-named-by-number.md
+  sha256: 5053bb0389804937ba213972b227e2495bed8dc6ebf5429792d3a119cbd84dae
+  revision: 6
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка правлена автором (ред. 5 → 6); эта запись её не трогает.
+  base_commit: 8b0379e2a9c53d30c89660dc38e00f17851f79d8
+  content_commit: null
+  content_note: >-
+    редакция 6 не закоммичена: правка в рабочем дереве поверх 8b0379e2a (origin/296); отпечаток снят
+    с рабочего дерева
+  branch: '211'
+  worktree: tmp/kaname-211-acc
+  measured_at: PRO-Robotech/kaname@8b0379e2a (голова эпика 296)
+  task: PRO-Robotech/kaname#524
+  wave: PRO-Robotech/kaname#540
+  epic: PRO-Robotech/kacho#1266
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/ceremony-pace-is-named-by-number.md
+  fingerprint_reproduced: true
+  lines: 1531
+  round: 6
+  predecessor_record: docs/specs/reviews/ceremony-pace-is-named-by-number/05dd1befb409f99573547ebdacdde3e12873d9a8b40a3bbc1e53c76e5b8b74b2.yaml (APPROVED, редакция 5)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-08'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 6 к 8b0379e2a (Р12, KN-PACE-10 а / 25 а / 28 b / 46, §2 порядок, производители, S4,
+  §9); прочее одобрено кругом 5
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: четыре пути слушателя выдачи отвечают на неверный метод иной формой, чем полоса входа
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git grep -n StatusMethodNotAllowed 8b0379e2a -- internal/handler/clienttokenhttp
+    internal/handler/ceremonyhttp internal/handler/registrytokenhttp ':!*_test.go' → 4 строки
+    (clienttokenhttp/handler.go:280, ceremonyhttp/authorize.go:98, discovery.go:87 — invalid_request;
+    registrytokenhttp/handler.go:152 — method_not_allowed text/plain); образец —
+    loginlanehttp/handler.go:217 TextMethodNotAllowed, :356, codeUnimplemented=12.
+
+blocking: []
+
+non_blocking:
+  - id: N6-1
+    summary: >-
+      S4 п.2 называет кейсы newman условно («если они его утверждают»); на 8b0379e2a утверждения
+      405-тела протокола на этих путях в tests/newman/cases не найдено — условие можно заменить
+      результатом перемера.
+
+accepted_parts: >-
+  Р12 обоснована порядком решений §2 (метод до протокола), форма совпадает с R36 п.3 (#261, в
+  эпике). У каждой строки KN-PACE-46 близнец с одним отличающим фактом — метод; «оси не тратятся»
+  сохранено; отрицательный контроль называет обе прежние формы. Слушатель набора ключей вынесен
+  находкой с координатами.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 1
+  not_performed: 0
+  detail: «Дано» KN-PACE-46 — посев Т (одобрен кругом 5), удержаний нет; новых состояний не требует.
+
+event_body: acceptance-reviewer · APPROVED · 5053bb0389804937ba213972b227e2495bed8dc6ebf5429792d3a119cbd84dae
+effective_approval:
+  issued: true
+  issued_at: "2026-10-08T04:00:11Z"
+  ban1_lifted: false
+  why: >-
+    Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
+    после публикации ревизии содержимого. До события запрет #1 по дельте редакции 6 в силе.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#524
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#524
+  status: performed
+  published: true
+  database_id: 6051905472
+  node_id: "IC_kwDOUO26pM8AAAABaLi_wA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/524#issuecomment-6051905472"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6051905472"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-08T04:00:11Z"
+  body_sha256: "6c4146cf0aee790ff3645c5347ee326efa152d786f109c9bc12b38e873ce3c4a"
+  subject_sha256: "5053bb0389804937ba213972b227e2495bed8dc6ebf5429792d3a119cbd84dae"
+  subject_revision_commit: "f779e794adac3e19debaa410a2cad37ae70d3f64"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh

@@ -8,7 +8,7 @@ package pg_test
 //
 // Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4); сценарии IAM-RW-1-01, -04, -05, -06, -08, -09, -13, -14,
-// -24, -29, -30. Задача продукта #1913.
+// -24, -29, -30. Задача продукта kacho#1913.
 //
 // # Почему манифест здесь ЗАГРУЖАЕТСЯ ИЗ ТЕКСТА, а не собирается литералом
 //
@@ -354,7 +354,7 @@ func TestIAMRW1RevivalReturnsTheSameRowAndClearsItsOwnLedger(t *testing.T) {
 }
 
 // TestIAMRW1OwnershipIsDecidedOnceAndProjectionsSurviveDisagreement — находка
-// `db-architect-reviewer` при ревью #1913.
+// `db-architect-reviewer` при ревью kacho#1913.
 //
 // # Предмет — ДВА РАЗНЫХ РАЗЛИЧИТЕЛЯ ВЛАДЕНИЯ
 //

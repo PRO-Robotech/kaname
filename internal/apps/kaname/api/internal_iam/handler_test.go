@@ -155,7 +155,7 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 		// sentinel (robust to error-text rewording), not an error-string prefix.
 		//
 		// Текст УТВЕРЖДАЕТСЯ, а не пропускается. Пустое ожидание здесь и было
-		// предметом задачи #2464: проба на одном коде остаётся зелёной при
+		// предметом задачи kacho#2464: проба на одном коде остаётся зелёной при
 		// вернувшемся эхе, потому что код `UNAVAILABLE` верен в обоих случаях.
 		// Две подачи различаются текстом ЦЕПОЧКИ и обязаны дать ОДИН ответ —
 		// именно это и значит «умолчание фиксировано».
@@ -192,7 +192,7 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 }
 
 // fakeGate — заглушка порта relationWriteGate (RelationWriteGate). Осталась
-// после снятия WriteCreatorTuple (#788): её читают пробы RegisterResource.
+// после снятия WriteCreatorTuple (kacho#788): её читают пробы RegisterResource.
 type fakeGate struct {
 	domain  string
 	err     error

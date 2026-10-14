@@ -4,13 +4,13 @@
 package user
 
 // account_less_delete_test.go — снятие БЕЗАККАУНТНОЙ строки личности решает
-// МОДЕЛЬ, а не проверка внутри сервиса (#1174).
+// МОДЕЛЬ, а не проверка внутри сервиса (kacho#1174).
 //
 // # Предмет
 //
 // В `delete.go` стояло «не сам и без аккаунта → отказ». Довод, которым проверка
 // обосновывалась, — «у безаккаунтного нет области, против которой можно написать
-// выдачу» — потерял предмет после #1131: снятие строки личности гейтится
+// выдачу» — потерял предмет после kacho#1131: снятие строки личности гейтится
 // `identity_remover`, и выдачей это отношение не резолвится вовсе НИ У КОГО.
 //
 // Что проверка делала на самом деле: отказывала НАДЗОРУ ОБЛАКА в снятии
@@ -19,7 +19,7 @@ package user
 //
 // Класс — `security.md` §«Авторизация живёт в МОДЕЛИ, а не в самодельных
 // проверках»: хардкод не выдаётся, не ограничивается областью, не отзывается, не
-// виден в аудите и не понимает машинных принципалов. #1102 снял такую же
+// виден в аудите и не понимает машинных принципалов. kacho#1102 снял такую же
 // проверку с двенадцати мест; эта осталась и была названа «не сужающей» — что и
 // опровергается здесь.
 //
@@ -55,7 +55,7 @@ func accountLessOversightCtxs() map[string]context.Context {
 	}
 }
 
-// TestDeleteUser_AccountLessTarget_DecidedByTheModel — предмет #1174.
+// TestDeleteUser_AccountLessTarget_DecidedByTheModel — предмет kacho#1174.
 func TestDeleteUser_AccountLessTarget_DecidedByTheModel(t *testing.T) {
 	for name, ctx := range accountLessOversightCtxs() {
 		t.Run(name, func(t *testing.T) {
@@ -94,5 +94,5 @@ func TestDeleteUser_AccountLessTarget_AnonymousStillRejected(t *testing.T) {
 	_, err := uc.Execute(context.Background(), delUserID)
 	require.Error(t, err,
 		"неаутентифицированный вызывающий снял безаккаунтную строку личности — снято "+
-			"больше, чем предмет #1174")
+			"больше, чем предмет kacho#1174")
 }

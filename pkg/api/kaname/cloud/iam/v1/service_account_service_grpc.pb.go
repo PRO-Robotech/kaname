@@ -53,6 +53,10 @@ type ServiceAccountServiceClient interface {
 	Update(ctx context.Context, in *UpdateServiceAccountRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Deletes the specified service account.
 	// ServiceAccount с висящим AccessBinding → FailedPrecondition.
+	//
+	// It asks for the elevated session level: the removal is irreversible, and
+	// it is never cheaper than its reversible neighbours `Disable` and `Enable`,
+	// which already ask for it.
 	Delete(ctx context.Context, in *DeleteServiceAccountRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Disables the specified service account: it may no longer authenticate.
 	//
@@ -211,6 +215,10 @@ type ServiceAccountServiceServer interface {
 	Update(context.Context, *UpdateServiceAccountRequest) (*operation.Operation, error)
 	// Deletes the specified service account.
 	// ServiceAccount с висящим AccessBinding → FailedPrecondition.
+	//
+	// It asks for the elevated session level: the removal is irreversible, and
+	// it is never cheaper than its reversible neighbours `Disable` and `Enable`,
+	// which already ask for it.
 	Delete(context.Context, *DeleteServiceAccountRequest) (*operation.Operation, error)
 	// Disables the specified service account: it may no longer authenticate.
 	//

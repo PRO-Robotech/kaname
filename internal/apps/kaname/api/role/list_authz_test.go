@@ -427,7 +427,7 @@ func TestListRoles_D44_NoLeak_UngrantedCustomAbsent(t *testing.T) {
 		"ungranted custom role MUST be absent from List (no existence leak, LST-5)")
 }
 
-// #185: accountId scopes the catalog — a foreign Account's custom roles never
+// kacho-iam#185: accountId scopes the catalog — a foreign Account's custom roles never
 // appear, even if (hypothetically) granted; the scope is enforced at the repo.
 func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 	repo := newRoleListFakeRepo()
@@ -442,7 +442,7 @@ func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100, AccountID: domain.AccountID("acc-A000000000000000")})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-sys1", "rol-cA"}, roleIDs(out),
-		"#185: accountId=acc-A000000000000000 → system + acc-A000000000000000 custom only; acc-B000000000000000 custom never visible")
+		"kacho-iam#185: accountId=acc-A000000000000000 → system + acc-A000000000000000 custom only; acc-B000000000000000 custom never visible")
 	require.Equal(t, domain.AccountID("acc-A000000000000000"), repo.lastFilter.AccountID,
 		"accountId scope is pushed into the repo filter")
 }

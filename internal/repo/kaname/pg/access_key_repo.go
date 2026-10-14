@@ -22,6 +22,10 @@ package pg
 // Идентификатор удостоверения, открытый ключ и рукоятка хранятся байтами как
 // приняты; индекс по идентификатору — сам ключ уникальности: по нему ищет
 // проверка утверждения (Ф7-08, Ф7-09).
+//
+// Рукоятка ЧЕЛОВЕКА (`user_ceremony_handles`, Ф13 Р3) заводится одним
+// оператором с разрешением конфликта: «завести, если нет, иначе вернуть то,
+// что есть» — исход держит ключ строки, а не сравнение прочитанного (ban #10).
 
 import (
 	"context"
@@ -66,10 +70,14 @@ func (r *AccessKeyRepo) UserOf(ctx context.Context, id domain.UserID) (domain.Us
 	if id == "" {
 		return domain.User{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
 	}
-	var u domain.User
+	var (
+		u    domain.User
+		home *string
+	)
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, account_id, email, display_name, invite_status, created_at
-		  FROM users WHERE id = $1`, string(id)).Scan(&u.ID, &u.AccountID, &u.Email, &u.DisplayName, &u.InviteStatus, &u.CreatedAt)
+		  FROM users WHERE id = $1`, string(id)).Scan(&u.ID, &home, &u.Email, &u.DisplayName, &u.InviteStatus, &u.CreatedAt)
+	u.AccountID = homeAccount(home)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
 	}
@@ -221,7 +229,173 @@ func (r *AccessKeyRepo) Writer(ctx context.Context) (access_keys.Writer, error) 
 	return &accessKeyWriter{tx: tx}, nil
 }
 
+// RevokeWriter — транзакция снятия ключа (см. порт): открыта ОТКРЫТИЕМ
+// писателя сессии (`beginHumanSessionWriter` — уровень изоляции писателей
+// церемонии, перепись `ceremony_writer_openers_test.go`), и ПЕРВЫМ оператором
+// взята строка личности замком писателя нескольких сессий
+// (`holdPersonForSessionSet`) — раньше строк ключей, которые затем берёт
+// `LockKeysOf`. Писатель ключа и писатель сессии — над ОДНОЙ `pgx.Tx`.
+func (r *AccessKeyRepo) RevokeWriter(ctx context.Context, userID domain.UserID) (access_keys.RevokeWriter, error) {
+	return r.openRevokeWriter(ctx, userID, "AccessKey.RevokeWriter")
+}
+
+// openRevokeWriter — открытие транзакции под замком строки личности, общее у
+// снятия ключа и сброса ключей: одна дверь, один порядок «личность → дети».
+func (r *AccessKeyRepo) openRevokeWriter(ctx context.Context, userID domain.UserID, site string) (*accessKeyRevokeWriter, error) {
+	sessions, err := beginHumanSessionWriter(ctx, r.pool)
+	if err != nil {
+		return nil, mapErr(err, site, "")
+	}
+	if err := sessions.holdPersonForSessionSet(ctx, userID); err != nil {
+		_ = sessions.tx.Rollback(ctx)
+		return nil, err
+	}
+	return &accessKeyRevokeWriter{accessKeyWriter: accessKeyWriter{tx: sessions.tx}, sessions: sessions}, nil
+}
+
+// AccessKeysResetTx — транзакция СБРОСА ключей человека администратором облака
+// (kaname#638; приёмка `cloud-administrator-resets-login-methods.md`, Р3, Р5,
+// Р7): та же дверь, что у снятия ключа, — открытие писателем сессии и строка
+// личности под замком ПЕРВЫМ оператором, — и два своих оператора. Исполняет
+// порт `user.AccessKeysResetWriter` (соответствие закрепляет корень композиции).
+//
+// # Порядок операторов — несущий (Р7)
+//
+// Испытания регистрации снимаются РАНЬШЕ строк ключей. Регистрация потребляет
+// испытание условным оператором (`ConsumeChallenge`) и вставляет строку ключа
+// той же транзакцией. Если её потребление стоит раньше снятия испытаний,
+// снятие ждёт её фиксации и строку, уже потреблённую, не трогает
+// (`consumed_at IS NULL` перепроверяется после ожидания); следующий оператор —
+// снятие ключей — исполняется новым снимком (`read committed` писателя сессии)
+// и видит зафиксированную строку ключа. Если раньше стоит снятие испытаний, то
+// потребление ждёт фиксации сброса и находит ноль строк — регистрация
+// отказывает. В обоих порядках строки ключа после обоих исходов нет; проверки
+// «прочитать — решить» нет ни на одной стороне (ban #10).
+type AccessKeysResetTx struct{ *accessKeyRevokeWriter }
+
+// AccessKeysResetWriter — см. [AccessKeysResetTx].
+func (r *AccessKeyRepo) AccessKeysResetWriter(ctx context.Context, userID domain.UserID) (*AccessKeysResetTx, error) {
+	w, err := r.openRevokeWriter(ctx, userID, "AccessKey.ResetWriter")
+	if err != nil {
+		return nil, err
+	}
+	return &AccessKeysResetTx{accessKeyRevokeWriter: w}, nil
+}
+
+// RetireRegistrationChallenges — выданные и не предъявленные испытания
+// регистрации человека сняты одним оператором; строки, потреблённые
+// регистрацией, остаются — их предмет уже исполнен, и уборка снимет их сроком.
+func (w *AccessKeysResetTx) RetireRegistrationChallenges(ctx context.Context, userID domain.UserID) (int64, error) {
+	return retireRegistrationChallengesTx(ctx, w.tx, userID)
+}
+
+// retireRegistrationChallengesTx — оператор снятия выданных и не предъявленных
+// испытаний регистрации человека: один у сброса ключей администратором облака
+// и у перехода записи к владельцу ящика (kaname#458).
+func retireRegistrationChallengesTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM access_key_challenges
+		 WHERE user_id = $1 AND purpose = $2 AND consumed_at IS NULL`, string(userID), string(domain.ChallengeForRegistration))
+	if err != nil {
+		return 0, mapErr(err, "AccessKey.RetireRegistrationChallenges", "")
+	}
+	return tag.RowsAffected(), nil
+}
+
+// Now — момент отсечки сброса: часы первичной базы соединением ЭТОЙ
+// транзакции после захвата строки личности (`momentInTx` — один оператор у
+// обоих сбросов).
+func (w *AccessKeysResetTx) Now(ctx context.Context) (time.Time, error) {
+	return momentInTx(ctx, w.tx)
+}
+
+// DeleteAccessKeysOf — все строки ключей человека одним оператором; слоты
+// потолка возвращает триггер на удалении в той же транзакции.
+func (w *AccessKeysResetTx) DeleteAccessKeysOf(ctx context.Context, userID domain.UserID) (int64, error) {
+	return deleteAccessKeysOfTx(ctx, w.tx, userID)
+}
+
+// deleteAccessKeysOfTx — оператор снятия всех строк ключей человека: один у
+// сброса ключей администратором облака и у перехода записи к владельцу ящика
+// (kaname#458). Порядок у обоих — после снятия испытаний регистрации (Р7
+// сброса, шапка [AccessKeysResetTx]).
+func deleteAccessKeysOfTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (int64, error) {
+	if userID == "" {
+		return 0, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM user_access_keys WHERE user_id = $1`, string(userID))
+	if err != nil {
+		return 0, mapErr(err, "AccessKey.DeleteAllOf", "")
+	}
+	return tag.RowsAffected(), nil
+}
+
 type accessKeyWriter struct{ tx pgx.Tx }
+
+// accessKeyRevokeWriter — писатель ключа и писатель сессии над одной
+// транзакцией: записи сессии снимает ДВЕРЬ писателя сессии
+// (`EndOtherSessions` → `endSessionsAndRevokeWhatTheyHold`), а не свой
+// оператор — снятие без отзыва выданного было бы половиной действия.
+type accessKeyRevokeWriter struct {
+	accessKeyWriter
+	sessions *humanSessionWriter
+}
+
+// EndOtherSessions — см. порт; пустой `keep` не равен ни одному
+// идентификатору, исключать ему нечего.
+func (w *accessKeyRevokeWriter) EndOtherSessions(ctx context.Context, userID domain.UserID, keep domain.HumanSessionID, at time.Time, reason string) (int, error) {
+	return w.sessions.EndOtherSessions(ctx, userID, keep, at, reason)
+}
+
+// sessionOfFamilySQL — сессия церемонии семейства $1, если семейство
+// принадлежит личности $2: выпуск ЧУЖОЙ личности не отвечает ничем.
+const sessionOfFamilySQL = `SELECT session_id FROM kaname.token_families WHERE id = $1 AND user_id = $2`
+
+// SessionOfCredential — см. порт.
+func (w *accessKeyRevokeWriter) SessionOfCredential(ctx context.Context, userID domain.UserID, credentialID string) (domain.HumanSessionID, bool, error) {
+	// Выпуск → семейство — единственным читателем записи выпуска
+	// (`issuanceOf`); семейство → сессия — строкой семейства.
+	iss, found, err := issuanceOf(ctx, w.tx, credentialID)
+	if err != nil || !found {
+		return "", false, err
+	}
+	var id string
+	err = w.tx.QueryRow(ctx, sessionOfFamilySQL, iss.familyID, string(userID)).Scan(&id)
+	if stderrors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, mapErr(err, "AccessKey.SessionOfCredential", "")
+	}
+	return domain.HumanSessionID(id), true, nil
+}
+
+// FirstAuthentication — см. порт.
+func (w *accessKeyRevokeWriter) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
+	return w.sessions.FirstAuthentication(ctx, userID)
+}
+
+// HasPassword — см. порт: строка пароля оператором адаптера таблицы секрета
+// (`getLoginMethod`), исполненным соединением этой транзакции, а не пулом.
+func (w *accessKeyRevokeWriter) HasPassword(ctx context.Context, userID domain.UserID) (bool, error) {
+	_, err := w.sessions.LoginMethod(ctx, userID, domain.LoginMethodPassword)
+	switch {
+	case err == nil:
+		return true, nil
+	case stderrors.Is(err, iamerr.ErrNotFound):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// UpsertCutoff — см. порт.
+func (w *accessKeyRevokeWriter) UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
+	return w.sessions.UpsertCutoff(ctx, u, revokedBy)
+}
 
 func (w *accessKeyWriter) InsertChallenge(ctx context.Context, c domain.AccessKeyChallenge) error {
 	if err := c.Validate(); err != nil {
@@ -234,6 +408,34 @@ func (w *accessKeyWriter) InsertChallenge(ctx context.Context, c domain.AccessKe
 		return mapErr(err, "AccessKey.InsertChallenge", "")
 	}
 	return nil
+}
+
+// EnsureCeremonyHandle — рукоятка человека ОДНИМ оператором. `DO UPDATE` с
+// присваиванием того же ключа значения не меняет, но делает существующую
+// строку видимой `RETURNING`: без него проигравший конкуренцию получил бы ноль
+// строк там, где ответ уже есть. Смены значения нет и быть не может —
+// рукоятка уже лежит в аутентификаторе держателя.
+func (w *accessKeyWriter) EnsureCeremonyHandle(ctx context.Context, userID domain.UserID, minted domain.CeremonyHandle) (domain.CeremonyHandle, error) {
+	if userID == "" {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	if err := minted.Validate(); err != nil {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%v", err)
+	}
+	var stored []byte
+	err := w.tx.QueryRow(ctx, `
+		INSERT INTO user_ceremony_handles (user_id, handle)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING handle`, string(userID), minted.Bytes()).Scan(&stored)
+	if err != nil {
+		return domain.CeremonyHandle{}, mapErr(err, "AccessKey.EnsureCeremonyHandle", "")
+	}
+	handle, err := domain.RestoreCeremonyHandle(stored)
+	if err != nil {
+		return domain.CeremonyHandle{}, iamerr.Wrapf(iamerr.ErrInternal, "stored ceremony handle: %v", err)
+	}
+	return handle, nil
 }
 
 // ConsumeChallenge — ОДИН оператор однократности: строка вызывающего этой
@@ -380,4 +582,19 @@ func (r *LoginMethodRepo) HasPassword(ctx context.Context, userID domain.UserID)
 		return false, nil
 	}
 	return false, err
+}
+
+// accessKeyEnrolled — есть ли у человека хоть одна строка ключа доступа. Один
+// оператор на оба носителя чтения — пул (`LoginMethodRepo.AccessKeyEnrolled`)
+// и транзакцию записи сессии (`humanSessionWriter.AccessKeyEnrolled`): таблицу
+// ключей называет только этот файл.
+func accessKeyEnrolled(ctx context.Context, q loginMethodQuerier, userID domain.UserID) (bool, error) {
+	if userID == "" {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	var has bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_access_keys WHERE user_id = $1)`, string(userID)).Scan(&has); err != nil {
+		return false, mapErr(err, "AccessKey.Enrolled", string(userID))
+	}
+	return has, nil
 }
