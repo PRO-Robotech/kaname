@@ -1,0 +1,99 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+  sha256: c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строка «редакция 2 (правка по кругу 1)» в шапке — статическая форма объявления;
+    шапка не правлена намеренно (change-graph.md §2). Действующий вердикт о редакции c9224c8b… — эта запись.
+  base_commit: c65c614624ad2598c514dd91478e201588c66e2e
+  content_commit: d81466bfb55ea588844438b9ccaa65fab399ef75
+  branch: '827'
+  task: PRO-Robotech/kaname#827
+  lines: 601
+  round: 2
+  predecessor_record: docs/specs/reviews/step-up-with-any-enrolled-method/3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-14T19:27:38Z'
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+effective_approval:
+  issued: false
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#827
+  status: not_performed
+  published: false
+  publication_mode: courier_of_agent_verdict
+  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/step-up-with-any-enrolled-method.md · sha256 c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/step-up-with-any-enrolled-method/3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9.yaml
+delta:
+  predicate: "git diff c65c61462 d81466bfb --stat → 1 файл, +36 −11"
+  scope_of_review: >-
+    Круг 2 (последний, fa-b8): закрытие двух блокирующих круга 1 и четырёх неблокирующих, плюс полный
+    проход по новым строкам (П-ккл2, SUA-15, SUA-16 And, SUA-22, Р7, §5). Остальное — без изменения против
+    редакции 3c6fdec0, прошедшей полное ревью круга 1.
+round_1_closure:
+  - kind: CONSTRUCTIBILITY
+    where: "SUA-15; Р3 «ключ снят»; посев"
+    status: closed
+    evidence: >-
+      Посев П-ккл2 (два ключа, _KEYS[0]/_KEYS[1]; второй ключ — путь Ф7-08); после Revoke K1 выдача держится K2
+      (allowCredentials = [K2]); утверждение K1 → 401 code 16; близнец — K2 → 200 «2». Материал есть:
+      bbbe33524:tests/newman/cases/kaname-access-keys.py «ключ 1 — второй ключ того же человека (Ф7-08)»;
+      идентификаторы удостоверений случайны (_cred_js, fresh → _ak.rand(16)) — столкновения с ключом Б нет.
+  - kind: CONSTRUCTIBILITY
+    where: "Р7; SUA-22"
+    status: closed
+    evidence: >-
+      Revoke — пол «2» без изменения: bbbe33524:proto/kaname/cloud/iam/v1/access_key_service.proto:157
+      required_acr_min = "2"; из «1» — форма Ф11 Р11 (kacho@8514270c4 gateway/internal/middleware/auth_stepup.go,
+      grep -c "step up with a second factor" → 1); путь человека без кода — ResetAccessKeys администратором;
+      положительный близнец — П-ккл повышением кодом → Revoke done, отличающий факт один — уровень сессии.
+  - non_blocking_round_1: >-
+      Все четыре закрыты: SUA-05 — флаги UP|UV|BE и «2»; SUA-01 — 401, code 16, authentication failed
+      (bbbe33524:internal/apps/kaname/api/humansession/sf_enroll.go:73,81 resolveLiveSession → ErrAuthenticationFailed);
+      Р7 — человек только с ключом при «выкл» назван; SUA-16 — And о нетронутом испытании S1 с близнецом.
+blocking: []
+non_blocking:
+  - >-
+    SUA-15 заголовок: «близнец SUA-03 (утверждение годным ключом над ТЕМ ЖЕ испытанием)» расходится с And
+    «то же испытание повторно — CHALLENGE_ALREADY_PRESENTED; НОВОЕ испытание и утверждение ключом K2 — 200».
+    Исполнимо тело (испытание сгорает на 401), заголовок — нет; автору проб следовать телу, заголовок поправить
+    следующей редакцией.
+  - >-
+    История review в шапке называет координату записи круга 1 «kacho-workspace:docs/specs/reviews/…»; запись
+    лежит в kaname@827 (git ls-tree -r --name-only 827 docs/specs/reviews/ → step-up-with-any-enrolled-method/3c6fdec0….yaml).
+checks:
+  scope: >-
+    Строк линии в 04-roadmap-and-phasing.md нет (как в круге 1); объём — решение владельца 2026-10-14 и эпик kaname#746.
+  neighbours: "Опоры §0.1 не менялись в дельте; пересчёт круга 1 (5 из 5 совпали) в силе."
+  producer: >-
+    §5 дописан строками SUA-22 (пол «2» Revoke и форма Ф11 Р11 — существует) и SUA-15 (выдача из годных ключей —
+    заказ kaname#827); производитель у всех ID есть.
+  twins: "Новые отрицания SUA-15, SUA-22 (Revoke из «1»), SUA-16 And несут однофактных близнецов."
+  dependents: >-
+    F8-S7 ред. 3 (559ae688…) опирается на SUA-21 и Р5: условие «годных ключей ноль» не зависит от наличия кода
+    (d81466bfb:…:193) — ретрансляция для Ф-п строится.
+  constructibility: >-
+    Фикстуры названы и существуют @bbbe33524: seed_login_lane.py, seed_key_person.py, _KEYS[0..1]/_UP/_UV/_BE
+    (kaname-access-keys.py:362-368). Посев не выполнялся — стенд заданием не назван: посеяно 0 из 8, не выполнилось 8.
