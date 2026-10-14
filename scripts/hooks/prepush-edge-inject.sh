@@ -103,7 +103,7 @@ upstream="$work/kacho-upstream.git"
 git init -q --bare "$upstream"
 git -C "$seed" init -q . && git -C "$seed" add -A && git -C "$seed" commit -q -m control
 git -C "$seed" push -q "$upstream" HEAD:refs/heads/main
-clone="$work/kacho"
+clone="$work/platform-clone"
 git clone -q "$upstream" "$clone"
 git -C "$clone" remote set-url origin "$upstream"
 # Поиск засчитывает лишь origin на PRO-Robotech/kacho — подмена адреса через
@@ -120,22 +120,20 @@ printf '%s' "$out" | grep -q "kacho: .* @ ${control_rev:0:12}" && ok "C: рев�
 
 # ── ОСЬ I ───────────────────────────────────────────────────────────────────
 echo "ось I — расхождение краснеет через fetch"
-python3 - "$seed/$CAT_REL" <<'PY' || unmet "копия края не разобрана как JSON"
-import json, sys
+# Строка дописывается ТЕКСТОМ, по форме файла (`[`, записи через `,`, `]` и
+# перевод строки): сверка судит и форму, и переписанный сериализатором файл она
+# назвала бы «условие не создано», а не расхождением.
+python3 - "$seed/$CAT_REL" <<'PY' || unmet "копия края не той формы, что ждёт опыт"
+import sys
 p = sys.argv[1]
-d = json.load(open(p))
-probe = "kacho.cloud.probe.v1.ProbeService/Inject"
-if isinstance(d, dict) and isinstance(d.get("permissions"), list) and d["permissions"]:
-    row = dict(d["permissions"][0]); key = next(k for k, v in row.items() if isinstance(v, str) and "/" in v)
-    row[key] = probe; d["permissions"].append(row)
-elif isinstance(d, list) and d:
-    row = dict(d[0]); key = next(k for k, v in row.items() if isinstance(v, str) and "/" in v)
-    row[key] = probe; d.append(row)
-elif isinstance(d, dict):
-    k0 = next(iter(d)); d[probe] = d[k0]
-else:
+s = open(p, encoding="utf-8").read()
+if not (s.startswith("[\n  {") and s.endswith("\n  }\n]\n")):
     sys.exit(1)
-json.dump(d, open(p, "w"), ensure_ascii=False, indent=2)
+first = s[2:s.index("\n  },\n") + len("\n  }")]
+key = '"fqn": "'
+i = first.index(key) + len(key)
+row = first[:i] + "kacho.cloud.probe.v1.ProbeService/Inject" + first[first.index('"', i):]
+open(p, "w", encoding="utf-8").write(s[:-len("\n]\n")] + ",\n" + row + "\n]\n")
 PY
 git -C "$seed" commit -q -am "inject: метод, которого у службы нет"
 git -C "$seed" push -q "$upstream" HEAD:refs/heads/main
@@ -171,7 +169,7 @@ git -C "$mod" init -q . && git -C "$mod" add -A && git -C "$mod" commit -q -m "#
 git -C "$mod" checkout -q -b 1
 hook_run() { ( cd "$mod" && printf '' | env -u KACHO_MONOREPO "$@" bash scripts/hooks/pre-push "--kaname-prepush-in-memory-scope" 2>&1 ); }
 out="$(hook_run)"; rc=$?
-[ "$rc" -eq 0 ] && ok "H1: без клона исход прежний (0)" || bad "H1: код $rc, ожидался 0: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+[ "$rc" -eq 0 ] && ok "H1: без клона исход прежний (0)" || bad "H1: код $rc, ожидался 0: $(printf '%s' "$out" | grep -E "условие не создано|УСЛОВИЕ|без условия" | tr '\n' ' ')"
 printf '%s' "$out" | grep -q '^сверка с краем      : НЕ ВЫПОЛНИЛОСЬ' && ok "H1: строка в переписи" || bad "H1: строки переписи нет"
 printf '%s' "$out" | grep -q '^  сверка с краем: НЕ ВЫПОЛНИЛОСЬ' && ok "H1: строка в перечне непроверенного" || bad "H1: строки перечня нет"
 out="$(hook_run KACHO_MONOREPO="$work/not-a-clone")"; rc=$?
