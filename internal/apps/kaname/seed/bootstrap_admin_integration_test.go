@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -75,7 +76,7 @@ func seedBootstrapUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, em
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, "boot-acc-"+strings.ToLower(accID[len(accID)-6:]), uid)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }

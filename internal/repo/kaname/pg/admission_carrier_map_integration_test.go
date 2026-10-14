@@ -27,6 +27,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // a197MapOwnLane — человек нашей полосы с личным аккаунтом (носитель база
@@ -45,7 +46,7 @@ func a197MapOwnLane(t *testing.T, ctx context.Context, pool *pgxpool.Pool, email
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels) VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accountID, "a197-map-"+strings.ToLower(userID[4:12]), userID)
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): личный аккаунт")
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return userID
 }

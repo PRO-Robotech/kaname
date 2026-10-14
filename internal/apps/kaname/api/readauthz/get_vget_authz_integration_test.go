@@ -62,6 +62,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
@@ -505,7 +506,7 @@ func seedUserWithAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(accID), "acc-"+suffix+"-"+string(accID)[len(accID)-6:], string(uid))
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }
@@ -521,7 +522,7 @@ func accountOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, owner doma
 func seedUserInAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID domain.AccountID, suffix string) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE', now())`),
 		string(uid), string(accID), "ext-"+suffix+"-"+string(uid),

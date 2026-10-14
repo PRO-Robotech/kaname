@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedUserWithEmail кладёт строку пользователя с ЗАДАННОЙ почтой: предмет
@@ -48,7 +49,7 @@ import (
 func seedUserWithEmail(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc domain.AccountID, email string) string {
 	t.Helper()
 	uid := ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		uid, string(acc), "ext-"+uid, email, email)

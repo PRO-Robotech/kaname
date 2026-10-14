@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
@@ -143,7 +144,7 @@ func seedProbeAccountWithoutOwnerBinding(t *testing.T, ctx context.Context, pool
 		 VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, "probe-acc-"+suffix, uid)
 	require.NoError(t, err, "посев аккаунта")
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

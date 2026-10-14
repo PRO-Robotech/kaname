@@ -32,6 +32,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
@@ -61,7 +62,7 @@ func ownerFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc, ow
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
 	     VALUES ('account', $1, 'owner', 'user:' || $2),
 	            ('account', $1, 'v_get', 'user:' || $2)`, acc, owner)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "коммит посева: форма читает СВОЕЙ транзакцией и "+
 		"незакоммиченного не увидит — проба зеленела бы на пустоте")
 }

@@ -3647,6 +3647,272 @@ CASES.append(Case(
     ],
 ))
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SUA — ПОВЫШЕНИЕ ВНУТРИ СЕССИИ КЛЮЧОМ ДОСТУПА (kaname#827, приёмка
+# `docs/engineering/acceptance/step-up-with-any-enrolled-method.md`, редакция 3,
+# отпечаток 35224856…; §8 п.2 — минимум сквозных проб края: SUA-03, SUA-04,
+# SUA-13, SUA-16, SUA-21, SUA-22, SUA-70).
+#
+# Новый путь `POST /iam/v1/auth/step-up/access-key/begin` (Р2) с признаком формы
+# своего вида `step-up-access-key-begin` и способ `webauthn` прежнего глагола
+# `POST /iam/v1/auth/step-up` (Р1) — на слушателе формы, тем же подставным
+# аутентификатором, что заводит ключи выше. Признак формы берётся глаголом
+# выдачи признака, как его берёт консоль: вид, которого служба не объявила,
+# глагол не выдаёт — это и есть первый красный до кода.
+#
+# Люди свои на прогон: U (пароль и ключ, кода нет — посев П-кл: код заведён для
+# регистрации ключа сессией «2» и снят самим человеком), Ub — второй «браузер»
+# U, V (пароль и код, ключей нет — П-к), W (пароль и код — П-к, своё окно
+# частоты по адресу). Единый суждённый отказ сверяется побайтово с отказом
+# неверному паролю (`akF13RefusedBody`, Ф3-02) — тем же, что у неверного кода.
+#
+# ЧЕГО БЛОК НЕ УТВЕРЖДАЕТ — КОММЕНТАРИЕМ, не строкой:
+#   · SUA-22 — установка с перечнем происхождений «никого»: стенд этого набора
+#     поставляет непустой перечень профиля, и «Дано» здесь не строится; нужен свой
+#     стенд с этой величиной профиля и свой набор (возврат полосы kaname#827);
+#     держит integration службы (`TestSUA22_…`).
+# ═══════════════════════════════════════════════════════════════════════════
+_U, _UB, _V, _W = "akU", "akUb", "akV", "akW"
+_SUA_BEGIN = "/iam/v1/auth/step-up/access-key/begin"
+_SUA_KIND = "step-up-access-key-begin"
+_SUA_NOT_ISSUED = ("CHALLENGE_NOT_ISSUED", "step-up challenge was not issued: begin step-up again")
+_SUA_PRESENTED = ("CHALLENGE_ALREADY_PRESENTED", "step-up challenge was already presented: begin step-up again")
+_SUA_NO_KEY = ("ACCESS_KEY_NOT_REGISTERED", "no access key is registered: register an access key first")
+_SUA_TOO_MANY = ("TOO_MANY_ATTEMPTS", "too many attempts; try again later")
+
+
+def _sua_login(p, tag, *, init=()):
+    """Вход паролем человека `p` — сессия «1»; носитель и новый контекст формы."""
+    up = tag.upper()
+    return [
+        _csrf(p, f"{tag}-login-csrf", "login", init=list(init)),
+        _lane_post(p, f"{tag}-login", _LOGIN,
+                   {"email": "{{" + p + "Email}}", "password": "{{" + p + "Password}}", "csrfToken": "{{" + p + "Csrf}}"},
+                   test_script=[
+                       *_status_is(200, f"{up}-LOGIN"),
+                       *_parse_body(),
+                       f"pm.test({js_str(up + '-LOGIN: вход паролем — сессия «1»')}, () => "
+                       "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('1'));",
+                       *_capture_cookie(p, "kaname_session", "SessionCookie", f"{up}-LOGIN"),
+                       *_capture_cookie(p, "kaname_form", "FormCookie", f"{up}-LOGIN"),
+                   ]),
+    ]
+
+
+def _sua_begin(p, name, ch, tok, *, slot=None, tests=None):
+    """Выдача испытания повышения ключом под сессией `p`; по умолчанию — `200`, испытание в `ch`.
+
+    `slot` — ключ, который ОДИН обязан стоять в `allowCredentials`."""
+    label = name.upper()
+    if tests is None:
+        tests = [
+            f"pm.environment.unset({js_str(ch)});",
+            *_status_is(200, label),
+            *_parse_body(),
+            "const _suaPk = __j.publicKey || {};",
+            f"pm.test({js_str(label + ': испытание повышения выдано непустым')}, () => "
+            "pm.expect(typeof _suaPk.challenge === 'string' && _suaPk.challenge.length > 0).to.eql(true));",
+            f"if (_suaPk.challenge) {{ {_set(ch, '_suaPk.challenge')} }}",
+        ]
+        if slot is not None:
+            tests += [
+                _AKU,
+                f"pm.test({js_str(label + ': allowCredentials — ровно удостоверение ключа ' + slot)}, () => "
+                "pm.expect(JSON.stringify((_suaPk.allowCredentials || []).map((c) => [c.type, c.id])))"
+                f".to.eql(JSON.stringify([['public-key', _akU({_env('ak' + slot + 'CredId')} || '')]])));",
+            ]
+    return _lane(p, name, "POST", _SUA_BEGIN, body={"csrfToken": "{{" + tok + "}}"},
+                 session=p + "SessionCookie", tests=list(tests))
+
+
+def _sua_key(p, name, *, slot, ch, tok, flags, origin=None, tests=()):
+    """Церемония повышения способом `webauthn`: утверждение ключа `slot` над испытанием `ch`."""
+    js = _assertion_js(slot, ch, flags=flags, count="next", key=None, handle=_U + "Handle", unknown_cred=False,
+                       tamper=False, tok=tok, drop=(), extra={"method": "webauthn"})
+    if origin is not None:
+        js = [x.replace(f"origin: {_ORIGIN_JS},", f"origin: {origin},") for x in js]
+    pre = [*_need(ch, f"{name.upper()}: испытание повышения не выдано",
+                  "шаг выдачи испытания выше не вернул challenge — собирать утверждение не на чем"),
+           *_need("ak" + slot + "CredId", f"{name.upper()}: удостоверение строки {slot} не заведено",
+                  "кейс выше не завёл ключ — предъявлять нечего"),
+           *js]
+    return _lane(p, name, "POST", _STEP_UP, body={}, session=p + "SessionCookie", pre=pre, tests=list(tests))
+
+
+def _sua_raised(p, label, slot, level):
+    """Повышение ключом прошло: уровень по флагам, недостающего нет, носитель перевыпущен."""
+    return [
+        *_status_is(200, label),
+        *_parse_body(),
+        f"pm.test({js_str(label + f': session.assuranceLevel и assurance.level — «{level}», недостающего нет')}, () => "
+        "pm.expect([__j.session && __j.session.assuranceLevel, __j.assurance && __j.assurance.level, "
+        f"__j.assurance && __j.assurance.missingForLevel2]).to.eql([{js_str(level)}, {js_str(level)}, []]));",
+        *_capture_cookie(p, "kaname_session", "SessionCookie", label),
+        f"if (pm.response.code === 200) {{ {_set('ak' + slot + 'Count', _env('_akSentCount'))} }}",
+    ]
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# «Дано» П-кл: U — пароль и ключ, кода нет.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-SUA-GIVEN-PASSWORD-AND-KEY",
+    title="verifies SUA-03 («Дано» П-кл): человек с паролем и ключом без кода — ключ заведён сессией «2», код снят самим человеком",
+    classes=["STATE"],
+    priority="P1",
+    steps=[
+        *_human(_U, "sua-u", factor=True),
+        *_register_key(_U, "sua-u-key", "U1", handle_var=_U + "Handle"),
+        *_remove_factor(_U, "sua-u"),
+        _list(_U, "sua-u-list", count=1, extra=_key_listed("U1", "SUA-U-LIST")),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUA-03: ключ поднимает сессию «1» до «2» (флаги UP|UV|BE).
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-SUA-03-KEY-RAISES-TO-LEVEL-TWO",
+    title="verifies SUA-03: выдача испытания повышения называет ровно ключ человека; утверждение UP|UV|BE поднимает сессию «1» до «2»",
+    classes=["CRUD", "CONF", "STATE"],
+    priority="P0",
+    steps=[
+        *_sua_login(_U, "sua-03"),
+        _tok(_U, "sua-03-begin-tok", _SUA_KIND, _U + "SuaB", session=_U + "SessionCookie"),
+        _sua_begin(_U, "sua-03-begin", "akSuaCh03", _U + "SuaB", slot="U1"),
+        _tok(_U, "sua-03-step-tok", "step-up", _U + "SuaS", session=_U + "SessionCookie"),
+        _sua_key(_U, "sua-03-step-up", slot="U1", ch="akSuaCh03", tok=_U + "SuaS", flags=_UP | _UV | _BE,
+                 tests=_sua_raised(_U, "SUA-03-STEP-UP", "U1", "2")),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUA-04: отличие от SUA-03 одно — флаги UP|UV без BE: уровень «3».
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-SUA-04-KEY-WITHOUT-BACKUP-RAISES-TO-LEVEL-THREE",
+    title="verifies SUA-04: утверждение UP|UV без BE поднимает сессию «1» до «3»",
+    classes=["STATE"],
+    priority="P0",
+    steps=[
+        *_sua_login(_U, "sua-04"),
+        _tok(_U, "sua-04-begin-tok", _SUA_KIND, _U + "SuaB", session=_U + "SessionCookie"),
+        _sua_begin(_U, "sua-04-begin", "akSuaCh04", _U + "SuaB", slot="U1"),
+        _tok(_U, "sua-04-step-tok", "step-up", _U + "SuaS", session=_U + "SessionCookie"),
+        _sua_key(_U, "sua-04-step-up", slot="U1", ch="akSuaCh04", tok=_U + "SuaS", flags=_UP | _UV,
+                 tests=_sua_raised(_U, "SUA-04-STEP-UP", "U1", "3")),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUA-13: близнец SUA-03, отличие — `origin` данных клиента; испытание сгорело.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-SUA-13-KEY-FROM-A-FOREIGN-ORIGIN",
+    title="verifies SUA-13: утверждение с происхождением вне перечня — 401 authentication failed побайтово как у неверного кода; то же испытание повторно — 400 CHALLENGE_ALREADY_PRESENTED",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        *_sua_login(_U, "sua-13"),
+        _tok(_U, "sua-13-begin-tok", _SUA_KIND, _U + "SuaB", session=_U + "SessionCookie"),
+        _sua_begin(_U, "sua-13-begin", "akSuaCh13", _U + "SuaB", slot="U1"),
+        _tok(_U, "sua-13-step-tok", "step-up", _U + "SuaS", session=_U + "SessionCookie"),
+        _sua_key(_U, "sua-13-foreign", slot="U1", ch="akSuaCh13", tok=_U + "SuaS", flags=_UP | _UV | _BE,
+                 origin=_FOREIGN_ORIGIN_JS, tests=_step_up_refused("SUA-13-FOREIGN")),
+        _sua_key(_U, "sua-13-again", slot="U1", ch="akSuaCh13", tok=_U + "SuaS", flags=_UP | _UV | _BE,
+                 tests=_refused(400, 9, "SUA-13-AGAIN", reason=_SUA_PRESENTED[0], text=_SUA_PRESENTED[1])),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUA-16: испытание другой сессии не находится и не сгорает; близнец по сессии.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-SUA-16-CHALLENGE-OF-ANOTHER-SESSION",
+    title="verifies SUA-16: утверждение над испытанием сессии S1 из сессии S2 — 400 CHALLENGE_NOT_ISSUED; в S1 то же испытание — 200, уровень «2»",
+    classes=["NEG", "STATE"],
+    priority="P0",
+    steps=[
+        *_sua_login(_U, "sua-16-s1"),
+        *_sua_login(_UB, "sua-16-s2", init=_same_person(_U, _UB)),
+        _tok(_U, "sua-16-begin-tok", _SUA_KIND, _U + "SuaB", session=_U + "SessionCookie"),
+        _sua_begin(_U, "sua-16-begin", "akSuaCh16", _U + "SuaB", slot="U1"),
+        _tok(_UB, "sua-16-s2-step-tok", "step-up", _UB + "SuaS", session=_UB + "SessionCookie"),
+        _sua_key(_UB, "sua-16-s2-step-up", slot="U1", ch="akSuaCh16", tok=_UB + "SuaS", flags=_UP | _UV | _BE,
+                 tests=_refused(400, 9, "SUA-16-S2-STEP-UP", reason=_SUA_NOT_ISSUED[0], text=_SUA_NOT_ISSUED[1])),
+        _tok(_U, "sua-16-s1-step-tok", "step-up", _U + "SuaS", session=_U + "SessionCookie"),
+        _sua_key(_U, "sua-16-s1-step-up", slot="U1", ch="akSuaCh16", tok=_U + "SuaS", flags=_UP | _UV | _BE,
+                 tests=_sua_raised(_U, "SUA-16-S1-STEP-UP", "U1", "2")),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUA-21: у П-к ключей ноль — выдача отвечает отказом состояния.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-SUA-21-NO-KEY-IS-REGISTERED",
+    title="verifies SUA-21: человек с кодом без ключей — выдача испытания повышения: 400 ACCESS_KEY_NOT_REGISTERED",
+    classes=["NEG", "STATE"],
+    priority="P0",
+    steps=[
+        *_human(_V, "sua-v", factor=True),
+        *_sua_login(_V, "sua-21"),
+        _tok(_V, "sua-21-begin-tok", _SUA_KIND, _V + "SuaB", session=_V + "SessionCookie"),
+        _sua_begin(_V, "sua-21-begin", "akSuaCh21", _V + "SuaB",
+                   tests=_refused(400, 9, "SUA-21-BEGIN", reason=_SUA_NO_KEY[0], text=_SUA_NO_KEY[1])),
+    ],
+))
+
+
+def _sua_wrong_code(p, name, tok):
+    return _lane(p, name, "POST", _STEP_UP, body={"method": "totp", "code": "{{" + p + "TotpCode}}", "csrfToken": "{{" + tok + "}}"},
+                 session=p + "SessionCookie",
+                 pre=[*_totp_of(p), _set(p + "TotpCode", f"__wrongCode({_env(p + 'TotpSecret')})")],
+                 tests=_step_up_refused(name.upper()))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# SUA-70: пять неверных кодов в окне — шестое предъявление верным кодом: 429.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-BVA-SUA-70-SIXTH-PRESENTATION-REFUSED",
+    title=f"verifies SUA-70: {_N_ADDRESS} неверных кодов повышения в окне — следующее верным кодом: 429 TOO_MANY_ATTEMPTS, Retry-After 1…900",
+    classes=["SEC", "BVA"],
+    priority="P0",
+    steps=[
+        *_human(_W, "sua-w", factor=True),
+        *_sua_login(_W, "sua-70"),
+        _tok(_W, "sua-70-tok", "step-up", _W + "SuaS", session=_W + "SessionCookie"),
+        *(_sua_wrong_code(_W, f"sua-70-wrong-{i + 1}", _W + "SuaS") for i in range(_N_ADDRESS)),
+        _lane(_W, "sua-70-right", "POST", _STEP_UP,
+              body={"method": "totp", "code": "{{" + _W + "TotpCode}}", "csrfToken": "{{" + _W + "SuaS}}"},
+              session=_W + "SessionCookie", pre=_totp_code_of(_W),
+              tests=[
+                  *_refused(429, 8, "SUA-70-RIGHT", reason=_SUA_TOO_MANY[0], text=_SUA_TOO_MANY[1]),
+                  "const __ra = String(pm.response.headers.get('Retry-After') || '');",
+                  "pm.test('SUA-70-RIGHT: Retry-After — целое 1…900 секунд', () => "
+                  "pm.expect([/^[0-9]+$/.test(__ra), parseInt(__ra, 10) >= 1, parseInt(__ra, 10) <= 900]).to.eql([true, true, true]));",
+              ]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Уборка SUA: ключ U снят сессией ключа («3»), перечень пуст.
+# ───────────────────────────────────────────────────────────────────────────
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-SUA-CLEANUP-KEYS",
+    title="verifies SUA (уборка): ключ человека U снят сессией его ключа; перечень пуст",
+    classes=["CRUD"],
+    priority="P1",
+    steps=[
+        *_key_token(_U, "sua-u-cleanup", "U1"),
+        _revoke(_U, "sua-u-revoke", "U1", tests=_registration_accepted("U1C", "SUA-U-REVOKE")),
+        _await_op(_U, "sua-u-revoke-op", "U1C"),
+        _list(_U, "sua-u-cleanup-list", count=0),
+    ],
+))
+
 CASES.insert(0, _GIVEN_STALE)
 
 

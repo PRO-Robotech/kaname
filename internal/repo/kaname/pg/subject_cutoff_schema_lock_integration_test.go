@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
@@ -143,7 +144,7 @@ func cutoffPerson(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tag str
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, user)
 	require.NoError(t, err, "посев аккаунта %s", tag)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return user
 }

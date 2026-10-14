@@ -51,6 +51,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // newOrphanMirrorSweeper собирает проход над пулом.
@@ -114,7 +115,7 @@ func seedAccountProjectForMirror(t *testing.T, ctx context.Context, pool *pgxpoo
 	      VALUES ($1, $2, $3, '{}'::jsonb)`, accID, "acc-"+suffix, userID)
 	exec(`INSERT INTO projects (id, account_id, name, labels)
 	      VALUES ($1, $2, $3, '{}'::jsonb)`, prjID, accID, "prj-"+suffix)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return accID, prjID
 }

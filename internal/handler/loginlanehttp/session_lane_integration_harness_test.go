@@ -77,6 +77,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -233,6 +234,16 @@ type sessionLaneOptions struct {
 	// фактора: пробы заведения способа (kaname#747) ставят НАСТОЯЩИЕ `enroll` и
 	// `confirm` над швом хранилища способов; nil — глаголы стенда как есть.
 	verbs func(sessionVerbs, humansession.SecondFactorDeps) loginlanehttp.Lane
+	// keyBinding — привязка ключей стенда (три ручки Ф7 Р2) вместо
+	// `laneKeyBinding()`; nil — привязка стенда. Пробы «ключи на установке
+	// выключены» (kaname#827, SUA-22…24) подают перечень происхождений `[]`
+	// («никого», Ф7 Р2): величина входа — одна, и всякий читатель решения
+	// «выключено» на стенде берёт её отсюда.
+	keyBinding *webauthnverify.Binding
+	// ceremonyObserver — приёмник исходов церемонии повышения и второго фактора
+	// (`SecondFactorDeps.Observer`); nil — молчащий. Пробы клеток наблюдаемости
+	// повышения ключом (kaname#827, Р10) читают его.
+	ceremonyObserver humansession.Observer
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -346,9 +357,13 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 		Limits: limits, Observer: nop, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
+	var ceremonyObserver humansession.Observer = nop
+	if opts.ceremonyObserver != nil {
+		ceremonyObserver = opts.ceremonyObserver
+	}
 	secondFactor := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
-		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: ceremonyNow, Logger: logger,
+		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: ceremonyObserver, Now: ceremonyNow, Logger: logger,
 	}
 	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
 	require.NoError(t, err)
@@ -402,10 +417,14 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	if opts.akKeys != nil {
 		akKeys = opts.akKeys(akKeys)
 	}
+	keyBinding := laneKeyBinding()
+	if opts.keyBinding != nil {
+		keyBinding = *opts.keyBinding
+	}
 	akDeps := humansession.AccessKeyLoginDeps{
 		CutoffClock: momentclock.Func(ceremonyNow),
 		Store:       sessions, Keys: akKeys, Methods: methods,
-		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
+		Binding: keyBinding, ChallengeTTL: access_keys.ChallengeTTL,
 		UserVerification: access_keys.UserVerificationAssertion,
 		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: ceremonyNow, Logger: logger,
 	}

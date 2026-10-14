@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 845
+Всего кейсов: 853
 
 ## Перепись по модулям
 
@@ -71,7 +71,7 @@
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 4 |
-| `cases/kaname-access-keys.py` | 43 |
+| `cases/kaname-access-keys.py` | 51 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 18 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1060,7 +1060,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 43 кейса
+## `cases/kaname-access-keys.py` — 51 кейс
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1136,6 +1136,14 @@
 - `IAM-ACCESSKEY-OK-KN747-15-16-GIVEN-SESSIONS`
 - `IAM-ACCESSKEY-NEG-KN747-15-STALE-LEVEL-TWO`
 - `IAM-ACCESSKEY-NEG-KN747-16-STALE-LEVEL-ONE`
+- `IAM-ACCESSKEY-OK-SUA-GIVEN-PASSWORD-AND-KEY`
+- `IAM-ACCESSKEY-OK-SUA-03-KEY-RAISES-TO-LEVEL-TWO`
+- `IAM-ACCESSKEY-OK-SUA-04-KEY-WITHOUT-BACKUP-RAISES-TO-LEVEL-THREE`
+- `IAM-ACCESSKEY-NEG-SUA-13-KEY-FROM-A-FOREIGN-ORIGIN`
+- `IAM-ACCESSKEY-NEG-SUA-16-CHALLENGE-OF-ANOTHER-SESSION`
+- `IAM-ACCESSKEY-NEG-SUA-21-NO-KEY-IS-REGISTERED`
+- `IAM-ACCESSKEY-BVA-SUA-70-SIXTH-PRESENTATION-REFUSED`
+- `IAM-ACCESSKEY-OK-SUA-CLEANUP-KEYS`
 
 ## `cases/kaname-address-verification.py` — 8 кейсов
 

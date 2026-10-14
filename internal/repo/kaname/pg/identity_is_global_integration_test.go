@@ -57,6 +57,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // rowsWithEmail — сколько строк пользователя несут эту почту (без учёта регистра).
@@ -189,7 +190,7 @@ func TestIntegration_FirstLoginActivatesEveryMembership(t *testing.T) {
 		_, aerr := w.UsersW().ActivateInvite(ctx, u.ID,
 			domain.ExternalSubject("ext-"+string(u.ID)), domain.DisplayName("Logged In"))
 		require.NoError(t, aerr)
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 
