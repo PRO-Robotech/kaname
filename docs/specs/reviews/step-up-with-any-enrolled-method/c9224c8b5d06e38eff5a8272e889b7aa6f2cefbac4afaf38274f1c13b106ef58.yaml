@@ -29,14 +29,26 @@ authority:
   authorized_actors: [pointpu]
   allowlisted_for_role: false
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-14T19:30:55Z"
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#827
-  status: not_performed
-  published: false
-  publication_mode: courier_of_agent_verdict
-  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/step-up-with-any-enrolled-method.md · sha256 c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58
+  status: performed
+  published: true
+  database_id: 6176615956
+  node_id: "IC_kwDOUO26pM8AAAABcCeuFA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/827#issuecomment-6176615956"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6176615956"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-14T19:30:55Z"
+  body_sha256: "297bd79a5bbb2a028497eb92e1c4900126920dcc141cbc4123aa6a0292c11007"
+  subject_sha256: "c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58"
+  subject_revision_commit: "d81466bfb55ea588844438b9ccaa65fab399ef75"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
