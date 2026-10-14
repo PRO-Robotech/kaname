@@ -65,6 +65,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -176,7 +177,7 @@ func seedTx(t *testing.T, ctx context.Context, conn *pgx.Conn, seed func(pgx.Tx)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	seed(tx)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("посев: фиксация отвергнута (%v).\nОтложенные ссылки проверяются НА "+
 			"КОММИТЕ, поэтому отказ здесь означает, что посев оставил пару "+

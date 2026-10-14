@@ -39,6 +39,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // bootstrapAdmin — utility: bootstrap-флоу (user + own Account) через одну TX
@@ -71,7 +72,7 @@ func bootstrapAdmin(t *testing.T, ctx context.Context, repo *kanamepg.Repository
 		Labels:      domain.Labels{},
 	})
 	require.NoError(t, err)
-	seedWayIn(t, ctx, kanamepg.WriterTx(w))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 	committed = true
 	return uid, accID
@@ -297,7 +298,7 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 		domain.ExternalSubject("external-sub-s05"),
 		domain.DisplayName("Real Name"))
 	require.NoError(t, err)
-	seedWayIn(t, ctx, kanamepg.WriterTx(w2))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w2))
 	require.NoError(t, w2.Commit(ctx))
 
 	assert.Equal(t, pending.ID, activated.ID)
@@ -381,7 +382,7 @@ func TestUserInvite_S06_Bootstrap_DeferrableFK(t *testing.T) {
 	require.NoError(t, err, "Insert account: FK check deferred")
 
 	// 3. COMMIT — DEFERRABLE FK проверяется здесь.
-	seedWayIn(t, ctx, kanamepg.WriterTx(w))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx), "COMMIT should succeed (both FK resolved)")
 
 	// Verify state
@@ -424,7 +425,7 @@ func TestUserInvite_S30_Bootstrap_DeferrableFK_FailOnCommit(t *testing.T) {
 
 	// Строка пароля той же транзакцией (kaname#608): отказ фиксации обязан
 	// прийти от ключа аккаунта, а не от инварианта способа входа.
-	seedWayIn(t, ctx, kanamepg.WriterTx(w))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 	// COMMIT должен упасть на FK-violation (account не существует).
 	err = w.Commit(ctx)
 	require.Error(t, err, "COMMIT must fail — account_id points to missing row")
@@ -737,7 +738,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 	require.NoError(t, err,
 		"тот же писатель на СВОБОДНОЙ почте обязан завести строку — иначе отказ выше "+
 			"доказывал бы лишь то, что писатель сломан целиком")
-	seedWayIn(t, ctx, kanamepg.WriterTx(w4))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w4))
 	require.NoError(t, w4.Commit(ctx))
 	assert.Len(t, membershipsOf(t, ctx, pool, otherID), 1,
 		"у своего человека своё единственное членство")

@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedAccountWithProjects заводит аккаунт, его владельца и n проектов.
@@ -71,7 +72,7 @@ func seedAccountWithProjects(t *testing.T, ctx context.Context, pool *pgxpool.Po
 		require.NoError(t, err)
 		projects = append(projects, pid)
 	}
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return accID, projects
 }
@@ -167,7 +168,7 @@ func TestIntegration_GrantDoesNotReachAcrossAccounts(t *testing.T) {
 	// Субъект выдачи — настоящий пользователь: строка привязки на него ссылается;
 	// адрес подтверждён — права действуют только подтвердившему (kaname#456, Р4а).
 	const subjectUser = "usr0000000000snapusr"
-	_, err = pool.Exec(ctx, withWayIn(`
+	_, err = pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
 		VALUES ($1, $1, $1 || '@example.test', $2, now())`), subjectUser, accA)
 	require.NoError(t, err)

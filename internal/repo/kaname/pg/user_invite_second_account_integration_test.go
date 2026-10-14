@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // ── известный человек, приглашённый во ВТОРОЙ аккаунт ──────────────────────
@@ -90,7 +91,7 @@ func TestUserInvite_ExistingActiveEmail_SecondAccount(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err, "посев действующей строки в аккаунте A")
-	seedWayIn(t, ctx, kanamepg.WriterTx(w0))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w0))
 	require.NoError(t, w0.Commit(ctx))
 
 	// Второй аккаунт со своим администратором — и третий, куда человека НИКТО
@@ -247,7 +248,7 @@ func TestUserInvite_ConcurrentBootstrap_RaceSafe(t *testing.T) {
 			}
 			// Строка пароля той же транзакцией (kaname#608): без неё фиксацию
 			// отверг бы инвариант, а не ключ гонки.
-			if _, err := kanamepg.WriterTx(w).Exec(ctx, wayInFixtureSQL); err != nil {
+			if _, err := kanamepg.WriterTx(w).Exec(ctx, activewayin.FixtureSQL); err != nil {
 				atomic.AddInt64(&failures, 1)
 				return
 			}

@@ -59,6 +59,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // overlapRuns — прогонов на клетку «рука × сцена». Сцены построены держателем,
@@ -95,7 +96,7 @@ func overlapScene(t *testing.T, ctx context.Context, pool *pgxpool.Pool, n int) 
 		VALUES ($1, $2, $3, $4, 'overlap-member', 'ACTIVE')`,
 		member, account, "ext-b-"+tag, tag+"b@example.invalid")
 	require.NoError(t, err, "посев снимаемого человека")
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	_, err = pool.Exec(ctx, `

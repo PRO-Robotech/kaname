@@ -32,6 +32,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,7 +195,7 @@ func TestIntegration_RemovalCapturesEveryScopeOfTheSubject(t *testing.T) {
 	_, accountOne := seedAccountWithOwner(t, db, "one")
 	_, accountTwo := seedAccountWithOwner(t, db, "two")
 
-	_, err := execWithWayIn(t, db,
+	_, err := activewayin.ExecGuarded(t, db,
 		`INSERT INTO kaname.users (id, external_id, email, account_id)
 		 VALUES ('usr-multi', 'usr-multi', 'multi@example.test', $1)`, accountOne)
 	require.NoError(t, err)

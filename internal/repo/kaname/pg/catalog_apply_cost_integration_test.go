@@ -114,6 +114,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // fullCostGridEnv / stressCostGridEnv — ручки «какую ОБЪЯВЛЕННУЮ сетку гнать», и
@@ -220,7 +221,7 @@ func seedCostRoles(t *testing.T, ctx context.Context, pool *pgxpool.Pool, roles 
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, "cost-acc-"+accID[len(accID)-6:], uid)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	roleIDs := make([]string, 0, roles)

@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -423,7 +424,7 @@ func seedIdentity(t *testing.T, ctx context.Context, env *testEnv,
 	accID domain.AccountID, ext domain.ExternalSubject, email domain.Email, status string) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := env.pool.Exec(ctx, withWayIn(`
+	_, err := env.pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, $5, $6)`),
 		string(uid), string(accID), string(ext), string(email), "Identity", status)

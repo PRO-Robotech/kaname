@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // dsnWithSchema — DSN этой пробы с путём поиска сервиса. Репозиторий пишет
@@ -85,7 +86,7 @@ func seedUserWithAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(accID), fmt.Sprintf("acc-%s-%s", strings.ToLower(suffix), strings.ToLower(string(accID[4:10]))), string(uid))
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

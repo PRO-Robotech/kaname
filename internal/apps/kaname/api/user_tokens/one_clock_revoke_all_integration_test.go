@@ -59,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
@@ -138,7 +139,7 @@ func newOneClockStand(t *testing.T) oneClockStand {
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 		VALUES ($1,$2,'ext-one-clock','clock@example.com','Clock','ACTIVE', now())`, user, account)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	shared, err := revocationpolicy.ClockWithDeadline(kanamepg.NewSharedClock(pool), 5*time.Second)
 	require.NoError(t, err)
