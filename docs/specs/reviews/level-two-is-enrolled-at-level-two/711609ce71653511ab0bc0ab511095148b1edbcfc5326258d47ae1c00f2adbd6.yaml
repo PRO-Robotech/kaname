@@ -55,7 +55,7 @@ closed_from_round_1:
     how: >-
       Р4 — формула «сессия «2» либо перечень ключей ПРОЧИТАН и пуст», «нечитаемый перечень — отказ», запрет строить условие на enrollmentBeforeWrite; KN747-17 (enroll) и KN747-18 (confirm) с близнецами KN747-06/-07; §7 п.6; §8 пятая клетка.
     verified: >-
-      completed_login.go:133-145 — enrollmentBeforeWrite при ошибке отдаёт nil,false; handler.go:1434-1435 — ErrStoreUnavailable → 503, codeUnavailable, unavailableText; enroll/confirm передают humansession.TextRequestNotPerformed (handler.go writeError); refusals.go:30 — "request not performed; try again later"; store.go:68 — AccessKeyEnrolled; fake_store_test.go:1058/1087 — fakeMethods и его AccessKeyEnrolled (переключателя отказа нет — заказан документом, §5).
+      закрыто формулой Р4 и сценариями KN747-17/-18
   - kind: DISCLOSURE
     how: >-
       §0 — нарратив «как сегодня» снят, фраза «не описывает» теперь верна; §1.2 — перепись требований ПОСЛЕ правки; «было» в Р2/Р3/Р6 снято; шапка — посадка в публичную ветку только вместе с диффом исправления.
@@ -85,5 +85,7 @@ constructibility:
   by_code_reading_and_fixture: >-
     KN747-01…16 — исходные условия строятся глаголами продукта в «Дано» (KN747-12 — администратор посева), разбор круга 1 в силе для неизменённых «Дано»; KN747-17, -18 — названная фикстура use-case (вариант fakeMethods с переключателем отказа чтения AccessKeyEnrolled), заказана документом; чтение перечня у fakeMethods — один метод порта, отказ выразим.
 verified_coordinates:
-  - "access_key_service.proto:78/104/141 = \"1\" (118 — List, без правки) — git grep @400493cf0"
-  - "KN747-сценариев 18 — grep -c '^\\*\\*ID: KN747'"
+  - "координаты сверены на ревизии 400493cf0; значения — в диффе исправления"
+added_note: >-
+  2026-10-14: правка публичного текста по разбору раскрытия; редакция до правки — в истории git.
+  Решение диспетчера — дописать на месте, новую запись не выпускать.
