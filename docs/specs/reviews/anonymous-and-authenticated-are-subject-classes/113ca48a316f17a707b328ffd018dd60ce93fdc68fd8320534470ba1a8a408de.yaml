@@ -178,8 +178,21 @@ event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 113ca48a316f17a7
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#829
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6180716101
+  node_id: IC_kwDOUO26pM8AAAABcGY-RQ
+  url: https://github.com/PRO-Robotech/kaname/issues/829#issuecomment-6180716101
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6180716101
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/829
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-14T23:25:27Z'
+  body_sha256: 7a7cc0b93442290a9afd5ab2c0e57f45bc00d73fb71b8a0a52eee6b78a719d6c
+  subject_sha256: 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de
+  subject_revision: e88473f6845882781577544b5f712d423f5c2d2f
+  verdict: CHANGES_REQUESTED
 
 attribution:
   reviewer_kind: claude_agent
