@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedMemberUser inserts a plain (non-owner) ACTIVE user in the given account —
@@ -45,7 +46,7 @@ import (
 func seedMemberUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID, suffix string) string {
 	t.Helper()
 	uid := ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, 'M', 'ACTIVE')`),
 		uid, accID, "ext-"+suffix+"-"+uid, "m-"+suffix+"@example.com")

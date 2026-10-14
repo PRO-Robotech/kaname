@@ -41,6 +41,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // setOwnCeiling — величина проекции посадки. Ровно тот оператор, которым её
@@ -260,7 +261,7 @@ func TestOwnCeiling_IdentityWithoutACountingRowStillReadsItsCeiling(t *testing.T
 		`SELECT account_id FROM users WHERE id = $1`, ownerID).Scan(&hostAccount))
 
 	external := "ext-quota-no-row-" + ids.NewID(domain.PrefixUser)
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		ids.NewID(domain.PrefixUser), hostAccount, external,

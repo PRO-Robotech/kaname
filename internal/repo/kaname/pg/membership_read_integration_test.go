@@ -30,6 +30,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	repomembership "github.com/PRO-Robotech/kaname/internal/repo/kaname/membership"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedMembership кладёт строку членства напрямую — тем же идентификатором,
@@ -398,7 +399,7 @@ func TestMembership_IAMID2_16_InviteTraceSurvivesTheFirstLogin(t *testing.T) {
 		UPDATE users SET external_id = $2, invite_status = 'ACTIVE' WHERE id = $1`,
 		string(invited), "ext-mbr16-inv")
 	require.NoError(t, err, "first login")
-	seedWayIn(t, ctx, tx) // вход заводит способ входа той же транзакцией (kaname#608)
+	activewayin.Seed(t, ctx, tx) // вход заводит способ входа той же транзакцией (kaname#608)
 	require.NoError(t, tx.Commit(ctx))
 
 	rd2, done2 := membershipReaderOn(t, ctx, repo)

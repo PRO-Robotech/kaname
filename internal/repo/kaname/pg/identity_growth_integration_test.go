@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iampg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // newIdentityGrowthDB — своя база и пул на пробу.
@@ -87,7 +88,7 @@ func seedIdentityHomeAccount(t *testing.T, ctx context.Context, pool *pgxpool.Po
 		accountID, "growth-acc-"+suffix, userID)
 	require.NoError(t, err, "seed account")
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit identity growth home account")
 	return accountID
 }
@@ -110,7 +111,7 @@ func seedIdentityMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool, a
 	if external == "" {
 		status = "PENDING"
 	}
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, 'Identity Growth Member', $5)`),
 		userID, accountID, external, email, status)
@@ -218,7 +219,7 @@ func TestIdentityGrowth_InvitationBecomesAnIdentityOnlyOnActivation(t *testing.T
 		UPDATE kaname.users SET external_id = $2, invite_status = 'ACTIVE' WHERE id = $1`,
 		userID, "ext-growth-invited")
 	require.NoError(t, err, "активация приглашения")
-	seedWayIn(t, ctx, tx) // вход заводит способ входа той же транзакцией (kaname#608)
+	activewayin.Seed(t, ctx, tx) // вход заводит способ входа той же транзакцией (kaname#608)
 	require.NoError(t, tx.Commit(ctx))
 
 	require.Equal(t, before+1, journalCount(t, ctx, pool),

@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 const (
@@ -108,7 +109,7 @@ func credQuotaFixtureWithVictim(t *testing.T, ctx context.Context, pool *pgxpool
 		"victim-"+suffix+"-"+victimID+"@example.invalid", "Cred Victim "+suffix)
 	require.NoError(t, err, "посев второго человека")
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "фиксация фикстуры")
 	return userID, svaID, accountID, victimID
 }

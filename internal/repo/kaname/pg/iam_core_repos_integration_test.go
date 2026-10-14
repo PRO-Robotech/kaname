@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // kac127Setup — общий setup: testcontainers + pgxpool + return DSN-pool pair.
@@ -90,7 +91,7 @@ func kac127SeedUserAndAccount(t *testing.T, ctx context.Context, pool *pgxpool.P
 		 VALUES ($1, $2, $3, $4, 'ACTIVE', now())`,
 		uid, "ext-"+suffix, "u-"+suffix+"@kac127.local", accID)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }
