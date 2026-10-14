@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // a197FixedCarrierText — сообщение сервера отказа KQ006 без идентификатора
@@ -243,7 +244,7 @@ func TestA197_09_SentForeignCarrierIsRefusedNotOverwritten(t *testing.T) {
 		_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels) VALUES ($1, $2, $3, '{}'::jsonb)`,
 			accountID, "a197-09-"+strings.ToLower(userID[4:10]), userID)
 		require.NoError(t, err)
-		seedWayIn(t, ctx, tx)
+		activewayin.Seed(t, ctx, tx)
 		return userID, tx.Commit(ctx)
 	}
 
@@ -288,7 +289,7 @@ func TestA197_09_SentForeignCarrierIsRefusedNotOverwritten(t *testing.T) {
 			userID, string(domain.NewOwnLaneSubject()), carrier); err != nil {
 			return err
 		}
-		seedWayIn(t, ctx, tx)
+		activewayin.Seed(t, ctx, tx)
 		return tx.Commit(ctx)
 	}
 

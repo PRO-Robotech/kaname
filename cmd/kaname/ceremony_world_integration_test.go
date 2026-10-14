@@ -115,6 +115,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -425,7 +426,7 @@ func (w *ceremonyWorld) seedPerson() {
 		account, "acc-"+strings.ToLower(account[3:9]), string(w.user)); err != nil {
 		w.fixture("посев аккаунта: %v", err)
 	}
-	seedWayIn(w.t, w.ctx, tx)
+	activewayin.Seed(w.t, w.ctx, tx)
 	if err := tx.Commit(w.ctx); err != nil {
 		w.fixture("коммит посева человека: %v", err)
 	}

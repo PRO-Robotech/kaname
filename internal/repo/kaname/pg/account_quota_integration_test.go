@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // accountQuotaFixture — одна личность, её строка пользователя и её первый
@@ -73,7 +74,7 @@ func accountQuotaFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		accountID, "quota-acc-"+suffix, userID)
 	require.NoError(t, err, "seed account")
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit account quota fixture")
 	return externalID, userID
 }

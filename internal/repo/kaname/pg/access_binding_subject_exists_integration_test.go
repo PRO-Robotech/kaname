@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedSAID inserts a live service_accounts row in the given account and returns
@@ -241,7 +242,7 @@ func TestABSubjectExists_ConcurrentDeleteVsCreate_NoDangling(t *testing.T) {
 	// A plain member user (account_id set, NOT an account owner → deletable by
 	// the guarded delete once it carries no bindings).
 	member := ids.NewID(domain.PrefixUser)
-	_, err = pool.Exec(ctx, withWayIn(`
+	_, err = pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, 'M', 'ACTIVE')`),
 		member, accID, "ext-abse7m-"+member, "m-abse7@example.com")

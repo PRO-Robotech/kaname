@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 func basicCredPool(t *testing.T) *pgxpool.Pool {
@@ -68,7 +69,7 @@ ON CONFLICT DO NOTHING`)
 INSERT INTO service_accounts (id, account_id, name, enabled)
 VALUES ('sva0000000000000bat1', 'acc0000000000000bat1', 'bat-one-sa', true) ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 }
 

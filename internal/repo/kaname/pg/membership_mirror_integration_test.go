@@ -39,6 +39,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // membershipsOf — состояние зеркала для одной строки пользователя.
@@ -132,7 +133,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 		_, err = w.UsersW().ActivateInvite(ctx, pendingID,
 			domain.ExternalSubject("ext-mir1-activated"), domain.DisplayName("Pending"))
 		require.NoError(t, err)
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 	act := membershipsOf(t, ctx, pool, pendingID)
@@ -249,7 +250,7 @@ func TestIntegration_MembershipMirrorUnderConcurrentWriters(t *testing.T) {
 				errs[i] = ierr
 				return
 			}
-			if _, xerr := kanamepg.WriterTx(w).Exec(ctx, wayInFixtureSQL); xerr != nil {
+			if _, xerr := kanamepg.WriterTx(w).Exec(ctx, activewayin.FixtureSQL); xerr != nil {
 				_ = w.Rollback(ctx)
 				errs[i] = xerr
 				return
@@ -308,7 +309,7 @@ func TestIntegration_PersonalAccountGateCountsOwnershipNotMembership(t *testing.
 			InviteStatus: domain.InviteStatusActive,
 		})
 		require.NoError(t, err)
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

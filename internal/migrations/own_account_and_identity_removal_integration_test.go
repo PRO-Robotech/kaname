@@ -40,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // ownRemovalMigration — файл миграции Р3, Р4, Р10, Р11 (приёмка §6 DoD 1).
@@ -191,7 +192,7 @@ func seedRemovalWorld(t *testing.T, db *sql.DB, tag string) removalWorld {
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
 		VALUES ($1, $2, $3, '{}'::jsonb)`, w.a, "kn664-"+tag+"-"+w.a[len(w.a)-6:], w.u)
 	require.NoError(t, err)
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 
 	_, err = db.Exec(`INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ($1, $2, $3)`,

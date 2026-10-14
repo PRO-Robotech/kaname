@@ -41,6 +41,7 @@ import (
 	sessionrev "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 )
@@ -96,7 +97,7 @@ func seedRevokeUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool) domai
 		string(accID), "seed-acc-"+string(accID)[len(accID)-6:], string(uid))
 	require.NoError(t, err, "seed account")
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx), "commit seed")
 	return uid
 }

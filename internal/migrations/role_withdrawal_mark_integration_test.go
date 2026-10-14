@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/stretchr/testify/require"
@@ -266,7 +267,7 @@ func seedTargetMemberFixture(db *sql.DB) error {
 		VALUES ('acc_rw_probe', 'rw-probe', 'usr_rw_probe');
 		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ('usr_rw_probe', 'ext-rw-probe', 'rw-probe@example.test', 'acc_rw_probe');
-		` + wayInGuardedSQL + `;
+		` + activewayin.GuardedSQL + `;
 		COMMIT;`); err != nil {
 		return err
 	}

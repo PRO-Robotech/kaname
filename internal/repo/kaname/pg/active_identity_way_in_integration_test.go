@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // awiProducerHarness — база и захват журнала одной пробы.
@@ -114,7 +115,7 @@ func (h *awiProducerHarness) seedInviter(t *testing.T) (domain.UserID, domain.Ac
 		VALUES ($1, $2, $3, $4, 'Inviter', 'ACTIVE')`,
 		string(inviter), string(acc), "ext-awi-inviter-"+string(inviter), "awi-inviter-"+string(inviter)+"@example.invalid")
 	require.NoError(t, err)
-	seedWayIn(t, h.ctx, tx)
+	activewayin.Seed(t, h.ctx, tx)
 	require.NoError(t, tx.Commit(h.ctx))
 	return inviter, acc
 }

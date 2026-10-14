@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound — снятие владельца аккаунта
@@ -108,7 +109,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 		InviteStatus: domain.InviteStatusActive,
 	})
 	require.NoError(t, err)
-	seedWayIn(t, ctx, kanamepg.WriterTx(w3))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w3))
 	require.NoError(t, w3.Commit(ctx))
 
 	w4, err := repo.Writer(ctx)
