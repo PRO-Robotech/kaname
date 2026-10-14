@@ -90,6 +90,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedUserRow вставляет ОДНУ строку человека вместе с аккаунтом, который его
@@ -133,7 +134,7 @@ func seedUserRow(
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		accID, accountName(accID), uid)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }

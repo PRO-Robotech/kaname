@@ -51,6 +51,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedUserInAccount сеет строку пользователя вместе с её аккаунтом одной
@@ -80,7 +81,7 @@ func seedUserInAccount(t *testing.T, db *sql.DB, tag, email, externalID, inviteS
 		accountID, "acc-"+tag, userID)
 	require.NoError(t, err, "посев аккаунта для %s", tag)
 
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 	return userID, accountID
 }

@@ -55,6 +55,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedTenantRows кладёт арендную обвязку НАСТОЯЩИМИ строками: аккаунт,
@@ -125,7 +126,7 @@ func seedTenantRows(t *testing.T, pool *pgxpool.Pool, accountID string, projectI
 				"фикстура ничего не посеяла", prj, landed)
 		}
 	}
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("фиксация посева арендатора: %v", err)
 	}

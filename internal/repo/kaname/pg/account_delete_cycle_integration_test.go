@@ -47,6 +47,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // removalEnv — настоящая база, настоящий репозиторий и лента операций.
@@ -156,7 +157,7 @@ func (e *removalEnv) seedMember(t *testing.T, tag string, home domain.AccountID,
 			VALUES (kaname.membership_mirror_id($1, $2), $1, $2, 'ACTIVE')`, string(uid), string(acc))
 		require.NoError(t, err, "Дано: членство участника в %s", acc)
 	}
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	w, err := e.repo.Writer(ctx)

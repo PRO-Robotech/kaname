@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // raceRole — живая роль модуля со своими проекциями, субъектом и аккаунтом.
@@ -76,7 +77,7 @@ func raceRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix stri
 		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 		"acc_rwrace"+suffix, "rwrace-"+strings.ToLower(suffix), "usr_rwrace"+suffix)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	_, err = pool.Exec(ctx, `

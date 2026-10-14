@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -81,7 +82,7 @@ func (w *gateWorld) person(t *testing.T, id string, verified bool) {
 		_, err = tx.Exec(w.ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, id)
 		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): отметка")
 	}
-	seedWayIn(t, w.ctx, tx)
+	activewayin.Seed(t, w.ctx, tx)
 	require.NoError(t, tx.Commit(w.ctx), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): фиксация")
 }
 
