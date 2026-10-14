@@ -28,8 +28,17 @@ reviewed_at: '2026-10-14T20:11:01Z'
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#827
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6177387012
+  node_id: "IC_kwDOUO26pM8AAAABcDNyBA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/827#issuecomment-6177387012"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6177387012"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-14T20:11:53Z"
+  body_sha256: "3c4c18ce108772a92d4b5608774c613f95076091755f590537dc908052f5f104"
   subject_sha256: "35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683"
   subject_revision_commit: "a897548d8ddbd22f70bdf5c7a63a65bddc4ebd88"
   verdict: "APPROVED"
