@@ -26,12 +26,23 @@ var recoveryPathMark = check.RecoveryPathMarkDecl{
 
 func TestTheRecoveryPathMarkHasTwoNamedWriters(t *testing.T) {
 	t.Parallel()
-	c, err := check.RecoveryPathMarkWriters(prodGoFiles(t, moduleRoot(t)), migrations.FS, recoveryPathMark)
+	// Оснастка проб (`internal/testsupport/`) — не прод-сборка: фикстура ставит
+	// отметку так же, как ставил её `*_test.go` до выноса (kaname#816).
+	// Предпосылку держит TestProbeToolingIsImportedOnlyByProbes.
+	shipped, tooling := map[string]string{}, 0
+	for rel, body := range prodGoFiles(t, moduleRoot(t)) {
+		if !check.ShippedGoFile(rel) {
+			tooling++
+			continue
+		}
+		shipped[rel] = body
+	}
+	c, err := check.RecoveryPathMarkWriters(shipped, migrations.FS, recoveryPathMark)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
-	t.Logf("перепись: файлов Go %d · миграций %d · упоминаний в Go %d · снимающих %v · миграций, называющих отметку, %v",
-		c.GoFiles, c.SQLFiles, c.GoMentions, c.Clearers, c.SQLMentioners)
+	t.Logf("перепись: файлов Go %d (оснастки проб снято с суда %d) · миграций %d · упоминаний в Go %d · снимающих %v · миграций, называющих отметку, %v",
+		c.GoFiles, tooling, c.SQLFiles, c.GoMentions, c.Clearers, c.SQLMentioners)
 	for _, f := range c.Findings {
 		t.Error(f)
 	}

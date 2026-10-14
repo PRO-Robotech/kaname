@@ -26,6 +26,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
@@ -333,7 +334,7 @@ func TestIntegration_PoolDoorRollsBackTheFirstRecordWhenTheSecondFails(t *testin
 	// ПОЗЖЕ стоящего — иначе замок отбросил бы причину, и отказа не случилось бы.
 	longReason := strings.Repeat("z", 130)
 	other := domain.UserID(scene.UserID + "-2")
-	_, err = pool.Exec(ctx, withWayIn(`
+	_, err = pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1, account_id, $2, $3, display_name, invite_status
 		  FROM kaname.users WHERE id = $4`),

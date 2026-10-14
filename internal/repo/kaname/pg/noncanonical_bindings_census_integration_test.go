@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // censusQuerier — общий знаменатель пула и транзакции.
@@ -182,7 +183,7 @@ func TestIntegration_NonCanonicalBindingCensus(t *testing.T) {
 		})
 		require.NoError(t, err,
 			"свободная почта обязана завести строку — иначе отказ выше про ключ не говорит ничего")
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

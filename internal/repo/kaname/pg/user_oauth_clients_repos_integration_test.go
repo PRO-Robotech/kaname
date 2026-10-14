@@ -37,6 +37,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // newUOC — доменная строка токена под данного user, с уникальным id.
@@ -236,7 +237,7 @@ func TestUserOAuthClient_09c_UserDelete_CascadesTokens(t *testing.T) {
 	var accID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT account_id FROM users WHERE id = $1`, string(ownerID)).Scan(&accID))
 	memberID := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err = pool.Exec(ctx, withWayIn(`
+	_, err = pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, 'Member', 'ACTIVE')`),
 		string(memberID), accID,

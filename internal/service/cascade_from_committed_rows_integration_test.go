@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 const ciClusterObject = "cluster:cluster_root"
@@ -143,7 +144,7 @@ func (w *ciWorld) seedAccountWithOwner(t *testing.T, accountID, ownerUserID stri
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
 	                       VALUES ($1, $1, $1 || '@example.test', $2, now())`, ownerUserID, accountID)
 	require.NoErrorf(t, err, "посев владельца %s", ownerUserID)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 }
 
@@ -152,7 +153,7 @@ func (w *ciWorld) seedAccountWithOwner(t *testing.T, accountID, ownerUserID stri
 // действует, обязан это условие создать).
 func (w *ciWorld) seedUser(t *testing.T, id, accountID string) {
 	t.Helper()
-	w.exec(t, withWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
+	w.exec(t, activewayin.WithWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
 	           VALUES ($1, $1, $1 || '@example.test', $2, now())`), id, accountID)
 }
 
@@ -160,7 +161,7 @@ func (w *ciWorld) seedUser(t *testing.T, id, accountID string) {
 // Д приёмки kaname#456.
 func (w *ciWorld) seedUnverifiedUser(t *testing.T, id, accountID string) {
 	t.Helper()
-	w.exec(t, withWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id)
+	w.exec(t, activewayin.WithWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id)
 	           VALUES ($1, $1, $1 || '@example.test', $2)`), id, accountID)
 }
 

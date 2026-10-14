@@ -54,6 +54,7 @@ import (
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // reasonReferenceInUse — машинный признак полосы «на ресурс ещё ссылаются»
@@ -116,7 +117,7 @@ func seedUserAccountProject(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(prjID), string(accID), "pne-prj-"+suffix)
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID, prjID
 }

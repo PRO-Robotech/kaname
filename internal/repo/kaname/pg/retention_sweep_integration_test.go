@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // sweepBatch — партия проб. Мала намеренно: предмет проб — предикат и порог, а
@@ -556,7 +557,7 @@ func seedNonOwningUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, su
 	require.NoError(t, pool.QueryRow(ctx, `SELECT account_id FROM users WHERE id = $1`, string(owner)).Scan(&accID))
 
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`),
 		string(uid), accID,

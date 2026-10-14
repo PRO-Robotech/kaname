@@ -41,6 +41,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedInviterAndPendingInvite creates an ACTIVE inviter + its owned account, then
@@ -63,7 +64,7 @@ func seedInviterAndPendingInvite(t *testing.T, ctx context.Context, repo *kaname
 		InvitedBy:    inviterID,
 	}, time.Time{})
 	require.NoError(t, err)
-	_, err = kanamepg.WriterTx(w).Exec(ctx, inviteePasswordSQL, string(inviteeID))
+	_, err = kanamepg.WriterTx(w).Exec(ctx, activewayin.InviteePasswordSQL, string(inviteeID))
 	require.NoError(t, err, "пароль приглашённого — до активации (kaname#456, kaname#608)")
 	require.NoError(t, w.Commit(ctx))
 	return inviterID, accID, inviteeID

@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedTokenOwner заводит человека со своим аккаунтом.
@@ -55,7 +56,7 @@ func seedTokenOwner(ctx context.Context, t *testing.T, pool *pgxpool.Pool, suffi
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(accID), fmt.Sprintf("ut-acc-%s-%s", suffix, accID[len(accID)-6:]), string(uid))
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }

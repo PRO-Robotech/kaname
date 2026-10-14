@@ -86,6 +86,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
@@ -253,7 +254,7 @@ func adapterSide(t *testing.T, ctx context.Context, people []parityPerson) parit
 	_, err = tx.Exec(ctx, `INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		string(people[1].user.AccountID), "acc-parity", string(owner))
 	require.NoError(t, err)
-	seedOpenPath(t, ctx, tx)
+	activewayin.SeedOpenPath(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	methods := kanamepg.NewLoginMethodRepo(pool)
 	for _, p := range people {

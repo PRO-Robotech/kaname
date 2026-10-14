@@ -26,6 +26,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // TestInviteRevoked_RemovalOfTheOnlyMembershipDevaluesTheInvite — ОТРИЦАНИЕ.
@@ -137,7 +138,7 @@ func TestInviteRevoked_SecondMembershipKeepsTheInviteAlive(t *testing.T) {
 	activated, aerr := w4.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail46b"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "исключение из ОДНОГО аккаунта отняло приглашение в остальные")
-	seedWayIn(t, ctx, kanamepg.WriterTx(w4))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w4))
 	require.NoError(t, w4.Commit(ctx))
 	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
 }

@@ -125,6 +125,7 @@ import (
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // Предмет ПЕРВОЙ пробы: ресурс ПОСТАВЛЯЕМОГО модуля. Блок его типа пришёл со
@@ -229,7 +230,7 @@ func seedVerdictTenant(t *testing.T, ctx context.Context, pool *pgxpool.Pool) ve
 		exec(`INSERT INTO kaname.service_accounts (id, account_id, name)
 		      VALUES ($1, $2, $3)`, sa, tn.accountID, sa)
 	}
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return tn
 }
