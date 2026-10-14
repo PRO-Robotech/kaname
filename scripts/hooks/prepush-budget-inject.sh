@@ -134,6 +134,9 @@ trap 'rm -rf "$work"' EXIT
 # первая строка `#1 `, ветка `1`: предмет этого опыта не правило, и страж
 # обязан его пропустить.
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
+# Клон платформы того, кто гоняет опыт, в фикстуру не протекает: иначе хук завёл
+# бы группу «сверка с краем» о синтетическом модуле (kaname#822).
+unset KACHO_MONOREPO
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
 # Временный каталог вне всякого репозитория — физическим путём (форма та же,

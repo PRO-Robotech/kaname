@@ -24,7 +24,11 @@
 #
 # Группы ниже — те задания конвейера (`.github/workflows/ci.yml`), которые
 # исполнимы на машине разработчика БЫСТРО: сборка · vet · vet под тегом
-# integration · gofmt · пробы `-short` без детектора гонок · audit-list-filter.
+# integration · gofmt · пробы `-short` без детектора гонок · audit-list-filter ·
+# и, когда рядом лежит клон PRO-Robotech/kacho, сверка каталога прав с копией
+# края, форма манифестов и канон модели доступов
+# (`scripts/hooks/prepush-edge.sh`, kaname#822; клона нет — «не выполнилось»
+# строкой в переписи и в перечне непроверенного).
 # Форма у них ТА ЖЕ, что в конвейере, и там, где рецепт уже объявляет цель,
 # зовётся цель, а не инструмент напрямую.
 #
@@ -136,6 +140,10 @@ set -uo pipefail
 # исполненного, а не как отсутствие строки.
 executed=0
 
+# edge_note — что стало со сверкой с краем. Умолчание — для путей выхода ДО
+# групп: там её не спрашивали вовсе.
+edge_note="каталог прав и канон модели — не спрошены (выход до групп)"
+
 not_run_notice() {
     {
         echo
@@ -143,8 +151,8 @@ not_run_notice() {
         echo "ЗДЕСЬ НЕ ГОНЯЛОСЬ (и потому «хук зелен» не значит «конвейер зелен»):"
         echo "  детектор гонок (-race) · golangci-lint (make lint) — тяжёлое, на агрегате конвейером ·"
         echo "  интеграция на контейнерах · самостоятельный клон · buf breaking против ствола ·"
-        echo "  каталог прав и канон модели (нужен чекаут дерева платформы) · govulncheck · gosec ·"
-        echo "  вердикт ствола"
+        echo "  govulncheck · gosec · вердикт ствола"
+        echo "  сверка с краем: $edge_note"
     } >&2
 }
 
@@ -406,6 +414,20 @@ group_probes() {
 
 group_listfilter() { need make || return "$UNMET_RC"; make audit-list-filter; }
 
+# Сверка с краем — второй операнд берётся из клона платформы рядом; поиск,
+# свежесть ствола и сами команды — в scripts/hooks/prepush-edge.sh.
+EDGE="$ROOT/scripts/hooks/prepush-edge.sh"
+group_edge() {
+    local rc=0
+    need git || return "$UNMET_RC"
+    bash "$EDGE" --axis-file "$AXIS_FILE" "$edge_clone" || rc=$?
+    if [ "$rc" -eq "$UNMET_RC" ]; then
+        declare_unmet "сверка с краем: клон $edge_clone не дал операнда либо сверка не исполнялась (строки выше)"
+        return "$UNMET_RC"
+    fi
+    return "$rc"
+}
+
 # Ведомость групп — ЕДИНСТВЕННЫЙ источник и перечня, и числа.
 groups=(
     "сборка|go build ./...|group_build"
@@ -415,6 +437,22 @@ groups=(
     "пробы|go test ./... -short (вердикт прогонщиком)|group_probes"
     "listfilter|make audit-list-filter|group_listfilter"
 )
+
+# Сверка с краем входит в ведомость ТОЛЬКО при найденном клоне платформы. Нет
+# клона — это не красное и не зелёное: строка в переписи и в перечне
+# непроверенного называет, где искали. Названный KACHO_MONOREPO принимается
+# поиском без проверки — негодный путь судит сама группа, и там это третий
+# исход с кодом 2, а не тишина.
+edge_clone=""
+if [ ! -f "$EDGE" ]; then
+    edge_note="НЕ ВЫПОЛНИЛОСЬ — нет $EDGE"
+elif edge_clone="$(bash "$EDGE" --locate 2>&1)"; then
+    groups+=("сверка с краем|каталог прав и канон модели против $edge_clone|group_edge")
+    edge_note="исполнялась группой «сверка с краем» (клон $edge_clone) — исход в переписи"
+else
+    edge_note="НЕ ВЫПОЛНИЛОСЬ — $edge_clone"
+    edge_clone=""
+fi
 
 declared=0
 green=0
@@ -567,6 +605,18 @@ for entry in "${groups[@]}"; do
 done
 executed=$((green + red))
 
+# Ревизию называет хук сам, после группы: группа освежила origin/main клона, и
+# судилась ровно эта ревизия (операнд строится из неё).
+if [ -n "$edge_clone" ]; then
+    edge_rev="$(git -C "$edge_clone" rev-parse -q --short=12 --verify 'refs/remotes/origin/main^{commit}' 2>/dev/null)" || edge_rev="?"
+    edge_state="зелёное"
+    for n in ${red_names[@]+"${red_names[@]}"}; do [ "$n" = "сверка с краем" ] && edge_state="КРАСНОЕ"; done
+    for n in ${unmet_names[@]+"${unmet_names[@]}"} ${undecided_names[@]+"${undecided_names[@]}"}; do
+        [ "$n" = "сверка с краем" ] && edge_state="НЕ ВЫПОЛНИЛОСЬ"
+    done
+    edge_note="$edge_state — kacho $edge_clone @ $edge_rev (origin/main после fetch)"
+fi
+
 {
     echo
     echo "=== pre-push: перепись прогона ==="
@@ -577,6 +627,7 @@ executed=$((green + red))
     echo "категория не установлена: $undecided  (дефект хука, не исход группы)"
     echo "осей не спрошено    : ${#axes_names[@]}  (внутри ИСПОЛНЕННЫХ групп; из вердикта не вычитается)"
     echo "память              : $memory_cap · параллелизм Go $GO_PARALLEL"
+    echo "сверка с краем      : $edge_note"
     [ "${#red_names[@]}" -eq 0 ] || echo "красные             : ${red_names[*]}"
     [ "${#unmet_names[@]}" -eq 0 ] || echo "без условия         : ${unmet_names[*]}"
     [ "${#undecided_names[@]}" -eq 0 ] || echo "без категории       : ${undecided_names[*]}"
