@@ -90,6 +90,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -101,6 +102,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 const (
@@ -187,6 +189,13 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 	sf := humansession.SecondFactorDeps{
 		Store: s.sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
 		Limits: limits, Freshness: 15 * time.Minute, Domain: "console.example.invalid", Observer: nop,
+		// Ветвь ключа повышения (kaname#827) — тем же составом, что корень.
+		Keys: humansession.StepUpKeys{
+			Store: kanamepg.NewAccessKeyStepUpRepo(s.pool, kanamepg.NewAccessKeyRepo(s.pool)),
+			Binding: webauthnverify.Binding{RPID: "console.example.invalid", Origins: []string{"https://console.example.invalid"},
+				Algorithms: []webauthnverify.Algorithm{webauthnverify.AlgES256}},
+			ChallengeTTL: access_keys.ChallengeTTL, UserVerification: access_keys.UserVerificationAssertion,
+		},
 		Now: time.Now, Logger: logger,
 	}
 	l.stepUp, err = humansession.NewStepUpUseCase(sf)

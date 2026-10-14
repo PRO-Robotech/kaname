@@ -1273,7 +1273,7 @@ CASES.append(Case(
         _post("confirm-without-code", _CONFIRM, {"csrfToken": "{{sfCsrfSecondFactor}}"}, [],
               _refusal(400, 3, "Illegal argument code: required", "NO-CODE")),
         _step_up("step-up-method-outside-vocabulary", {"method": "sms", "code": "123456", "csrfToken": "{{sfCsrfStepUp}}"}, [],
-                 _refusal(400, 3, "Illegal argument method: must be one of password|totp|lookup_secret", "BAD-METHOD")),
+                 _refusal(400, 3, "Illegal argument method: must be one of password|totp|lookup_secret|webauthn", "BAD-METHOD")),
         _post("confirm-without-pending-enrollment", _CONFIRM, {"code": "123456", "csrfToken": "{{sfCsrfSecondFactor}}"}, [],
               _refusal(400, 9, "no pending enrollment: begin with enroll", "NOT-PENDING", reason="ENROLLMENT_NOT_PENDING")),
         *_logout_steps("after-negatives"),

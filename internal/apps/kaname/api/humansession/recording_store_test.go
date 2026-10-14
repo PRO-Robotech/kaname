@@ -340,14 +340,19 @@ func (w recordingWriter) LockLookupSet(ctx context.Context, userID domain.UserID
 	return w.inner.LockLookupSet(ctx, userID)
 }
 
-func (w recordingWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (bool, error) {
+func (w recordingWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string, at time.Time) (bool, error) {
 	defer w.rec("ConsumeLookupElement")()
-	return w.inner.ConsumeLookupElement(ctx, userID, element)
+	return w.inner.ConsumeLookupElement(ctx, userID, element, at)
 }
 
-func (w recordingWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (bool, error) {
+func (w recordingWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64, at time.Time) (bool, error) {
 	defer w.rec("RecordAcceptedStep")()
-	return w.inner.RecordAcceptedStep(ctx, userID, step)
+	return w.inner.RecordAcceptedStep(ctx, userID, step, at)
+}
+
+func (w recordingWriter) AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, at time.Time) (bool, error) {
+	defer w.rec("AdvanceSignCount")()
+	return w.inner.AdvanceSignCount(ctx, id, expected, reported, at)
 }
 
 func (w recordingWriter) RemoveSecondFactor(ctx context.Context, userID domain.UserID) (bool, error) {

@@ -276,6 +276,10 @@ func PresentableLevels(wired []Method) Levels {
 // «3» у каждого заведённого ключа — и вход ключом без проверки пользователя
 // («2») перестал бы обнулять счёт (против Ф13 Р9); худший даёт «2» — уровень,
 // который ключ производит всегда (строка «утверждение ключа доступа (любое)»).
+//
+// Второй читатель — достижимость «2» в виде `assurance` церемоний внутри
+// сессии (`humansession.assuranceViewOf`, kaname#827): вопрос там тот же — «даст
+// ли заведённое «2» при любых флагах», — и лучший исход ответил бы «3» без «2».
 func GuaranteedLevels(enrolled []Method) Levels {
 	return levelsOver(enrolled, worstPresentation)
 }
@@ -321,6 +325,13 @@ func bestPresentation(m Method) Presentation {
 	}
 	return Presentation{method: m}
 }
+
+// WorstPresentation — предъявление способа в худшем исходе его флагов: ключ
+// без проверки пользователя, допускающий резервное копирование. Тот же исход,
+// что у GuaranteedLevels; читатель вне пакета — недостающее для «2» в виде
+// `assurance` церемонии (kaname#827, замысел §2.6): способ, который ещё не
+// предъявлен, обещает уровень, который он даст ПРИ ЛЮБЫХ своих флагах.
+func WorstPresentation(m Method) Presentation { return worstPresentation(m) }
 
 // worstPresentation — предъявление способа в худшем исходе его флагов: ключ
 // без проверки пользователя, допускающий резервное копирование.

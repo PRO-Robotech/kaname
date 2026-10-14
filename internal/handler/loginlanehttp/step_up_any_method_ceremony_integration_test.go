@@ -26,9 +26,12 @@
 package loginlanehttp_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,7 +39,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
 )
 
@@ -197,6 +202,15 @@ func TestSUA05_KeyRefreshesAKeyOnlyPersonsSession(t *testing.T) {
 	require.Equal(t, "2", sessionLevel, "%s: уровень прежний — «2»", id)
 	fresh := rotated(t, id, r, s)
 
+	// Другие живые сессии человека — перепись до снятия: кроме сессии
+	// `other` посева живёт и сессия, выданная регистрацией П-л (Ф4 выдаёт её
+	// сразу), и снимаются ВСЕ другие (kaname#634).
+	var others int
+	require.NoError(t, h.pool.QueryRow(h.ctx, `
+		SELECT count(*) FROM kaname.human_sessions
+		 WHERE user_id = $1 AND ended_at IS NULL AND bearer_digest <> $2`,
+		string(p.user), string(domain.PresentedSessionBearer(fresh.bearer.Value).Digest())).Scan(&others))
+	require.GreaterOrEqual(t, others, 1, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): другая сессия посева жива")
 	done := endOthers(fresh)
 	require.Equalf(t, http.StatusOK, done.status, "%s: end-others после повышения — 200: %s", id, done.body)
 	var out struct {
@@ -204,7 +218,10 @@ func TestSUA05_KeyRefreshesAKeyOnlyPersonsSession(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(done.body), &out), done.body)
 	require.NotNil(t, out.Ended, "%s: тело {ended: <число>}", id)
-	require.Equal(t, 1, *out.Ended, "%s: снята одна другая сессия", id)
+	require.Equal(t, others, *out.Ended, "%s: сняты все другие живые сессии", id)
+	_, otherLive := h.rowByBearer(t, other.bearer.Value)
+	require.True(t, otherLive, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): запись сессии other найдена")
+	require.True(t, h.rowEnded(t, other), "%s: сессия other снята", id)
 }
 
 // TestSUA10_WrongCodeIsRefusedAndStampsNothing — SUA-10; близнец SUA-01 (верный
@@ -543,8 +560,13 @@ func TestSUA80_LostCounterRaceIsRefused(t *testing.T) {
 	}
 	require.Equal(t, 1, ok, "%s: ровно одно 200", id)
 	require.Equal(t, 1, refused, "%s: ровно один 401", id)
+	// Поднятая сессия перевыпустила носитель (Ф11 Р5): её запись читается по
+	// новому носителю из ответа, отказанная — по прежнему.
 	raised := 0
-	for _, s := range sessions {
+	for i, s := range sessions {
+		if replies[i].status == http.StatusOK {
+			s = rotated(t, id, replies[i], s)
+		}
 		if h.levelOf(t, s) == "2" {
 			raised++
 		}
@@ -553,4 +575,97 @@ func TestSUA80_LostCounterRaceIsRefused(t *testing.T) {
 	got, _ := h.keyRow(t, k.id)
 	require.EqualValues(t, next, got, "%s: счётчик сдвинут ровно до присланного", id)
 	require.LessOrEqual(t, rec.clones()-clonesBefore, 1, "%s: сигнал клонирования — не больше одного", id)
+}
+
+// suaLostAdvance — шов «сдвиг проигран» (замысел §2.3): декоратор порта
+// хранилища ветви ключа над НАСТОЯЩИМ адаптером. Взведённый, он отдаёт
+// прочитанную строку ключа и перед возвратом фиксирует НАСТОЯЩИМ оператором
+// хранилища ключей сдвиг того же ключа на присланное значение — так, как это
+// сделало бы утверждение соседней сессии. Ветвь повышения видит «растёт» по
+// прочитанному и проигрывает оператору внутри своей транзакции.
+type suaLostAdvance struct {
+	humansession.StepUpChallengeStore
+	keys  *kanamepg.AccessKeyRepo
+	now   func() time.Time
+	to    uint32
+	armed atomic.Bool
+	fired atomic.Int32
+}
+
+func (d *suaLostAdvance) KeyByCredentialID(ctx context.Context, id []byte) (domain.AccessKey, bool, error) {
+	k, ok, err := d.StepUpChallengeStore.KeyByCredentialID(ctx, id)
+	if err != nil || !ok || !d.armed.Swap(false) {
+		return k, ok, err
+	}
+	w, err := d.keys.Writer(ctx)
+	if err != nil {
+		return domain.AccessKey{}, false, err
+	}
+	defer func() { _ = w.Rollback(ctx) }()
+	advanced, err := w.AdvanceSignCount(ctx, k.ID, k.SignCount, d.to, d.now())
+	if err != nil {
+		return domain.AccessKey{}, false, err
+	}
+	if !advanced {
+		return domain.AccessKey{}, false, fmt.Errorf("шов пробы: сдвиг соседа не лёг")
+	}
+	if err := w.Commit(ctx); err != nil {
+		return domain.AccessKey{}, false, err
+	}
+	d.fired.Add(1)
+	return k, ok, nil
+}
+
+// TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal — SUA-80, ветвь «сдвиг
+// проигран» детерминированно (замысел §2.3): чтение строки ключа показало
+// «растёт», а условный оператор сдвига внутри транзакции предъявления дал ноль
+// строк. Исход — тот же 401, что у «не вырос», те же следствия, и БЕЗ сигнала
+// клонирования. Близнец — тот же человек и тот же присланный рост без
+// вмешательства шва: 200 и «2».
+func TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal(t *testing.T) {
+	const id = "SUA-80 проигран"
+	rec := newSUARecorder()
+	dec := &suaLostAdvance{}
+	h := newSUAStandWith(t, suaOptions{observer: rec, stepUpKeys: func(in humansession.StepUpChallengeStore) humansession.StepUpChallengeStore {
+		dec.StepUpChallengeStore = in
+		return dec
+	}})
+	dec.keys, dec.now = kanamepg.NewAccessKeyRepo(h.pool), h.clock.Now
+	p := h.person(t, "80l")
+	k := h.withKey(t, p)
+	s0 := h.login(t, p)
+	first := h.keyStepUp(t, id, s0, k, h.challenge(t, id, s0).raw, strong())
+	require.Equalf(t, http.StatusOK, first.status, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): первое предъявление ключа — 200: %s", first.body)
+	stored, _ := h.keyRow(t, k.id)
+	require.Positive(t, stored, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): записанный счётчик подписи > 0")
+
+	s := h.login(t, p)
+	c := h.challenge(t, id, s)
+	next := uint32(stored) + 1 // #nosec G115 -- счётчик схемы помещается в uint32
+	o := strong()
+	o.SignCount = &next
+	dec.to = next
+	dec.armed.Store(true)
+	clonesBefore, mismatchedBefore := rec.clones(), rec.cell("webauthn×mismatched")
+	addrBefore, _ := h.failures(t, p)
+	r := h.keyStepUp(t, id, s, k, c.raw, o)
+	require.EqualValues(t, 1, dec.fired.Load(), "НЕ-ВЫПОЛНИЛОСЬ(шов): сосед сдвинул счётчик между чтением и оператором")
+	requireAuthFailed(t, id, r)
+	require.Equal(t, "1", h.levelOf(t, s), "%s: уровень «1» — транзакция предъявления откачена", id)
+	got, _ := h.keyRow(t, k.id)
+	require.EqualValues(t, next, got, "%s: счётчик — сдвиг соседа, отказавшее предъявление второго сдвига не сделало", id)
+	requireLastJournal(t, id, h.journalOf(t, s), "webauthn", "refused")
+	addrAfter, _ := h.failures(t, p)
+	require.Equal(t, addrBefore+1, addrAfter, "%s: след попытки +1", id)
+	require.Equal(t, clonesBefore, rec.clones(), "%s: сигнала клонирования у проигранного сдвига нет", id)
+	require.Greater(t, rec.cell("webauthn×mismatched"), mismatchedBefore, "%s: клетка webauthn × mismatched", id)
+
+	twinCount := next + 1
+	ot := strong()
+	ot.SignCount = &twinCount
+	twin := h.keyStepUp(t, id, s, k, h.challenge(t, id, s).raw, ot)
+	require.Equalf(t, http.StatusOK, twin.status, "%s близнец: шов не вмешан — 200: %s", id, twin.body)
+	_, lvl := ceremonyLevels(t, twin.body)
+	require.Equal(t, "2", lvl, "%s близнец: уровень «2»", id)
+	require.Equal(t, clonesBefore, rec.clones(), "%s близнец: сигнала нет", id)
 }

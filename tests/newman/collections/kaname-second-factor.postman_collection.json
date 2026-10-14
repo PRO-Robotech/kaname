@@ -15335,7 +15335,7 @@
                   "});",
                   "pm.test('BAD-METHOD: текст отказа фиксирован', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
-                  "  pm.expect(j.message, 'текст отказа').to.eql('Illegal argument method: must be one of password|totp|lookup_secret');",
+                  "  pm.expect(j.message, 'текст отказа').to.eql('Illegal argument method: must be one of password|totp|lookup_secret|webauthn');",
                   "});",
                   "pm.test('BAD-METHOD: носитель сессии НЕ выдан', () => pm.expect(pm.response.headers.all().filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith('kaname_session=')).length, 'печений сессии').to.eql(0));"
                 ]

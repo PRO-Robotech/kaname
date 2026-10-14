@@ -583,12 +583,16 @@ func parityCases() []parityCase {
 		return said(err, "найден %v %s", ok, m.State)
 	})
 	wr("ConsumeLookupElement", "её личность, элемент её набора", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
-		ok, err := w.ConsumeLookupElement(ctx, p.user.ID, "e1")
+		ok, err := w.ConsumeLookupElement(ctx, p.user.ID, "e1", parityNow)
 		return said(err, "снят %v", ok)
 	})
 	wr("RecordAcceptedStep", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
-		ok, err := w.RecordAcceptedStep(ctx, p.user.ID, 101)
+		ok, err := w.RecordAcceptedStep(ctx, p.user.ID, 101, parityNow)
 		return said(err, "записан %v", ok)
+	})
+	wr("AdvanceSignCount", "незаведённый ключ", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
+		ok, err := w.AdvanceSignCount(ctx, domain.AccessKeyID("ak-parity-"+p.tag), 3, 4, parityNow)
+		return said(err, "сдвинут %v", ok)
 	})
 	wr("RemoveSecondFactor", "её личность", func(ctx context.Context, w humansession.Writer, p parityPerson) string {
 		ok, err := w.RemoveSecondFactor(ctx, p.user.ID)
@@ -683,7 +687,7 @@ func parityCases() []parityCase {
 			Kind: domain.LoginMethodLookupSecret, Verifier: parityVerifier(",e7,e8,"), State: domain.LoginMethodStateActive}), "записан")
 	})
 	wr("ConsumeLookupElement", "элемент с разделителем", func(ctx context.Context, w humansession.Writer, _ parityPerson) string {
-		ok, err := w.ConsumeLookupElement(ctx, domain.UserID(fmt.Sprintf("usr%017s", "prtfactor")), "e1,e2")
+		ok, err := w.ConsumeLookupElement(ctx, domain.UserID(fmt.Sprintf("usr%017s", "prtfactor")), "e1,e2", parityNow)
 		return said(err, "снят %v", ok)
 	})
 	return cs

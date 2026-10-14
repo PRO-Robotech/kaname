@@ -507,17 +507,33 @@ func (w *accessKeyWriter) DeleteOwnedByID(ctx context.Context, userID domain.Use
 }
 
 // AdvanceSignCount — атомарный сдвиг с условием на прежнее значение (Р6):
-// проигравший конкуренции получает ноль строк. При `0 → 0` двигается только
-// момент предъявления (ноль не судится, Ф7-19).
+// проигравший конкуренции получает ноль строк. Оператор — общий
+// (`advanceSignCountTx`).
 func (w *accessKeyWriter) AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (bool, error) {
+	return advanceSignCountTx(ctx, w.tx, id, expected, reported, usedAt)
+}
+
+// advanceSignCountTx — ЕДИНСТВЕННЫЙ оператор сдвига счётчика подписи и
+// момента предъявления ключа (Ф7 Р6), исполняемый транзакцией вызывающего:
+// писатель ключей (проверка утверждения Ф7, вход ключом Ф13) и писатель
+// сессии (ветвь ключа церемонии повышения, kaname#827 — сдвиг внутри
+// транзакции предъявления, и откат предъявления снимает его тоже).
+//
+// Две ветви, и обе — часть одного оператора:
+//
+//   - `0 → 0` — аутентификатор счётчика не ведёт, ноль не судится (Ф7-19):
+//     двигается только момент, и только у строки, чей счётчик всё ещё ноль;
+//   - иначе — сдвиг с условием на прежнее значение и рост: ноль строк —
+//     сдвиг перехвачен другим утверждением того же ключа либо строки нет.
+func advanceSignCountTx(ctx context.Context, tx pgx.Tx, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (bool, error) {
 	var (
 		tag interface{ RowsAffected() int64 }
 		err error
 	)
 	if expected == 0 && reported == 0 {
-		tag, err = w.tx.Exec(ctx, `UPDATE user_access_keys SET last_used_at = $2 WHERE id = $1 AND sign_count = 0`, string(id), usedAt)
+		tag, err = tx.Exec(ctx, `UPDATE user_access_keys SET last_used_at = $2 WHERE id = $1 AND sign_count = 0`, string(id), usedAt)
 	} else {
-		tag, err = w.tx.Exec(ctx, `
+		tag, err = tx.Exec(ctx, `
 			UPDATE user_access_keys SET sign_count = $3, last_used_at = $4
 			 WHERE id = $1 AND sign_count = $2 AND $3 > sign_count`, string(id), int64(expected), int64(reported), usedAt)
 	}

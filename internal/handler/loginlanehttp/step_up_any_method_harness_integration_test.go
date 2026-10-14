@@ -165,6 +165,8 @@ type suaOptions struct {
 	keysOff bool
 	// observer — приёмник исходов церемонии; nil — молчащий.
 	observer humansession.Observer
+	// stepUpKeys — шов хранилища ветви ключа (замысел §2.3); nil — адаптер.
+	stepUpKeys func(humansession.StepUpChallengeStore) humansession.StepUpChallengeStore
 }
 
 // suaStand — стенд проб SUA.
@@ -182,6 +184,7 @@ func newSUAStandWith(t *testing.T, o suaOptions) *suaStand {
 		loginNow:         clock.Now,
 		ceremonyNow:      clock.Now,
 		ceremonyObserver: o.observer,
+		stepUpKeys:       o.stepUpKeys,
 		verbs: func(v sessionVerbs, d humansession.SecondFactorDeps) loginlanehttp.Lane {
 			enroll, err := humansession.NewEnrollSecondFactorUseCase(d)
 			require.NoError(t, err)
@@ -261,6 +264,14 @@ func (h *suaStand) levelOf(t *testing.T, s laneSession) string {
 	row, ok := h.rowByBearer(t, s.bearer.Value)
 	require.True(t, ok, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): запись сессии найдена по носителю")
 	return row.level
+}
+
+// rowEnded — запись сессии s снята (по носителю, которым её держит браузер).
+func (h *suaStand) rowEnded(t *testing.T, s laneSession) bool {
+	t.Helper()
+	row, ok := h.rowByBearer(t, s.bearer.Value)
+	require.True(t, ok, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): запись сессии найдена по носителю")
+	return row.ended
 }
 
 // withCode — П-к: заведение и подтверждение кода НАСТОЯЩИМИ глаголами в
