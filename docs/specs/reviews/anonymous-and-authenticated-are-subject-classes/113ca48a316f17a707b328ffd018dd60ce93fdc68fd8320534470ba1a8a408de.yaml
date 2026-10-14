@@ -1,0 +1,192 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 1d3c28969
+  content_commit: e88473f68
+  branch: '829'
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238]
+  lines: 802
+  round: 2
+  round_scope: >-
+    Второй и последний круг (fa-b8). Судится дельта к 2ce50ec0… (git diff 78a8f22fe e88473f68
+    по документу: +436/−107) и закрытие B1–B5 круга 1; вне дельты переоткрытий нет.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+    в копии tmp/sc-kaname @ e88473f68 → 113ca48a…a8a408de (совпало с заданием)
+  measurement_revisions: >-
+    kaname — дерево e88473f68; kacho — `git show 2ec6e1e3d:<путь>` и `git grep … 2ec6e1e3d`;
+    фундамент — corelib v1.14.0, модульный кэш.
+  neighbours_pinned:
+    module-manifest-relation-grant.md: 1be08963319c6703d63b767a814e47346a311c72e74cc0381aff4e87af8e47ba
+    register-resource-checks-the-module-vocabulary.md: e7d64c5e5c5c9430582510fea92a488228e1a936d010b33fc4810e7774d3a3fc
+    composed-model-admits-only-what-it-owns.md: 9f1b5a8546b6803a9895eff59383c7e51fa513685416d251a9efccc3ad77f50d
+    model-composes-at-boot-from-delivered-manifests.md: d0e89a3b8572db7985afca7a251218eca6a12af987f079710572e62794505d64
+    retired-resource-names-its-successor.md: 966117c09d00c47cc03c1d51c78e6c3f1b51bbdecfc6c10847b064cabb83657c
+  neighbours_note: префиксы всех пяти совпали с кругом 1 — опора не сменилась (fa-b7)
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T01:35:00+03:00'
+
+summary:
+  scenarios: 49
+  producer_named: 49 of 49 (но см. B2 — у SC-30 производитель назван не полностью)
+  twin_named_for_negatives: все
+  blocking: 2
+  blocking_kinds: [CONSTRUCTIBILITY, PRODUCER]
+  round1_closed:
+    B1_NEGATIVE: закрыт — Р6 п. 1–3, SC-45 (близнец SC-30), SC-35 (г), SC-36 двумя предикатами; числа перемерены
+    B2_CONSTRUCTIBILITY: закрыт частично — фикстуры названы и есть, но П3 без слоя аутентификации (новый B1 ниже)
+    B3_COVERAGE: закрыт — П1 с acc-B, Р5 называет расширение поверхности, SC-18, SC-19, SC-51
+    B4_FORMAT: закрыт — SC-09, SC-16, SC-26, SC-39 с кодом и текстом; координаты перемерены
+    B5_DoD: закрыт — newman/причина по каждому ID, SC-53 в S4
+  repeated_kind: >-
+    CONSTRUCTIBILITY повторился (круг 1 B2 → круг 2 B1) с другим предметом (там — фикстура
+    не существует, здесь — фикстура не включает слой, который производит «Тогда»). Круг
+    третий не предусмотрен (fa-b8): решение — у диспетчера.
+
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    scenarios: [П3, SC-30, SC-32, SC-33, SC-45, SC-31, SC-38]
+    note: >-
+      П3 строит только посредник ПРАВ (`buildAuthzMiddleware`), а запрос без удостоверения на
+      боевом крае до него не доходит: его отвергает слой АУТЕНТИФИКАЦИИ раньше. kacho
+      @2ec6e1e3d `gateway/internal/middleware/auth.go`: нативная полоса — `if bearer == ""`
+      → в `production`/`production-strict` отказ, кроме `publicMethods`
+      (`DefaultPublicAllowlist`, строки 463–470); полоса REST — `refuseUncredentialed`
+      (строки 1072–1083), отказ, кроме `isPublicHTTPPath`. Маркер `system/anonymous`, которым
+      существующие пробы подают анонима посреднику прав (`anonymousMarkerCtx` в
+      `anonymity_not_an_identity_test.go`), по шапке `injectAnonymous` (строка 698) — «dev-mode
+      only»: в боевой посадке такого состояния нет. Следствия: (1) «Дано» SC-30 в П3 не
+      названо (каким контекстом «без удостоверения» входит в посредник прав) и, если это
+      маркер, — состояние, которого боевая посадка не производит; SC-30 зеленеет на П3, когда
+      край продолжает отвергать анонима на каждом методе, а newman этого не поймает — в
+      стволе метода с «0» нет (DoD S3). (2) SC-33 в П3 не строится вовсе: подпись Bearer
+      сверяет `AuthInterceptor`, посредник прав удостоверения не видит. (3) SC-32 (в) и SC-45
+      утверждают «побайтово равно сегодняшнему отказу без удостоверения», а сегодняшний отказ
+      производит `authnrefusal.Err()` слоя аутентификации — в П3 его нет, сравниваются два
+      отказа посредника прав. Нужно: П3 — цепочка `NewAuthInterceptor(AuthModeProduction, …,
+      &fakeLookup{}, …)` → `buildAuthzMiddleware` (фикстуры есть в том же пакете:
+      `anonymity_not_an_identity_test.go`, `auth_jwks_test.go`), обе полосы — нативная и
+      REST; «Когда» SC-30/31/32/33/45 — запрос без заголовка `Authorization` через эту цепочку.
+      Близнец SC-45 и SC-31 остаются прежними.
+  - id: B2
+    kind: PRODUCER
+    scenarios: [Р6, SC-30, SC-32, Инвариант 2]
+    note: >-
+      У «Тогда обработчик вызван» SC-30 производитель не заказан. Таблица «сценарий →
+      производитель» называет `auth.go` только как уже производящий ОТКАЗ и заказывает
+      изменения лишь в `permission_catalog.go` (признак строки) и субъекте вопроса. Но чтобы
+      строка «0» пропустила анонима, слой аутентификации обеих полос (нативный `authorize`,
+      REST `refuseUncredentialed`) должен спрашивать каталог о признаке строки — сегодня он
+      знает только `publicMethods`/`isPublicHTTPPath`, а Инвариант 2 запрещает расширять этот
+      список. Не названо и то, ЧТО слой аутентификации кладёт в контекст анониму на строке
+      «0»: шапка `auth.go` (строки 455–462) фиксирует, что именованная личность
+      `{system, anonymous}` уже была дефектом — «every anonymous request owns every other
+      anonymous request's operations». Нужно: (1) в таблице — строка «слой аутентификации,
+      обе полосы: проход без удостоверения только для строки с признаком Р6, без
+      именованной личности» — **заказан (S3)**; (2) в SC-30 «И»: до обработчика не доходит
+      метаданных принципала (`principalmeta.MetaPrincipalType`/`MetaPrincipalID` пусты), с
+      близнецом — вызов `usr-B`, где они заданы. Это поверхность безопасности
+      (ban18-q-security), не только формальность.
+
+minor:
+  - kind: FORMAT
+    note: SC-19 стоит в S2 после SC-24 — порядок ID нарушен; трассировке не мешает.
+  - kind: PRODUCER
+    note: >-
+      SC-27 «grantedByUserId пуст … поле исполнителя-учётки — сверить в S2»: производитель
+      исполнителя-учётки в аудите не прочитан; полоса S2 обязана измерить до кода.
+  - kind: FORMAT
+    note: >-
+      DoD S3, SC-18 через край: «после отзыва … 403 / PERMISSION_DENIED» — строка каталога
+      `NetworkService/Get` без `hide_existence` подтверждена (разбор @2ec6e1e3d), но служба
+      vpc судит право и сама; проба обязана утверждать пару, которую отдаёт край, а не
+      предполагать её.
+
+open_questions_defaults:
+  - question: allInScope у authenticated вне кластера (вопрос 1 круга 1)
+    default: >-
+      (б) отвергается — принимается как допущение документа; цена — один отрицательный
+      сценарий SC-19 с близнецами. Не блокирует; окончательно — диспетчер.
+  - question: Окно материализации 30 с / опрос 200 мс (SC-13)
+    default: допущение приёмки, принимается; числа в дереве нет — так и помечено.
+  - question: Строки fga_outbox с user:* вне переписи SC-43
+    default: принимается — журнал доставки не переписывается (ban #5 по смыслу).
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> @e88473f68 → 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de
+    - разбор permission_catalog.json @2ec6e1e3d → 359 строк; «1» 292, «2» 38, поле отсутствует 29 (<exempt> 22, scope_filtered 7); «0» 0 — совпало с SC-36
+    - строка kacho.cloud.vpc.v1.NetworkService/Get → v_get, vpc_network/network_id, required_acr_min "1", hide_existence нет
+    - git grep 'type vpc_network' internal/authzmodel/fga_model.fga → :965
+    - git grep -n 'func buildAuthzMiddleware|func buildCatalog|type fakeChecker|lastInput' 2ec6e1e3d -- gateway/internal/middleware/authz_test.go → :33, :39, :67, :82
+    - git grep -n 'func newDecisionCache' 2ec6e1e3d → authz_cache.go:48 (параметр now)
+    - git show 2ec6e1e3d:gateway/internal/middleware/auth.go → строки 455–470 (отказ без Bearer в production), 698–704 (injectAnonymous — dev-only), 1072–1083 (refuseUncredentialed)
+    - internal/apps/kaname/api/cluster/helpers.go:58 → "must be 'user' or 'service_account'"
+    - internal/authzguard/acr_floor.go:202–209 → PermissionDenied, PreconditionFailure authz.step_up, acr_values:<N>
+    - corelib v1.14.0 grpcsrv/acr.go:178–183 → ветвь 1 освобождает PrincipalTypeServiceAccount
+    - internal/apps/kaname/api/registry_token/token.go:170–181 → AnonymousSubject "user:*", 403 DENIED, 404 единый
+
+constructibility:
+  method: >-
+    Посев не ставился — изоляции для посева задание не назвало, стенда нет. По названным
+    фикстурам: П1 — существующие фикстуры kaname; П2 — миграции ствола плюс новая; П3 —
+    фикстуры существуют (прочитаны), но не включают слой аутентификации (B1); П4/П5 — стенд
+    не поднимался.
+  seeded: 0
+  of: 5
+  named_fixture: 2
+  not_constructible: 1
+  not_executed: 2
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  reason: вердикт — возврат; санкции на код нет
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
