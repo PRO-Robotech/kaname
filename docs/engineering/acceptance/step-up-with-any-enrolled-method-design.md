@@ -26,14 +26,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > **Issue:** `PRO-Robotech/kaname#827` · эпик `kaname#746` · зеркало `PRO-Robotech/kacho#3230`
 > **Ревизии измерения:** служба — ветка `827`, ревизия `6a82d3198` (код совпадает с головой ветки
 > эпика `746`, ревизия `bee57fd5c`: `git diff --stat bee57fd5c 6a82d3198 -- internal cmd` → пусто); платформа — `kacho@8514270c4`
-> (`origin/main`). Координаты ниже — на этих ревизиях; сдвинется голова — перемерь.
+> (`origin/main`). Координаты ниже — на этих ревизиях; на голове ветки после слияния с полосой
+> проб (`1ee5848a3`) названные файлы не правлены: `git diff --stat 6a82d3198 1ee5848a3 -- internal cmd
+> ':!*_test.go'` — 7 файлов, ни одного из названных здесь. Сдвинется голова — перемерь.
 > **История редакций замысла (только дописывается):**
 > - редакция 1 — опора на SUA редакции 3; решения диспетчера по честному красному
 >   2026-10-14 (шесть пунктов) учтены в §1б.
-> - редакция 2 (эта) — правка ПОСЛЕ объявления состояния (строка «Статус» не менялась, вердикта у
+> - редакция 2 — правка ПОСЛЕ объявления состояния (строка «Статус» не менялась, вердикта у
 >   замысла нет), до первой пересверки: заказанные пробы названы прозой, а не координатой (их в
 >   дереве ещё нет), пробы платформы — с домом и ревизией, ревизии измерения — хешем. Решения не
 >   менялись.
+> - редакция 3 (эта) — правка ПОСЛЕ объявления состояния, до первой пересверки: пробы, которые
+>   соседняя полоса уже завела красными (`ef2fa20be`), названы своими именами; заказанной остаётся
+>   одна детерминированная проба шва «сдвиг проигран» (§2.3) и пробы уборки (решение диспетчера 4).
+>   Решения не менялись.
 
 ---
 
@@ -81,15 +87,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | пункт | решение замысла | место в коде | проба-держатель |
 |---|---|---|---|
-| SUAX-01 (SUAD3, хвост суждения третьим вызывающим) | §2.2: перепись ветвей Ф13 и Ф7 против ветви повышения — таблица §2.2, ни одна ветвь не выпала | `step_up.go` (ветвь `webauthn`) | по пробе на ветвь: `TestSUA13_…`, `TestSUA14_…`, `TestSUA15_…`, TestSUA80_CounterNotAdvancedIsRefusedWithTheCloneSignal, TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal; статический гейт полноты хвоста — **заказ** `tooling-maintainer` (§7) |
-| SUAX-02 (SUAD3, сдвиг в транзакции предъявления) | §2.3: `AdvanceSignCount` — оператором транзакции `PersonWriter`, после строки личности, до `presentInSession`; ноль строк — откат всей транзакции | `humansession.Writer` + общий оператор `advanceSignCountTx` (`pg/access_key_repo.go:512`) | TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal; гонка двух повышений — TestSUA80_TwoStepUpsOfOneKeyRaceAndExactlyOneIsAccepted |
+| SUAX-01 (SUAD3, хвост суждения третьим вызывающим) | §2.2: перепись ветвей Ф13 и Ф7 против ветви повышения — таблица §2.2, ни одна ветвь не выпала | `step_up.go` (ветвь `webauthn`) | по пробе на ветвь: `TestSUA13_…`, `TestSUA14_…`, `TestSUA15_…`, `TestSUA80_SignCountThatDidNotGrowIsRefusedAndSignalled`, TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal (заказ); статический гейт полноты хвоста — **заказ** `tooling-maintainer` (§7) |
+| SUAX-02 (SUAD3, сдвиг в транзакции предъявления) | §2.3: `AdvanceSignCount` — оператором транзакции `PersonWriter`, после строки личности, до `presentInSession`; ноль строк — откат всей транзакции | `humansession.Writer` + общий оператор `advanceSignCountTx` (`pg/access_key_repo.go:512`) | TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal (заказ); гонка двух повышений — `TestSUA80_LostCounterRaceIsRefused` |
 | SUAX-03 (SUAD4, предъявление акта, а не имя) | Р4 строка §1 | `session_level.go:50` | `TestSessionLevelHasOneWriterCallSite` (есть); `TestSUA03_…` и `TestSUA04_…` — пара по `BE` |
 | SUAX-04 (SUAD4, «3» впервые внутри сессии пароля) | признак `BE` — из каждого утверждения; у строки ключа не хранится; условие возврата — первый глагол с полом «3» (`kaname#133`, `kaname#754`) | — | держится вниманием до `kaname#754`; гейта нет, предмета (глагола «3») нет |
-| SUAX-05 (SUAD2, своё хранилище) | §2.1: **новая таблица**, а не расширение `access_key_challenges` | новая миграция | `TestIntegration_CheckLedgerCoversTheLiveSchema`, `TestIntegration_EveryLiveCheckAnswersInItsLane` (есть; краснеют без строк перечня); перекрёстное непринятие — `TestSUA16_…`, TestStepUpChallengeIsNotAcceptedByLoginOrAssertion |
+| SUAX-05 (SUAD2, своё хранилище) | §2.1: **новая таблица**, а не расширение `access_key_challenges` | новая миграция | `TestIntegration_CheckLedgerCoversTheLiveSchema`, `TestIntegration_EveryLiveCheckAnswersInItsLane` (есть; краснеют без строк перечня); перекрёстное непринятие — `TestSUA16_…`, `TestSUAX_CROSS_ChallengesOfThreeKindsAreNotInterchangeable` |
 | SUAX-06 (SUAD2, «сменено» ≠ «предъявлено») | §2.1 п. 3–4: смена — переписью значения строки арбитром частичного ключа (прежнего значения в таблице нет — «не выдавалось»), предъявление — отметкой `consumed_at` | адаптер испытаний повышения | `TestSUA17_…`, `TestSUA13_…` (повтор → `CHALLENGE_ALREADY_PRESENTED`) |
 | SUAX-07 (SUAD2, привязка к записи сессии) | §2.1 п. 2: `session_id` → `human_sessions(id)`, не дайджест носителя (носитель перевыпускается каждым повышением) | новая таблица | `TestSUA16_…` (испытание S1 не сгорает в S2) |
 | SUAX-08 (SUAD2, рост без потолка) | §2.1 п. 6: одно живое на сессию + уборка в реестре | `retention/registry.go:120`, `:232` | TestWithHumanSessionsCarriesTheStepUpChallengeSweeper (реестр), TestAccessKeyStepUpRepo_SweepRemovesOnlyUnservable (integration) — после замысла, решение диспетчера 4 |
-| SUAX-09 (SUAD10, путь в положениях) | §2.4 | `loginlanehttp/handler.go:125`, `:149` | `TestEveryLanePathIsDeclaredInTheR2List`, `TestLaneServesExactlyItsDeclaredPaths` (есть); вызов `admitted` — TestStepUpAccessKeyBegin_IsRefusedInTheVerificationPosition |
+| SUAX-09 (SUAD10, путь в положениях) | §2.4 | `loginlanehttp/handler.go:125`, `:149` | `TestEveryLanePathIsDeclaredInTheR2List`, `TestLaneServesExactlyItsDeclaredPaths` (есть); вызов `admitted` — `TestSUAX_POSITION_BeginIsRefusedInVerificationPosition` |
 | SUAX-10 (SUAD7, одно написание «выключено») | §2.6: метод `Binding.Disabled()`, шесть читателей зовут только его | `webauthnverify/verify.go:116` | SUA-22/23/24; гейт «один читатель» — **заказ** `tooling-maintainer` (§7) |
 | SUAX-11 (SUAD7, отказ до выдачи и до попытки) | §2.6 п. 3 | `access_keys/begin_registration.go`, `humansession/access_key_login.go` (выдача Ф13), новый use-case | `TestSUA23_…`, `TestSUA24_…` (счёт по источнику не вырос) |
 | SUAX-12 (SUAD6, `totp.lastUsedAt` — свой столбец) | §2.5 | `pg/login_method_repo.go:511` (`recordAcceptedStepTx`), `:437` (`activateTOTPTx` — не пишет) | `TestSUA40_…` + `TestSUA01_…`, `TestSUA41_…` |
@@ -97,7 +103,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | SUAX-14 (SUAD6, усечение и отсутствие) | Р6 строка §1: формат транспорта; отсутствие — отсутствие ключа | `loginlanehttp/handler.go:925` | `TestSUA40_…` (ключа нет; момент до секунды); гейт усечения моментов живёт в доме платформы (`PRO-Robotech/kacho@8514270c4:TestOperationTimestampsAreTruncatedEverywhere`, `internal/repohygiene/operationtimestamptruncation_test.go`) и дерева службы не читает — держит проба |
 | SUAX-15 (SUAD6, миграция) | §2.1, §2.5: две новые миграции, шапка «Санкция» с отпечатком `35224856…` и записью круга 3; откат не уничтожает материала | `internal/migrations/` | `TestNewMigrationOutranksEveryAppliedOne`; цитату санкции держит `db-architect-reviewer` (гейта цитаты в службе нет — разбор) |
 | SUAX-16 (SUAD1, один разборщик, отказ формы до сессии) | Р1 строка §1 | `loginlanehttp/access_key_login.go:160`, `handler.go:1016` | `TestSUA19_…` (пять строк, счёт по адресу не вырос) |
-| SUAX-17 (SUAD2, порядок `allowCredentials`) | `CredentialIDsOf` без изменения (`ORDER BY created_at, id`) | `pg/access_key_repo.go:167` | TestStepUpAccessKeyBegin_AllowCredentialsKeepCreationOrder — ≥ 3 ключа, заведённых не в порядке `id` |
+| SUAX-17 (SUAD2, порядок `allowCredentials`) | `CredentialIDsOf` без изменения (`ORDER BY created_at, id`) | `pg/access_key_repo.go:167` | `TestSUAX_ORDER_AllowCredentialsAreOrderedByCreationThenID` (≥ 3 ключа, заведённых не в порядке `id`) |
 | SUAX-18 (SUAD8, отказ ключа в том же счёте) | Р8 строка §1 | `step_up.go:267` | `TestSUA72_…`, `TestSUA73_…` |
 | SUAX-19 (SUAD9, клетки) | §2.7 | `humansession/observer.go` | клетки утверждаются в `TestSUA03_…`, `TestSUA13_…`, `TestSUA21_…`, `TestSUA22_…`, `TestSUA80_…` |
 
@@ -247,17 +253,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 `StepUpChallengeStore` декоратором над **настоящим** адаптером: `KeyByCredentialID` отдаёт
 прочитанную строку, а перед возвратом фиксирует настоящим оператором сдвиг того же ключа на
 присланное значение (так, как это сделало бы утверждение соседней сессии). Ветвь повышения видит
-«растёт» по прочитанному и проигрывает оператору. Утверждения пары:
+«растёт» по прочитанному и проигрывает оператору. Декоратор подаётся сборке стенда пробы тем же
+путём, что наблюдатель (`suaOptions` в `internal/handler/loginlanehttp/step_up_any_method_harness_integration_test.go`);
+прод-кода шов не требует — это граница порта, а не ручка. Утверждения пары:
 
 | проба | вход | исход | сигнал клонирования |
 |---|---|---|---|
-| TestSUA80_CounterNotAdvancedIsRefusedWithTheCloneSignal | П-кл после SUA-03, `count="same"` | 401 `code` 16 `authentication failed`; уровень «1»; `Set-Cookie` нет; `lastUsedAt` прежний; журнал `refused`; след попытки +1 | +1 |
-| TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal | тот же человек, `count="next"`, декоратор фиксирует сдвиг между чтением и оператором | тот же 401 и те же следствия | 0 |
+| `TestSUA80_SignCountThatDidNotGrowIsRefusedAndSignalled` | П-кл после SUA-03, `count="same"` | 401 `code` 16 `authentication failed`; уровень «1»; `Set-Cookie` нет; `lastUsedAt` прежний; журнал `refused`; след попытки +1 | +1 |
+| TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal (заказ) | тот же человек, `count="next"`, декоратор фиксирует сдвиг между чтением и оператором | тот же 401 и те же следствия | 0 |
 | близнец (SUA-03) | `count="next"`, декоратор не вмешивается | 200, уровень «2» | 0 |
 
 Общая проба гонки (без декоратора): две сессии одного человека, у каждой своё испытание, два
 утверждения одного ключа с одним присланным значением, запуск под барьером —
-TestSUA80_TwoStepUpsOfOneKeyRaceAndExactlyOneIsAccepted: ровно одно 200 и **не больше одного**
+`TestSUA80_LostCounterRaceIsRefused`: ровно одно 200 и **не больше одного**
 сигнала (0 — оба прочитали до фиксации, 1 — второй прочитал после неё).
 
 Сигнал — счётчик `kaname_access_key_sign_count_regressions_total`
