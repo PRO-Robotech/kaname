@@ -26,7 +26,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `PRO-Robotech/kacho-workspace:docs/specs/sub-phase-F8-S7-console-security-settings-and-step-up-methods-acceptance.md`
   (далее — **F8-S7**). Он потребитель этого контракта и ни одного решения отсюда не переоткрывает.
 - **Ревизии измерения:** служба — `PRO-Robotech/kaname@bbbe33524` (`origin/main`); ветка этого
-  изменения `827-step-up-any-method` — от ветки эпика `origin/746@bee57fd5c`; платформа —
+  изменения `827` — от ветки эпика `origin/746@bee57fd5c`; платформа —
   `PRO-Robotech/kacho@8514270c4` (`origin/main`).
 - **Тип изменения:** новый способ у существующей церемонии повышения, один новый глагол (выдача
   испытания повышения ключом), новые поля ответа чтения состояния второго фактора, новый отказ
