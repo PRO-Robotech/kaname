@@ -125,19 +125,22 @@ func (zeroEnvelope) Admit(context.Context, domain.PasswordCostClass, passwordver
 // адаптерами, собранные теми же конструкторами, что в корне
 // (`cmd/kaname/loginlane.go`, `buildLoginLane`).
 type sessionWriterLane struct {
-	s        *concurrencyScene
-	users    *kanamepg.Repository
-	hasher   *passwordverify.Hasher
-	owner    domain.UserID
-	login    *humansession.LoginUseCase
-	logout   *humansession.LogoutUseCase
-	stepUp   *humansession.StepUpUseCase
-	enroll   *humansession.EnrollSecondFactorUseCase
-	confirm  *humansession.ConfirmSecondFactorUseCase
-	regen    *humansession.RegenerateBackupCodesUseCase
-	remove   *humansession.RemoveSecondFactorUseCase
-	request  *humansession.RequestRecoveryUseCase
-	complete *humansession.CompleteRecoveryUseCase
+	s      *concurrencyScene
+	users  *kanamepg.Repository
+	hasher *passwordverify.Hasher
+	owner  domain.UserID
+	login  *humansession.LoginUseCase
+	logout *humansession.LogoutUseCase
+	stepUp *humansession.StepUpUseCase
+	// stepUpBegin — выдача испытания повышения ключом (kaname#827): сцене
+	// ветви ключа церемонии нужно испытание этой сессии.
+	stepUpBegin *humansession.StepUpAccessKeyBeginUseCase
+	enroll      *humansession.EnrollSecondFactorUseCase
+	confirm     *humansession.ConfirmSecondFactorUseCase
+	regen       *humansession.RegenerateBackupCodesUseCase
+	remove      *humansession.RemoveSecondFactorUseCase
+	request     *humansession.RequestRecoveryUseCase
+	complete    *humansession.CompleteRecoveryUseCase
 }
 
 func newSessionWriterLane(t *testing.T) *sessionWriterLane {
@@ -199,6 +202,8 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 		Now: time.Now, Logger: logger,
 	}
 	l.stepUp, err = humansession.NewStepUpUseCase(sf)
+	require.NoError(t, err)
+	l.stepUpBegin, err = humansession.NewStepUpAccessKeyBeginUseCase(sf)
 	require.NoError(t, err)
 	l.enroll, err = humansession.NewEnrollSecondFactorUseCase(sf)
 	require.NoError(t, err)

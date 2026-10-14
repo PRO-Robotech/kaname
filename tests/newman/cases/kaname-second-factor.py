@@ -327,7 +327,9 @@ def _backup_summary(label, remaining):
     return [
         f"pm.test({js_str(label)}, () => {{",
         "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-        "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+        # Моменты набора (kaname#827, SUA Р6): `issuedAt` есть всегда, `lastUsedAt` —
+        # только после траты; значения кодов сводка не несёт.
+        "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
         f"  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([{remaining}, 10]);",
         "});",
     ]

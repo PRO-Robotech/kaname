@@ -3706,7 +3706,7 @@
                   "});",
                   "pm.test('STATUS-ACTIVE: 10 из 10', () => {",
                   "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
                   "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([10, 10]);",
                   "});",
                   "pm.test('STATUS: ни секрета, ни кодов, ни адреса в ответе (Ф12-27)', () => {",
@@ -3914,7 +3914,7 @@
                   "pm.test('STATUS-ACTIVE-KEPT: строка не изменена — момент подтверждения прежний', () => pm.expect(j.totp && j.totp.confirmedAt, 'момент подтверждения').to.eql(pm.environment.get('sfConfirmedAt')));",
                   "pm.test('STATUS-ACTIVE-KEPT: 10 из 10', () => {",
                   "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
                   "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([10, 10]);",
                   "});"
                 ]
@@ -5208,7 +5208,7 @@
                   "const j = pm.response.json();",
                   "pm.test('STATUS: 9 из 10', () => {",
                   "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
                   "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([9, 10]);",
                   "});"
                 ]
@@ -9396,7 +9396,7 @@
                   "const j = pm.response.json();",
                   "pm.test('RG-STATUS: 10 из 10', () => {",
                   "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
                   "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([10, 10]);",
                   "});"
                 ]
@@ -10960,7 +10960,7 @@
                   "const j = pm.response.json();",
                   "pm.test('RG-STATUS-AFTER: три новых потреблены — 7 из 10', () => {",
                   "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
                   "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([7, 10]);",
                   "});"
                 ]
@@ -11882,7 +11882,7 @@
                   "const j = pm.response.json();",
                   "pm.test('EX-STATUS: 0 из 10 — остаток назван числом', () => {",
                   "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-                  "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+                  "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
                   "  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([0, 10]);",
                   "});"
                 ]
