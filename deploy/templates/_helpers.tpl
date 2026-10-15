@@ -512,6 +512,14 @@ kaname-svc.requireMailRelay — ОТКАЗ УСТАНОВКИ БОЕВОЙ ПО�
 адреса узла, домен отправителя, половина удостоверения) судит страж старта
 (`InviteMailConfig.Validate`), а не этот шаблон. Вне боевого режима пустой узел
 законен: секция не рендерится, и это видно счётчиком исходов отправки.
+
+ЗАГЛУШКА — ТОЖЕ НЕ УЗЕЛ (kaname#733). Боевой профиль несёт на месте узла и
+отправителя имена в зарезервированной зоне `.invalid` (RFC 2606) — той же формы,
+что `authn.domain` (`kaname-svc.requireInstallDomain`). Такое имя не разрешается
+ни у одной установки: служба поднялась бы, а первое же письмо подтверждения не
+ушло бы. Признак — ЗОНА, а не строка образца: регистр, завершающая точка, схема,
+удостоверение и порт в адресе узла его не меняют; имя, лишь содержащее
+`invalid`, признаком не является.
 */}}
 {{- define "kaname-svc.requireMailRelay" -}}
 {{- $mode := default "production" (include "kaname-svc.authMode" .) -}}
@@ -523,6 +531,24 @@ kaname-svc.requireMailRelay — ОТКАЗ УСТАНОВКИ БОЕВОЙ ПО�
 {{- end -}}
 {{- if not (trim (toString (default "" $im.from))) -}}
 {{- $missing = append $missing "  inviteMail.from  — invite-mail.from: адрес отправителя, один на установку, формы имя@домен." -}}
+{{- end -}}
+{{- $relay := trim (toString (default "" $im.relay)) -}}
+{{- if $relay -}}
+{{- $host := regexReplaceAll "^[A-Za-z][A-Za-z0-9+.-]*://" $relay "" -}}
+{{- $host = regexReplaceAll "^[^@/]*@" $host "" -}}
+{{- $host = regexReplaceAll "[/?#].*$" $host "" -}}
+{{- $host = regexReplaceAll ":[0-9]*$" $host "" -}}
+{{- $host = trimSuffix "." (lower $host) -}}
+{{- if or (eq $host "invalid") (hasSuffix ".invalid" $host) -}}
+{{- fail (printf "inviteMail.relay=%q — заглушка почтового узла в зарезервированной зоне .invalid (RFC 2606): такое имя не разрешается ни у одной установки, и ни одно письмо — подтверждения адреса, восстановления доступа, смены адреса — не ушло бы. Назовите узел этой установки: inviteMail.relay в профиле чарта (invite-mail.relay, INSTALL.md §3 «Почтовая полоса»)" $relay) -}}
+{{- end -}}
+{{- end -}}
+{{- $from := trim (toString (default "" $im.from)) -}}
+{{- if $from -}}
+{{- $fromDomain := trimSuffix "." (lower (regexReplaceAll "^.*@" $from "")) -}}
+{{- if or (eq $fromDomain "invalid") (hasSuffix ".invalid" $fromDomain) -}}
+{{- fail (printf "inviteMail.from=%q — адрес отправителя в зарезервированной зоне .invalid (RFC 2606): узел установки такого отправителя не примет. Назовите отправителя этой установки: inviteMail.from в профиле чарта (invite-mail.from, INSTALL.md §3 «Почтовая полоса»)" $from) -}}
+{{- end -}}
 {{- end -}}
 {{- if $missing -}}
 {{- fail (printf "чарт службы прав не ставится: почтовый узел не объявлен в боевом режиме (authMode=%q) — %d.\n\nКоды подтверждения адреса и восстановления доступа уходят только письмом, а дальше входа пускается только человек с подтверждённым адресом: без узла служба поднялась бы, а ни один человек, первый администратор кластера тоже, дальше входа не прошёл бы. Страж старта процесса такую службу не поднимает (invite-mail.relay, invite-mail.from); отказ здесь приходит на установке, а не в кластере.\n\n%s\n\nЧТО СДЕЛАТЬ: назовите узел и отправителя профилю — накладкой `-f` либо `--set`, вместе с удостоверением к узлу и якорем доверия, если они нужны вашему узлу (INSTALL.md §3 «Почтовая полоса»). Без почты служба ставится только в режиме разработчика (authMode=dev)." $mode (len $missing) (join "\n" $missing)) -}}
