@@ -4,14 +4,20 @@
 """Case-set: «аноним» и «вошедший» — системный класс субъекта привязки прав.
 
 Приёмка: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md,
-редакция 5 (отпечаток 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d),
+редакция 6 (отпечаток 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c),
 задача PRO-Robotech/kaname#829. Кейсы — по DoD приёмки, второй эшелон через собственный
-публичный REST-фронт службы: S1 — SC-01…11, 14, 16, 17, 18, 40; S2 — SC-19, 20, 21, 22,
+публичный REST-фронт службы: S1 — SC-01…09, 14, 17, 40; S2 — SC-19, 20, 21, 22,
 24, 27, 28; S4 — краевая половина SC-53 (перечень кластерных администраторов, который
 читает страница `/system/cluster/admins`; консольную половину держит проба браузера
 `PRO-Robotech/kacho#3238`). Каждый ID несёт пару «статус + code». Сценарии только
 integration (SC-12, 13, 23, 25, 26, 29, 37, 42, 43, 44; переход SC-15) — с причиной в
 приёмке, здесь их нет.
+
+SC-10, 11, 16, 18 этим набором НЕ исполняются (редакция 6, DoD S1): их «Дано» — объект
+сети, зарегистрированный его владельцем, а владельца сети на автономном стенде службы без
+платформы нет by construction. На стадии S1 их держат integration-пробы
+`internal/apps/kaname/api/access_binding/system_class_s1_integration_test.go`; сквозной
+эшелон с теми же утверждениями — на стенде платформы, PRO-Robotech/kacho#3256.
 
 SC-15 (отказ подстановке говорящим) этим набором НЕ исполняется: решение диспетчера Д1
 отдаёт отказ и его пробу полосе L6 — Tests-followup: PRO-Robotech/kaname#832, условие
@@ -25,16 +31,14 @@ SC-15 (отказ подстановке говорящим) этим набор
 ФИКСТУРА (tests/authz-fixtures/seed_own_stand.py) против принципалов приёмки:
 jwtAccountAdminA — распорядитель аккаунта A (`usr-A`; на стенде — учётка с ролью admin
 на аккаунте A); userNOBId — человек без выдач (`usr-B`, только как цель выдачи и вопроса);
-jwtNoBindings — предъявитель без права выдавать; userAABId — человек ДРУГОГО арендатора
-(`usr-C` как субъект вопроса), jwtAccountAdminB — вызывающий ДРУГОГО арендатора без прав
-в аккаунте A (`usr-C` как вызывающий, SC-17); jwtBootstrap — кластерный администратор
-(`usr-K`: вопросы `Check`, развёртка SC-16, перечни SC-17 и SC-53, тело К SC-28);
+jwtNoBindings — предъявитель без права выдавать; jwtAccountAdminB — вызывающий ДРУГОГО
+арендатора без прав в аккаунте A (`usr-C` как вызывающий, SC-17); jwtBootstrap — кластерный администратор
+(`usr-K`: вопросы `Check`, перечни SC-17 и SC-53, тело К SC-28);
 existingProjectId — проект аккаунта A; svaAId / jwtSAA — учётка аккаунта A. Роль только
 чтения — системная `vpc.network.view` (`rolfe683216e63311d3f`, правила `[get, list]`),
 роль правки — `vpc.network.admin` (`rol8ed48ecc3878c2e73`), роль кластерного
-администратора — `rol21232f297a57a5a74`. Объекты — сети `enp00000000000000001` (obj-1) и
-`enp00000000000000002` (obj-2) правильной формы, цель выдачи — тип `vpc.network`, в
-вопросах к модели — тип `vpc_network`.
+администратора — `rol21232f297a57a5a74`. Объект — сеть `enp00000000000000001` (obj-1)
+правильной формы, цель выдачи — тип `vpc.network`, в вопросах к модели — тип `vpc_network`.
 
 Test-design: ECP (виды субъекта; имена класса; вызывающие перечня), BVA (пустое имя),
 decision table (класс × роль × цель × уровень области × вызывающий), error guessing
@@ -49,7 +53,6 @@ POLL_CAP = 30
 
 ROLE_READ = "rolfe683216e63311d3f"   # vpc.network.view — [get, list]
 OBJ_ID = "enp00000000000000001"      # vpc.network правильной формы
-OBJ2_ID = "enp00000000000000002"
 SYSTEM_GRANT = "acbc5d32d66fc8dc4952"
 ROLE_EDIT = "rol8ed48ecc3878c2e73"   # vpc.network.admin — [get, list, update]
 ROLE_CLUSTER_ADMIN = "rol21232f297a57a5a74"
@@ -158,7 +161,7 @@ def revoke(id_var, auth="jwtAccountAdminA"):
     ]
 
 
-def check(name, subject, obj=OBJ_ID, verb="get", allowed=None, poll=False, refused=None):
+def check(name, subject, obj=OBJ_ID, verb="get", allowed=None, refused=None):
     """`AuthorizeService.Check` от кластерного администратора."""
     body = {"subject": subject, "resource": {"type": "vpc_network", "id": obj}, "action": f"vpc.networks.{verb}"}
     script = []
@@ -168,21 +171,6 @@ def check(name, subject, obj=OBJ_ID, verb="get", allowed=None, poll=False, refus
             "const j = pm.response.json();",
             "pm.test('code 3', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
             f"pm.test('текст отказа дословно', () => pm.expect(j.message).to.eql({js_str(refused)}));",
-        ]
-    elif poll:
-        script = [
-            "const j = pm.response.json();",
-            "if (pm.environment.get('_ckStarted') !== pm.info.requestName) { pm.environment.set('_ckCount', '0'); pm.environment.set('_ckStarted', pm.info.requestName); }",
-            "const c = parseInt(pm.environment.get('_ckCount') || '0', 10);",
-            f"if (j.allowed !== {str(allowed).lower()} && c < 150) {{",
-            "  pm.environment.set('_ckCount', String(c + 1));",
-            "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
-            "  pm.execution.setNextRequest(pm.info.requestName);",
-            "  return;",
-            "}",
-            "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
-            *assert_status(200),
-            f"pm.test({js_str('allowed = ' + str(allowed).lower())}, () => pm.expect(j.allowed, JSON.stringify(j)).to.eql({str(allowed).lower()}));",
         ]
     else:
         script = [
@@ -308,82 +296,12 @@ _case("SC09-CLASS-NOT-CLUSTER-ADMIN", "SC-09: subjectType 4 у кластерн�
                             "pm.expect(v.map(x => x.description)).to.include(\"must be 'user' or 'service_account'\"); });"]),
       ])
 
-_case("SC10-ANONYMOUS-NOT-AUTHENTICATED", "SC-10: аноним не получает выданного вошедшим; близнецы — человек и учётка",
-      ["AUTHZ"], [
-          *create_ok("sc10-given", _body([_klass("authenticated")]), "sc10AcbId"),
-          check("sc10-given-materialized", "user:{{userNOBId}}", allowed=True, poll=True),
-          check("sc10-anonymous", "system_class:anonymous", allowed=False),
-          check("sc10-twin-sva", "service_account:{{svaAId}}", allowed=True),
-          *revoke("sc10AcbId"),
-      ])
-
-_case("SC11-SIGNED-IN-INHERITS-ANONYMOUS", "SC-11: вошедший получает выданное анониму; группа — нет", ["AUTHZ"], [
-    *create_ok("sc11-given", _body([_klass("anonymous")]), "sc11AcbId"),
-    check("sc11-user", "user:{{userNOBId}}", allowed=True, poll=True),
-    check("sc11-anonymous", "system_class:anonymous", allowed=True),
-    *revoke("sc11AcbId"),
-])
-
 _case("SC14-AUTHENTICATED-NOT-A-SPEAKER", "SC-14: system_class:authenticated говорящим → 400; близнец — аноним отвечается",
       ["VAL", "NEG"], [
           check("sc14-twin-anonymous", "system_class:anonymous", allowed=False),
           check("sc14-refused", "system_class:authenticated",
                 refused="Illegal argument subject: system class authenticated is not a speaker"),
       ])
-
-_EXPAND_PATH = f"/iam/v1/accessBindings:expandAccess?objectType=vpc_network&objectId={OBJ_ID}&relation=v_get"
-
-
-def _expand(name, test_script, wait_user=False):
-    """Развёртка `v_get` на obj-1 от кластерного администратора (`usr-K`, решение Д2).
-
-    `wait_user` — ожидание окна материализации прямой выдачи человеку (единственное
-    законное ожидание, e2e-flow.md#only-materialization-wait): опрос с настоящей паузой,
-    пока в `principals` не появится `usr-B`; по исчерпании падает утверждение ниже.
-    """
-    wait = []
-    if wait_user:
-        wait = [
-            "const _ps = (pm.response.code === 200 && pm.response.json().principals) || [];",
-            "if (pm.environment.get('_exStarted') !== pm.info.requestName) { pm.environment.set('_exCount', '0'); pm.environment.set('_exStarted', pm.info.requestName); }",
-            "const _ec = parseInt(pm.environment.get('_exCount') || '0', 10);",
-            "if (!_ps.some(p => p.id === pm.environment.get('userNOBId')) && _ec < 150) {",
-            "  pm.environment.set('_exCount', String(_ec + 1));",
-            "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
-            "  pm.execution.setNextRequest(pm.info.requestName);",
-            "  return;",
-            "}",
-            "pm.environment.unset('_exCount'); pm.environment.unset('_exStarted');",
-        ]
-    return Step(name=name, method="GET", path=_EXPAND_PATH, auth="jwtBootstrap",
-                test_script=[*wait, *test_script])
-
-
-_case("SC16-EXPAND-NO-CLASSES", "SC-16: развёртка от кластерного администратора классов не перечисляет; близнец без выдачи классу побайтово тот же",
-      ["CONF", "AUTHZ"], [
-          *create_ok("sc16-user", _body([_user("userNOBId")]), "sc16UserAcbId"),
-          _expand("sc16-twin-expand", wait_user=True, test_script=[
-              *assert_status(200),
-              "const j = pm.response.json();",
-              "pm.test('близнец: ровно usr-B', () => pm.expect(j.principals, JSON.stringify(j)).to.eql([{type: 'SUBJECT_TYPE_USER', id: pm.environment.get('userNOBId')}]));",
-              "pm.environment.set('sc16TwinBody', pm.response.text());",
-          ]),
-          *create_ok("sc16-class", _body([_klass("authenticated")]), "sc16AcbId"),
-          # Материализация выдачи классу: вошедший ДРУГОГО арендатора (выдач на obj-1 у
-          # него нет) получает чтение только через неё.
-          check("sc16-class-materialized", "user:{{userAABId}}", allowed=True, poll=True),
-          _expand("sc16-expand", test_script=[
-              *assert_status(200),
-              "const j = pm.response.json();",
-              "pm.test('ровно usr-B', () => pm.expect(j.principals, JSON.stringify(j)).to.eql([{type: 'SUBJECT_TYPE_USER', id: pm.environment.get('userNOBId')}]));",
-              "pm.test('элемента SUBJECT_TYPE_SYSTEM_CLASS нет', () => pm.expect((j.principals || []).filter(p => p.type === 'SUBJECT_TYPE_SYSTEM_CLASS'), JSON.stringify(j)).to.eql([]));",
-              "pm.test('truncated=false', () => pm.expect(j.truncated || false).to.eql(false));",
-              "pm.test('ответ побайтово равен близнецу без выдачи классу', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('sc16TwinBody')));",
-              "pm.environment.unset('sc16TwinBody');",
-          ]),
-          *revoke("sc16AcbId"), *revoke("sc16UserAcbId"),
-      ])
-
 
 def _list_by_class(name, auth, klass, want_js=None, wait_for=None):
     """`ListBySubject` по субъекту-классу. `want_js` — JS-массив ожидаемых id в порядке
@@ -437,16 +355,6 @@ _case("SC17-LIST-BY-CLASS", "SC-17: перечень выдач классу с�
           _list_by_class("sc17-own-authenticated", "jwtAccountAdminA", "authenticated",
                          want_js="[pm.environment.get('sc17AuthId')]", wait_for="sc17AuthId"),
           *revoke("sc17AuthId"), *revoke("sc17AnonId"),
-      ])
-
-_case("SC18-OTHER-TENANT-SIGNED-IN-READS", "SC-18: вошедший другого арендатора читает названный объект; соседний — нет; отзыв закрывает",
-      ["AUTHZ", "STATE"], [
-          check("sc18-precondition", "user:{{userAABId}}", allowed=False),
-          *create_ok("sc18-given", _body([_klass("authenticated")]), "sc18AcbId"),
-          check("sc18-other-tenant", "user:{{userAABId}}", allowed=True, poll=True),
-          check("sc18-neighbour-closed", "user:{{userAABId}}", obj=OBJ2_ID, allowed=False),
-          *revoke("sc18AcbId"),
-          check("sc18-after-revoke", "user:{{userAABId}}", allowed=False, poll=True),
       ])
 
 _case("SC40-SYSTEM-GRANT-MOVED", "SC-40: системная выдача чтения справочников — system_class/authenticated", ["CONF", "STATE"], [
