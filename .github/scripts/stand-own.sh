@@ -129,6 +129,13 @@ BOOTSTRAP_CALLER_SAN="${KANAME_STAND_BOOTSTRAP_SAN:-spiffe://kaname.local/ns/kan
 # константой края — `api-gateway`. То же имя, что у стенда чарта.
 EDGE_SA="kacho-api-gateway"
 
+# Имя модуля сетей в SAN листа, которым посев регистрирует объекты приёмки
+# системного класса (`RegisterResource`). Служба выводит из него домен вызывающего
+# (`kacho-` снимается) и учётку модуля; имя файла листа — то, что читает посев
+# (`seed_own_stand.py`, `OWNER_LEAF`).
+OWNER_SA="kacho-vpc"
+OWNER_LEAF="owner-vpc"
+
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'НАХОДКА: %s\n' "$*" >&2; }
 unmet() { printf 'УСЛОВИЕ НЕ СОЗДАНО: %s\n' "$*" >&2; }
@@ -147,7 +154,8 @@ need_tool() {
 # украшение сертификата.
 make_pki() {
   mkdir -p "$PKI" || { unmet "каталог $PKI не создаётся"; exit "$RC_UNMET"; }
-  if [ -f "$PKI/srv.crt" ] && [ -f "$PKI/ca.crt" ] && [ -f "$PKI/edge.crt" ]; then
+  if [ -f "$PKI/srv.crt" ] && [ -f "$PKI/ca.crt" ] && [ -f "$PKI/edge.crt" ] \
+     && [ -f "$PKI/$OWNER_LEAF.crt" ]; then
     say "PKI уже есть: $PKI"
     return 0
   fi
@@ -168,6 +176,11 @@ basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=clientAuth
 subjectAltName=URI:spiffe://kaname.local/ns/kaname/sa/$EDGE_SA
+[v3_owner]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+subjectAltName=URI:spiffe://kaname.local/ns/kaname/sa/$OWNER_SA
 EOF
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj '/CN=kaname-stand-ca' \
     -config "$PKI/openssl.cnf" -extensions v3_ca \
@@ -188,8 +201,19 @@ EOF
   openssl x509 -req -in "$PKI/edge.csr" -CA "$PKI/ca.crt" -CAkey "$PKI/ca.key" \
     -days 2 -extfile "$PKI/openssl.cnf" -extensions v3_edge -out "$PKI/edge.crt" >/dev/null 2>&1 || {
       unmet "лист края не выпустился"; exit "$RC_UNMET"; }
+  # ЛИСТ ВЛАДЕЛЬЦА СЕТЕЙ — только клиентский. Объекты приёмки системного класса
+  # (kaname#829) служба знает лишь после регистрации их владельцем
+  # (`RegisterResource`, :9091); на платформе это служба сетей, здесь её нет, и
+  # её место у этого ОДНОГО глагола занимает посев (`seed_own_stand.py`,
+  # `register_owner_objects`). Право писать решает служба: `fga_writer` на
+  # кластере у учётки модуля из посева миграций.
+  openssl req -newkey rsa:2048 -nodes -subj "/CN=$OWNER_SA" \
+    -keyout "$PKI/$OWNER_LEAF.key" -out "$PKI/$OWNER_LEAF.csr" >/dev/null 2>&1
+  openssl x509 -req -in "$PKI/$OWNER_LEAF.csr" -CA "$PKI/ca.crt" -CAkey "$PKI/ca.key" \
+    -days 2 -extfile "$PKI/openssl.cnf" -extensions v3_owner -out "$PKI/$OWNER_LEAF.crt" >/dev/null 2>&1 || {
+      unmet "лист владельца сетей не выпустился"; exit "$RC_UNMET"; }
   cp "$PKI/srv.crt" "$PKI/pg.crt"; cp "$PKI/srv.key" "$PKI/pg.key"
-  say "PKI выпущен: $PKI (УЦ + сертификат службы с SPIFFE-именем в SAN + клиентский лист края)"
+  say "PKI выпущен: $PKI (УЦ + сертификат службы с SPIFFE-именем в SAN + клиентские листы края и владельца сетей)"
 }
 
 # ─── База: TLS обязателен, иначе страж посадки откажет ───────────────────────

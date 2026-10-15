@@ -50,7 +50,12 @@
      `SAKeyService/Issue`. Приватный ключ показывается ОДИН раз;
   4. обмен — `POST /iam/v1/token` на :9096: подписанное утверждение клиента
      (RFC 7521/7523) у НАШЕГО издателя. Адресат утверждения — идентификатор
-     издателя, а не адрес эндпоинта.
+     издателя, а не адрес эндпоинта;
+  5. регистрация объектов приёмки системного класса их владельцем —
+     `InternalIAMService/RegisterResource` на :9091 листом модуля сетей
+     (`owner-vpc`, SAN `kacho-vpc`), выписанным УЦ стенда: на платформе объект
+     регистрирует служба сетей, на автономном стенде её нет (kaname#829).
+     Лист предъявляется ТОЛЬКО этому глаголу.
 
 ПОЧЕМУ ВТОРОЙ ВХОД (ПОЛОСА ВХОДА) ЗАКОНЕН, И ГДЕ ЕГО ГРАНИЦА — СКАЗАНО ПРЯМО.
 Аккаунт принадлежит ЧЕЛОВЕКУ by construction: `CreateAccount` от служебной
@@ -155,6 +160,18 @@ ASSERTION_TOKEN_TYPE = "client-authentication+jwt"
 BOOTSTRAP_METHOD = (
     "kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken")
 BOOTSTRAP_PROTO = "kaname/cloud/iam/v1/internal_bootstrap_token_service.proto"
+
+# Регистрация объекта его владельцем (`register_owner_objects`). Лист владельца
+# выписывает стенд (`stand-own.sh`, `make_pki`) под ЭТИМ именем файла; имя модуля
+# в его SAN — `kacho-vpc`, владелец типа `vpc_network`.
+REGISTER_METHOD = "kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
+REGISTER_PROTO = "kaname/cloud/iam/v1/internal_iam_service.proto"
+OWNER_LEAF = "owner-vpc"
+# Объекты приёмки системного класса (П1 `anonymous-and-authenticated-are-subject-
+# classes.md`): `obj-1` и `obj-2` — сети проекта арендатора A. Идентификаторы
+# закреплены ПРИЁМКОЙ, и кейсы набора называют их теми же литералами
+# (`tests/newman/cases/iam-system-class-subjects.py`, `OBJ_ID`, `OBJ2_ID`).
+SYSTEM_CLASS_OBJECTS = ("enp00000000000000001", "enp00000000000000002")
 
 # Путь набора ключей СОБСТВЕННОЙ чеканки на слушателе :9097. Дефолт посадки —
 # `authn.token-signing.key-set-path` (`internal/apps/kaname/config/token_signing.go`).
@@ -432,6 +449,63 @@ def mint_bootstrap(pki: pathlib.Path, host: str, grpc_port: int) -> str:
     if not token:
         raise Finding(f"чеканка ответила без accessToken: ключи {list(body)}")
     return token
+
+
+def register_owner_objects(pki: pathlib.Path, host: str, grpc_port: int,
+                           project_id: str, account_id: str,
+                           runner=subprocess.run) -> int:
+    """Объекты приёмки системного класса регистрирует ВЛАДЕЛЕЦ их типа.
+
+    ПОЧЕМУ ЭТОТ ШАГ ЕСТЬ. Выдача целью «названные объекты» материализуется только
+    на объекте, который служба знает: объект вне зеркала владельца сверка держит
+    в ожидании до его регистрации (`internal/repo/kaname/pg/reconcile_adapter.go`),
+    и ни один вопрос о нём не получает «да» — ни классу, ни человеку. Приёмка
+    (`anonymous-and-authenticated-are-subject-classes.md`, П1) называет `obj-1` и
+    `obj-2` СУЩЕСТВУЮЩИМИ сетями проекта `prj-A`; на платформе их регистрирует
+    служба сетей, а у автономного стенда её нет. Без этого шага восемь утверждений
+    коллекции `iam-system-class-subjects` (SC-10, SC-11, SC-16, SC-18) получали
+    отказ «no direct relations granted» на законном мире — kaname#829, K3.
+
+    КАК. Тем же глаголом, что владелец на платформе, — `RegisterResource` на
+    внутреннем gRPC :9091, листом с именем модуля сетей (`kacho-vpc`), выписанным
+    УЦ стенда (`stand-own.sh`, `make_pki`). Право писать за модуль решает сама
+    служба (`fga_writer` на кластере у его учётки из посева миграций), а вид
+    объекта — словарь владения типом. Лист предъявляется ТОЛЬКО этому глаголу.
+
+    Исходы: код grpcurl не 0 — НАХОДКА (продукт отверг законного владельца); нет
+    листа владельца или `grpcurl` — УСЛОВИЕ НЕ СОЗДАНО.
+    """
+    crt, key = pki / f"{OWNER_LEAF}.crt", pki / f"{OWNER_LEAF}.key"
+    if not (crt.is_file() and key.is_file()):
+        raise Unmet(f"нет листа владельца {crt.name} в {pki}: его выписывает стенд "
+                    "(`stand-own.sh`, `make_pki`), и зарегистрировать объекты "
+                    "приёмки больше нечем")
+    if runner is subprocess.run and not shutil.which("grpcurl"):
+        raise Unmet("нет grpcurl — у регистрации владельцем REST-маршрута нет нигде")
+    proto_root = module_proto_root() if runner is subprocess.run else pathlib.Path(".")
+    done = 0
+    for obj in SYSTEM_CLASS_OBJECTS:
+        body = {
+            "subjectId": f"project:{project_id}",
+            "relation": "parent",
+            "object": f"vpc_network:{obj}",
+            "parentProjectId": project_id,
+            "parentAccountId": account_id,
+            "parentChain": [f"project:{project_id}", f"account:{account_id}"],
+        }
+        args = ["grpcurl", "-insecure", "-max-time", "20",
+                "-cert", str(crt), "-key", str(key),
+                "-import-path", str(proto_root), "-proto", REGISTER_PROTO,
+                "-d", json.dumps(body), f"{host}:{grpc_port}", REGISTER_METHOD]
+        proc = runner(args, capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            raise Finding(
+                f"регистрация владельцем vpc_network:{obj} отказала (grpcurl rc="
+                f"{proc.returncode}): {(proc.stderr or proc.stdout).strip()[:400]}. "
+                f"Лист владельца — {OWNER_LEAF}, право — `fga_writer` учётки модуля "
+                f"сетей на кластере")
+        done += 1
+    return done
 
 
 def module_proto_root() -> pathlib.Path:
@@ -1158,6 +1232,13 @@ def run(args: argparse.Namespace) -> int:
             "проверяли бы своего, и «неотличимо от нет-такой» стало бы истинно "
             "тривиально")
 
+    say("── объекты приёмки системного класса: регистрация их владельцем ──────")
+    registered = register_owner_objects(pki, host, args.port_grpc,
+                                        tenants["a"]["projectId"],
+                                        tenants["a"]["accountId"])
+    step(f"владелец сетей зарегистрировал объекты приёмки ({registered}) в проекте "
+         f"{tenants['a']['projectId']}: {', '.join(SYSTEM_CLASS_OBJECTS)}")
+
     say("── предъявители арендаторов: служебная учётка с выдачей на аккаунте ──")
     #
     # ПРЕДЪЯВИТЕЛЬ ЗДЕСЬ — МАШИНА, А НЕ ЧЕЛОВЕК, И ЭТО ЗАМЕР, А НЕ УДОБСТВО.
@@ -1857,6 +1938,90 @@ def self_test() -> int:
         _c("запись заменяет известный ключ и ДОБАВЛЯЕТ неизвестный",
            replaced == 1 and got == {"jwtSAA": "x", "ownRestBaseUrl": "https://y"},
            f"заменено {replaced}, получено {got}")
+
+    # Ось 7: ОБЪЕКТЫ ПРИЁМКИ СИСТЕМНОГО КЛАССА РЕГИСТРИРУЕТ ВЛАДЕЛЕЦ (kaname#829).
+    #
+    # Мир отличается от законного близнеца ОДНИМ фактом: отказ регистрации (код
+    # grpcurl не 0) — находка; нет листа владельца — «условие не создано»; код 0 —
+    # молчание, и тогда утверждается ФОРМА вызова: лист владельца, глагол
+    # регистрации, оба объекта приёмки в проекте арендатора A с цепью предков.
+    with tempfile.TemporaryDirectory(prefix="seed-selftest-owner-") as td:
+        pki_ok = pathlib.Path(td)
+        for name in ("ca.crt", f"{OWNER_LEAF}.crt", f"{OWNER_LEAF}.key"):
+            (pki_ok / name).write_text("x", encoding="utf-8")
+
+        class _Proc:
+            def __init__(self, rc, out="{}", err=""):
+                self.returncode, self.stdout, self.stderr = rc, out, err
+
+        def _runner(rc):
+            calls = []
+
+            def run_(args, **kw):
+                calls.append(args)
+                return _Proc(rc, err="" if rc == 0 else "Code: PermissionDenied")
+            return calls, run_
+
+        calls, ok_run = _runner(0)
+        try:
+            n = register_owner_objects(pki_ok, "127.0.0.1", 9091, "prjSELF", "accSELF",
+                                       runner=ok_run)
+            outcome = "ok"
+        except (Finding, Unmet) as e:
+            n, outcome = 0, f"{type(e).__name__}: {e}"
+        _c("регистрация объектов приёмки: код 0 — молчание, объектов два",
+           outcome == "ok" and n == 2 and len(calls) == 2, f"исход {outcome}, n={n}, "
+           f"вызовов {len(calls)}")
+        bodies = []
+        for a in calls:
+            if "-d" in a:
+                try:
+                    bodies.append(json.loads(a[a.index("-d") + 1]))
+                except (ValueError, IndexError):
+                    pass
+        want_objects = {f"vpc_network:{o}" for o in SYSTEM_CLASS_OBJECTS}
+        _c("и каждый вызов — глагол регистрации листом ВЛАДЕЛЬЦА, не листом службы",
+           len(calls) == 2 and all(a[-1] == REGISTER_METHOD
+                                   and str(pki_ok / f"{OWNER_LEAF}.crt") in a
+                                   and str(pki_ok / "srv.crt") not in a for a in calls),
+           f"вызовы {calls!r}")
+        _c("и тела называют оба объекта приёмки в проекте A с цепью предков",
+           len(bodies) == 2
+           and {b.get("object") for b in bodies} == want_objects
+           and all(b.get("subjectId") == "project:prjSELF"
+                   and b.get("relation") == "parent"
+                   and b.get("parentProjectId") == "prjSELF"
+                   and b.get("parentAccountId") == "accSELF"
+                   and b.get("parentChain") == ["project:prjSELF", "account:accSELF"]
+                   for b in bodies),
+           f"тела {bodies!r}")
+
+        _, bad_run = _runner(7)
+        try:
+            register_owner_objects(pki_ok, "127.0.0.1", 9091, "prjSELF", "accSELF",
+                                   runner=bad_run)
+            outcome = "ok"
+        except Finding:
+            outcome = "finding"
+        except Unmet:
+            outcome = "unmet"
+        _c("отказ регистрации (код grpcurl не 0) — находка, а не молчание",
+           outcome == "finding", f"исход {outcome}")
+
+        pki_no = pathlib.Path(td) / "no-owner"
+        pki_no.mkdir()
+        (pki_no / "ca.crt").write_text("x", encoding="utf-8")
+        _, never_run = _runner(0)
+        try:
+            register_owner_objects(pki_no, "127.0.0.1", 9091, "prjSELF", "accSELF",
+                                   runner=never_run)
+            outcome = "ok"
+        except Finding:
+            outcome = "finding"
+        except Unmet:
+            outcome = "unmet"
+        _c("нет листа владельца — «условие не создано», а не находка",
+           outcome == "unmet", f"исход {outcome}")
 
     return _finish_self_test()
 
