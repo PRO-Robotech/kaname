@@ -190,6 +190,39 @@ func storeFailureScenarios() map[string]storeFailureScenario {
 				return err
 			}
 		}},
+		// Свои сессии (kaname#735): перечень, выход из выбранной, выход из прочих.
+		"перечень своих сессий": {verb: humansession.StoreFailureOwnSessionsList, setup: func(t *testing.T, h *sfHarness) func() error {
+			h.person(t, "usr-sf-ol", "ol@example.invalid", sfStorePassword, true)
+			login := h.freshSession(t, "ol@example.invalid", sfStorePassword)
+			uc, err := humansession.NewListOwnSessionsUseCase(sfOwnSessionsDeps(h))
+			require.NoError(t, err)
+			return func() error {
+				_, err := uc.Execute(ctx, humansession.ListOwnSessionsInput{Bearer: login.Bearer})
+				return err
+			}
+		}},
+		"выход из выбранной сессии": {verb: humansession.StoreFailureOwnSessionEnd, setup: func(t *testing.T, h *sfHarness) func() error {
+			h.person(t, "usr-sf-oe", "oe@example.invalid", sfStorePassword, true)
+			login := h.freshSession(t, "oe@example.invalid", sfStorePassword)
+			other := h.freshSession(t, "oe@example.invalid", sfStorePassword)
+			uc, err := humansession.NewEndOwnSessionUseCase(sfOwnSessionsDeps(h))
+			require.NoError(t, err)
+			return func() error {
+				_, err := uc.Execute(ctx, humansession.EndOwnSessionInput{Bearer: login.Bearer, SessionID: other.View.Session.ID})
+				return err
+			}
+		}},
+		"выход из прочих сессий": {verb: humansession.StoreFailureOwnSessionsEndOthers, setup: func(t *testing.T, h *sfHarness) func() error {
+			h.person(t, "usr-sf-oo", "oo@example.invalid", sfStorePassword, true)
+			login := h.freshSession(t, "oo@example.invalid", sfStorePassword)
+			h.freshSession(t, "oo@example.invalid", sfStorePassword)
+			uc, err := humansession.NewEndOtherOwnSessionsUseCase(sfOwnSessionsDeps(h))
+			require.NoError(t, err)
+			return func() error {
+				_, err := uc.Execute(ctx, humansession.EndOtherOwnSessionsInput{Bearer: login.Bearer})
+				return err
+			}
+		}},
 		"заведение пароля": {verb: humansession.StoreFailurePasswordEnroll, setup: func(t *testing.T, h *sfHarness) func() error {
 			u := h.person(t, "usr-sf-pe", "pe@example.invalid", "", true)
 			w, err := h.store.Writer(ctx)
@@ -209,6 +242,14 @@ func storeFailureScenarios() map[string]storeFailureScenario {
 				return err
 			}
 		}},
+	}
+}
+
+// sfOwnSessionsDeps — зависимости глаголов своих сессий над дублёром харнесса.
+func sfOwnSessionsDeps(h *sfHarness) humansession.OwnSessionsDeps {
+	return humansession.OwnSessionsDeps{
+		Store: h.store, Freshness: 15 * time.Minute, Observer: h.obs,
+		Now: func() time.Time { return h.clock }, Logger: slog.New(slog.DiscardHandler),
 	}
 }
 

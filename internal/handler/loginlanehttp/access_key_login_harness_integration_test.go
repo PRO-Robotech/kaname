@@ -95,14 +95,15 @@ func givenAcceptedKey(t *testing.T, h *sessionLane, user domain.UserID) akKey {
 	handle, err := w.EnsureCeremonyHandle(h.ctx, user, minted)
 	require.NoError(t, err, "Дано: рукоятка человека — из его строки рукояток (Р3)")
 	k, err := w.InsertKey(h.ctx, domain.AccessKey{
-		ID:           domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)),
-		UserID:       user,
-		CredentialID: auth.CredentialID(),
-		PublicKey:    auth.COSEPublicKey(t),
-		Algorithm:    auth.Algorithm(),
-		UserHandle:   handle.Bytes(),
-		Name:         "probe-key",
-		CreatedAt:    time.Now().UTC(),
+		ID:              domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)),
+		UserID:          user,
+		CredentialID:    auth.CredentialID(),
+		PublicKey:       auth.COSEPublicKey(t),
+		Algorithm:       auth.Algorithm(),
+		UserHandle:      handle.Bytes(),
+		Name:            "probe-key",
+		CreatedAt:       time.Now().UTC(),
+		Discoverability: domain.DiscoverabilityConfirmed,
 	})
 	require.NoError(t, err, "Дано: строка ключа кладётся писателем продукта")
 	require.NoError(t, w.Commit(h.ctx))

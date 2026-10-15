@@ -76,7 +76,7 @@ func beginKeyEnrollment(t *testing.T, ctx context.Context, pool *pgxpool.Pool, u
 	_, err = w.InsertKey(ctx, domain.AccessKey{
 		ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: userID,
 		CredentialID: auth.CredentialID(), PublicKey: auth.COSEPublicKey(t), Algorithm: auth.Algorithm(),
-		UserHandle: handle.Bytes(), Name: "lock-scene-key", CreatedAt: time.Now().UTC(),
+		UserHandle: handle.Bytes(), Name: "lock-scene-key", CreatedAt: time.Now().UTC(), Discoverability: domain.DiscoverabilityConfirmed,
 	})
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка ключа вставлена писателем продукта")
 	return pendingEnrollment{

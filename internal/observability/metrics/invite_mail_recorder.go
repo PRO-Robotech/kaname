@@ -18,6 +18,11 @@ import (
 // кардинальность росла бы с трафиком, а имена клеток задавал бы чужой процесс.
 const InviteMailOutcomesMetric = "kaname_invite_mail_outcomes_total"
 
+// MailOutcomesMetric — исходы отправки письма по ВИДУ письма (kaname#733): метка
+// `kind` — вид события очереди (`clients.MailEventTypes`), `outcome` — та же
+// закрытая клетка, что у ряда без вида.
+const MailOutcomesMetric = "kaname_mail_outcomes_total"
+
 // InviteMailRecorder — счётчик исходов отправки письма приглашения.
 //
 // # ПОЧЕМУ СДАННЫЕ СЧИТАЮТСЯ НАРАВНЕ С ОТКАЗАМИ
@@ -39,12 +44,15 @@ const InviteMailOutcomesMetric = "kaname_invite_mail_outcomes_total"
 //
 // # ГРАНИЦА УТВЕРЖДЕНИЯ НАЗВАНА ЗДЕСЬ, А НЕ ВЫВЕДЕНА ЧИТАТЕЛЕМ
 //
-// Счётчик считает НАШИ отправки — письма приглашения. О письмах подтверждения
-// адреса и восстановления доступа он не утверждает НИЧЕГО: их отправляет чужой
-// процесс, чьи величины из нашего дерева не измеримы вовсе. Счётчик, названный
-// «письма продукта» и считающий одну полосу, — то же «принято-и-проигнорировано»,
-// только заведённое собственными руками: читатель получил бы величину, которая
-// говорит меньше, чем её имя. Поэтому имя семейства называет ПРИГЛАШЕНИЕ.
+// Полоса писем одна на все виды (`clients.MailEventTypes`): приглашение,
+// восстановление доступа, подтверждение адреса, код смены адреса и уведомление
+// о смене. Ряд `kaname_invite_mail_outcomes_total{outcome}` считает попытки ВСЕХ
+// видов вместе — имя осталось от приглашения, с которого полоса началась, и
+// переименование сломало бы читателей ряда. Вид письма несёт второй ряд,
+// `kaname_mail_outcomes_total{kind,outcome}` (kaname#733): неудача письма
+// восстановления в общем ряду неотличима от неудачи приглашения, а человеку
+// без кода подтверждения дальше входа не пройти. Тревогу о неотправленном
+// письме (`KanameMailUndeliverable`) читает второй ряд.
 //
 // # ЧТО ЗНАЧИТ «СДАНО»
 //
@@ -61,6 +69,7 @@ const InviteMailOutcomesMetric = "kaname_invite_mail_outcomes_total"
 // конкретная».
 type InviteMailRecorder struct {
 	outcomes *prometheus.CounterVec
+	byKind   *prometheus.CounterVec
 }
 
 // NewInviteMailRecorder регистрирует счётчик в этом реестре.
@@ -77,21 +86,32 @@ func (r *Registry) NewInviteMailRecorder() *InviteMailRecorder {
 				"наравне с отказами, поэтому «отказов не было» отличимо от «сюда никто не " +
 				"приходил»; настройка стоит своей клеткой, потому что, в отличие от " +
 				"недоступности, временем она не лечится. Клетка «sent» означает СДАНО ретранслятору, " +
-				"НЕ получено адресатом. О письмах подтверждения адреса и восстановления доступа " +
-				"этот счётчик не утверждает ничего: их отправляет процесс поставщика.",
+				"НЕ получено адресатом. Считает попытки ВСЕХ видов письма полосы вместе; вид " +
+				"письма несёт ряд " + MailOutcomesMetric + ".",
 		}, []string{"outcome"}),
+		byKind: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: MailOutcomesMetric,
+			Help: "Исходы отправки письма нашим отправителем по виду письма (" +
+				strings.Join(clients.MailEventTypes, "|") + ") и клетке закрытого набора (" +
+				strings.Join(clients.InviteMailOutcomes, "|") + "). Клетка «sent» означает СДАНО " +
+				"ретранслятору, НЕ получено адресатом; «transient» и «misconfigured» — письмо не ушло.",
+		}, []string{"kind", "outcome"}),
 	}
 	for _, outcome := range clients.InviteMailOutcomes {
 		rec.outcomes.WithLabelValues(outcome)
+		for _, kind := range clients.MailEventTypes {
+			rec.byKind.WithLabelValues(kind, outcome)
+		}
 	}
-	r.reg.MustRegister(rec.outcomes)
+	r.reg.MustRegister(rec.outcomes, rec.byKind)
 	return rec
 }
 
 // IncInviteMailOutcome — исход одной попытки отправки. Реализует
 // clients.InviteMailObserver.
-func (rec *InviteMailRecorder) IncInviteMailOutcome(outcome string) {
+func (rec *InviteMailRecorder) IncInviteMailOutcome(kind, outcome string) {
 	rec.outcomes.WithLabelValues(outcome).Inc()
+	rec.byKind.WithLabelValues(kind, outcome).Inc()
 }
 
 // InviteMailRecorder возвращает ЕДИНСТВЕННЫЙ экземпляр счётчика этого реестра,

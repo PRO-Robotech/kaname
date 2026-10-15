@@ -116,8 +116,8 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 					o := owners[nextOwner%len(owners)]
 					nextOwner++
 					return `INSERT INTO kaname.user_access_keys
-					            (id, user_id, credential_id, public_key, algorithm, sign_count, name, description)
-					        VALUES ($1, $2, $3, '', -7, 0, $4, '')`,
+					            (id, user_id, credential_id, public_key, algorithm, sign_count, name, description, discoverability)
+					        VALUES ($1, $2, $3, '', -7, 0, $4, '', 'unreported')`,
 						[]any{
 							fmt.Sprintf("ak-%017d", seq),
 							string(o),

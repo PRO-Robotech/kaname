@@ -71,7 +71,7 @@ func Test_InviteMailRecorder_CountsIntoTheNamedCell(t *testing.T) {
 	r := NewRegistry()
 	rec := r.InviteMailRecorder()
 
-	rec.IncInviteMailOutcome(clients.InviteMailOutcomeMisconfigured)
+	rec.IncInviteMailOutcome(clients.EventInviteMailSend, clients.InviteMailOutcomeMisconfigured)
 
 	got, _ := labelledCounter(t, r, InviteMailOutcomesMetric,
 		map[string]string{"outcome": clients.InviteMailOutcomeMisconfigured})
