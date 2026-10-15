@@ -255,11 +255,15 @@ resources:
 // умолчания, выразим манифестом.
 //
 // Замер по канону: `registry_repository` несёт
-// `define v_get: [user:*, user, service_account, group#member] or owner or super_admin`
+// `define v_get: [system_class, user, service_account, group#member] or owner or super_admin`
 // — анонимное чтение публичного репозитория, — и остальные его действия выводятся
 // ещё и от `owner`. Умолчательная форма этого не давала, а объявить `v_get`
 // авторским отношением загрузчик не позволяет (имя порождается глаголом того же
 // ресурса): возможность была объявлена и неисполнима ни одним входом.
+//
+// Манифест платформы пишет на месте класса прежнее слово `user:*`, и сборщик
+// переводит его в `system_class` (kaname#829; снятие перевода — kaname#836),
+// поэтому вход ниже несёт слово, а порождённая строка — класс.
 func TestMODMR33AVerbRelationMayCarryItsOwnSubjectsAndSources(t *testing.T) {
 	block := renderFromYAML(t, `apiVersion: iam/v1
 module: registry
@@ -278,7 +282,7 @@ resources:
       - {name: delete, from: [owner, super_admin]}
 `)
 	mustContainLine(t, block,
-		"    define v_get: [user:*, user, service_account, group#member] or owner or super_admin\n")
+		"    define v_get: [system_class, user, service_account, group#member] or owner or super_admin\n")
 	mustContainLine(t, block,
 		"    define v_list: [user, service_account, group#member] or owner or super_admin\n")
 }

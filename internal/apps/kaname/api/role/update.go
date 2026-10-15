@@ -210,6 +210,16 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		return nil, shared.MapValidationErr(err)
 	}
 
+	// Роль, выданная системному классу, пишущего глагола не получает (Р4,
+	// SC-22). Здесь — синхронный ответ до заведения операции; последнее слово —
+	// у записи (`GuardSystemClassReads` под замком строки роли в doUpdate):
+	// выдача классу, заведённая между этим чтением и записью, не проходит мимо.
+	if slices.Contains(changed, "rules") && !target.GrantsReadsOnly() {
+		if err := u.refuseIfBoundToSystemClass(ctx, in.ID); err != nil {
+			return nil, err
+		}
+	}
+
 	// OCC: when the caller supplies a resource_version AND the rules are
 	// changing, it must match the version read on the sync path; a stale token →
 	// FAILED_PRECONDITION (the role was edited concurrently). When omitted, the
@@ -267,6 +277,11 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			// captured on the sync path. A concurrent Role.Update that committed first
 			// bumped xmin → this CAS matches 0 rows → ErrFailedPrecondition and the
 			// whole writer-tx (incl. the reconcile fan-out below) rolls back.
+			if slices.Contains(changed, "rules") {
+				if gerr := w.RolesW().GuardSystemClassReads(ctx, r.ID, r.GrantsReadsOnly()); gerr != nil {
+					return domain.Role{}, gerr
+				}
+			}
 			upd, uerr := w.RolesW().UpdateCAS(ctx, r, mask, expectedVersion)
 			if uerr != nil {
 				return domain.Role{}, uerr
@@ -421,4 +436,22 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 	// вернул бы превью, собранное другим источником, чем последующий `Get`.
 	updated.TypeVerbs = u.cat.Facts().RolePreviewLookup()
 	return marshalRole(updated)
+}
+
+// refuseIfBoundToSystemClass — синхронный отказ правке, дающей пишущий глагол
+// роли, выданной системному классу (SC-22).
+func (u *UpdateRoleUseCase) refuseIfBoundToSystemClass(ctx context.Context, id domain.RoleID) error {
+	rd, err := u.repo.Reader(ctx)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	bound, err := rd.Roles().BoundToSystemClass(ctx, id)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	if bound {
+		return status.Error(codes.FailedPrecondition, domain.RoleBoundToSystemClassText(id))
+	}
+	return nil
 }

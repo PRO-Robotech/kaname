@@ -10,8 +10,8 @@ import (
 )
 
 // anonConfig — a Config with anonymous pull ENABLED: a declared public identity
-// the registry data-plane resolves to the FGA wildcard AnonymousSubject
-// (`user:*`). No user/SA credential is ever presented for the anonymous flow —
+// the registry data-plane resolves to the anonymous system class AnonymousSubject
+// (`system_class:anonymous`). No user/SA credential is ever presented for the anonymous flow —
 // our signer mints for that identity.
 func anonConfig() Config {
 	return Config{
@@ -23,7 +23,7 @@ func anonConfig() Config {
 
 // TestExecuteAnonymous_IssuesReadOnlyPublicBearer — RG-1-B13. A `/token` request
 // WITHOUT Basic creds (the docker anon-pull flow) gets a Bearer minted by OUR
-// signer whose subject resolves to the public `user:*` principal, requested for
+// signer whose subject resolves to the public `system_class:anonymous` principal, requested for
 // the registry data-plane audience. NO user credential is validated (anonymous =
 // wildcard, not a specific user).
 //
@@ -47,7 +47,7 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 		t.Fatalf("out = %+v; want our minted anon bearer relayed", out)
 	}
 	// The token is minted FOR the declared anon identity — the subject the
-	// data-plane resolves to the public AnonymousSubject (`user:*`), NOT a user SA.
+	// data-plane resolves to the public AnonymousSubject, NOT a user SA.
 	if m.got.Subject != "registry-anonymous" {
 		t.Errorf("anon token subject = %q; want the declared anon identity", m.got.Subject)
 	}
@@ -59,8 +59,9 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 	if m.got.HasConfirmation() {
 		t.Error("anon token carries a binding nobody presented")
 	}
-	// Contract: the anonymous principal is the FGA wildcard.
-	if AnonymousSubject != "user:*" {
-		t.Errorf("AnonymousSubject = %q; want the FGA wildcard user:*", AnonymousSubject)
+	// Контракт: анонимный принципал — системный класс anonymous (SC-39), а не
+	// подстановка: подстановка говорящим не бывает (Р3).
+	if AnonymousSubject != "system_class:anonymous" {
+		t.Errorf("AnonymousSubject = %q; want the anonymous system class", AnonymousSubject)
 	}
 }

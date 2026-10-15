@@ -45,9 +45,11 @@ type SystemGrantCensus struct {
 	// Revoked — отозванных: отличать «их никогда не заводили» от «их сняли»
 	// обязательно, иначе обе картины читаются как одна.
 	Revoked int
-	// WildcardSubject — из действующих: выданных субъекту «любой
-	// аутентифицированный». Публичное чтение справочника держится ими.
-	WildcardSubject int
+	// AuthenticatedClass — из действующих: выданных системному классу
+	// `authenticated` («любой вошедший»). Публичное чтение справочника держится
+	// ими. Прежде поле считало подстановку `user:*` и после переезда на классы
+	// показывало бы ноль при исправном доступе (kaname#829, разбор CE-09).
+	AuthenticatedClass int
 	// ClusterAnchored — из действующих: с якорем на кластере.
 	ClusterAnchored int
 }
@@ -60,12 +62,12 @@ func CensusOfSystemGrants(ctx context.Context, pool *pgxpool.Pool) (SystemGrantC
 		  count(*) FILTER (WHERE status = 'ACTIVE' AND revoked_at IS NULL),
 		  count(*) FILTER (WHERE status = 'REVOKED' OR revoked_at IS NOT NULL),
 		  count(*) FILTER (WHERE status = 'ACTIVE' AND revoked_at IS NULL
-		                     AND subject_type = 'user' AND subject_id = '*'),
+		                     AND subject_type = 'system_class' AND subject_id = 'authenticated'),
 		  count(*) FILTER (WHERE status = 'ACTIVE' AND revoked_at IS NULL
 		                     AND resource_type = 'cluster')
 		  FROM kaname.access_bindings
 		 WHERE is_system`).
-		Scan(&c.Active, &c.Revoked, &c.WildcardSubject, &c.ClusterAnchored)
+		Scan(&c.Active, &c.Revoked, &c.AuthenticatedClass, &c.ClusterAnchored)
 	if err != nil {
 		return SystemGrantCensus{}, fmt.Errorf("seed: перепись системных выдач: %w", err)
 	}
@@ -93,13 +95,19 @@ func LogSystemGrantCensus(ctx context.Context, pool *pgxpool.Pool, logger *slog.
 	attrs := []any{
 		slog.Int("active", c.Active),
 		slog.Int("revoked", c.Revoked),
-		slog.Int("wildcard_subject", c.WildcardSubject),
+		slog.Int("authenticated_class", c.AuthenticatedClass),
 		slog.Int("cluster_anchored", c.ClusterAnchored),
 	}
 	if c.Active == 0 {
 		logger.Warn("системных выдач НЕТ: встроенный доступ платформы не выдан ни одной строкой. "+
 			"Если это не решение администратора — служебные учётки и публичное чтение "+
 			"глобального справочника закрыты", attrs...)
+		return
+	}
+	if c.AuthenticatedClass == 0 {
+		logger.Warn("системной выдачи классу «вошедшие» НЕТ: публичное чтение глобального "+
+			"справочника закрыто каждому вошедшему. Если это не решение администратора — "+
+			"встроенная выдача снята или не переехала на системный класс", attrs...)
 		return
 	}
 	logger.Info("перепись системных выдач (встроенный доступ платформы)", attrs...)

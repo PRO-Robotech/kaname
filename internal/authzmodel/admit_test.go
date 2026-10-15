@@ -104,10 +104,10 @@ func TestAdmitLegalTwinFromCanonIsAdmitted(t *testing.T) {
 	if !rep.Admitted() {
 		t.Fatalf("законный близнец из канона обязан быть допущен; находки: %v; перепись: %s", rep.Findings, rep.Census())
 	}
-	if rep.TypesSeen != 33 || rep.TypesNew != 1 {
-		t.Fatalf("перепись: типов осмотрено %d (ждали 33), новых %d (ждали 1)", rep.TypesSeen, rep.TypesNew)
+	if rep.TypesSeen != 34 || rep.TypesNew != 1 {
+		t.Fatalf("перепись: типов осмотрено %d (ждали 34), новых %d (ждали 1)", rep.TypesSeen, rep.TypesNew)
 	}
-	if !strings.Contains(rep.Census(), "типов осмотрено 33, новых 1, находок 0") {
+	if !strings.Contains(rep.Census(), "типов осмотрено 34, новых 1, находок 0") {
 		t.Fatalf("перепись обязана печататься в форме нормы §5 п. 3, получено: %s", rep.Census())
 	}
 }
@@ -128,7 +128,7 @@ func TestAdmitTypeNameAlreadyCarriedByCanon(t *testing.T) {
 		t.Fatalf("находка обязана называть ЧИСЛО вхождений, получено %q", got[0].Text)
 	}
 	// Переопределение канонического имени новым типом НЕ считается новым типом:
-	// формулировка через множество здесь молчит (различных имён по-прежнему 32).
+	// формулировка через множество здесь молчит (различных имён по-прежнему 33).
 	if rep.TypesNew != 0 {
 		t.Fatalf("новых типов обязано быть 0, получено %d", rep.TypesNew)
 	}
@@ -454,7 +454,7 @@ func TestAdmitTypeNameOutsideIdentifierForm(t *testing.T) {
 	if !strings.Contains(got[0].Text, "acme widget") {
 		t.Fatalf("находка обязана называть ПРЕДЪЯВЛЕННОЕ имя, получено %q", got[0].Text)
 	}
-	// Положительный близнец: все 32 имени типов канона форме удовлетворяют.
+	// Положительный близнец: все 33 имени типов канона форме удовлетворяют.
 	re := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
@@ -466,8 +466,8 @@ func TestAdmitTypeNameOutsideIdentifierForm(t *testing.T) {
 			bad++
 		}
 	}
-	if len(m.Types) != 32 || bad != 0 {
-		t.Fatalf("канон: имён вне формы %d из %d (ждали 0 из 32)", bad, len(m.Types))
+	if len(m.Types) != 33 || bad != 0 {
+		t.Fatalf("канон: имён вне формы %d из %d (ждали 0 из 33)", bad, len(m.Types))
 	}
 }
 
@@ -570,7 +570,7 @@ func TestAdmitWildcardReachedTransitivelyViaPointer(t *testing.T) {
 	var witnessed bool
 	for _, a := range p.Atoms {
 		if a.ParentType == "cluster" && a.Relation == "viewer" &&
-			a.Origin == "cluster.viewer → [user, user:*, service_account]" {
+			a.Origin == "cluster.viewer → [user, service_account, system_class]" {
 			witnessed = true
 		}
 	}
@@ -636,7 +636,10 @@ func TestCanonWildcardSetIsTwoOfTwoHundredSeventy(t *testing.T) {
 			pairs++
 			for _, term := range r.Terms {
 				for _, d := range term.Direct {
-					if d.Wildcard {
+					// Подстановка и системный класс — одно по смыслу: отношение
+					// выполнимо «каждым вошедшим» либо «каждым без входа»
+					// (kaname#829). После переезда канон выражает их классом.
+					if d.Wildcard || d.Type == "system_class" {
 						direct[ty.Name+"."+r.Name] = true
 					}
 				}
@@ -969,7 +972,7 @@ func probeReachesWildcardFrom(t *testing.T, m *authzplan.Model, typeName, relati
 		}
 		for _, term := range r.Terms {
 			for _, d := range term.Direct {
-				if d.Wildcard {
+				if d.Wildcard || d.Type == "system_class" {
 					out[key] = true
 				}
 			}
@@ -1024,7 +1027,7 @@ func probeReachesWildcard(t *testing.T, m *authzplan.Model, newType string, seed
 		}
 		for _, term := range r.Terms {
 			for _, d := range term.Direct {
-				if d.Wildcard {
+				if d.Wildcard || d.Type == "system_class" {
 					hit = true
 				}
 			}

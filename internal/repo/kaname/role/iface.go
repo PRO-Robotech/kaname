@@ -23,6 +23,11 @@ type ReaderIface interface {
 	// mismatch (a concurrent Role.Update bumped xmin) is rejected by UpdateCAS
 	// with ErrFailedPrecondition. Not-found → ErrNotFound (verbatim Get text).
 	GetWithVersion(ctx context.Context, id domain.RoleID) (domain.Role, string, error)
+
+	// BoundToSystemClass — роль выдана системному классу действующей выдачей
+	// (Р4, SC-22). Синхронный ответ правке роли; последнее слово — у записи
+	// (`RolesW().GuardSystemClassReads`, под блокировкой строки роли).
+	BoundToSystemClass(ctx context.Context, id domain.RoleID) (bool, error)
 	// List — может фильтровать по is_system и/или account_id.
 	List(ctx context.Context, filter ListFilter) ([]domain.Role, string, error)
 	// ListAssignable — roles valid for binding on (resourceType, resourceID)
@@ -132,6 +137,13 @@ type WriterIface interface {
 	// InvalidArgument до repo (см. role-RPC handler).
 	Insert(ctx context.Context, r domain.Role) (domain.Role, error)
 	Update(ctx context.Context, r domain.Role, updateMask []string) (domain.Role, error)
+
+	// GuardSystemClassReads — последнее слово правки роли о системном классе
+	// (Р4, SC-22): берёт строку роли под замком, несовместимым со стражем выдачи
+	// классу, и отказывает FailedPrecondition, когда новые правила пишут
+	// (readsOnly=false), а роль выдана классу. Зовётся в транзакции правки ДО
+	// записи роли.
+	GuardSystemClassReads(ctx context.Context, id domain.RoleID, readsOnly bool) error
 
 	// UpdateCAS is Update guarded by an xmin OCC token. It runs a
 	// single-statement `UPDATE roles SET … WHERE id=$id AND xmin::text=$expected

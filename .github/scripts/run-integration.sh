@@ -86,6 +86,36 @@ TIMEOUT="${INTEGRATION_TIMEOUT:-25m}"
 
 cd "$ROOT" || exit 2
 
+# ШАРД: `INTEGRATION_SHARD=<k>/<N>`, k от 0 — ровно `strategy.job-index` и
+# `strategy.job-total` задания, то есть число шардов берётся у самой матрицы и
+# разойтись с ней не может. `--plan` печатает раскладку всех N шардов и выходит,
+# не исполняя проб (`INTEGRATION_SHARD=0/3 run-integration.sh --plan`).
+# DEFAULT_WEIGHT — вес пакета, которого ведомость весов не знает (секунды).
+DEFAULT_WEIGHT=10
+plan_only=0
+case "${1:-}" in
+    "") ;;
+    --plan) plan_only=1 ;;
+    *) echo "аргумент не предусмотрен: $1 (знаю только --plan)" >&2; exit 2 ;;
+esac
+shard_index=""
+shard_total=""
+if [ -n "${INTEGRATION_SHARD:-}" ]; then
+    if ! [[ "$INTEGRATION_SHARD" =~ ^(0|[1-9][0-9]*)/([1-9][0-9]*)$ ]]; then
+        echo "INTEGRATION_SHARD=$INTEGRATION_SHARD не в форме <k>/<N> (k от 0) — это отказ" >&2
+        exit 2
+    fi
+    shard_index="${BASH_REMATCH[1]}"
+    shard_total="${BASH_REMATCH[2]}"
+    if [ "$shard_index" -ge "$shard_total" ]; then
+        echo "INTEGRATION_SHARD=$INTEGRATION_SHARD: номер шарда вне 0..$((shard_total - 1)) — это отказ" >&2
+        exit 2
+    fi
+elif [ "$plan_only" -eq 1 ]; then
+    echo "--plan без INTEGRATION_SHARD: число шардов не названо — это отказ" >&2
+    exit 2
+fi
+
 # ВРЕМЕННЫЕ ФАЙЛЫ ЖИВУТ В ОДНОМ КАТАЛОГЕ, И ЛОВУШКА СНЯТИЯ — ОДНА (kaname#671).
 #
 # Здесь стояли три ловушки `EXIT`, по одной на временный файл, и каждая
@@ -165,6 +195,103 @@ if [ "$with_db" -ne "$selected" ]; then
     exit 2
 fi
 echo ""
+
+# РАСКЛАДКА ПО ШАРДАМ (kaname#840). Пакеты внутри прогона идут по одному (`-p 1`,
+# довод выше), поэтому срок задания — СУММА времён пакетов: замер 2026-10-15 —
+# 1549 с на прогоне 38766280699 и 2133 с без четырёх недошедших пакетов на
+# 38781486845 (тот же состав из 36 пакетов, другой пул исполнителей), и второй
+# снят пределом задания без единого FAIL. Предел поднимать — значит отложить ту
+# же отсечку до следующего роста; поэтому сумма делится между машинами.
+#
+# Раскладка ДЕТЕРМИНИРОВАНА и выводится из того же отбора на каждом шарде:
+# пакеты по убыванию замеренного веса (`.github/integration-shard-weights.txt`),
+# каждый — в наименее загруженный шард. Каждый шард строит ПОЛНЫЙ план и
+# проверяет его: каждый отобранный пакет ровно в одном шарде, ни один шард не
+# пуст. Иначе код 2 — выпавший пакет был бы ровно тем молчаливым выпадением,
+# против которого переписан отбор.
+#
+# Без `INTEGRATION_SHARD` прогон — весь отбор, как прежде (локально и в пробах).
+if [ -n "$shard_total" ]; then
+    weights="$ROOT/.github/integration-shard-weights.txt"
+    if [ ! -r "$weights" ]; then
+        echo "ведомость весов $weights не прочитана — раскладка не из чего, это отказ" >&2
+        exit 2
+    fi
+    plan_err="$work/plan.err"
+    plan_rc=0
+    plan="$(printf '%s\n' "$pkgs" | awk -v n="$shard_total" -v wf="$weights" -v dflt="$DEFAULT_WEIGHT" '
+        BEGIN {
+            while ((getline line < wf) > 0) {
+                if (line ~ /^[[:space:]]*(#|$)/) continue
+                if (split(line, f, " ") != 2 || f[1] !~ /^[0-9]+$/) {
+                    print "строка ведомости весов не разобрана: " line > "/dev/stderr"; bad = 1; continue
+                }
+                if (f[2] in w) { print "пакет дважды в ведомости весов: " f[2] > "/dev/stderr"; bad = 1 }
+                w[f[2]] = f[1] + 0
+            }
+            close(wf)
+        }
+        NF { p[++np] = $1; sel[$1] = 1 }
+        END {
+            for (k in w) if (!(k in sel)) { print "в ведомости весов пакет, которого отбор не дал (запись без предмета): " k > "/dev/stderr"; bad = 1 }
+            if (bad) exit 3
+            for (i = 1; i <= np; i++) {
+                if (p[i] in w) pw[i] = w[p[i]]
+                else { pw[i] = dflt; print "вес не замерен, взят по умолчанию " dflt " с: " p[i] > "/dev/stderr" }
+            }
+            # Порядок: вес по убыванию, при равенстве — путь по возрастанию.
+            for (i = 2; i <= np; i++) {
+                ki = p[i]; kw = pw[i]; j = i - 1
+                while (j >= 1 && (pw[j] < kw || (pw[j] == kw && p[j] > ki))) { p[j+1] = p[j]; pw[j+1] = pw[j]; j-- }
+                p[j+1] = ki; pw[j+1] = kw
+            }
+            for (s = 0; s < n; s++) load[s] = 0
+            for (i = 1; i <= np; i++) {
+                best = 0
+                for (s = 1; s < n; s++) if (load[s] < load[best]) best = s
+                load[best] += pw[i]
+                print best "\t" pw[i] "\t" p[i]
+            }
+        }' 2>"$plan_err")" || plan_rc=$?
+    cat "$plan_err" >&2
+    if [ "$plan_rc" -ne 0 ]; then
+        echo "раскладка по шардам НЕ ПОСТРОЕНА (код $plan_rc) — это отказ" >&2
+        exit 2
+    fi
+
+    # Проверка плана — отдельно от построения: каждый отобранный пакет ровно
+    # в одном шарде, ни один шард не пуст.
+    planned="$(printf '%s\n' "$plan" | awk -F'\t' 'NF' | wc -l)"
+    distinct="$(printf '%s\n' "$plan" | awk -F'\t' 'NF {print $3}' | sort -u | wc -l)"
+    missing="$(comm -23 <(printf '%s\n' "$pkgs" | sort -u) <(printf '%s\n' "$plan" | awk -F'\t' 'NF {print $3}' | sort -u))"
+    if [ "$planned" -ne "$selected" ] || [ "$distinct" -ne "$selected" ] || [ -n "$missing" ]; then
+        echo "РАСКЛАДКА НЕПОЛНА: отобрано $selected, в плане строк $planned, различных $distinct." >&2
+        # shellcheck disable=SC2086
+        [ -n "$missing" ] && printf 'вне плана: %s\n' $missing >&2
+        exit 2
+    fi
+
+    echo "=== РАСКЛАДКА ПО ШАРДАМ ($shard_total) ==="
+    for ((s = 0; s < shard_total; s++)); do
+        n_s="$(printf '%s\n' "$plan" | awk -F'\t' -v s="$s" '$1 == s' | wc -l)"
+        sum_s="$(printf '%s\n' "$plan" | awk -F'\t' -v s="$s" '$1 == s {t += $2} END {print t + 0}')"
+        mark=""
+        [ "$s" = "$shard_index" ] && mark="  ← этот"
+        echo "шард $s: пакетов $n_s · замеренный вес $sum_s с$mark"
+        if [ "$n_s" -eq 0 ]; then
+            echo "шард $s пуст: шардов больше, чем пакетов, — это отказ" >&2
+            exit 2
+        fi
+    done
+    echo "в плане пакетов       : $planned из $selected, каждый ровно в одном шарде"
+    if [ "$plan_only" -eq 1 ]; then
+        printf '%s\n' "$plan" | awk -F'\t' 'NF {print "  " $1 "\t" $2 "\t" $3}'
+        exit 0
+    fi
+    pkgs="$(printf '%s\n' "$plan" | awk -F'\t' -v s="$shard_index" '$1 == s {print $3}')"
+    echo "исполняется в шарде $shard_index: $(printf '%s\n' "$pkgs" | wc -l)"
+    echo ""
+fi
 
 log="$work/go-test.log"
 

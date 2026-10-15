@@ -610,3 +610,13 @@ func TestWhoAmI_AccountRoles_FollowTheSeededRole(t *testing.T) {
 		}
 	}
 }
+
+// BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *fakeRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
+	return false, nil
+}
+
+// GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *fakeABRdr) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}

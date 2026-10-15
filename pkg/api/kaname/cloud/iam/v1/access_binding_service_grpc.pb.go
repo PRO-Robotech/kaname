@@ -159,8 +159,9 @@ type AccessBindingServiceClient interface {
 	// cluster administrator — ONE predicate, shared with `ListBySubject`. That
 	// account is not a request field — it is resolved from the subject — so the edge
 	// has no object to check and declares `scope_filtered`. `subject_type ∈
-	// {"user","service_account","group"}`; malformed subject_id / prefix↔type
-	// mismatch → INVALID_ARGUMENT.
+	// {"user","service_account","group","system_class"}`; malformed subject_id /
+	// prefix↔type mismatch / class name outside `anonymous|authenticated` →
+	// INVALID_ARGUMENT.
 	//
 	// ДОПУСК НЕ ЕСТЬ ПОЛНОТА ОТВЕТА. Допуск решается по ДОМАШНЕМУ аккаунту
 	// субъекта, а строки называют ОБЛАСТЬ каждой выдачи, и области одного человека
@@ -555,8 +556,9 @@ type AccessBindingServiceServer interface {
 	// cluster administrator — ONE predicate, shared with `ListBySubject`. That
 	// account is not a request field — it is resolved from the subject — so the edge
 	// has no object to check and declares `scope_filtered`. `subject_type ∈
-	// {"user","service_account","group"}`; malformed subject_id / prefix↔type
-	// mismatch → INVALID_ARGUMENT.
+	// {"user","service_account","group","system_class"}`; malformed subject_id /
+	// prefix↔type mismatch / class name outside `anonymous|authenticated` →
+	// INVALID_ARGUMENT.
 	//
 	// ДОПУСК НЕ ЕСТЬ ПОЛНОТА ОТВЕТА. Допуск решается по ДОМАШНЕМУ аккаунту
 	// субъекта, а строки называют ОБЛАСТЬ каждой выдачи, и области одного человека

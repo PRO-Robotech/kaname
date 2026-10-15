@@ -162,9 +162,17 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	b.SubjectID = subjects[0].ID
 
 	// Stamp granted_by from the authenticated caller (anti-spoofing — never
-	// from a request-body field). This also feeds the durable audit_outbox
-	// compliance event's `actor` so "who granted this" is recorded.
-	b.GrantedByUserID = domain.UserID(authzguard.PrincipalUserID(ctx))
+	// from a request-body field).
+	//
+	// ИСПОЛНИТЕЛЬ и «выдал человек» — РАЗНЫЕ поля. `granted_by_user_id` называет
+	// человека и только его: у выдачи, заведённой сервисной учёткой, он пуст
+	// (SC-27), а исполнителя называет запись аудита (`actor`) — её пишет
+	// принципал вызова, кем бы он ни был. Прежде оба поля брали один идентификатор,
+	// и учётка становилась «пользователем, выдавшим право».
+	actor := authzguard.PrincipalUserID(ctx)
+	if p := operations.PrincipalFromContext(ctx); p.Type == string(domain.SubjectTypeUser) {
+		b.GrantedByUserID = domain.UserID(actor)
+	}
 	// F9 gate 1 (IAM-1-26): scope well-formedness — first statement, BEFORE
 	// domain.Validate, so a malformed scope id yields the canonical
 	// "invalid access binding scope id '<x>'" (not a generic scope-mismatch).
@@ -203,6 +211,12 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// tuple-emission) and AFTER the authority gate above (they read the role + the
 	// scope project).
 	if err := u.validateStructuralGates(ctx, b); err != nil {
+		return nil, err
+	}
+	// Ворота системного класса (Р4, Р5): после права выдавать и структурных
+	// ворот, до правила кластера — порядок и его довод у самих ворот
+	// (system_class_gates.go).
+	if err := u.validateSystemClassGates(ctx, b); err != nil {
 		return nil, err
 	}
 
@@ -270,7 +284,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 				}
 			}
 		}()
-		res, derr = u.doCreate(ctx, b)
+		res, derr = u.doCreate(ctx, b, actor)
 		if derr != nil && u.logger != nil {
 			u.logger.Error("access_binding create operation failed",
 				"op", op.ID, "err", derr,
@@ -282,7 +296,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	return &op, nil
 }
 
-func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.AccessBinding) (*anypb.Any, error) {
+func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.AccessBinding, actor string) (*anypb.Any, error) {
 	w, err := u.repo.Writer(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
@@ -379,7 +393,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 		}
 		if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
 			EventType:       abrepo.AuditEventTypeGranted,
-			Actor:           string(created.GrantedByUserID),
+			Actor:           actor,
 			SubjectType:     string(s.Type),
 			SubjectID:       string(s.ID),
 			ResourceType:    string(created.ResourceType),

@@ -346,6 +346,18 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 	if role.Lifecycle.State != domain.RoleLifecycleDeclared {
 		role = domain.Role{ID: role.ID}
 	}
+	selectors := role.Rules.MaterializingSelectorsInScope(b.Scope)
+	scopeSelf := role.Rules.ScopeSelfVerbs(string(b.ResourceType), scopeTypeVerbs(cat, string(b.ResourceType)))
+	// Выдача СИСТЕМНОМУ КЛАССУ материализует только чтение (Р4, SC-23), какими
+	// бы ни были правила роли СЕЙЧАС: роль может получить пишущий глагол путём,
+	// который правкой роли не является (поставка модулем), и страж правки его не
+	// видит. Сужение — здесь, в единственной точке вывода состава, поэтому
+	// пакетный и поштучный пути не расходятся; форма вердикта несёт то же
+	// правило на каждой ветви выдач (`relverdict.classVerbFilterSQL`).
+	if b.SubjectType == domain.SubjectTypeSystemClass {
+		selectors = classReadSelectors(selectors)
+		scopeSelf = classReadVerbs(scopeSelf)
+	}
 	return reconcile.BindingScope{
 		BindingID:   b.ID,
 		Scope:       scopeAnchorFor(b),
@@ -361,13 +373,12 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 		// the owner becomes an explicit per-object admin on the account's content; a
 		// GLOBAL/CLUSTER `*.*` binding (cluster super-admin) yields no content
 		// selectors — it is served by the D-9 flat short-circuit, never per-object.
-		Selectors: role.Rules.MaterializingSelectorsInScope(b.Scope),
+		Selectors: selectors,
 		// Scope-self verbs (D-7 / КФ-3 / C-01): the role's verbs that apply to the
 		// binding's OWN scope resource-type, so the reconciler materializes the tier
 		// (+ verb-bearing v_*) tuple on the scope object itself (the write-authz /
 		// no-access-loss anchor the removed binding-time anchor emit produced).
-		ScopeSelfVerbs: role.Rules.ScopeSelfVerbs(string(b.ResourceType),
-			scopeTypeVerbs(cat, string(b.ResourceType))),
+		ScopeSelfVerbs: scopeSelf,
 		// Target — the per-object least-privilege selection (F8, IAM-1-21). When
 		// Target.Resources is non-empty the reconciler materializes ONLY the listed
 		// objects (never the whole scope). Read from the persisted access_bindings.target
@@ -1544,4 +1555,30 @@ func scopeTypeVerbs(cat *catalog.Facts, scopeType string) []string {
 		return set
 	}
 	return cat.AllVerbVocabulary()
+}
+
+// classReadVerbs — только глаголы чтения (Р4); `*` чтением не считается: он
+// раскрывается в набор типа, а набор растёт.
+func classReadVerbs(verbs []string) []string {
+	out := make([]string, 0, len(verbs))
+	for _, v := range verbs {
+		if domain.IsClassReadVerb(v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// classReadSelectors — селекторы, сужённые до глаголов чтения; селектор, у
+// которого чтения не осталось, не материализует ничего и снимается целиком.
+func classReadSelectors(in []domain.RuleSelector) []domain.RuleSelector {
+	out := make([]domain.RuleSelector, 0, len(in))
+	for _, sel := range in {
+		sel.Verbs = classReadVerbs(sel.Verbs)
+		if len(sel.Verbs) == 0 {
+			continue
+		}
+		out = append(out, sel)
+	}
+	return out
 }

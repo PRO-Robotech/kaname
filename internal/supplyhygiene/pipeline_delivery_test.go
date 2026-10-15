@@ -126,6 +126,9 @@ var deliveredPipelineFiles = []string{
 	// файле, а не на образе.
 	".github/scripts/image-published-revision.sh",
 	".github/scripts/run-integration.sh",
+	// Ведомость весов раскладки контейнерных проб по шардам (kaname#840): без
+	// неё каждый шард отказывает кодом 2 — раскладку не из чего строить.
+	".github/integration-shard-weights.txt",
 }
 
 // deliveredIdentifierForm — машиночитаемая форма идентификатора задания и шага.

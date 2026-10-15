@@ -45,7 +45,7 @@
   ],
   "item": [
     {
-      "name": "IAM-ACB-SYSGRANT-VISIBLE-OK — GET /iam/v1/accessBindings as jwtBootstrap → 200; системные выдачи видны, несут grantedRelation без roleId, среди них есть подстановочный субъект",
+      "name": "IAM-ACB-SYSGRANT-VISIBLE-OK — GET /iam/v1/accessBindings as jwtBootstrap → 200; системные выдачи видны, несут grantedRelation без roleId, среди них есть выдача классу authenticated",
       "description": "class:CONF | class:AUTHZ | priority:P0",
       "item": [
         {
@@ -144,14 +144,16 @@
                   "      .to.equal('');",
                   "  });",
                   "});",
-                  "pm.test('публичное чтение справочника: есть выдача подстановочному субъекту', () => {",
+                  "pm.test('публичное чтение справочника: есть выдача классу «вошедшие»', () => {",
                   "  const sys = (pm.response.json().accessBindings || []).filter(b => b.system === true);",
-                  "  const wildcard = sys.filter(b => b.subjectId === '*');",
-                  "  pm.expect(wildcard.length, 'выдач субъекту «любой аутентифицированный» среди ' + sys.length)",
+                  "  const klass = sys.filter(b => b.subjectType === 'system_class' && b.subjectId === 'authenticated');",
+                  "  pm.expect(klass.length, 'выдач системному классу authenticated среди ' + sys.length)",
                   "    .to.be.greaterThan(0);",
-                  "  wildcard.forEach(b => {",
-                  "    pm.expect(b.subjectType, 'тип подстановочного субъекта').to.equal('user');",
-                  "  });",
+                  "});",
+                  "pm.test('подстановки как субъекта выдачи нет (SC-43)', () => {",
+                  "  const all = pm.response.json().accessBindings || [];",
+                  "  const wildcard = all.filter(b => b.subjectId === '*');",
+                  "  pm.expect(wildcard.map(b => b.id), 'выдачи подстановочному субъекту').to.eql([]);",
                   "});",
                   "pm.test('ЗАКОННЫЙ БЛИЗНЕЦ: обычная выдача в том же ответе — с ролью и без признака', () => {",
                   "  // Без этого утверждения проба зеленела бы и на ответе, где системными",

@@ -27,13 +27,16 @@ import (
 const publicReadPublicationVersion int64 = 20260916020000
 
 // enqueueOwnerOrderedPublication кладёт строку журнала ровно той формы, какую
-// кладёт путь публикации: кортеж публичного чтения и версия владельца.
+// кладёт путь публикации: кортеж публичного чтения и версия владельца. Хранимый
+// субъект публикации — системный класс `anonymous` (kaname#829, SC-12):
+// проекции журнала субъект безразличен, поэтому строка той же формы честна на
+// любой ревизии схемы, через которую проходит откат.
 func enqueueOwnerOrderedPublication(t *testing.T, db *sql.DB, objectID string) {
 	t.Helper()
 	_, err := db.Exec(`
 		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		VALUES ('fga.tuple.write',
-		        jsonb_build_object('user', 'user:*', 'relation', 'v_get',
+		        jsonb_build_object('user', 'system_class:anonymous', 'relation', 'v_get',
 		                           'object', 'registry_repository:' || $1::text,
 		                           'source_version', now()),
 		        now())`, objectID)
@@ -46,7 +49,7 @@ func publicationFacts(t *testing.T, db *sql.DB, objectID string) int {
 	require.NoError(t, db.QueryRow(`
 		SELECT count(*) FROM kaname.relation_fact
 		 WHERE object_type = 'registry_repository' AND object_id = $1
-		   AND relation = 'v_get' AND subject = 'user:*'`, objectID).Scan(&n))
+		   AND relation = 'v_get' AND subject = 'system_class:anonymous'`, objectID).Scan(&n))
 	return n
 }
 
