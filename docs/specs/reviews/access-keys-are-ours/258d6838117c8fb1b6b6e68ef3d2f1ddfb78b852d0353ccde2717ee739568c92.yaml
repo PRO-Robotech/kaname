@@ -1,0 +1,76 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-keys-are-ours.md
+  sha256: 258d6838117c8fb1b6b6e68ef3d2f1ddfb78b852d0353ccde2717ee739568c92
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: ede94db30 (редакция 15, 5ea26ad0…)
+  content_commit: a42d514205f9844d75340e5c18567b4785c47cde
+  branch: 777-w9-kn-acc
+  worktree: tmp/w9/kn-acc
+  task: PRO-Robotech/kaname#777
+  lines: 5846
+  round: 12
+  round_note: Круг 1 из 2 редакции 16 (fa-b8); по дельте к одобренной редакции 15 (fa-b1).
+  predecessor_record: docs/specs/reviews/access-keys-are-ours/5ea26ad012add99800a8c185e98b9e2f38910c1c54daec5bdd8a5c4f3ea3efbe.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/access-keys-are-ours.md @ 3b4ea39a0 → 258d6838…8c92;
+    совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15'
+publication_mode: courier_of_agent_verdict
+scope_of_round: >-
+  git diff ede94db30 3b4ea39a0 -- <приёмка>: шапка (редакция 16), §0 абзац каталога, Р5 три абзаца,
+  Р11 (заголовок, таблица, доводы, цена, инъекция), §3 вводный абзац, «Дано» Ф7-01, -04, -25, -26,
+  -27, -33, -36, -47, -56, §4.1 п. 13, §4.22 (новый), §5 строка 13, §8 строка каталога, §9.1 п. 11,
+  §10 п. 24. «Тогда» — без правки.
+blocking: []
+checks:
+  floors_measured: >-
+    grep required_acr_min proto/kaname/cloud/iam/v1/access_key_service.proto → 86 "2" · 116 "2" ·
+    130 "1" · 157 "2"; встроенный каталог → BeginRegistration 2 · FinishRegistration 2 · List 1 ·
+    Revoke 2 · BeginAssertion/FinishAssertion без пола — совпало с §4.22 @ 3b4ea39a0.
+  s4_22_predicate: >-
+    awk живых разделов | grep старых формулировок пола | grep -v 'редакци[йия] 9…15' → пусто;
+    контроль в §2 → 2 (≥ 1); grep -c '^**ID: Ф7-' → 51. Предикат §4.4 расх. 11 → «сценариев §3.1 13 ·
+    без вошедшего человека в «Дано» 0».
+  twins: >-
+    Ф7-04↔01, -36↔25, -27↔25 — обе стороны в сессии «2», отличающий факт прежний (окно; чужой ключ).
+    Ф7-33 — множество {пароль, код} согласовано с Ф7-01.
+  constructibility: >-
+    «Дано» сессии «2» строит набор ключей: _human(p, factor=True) (kaname-access-keys.py:933) и
+    _second_factor → _register_key (Ф13-32, :2625-2629); Ф7-26/-56 — записью, как в редакции 15.
+    Посева не было — стенда в задании нет.
+  gates_run: >-
+    heavy-slot go-race: go test -count=1 ./internal/check/ ./internal/apps/kaname/config/ -run
+    'Acceptance|OwnCeiling|Prose' → ok, ok (код 0) @ 3b4ea39a0.
+non_blocking:
+  - >-
+    §3 Ф7-33, абзац «Почему это сценарий Ф7» (строка ~3004): «Р5 отвечает на это окном свежести»
+    — с редакции 16 Р5 отвечает полом «2» и окном сверх него; дописать при следующей правке.
+  - >-
+    Предикат §4.22 исключает §4 целиком как историю, хотя §4.1…§4.5 — живые разделы объёма;
+    перемер: в §4.1…§4.5 единственная старая формулировка — цитата в §4.4 расх. 11 (~3685),
+    исторически верная. Сузить исключение до §4.6…§4.21 при следующей правке.
+  - >-
+    Новый сосед `step-up-with-any-enrolled-method.md` в этом документе не назван, а level-two и
+    Ф12 его уже несут; связи нет — не находка, заметка для следующего переноса.
+event_body: acceptance-reviewer · APPROVED · 258d6838117c8fb1b6b6e68ef3d2f1ddfb78b852d0353ccde2717ee739568c92
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#777
+  status: not_performed
+  published: false
+effective_approval:
+  issued: false
+  why: Санкцию выпускает внешнее событие курьера, а не эта запись.
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
