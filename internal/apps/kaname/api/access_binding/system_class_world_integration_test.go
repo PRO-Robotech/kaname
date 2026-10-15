@@ -133,9 +133,20 @@ func newSCWorld(t *testing.T) *scWorld {
 	w.rolEdit = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_edit",
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list", "update"}}})
 
+	verifyAddresses(t, ctx, pool)
 	seedMirrorObject(t, ctx, pool, scTargetType, scObj1, string(w.prjA), string(w.accA))
 	seedMirrorObject(t, ctx, pool, scTargetType, scObj2, string(w.prjA), string(w.accA))
 	return w
+}
+
+// verifyAddresses — адреса посеянных людей подтверждены: П1 — обычные вошедшие,
+// а допуск двери отвергает человека с неподтверждённым адресом раньше вопроса
+// о праве (`email_not_verified`), и без этого каждый вопрос о человеке был бы
+// отказом допуска, а не ответом о выдаче.
+func verifyAddresses(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE email_verified_at IS NULL`)
+	require.NoError(t, err, "посев: адреса людей подтверждены")
 }
 
 // seedServiceAccount — строка учётки в аккаунте; id по префиксу домена.
@@ -215,7 +226,7 @@ func (w *scWorld) controlUserGrant(user domain.UserID, role domain.RoleID) strin
 	req.Subjects = []*iamv1.Subject{userSubject(user)}
 	req.RoleId = string(role)
 	id := w.createDone(asUser(w.ctx, w.usrA), req, "контроль фикстуры: выдача человеку")
-	w.requireCheck("user:"+string(user), "v_get", scObj1, true,
+	w.pollCheck("user:"+string(user), "get", scObj1, true,
 		"контроль фикстуры: выдача человеку материализуется в право чтения obj-1")
 	return id
 }
@@ -227,30 +238,31 @@ func moduleCtx() context.Context {
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc", true)
 }
 
-// check — `AuthorizeService.Check` через обработчик.
-func (w *scWorld) check(subject, relation, objID string) (*iamv1.AuthorizeCheckResponse, error) {
+// check — `AuthorizeService.Check` через обработчик, действием `verb`
+// (`get` | `update`): отношение служба выводит из глагола, как в сценариях
+// приёмки («действием get»).
+func (w *scWorld) check(subject, verb, objID string) (*iamv1.AuthorizeCheckResponse, error) {
 	return w.authz.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:          subject,
-		Resource:         &iamv1.ResourceRef{Type: scModelType, Id: objID},
-		Action:           "vpc.networks.get",
-		RequiredRelation: relation,
+		Subject:  subject,
+		Resource: &iamv1.ResourceRef{Type: scModelType, Id: objID},
+		Action:   "vpc.networks." + verb,
 	})
 }
 
-func (w *scWorld) requireCheck(subject, relation, objID string, want bool, why string) {
+func (w *scWorld) requireCheck(subject, verb, objID string, want bool, why string) {
 	w.t.Helper()
-	resp, err := w.check(subject, relation, objID)
-	require.NoErrorf(w.t, err, "%s: Check(%s, %s, %s) не ответил", why, subject, relation, objID)
-	require.Equalf(w.t, want, resp.GetAllowed(), "%s: Check(%s, %s, %s)", why, subject, relation, objID)
+	resp, err := w.check(subject, verb, objID)
+	require.NoErrorf(w.t, err, "%s: Check(%s, %s, %s) не ответил", why, subject, verb, objID)
+	require.Equalf(w.t, want, resp.GetAllowed(), "%s: Check(%s, %s, %s)", why, subject, verb, objID)
 }
 
 // pollCheck — опрос `Check` раз в 200 мс до 30 с (окно материализации SC-13).
-func (w *scWorld) pollCheck(subject, relation, objID string, want bool, why string) {
+func (w *scWorld) pollCheck(subject, verb, objID string, want bool, why string) {
 	w.t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	var last bool
 	for {
-		resp, err := w.check(subject, relation, objID)
+		resp, err := w.check(subject, verb, objID)
 		require.NoErrorf(w.t, err, "%s: Check(%s) не ответил", why, subject)
 		last = resp.GetAllowed()
 		if last == want {
@@ -262,7 +274,7 @@ func (w *scWorld) pollCheck(subject, relation, objID string, want bool, why stri
 		time.Sleep(200 * time.Millisecond)
 	}
 	w.t.Fatalf("%s: Check(%s, %s, %s) за 30 с не дошёл до allowed=%v (последний ответ %v)",
-		why, subject, relation, objID, want, last)
+		why, subject, verb, objID, want, last)
 }
 
 // fmtSubject — субъект в форме вопроса к модели.

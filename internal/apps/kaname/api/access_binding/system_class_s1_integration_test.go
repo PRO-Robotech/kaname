@@ -156,13 +156,13 @@ func TestSystemClass_SC10_AnonymousDoesNotInheritAuthenticated(t *testing.T) {
 	w := newSCWorld(t)
 	w.controlUserGrant(w.usrC, w.rolRead2)
 	w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-10 Дано: выдача SC-01")
-	w.pollCheck(fmtSubject("user", string(w.usrB)), "v_get", scObj1, true, "SC-10 Дано: материализация для usr-B")
+	w.pollCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true, "SC-10 Дано: материализация для usr-B")
 
-	resp, err := w.check("system_class:anonymous", "v_get", scObj1)
+	resp, err := w.check("system_class:anonymous", "get", scObj1)
 	require.NoError(t, err, "SC-10: вопрос анонима")
 	assert.False(t, resp.GetAllowed(), "SC-10: аноним не выводит authenticated")
 	assert.Empty(t, resp.GetDenyReasons(), "SC-10: «пути нет»")
-	w.requireCheck(fmtSubject("service_account", w.svaA), "v_get", scObj1, true, "SC-10 близнец: учётка")
+	w.requireCheck(fmtSubject("service_account", w.svaA), "get", scObj1, true, "SC-10 близнец: учётка")
 }
 
 // SC-11 — вошедший получает выданное анониму (включение, Р2); группа —
@@ -177,18 +177,18 @@ func TestSystemClass_SC11_SignedInInheritsAnonymous(t *testing.T) {
 	}
 	w.createDone(asUser(w.ctx, w.usrA), legacy, "SC-11 Дано: выдача SC-07")
 
-	w.pollCheck(fmtSubject("user", string(w.usrB)), "v_get", scObj1, true, "SC-11: вошедший читает выданное анониму")
-	w.requireCheck("system_class:anonymous", "v_get", scObj1, true, "SC-11: аноним читает выданное анониму")
-	w.requireCheck("group:"+w.grpA+"#member", "v_get", scObj1, false, "SC-11 отрицание: группа классов не получает")
+	w.pollCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true, "SC-11: вошедший читает выданное анониму")
+	w.requireCheck("system_class:anonymous", "get", scObj1, true, "SC-11: аноним читает выданное анониму")
+	w.requireCheck("group:"+w.grpA+"#member", "get", scObj1, false, "SC-11 отрицание: группа классов не получает")
 }
 
 // SC-14 — «вошедший» без личности говорящим не бывает.
 func TestSystemClass_SC14_AuthenticatedIsNotASpeaker(t *testing.T) {
 	w := newSCWorld(t)
-	_, err := w.check("system_class:anonymous", "v_get", scObj1)
+	_, err := w.check("system_class:anonymous", "get", scObj1)
 	require.NoError(t, err, "SC-14 близнец: вопрос анонима отвечается по выдачам, не отказом")
 
-	_, err = w.check("system_class:authenticated", "v_get", scObj1)
+	_, err = w.check("system_class:authenticated", "get", scObj1)
 	requireSyncRefusal(t, err, codes.InvalidArgument,
 		"Illegal argument subject: system class authenticated is not a speaker", "SC-14")
 }
@@ -196,10 +196,10 @@ func TestSystemClass_SC14_AuthenticatedIsNotASpeaker(t *testing.T) {
 // SC-15 — подстановка говорящим не бывает.
 func TestSystemClass_SC15_WildcardIsNotASpeaker(t *testing.T) {
 	w := newSCWorld(t)
-	_, err := w.check(fmtSubject("user", string(w.usrB)), "v_get", scObj1)
+	_, err := w.check(fmtSubject("user", string(w.usrB)), "get", scObj1)
 	require.NoError(t, err, "SC-15 близнец: вопрос человека отвечается по выдачам")
 
-	_, err = w.check("user:*", "v_get", scObj1)
+	_, err = w.check("user:*", "get", scObj1)
 	requireSyncRefusal(t, err, codes.InvalidArgument,
 		"Illegal argument subject: wildcard is not a speaker", "SC-15")
 }
@@ -208,14 +208,20 @@ func TestSystemClass_SC15_WildcardIsNotASpeaker(t *testing.T) {
 // выдачи ответ тот же.
 func TestSystemClass_SC16_ExpandAccessDoesNotListClasses(t *testing.T) {
 	w := newSCWorld(t)
+	// Дано: владелец аккаунта держит право разворачивать объекты аккаунта — тем же
+	// путём, каким его даёт сага создания аккаунта: выдача роли владельца на аккаунт.
+	w.createDone(asUser(w.ctx, w.usrA), &iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{userSubject(w.usrA)}, RoleId: string(domain.OwnerRoleID),
+		ScopeType: "iam.account", ScopeId: string(w.accA), Target: allInScopeTarget(),
+	}, "SC-16 Дано: выдача владельца usr-A на аккаунт")
 	userReq := w.sc01Request()
 	userReq.Subjects = []*iamv1.Subject{userSubject(w.usrB)}
 	w.createDone(asUser(w.ctx, w.usrA), userReq, "SC-16 Дано: прямая выдача usr-B")
-	w.pollCheck(fmtSubject("user", string(w.usrB)), "v_get", scObj1, true, "SC-16 Дано: материализация usr-B")
+	w.pollCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true, "SC-16 Дано: материализация usr-B")
 
 	expand := func() *iamv1.ExpandAccessResponse {
 		resp, err := w.ab.ExpandAccess(asUser(w.ctx, w.usrA), &iamv1.ExpandAccessRequest{
-			ObjectType: scModelType, ObjectId: scObj1, Relation: "v_get",
+			ObjectType: scModelType, ObjectId: scObj1, Relation: "viewer",
 		})
 		require.NoError(t, err, "SC-16: развёртка")
 		return resp
@@ -256,18 +262,18 @@ func TestSystemClass_SC17_ListBySubjectClass(t *testing.T) {
 func TestSystemClass_SC18_SignedInOfAnotherTenantReadsTheNamedObject(t *testing.T) {
 	w := newSCWorld(t)
 	w.controlUserGrant(w.usrB, w.rolRead2)
-	w.requireCheck(fmtSubject("user", string(w.usrC)), "v_get", scObj1, false, "SC-18 предпосылка: у usr-C нет выдач в acc-A")
+	w.requireCheck(fmtSubject("user", string(w.usrC)), "get", scObj1, false, "SC-18 предпосылка: у usr-C нет выдач в acc-A")
 
 	id := w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-18 Дано: SC-01")
-	w.pollCheck(fmtSubject("user", string(w.usrC)), "v_get", scObj1, true, "SC-18: usr-C из acc-B")
-	w.requireCheck(fmtSubject("service_account", w.svaB), "v_get", scObj1, true, "SC-18: sva-B из acc-B")
-	w.requireCheck(fmtSubject("user", string(w.usrC)), "v_get", scObj2, false, "SC-18: соседний объект закрыт")
+	w.pollCheck(fmtSubject("user", string(w.usrC)), "get", scObj1, true, "SC-18: usr-C из acc-B")
+	w.requireCheck(fmtSubject("service_account", w.svaB), "get", scObj1, true, "SC-18: sva-B из acc-B")
+	w.requireCheck(fmtSubject("user", string(w.usrC)), "get", scObj2, false, "SC-18: соседний объект закрыт")
 
 	op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err, "SC-18 близнец: отзыв")
 	require.Nil(t, awaitOp(t, w.ctx, w.ops, op.GetId()).Error)
-	w.pollCheck(fmtSubject("user", string(w.usrC)), "v_get", scObj1, false, "SC-18 близнец: после отзыва usr-C")
-	w.pollCheck(fmtSubject("service_account", w.svaB), "v_get", scObj1, false, "SC-18 близнец: после отзыва sva-B")
+	w.pollCheck(fmtSubject("user", string(w.usrC)), "get", scObj1, false, "SC-18 близнец: после отзыва usr-C")
+	w.pollCheck(fmtSubject("service_account", w.svaB), "get", scObj1, false, "SC-18 близнец: после отзыва sva-B")
 }
 
 // SC-08 — класс не становится членом группы: отказ называет поле

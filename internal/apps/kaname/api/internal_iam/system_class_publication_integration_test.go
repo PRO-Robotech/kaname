@@ -65,7 +65,7 @@ func TestSystemClass_SC12_SC13_PublicationIsAGrantToAnonymous(t *testing.T) {
 
 	// Положительный контроль: системная выдача чтения справочников действует
 	// для вошедшего (Р8, SC-40) — без неё «нет» анониму ниже ничего не различало бы.
-	require.True(t, scAllowed(t, a, person, "cluster", "cluster_kacho_root", "viewer"),
+	require.True(t, scAllowed(t, a, person, "cluster", "cluster_root", "viewer"),
 		"SC-12 контроль: вошедший читает справочники")
 	require.False(t, scAllowed(t, a, "system_class:anonymous", "registry_repository", scPublicRepo, "v_get"),
 		"SC-12 предпосылка: до публикации аноним не читает")
@@ -76,7 +76,7 @@ func TestSystemClass_SC12_SC13_PublicationIsAGrantToAnonymous(t *testing.T) {
 
 	assert.True(t, scAllowed(t, a, "system_class:anonymous", "registry_repository", scPublicRepo, "v_get"), "SC-12: аноним читает")
 	assert.True(t, scAllowed(t, a, person, "registry_repository", scPublicRepo, "v_get"), "SC-12: вошедший читает")
-	assert.False(t, scAllowed(t, a, "system_class:anonymous", "cluster", "cluster_kacho_root", "viewer"),
+	assert.False(t, scAllowed(t, a, "system_class:anonymous", "cluster", "cluster_root", "viewer"),
 		"SC-12: публикация не даёт анониму чтения справочников")
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{

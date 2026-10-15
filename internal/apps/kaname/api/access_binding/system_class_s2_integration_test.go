@@ -207,8 +207,8 @@ func TestSystemClass_SC23_WriteVerbUnreachableForAClassOnAnyRolePath(t *testing.
 	require.NoError(t, wr.Commit(w.ctx))
 	require.NoError(t, w.rec.ReconcileBindingForward(w.ctx, domain.AccessBindingID(id)), "SC-23: повторная материализация")
 
-	w.requireCheck(fmtSubject("user", string(w.usrB)), "v_update", scObj1, false, "SC-23: пишущий глагол классу недостижим")
-	w.requireCheck(fmtSubject("user", string(w.usrB)), "v_get", scObj1, true, "SC-23 близнец: чтение осталось")
+	w.requireCheck(fmtSubject("user", string(w.usrB)), "update", scObj1, false, "SC-23: пишущий глагол классу недостижим")
+	w.requireCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true, "SC-23 близнец: чтение осталось")
 }
 
 // SC-24 — анониму нельзя выдать всю область; близнец — SC-07.
@@ -360,6 +360,7 @@ func TestSystemClass_SC28_ClusterGrantToAClassIsClusterAdminOnly(t *testing.T) {
 		"SC-28 предпосылка: системная роль чтения сетей")
 	require.True(t, live, "SC-28 предпосылка: роль жива")
 	admin := mustSeedUser(t, w.ctx, w.pool, "scadm")
+	verifyAddresses(t, w.ctx, w.pool)
 	_, err := w.pool.Exec(w.ctx, `SELECT kaname.restore_cluster_admin('user', $1)`, string(admin))
 	require.NoError(t, err, "SC-28 посев: кластерный администратор объявленным путём")
 
