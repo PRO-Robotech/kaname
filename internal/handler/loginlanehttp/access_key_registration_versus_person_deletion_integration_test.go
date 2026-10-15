@@ -29,6 +29,8 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 const registrationDeletionHold = "probe_registration_deletion_hold"
@@ -131,8 +133,7 @@ func TestIntegration_AccessKeyRegistrationAndPersonDeletionDoNotDeadlock(t *test
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, err := h.pool.Exec(ctx, `DELETE FROM kaname.users WHERE id = $1`, string(u))
-		deleted <- err
+		deleted <- deletePersonByProduct(ctx, h, u)
 	}()
 	done := h.awaitOp(t, op.ID)
 	delErr := <-deleted
@@ -140,7 +141,8 @@ func TestIntegration_AccessKeyRegistrationAndPersonDeletionDoNotDeadlock(t *test
 	var seen int64
 	require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT last_value FROM kaname.`+registrationDeletionHold+`_seen`).Scan(&seen))
 	if seen < 1 {
-		t.Fatalf("отказ фикстуры: держатель отпустил замки по сроку, не видя ждущего — сцена не построена")
+		t.Fatalf("отказ фикстуры: держатель отпустил замки по сроку, не видя ждущего — сцена не построена "+
+			"(регистрация: %v · удаление: %v)", done.Error, delErr)
 	}
 	deadlocksAfter := laneDeadlocks(t, h)
 	t.Logf("ждавших замка %d · регистрация: ошибка=%v · удаление: ошибка=%v · deadlocks +%d",
@@ -148,4 +150,18 @@ func TestIntegration_AccessKeyRegistrationAndPersonDeletionDoNotDeadlock(t *test
 	assert.NoError(t, delErr, "удаление личности фиксируется")
 	assert.Nil(t, done.Error, "регистрация исполнена без взаимной блокировки")
 	assert.Zero(t, h.keysOf(t, u), "у удалённой личности ключей нет")
+}
+
+// deletePersonByProduct — удаление личности писателем продукта: строка `users`
+// и каскад её детей одной транзакцией.
+func deletePersonByProduct(ctx context.Context, h *sessionLane, uid domain.UserID) error {
+	w, err := kanamepg.New(h.pool, nil).Writer(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = w.Rollback(ctx) }()
+	if err := w.UsersW().Delete(ctx, uid); err != nil {
+		return err
+	}
+	return w.Commit(ctx)
 }
