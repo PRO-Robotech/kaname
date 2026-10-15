@@ -1,0 +1,47 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/credential-issuance-and-federated-subject-described-once.md
+  sha256: 57bfc0aa1c17ba958d03378eeed0968c9c987a9234746f7d751926682ecb911e
+  static_status: DRAFT
+  base_commit: c032a0274449435513963ff705259bc41740844d
+  content_commit: null
+  branch: null
+  task: PRO-Robotech/kaname#752
+  lines: 189
+  round: 2
+  predecessor_record: docs/specs/reviews/credential-issuance-and-federated-subject-described-once/614a1ecb359c98d0747bee440d5d0bb6397cd72e643f9b1a86d5664c7ba12794.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/credential-issuance-and-federated-subject-described-once.md
+  static_status_note: >-
+    Шапка документа (DRAFT) — статическая форма; вердикт из неё не выводится и рецензентом не правится.
+  publication_mode: courier
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15'
+effective_approval:
+  issued: false
+  ban1_lifted: false
+closed_from_round_1: [FORMAT, PRODUCER]
+blocking:
+  - kind: CONSTRUCTIBILITY
+    scenarios: [CIF-02]
+    note: >-
+      jwtHumanCeremony выдачи system_admin не несёт: grant_cluster_admin зовётся только для надзора (seed_ceremony.py:723)
+      и слотов ADMIN_SLOTS (:938); самопроверка посева утверждает «system_admin выдан ровно надзору облака, человеку
+      стенда — нет» (:1461). Близнец CIF-01 «отношение на svaAId у обоих есть» на названной фикстуре ложен —
+      отличие в двух фактах. Предъявитель уровня 1 с system_admin есть — jwtHuman<AdminSlot> (slot_keys, ADMIN_SLOTS).
+  - kind: DoD
+    scenarios: [CIF-01, CIF-02, CIF-03, CIF-05]
+    note: >-
+      держатель tests/newman/cases/iam-service-account.py адресуется к КРАЮ платформы (ownRestBaseUrl в модуле — 0
+      вхождений; шапка «Poll via OpsProxy»), а документ объявляет полосу собственного фронта kaname и «край kacho не
+      участвует»; кейс судил бы производителя края, не названного (run.sh:36-46, scripts/own_front_env_test.py).
+      Модуль собственного фронта — kaname-own-rest-front.py / kaname-access-keys.py; чтение ключа jwtHuman*
+      переводит коллекцию в волну церемонии (newman-suite-debt.py is_ceremony_key) — назвать.
+unverified:
+  constructibility: {seeded: 0, total: 5, not_executed: 5, reason: стенд и изоляция заданием не названы; фикстуры сверены чтением посева}
+event:
+  status: not_performed
+  body: "acceptance-reviewer · CHANGES_REQUESTED · 57bfc0aa1c17ba958d03378eeed0968c9c987a9234746f7d751926682ecb911e"
