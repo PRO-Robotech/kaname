@@ -3,7 +3,7 @@
 
 // system_class_rename_integration_test.go — переезд подстановки `user:*` на
 // системные классы (приёмка anonymous-and-authenticated-are-subject-classes.md,
-// отпечаток fa4ff26f…bb21757e, сценарии SC-40, SC-42, SC-43, SC-44; задача
+// отпечаток ae9ba373…0427f51 (редакция 4), сценарии SC-40, SC-42, SC-43, SC-44; задача
 // PRO-Robotech/kaname#829).
 //
 // Посев П2: база поднята цепочкой ствола до его последней миграции

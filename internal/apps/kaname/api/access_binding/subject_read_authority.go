@@ -88,8 +88,16 @@ const (
 	// уровня супер-доступа): каскадом на всё, в паритете с соседними чтениями.
 	subjectReadClusterAdmin
 	// subjectReadAccountAdmin — владелец либо делегированный распорядитель
-	// ДОМАШНЕГО аккаунта субъекта. Единственная полоса, чья страница сужается.
+	// ДОМАШНЕГО аккаунта субъекта. Страница сужается построчно.
 	subjectReadAccountAdmin
+	// subjectReadSystemClass — субъект есть системный класс, у которого нет
+	// дома (разбор CE-22). Выдачи классу стоят в областях РАЗНЫХ арендаторов,
+	// поэтому допуск по дому невозможен, а «сам» неприменим: принадлежность
+	// классу полосой «сам» не является — иначе всякий вошедший читал бы выдачи
+	// классу всех арендаторов (роли, области, id чужих объектов). Страница
+	// сужается построчно правом на каждую выдачу; ветви «нет дома — значит
+	// можно» нет.
+	subjectReadSystemClass
 )
 
 // narrowsPage — сужается ли страница этой полосы построчно.
@@ -102,7 +110,9 @@ const (
 //     прямого кортежа у субъекта на свою же выдачу обычно нет;
 //   - надзор облака — верхний ярус супер-доступа, паритет с Get / ListByScope /
 //     ListByAccount / ListByRole / List.
-func (l subjectReadLane) narrowsPage() bool { return l == subjectReadAccountAdmin }
+func (l subjectReadLane) narrowsPage() bool {
+	return l == subjectReadAccountAdmin || l == subjectReadSystemClass
+}
 
 // subjectReadDecision — исход допуска ВМЕСТЕ с придержанным существованием.
 type subjectReadDecision struct {
@@ -160,6 +170,11 @@ func subjectReadAuthority(
 	// которую можно было бы откатиться, у этих чтений нет.
 	if subject, ok := authzguard.PrincipalSubject(ctx); !ok || subject == "" {
 		return subjectReadDecision{}, authzguard.PermissionDenied()
+	}
+
+	// 2а. Системный класс — субъект без дома: своя пара полос (CE-22).
+	if subjectType == domain.SubjectTypeSystemClass {
+		return systemClassReadAuthority(ctx, relations, subjectID)
 	}
 
 	// 3. Резолв субъекта: даёт домашний аккаунт, нужный полосе распорядителя.
@@ -379,4 +394,32 @@ func visibleOnNarrowedPage(ctx context.Context, q clients.RelationQueries, ids [
 		return nil, shared.MapRepoErr(iamerr.ErrUnavailable)
 	}
 	return visible, nil
+}
+
+// systemClassReadAuthority — допуск к выдачам системного класса (CE-22).
+//
+// Полосы две: администратор облака — без сужения; всякий иной вошедший —
+// сужение страницы построчно правом читать саму выдачу. Невидимость системной
+// выдачи у арендатора (SC-53) держится тем же правом на её область — кластер, —
+// а не фильтром по признаку `system`.
+//
+// Имя класса вне словаря — отказ формы: класс существует по объявлению, и
+// «такого класса нет» — ответ о запросе, а не о чьих-то правах.
+func systemClassReadAuthority(
+	ctx context.Context,
+	relations clients.RelationStore,
+	subjectID domain.SubjectID,
+) (subjectReadDecision, error) {
+	if err := (domain.Subject{Type: domain.SubjectTypeSystemClass, ID: subjectID}).Validate(); err != nil {
+		return subjectReadDecision{}, shared.MapValidationErr(err)
+	}
+	resolved := subjectResolution{found: true}
+	clusterAdmin, aerr := authzguard.IsClusterAdminE(ctx, relations)
+	if aerr != nil {
+		return subjectReadDecision{}, authzguard.AuthzBackendUnavailable()
+	}
+	if clusterAdmin {
+		return subjectReadDecision{lane: subjectReadClusterAdmin, resolved: resolved}, nil
+	}
+	return subjectReadDecision{lane: subjectReadSystemClass, resolved: resolved}, nil
 }

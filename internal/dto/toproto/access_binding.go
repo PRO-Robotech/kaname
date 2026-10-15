@@ -116,6 +116,8 @@ func subjectTypeToProtoDTO(t domain.SubjectType) iamv1.SubjectType {
 		return iamv1.SubjectType_SUBJECT_TYPE_SERVICE_ACCOUNT
 	case domain.SubjectTypeGroup:
 		return iamv1.SubjectType_SUBJECT_TYPE_GROUP
+	case domain.SubjectTypeSystemClass:
+		return iamv1.SubjectType_SUBJECT_TYPE_SYSTEM_CLASS
 	default:
 		return iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED
 	}

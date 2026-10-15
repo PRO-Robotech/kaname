@@ -353,3 +353,11 @@ func (w *fakeRoleWtr) RetireRole(context.Context, domain.RoleID, string, string,
 }
 
 func (w *fakeRoleWtr) ReviveRole(context.Context, domain.RoleID) (bool, error) { return false, nil }
+
+// GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *fakeABRdr) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+// GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *fakeRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }

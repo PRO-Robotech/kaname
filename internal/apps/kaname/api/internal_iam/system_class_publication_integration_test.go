@@ -3,7 +3,7 @@
 
 // system_class_publication_integration_test.go — публикация владельца
 // становится выдачей классу `anonymous` (приёмка
-// anonymous-and-authenticated-are-subject-classes.md, отпечаток fa4ff26f…bb21757e,
+// anonymous-and-authenticated-are-subject-classes.md, отпечаток ae9ba373…0427f51 (редакция 4),
 // SC-12 и SC-13; задача PRO-Robotech/kaname#829).
 //
 // Вход соседа не меняется: публикация приходит парой `user:*` + `v_get` через

@@ -489,6 +489,12 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		p.invalid = fmt.Errorf("Illegal argument subject: required")
 		return p
 	}
+	// Говорящим бывает не всякий субъект (Р3, SC-14, SC-15): разборщик ОДИН на
+	// все методы, принимающие говорящего, — его же зовёт CheckRelation.
+	if err := domain.SpeakerRefusal(req.Subject); err != nil {
+		p.invalid = err
+		return p
+	}
 	if req.Resource.Type == "" || req.Resource.ID == "" {
 		p.invalid = fmt.Errorf("Illegal argument resource: required")
 		return p
@@ -743,6 +749,9 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 
 	if req.Subject == "" {
 		return result, fmt.Errorf("Illegal argument subject: required")
+	}
+	if err := domain.SpeakerRefusal(req.Subject); err != nil {
+		return result, err
 	}
 	if req.Relation == "" {
 		return result, fmt.Errorf("Illegal argument relation: required")

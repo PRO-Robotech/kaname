@@ -57,6 +57,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // ListQuery — вопрос «какие объекты этого типа доступны субъекту».
@@ -145,10 +147,13 @@ WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
      WHERE gm.member_type = split_part($1::text, ':', 1)
        AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION ALL
-    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
-    -- аутентифицированный) и потому перечислена явно, а не выведена из формы
-    -- имени.
-    SELECT 'user', '*', 'wildcard'
+    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
+    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
+    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
+    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
+    -- получает (SC-10), группа — ничего (SC-11).
+    SELECT split_part(c, ':', 1), substr(c, length(split_part(c, ':', 1)) + 2), 'class'
+      FROM unnest($10::text[]) AS c
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -165,7 +170,7 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'user:*'
+    SELECT c FROM unnest($10::text[]) AS c
 ),
 candidate(object_id, labels) AS (
     -- ЗДЕСЬ СХОДЯТСЯ ДВА СВОЙСТВА, И НИ ОДНО ИЗ НИХ НЕ ВЫВОДИТСЯ ИЗ ДРУГОГО.
@@ -295,6 +300,7 @@ SELECT c.object_id,
           JOIN kaname.role_verb rv
             ON rv.role_id = b.role_id AND rv.object_type = $9::text
            AND rv.verb = ANY ($8::text[])
+           AND ` + classVerbFilterSQL + `
           JOIN kaname.role_rule_selectors rs
             ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
          WHERE b.status = 'ACTIVE'
@@ -424,7 +430,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType)
+		factParents, factRelations, bindVerbs, catalogType, domain.SpeakerClasses(in.Subject))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

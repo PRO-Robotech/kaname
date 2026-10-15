@@ -151,9 +151,10 @@ type Config struct {
 
 // AnonymousIdentity — объявленный публичный принципал, за которого наш
 // подписант выпускает токен анонимного чтения. Приёмная сторона реестра
-// резолвит его в подстановочного принципала AnonymousSubject (`user:*`); у
-// `user:*` есть только грант чтения публичных репозиториев, поэтому анонимный
-// токен читает публичный репозиторий и не пишет никогда (B13/B14).
+// резолвит его в принципала AnonymousSubject (системный класс
+// `system_class:anonymous`); у класса есть только чтение публичных
+// репозиториев, поэтому анонимный токен читает публичный репозиторий и не
+// пишет никогда (B13/B14).
 //
 // Поле ОДНО — идентичность. Прежде рядом стояли идентификатор ключа и закрытая
 // половина, которыми подписывалось утверждение для обмена у внешнего
@@ -167,16 +168,18 @@ type AnonymousIdentity struct {
 }
 
 const (
-	// AnonymousSubject — the FGA principal an anonymous (no-credential) docker
-	// pull resolves to on the registry data-plane. The anonymous identity's token
-	// is mapped to this wildcard subject; `user:*` holds ONLY the per-repo `v_get`
-	// wildcard grant emitted for PUBLIC repositories, so it can pull a PUBLIC repo
-	// but can never write (D-7). PRIVATE/absent repos deny uniformly (404).
-	AnonymousSubject = "user:*"
+	// AnonymousSubject — субъект модели прав, которым плоскость данных реестра
+	// спрашивает о вызывающем без удостоверения (docker pull без входа):
+	// системный класс `anonymous` (kaname#829, SC-39). Класс держит ТОЛЬКО чтение
+	// публикованных репозиториев (публикация владельца выводится в выдачу этому
+	// классу), поэтому публичный репозиторий он читает, а писать не может
+	// никогда (D-7). Закрытый и отсутствующий репозиторий отвечают одинаково
+	// (404). Подстановка `user:*` говорящим не является (Р3).
+	AnonymousSubject = domain.SpeakerAnonymous
 	// AnonymousReadScope — the ONLY scope an anonymous token requests: a read
-	// (pull) verb. The shim NEVER requests a write/push verb for `user:*` — the
-	// read-only floor is enforced HERE (IAM half) AND by the data-plane FGA Check
-	// on `user:*` (which carries no write relation). A push with an anon token is
+	// (pull) verb. The shim NEVER requests a write/push verb for the anonymous class — the
+	// read-only floor is enforced HERE (IAM half) AND by the data-plane Check
+	// on the anonymous class (a class receives read verbs only, Р4). A push with an anon token is
 	// therefore denied (403 DENIED) even in a pull-able PUBLIC repo (B14).
 	AnonymousReadScope = "registry:pull"
 )

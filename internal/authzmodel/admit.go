@@ -487,10 +487,26 @@ func declarationsNamed(t *authzplan.ModelType, name string) []*authzplan.Relatio
 	return out
 }
 
-// wildcardRecords — записи субъектов пары, делающие её разрешаемой подстановкой.
+// isWildcardLike — запись субъекта делает пару разрешаемой подстановкой.
 // Признак — ПОЛЕ разбора (`DirectSubject.Wildcard`), а не написание `:*` в
 // тексте: написание живёт в `Term.Raw`, и сверка по нему разошлась бы с разбором
 // на первой же правке грамматики.
+//
+// Системный класс — та же подстановка по смыслу: отношение, принимающее класс
+// прямо (`system_class`, `system_class:<имя>`), выполнимо «каждым вошедшим» или
+// «каждым без входа». Словарь классов объявлен ядром, и модуль его не вносит
+// (SC-37) — по тому же доводу, по которому не вносит `user:*`. Узнаётся по типу
+// записи разбора, а не по написанию.
+func isWildcardLike(d authzplan.DirectSubject) bool {
+	if d.Wildcard {
+		return true
+	}
+	kind, _, _ := strings.Cut(d.Type, ":")
+	return kind == string(domain.SubjectTypeSystemClass)
+}
+
+// wildcardRecords — записи субъектов пары, делающие её разрешаемой подстановкой
+// (признак — [isWildcardLike]).
 func wildcardRecords(m *authzplan.Model, typeName, relation string) []string {
 	t := m.Type(typeName)
 	if t == nil {
@@ -500,7 +516,7 @@ func wildcardRecords(m *authzplan.Model, typeName, relation string) []string {
 	for _, r := range declarationsNamed(t, relation) {
 		for _, term := range r.Terms {
 			for _, d := range term.Direct {
-				if d.Wildcard {
+				if isWildcardLike(d) {
 					out = append(out, d.String())
 				}
 			}

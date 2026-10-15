@@ -5,7 +5,8 @@ package access_binding_test
 
 // system_class_world_integration_test.go — посев П1 приёмки
 // docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
-// (отпечаток fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e).
+// (отпечаток ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51,
+// редакция 4: id объектов `enp…` правильной формы; сессия владельца П1).
 //
 // Мир собирается ТЕМИ ЖЕ частями, что корень службы (`cmd/kaname/wiring.go`):
 // дверь решения — форма `relverdict` под допуском `authzcascade.WrapAdmitted`,
@@ -58,8 +59,8 @@ const scSystemClassType = iamv1.SubjectType(4)
 const (
 	scTargetType = "vpc.network"
 	scModelType  = "vpc_network"
-	scObj1       = "net-obj1"
-	scObj2       = "net-obj2"
+	scObj1       = "enp00000000000000001"
+	scObj2       = "enp00000000000000002"
 )
 
 // scWorld — П1 одной базы.
@@ -134,6 +135,9 @@ func newSCWorld(t *testing.T) *scWorld {
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list", "update"}}})
 
 	verifyAddresses(t, ctx, pool)
+	// П1: владелец usr-A вошёл сессией уровня «2», предъявление минуту назад —
+	// окно свежести выдачи классу (Р5) судит именно её.
+	seedLiveHumanSession(t, w, w.usrA)
 	seedMirrorObject(t, ctx, pool, scTargetType, scObj1, string(w.prjA), string(w.accA))
 	seedMirrorObject(t, ctx, pool, scTargetType, scObj2, string(w.prjA), string(w.accA))
 	return w

@@ -5,7 +5,7 @@ package authzmodel
 
 // system_class_admit_test.go — модуль не вносит системный класс в модель
 // (приёмка anonymous-and-authenticated-are-subject-classes.md, отпечаток
-// fa4ff26f…bb21757e, SC-37; задача PRO-Robotech/kaname#829).
+// ae9ba373…0427f51 (редакция 4), SC-37; задача PRO-Robotech/kaname#829).
 //
 // Отказ тот же, что у подстановки `user:*` по соседу
 // composed-model-admits-only-what-it-owns.md: находка Д3 называет тип и

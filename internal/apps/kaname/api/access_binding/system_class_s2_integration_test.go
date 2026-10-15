@@ -223,7 +223,8 @@ func TestSystemClass_SC24_AnonymousAllInScopeIsRejected(t *testing.T) {
 }
 
 // seedLiveHumanSession — живая запись сессии человека уровня «2» (вход час
-// назад); момент последнего предъявления задаёт seedPresentedSession.
+// назад, предъявление минуту назад — П1); момент последнего предъявления
+// переставляет seedPresentedSession.
 func seedLiveHumanSession(t *testing.T, w *scWorld, user domain.UserID) {
 	t.Helper()
 	_, err := w.pool.Exec(w.ctx, `
@@ -248,8 +249,7 @@ func seedPresentedSession(t *testing.T, w *scWorld, user domain.UserID, ago time
 // SC-25 — несвежая сессия (16 мин) не выдаёт классу; 14 мин — выдаёт; выдача
 // человеку той же несвежей сессией принята.
 func TestSystemClass_SC25_StaleSessionDoesNotGrantToAClass(t *testing.T) {
-	w := newSCWorld(t)
-	seedLiveHumanSession(t, w, w.usrA)
+	w := newSCWorld(t) // П1 уже держит живую сессию usr-A
 
 	seedPresentedSession(t, w, w.usrA, 16*time.Minute)
 	userReq := w.sc01Request()
