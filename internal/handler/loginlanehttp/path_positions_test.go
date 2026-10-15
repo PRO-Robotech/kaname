@@ -158,9 +158,10 @@ func TestEveryLanePathIsDeclaredInTheR2List(t *testing.T) {
 	// добавила два (`access-key/begin`, `access-key/login`, kaname#613), A7 —
 	// один (`password/enroll`, kaname#213), смена адреса — два
 	// (`email-change`, `email-change/confirm`, kaname#635), свои сессии — три
-	// (`sessions`, `sessions/end`, `sessions/end-others`, kaname#634).
-	if len(Paths()) != 23 || len(positions) != 23 {
-		t.Errorf("путей полосы не 23: перечень %d, строк Р2 %d", len(Paths()), len(positions))
+	// (`sessions`, `sessions/end`, `sessions/end-others`, kaname#634), повышение
+	// ключом — один (`step-up/access-key/begin`, kaname#827).
+	if len(Paths()) != 24 || len(positions) != 24 {
+		t.Errorf("путей полосы не 24: перечень %d, строк Р2 %d", len(Paths()), len(positions))
 	}
 	for _, p := range Paths() {
 		if _, ok := positions[p]; !ok {

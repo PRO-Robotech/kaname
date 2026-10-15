@@ -23,6 +23,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
@@ -101,6 +102,69 @@ func TestIntegration_SessionWriterAccessKeyLoginAndIdentityDeletionDoNotDeadlock
 				FormContext: form, CredentialID: as.CredentialID, ClientDataJSON: as.ClientDataJSON,
 				AuthenticatorData: as.AuthenticatorData, Signature: as.Signature, UserHandle: k.handle,
 				Source: writerSceneSource,
+			})
+			return err
+		},
+	})
+}
+
+// TestIntegration_SessionWriterStepUpWithKeyAndIdentityDeletionDoNotDeadlock —
+// ветвь ключа церемонии повышения (kaname#827, замысел §2.3) против удаления
+// личности: её транзакция предъявления берёт строку личности первой, затем
+// строку ключа (сдвиг счётчика), затем запись сессии — тот же порядок, что у
+// удаления «личность → дети», встречного нет. Задержка — после записи
+// предъявления в строке сессии.
+func TestIntegration_SessionWriterStepUpWithKeyAndIdentityDeletionDoNotDeadlock(t *testing.T) {
+	l := newSessionWriterLane(t)
+	ctx := context.Background()
+	keys := kanamepg.NewAccessKeyRepo(l.s.pool)
+	_, err := l.s.pool.Exec(ctx, `INSERT INTO kaname.own_ceilings (kind, limit_value) VALUES ('iam.user.accessKey', 8)
+		ON CONFLICT (kind) DO UPDATE SET limit_value = EXCLUDED.limit_value`)
+	require.NoError(t, err, "посев: потолок вида ключа")
+
+	type keyed struct {
+		auth   *webauthntest.Authenticator
+		handle []byte
+	}
+	byPerson := map[domain.UserID]keyed{}
+	seed := func(t *testing.T) writerPerson {
+		t.Helper()
+		p := l.seedPerson(t)
+		auth := webauthntest.New(t, webauthntest.AlgES256)
+		w, err := keys.Writer(ctx)
+		require.NoError(t, err)
+		defer func() { _ = w.Rollback(ctx) }()
+		minted, err := domain.NewCeremonyHandle()
+		require.NoError(t, err)
+		handle, err := w.EnsureCeremonyHandle(ctx, p.id, minted)
+		require.NoError(t, err)
+		_, err = w.InsertKey(ctx, domain.AccessKey{
+			ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: p.id,
+			CredentialID: auth.CredentialID(), PublicKey: auth.COSEPublicKey(t), Algorithm: auth.Algorithm(),
+			UserHandle: handle.Bytes(), Name: "scene-key", CreatedAt: time.Now().UTC(),
+		})
+		require.NoError(t, err, "посев: строка ключа писателем продукта")
+		require.NoError(t, w.Commit(ctx))
+		byPerson[p.id] = keyed{auth: auth, handle: handle.Bytes()}
+		return p
+	}
+
+	runWriterScene(t, l, writerScene{
+		table: "human_sessions", event: "UPDATE OF presented_methods",
+		seed: seed,
+		write: func(ctx context.Context, p writerPerson) error {
+			k := byPerson[p.id]
+			ch, err := l.stepUpBegin.Execute(ctx, humansession.StepUpAccessKeyBeginInput{Bearer: p.bearer})
+			if err != nil {
+				return err
+			}
+			as := k.auth.Assert(t, webauthntest.AssertionOptions{Challenge: ch.Challenge, Origin: akSceneOrigin, RPID: akSceneRPID})
+			_, err = l.stepUp.Execute(ctx, humansession.StepUpInput{
+				Bearer: p.bearer, Method: assurance.MethodWebAuthn, Source: writerSceneSource,
+				Assertion: &humansession.AssertionPresentation{
+					CredentialID: as.CredentialID, ClientDataJSON: as.ClientDataJSON,
+					AuthenticatorData: as.AuthenticatorData, Signature: as.Signature, UserHandle: k.handle,
+				},
 			})
 			return err
 		},

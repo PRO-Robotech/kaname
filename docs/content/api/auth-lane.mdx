@@ -15,7 +15,7 @@ import dedent from 'ts-dedent'
 Это **единственный** вход человека в продукт: посадка личности у службы одна, внешнего
 поставщика удостоверений нет (устройство — [Идентичность и токены](/architecture/identity)).
 
-Путей у полосы **двадцать три**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
+Путей у полосы **двадцать четыре**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
 (`internal/handler/loginlanehttp/handler.go`); перечень ниже сверяется с ним пробой, а не
 выписан.
 
@@ -36,6 +36,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/second-factor/remove</code></td><td>снятие фактора, подтверждённое кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/backup-codes</code></td><td>перечеканка запасных кодов, подтверждённая кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/step-up/access-key/begin</code></td><td>испытание повышения ключом доступа этой сессии; перечень ключей человека</td><td><code>step-up-access-key-begin</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/verify-email</code></td><td>запрос письма с кодом подтверждения адреса</td><td><code>verify-email</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/verify-email/confirm</code></td><td>предъявление кода подтверждения; новый носитель той же сессии</td><td><code>verify-email-confirm</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/access-key/begin</code></td><td>испытание входа ключом доступа; человека запрос не называет</td><td><code>access-key-begin</code></td><td>нет</td></tr>
@@ -163,8 +164,8 @@ SAN проверенного клиентского сертификата по�
   место края занимает прогонщик набора: клиентский лист на имя края ему выписывает
   внутренний удостоверяющий центр стенда (`.github/scripts/stand-chart.sh`).
 
-:::note Что из двадцати трёх путей ретранслирует край — свойство версии края
-Служба обслуживает все двадцать три (`loginlanehttp.Paths()`). Край платформы ретранслирует
+:::note Что из двадцати четырёх путей ретранслирует край — свойство версии края
+Служба обслуживает все двадцать четыре (`loginlanehttp.Paths()`). Край платформы ретранслирует
 перечень, объявленный у него (`gateway/internal/middleware/login_lane_paths.go` в
 `PRO-Robotech/kacho`), и перечень этот — свойство ревизии края, которую вы ставите. Путь,
 которого край не ретранслирует, отвечает с адреса консоли отказом края, а не службы.
@@ -190,8 +191,8 @@ SAN проверенного клиентского сертификата по�
 печеньем `kaname_form`. Признак — свёртка HMAC-SHA256 над видом формы с ключом-контекстом:
 признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
 случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
-`recovery`, `recovery-complete`, `second-factor`, `step-up`, `verify-email`,
-`verify-email-confirm`, `access-key-begin`, `access-key-login`, `password-enroll`,
+`recovery`, `recovery-complete`, `second-factor`, `step-up`, `step-up-access-key-begin`,
+`verify-email`, `verify-email-confirm`, `access-key-begin`, `access-key-login`, `password-enroll`,
 `email-change`, `email-change-confirm`, `session-end`.
 
 <CodeBlock language="bash">
@@ -202,7 +203,7 @@ SAN проверенного клиентского сертификата по�
 </CodeBlock>
 
 Неизвестный вид — `400` с кодом `3`:
-`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm access-key-begin access-key-login password-enroll email-change email-change-confirm session-end]`.
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up step-up-access-key-begin verify-email verify-email-confirm access-key-begin access-key-login password-enroll email-change email-change-confirm session-end]`.
 
 ## Форма запроса и ответа — по глаголу
 
@@ -385,16 +386,28 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 ### Второй фактор {#second-factor}
 
-`GET /iam/v1/auth/second-factor` (без признака, с сессией) — три формы тела:
+`GET /iam/v1/auth/second-factor` (без признака, с сессией) — три формы `totp`, и у каждой —
+доступность ключей и способы повышения:
 
 <CodeBlock language="json">
   {dedent`
-    { "totp": { "enrolled": false } }
-    { "totp": { "enrolled": false, "pendingUntil": "2026-09-17T10:15:00Z" } }
-    { "totp": { "enrolled": true, "confirmedAt": "2026-09-17T10:00:00Z" },
-      "backupCodes": { "remaining": 8, "total": 10 } }
+    { "totp": { "enrolled": false },
+      "accessKeys": { "available": true }, "stepUpMethods": ["webauthn"] }
+    { "totp": { "enrolled": false, "pendingUntil": "2026-09-17T10:15:00Z" },
+      "accessKeys": { "available": true }, "stepUpMethods": [] }
+    { "totp": { "enrolled": true, "confirmedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T08:00:00Z" },
+      "backupCodes": { "remaining": 8, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" },
+      "accessKeys": { "available": true }, "stepUpMethods": ["lookup_secret", "totp", "webauthn"] }
   `}
 </CodeBlock>
+
+Моменты — UTC, до секунды. `totp.lastUsedAt` — последний принятый код (вход с кодом, повышение,
+перечеканка), `backupCodes.lastUsedAt` — последний потраченный запасной код, `issuedAt` — выпуск
+набора; момента, которого не было, в теле **нет ключом** — сразу после подтверждения обоих
+`lastUsedAt` нет. `accessKeys.available` — включены ли ключи на установке. `stepUpMethods` —
+набор способов, которыми человек повысит **эту** сессию, по алфавиту: `totp` — у заведённого
+фактора, `lookup_secret` — пока в наборе есть коды, `webauthn` — при включённых ключах и хотя бы
+одном ключе; пароль способом повышения не считается, пусто — `[]`.
 
 `POST …/enroll` (`{ "csrfToken" }`) отвечает `{ "secret", "otpauthUri", "expiresAt" }` — секрет
 в Base32 показывается **один раз**; печений нет. Требует **свежего** предъявления: последнее
@@ -444,11 +457,15 @@ with the current password`: пароль меняют через `POST /iam/v1/a
   {dedent`
     { "method": "totp", "code": "123456", "csrfToken": "…" }
     { "method": "password", "password": "…", "csrfToken": "…" }
+    { "method": "webauthn", "credential": { "id": "…", "type": "public-key",
+      "response": { "clientDataJSON": "…", "authenticatorData": "…", "signature": "…", "userHandle": "…" } },
+      "csrfToken": "…" }
   `}
 </CodeBlock>
 
-Способ называет клиент: `password`, `totp`, `lookup_secret`; поле, не относящееся к способу,
-отвергается по имени. Успешное предъявление кладёт способ в множество предъявленных, уровень
+Способ называет клиент: `password`, `totp`, `lookup_secret`, `webauthn`; иной —
+`Illegal argument method: must be one of password|totp|lookup_secret|webauthn`. Поле другого
+способа отвергается по имени: `Illegal argument <поле>: not accepted with method <способ>`. Успешное предъявление кладёт способ в множество предъявленных, уровень
 пересчитывается правилом (монотонно — понижения нет), носитель перевыпускается. Неудачное
 предъявление сессию не гасит и не понижает. Ответ — `{ "session", "assurance" }`:
 
@@ -460,9 +477,32 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 </CodeBlock>
 
 `level2Reachable` — есть ли среди заведённых у человека способов такой, что даст `2`;
-`missingForLevel2` — какие способы (`totp`, `lookup_secret`) его предъявление в этой сессии
-выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
-запасным кодом — `2`; один пароль либо код восстановления — `1`.
+`missingForLevel2` — какие способы (`totp`, `lookup_secret`, `webauthn`) его предъявление в этой
+сессии выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
+запасным кодом — `2`; ключ доступа — `2`, а ключ с проверкой пользователя, не допускающий
+резервного копирования, — `3`; один пароль либо код восстановления — `1`.
+
+#### Повышение ключом доступа — `POST /iam/v1/auth/step-up/access-key/begin` {#step-up-access-key}
+
+Сначала испытание **этой** сессии: `{ "csrfToken" }` признаком вида `step-up-access-key-begin`.
+Ответ — параметры предъявления, `allowCredentials` — ключи человека в порядке заведения:
+
+<CodeBlock language="json">
+  {dedent`
+    { "publicKey": { "challenge": "…", "rpId": "console.example", "timeout": 300000,
+      "userVerification": "preferred",
+      "allowCredentials": [ { "type": "public-key", "id": "…" } ] } }
+  `}
+</CodeBlock>
+
+Живое испытание у сессии одно: новая выдача сменяет прежнее, и прежнее предъявить нельзя.
+Выдача попыткой не считается. Ключей нет — `400` `ACCESS_KEY_NOT_REGISTERED`; ключи на установке
+выключены — `400` `ACCESS_KEYS_DISABLED` (тем же отказом отвечают выдача регистрации ключа и
+выдача входа ключом). Затем — церемония `POST /iam/v1/auth/step-up` способом `webauthn`.
+Испытание сгорает при предъявлении, каким бы ни был исход сверки. Испытание другой сессии либо
+сменённое — `400` `CHALLENGE_NOT_ISSUED`, повтор — `400` `CHALLENGE_ALREADY_PRESENTED`, истёкшее —
+`400` `CHALLENGE_EXPIRED`; эти отказы попыткой не считаются. Прочие отказы ключа — тот же
+`401` `authentication failed`, что у неверного кода, и та же попытка в том же счёте.
 
 ### Вход ключом доступа — `POST /iam/v1/auth/access-key/{begin,login}` {#access-key-login}
 
@@ -694,6 +734,9 @@ with the current password`: пароль меняют через `POST /iam/v1/a
     <tr><td>400</td><td>9</td><td><code>registration refused; if this address is already yours, sign in or recover access; if you were invited, ask an account administrator to invite again; otherwise try again later</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · способ входа на строку приглашения уже записан · приглашение истекло · потолок темпа заведения исчерпан · окно регистраций источника полно — <strong>один</strong> отказ на все, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса. Текст называет шаг условием, которое знает сам вызывающий, и ни одной причины, числа или срока</td></tr>
     <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>церемония повышения, снятие или перечеканка без заведённого фактора — глаголы под живой сессией; <strong>на входе не производится</strong>: код при незаведённом факторе — тот же <code>401</code>, что неверный пароль с тем же полем <code>secondFactor</code></td></tr>
     <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
+    <tr><td>400</td><td>9</td><td><code>no access key is registered: register an access key first</code></td><td><code>ACCESS_KEY_NOT_REGISTERED</code></td><td>выдача испытания повышения ключом у человека без ключей; попыткой не считается</td></tr>
+    <tr><td>400</td><td>9</td><td><code>access keys are turned off on this installation</code></td><td><code>ACCESS_KEYS_DISABLED</code></td><td>выдача испытания повышения ключом и выдача входа ключом на установке с пустым перечнем происхождений; попыткой не считается</td></tr>
+    <tr><td>400</td><td>9</td><td><code>step-up challenge was not issued: begin step-up again</code> · <code>step-up challenge was already presented: begin step-up again</code> · <code>step-up challenge expired: begin step-up again</code></td><td><code>CHALLENGE_NOT_ISSUED</code> · <code>CHALLENGE_ALREADY_PRESENTED</code> · <code>CHALLENGE_EXPIRED</code></td><td>церемония повышения ключом: испытания этой сессии нет (другой сессии либо сменено) · уже предъявлено · истекло; попыткой не считается</td></tr>
     <tr><td>400</td><td>9</td><td><code>email address is already verified</code></td><td><code>EMAIL_ALREADY_VERIFIED</code></td><td>запрос письма либо предъявление кода подтверждённым: письмо не ставится, отметка не переписывается</td></tr>
     <tr><td>400</td><td>9</td><td><code>the current session ends by logout</code></td><td><code>SESSION_IS_CURRENT</code></td><td>выход из выбранной сессии назвал текущую: из неё выходят выходом, ничего не снято</td></tr>
     <tr><td>400</td><td>9</td><td><code>invite is no longer valid; ask an account administrator to invite again</code></td><td><code>INVITE_NOT_VALID</code></td><td>код подошёл — подтверждения адреса либо завершения восстановления, переводящего запись к владельцу ящика, — а приглашение приглашённого истекло либо снято: отметки нет, попытка кода не истрачена, у завершения восстановления ничего не меняется и код остаётся годным; выход — повторное приглашение</td></tr>

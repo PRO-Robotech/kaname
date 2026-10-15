@@ -121,6 +121,9 @@ type loginLane struct {
 	// loginChallenges — испытания полосы входа ключом (Ф13, kaname#613): своя
 	// таблица со своим уборщиком; есть — полоса входа ключом провязана.
 	loginChallenges *kanamepg.AccessKeyLoginRepo
+	// stepUpChallenges — испытания повышения ключом внутри живой сессии
+	// (kaname#827): своя таблица со своим уборщиком.
+	stepUpChallenges *kanamepg.AccessKeyStepUpRepo
 	// verifier — проверяющий паролей полосы с приманкой объявленного класса.
 	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
 	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
@@ -242,6 +245,9 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	// «полоса входа ключом не провязана» по nil интерфейса.
 	if l.loginChallenges != nil {
 		r.LoginChallenges = l.loginChallenges
+	}
+	if l.stepUpChallenges != nil {
+		r.StepUpChallenges = l.stepUpChallenges
 	}
 	return r
 }
@@ -635,9 +641,20 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	if err := cfg.AuthN.ValidateSelfServiceFreshness(); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Хранилище ключей доступа — одно на полосу: им читают и вход ключом (Ф13),
+	// и ветвь ключа церемонии повышения (kaname#827), и служба ключей (Ф7).
+	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	stepUpChallenges := kanamepg.NewAccessKeyStepUpRepo(pool, accessKeys)
 	sfDeps := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
 		Limits: limits, Freshness: cfg.AuthN.SelfServiceFreshness, Domain: cfg.AuthN.ResolveDomain(),
+		// Ветвь ключа церемонии (kaname#827): привязка — ручки Ф7, срок и
+		// требование проверки пользователя — величины контракта Ф7; своих
+		// ручек ветвь не заводит.
+		Keys: humansession.StepUpKeys{
+			Store: stepUpChallenges, Binding: cfg.AuthN.AccessKeys.Binding(),
+			ChallengeTTL: access_keys.ChallengeTTL, UserVerification: access_keys.UserVerificationAssertion,
+		},
 		Observer: rec, Now: time.Now, Logger: logger,
 	}
 	enrollUC, err := humansession.NewEnrollSecondFactorUseCase(sfDeps)
@@ -661,6 +678,10 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	stepUpUC, err := humansession.NewStepUpUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	stepUpBeginUC, err := humansession.NewStepUpAccessKeyBeginUseCase(sfDeps)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -705,7 +726,6 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	// уровня Ф11, выдача Ф3, единый отказ и счёт по источнику. Своих ручек
 	// посадки полоса не заводит (Р9): привязка — ручки Ф7, срок испытания —
 	// величина контракта Ф7.
-	accessKeys := kanamepg.NewAccessKeyRepo(pool)
 	loginChallenges := kanamepg.NewAccessKeyLoginRepo(pool, accessKeys)
 	akDeps := humansession.AccessKeyLoginDeps{
 		Store: sessions, Keys: loginChallenges, Methods: methods,
@@ -750,6 +770,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 	}, laneVerbs{
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
+		stepUpBegin:         stepUpBeginUC,
 		requestVerification: requestVerificationUC, confirmVerification: confirmVerificationUC, position: positionUC,
 		akBegin: akBeginUC, akLogin: akLoginUC, enrollPassword: enrollPasswordUC,
 		requestEmailChange: requestEmailChangeUC, confirmEmailChange: confirmEmailChangeUC,
@@ -763,8 +784,8 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      accessKeys, keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
-		loginChallenges: loginChallenges,
-		verifier:        verifier, letterWindow: login.VerificationResendWindow,
+		loginChallenges: loginChallenges, stepUpChallenges: stepUpChallenges,
+		verifier: verifier, letterWindow: login.VerificationResendWindow,
 	}, nil
 }
 
@@ -867,6 +888,8 @@ type laneVerbs struct {
 	remove     *humansession.RemoveSecondFactorUseCase
 	regenerate *humansession.RegenerateBackupCodesUseCase
 	stepUp     *humansession.StepUpUseCase
+	// stepUpBegin — выдача испытания повышения ключом (kaname#827).
+	stepUpBegin *humansession.StepUpAccessKeyBeginUseCase
 	// Подтверждение адреса (kaname#456).
 	requestVerification *humansession.RequestVerificationUseCase
 	confirmVerification *humansession.ConfirmVerificationUseCase
@@ -975,6 +998,10 @@ func (v laneVerbs) RegenerateBackupCodes(ctx context.Context, in humansession.Re
 
 func (v laneVerbs) StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error) {
 	return v.stepUp.Execute(ctx, in)
+}
+
+func (v laneVerbs) BeginStepUpAccessKey(ctx context.Context, in humansession.StepUpAccessKeyBeginInput) (humansession.StepUpAccessKeyBeginOutput, error) {
+	return v.stepUpBegin.Execute(ctx, in)
 }
 
 // loginLaneSurface — профиль поверхности слушателя формы. Досягаемость —

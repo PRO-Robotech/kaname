@@ -449,7 +449,9 @@ func TestAccessKey_F7_41_DiscoverabilityExtensionHasThreeSides(t *testing.T) {
 }
 
 // TestAccessKey_F7_44_CeremonyOriginIsJudgedByTheList — происхождение результата
-// вне перечня — отказ; из перечня — принимается; пустой перечень — никого.
+// вне перечня — отказ; из перечня — принимается; пустой перечень — никого: с
+// kaname#827 (приёмка SUA Р7, SUA-23) «никого» отвечает уже ВЫДАЧА испытания
+// регистрации отказом состояния установки, и ключ не заводится.
 func TestAccessKey_F7_44_CeremonyOriginIsJudgedByTheList(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -459,9 +461,11 @@ func TestAccessKey_F7_44_CeremonyOriginIsJudgedByTheList(t *testing.T) {
 	require.Equal(t, 0, h.store.keyCount(alice))
 	h.mustRegister(alice, a)
 	h.deps.Binding.Origins = []string{}
-	b := webauthntest.New(t, webauthntest.AlgES256)
-	_, err = h.registerKey(alice, b, webauthntest.RegistrationOptions{})
-	requireReason(t, err, codes.InvalidArgument, access_keys.ReasonOriginNotAllowed)
+	begin, err := access_keys.NewBeginRegistrationUseCase(h.deps)
+	require.NoError(t, err)
+	_, err = begin.Execute(h.ctx(), access_keys.BeginRegistrationInput{UserID: alice, Actor: alice})
+	requireReason(t, err, codes.FailedPrecondition, webauthnverify.ReasonKeysDisabled)
+	require.Equal(t, 1, h.store.keyCount(alice), "на установке без ключей второй ключ не заведён")
 }
 
 // TestAccessKey_F7_45_CeremonyRPIDHashIsJudged — чужой хэш имени — отказ; свой —

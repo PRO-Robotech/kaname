@@ -24,6 +24,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 // Тексты отказов — контракт.
@@ -116,6 +117,12 @@ func notFoundUser(id domain.UserID) error {
 // userNotActive — ключ заводится только активному: состояние решает владелец.
 func userNotActive(id domain.UserID) error {
 	return status.Errorf(codes.FailedPrecondition, TextUserNotActive, id)
+}
+
+// keysDisabled — ключи на установке выключены (kaname#827, Р7): текст и
+// признак — единственного объявления у проверяющего, форма — gRPC полосы.
+func keysDisabled() error {
+	return withReason(codes.FailedPrecondition, webauthnverify.ReasonKeysDisabled, webauthnverify.TextKeysDisabled)
 }
 
 // lastSignInMethod — единственный способ входа не снимается (Ф7-26).

@@ -1,0 +1,106 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+  sha256: 35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строка «редакция 2» в шапке — статическая форма объявления; шапка не правлена
+    намеренно (change-graph.md §2). Действующий вердикт о редакции 35224856… — эта запись.
+  base_commit: 9e43b2a48
+  content_commit: a897548d8ddbd22f70bdf5c7a63a65bddc4ebd88
+  previous_sha256: c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58
+  previous_content_commit: d81466bfb55ea588844438b9ccaa65fab399ef75
+  branch: '827'
+  task: PRO-Robotech/kaname#827
+  lines: 628
+  scenarios: 36
+  round: 3
+  round_note: >-
+    Круг по дельте после правки одобренной редакции (находка безопасности M1 разбора классов),
+    назначен диспетчером; не третий круг спора fa-b8 — редакция 2 была одобрена.
+  predecessor_record: docs/specs/reviews/step-up-with-any-enrolled-method/c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-14T20:11:01Z'
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#827
+  status: performed
+  published: true
+  database_id: 6177387012
+  node_id: "IC_kwDOUO26pM8AAAABcDNyBA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/827#issuecomment-6177387012"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6177387012"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-14T20:11:53Z"
+  body_sha256: "3c4c18ce108772a92d4b5608774c613f95076091755f590537dc908052f5f104"
+  subject_sha256: "35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683"
+  subject_revision_commit: "a897548d8ddbd22f70bdf5c7a63a65bddc4ebd88"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/step-up-with-any-enrolled-method/3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9.yaml
+    - docs/specs/reviews/step-up-with-any-enrolled-method/c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58.yaml
+delta:
+  predicate: "git diff d81466bfb a897548d8 -- docs/engineering/acceptance/step-up-with-any-enrolled-method.md → +30 −3, один файл"
+  scope_of_review: >-
+    Только дельта: история (2 строки), Р2 (частота выдачи — вариант «б»; положение подтверждения
+    PathRefusedInVerification), Р3 (2 строки 401 по счётчику), Р10 (клетка счётчика и сигнал
+    клонирования), SUA-80, §5 (строка производителя SUA-80), §8 п.1. Лишнего в дельте нет.
+m1_closure:
+  - where: Р3
+    status: closed
+    evidence: >-
+      Две строки «счётчик не вырос» и «сдвиг проигран в гонке» → 401 code 16 authentication failed,
+      попытка по обеим осям. Опора: bbbe33524:internal/apps/kaname/api/humansession/access_key_login.go:359
+      (CounterRegressed → refuse) и :383 (!advanced → refuse) — Ф13 так же.
+  - where: Р10
+    status: closed
+    evidence: >-
+      Сигнал SignCountRegressionObserved только при невыросшем счётчике, при гонке — нет:
+      bbbe33524:internal/apps/kaname/api/access_keys/finish_assertion.go:148 и :167-170 (RefusalCounterRace без сигнала).
+  - where: "§3.2 SUA-80"
+    status: closed
+    evidence: >-
+      Отрицание с близнецом SUA-03, отличающий факт один — присланный счётчик ≤ записанного.
+      Given «записанный > 0» обязателен: bbbe33524:internal/webauthnverify/verify.go:542-551 (два нуля — CounterZeroUnjudged).
+  - where: "§5, §8 п.1"
+    status: closed
+    evidence: "Производитель SUA-80 — integration humansession; она же отдельным случаем — гонка (Р3) без сигнала."
+  - where: Р2
+    status: closed
+    evidence: >-
+      PathStepUp уже PathRefusedInVerification: bbbe33524:internal/handler/loginlanehttp/handler.go:168;
+      новый путь выдачи объявлен так же. Частота: одно живое испытание на сессию, уборка — реестр
+      internal/apps/kaname/retention/registry.go (существует @bbbe33524).
+blocking: []
+non_blocking:
+  - >-
+    M1 называл §8 п.1 и п.2; п.2 (newman) SUA-80 не перечисляет. Не блок: п.2 — объявленный минимум
+    набора, производитель SUA-80 назван (integration), а фикстура для края есть
+    (bbbe33524:tests/newman/cases/kaname-access-keys.py:1238, count="same"). Рекомендация — добавить SUA-80
+    в минимум п.2 следующей редакцией либо замыслом; решает диспетчер.
+  - >-
+    Гонка (Р3, вторая строка) держится подслучаем пробы SUA-80 без собственного ID; для трассировки
+    сценарий↔проба лучше отдельный ID (напр. SUA-81) при следующей редакции.
+  - "Шапка всё ещё «редакция 2» — статическая форма, не вердикт; поправить заодно со следующей правкой."
+checks:
+  producer: "Производитель у SUA-80 — §5 и §8 п.1; новых «Тогда» без производителя нет."
+  twins: "Единственное новое отрицание SUA-80 — близнец SUA-03 (1 из 1)."
+  constructibility: >-
+    Фикстура названа и существует @bbbe33524: _finish_assertion(count='same'|'next'|число),
+    kaname-access-keys.py:1238; цепочка П-кл → SUA-03 (count next → записанный ≥ 1) → новая сессия →
+    count same → CounterRegressed. Посев не выполнялся — стенд заданием не назван: посеяно 0 из 1, не выполнилось 1.
+  scope: "Новых возможностей вне объёма kaname#827 нет; признаки маршрута не изменились (proto — нет, схема — да, публичный путь — да, безопасность — да)."
