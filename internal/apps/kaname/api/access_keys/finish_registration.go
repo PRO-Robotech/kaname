@@ -152,6 +152,9 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 		Algorithm: int64(res.Algorithm), SignCount: res.SignCount,
 		Name:        domain.AccessKeyName(corevalidate.NameOrDefault(in.Name, string(keyID))),
 		Description: domain.AccessKeyDescription(in.Description), CreatedAt: now,
+		// Признак пишется здесь и ниоткуда больше: расширение приходит один
+		// раз (Р12); «не сообщено» — своё состояние, а не «нет».
+		Discoverability: domain.DiscoverabilityFromExtension(in.Discoverable),
 	}
 	if err := key.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)

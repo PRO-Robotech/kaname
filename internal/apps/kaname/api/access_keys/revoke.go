@@ -149,7 +149,7 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	// Последний способ входа судится синхронно, чтобы отказ назвал следующий
 	// шаг клиенту, и ещё раз под замком внутри транзакции — второе чтение
 	// держит инвариант, первое только классифицирует.
-	if err := uc.lastMethodRefusal(ctx, in.UserID); err != nil {
+	if err := uc.lastMethodRefusal(ctx, in.UserID, keyID); err != nil {
 		return nil, err
 	}
 	if err := uc.ops.Create(ctx, op); err != nil {
@@ -191,10 +191,11 @@ func (uc *RevokeUseCase) keysOf(ctx context.Context, userID domain.UserID) ([]do
 }
 
 // lastMethodRefusal — синхронная сверка ДО операции, портом пула (транзакции
-// ещё нет): человек без пароля с одним ключом остался бы без способа входа
-// (Ф7-26). Она только классифицирует — инвариант держит сверка под замком
+// ещё нет): человек без пароля, у которого после снятия не осталось бы ни
+// одного ГОДНОГО к предъявлению ключа, остался бы без способа входа (Ф7-26,
+// Ф7-56). Она только классифицирует — инвариант держит сверка под замком
 // внутри транзакции (`lockedLastMethodRefusal`).
-func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID) error {
+func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID) error {
 	has, err := uc.deps.Methods.HasPassword(ctx, userID)
 	if err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
@@ -206,7 +207,7 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 	if err != nil {
 		return err
 	}
-	return uc.judgeLastMethod(false, len(keys))
+	return uc.judgeLastMethod(false, presentableAfter(keys, keyID))
 }
 
 // lockedLastMethodRefusal — та же сверка ВНУТРИ транзакции снятия: строки
@@ -214,18 +215,31 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 // (`RevokeWriter.HasPassword`). Ни одного чтения портом пула здесь нет: второе
 // соединение изнутри транзакции, держащей замки личности и ключей, — взаимная
 // блокировка с входами ключом, которой база не видит (kaname#669).
-func (uc *RevokeUseCase) lockedLastMethodRefusal(ctx context.Context, w RevokeWriter, userID domain.UserID, locked int) error {
+func (uc *RevokeUseCase) lockedLastMethodRefusal(ctx context.Context, w RevokeWriter, userID domain.UserID, keyID domain.AccessKeyID, locked []domain.AccessKey) error {
 	has, err := w.HasPassword(ctx, userID)
 	if err != nil {
 		return mapStoreErr(uc.deps, "access_keys.Revoke.methods", err)
 	}
-	return uc.judgeLastMethod(has, locked)
+	return uc.judgeLastMethod(has, presentableAfter(locked, keyID))
 }
 
-// judgeLastMethod — правило Ф7-26 одно на обе сверки: без пароля ключ, который
-// снимают, обязан быть не последним.
-func (uc *RevokeUseCase) judgeLastMethod(hasPassword bool, keys int) error {
-	if hasPassword || keys > 1 {
+// presentableAfter — сколько ГОДНЫХ к предъявлению ключей останется после
+// снятия keyID (Р12): единица счёта — годный ключ, а не строка. Снимаемый
+// не считается, каким бы он ни был.
+func presentableAfter(keys []domain.AccessKey, keyID domain.AccessKeyID) int {
+	n := 0
+	for _, k := range keys {
+		if k.ID != keyID && k.Presentable() {
+			n++
+		}
+	}
+	return n
+}
+
+// judgeLastMethod — правило Ф7-26 и Ф7-56 одно на обе сверки: без пароля
+// после снятия обязан остаться хотя бы один годный к предъявлению ключ.
+func (uc *RevokeUseCase) judgeLastMethod(hasPassword bool, presentableLeft int) error {
+	if hasPassword || presentableLeft > 0 {
 		return nil
 	}
 	uc.deps.Observer.AccessKeyRefusalObserved(LaneRevoke, RefusalLastSignInMethod)
@@ -243,7 +257,7 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.lock", err)
 	}
-	if err := uc.lockedLastMethodRefusal(ctx, w, userID, len(locked)); err != nil {
+	if err := uc.lockedLastMethodRefusal(ctx, w, userID, keyID, locked); err != nil {
 		return nil, err
 	}
 	removed, found, err := w.DeleteOwnedByID(ctx, userID, keyID)

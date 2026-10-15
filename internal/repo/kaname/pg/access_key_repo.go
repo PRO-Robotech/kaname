@@ -47,7 +47,7 @@ type AccessKeyRepo struct{ pool *pgxpool.Pool }
 // NewAccessKeyRepo — построение над пулом.
 func NewAccessKeyRepo(pool *pgxpool.Pool) *AccessKeyRepo { return &AccessKeyRepo{pool: pool} }
 
-const accessKeyCols = `id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, last_used_at`
+const accessKeyCols = `id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, last_used_at, discoverability`
 
 func scanAccessKey(row pgx.Row) (domain.AccessKey, error) {
 	var (
@@ -56,7 +56,7 @@ func scanAccessKey(row pgx.Row) (domain.AccessKey, error) {
 		used      *time.Time
 	)
 	if err := row.Scan(&k.ID, &k.UserID, &k.CredentialID, &k.PublicKey, &k.Algorithm, &signCount, &k.UserHandle,
-		&k.Name, &k.Description, &k.CreatedAt, &used); err != nil {
+		&k.Name, &k.Description, &k.CreatedAt, &used, &k.Discoverability); err != nil {
 		return domain.AccessKey{}, err
 	}
 	// Схема держит счётчик в `[0, 2^32-1]`, поэтому сужение без потерь.
@@ -462,11 +462,11 @@ func (w *accessKeyWriter) InsertKey(ctx context.Context, k domain.AccessKey) (do
 		handle = k.UserHandle
 	}
 	row := w.tx.QueryRow(ctx, `
-		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, discoverability)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+accessKeyCols,
 		string(k.ID), string(k.UserID), k.CredentialID, k.PublicKey, k.Algorithm, int64(k.SignCount), handle,
-		string(k.Name), string(k.Description), k.CreatedAt)
+		string(k.Name), string(k.Description), k.CreatedAt, string(k.Discoverability))
 	got, err := scanAccessKey(row)
 	if err != nil {
 		return domain.AccessKey{}, mapErr(err, "AccessKey.Insert", "")
