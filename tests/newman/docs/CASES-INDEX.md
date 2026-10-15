@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 845
+Всего кейсов: 869
 
 ## Перепись по модулям
 
@@ -61,6 +61,7 @@
 | `cases/iam-role.py` | 44 |
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
+| `cases/iam-system-class-subjects.py` | 24 |
 | `cases/iam-system-grant-visibility.py` | 1 |
 | `cases/iam-token-facade-conformance.py` | 4 |
 | `cases/iam-user.py` | 47 |
@@ -832,6 +833,35 @@
 - `IAM-ACB-LSP-DENY-NO-ORACLE`
 - `IAM-ACB-LSP-VAL`
 - `IAM-ACB-LSP-PAGE-BEFORE-IDENTITY`
+
+## `cases/iam-system-class-subjects.py` — 24 кейса
+
+> Case-set: «аноним» и «вошедший» — системный класс субъекта привязки прав.
+
+- `SC01-CLASS-GRANT-CREATED`
+- `SC02-UNKNOWN-CLASS-NAME`
+- `SC03-EMPTY-CLASS-NAME`
+- `SC04-CLASS-AND-USER`
+- `SC05-DUPLICATE-CLASS`
+- `SC06-SECOND-ACTIVE-ALREADY-EXISTS`
+- `SC07-LEGACY-PAIR-ACCEPTS-CLASS`
+- `SC08-CLASS-NOT-GROUP-MEMBER`
+- `SC09-CLASS-NOT-CLUSTER-ADMIN`
+- `SC10-ANONYMOUS-NOT-AUTHENTICATED`
+- `SC11-SIGNED-IN-INHERITS-ANONYMOUS`
+- `SC14-AUTHENTICATED-NOT-A-SPEAKER`
+- `SC15-WILDCARD-NOT-A-SPEAKER`
+- `SC16-EXPAND-NO-CLASSES`
+- `SC17-LIST-BY-CLASS`
+- `SC18-OTHER-TENANT-SIGNED-IN-READS`
+- `SC40-SYSTEM-GRANT-MOVED`
+- `SC19-AUTHENTICATED-ALL-IN-SCOPE-REFUSED`
+- `SC20-NO-AUTHORITY-NO-CLASS-GRANT`
+- `SC21-WRITE-ROLE-REFUSED`
+- `SC22-BOUND-ROLE-REFUSES-WRITE-VERB`
+- `SC24-ANONYMOUS-ALL-IN-SCOPE-REFUSED`
+- `SC27-SERVICE-ACCOUNT-GRANTS-TO-CLASS`
+- `SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY`
 
 ## `cases/iam-system-grant-visibility.py` — 1 кейсов
 
