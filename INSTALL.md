@@ -173,8 +173,15 @@ go test ./deploy/ -run 'RetiredPosture|OwnLaneMemory|StandChartCreatesEverySecre
 
 | объект | что несёт |
 |---|---|
-| `<релиз>` | `:9090`, `:9096`, `:9098` — то, что вы выводите наружу |
-| `<релиз>-internal` | `:9091`, `:9097`, `:9099`, `:9100` — то, что наружу не выводится |
+| `<имя>` | `:9090`, `:9096`, `:9098` — то, что вы выводите наружу |
+| `<имя>-internal` | `:9091`, `:9097`, `:9099`, `:9100` — то, что наружу не выводится |
+
+`<имя>` здесь и в командах проверки ниже — величина `name` в значениях чарта
+(умолчание — `kaname`), а не имя выпуска helm: от `name` идут имена всех
+объектов чарта (Service, Deployment, `PodMonitor`, правила тревоги), метка
+`app` и имя, по которому сверяется лист TLS (`<имя>.<пространство>.svc.cluster.local`).
+Выпуск под другим именем объекты не переименовывает; меняя `name`, выпишите лист
+на новое имя и поменяйте адрес службы у её вызывающих.
 
 Разделение существует ради одного: тип объекта Service — единственный рычаг,
 которым дверь выводится наружу, и на одном объекте он двигал бы служебные двери
@@ -496,16 +503,16 @@ KANAME_REPOSITORY__POSTGRES__URL=postgres://iam:...@pg:5432/kaname?sslmode=requi
    оператор не читает, и без объекта правила стояли бы без рядов. Проверка:
 
    ```sh
-   kubectl -n <пространство> get podmonitor <релиз> \
+   kubectl -n <пространство> get podmonitor <имя> \
      -o jsonpath='{.spec.podMetricsEndpoints[0]}'
    #   port: metrics, path: /metrics, scheme: https,
-   #   tlsConfig: якорь из секрета tls.secretName (ca.crt), serverName <релиз>.<пространство>.svc.cluster.local
+   #   tlsConfig: якорь из секрета tls.secretName (ca.crt), serverName <имя>.<пространство>.svc.cluster.local
    ```
 
    Собиратель без оператора читает то же объявление **на поде**:
 
    ```sh
-   kubectl -n <пространство> get pod -l app=<релиз> \
+   kubectl -n <пространство> get pod -l app=<имя> \
      -o jsonpath='{.items[0].metadata.annotations}' | tr ',' '\n' | grep prometheus
    #   prometheus.io/scrape: true
    #   prometheus.io/port:   9095
@@ -518,7 +525,7 @@ KANAME_REPOSITORY__POSTGRES__URL=postgres://iam:...@pg:5432/kaname?sslmode=requi
    поверхность той схемой, которую она назвала:
 
    ```sh
-   kubectl -n <пространство> port-forward deploy/<релиз> 9095:9095 &
+   kubectl -n <пространство> port-forward deploy/<имя> 9095:9095 &
    curl -sk https://127.0.0.1:9095/metrics | head
    ```
 
