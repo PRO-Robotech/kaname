@@ -68,6 +68,16 @@
 -- одном из четырёх мест (SC-43); встретилась — отказ миграции целиком, а не
 -- частичное состояние.
 --
+-- НОЛЬ ДЕРЖИТ ОГРАНИЧЕНИЕ, А НЕ ПЕРЕПИСЬ. Перепись судит состояние на миг
+-- наката; писатель прежней версии, работающий во время выкатки, положил бы
+-- подстановку и после неё — прямо в выпущенные факты выдачи либо журналом,
+-- который проекция переносит в `relation_fact`. Поэтому после переписи обе
+-- таблицы фактов получают проверочные ограничения
+-- `relation_fact_subject_not_wildcard` и
+-- `access_binding_emitted_tuples_user_not_wildcard`: субъект, чей идентификатор
+-- — `*` (`тип:*` и `тип:*#отношение`), отвергается с 23514 при любой записи,
+-- в том числе журнальной. Выдачи держит `kaname.subject_ref_exists`.
+--
 -- ПОВТОР БЕЗВРЕДЕН (SC-44): выборка — по подстановке, которой после первого
 -- наката нет; вставки — `ON CONFLICT DO NOTHING` без цели; ограничения и
 -- функции переобъявляются целиком.
@@ -267,6 +277,17 @@ END
 $$;
 -- +goose StatementEnd
 
+-- Ноль держит ограничение: запись подстановки после переезда отвергается.
+ALTER TABLE kaname.relation_fact DROP CONSTRAINT IF EXISTS relation_fact_subject_not_wildcard;
+ALTER TABLE kaname.relation_fact
+    ADD CONSTRAINT relation_fact_subject_not_wildcard
+        CHECK ((subject !~ ':\*($|#)'::text));
+
+ALTER TABLE kaname.access_binding_emitted_tuples DROP CONSTRAINT IF EXISTS access_binding_emitted_tuples_user_not_wildcard;
+ALTER TABLE kaname.access_binding_emitted_tuples
+    ADD CONSTRAINT access_binding_emitted_tuples_user_not_wildcard
+        CHECK ((fga_user !~ ':\*($|#)'::text));
+
 -- +goose Down
 
 -- Откат возвращает подстановку на место классов — но ТОЛЬКО если классу не
@@ -285,6 +306,9 @@ BEGIN
 END
 $$;
 -- +goose StatementEnd
+
+ALTER TABLE kaname.relation_fact DROP CONSTRAINT IF EXISTS relation_fact_subject_not_wildcard;
+ALTER TABLE kaname.access_binding_emitted_tuples DROP CONSTRAINT IF EXISTS access_binding_emitted_tuples_user_not_wildcard;
 
 DROP TRIGGER IF EXISTS access_binding_subjects_class_reads_only_trg ON kaname.access_binding_subjects;
 DROP FUNCTION IF EXISTS kaname.access_binding_subject_class_reads_only();
