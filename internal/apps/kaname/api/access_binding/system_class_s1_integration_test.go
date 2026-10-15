@@ -193,15 +193,38 @@ func TestSystemClass_SC14_AuthenticatedIsNotASpeaker(t *testing.T) {
 		"Illegal argument subject: system class authenticated is not a speaker", "SC-14")
 }
 
-// SC-15 — подстановка говорящим не бывает.
-func TestSystemClass_SC15_WildcardIsNotASpeaker(t *testing.T) {
-	w := newSCWorld(t)
-	_, err := w.check(fmtSubject("user", string(w.usrB)), "get", scObj1)
-	require.NoError(t, err, "SC-15 близнец: вопрос человека отвечается по выдачам")
+// SC-15 — подстановка говорящим: ПЕРЕХОД до полосы L6 (решение диспетчера
+// Д1, приёмка ред. 5/6, «Переход до L6 (в этом изменении, S1)»).
+//
+// Tests-followup: #832 — отказ из «Тогда» SC-15 (`INVALID_ARGUMENT`,
+// `Illegal argument subject: wildcard is not a speaker`) и его проба
+// исполняются полосой L6, PRO-Robotech/kaname#832, после выкатки края L4;
+// раньше отказ сесть не может (анонимное чтение публичного реестра).
+//
+// Здесь утверждается наблюдаемое поведение S1: вопрос от `user:*` отвечается
+// как вопрос от `system_class:anonymous` и ничего сверх него не получает.
+// Два состояния — два мира; близнец в каждом — тот же вопрос от анонима, во
+// втором ещё и от `usr-B`: отличие — один факт, говорящий.
+func TestSystemClass_SC15_WildcardSpeaksAsAnonymousUntilL6(t *testing.T) {
+	t.Run("выдача анониму", func(t *testing.T) {
+		w := newSCWorld(t)
+		w.createDone(asUser(w.ctx, w.usrA),
+			withSubjects(w.sc01Request(), classSubject("anonymous")), "SC-15 Дано: выдача SC-07")
+		// Материализация: вошедший читает выданное анониму (SC-11).
+		w.pollCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true, "SC-15 Дано: материализация SC-07")
 
-	_, err = w.check("user:*", "get", scObj1)
-	requireSyncRefusal(t, err, codes.InvalidArgument,
-		"Illegal argument subject: wildcard is not a speaker", "SC-15")
+		w.requireCheck("system_class:anonymous", "get", scObj1, true, "SC-15 близнец перехода: аноним, состояние 1")
+		w.requireCheck("user:*", "get", scObj1, true, "SC-15 переход: подстановка читает выданное анониму")
+	})
+	t.Run("выдача вошедшим", func(t *testing.T) {
+		w := newSCWorld(t)
+		w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-15 Дано: выдача SC-01")
+		w.pollCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true,
+			"SC-15 близнец перехода: usr-B читает выданное вошедшим")
+
+		w.requireCheck("system_class:anonymous", "get", scObj1, false, "SC-15 близнец перехода: аноним, состояние 2")
+		w.requireCheck("user:*", "get", scObj1, false, "SC-15 переход: подстановка не получает выданного вошедшим")
+	})
 }
 
 // SC-16 — развёртка прав классов не перечисляет; близнец — без классовой

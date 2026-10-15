@@ -352,8 +352,17 @@ func TestSystemClass_SC27_ServiceAccountWithAuthorityGrantsToAClass(t *testing.T
 	assert.Equal(t, w.svaA, actor, "SC-27: исполнитель в записи аудита — sva-A")
 }
 
-// SC-28 — выдача классу на кластере — только кластерному администратору.
-func TestSystemClass_SC28_ClusterGrantToAClassIsClusterAdminOnly(t *testing.T) {
+// SC-28 — выдача классу на кластере глаголом создания недостижима (решение
+// диспетчера Д4, приёмка ред. 5/6): класс на кластере получает тот же отказ
+// ствола, что человек; своего правила у класса нет.
+//
+// Строки сценария: отказ в праве у владельца аккаунта (`usr-A`); близнец —
+// тот же запрос от кластерного администратора упирается в правило ствола
+// дословно; близнец правила — субъект-человек получает тот же отказ;
+// контроль живости пути — выдача человеку роли кластерного администратора на
+// кластере доходит до `done`. Положительного близнеца для класса нет — это
+// утверждение сценария.
+func TestSystemClass_SC28_ClusterGrantToAClassIsUnreachableByCreate(t *testing.T) {
 	w := newSCWorld(t)
 	var live bool
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT live FROM kaname.roles WHERE id = $1`, scClusterViewRole).Scan(&live),
@@ -363,20 +372,61 @@ func TestSystemClass_SC28_ClusterGrantToAClassIsClusterAdminOnly(t *testing.T) {
 	verifyAddresses(t, w.ctx, w.pool)
 	_, err := w.pool.Exec(w.ctx, `SELECT kaname.restore_cluster_admin('user', $1)`, string(admin))
 	require.NoError(t, err, "SC-28 посев: кластерный администратор объявленным путём")
+	// usr-K выдаёт свежей сессией уровня «2», как usr-A в П1 (Р5): без неё
+	// близнец упирался бы в окно свежести выдачи классу, а не в правило ствола.
+	seedLiveHumanSession(t, w, admin)
 
-	clusterReq := func(subject *iamv1.Subject) *iamv1.CreateAccessBindingRequest {
+	clusterReq := func(subject *iamv1.Subject, role string) *iamv1.CreateAccessBindingRequest {
 		return &iamv1.CreateAccessBindingRequest{
-			Subjects: []*iamv1.Subject{subject}, RoleId: scClusterViewRole,
+			Subjects: []*iamv1.Subject{subject}, RoleId: role,
 			ScopeType: "iam.cluster", ScopeId: domain.ClusterSingletonID, Target: allInScopeTarget(),
 		}
 	}
-	w.createDone(asUser(w.ctx, admin), clusterReq(userSubject(w.usrB)), "SC-28 контроль: выдача человеку на кластере")
+	countOps := func() int {
+		var n int
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM kaname.operations`).Scan(&n))
+		return n
+	}
+	// refused — синхронный отказ кодом; текст сверяется дословно, когда задан.
+	refused := func(err error, code codes.Code, text, why string) {
+		t.Helper()
+		require.Errorf(t, err, "%s: ожидался синхронный отказ", why)
+		st := status.Convert(err)
+		require.Equalf(t, code, st.Code(), "%s: код (текст %q)", why, st.Message())
+		if text != "" {
+			require.Equalf(t, text, st.Message(), "%s: текст отказа", why)
+		}
+	}
+	const trunkRule = "GLOBAL scope requires names or labels selector for non-cluster-admin roles"
 
-	_, err = w.ab.Create(asUser(w.ctx, w.usrA), clusterReq(classSubject("authenticated")))
-	require.Error(t, err, "SC-28: владелец аккаунта не выдаёт на кластере")
-	assert.Equal(t, codes.PermissionDenied, status.Code(err), "SC-28: код (текст %q)", status.Convert(err).Message())
+	// Контроль живости пути (не близнец): человеку — роль кластерного
+	// администратора на кластере от usr-K.
+	w.createDone(asUser(w.ctx, admin), clusterReq(userSubject(w.usrB), domain.ClusterAdminRoleID),
+		"SC-28 контроль: выдача человеку роли кластерного администратора на кластере")
 
-	w.createDone(asUser(w.ctx, admin), clusterReq(classSubject("authenticated")), "SC-28 близнец: кластерный администратор")
+	opsBefore := countOps()
+
+	// Строка 1: usr-A, тело К — отказ в праве, роль не названа.
+	_, err = w.ab.Create(asUser(w.ctx, w.usrA), clusterReq(classSubject("authenticated"), scClusterViewRole))
+	refused(err, codes.PermissionDenied, "", "SC-28: владелец аккаунта не выдаёт на кластере")
+	msg := status.Convert(err).Message()
+	assert.NotContains(t, msg, scClusterViewRole, "SC-28: текст отказа не называет роль")
+	assert.NotContains(t, msg, "vpc.network.view", "SC-28: текст отказа не называет роль")
+
+	// Близнец: тело К от usr-K — правило ствола дословно.
+	_, err = w.ab.Create(asUser(w.ctx, admin), clusterReq(classSubject("authenticated"), scClusterViewRole))
+	refused(err, codes.InvalidArgument, trunkRule, "SC-28 близнец: кластерный администратор, класс")
+
+	// Близнец правила ствола: тело К с субъектом-человеком от usr-K.
+	_, err = w.ab.Create(asUser(w.ctx, admin), clusterReq(userSubject(w.usrB), scClusterViewRole))
+	refused(err, codes.InvalidArgument, trunkRule, "SC-28 близнец правила: кластерный администратор, человек")
+
+	assert.Equal(t, opsBefore, countOps(), "SC-28: ни одна строка отказа не создала Operation")
+	var classOnCluster int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `
+		SELECT count(*) FROM kaname.access_bindings
+		 WHERE subject_type = 'system_class' AND role_id = $1`, scClusterViewRole).Scan(&classOnCluster))
+	assert.Zero(t, classOnCluster, "SC-28: выдачи классу на кластере нет")
 }
 
 // SC-29 — аудит называет класс и исполнителя на выдаче и отзыве; близнец —

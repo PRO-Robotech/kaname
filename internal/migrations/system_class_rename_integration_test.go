@@ -236,26 +236,36 @@ func TestSystemClass_SC43_WildcardSubjectIsGone(t *testing.T) {
 	}, wildcardCensus(t, p.db), "SC-43: перепись после миграции")
 }
 
-// SC-44 — миграция повторно безвредна: повтор шага подъёма (версии изменения
-// сняты с учёта goose и накатаны вновь) не меняет состояния SC-40…43.
+// moveMigration — шаг переезда этого изменения: единственный, который SC-44
+// повторяет. Соседние миграции изменения новее границы П2 (чужие предметы,
+// например 20261015100000 второго фактора) повтору не подлежат: их
+// повторяемость — не утверждение этой приёмки.
+const moveMigration = "20261015120000_anonymous_and_authenticated_are_subject_classes.sql"
+
+// SC-44 — миграция повторно безвредна: повтор шага подъёма (версия шага
+// переезда снята с учёта goose и накатана вновь) не меняет состояния SC-40…43.
 func TestSystemClass_SC44_MoveMigrationIsRepeatable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	p := openP2(t)
 	p.publish(t, "registry_repository:r-pub44", true)
-	change := changeMigrations(t)
-	require.NotEmpty(t, change, "SC-44: миграции переезда в дереве нет — повторять нечего")
+	move, _ := versionsOf(t, moveMigration)
+	require.Contains(t, changeMigrations(t), move, "SC-44: шаг переезда не новее границы П2 — повторять нечего")
 	require.NoError(t, goose.Up(p.db, "."), "SC-44: первый накат")
 	first := wildcardCensus(t, p.db)
 	var st1, sid1 string
 	require.NoError(t, p.db.QueryRow(`SELECT subject_type, subject_id FROM kaname.access_bindings WHERE id = $1`, scSystemGrant).Scan(&st1, &sid1))
 
-	for _, v := range change {
-		_, err := p.db.Exec(`DELETE FROM goose_db_version WHERE version_id = $1`, v)
-		require.NoError(t, err, "SC-44: снять версию %d с учёта", v)
-	}
-	require.NoError(t, goose.Up(p.db, "."), "SC-44: повтор шага подъёма без ошибок")
+	res, err := p.db.Exec(`DELETE FROM goose_db_version WHERE version_id = $1`, move)
+	require.NoError(t, err, "SC-44: снять версию %d с учёта", move)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "SC-44: версия шага переезда %d стояла на учёте ровно один раз", move)
+	require.NoError(t, goose.UpTo(p.db, ".", move), "SC-44: повтор шага подъёма без ошибок")
+	var applied int
+	require.NoError(t, p.db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id = $1 AND is_applied`, move).Scan(&applied))
+	require.Equal(t, 1, applied, "SC-44: шаг переезда накатан вновь, а не пропущен")
 	assert.Equal(t, first, wildcardCensus(t, p.db), "SC-44: перепись не изменилась")
 	var st2, sid2 string
 	require.NoError(t, p.db.QueryRow(`SELECT subject_type, subject_id FROM kaname.access_bindings WHERE id = $1`, scSystemGrant).Scan(&st2, &sid2))
