@@ -196,7 +196,7 @@ func TestSystemClass_SC14_AuthenticatedIsNotASpeaker(t *testing.T) {
 // SC-15 — подстановка говорящим: ПЕРЕХОД до полосы L6 (решение диспетчера
 // Д1, приёмка ред. 5/6, «Переход до L6 (в этом изменении, S1)»).
 //
-// Tests-followup: #832 — отказ из «Тогда» SC-15 (`INVALID_ARGUMENT`,
+// Tests-followup: kaname#832 — отказ из «Тогда» SC-15 (`INVALID_ARGUMENT`,
 // `Illegal argument subject: wildcard is not a speaker`) и его проба
 // исполняются полосой L6, PRO-Robotech/kaname#832, после выкатки края L4;
 // раньше отказ сесть не может (анонимное чтение публичного реестра).
