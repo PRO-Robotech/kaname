@@ -9,7 +9,8 @@ package internal_iam_test
 // редакция 3, сценарии RCL-02 и RCL-05).
 //
 // Сцены построены однократной задержкой на снятии кодов (`installOneShotHold`
-// на `recovery_codes`, `DELETE`): держатель снял коды и спит, не
+// на `recovery_codes`, `DELETE`; сцены перекрытия со сменой адреса — под
+// именем `recoveryLockOrderHold`, которое взводит `runRecoveryOverlap`): держатель снял коды и спит, не
 // зафиксировавшись, пока прочие участники не встанут в ожидание ЗАМКА; не
 // встали — отказ фикстуры (`requireHoldSceneBuilt`), а не вердикт о предмете.
 
@@ -115,7 +116,7 @@ func TestIntegration_RCL05_RequestAfterAddressChangeGetsNoCode(t *testing.T) {
 	pool := l.s.pool
 
 	p := l.seedWithPendingChange(t)
-	installOneShotHold(t, ctx, pool, recoveryOneLiveHold, "recovery_codes", "DELETE")
+	installOneShotHold(t, ctx, pool, recoveryLockOrderHold, "recovery_codes", "DELETE")
 	deadlocksBefore := databaseDeadlocks(t, ctx, pool)
 	queuedBefore := l.observer.count(humansession.RecoveryRequestQueued)
 	noRowBefore := l.observer.count(humansession.RecoveryRequestNoRow)
@@ -148,5 +149,123 @@ func TestIntegration_RCL05_RequestAfterAddressChangeGetsNoCode(t *testing.T) {
 
 	deadlocksAfter := deadlocksAfterPoolClose(t, ctx, l.s.dsn, pool)
 	t.Logf("pg_stat_database.deadlocks +%d", deadlocksAfter-deadlocksBefore)
+	assert.Zero(t, deadlocksAfter-deadlocksBefore, "ни одна транзакция не получает 40P01")
+}
+
+const recoveryReleasableHold = "probe_recovery_releasable_hold"
+
+// installReleasableHold — однократная задержка С ЯВНЫМ ОТПУСКОМ (заказ
+// приёмки RCL-03): первый оператор, поднявший триггер, держит замки, пока
+// проба не отпустит его (`releaseHold`), без счёта ждущих. Общий срок —
+// только страховка: исчерпан — держатель отметит это в `_expired`, и проба
+// кончится отказом фикстуры, а не вердиктом.
+func installReleasableHold(t *testing.T, ctx context.Context, l *recoveryLockOrderLane, table, event string) {
+	t.Helper()
+	pool := l.s.pool
+	name := recoveryReleasableHold
+	for _, q := range []string{
+		`CREATE SEQUENCE kaname.` + name + `_seq`,
+		`CREATE SEQUENCE kaname.` + name + `_expired MINVALUE 0`,
+		`CREATE TABLE kaname.` + name + `_gate (released boolean NOT NULL)`,
+		`INSERT INTO kaname.` + name + `_gate VALUES (false)`,
+	} {
+		_, err := pool.Exec(ctx, q)
+		require.NoError(t, err, "состояние задержки %s: %s", name, q)
+	}
+	_, err := pool.Exec(ctx, `
+		CREATE FUNCTION kaname.`+name+`() RETURNS trigger
+		LANGUAGE plpgsql AS $$
+		DECLARE
+			v_deadline timestamptz := clock_timestamp() + interval '20 seconds';
+		BEGIN
+			IF nextval('kaname.`+name+`_seq') <> 1 THEN
+				RETURN NULL;
+			END IF;
+			LOOP
+				EXIT WHEN (SELECT released FROM kaname.`+name+`_gate);
+				IF clock_timestamp() >= v_deadline THEN
+					PERFORM setval('kaname.`+name+`_expired', 1, true);
+					EXIT;
+				END IF;
+				PERFORM pg_sleep(0.005);
+			END LOOP;
+			RETURN NULL;
+		END $$`)
+	require.NoError(t, err, "функция задержки %s", name)
+	_, err = pool.Exec(ctx, `CREATE TRIGGER `+name+` AFTER `+event+` ON kaname.`+table+`
+		FOR EACH STATEMENT EXECUTE FUNCTION kaname.`+name+`()`)
+	require.NoError(t, err, "триггер задержки %s", name)
+}
+
+func releaseHold(t *testing.T, ctx context.Context, l *recoveryLockOrderLane) {
+	t.Helper()
+	_, err := l.s.pool.Exec(ctx, `UPDATE kaname.`+recoveryReleasableHold+`_gate SET released = true`)
+	require.NoError(t, err, "отпустить задержку")
+}
+
+func requireHoldNotExpired(t *testing.T, ctx context.Context, l *recoveryLockOrderLane) {
+	t.Helper()
+	var expired bool
+	require.NoError(t, l.s.pool.QueryRow(ctx,
+		`SELECT is_called FROM kaname.`+recoveryReleasableHold+`_expired`).Scan(&expired))
+	if expired {
+		t.Fatal("отказ фикстуры: задержка отпущена по страховочному сроку, а не пробой — вердикта о предмете нет")
+	}
+}
+
+// TestIntegration_RCL03_DifferentPersonsDoNotWaitForEachOther — положительный
+// близнец RCL-02: у запросов РАЗНЫЕ личности. Пока запрос P1 спит в задержке
+// со снятыми кодами, запрос P2 ставит письмо и возвращается (Р2).
+func TestIntegration_RCL03_DifferentPersonsDoNotWaitForEachOther(t *testing.T) {
+	l := newRecoveryLockOrderLane(t)
+	ctx := context.Background()
+	p1 := l.seedPerson(t)
+	p2 := l.seedPerson(t)
+	installReleasableHold(t, ctx, l, "recovery_codes", "DELETE")
+	queuedBefore := l.observer.count(humansession.RecoveryRequestQueued)
+
+	holderDone := make(chan error, 1)
+	go func() { holderDone <- l.requestRecovery(ctx, p1) }()
+	awaitSleepingBackend(t, ctx, l.s.pool)
+
+	require.NoError(t, l.requestRecovery(ctx, p2), "запрос P2 вернулся, пока P1 в задержке")
+	select {
+	case err := <-holderDone:
+		releaseHold(t, ctx, l)
+		t.Fatalf("отказ фикстуры: держатель вернулся до отпуска (%v) — сцена не построена", err)
+	default:
+	}
+	assert.Equal(t, 1, l.observer.count(humansession.RecoveryRequestQueued)-queuedBefore,
+		"запрос P2 поставил письмо, не дожидаясь P1")
+	assert.Equal(t, 1, liveRecoveryCodes(t, l, p2), "код P2 зафиксирован")
+	assert.Zero(t, liveRecoveryCodes(t, l, p1), "код P1 не зафиксирован")
+
+	releaseHold(t, ctx, l)
+	require.NoError(t, <-holderDone)
+	requireHoldNotExpired(t, ctx, l)
+	assert.Equal(t, 2, l.observer.count(humansession.RecoveryRequestQueued)-queuedBefore, "запрос P1 поставил письмо")
+	assert.Equal(t, 1, liveRecoveryCodes(t, l, p1))
+	assert.Equal(t, 1, liveRecoveryCodes(t, l, p2))
+}
+
+// TestIntegration_RCL04_RequestCommittedBeforeAddressChange — запрос кода
+// держит задержку, исход смены адреса приходит в окно: обе фиксации без
+// 40P01, исход запроса «поставлено», после обеих живых кодов ноль — код из
+// письма на прежний адрес снят исходом смены.
+func TestIntegration_RCL04_RequestCommittedBeforeAddressChange(t *testing.T) {
+	l := newRecoveryLockOrderLane(t)
+	ctx := context.Background()
+	pool := l.s.pool
+	p := l.seedWithPendingChange(t)
+	installOneShotHold(t, ctx, pool, recoveryLockOrderHold, "recovery_codes", "DELETE")
+	deadlocksBefore := databaseDeadlocks(t, ctx, pool)
+	queuedBefore := l.observer.count(humansession.RecoveryRequestQueued)
+
+	r := runRecoveryOverlap(t, l, p, l.requestRecovery, l.confirmChange)
+	require.NoError(t, r.holderErr)
+	require.NoError(t, r.otherErr, "исход смены адреса (EC-02)")
+	assert.Equal(t, 1, l.observer.count(humansession.RecoveryRequestQueued)-queuedBefore, "исход запроса — поставлено")
+	assert.Zero(t, liveRecoveryCodes(t, l, p), "код c1 снят исходом смены, c0 — запросом")
+	deadlocksAfter := deadlocksAfterPoolClose(t, ctx, l.s.dsn, pool)
 	assert.Zero(t, deadlocksAfter-deadlocksBefore, "ни одна транзакция не получает 40P01")
 }
