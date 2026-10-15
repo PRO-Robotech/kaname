@@ -96,3 +96,38 @@ func TestAccessKey_RegistrationRefusalsNameTheNextStep(t *testing.T) {
 		})
 	}
 }
+
+// TestAccessKey_AssertionRefusalNamesTheStepOnEveryLane — единый отказ полосы
+// утверждения называет шаг «начать утверждение заново» (kaname#757, приёмка
+// `access-key-assertion-surfaces-declare-their-difference.md`, Р2): повтор
+// погашенного испытания (AKS-06) и подделанная подпись (AKS-07) — побайтово
+// один текст, код `INVALID_ARGUMENT`, подробностей нет. Близнецы: новое
+// испытание принимает утверждение (AKS-06), испытание, над которым подпись
+// отвергнута, живо (AKS-08) — шаг верен на обеих полосах.
+func TestAccessKey_AssertionRefusalNamesTheStepOnEveryLane(t *testing.T) {
+	t.Parallel()
+	const text = "access key assertion is not accepted: begin the assertion again"
+	h := newHarness(t)
+	a := webauthntest.New(t, webauthntest.AlgES256)
+	h.mustRegister(alice, a)
+
+	// AKS-06: принятое утверждение над испытанием, затем повтор того же.
+	ch := h.beginAssertion(alice).Challenge
+	as := a.Assert(t, webauthntest.AssertionOptions{Challenge: ch, Origin: origin, RPID: rpID})
+	_, err := h.finishAssertion(alice, as, nil)
+	require.NoError(t, err, "AKS-06: первое утверждение принято")
+	_, err = h.finishAssertion(alice, as, nil)
+	replay := requireCode(t, err, codes.InvalidArgument)
+	require.Equal(t, text, replay.Message(), "AKS-06: отказ повтора называет шаг")
+	require.Empty(t, replay.Details(), "AKS-06: единый отказ подробностей не несёт")
+	_, err = h.assertWith(alice, a, webauthntest.AssertionOptions{})
+	require.NoError(t, err, "AKS-06 близнец: новое испытание принимает утверждение")
+
+	// AKS-07 и AKS-08: подделанная подпись над живым испытанием c.
+	c := h.beginAssertion(alice).Challenge
+	_, err = h.assertWith(alice, a, webauthntest.AssertionOptions{Challenge: c, ForgeSignature: true})
+	forged := requireCode(t, err, codes.InvalidArgument)
+	require.Equal(t, replay.Proto().String(), forged.Proto().String(), "AKS-07: тело побайтово равно телу повтора")
+	_, err = h.assertWith(alice, a, webauthntest.AssertionOptions{Challenge: c})
+	require.NoError(t, err, "AKS-08: испытание после отказа REST живо")
+}

@@ -33,7 +33,10 @@ import (
 // любом состоянии прежнего испытания: новое выдаётся всегда.
 const (
 	// TextAssertionNotAccepted — ЕДИНЫЙ отказ аутентификации полосы утверждения.
-	TextAssertionNotAccepted = "access key assertion is not accepted"
+	// Шаг один на все четырнадцать полос (kaname#757, Р2): новое испытание
+	// выдаётся при любом состоянии прежнего, поэтому шаг не говорит, какая
+	// сверка не сошлась.
+	TextAssertionNotAccepted = "access key assertion is not accepted: begin the assertion again"
 	TextSessionNotFresh      = "re-authentication required: present a credential again"
 	TextChallengeUnknown     = "registration challenge was not issued: begin registration again"
 	TextChallengeConsumed    = "registration challenge was already presented: begin registration again"
