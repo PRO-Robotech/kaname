@@ -65,7 +65,7 @@ func newSFHarness(t *testing.T) *sfHarness {
 	logger := slog.New(slog.DiscardHandler)
 	deps := humansession.SecondFactorDeps{
 		Store: h.store, Methods: fakeMethods{h.store}, TOTP: totp, Sets: h.verifier, SetHasher: h.hasher,
-		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain,
+		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain, Keys: sfKeys(),
 		Observer: h.obs, Now: now, Logger: logger,
 	}
 	h.enroll, err = humansession.NewEnrollSecondFactorUseCase(deps)

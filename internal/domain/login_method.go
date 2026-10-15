@@ -237,6 +237,15 @@ type LoginMethod struct {
 	// CreatedAt назначает запись. У строки `pending` — момент заведения, от
 	// которого считается срок (Ф12 Р8); у `active` — момент подтверждения.
 	CreatedAt time.Time
+	// LastUsedAt — момент последнего ПРИНЯТОГО предъявления способа второго
+	// фактора (kaname#827, приёмка SUA Р6): у `totp` — принятый код, у
+	// `lookup_secret` — снятый запасной код. LastUsed отделяет «не
+	// использовали» от значения: нулевой момент значением оси не является, и
+	// отсутствие наружу — отсутствие ключа ответа, а не нулевое время. Пишут
+	// его только операторы предъявления; у пароля момента нет — его не
+	// допускает проверка схемы.
+	LastUsedAt time.Time
+	LastUsed   bool
 }
 
 // Validate — строка, годная к записи. Отказ не несёт материала.
@@ -258,6 +267,9 @@ func (m LoginMethod) Validate() error {
 	}
 	if m.StepAccepted && m.Kind != LoginMethodTOTP {
 		return fmt.Errorf("Illegal argument login_method.accepted_step: only %q carries one", LoginMethodTOTP)
+	}
+	if m.LastUsed && m.Kind != LoginMethodTOTP && m.Kind != LoginMethodLookupSecret {
+		return fmt.Errorf("Illegal argument login_method.last_used_at: only %q and %q carry one", LoginMethodTOTP, LoginMethodLookupSecret)
 	}
 	return nil
 }

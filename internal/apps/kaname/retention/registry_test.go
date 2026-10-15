@@ -342,3 +342,35 @@ func TestWithHumanSessionsCarriesTheEmailChangeSweeper(t *testing.T) {
 		t.Errorf("без уборщика смены записей %d, ждали %d", len(got), len(with)-1)
 	}
 }
+
+func (stubReaper) SweepUnservableStepUpChallenges(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+// TestWithHumanSessionsCarriesTheStepUpChallengeSweeper — kaname#827 (замысел
+// §2.1 п. 6): испытания повышения ключом — свой предмет с порогом в срок
+// испытания, НЕ ноль (три состояния испытания различимы, и различимость
+// держит хранение строки); без уборщика ветвь ключа не провязана — предмета нет.
+func TestWithHumanSessionsCarriesTheStepUpChallengeSweeper(t *testing.T) {
+	full := HumanSessionReapers{
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, ChallengeTTL: 5 * time.Minute,
+		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
+		VerificationCodes: stubReaper{}, SourceWindows: stubReaper{}, BearerLetters: stubReaper{},
+		LetterWindow: 24 * time.Hour, SourceWindow: 10 * time.Minute, StepUpChallenges: stubReaper{},
+	}
+	with := WithHumanSessions(nil, full)
+	var found *Subject
+	for i := range with {
+		if with[i].Name == SubjectAccessKeyStepUpChallenges {
+			found = &with[i]
+		}
+	}
+	if found == nil || found.Grace != 5*time.Minute || found.Sweep == nil {
+		t.Fatalf("предмет %q: %+v — ждали порог срока испытания 5m и уборщик", SubjectAccessKeyStepUpChallenges, found)
+	}
+	without := full
+	without.StepUpChallenges = nil
+	if got := WithHumanSessions(nil, without); len(got) != len(with)-1 {
+		t.Errorf("без уборщика испытаний повышения записей %d, ждали %d", len(got), len(with)-1)
+	}
+}

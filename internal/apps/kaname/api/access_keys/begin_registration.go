@@ -82,6 +82,12 @@ func (uc *BeginRegistrationUseCase) Execute(ctx context.Context, in BeginRegistr
 	if in.UserID == "" {
 		return BeginRegistrationOutput{}, fieldRequired("user_id")
 	}
+	// Ключи на установке выключены (kaname#827, приёмка SUA Р7): отказ
+	// состояния установки до всякой выдачи — испытание, которое нечем
+	// принять, не чеканится и не кладётся.
+	if uc.deps.Binding.Disabled() {
+		return BeginRegistrationOutput{}, keysDisabled()
+	}
 	now := uc.deps.Now().UTC()
 	if err := requireFresh(ctx, uc.deps, LaneRegistration, in.Actor, now); err != nil {
 		return BeginRegistrationOutput{}, err

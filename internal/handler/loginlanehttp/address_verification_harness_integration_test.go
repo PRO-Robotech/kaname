@@ -45,6 +45,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
@@ -252,9 +253,17 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	require.NoError(t, err)
 	sf := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
-		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: clock.Now, Logger: logger,
+		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain,
+		// Ветвь ключа повышения (kaname#827) — тем же составом, что корень.
+		Keys: humansession.StepUpKeys{
+			Store: kanamepg.NewAccessKeyStepUpRepo(pool, kanamepg.NewAccessKeyRepo(pool)), Binding: laneKeyBinding(),
+			ChallengeTTL: access_keys.ChallengeTTL, UserVerification: access_keys.UserVerificationAssertion,
+		},
+		Observer: nop, Now: clock.Now, Logger: logger,
 	}
 	stepUp, err := humansession.NewStepUpUseCase(sf)
+	require.NoError(t, err)
+	stepUpBegin, err := humansession.NewStepUpAccessKeyBeginUseCase(sf)
 	require.NoError(t, err)
 	status, err := humansession.NewSecondFactorStatusUseCase(sf)
 	require.NoError(t, err)
@@ -331,7 +340,8 @@ func newAVLaneWith(t *testing.T, opts avOptions) *avLane {
 	require.NoError(t, err)
 	verbs := avVerbs{stubLane: &stubLane{}, enrollPw: enrollPw, ownList: ownList, ownEnd: ownEnd, ownEndOthers: ownEndOthers, register: register, login: login, logout: logout, change: change,
 		stepUp: stepUp, status: status, enroll: enroll, confirmSF: confirmSF, remove: remove, regen: regen, recovery: recovery,
-		requestV: requestV, confirmV: confirmV, position: position, requestC: requestC, confirmC: confirmC, completeR: completeR}
+		requestV: requestV, confirmV: confirmV, position: position, requestC: requestC, confirmC: confirmC, completeR: completeR,
+		stepUpBegin: stepUpBegin}
 	l := newLaneOver(t, verbs, "")
 	return &avLane{
 		ctx: ctx, pool: pool, lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
@@ -449,20 +459,23 @@ func (s avEmailChangeStore) EmailChangeWriter(ctx context.Context, userID domain
 // avVerbs — глаголы слушателя стенда: настоящие варианты использования.
 type avVerbs struct {
 	*stubLane
-	register  *registration.RegisterUseCase
-	login     *humansession.LoginUseCase
-	logout    *humansession.LogoutUseCase
-	change    *humansession.ChangePasswordUseCase
-	stepUp    *humansession.StepUpUseCase
-	status    *humansession.SecondFactorStatusUseCase
-	enroll    *humansession.EnrollSecondFactorUseCase
-	confirmSF *humansession.ConfirmSecondFactorUseCase
-	remove    *humansession.RemoveSecondFactorUseCase
-	regen     *humansession.RegenerateBackupCodesUseCase
-	recovery  *humansession.RequestRecoveryUseCase
-	requestV  *humansession.RequestVerificationUseCase
-	confirmV  *humansession.ConfirmVerificationUseCase
-	position  *humansession.PositionUseCase
+	register *registration.RegisterUseCase
+	login    *humansession.LoginUseCase
+	logout   *humansession.LogoutUseCase
+	change   *humansession.ChangePasswordUseCase
+	stepUp   *humansession.StepUpUseCase
+	// Выдача испытания повышения ключом (kaname#827) — НАСТОЯЩИЙ глагол:
+	// отказ положения судит слушатель до него, близнец доходит до глагола.
+	stepUpBegin *humansession.StepUpAccessKeyBeginUseCase
+	status      *humansession.SecondFactorStatusUseCase
+	enroll      *humansession.EnrollSecondFactorUseCase
+	confirmSF   *humansession.ConfirmSecondFactorUseCase
+	remove      *humansession.RemoveSecondFactorUseCase
+	regen       *humansession.RegenerateBackupCodesUseCase
+	recovery    *humansession.RequestRecoveryUseCase
+	requestV    *humansession.RequestVerificationUseCase
+	confirmV    *humansession.ConfirmVerificationUseCase
+	position    *humansession.PositionUseCase
 	// Заведение первого пароля (kaname#213) — НАСТОЯЩИЙ глагол.
 	enrollPw *humansession.EnrollPasswordUseCase
 	// Смена адреса почты (kaname#635) — НАСТОЯЩИЕ глаголы.
@@ -534,6 +547,10 @@ func (v avVerbs) Logout(ctx context.Context, b domain.SessionBearer) (bool, erro
 
 func (v avVerbs) ChangePassword(ctx context.Context, in humansession.ChangePasswordInput) (humansession.ChangePasswordOutput, error) {
 	return v.change.Execute(ctx, in)
+}
+
+func (v avVerbs) BeginStepUpAccessKey(ctx context.Context, in humansession.StepUpAccessKeyBeginInput) (humansession.StepUpAccessKeyBeginOutput, error) {
+	return v.stepUpBegin.Execute(ctx, in)
 }
 
 func (v avVerbs) StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error) {

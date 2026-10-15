@@ -203,6 +203,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "вход ключом отвечает ОДНИМ отказом на все причины (Ф13 Р7): испытание, удостоверение, рукоятка и подпись снаружи неразличимы by construction, и клетка — единственное место, где причина видна. Ноль по ней до первого события обязан быть виден (Ф3 Р14), иначе непровязанная полоса выглядит как полоса без отказов",
 	},
+	StepUpAccessKeyOutcomesMetric: {
+		Cells: len(humansession.StepUpAccessKeyOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "ветвь ключа церемонии повышения отвечает ОДНИМ `authentication failed` на все суждённые причины (kaname#827, Р3): происхождение, подпись, рукоятка, счётчик снаружи неразличимы, и клетка — единственное место, где причина видна; ноль до первого события обязан быть виден",
+	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },

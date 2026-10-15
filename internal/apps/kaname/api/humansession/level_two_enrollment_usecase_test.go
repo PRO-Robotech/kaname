@@ -215,7 +215,7 @@ func (h *sfHarness) staleKeyVerbs(t *testing.T) (*humansession.EnrollSecondFacto
 	t.Helper()
 	deps := humansession.SecondFactorDeps{
 		Store: h.store, Methods: staleKeyList{fakeMethods{h.store}}, TOTP: h.totp, Sets: h.verifier, SetHasher: h.hasher,
-		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain,
+		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain, Keys: sfKeys(),
 		Observer: h.obs, Now: func() time.Time { return h.clock }, Logger: slog.New(slog.DiscardHandler),
 	}
 	enroll, err := humansession.NewEnrollSecondFactorUseCase(deps)

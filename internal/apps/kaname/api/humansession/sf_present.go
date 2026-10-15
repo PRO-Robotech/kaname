@@ -30,6 +30,7 @@ package humansession
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -58,8 +59,11 @@ const (
 
 // preparedPresentation — исход первой половины.
 type preparedPresentation struct {
-	method  assurance.Method
-	userID  domain.UserID
+	method assurance.Method
+	userID domain.UserID
+	// at — момент сверки, часами глагола: он же ложится моментом последнего
+	// предъявления способа при полном успехе (kaname#827, SUA Р6).
+	at      time.Time
 	verdict presentVerdict
 	outcome PresentationOutcome
 	// totp
@@ -85,8 +89,8 @@ type presenter struct {
 // prepare — см. шапку. Состояние судится РАНЬШЕ кода: при «нет» и `pending`
 // сверка холостая, исход — «не заведён».
 func (p presenter) prepare(ctx context.Context, userID domain.UserID, in SecondFactorPresentation) (preparedPresentation, error) {
-	out := preparedPresentation{method: in.Method, userID: userID}
 	now := p.deps.Now().UTC()
+	out := preparedPresentation{method: in.Method, userID: userID, at: now}
 	totp, found, err := factorState(ctx, p.deps.Methods, userID)
 	if err != nil {
 		return out, err
@@ -165,7 +169,7 @@ func (p presenter) settle(ctx context.Context, w Writer, pr preparedPresentation
 		if !write {
 			return out, nil
 		}
-		recorded, err := w.RecordAcceptedStep(ctx, pr.userID, pr.step)
+		recorded, err := w.RecordAcceptedStep(ctx, pr.userID, pr.step, pr.at)
 		if err != nil {
 			return out, err
 		}
@@ -189,7 +193,7 @@ func (p presenter) settle(ctx context.Context, w Writer, pr preparedPresentation
 			if !write {
 				return out, nil
 			}
-			consumed, err := w.ConsumeLookupElement(ctx, pr.userID, pr.candidate.Element())
+			consumed, err := w.ConsumeLookupElement(ctx, pr.userID, pr.candidate.Element(), pr.at)
 			if err != nil {
 				return out, err
 			}

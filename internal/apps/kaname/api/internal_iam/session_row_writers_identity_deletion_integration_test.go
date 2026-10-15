@@ -90,6 +90,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -101,6 +102,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 const (
@@ -123,19 +125,22 @@ func (zeroEnvelope) Admit(context.Context, domain.PasswordCostClass, passwordver
 // адаптерами, собранные теми же конструкторами, что в корне
 // (`cmd/kaname/loginlane.go`, `buildLoginLane`).
 type sessionWriterLane struct {
-	s        *concurrencyScene
-	users    *kanamepg.Repository
-	hasher   *passwordverify.Hasher
-	owner    domain.UserID
-	login    *humansession.LoginUseCase
-	logout   *humansession.LogoutUseCase
-	stepUp   *humansession.StepUpUseCase
-	enroll   *humansession.EnrollSecondFactorUseCase
-	confirm  *humansession.ConfirmSecondFactorUseCase
-	regen    *humansession.RegenerateBackupCodesUseCase
-	remove   *humansession.RemoveSecondFactorUseCase
-	request  *humansession.RequestRecoveryUseCase
-	complete *humansession.CompleteRecoveryUseCase
+	s      *concurrencyScene
+	users  *kanamepg.Repository
+	hasher *passwordverify.Hasher
+	owner  domain.UserID
+	login  *humansession.LoginUseCase
+	logout *humansession.LogoutUseCase
+	stepUp *humansession.StepUpUseCase
+	// stepUpBegin — выдача испытания повышения ключом (kaname#827): сцене
+	// ветви ключа церемонии нужно испытание этой сессии.
+	stepUpBegin *humansession.StepUpAccessKeyBeginUseCase
+	enroll      *humansession.EnrollSecondFactorUseCase
+	confirm     *humansession.ConfirmSecondFactorUseCase
+	regen       *humansession.RegenerateBackupCodesUseCase
+	remove      *humansession.RemoveSecondFactorUseCase
+	request     *humansession.RequestRecoveryUseCase
+	complete    *humansession.CompleteRecoveryUseCase
 }
 
 func newSessionWriterLane(t *testing.T) *sessionWriterLane {
@@ -187,9 +192,18 @@ func newSessionWriterLane(t *testing.T) *sessionWriterLane {
 	sf := humansession.SecondFactorDeps{
 		Store: s.sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
 		Limits: limits, Freshness: 15 * time.Minute, Domain: "console.example.invalid", Observer: nop,
+		// Ветвь ключа повышения (kaname#827) — тем же составом, что корень.
+		Keys: humansession.StepUpKeys{
+			Store: kanamepg.NewAccessKeyStepUpRepo(s.pool, kanamepg.NewAccessKeyRepo(s.pool)),
+			Binding: webauthnverify.Binding{RPID: "console.example.invalid", Origins: []string{"https://console.example.invalid"},
+				Algorithms: []webauthnverify.Algorithm{webauthnverify.AlgES256}},
+			ChallengeTTL: access_keys.ChallengeTTL, UserVerification: access_keys.UserVerificationAssertion,
+		},
 		Now: time.Now, Logger: logger,
 	}
 	l.stepUp, err = humansession.NewStepUpUseCase(sf)
+	require.NoError(t, err)
+	l.stepUpBegin, err = humansession.NewStepUpAccessKeyBeginUseCase(sf)
 	require.NoError(t, err)
 	l.enroll, err = humansession.NewEnrollSecondFactorUseCase(sf)
 	require.NoError(t, err)

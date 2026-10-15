@@ -154,16 +154,24 @@ func TestLane_F12_StatusHasTwoShapes(t *testing.T) {
 
 	r := l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
 	require.Equal(t, http.StatusOK, r.status, r.body)
-	require.JSONEq(t, `{"totp":{"enrolled":false,"pendingUntil":"2026-09-16T12:15:00Z"}}`, r.body)
+	require.JSONEq(t, `{"totp":{"enrolled":false,"pendingUntil":"2026-09-16T12:15:00Z"},"accessKeys":{"available":false},"stepUpMethods":[]}`, r.body)
 	require.Equal(t, "bearer-1", stub.statusIn[0].Bearer.CookieValue())
 
 	stub.statusOut = humansession.StatusOutput{}
 	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
-	require.JSONEq(t, `{"totp":{"enrolled":false}}`, r.body, "строки нет — ни срока, ни набора")
+	require.JSONEq(t, `{"totp":{"enrolled":false},"accessKeys":{"available":false},"stepUpMethods":[]}`, r.body, "строки нет — ни срока, ни набора")
 
-	stub.statusOut = humansession.StatusOutput{TOTPEnrolled: true, ConfirmedAt: base, BackupCodes: &humansession.BackupCodesView{Remaining: 0, Total: 10}}
+	// `active`: моменты — до секунды; момента, которого не было, нет ключом
+	// (kaname#827, SUA Р6).
+	stub.statusOut = humansession.StatusOutput{TOTPEnrolled: true, ConfirmedAt: base,
+		BackupCodes:         &humansession.BackupCodesView{Remaining: 0, Total: 10, IssuedAt: base.Add(time.Second / 2)},
+		AccessKeysAvailable: true, StepUpMethods: []string{"totp"}}
 	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
-	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z"},"backupCodes":{"remaining":0,"total":10}}`, r.body)
+	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z"},"backupCodes":{"remaining":0,"total":10,"issuedAt":"2026-09-16T12:00:00Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
+	stub.statusOut.TOTPLastUsed, stub.statusOut.TOTPLastUsedAt = true, base.Add(90*time.Second+time.Millisecond)
+	stub.statusOut.BackupCodes.LastUsed, stub.statusOut.BackupCodes.LastUsedAt = true, base.Add(time.Minute)
+	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
+	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:30Z"},"backupCodes":{"remaining":0,"total":10,"issuedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:00Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
 
 	post := l.do(t, c, http.MethodPost, "/iam/v1/auth/second-factor", map[string]string{}, nil, sess)
 	require.Equal(t, http.StatusMethodNotAllowed, post.status)
@@ -272,7 +280,7 @@ func TestLane_F12_06_FormsNameTheField(t *testing.T) {
 	}{
 		{"enroll-extra", "/iam/v1/auth/second-factor/enroll", map[string]any{"csrfToken": sfTok, "extra": 1}, `"Illegal argument extra: unknown field"`},
 		{"confirm-no-code", "/iam/v1/auth/second-factor/confirm", map[string]any{"csrfToken": sfTok}, `"Illegal argument code: required"`},
-		{"step-up-method", "/iam/v1/auth/step-up", map[string]any{"method": "sms", "code": "123456", "csrfToken": suTok}, `"Illegal argument method: must be one of password|totp|lookup_secret"`},
+		{"step-up-method", "/iam/v1/auth/step-up", map[string]any{"method": "sms", "code": "123456", "csrfToken": suTok}, `"Illegal argument method: must be one of password|totp|lookup_secret|webauthn"`},
 		{"step-up-no-method", "/iam/v1/auth/step-up", map[string]any{"code": "123456", "csrfToken": suTok}, `"Illegal argument method: required"`},
 		{"step-up-password-no-password", "/iam/v1/auth/step-up", map[string]any{"method": "password", "csrfToken": suTok}, `"Illegal argument password: required"`},
 		{"remove-no-method", "/iam/v1/auth/second-factor/remove", map[string]any{"code": "123456", "csrfToken": sfTok}, `"Illegal argument method: required"`},
@@ -310,9 +318,12 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	// закрытом перечне.
 	require.Contains(t, domain.FormKinds(), domain.FormSessionEnd)
 	require.Equal(t, domain.FormKind("session-end"), domain.FormSessionEnd)
-	// Видов признака 16: тринадцать базы, два смены адреса (kaname#635, Р1) и
-	// один своих сессий (kaname#634, Р1).
-	require.Len(t, domain.FormKinds(), 16, "видов признака — 16 (приёмки kaname#635 и kaname#634, Р1)")
+	// Видов признака 17: тринадцать базы, два смены адреса (kaname#635, Р1),
+	// один своих сессий (kaname#634, Р1) и один выдачи испытания повышения
+	// ключом (kaname#827, Р2).
+	require.Contains(t, domain.FormKinds(), domain.FormStepUpAccessKeyBegin)
+	require.Equal(t, domain.FormKind("step-up-access-key-begin"), domain.FormStepUpAccessKeyBegin)
+	require.Len(t, domain.FormKinds(), 17, "видов признака — 17 (приёмки kaname#635, kaname#634 и kaname#827)")
 
 	stub := &stubLane{}
 	l := newLane(t, stub, "")
@@ -343,12 +354,12 @@ func TestLane_F12_41_FormKindsAreOneList(t *testing.T) {
 	} {
 		require.Contains(t, loginlanehttp.Paths(), p)
 	}
-	// Путей полосы — 23: два глагола подтверждения адреса (kaname#456, Р6),
+	// Путей полосы — 24: два глагола подтверждения адреса (kaname#456, Р6),
 	// два глагола входа ключом (Ф13, kaname#613), заведение первого пароля
 	// (kaname#213), два глагола смены адреса (kaname#635) и три глагола своих
-	// сессий (kaname#634). Число — перепись популяции, двигает его тот, кто
-	// популяцию изменил.
-	require.Len(t, loginlanehttp.Paths(), 23)
+	// сессий (kaname#634), выдача испытания повышения ключом (kaname#827).
+	// Число — перепись популяции, двигает его тот, кто популяцию изменил.
+	require.Len(t, loginlanehttp.Paths(), 24)
 }
 
 // TestLane_F12_RefusalsCarryTheirTokens — отказы глаголов семейства (Р4):
