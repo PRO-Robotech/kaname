@@ -62,6 +62,9 @@ import (
 	"context"
 	"errors"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -422,4 +425,60 @@ func systemClassReadAuthority(
 		return subjectReadDecision{lane: subjectReadClusterAdmin, resolved: resolved}, nil
 	}
 	return subjectReadDecision{lane: subjectReadSystemClass, resolved: resolved}, nil
+}
+
+// readableClassRows — строки страницы выдач системному классу, которые
+// вызывающий вправе прочитать по идентификатору (разбор CE-22 (б)).
+//
+// Правило — ТО ЖЕ, что у `Get`: право выдавать на области строки ЛИБО
+// пообъектное право на саму выдачу. Своего условия у перечня нет: выдача,
+// которую `Get` показывает, видна и в перечне, а которую не показывает — не
+// видна; два правила об одном предмете разошлись бы молча. Невидимость
+// системной выдачи у арендатора (SC-53) держится тем же: её область —
+// кластер, а право выдавать на кластере есть только у администратора облака.
+//
+// Право на область спрашивается ОДИН раз на различную область страницы, а не
+// на строку. Отказ в праве и отсутствие области — «строки не видно»; иная
+// ошибка (хранилище не ответило) — ошибка перечня, а не молча суженная
+// страница.
+func readableClassRows(
+	ctx context.Context,
+	repo Repo,
+	relations clients.RelationStore,
+	queries clients.RelationQueries,
+	rows []domain.AccessBinding,
+) ([]domain.AccessBinding, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	visible, err := visibleOnNarrowedPage(ctx, queries, bindingIDs(rows))
+	if err != nil {
+		return nil, err
+	}
+	scopeReadable := map[string]bool{}
+	out := make([]domain.AccessBinding, 0, len(rows))
+	for _, b := range rows {
+		if visible[string(b.ID)] {
+			out = append(out, b)
+			continue
+		}
+		key := string(b.ResourceType) + ":" + b.ResourceID
+		ok, asked := scopeReadable[key]
+		if !asked {
+			aerr := requireGrantAuthority(ctx, repo, relations, string(b.ResourceType), b.ResourceID)
+			switch status.Code(aerr) {
+			case codes.OK:
+				ok = true
+			case codes.PermissionDenied, codes.NotFound:
+				ok = false
+			default:
+				return nil, aerr
+			}
+			scopeReadable[key] = ok
+		}
+		if ok {
+			out = append(out, b)
+		}
+	}
+	return out, nil
 }

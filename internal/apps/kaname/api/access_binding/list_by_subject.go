@@ -98,6 +98,15 @@ func (u *ListBySubjectUseCase) Execute(ctx context.Context, subjectType domain.S
 	if !dec.lane.narrowsPage() {
 		return rows, next, nil
 	}
+	if dec.lane == subjectReadSystemClass {
+		// У класса нет дома: строка остаётся ровно тогда, когда вызывающий прочёл
+		// бы её по идентификатору (CE-22, паритет с Get).
+		visible, verr := readableClassRows(ctx, u.repo, u.relations, u.queries, rows)
+		if verr != nil {
+			return nil, "", verr
+		}
+		return visible, next, nil
+	}
 
 	// Полоса распорядителя аккаунта: строки называют ОБЛАСТЬ каждой выдачи, а
 	// области у одного субъекта бывают в разных аккаунтах. Остаются те, чью выдачу

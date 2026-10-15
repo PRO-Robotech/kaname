@@ -10,7 +10,6 @@ package access_binding_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -245,18 +244,13 @@ func TestSystemClass_SC16_ExpandAccessDoesNotListClasses(t *testing.T) {
 
 // SC-17 — перечень выдач по субъекту-классу.
 //
-// У класса нет дома (разбор CE-22): страница сужается построчно правом читать
-// каждую выдачу. Владелец читает выдачи своего аккаунта той же выдачей роли
-// владельца, что заводит сага создания аккаунта, — она заводится в Дано.
-// Отрицательный близнец (CE-22, заказан приёмке): арендатор другого аккаунта
-// чужих выдач классу не видит — страница пуста, полосы «сам» у класса нет.
+// У класса нет дома (разбор CE-22): страница сужается построчно — строка видна
+// тому, кто прочёл бы её по идентификатору (паритет с Get). Отрицательный
+// близнец (CE-22, заказан приёмке): арендатор другого аккаунта чужих выдач
+// классу не видит — страница пуста, полосы «сам» у класса нет.
 func TestSystemClass_SC17_ListBySubjectClass(t *testing.T) {
 	w := newSCWorld(t)
 	w.controlUserGrant(w.usrB, w.rolRead2)
-	w.createDone(asUser(w.ctx, w.usrA), &iamv1.CreateAccessBindingRequest{
-		Subjects: []*iamv1.Subject{userSubject(w.usrA)}, RoleId: string(domain.OwnerRoleID),
-		ScopeType: "iam.account", ScopeId: string(w.accA), Target: allInScopeTarget(),
-	}, "SC-17 Дано: выдача владельца usr-A на аккаунт")
 	authID := w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-17 Дано: SC-01")
 	anonID := w.createDone(asUser(w.ctx, w.usrA),
 		withSubjects(w.sc01Request(), classSubject("anonymous")), "SC-17 Дано: SC-07")
@@ -272,18 +266,18 @@ func TestSystemClass_SC17_ListBySubjectClass(t *testing.T) {
 		}
 		return got
 	}
-	// Право владельца на новую выдачу материализуется после фиксации (окно
-	// SC-13, раз в 200 мс до 30 с) — опрос, а не одно чтение.
-	deadline := time.Now().Add(30 * time.Second)
 	got := list(w.usrA)
-	for len(got) == 0 && time.Now().Before(deadline) {
-		time.Sleep(200 * time.Millisecond)
-		got = list(w.usrA)
-	}
 	assert.Equal(t, []string{anonID}, got, "SC-17: ровно выдача SC-07")
 	assert.NotContains(t, got, authID)
 
 	assert.Empty(t, list(w.usrC), "SC-17 близнец: арендатор acc-B выдач классу в acc-A не видит")
+
+	// Администратор облака — без сужения (полоса надзора).
+	admin := mustSeedUser(t, w.ctx, w.pool, "sc17adm")
+	verifyAddresses(t, w.ctx, w.pool)
+	_, err := w.pool.Exec(w.ctx, `SELECT kaname.restore_cluster_admin('user', $1)`, string(admin))
+	require.NoError(t, err, "SC-17 посев: кластерный администратор объявленным путём")
+	assert.Equal(t, []string{anonID}, list(admin), "SC-17: администратор облака видит выдачу классу")
 }
 
 // SC-18 — «вошедший» другого арендатора читает выданное классу в acc-A;
