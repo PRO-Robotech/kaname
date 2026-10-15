@@ -1342,12 +1342,11 @@ type registry_repository
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
     # RG-1 D-7: public read — anonymous pull of a PUBLIC repo. The owner's
-    # publication (`user:* #v_get` on the proxy input) is stored as a grant to
-    # the system class `system_class:anonymous` (kaname#829, SC-12): v_get ONLY
-    # on repos that carry that fact; absent it the class has no access → uniform
-    # 404. ONLY v_get admits the class — no write relation does (anon is a
-    # read-only floor, B14). A signed-in principal holds the anonymous class too
-    # (classification by inclusion), so a public repo stays readable after login.
+    # publication (`user:* #v_get` on the proxy input) is stored as a fact for
+    # `system_class:anonymous` (kaname#829, SC-12): v_get ONLY on repos carrying
+    # it; absent it the class has no access → uniform 404. ONLY v_get admits the
+    # class — no write relation does (read-only floor, B14). A signed-in caller
+    # holds the anonymous class too, so a public repo stays readable after login.
     # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
     # the repo owner fully manages their own repository.
     define v_get: [system_class, user, service_account, group#member] or owner or super_admin

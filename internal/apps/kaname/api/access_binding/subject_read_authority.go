@@ -62,9 +62,6 @@ import (
 	"context"
 	"errors"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -430,21 +427,22 @@ func systemClassReadAuthority(
 // readableClassRows — строки страницы выдач системному классу, которые
 // вызывающий вправе прочитать по идентификатору (разбор CE-22 (б)).
 //
-// Правило — ТО ЖЕ, что у `Get`: право выдавать на области строки ЛИБО
-// пообъектное право на саму выдачу. Своего условия у перечня нет: выдача,
-// которую `Get` показывает, видна и в перечне, а которую не показывает — не
-// видна; два правила об одном предмете разошлись бы молча. Невидимость
-// системной выдачи у арендатора (SC-53) держится тем же: её область —
-// кластер, а право выдавать на кластере есть только у администратора облака.
+// Правило — ТО ЖЕ, что у `Get`: право выдавать на области строки (владелец
+// аккаунта области либо `admin` на ней) ЛИБО пообъектное право на саму выдачу.
+// Своего условия у перечня нет: выдача, которую `Get` показывает, видна и в
+// перечне, а которую не показывает — не видна; два правила об одном предмете
+// разошлись бы молча. Невидимость системной выдачи у арендатора (SC-53)
+// держится тем же: её область — кластер, а право выдавать на кластере есть
+// только у администратора облака, чья полоса страницу не сужает вовсе.
 //
-// Право на область спрашивается ОДИН раз на различную область страницы, а не
-// на строку. Отказ в праве и отсутствие области — «строки не видно»; иная
-// ошибка (хранилище не ответило) — ошибка перечня, а не молча суженная
-// страница.
+// Стоимость страницы принадлежит запросу: ни одного вопроса к хранилищу прав
+// на строку. Пообъектное право — одной партией (`visibleOnNarrowedPage`);
+// право `admin` на области — одной партией на вид области; владелец — чтением
+// базы однажды на РАЗЛИЧНУЮ область, в одной читающей транзакции. Хранилище не
+// ответило — ошибка перечня, а не молча суженная страница.
 func readableClassRows(
 	ctx context.Context,
 	repo Repo,
-	relations clients.RelationStore,
 	queries clients.RelationQueries,
 	rows []domain.AccessBinding,
 ) ([]domain.AccessBinding, error) {
@@ -455,30 +453,132 @@ func readableClassRows(
 	if err != nil {
 		return nil, err
 	}
-	scopeReadable := map[string]bool{}
-	out := make([]domain.AccessBinding, 0, len(rows))
+	scopes := map[string][]string{} // вид области → различные идентификаторы
+	seen := map[string]bool{}
 	for _, b := range rows {
-		if visible[string(b.ID)] {
-			out = append(out, b)
+		key := string(b.ResourceType) + ":" + b.ResourceID
+		if visible[string(b.ID)] || seen[key] {
 			continue
 		}
-		key := string(b.ResourceType) + ":" + b.ResourceID
-		ok, asked := scopeReadable[key]
-		if !asked {
-			aerr := requireGrantAuthority(ctx, repo, relations, string(b.ResourceType), b.ResourceID)
-			switch status.Code(aerr) {
-			case codes.OK:
-				ok = true
-			case codes.PermissionDenied, codes.NotFound:
-				ok = false
-			default:
-				return nil, aerr
-			}
-			scopeReadable[key] = ok
+		seen[key] = true
+		if b.ResourceType == "account" || b.ResourceType == "project" {
+			scopes[string(b.ResourceType)] = append(scopes[string(b.ResourceType)], b.ResourceID)
 		}
-		if ok {
+	}
+	readable, err := scopesCallerAdministers(ctx, repo, queries, scopes)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.AccessBinding, 0, len(rows))
+	for _, b := range rows {
+		if visible[string(b.ID)] || readable[string(b.ResourceType)+":"+b.ResourceID] {
 			out = append(out, b)
 		}
 	}
 	return out, nil
+}
+
+// scopesCallerAdministers — области (аккаунт, проект), на которых вызывающий
+// держит право выдавать: владеет аккаунтом области либо держит `admin` на ней.
+// Ключ ответа — `<вид>:<идентификатор>`.
+func scopesCallerAdministers(
+	ctx context.Context,
+	repo Repo,
+	queries clients.RelationQueries,
+	scopes map[string][]string,
+) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(scopes) == 0 {
+		return out, nil
+	}
+	rd, err := repo.Reader(ctx)
+	if err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	owner := map[domain.AccountID]bool{}
+	ownsAccount := func(id domain.AccountID) (bool, error) {
+		if got, ok := owner[id]; ok {
+			return got, nil
+		}
+		acct, gerr := rd.Accounts().Get(ctx, id)
+		if gerr != nil && !errors.Is(gerr, iamerr.ErrNotFound) {
+			return false, shared.MapRepoErr(gerr)
+		}
+		got := gerr == nil && acct.OwnerUserID != "" && authzguard.IsSelf(ctx, string(acct.OwnerUserID))
+		owner[id] = got
+		return got, nil
+	}
+	for _, id := range scopes["account"] {
+		ok, oerr := ownsAccount(domain.AccountID(id))
+		if oerr != nil {
+			_ = rd.Rollback(ctx)
+			return nil, oerr
+		}
+		out["account:"+id] = ok
+	}
+	for _, id := range scopes["project"] {
+		proj, gerr := rd.Projects().Get(ctx, domain.ProjectID(id))
+		if gerr != nil {
+			if errors.Is(gerr, iamerr.ErrNotFound) {
+				continue
+			}
+			_ = rd.Rollback(ctx)
+			return nil, shared.MapRepoErr(gerr)
+		}
+		ok, oerr := ownsAccount(proj.AccountID)
+		if oerr != nil {
+			_ = rd.Rollback(ctx)
+			return nil, oerr
+		}
+		out["project:"+id] = ok
+	}
+	_ = rd.Rollback(ctx)
+
+	subject, ok := authzguard.PrincipalSubject(ctx)
+	if !ok || subject == "" || queries == nil {
+		return out, nil
+	}
+	// Два вида области — два вопроса партией, по одному на вид: партия судит
+	// объекты ОДНОГО типа.
+	ask := unownedScopes(out, scopes)
+	if err := markAdministered(ctx, queries, subject, ask["account"], out); err != nil {
+		return nil, err
+	}
+	if err := markAdministered(ctx, queries, subject, ask["project"], out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// unownedScopes — объекты модели областей, право на которые владением не
+// решено и спрашивается отношением `admin`.
+func unownedScopes(owned map[string]bool, scopes map[string][]string) map[string][]string {
+	ask := map[string][]string{}
+	for kind, ids := range scopes {
+		for _, id := range ids {
+			if !owned[kind+":"+id] {
+				ask[kind] = append(ask[kind], fgaAdminObject(kind, id))
+			}
+		}
+	}
+	return ask
+}
+
+// markAdministered — ОДИН вопрос партией `admin` об объектах одного вида;
+// разрешённые помечаются в out.
+func markAdministered(ctx context.Context, queries clients.RelationQueries, subject string,
+	objects []string, out map[string]bool) error {
+	if len(objects) == 0 {
+		return nil
+	}
+	allowed, err := queries.BatchCheckWithContext(ctx, subject, "admin", objects, nil)
+	if err != nil {
+		return authzguard.AuthzBackendUnavailable()
+	}
+	for i, obj := range objects {
+		if i < len(allowed) && allowed[i] {
+			out[obj] = true
+		}
+	}
+	return nil
 }

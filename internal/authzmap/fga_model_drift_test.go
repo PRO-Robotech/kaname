@@ -135,6 +135,8 @@ var tierOnlyObjectTypes = map[string]bool{}
 //     resource, it is the D-9 super-admin short-circuit anchor. С kacho#914 он несёт и
 //     `fga_writer` — право модуля писать кортежи, переехавшее сюда с якоря вне
 //     иерархии: там оно не выражалось выдачей и не поддавалось отзыву.
+//   - system_class — вид субъекта «системный класс» (kaname#829): слева в
+//     факте, как user и service_account; объектом прав не бывает.
 //   - iam_fgaproxy — ИСТОРИЧЕСКИЙ якорь того же права. Живых фактов на нём нет
 //     (kacho#914 их снял), но выдают его уже ПРИМЕНЁННЫЕ миграции, а применённую
 //     миграцию не правят: тип обязан оставаться объявленным, пока они в цепи.
@@ -144,6 +146,7 @@ var nonGrantableModelTypes = map[string]string{
 	"group":           "subject-set type for group#member usersets (the grantable resource is iam_group)",
 	"cluster":         "platform singleton cluster:cluster_root — super-admin ladder anchor, not a grantable resource",
 	"iam_fgaproxy":    "исторический якорь права писать кортежи: живых фактов нет (kacho#914), но его выдают уже применённые миграции",
+	"system_class":    "вид субъекта «системный класс» (anonymous|authenticated, kaname#829): стоит слева в факте, объектом прав не бывает",
 }
 
 // canonicalModelRelPath — the canonical authorization model, relative to the

@@ -57,8 +57,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // ListQuery — вопрос «какие объекты этого типа доступны субъекту».
@@ -151,9 +149,16 @@ WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
     -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
     -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
     -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
-    -- получает (SC-10), группа — ничего (SC-11).
-    SELECT split_part(c, ':', 1), substr(c, length(split_part(c, ':', 1)) + 2), 'class'
-      FROM unnest($10::text[]) AS c
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят ДВУМЯ СКАЛЯРАМИ, а не массивом: строки с постоянным
+    -- видом и одним параметром планировщик оценивает одной строкой и идёт в
+    -- индекс субъекта, как шёл за прежней постоянной подстановкой; развёртка
+    -- массива оценивается десятью строками и уводит соединение в полный
+    -- просмотр субъектов (замер — проба объёма матрицы). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class'
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class'
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -170,7 +175,9 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT c FROM unnest($10::text[]) AS c
+    SELECT 'system_class:' || $10::text
+  UNION
+    SELECT 'system_class:' || $11::text
 ),
 candidate(object_id, labels) AS (
     -- ЗДЕСЬ СХОДЯТСЯ ДВА СВОЙСТВА, И НИ ОДНО ИЗ НИХ НЕ ВЫВОДИТСЯ ИЗ ДРУГОГО.
@@ -430,7 +437,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType, domain.SpeakerClasses(in.Subject))
+		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

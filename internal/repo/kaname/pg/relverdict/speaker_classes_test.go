@@ -39,11 +39,31 @@ func TestSystemClass_VerbFilterMatchesTheDomainRule(t *testing.T) {
 		if !strings.Contains(sql, classVerbFilterSQL) {
 			t.Errorf("форма «%s»: ветвь выдач без фильтра класса", name)
 		}
-		if !strings.Contains(sql, "unnest($10::text[])") {
-			t.Errorf("форма «%s»: классы говорящего не приходят параметром", name)
+		if !strings.Contains(sql, "'system_class', $10::text") || !strings.Contains(sql, "'system_class', $11::text") {
+			t.Errorf("форма «%s»: классы говорящего не приходят параметрами", name)
 		}
 		if strings.Contains(sql, "'user:*'") || strings.Contains(sql, "'wildcard'") {
 			t.Errorf("форма «%s»: безусловная подстановка не снята", name)
+		}
+	}
+}
+
+// TestSystemClass_ClassSlotsCarryEveryClass — двух слотов хватает на всё, что
+// отдаёт производитель классов: слот, которого нет, потерял бы класс молча.
+func TestSystemClass_ClassSlotsCarryEveryClass(t *testing.T) {
+	for _, sp := range []string{"user:usr-1", "service_account:sva-1", "system_class:anonymous", "user:*", "group:g#member"} {
+		classes := domain.SpeakerClasses(sp)
+		if len(classes) > 2 {
+			t.Fatalf("классов у %q %d, слотов 2", sp, len(classes))
+		}
+		var got []string
+		for i := 0; i < 2; i++ {
+			if c := classSlot(sp, i); c != "" {
+				got = append(got, string(domain.SubjectTypeSystemClass)+":"+c)
+			}
+		}
+		if !slices.Equal(got, classes) && !(len(got) == 0 && len(classes) == 0) {
+			t.Errorf("слоты %q = %v, классы %v", sp, got, classes)
 		}
 	}
 }

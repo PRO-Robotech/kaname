@@ -262,3 +262,37 @@ func TestSystemClass_SC44_MoveMigrationIsRepeatable(t *testing.T) {
 	assert.Equal(t, []string{"system_class", "authenticated"}, []string{st2, sid2}, "SC-44: состояние SC-40 после повтора")
 	assert.Equal(t, []string{st1, sid1}, []string{st2, sid2})
 }
+
+// CE-21 — переезд не знает написания якоря кластера: на установке, где якорь
+// переписан (`kaname.rename_cluster_anchor`), системная выдача и её факты
+// переезжают так же, как на П2 (близнец — SC-40/SC-43 на якоре как есть).
+// Предикат с литералом якоря переписал бы здесь ноль строк и прошёл молча.
+func TestSystemClass_CE21_MoveFollowsARenamedClusterAnchor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	p := openP2(t)
+	var anchor string
+	require.NoError(t, p.db.QueryRow(`SELECT kaname.cluster_anchor()`).Scan(&anchor), "якорь П2")
+	const renamed = "cluster_ce21_elsewhere"
+	_, err := p.db.Exec(`SELECT * FROM kaname.rename_cluster_anchor($1, $2)`, anchor, renamed)
+	require.NoError(t, err, "CE-21 Дано: якорь переписан объявленным переписчиком")
+	require.Equal(t, map[string]int{
+		"access_bindings": 1, "access_binding_subjects": 1, "access_binding_emitted_tuples": 1, "relation_fact": 1,
+	}, wildcardCensus(t, p.db), "CE-21 Дано: подстановка стоит на переписанном якоре")
+
+	require.NoError(t, goose.Up(p.db, "."), "CE-21: накат")
+	assert.Equal(t, map[string]int{
+		"access_bindings": 0, "access_binding_subjects": 0, "access_binding_emitted_tuples": 0, "relation_fact": 0,
+	}, wildcardCensus(t, p.db), "CE-21: подстановки не осталось")
+	var facts int
+	require.NoError(t, p.db.QueryRow(`
+		SELECT count(*) FROM kaname.relation_fact
+		 WHERE object_type = 'cluster' AND object_id = $1 AND relation = 'viewer'
+		   AND subject = 'system_class:authenticated'`, renamed).Scan(&facts))
+	assert.Equal(t, 1, facts, "CE-21: факт чтения справочников переехал на класс на переписанном якоре")
+	var st, sid, rid string
+	require.NoError(t, p.db.QueryRow(`SELECT subject_type, subject_id, resource_id FROM kaname.access_bindings WHERE id = $1`,
+		scSystemGrant).Scan(&st, &sid, &rid))
+	assert.Equal(t, []string{"system_class", "authenticated", renamed}, []string{st, sid, rid}, "CE-21: системная выдача")
+}

@@ -102,7 +102,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
-	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // MaxAncestorDepth — предел обхода цепи предков.
@@ -343,9 +342,16 @@ speaker_pair(s_type, s_id, via) AS (
     -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
     -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
     -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
-    -- получает (SC-10), группа — ничего (SC-11).
-    SELECT split_part(c, ':', 1), substr(c, length(split_part(c, ':', 1)) + 2), 'class'
-      FROM unnest($10::text[]) AS c
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят ДВУМЯ СКАЛЯРАМИ, а не массивом: строки с постоянным
+    -- видом и одним параметром планировщик оценивает одной строкой и идёт в
+    -- индекс субъекта, как шёл за прежней постоянной подстановкой; развёртка
+    -- массива оценивается десятью строками и уводит соединение в полный
+    -- просмотр субъектов (замер — проба объёма матрицы). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class'
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class'
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -362,7 +368,9 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT c FROM unnest($10::text[]) AS c
+    SELECT 'system_class:' || $10::text
+  UNION
+    SELECT 'system_class:' || $11::text
 ),
 fact_atom(parent_type, relation) AS (
     -- Источники-факты плана: где искать и что искать. Пустой тип предка означает
@@ -660,7 +668,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, domain.SpeakerClasses(in.Subject),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
@@ -882,9 +890,16 @@ speaker_pair(s_type, s_id, via) AS (
     -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
     -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
     -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
-    -- получает (SC-10), группа — ничего (SC-11).
-    SELECT split_part(c, ':', 1), substr(c, length(split_part(c, ':', 1)) + 2), 'class'
-      FROM unnest($10::text[]) AS c
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят ДВУМЯ СКАЛЯРАМИ, а не массивом: строки с постоянным
+    -- видом и одним параметром планировщик оценивает одной строкой и идёт в
+    -- индекс субъекта, как шёл за прежней постоянной подстановкой; развёртка
+    -- массива оценивается десятью строками и уводит соединение в полный
+    -- просмотр субъектов (замер — проба объёма матрицы). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class'
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class'
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов. Обе формы имени группы: канонический
@@ -895,7 +910,9 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT c FROM unnest($10::text[]) AS c
+    SELECT 'system_class:' || $10::text
+  UNION
+    SELECT 'system_class:' || $11::text
 ),
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($4::text[], $5::text[])
@@ -993,7 +1010,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	rows, err := q.Query(ctx, verdictManyQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, domain.SpeakerClasses(in.Subject),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)
