@@ -79,7 +79,7 @@ func akKey(user domain.UserID, cred string) domain.AccessKey {
 		ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: user,
 		CredentialID: []byte(fmt.Sprintf("%-32s", cred)), PublicKey: []byte{0xa5, 0x01, 0x02},
 		Algorithm: -7, UserHandle: akHandle(), Name: "", Description: "проба",
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: time.Now().UTC(), Discoverability: domain.DiscoverabilityConfirmed,
 	}
 }
 
@@ -497,6 +497,54 @@ func TestAccessKeyRepo_F7_31_AttestationHasNoColumn(t *testing.T) {
 	var live int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='kaname' AND table_name='user_access_keys' AND column_name='public_key'`).Scan(&live))
 	require.Equal(t, 1, live, "живой близнец: столбец открытого ключа есть")
+}
+
+// TestAccessKeyRepo_F7_57_DiscoverabilityRoundTripsThreeStates — на настоящей
+// базе признак обнаружимости хранится ТРЕМЯ различимыми состояниями (Р12):
+// каждое кладётся писателем продукта и читается обратно тем же значением —
+// и чтением пула, и чтением под замком транзакции снятия (его читает страж,
+// Ф7-56). Вне перечня — отказ схемы 23514; строка без признака — отказ
+// NOT NULL 23502: умолчания у колонки нет, «не сообщено» молча не ставится.
+func TestAccessKeyRepo_F7_57_DiscoverabilityRoundTripsThreeStates(t *testing.T) {
+	pool := akPool(t)
+	akCeiling(t, pool, 10)
+	repo := pg.NewAccessKeyRepo(pool)
+	people := lmPeople(t, pool, "ak57", 1)
+	ctx := context.Background()
+
+	want := map[domain.AccessKeyID]domain.Discoverability{}
+	for i, d := range domain.AccessKeyDiscoverabilities() {
+		k := akKey(people[0], fmt.Sprintf("ak57-cred-%d", i))
+		k.Discoverability = d
+		got := akInsert(t, repo, k)
+		require.Equal(t, d, got.Discoverability, "RETURNING несёт записанное")
+		read, ok, err := repo.KeyByCredentialID(ctx, k.CredentialID)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, d, read.Discoverability, "чтение пула несёт записанное")
+		want[got.ID] = d
+	}
+	require.Len(t, want, 3)
+
+	w, err := repo.RevokeWriter(ctx, people[0])
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	locked, err := w.LockKeysOf(ctx, people[0])
+	require.NoError(t, err)
+	require.Len(t, locked, 3)
+	for _, k := range locked {
+		require.Equal(t, want[k.ID], k.Discoverability, "чтение под замком несёт записанное")
+	}
+	require.NoError(t, w.Rollback(ctx))
+
+	_, err = pool.Exec(ctx, `UPDATE user_access_keys SET discoverability = 'maybe' WHERE user_id = $1`, string(people[0]))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "user_access_keys_discoverability_check", "перечень закрыт схемой")
+	_, err = pool.Exec(ctx, `
+		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, name)
+		VALUES ('ak-0000000000000057z', $1, $2, '\x01', -7, 'no-flag')`, string(people[0]), []byte("ak57-credential-without-the-flag"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "23502", "умолчания нет: строка без признака отвергается")
 }
 
 func TestAccessKeyRepo_AlgorithmDictionaryAgreesWithTheVerifier(t *testing.T) {

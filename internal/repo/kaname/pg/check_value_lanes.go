@@ -465,6 +465,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"user_access_keys_sign_count_check",
 		},
 		service: []string{
+			"user_access_keys_discoverability_check",
 			"user_access_keys_id_form_check",
 			"user_access_keys_name_check",
 			"user_access_keys_user_handle_check",

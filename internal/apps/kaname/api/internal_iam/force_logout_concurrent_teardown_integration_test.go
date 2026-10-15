@@ -55,6 +55,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -178,11 +179,24 @@ type concurrencyScene struct {
 	refusals *storeRefusalLog
 }
 
+// sceneMaxConns — предел пула сцены, названный явно. Умолчание драйвера —
+// max(4, runtime.NumCPU()), то есть ширина сцены зависела от исполнителя: на
+// исполнителе конвейера в 4 процессора пул вмещал держателя и трёх ждущих, а
+// остальные участники ждали СОЕДИНЕНИЯ пула, не замка базы, и держатель их не
+// видел («видя ждущих замка 3 из 7», RCL-02 при N = 8; воспроизведено
+// `taskset -c 0-3`). Шестнадцать — с запасом над самой широкой сценой пакета
+// (RCL-02: восемь участников); недостаток предела для взведённой сцены
+// называет `armOneShotHold` отказом фикстуры.
+const sceneMaxConns = 16
+
 func newConcurrencyScene(t *testing.T) *concurrencyScene {
 	t.Helper()
 	ctx := context.Background()
 	dsn := iampgtest.NewTestPostgres(t)
-	pool, err := coredb.NewPool(ctx, dsn)
+	// Предел — только у пула: `pool_max_conns` читает разбор пула, а простое
+	// соединение по `dsn` (чтение статистики после закрытия пула) отдало бы
+	// его серверу неизвестным параметром.
+	pool, err := coredb.NewPool(ctx, dsn+"&pool_max_conns="+strconv.Itoa(sceneMaxConns))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	log := &storeRefusalLog{}
@@ -312,6 +326,13 @@ func installOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, n
 func armOneShotHold(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string, want int) {
 	t.Helper()
 	require.Positive(t, want, "фикстура: сцене задержки нужен хотя бы один ждущий")
+	// Держатель и каждый ждущий занимают по соединению пула на всё время сцены;
+	// участник сверх предела ждёт соединения, а не замка, и держатель его не
+	// увидит — сцена не построится ни при каком сроке.
+	if limit := int(pool.Config().MaxConns); want+1 > limit {
+		t.Fatalf("отказ фикстуры: сцене задержки %s нужны держатель и %d ждущих — %d соединений, а пул вмещает %d, "+
+			"— сцена конкуренции не построится, вердикта о предмете нет", name, want, want+1, limit)
+	}
 	for _, q := range []string{
 		`SELECT setval('kaname.` + name + `_seen', 0, false)`,
 		`SELECT setval('kaname.` + name + `_held_ms', 0, false)`,

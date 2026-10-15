@@ -45,7 +45,7 @@ func newRecordingObserver() *recordingObserver {
 	return &recordingObserver{outcomes: map[string]int{}}
 }
 
-func (o *recordingObserver) IncInviteMailOutcome(outcome string) {
+func (o *recordingObserver) IncInviteMailOutcome(_, outcome string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.outcomes[outcome]++

@@ -48,6 +48,13 @@ func renderProdRaw(t *testing.T, sets ...string) (string, error) {
 	return string(out), err
 }
 
+// installMailSets — узел и отправитель установки: профиль несёт и их заглушки,
+// и их отказ (kaname#733) судит `mail_lane_undeliverable_test.go`, а не эти пробы.
+var installMailSets = []string{
+	"inviteMail.relay=" + installMailRelayForRender,
+	"inviteMail.from=" + installMailFromForRender,
+}
+
 // TestShippedProfileCarriesTheDomainPlaceholder — предпосылка Р1.
 func TestShippedProfileCarriesTheDomainPlaceholder(t *testing.T) {
 	raw, err := os.ReadFile("values.prod.yaml")
@@ -66,24 +73,24 @@ func TestShippedProfileCarriesTheDomainPlaceholder(t *testing.T) {
 // TestDomainPlaceholderIsRefusedAtInstall — Р1, Р2, Р3.
 func TestDomainPlaceholderIsRefusedAtInstall(t *testing.T) {
 	t.Run("профиль как есть", func(t *testing.T) {
-		out, err := renderProdRaw(t)
+		out, err := renderProdRaw(t, installMailSets...)
 		require.Errorf(t, err, "профиль с оставленной заглушкой домена отрендерился — обещанного отказа нет")
 		require.Contains(t, out, "authn.domain", "отказ не называет ключа — оператору нечего сделать")
 	})
 	for _, v := range []string{"ACCESS.Example.INVALID", "access.example.invalid.", "kaname.invalid", "invalid"} {
 		t.Run("форма "+v, func(t *testing.T) {
-			out, err := renderProdRaw(t, "authn.domain="+v)
+			out, err := renderProdRaw(t, append([]string{"authn.domain=" + v}, installMailSets...)...)
 			require.Errorf(t, err, "заглушка %q прошла рендер", v)
 			require.Contains(t, out, "authn.domain")
 		})
 	}
 	t.Run("домен установки", func(t *testing.T) {
-		out, err := renderProdRaw(t, "authn.domain="+installDomainForRender)
+		out, err := renderProdRaw(t, append([]string{"authn.domain=" + installDomainForRender}, installMailSets...)...)
 		require.NoErrorf(t, err, "профиль с доменом установки не отрендерился:\n%s", out)
 		require.Contains(t, out, `domain: "`+installDomainForRender+`"`, "в карту настроек уехал не домен установки")
 	})
 	t.Run("имя, лишь содержащее invalid", func(t *testing.T) {
-		out, err := renderProdRaw(t, "authn.domain=invalid.kaname.local")
+		out, err := renderProdRaw(t, append([]string{"authn.domain=invalid.kaname.local"}, installMailSets...)...)
 		require.NoErrorf(t, err, "имя вне зоны .invalid отвергнуто — признак судит строку, а не зону:\n%s", out)
 	})
 }

@@ -152,6 +152,9 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 		Algorithm: int64(res.Algorithm), SignCount: res.SignCount,
 		Name:        domain.AccessKeyName(corevalidate.NameOrDefault(in.Name, string(keyID))),
 		Description: domain.AccessKeyDescription(in.Description), CreatedAt: now,
+		// Признак пишется здесь и ниоткуда больше: расширение приходит один
+		// раз (Р12); «не сообщено» — своё состояние, а не «нет».
+		Discoverability: domain.DiscoverabilityFromExtension(in.Discoverable),
 	}
 	if err := key.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
@@ -176,7 +179,8 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 // commit — ОДНА транзакция: рукоятка человека, потребление испытания, строка,
 // событие.
 func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.AccessKey, user domain.User, challenge []byte, actor string, now time.Time) (*anypb.Any, error) {
-	w, err := uc.deps.Store.Writer(ctx)
+	// Строка личности — первой (kaname#775): до рукоятки и испытания.
+	w, err := uc.deps.Store.RegistrationWriter(ctx, key.UserID)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.writer", err)
 	}

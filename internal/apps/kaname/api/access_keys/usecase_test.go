@@ -92,6 +92,13 @@ func (h *harness) finishRegistration(in access_keys.FinishRegistrationInput) (*o
 // registerKey — Ф7-01 целиком: испытание → результат → операция → строка.
 func (h *harness) registerKey(user domain.UserID, a *webauthntest.Authenticator, o webauthntest.RegistrationOptions) (*operations.Operation, error) {
 	h.t.Helper()
+	return h.registerKeyRK(user, a, o, nil)
+}
+
+// registerKeyRK — то же заведение с названным расширением `credProps.rk`
+// (nil — расширения в результате нет, Ф7-41 третья сторона).
+func (h *harness) registerKeyRK(user domain.UserID, a *webauthntest.Authenticator, o webauthntest.RegistrationOptions, rk *bool) (*operations.Operation, error) {
+	h.t.Helper()
 	ch := h.beginRegistration(user)
 	if o.Challenge == nil {
 		o.Challenge = ch.Challenge
@@ -104,12 +111,24 @@ func (h *harness) registerKey(user domain.UserID, a *webauthntest.Authenticator,
 	}
 	cd, att := a.Register(h.t, o)
 	op, err := h.finishRegistration(access_keys.FinishRegistrationInput{
-		UserID: user, Actor: user, CredentialID: a.CredentialID(), ClientDataJSON: cd, AttestationObject: att,
+		UserID: user, Actor: user, CredentialID: a.CredentialID(), ClientDataJSON: cd, AttestationObject: att, Discoverable: rk,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return h.ops.await(h.t, op.ID), nil
+}
+
+// mustRegisterRK — принятый ключ с названным расширением обнаружимости.
+func (h *harness) mustRegisterRK(user domain.UserID, a *webauthntest.Authenticator, rk *bool) domain.AccessKey {
+	h.t.Helper()
+	op, err := h.registerKeyRK(user, a, webauthntest.RegistrationOptions{}, rk)
+	require.NoError(h.t, err)
+	require.Nil(h.t, op.Error, "операция заведения упала: %v", op.Error)
+	k, ok, err := h.store.KeyByCredentialID(h.ctx(), a.CredentialID())
+	require.NoError(h.t, err)
+	require.True(h.t, ok)
+	return k
 }
 
 func (h *harness) mustRegister(user domain.UserID, a *webauthntest.Authenticator) domain.AccessKey {
@@ -879,6 +898,111 @@ func TestAccessKey_F7_26_LastSignInMethodIsNotRevoked(t *testing.T) {
 	require.Nil(t, op.Error)
 }
 
+// TestAccessKey_F7_56_GuardCountsPresentableKeysNotRows — страж последнего
+// способа входа считает ГОДНЫЕ к предъявлению ключи, а не строки (Р12).
+// Человек без пароля с двумя ключами: «подтверждённо обнаружим» и «не
+// сообщено». Снятие первого — отказ Ф7-26 (годных осталось бы ноль, строк —
+// одна); снятие второго — проходит (судится годность, не порядок). Второй
+// положительный контроль — оба годны: снимается любой.
+func TestAccessKey_F7_56_GuardCountsPresentableKeysNotRows(t *testing.T) {
+	t.Parallel()
+	yes := true
+	t.Run("presentable-is-refused-unreported-passes", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t)
+		h.meth.password[alice] = false
+		a1 := webauthntest.New(t, webauthntest.AlgES256)
+		a2 := webauthntest.New(t, webauthntest.AlgES256)
+		k1 := h.mustRegisterRK(alice, a1, &yes)
+		k2 := h.mustRegisterRK(alice, a2, nil)
+		require.Equal(t, domain.DiscoverabilityConfirmed, k1.Discoverability)
+		require.Equal(t, domain.DiscoverabilityUnreported, k2.Discoverability)
+
+		_, err := h.revoke(alice, string(k1.ID))
+		requireReason(t, err, codes.FailedPrecondition, access_keys.ReasonLastSignInMethod)
+		require.Contains(t, err.Error(), "enrol another sign-in method")
+		require.Equal(t, 2, h.store.keyCount(alice), "оба ключа на месте")
+		_, err = h.assertWith(alice, a1, webauthntest.AssertionOptions{})
+		require.NoError(t, err, "годный ключ не снят")
+		_, err = h.assertWith(alice, a2, webauthntest.AssertionOptions{})
+		require.NoError(t, err, "второй ключ не снят")
+		require.Empty(t, h.store.auditOf(access_keys.AuditAccessKeyRevoked))
+
+		op, err := h.revoke(alice, string(k2.ID))
+		require.NoError(t, err)
+		require.Nil(t, op.Error, "снятие негодного проходит: %v", op.Error)
+		require.Equal(t, 1, h.store.keyCount(alice))
+		_, err = h.assertWith(alice, a1, webauthntest.AssertionOptions{})
+		require.NoError(t, err, "годный ключ жив")
+	})
+	t.Run("two-presentable-either-is-revoked", func(t *testing.T) {
+		t.Parallel()
+		for _, first := range []bool{true, false} {
+			h := newHarness(t)
+			h.meth.password[alice] = false
+			k1 := h.mustRegisterRK(alice, webauthntest.New(t, webauthntest.AlgES256), &yes)
+			k2 := h.mustRegisterRK(alice, webauthntest.New(t, webauthntest.AlgES256), &yes)
+			target := k2
+			if first {
+				target = k1
+			}
+			op, err := h.revoke(alice, string(target.ID))
+			require.NoError(t, err)
+			require.Nil(t, op.Error, "снятие одного из двух годных проходит: %v", op.Error)
+			require.Equal(t, 1, h.store.keyCount(alice))
+		}
+	})
+}
+
+// TestAccessKey_F7_57_DiscoverabilityHasThreeDistinguishableStates — область
+// значений признака — ТРИ состояния, попарно различимых (Р12). Приём
+// церемонии пишет два («обнаружим» и «не сообщено»), третье («подтверждённо
+// необнаружим») ВЫРАЗИМО — строка, которой оно положено, его и несёт; писателя
+// у него нет (Ф7-41 отвергает такой результат). Перепись печатается парой.
+func TestAccessKey_F7_57_DiscoverabilityHasThreeDistinguishableStates(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	yes, no := true, false
+	written := map[domain.Discoverability]bool{}
+	for _, rk := range []*bool{&yes, nil, &no} {
+		op, err := h.registerKeyRK(alice, webauthntest.New(t, webauthntest.AlgES256), webauthntest.RegistrationOptions{}, rk)
+		if err != nil {
+			requireReason(t, err, codes.InvalidArgument, access_keys.ReasonNotDiscoverable)
+			continue
+		}
+		require.Nil(t, op.Error)
+	}
+	for _, k := range h.list(alice) {
+		written[k.Discoverability] = true
+	}
+	// Третье состояние кладётся записью — попыткой положить его в строку.
+	w, err := h.store.Writer(h.ctx())
+	require.NoError(t, err)
+	put := domain.AccessKey{
+		ID: "ak-0000000000000000n", UserID: alice, CredentialID: []byte("not-discoverable-credential-0001"),
+		PublicKey: []byte{1}, Algorithm: -7, Name: "nd", CreatedAt: h.now, Discoverability: domain.DiscoverabilityNotDiscoverable,
+	}
+	_, err = w.InsertKey(h.ctx(), put)
+	require.NoError(t, err, "третье состояние выразимо")
+	require.NoError(t, w.Commit(h.ctx()))
+	got, ok, err := h.store.KeyByCredentialID(h.ctx(), put.CredentialID)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	states := domain.AccessKeyDiscoverabilities()
+	require.Len(t, states, 3)
+	seen := map[domain.Discoverability]bool{}
+	for _, s := range states {
+		require.NoError(t, s.Validate())
+		require.False(t, seen[s], "состояния попарно различимы")
+		seen[s] = true
+	}
+	require.Equal(t, domain.DiscoverabilityNotDiscoverable, got.Discoverability)
+	require.Equal(t, map[domain.Discoverability]bool{domain.DiscoverabilityConfirmed: true, domain.DiscoverabilityUnreported: true}, written)
+	t.Logf("состояний области значений %d · состояний, у которых есть писатель, %d", len(states), len(written))
+	require.Error(t, domain.Discoverability("").Validate(), "пустое — не состояние")
+}
+
 // TestAccessKey_F7_27_ForeignAndAbsentAreOneRefusal — чужой ключ и несуществующий
 // годной формы: отказы побайтово равны, ключ второго на месте.
 func TestAccessKey_F7_27_ForeignAndAbsentAreOneRefusal(t *testing.T) {
@@ -937,8 +1061,11 @@ func TestAccessKey_Revoke_StoreReadFaultIsInternalOnTheLastMethodLane(t *testing
 	t.Parallel()
 	h := newHarness(t)
 	h.meth.password[alice] = false
-	k1 := h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
-	h.mustRegister(alice, webauthntest.New(t, webauthntest.AlgES256))
+	// Оба ключа годны к предъявлению (Р12): законный близнец ниже — снятие,
+	// которое страж пропускает, а не отказ по признаку.
+	yes := true
+	k1 := h.mustRegisterRK(alice, webauthntest.New(t, webauthntest.AlgES256), &yes)
+	h.mustRegisterRK(alice, webauthntest.New(t, webauthntest.AlgES256), &yes)
 
 	h.store.mu.Lock()
 	h.store.keysOfFailFrom = h.store.keysOfCalls + 2
