@@ -393,3 +393,63 @@ func TestEmailChangeDeps_RefuseToBuildWithoutTheirValues(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+// TestEmailChange_RequiredFieldIsNamedBeforeTheSession — незаполненное
+// обязательное поле называется ДО суждения о сессии, как у соседей полосы
+// (заведение пароля, повышение, завершение сессий) и как говорит страница
+// «Форма запроса и ответа» (kaname#739): без сессии и без поля оба глагола
+// смены отвечают отказом поля, а не отказом аутентификации, и хранилище не
+// спрашивают. Близнец — то же без сессии, но с полем: отказ аутентификации.
+func TestEmailChange_RequiredFieldIsNamedBeforeTheSession(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field string
+		want  string
+		call  func(d humansession.EmailChangeDeps, b domain.SessionBearer, value string) error
+	}{
+		{"запрос смены", "newEmail", "Illegal argument newEmail: required",
+			func(d humansession.EmailChangeDeps, b domain.SessionBearer, v string) error {
+				uc, err := humansession.NewRequestEmailChangeUseCase(d)
+				if err != nil {
+					return err
+				}
+				_, err = uc.Execute(context.Background(), humansession.RequestEmailChangeInput{Bearer: b, NewEmail: v})
+				return err
+			}},
+		{"предъявление кода", "code", "Illegal argument code: required",
+			func(d humansession.EmailChangeDeps, b domain.SessionBearer, v string) error {
+				uc, err := humansession.NewConfirmEmailChangeUseCase(d)
+				if err != nil {
+					return err
+				}
+				_, err = uc.Execute(context.Background(), humansession.ConfirmEmailChangeInput{Bearer: b, Code: v})
+				return err
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, absent := range []string{"", "   "} {
+				for _, bearer := range []struct {
+					name  string
+					value func(t *testing.T) domain.SessionBearer
+					store func(s *ecStore)
+				}{
+					{"носителя нет", func(*testing.T) domain.SessionBearer { return domain.SessionBearer{} }, func(*ecStore) {}},
+					{"сессия снята", func(t *testing.T) domain.SessionBearer {
+						b, err := domain.NewSessionBearer()
+						require.NoError(t, err)
+						return b
+					}, func(s *ecStore) { s.reason = humansession.NoSessionEnded }},
+				} {
+					s, _ := newECStore(t)
+					bearer.store(s)
+					err := tc.call(ecDeps(s), bearer.value(t), absent)
+					require.EqualError(t, err, tc.want, "%s, %s, поле %q", tc.name, bearer.name, absent)
+					require.Zero(t, s.opened, "отказ поля транзакции не открывает")
+				}
+			}
+			s, _ := newECStore(t)
+			err := tc.call(ecDeps(s), domain.SessionBearer{}, "new@example.test")
+			require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "близнец: поле есть, сессии нет")
+		})
+	}
+}
