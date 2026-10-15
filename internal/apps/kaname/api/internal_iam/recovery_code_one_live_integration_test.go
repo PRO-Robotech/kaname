@@ -6,13 +6,14 @@ package internal_iam_test
 // recovery_code_one_live_integration_test.go — у личности один живой код
 // восстановления и под конкуренцией тоже (задача PRO-Robotech/kaname#776;
 // приёмка `docs/engineering/acceptance/recovery-code-one-live-per-person.md`,
-// редакция 3, сценарии RCL-02 и RCL-05).
+// редакция 3, сценарии RCL-02…RCL-05).
 //
 // Сцены построены однократной задержкой на снятии кодов (`installOneShotHold`
 // на `recovery_codes`, `DELETE`; сцены перекрытия со сменой адреса — под
-// именем `recoveryLockOrderHold`, которое взводит `runRecoveryOverlap`): держатель снял коды и спит, не
+// именем `recoveryLockOrderHold`, которое взводит `runRecoveryOverlap`;
+// RCL-03 — задержкой с явным отпуском): держатель снял коды и спит, не
 // зафиксировавшись, пока прочие участники не встанут в ожидание ЗАМКА; не
-// встали — отказ фикстуры (`requireHoldSceneBuilt`), а не вердикт о предмете.
+// встали — отказ фикстуры, а не вердикт о предмете.
 
 import (
 	"context"
