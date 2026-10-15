@@ -185,12 +185,25 @@ docker login registry.kacho.local -u <id удостоверения> -p <стр�
   </tbody>
 </table>
 
+**Кто предъявляет выпуск.** `Issue` несёт порог уровня аутентификации `2`, и предъявитель
+выбирается по нему, а не по удобству:
+
+- **человек** — интерактивной сессией уровня `2` (печенье `kaname_session`, как на странице
+  [Первое удостоверение](/first-credential)); его базовый токен даёт уровень `1` и получает
+  отказ `401`;
+- **другая служебная учётка** — своим базовым токеном: машинный принципал от порога
+  освобождён и судится только отношением `v_update` на целевой учётке.
+
+Примеры ниже показывают оба случая: первый — служебной учёткой (`$SA_TOKEN` — её базовый
+токен), второй — сессией человека (`$SESSION_COOKIE`).
+
 **Базовый токен доступа** — вид, которым CI ходит в реестр и на край:
 
 <CodeBlock language="bash">
   {dedent`
+    # базовый токен служебной учётки с v_update на цели — от порога освобождена
     curl -X POST 'http://localhost:18080/iam/v1/serviceAccounts/svavn8sraky9vgh0ygc8/keys' \\
-      -H "Authorization: Bearer $TOKEN" \\
+      -H "Authorization: Bearer $SA_TOKEN" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "credentialKind": "CREDENTIAL_KIND_SECRET",
@@ -219,8 +232,9 @@ docker login registry.kacho.local -u <id удостоверения> -p <стр�
 
 <CodeBlock language="bash">
   {dedent`
+    # интерактивной сессией человека уровня 2 — не базовым токеном человека
     curl -X POST 'http://localhost:18080/iam/v1/serviceAccounts/svavn8sraky9vgh0ygc8/keys' \\
-      -H "Authorization: Bearer $TOKEN" \\
+      -H "Cookie: $SESSION_COOKIE" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "credentialKind": "CREDENTIAL_KIND_KEYPAIR",
@@ -350,10 +364,16 @@ Step-up (`required_acr_min=2`) стоит на **мутациях**: выпус�
 (`uoc…`). Им заполняются `iss` и `sub` подписанного `client_assertion` при обмене на
 access-токен. Второго имени у токена нет.
 
+Выпуск предъявляется **интерактивной сессией уровня `2`** — той, которой получено первое
+удостоверение ([Первое удостоверение](/first-credential)). Базовый токен человека даёт
+уровень `1` и получает отказ `401`, неотличимый от опечатки: порог `2` стоит на `Issue` и
+`Revoke` этой службы, и освобождения у личности нет.
+
 <CodeBlock language="bash">
   {dedent`
+    # интерактивной сессией уровня 2 (печенье kaname_session=…), не $TOKEN
     curl -X POST 'http://localhost:18080/iam/v1/users/usrbr69ze0ftz3jf7396/tokens' \\
-      -H "Authorization: Bearer $TOKEN" \\
+      -H "Cookie: $SESSION_COOKIE" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "credentialKind": "CREDENTIAL_KIND_SECRET",
