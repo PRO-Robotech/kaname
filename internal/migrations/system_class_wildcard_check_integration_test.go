@@ -33,6 +33,9 @@ func scWildcardRefused(t *testing.T, err error, constraint, what string) {
 	assert.Equalf(t, constraint, pgErr.ConstraintName, "%s: имя ограничения (%s)", what, pgErr.Message)
 }
 
+// scMoveMigration — миграция переезда подстановки на классы.
+const scMoveMigration = "20261015120000_anonymous_and_authenticated_are_subject_classes.sql"
+
 func scMovedP2(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	p := openP2(t)
@@ -110,7 +113,11 @@ func TestSystemClass_DownLiftsTheWildcardChecksBeforeTheWildcardReturns(t *testi
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	db, _ := scMovedP2(t)
-	require.NoError(t, goose.Down(db, "."), "откат миграции переезда")
+	// Откат — ДО предшественницы миграции переезда, а не на один шаг: шаг
+	// снимал бы ту миграцию, что стоит в дереве последней, а она не обязана
+	// быть переездом.
+	_, beforeMove := versionsOf(t, scMoveMigration)
+	require.NoError(t, goose.DownTo(db, ".", beforeMove), "откат миграции переезда")
 	back := wildcardCensus(t, db)
 	assert.Equal(t, 1, back["relation_fact"], "откат: факт системной выдачи вернулся на подстановку")
 	assert.Equal(t, 1, back["access_binding_emitted_tuples"], "откат: выпущенный факт вернулся на подстановку")

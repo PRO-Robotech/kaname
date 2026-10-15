@@ -262,7 +262,9 @@ func TestSystemClass_SC44_MoveMigrationIsRepeatable(t *testing.T) {
 	n, err := res.RowsAffected()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n, "SC-44: версия шага переезда %d стояла на учёте ровно один раз", move)
-	require.NoError(t, goose.UpTo(p.db, ".", move), "SC-44: повтор шага подъёма без ошибок")
+	// Шаг переезда не обязан быть последним в дереве: снятая с учёта версия
+	// ниже текущей — «пропущенная», и повтор накатывает именно её.
+	require.NoError(t, goose.UpTo(p.db, ".", move, goose.WithAllowMissing()), "SC-44: повтор шага подъёма без ошибок")
 	var applied int
 	require.NoError(t, p.db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id = $1 AND is_applied`, move).Scan(&applied))
 	require.Equal(t, 1, applied, "SC-44: шаг переезда накатан вновь, а не пропущен")

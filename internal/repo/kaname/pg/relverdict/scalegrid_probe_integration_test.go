@@ -458,6 +458,10 @@ func (f *gridFixture) setR(t *testing.T, ctx context.Context, target int, rec sc
 // значит сотня фактов набирается двадцатью пятью отношениями. Совпадать с
 // атомами плана они не обязаны и в большинстве не совпадают — предмет оси в том,
 // СКОЛЬКО строк лежит на пути, а не сколько из них дали основание.
+//
+// Исключение — набор классом: классу факт допустим только на отношении чтения
+// (kaname#838), и его строки сверх цепи лежат на других объектах того же типа
+// (см. тело).
 func (f *gridFixture) setF(t *testing.T, ctx context.Context, target int, rec scalegrid.Recruit) {
 	t.Helper()
 	if rec != f.recF || target < f.seedF {
@@ -486,6 +490,16 @@ func (f *gridFixture) setF(t *testing.T, ctx context.Context, target int, rec sc
 		relation := probeRelation
 		if i >= len(chain) {
 			relation = fmt.Sprintf("v_probe_%04d", i/len(chain))
+			// Классу прямой факт допустим только на отношении чтения
+			// (`relation_fact_subject_class_reads_only`, kaname#838): двадцать
+			// пять отношений на объекте цепи для класса непредставимы. Сверх
+			// цепи его факты — публикации ДРУГИХ объектов того же типа:
+			// строки, называющие говорящего, которые вопросу основания не
+			// дают, — та же величина F, единственно представимой формой.
+			if rec == scalegrid.RecruitFactClass {
+				obj = [2]string{probeModelType, fmt.Sprintf("repo-c%06d", i)}
+				relation = probeRelation
+			}
 		}
 		must(t, s.QueueRaw(ctx,
 			`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
