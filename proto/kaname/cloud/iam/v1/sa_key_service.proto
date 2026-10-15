@@ -16,31 +16,36 @@ import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
-// SAKeyService — public-facing CRUD for static ServiceAccount OAuth keys
-// (Class A workload identity). Each key is a client of the service's own
-// registry, named by the id of its row. A key pair and a federated key are
-// exchanged for an access JWT at the platform token endpoint
-// (`POST /iam/v1/token`), which the service signs itself; a basic secret is
-// presented as is.
+// SAKeyService — публичная выдача, перечень и отзыв статических ключей
+// служебной учётки (удостоверение рабочей нагрузки класса A). Каждый ключ —
+// клиент собственного реестра службы, названный идентификатором своей строки.
 //
-// AUTHENTICATION IS `private_key_jwt`, NOT A SHARED SECRET. The workload holds
-// the PKCS#8 EC private key returned in `private_key_pem` and signs an RFC-7523
-// client assertion with it; nothing symmetric is exchanged, and kaname stores
-// only the public half plus the key → ServiceAccount mapping in
-// `service_account_oauth_clients`.
+// ВИДОВ ВЫДАЧИ ТРИ, и все они перечислены в словаре `CredentialKind`
+// (credential_kind.proto). Вид называет поле `credential_kind` запроса (не
+// названный выводится из `trusted_subjects`), а по виду читатель узнаёт, какое
+// поле ответа заполнено:
 //
-// `private_key_pem` is returned EXACTLY ONCE in the Issue response and is never
-// persisted by kaname. `client_secret` is `[deprecated = true]` and is always
-// empty for keys issued today — see the field's own comment.
+//   * KEYPAIR — ключевая пара ES256. Ответ несёт `private_key_pem`; нагрузка
+//     подписывает им утверждение клиента (RFC 7523) и обменивает его на токен
+//     доступа на токен-эндпоинте платформы (`POST /iam/v1/token`), который
+//     служба подписывает сама. Хранится только открытая половина.
+//   * SECRET — однострочный базовый секрет, СИММЕТРИЧНОЕ удостоверение. Ответ
+//     несёт `secret`; секрет предъявляется КАК ЕСТЬ, без обмена:
+//     `Authorization: Bearer <строка>` на крае и полем пароля докер-полосы.
+//     Хранится только хэш по идентификатору строки и секрету вместе; сам
+//     секрет не хранится нигде. Бессрочным он не бывает.
+//   * FEDERATED — утверждение ВНЕШНЕГО издателя по перечню
+//     `trusted_subjects`, обмениваемое на том же токен-эндпоинте. Ни ключевого
+//     материала, ни секрета у службы нет, и ответ не несёт ни того, ни другого.
 //
-// This header used to describe basic-auth `<client_id>:<client_secret>` and
-// promised the plaintext secret «exactly once». That outlived its subject when
-// the flow moved to `private_key_jwt`, and it sat two lines above the field
-// marking the same secret deprecated — two statements about one thing, of which
-// one was true. It is corrected here rather than deleted, because a reader who
-// followed it would look for a field the contract no longer carries and would
-// put the wrong value in the docker username (that is `client_id`, not the
-// Kachō-side `key_id`).
+// Предъявительский материал — `private_key_pem` у KEYPAIR и `secret` у SECRET
+// — показывается ОДИН РАЗ, в ответе выдачи, и восстановлению не подлежит. В
+// строке ресурса его нет. Секрет вида SECRET не попадает и в строку операции;
+// `private_key_pem` лежит в ответе операции лишь окно, которое даётся
+// поллящему клиенту, и затем затирается.
+//
+// `client_secret` помечен `[deprecated = true]` и пуст у ключа любого вида —
+// базовый секрет едет в `secret`, а не в нём.
 service SAKeyService {
   rpc Issue (IssueSAKeyRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
