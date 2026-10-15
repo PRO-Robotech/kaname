@@ -6833,201 +6833,8 @@
       ]
     },
     {
-      "name": "SC15-WILDCARD-NOT-A-SPEAKER — SC-15: user:* говорящим → 400; близнец — человек отвечается",
-      "description": "class:VAL | class:NEG | priority:P0",
-      "item": [
-        {
-          "name": "SC15-WILDCARD-NOT-A-SPEAKER :: sc15-twin-user",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/authorize:check",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "authorize:check"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"subject\": \"user:{{userNOBId}}\", \"resource\": {\"type\": \"vpc_network\", \"id\": \"enp00000000000000001\"}, \"action\": \"vpc.networks.get\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtBootstrap'",
-                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/authorize:check');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
-                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "const j = pm.response.json();",
-                  "pm.test('allowed = false', () => pm.expect(j.allowed, JSON.stringify(j)).to.eql(false));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "SC15-WILDCARD-NOT-A-SPEAKER :: sc15-refused",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/authorize:check",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "authorize:check"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"subject\": \"user:*\", \"resource\": {\"type\": \"vpc_network\", \"id\": \"enp00000000000000001\"}, \"action\": \"vpc.networks.get\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtBootstrap'",
-                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
-                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
-                  "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/authorize:check');",
-                  "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
-                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
-                  "const j = pm.response.json();",
-                  "pm.test('code 3', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
-                  "pm.test('текст отказа дословно', () => pm.expect(j.message).to.eql('Illegal argument subject: wildcard is not a speaker'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "SC16-EXPAND-NO-CLASSES — SC-16: развёртка прав классов не перечисляет",
-      "description": "class:CONF | priority:P0",
+      "name": "SC16-EXPAND-NO-CLASSES — SC-16: развёртка от кластерного администратора классов не перечисляет; близнец без выдачи классу побайтово тот же",
+      "description": "class:CONF | class:AUTHZ | priority:P0",
       "item": [
         {
           "name": "SC16-EXPAND-NO-CLASSES :: sc16-user",
@@ -7218,6 +7025,101 @@
                   "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
                   "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
                   "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC16-EXPAND-NO-CLASSES :: sc16-twin-expand",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:expandAccess?objectType=vpc_network&objectId=enp00000000000000001&relation=v_get",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings:expandAccess?objectType=vpc_network&objectId=enp00000000000000001&relation=v_get"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings:expandAccess?objectType=vpc_network&objectId=enp00000000000000001&relation=v_get');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _ps = (pm.response.code === 200 && pm.response.json().principals) || [];",
+                  "if (pm.environment.get('_exStarted') !== pm.info.requestName) { pm.environment.set('_exCount', '0'); pm.environment.set('_exStarted', pm.info.requestName); }",
+                  "const _ec = parseInt(pm.environment.get('_exCount') || '0', 10);",
+                  "if (!_ps.some(p => p.id === pm.environment.get('userNOBId')) && _ec < 150) {",
+                  "  pm.environment.set('_exCount', String(_ec + 1));",
+                  "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_exCount'); pm.environment.unset('_exStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('близнец: ровно usr-B', () => pm.expect(j.principals, JSON.stringify(j)).to.eql([{type: 'SUBJECT_TYPE_USER', id: pm.environment.get('userNOBId')}]));",
+                  "pm.environment.set('sc16TwinBody', pm.response.text());"
                 ]
               }
             }
@@ -7418,6 +7320,108 @@
           ]
         },
         {
+          "name": "SC16-EXPAND-NO-CLASSES :: sc16-class-materialized",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/authorize:check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "authorize:check"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subject\": \"user:{{userAABId}}\", \"resource\": {\"type\": \"vpc_network\", \"id\": \"enp00000000000000001\"}, \"action\": \"vpc.networks.get\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/authorize:check');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (pm.environment.get('_ckStarted') !== pm.info.requestName) { pm.environment.set('_ckCount', '0'); pm.environment.set('_ckStarted', pm.info.requestName); }",
+                  "const c = parseInt(pm.environment.get('_ckCount') || '0', 10);",
+                  "if (j.allowed !== true && c < 150) {",
+                  "  pm.environment.set('_ckCount', String(c + 1));",
+                  "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_ckCount'); pm.environment.unset('_ckStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('allowed = true', () => pm.expect(j.allowed, JSON.stringify(j)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "SC16-EXPAND-NO-CLASSES :: sc16-expand",
           "request": {
             "method": "GET",
@@ -7445,13 +7449,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
-                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -7495,8 +7499,11 @@
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "const j = pm.response.json();",
-                  "pm.test('ровно usr-B, класса нет', () => pm.expect(j.principals, JSON.stringify(j)).to.eql([{type: 'SUBJECT_TYPE_USER', id: pm.environment.get('userNOBId')}]));",
-                  "pm.test('truncated=false', () => pm.expect(j.truncated || false).to.eql(false));"
+                  "pm.test('ровно usr-B', () => pm.expect(j.principals, JSON.stringify(j)).to.eql([{type: 'SUBJECT_TYPE_USER', id: pm.environment.get('userNOBId')}]));",
+                  "pm.test('элемента SUBJECT_TYPE_SYSTEM_CLASS нет', () => pm.expect((j.principals || []).filter(p => p.type === 'SUBJECT_TYPE_SYSTEM_CLASS'), JSON.stringify(j)).to.eql([]));",
+                  "pm.test('truncated=false', () => pm.expect(j.truncated || false).to.eql(false));",
+                  "pm.test('ответ побайтово равен близнецу без выдачи классу', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('sc16TwinBody')));",
+                  "pm.environment.unset('sc16TwinBody');"
                 ]
               }
             }
@@ -7967,8 +7974,8 @@
       ]
     },
     {
-      "name": "SC17-LIST-BY-CLASS — SC-17: перечень выдач по субъекту-классу",
-      "description": "class:FILTER | priority:P0",
+      "name": "SC17-LIST-BY-CLASS — SC-17: перечень выдач классу сужен по праву на область; чужой арендатор — пустая страница; кластерный администратор — без сужения",
+      "description": "class:FILTER | class:AUTHZ | priority:P0",
       "item": [
         {
           "name": "SC17-LIST-BY-CLASS :: sc17-auth",
@@ -8359,7 +8366,7 @@
           ]
         },
         {
-          "name": "SC17-LIST-BY-CLASS :: sc17-list",
+          "name": "SC17-LIST-BY-CLASS :: sc17-own-anonymous",
           "request": {
             "method": "GET",
             "header": [
@@ -8434,11 +8441,296 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "const _ids = ((pm.response.code === 200 && pm.response.json().accessBindings) || []).map(b => b.id);",
+                  "if (pm.environment.get('_lsStarted') !== pm.info.requestName) { pm.environment.set('_lsCount', '0'); pm.environment.set('_lsStarted', pm.info.requestName); }",
+                  "const _lc = parseInt(pm.environment.get('_lsCount') || '0', 10);",
+                  "if (!_ids.includes(pm.environment.get('sc17AnonId')) && _lc < 50) {",
+                  "  pm.environment.set('_lsCount', String(_lc + 1));",
+                  "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_lsCount'); pm.environment.unset('_lsStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "const j = pm.response.json();",
                   "const ids = (j.accessBindings || []).map(b => b.id);",
-                  "pm.test('есть выдача SC-07', () => pm.expect(ids).to.include(pm.environment.get('sc17AnonId')));",
-                  "pm.test('нет выдачи SC-01', () => pm.expect(ids).to.not.include(pm.environment.get('sc17AuthId')));"
+                  "pm.test('ровно ожидаемые выдачи в порядке (createdAt, id)', () => pm.expect(ids, JSON.stringify(j)).to.eql([pm.environment.get('sc17AnonId')]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC17-LIST-BY-CLASS :: sc17-other-tenant-anonymous",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=system_class&subjectId=anonymous",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings:listBySubject?subjectType=system_class&subjectId=anonymous"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminB'",
+                  "const __t = pm.environment.get('jwtAccountAdminB') || pm.variables.get('jwtAccountAdminB') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminB is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminB is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings:listBySubject?subjectType=system_class&subjectId=anonymous');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const ids = (j.accessBindings || []).map(b => b.id);",
+                  "pm.test('страница пуста', () => pm.expect(ids, JSON.stringify(j)).to.eql([]));",
+                  "pm.test('nextPageToken пуст', () => pm.expect(j.nextPageToken || '', JSON.stringify(j)).to.eql(''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC17-LIST-BY-CLASS :: sc17-cluster-admin-authenticated",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=system_class&subjectId=authenticated",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings:listBySubject?subjectType=system_class&subjectId=authenticated"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings:listBySubject?subjectType=system_class&subjectId=authenticated');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _ids = ((pm.response.code === 200 && pm.response.json().accessBindings) || []).map(b => b.id);",
+                  "if (pm.environment.get('_lsStarted') !== pm.info.requestName) { pm.environment.set('_lsCount', '0'); pm.environment.set('_lsStarted', pm.info.requestName); }",
+                  "const _lc = parseInt(pm.environment.get('_lsCount') || '0', 10);",
+                  "if (!_ids.includes(pm.environment.get('sc17AuthId')) && _lc < 50) {",
+                  "  pm.environment.set('_lsCount', String(_lc + 1));",
+                  "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_lsCount'); pm.environment.unset('_lsStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const ids = (j.accessBindings || []).map(b => b.id);",
+                  "pm.test('ровно ожидаемые выдачи в порядке (createdAt, id)', () => pm.expect(ids, JSON.stringify(j)).to.eql(['acbc5d32d66fc8dc4952', pm.environment.get('sc17AuthId')]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC17-LIST-BY-CLASS :: sc17-own-authenticated",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings:listBySubject?subjectType=system_class&subjectId=authenticated",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings:listBySubject?subjectType=system_class&subjectId=authenticated"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings:listBySubject?subjectType=system_class&subjectId=authenticated');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _ids = ((pm.response.code === 200 && pm.response.json().accessBindings) || []).map(b => b.id);",
+                  "if (pm.environment.get('_lsStarted') !== pm.info.requestName) { pm.environment.set('_lsCount', '0'); pm.environment.set('_lsStarted', pm.info.requestName); }",
+                  "const _lc = parseInt(pm.environment.get('_lsCount') || '0', 10);",
+                  "if (!_ids.includes(pm.environment.get('sc17AuthId')) && _lc < 50) {",
+                  "  pm.environment.set('_lsCount', String(_lc + 1));",
+                  "  const _w = Date.now(); while (Date.now() - _w < 200) void 0;",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_lsCount'); pm.environment.unset('_lsStarted');",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const ids = (j.accessBindings || []).map(b => b.id);",
+                  "pm.test('ровно ожидаемые выдачи в порядке (createdAt, id)', () => pm.expect(ids, JSON.stringify(j)).to.eql([pm.environment.get('sc17AuthId')]));"
                 ]
               }
             }
@@ -10929,7 +11221,8 @@
                   "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
                   "const j = pm.response.json();",
                   "pm.test('code 9', () => pm.expect(j.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('Operation не создана', () => pm.expect(j.done, JSON.stringify(j)).to.not.exist);"
+                  "pm.test('Operation не создана', () => pm.expect(j.done, JSON.stringify(j)).to.not.exist);",
+                  "pm.test('текст отказа дословно', () => pm.expect(j.message).to.eql('Role rol8ed48ecc3878c2e73 grants verbs beyond get and list; a system class subject accepts read-only roles'));"
                 ]
               }
             }
@@ -13126,11 +13419,11 @@
       ]
     },
     {
-      "name": "SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY — SC-28: класс на кластере — только кластерный администратор",
-      "description": "class:AUTHZ | class:NEG | priority:P0",
+      "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE — SC-28: выдача классу на кластере глаголом создания недостижима — отказ в праве, отказ правила ствола, близнец с человеком, контроль живости пути",
+      "description": "class:AUTHZ | class:NEG | class:STATE | priority:P0",
       "item": [
         {
-          "name": "SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY :: sc28-owner-refused",
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: sc28-owner-refused",
           "request": {
             "method": "POST",
             "header": [
@@ -13215,14 +13508,17 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 403', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(403));",
-                  "pm.test('code 7', () => pm.expect(pm.response.json().code).to.eql(7));"
+                  "const j = pm.response.json();",
+                  "pm.test('code 7', () => pm.expect(j.code, JSON.stringify(j)).to.eql(7));",
+                  "pm.test('текст не называет роль', () => pm.expect(j.message || '').to.not.include('rolfe683216e63311d3f'));",
+                  "pm.test('Operation не создана', () => pm.expect(j.done, JSON.stringify(j)).to.not.exist);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY :: sc28-cluster-admin",
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: sc28-cluster-admin-refused",
           "request": {
             "method": "POST",
             "header": [
@@ -13306,12 +13602,202 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "const j = pm.response.json();",
+                  "pm.test('code 3', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
+                  "pm.test('Operation не создана', () => pm.expect(j.done, JSON.stringify(j)).to.not.exist);",
+                  "pm.test('текст отказа дословно', () => pm.expect(j.message).to.eql('GLOBAL scope requires names or labels selector for non-cluster-admin roles'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: sc28-user-same-rule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userNOBId}}\"}], \"roleId\": \"rolfe683216e63311d3f\", \"scopeType\": \"iam.cluster\", \"scopeId\": \"cluster_root\", \"target\": {\"allInScope\": {}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "const j = pm.response.json();",
+                  "pm.test('code 3', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
+                  "pm.test('Operation не создана', () => pm.expect(j.done, JSON.stringify(j)).to.not.exist);",
+                  "pm.test('текст отказа дословно', () => pm.expect(j.message).to.eql('GLOBAL scope requires names or labels selector for non-cluster-admin roles'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: sc28-path-alive",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjects\": [{\"type\": \"SUBJECT_TYPE_USER\", \"id\": \"{{userNOBId}}\"}], \"roleId\": \"rol21232f297a57a5a74\", \"scopeType\": \"iam.cluster\", \"scopeId\": \"cluster_root\", \"target\": {\"allInScope\": {}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.unset('sc28AcbIdOpId');",
+                  "pm.environment.unset('sc28CtlIdOpId');",
                   "try {",
                   "  const j = pm.response.json();",
                   "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('sc28AcbIdOpId', String(v));",
+                  "  if (v !== undefined && v !== null) pm.environment.set('sc28CtlIdOpId', String(v));",
                   "} catch (e) {}"
                 ]
               }
@@ -13319,7 +13805,7 @@
           ]
         },
         {
-          "name": "SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY :: sc28-cluster-admin-poll",
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: sc28-path-alive-poll",
           "request": {
             "method": "GET",
             "header": [
@@ -13329,13 +13815,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{sc28AcbIdOpId}}",
+              "raw": "{{baseUrl}}/operations/{{sc28CtlIdOpId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{sc28AcbIdOpId}}"
+                "{{sc28CtlIdOpId}}"
               ]
             }
           },
@@ -13359,14 +13845,14 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{sc28AcbIdOpId}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{sc28CtlIdOpId}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('sc28AcbIdOpId')) { pm.execution.skipRequest(); }",
+                  "if (!pm.environment.get('sc28CtlIdOpId')) { pm.execution.skipRequest(); }",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -13405,7 +13891,7 @@
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
-                  "if (j.done && !j.error && j.response && j.response.id) pm.environment.set('sc28AcbId', j.response.id);",
+                  "if (j.done && !j.error && j.response && j.response.id) pm.environment.set('sc28CtlId', j.response.id);",
                   "pm.test('operation done без error', () => {",
                   "  pm.expect(j.done, JSON.stringify(j)).to.eql(true);",
                   "  pm.expect(j.error, JSON.stringify(j)).to.not.exist;",
@@ -13416,7 +13902,7 @@
           ]
         },
         {
-          "name": "SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY :: cleanup-sc28AcbId",
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: cleanup-sc28CtlId",
           "request": {
             "method": "DELETE",
             "header": [
@@ -13426,7 +13912,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{sc28AcbId}}",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{sc28CtlId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -13434,7 +13920,7 @@
                 "iam",
                 "v1",
                 "accessBindings",
-                "{{sc28AcbId}}"
+                "{{sc28CtlId}}"
               ]
             }
           },
@@ -13458,14 +13944,14 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{sc28AcbId}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{sc28CtlId}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('sc28AcbId')) { pm.execution.skipRequest(); }",
+                  "if (!pm.environment.get('sc28CtlId')) { pm.execution.skipRequest(); }",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -13531,11 +14017,11 @@
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('уборка: снята (200) либо уже нет (404)', () => pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 404]));",
                   "if (pm.response.code === 200) {",
-                  "  pm.environment.unset('sc28AcbIdDelOpId');",
+                  "  pm.environment.unset('sc28CtlIdDelOpId');",
                   "  try {",
                   "    const j = pm.response.json();",
                   "    const v = (j.id);",
-                  "    if (v !== undefined && v !== null) pm.environment.set('sc28AcbIdDelOpId', String(v));",
+                  "    if (v !== undefined && v !== null) pm.environment.set('sc28CtlIdDelOpId', String(v));",
                   "  } catch (e) {}",
                   "}"
                 ]
@@ -13544,7 +14030,7 @@
           ]
         },
         {
-          "name": "SC28-CLUSTER-CLASS-GRANT-ADMIN-ONLY :: cleanup-sc28AcbId-poll",
+          "name": "SC28-CLUSTER-CLASS-GRANT-UNREACHABLE :: cleanup-sc28CtlId-poll",
           "request": {
             "method": "GET",
             "header": [
@@ -13554,13 +14040,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/operations/{{sc28AcbIdDelOpId}}",
+              "raw": "{{baseUrl}}/operations/{{sc28CtlIdDelOpId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "operations",
-                "{{sc28AcbIdDelOpId}}"
+                "{{sc28CtlIdDelOpId}}"
               ]
             }
           },
@@ -13584,14 +14070,14 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{sc28AcbIdDelOpId}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/operations/{{sc28CtlIdDelOpId}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
-                  "if (!pm.environment.get('sc28AcbIdDelOpId')) { pm.execution.skipRequest(); }",
+                  "if (!pm.environment.get('sc28CtlIdDelOpId')) { pm.execution.skipRequest(); }",
                   "(function () {",
                   "  var _u = '';",
                   "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
@@ -13630,7 +14116,7 @@
                   "  return;",
                   "}",
                   "pm.environment.unset('_pollCount'); pm.environment.unset('_pollStarted');",
-                  "pm.environment.unset('sc28AcbId');",
+                  "pm.environment.unset('sc28CtlId');",
                   "pm.test('отзыв завершён', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
                   "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
@@ -13641,6 +14127,187 @@
                   "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
                   "  });",
                   "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SC53-CLUSTER-ADMINS-NO-CLASS-ROW — SC-53: перечень кластерных администраторов (страница /system/cluster/admins) без строки класса и без системной выдачи",
+      "description": "class:CONF | class:NEG | priority:P0",
+      "item": [
+        {
+          "name": "SC53-CLUSTER-ADMINS-NO-CLASS-ROW :: sc53-whoami",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/me');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "pm.test('кластерный администратор назван субъектом', () => pm.expect(j.subject, JSON.stringify(j)).to.match(/^(user|service_account):/));",
+                  "pm.environment.set('sc53AdminId', String(j.subject || '').split(':')[1] || '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SC53-CLUSTER-ADMINS-NO-CLASS-ROW :: sc53-list",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/cluster/admins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "cluster",
+                "admins"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/cluster/admins');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы: предмет — выдача классу и вопрос о доступе службы, а не край платформы', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const rows = j.admins || [];",
+                  "pm.test('перечень содержит вызывающего администратора', () => pm.expect(rows.map(a => a.subjectId), JSON.stringify(j)).to.include(pm.environment.get('sc53AdminId')));",
+                  "pm.test('виды строк — только USER и SERVICE_ACCOUNT', () => pm.expect(rows.filter(a => !['USER', 'SERVICE_ACCOUNT'].includes(a.subjectType)), JSON.stringify(j)).to.eql([]));",
+                  "pm.test('строки с субъектом-классом нет', () => pm.expect(rows.filter(a => ['authenticated', 'anonymous'].includes(a.subjectId)), JSON.stringify(j)).to.eql([]));",
+                  "pm.test('системной выдачи acbc5d32d66fc8dc4952 нет', () => pm.expect(pm.response.text()).to.not.include('acbc5d32d66fc8dc4952'));",
+                  "pm.environment.unset('sc53AdminId');"
                 ]
               }
             }
