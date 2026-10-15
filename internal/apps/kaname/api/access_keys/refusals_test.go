@@ -9,14 +9,29 @@ package access_keys_test
 // зеленела бы при любой её правке, а клиент читает байты ответа.
 
 import (
+	"context"
+	"net"
+	"net/http"
 	"testing"
+	"time"
 
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // TestAccessKey_RegistrationRefusalsNameTheNextStep — шесть отказов приёма
@@ -130,4 +145,59 @@ func TestAccessKey_AssertionRefusalNamesTheStepOnEveryLane(t *testing.T) {
 	require.Equal(t, replay.Proto().String(), forged.Proto().String(), "AKS-07: тело побайтово равно телу повтора")
 	_, err = h.assertWith(alice, a, webauthntest.AssertionOptions{Challenge: c})
 	require.NoError(t, err, "AKS-08: испытание после отказа REST живо")
+}
+
+// TestAccessKey_FSR03_StaleSessionRefusalCrossesTheNativeWire — несвежая сессия
+// на `AccessKeyService/BeginRegistration` через НАСТОЯЩИЙ gRPC-сервер и
+// клиента (kaname#719, приёмка `forbidden-status-names-its-reasons.md`, Р2,
+// FSR-03): клиент получает `PERMISSION_DENIED`, текст `re-authentication
+// required: present a credential again` и ОДНУ подробность `ErrorInfo` с
+// признаком `SESSION_NOT_FRESH` и доменом службы, `metadata` пуст; статус края
+// для этого кода — 403 (FSR-01, FSR-04 — та же пара). Близнец (FSR-02): та же
+// сессия, свежая, — испытание выдано. Поведение не меняется: проба закрепляет,
+// что подробность переживает провод, а не только сценарий.
+func TestAccessKey_FSR03_StaleSessionRefusalCrossesTheNativeWire(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	client := nativeAccessKeyClient(t, h, alice)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := client.BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: string(alice)})
+	require.NoError(t, err, "FSR-02: свежая сессия — испытание выдано")
+	require.NotEmpty(t, ch.GetChallenge(), "FSR-02: испытание непусто")
+
+	h.fresh.set(alice, h.now.Add(-freshness-time.Minute))
+	_, err = client.BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: string(alice)})
+	st, ok := status.FromError(err)
+	require.True(t, ok, "FSR-03: ожидался gRPC-статус, получено %v", err)
+	require.Equal(t, codes.PermissionDenied, st.Code(), "FSR-03: код")
+	require.Equal(t, http.StatusForbidden, runtime.HTTPStatusFromCode(st.Code()), "FSR-03: статус края для кода")
+	require.Equal(t, "re-authentication required: present a credential again", st.Message(), "FSR-03: текст")
+	require.Len(t, st.Details(), 1, "FSR-03: подробность одна — признак")
+	info, ok := st.Details()[0].(*errdetails.ErrorInfo)
+	require.True(t, ok, "FSR-03: подробность — ErrorInfo, получено %T", st.Details()[0])
+	require.Equal(t, "SESSION_NOT_FRESH", info.GetReason(), "FSR-03: признак")
+	require.Equal(t, refusaldomain.For(refusaldomain.ServiceIAM), info.GetDomain(), "FSR-03: домен службы")
+	require.Empty(t, info.GetMetadata(), "FSR-03: metadata пуст")
+}
+
+// nativeAccessKeyClient — клиент к настоящему gRPC-серверу службы над памятью.
+// Принципал ставит перехватчик сервера — так его ставит аутентификация
+// слушателя; судится не она, а то, что статус сценария доходит до клиента.
+func nativeAccessKeyClient(t *testing.T, h *harness, user domain.UserID) iamv1.AccessKeyServiceClient {
+	t.Helper()
+	lis := bufconn.Listen(1 << 20)
+	srv := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		return next(operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(user)}), req)
+	}))
+	iamv1.RegisterAccessKeyServiceServer(srv, h.handler())
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return iamv1.NewAccessKeyServiceClient(conn)
 }
