@@ -1,0 +1,37 @@
+# Пост-дифф ревью схемы — роль db-architect-reviewer, kaname#827 (повышение
+# любым заведённым способом: испытания повышения ключом, момент последнего
+# использования способа). Запись не правится: вердикт привязан к отпечатку.
+schema_version: 1
+change_id: kn-827
+holder: post-diff/db-architect-reviewer
+owner: db-architect-reviewer
+mode: review
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: "827"
+  base: 6b6f58de3
+  head: a467531b8
+  files_touched: 10   # миграции + internal/repo/**
+content_digest: sha256:930e24a5812870f0b70857364b205856dee4f496795540fd91f4fd2e49d802c6
+digest_command: git diff --full-index 6b6f58de3...a467531b8 | sha256sum
+verdict: accepted
+migrations_touched: 2
+repo_sql_touched: 5   # access_key_step_up_repo.go, access_key_repo.go, login_method_repo.go, human_session_repo.go, check_value_lanes.go
+evidence:
+  - "одно живое на сессию: UNIQUE INDEX access_key_step_up_challenges_live_session_idx (session_id) WHERE consumed_at IS NULL; выдача — INSERT … ON CONFLICT (session_id) WHERE consumed_at IS NULL DO UPDATE, предикат арбитра совпадает с индексом"
+  - "CHECK inline с CREATE TABLE: octet_length(challenge)=32, expires_at > issued_at; моменты NOT NULL без умолчания"
+  - "принадлежность: FK session_id → human_sessions(id) ON DELETE CASCADE, та же база; полный индекс по session_id под каскад обоснован"
+  - "однократность: один условный UPDATE … WHERE session_id AND challenge AND consumed_at IS NULL AND expires_at > $3; кардинальность 1 — успех"
+  - "сдвиг счётчика: единственный оператор advanceSignCountTx, CAS sign_count=$2 AND $3>sign_count, ветвь 0→0 под sign_count=0; зовётся транзакцией вызывающего (accessKeyWriter, humanSessionWriter)"
+  - "last_used_at: новый столбец nullable (NULL = не использовали — значимое отсутствие), CHECK kind IN ('totp','lookup_secret') — значения совпадают с user_login_methods_kind_check; пишут только условные операторы предъявления, замена набора и перезаведение гасят"
+  - "уборка: DELETE по ctid подвыборки с LIMIT; переписанная повторной выдачей строка получает новый ctid и под DELETE не попадает; проведена в retention/registry.go"
+  - "гигиена: обе миграции — новые файлы, номера старше последней применённой (20261012120000), Up/Down есть; применённых правок нет"
+concurrent_probe: >-
+  TestAccessKeyStepUpRepo_ConcurrentIssuesLeaveOneLive, …_ConsumeRaceHasOneWinner (горутины, testcontainers);
+  TestSUA80_LostCounterRaceIsRefused и TestSUA80_LostAdvanceIsRefusedWithoutTheCloneSignal на сдвиг счётчика —
+  наличие прочитано в дереве @a467531b8; зелёный — со слов возврата исполнителя, мной не перепрогнан
+findings: []
+notes_non_blocking:
+  - "уборка сравнивает моменты часов службы с now() базы; порог = срок испытания, расхождение часов лишь сдвигает момент снятия"
+  - "ветвь consumed_at IS NOT NULL уборки индексом не покрыта; таблица ограничена одной живой строкой на сессию плюс погашенные в пределах порога"
+distributed_overlap: true   # сгорание испытания вне транзакции предъявления (pool), by design fail-closed — предмет system-design-reviewer
