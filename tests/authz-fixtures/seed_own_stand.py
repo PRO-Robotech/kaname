@@ -32,6 +32,12 @@
     того же распорядителя (см. `MINTED_CREDENTIALS`);
   · ИСТЁКШЕЕ и ПОВРЕЖДЁННОЕ удостоверения — причины у самого шага отзыва ниже.
 
+КРОМЕ КЛЮЧЕЙ, посев заводит ОБЪЕКТЫ, о которых спрашивает набор системных
+классов (`cases/iam-system-class-subjects.py`, kaname#829): две сети в проекте
+арендатора A регистрируются внутренним глаголом владельца ресурса
+(`InternalIAMService.RegisterResource`). Ключа окружения они не дают — их
+идентификаторы живут в наборе кейсов, и посев читает их оттуда.
+
 ВСЁ, ЧТО ЗДЕСЬ ДЕЛАЕТСЯ, ДЕЛАЕТСЯ ЕДИНСТВЕННЫМ ГЛАГОЛОМ ПРОДУКТА. Ни одной
 записи в базу, ни одной подписи чужим ключом, ни одного обхода рубежа:
 
@@ -92,6 +98,7 @@ service_account»). Под посадкой `own` — единственной �
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import json
 import os
@@ -103,6 +110,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -432,6 +440,73 @@ def mint_bootstrap(pki: pathlib.Path, host: str, grpc_port: int) -> str:
     if not token:
         raise Finding(f"чеканка ответила без accessToken: ключи {list(body)}")
     return token
+
+
+# Объекты приёмки системных классов (kaname#829): сети `obj-1` и `obj-2` в проекте
+# арендатора A. Их идентификаторы живут в ОДНОМ доме — наборе кейсов, который о них
+# спрашивает; посев читает их разбором этого файла, а не второй выписанной копией.
+CLASS_CASES = ROOT / "tests" / "newman" / "cases" / "iam-system-class-subjects.py"
+CLASS_OBJECT_NAMES = ("OBJ_ID", "OBJ2_ID")
+REGISTER_METHOD = "kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
+REGISTER_PROTO = "kaname/cloud/iam/v1/internal_iam_service.proto"
+
+
+def class_case_objects(path: pathlib.Path = CLASS_CASES) -> tuple[str, ...]:
+    """Идентификаторы сетей приёмки — из констант набора кейсов.
+
+    Константа, которой в наборе нет, — отказ «условие не создано», а не пустой
+    перечень: посев без объектов оставил бы каждый вопрос о них отказом,
+    неотличимым от честного (объект без предка выпадает из области выдачи).
+    """
+    if not path.is_file():
+        raise Unmet(f"нет набора кейсов {path} — объекты приёмки назвать нечем")
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) \
+                and node.targets[0].id in CLASS_OBJECT_NAMES \
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            found[node.targets[0].id] = node.value.value
+    missing = [n for n in CLASS_OBJECT_NAMES if not found.get(n)]
+    if missing:
+        raise Unmet(f"набор кейсов {path.name} не несёт констант {missing} — "
+                    "объекты приёмки назвать нечем")
+    return tuple(found[n] for n in CLASS_OBJECT_NAMES)
+
+
+def register_network(pki: pathlib.Path, host: str, grpc_port: int, network_id: str,
+                     project_id: str, account_id: str) -> None:
+    """Сеть регистрируется в проекте тем же внутренним глаголом, которым это делает
+    владелец ресурса: `InternalIAMService.RegisterResource` на :9091.
+
+    Зачем это посеву. Вопрос о доступе к объекту решается по области, а область
+    объекта — его присланная владельцем цепь предков. Соседа vpc на автономном
+    стенде нет, и без этого шага сеть остаётся объектом БЕЗ ПРЕДКА: выдача на её
+    проекте до неё не доходит, и каждый `Check` отвечает «пути нет» при исправном
+    продукте — ровно так падали SC-10, SC-11, SC-16 и SC-18 (kaname#829).
+    Публичного маршрута у глагола нет (ban #6), поэтому его зовёт посев, а не кейс.
+    """
+    if not shutil.which("grpcurl"):
+        raise Unmet("нет grpcurl — внутренний глагол регистрации позвать нечем")
+    body = {
+        "subjectId": f"project:{project_id}",
+        "relation": "project",
+        "object": f"vpc_network:{network_id}",
+        "parentProjectId": project_id,
+        "parentAccountId": account_id,
+        "parentChain": [f"project:{project_id}", f"account:{account_id}"],
+    }
+    args = ["grpcurl", "-insecure", "-max-time", "20",
+            "-cert", str(pki / "srv.crt"), "-key", str(pki / "srv.key"),
+            "-import-path", str(module_proto_root()), "-proto", REGISTER_PROTO,
+            "-d", json.dumps(body), f"{host}:{grpc_port}", REGISTER_METHOD]
+    proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    if proc.returncode != 0:
+        raise Finding(
+            f"регистрация сети {network_id} в проекте {project_id} отказала "
+            f"(grpcurl rc={proc.returncode}): "
+            f"{(proc.stderr or proc.stdout).strip()[:400]}")
 
 
 def module_proto_root() -> pathlib.Path:
@@ -1400,6 +1475,13 @@ def run(args: argparse.Namespace) -> int:
                   "jwtInvitee (читает проект своей выдачи)")
     step("jwtInvitee получен обменом и ПРИНЯТ на проекте своей выдачи")
 
+    say("── объекты приёмки системных классов: сети в проекте арендатора A ─────")
+    for network_id in class_case_objects():
+        register_network(pki, host, args.port_grpc, network_id,
+                         tenants["a"]["projectId"], tenants["a"]["accountId"])
+        step(f"сеть {network_id} зарегистрирована в проекте "
+             f"{tenants['a']['projectId']} внутренним глаголом владельца")
+
     say("── ОТОЗВАННОЕ удостоверение: принято ДО отзыва, отвергнуто ПОСЛЕ ──────")
     #
     # ЕДИНСТВЕННОЕ ДЕФЕКТНОЕ СОСТОЯНИЕ, КОТОРОЕ ЭТОТ СТЕНД ДОКАЗЫВАЕТ, И ОСТАЛЬНЫЕ
@@ -1857,6 +1939,27 @@ def self_test() -> int:
         _c("запись заменяет известный ключ и ДОБАВЛЯЕТ неизвестный",
            replaced == 1 and got == {"jwtSAA": "x", "ownRestBaseUrl": "https://y"},
            f"заменено {replaced}, получено {got}")
+
+    # ── Ось 9: ОБЪЕКТЫ ПРИЁМКИ СИСТЕМНЫХ КЛАССОВ ЧИТАЮТСЯ ИЗ НАБОРА КЕЙСОВ ──────
+    #
+    # Живой набор несёт обе константы — читаются они, а не выписанная копия.
+    # Набор без константы — «условие не создано», а не пустой перечень: посев
+    # без объектов оставил бы каждый вопрос о них отказом при исправном продукте.
+    try:
+        objs = class_case_objects()
+        _c("объекты приёмки прочитаны из живого набора кейсов",
+           len(objs) == len(CLASS_OBJECT_NAMES) and all(objs), f"прочитано {objs!r}")
+    except Unmet as e:
+        _c("объекты приёмки прочитаны из живого набора кейсов", False, str(e))
+    with tempfile.TemporaryDirectory() as td:
+        lacking = pathlib.Path(td) / "cases.py"
+        lacking.write_text('OBJ_ID = "enp-x"\n', encoding="utf-8")
+        try:
+            class_case_objects(lacking)
+            _c("набор без константы объекта — условие не создано", False,
+               "разбор промолчал и отдал неполный перечень")
+        except Unmet:
+            _c("набор без константы объекта — условие не создано", True)
 
     return _finish_self_test()
 

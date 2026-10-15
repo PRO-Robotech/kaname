@@ -519,12 +519,23 @@ _case("SC24-ANONYMOUS-ALL-IN-SCOPE-REFUSED", "SC-24: анониму allInScope �
     *revoke("sc24TwinId"),
 ])
 
-_case("SC27-SERVICE-ACCOUNT-GRANTS-TO-CLASS", "SC-27: учётка с admin на проекте выдаёт классу; grantedByUserId пуст", ["AUTHZ", "CRUD"], [
+_SVA_A = {"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": "{{svaAId}}"}
+
+_case("SC27-SERVICE-ACCOUNT-GRANTS-TO-CLASS", "SC-27: учётка с admin на проекте выдаёт классу; grantedByUserId пуст; близнец без admin — 403", ["AUTHZ", "CRUD", "NEG"], [
+    # Близнец (SC-20): посев выдач учётке A не заводит, и без admin на проекте
+    # она выдать классу не вправе. Отличие от предмета — один факт: выдача admin.
+    Step(name="sc27-twin-no-admin-refused", method="POST", path="/iam/v1/accessBindings", auth="jwtSAA",
+         body=_body([_klass("authenticated")]),
+         test_script=[*assert_status(403), "const j = pm.response.json();",
+                      "pm.test('code 7', () => pm.expect(j.code, JSON.stringify(j)).to.eql(7));",
+                      "pm.test('Operation не создана', () => pm.expect(j.done, JSON.stringify(j)).to.not.exist);"]),
+    # Дано SC-27: у sva-A есть admin на prj-A — выдаёт распорядитель аккаунта A.
+    *create_ok("sc27-given-admin", _body([_SVA_A], role=ROLE_CLUSTER_ADMIN, target=_ALL), "sc27AdminAcbId"),
     *create_ok("sc27-class-by-sva", _body([_klass("authenticated")]), "sc27AcbId", auth="jwtSAA"),
     Step(name="sc27-get", method="GET", path="/iam/v1/accessBindings/{{sc27AcbId}}", auth="jwtAccountAdminA",
          test_script=[*assert_status(200), "const j = pm.response.json();",
                       "pm.test('grantedByUserId пуст', () => pm.expect(j.grantedByUserId || '').to.eql(''));"]),
-    *revoke("sc27AcbId"),
+    *revoke("sc27AcbId"), *revoke("sc27AdminAcbId"),
 ])
 
 _K_CLUSTER = dict(target=_ALL, scope_type="iam.cluster", scope_id="cluster_root")
