@@ -27,7 +27,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
-// Тексты отказов — контракт.
+// Тексты отказов — контракт. Каждый отказ, который видит вызывающий полосы
+// церемонии, называет следующий шаг после двоеточия (kaname#802): начать
+// регистрацию заново — и с чем именно, — либо повторить позже. Шаг верен при
+// любом состоянии прежнего испытания: новое выдаётся всегда.
 const (
 	// TextAssertionNotAccepted — ЕДИНЫЙ отказ аутентификации полосы утверждения.
 	TextAssertionNotAccepted = "access key assertion is not accepted"
@@ -35,12 +38,12 @@ const (
 	TextChallengeUnknown     = "registration challenge was not issued: begin registration again"
 	TextChallengeConsumed    = "registration challenge was already presented: begin registration again"
 	TextChallengeExpired     = "registration challenge expired: begin registration again"
-	TextOriginNotAllowed     = "credential origin is not in the declared list"
-	TextRPIDMismatch         = "credential was created for another relying party"
-	TextUserNotPresent       = "authenticator did not report user presence"
-	TextAlgorithmNotAllowed  = "credential public key algorithm is not in the declared list"
-	TextNotDiscoverable      = "credential is not discoverable: a discoverable credential is required"
-	TextMalformedCredential  = "credential result is malformed" // #nosec G101 -- текст отказа, а не секрет
+	TextOriginNotAllowed     = "credential origin is not in the declared list: begin registration again from a declared origin, or ask the operator to declare this origin"
+	TextRPIDMismatch         = "credential was created for another relying party: begin registration again and create the credential for the relying party named in the challenge"
+	TextUserNotPresent       = "authenticator did not report user presence: begin registration again and confirm presence on the authenticator"
+	TextAlgorithmNotAllowed  = "credential public key algorithm is not in the declared list: begin registration again with an algorithm named in the challenge"
+	TextNotDiscoverable      = "credential is not discoverable: begin registration again with a discoverable credential"
+	TextMalformedCredential  = "credential result is malformed: begin registration again" // #nosec G101 -- текст отказа, а не секрет
 	TextLastSignInMethod     = "last sign-in method cannot be revoked: enrol another sign-in method first"
 	TextUserNotActive        = "user %s is not active and cannot register an access key"
 	TextAccessKeyNotFound    = "AccessKey %s not found"
@@ -196,8 +199,9 @@ func Events() []Event {
 // TextStoreUnavailable — ФИКСИРОВАННЫЙ текст отказа на полосе чужой причины
 // (хранилище, окно свежести): в нём нет ни имени глагола, ни текста полученной
 // ошибки — незамапленная ошибка драйвера несёт строку подключения, и
-// подставленный текст уехал бы вызывающему. Причина остаётся в журнале.
-const TextStoreUnavailable = "access key service temporarily unavailable"
+// подставленный текст уехал бы вызывающему. Причина остаётся в журнале. Шаг
+// один — повторить позже: ни форма, ни испытание вызывающего здесь не виноваты.
+const TextStoreUnavailable = "access key service temporarily unavailable: retry later"
 
 // storeUnavailable — хранилище не ответило: фиксированный текст, без причины.
 func storeUnavailable() error {
