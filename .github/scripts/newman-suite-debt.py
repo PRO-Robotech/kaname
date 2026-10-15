@@ -1461,7 +1461,7 @@ _HOME_CLOUD_ADMIN_LANE = ("PRO-Robotech/kacho:ui-future/e2e/specs/cloud-admin-la
 SCENARIO_HOME.update({sid: _HOME_SESSION_LANE_EDGE for sid in ("Ф3-14", "Ф3-26", "Ф5-24", "Ф12-20")})
 SCENARIO_HOME.update({sid: _HOME_CLOUD_ADMIN_LANE for sid in ("Ф3-24", "Ф12-45")})
 # Ф13-10, Ф13-11, Ф13-12, Ф13-15 — проба браузером `access-key-assurance.spec.ts`
-# дома платформы (`verifies #1282`): уровень в ответе входа ключом, ответ края о
+# дома платформы (`verifies kacho#1282`): уровень в ответе входа ключом, ответ края о
 # сессии и пол «2» на публичном пути; Ф13-06 она несёт не целиком (выше, долг).
 _HOME_ACCESS_KEY_ASSURANCE = ("PRO-Robotech/kacho:ui-future/e2e/specs/access-key-assurance.spec.ts",
                               _HOME_PLATFORM_CONSOLE_STEP)
