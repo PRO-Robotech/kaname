@@ -348,11 +348,6 @@ func TestEveryEnrollmentReaderRefusesToBuildWithoutTheMethodStore(t *testing.T) 
 			_, err := NewRegenerateBackupCodesUseCase(SecondFactorDeps{Store: store})
 			return err
 		},
-		// Вход ключом (Ф13): хранилище испытаний дано, хранилища способов нет.
-		"AccessKeyLoginUseCase": func() error {
-			_, err := NewAccessKeyLoginUseCase(AccessKeyLoginDeps{CutoffClock: momentclock.Func(time.Now), Store: store, Keys: noKeyLoginStore{}})
-			return err
-		},
 	}
 
 	readers := enrollmentReaders(t)
@@ -413,6 +408,109 @@ func TestEnrolledForCompletionReadsTheKeyTable(t *testing.T) {
 	}
 }
 
-// noKeyLoginStore — хранилище испытаний полосы входа ключом, которое сборка
-// лишь проверяет на присутствие; его методы проба не зовёт.
-type noKeyLoginStore struct{ AccessKeyLoginStore }
+// TestKeyAloneSetsTheRequiredLevelOfEveryEnrollmentWithAKey — ПОСЫЛКА оси
+// «заведено» полосы входа ключом (`keyLoginEnrollment`, kaname#787): у
+// личности с ключом требуемый уровень даёт сам ключ, что бы ещё у неё ни было
+// заведено. Подмножества выводятся из словаря `assurance.Methods()`, решение
+// спрашивается у самого писателя обнуления на каждом уровне оси: изменись
+// правило так, что пароль либо фактор рядом с ключом поднимут требуемое, —
+// проба покраснеет здесь, а не откроет окно подбора молча.
+func TestKeyAloneSetsTheRequiredLevelOfEveryEnrollmentWithAKey(t *testing.T) {
+	t.Parallel()
+	vocabulary := assurance.Methods()
+	if len(vocabulary) == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: словарь способов пуст")
+	}
+	keyAxis := keyLoginEnrollment()
+	if len(keyAxis) != 1 || keyAxis[0] != assurance.MethodWebAuthn {
+		t.Fatalf("ось полосы ключа %v — ожидалось [webauthn]", keyAxis)
+	}
+	reached := []string{assurance.Level1.String(), assurance.Level2.String(), assurance.Level3.String()}
+	compared := 0
+	for mask := 0; mask < 1<<len(vocabulary); mask++ {
+		var enrolled []assurance.Method
+		for i, m := range vocabulary {
+			if mask&(1<<i) != 0 {
+				enrolled = append(enrolled, m)
+			}
+		}
+		hasKey := false
+		for _, m := range enrolled {
+			hasKey = hasKey || m == assurance.MethodWebAuthn
+		}
+		if !hasKey {
+			continue
+		}
+		for _, r := range reached {
+			full := loginCompletedToEnrolledLevel(r, enrolled)
+			alone := loginCompletedToEnrolledLevel(r, keyAxis)
+			if full != alone {
+				t.Fatalf("заведено %v, достигнуто %q: решение по всей оси %v, по одному ключу %v — "+
+					"полоса ключа, не читающая прочих способов, решала бы иначе, чем правило", enrolled, r, full, alone)
+			}
+			compared++
+		}
+	}
+	if compared == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: подмножеств с ключом не найдено")
+	}
+	t.Logf("перепись: способов словаря %d, сравнений «вся ось против одного ключа» %d — расхождений 0",
+		len(vocabulary), compared)
+}
+
+// TestKeyLoginEnrollmentIsCalledOnlyAfterTheKeyIsHeld — «прочитано» у оси
+// полосы ключа есть удержание строки ключа той же транзакцией: всякий вызов
+// `keyLoginEnrollment` в пакете стоит ПОСЛЕ вызова `HoldAccessKeyForLogin` в
+// теле той же функции. Перечень вызовов выводится разбором пакета.
+func TestKeyLoginEnrollmentIsCalledOnlyAfterTheKeyIsHeld(t *testing.T) {
+	t.Parallel()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: каталог пакета не прочитан: %v", err)
+	}
+	fset := token.NewFileSet()
+	files, calls := 0, 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: разбор %s: %v", name, err)
+		}
+		files++
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Body == nil {
+				continue
+			}
+			held := token.NoPos
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch fun := call.Fun.(type) {
+				case *ast.SelectorExpr:
+					if fun.Sel.Name == "HoldAccessKeyForLogin" && held == token.NoPos {
+						held = call.Pos()
+					}
+				case *ast.Ident:
+					if fun.Name == "keyLoginEnrollment" {
+						calls++
+						if held == token.NoPos || held > call.Pos() {
+							t.Errorf("%s: keyLoginEnrollment в %s позван до удержания ключа HoldAccessKeyForLogin — "+
+								"ось «заведено» объявлена, а не прочитана", fset.Position(call.Pos()), fd.Name.Name)
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+	if calls == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: вызовов keyLoginEnrollment разбором найдено 0 (файлов прочитано %d)", files)
+	}
+	t.Logf("перепись: файлов пакета %d, вызовов keyLoginEnrollment %d — все после удержания ключа", files, calls)
+}
