@@ -298,11 +298,17 @@ SELECT c.object_id,
           -- Заход с пары «субъект + область»: оба предиката сужают набор ДО
           -- чтения строк, и оба стоят теперь на ОДНОМ отношении (миграция
           -- 732001). Склейка субъекта выводила колонки из-под индекса.
+          -- Обращение ВБОК — по паре «субъект + область» на строку, с оградой
+          -- OFFSET 0: довод у ветви выдач прямого вопроса (grantArmSQL).
           FROM speaker_pair sp
           JOIN scope_distinct sc ON sc.object_id = c.object_id
-          JOIN kaname.access_binding_subjects bs
-            ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
-           AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
+          CROSS JOIN LATERAL (
+                 SELECT s.binding_id, s.subject_type
+                   FROM kaname.access_binding_subjects s
+                  WHERE s.subject_type  = sp.s_type AND s.subject_id  = sp.s_id
+                    AND s.resource_type = sc.s_type AND s.resource_id = sc.s_id
+                 OFFSET 0
+               ) bs
           JOIN kaname.access_bindings b ON b.id = bs.binding_id
           JOIN kaname.role_verb rv
             ON rv.role_id = b.role_id AND rv.object_type = $9::text

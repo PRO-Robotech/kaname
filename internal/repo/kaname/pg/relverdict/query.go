@@ -519,12 +519,24 @@ const grantArmSQL = `
     --
     -- Обращений — не больше, чем произведение мощностей speaker_pair и scope,
     -- и каждое возвращает выдачи ровно этого субъекта ровно в этой области.
+    --
+    -- Обращение — ВБОК, по паре на строку, и это ДЕРЖИТ обещание абзацем выше,
+    -- а не надеется на план. Обычное соединение оставляло порядок планировщику,
+    -- и он менял его по оценке числа строк говорящего: при трёх строках
+    -- (говорящий и два его системных класса, kaname#829) он предпочитал полный
+    -- просмотр субъектов выдач с хэшем, и стоимость вопроса шла за числом выдач
+    -- в базе (замер — проба объёма матрицы и сетка масштаба). OFFSET 0 не даёт
+    -- подзапросу раствориться в соединении: он и есть ограда порядка.
     SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm
       FROM speaker_pair sp
       {{scope_join}}
-      JOIN kaname.access_binding_subjects bs
-        ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
-       AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
+      CROSS JOIN LATERAL (
+             SELECT s.binding_id, s.subject_type
+               FROM kaname.access_binding_subjects s
+              WHERE s.subject_type  = sp.s_type AND s.subject_id  = sp.s_id
+                AND s.resource_type = sc.s_type AND s.resource_id = sc.s_id
+             OFFSET 0
+           ) bs
       JOIN kaname.access_bindings b ON b.id = bs.binding_id
       JOIN kaname.role_verb rv
         ON rv.role_id = b.role_id AND rv.object_type = $9::text
