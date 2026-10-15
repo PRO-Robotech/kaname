@@ -92,6 +92,36 @@
 --
 -- Журнал `fga_outbox` НЕ переписывается: он история доставки, применённое в
 -- нём не повторяется, а проекция журнала в факт срабатывает только на вставке.
+--
+-- =============================================================================
+-- 4. СНЯТИЕ ПРЕЖНИМ ПИСАТЕЛЕМ — ПЕРЕВОДОМ, ЗАПИСЬ — ОТКАЗОМ
+-- =============================================================================
+-- Ограничение п. 3 судит только ЗАПИСЬ. Снятие прежний писатель кладёт той же
+-- подстановкой: снятие публикации (`fga.tuple.delete user:* #v_get` с версией
+-- владельца) — и при `published=false`, и на КАЖДОМ снятии объекта типа с
+-- публикацией, стоит она или нет (надгробие пишется всегда). Прежняя свёртка
+-- снимала `subject = 'user:*'` — ноль строк без ошибки, а надгробие той же
+-- транзакцией уже записано: факт `system_class:anonymous #v_get` пережил бы
+-- снятие, и повтор доставки «не новее» его не лечит.
+--
+-- Свёртка (`kaname.relation_fact_fold_row`, тело 20261011120000) поэтому
+-- переобъявлена: снятие с субъектом `user:*` снимает хранимого субъекта по тому
+-- же переводу, что у переписи п. 3 (`v_get` — `system_class:anonymous`, прочее
+-- — `system_class:authenticated`). Почему перевод, а не отказ:
+--   * снятие только сужает: строка снимает ровно то, что этот писатель положил
+--     до переезда, и права не даёт никому — поверхность не растёт;
+--   * отказ ронял бы КАЖДОЕ снятие объекта прежним подом на всё окно выкатки
+--     (надгробие пишется безусловно), то есть порчи нет, но и снять нечего;
+--   * исход — тот, что заказал владелец: публикация снята его же версией.
+-- Запись с подстановкой НЕ переводится и остаётся отказом 23514 ограничения
+-- `relation_fact_subject_not_wildcard`: перевод записи дал бы право словом,
+-- которое после переезда право не называет, — расширение, а не сужение.
+-- Других форм подстановки (`тип:*`, `тип:*#…`) хранимые факты не несут (ноль
+-- п. 3 и ограничение), и снятие ими честно снимает ноль.
+--
+-- Порядок захвата замков операторной проекции идёт по написанию субъекта в
+-- журнале; строка снятия публикации — оператор из одной строки
+-- (`EmitPublicationTx`), так что перевод его не переставляет.
 
 -- +goose Up
 
@@ -296,7 +326,242 @@ ALTER TABLE kaname.access_binding_emitted_tuples
     ADD CONSTRAINT access_binding_emitted_tuples_user_not_wildcard
         CHECK ((fga_user !~ ':\*($|#)'::text));
 
+-- 4. Снятие прежним писателем — переводом.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.relation_fact_fold_row(
+    p_event_type text, p_payload jsonb, p_created_at timestamptz) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_user      text := p_payload ->> 'user';
+    v_object    text := p_payload ->> 'object';
+    -- Версия ВЛАДЕЛЬЦА. Есть только у строки, которую владелец упорядочил сам.
+    v_owner     text := p_payload ->> 'source_version';
+    v_version   timestamptz;
+    v_relations text[];
+    v_relation  text;
+    v_type      text;
+    v_id        text;
+    v_colon     int;
+    -- Условие, которое модель объявляет на прямом списке этого отношения для
+    -- типа субъекта строки (`[user with mfa_fresh]`); пусто — безусловно.
+    v_condition text;
+    -- Хранимый субъект строки снятия (п. 4 шапки миграции kaname#829).
+    v_stored    text;
+BEGIN
+    -- Набор ВЫИГРЫВАЕТ у скаляра: на выдаче набора присутствуют оба поля, и
+    -- скаляр там — эхо для пода прежнего выпуска, а не весь предмет строки.
+    IF jsonb_array_length(coalesce(p_payload -> 'relations', '[]'::jsonb)) > 0 THEN
+        -- Отношения набора — в ОБЩЕМ порядке, а не в порядке писателя: строка
+        -- факта ключуется отношением, и два набора одного субъекта на одном
+        -- объекте, перечисленные встречно, брали бы их блокировки встречно.
+        SELECT array_agg(value ORDER BY value COLLATE "C") INTO v_relations
+          FROM jsonb_array_elements_text(p_payload -> 'relations') AS value;
+    ELSIF p_payload ->> 'relation' IS NOT NULL THEN
+        v_relations := ARRAY[p_payload ->> 'relation'];
+    END IF;
+
+    IF v_user IS NULL OR v_relations IS NULL OR v_object IS NULL THEN
+        RAISE EXCEPTION
+            'fga_outbox: строка без user/relation/object (%). Прямой факт складывается из этого журнала, и строка, которую нельзя спроецировать, дала бы движку право, о котором своя БД не знает.',
+            p_payload;
+    END IF;
+
+    -- Порядок строки. У строки, упорядоченной владельцем, его задаёт версия
+    -- владельца: метка журнала — момент НАЧАЛА транзакции службы, и у снятия,
+    -- начавшего транзакцию раньше открытия, она оказалась бы старше того, что
+    -- снятие обязано снять. Неразбираемая версия роняет строку, а не
+    -- подменяется меткой: молчаливая подмена вернула бы ровно тот порядок, от
+    -- которого поле защищает.
+    v_version := coalesce(v_owner::timestamptz, p_created_at);
+
+    -- Глагол выводится из выдачи и копией не хранится (см. 0098). Набор из
+    -- одних глаголов выходит здесь — до разбора объекта, как и одиночный.
+    --
+    -- ИСКЛЮЧЕНИЕ ОДНО: строка, упорядоченная владельцем, — публикация для
+    -- анонимного чтения. Её не выводит ни одна выдача, и отброшенная здесь, она
+    -- не существовала бы нигде (kaname#107).
+    IF v_owner IS NULL THEN
+        v_relations := ARRAY(SELECT r FROM unnest(v_relations) AS r WHERE r NOT LIKE 'v\_%');
+        IF array_length(v_relations, 1) IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
+
+    v_colon := position(':' in v_object);
+    IF v_colon <= 1 OR v_colon = length(v_object) THEN
+        RAISE EXCEPTION
+            'fga_outbox: объект % не имеет формы "<тип>:<идентификатор>" — спроецировать прямой факт нельзя.',
+            v_object;
+    END IF;
+    v_type := substr(v_object, 1, v_colon - 1);
+    v_id   := substr(v_object, v_colon + 1);
+
+    IF v_type LIKE '%.%' THEN
+        RAISE EXCEPTION
+            'fga_outbox: тип объекта % назван словарём каталога. Вопрос о доступе приходит словарём модели прав, и такая строка не совпала бы ни с одним вопросом.',
+            v_type;
+    END IF;
+
+    FOREACH v_relation IN ARRAY v_relations LOOP
+        IF p_event_type = 'fga.tuple.write' THEN
+            -- Условие прикладывает ПИСАТЕЛЬ, и только он: факт человека на
+            -- условном отношении без условия значил бы безусловный допуск там,
+            -- где модель объявляет допуск лишь при выполненном условии.
+            -- Перечень — дословно `with`-записи канонической модели; гейт
+            -- `TestConditionedRelationHasAProducer` сверяет его с моделью в обе
+            -- стороны (запись модели без строки и строка без записи модели —
+            -- находки).
+            SELECT c.condition_name INTO v_condition
+              FROM (VALUES
+                    ('compute_instance', 'console', 'user', 'mfa_fresh'),
+                    ('compute_instance', 'ssh',     'user', 'mfa_fresh')
+                   ) AS c(object_type, relation, subject_type, condition_name)
+             WHERE c.object_type = v_type AND c.relation = v_relation
+               AND c.subject_type = split_part(v_user, ':', 1);
+
+            INSERT INTO kaname.relation_fact
+                   (object_type, object_id, relation, subject, source_version, created_at, condition_name)
+            VALUES (v_type, v_id, v_relation, v_user, v_version, now(), coalesce(v_condition, ''))
+            ON CONFLICT (object_type, object_id, relation, subject) DO UPDATE
+               SET source_version = EXCLUDED.source_version,
+                   condition_name = EXCLUDED.condition_name
+             WHERE relation_fact.source_version < EXCLUDED.source_version;
+        ELSIF p_event_type = 'fga.tuple.delete' THEN
+            -- Снятие с подстановкой прежнего писателя снимает строку, в которую
+            -- переезд (п. 3) перенёс то, что этот писатель когда-то положил:
+            -- перевод тот же, что у переписи, по отношению (п. 4 шапки).
+            v_stored := v_user;
+            IF v_user = 'user:*' THEN
+                v_stored := CASE WHEN v_relation = 'v_get' THEN 'system_class:anonymous'
+                                 ELSE 'system_class:authenticated' END;
+            END IF;
+            DELETE FROM kaname.relation_fact
+             WHERE object_type = v_type AND object_id = v_id
+               AND relation = v_relation AND subject = v_stored
+               AND source_version <= v_version;
+        END IF;
+    END LOOP;
+    RETURN;
+END $$;
+-- +goose StatementEnd
+
+COMMENT ON FUNCTION kaname.relation_fact_fold_row(text, jsonb, timestamptz) IS 'Свёртка ОДНОЙ строки журнала намерений в прямой факт. Отношения набора — в побайтном порядке (kaname#568). К факту прикладывается условие, которое модель объявляет на прямом списке отношения для типа субъекта строки (`[user with mfa_fresh]` на compute_instance#ssh и #console, kaname#133). Снятие с подстановкой `user:*` (писатель прежнего выпуска) снимает хранимого субъекта-класс: `v_get` — system_class:anonymous, прочее — system_class:authenticated, перевод переезда; запись подстановки отвергает relation_fact_subject_not_wildcard (kaname#829). Зовётся только операторной проекцией kaname.relation_fact_from_journal().';
+
 -- +goose Down
+
+-- Свёртка — дословно тело 20261011120000: снятие подстановки снова снимает
+-- только её написание.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.relation_fact_fold_row(
+    p_event_type text, p_payload jsonb, p_created_at timestamptz) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_user      text := p_payload ->> 'user';
+    v_object    text := p_payload ->> 'object';
+    -- Версия ВЛАДЕЛЬЦА. Есть только у строки, которую владелец упорядочил сам.
+    v_owner     text := p_payload ->> 'source_version';
+    v_version   timestamptz;
+    v_relations text[];
+    v_relation  text;
+    v_type      text;
+    v_id        text;
+    v_colon     int;
+    -- Условие, которое модель объявляет на прямом списке этого отношения для
+    -- типа субъекта строки (`[user with mfa_fresh]`); пусто — безусловно.
+    v_condition text;
+BEGIN
+    -- Набор ВЫИГРЫВАЕТ у скаляра: на выдаче набора присутствуют оба поля, и
+    -- скаляр там — эхо для пода прежнего выпуска, а не весь предмет строки.
+    IF jsonb_array_length(coalesce(p_payload -> 'relations', '[]'::jsonb)) > 0 THEN
+        -- Отношения набора — в ОБЩЕМ порядке, а не в порядке писателя: строка
+        -- факта ключуется отношением, и два набора одного субъекта на одном
+        -- объекте, перечисленные встречно, брали бы их блокировки встречно.
+        SELECT array_agg(value ORDER BY value COLLATE "C") INTO v_relations
+          FROM jsonb_array_elements_text(p_payload -> 'relations') AS value;
+    ELSIF p_payload ->> 'relation' IS NOT NULL THEN
+        v_relations := ARRAY[p_payload ->> 'relation'];
+    END IF;
+
+    IF v_user IS NULL OR v_relations IS NULL OR v_object IS NULL THEN
+        RAISE EXCEPTION
+            'fga_outbox: строка без user/relation/object (%). Прямой факт складывается из этого журнала, и строка, которую нельзя спроецировать, дала бы движку право, о котором своя БД не знает.',
+            p_payload;
+    END IF;
+
+    -- Порядок строки. У строки, упорядоченной владельцем, его задаёт версия
+    -- владельца: метка журнала — момент НАЧАЛА транзакции службы, и у снятия,
+    -- начавшего транзакцию раньше открытия, она оказалась бы старше того, что
+    -- снятие обязано снять. Неразбираемая версия роняет строку, а не
+    -- подменяется меткой: молчаливая подмена вернула бы ровно тот порядок, от
+    -- которого поле защищает.
+    v_version := coalesce(v_owner::timestamptz, p_created_at);
+
+    -- Глагол выводится из выдачи и копией не хранится (см. 0098). Набор из
+    -- одних глаголов выходит здесь — до разбора объекта, как и одиночный.
+    --
+    -- ИСКЛЮЧЕНИЕ ОДНО: строка, упорядоченная владельцем, — публикация для
+    -- анонимного чтения. Её не выводит ни одна выдача, и отброшенная здесь, она
+    -- не существовала бы нигде (kaname#107).
+    IF v_owner IS NULL THEN
+        v_relations := ARRAY(SELECT r FROM unnest(v_relations) AS r WHERE r NOT LIKE 'v\_%');
+        IF array_length(v_relations, 1) IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
+
+    v_colon := position(':' in v_object);
+    IF v_colon <= 1 OR v_colon = length(v_object) THEN
+        RAISE EXCEPTION
+            'fga_outbox: объект % не имеет формы "<тип>:<идентификатор>" — спроецировать прямой факт нельзя.',
+            v_object;
+    END IF;
+    v_type := substr(v_object, 1, v_colon - 1);
+    v_id   := substr(v_object, v_colon + 1);
+
+    IF v_type LIKE '%.%' THEN
+        RAISE EXCEPTION
+            'fga_outbox: тип объекта % назван словарём каталога. Вопрос о доступе приходит словарём модели прав, и такая строка не совпала бы ни с одним вопросом.',
+            v_type;
+    END IF;
+
+    FOREACH v_relation IN ARRAY v_relations LOOP
+        IF p_event_type = 'fga.tuple.write' THEN
+            -- Условие прикладывает ПИСАТЕЛЬ, и только он: факт человека на
+            -- условном отношении без условия значил бы безусловный допуск там,
+            -- где модель объявляет допуск лишь при выполненном условии.
+            -- Перечень — дословно `with`-записи канонической модели; гейт
+            -- `TestConditionedRelationHasAProducer` сверяет его с моделью в обе
+            -- стороны (запись модели без строки и строка без записи модели —
+            -- находки).
+            SELECT c.condition_name INTO v_condition
+              FROM (VALUES
+                    ('compute_instance', 'console', 'user', 'mfa_fresh'),
+                    ('compute_instance', 'ssh',     'user', 'mfa_fresh')
+                   ) AS c(object_type, relation, subject_type, condition_name)
+             WHERE c.object_type = v_type AND c.relation = v_relation
+               AND c.subject_type = split_part(v_user, ':', 1);
+
+            INSERT INTO kaname.relation_fact
+                   (object_type, object_id, relation, subject, source_version, created_at, condition_name)
+            VALUES (v_type, v_id, v_relation, v_user, v_version, now(), coalesce(v_condition, ''))
+            ON CONFLICT (object_type, object_id, relation, subject) DO UPDATE
+               SET source_version = EXCLUDED.source_version,
+                   condition_name = EXCLUDED.condition_name
+             WHERE relation_fact.source_version < EXCLUDED.source_version;
+        ELSIF p_event_type = 'fga.tuple.delete' THEN
+            DELETE FROM kaname.relation_fact
+             WHERE object_type = v_type AND object_id = v_id
+               AND relation = v_relation AND subject = v_user
+               AND source_version <= v_version;
+        END IF;
+    END LOOP;
+    RETURN;
+END $$;
+-- +goose StatementEnd
+
+COMMENT ON FUNCTION kaname.relation_fact_fold_row(text, jsonb, timestamptz) IS 'Свёртка ОДНОЙ строки журнала намерений в прямой факт. Отношения набора — в побайтном порядке (kaname#568). К факту прикладывается условие, которое модель объявляет на прямом списке отношения для типа субъекта строки (`[user with mfa_fresh]` на compute_instance#ssh и #console, kaname#133). Зовётся только операторной проекцией kaname.relation_fact_from_journal().';
 
 -- Откат возвращает подстановку на место классов — но ТОЛЬКО если классу не
 -- выдано ничего, кроме системной выдачи и публикаций: выдачу классу,
