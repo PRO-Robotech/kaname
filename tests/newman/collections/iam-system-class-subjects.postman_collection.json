@@ -11488,7 +11488,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"name\": \"sc22-read-{{runId}}\", \"definitionTier\": {\"tierType\": \"iam.account\", \"tierId\": \"{{accountAId}}\"}, \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"]}]}",
+              "raw": "{\"name\": \"sc22_read_{{runId}}\", \"definitionTier\": {\"tierType\": \"iam.account\", \"tierId\": \"{{accountAId}}\"}, \"rules\": [{\"module\": \"vpc\", \"resources\": [\"network\"], \"verbs\": [\"get\", \"list\"]}]}",
               "options": {
                 "raw": {
                   "language": "json"

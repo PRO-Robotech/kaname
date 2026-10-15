@@ -496,7 +496,7 @@ _case("SC21-WRITE-ROLE-REFUSED", "SC-21: роль с пишущим глагол
 
 _case("SC22-BOUND-ROLE-REFUSES-WRITE-VERB", "SC-22: роль, выданная классу, не получает пишущего глагола правкой", ["STATE", "NEG"], [
     Step(name="sc22-role", method="POST", path="/iam/v1/roles", auth="jwtAccountAdminA",
-         body={"name": "sc22-read-{{runId}}", "definitionTier": {"tierType": "iam.account", "tierId": "{{accountAId}}"},
+         body={"name": "sc22_read_{{runId}}", "definitionTier": {"tierType": "iam.account", "tierId": "{{accountAId}}"},
                "rules": [{"module": "vpc", "resources": ["network"], "verbs": ["get", "list"]}]},
          test_script=[*assert_status(200), *save_from_response("j.id", "sc22RoleOpId")]),
     _poll("sc22RoleOpId", "jwtAccountAdminA", "sc22-role-poll", capture="sc22RoleId", extra=_done_ok()),
