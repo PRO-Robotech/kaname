@@ -229,6 +229,25 @@ func (r *AccessKeyRepo) Writer(ctx context.Context) (access_keys.Writer, error) 
 	return &accessKeyWriter{tx: tx}, nil
 }
 
+// RegistrationWriter — транзакция завершения регистрации ключа (см. порт):
+// открыта тем же уровнем, что `Writer` (записей сессии она не пишет), и
+// ПЕРВЫМ оператором взята строка личности ключевым замком
+// (`lockUserForKeySQL`) — раньше рукоятки церемонии и испытания (kaname#775).
+func (r *AccessKeyRepo) RegistrationWriter(ctx context.Context, userID domain.UserID) (access_keys.Writer, error) {
+	if userID == "" {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, mapErr(err, "AccessKey.RegistrationWriter", "")
+	}
+	if _, err := tx.Exec(ctx, lockUserForKeySQL, string(userID)); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, mapErr(err, "User", string(userID))
+	}
+	return &accessKeyWriter{tx: tx}, nil
+}
+
 // RevokeWriter — транзакция снятия ключа (см. порт): открыта ОТКРЫТИЕМ
 // писателя сессии (`beginHumanSessionWriter` — уровень изоляции писателей
 // церемонии, перепись `ceremony_writer_openers_test.go`), и ПЕРВЫМ оператором
