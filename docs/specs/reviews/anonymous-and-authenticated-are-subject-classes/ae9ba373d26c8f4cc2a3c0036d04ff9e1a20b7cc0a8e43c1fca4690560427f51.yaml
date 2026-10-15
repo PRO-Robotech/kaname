@@ -1,0 +1,126 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51
+  revision: 4
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: e7b177032
+  content_commit: 584350e55
+  branch: '829'
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238]
+  lines: 931
+  round: 2
+  round_scope: >-
+    Проверка исполнения: правка одобренной редакции 3 (fa4ff26f…) по шести решениям диспетчера
+    класса «исправить по факту дерева» на вопросы красной фазы. Нового круга нет (fa-b8);
+    судится только исполнение шести решений и отсутствие лишнего в дельте.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/sc-kaname @ 584350e55 → ae9ba373…427f51 (совпало с заданием);
+    git show e7b177032:<док> | sha256sum → fa4ff26f…bb21757e (база дельты = одобренная редакция)
+  measurement_revisions: >-
+    kaname — дерево 584350e55; kacho — git show @4da378bc4.
+
+verdict: APPROVED
+verdict_note: проверка исполнения — шесть решений диспетчера исполнены, лишнего в дельте нет
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T03:56:57+03:00'
+
+execution_check:
+  delta: >-
+    git diff e7b177032 584350e55 → один файл (документ), +87/−32. Ханки: шапка (история
+    вердиктов, редакция 4), Р5 (абзац о правиле ствола на кластере — решение 3), Р8 (решение 4),
+    П1 (решения 1, 2, 3), П3 (решение 2), П5 (решения 3, 5), SC-01 и SC-07 (1, 2), SC-12 (4),
+    SC-16 (2), SC-19 (3), SC-28 (3, 4), SC-30 и SC-32 (2), SC-43 (4), SC-50 и SC-51 (6), SC-53 (5),
+    раздел «Редакция 4: что исправлено». Каждый ханк — исполнение одного из шести решений либо
+    его учёт; сценариев не добавлено и не снято (49 SC), ID не менялись.
+  decisions:
+    - n: 1
+      result: >-
+        исполнено — цель выдачи `vpc.network` в П1, SC-01, SC-07; тип модели `vpc_network` оставлен
+        там, где спрашивают модель (SC-10, SC-16, SC-30). Верно по дереву: tables_gen.go:107
+        «"vpc.network": "vpc_network"»; expand_access.go:224 передаёт objectType в ListUsers модели.
+    - n: 2
+      result: исполнено — enp00000000000000001/…002 везде; остатков net-obj 0 (grep -n).
+    - n: 3
+      result: >-
+        исполнено — близнец SC-28: вызывающий кластерный администратор usr-K, роль rol-read-named с
+        именем; отрицание: rol-read (без имён и меток) от usr-K → INVALID_ARGUMENT текстом
+        helpers.go:378 «GLOBAL scope requires names or labels selector for non-cluster-admin roles»;
+        контроль: роль кластерного администратора без селектора принимается (выдача человеку).
+        Порядок проверок по дереву: requireGrantAuthority create.go:198 раньше
+        validateGlobalAllSelector create.go:218 — отказ usr-A остаётся PERMISSION_DENIED.
+        Прочтение «берёт кластерного администратора» как вызывающего, а не как роль классу,
+        — единственное исполнимое: роль кластерного администратора классу не выдать (Р4, SC-21).
+    - n: 4
+      result: >-
+        исполнено — cluster_root в Р8, SC-12, SC-28, SC-43; остатков cluster_kacho_root 0;
+        по дереву constants_extended.go:24 ClusterSingletonID = "cluster_root".
+    - n: 5
+      result: >-
+        исполнено — SC-53: «Тогда» арендатора — системной выдачи в перечне нет; близнец —
+        кластерный администратор видит её с меткой «платформенная»; отличие — один факт.
+    - n: 6
+      result: >-
+        исполнено — SC-51 близнец `user`; SC-50 вид `system_class` тем же правилом подписи; по
+        kacho @4da378bc4 AccessBindingCreateForm.tsx:798 «SUBJECT_TYPES.map((t) => ({ value: t, label: t }))».
+  author_questions_resolved:
+    - SC-28 вариант (а) принят — см. решение 3.
+    - SC-50 подпись `system_class` принята — следствие решения 6, иначе SC-50 и SC-51 расходятся.
+
+summary:
+  scenarios: 49
+  producer_named: 49 of 49
+  twin_named_for_negatives: все
+  blocking: 0
+  blocking_kinds: []
+
+minor:
+  - kind: FORMAT
+    note: minor круга 2 (порядок SC-19, исполнитель-учётка SC-27, пара края SC-18) остаются к учёту в S2/S3.
+
+constructibility:
+  method: >-
+    Посев не ставился — изоляции для посева задание не назвало. Новые элементы П1 (usr-K,
+    rol-read-named) строятся объявленным путём восстановления кластерного администратора и
+    фикстурой роли; П3 — названная фикстура, как в записи fa4ff26f…; П4/П5 — стенд не поднимался.
+  seeded: 0
+  of: 5
+  named_fixture: 3
+  not_constructible: 0
+  not_executed: 2
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  reason: одобрение вступает в силу внешним событием; до публикации — not_performed
+
+event_body: "acceptance-reviewer · APPROVED · sha256 ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51 · проверка исполнения"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: not_performed
+  published: false
