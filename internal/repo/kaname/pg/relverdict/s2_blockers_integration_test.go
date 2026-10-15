@@ -81,6 +81,22 @@ func rowsOf(m planrows.Measurement, relation string) int64 {
 	return n
 }
 
+// touchedOf — отдано И отброшено узлами отношения: «тронуто» прибора сетки.
+//
+// Для субъектов выдач судится именно оно, а не отданное: обращение к ним идёт
+// вбок по паре «субъект + область» (kaname#829), и без индекса просмотр
+// отбрасывает чужие строки ФИЛЬТРОМ на самом узле — отданного при этом ноль,
+// а прочитано всё. Мера «отдано» эту стоимость не видела бы вовсе.
+func touchedOf(m planrows.Measurement, relation string) int64 {
+	var n int64
+	for _, a := range m.Accesses {
+		if a.Relation == relation {
+			n += a.Rows + a.Removed
+		}
+	}
+	return n
+}
+
 // ── R7-1-18: ОБХОД ЦЕПИ ОБЛАСТЕЙ ПЕРЕСТАЁТ ПЕРЕВЫЧИСЛЯТЬ ЗАМЫКАНИЕ ──────────
 
 // TestR7_1_18_ScopeWalkCostsTheRequestNotTheCloud — R7-1-18, задача kacho#732.
@@ -351,8 +367,8 @@ func TestR7_1_12_SubjectAndScopeResolveOnOneIndex(t *testing.T) {
 	if vWith != relverdict.Allow {
 		t.Fatalf("вердикт %s: мерилась бы стоимость неверного ответа", vWith)
 	}
-	subjWith := rowsOf(mWith, "access_binding_subjects")
-	t.Logf("с индексом: строк за вердикт %d, из них по строкам субъектов выдач %d "+
+	subjWith := touchedOf(mWith, "access_binding_subjects")
+	t.Logf("с индексом: строк за вердикт %d, тронуто строк субъектов выдач %d "+
 		"(в облаке %d чужих выдач)", mWith.Rows, subjWith, foreign)
 
 	// ── ИНЪЕКЦИЯ: индекс снят, всё прочее не тронуто ─────────────────────────
@@ -363,8 +379,8 @@ func TestR7_1_12_SubjectAndScopeResolveOnOneIndex(t *testing.T) {
 	}
 	f.analyze(t, ctx)
 	vNo, mNo := askAndExplain(t, ctx, tx, cap, probeObjectID)
-	subjNo := rowsOf(mNo, "access_binding_subjects")
-	t.Logf("без индекса: строк за вердикт %d, из них по строкам субъектов выдач %d", mNo.Rows, subjNo)
+	subjNo := touchedOf(mNo, "access_binding_subjects")
+	t.Logf("без индекса: строк за вердикт %d, тронуто строк субъектов выдач %d", mNo.Rows, subjNo)
 
 	// Ответ обязан совпасть: инъекция меняет СТОИМОСТЬ, а не смысл.
 	if vNo != vWith {
