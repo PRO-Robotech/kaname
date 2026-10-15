@@ -83420,7 +83420,7 @@
                 "exec": [
                   "pm.test('KN747-06-STATE: ответ 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('KN747-06-STATE: заведение не начато — totp.enrolled false без pendingUntil', () => pm.expect(JSON.stringify(__j) === '{\"totp\":{\"enrolled\":false}}').to.eql(true));"
+                  "pm.test('KN747-06-STATE: заведение не начато — totp.enrolled false без pendingUntil; способ повышения один — ключ (Р6 step-up-with-any-enrolled-method)', () => pm.expect(JSON.stringify(__j)).to.eql('{\"accessKeys\":{\"available\":true},\"stepUpMethods\":[\"webauthn\"],\"totp\":{\"enrolled\":false}}'));"
                 ]
               }
             }

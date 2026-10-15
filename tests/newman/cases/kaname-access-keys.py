@@ -3494,8 +3494,9 @@ CASES.append(Case(
         _sf_enroll(_Q, "kn747-06-enroll", secret_of=_Q + "Refused",
                    tests=[*_level_hint("KN747-06-ENROLL"), *_no_cookies("KN747-06-ENROLL")]),
         _sf_state(_Q, "kn747-06-state", [
-            "pm.test('KN747-06-STATE: заведение не начато — totp.enrolled false без pendingUntil', () => "
-            """pm.expect(JSON.stringify(__j) === '{"totp":{"enrolled":false}}').to.eql(true));""",
+            "pm.test('KN747-06-STATE: заведение не начато — totp.enrolled false без pendingUntil; "
+            "способ повышения один — ключ (Р6 step-up-with-any-enrolled-method)', () => "
+            """pm.expect(JSON.stringify(__j)).to.eql('{"accessKeys":{"available":true},"stepUpMethods":["webauthn"],"totp":{"enrolled":false}}'));""",
         ]),
     ],
 ))
