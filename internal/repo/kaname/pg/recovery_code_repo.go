@@ -151,6 +151,17 @@ func (w *humanSessionWriter) EmitRecoveryMail(ctx context.Context, in humansessi
 	if in.Code.IsZero() {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument recovery_mail.code: required")
 	}
+	// Адрес судится соединением ЭТОЙ транзакции, после замка строки личности
+	// (kaname#776, Р4): оператор READ COMMITTED берёт свой снимок и видит смену
+	// адреса, зафиксированную до замка.
+	var owned bool
+	if err := w.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND email = $2)`,
+		string(in.UserID), in.To).Scan(&owned); err != nil {
+		return mapErr(err, "RecoveryMail.Address", string(in.UserID))
+	}
+	if !owned {
+		return humansession.ErrRecoveryAddressMoved
+	}
 	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, mailWindowRecovery, in.To, in.Limit)
 	if err != nil {
 		return err

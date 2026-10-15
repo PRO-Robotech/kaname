@@ -626,10 +626,13 @@ func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID
 //	git grep -nE '\.(UpsertPendingTOTP|ActivateTOTP|ReplaceLookupSet|ConsumeLookupElement|RemoveSecondFactor)\(ctx' -- '*.go' ':!*_test.go'
 //
 //	строки смены адреса        — только глаголы смены (эта дверь)
-//	коды восстановления        — запрос кода: `PersonWriter` (kaname#770;
-//	                             брал коды раньше личности — 3 блокировки из 3
-//	                             с исходом смены и с удалением личности,
-//	                             `recovery_request_lock_order_integration_test.go`);
+//	коды восстановления        — запрос кода: `SessionSetWriter` (kaname#770
+//	                             поставил личность первой — брал коды раньше
+//	                             неё, 3 блокировки из 3 с исходом смены и с
+//	                             удалением личности,
+//	                             `recovery_request_lock_order_integration_test.go`;
+//	                             kaname#776 поднял силу: ключевой замок не
+//	                             упорядочивал запросы одной личности);
 //	                             завершение: `RecoveryCompletionWriter`
 //	записи сессии              — выдача входа: `LockPersonForLogin` первым;
 //	                             выход, повышение, перечеканка: `PersonWriter`;

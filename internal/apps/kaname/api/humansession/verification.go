@@ -608,3 +608,9 @@ type SourcePacer interface {
 // ErrLetterWindowFull — окно писем адресата полно: письмо не ставится, ответ
 // вызывающему не меняется (оракула нет). Отличим от отказа хранилища.
 var ErrLetterWindowFull = errors.New("letter window of the recipient is full")
+
+// ErrRecoveryAddressMoved — адрес письма восстановления личности на момент
+// записи кода уже не принадлежит (смена адреса зафиксирована раньше,
+// kaname#776 Р4): кода и письма нет, исход запроса — `no-row` (Д3), ответ
+// вызывающему не меняется.
+var ErrRecoveryAddressMoved = errors.New("recovery address no longer belongs to the person")

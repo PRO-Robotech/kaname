@@ -119,6 +119,12 @@ func (w *fakeWriter) EmitRecoveryMail(_ context.Context, in humansession.Recover
 	}
 	w.store.trip()
 	w.store.mu.Lock()
+	// Адрес судится транзакцией до списания окна — как у адаптера
+	// (kaname#776, Р4): адрес, личности уже не принадлежащий, — отказ без письма.
+	if u, ok := w.store.users[in.UserID]; !ok || string(u.Email) != in.To {
+		w.store.mu.Unlock()
+		return humansession.ErrRecoveryAddressMoved
+	}
 	if w.store.mailWindow == nil {
 		w.store.mailWindow = map[string]int{}
 	}
