@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package loginlanehttp_test
+package internal_iam_test
 
 // access_key_registration_versus_person_deletion_integration_test.go —
 // завершение регистрации ключа доступа против удаления той же личности
@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -31,24 +30,77 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest"
 )
 
 const registrationDeletionHold = "probe_registration_deletion_hold"
 
+const (
+	regSceneRPID   = "console.example.invalid"
+	regSceneOrigin = "https://" + regSceneRPID
+)
+
+func regKeyDeps(l *sessionWriterLane) access_keys.Deps {
+	return access_keys.Deps{
+		Store:     kanamepg.NewAccessKeyRepo(l.s.pool),
+		Freshness: kanamepg.NewHumanSessionFreshness(l.s.pool),
+		Methods:   kanamepg.NewLoginMethodRepo(l.s.pool),
+		Binding: webauthnverify.Binding{RPID: regSceneRPID, Origins: []string{regSceneOrigin},
+			Algorithms: []webauthnverify.Algorithm{webauthnverify.AlgES256}},
+		FreshnessWindow: 15 * time.Minute,
+		Now:             time.Now,
+	}
+}
+
+// regPending — выданное испытание регистрации и собранный на нём результат.
+func regPending(t *testing.T, l *sessionWriterLane, user domain.UserID) access_keys.FinishRegistrationInput {
+	t.Helper()
+	begin, err := access_keys.NewBeginRegistrationUseCase(regKeyDeps(l))
+	require.NoError(t, err)
+	out, err := begin.Execute(context.Background(), access_keys.BeginRegistrationInput{UserID: user, Actor: user})
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): испытание регистрации выдано")
+	auth := webauthntest.New(t, webauthntest.AlgES256)
+	cdj, att := auth.Register(t, webauthntest.RegistrationOptions{Challenge: out.Challenge, Origin: regSceneOrigin, RPID: regSceneRPID})
+	rk := true
+	return access_keys.FinishRegistrationInput{UserID: user, Actor: user, CredentialID: auth.CredentialID(),
+		ClientDataJSON: cdj, AttestationObject: att, Discoverable: &rk}
+}
+
+func regAwaitOp(t *testing.T, l *sessionWriterLane, id string) *operations.Operation {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, operations.Wait(ctx), "НЕ ВЫПОЛНИЛОСЬ: исполнитель операций не завершил очередь")
+	got, err := operations.NewRepo(l.s.pool, "kaname").Get(context.Background(), id)
+	require.NoError(t, err)
+	require.True(t, got.Done, "операция %s не терминальна", id)
+	return got
+}
+
+func regKeysOf(t *testing.T, l *sessionWriterLane, user domain.UserID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, l.s.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM kaname.user_access_keys WHERE user_id = $1`, string(user)).Scan(&n))
+	return n
+}
+
 // installRegistrationHold — однократная задержка после потребления испытания:
 // держит замки, пока в базе не появится ждущий замка, но не дольше 5 с.
 // Исход — `_seen` (сколько ждущих держатель видел, отпуская).
-func installRegistrationHold(t *testing.T, h *sessionLane) {
+func installRegistrationHold(t *testing.T, l *sessionWriterLane) {
 	t.Helper()
+	ctx := context.Background()
 	name := registrationDeletionHold
 	for _, q := range []string{
 		`CREATE SEQUENCE kaname.` + name + `_seq`,
 		`CREATE SEQUENCE kaname.` + name + `_seen MINVALUE 0`,
 	} {
-		_, err := h.pool.Exec(h.ctx, q)
+		_, err := l.s.pool.Exec(ctx, q)
 		require.NoError(t, err, "состояние задержки: %s", q)
 	}
-	_, err := h.pool.Exec(h.ctx, `
+	_, err := l.s.pool.Exec(ctx, `
 		CREATE FUNCTION kaname.`+name+`() RETURNS trigger
 		LANGUAGE plpgsql AS $$
 		DECLARE
@@ -69,21 +121,9 @@ func installRegistrationHold(t *testing.T, h *sessionLane) {
 			RETURN NULL;
 		END $$`)
 	require.NoError(t, err, "функция задержки")
-	_, err = h.pool.Exec(h.ctx, `CREATE TRIGGER `+name+` AFTER UPDATE ON kaname.access_key_challenges
+	_, err = l.s.pool.Exec(ctx, `CREATE TRIGGER `+name+` AFTER UPDATE ON kaname.access_key_challenges
 		FOR EACH STATEMENT EXECUTE FUNCTION kaname.`+name+`()`)
 	require.NoError(t, err, "триггер задержки")
-}
-
-// laneDeadlocks — счётчик взаимных блокировок базы своим соединением.
-func laneDeadlocks(t *testing.T, h *sessionLane) int64 {
-	t.Helper()
-	conn, err := pgx.Connect(h.ctx, h.dsn)
-	require.NoError(t, err)
-	defer func() { _ = conn.Close(h.ctx) }()
-	var n int64
-	require.NoError(t, conn.QueryRow(h.ctx,
-		`SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()`).Scan(&n))
-	return n
 }
 
 // TestIntegration_AccessKeyRegistrationAndPersonDeletionDoNotDeadlock — обе
@@ -91,77 +131,46 @@ func laneDeadlocks(t *testing.T, h *sessionLane) int64 {
 // личности нет. Законный близнец — та же регистрация без конкурента: ключ
 // заведён (сцена способна дойти до вставки).
 func TestIntegration_AccessKeyRegistrationAndPersonDeletionDoNotDeadlock(t *testing.T) {
-	h := newSessionLane(t)
-	u := h.user.ID
-	h.login(t, integrationPassword)
-	// Потолок вида объявлен ДО вставки: без него писатель отказывает учётом —
-	// «условие не создано», а не исход сцены.
-	_, err := h.pool.Exec(h.ctx, `
-		INSERT INTO own_ceilings (kind, limit_value) VALUES ('iam.user.accessKey', 8)
+	l := newSessionWriterLane(t)
+	ctx := context.Background()
+	pool := l.s.pool
+	_, err := pool.Exec(ctx, `
+		INSERT INTO kaname.own_ceilings (kind, limit_value) VALUES ('iam.user.accessKey', 8)
 		ON CONFLICT (kind) DO UPDATE SET limit_value = EXCLUDED.limit_value`)
 	require.NoError(t, err, "Дано: потолок вида ключа объявлен")
+	p := l.seedPerson(t)
 
-	twin, err := h.finishRegistration(t, h.beginRegistration(t, u))
-	require.NoError(t, err, "близнец: регистрация без конкурента принята")
-	require.Nil(t, twin.Error, "близнец: регистрация без конкурента исполнена: %v", twin.Error)
-	require.Equal(t, 1, h.keysOf(t, u), "близнец: ключ заведён")
-
-	pending := h.beginRegistration(t, u)
-	installRegistrationHold(t, h)
-	deadlocksBefore := laneDeadlocks(t, h)
-
-	uc, err := access_keys.NewFinishRegistrationUseCase(h.keyDeps(), operations.NewRepo(h.pool, "kaname"))
+	finish, err := access_keys.NewFinishRegistrationUseCase(regKeyDeps(l), operations.NewRepo(pool, "kaname"))
 	require.NoError(t, err)
-	op, err := uc.Execute(h.ctx, pending.in)
-	require.NoError(t, err, "синхронная часть регистрации принята")
+	twinOp, err := finish.Execute(ctx, regPending(t, l, p.id))
+	require.NoError(t, err, "близнец: регистрация без конкурента принята")
+	twin := regAwaitOp(t, l, twinOp.ID)
+	require.Nil(t, twin.Error, "близнец: регистрация без конкурента исполнена: %v", twin.Error)
+	require.Equal(t, 1, regKeysOf(t, l, p.id), "близнец: ключ заведён")
 
-	// Держатель уснул в задержке — удаление приходит в окно.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var sleeping int
-		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM pg_stat_activity
-			 WHERE datname = current_database() AND wait_event = 'PgSleep'`).Scan(&sleeping))
-		if sleeping > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("отказ фикстуры: регистрация не вошла в задержку за 10 с — сцена не построена")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	pending := regPending(t, l, p.id)
+	installRegistrationHold(t, l)
+	deadlocksBefore := databaseDeadlocks(t, ctx, pool)
+	op, err := finish.Execute(ctx, pending)
+	require.NoError(t, err, "синхронная часть регистрации принята")
+	awaitSleepingBackend(t, ctx, pool)
 	deleted := make(chan error, 1)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		deleted <- deletePersonByProduct(ctx, h, u)
-	}()
-	done := h.awaitOp(t, op.ID)
+	go func() { deleted <- deletePerson(ctx, l.users, p.id) }()
+	done := regAwaitOp(t, l, op.ID)
 	delErr := <-deleted
 
 	var seen int64
-	require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT last_value FROM kaname.`+registrationDeletionHold+`_seen`).Scan(&seen))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT last_value FROM kaname.`+registrationDeletionHold+`_seen`).Scan(&seen))
 	if seen < 1 {
 		t.Fatalf("отказ фикстуры: держатель отпустил замки по сроку, не видя ждущего — сцена не построена "+
 			"(регистрация: %v · удаление: %v)", done.Error, delErr)
 	}
-	deadlocksAfter := laneDeadlocks(t, h)
-	t.Logf("ждавших замка %d · регистрация: ошибка=%v · удаление: ошибка=%v · deadlocks +%d",
-		seen, done.Error, delErr, deadlocksAfter-deadlocksBefore)
+	keys := regKeysOf(t, l, p.id)
+	deadlocksAfter := deadlocksAfterPoolClose(t, ctx, l.s.dsn, pool)
+	t.Logf("ждавших замка %d · регистрация: ошибка=%v · удаление: ошибка=%v · ключей после %d · deadlocks +%d",
+		seen, done.Error, delErr, keys, deadlocksAfter-deadlocksBefore)
 	assert.NoError(t, delErr, "удаление личности фиксируется")
 	assert.Nil(t, done.Error, "регистрация исполнена без взаимной блокировки")
-	assert.Zero(t, h.keysOf(t, u), "у удалённой личности ключей нет")
-}
-
-// deletePersonByProduct — удаление личности писателем продукта: строка `users`
-// и каскад её детей одной транзакцией.
-func deletePersonByProduct(ctx context.Context, h *sessionLane, uid domain.UserID) error {
-	w, err := kanamepg.New(h.pool, nil).Writer(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = w.Rollback(ctx) }()
-	if err := w.UsersW().Delete(ctx, uid); err != nil {
-		return err
-	}
-	return w.Commit(ctx)
+	assert.Zero(t, keys, "у удалённой личности ключей нет")
+	assert.Zero(t, deadlocksAfter-deadlocksBefore, "pg_stat_database.deadlocks")
 }
