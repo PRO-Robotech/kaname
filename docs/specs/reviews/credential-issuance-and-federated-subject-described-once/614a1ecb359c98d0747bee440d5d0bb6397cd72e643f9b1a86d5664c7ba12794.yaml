@@ -38,6 +38,13 @@ blocking:
     note: наблюдаемое краем без newman-держателя; CIF-06 п.2 без предиката
 unverified:
   constructibility: {seeded: 0, total: 5, not_executed: 5, reason: стенд и изоляция заданием не названы}
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
 event:
   status: not_performed
   body: "acceptance-reviewer · CHANGES_REQUESTED · 614a1ecb359c98d0747bee440d5d0bb6397cd72e643f9b1a86d5664c7ba12794"

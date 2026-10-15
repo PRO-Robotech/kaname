@@ -42,6 +42,13 @@ blocking:
       переводит коллекцию в волну церемонии (newman-suite-debt.py is_ceremony_key) — назвать.
 unverified:
   constructibility: {seeded: 0, total: 5, not_executed: 5, reason: стенд и изоляция заданием не названы; фикстуры сверены чтением посева}
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
 event:
   status: not_performed
   body: "acceptance-reviewer · CHANGES_REQUESTED · 57bfc0aa1c17ba958d03378eeed0968c9c987a9234746f7d751926682ecb911e"
