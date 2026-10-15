@@ -16,7 +16,6 @@ package deploy_test
 
 import (
 	"context"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"sort"
 	"testing"
 	"time"
@@ -29,6 +28,8 @@ import (
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/util/annotations"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // engineEvalAt — момент вычисления: двадцатая минута ряда; первые десять
