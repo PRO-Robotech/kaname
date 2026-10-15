@@ -1,0 +1,114 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-code-one-live-per-person.md
+  sha256: 02ab12cd396c0e54db673e9e9f7d9a84b11c799335259dbd6975969a40a42136
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке описывает документ и вердиктом не является; шапку намеренно не правили
+    (change-graph.md §2). Действующий вердикт о редакции 3 — эта запись плюс внешнее событие.
+  base_commit: c032a0274449435513963ff705259bc41740844d (origin/746)
+  content_commit: fa65fb0264dffec2e7eeb1e9697fa02498cda1c6
+  prior_revision_sha256: 835325684da6eb484ee9cff54c204f54274f66342a6902fed0661322b2c5f603
+  task: https://github.com/PRO-Robotech/kaname/issues/776
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/recovery-code-one-live-per-person.md
+  lines: 211
+verdict: APPROVED
+round: 3
+round_note: >-
+  Проверка исполнения по решению диспетчера: судится ТОЛЬКО дельта редакции 2 → 3 (fa-b1),
+  нового объёма нет. Блокирующий круга 2 (CONSTRUCTIBILITY, RCL-03) закрыт по существу;
+  важные круга 2 (FORMAT RCL-05, построение RCL-02, DoD п. 4) учтены.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T00:00:00Z'
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#776
+  status: performed
+  published: true
+  url: https://github.com/PRO-Robotech/kaname/issues/776#issuecomment-6185556258
+  published_at: '2026-10-15T05:58:09Z'
+  published_by: pointpu
+  body_fields:
+    role: acceptance-reviewer
+    verdict: APPROVED
+    subject_revision: fa65fb0264dffec2e7eeb1e9697fa02498cda1c6
+    subject_sha256: 02ab12cd396c0e54db673e9e9f7d9a84b11c799335259dbd6975969a40a42136
+  note: опубликовал курьер (git-operator); блок приведён к факту по ответу API комментария
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: pointpu (курьер git-operator)
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - круг 1 (ред. 1, b880985c…, CHANGES_REQUESTED) — tmp/wave-834/reports/L1/acceptance-review-1.md
+    - круг 2 (ред. 2, 83532568…, CHANGES_REQUESTED) — tmp/wave-834/reports/L1/acceptance-review-2.md
+
+closure_of_round_2:
+  - kind: CONSTRUCTIBILITY
+    item: RCL-03 — «requireHoldSceneBuilt возвращает 0» недостижимо
+    status: closed
+    evidence: >-
+      Ссылка на счёт ждущих как производитель «0» снята из сценария и из таблицы производителей.
+      Независимость утверждается производимым наблюдаемым: исход P2 (queuedRecoveryObserver)
+      при пустом канале исхода P1 и чтение recovery_codes вне транзакций. Сцена исполнима:
+      триггер задержки — FOR EACH STATEMENT (force_logout_concurrent_teardown_integration_test.go:303-304
+      @c032a0274), то есть срабатывает и на DELETE нуля строк у P1 без кода; однократность —
+      nextval(_seq) <> 1 → RETURN NULL (стр. 282-284), поэтому DELETE запроса P2 проходит
+      без задержки; ключевой замок P1 строку P2 не трогает (recovery_request.go, write).
+      Задержка с явным отпуском в линии отсутствует и честно названа заказом полосе kaname#776
+      (armOneShotHold: require.Positive(want), стр. 314), DoD п. 1 её требует.
+  - kind: FORMAT (важное)
+    item: RCL-05 When — видимость зафиксированного состояния
+    status: closed
+  - kind: COVERAGE (важное)
+    item: RCL-02 — детерминированное построение сцены
+    status: closed
+    evidence: >-
+      Посев c0 (seedWithLiveCode, recovery_request_lock_order_integration_test.go:123) и want = N − 1.
+      На origin/746 PersonWriter — ключевой замок, совместимый между запросами, поэтому N − 1
+      прочих ждут строку c0 под DELETE первого (ожидание вида Lock) — сцена строится; после
+      отпуска каждый вставляет свой код — красное до правки (DoD п. 1). После правки прочие ждут
+      замка личности — сцена строится так же.
+  - kind: DoD (важное)
+    item: п. 4 — последняя миграция линии названа командой
+    status: closed
+    evidence: >-
+      git ls-tree -r --name-only origin/746 -- internal/migrations | grep '\.sql$' | sort | tail -1
+      → 20261015100100_second_factor_method_carries_its_last_use.sql (совпадает с документом).
+
+non_blocking:
+  - kind: TWIN
+    item: >-
+      RCL-03 объявлен близнецом RCL-02 с одним отличающим фактом (личности), но после дельты
+      сцены различаются ещё посевом c0, N и видом задержки (счёт ждущих против явного отпуска).
+      Различие вынуждено (want ≥ 1 при нуле ждущих невыполнимо), контроль «сериализация есть
+      у одной личности» сохранён — не блокирует; формулировку «отличающий факт один» уточнить.
+  - kind: FORMAT
+    item: >-
+      RCL-02 When: «requireHoldSceneBuilt вернул N − 1» — функция возвращает число ждущих замка
+      по всей базе, не меньше want (стр. 289-291, 360); в таблице это сказано верно, в When
+      писать «не меньше N − 1».
+  - kind: DoD
+    item: >-
+      п. 4: «20261015120000 (ветка 829)» — на origin/829 этой миграции нет (со слов автора,
+      git ls-tree -r --name-only origin/829 -- internal/migrations), она только в локальной
+      829-impl. Порог не ложен (условие «позже обеих» безвредно), координату ветки уточнить.
+
+constructibility:
+  seeded: 0
+  total: 5
+  not_performed: 5
+  not_performed_reason: стенд и изоляция для посева заданием не названы; конструируемость показана разбором фикстур на origin/746 @c032a0274 (4 из 5 существующими, RCL-03 — существующей с заказанным вариантом явного отпуска)
+
+route_signs:
+  proto: false
+  schema: possible (DoD п. 4, решение реализации)
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
