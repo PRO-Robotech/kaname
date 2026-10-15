@@ -629,11 +629,11 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 		if have.Relation == t.relation && have.User == t.subject {
 			continue // the request already carries this one
 		}
-		// The STORED publication is recognised by the stored pair, not by the
-		// neighbour's input word: since the move to system classes (kaname#829,
-		// CE-08) the fact carries `system_class:anonymous`, which the input-word
-		// predicates below would not recognise and would sort as "not ours" by
-		// coincidence. It is withdrawn by its own path, in the owner's order.
+		// ХРАНИМАЯ публикация узнаётся по хранимой паре, а не по входному слову
+		// соседа: после переезда на системные классы (kaname#829, разбор CE-08)
+		// факт несёт `system_class:anonymous`, и предикаты входного слова ниже его
+		// не узнали бы, отнеся к «не нашим» по совпадению. Снимается она своим
+		// путём, в порядке версий владельца.
 		if domain.IsStoredPublication(have.User, have.Relation) {
 			continue
 		}

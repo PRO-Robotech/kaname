@@ -10,6 +10,7 @@ package access_binding_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -208,19 +209,24 @@ func TestSystemClass_SC15_WildcardIsNotASpeaker(t *testing.T) {
 // выдачи ответ тот же.
 func TestSystemClass_SC16_ExpandAccessDoesNotListClasses(t *testing.T) {
 	w := newSCWorld(t)
-	// Дано: владелец аккаунта держит право разворачивать объекты аккаунта — тем же
-	// путём, каким его даёт сага создания аккаунта: выдача роли владельца на аккаунт.
-	w.createDone(asUser(w.ctx, w.usrA), &iamv1.CreateAccessBindingRequest{
-		Subjects: []*iamv1.Subject{userSubject(w.usrA)}, RoleId: string(domain.OwnerRoleID),
-		ScopeType: "iam.account", ScopeId: string(w.accA), Target: allInScopeTarget(),
-	}, "SC-16 Дано: выдача владельца usr-A на аккаунт")
+	// Разворачивает КЛАСТЕРНЫЙ АДМИНИСТРАТОР, а не владелец аккаунта. Право
+	// разворачивать объект владелец получает выдачей роли владельца на аккаунт
+	// (её заводит сага создания аккаунта), а она же делает его читателем объекта
+	// — и он сам оказывается в развёртке вторым принципалом. «Ровно один
+	// принципал» приёмки поэтому достижим только у вызывающего, право которого
+	// не материализуется на объекте: у администратора облака (плоский
+	// надзор). Расхождение с «Когда usr-A» приёмки вынесено в возврат.
+	admin := mustSeedUser(t, w.ctx, w.pool, "sc16adm")
+	verifyAddresses(t, w.ctx, w.pool)
+	_, err := w.pool.Exec(w.ctx, `SELECT kaname.restore_cluster_admin('user', $1)`, string(admin))
+	require.NoError(t, err, "SC-16 посев: кластерный администратор объявленным путём")
 	userReq := w.sc01Request()
 	userReq.Subjects = []*iamv1.Subject{userSubject(w.usrB)}
 	w.createDone(asUser(w.ctx, w.usrA), userReq, "SC-16 Дано: прямая выдача usr-B")
 	w.pollCheck(fmtSubject("user", string(w.usrB)), "get", scObj1, true, "SC-16 Дано: материализация usr-B")
 
 	expand := func() *iamv1.ExpandAccessResponse {
-		resp, err := w.ab.ExpandAccess(asUser(w.ctx, w.usrA), &iamv1.ExpandAccessRequest{
+		resp, err := w.ab.ExpandAccess(asUser(w.ctx, admin), &iamv1.ExpandAccessRequest{
 			ObjectType: scModelType, ObjectId: scObj1, Relation: "viewer",
 		})
 		require.NoError(t, err, "SC-16: развёртка")
@@ -238,23 +244,46 @@ func TestSystemClass_SC16_ExpandAccessDoesNotListClasses(t *testing.T) {
 }
 
 // SC-17 — перечень выдач по субъекту-классу.
+//
+// У класса нет дома (разбор CE-22): страница сужается построчно правом читать
+// каждую выдачу. Владелец читает выдачи своего аккаунта той же выдачей роли
+// владельца, что заводит сага создания аккаунта, — она заводится в Дано.
+// Отрицательный близнец (CE-22, заказан приёмке): арендатор другого аккаунта
+// чужих выдач классу не видит — страница пуста, полосы «сам» у класса нет.
 func TestSystemClass_SC17_ListBySubjectClass(t *testing.T) {
 	w := newSCWorld(t)
 	w.controlUserGrant(w.usrB, w.rolRead2)
+	w.createDone(asUser(w.ctx, w.usrA), &iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{userSubject(w.usrA)}, RoleId: string(domain.OwnerRoleID),
+		ScopeType: "iam.account", ScopeId: string(w.accA), Target: allInScopeTarget(),
+	}, "SC-17 Дано: выдача владельца usr-A на аккаунт")
 	authID := w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-17 Дано: SC-01")
 	anonID := w.createDone(asUser(w.ctx, w.usrA),
 		withSubjects(w.sc01Request(), classSubject("anonymous")), "SC-17 Дано: SC-07")
 
-	resp, err := w.ab.ListBySubject(asUser(w.ctx, w.usrA), &iamv1.ListAccessBindingsBySubjectRequest{
-		SubjectType: "system_class", SubjectId: "anonymous",
-	})
-	require.NoError(t, err, "SC-17: перечень по классу")
-	var got []string
-	for _, b := range resp.GetAccessBindings() {
-		got = append(got, b.GetId())
+	list := func(caller domain.UserID) []string {
+		resp, err := w.ab.ListBySubject(asUser(w.ctx, caller), &iamv1.ListAccessBindingsBySubjectRequest{
+			SubjectType: "system_class", SubjectId: "anonymous",
+		})
+		require.NoError(t, err, "SC-17: перечень по классу")
+		var got []string
+		for _, b := range resp.GetAccessBindings() {
+			got = append(got, b.GetId())
+		}
+		return got
+	}
+	// Право владельца на новую выдачу материализуется после фиксации (окно
+	// SC-13, раз в 200 мс до 30 с) — опрос, а не одно чтение.
+	deadline := time.Now().Add(30 * time.Second)
+	got := list(w.usrA)
+	for len(got) == 0 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		got = list(w.usrA)
 	}
 	assert.Equal(t, []string{anonID}, got, "SC-17: ровно выдача SC-07")
 	assert.NotContains(t, got, authID)
+
+	assert.Empty(t, list(w.usrC), "SC-17 близнец: арендатор acc-B выдач классу в acc-A не видит")
 }
 
 // SC-18 — «вошедший» другого арендатора читает выданное классу в acc-A;

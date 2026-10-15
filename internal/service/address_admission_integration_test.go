@@ -115,7 +115,7 @@ func TestEV51_WildcardRelationDoesNotActForTheUnverified(t *testing.T) {
 		const acc, owner, person = "acc-ev51", "usr-ev51own", "usr-ev51"
 		w.ci.seedAccountWithOwner(t, acc, owner)
 		w.ci.seedUnverifiedUser(t, person, acc)
-		w.ci.factThroughJournal(t, "user:*", "viewer", "cluster", "cluster_root")
+		w.ci.factThroughJournal(t, "system_class:authenticated", "viewer", "cluster", "cluster_root")
 		if verified {
 			w.mark(t, person)
 			require.True(t, w.check(t, "user:"+person, "cluster", "cluster_root", "viewer").Allowed, "EV-51 (б)")

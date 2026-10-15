@@ -21,8 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +28,6 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
@@ -81,21 +78,38 @@ func openP2(t *testing.T) scP2 {
 	return scP2{db: db, dsn: dsn}
 }
 
-// publish — публикация объекта писателем журнала продукта.
+// publish — публикация объекта В ФОРМЕ СТВОЛА: строка журнала, которую клал
+// писатель публикации на `bbbe33524`, — кортеж `user:* #v_get` с версией
+// владельца. Писатель головы ветки для П2 не годится: он кладёт уже хранимого
+// субъекта класса (`domain.PublicationSubject`), и «до переезда» описывало бы
+// базу, которой на стволе не было.
 func (p scP2) publish(t *testing.T, object string, published bool) {
 	t.Helper()
-	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, p.dsn)
-	require.NoError(t, err)
-	defer func() { _ = conn.Close(ctx) }()
-	_, err = conn.Exec(ctx, `SET search_path = kaname, public`)
-	require.NoError(t, err)
-	tx, err := conn.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	require.NoError(t, fga_outbox.EmitPublicationTx(ctx, tx, published, object,
-		pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}), "публикация %s", object)
-	require.NoError(t, tx.Commit(ctx))
+	event := "fga.tuple.delete"
+	if published {
+		event = "fga.tuple.write"
+	}
+	_, err := p.db.Exec(`
+		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+		VALUES ($1, jsonb_build_object('user', 'user:*', 'relation', 'v_get',
+		                               'object', $2::text, 'source_version', '-infinity'::timestamptz),
+		        now())`, event, object)
+	require.NoError(t, err, "публикация %s в форме ствола", object)
+}
+
+// trunkPublicRead — ответ СТВОЛА на чтение объекта вошедшим: на стволе форма
+// вердикта добавляла подстановку всякому говорящему, поэтому объект читался
+// ровно тогда, когда на нём стоял факт `user:* #v_get`. Голова ветки этой
+// подстановки уже не добавляет, и спросить её о базе П2 значило бы получить
+// ответ, которого ствол не давал.
+func trunkPublicRead(t *testing.T, db *sql.DB, objType, objID string) bool {
+	t.Helper()
+	var n int
+	require.NoError(t, db.QueryRow(`
+		SELECT count(*) FROM kaname.relation_fact
+		 WHERE object_type = $1 AND object_id = $2 AND relation = 'v_get' AND subject = 'user:*'`,
+		objType, objID).Scan(&n))
+	return n > 0
 }
 
 // wildcardCensus — перепись `*` как субъекта в четырёх местах SC-43.
@@ -188,9 +202,10 @@ func TestSystemClass_SC42_PublicRepositoryUnchangedAcrossTheMove(t *testing.T) {
 	p.publish(t, "registry_repository:r-pub", true)
 	a := p.asker(t)
 
-	// Снимок «до» на П2: публичный читает вошедший (через подстановку).
-	beforePub := allowed(t, a, person, "registry_repository", "r-pub", "v_get")
-	beforePriv := allowed(t, a, person, "registry_repository", "r-priv", "v_get")
+	// Снимок «до» на П2 — ответ ствола: публичный читает вошедший (через
+	// подстановку).
+	beforePub := trunkPublicRead(t, p.db, "registry_repository", "r-pub")
+	beforePriv := trunkPublicRead(t, p.db, "registry_repository", "r-priv")
 	require.True(t, beforePub, "SC-42 Дано: до переезда вошедший читает публичный")
 	require.False(t, beforePriv, "SC-42 Дано: до переезда закрытый закрыт")
 

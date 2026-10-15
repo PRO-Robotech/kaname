@@ -176,11 +176,12 @@ const (
 	// никогда (D-7). Закрытый и отсутствующий репозиторий отвечают одинаково
 	// (404). Подстановка `user:*` говорящим не является (Р3).
 	AnonymousSubject = domain.SpeakerAnonymous
-	// AnonymousReadScope — the ONLY scope an anonymous token requests: a read
-	// (pull) verb. The shim NEVER requests a write/push verb for the anonymous class — the
-	// read-only floor is enforced HERE (IAM half) AND by the data-plane Check
-	// on the anonymous class (a class receives read verbs only, Р4). A push with an anon token is
-	// therefore denied (403 DENIED) even in a pull-able PUBLIC repo (B14).
+	// AnonymousReadScope — ЕДИНСТВЕННАЯ область, которую просит анонимный токен:
+	// чтение (pull). Записи прослойка для анонима не просит НИКОГДА: пол «только
+	// чтение» держится ЗДЕСЬ (половина службы прав) И вопросом плоскости данных
+	// от класса `anonymous`, которому выдаётся только чтение (Р4). Поэтому push
+	// анонимным токеном отвергается (403 DENIED) даже в публичном репозитории
+	// (B14).
 	AnonymousReadScope = "registry:pull"
 )
 

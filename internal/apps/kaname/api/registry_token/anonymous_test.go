@@ -47,8 +47,7 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 		t.Fatalf("out = %+v; want our minted anon bearer relayed", out)
 	}
 	// The token is minted FOR the declared anon identity — the subject the
-	// data-plane resolves to the public AnonymousSubject (the anonymous system
-	// class), NOT a user SA.
+	// data-plane resolves to the public AnonymousSubject, NOT a user SA.
 	if m.got.Subject != "registry-anonymous" {
 		t.Errorf("anon token subject = %q; want the declared anon identity", m.got.Subject)
 	}
@@ -60,8 +59,8 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 	if m.got.HasConfirmation() {
 		t.Error("anon token carries a binding nobody presented")
 	}
-	// Contract: the anonymous principal is the anonymous system class (SC-39),
-	// not the wildcard — the wildcard is no speaker (Р3).
+	// Контракт: анонимный принципал — системный класс anonymous (SC-39), а не
+	// подстановка: подстановка говорящим не бывает (Р3).
 	if AnonymousSubject != "system_class:anonymous" {
 		t.Errorf("AnonymousSubject = %q; want the anonymous system class", AnonymousSubject)
 	}

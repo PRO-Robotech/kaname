@@ -88,7 +88,8 @@ var (
 		"user:usr-1",
 		"group:" + probeGroupID,
 		"group:" + probeGroupID + "#member",
-		"user:*",
+		"system_class:authenticated",
+		"system_class:anonymous",
 	}
 )
 
@@ -470,8 +471,8 @@ func (f *gridFixture) setF(t *testing.T, ctx context.Context, target int, rec sc
 	switch rec {
 	case scalegrid.RecruitFactGroup:
 		subject = "group:" + probeGroupID + "#member"
-	case scalegrid.RecruitFactWildcard:
-		subject = "user:*"
+	case scalegrid.RecruitFactClass:
+		subject = "system_class:authenticated"
 	}
 	chain := [][2]string{
 		{probeModelType, "repo-0000000"},
@@ -547,7 +548,7 @@ func recruitForR(p scalegrid.Point) scalegrid.Recruit {
 
 func recruitForF(p scalegrid.Point) scalegrid.Recruit {
 	switch p.Recruit {
-	case scalegrid.RecruitFactGroup, scalegrid.RecruitFactWildcard:
+	case scalegrid.RecruitFactGroup, scalegrid.RecruitFactClass:
 		return p.Recruit
 	}
 	return scalegrid.RecruitFactSelf
@@ -1278,7 +1279,7 @@ func TestScaleGrid_EveryRecruitVariantIsConstructible(t *testing.T) {
 	}
 	for _, want := range []scalegrid.Recruit{
 		scalegrid.RecruitDirect, scalegrid.RecruitViaGroup,
-		scalegrid.RecruitFactSelf, scalegrid.RecruitFactGroup, scalegrid.RecruitFactWildcard,
+		scalegrid.RecruitFactSelf, scalegrid.RecruitFactGroup, scalegrid.RecruitFactClass,
 	} {
 		if seenRecruits[want] == 0 {
 			t.Errorf("способ набора %q не исполнен ни разу: его конструируемость не проверена, "+

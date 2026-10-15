@@ -46,8 +46,8 @@ type Subject struct {
 	ID   SubjectID
 }
 
-// Validate — self-validating subject: closed type + non-empty id; a system
-// class names one of the closed set (`anonymous` | `authenticated`).
+// Validate — субъект судит себя сам: закрытый вид и непустой идентификатор;
+// системный класс называет имя закрытого словаря (`anonymous` | `authenticated`).
 func (s Subject) Validate() error {
 	if err := s.Type.Validate(); err != nil {
 		return err
