@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedAccountMember — ещё одна активная личность в аккаунте владельца. Владелец
@@ -57,7 +58,7 @@ import (
 func seedAccountMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool, owner domain.UserID) domain.UserID {
 	t.Helper()
 	uid := domain.UserID(ids.NewID(domain.PrefixUser))
-	_, err := pool.Exec(ctx, withWayIn(`
+	_, err := pool.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1, account_id, $2, $3, 'Deletion Race Target', 'ACTIVE'
 		  FROM kaname.users WHERE id = $4`),

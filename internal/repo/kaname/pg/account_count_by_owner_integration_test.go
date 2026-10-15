@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 func TestAccountCountByOwner_RC5(t *testing.T) {
@@ -64,7 +65,7 @@ func TestAccountCountByOwner_RC5(t *testing.T) {
 			Labels:      domain.Labels{},
 		})
 		require.NoError(t, err)
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 

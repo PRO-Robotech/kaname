@@ -31,6 +31,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
@@ -86,10 +87,10 @@ func disclosureRootAsk(t *testing.T, reg *metrics.Registry, strangerVerified, st
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id, email_verified_at)
 	                       VALUES ($1, $1, $1 || '@example.test', $2, now())`, owner, acc)
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев владельца")
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	for _, u := range []string{admin, stranger} {
-		exec(withWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ($1, $1, $1 || '@example.test', $2)`), u, acc)
+		exec(activewayin.WithWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ($1, $1, $1 || '@example.test', $2)`), u, acc)
 	}
 	fact("user:"+admin, "admin", "account", acc)
 	mark(admin)

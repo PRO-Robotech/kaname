@@ -50,6 +50,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 var sakeyEvtIDRe = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)
@@ -106,7 +107,7 @@ func seedSAKeyUserAndSA(t *testing.T, ctx context.Context, pool *pgxpool.Pool, s
 		fmt.Sprintf("sak-sa-%s", suffix))
 	require.NoError(t, err)
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, svaID
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
@@ -44,7 +45,7 @@ func TestEV74_ProviderHookDoesNotActivateAnUnverifiedInvite(t *testing.T) {
 		_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status, email_verified_at)
 			VALUES ($1, $2, 'ext-ev74-inviter', 'ev74-inviter@example.test', 'Inviter', 'ACTIVE', now())`, string(inviter), string(acc))
 		require.NoError(t, err)
-		seedWayIn(t, ctx, tx)
+		activewayin.Seed(t, ctx, tx)
 		require.NoError(t, tx.Commit(ctx))
 
 		// Приглашение адреса V.

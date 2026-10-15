@@ -23,6 +23,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // seedAccountAndUser inserts (account, user) with the given external_id / email /
@@ -48,7 +49,7 @@ func seedAccountAndUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, e
 		string(accID), fmt.Sprintf("rec-acc-%s", accID[len(accID)-6:]), string(uid))
 	require.NoError(t, err, "seed account")
 
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
 }
