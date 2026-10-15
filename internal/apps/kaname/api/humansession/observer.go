@@ -237,6 +237,11 @@ const (
 	StoreFailureBackupCodesRegenerate StoreFailureVerb = "backup-codes-regenerate"
 	StoreFailurePasswordChange        StoreFailureVerb = "password-change"
 	StoreFailurePasswordEnroll        StoreFailureVerb = "password-enroll"
+	// Свои сессии (kaname#735): перечень, выход из выбранной и выход из всех,
+	// кроме текущей. Прежде их сбой хранилища не считал ни один ряд.
+	StoreFailureOwnSessionsList      StoreFailureVerb = "own-sessions-list"
+	StoreFailureOwnSessionEnd        StoreFailureVerb = "own-session-end"
+	StoreFailureOwnSessionsEndOthers StoreFailureVerb = "own-sessions-end-others"
 )
 
 // StoreFailureVerbs — закрытый перечень: приёмник засевает им клетки нулём до
@@ -246,6 +251,7 @@ func StoreFailureVerbs() []StoreFailureVerb {
 		StoreFailureStepUp, StoreFailureSecondFactorEnroll, StoreFailureSecondFactorConfirm,
 		StoreFailureSecondFactorStatus, StoreFailureSecondFactorRemove, StoreFailureBackupCodesRegenerate,
 		StoreFailurePasswordChange, StoreFailurePasswordEnroll,
+		StoreFailureOwnSessionsList, StoreFailureOwnSessionEnd, StoreFailureOwnSessionsEndOthers,
 	}
 }
 

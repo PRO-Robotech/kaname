@@ -97,6 +97,19 @@ const (
 	EventEmailChangedMailSend = "mail.email-changed.send"
 )
 
+// MailEventTypes — ЗАКРЫТЫЙ перечень видов события очереди писем, по одному на
+// ветвь применителя. Им засевается метка `kind` ряда исходов по виду письма
+// (kaname#733): неудача письма восстановления видна своей клеткой, а не
+// растворяется в общем счёте полосы. Сверку с ветвями применителя и словарём
+// схемы держит `TestEveryMailKindHasExactlyOneSender`.
+var MailEventTypes = []string{
+	EventInviteMailSend,
+	EventRecoveryMailSend,
+	EventVerificationMailSend,
+	EventEmailChangeMailSend,
+	EventEmailChangedMailSend,
+}
+
 // SettingsScreenPath — путь экрана параметров учётной записи в консоли:
 // письмо с кодом смены адреса называет его (kaname#635, Р7). Адрес экрана —
 // происхождение консоли, объявленное той же настройкой, что адрес входа, и этот
@@ -261,9 +274,9 @@ type MailEvent struct {
 // отправитель и здоровое облако, куда никто не приходил, выглядят одинаково —
 // тихо (класс мёртвой очереди регистраций).
 type InviteMailObserver interface {
-	// IncInviteMailOutcome — исход одной попытки отправки; outcome — клетка из
-	// InviteMailOutcomes.
-	IncInviteMailOutcome(outcome string)
+	// IncInviteMailOutcome — исход одной попытки отправки; kind — вид события
+	// из MailEventTypes, outcome — клетка из InviteMailOutcomes.
+	IncInviteMailOutcome(kind, outcome string)
 }
 
 // InviteMailTransport — порт: то, что умеет сдать письмо почтовому узлу.
@@ -1034,7 +1047,7 @@ func NewInviteMailApplier(
 		err := transport.Send(ctx, ev)
 		outcome := ClassifyInviteMailOutcome(err)
 		if obs != nil {
-			obs.IncInviteMailOutcome(outcome)
+			obs.IncInviteMailOutcome(eventType, outcome)
 		}
 		if err == nil {
 			return nil

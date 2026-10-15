@@ -78,13 +78,22 @@ func (r *HumanSessionRepo) SweepUnservableRecoveryCodes(ctx context.Context, gra
 	if batch <= 0 {
 		return 0, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument batch: must be positive")
 	}
+	// Строки берутся клеймом `FOR UPDATE SKIP LOCKED` (kaname#774): строку,
+	// которую держит транзакция запроса восстановления либо подтверждения смены
+	// адреса (`SupersedeRecoveryCodes`), уборка пропускает, а не ждёт. Уборка,
+	// не ждущая ни одной строки, в цикл ожиданий не входит при любом порядке
+	// строк; пропущенную строку снимет её транзакция либо следующий проход.
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM recovery_codes
-		 WHERE ctid IN (
-		       SELECT ctid FROM recovery_codes
-		        WHERE (expires_at <= now() - $1::interval)
-		           OR (consumed_at IS NOT NULL AND consumed_at <= now() - $1::interval)
-		        LIMIT $2)`, grace, batch)
+		WITH doomed AS (
+		     SELECT id FROM recovery_codes
+		      WHERE (expires_at <= now() - $1::interval)
+		         OR (consumed_at IS NOT NULL AND consumed_at <= now() - $1::interval)
+		      ORDER BY id
+		      LIMIT $2
+		        FOR UPDATE SKIP LOCKED)
+		DELETE FROM recovery_codes r
+		 USING doomed
+		 WHERE r.id = doomed.id`, grace, batch)
 	if err != nil {
 		return 0, false, mapErr(err, "RecoveryCodes.Sweep", "")
 	}
@@ -150,6 +159,17 @@ func (w *humanSessionWriter) ConsumeRecoveryCode(ctx context.Context, userID dom
 func (w *humanSessionWriter) EmitRecoveryMail(ctx context.Context, in humansession.RecoveryMailIntent) error {
 	if in.Code.IsZero() {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument recovery_mail.code: required")
+	}
+	// Адрес судится соединением ЭТОЙ транзакции, после замка строки личности
+	// (kaname#776, Р4): оператор READ COMMITTED берёт свой снимок и видит смену
+	// адреса, зафиксированную до замка.
+	var owned bool
+	if err := w.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND email = $2)`,
+		string(in.UserID), in.To).Scan(&owned); err != nil {
+		return mapErr(err, "RecoveryMail.Address", string(in.UserID))
+	}
+	if !owned {
+		return humansession.ErrRecoveryAddressMoved
 	}
 	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, mailWindowRecovery, in.To, in.Limit)
 	if err != nil {

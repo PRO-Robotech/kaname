@@ -1,0 +1,50 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/credential-issuance-and-federated-subject-described-once.md
+  sha256: 614a1ecb359c98d0747bee440d5d0bb6397cd72e643f9b1a86d5664c7ba12794
+  static_status: DRAFT
+  base_commit: c032a0274449435513963ff705259bc41740844d
+  content_commit: null
+  branch: null
+  task: PRO-Robotech/kaname#752
+  lines: 107
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/credential-issuance-and-federated-subject-described-once.md
+  static_status_note: >-
+    Шапка документа (DRAFT) — статическая форма; вердикт из неё не выводится и рецензентом не правится.
+  publication_mode: courier
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15'
+effective_approval:
+  issued: false
+  ban1_lifted: false
+blocking:
+  - kind: CONSTRUCTIBILITY
+    scenarios: [CIF-01, CIF-02, CIF-04]
+    note: фикстуры Given не названы; CIF-04 требует посадки с собственной выдачей и названного вызывающего (required_acr_min=2)
+  - kind: FORMAT
+    scenarios: [CIF-02, CIF-03, CIF-04, CIF-05]
+    note: CIF-05 текст на проводе с префиксом trusted_subjects[0] (sa_keys/usecases.go:332); CIF-02/03 без message; CIF-04/05 без конкретного payload
+  - kind: PRODUCER
+    scenarios: [CIF-03, CIF-01, CIF-02]
+    note: CIF-03 производитель — комментарий; полоса (край kacho vs полоса предъявленного kaname) не названа
+  - kind: DoD
+    scenarios: [CIF-01, CIF-02, CIF-03, CIF-06]
+    note: наблюдаемое краем без newman-держателя; CIF-06 п.2 без предиката
+unverified:
+  constructibility: {seeded: 0, total: 5, not_executed: 5, reason: стенд и изоляция заданием не названы}
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+event:
+  status: not_performed
+  body: "acceptance-reviewer · CHANGES_REQUESTED · 614a1ecb359c98d0747bee440d5d0bb6397cd72e643f9b1a86d5664c7ba12794"

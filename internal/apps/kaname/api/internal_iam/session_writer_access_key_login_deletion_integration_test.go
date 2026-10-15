@@ -76,7 +76,7 @@ func TestIntegration_SessionWriterAccessKeyLoginAndIdentityDeletionDoNotDeadlock
 		_, err = w.InsertKey(ctx, domain.AccessKey{
 			ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: p.id,
 			CredentialID: auth.CredentialID(), PublicKey: auth.COSEPublicKey(t), Algorithm: auth.Algorithm(),
-			UserHandle: handle.Bytes(), Name: "scene-key", CreatedAt: time.Now().UTC(),
+			UserHandle: handle.Bytes(), Name: "scene-key", CreatedAt: time.Now().UTC(), Discoverability: domain.DiscoverabilityConfirmed,
 		})
 		require.NoError(t, err, "посев: строка ключа писателем продукта")
 		require.NoError(t, w.Commit(ctx))
@@ -141,7 +141,7 @@ func TestIntegration_SessionWriterStepUpWithKeyAndIdentityDeletionDoNotDeadlock(
 		_, err = w.InsertKey(ctx, domain.AccessKey{
 			ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: p.id,
 			CredentialID: auth.CredentialID(), PublicKey: auth.COSEPublicKey(t), Algorithm: auth.Algorithm(),
-			UserHandle: handle.Bytes(), Name: "scene-key", CreatedAt: time.Now().UTC(),
+			UserHandle: handle.Bytes(), Name: "scene-key", CreatedAt: time.Now().UTC(), Discoverability: domain.DiscoverabilityConfirmed,
 		})
 		require.NoError(t, err, "посев: строка ключа писателем продукта")
 		require.NoError(t, w.Commit(ctx))

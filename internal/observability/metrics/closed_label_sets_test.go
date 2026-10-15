@@ -291,6 +291,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.NewInviteMailRecorder() },
 		Why:   "эталон формы: «сюда никто не приходил» отличимо от «отказов не было»",
 	},
+	MailOutcomesMetric: {
+		Cells: len(clients.MailEventTypes) * len(clients.InviteMailOutcomes),
+		Build: func(r *Registry) { r.NewInviteMailRecorder() },
+		Why:   "неотправленное письмо каждого вида видно своей клеткой до первого письма (kaname#733)",
+	},
 	Namespace + "_register_postcommit_steps_total": {
 		Cells: len(RegisterPostCommitSteps) * len(RegisterPostCommitOutcomes),
 		Build: func(r *Registry) { r.NewRegisterPostCommitRecorder() },
