@@ -741,7 +741,13 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 Форма — та же, что у края через grpc-gateway: `{code, message, details}`, `details` — всегда
 массив, пустой либо с одним `google.rpc.ErrorInfo` (`reason`, `domain`). Тексты — контракт:
-они не несут причины, и клиент ключуется на `reason`, а не на прозу.
+они не несут причины, и клиент ключуется на `reason`, а не на прозу. Где `reason` в таблице — «—»,
+`details` пуст, и отказ различается парой HTTP-статус и `code` на своём глаголе. Так отвечает и
+«сессии нет» у глаголов полосы под сессией (`GET /iam/v1/auth/sessions`,
+`GET /iam/v1/auth/second-factor` и прочие): `401`, код `16`, `authentication failed`, `details`
+пуст. Маршрут края `GET /iam/v1/me` то же состояние отвечает тем же статусом, кодом и текстом, но
+с `ErrorInfo` (`reason` `AUTHN_REQUIRED`) в `details`: клиент, который читает оба, узнаёт «сессии
+нет» по `401` и коду `16`, а не по `reason`.
 
 <table>
   <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
