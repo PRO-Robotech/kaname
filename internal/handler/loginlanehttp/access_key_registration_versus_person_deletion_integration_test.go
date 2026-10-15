@@ -92,6 +92,12 @@ func TestIntegration_AccessKeyRegistrationAndPersonDeletionDoNotDeadlock(t *test
 	h := newSessionLane(t)
 	u := h.user.ID
 	h.login(t, integrationPassword)
+	// Потолок вида объявлен ДО вставки: без него писатель отказывает учётом —
+	// «условие не создано», а не исход сцены.
+	_, err := h.pool.Exec(h.ctx, `
+		INSERT INTO own_ceilings (kind, limit_value) VALUES ('iam.user.accessKey', 8)
+		ON CONFLICT (kind) DO UPDATE SET limit_value = EXCLUDED.limit_value`)
+	require.NoError(t, err, "Дано: потолок вида ключа объявлен")
 
 	twin, err := h.finishRegistration(t, h.beginRegistration(t, u))
 	require.NoError(t, err, "близнец: регистрация без конкурента принята")
