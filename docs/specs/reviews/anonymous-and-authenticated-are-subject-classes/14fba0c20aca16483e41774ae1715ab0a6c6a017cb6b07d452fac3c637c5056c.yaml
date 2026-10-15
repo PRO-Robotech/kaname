@@ -1,0 +1,132 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c
+  revision: 6
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 4088c9f23
+  content_commit: b872c300bad4ea7c96814dcab848236a1c346a02
+  branch: 829-impl
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238, PRO-Robotech/kacho#3256, PRO-Robotech/kaname#832]
+  lines: 1078
+  round: 2
+  round_scope: >-
+    Проверка исполнения (fa-b8, решение диспетчера по K3): правка одобренной редакции 5
+    (36066b6a…) — сквозной эшелон newman SC-10, 11, 16, 18 переезжает на стенд платформы kacho
+    (kacho#3256), на стадии S1 их держат integration-пробы. Нового круга и нового объёма нет;
+    судится только дельта.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/829/wt-impl @ b872c300b → 14fba0c2…5056c (совпало с заданием);
+    git show 4088c9f23:<док> | sha256sum → 36066b6a…2f905d (база дельты = одобренная редакция 5)
+  measurement_revisions: >-
+    kaname — дерево b872c300b (git diff / git grep / go test); трекер — gh issue view kacho#3256
+    на 2026-10-15.
+
+verdict: APPROVED
+verdict_note: >-
+  проверка исполнения — дельта внесена корректно: утверждения SC-10/11/16/18 не ослаблены,
+  держатель S1 назван и исполнен, сквозной эшелон переехал в дом производителя условия с задачей
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T13:10:00+03:00'
+
+execution_check:
+  delta: >-
+    git diff 4088c9f23 b872c300b → +18/−4, один файл документа. Ханки: шапка (запись о правке
+    после вердикта 36066b6a…, редакция 6), DoD S1 (перечень newman-ID без 10, 11, 16, 18; новый
+    пункт — держатели integration и переезд эшелона на kacho#3256 с причиной). Тела сценариев,
+    «Тогда», близнецы, таблица производителей — не тронуты.
+  checks:
+    - item: утверждения не ослаблены
+      result: >-
+        тела SC-10/11/16/18 и их близнецы вне дельты; «с теми же утверждениями» записано в DoD.
+    - item: держатель S1 существует и исполним
+      result: >-
+        git grep -n '^func Test.*SC1[0168]' -- internal → 4 функции в
+        internal/apps/kaname/api/access_binding/system_class_s1_integration_test.go:155/170/209/285,
+        имена совпадают с DoD дословно; близнецы утверждаются в тех же функциях (строки с
+        «SC-10 близнец», «SC-16 близнец», «SC-18 близнец»). Прогон heavy-slot integration
+        go test -tags integration -count=1 -run 'TestSystemClass_SC1[0168]_' → ok (21.5 s), rc=0
+        @b872c300b (ns t829-heavy-integration-5614, снято).
+    - item: дом сквозного эшелона
+      result: >-
+        gh issue view 3256 -R PRO-Robotech/kacho → OPEN «iam: newman-кейсы классов субъектов на
+        стенде платформы». Краевая половина SC-18 уже в S3 (kacho#3238, П4) — согласовано.
+    - item: причина неконструируемости на автономном стенде
+      result: >-
+        «Дано» требует объекта сети, зарегистрированного владельцем; владельца сети на стенде
+        службы без платформы нет — согласуется с откатом посева 4088c9f23. Причина названа в
+        форме `#edge-internal-consequence`-исключения DoD.
+
+summary:
+  scenarios: 49
+  producer_named: 49 of 49 (таблица производителей вне дельты)
+  twin_named_for_negatives: без изменений к редакции 5
+  blocking: 0
+  blocking_kinds: []
+
+minor:
+  - >-
+    Двусторонняя трассировка (§3.4): tests/newman/cases/iam-system-class-subjects.py @b872c300b
+    всё ещё несёт кейсы SC10-…, SC11-…, SC16-…, SC18-… (строки 311, 320, 362, 442). По редакции 6
+    на стенде kaname их быть не должно — снять из модуля kaname в полосе реализации (перенос — в
+    kacho#3256), иначе второй эшелон S1 краснеет на неконструируемом «Дано». Предмет кода, не
+    приёмки.
+
+constructibility:
+  method: >-
+    Given SC-10/11/16/18 на S1 — посев мира system_class_world_integration_test.go внутри
+    testcontainers; исполнено прогоном 4 проб. Стенд kacho (П4) для эшелона — вне этой проверки.
+  seeded: 4
+  of: 4
+  named_fixture: 0
+  not_constructible: 0
+  not_executed: 0
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: одобрение вступает в силу внешним событием; до публикации — not_performed
+
+event_body: "acceptance-reviewer · APPROVED · sha256 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c · проверка исполнения K3 (ред. 6)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
