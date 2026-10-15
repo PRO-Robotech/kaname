@@ -78,13 +78,22 @@ func (r *HumanSessionRepo) SweepUnservableRecoveryCodes(ctx context.Context, gra
 	if batch <= 0 {
 		return 0, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument batch: must be positive")
 	}
+	// Строки берутся клеймом `FOR UPDATE SKIP LOCKED` (kaname#774): строку,
+	// которую держит транзакция запроса восстановления либо подтверждения смены
+	// адреса (`SupersedeRecoveryCodes`), уборка пропускает, а не ждёт. Уборка,
+	// не ждущая ни одной строки, в цикл ожиданий не входит при любом порядке
+	// строк; пропущенную строку снимет её транзакция либо следующий проход.
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM recovery_codes
-		 WHERE ctid IN (
-		       SELECT ctid FROM recovery_codes
-		        WHERE (expires_at <= now() - $1::interval)
-		           OR (consumed_at IS NOT NULL AND consumed_at <= now() - $1::interval)
-		        LIMIT $2)`, grace, batch)
+		WITH doomed AS (
+		     SELECT id FROM recovery_codes
+		      WHERE (expires_at <= now() - $1::interval)
+		         OR (consumed_at IS NOT NULL AND consumed_at <= now() - $1::interval)
+		      ORDER BY id
+		      LIMIT $2
+		        FOR UPDATE SKIP LOCKED)
+		DELETE FROM recovery_codes r
+		 USING doomed
+		 WHERE r.id = doomed.id`, grace, batch)
 	if err != nil {
 		return 0, false, mapErr(err, "RecoveryCodes.Sweep", "")
 	}
