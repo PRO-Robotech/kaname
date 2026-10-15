@@ -306,6 +306,10 @@ message CheckRequest {
   //   "user:<usr…>"
   //   "service_account:<sva…>"
   //   "group:<grp…>#member"
+  //   "system_class:anonymous" — вызывающий без личности (край спрашивает им на
+  //     методе, допускающем анонима).
+  // "system_class:authenticated" и подстановка "user:*" говорящими не бывают →
+  // INVALID_ARGUMENT.
   string subject_id = 1;
 
   // FGA-relation: "viewer" | "editor" | "admin" | "use" | "member" | etc.
@@ -543,7 +547,8 @@ message SubjectChange {
   string op         = 3; // binding_upsert | binding_delete | group_member_change
 
   // subject_type — тип субъекта в словаре модели прав: `user` |
-  // `service_account` | `group`.
+  // `service_account` | `group` | `system_class` (у выдачи системному классу
+  // `subject_id` — имя класса `anonymous` | `authenticated`).
   //
   // ПОЧЕМУ ЭТО ПОЛЕ ЕСТЬ. `subject_id` — голый идентификатор (`usrXXXX`), а
   // субъектом модели он становится только в паре с типом (`user:usrXXXX`).

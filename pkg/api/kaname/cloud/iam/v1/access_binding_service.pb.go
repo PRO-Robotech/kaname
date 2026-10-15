@@ -197,9 +197,10 @@ func (x *GetAccessBindingRequest) GetAccessBindingId() string {
 
 type CreateAccessBindingRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Тип subject'а: "user" | "service_account" | "group".
+	// Тип subject'а: "user" | "service_account" | "group" | "system_class".
 	SubjectType string `protobuf:"bytes,1,opt,name=subject_type,json=subjectType,proto3" json:"subject_type,omitempty"`
-	// ID subject'а.
+	// ID subject'а; при `subject_type = "system_class"` — имя класса
+	// "anonymous" | "authenticated".
 	SubjectId string `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	// ID of the Role to assign.
 	RoleId string `protobuf:"bytes,3,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
@@ -767,9 +768,10 @@ func (x *ListAccessBindingsByScopeRequest) GetScopeId() string {
 
 type ListAccessBindingsBySubjectRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Тип subject'а.
+	// Тип subject'а: "user" | "service_account" | "group" | "system_class".
 	SubjectType string `protobuf:"bytes,1,opt,name=subject_type,json=subjectType,proto3" json:"subject_type,omitempty"`
-	// ID subject'а.
+	// ID subject'а; при `subject_type = "system_class"` — имя класса
+	// "anonymous" | "authenticated".
 	SubjectId string `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	// The maximum number of results per page to return. Default value: 100.
 	PageSize int64 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
@@ -847,8 +849,8 @@ type ListAccessBindingsByAccountRequest struct {
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	// Optional: filter by subject_type ("user" | "service_account" | "group").
-	// Empty = no filter.
+	// Optional: filter by subject_type ("user" | "service_account" | "group" |
+	// "system_class"). Empty = no filter.
 	SubjectTypeFilter string `protobuf:"bytes,4,opt,name=subject_type_filter,json=subjectTypeFilter,proto3" json:"subject_type_filter,omitempty"`
 	// Optional: include revoked bindings (status='REVOKED'). Default false
 	// (only PENDING/ACTIVE are returned).
@@ -1888,7 +1890,8 @@ func (x *ExpandAccessRequest) GetMaxResults() int64 {
 }
 
 // Principal is a concrete grantee resolved by ExpandAccess — a USER or
-// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members).
+// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members; never a
+// SYSTEM_CLASS — a class names no concrete principal and is not enumerated).
 type Principal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Type of the principal (USER / SERVICE_ACCOUNT). Reuses SubjectType.
