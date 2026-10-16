@@ -87,12 +87,22 @@ func TestInjection_LimitEqualToTheBudgetIsLegal(t *testing.T) {
 	dir := chartCopy(t)
 	// Бюджет читается ПОДПРОБОЙ: загрузчик настроек привязывает окружение
 	// прогона, и второе чтение в той же пробе застало бы его занятым.
+	//
+	// Пропуск подпробы (рендерить нечем) — третья категория и у близнеца:
+	// исход переносится наверх, а не читается нулевым бюджетом. Иначе
+	// «вердикта нет» печаталось бы красным «бюджет не прочитан».
 	var need uint64
-	t.Run("бюджет", func(t *testing.T) {
+	var skipped bool
+	ran := t.Run("бюджет", func(t *testing.T) {
+		defer func() { skipped = t.Skipped() }()
 		probe := renderChartAt2(t, dir, chartProfiles, withOperatorOverlay(minimalOperatorCoordinates...)...)
 		census, _ := judgeOwnLaneMemoryCeiling(loginLaneOfRender(t, probe), 0, false, "")
 		need = census.Need
 	})
+	if skipped {
+		t.Skip("подпроба бюджета пропущена — вердикта у близнеца НЕТ: третья категория, не зелёное и не красное")
+	}
+	require.True(t, ran, "подпроба бюджета упала — близнеца не из чего построить")
 	require.NotZero(t, need, "бюджет полосы не прочитан — близнеца не из чего построить")
 
 	sets := withOperatorOverlay(append([]string{fmt.Sprintf("resources.limits.memory=%d", need)}, minimalOperatorCoordinates...)...)
