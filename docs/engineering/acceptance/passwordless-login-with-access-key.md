@@ -2276,28 +2276,29 @@ awk '/^## §5 /,/^## §6 /' "$F" | grep -cE '^\*\*F13-[0-9]+'                   
 Правило: каждая часть «Тогда» позиции, чей дом — платформа, называет **пробу по имени** и её
 файл. Часть без держателя названа как пробел, а не прикрыта соседней пробой. Ревизия замера —
 ветка эпика платформы `3172-identity-own-2` @ `e9ce4ffbdc`. Четыре Go-пробы есть и в стволе
-платформы @ `a952484649`, проба браузером — только на ветке эпика. Предикат наличия — `git -C <дерево платформы> grep -n
-'func <имя>' e9ce4ffbdc -- gateway/` для Go-проб и `git grep -n '^test("<метка>' e9ce4ffbdc --
-ui-future/e2e/specs/access-key-assurance.spec.ts` для пробы браузером. Пробелы в столбце «несёт»
+платформы @ `a952484649`, проба браузером — только на ветке эпика. Предикат наличия — в клоне платформы `git grep -n
+'func <имя>' e9ce4ffbdc:gateway/` для Go-проб и `git grep -n '^test("<метка>'
+e9ce4ffbdc:ui-future/e2e/specs/access-key-assurance.spec.ts` для пробы браузером (дерево —
+аргументом ревизии, а не путём после `--`: путь чужого дома в этом дереве пуст). Пробелы в столбце «несёт»
 — заказ держателю, а не исход позиции.
 
 **Ф13-28 — держатель каждой части: Go-проба края** (каталог `gateway/internal/`):
 
 | часть «Тогда» | Go-проба края | файл | несёт |
 |---|---|---|---|
-| `B` (отсечка): отказ на крае, носитель гасится, ретранслировано 0 — на обоих глаголах | `TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`, случай «отсечка»: исход {код, ретранслировано, гашение} сверяется **парой** с входом паролем, а пара — с объявленным `401 · 0 · гасится` | `middleware/own_session_lane_test.go:608` | код, счёт ретрансляций, гашение — да; **текст F4d-22 на двух глаголах — нет**: проба сравнивает исход без тела, текст сверяется только у глаголов Ф3 (`TestOwnSessionLane_F3_51_FormVerbsRefuseTheCutOffCarrierAndRelayNoSession`, `:403`) |
+| `B` (отсечка): отказ на крае, носитель гасится, ретранслировано 0 — на обоих глаголах | `PRO-Robotech/kacho@e9ce4ffbdc:TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`, случай «отсечка»: исход {код, ретранслировано, гашение} сверяется **парой** с входом паролем, а пара — с объявленным `401 · 0 · гасится` | `middleware/own_session_lane_test.go:608` | код, счёт ретрансляций, гашение — да; **текст F4d-22 на двух глаголах — нет**: проба сравнивает исход без тела, текст сверяется только у глаголов Ф3 (`PRO-Robotech/kacho@e9ce4ffbdc:TestOwnSessionLane_F3_51_FormVerbsRefuseTheCutOffCarrierAndRelayNoSession`, `:403`) |
 | `C` («сессии нет»): ретранслировано, личность не выставлена, носитель не гасится | та же, случай «сессии нет» | `middleware/own_session_lane_test.go:608` | да |
-| `A` и `C`: запрос несёт `Cookie`, **один** `X-Forwarded-For`, **ноль** заголовков `x-kacho-` в обеих формах, без `Authorization`; приложенные клиентом `x-kacho-principal-*` не доезжают | `TestLoginLaneRelay_F12_38_EveryDeclaredVerbCarriesTheNamedCompositionOnly`: обходит **каждую** запись объявления полосы, оба глагола входа ключом в их числе, с носителями `A_live_session` и `C_no_session` | `handler/login_lane_relay_composition_test.go:97` | да |
-| без носителя: ретранслировано | `TestOwnSessionAddressGate_F6b_04_OpenListIsSixVerbsThreeCeremonyCoordinatesAndFourPaths`, близнец «закрытые глаголы без носителя — ретранслирован 1»; оба глагола входа ключом — в закрытых | `middleware/own_session_address_gate_test.go:326` | ретрансляция — да; **состав запроса без носителя** (`X-Forwarded-For`, `x-kacho-`, `Authorization`) **— нет**: проба состава обходит носители `A` и `C`, третьего нет |
-| оба пути — в перечне без записи каталога (`isPublicHTTPPath`) и в объявлении ретрансляции тем же объявлением; записей семейства ровно две | `TestLoginLanePaths_F13_28_TwoAccessKeyVerbsAndNoThird` (с отрицательным контролем соседей по имени) | `middleware/login_lane_paths_test.go:297` | да. Каталог, пол уверенности и привязку предъявителя на этих путях снимает один предикат `isPublicHTTPPath`, единственный источник для всех трёх рубежей (шапка предиката, `middleware/authz_util.go`) |
-| недоступность службы — **тот же** исход, что у `POST /iam/v1/auth/login` при том же дублёре и носителе | `TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`, случаи «Resolve недоступен» и «отсечка недоступна» — парой; решение о ретрансляции при неответе — парой в `TestLoginLanePaths_F13_28_TwoAccessKeyVerbsAndNoThird` | `middleware/own_session_lane_test.go:608`; `middleware/login_lane_paths_test.go:297` | да |
+| `A` и `C`: запрос несёт `Cookie`, **один** `X-Forwarded-For`, **ноль** заголовков `x-kacho-` в обеих формах, без `Authorization`; приложенные клиентом `x-kacho-principal-*` не доезжают | `PRO-Robotech/kacho@e9ce4ffbdc:TestLoginLaneRelay_F12_38_EveryDeclaredVerbCarriesTheNamedCompositionOnly`: обходит **каждую** запись объявления полосы, оба глагола входа ключом в их числе, с носителями `A_live_session` и `C_no_session` | `handler/login_lane_relay_composition_test.go:97` | да |
+| без носителя: ретранслировано | `PRO-Robotech/kacho@e9ce4ffbdc:TestOwnSessionAddressGate_F6b_04_OpenListIsSixVerbsThreeCeremonyCoordinatesAndFourPaths`, близнец «закрытые глаголы без носителя — ретранслирован 1»; оба глагола входа ключом — в закрытых | `middleware/own_session_address_gate_test.go:326` | ретрансляция — да; **состав запроса без носителя** (`X-Forwarded-For`, `x-kacho-`, `Authorization`) **— нет**: проба состава обходит носители `A` и `C`, третьего нет |
+| оба пути — в перечне без записи каталога (`isPublicHTTPPath`) и в объявлении ретрансляции тем же объявлением; записей семейства ровно две | `PRO-Robotech/kacho@e9ce4ffbdc:TestLoginLanePaths_F13_28_TwoAccessKeyVerbsAndNoThird` (с отрицательным контролем соседей по имени) | `middleware/login_lane_paths_test.go:297` | да. Каталог, пол уверенности и привязку предъявителя на этих путях снимает один предикат `isPublicHTTPPath`, единственный источник для всех трёх рубежей (шапка предиката, `middleware/authz_util.go`) |
+| недоступность службы — **тот же** исход, что у `POST /iam/v1/auth/login` при том же дублёре и носителе | `PRO-Robotech/kacho@e9ce4ffbdc:TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`, случаи «Resolve недоступен» и «отсечка недоступна» — парой; решение о ретрансляции при неответе — парой в `PRO-Robotech/kacho@e9ce4ffbdc:TestLoginLanePaths_F13_28_TwoAccessKeyVerbsAndNoThird` | `middleware/own_session_lane_test.go:608`; `middleware/login_lane_paths_test.go:297` | да |
 
 **Ф13-09 — две половины, два дома:**
 
 | часть «Тогда» | держатель | несёт |
 |---|---|---|
 | `200`; новая запись `S2` с `{webauthn}`, `Set-Cookie` заменяет носитель; `S1` жива, её носитель годен и несёт «1» | **служба** — кейс набора `tests/newman/` дома службы (уровень E на слушателе службы напрямую) | **нет**: идентификатор `Ф13-09` не стоит ни в одном строковом литерале модулей `tests/newman/cases/*.py` (перепись `.github/scripts/newman-suite-debt.py` @ `81fa3e123`) |
-| через край с носителем сессии под отсечкой — отказ на крае на обоих глаголах, до службы не доходит | Go-проба края — та же, что `B` у Ф13-28: `TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`, случай «отсечка» | код и счёт ретрансляций — да; текст F4d-22 — нет (строка `B` выше) |
+| через край с носителем сессии под отсечкой — отказ на крае на обоих глаголах, до службы не доходит | Go-проба края — та же, что `B` у Ф13-28: `PRO-Robotech/kacho@e9ce4ffbdc:TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`, случай «отсечка» | код и счёт ретрансляций — да; текст F4d-22 — нет (строка `B` выше) |
 | положительный контроль: с носителем сессии, снятой выходом, оба глагола ретранслированы | та же проба, случай «сессии нет»; «вход выдаёт новую запись» — служба, кейс первой строки | ретрансляция — да; выдача — нет (первая строка) |
 
 **Тем же правилом — позиции, которые несёт проба браузером дома платформы**
@@ -2455,7 +2456,7 @@ ui-future/e2e/specs/access-key-assurance.spec.ts` для пробы браузе
    службы; едет **своей задачей платформы**, заведённой при открытии кода Ф13 (номер — в
    закрывающем комментарии `#1282`), базой — ствол платформы (`#2689` влит, `275240efdc`).
    **Дописано редакцией 10:** задача платформы — `kacho#3037`, записи и Go-пробы края посажены
-   (`18180823b5` вводит `TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`);
+   (`18180823b5` вводит `PRO-Robotech/kacho@e9ce4ffbdc:TestOwnSessionLane_F13_28_AccessKeyVerbsBehaveLikeTheLoginVerb`);
    держатели по частям «Тогда» и два пробела (текст F4d-22 на двух глаголах, состав запроса без
    носителя) — §6.4.
 9. **Сквозная проба на слушателе службы** — вход ключом без пароля, наблюдаемый §5: Ф13-05,
