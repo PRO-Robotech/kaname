@@ -5057,7 +5057,7 @@
                   "pm.test('AK35-ALGORITHM-OUTSIDE: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('AK35-ALGORITHM-OUTSIDE: код отказа 3', () => pm.expect(__j.code).to.eql(3));",
-                  "pm.test('AK35-ALGORITHM-OUTSIDE: текст отказа', () => pm.expect(__j.message).to.eql('credential public key algorithm is not in the declared list'));",
+                  "pm.test('AK35-ALGORITHM-OUTSIDE: текст отказа', () => pm.expect(__j.message).to.eql('credential public key algorithm is not in the declared list: begin registration again with an algorithm named in the challenge'));",
                   "const __info = (Array.isArray(__j.details) ? __j.details : []).filter((d) => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
                   "pm.test('AK35-ALGORITHM-OUTSIDE: признак отказа ALGORITHM_NOT_ALLOWED в домене службы', () => pm.expect([__info.reason, __info.domain]).to.eql(['ALGORITHM_NOT_ALLOWED', 'iam.kaname.cloud']));"
                 ]
@@ -5228,7 +5228,7 @@
                   "pm.test('AK41-NOT-DISCOVERABLE: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('AK41-NOT-DISCOVERABLE: код отказа 3', () => pm.expect(__j.code).to.eql(3));",
-                  "pm.test('AK41-NOT-DISCOVERABLE: текст отказа', () => pm.expect(__j.message).to.eql('credential is not discoverable: a discoverable credential is required'));",
+                  "pm.test('AK41-NOT-DISCOVERABLE: текст отказа', () => pm.expect(__j.message).to.eql('credential is not discoverable: begin registration again with a discoverable credential'));",
                   "const __info = (Array.isArray(__j.details) ? __j.details : []).filter((d) => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
                   "pm.test('AK41-NOT-DISCOVERABLE: признак отказа CREDENTIAL_NOT_DISCOVERABLE в домене службы', () => pm.expect([__info.reason, __info.domain]).to.eql(['CREDENTIAL_NOT_DISCOVERABLE', 'iam.kaname.cloud']));"
                 ]
@@ -5400,7 +5400,7 @@
                   "pm.test('AK44-ORIGIN-OUTSIDE: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('AK44-ORIGIN-OUTSIDE: код отказа 3', () => pm.expect(__j.code).to.eql(3));",
-                  "pm.test('AK44-ORIGIN-OUTSIDE: текст отказа', () => pm.expect(__j.message).to.eql('credential origin is not in the declared list'));",
+                  "pm.test('AK44-ORIGIN-OUTSIDE: текст отказа', () => pm.expect(__j.message).to.eql('credential origin is not in the declared list: begin registration again from a declared origin, or ask the operator to declare this origin'));",
                   "const __info = (Array.isArray(__j.details) ? __j.details : []).filter((d) => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
                   "pm.test('AK44-ORIGIN-OUTSIDE: признак отказа ORIGIN_NOT_ALLOWED в домене службы', () => pm.expect([__info.reason, __info.domain]).to.eql(['ORIGIN_NOT_ALLOWED', 'iam.kaname.cloud']));"
                 ]
@@ -5571,7 +5571,7 @@
                   "pm.test('AK45-FOREIGN-RP-HASH: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('AK45-FOREIGN-RP-HASH: код отказа 3', () => pm.expect(__j.code).to.eql(3));",
-                  "pm.test('AK45-FOREIGN-RP-HASH: текст отказа', () => pm.expect(__j.message).to.eql('credential was created for another relying party'));",
+                  "pm.test('AK45-FOREIGN-RP-HASH: текст отказа', () => pm.expect(__j.message).to.eql('credential was created for another relying party: begin registration again and create the credential for the relying party named in the challenge'));",
                   "const __info = (Array.isArray(__j.details) ? __j.details : []).filter((d) => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
                   "pm.test('AK45-FOREIGN-RP-HASH: признак отказа RP_ID_MISMATCH в домене службы', () => pm.expect([__info.reason, __info.domain]).to.eql(['RP_ID_MISMATCH', 'iam.kaname.cloud']));"
                 ]
@@ -5742,7 +5742,7 @@
                   "pm.test('AK48-VERIFIED-NOT-PRESENT: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
                   "pm.test('AK48-VERIFIED-NOT-PRESENT: код отказа 3', () => pm.expect(__j.code).to.eql(3));",
-                  "pm.test('AK48-VERIFIED-NOT-PRESENT: текст отказа', () => pm.expect(__j.message).to.eql('authenticator did not report user presence'));",
+                  "pm.test('AK48-VERIFIED-NOT-PRESENT: текст отказа', () => pm.expect(__j.message).to.eql('authenticator did not report user presence: begin registration again and confirm presence on the authenticator'));",
                   "const __info = (Array.isArray(__j.details) ? __j.details : []).filter((d) => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
                   "pm.test('AK48-VERIFIED-NOT-PRESENT: признак отказа USER_NOT_PRESENT в домене службы', () => pm.expect([__info.reason, __info.domain]).to.eql(['USER_NOT_PRESENT', 'iam.kaname.cloud']));"
                 ]
@@ -7200,7 +7200,7 @@
                 "exec": [
                   "pm.test('AK07-FORGED-SIGNATURE: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK07-FORGED-SIGNATURE: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK07-FORGED-SIGNATURE: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "if (pm.response.code === 400) { pm.environment.set('akRefusalBody', pm.response.text()); }"
                 ]
               }
@@ -7372,7 +7372,7 @@
                 "exec": [
                   "pm.test('AK08-SIGNED-BY-SECOND-KEY: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK08-SIGNED-BY-SECOND-KEY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK08-SIGNED-BY-SECOND-KEY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK08-SIGNED-BY-SECOND-KEY: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -7538,7 +7538,7 @@
                 "exec": [
                   "pm.test('AK09-UNKNOWN-CREDENTIAL: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK09-UNKNOWN-CREDENTIAL: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK09-UNKNOWN-CREDENTIAL: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK09-UNKNOWN-CREDENTIAL: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -7710,7 +7710,7 @@
                 "exec": [
                   "pm.test('AK10-ORIGIN-OUTSIDE: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK10-ORIGIN-OUTSIDE: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK10-ORIGIN-OUTSIDE: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK10-ORIGIN-OUTSIDE: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -7883,7 +7883,7 @@
                 "exec": [
                   "pm.test('AK11-ORIGIN-HEADER-AGREES: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK11-ORIGIN-HEADER-AGREES: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK11-ORIGIN-HEADER-AGREES: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK11-ORIGIN-HEADER-AGREES: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -8055,7 +8055,7 @@
                 "exec": [
                   "pm.test('AK-FOREIGN-RP-HASH: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK-FOREIGN-RP-HASH: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK-FOREIGN-RP-HASH: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK-FOREIGN-RP-HASH: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -8227,7 +8227,7 @@
                 "exec": [
                   "pm.test('AK49-NOT-PRESENT: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK49-NOT-PRESENT: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK49-NOT-PRESENT: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK49-NOT-PRESENT: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -8399,7 +8399,7 @@
                 "exec": [
                   "pm.test('AK18-COUNTER-NOT-GROWN: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK18-COUNTER-NOT-GROWN: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK18-COUNTER-NOT-GROWN: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK18-COUNTER-NOT-GROWN: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -8565,7 +8565,7 @@
                 "exec": [
                   "pm.test('AK52-CHALLENGE-NOT-ISSUED: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK52-CHALLENGE-NOT-ISSUED: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK52-CHALLENGE-NOT-ISSUED: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK52-CHALLENGE-NOT-ISSUED: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -8955,7 +8955,7 @@
                 "exec": [
                   "pm.test('AK53-REPLAY: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK53-REPLAY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK53-REPLAY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK53-REPLAY: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -12408,7 +12408,7 @@
                 "exec": [
                   "pm.test('AK51-FOREIGN-KEY: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK51-FOREIGN-KEY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK51-FOREIGN-KEY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK51-FOREIGN-KEY: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -12995,7 +12995,7 @@
                 "exec": [
                   "pm.test('AK55-FOREIGN-CHALLENGE: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK55-FOREIGN-CHALLENGE: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK55-FOREIGN-CHALLENGE: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK55-FOREIGN-CHALLENGE: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -19322,7 +19322,7 @@
                 "exec": [
                   "pm.test('AK54-EXPIRED: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK54-EXPIRED: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK54-EXPIRED: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK54-EXPIRED: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }
@@ -20534,7 +20534,7 @@
                 "exec": [
                   "pm.test('AK25-REVOKED-KEY: ответ 400', () => pm.expect(pm.response.code).to.eql(400));",
                   "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
-                  "pm.test('AK25-REVOKED-KEY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted']));",
+                  "pm.test('AK25-REVOKED-KEY: единый отказ — код 3 и текст', () => pm.expect([__j.code, __j.message]).to.eql([3, 'access key assertion is not accepted: begin the assertion again']));",
                   "pm.test('AK25-REVOKED-KEY: тело побайтово равно телу единого отказа Ф7-07', () => pm.expect(!!pm.environment.get('akRefusalBody') && pm.response.text() === pm.environment.get('akRefusalBody')).to.eql(true));"
                 ]
               }

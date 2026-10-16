@@ -343,17 +343,33 @@ _RESIDENT_REQUIRED = "required"
 _ATTESTATION_NONE = "none"
 _FRESHNESS_WINDOW_S = 15 * 60
 _REFUSAL_DOMAIN = "iam.kaname.cloud"
-_ASSERTION_REFUSED = "access key assertion is not accepted"
+# Единый отказ полосы утверждения называет шаг — начать утверждение заново:
+# приёмка `access-key-assertion-surfaces-declare-their-difference.md`, Р2
+# (APPROVED, отпечаток `b095e1f6…`, kaname#757); тот же текст — в таблице
+# отказов `docs/content/api/auth-lane.mdx`.
+_ASSERTION_REFUSED = "access key assertion is not accepted: begin the assertion again"
 _CHALLENGE_NOT_ISSUED = ("CHALLENGE_NOT_ISSUED", "registration challenge was not issued: begin registration again")
 _CHALLENGE_PRESENTED = ("CHALLENGE_ALREADY_PRESENTED",
                         "registration challenge was already presented: begin registration again")
 _CHALLENGE_EXPIRED = ("CHALLENGE_EXPIRED", "registration challenge expired: begin registration again")
-_ORIGIN_REFUSED = ("ORIGIN_NOT_ALLOWED", "credential origin is not in the declared list")
-_RP_REFUSED = ("RP_ID_MISMATCH", "credential was created for another relying party")
-_UP_REFUSED = ("USER_NOT_PRESENT", "authenticator did not report user presence")
-_ALG_REFUSED = ("ALGORITHM_NOT_ALLOWED", "credential public key algorithm is not in the declared list")
+# Отказы приёма результата церемонии регистрации называют следующий шаг после
+# двоеточия (kaname#802): начать регистрацию заново — и с чем именно. Тексты —
+# дословно из таблицы отказов `docs/content/api/auth-lane.mdx`.
+_ORIGIN_REFUSED = ("ORIGIN_NOT_ALLOWED",
+                   "credential origin is not in the declared list: begin registration again from a "
+                   "declared origin, or ask the operator to declare this origin")
+_RP_REFUSED = ("RP_ID_MISMATCH",
+               "credential was created for another relying party: begin registration again and "
+               "create the credential for the relying party named in the challenge")
+_UP_REFUSED = ("USER_NOT_PRESENT",
+               "authenticator did not report user presence: begin registration again and confirm "
+               "presence on the authenticator")
+_ALG_REFUSED = ("ALGORITHM_NOT_ALLOWED",
+                "credential public key algorithm is not in the declared list: begin registration "
+                "again with an algorithm named in the challenge")
 _NOT_DISCOVERABLE = ("CREDENTIAL_NOT_DISCOVERABLE",
-                     "credential is not discoverable: a discoverable credential is required")
+                     "credential is not discoverable: begin registration again with a discoverable "
+                     "credential")
 _CEILING_NEXT_STEP = "revoke an access key you no longer need"
 # Алгоритм вне словаря проверяющего и вне профиля: PS256 (COSE -37).
 _ALG_OUTSIDE = -37
