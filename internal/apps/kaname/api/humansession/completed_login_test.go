@@ -512,5 +512,8 @@ func TestKeyLoginEnrollmentIsCalledOnlyAfterTheKeyIsHeld(t *testing.T) {
 	if calls == 0 {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: вызовов keyLoginEnrollment разбором найдено 0 (файлов прочитано %d)", files)
 	}
+	if t.Failed() {
+		return
+	}
 	t.Logf("перепись: файлов пакета %d, вызовов keyLoginEnrollment %d — все после удержания ключа", files, calls)
 }
