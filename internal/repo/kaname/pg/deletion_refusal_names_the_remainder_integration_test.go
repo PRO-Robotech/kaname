@@ -181,20 +181,21 @@ func TestDRS11_EachAccountHolderKindHasItsOwnRefusal(t *testing.T) {
 		noun     string
 		label    string
 		metaType string
+		name     string // имя — по ограничению формы имени своей таблицы
 	}
 	for _, k := range []seeded{
 		{`INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ($1, $2, $3)`,
-			domain.PrefixServiceAccount, "contains service accounts", "ServiceAccount", "service accounts", "service_account"},
+			domain.PrefixServiceAccount, "contains service accounts", "ServiceAccount", "service accounts", "service_account", "drs11-sa"},
 		{`INSERT INTO kaname.groups (id, account_id, name) VALUES ($1, $2, $3)`,
-			domain.PrefixGroup, "contains groups", "Group", "groups", "group"},
+			domain.PrefixGroup, "contains groups", "Group", "groups", "group", "drs11-group"},
 		{`INSERT INTO kaname.roles (id, account_id, name, permissions) VALUES ($1, $2, $3, '[]'::jsonb)`,
-			domain.PrefixRole, "contains custom roles", "Role", "custom roles", "role"},
+			domain.PrefixRole, "contains custom roles", "Role", "custom roles", "role", "drs11_role"},
 	} {
 		t.Run(k.metaType, func(t *testing.T) {
 			uid, acc := e.emptied(t, "drs11"+k.metaType)
 			id := ids.NewID(k.prefix)
-			_, err := e.pool.Exec(ctx, k.insert, id, string(acc), "drs11-"+k.metaType)
-			require.NoError(t, err, "Дано: %s", k.metaType)
+			_, err := e.pool.Exec(ctx, k.insert, id, string(acc), k.name)
+			require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): Дано: %s", k.metaType)
 
 			want := fmt.Sprintf("Account %s %s and cannot be deleted: delete %s %s first (%s: 1)",
 				acc, k.phrase, k.noun, id, k.label)
