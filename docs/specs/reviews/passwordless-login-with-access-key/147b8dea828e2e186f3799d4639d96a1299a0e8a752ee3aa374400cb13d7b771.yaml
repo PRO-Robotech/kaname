@@ -158,19 +158,53 @@ event_body: acceptance-reviewer · APPROVED · 147b8dea828e2e186f3799d4639d96a12
 effective_approval:
   issued: false
   ban1_lifted: false
+  event_performed: true
+  blocked_by: subject_revision_not_on_remote
   publication_pending:
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
+    remaining_step: >-
+      Опубликовать ревизию 7660dbb2d на origin (ветка 853); затем решение диспетчера — засчитать
+      событие 6226720104 либо опубликовать событие повторно после отправки. Решает не эта запись.
   why: >-
-    Санкцию даёт внешнее событие допущенной учётки с отпечатком этой записи и опубликованной
-    ревизией содержимого. Коммит 7660dbb2d пока только локальный — сначала отправка ветки 853,
-    затем событие. Одобрения 5b2f7bfc… и c359d1a2… остаются одобрениями своих редакций и на
-    редакцию 12 не переносятся (change-graph.md §2).
+    Событие опубликовано и его заголовок полон: пять полей (role, verdict, subject,
+    subject_revision, subject_sha256), subject_sha256 равен отпечатку этой записи, учётка pointpu —
+    из authority.authorized_actors. Но санкцию по прецеденту записи 5b2f7bfc… выдаёт событие, чья
+    subject_revision опубликована на origin РАНЬШЕ события, и ритуал approval-event.sh отказывает
+    в публикации при «ревизия не на удалённом». Здесь это условие не выполнено, измерено:
+    git fetch origin 853 → origin/853 = 8e621ca5a; git branch -r --contains 7660dbb2d → пусто;
+    gh api repos/PRO-Robotech/kaname/commits/7660dbb2d… → HTTP 422 «No commit found for SHA»
+    (2026-10-16T23:39:32Z, через минуту после события 23:38:29Z). Внешний читатель #468 ревизию
+    события проверить не может. Поэтому issued: false; событие — факт и записано блоком event
+    целиком. Одобрения 5b2f7bfc… и c359d1a2… остаются одобрениями своих редакций и на редакцию
+    12 не переносятся (change-graph.md §2). Дописано отдельным коммитом поверх записи круга;
+    вердикт и разбор не правились.
 event:
-  status: not_performed
-  note: >-
-    Публикует курьер (git-operator) после того, как ревизия с этим отпечатком появится на origin;
-    тем же заходом блок приводится к факту (status: performed, адрес события).
+  type: issue_comment
+  target: PRO-Robotech/kaname#468
+  target_note: >-
+    Задача события (#468) — не subject.task записи (#853): событие опубликовано в задаче ветви (г)
+    по прецеденту 5b2f7bfc…; адрес назван здесь, чтобы гейт review-event-silence читал задачу из
+    дерева.
+  status: performed
+  published: true
+  database_id: 6226720104
+  node_id: IC_kwDOUO26pM8AAAABcyQ1aA
+  url: https://github.com/PRO-Robotech/kaname/issues/468#issuecomment-6226720104
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6226720104
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/468
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-16T23:38:29Z'
+  body_sha256: 8b105899e6b88247a4db56cb57b37a577cb349b3ac1b7ad7276bb090c3ea5528
+  body_sha256_note: тело без завершающего перевода строки (jq -j '.body' | sha256sum)
+  subject_sha256: 147b8dea828e2e186f3799d4639d96a1299a0e8a752ee3aa374400cb13d7b771
+  subject_revision_commit: 7660dbb2d3e87743d4b164bb9b947c4b20672886
+  subject_revision_on_remote_at_event: false
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
+  measured_by: gh api repos/PRO-Robotech/kaname/issues/comments/6226720104 (перемерено рецензентом)
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
