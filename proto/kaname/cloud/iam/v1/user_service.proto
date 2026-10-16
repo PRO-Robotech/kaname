@@ -578,7 +578,9 @@ message ListUsersRequest {
   // фильтрует Users по Account). system-admin может оставить пустым (видит всех).
   string account_id = 4;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 1;
 
   // Page token.
@@ -705,7 +707,9 @@ message ListUserOperationsRequest {
   // ID of the User resource to list operations for.
   string user_id = 1;
 
-  // The maximum number of results per page that should be returned.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.

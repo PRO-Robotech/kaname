@@ -554,8 +554,9 @@ message UpdateAccessBindingRequest {
 }
 
 message ListAccessBindingsRequest {
-  // The maximum number of results per page to return. Default 100; >1000 →
-  // INVALID_ARGUMENT (rejected, not clamped).
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 1;
 
   // Page token. A malformed token → INVALID_ARGUMENT (validated before the
@@ -632,7 +633,9 @@ message ListAccessBindingsByScopeRequest {
   // DEPRECATED — use `scope_id` (field 6). Scope-anchor id.
   string resource_id = 2;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 3;
 
   // Page token.
@@ -668,7 +671,9 @@ message ListAccessBindingsBySubjectRequest {
   // "anonymous" | "authenticated".
   string subject_id = 2;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 3;
 
   // Page token.
@@ -681,7 +686,9 @@ message ListAccessBindingsByAccountRequest {
   // the account.
   string account_id = 1;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.
@@ -741,7 +748,9 @@ message ListAccessBindingOperationsRequest {
   // ID of the AccessBinding resource to list operations for.
   string access_binding_id = 1;
 
-  // The maximum number of results per page that should be returned.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.
