@@ -59,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 const (
@@ -116,7 +117,7 @@ func (sc *serScene) serPerson(t *testing.T) domain.User {
 		VALUES ($1, $2, $3, '{}'::jsonb)`,
 		string(u.AccountID), "ser-acc-"+string(u.AccountID)[len(u.AccountID)-6:], string(u.ID))
 	require.NoError(t, err, "Дано: строка аккаунта")
-	seedWayIn(t, sc.ctx, tx)
+	activewayin.Seed(t, sc.ctx, tx)
 	require.NoError(t, tx.Commit(sc.ctx), "Дано: посев личности зафиксирован")
 	return u
 }

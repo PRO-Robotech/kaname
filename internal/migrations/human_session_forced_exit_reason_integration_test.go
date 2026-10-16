@@ -56,6 +56,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 const (
@@ -161,7 +162,7 @@ func serSeedPerson(t *testing.T, db *sql.DB, tag string) string {
 	require.NoError(t, err, "Дано: личность")
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`, acc, "acc-"+tag, id)
 	require.NoError(t, err, "Дано: аккаунт")
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 	return id
 }

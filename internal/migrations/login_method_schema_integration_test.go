@@ -66,6 +66,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // loginMethodMigration — файл, заводящий предмет этих проб. Имя стоит здесь
@@ -128,7 +129,7 @@ func lmSeed(t *testing.T, db *sql.DB, tag string) (owner, member string) {
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "acc-"+tag, owner)
 	require.NoError(t, err, "посев аккаунта %s", tag)
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 	return owner, member
 }

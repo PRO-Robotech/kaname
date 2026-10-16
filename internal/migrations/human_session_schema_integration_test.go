@@ -23,6 +23,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 func hsDB(t *testing.T) *sql.DB {
@@ -47,7 +48,7 @@ func hsSeedPerson(t *testing.T, db *sql.DB, tag string) string {
 	require.NoError(t, err)
 	_, err = tx.Exec(`INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`, acc, "acc-"+tag, id)
 	require.NoError(t, err)
-	seedWayIn(t, tx)
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 	return id
 }

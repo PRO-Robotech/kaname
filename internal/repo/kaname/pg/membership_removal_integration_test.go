@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse — плечо 1.
@@ -232,7 +233,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, err = w.UsersW().ActivateInvite(ctx, excluded,
 			domain.ExternalSubject("ext-rmres-activated"), domain.DisplayName("Excluded"))
 		require.NoError(t, err)
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 
@@ -261,7 +262,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, err = w.UsersW().ActivateInvite(ctx, kept,
 			domain.ExternalSubject("ext-rmres-kept"), domain.DisplayName("Kept"))
 		require.NoError(t, err)
-		seedWayIn(t, ctx, kanamepg.WriterTx(w))
+		activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 		require.NoError(t, w.Commit(ctx))
 	}
 	keptAfter := membershipsOf(t, ctx, pool, kept)

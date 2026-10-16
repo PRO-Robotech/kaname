@@ -32,6 +32,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // upsertUser-compatible helper: создает **дополнительного** user-row
@@ -88,7 +89,7 @@ func upsertUser(t *testing.T, ctx context.Context, repo *kanamepg.Repository, ex
 	})
 	require.NoError(t, err, "InsertActive target")
 
-	seedWayIn(t, ctx, kanamepg.WriterTx(w))
+	activewayin.Seed(t, ctx, kanamepg.WriterTx(w))
 	require.NoError(t, w.Commit(ctx))
 	committed = true
 	return target, true

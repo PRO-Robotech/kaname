@@ -61,6 +61,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // membershipStatesOf — членства человека как «аккаунт=состояние». Читает
@@ -144,7 +145,7 @@ func personInvitedToTwoAccounts(t *testing.T, tagA, tagB, email string) (*sql.DB
 // перестаёт быть приглашением и получает внешний субъект.
 func logIn(t *testing.T, db *sql.DB, person, externalID string) {
 	t.Helper()
-	res, err := execWithWayIn(t, db, `
+	res, err := activewayin.ExecGuarded(t, db, `
 		UPDATE kaname.users
 		   SET invite_status = 'ACTIVE', external_id = $2
 		 WHERE id = $1`, person, externalID)

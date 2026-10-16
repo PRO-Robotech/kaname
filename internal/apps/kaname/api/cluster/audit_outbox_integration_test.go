@@ -37,6 +37,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 var evtIDFormat = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`)
@@ -69,7 +70,7 @@ func seedAuditUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix
 		fmt.Sprintf("aud-acc-%s-%s", suffix, accID[len(accID)-6:]),
 		string(uid))
 	require.NoError(t, err)
-	seedWayIn(t, ctx, tx)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid
 }
