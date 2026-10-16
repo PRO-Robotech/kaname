@@ -129,16 +129,21 @@ non_blocking:
       он даёт тот же вывод (перемерено), но ревизию замера лучше брать своей.
 event_body: acceptance-reviewer · APPROVED · 5b2f7bfcef4af275a0b482c74defe525cd6c1f0a2c0c1d3e122259e9a7a171bf
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-16T19:50:04Z'
+  ban1_lifted: true
   publication_pending:
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
   why: >-
-    Вердикт агента APPROVED на отпечаток 5b2f7bfc…; санкцию выдаёт внешнее событие допущенной
-    учётки с заголовком из пяти полей (role, verdict, subject, subject_revision, subject_sha256),
-    до его публикации санкции нет. Ревизия bb86146f3 уже на origin/468. Одобрение круга 8
-    (5fe6cca1…) остаётся одобрением редакции 9 и на редакцию 11 не переносится.
+    Санкцию выдаёт внешнее событие допущенной учётки в форме заголовка из пяти полей
+    (role, verdict, subject, subject_revision, subject_sha256). Событие 6223458804 учётки
+    pointpu на PRO-Robotech/kaname#468 несёт все пять полей, subject_sha256 равен отпечатку
+    этой записи, subject_revision bb86146f3179 опубликована на origin раньше события
+    (git branch -r --contains bb86146f3 даёт origin/468); запрет #1 по этому отпечатку снят.
+    Одобрение круга 8 (5fe6cca1…) остаётся одобрением редакции 9 и на редакцию 11 не
+    переносится. Дописано отдельным коммитом поверх записи, вердикт и разбор задним числом
+    не правились.
 authority:
   repository: PRO-Robotech/kacho-workspace
   policy_document: docs/changes/policy.yaml
@@ -148,9 +153,17 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#468
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6223458804
+  node_id: IC_kwDOUO26pM8AAAABcvJx9A
+  url: https://github.com/PRO-Robotech/kaname/issues/468#issuecomment-6223458804
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6223458804
+  actor: pointpu
   role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-16T19:50:04Z'
+  body_sha256: 51dd2dcb035caebafef853637fc3cfc0f159b235f212949bd22a021c319df802
   subject_sha256: 5b2f7bfcef4af275a0b482c74defe525cd6c1f0a2c0c1d3e122259e9a7a171bf
   subject_revision_commit: bb86146f31796a113afd82c5fc6a73f5646fb24b
   verdict: APPROVED
