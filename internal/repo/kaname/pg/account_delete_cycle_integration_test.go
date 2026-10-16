@@ -28,11 +28,13 @@ package pg_test
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -206,6 +208,32 @@ func countRows(t *testing.T, pool *pgxpool.Pool, q string, args ...any) int {
 	return n
 }
 
+// firstValue — первое значение одноколоночного чтения либо "" (строк нет):
+// исход гонки читается и тогда, когда держащего не осталось, и сравнение
+// с ожидаемым текстом решает исход, а не отказ чтения.
+func firstValue(t *testing.T, pool *pgxpool.Pool, q string, args ...any) string {
+	t.Helper()
+	var v string
+	err := pool.QueryRow(context.Background(), q, args...).Scan(&v)
+	if stderrors.Is(err, pgx.ErrNoRows) {
+		return ""
+	}
+	require.NoError(t, err)
+	return v
+}
+
+// firstProjectOf — наименьший id проекта аккаунта: его называет отказ снятия
+// аккаунта (kaname#725, Р1).
+func firstProjectOf(t *testing.T, pool *pgxpool.Pool, acc domain.AccountID) string {
+	return firstValue(t, pool, `SELECT id FROM kaname.projects WHERE account_id = $1 ORDER BY id LIMIT 1`, string(acc))
+}
+
+// ownedAccountOf — наименьший id аккаунта во владении человека: его называет
+// отказ снятия человека (kaname#725, Р1).
+func ownedAccountOf(t *testing.T, pool *pgxpool.Pool, uid domain.UserID) string {
+	return firstValue(t, pool, `SELECT id FROM kaname.accounts WHERE owner_user_id = $1 ORDER BY id LIMIT 1`, string(uid))
+}
+
 func memberships(t *testing.T, pool *pgxpool.Pool, uid domain.UserID) []string {
 	t.Helper()
 	rows, err := pool.Query(context.Background(),
@@ -249,9 +277,10 @@ func TestKN664_10_OwnerRemovesTheEmptyPersonalAccount(t *testing.T) {
 // TestKN664_11_AccountWithAProjectIsRefused — KN664-11, близнец KN664-10.
 func TestKN664_11_AccountWithAProjectIsRefused(t *testing.T) {
 	e := newRemovalEnv(t)
-	uid, acc, _ := e.selfRegistered(t, "11")
+	uid, acc, prj := e.selfRegistered(t, "11")
 
-	require.Equal(t, opOutcome{code: 9, msg: "Account " + string(acc) + " contains projects and cannot be deleted"},
+	require.Equal(t, opOutcome{code: 9, msg: "Account " + string(acc) + " contains projects and cannot be deleted: delete Project " +
+		string(prj) + " first (projects: 1)"},
 		e.deleteAccount(t, uid, acc))
 	require.Equal(t, 1, countRows(t, e.pool, `SELECT count(*) FROM kaname.accounts WHERE id = $1`, string(acc)))
 	require.Equal(t, []string{string(acc)}, memberships(t, e.pool, uid), "членство U в A на месте")
@@ -377,7 +406,8 @@ func TestKN664_20_AccountRemovalRacesProjectCreation(t *testing.T) {
 		accountLeft := countRows(t, e.pool, `SELECT count(*) FROM kaname.accounts WHERE id = $1`, string(acc.ID))
 
 		switch {
-		case prj == opOutcome{} && del == opOutcome{code: 9, msg: "Account " + string(acc.ID) + " contains projects and cannot be deleted"}:
+		case prj == opOutcome{} && del == opOutcome{code: 9, msg: "Account " + string(acc.ID) + " contains projects and cannot be deleted: delete Project " +
+			firstProjectOf(t, e.pool, acc.ID) + " first (projects: 1)"}:
 			counts["а: проект создан, снятие отвергнуто"]++
 			require.Equal(t, 1, accountLeft)
 		case del == opOutcome{} && prj == opOutcome{code: 9, msg: "Account " + string(acc.ID) + " not found"}:
