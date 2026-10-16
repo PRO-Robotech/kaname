@@ -574,7 +574,11 @@ plan_out="$(python3 "$CLASSES_PY" plan --out "$plan_dir" --remote "${1:-origin}"
 plan_rc=$?
 printf '%s\n' "$plan_out" >&2
 [ "$plan_rc" -eq 0 ] || finish 2 "pre-push: НЕ ВЫПОЛНИЛОСЬ — классы до отправки не выбраны (код $plan_rc). Отправка остановлена."
-classes_note="$(grep -c . "$plan_dir/classes" 2>/dev/null || echo 0) из 4 выбрано по тронутым путям — строки «классы до отправки» выше"
+classes_note="$(head -n 1 "$plan_dir/note" 2>/dev/null)"
+if [ -z "$classes_note" ]; then
+    classes_note="НЕ ВЫПОЛНИЛОСЬ — строки выбора нет"
+    finish 2 "pre-push: НЕ ВЫПОЛНИЛОСЬ — помощник не записал строку выбора $plan_dir/note. Отправка остановлена."
+fi
 has_class() { grep -qx "$1" "$plan_dir/classes"; }
 has_class request && groups+=("правило запроса|.github/scripts/pr-rule-check.sh по диапазону база..вершина|group_request")
 has_class reviews && groups+=("записи ревью|.github/scripts/review-event-silence.py --rev <вершина>|group_reviews")
