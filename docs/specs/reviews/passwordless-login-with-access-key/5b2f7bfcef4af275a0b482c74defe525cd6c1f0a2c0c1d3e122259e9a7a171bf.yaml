@@ -1,0 +1,157 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/passwordless-login-with-access-key.md
+  sha256: 5b2f7bfcef4af275a0b482c74defe525cd6c1f0a2c0c1d3e122259e9a7a171bf
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 6a5a41086
+  content_commit: bb86146f31796a113afd82c5fc6a73f5646fb24b
+  branch: '468'
+  worktree: tmp/w9/kn-ledger
+  pull_request: null
+  task: PRO-Robotech/kaname#468
+  lines: 2593
+  round: 10
+  round_note: >-
+    круг 10 — следующий за записью круга 9 (71667f13…, CHANGES_REQUESTED на редакцию 10); по
+    заданию диспетчера судится ТОЛЬКО дельта редакции 11 к редакции 10 и только исполнение правок
+    круга 9: B1 (а)–(д), B2, N1, N2. Вне дельты ничего не переоткрыто (flow-acceleration.md fa-b1)
+  predecessor_record: >-
+    docs/specs/reviews/passwordless-login-with-access-key/71667f13cd0817ea1b541266be8d37c8437edea79e698e4eb837cf0d04275f26.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/passwordless-login-with-access-key.md на tmp/w9/kn-ledger @
+    bb86146f3 → 5b2f7bfcef4af275a0b482c74defe525cd6c1f0a2c0c1d3e122259e9a7a171bf; совпал с
+    отпечатком задания. Редакция 10 — git show 6a5a41086:<файл> | sha256sum → 71667f13…; дельта —
+    git diff --numstat 6a5a41086 bb86146f3 -- <файл> → 53 вставки, 15 удалений, 9 участков.
+    Ревизия опубликована: git branch -r --contains bb86146f3 → origin/468
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-16'
+publication_mode: courier_of_agent_verdict
+edits_checked:
+  - id: B1 (а)
+    where: стр. 1731
+    outcome: >-
+      ИСПОЛНЕНО. Заголовок «**Ф13-06 — …; одиннадцать ветвей** · E + I». Форма законна для
+      переписи долга: .github/scripts/newman-suite-debt.py, SCENARIO_FORMS — вторая форма
+      «**<ID> — <заголовок>** · E + I»; прогон python3 .github/scripts/newman-suite-debt.py @
+      bb86146f3 → код 0, незнакомых форм не напечатано (строка «формы заголовка сценария … 330 · 174»).
+  - id: B1 (б)
+    where: стр. 1750…1758
+    outcome: >-
+      ИСПОЛНЕНО по тексту требования круга 9: процесс службы над настоящим проверяющим Ф7 и
+      настоящей выдачей, настенные часы, полосы (а)/(б) по кругу, число обращений объявлено и не
+      ниже нижней границы, критерий Ф1-48 на паре, вывод — медианы, размахи, N, T, потолок
+      годности, красное называет пару, ручка инъекции как KACHO_LOGIN_TIMING_INJECT (Ф1-49).
+      Образец в дереве есть: git grep -n 'func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses'
+      bb86146f3 → internal/apps/kaname/api/humansession/timing_probe_test.go:238; ручка
+      инъекции — там же :110 (timingInjectEnv = "KACHO_LOGIN_TIMING_INJECT").
+  - id: B1 (в)
+    where: стр. 2345…2353
+    outcome: >-
+      ИСПОЛНЕНО. Держатель — измерительная проба уровня I, назван пробелом-заказом с носителем
+      kaname#468; gh issue view 468 -R PRO-Robotech/kaname → OPEN. Утверждение «такой пробы нет»
+      перемерено на своей ревизии: git grep -nE 'func Test[A-Za-z_]*F13_06' bb86146f3 -- '*.go' →
+      одна функция (internal/handler/loginlanehttp/access_key_login_integration_test.go:256,
+      TestF13_06_OneRefusalForEveryCause), не измерительная — верно.
+  - id: B1 (г)
+    where: стр. 8…30, 41…42
+    outcome: >-
+      ИСПОЛНЕНО. Шапка редакции 11 перечисляет правки и основание D3; строка о ветви «л» в шапке
+      редакции 10 приведена к решению с пометкой «внесено редакцией 11». Прежняя шапка редакции 10
+      сохранена с оговоркой «так на момент записи» — история не переписана.
+  - id: B1 (д)
+    where: стр. 2421
+    outcome: >-
+      ИСПОЛНЕНО: «(л) — измерительный … на трёх личностях, уровня I, в процессе службы (форма Ф3-31)».
+  - id: B2
+    where: стр. 2496…2502
+    outcome: >-
+      ИСПОЛНЕНО. §9 п. 9 расписан по домам §6.4 с числом позиций: набор службы
+      tests/newman/cases/kaname-access-keys.py (файл есть) — семь позиций (Ф13-05; Ф13-06 «а»…«з»,
+      «к» — девять ветвей; Ф13-10, -11, -12 копией уровня; Ф13-19; Ф13-09 первая половина —
+      1+1+3+1+1 = 7, «а»…«з» = 8, +«к» = 9 — счёт сходится); проба браузером платформы — Ф13-06
+      «в», «и», пол «2» края у Ф13-10…12 и Ф13-15 (совпадает со второй таблицей §6.4, стр.
+      2335…2343); Ф13-06 «л» — уровень I. Одиннадцать ветвей разложены без пропуска: девять +
+      «и» + «л»; «в» держат оба дома (служба на своём слушателе, платформа через край) — пересечение
+      повторяет текст требования круга 9 и противоречия не несёт. Каждый пункт измерим.
+  - id: N1
+    where: стр. 2329
+    outcome: >-
+      ИСПОЛНЕНО: модуль tests/newman/cases/kaname-access-keys.py, коллекция kaname-access-keys,
+      заводит qa, носитель kaname#468.
+  - id: N2
+    where: стр. 2309…2312
+    outcome: >-
+      ИСПОЛНЕНО ЧАСТИЧНО, по заданию неблокирующее: закрытые kacho#3037 и kacho#1282 больше не
+      названы носителем (это была ложная часть, она снята); носитель назван «задача заказана, номер
+      впишется по заведении» — координаты пока нет. См. non_blocking NB1.
+scope_of_delta: >-
+  Сценариев 32 на обеих ревизиях (awk '/^## §5 /,/^## §6 /' <файл> | grep -oE '^\*\*Ф13-[0-9]+' |
+  sort -u | wc -l → 32 и 32). Дифф затрагивает шапку, заголовок и строку «(л)» Ф13-06, §6.4
+  (абзац пробелов края, первую строку Ф13-09, абзац «л»), §8 строку «Ф13-05…09 вход» и §9 п. 9 —
+  ровно объявленное шапкой; «Дано», прочие «Тогда», Р1…Р15 и §7 не тронуты. Строки, названные
+  автором (1731, 1752–1758, 2345–2349, 41, 8–30, 2421, 2496–2503, 2329, 2311), совпали с
+  содержимым правок.
+twin_check: >-
+  Новых отрицательных сценариев дельта не вводит. У ветви «л» различающая пара задана формой Ф3-31:
+  положительный исход — |Δмедиан| в пределах размаха на верной реализации, близнец — то же
+  измерение с внесённым различием в одну полосу ручкой инъекции (Ф1-49), обязан покраснеть и
+  назвать пару; отличие — один факт (внесённая задержка).
+constructibility: >-
+  Посева не было: стенда в задании нет, и для дельты он не нужен. Новое «Дано» дельты одно —
+  полоса входа ключом в процессе службы над настоящим проверяющим Ф7 и выдачей; строится по
+  названной фикстуре образца — timing_probe_test.go пакета humansession (Ф3-31, в дереве есть,
+  координаты выше); сама проба Ф13 — пробел-заказ с живым носителем kaname#468. Перевод «л» на
+  уровень I снимает неисполнимость by construction, найденную кругом 9 (B1). Посеяно 0 из 0;
+  «не выполнилось» — 0.
+non_blocking:
+  - id: NB1
+    summary: >-
+      §6.4, стр. 2311: «задача заказана, номер впишется по заведении» — утверждение без координаты.
+      Вписать номер — правка документа, то есть редакция 12 с новым отпечатком; одобрение этой
+      записи на неё не переносится (change-graph.md §2). Номер разумно вписать вместе со следующей
+      содержательной правкой, чтобы не тратить отдельный круг.
+  - id: NB2
+    summary: >-
+      Вне предмета этой записи, но следует из неё: запись долга Ф13-06 в
+      .github/scripts/newman-suite-debt.py:1302 и комментарий модуля
+      tests/newman/cases/kaname-access-keys.py:1927…1929 объясняют долг позиции E ветвью «л»
+      («позиция … без ветви «л» целиком не исполняется»). После редакции 11 «л» — уровень I, и довод
+      устарел: долг E-позиции Ф13-06 теперь держит лишь «и» (дом — проба браузером) и отсутствие
+      строкового литерала в модуле. Привести довод в ведомости — работа держателя kaname#468.
+  - id: NB3
+    summary: >-
+      §6.4, стр. 2350: предикат «пробы нет» записан @ 6a5a41086 (ревизия редакции 10). На bb86146f3
+      он даёт тот же вывод (перемерено), но ревизию замера лучше брать своей.
+event_body: acceptance-reviewer · APPROVED · 5b2f7bfcef4af275a0b482c74defe525cd6c1f0a2c0c1d3e122259e9a7a171bf
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  publication_pending:
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+  why: >-
+    Вердикт агента APPROVED на отпечаток 5b2f7bfc…; санкцию выдаёт внешнее событие допущенной
+    учётки с заголовком из пяти полей (role, verdict, subject, subject_revision, subject_sha256),
+    до его публикации санкции нет. Ревизия bb86146f3 уже на origin/468. Одобрение круга 8
+    (5fe6cca1…) остаётся одобрением редакции 9 и на редакцию 11 не переносится.
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#468
+  status: not_performed
+  published: false
+  role: acceptance-reviewer
+  subject_sha256: 5b2f7bfcef4af275a0b482c74defe525cd6c1f0a2c0c1d3e122259e9a7a171bf
+  subject_revision_commit: bb86146f31796a113afd82c5fc6a73f5646fb24b
+  verdict: APPROVED
+  publication_mode: courier_of_agent_verdict
