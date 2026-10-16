@@ -181,7 +181,10 @@ Coverage (техники: классы эквивалентности резул
   Ф13-16, Ф13-17 — IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS;
   Ф13-19, Ф13-22, Ф13-23 — IAM-AKLOGIN-OK-PASSWORDLESS-PERSON;
   Ф13-25 — IAM-AKLOGIN-SEC-RECOVERY-OF-PASSWORDLESS-PERSON-LEVEL-ONE (шаги (4)–(5) — по Р5
-           приёмки kaname#747).
+           приёмки kaname#747);
+  Ф13-09 (первая половина) — IAM-AKLOGIN-OK-KEY-LOGIN-OVER-LIVE-SESSION;
+  Ф13-06, ветви «а»…«з» и «к» — IAM-AKLOGIN-NEG-ONE-REFUSAL-EVERY-CAUSE (испытание ветви «ж»
+           «просрочено» выдаёт кейс IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY до своего ожидания срока).
 Позиции, которые блок не утверждает, названы комментарием в его шапке.
 
 СПОСОБ УРОВНЯ «2» ЗАВОДИТСЯ И СНИМАЕТСЯ СЕССИЕЙ «2» (kaname#747, приёмка
@@ -274,6 +277,8 @@ _OWN_WHY = ("собственный публичный фронт службы: 
 _CSRF = "/iam/v1/auth/csrf"
 _REGISTER = "/iam/v1/auth/register"
 _LOGIN = "/iam/v1/auth/login"
+_AK_BEGIN = "/iam/v1/auth/access-key/begin"
+_AK_LOGIN = "/iam/v1/auth/access-key/login"
 _VERIFY_CONFIRM = "/iam/v1/auth/verify-email/confirm"
 _AUTHORIZE = "/iam/v1/authorize"
 _TOKEN = "/iam/v1/token"
@@ -1782,6 +1787,31 @@ def _clock_until(p, name, exp_var):
     ])
 
 
+# «Дано» ветви (ж) «просрочено» Ф13-06 (кейс IAM-AKLOGIN-NEG-ONE-REFUSAL-EVERY-CAUSE
+# блока Ф13 ниже): испытание ВХОДА ключом выдаётся здесь, раньше испытаний Ф7, и
+# истекает тем же ожиданием срока — срок у обеих процедур один (Ф7 §7 инв. 5,
+# Ф13-01), и второе пятиминутное ожидание набору не нужно. Испытание входа никого
+# не называет (Р2): чьим ключом его предъявят, здесь не решается. Браузер свой
+# (`akC6x`) — контекст формы и источник не делятся ни с кем; момент истечения —
+# по ответу службы (`timeout`), а не литералом.
+_C6X = "akC6x"
+_F13_06_EXPIRING_CHALLENGE = [
+    _csrf(_C6X, "f13-06j-expiring-begin-csrf", "access-key-begin", init=[
+        *(f"pm.environment.unset({js_str(_C6X + n)});" for n in ("FormCookie", "Csrf")),
+        _set(_C6X + "Src", "'198.19.' + Math.floor(Math.random() * 256) + '.' + (1 + Math.floor(Math.random() * 254))"),
+    ]),
+    _lane_post(_C6X, "f13-06j-expiring-begin", _AK_BEGIN, {"csrfToken": "{{" + _C6X + "Csrf}}"}, test_script=[
+        *_status_is(200, "F13-06J-EXPIRING-BEGIN"),
+        *_parse_body(),
+        "const _akEx = __j.publicKey || {};",
+        "pm.test('F13-06J-EXPIRING-BEGIN: испытание входа выдано со сроком', () => "
+        "pm.expect([typeof _akEx.challenge === 'string' && _akEx.challenge.length > 0, "
+        "typeof _akEx.timeout === 'number' && _akEx.timeout > 0]).to.eql([true, true]));",
+        f"if (_akEx.challenge) {{ {_set('akLc06exp', '_akEx.challenge')} }}",
+        f"if (typeof _akEx.timeout === 'number') {{ {_set('akLc06expAt', 'new Date(Date.now() + _akEx.timeout).toISOString()')} }}",
+    ]),
+]
+
 CASES.append(Case(
     id="IAM-ACCESSKEY-BVA-CHALLENGE-EXPIRY",
     title="Ф7-34, Ф7-54: испытания регистрации и предъявления за сроком — отказ со следующим шагом и единый отказ",
@@ -1789,6 +1819,7 @@ CASES.append(Case(
     priority="P1",
     steps=[
         _list(_A, "ak34-list-before", count=_CEILING_JS, count_says=_CEILING_SAYS, extra=_key_listed("K1", "AK34-LIST-BEFORE", last_used="record")),
+        *_F13_06_EXPIRING_CHALLENGE,
         _begin_registration(_A, "ak34-begin", "34"),
         _begin_assertion(_A, "ak54-begin", "54"),
         _clock_until(_A, "ak34-wait-expiry", "akRegExp34"),
@@ -1937,20 +1968,23 @@ CASES.append(Case(
 # «вид признака × контекст»; положительный близнец у каждого отказа с одним
 # изменённым фактом.
 #
-# ЧЕГО ЭТОТ БЛОК НЕ УТВЕРЖДАЕТ — позиции названы КОММЕНТАРИЕМ, не строкой
-# (перепись долга считает позицию несомой по строковому литералу модуля); у
-# каждой запись долга с доводом и держателем в `.github/scripts/newman-suite-debt.py`:
-#   · Ф13-06 — ветвь «и» (владелец заблокирован распорядителем уровня «2») и
-#     ветвь «л» (время, критерий Ф1-48); прочие ветви единого отказа несут кейсы
-#     ниже (подпись, повтор, чужой контекст, неизвестное удостоверение);
-#   · Ф13-09 — вторая половина: отсечка принудительного выхода на крае;
+# ЧЕГО ЭТОТ БЛОК НЕ УТВЕРЖДАЕТ — части позиций, чей дом другой (§6.4 приёмки,
+# редакция 11), названы КОММЕНТАРИЕМ, не строкой (перепись долга считает позицию
+# несомой по строковому литералу модуля):
+#   · Ф13-06 — ветвь «и» (владелец заблокирован распорядителем уровня «2») —
+#     проба браузером дома платформы `access-key-assurance.spec.ts` (она же
+#     повторяет ветвь «в»); ветвь «л» (время, критерий Ф1-48) — измерительная
+#     проба уровня I службы (`access_key_timing_probe_test.go`, ручка
+#     `KACHO_LOGIN_ACCESS_KEY_TIMING`); прочие ветви несёт кейс Ф13-06 ниже;
+#   · Ф13-09 — вторая половина (отсечка принудительного выхода на крае) — Go-проба
+#     края платформы; первую половину несёт кейс Ф13-09 ниже;
 #   · Ф13-10, Ф13-11, Ф13-12, Ф13-15 — пол «2» судит край, ответ краю о сессии —
 #     глагол внутреннего слушателя; копия уровня в ответе входа утверждается здесь
 #     на каждом входе;
-#   · Ф13-28 — ретрансляция краем, дом пробы — платформа.
+#   · Ф13-28 — ретрансляция краем, дом пробы — платформа (Go-пробы края; два
+#     пробела у неё и у второй половины Ф13-09 — запись долга в
+#     `.github/scripts/newman-suite-debt.py`).
 
-_AK_BEGIN = "/iam/v1/auth/access-key/begin"
-_AK_LOGIN = "/iam/v1/auth/access-key/login"
 _SESSIONS = "/iam/v1/auth/sessions"
 _STEP_UP = "/iam/v1/auth/step-up"
 _LOGOUT = "/iam/v1/auth/logout"
@@ -2048,8 +2082,10 @@ def _tok(p, name, form, var, *, fresh=False, session=None, init=()):
                 ])
 
 
-def _begin(p, name, ch, tok, *, body=None, tests=None, form_var=None, extra_tests=()):
-    """Выдача испытания входа ключом; по умолчанию — `200` и испытание в `ch`."""
+def _begin(p, name, ch, tok, *, body=None, tests=None, form_var=None, extra_tests=(), session=None):
+    """Выдача испытания входа ключом; по умолчанию — `200` и испытание в `ch`.
+
+    `session` — переменная носителя сессии, который браузер шлёт вместе с контекстом."""
     label = name.upper()
     if tests is None:
         tests = [
@@ -2061,13 +2097,19 @@ def _begin(p, name, ch, tok, *, body=None, tests=None, form_var=None, extra_test
             f"if (__j.publicKey && __j.publicKey.challenge) {{ {_set(ch, '__j.publicKey.challenge')} }}",
         ]
     return _lane(p, name, "POST", _AK_BEGIN, body={"csrfToken": "{{" + tok + "}}"} if body is None else body,
-                 form_var=form_var, tests=[*tests, *extra_tests])
+                 form_var=form_var, session=session, tests=[*tests, *extra_tests])
 
 
-def _assertion_js(slot, ch, *, flags, count, key, handle, unknown_cred, tamper, tok, drop, extra, extra_js=None):
-    """Тело входа ключом: утверждение подставного аутентификатора в форме браузера."""
+def _assertion_js(slot, ch, *, flags, count, key, handle, unknown_cred, tamper, tok, drop, extra, extra_js=None,
+                  origin=None, rp_id=None):
+    """Тело входа ключом: утверждение подставного аутентификатора в форме браузера.
+
+    `count` — 'next' (записанный + 1), 'same' (записанный) либо число; `origin` и
+    `rp_id` — выражения JS, по умолчанию — привязка стенда (`_ORIGIN_JS`, `_RP_JS`)."""
     if count == "next":
         count_expr = f"parseInt({_env('ak' + slot + 'Count')} || '0', 10) + 1"
+    elif count == "same":
+        count_expr = f"parseInt({_env('ak' + slot + 'Count')} || '0', 10)"
     else:
         count_expr = str(int(count))
     key_expr = str(int(key)) if key is not None else f"parseInt({_env('ak' + slot + 'Mat')} || '0', 10)"
@@ -2079,8 +2121,8 @@ def _assertion_js(slot, ch, *, flags, count, key, handle, unknown_cred, tamper, 
          else f"const _akCred = _ak.unb64({_env('ak' + slot + 'CredId')} || '');"),
         f"const _akN = {count_expr};",
         _set("_akSentCount", "String(_akN)"),
-        f"const _akA = _ak.assert({{ challenge: _ak.unb64({_env(ch)} || ''), rpId: {_RP_JS}, "
-        f"origin: {_ORIGIN_JS}, flags: {int(flags)}, count: _akN, credId: _akCred, key: {key_expr}, "
+        f"const _akA = _ak.assert({{ challenge: _ak.unb64({_env(ch)} || ''), rpId: {rp_id or _RP_JS}, "
+        f"origin: {origin or _ORIGIN_JS}, flags: {int(flags)}, count: _akN, credId: _akCred, key: {key_expr}, "
         f"tamper: {'true' if tamper else 'false'} }});",
         "const _akR = { clientDataJSON: _akU(_akA.clientDataJson), authenticatorData: _akU(_akA.authenticatorData), "
         f"signature: _akU(_akA.signature), userHandle: {handle_expr} }};",
@@ -2100,16 +2142,19 @@ def _assertion_js(slot, ch, *, flags, count, key, handle, unknown_cred, tamper, 
 
 def _key_login(p, name, *, slot, ch, tok, flags=_UP | _UV, count="next", key=None, handle=None,
                unknown_cred=False, tamper=False, drop=(), extra=None, extra_js=None, pre=(), form_var=None,
-               tests=()):
-    """Предъявление утверждения полосе входа ключом (`p` — «браузер»: контекст и источник)."""
+               origin=None, rp_id=None, session=None, tests=()):
+    """Предъявление утверждения полосе входа ключом (`p` — «браузер»: контекст и источник).
+
+    `session` — переменная носителя сессии, который браузер шлёт вместе с контекстом."""
     pre = [*pre, *_need(ch, f"{name.upper()}: испытание входа не выдано",
                         "шаг выдачи испытания выше не вернул challenge — собирать утверждение не на чем")]
     if not unknown_cred:
         pre += _need("ak" + slot + "CredId", f"{name.upper()}: удостоверение строки {slot} не заведено",
                      "кейс выше не завёл ключ — предъявлять нечего")
     pre += _assertion_js(slot, ch, flags=flags, count=count, key=key, handle=handle,
-                         unknown_cred=unknown_cred, tamper=tamper, tok=tok, drop=drop, extra=extra, extra_js=extra_js)
-    return _lane(p, name, "POST", _AK_LOGIN, body={}, form_var=form_var, pre=pre, tests=list(tests))
+                         unknown_cred=unknown_cred, tamper=tamper, tok=tok, drop=drop, extra=extra, extra_js=extra_js,
+                         origin=origin, rp_id=rp_id)
+    return _lane(p, name, "POST", _AK_LOGIN, body={}, form_var=form_var, session=session, pre=pre, tests=list(tests))
 
 
 def _signed_in(p, label, slot, session_var, level, *, user_var=None):
@@ -3078,6 +3123,60 @@ CASES.append(Case(
 ))
 
 # ───────────────────────────────────────────────────────────────────────────
+# Ф13-09, первая половина (§6.4 и §9 п. 9 приёмки, редакция 11): вход ключом в
+# браузере, где уже живёт носитель сессии S1, выданной паролем. Оба глагола
+# несут S1 в `Cookie`; выдаётся НОВАЯ запись S2 со своим уровнем, `Set-Cookie`
+# заменяет носитель, а S1 жива: её носитель, сохранённый вне браузера, годен и
+# несёт «1». Уровень S1 читается тем, кто его судит, — полом «2» глагола
+# регистрации ключа: токен из S1 получает указание повысить уровень с
+# предъявленным «1». Вторая половина — отсечка принудительного выхода на крае —
+# дом платформы (Go-проба края, §6.4).
+# ───────────────────────────────────────────────────────────────────────────
+_C9 = "akC9"
+CASES.append(Case(
+    id="IAM-AKLOGIN-OK-KEY-LOGIN-OVER-LIVE-SESSION",
+    title="Ф13-09 (первая половина): вход ключом с живым носителем S1 — новая запись S2 «3», носитель заменён; S1 жива и несёт «1»",
+    classes=["CRUD", "SEC"],
+    priority="P1",
+    steps=[
+        _tok(_C9, "f13-09-pw-tok", "login", "akC09Pw", fresh=True,
+             init=[*_fresh_src(_C9), _set(_C9 + "UserId", _env(_C + "UserId"))]),
+        _password_login(_C9, "f13-09-s1-password-login", _C, "akC09Pw",
+                        tests=_password_signed_in(_C9, "F13-09-S1-PASSWORD-LOGIN", _C9 + "SessionCookie")),
+        _current_session(_C9, "f13-09-s1-record", _C9 + "SessionCookie", [
+            _set("akC09S1Id", "(_akCur && _akCur.id) || ''"),
+            _set("akC09S1Count", "String(_akSess.length)"),
+        ]),
+        # Контекст формы получен под S1: браузер шлёт носитель вместе с контекстом.
+        _tok(_C9, "f13-09-begin-tok", "access-key-begin", "akC09B", session=_C9 + "SessionCookie"),
+        _begin(_C9, "f13-09-begin", "akLc09", "akC09B", session=_C9 + "SessionCookie"),
+        _tok(_C9, "f13-09-key-tok", "access-key-login", "akC09K", session=_C9 + "SessionCookie"),
+        _key_login(_C9, "f13-09-key-login", slot="C1", ch="akLc09", tok="akC09K", handle=_C + "Handle",
+                   session=_C9 + "SessionCookie", tests=[
+                       *_signed_in(_C9, "F13-09-KEY-LOGIN", "C1", "akC09S2", "3", user_var=_C + "UserId"),
+                       "pm.test('F13-09-KEY-LOGIN: Set-Cookie заменяет носитель — значение S2 не равно S1', () => "
+                       f"pm.expect([!!{_env('akC09S2')}, !!{_env(_C9 + 'SessionCookie')}, "
+                       f"{_env('akC09S2')} !== {_env(_C9 + 'SessionCookie')}]).to.eql([true, true, true]));",
+                   ]),
+        _current_session(_C9, "f13-09-s2-record", "akC09S2", [
+            "pm.test('F13-09-S2-RECORD: S2 — новая запись, S1 в перечне жива и не текущая, записей на одну больше', () => "
+            f"pm.expect([!!{_env('akC09S1Id')}, !!_akCur && _akCur.id !== {_env('akC09S1Id')}, "
+            f"_akSess.some((s) => s.id === {_env('akC09S1Id')} && s.current === false), "
+            f"String(_akSess.length) === String(parseInt({_env('akC09S1Count')} || '0', 10) + 1)])"
+            ".to.eql([true, true, true, true]));",
+        ]),
+        # Носитель S1, сохранённый вне браузера, годен.
+        _probe(_C9, "f13-09-s1-bearer-alive", _C9 + "SessionCookie", alive=True),
+        _probe(_C9, "f13-09-s2-bearer-alive", "akC09S2", alive=True),
+        # Носитель S1 несёт «1»: токен, выкованный из S1, получает указание
+        # повысить уровень с предъявленным «1» у глагола с полом «2».
+        _authorize(_C9, "f13-09-s1-authorize"),
+        _exchange(_C9, "f13-09-s1-exchange"),
+        _begin_registration_refused(_C9, "f13-09-s1-level-one", presented="1"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
 # Ф13-21: снятие ключа гасит ПРОЧИЕ сессии человека причиной
 # `access-key-revoked`; текущая — сессия, в которой выпущен токен снимающего
 # (выпуск → семейство → сессия церемонии), — остаётся (Р8, kaname#669). S2 —
@@ -3127,6 +3226,112 @@ CASES.append(Case(
         _await_op(_C, "f13-21-revoke-b-op", "C21bR"),
         _probe(_CB, "f13-21-s3-ended", "akC21S3", alive=False),
         _probe(_C, "f13-21-s2-still-alive", _C + "SessionCookie", alive=True),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф13-06: единый отказ входа ОДИН на все причины — ветви «а»…«з» и «к» на
+# слушателе службы (§6.4 и §9 п. 9 приёмки, редакция 11). Ветви «в» и «и» несёт и
+# проба браузером дома платформы (`access-key-assurance.spec.ts`), ветвь «л»
+# (время) — измерительная проба уровня I
+# (`internal/apps/kaname/api/humansession/access_key_timing_probe_test.go`).
+#
+# Каждая ветвь — утверждение, годное во всём, кроме ОДНОГО факта, над свежим
+# испытанием своего контекста; положительный близнец — вход ключом C1 над свежим
+# испытанием того же контекста в конце кейса (Ф13-05), у ветви «к» — вход тем же
+# ключом C6 до снятия. Тело каждого отказа побайтово равно эталону Ф3-02 (отказ
+# неверному паролю, записан кейсом Ф13-20), значит и тела ветвей равны между
+# собой. Состояние не изменено ни одной ветвью: записей сессий человека столько
+# же и текущая та же; момент последнего предъявления ключа C1 прежний (часы
+# прогона перешагнули секунду записи до первой ветви); положительный контроль
+# входит со счётчиком «записанный + 1» — ни одна ветвь счётчик не сдвинула.
+# Испытание сгорает и отказом: годное утверждение над испытанием ветви «а» —
+# ветвь (ж) «уже предъявлено».
+# ───────────────────────────────────────────────────────────────────────────
+_C6, _C6B = "akC6", "akC6b"
+_RANDOM_CHALLENGE_JS = ("CryptoJS.enc.Base64.stringify(CryptoJS.lib.WordArray.random(32))"
+                        ".split('+').join('-').split('/').join('_').split('=').join('')")
+
+
+def _f13_06_branch(tag, ch, *, slot="C1", begin=True, pre=(), **kw):
+    """Ветвь Ф13-06: свежее испытание контекста C6 (по выбору) и утверждение — единый отказ."""
+    label = f"F13-06{tag.upper()}"
+    steps = [_begin(_C6, f"f13-06{tag}-begin", ch, "akC6B")] if begin else []
+    kw.setdefault("handle", _C + "Handle")
+    steps.append(_key_login(_C6, f"f13-06{tag}", slot=slot, ch=ch, tok="akC6K", pre=pre,
+                            tests=_signin_refused(label), **kw))
+    return steps
+
+
+CASES.append(Case(
+    id="IAM-AKLOGIN-NEG-ONE-REFUSAL-EVERY-CAUSE",
+    title="Ф13-06 «а»…«з», «к»: каждая причина — единый отказ входа, побайтово равный Ф3-02; сессий не выдано, ключ не сдвинут; близнец входит",
+    classes=["NEG", "SEC"],
+    priority="P0",
+    steps=[
+        # «Дано»: токен C из сессии ключа C1 («3», окно свежести открыто входом).
+        *_key_token(_C, "f13-06-token", "C1"),
+        # «Дано» ветви «к»: ключ C6 заведён, вход им проходит (близнец), затем он
+        # снят глаголом Ф7-25 — аутентификатор его ещё держит.
+        *_register_key(_C, "f13-06k-key", "C6"),
+        _tok(_C6B, "f13-06k-twin-begin-tok", "access-key-begin", "akC6bB", fresh=True, init=_fresh_src(_C6B)),
+        _begin(_C6B, "f13-06k-twin-begin", "akLc06kt", "akC6bB"),
+        _tok(_C6B, "f13-06k-twin-login-tok", "access-key-login", "akC6bK"),
+        _key_login(_C6B, "f13-06k-twin", slot="C6", ch="akLc06kt", tok="akC6bK", handle=_C + "Handle",
+                   tests=_signed_in(_C6B, "F13-06K-TWIN", "C6", "akC06Twin", "3", user_var=_C + "UserId")),
+        _revoke(_C, "f13-06k-revoke", "C6", tests=_registration_accepted("C6R", "F13-06K-REVOKE")),
+        _await_op(_C, "f13-06k-revoke-op", "C6R"),
+        # Состояние ДО ветвей.
+        _current_session(_C, "f13-06-sessions-before", _C + "SessionCookie", [
+            _set("akC06Count", "String(_akSess.length)"),
+            _set("akC06Current", "(_akCur && _akCur.id) || ''"),
+        ]),
+        _list(_C, "f13-06-key-before", count=1, extra=_key_listed("C1", "F13-06-KEY-BEFORE", last_used="record")),
+        _tok(_C6, "f13-06-begin-tok", "access-key-begin", "akC6B", fresh=True, init=_fresh_src(_C6)),
+        _tok(_C6, "f13-06-login-tok", "access-key-login", "akC6K"),
+        # (а) подпись не сверяется с открытым ключом строки.
+        *_f13_06_branch("a-signature", "akLc06a", tamper=True, pre=_tick_past("akC1LastUsed")),
+        # (ж) уже предъявлено: испытание ветви «а» сгорело её отказом.
+        *_f13_06_branch("j-already-presented", "akLc06a", begin=False),
+        # (б) удостоверения нет в хранилище вовсе.
+        *_f13_06_branch("b-unknown-credential", "akLc06b", unknown_cred=True),
+        # (в) происхождение вне объявленного перечня.
+        *_f13_06_branch("v-origin", "akLc06v", origin=_FOREIGN_ORIGIN_JS),
+        # (г) хэш имени доверяющей стороны не совпадает.
+        *_f13_06_branch("g-rp-id-hash", "akLc06g", rp_id=_FOREIGN_RP_ID_JS),
+        # (д) бит присутствия не установлен.
+        *_f13_06_branch("d-presence", "akLc06d", flags=_UV),
+        # (е) сообщённый счётчик не больше сохранённого.
+        *_f13_06_branch("e-counter", "akLc06e", count="same"),
+        # (ж) испытание не выдавалось.
+        *_f13_06_branch("j-never-issued", "akLc06none", begin=False,
+                        pre=[_set("akLc06none", _RANDOM_CHALLENGE_JS)]),
+        # (ж) испытание выдано другому контексту формы.
+        _tok(_C6B, "f13-06j-foreign-begin-tok", "access-key-begin", "akC6bB2"),
+        _begin(_C6B, "f13-06j-foreign-begin", "akLc06f", "akC6bB2"),
+        *_f13_06_branch("j-foreign-context", "akLc06f", begin=False),
+        # (ж) испытание просрочено: выдано кейсом Ф7-34/Ф7-54 до его ожидания
+        # срока; часы прогона перешагнули срок, названный службой.
+        _clock_until(_C, "f13-06j-expiry-passed", "akLc06expAt"),
+        _tok(_C6X, "f13-06j-expired-login-tok", "access-key-login", "akC6xK"),
+        _key_login(_C6X, "f13-06j-expired", slot="C1", ch="akLc06exp", tok="akC6xK", handle=_C + "Handle",
+                   tests=_signin_refused("F13-06J-EXPIRED")),
+        # (з) рукоятка другого человека (D) и случайные байты.
+        *_f13_06_branch("z-foreign-handle", "akLc06z", handle=_D + "Handle"),
+        *_f13_06_branch("z-random-handle", "akLc06zr", handle=None),
+        # (к) ключ снят — аутентификатор его держит и подписывает.
+        *_f13_06_branch("k-revoked-key", "akLc06k", slot="C6"),
+        # Состояние ПОСЛЕ ветвей — то же.
+        _current_session(_C, "f13-06-sessions-after", _C + "SessionCookie", [
+            "pm.test('F13-06-SESSIONS-AFTER: ни одна ветвь сессии не выдала — записей столько же, текущая та же', () => "
+            f"pm.expect([String(_akSess.length), (_akCur && _akCur.id) || '']).to.eql([{_env('akC06Count')}, {_env('akC06Current')}]));",
+        ]),
+        _list(_C, "f13-06-key-after", count=1, extra=_key_listed("C1", "F13-06-KEY-AFTER", last_used="kept")),
+        # Положительный близнец: тот же контекст, свежее испытание, годное
+        # утверждение ключом C1 со счётчиком «записанный + 1» — вход.
+        _begin(_C6, "f13-06-control-begin", "akLc06ok", "akC6B"),
+        _key_login(_C6, "f13-06-control", slot="C1", ch="akLc06ok", tok="akC6K", handle=_C + "Handle",
+                   tests=_signed_in(_C6, "F13-06-CONTROL", "C1", "akC06Ok", "3", user_var=_C + "UserId")),
     ],
 ))
 
