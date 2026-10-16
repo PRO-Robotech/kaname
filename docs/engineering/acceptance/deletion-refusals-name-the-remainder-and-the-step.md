@@ -14,6 +14,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 >   `docs/specs/reviews/deletion-refusals-name-the-remainder-and-the-step/3217711702358047275c3f7c588011e80d55704e9b1d589487733d42ae160faf.yaml`
 > - редакция 2 — 2026-10-15 — правка по B1–B4 и замечаниям круга 1 (раздел «Дельта к редакции 1»);
 >   отпечаток считает `sha256sum` этого файла
+> - редакция 2 — 2026-10-15 — круг 2 — APPROVED — `b7a49bb0…846d5f0` —
+>   `docs/specs/reviews/deletion-refusals-name-the-remainder-and-the-step/b7a49bb043e611e774b689c800391dd9cfc42c37bdb09b37e50bae535846d5f0.yaml`
+> - редакция 3 — 2026-10-16 — только §0.4: предикат потребителей в `PRO-Robotech/kacho` записан формой
+>   названного дома с ревизией `a95248464` (гейт `TestAcceptancePathCoordinateResolves`); вывод тот же,
+>   утверждения не меняются; отпечаток считает `sha256sum` этого файла
 > **Дата:** 2026-10-15
 > **Эпик/issue:** PRO-Robotech/kaname#725 (P2), волна 8 линии identity-own (`PRO-Robotech/kacho#3162`),
 > источник — `PRO-Robotech/kacho#3127`
@@ -140,8 +145,8 @@ git grep -l -e 'owns accounts and cannot be deleted' -e 'has active access bindi
   -e 'contains service accounts and cannot be deleted' -e 'contains groups and cannot be deleted' \
   -e 'contains custom roles and cannot be deleted' -- ':!docs/specs/reviews' | sort -u | wc -l
 # → 26 файлов @ede94db30 (кроме записей ревью)
-# в рабочей копии PRO-Robotech/kacho:
-git grep -l -e "contains projects and cannot" origin/main -- tests ui-future
+# в рабочей копии PRO-Robotech/kacho, origin/main = a95248464:
+git grep -l -e "contains projects and cannot" a95248464 -- 'PRO-Robotech/kacho@a95248464:tests' 'PRO-Robotech/kacho@a95248464:ui-future'
 # → tests/newman/kacholib/gen_shared.py (пример в шапке функции, :860)
 ```
 
