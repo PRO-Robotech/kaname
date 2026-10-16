@@ -157,10 +157,14 @@ type UserServiceClient interface {
 	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
 	// access keys, recovery codes, personal tokens and memberships go in the same
 	// transaction, and every credential issued to it up to that moment is refused
-	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
-	// the declared revocation window after the deletion commits. Records that
-	// only attribute an act to the person (who issued a service-account key, who
-	// granted a binding) keep the identifier; it is never issued again.
+	// on presentation with UNAUTHENTICATED no later than the declared revocation
+	// window after the deletion commits. The body is the refusing surface's own:
+	// this service's public front answers "credential is not accepted", while a
+	// request through the platform edge — the path a person takes — gets the
+	// edge's single authentication refusal, described by the edge, not here.
+	// Records that only attribute an act to the person (who issued a
+	// service-account key, who granted a binding) keep the identifier; it is
+	// never issued again.
 	//
 	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
 	// irreversible removal is never cheaper than the reversible operations on the
@@ -661,10 +665,14 @@ type UserServiceServer interface {
 	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
 	// access keys, recovery codes, personal tokens and memberships go in the same
 	// transaction, and every credential issued to it up to that moment is refused
-	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
-	// the declared revocation window after the deletion commits. Records that
-	// only attribute an act to the person (who issued a service-account key, who
-	// granted a binding) keep the identifier; it is never issued again.
+	// on presentation with UNAUTHENTICATED no later than the declared revocation
+	// window after the deletion commits. The body is the refusing surface's own:
+	// this service's public front answers "credential is not accepted", while a
+	// request through the platform edge — the path a person takes — gets the
+	// edge's single authentication refusal, described by the edge, not here.
+	// Records that only attribute an act to the person (who issued a
+	// service-account key, who granted a binding) keep the identifier; it is
+	// never issued again.
 	//
 	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
 	// irreversible removal is never cheaper than the reversible operations on the
