@@ -101,8 +101,9 @@ func (x *GetInteractiveClientRequest) GetInteractiveClientId() string {
 
 type ListInteractiveClientsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maximum number of results per page. 0 → default; >1000 is REJECTED,
-	// not clamped (api-conventions).
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Opaque cursor from a previous response.
 	PageToken string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`

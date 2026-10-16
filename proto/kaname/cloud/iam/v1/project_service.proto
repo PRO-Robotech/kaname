@@ -164,7 +164,9 @@ message ListProjectsRequest {
   // ID of the Account to list projects in.
   string account_id = 1;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.
@@ -233,7 +235,9 @@ message ListProjectOperationsRequest {
   // ID of the Project resource to list operations for.
   string project_id = 1;
 
-  // The maximum number of results per page that should be returned.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.
