@@ -301,7 +301,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, assurance.MethodTOTP, bearer.Digest(), now)
+	rec, err := presentInSession(ctx, w, resolved.Session, assurance.TOTPPresented(), bearer.Digest(), now)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
@@ -341,7 +341,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 // заведённые способы читаются заново. Отказ чтения — журнал и вид без пути к
 // «2»: ответ уже выдан, лгать о достижимости нельзя, честнее назвать неизвестное.
 func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, rec PresentedRecord) AssuranceView {
-	enrolled, err := enrolledMethods(ctx, d.Methods.Get, userID)
+	enrolled, err := presentableMethods(ctx, d, userID)
 	if err != nil {
 		d.Logger.Error("second factor: enrolled methods unreadable after commit", "err", err.Error())
 	}

@@ -28,6 +28,23 @@ package humansession
 // у кода — «не сошёлся» и «повторён». Попыткой не считаются и записи не
 // оставляют: исчерпание ёмкости проверяющего (преходящий исход), фактор не
 // заведён (сверка холостая), материал кода не открывается (сверять нечем).
+//
+// # Ветвь ключа доступа — третий вызывающий проверяющего Ф7 (kaname#827)
+//
+// Способ `webauthn` (приёмка SUA Р3) предъявляет утверждение над испытанием,
+// выданным ЭТОЙ записи сессии (`step_up_access_key_begin.go`). Порядок:
+//
+//	форма → сессия → частота → СГОРАНИЕ испытания (до приговора и независимо
+//	от него) → строка ключа (нет — приманка) → СВЕРКА проверяющим (всегда) →
+//	приговор → счётчик по ПРОЧИТАННОМУ → предъявление одной транзакцией
+//	(личность → сдвиг счётчика → запись сессии)
+//
+// Отказ испытания (не выдавалось · уже предъявлено · истекло) — состояние, не
+// попытка: сверки не было. Отказ после сверки — суждённый: тот же
+// `authentication failed`, что у неверного кода, тот же след и тот же журнал.
+// «Счётчик не вырос» решает ЧТЕНИЕ — с сигналом клонирования; «сдвиг
+// проигран» решает ОПЕРАТОР внутри транзакции предъявления — без сигнала, и
+// откат снимает и сдвиг, и предъявление (замысел §2.3).
 
 import (
 	"context"
@@ -37,16 +54,19 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 // StepUpInput — предъявление одного способа внутри сессии.
 type StepUpInput struct {
 	Bearer domain.SessionBearer
 	Method assurance.Method
-	// Password — у способа `password`; Code — у `totp` и `lookup_secret`.
-	Password string
-	Code     string
-	Source   string
+	// Password — у способа `password`; Code — у `totp` и `lookup_secret`;
+	// Assertion — у `webauthn` (nil — поля `credential` в форме нет).
+	Password  string
+	Code      string
+	Assertion *AssertionPresentation
+	Source    string
 }
 
 // StepUpOutput — сессия после предъявления, новый носитель, вид `assurance`.
@@ -62,15 +82,23 @@ type StepUpOutput struct {
 type StepUpUseCase struct {
 	deps SecondFactorDeps
 	gate attemptGate
+	// decoy — приманка выравнивания работы ветви ключа: сверка по неизвестному
+	// удостоверению идёт над ней и стоит столько же, сколько по известному.
+	decoy webauthnverify.DecoyKey
 }
 
-// NewStepUpUseCase — построение с проверкой зависимостей.
+// NewStepUpUseCase — построение с проверкой зависимостей и приманкой того же
+// семейства, что первое объявленное посадкой.
 func NewStepUpUseCase(d SecondFactorDeps) (*StepUpUseCase, error) {
 	d, err := d.validate("step-up")
 	if err != nil {
 		return nil, err
 	}
-	return &StepUpUseCase{deps: d, gate: d.gate()}, nil
+	decoy, err := webauthnverify.NewDecoyKey(d.Keys.Binding.Algorithms[0])
+	if err != nil {
+		return nil, fmt.Errorf("step-up: %w", err)
+	}
+	return &StepUpUseCase{deps: d, gate: d.gate(), decoy: decoy}, nil
 }
 
 // Execute — порядок: форма → сессия → частота → (у кода) состояние → сверка →
@@ -104,6 +132,9 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpO
 		judged     = judgedPresentation{user: user, session: resolved.Session, method: in.Method,
 			addressKey: addressKey, source: in.Source, at: now}
 	)
+	if in.Method == assurance.MethodWebAuthn {
+		return uc.presentKey(ctx, *in.Assertion, resolved, judged)
+	}
 	if in.Method == assurance.MethodPassword {
 		outcome, err := uc.verifyPassword(ctx, user.ID, in.Password)
 		if err != nil {
@@ -163,7 +194,11 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpO
 			return StepUpOutput{}, uc.refuse(ctx, st.verdict, judged)
 		}
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, in.Method, bearer.Digest(), now)
+	act := assurance.PasswordPresented()
+	if !passwordOK {
+		act = codePresentation(in.Method)
+	}
+	rec, err := presentInSession(ctx, w, resolved.Session, act, bearer.Digest(), now)
 	if err != nil {
 		return StepUpOutput{}, ErrStoreUnavailable
 	}
@@ -200,6 +235,142 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpO
 		out.BackupCodesRemaining = &remaining
 	}
 	return out, nil
+}
+
+// presentKey — ветвь ключа доступа (шапка): сгорание, сверка, приговор,
+// счётчик, предъявление.
+func (uc *StepUpUseCase) presentKey(ctx context.Context, a AssertionPresentation, resolved Resolved, j judgedPresentation) (StepUpOutput, error) {
+	keys := uc.deps.Keys
+	cd, cdErr := webauthnverify.ParseClientData(a.ClientDataJSON)
+	if cdErr != nil {
+		// Данные клиента не разбираются: испытания в них не назвать, сгорать
+		// нечему; утверждение не сверено — клетка «подпись».
+		return StepUpOutput{}, uc.refuseKey(ctx, AccessKeyLoginSignature, j)
+	}
+	// Сгорание — ДО приговора и независимо от него: предъявленное испытание не
+	// оживает ни отказом подписи, ни отказом рукоятки. Годность решает оператор.
+	consumed, err := keys.Store.ConsumeStepUpChallenge(ctx, j.session.ID, cd.Challenge, j.at)
+	if err != nil {
+		uc.deps.Observer.StepUpAccessKeyObserved(AccessKeyLoginStoreFailed)
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	if !consumed {
+		state, err := keys.Store.StepUpChallengeState(ctx, j.session.ID, cd.Challenge, j.at)
+		if err != nil {
+			uc.deps.Observer.StepUpAccessKeyObserved(AccessKeyLoginStoreFailed)
+			return StepUpOutput{}, ErrStoreUnavailable
+		}
+		uc.deps.Observer.StepUpAccessKeyObserved(AccessKeyLoginChallenge)
+		return StepUpOutput{}, stepUpChallengeRefusal(state)
+	}
+
+	key, known, err := keys.Store.KeyByCredentialID(ctx, a.CredentialID)
+	if err != nil {
+		uc.deps.Observer.StepUpAccessKeyObserved(AccessKeyLoginStoreFailed)
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	pub, alg := key.PublicKey, webauthnverify.Algorithm(key.Algorithm)
+	if !known {
+		pub, alg = uc.decoy.Public(), uc.decoy.Algorithm()
+	}
+	// Сверка — ВСЕГДА, тем же проверяющим, что Ф7 и Ф13: работа отказа равна
+	// работе сверки, и «ключ другого человека» судится ПОСЛЕ неё, в одном
+	// приговоре, а не ранним возвратом.
+	res, verr := webauthnverify.VerifyAssertion(webauthnverify.AssertionInput{
+		Challenge: cd.Challenge, Binding: keys.Binding,
+		ClientDataJSON: a.ClientDataJSON, AuthenticatorData: a.AuthenticatorData,
+		Signature: a.Signature, PublicKey: pub, Algorithm: alg,
+	})
+	switch {
+	case !known:
+		return StepUpOutput{}, uc.refuseKey(ctx, AccessKeyLoginCredentialUnknown, j)
+	case key.UserID != j.user.ID:
+		// Ключ другого человека: для этой сессии удостоверения нет.
+		return StepUpOutput{}, uc.refuseKey(ctx, AccessKeyLoginCredentialUnknown, j)
+	case !handleMatches(a.UserHandle, key.UserHandle):
+		// Сравнение БЕЗУСЛОВНО: форма та же, что у входа ключом (Р1, Ф13-07).
+		return StepUpOutput{}, uc.refuseKey(ctx, AccessKeyLoginUserHandle, j)
+	case verr != nil:
+		return StepUpOutput{}, uc.refuseKey(ctx, assertionRefusalOutcome(verr), j)
+	}
+	// «Счётчик не вырос» решает ЧТЕНИЕ: сигнал клонирования и отказ;
+	// транзакция предъявления не открывается.
+	if webauthnverify.JudgeCounter(key.SignCount, res.SignCount) == webauthnverify.CounterRegressed {
+		uc.deps.Observer.SignCountRegressionObserved()
+		return StepUpOutput{}, uc.refuseKey(ctx, AccessKeyLoginCounter, j)
+	}
+
+	bearer, err := domain.NewSessionBearer()
+	if err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, j.user.ID)
+	// Порядок замков «личность → строка ключа → запись сессии» — тот же, что у
+	// снятия ключа (личность первой, затем ключи): встречного нет.
+	w, err := uc.deps.Store.PersonWriter(ctx, j.user.ID)
+	if err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	defer func() { _ = w.Rollback(ctx) }()
+	advanced, err := w.AdvanceSignCount(ctx, key.ID, key.SignCount, res.SignCount, j.at)
+	if err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	if !advanced {
+		// «Сдвиг проигран» решает ОПЕРАТОР: другое утверждение того же ключа
+		// зафиксировало сдвиг между чтением и оператором (либо строку ключа
+		// сняли). Откат всей транзакции, отказ БЕЗ сигнала клонирования.
+		_ = w.Rollback(ctx)
+		return StepUpOutput{}, uc.refuseKey(ctx, AccessKeyLoginCounter, j)
+	}
+	rec, err := presentInSession(ctx, w, j.session, assurance.KeyAssertion(res.Flags.UserVerified, res.Flags.BackupEligible), bearer.Digest(), j.at)
+	if err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
+		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		AddressKey: j.addressKey, Level: rec.Level,
+	}); err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	if err := emitStepUpJournal(ctx, w, j.user, j.session, assurance.MethodWebAuthn, rec.Level); err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	if err := w.Commit(ctx); err != nil {
+		return StepUpOutput{}, ErrStoreUnavailable
+	}
+	uc.deps.Observer.SecondFactorPresentationObserved(assurance.MethodWebAuthn, PresentationMatched)
+
+	s := j.session
+	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, j.at
+	return StepUpOutput{
+		View:      SessionView{User: j.user, Session: s, EmailVerified: resolved.EmailVerified},
+		Bearer:    bearer,
+		Assurance: assuranceAfter(ctx, uc.deps, j.user.ID, rec),
+	}, nil
+}
+
+// refuseKey — суждённый отказ ветви ключа: клетка причины словарём полосы
+// ключа, клетка предъявления, след попытки и журнал `refused` (Р8) — и тот же
+// единый отказ, что у неверного кода.
+func (uc *StepUpUseCase) refuseKey(ctx context.Context, outcome AccessKeyLoginOutcome, j judgedPresentation) error {
+	uc.deps.Observer.StepUpAccessKeyObserved(outcome)
+	uc.deps.Observer.SecondFactorPresentationObserved(assurance.MethodWebAuthn, PresentationMismatched)
+	uc.recordRefusal(ctx, j)
+	return ErrAuthenticationFailed
+}
+
+// stepUpChallengeRefusal — отказ состояния несгоревшего испытания по причине,
+// которую назвало классифицирующее чтение.
+func stepUpChallengeRefusal(state domain.StepUpChallengeState) error {
+	switch state {
+	case domain.StepUpChallengePresented:
+		return ErrStepUpChallengePresented
+	case domain.StepUpChallengeExpired:
+		return ErrStepUpChallengeExpired
+	default:
+		return ErrStepUpChallengeNotIssued
+	}
 }
 
 // verifyPassword — ветвь пароля (Ф11-09): тем же проверяющим, что вход; исход

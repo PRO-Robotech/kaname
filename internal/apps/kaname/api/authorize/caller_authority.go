@@ -9,7 +9,7 @@
 // `iam.subjects.checkAuthorization` on the subject/resource; there is no such
 // permission in the catalog and no such relation in the model. What the catalog
 // actually asks for all four public RPCs is `viewer` on the cluster singleton —
-// and the cluster bootstrap deliberately grants that relation to `user:*`, so
+// and the cluster bootstrap deliberately grants that relation to the class `authenticated`, so
 // the global reference catalog (regions, zones, disk types) is readable by
 // anyone authenticated. Every authenticated subject therefore answers the
 // gateway's question, and this file is the ONLY thing deciding who may ask the

@@ -65,6 +65,7 @@ var sessionRowDoors = map[string]bool{
 var writerSceneLedger = map[string]string{
 	"access_keys.RevokeUseCase.endSessionsOf":           "TestIntegration_SessionWriterAccessKeyRevokeAndIdentityDeletionDoNotDeadlock",
 	"humansession.AccessKeyLoginUseCase.issue":          "TestIntegration_SessionWriterAccessKeyLoginAndIdentityDeletionDoNotDeadlock",
+	"humansession.StepUpUseCase.presentKey":             "TestIntegration_SessionWriterStepUpWithKeyAndIdentityDeletionDoNotDeadlock",
 	"humansession.ChangePasswordUseCase.Execute":        "TestIntegration_PasswordChangeAndIdentityDeletionDoNotDeadlock",
 	"humansession.CompleteRecoveryUseCase.complete":     "TestIntegration_SessionWriterRecoveryCompletionAndIdentityDeletionDoNotDeadlock",
 	"humansession.ConfirmSecondFactorUseCase.Execute":   "TestIntegration_SessionWriterSecondFactorConfirmAndIdentityDeletionDoNotDeadlock",

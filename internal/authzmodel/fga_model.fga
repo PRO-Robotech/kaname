@@ -172,6 +172,19 @@ type user
 
 type service_account
 
+# system_class — системный класс принципалов (kaname#829, приёмка
+# anonymous-and-authenticated-are-subject-classes.md): `system_class:anonymous`
+# (любой вызывающий, в том числе без личности) и `system_class:authenticated`
+# (любой принципал кластера с личностью, из любого аккаунта). Имена — закрытый
+# словарь, объявленный ядром; модуль класс не вносит (Д3 допуска модели).
+#
+# Классификация ВКЛЮЧЕНИЕМ — у решения, а не в модели: вопрос от человека или
+# сервисной учётки несёт оба класса, вопрос без личности — только `anonymous`,
+# группа классов не несёт (`domain.SpeakerClasses`). Класс — не подстановка: его
+# выдают и отзывают поимённо, и всякое отношение, принимающее класс прямо,
+# выполнимо «каждым вошедшим» так же, как прежде подстановкой.
+type system_class
+
 # group — subject-grouping type. `group#member` usersets are accepted as
 # direct subjects on hierarchy + resource relations.
 #
@@ -248,12 +261,12 @@ type cluster
     # KAC-178 §3: viewer — общий read-relation для глобальных reference-данных
     # (compute.Region, compute.Zone, …), к которым каталог permissions
     # привязан через scope_extractor {object_type: cluster, from_request_field: '*'}.
-    # `user:*` userset делает справочные данные читаемыми ЛЮБЫМ authenticated
-    # subject'ом (как и должно быть для tenant-facing reference-data). Также
+    # Справочные данные читает каждый вошедший: системная выдача этого
+    # отношения классу `system_class:authenticated` (kaname#829, Р8). Также
     # включает system_viewer / any_admin transitively. До этого relation'а на
     # cluster не было `viewer` вообще → catalog `required_relation: "viewer"`
     # на cluster-scope'ed RPC всегда возвращал deny → UI dashboard падал.
-    define viewer: [user, user:*, service_account] or system_viewer or any_admin
+    define viewer: [user, service_account, system_class] or system_viewer or any_admin
     # KAC-198 follow-up: editor + admin — derived-relation aliases.
     # iam/internal/service/authorize_service.go::resolveActionToRelation
     # maps verbs to canonical relations:
@@ -1336,7 +1349,7 @@ type registry_repository
     # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
     # the repo owner fully manages their own repository; `user:*` wildcard stays
     # on v_get ONLY (anonymous public-read floor, B14).
-    define v_get: [user:*, user, service_account, group#member] or owner or super_admin
+    define v_get: [system_class, user, service_account, group#member] or owner or super_admin
     define v_list: [user, service_account, group#member] or owner or super_admin
     define v_update: [user, service_account, group#member] or owner or super_admin
     define v_delete: [user, service_account, group#member] or owner or super_admin

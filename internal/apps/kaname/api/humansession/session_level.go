@@ -45,22 +45,38 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// presentInSession — предъявление способа m внутри сессии s одной записью:
+// presentInSession — предъявление act внутри сессии s одной записью:
 // множество, уровень, новый носитель и момент. Ответ — то, что легло.
-func presentInSession(ctx context.Context, w Writer, s domain.HumanSession, m assurance.Method,
+//
+// Вызывающий приносит ПРЕДЪЯВЛЕНИЕ ЭТОГО АКТА, а не имя способа (kaname#827,
+// приёмка SUA Р4): у ключа акт несёт флаги ЭТОГО утверждения, и кандидат —
+// правило над записанным ∪ {act}. Множество пополняется именем способа акта;
+// флагов запись не хранит, и прежние слова `webauthn` в правило по-прежнему не
+// переводятся (шапка).
+func presentInSession(ctx context.Context, w Writer, s domain.HumanSession, act assurance.Presentation,
 	digest domain.BearerDigest, at time.Time,
 ) (PresentedRecord, error) {
-	methods := withMethod(s.PresentedMethods, m)
-	return w.PresentInSession(ctx, s.ID, methods, candidateLevel(s.AssuranceLevel, methods), digest, at)
+	methods := withMethod(s.PresentedMethods, act.Method())
+	return w.PresentInSession(ctx, s.ID, methods, candidateLevel(s.AssuranceLevel, s.PresentedMethods, act), digest, at)
 }
 
-// candidateLevel — кандидат правила от имён предъявленного; множество без
-// уровня (код второго фактора в сессии ключа) — записанный уровень.
-func candidateLevel(recorded string, methods []string) string {
-	if l, ok := assurance.LevelOf(presentationsOf(methods)); ok {
+// candidateLevel — кандидат правила от записанного множества и предъявления
+// этого акта; множество без уровня (код второго фактора в сессии ключа) —
+// записанный уровень.
+func candidateLevel(recorded string, presented []string, act assurance.Presentation) string {
+	if l, ok := assurance.LevelOf(append(presentationsOf(presented), act)); ok {
 		return l.String()
 	}
 	return recorded
+}
+
+// codePresentation — предъявление кода второго фактора по способу формы:
+// у `totp` и `lookup_secret` флагов нет, акт выражается одним именем.
+func codePresentation(m assurance.Method) assurance.Presentation {
+	if m == assurance.MethodLookupSecret {
+		return assurance.LookupSecretPresented()
+	}
+	return assurance.TOTPPresented()
 }
 
 // presentationsOf — слова записи → предъявления правила уровня. Слово

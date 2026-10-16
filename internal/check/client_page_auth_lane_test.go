@@ -18,6 +18,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 // Клиентская страница полосы входа обязана СХОДИТЬСЯ со слушателем: перечень
@@ -132,6 +133,17 @@ func liveAuthLaneContract() authLaneContract {
 			humansession.TextSessionIsCurrent,
 			humansession.ReasonSessionNotFound,
 			humansession.ReasonSessionIsCurrent,
+			// Повышение ключом доступа (kaname#827).
+			humansession.TextStepUpChallengeNotIssued,
+			humansession.TextStepUpChallengePresented,
+			humansession.TextStepUpChallengeExpired,
+			humansession.TextAccessKeyNotRegistered,
+			humansession.ReasonStepUpChallengeNotIssued,
+			humansession.ReasonStepUpChallengePresented,
+			humansession.ReasonStepUpChallengeExpired,
+			humansession.ReasonAccessKeyNotRegistered,
+			webauthnverify.TextKeysDisabled,
+			webauthnverify.ReasonKeysDisabled,
 		},
 		Cookies:  []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
 		BodyKeys: loginlanehttp.ResponseObjectKeys(),

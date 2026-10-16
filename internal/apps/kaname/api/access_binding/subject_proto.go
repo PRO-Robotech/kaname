@@ -27,6 +27,8 @@ func subjectTypeToDomain(t iamv1.SubjectType) domain.SubjectType {
 		return domain.SubjectTypeServiceAccount
 	case iamv1.SubjectType_SUBJECT_TYPE_GROUP:
 		return domain.SubjectTypeGroup
+	case iamv1.SubjectType_SUBJECT_TYPE_SYSTEM_CLASS:
+		return domain.SubjectTypeSystemClass
 	default:
 		return ""
 	}
@@ -64,6 +66,8 @@ func subjectTypeToProto(t domain.SubjectType) iamv1.SubjectType {
 		return iamv1.SubjectType_SUBJECT_TYPE_SERVICE_ACCOUNT
 	case domain.SubjectTypeGroup:
 		return iamv1.SubjectType_SUBJECT_TYPE_GROUP
+	case domain.SubjectTypeSystemClass:
+		return iamv1.SubjectType_SUBJECT_TYPE_SYSTEM_CLASS
 	default:
 		return iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED
 	}

@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -627,6 +628,14 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 	for _, have := range standing {
 		if have.Relation == t.relation && have.User == t.subject {
 			continue // the request already carries this one
+		}
+		// ХРАНИМАЯ публикация узнаётся по хранимой паре, а не по входному слову
+		// соседа: после переезда на системные классы (kaname#829, разбор CE-08)
+		// факт несёт `system_class:anonymous`, и предикаты входного слова ниже его
+		// не узнали бы, отнеся к «не нашим» по совпадению. Снимается она своим
+		// путём, в порядке версий владельца.
+		if domain.IsStoredPublication(have.User, have.Relation) {
+			continue
 		}
 		if !proxytuple.IsProxyWritable(have.User, have.Relation) {
 			continue // not ours to remove — see the doc above

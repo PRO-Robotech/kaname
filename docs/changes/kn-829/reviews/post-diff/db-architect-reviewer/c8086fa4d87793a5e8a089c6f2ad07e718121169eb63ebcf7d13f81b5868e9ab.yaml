@@ -1,0 +1,46 @@
+# Пост-дифф ревью схемы — роль db-architect-reviewer, проверка исполнения
+# своего возврата (CHECK «субъект не подстановка») по kaname#829. Запись не
+# правится: вердикт привязан к отпечатку (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/db-architect-reviewer
+owner: db-architect-reviewer
+mode: review
+round: execution-check
+subject: >-
+  kaname#829 — миграция 20261015120000: после переписи подстановки на системные
+  классы ноль держат проверочные ограничения relation_fact_subject_not_wildcard
+  и access_binding_emitted_tuples_user_not_wildcard (subject/fga_user !~
+  ':\*($|#)'), снимаемые откатом до возврата подстановки.
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: "829-impl"
+  base: ca15953e1f02b1abc0f73b09e6cc48f08c5185d5   # origin/829
+  head: 993b99f013ea0e6254b3879e25364489deace0c8
+  files_touched: 91
+content_digest: sha256:c8086fa4d87793a5e8a089c6f2ad07e718121169eb63ebcf7d13f81b5868e9ab
+digest_command: git diff --full-index ca15953e1...993b99f01 | sha256sum
+verdict: accepted
+migrations_touched: 1   # internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
+repo_sql_touched: 14
+returned_finding: CHECK «субъект не подстановка» на relation_fact и access_binding_emitted_tuples
+returned_finding_closed: true
+evidence:
+  - "1bdda4e1a: оба ограничения добавлены в Up ПОСЛЕ DO-переписи и проверки нуля; ADD CONSTRAINT без NOT VALID — проверяет наличные строки, оставшаяся подстановка валит миграцию целиком"
+  - "форма ':\\*($|#)' ловит и 'тип:*', и 'тип:*#отношение'; перепись нуля в DO (LIKE '%:*') вторую форму не видит — её закрывает проверка при ADD CONSTRAINT"
+  - "Down: DROP CONSTRAINT IF EXISTS обоих стоит до возврата подстановки; повторный накат переобъявляет (DROP IF EXISTS + ADD)"
+  - "миграция в линии не применена: файла нет ни в origin/main, ни в origin/829, ни в origin/746 (git cat-file -e) — правка не нарушает запрет #5"
+  - "новые писатели подстановку не пишут: fga_outbox/emitter.go EmitPublicationTx кладёт domain.PublicationSubject (system_class:anonymous); git grep '\"[a-z_]*:\\*' по не-тестовому Go — лишь правило модели (authzplan/compile.go) и сравнение говорящего (domain/system_class.go), не запись"
+  - "журнальный путь: строка fga_outbox с подстановкой отвергается 23514 через проекцию в relation_fact — писатель прежней версии во время выкатки получает отказ, а не тихую выдачу"
+  - "fa3fa9a3f: комментарий о замке сверен с 0001_initial.sql:276-279 — access_bindings_role_is_live() читает роль под FOR SHARE"
+  - "имена ограничений в checkText (pgmaperr.go) не перечислены — ветка по умолчанию, текст драйвера наружу не выходит; путь достижим лишь обходом сервиса"
+concurrent_probe: >-
+  Ограничение CHECK конкурентной пробы не требует (судит строку). Пробы
+  system_class_wildcard_check_integration_test.go перепрогнаны мной @993b99f01:
+  4/4 зелёных; инъекция (снятие обоих ADD CONSTRAINT в копии git archive) —
+  4/4 красных. Порядок выдачи и правки роли — SC-22,
+  system_class_role_edit_race_integration_test.go (мной не перепрогнана).
+findings: []
+notes_non_blocking:
+  - "ADD CONSTRAINT берёт ACCESS EXCLUSIVE и сканирует relation_fact целиком; на объёме арендатора — окно блокировки на время наката. Корректности не касается; задачей не заводится."
+distributed_overlap: false

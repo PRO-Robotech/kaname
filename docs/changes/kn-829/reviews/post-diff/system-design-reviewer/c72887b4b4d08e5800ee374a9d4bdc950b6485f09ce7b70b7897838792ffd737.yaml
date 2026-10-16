@@ -1,0 +1,122 @@
+# Пост-дифф ревью распределённых свойств — роль system-design-reviewer.
+# kaname#829, системный класс субъекта. Имя файла — content_digest. Запись новая,
+# добавлением (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/system-design-reviewer
+owner: system-design-reviewer
+round: 1
+
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: 829-impl (локальная; копия tmp/829/wt-impl)
+  base: origin/746 @ f0af1b0dfbba71e8b85ea08a4c1e9c8d8947f84f
+  merge_base: bbbe33524c4ae501d4ea14d2d9747f300d057a99
+  head: 993b99f013ea0e6254b3879e25364489deace0c8
+  commits: 40        # git rev-list --count origin/746..HEAD
+  files: 112         # git diff --name-only origin/746...HEAD | wc -l
+content_digest: sha256:c72887b4b4d08e5800ee374a9d4bdc950b6485f09ce7b70b7897838792ffd737
+digest_definition: 'git -C tmp/829/wt-impl diff --full-index origin/746...993b99f01 | sha256sum'
+committed: 'да; git status --porcelain → 0 строк до записи'
+
+verdict: ⛔ возврат
+blocks_landing: true
+return_to: автор диффа полосы 829-impl (исполнитель задания)
+distributed_surface: true
+schema_overlap: true   # миграция, функция свёртки журнала, замки строки роли
+
+critical:
+  - id: SD-829-1
+    where: internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql:255-297 (не переобъявлена kaname.relation_fact_fold_row из 20261005040457_relation_fact_fold_takes_locks_in_one_order.sql)
+    class: окно катящейся выкатки — тихая порча, лишнее право
+    finding: >-
+      Мигратор — init-контейнер нового пода (deploy/templates/deployment.yaml,
+      RollingUpdate по умолчанию), значит прежний под служит на новой схеме.
+      Прежний под снимает публикацию (RegisterResource снятие объекта либо
+      published=false: register_resource.go ApplyTx(...false...) →
+      public_read.ApplyTx → EmitPublicationTx с proxytuple.PublicReadSubject =
+      user:*) строкой журнала fga.tuple.delete user:* #v_get. Свёртка делает
+      DELETE ... WHERE subject = 'user:*' — ноль строк, без ошибки. Факт
+      system_class:anonymous #v_get остаётся, а надгробие public_read_publication
+      уже записано этой же версией, и повтор доставки «не новее» — не лечит
+      никто. По шапке самого register_resource.go id репозитория — его имя:
+      уцелевшая публикация отдаёт анонимное чтение следующему репозиторию с тем
+      же именем. CHECK relation_fact_subject_not_wildcard ловит только ЗАПИСЬ
+      подстановки; удаление проходит мимо. Пробы на путь снятия нет
+      (system_class_wildcard_check_integration_test.go судит только fga.tuple.write).
+    requirement: >-
+      Переобъявить в этой миграции kaname.relation_fact_fold_row так, чтобы
+      входное слово соседа в журнале сворачивалось в хранимого субъекта
+      (user:* + v_get → system_class:anonymous; прочее user:* →
+      system_class:authenticated) И на записи, И на снятии — тот же перевод, что
+      у переписи п.3; либо, минимум, снятие с субъектом-подстановкой отвергать
+      RAISE (транзакция прежнего пода откатывается целиком вместе с надгробием,
+      владелец повторяет доставку, её принимает новый под). Down — вернуть
+      прежнее тело.
+    predicate: >-
+      Проба на P2 после goose.Up: факт system_class:anonymous #v_get
+      registry_repository:r-x с source_version V0; INSERT в kaname.fga_outbox
+      ('fga.tuple.delete', {user:'user:*', relation:'v_get',
+      object:'registry_repository:r-x', source_version:V1>V0}). Сейчас: вставка
+      принята И SELECT count(*) FROM kaname.relation_fact WHERE object_id='r-x'
+      AND subject='system_class:anonymous' = 1 — красное. Зелёное: count = 0
+      (перевод) либо вставка отвергнута ошибкой базы (отказ). Близнец — то же
+      снятие с subject system_class:anonymous → count 0.
+
+important:
+  - id: SD-829-2
+    where: internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql:79-87; docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md (нет раздела)
+    finding: >-
+      Порядок выкатки не описан нигде в диффе (поиск «выкатк|прежн* выпуск»
+      по диффу: только окно L4–L6 и шапка миграции о писателе прежней версии).
+      Поведение окна по факту: прежний вердикт ищет 'user:*' литералом
+      (origin/746 relverdict/query.go:361,889, list.go:168) — после наката
+      прежние поды ОТКАЗЫВАЮТ в анонимном чтении публичных репозиториев и в
+      чтении справочника вошедшим, до замены последнего пода (закрыто, не
+      порча). Запись публикации прежним подом — 23514 от проекции, откат
+      транзакции целиком (отказ — верно). Правка роли прежним подом не несёт
+      GuardSystemClassReads — роль, выданная классу, может получить пишущий
+      глагол; вред держат фильтр classVerbFilterSQL и classReadSelectors (SC-23).
+    requirement: >-
+      Описать в шапке миграции или в операторском документе: накат —
+      init-контейнером первого нового пода; что ломается у прежних подов в
+      окне (три пункта выше) и что окно закрывается заменой последнего пода;
+      либо выкатка с maxSurge/maxUnavailable, сводящей окно к нулю, названная
+      ручкой чарта. После SD-829-1 пункт о снятии публикации уходит.
+  - id: SD-829-3
+    where: internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql:266-297
+    finding: >-
+      Между DO-переписью и ADD CONSTRAINT прежний под может закоммитить новый
+      факт user:* (запись ещё без ограничения) — тогда проверка ограничения
+      отвергнет миграцию целиком, init-контейнер повторит. Громко и сходится, но
+      миграция может не сходиться под постоянной публикацией прежних подов.
+    requirement: 'не блокирует; LOCK TABLE kaname.relation_fact, kaname.access_binding_emitted_tuples IN SHARE ROW EXCLUSIVE MODE до п.3 убирает гонку.'
+
+checked_ok:
+  sc22_lock: >-
+    Сторона выдачи: BEFORE-триггер access_bindings_role_is_live (0001_initial.sql:259)
+    берёт строку роли FOR SHARE до вставки субъекта; страж класса перечитывает
+    её FOR SHARE новым оператором (plpgsql VOLATILE — свежий снимок). Сторона
+    правки: GuardSystemClassReads — FOR NO KEY UPDATE до вопроса о выдачах,
+    вопрос — новым оператором. Замки несовместимы, обе очерёдности дают ровно
+    одну проходящую; FOR NO KEY UPDATE не конфликтует с FOR KEY SHARE внешнего
+    ключа — взаимного ожидания нет; замок не меняет xmin, CAS UpdateCAS цел.
+    Правка субъекта существующей выдачи (без смены роли) — замок берёт сам
+    страж класса, вывод тот же. Проба — 4 кейса в обе стороны с ожиданием по
+    pg_stat_activity (system_class_role_edit_race_integration_test.go:331-379).
+  relverdict_lateral: >-
+    CROSS JOIN LATERAL (... OFFSET 0) по (subject_type, subject_id,
+    resource_type, resource_id) — семантика внутреннего соединения сохранена,
+    ограда держит порядок; пустой слот класса ($10/$11 = '') не совпадает ни с
+    одной строкой. classVerbFilterSQL стоит на всех четырёх соединениях с
+    role_verb (query, list, expand, subjects), алиас bs в каждом есть.
+  publication_translation_write: >-
+    Новый под пишет system_class:anonymous одним производителем
+    (domain.PublicationSubject); разбор остаточных фактов узнаёт хранимую
+    пару (IsStoredPublication) — прежний путь «не наш» по совпадению закрыт.
+  atomicity: 'надгробие публикации и строка журнала — одна транзакция; проекция — триггер оператора той же фиксации; двойной записи нет.'
+  edges: 'новых межсервисных рёбер нет; внешних вызовов дифф не добавляет.'
+
+orders:
+  - 'integration-tester: красная проба SD-829-1 (снятие публикации прежним писателем) до фикса'
+  - 'db-architect-reviewer: тот же дайджест — переобъявление функции свёртки и замки (пересечение со схемой)'

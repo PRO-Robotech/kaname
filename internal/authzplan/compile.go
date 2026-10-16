@@ -52,8 +52,14 @@ const (
 
 // DirectSubject — одна запись прямого списка.
 type DirectSubject struct {
-	Type      string // тип субъекта либо тип-указатель: user, service_account, group, cluster…
-	Wildcard  bool   // `user:*`
+	Type     string // тип субъекта либо тип-указатель: user, service_account, group, cluster…
+	Wildcard bool   // `user:*`
+	// Object — поимённый субъект системного класса (`system_class:anonymous`).
+	// Грамматика принимает поимённую запись ТОЛЬКО для этого типа: имена класса
+	// — закрытый словарь ядра, и запись класса в объявлении модуля обязана дойти
+	// до допуска как находка (Д3), а не упасть ошибкой разбора, неотличимой от
+	// опечатки. Поимённая запись любого иного типа остаётся необъявленным типом.
+	Object    string
 	Userset   string // `group#member` → "member"
 	Condition string // `user with mfa_fresh` → "mfa_fresh"
 }
@@ -64,6 +70,8 @@ func (d DirectSubject) String() string {
 	switch {
 	case d.Wildcard:
 		s += ":*"
+	case d.Object != "":
+		s += ":" + d.Object
 	case d.Userset != "":
 		s += "#" + d.Userset
 	}
@@ -294,6 +302,8 @@ func parseTerm(s string, line int) (Term, error) {
 			switch {
 			case strings.HasSuffix(e, ":*"):
 				d.Type, d.Wildcard = strings.TrimSuffix(e, ":*"), true
+			case strings.HasPrefix(e, systemClassType+":"):
+				d.Type, d.Object = systemClassType, strings.TrimPrefix(e, systemClassType+":")
 			case strings.Contains(e, "#"):
 				p := strings.SplitN(e, "#", 2)
 				d.Type, d.Userset = p[0], p[1]
@@ -692,3 +702,6 @@ func (m *Model) Census() Census {
 	}
 	return c
 }
+
+// systemClassType — тип системного класса субъекта в модели (kaname#829).
+const systemClassType = "system_class"

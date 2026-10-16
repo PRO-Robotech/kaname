@@ -44,7 +44,10 @@ const (
 // helpers).
 //
 // **Subject binding** — every RPC takes a subject identifier in the form
-// `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member`.
+// `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member` /
+// `system_class:anonymous` (the caller without an identity). Neither
+// `system_class:authenticated` nor the wildcard `user:*` is a speaker: a question
+// on their behalf is INVALID_ARGUMENT.
 // **Who may ask about whom is decided HERE, in this service, not at the
 // api-gateway.** The edge authenticates the caller and stops: the subject and the
 // queried resource arrive as request fields (the resource as a nested
@@ -63,7 +66,8 @@ const (
 // permission is issued by the permission catalog and no such relation exists in
 // the authorization model, so nothing ever enforced it; what the catalog asked for
 // was `viewer` on the cluster singleton, a relation the cluster bootstrap grants
-// to `user:*` so every tenant can read the global reference catalogue. The
+// to every authenticated principal (the system class `authenticated`) so every
+// tenant can read the global reference catalogue. The
 // sentence described a control that did not exist, over a surface that answers
 // "who can reach what" for the whole platform.
 //
@@ -218,7 +222,10 @@ func (c *authorizeServiceClient) WhoAmI(ctx context.Context, in *WhoAmIRequest, 
 // helpers).
 //
 // **Subject binding** — every RPC takes a subject identifier in the form
-// `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member`.
+// `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member` /
+// `system_class:anonymous` (the caller without an identity). Neither
+// `system_class:authenticated` nor the wildcard `user:*` is a speaker: a question
+// on their behalf is INVALID_ARGUMENT.
 // **Who may ask about whom is decided HERE, in this service, not at the
 // api-gateway.** The edge authenticates the caller and stops: the subject and the
 // queried resource arrive as request fields (the resource as a nested
@@ -237,7 +244,8 @@ func (c *authorizeServiceClient) WhoAmI(ctx context.Context, in *WhoAmIRequest, 
 // permission is issued by the permission catalog and no such relation exists in
 // the authorization model, so nothing ever enforced it; what the catalog asked for
 // was `viewer` on the cluster singleton, a relation the cluster bootstrap grants
-// to `user:*` so every tenant can read the global reference catalogue. The
+// to every authenticated principal (the system class `authenticated`) so every
+// tenant can read the global reference catalogue. The
 // sentence described a control that did not exist, over a surface that answers
 // "who can reach what" for the whole platform.
 //

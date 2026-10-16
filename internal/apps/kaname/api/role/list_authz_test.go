@@ -546,3 +546,8 @@ func (*roleListReader) Lifecycles(_ context.Context, _ []domain.RoleID) (
 	map[domain.RoleID]domain.RoleLifecycle, error) {
 	return nil, nil
 }
+
+// BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *roleListReader) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
+	return false, nil
+}

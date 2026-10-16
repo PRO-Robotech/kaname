@@ -10,8 +10,10 @@ package humansession
 
 import (
 	"context"
+	"sort"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
@@ -26,9 +28,17 @@ type StatusInput struct {
 type BackupCodesView struct {
 	Remaining int
 	Total     int
+	// IssuedAt — момент выпуска набора (kaname#827, SUA Р6): момент строки
+	// набора; перевыпуск его сдвигает.
+	IssuedAt time.Time
+	// LastUsedAt — момент последней траты запасного кода; LastUsed=false —
+	// после выпуска набора не тратили, и ключа в ответе нет.
+	LastUsedAt time.Time
+	LastUsed   bool
 }
 
-// StatusOutput — состояние строки `totp` и набора.
+// StatusOutput — состояние строки `totp` и набора, способы повышения и
+// доступность ключей (kaname#827, SUA Р6).
 type StatusOutput struct {
 	TOTPEnrolled bool
 	// PendingUntil — срок ожидающего заведения; нулевой — заведения нет либо
@@ -36,8 +46,17 @@ type StatusOutput struct {
 	PendingUntil time.Time
 	// ConfirmedAt — момент подтверждения у `active`.
 	ConfirmedAt time.Time
+	// TOTPLastUsedAt — момент последнего принятого кода; TOTPLastUsed=false —
+	// после подтверждения код не предъявляли, и ключа в ответе нет.
+	TOTPLastUsedAt time.Time
+	TOTPLastUsed   bool
 	// BackupCodes — есть только у заведённого фактора.
 	BackupCodes *BackupCodesView
+	// AccessKeysAvailable — ключи доступа на установке включены.
+	AccessKeysAvailable bool
+	// StepUpMethods — способы, которыми человек может повысить уровень этой
+	// сессии: набор, отсортированный по имени; пусто — пустой набор.
+	StepUpMethods []string
 }
 
 // SecondFactorStatusUseCase — чтение состояния.
@@ -68,18 +87,28 @@ func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput
 	if err != nil {
 		return StatusOutput{}, ErrStoreUnavailable
 	}
+	methods, err := uc.stepUpMethods(ctx, resolved.User.ID)
+	if err != nil {
+		return StatusOutput{}, ErrStoreUnavailable
+	}
+	out := StatusOutput{AccessKeysAvailable: !uc.deps.Keys.Binding.Disabled(), StepUpMethods: methods}
 	switch {
 	case !found:
-		return StatusOutput{}, nil
+		return out, nil
 	case !row.Enrolled():
 		// Истёкшее заведение показывается сроком в прошлом, не скрывается:
 		// ответ не зависит от расписания уборки (Ф12-04).
-		return StatusOutput{PendingUntil: row.CreatedAt.Add(uc.deps.Freshness)}, nil
+		out.PendingUntil = row.CreatedAt.Add(uc.deps.Freshness)
+		return out, nil
 	}
-	out := StatusOutput{TOTPEnrolled: true, ConfirmedAt: row.CreatedAt, BackupCodes: &BackupCodesView{Total: passwordverify.BackupCodeCount}}
+	out.TOTPEnrolled, out.ConfirmedAt = true, row.CreatedAt
+	out.TOTPLastUsedAt, out.TOTPLastUsed = row.LastUsedAt, row.LastUsed
+	out.BackupCodes = &BackupCodesView{Total: passwordverify.BackupCodeCount}
 	set, err := uc.deps.Methods.Get(ctx, resolved.User.ID, domain.LoginMethodLookupSecret)
 	switch {
 	case err == nil:
+		out.BackupCodes.IssuedAt = set.CreatedAt
+		out.BackupCodes.LastUsedAt, out.BackupCodes.LastUsed = set.LastUsedAt, set.LastUsed
 		if n, ok := uc.deps.Sets.SetSize(set.Verifier); ok {
 			out.BackupCodes.Remaining = n
 		} else {
@@ -93,4 +122,47 @@ func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput
 		return StatusOutput{}, ErrStoreUnavailable
 	}
 	return out, nil
+}
+
+// stepUpMethods — способы, которыми человек может повысить уровень сессии
+// (SUA Р6): код по времени — при заведённом факторе, запасной код — при
+// непустом остатке набора, ключ — при включённых ключах и хотя бы одной
+// строке ключа. Пароль способом ПОВЫШЕНИЯ не считается: «2» он не даёт.
+func (uc *SecondFactorStatusUseCase) stepUpMethods(ctx context.Context, userID domain.UserID) ([]string, error) {
+	presentable, err := presentableMethods(ctx, uc.deps, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, m := range presentable {
+		switch m {
+		case assurance.MethodTOTP, assurance.MethodWebAuthn:
+			out = append(out, m.String())
+		case assurance.MethodLookupSecret:
+			has, err := uc.setHasCodes(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
+			if has {
+				out = append(out, m.String())
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// setHasCodes — у набора остался хоть один код. Набора нет либо он не
+// читается — способом не называется: предъявить его нечем (о нечитаемом
+// набору уже сказал журнал чтения состояния). Отказ хранилища — отказ.
+func (uc *SecondFactorStatusUseCase) setHasCodes(ctx context.Context, userID domain.UserID) (bool, error) {
+	set, err := uc.deps.Methods.Get(ctx, userID, domain.LoginMethodLookupSecret)
+	switch {
+	case isNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	n, ok := uc.deps.Sets.SetSize(set.Verifier)
+	return ok && n > 0, nil
 }

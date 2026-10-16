@@ -441,3 +441,8 @@ func (w *delFakeWriter) EmitInviteMail(_ context.Context, intent outboxtypes.Inv
 	}
 	return true, nil
 }
+
+// GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ delABReader) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}

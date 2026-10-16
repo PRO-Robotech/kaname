@@ -37,6 +37,14 @@ const (
 	SubjectType_SUBJECT_TYPE_USER            SubjectType = 1
 	SubjectType_SUBJECT_TYPE_SERVICE_ACCOUNT SubjectType = 2
 	SubjectType_SUBJECT_TYPE_GROUP           SubjectType = 3
+	// Системный класс принципалов: `id` — имя класса из закрытого словаря
+	// `anonymous` (любой вызывающий, в том числе без личности) | `authenticated`
+	// (любой принципал кластера с личностью, из любого аккаунта). Классификация
+	// включением: принципал с личностью принадлежит обоим классам, вызывающий без
+	// личности — только `anonymous`. Классу выдаётся только роль чтения; членом
+	// группы и кластерным администратором класс не бывает, и развёртка прав
+	// (`ExpandAccess`) классы не перечисляет.
+	SubjectType_SUBJECT_TYPE_SYSTEM_CLASS SubjectType = 4
 )
 
 // Enum value maps for SubjectType.
@@ -46,12 +54,14 @@ var (
 		1: "SUBJECT_TYPE_USER",
 		2: "SUBJECT_TYPE_SERVICE_ACCOUNT",
 		3: "SUBJECT_TYPE_GROUP",
+		4: "SUBJECT_TYPE_SYSTEM_CLASS",
 	}
 	SubjectType_value = map[string]int32{
 		"SUBJECT_TYPE_UNSPECIFIED":     0,
 		"SUBJECT_TYPE_USER":            1,
 		"SUBJECT_TYPE_SERVICE_ACCOUNT": 2,
 		"SUBJECT_TYPE_GROUP":           3,
+		"SUBJECT_TYPE_SYSTEM_CLASS":    4,
 	}
 )
 
@@ -288,9 +298,10 @@ type AccessBinding struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the access binding.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Тип subject'а: "user" | "service_account" | "group".
+	// Тип subject'а: "user" | "service_account" | "group" | "system_class".
 	SubjectType string `protobuf:"bytes,2,opt,name=subject_type,json=subjectType,proto3" json:"subject_type,omitempty"`
-	// ID subject'а (User id / ServiceAccount id / Group id).
+	// ID subject'а (User id / ServiceAccount id / Group id) либо имя системного
+	// класса ("anonymous" | "authenticated") при `subject_type = "system_class"`.
 	SubjectId string `protobuf:"bytes,3,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	// ID of the Role assigned to the subject.
 	RoleId string `protobuf:"bytes,4,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
@@ -420,10 +431,10 @@ type AccessBinding struct {
 	// выдал не человек, а платформа, и признак `system` отвечает на вопрос «кто
 	// выдал» точнее, чем любая подставленная учётка.
 	//
-	// Субъектом такой выдачи может быть подстановка «любой аутентифицированный»
-	// (`subject_type = "user"`, `subject_id = "*"`) — единственный субъект, которого
-	// нельзя ни назвать, ни отозвать поимённо, поэтому у обычной выдачи он
-	// отвергается.
+	// Платформенное чтение «любым вошедшим» выдаётся системному классу
+	// (`subject_type = "system_class"`, `subject_id = "authenticated"`). Подстановка
+	// `subject_id = "*"` субъектом выдачи не является ни у какой выдачи: у обычной
+	// она отвергается, у платформенной заменена системным классом.
 	System        bool `protobuf:"varint,25,opt,name=system,proto3" json:"system,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -764,17 +775,20 @@ func (*AccessTargetAllInScope) Descriptor() ([]byte, []int) {
 }
 
 // Subject is one grantee of an AccessBinding. `type` is the closed
-// `SubjectType` (USER / SERVICE_ACCOUNT /
-// GROUP); `id` is the subject id whose prefix matches the type (`usr…` /
-// `sva…` / `grp…`). A GROUP subject grants the role to every member (userset),
+// `SubjectType` (USER / SERVICE_ACCOUNT / GROUP / SYSTEM_CLASS); `id` is the
+// subject id whose prefix matches the type (`usr…` / `sva…` / `grp…`), or, for
+// SYSTEM_CLASS, the class name from the closed set `anonymous` | `authenticated`.
+// A GROUP subject grants the role to every member (userset),
 // which `ExpandAccess` resolves to concrete principals and which, for
 // admin/editor-tier roles, requires `requireGrantAuthority` on the scope
 // (group-amplification guard).
 type Subject struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Type of the subject (USER / SERVICE_ACCOUNT / GROUP).
+	// Type of the subject (USER / SERVICE_ACCOUNT / GROUP / SYSTEM_CLASS).
 	Type SubjectType `protobuf:"varint,1,opt,name=type,proto3,enum=kaname.cloud.iam.v1.SubjectType" json:"type,omitempty"`
-	// Subject id (`usr…` | `sva…` | `grp…`), prefix-consistent with `type`.
+	// Subject id (`usr…` | `sva…` | `grp…`), prefix-consistent with `type`; for
+	// SYSTEM_CLASS — the class name `anonymous` | `authenticated` (any other name,
+	// including the wildcard `*`, is INVALID_ARGUMENT).
 	Id            string `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1413,12 +1427,13 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x1bRevokeAccessBindingMetadata\x12*\n" +
 	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId*|\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId*\x9b\x01\n" +
 	"\vSubjectType\x12\x1c\n" +
 	"\x18SUBJECT_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11SUBJECT_TYPE_USER\x10\x01\x12 \n" +
 	"\x1cSUBJECT_TYPE_SERVICE_ACCOUNT\x10\x02\x12\x16\n" +
-	"\x12SUBJECT_TYPE_GROUP\x10\x03*\xac\x01\n" +
+	"\x12SUBJECT_TYPE_GROUP\x10\x03\x12\x1d\n" +
+	"\x19SUBJECT_TYPE_SYSTEM_CLASS\x10\x04*\xac\x01\n" +
 	"\x10GrantSurfaceKind\x12\"\n" +
 	"\x1eGRANT_SURFACE_KIND_UNSPECIFIED\x10\x00\x12%\n" +
 	"!GRANT_SURFACE_KIND_ACCESS_BINDING\x10\x01\x12'\n" +
