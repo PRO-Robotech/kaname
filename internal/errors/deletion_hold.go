@@ -4,8 +4,7 @@
 package errors
 
 // deletion_hold.go — отказ снятия ПО СОДЕРЖИМОМУ у `UserService.Delete` и
-// `AccountService.Delete` (kaname#725, приёмка
-// `deletion-refusals-name-the-remainder-and-the-step.md`).
+// `AccountService.Delete` (приёмка задачи kaname#725).
 //
 // # Две половины одного отказа
 //
