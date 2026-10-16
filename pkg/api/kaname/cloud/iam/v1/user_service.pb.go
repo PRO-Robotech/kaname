@@ -531,8 +531,9 @@ func (x *RemoveUserFromAccountRequest) GetAccountId() string {
 
 type BlockUserRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the User membership row to block. The only input: the state is the
-	// verb, so there is no field that could be forgotten.
+	// ID of the User to block — the person, one row for the whole platform, not
+	// a membership in one Account. The only input: the state is the verb, so
+	// there is no field that could be forgotten.
 	UserId        string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -577,7 +578,8 @@ func (x *BlockUserRequest) GetUserId() string {
 
 type UnblockUserRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the User membership row to unblock.
+	// ID of the User to unblock — the person, one row for the whole platform,
+	// not a membership in one Account.
 	UserId        string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
