@@ -124,22 +124,29 @@ func runDup(t *testing.T, script string, w dupWorld) (map[string]string, string,
 	if out, err := jq.CombinedOutput(); err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: `jq` не исполняется, а шаг на раннере его зовёт: %v; %s", err, out)
 	}
+	// Двойник подставлен ФУНКЦИЕЙ оболочки из окружения, а не исполняемым
+	// файлом в PATH: свежезаписанный исполняемый файл под параллельными пробами
+	// пакета ловит ETXTBSY (дескриптор записи унаследован чужим fork до exec),
+	// шаг уходит в ветвь «не установлено — собираем», и мир с ответом «false»
+	// зеленел бы беспредметно — замер: хук отправки @7f07ddbd9, мир линии, журнал
+	// обращений пуст. Файл двойника здесь только читается оболочкой.
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "bin")
-	require.NoError(t, os.MkdirAll(bin, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "gh"), []byte(dupStub), 0o700)) // #nosec G306 -- двойник обязан исполняться
+	stub := filepath.Join(dir, "gh-stub.sh")
+	require.NoError(t, os.WriteFile(stub, []byte(dupStub), 0o600))
 	logPath := filepath.Join(dir, "gh.log")
 	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 	env := map[string]string{
-		"PATH":          bin + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"EVENT":         w.event,
-		"REF_TYPE":      w.refType,
-		"REF_NAME":      w.refName,
-		"REPO":          "PRO-Robotech/kaname",
-		"GH_TOKEN":      "token",
-		"HOME":          os.Getenv("HOME"),
-		"GH_STUB_LOG":   logPath,
-		"GH_STUB_PULLS": w.pulls,
+		"BASH_FUNC_gh%%": `() { bash "$GH_STUB_SCRIPT" "$@"; }`,
+		"GH_STUB_SCRIPT": stub,
+		"PATH":           os.Getenv("PATH"),
+		"EVENT":          w.event,
+		"REF_TYPE":       w.refType,
+		"REF_NAME":       w.refName,
+		"REPO":           "PRO-Robotech/kaname",
+		"GH_TOKEN":       "token",
+		"HOME":           os.Getenv("HOME"),
+		"GH_STUB_LOG":    logPath,
+		"GH_STUB_PULLS":  w.pulls,
 	}
 	if w.apiFails {
 		env["GH_STUB_FAIL"] = "1"
