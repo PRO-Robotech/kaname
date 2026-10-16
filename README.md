@@ -74,9 +74,15 @@ make -C deploy dev-up
 # 2. Прокинуть api-gateway наружу
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
-# 3. Smoke:
-curl 'http://localhost:18080/iam/v1/accounts?pageSize=5'
+# 3. Smoke — с удостоверением: анонимный вызов получает 401 (UNAUTHENTICATED)
+#    на любом RPC. Где взять $TOKEN — docs/content/first-credential.mdx.
+curl 'http://localhost:18080/iam/v1/accounts?pageSize=5' \
+  -H "Authorization: Bearer $TOKEN"
 ```
+
+Без заголовка `Authorization` тот же вызов отвечает `401`, и это исход
+правильно поднятого стенда, а не поломки: анонимный доступ запрещён везде
+(`docs/content/api/overview.mdx`, раздел об аутентификации).
 
 Перезапуск только этой службы после изменений в коде:
 
