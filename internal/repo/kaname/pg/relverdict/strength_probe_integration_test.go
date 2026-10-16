@@ -102,7 +102,8 @@ var strSpeakers = []string{
 	strSubject,
 	"group:" + strGroupID,
 	"group:" + strGroupID + "#member",
-	"user:*",
+	"system_class:authenticated",
+	"system_class:anonymous",
 }
 
 // strWantRelations — ПРЕДПОСЫЛКА замера: отношения, которые запрос обязан читать.

@@ -65,7 +65,7 @@ func catalogGrantID(t *testing.T, ctx context.Context, pool *pgxpool.Pool) domai
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT id FROM kaname.access_bindings
 		 WHERE is_system AND granted_relation = 'viewer'
-		   AND subject_type = 'user' AND subject_id = '*'
+		   AND subject_type = 'system_class' AND subject_id = 'authenticated'
 		   AND resource_type = 'cluster'`).Scan(&id),
 		"системной выдачи публичного чтения нет — обратное заполнение не доехало")
 	return domain.AccessBindingID(id)
@@ -96,7 +96,8 @@ func TestABSystem_R893_RelationFormIsReadable(t *testing.T) {
 	assert.Equal(t, "viewer", got.GrantedRelation, "форма отношения обязана доезжать до чтения")
 	assert.True(t, got.System, "признак системности обязан доезжать до чтения")
 	assert.Equal(t, domain.RoleID(""), got.RoleID, "у формы отношения роли нет")
-	assert.Equal(t, domain.SubjectID("*"), got.SubjectID, "подстановочный субъект обязан читаться как есть")
+	assert.Equal(t, domain.SubjectTypeSystemClass, got.SubjectType, "субъект системной выдачи — системный класс (kaname#829, SC-40)")
+	assert.Equal(t, domain.ClassAuthenticated, got.SubjectID, "класс «вошедшие» обязан читаться как есть")
 	assert.True(t, got.DeletionProtection, "системная выдача защищена от случайного снятия")
 
 	// Перепись: сколько системных выдач вообще прочитано. «Ноль находок» обязано
@@ -123,7 +124,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 
 	id := catalogGrantID(t, ctx, pool)
 
-	require.True(t, factExists(t, ctx, pool, "cluster", domain.ClusterSingletonID, "viewer", "user:*"),
+	require.True(t, factExists(t, ctx, pool, "cluster", domain.ClusterSingletonID, "viewer", "system_class:authenticated"),
 		"предпосылка: публичное чтение справочников действует до отзыва")
 
 	// Соседнее основание — то, что отзыв ОДНОЙ выдачи трогать не вправе.
@@ -144,7 +145,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 		"у системной выдачи обязан быть реестр выданного: отзыв повторяет ЕГО, "+
 			"а не пересчёт по роли — роли у этой формы нет, и пустой реестр дал бы "+
 			"отзыв, который ничего не отзывает")
-	assert.Equal(t, "user:*", stored[0].User)
+	assert.Equal(t, "system_class:authenticated", stored[0].User)
 	assert.Equal(t, "viewer", stored[0].Relation)
 	assert.Equal(t, "cluster:"+domain.ClusterSingletonID, stored[0].Object)
 
@@ -156,7 +157,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 	require.Error(t, err, "системная выдача снимается только после снятия защиты")
 	assert.ErrorIs(t, err, iamerr.ErrFailedPrecondition)
 
-	require.True(t, factExists(t, ctx, pool, "cluster", domain.ClusterSingletonID, "viewer", "user:*"),
+	require.True(t, factExists(t, ctx, pool, "cluster", domain.ClusterSingletonID, "viewer", "system_class:authenticated"),
 		"отказ снятия обязан оставить доступ на месте")
 
 	// ── Штатный отзыв: снять защиту, снять выдачу, снять факт ───────────────
@@ -192,7 +193,7 @@ func TestABSystem_R893_RevokeClosesTheAccess(t *testing.T) {
 		t.FailNow()
 	}
 
-	assert.False(t, factExists(t, ctx, pool, "cluster", domain.ClusterSingletonID, "viewer", "user:*"),
+	assert.False(t, factExists(t, ctx, pool, "cluster", domain.ClusterSingletonID, "viewer", "system_class:authenticated"),
 		"отзыв обязан ЗАКРЫВАТЬ доступ: иначе выдача исчезла, а право осталось — "+
 			"состояние, которое не видно ни на одной поверхности")
 

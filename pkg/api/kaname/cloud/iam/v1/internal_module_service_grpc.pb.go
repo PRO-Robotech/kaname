@@ -61,8 +61,9 @@
 // singleton `cluster` object (`scope_extractor.object_type = "cluster"`,
 // `from_request_field = "*"`), the same gate `InternalClusterService` carries. No
 // new relation and no new model type is introduced. `viewer` on `cluster` would
-// NOT do: that relation is satisfiable by a wildcard tuple written for the global
-// catalogs, so it answers "yes" to every authenticated caller and would mean
+// NOT do: that relation is satisfiable by the class tuple
+// (`system_class:authenticated`) written for the global catalogs, so it answers
+// "yes" to every authenticated caller and would mean
 // "authenticated", not "authorized" (security.md §«Отношение, выполнимое
 // подстановочным знаком, не сужает НИЧЕГО»). The `<exempt>` band would be worse
 // still: access granted by it is not visible in an enumeration of grants and is

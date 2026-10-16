@@ -1,0 +1,142 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 7673c2bd2
+  content_commit: fb2abe283
+  branch: '829'
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238]
+  lines: 876
+  round: 2
+  round_scope: >-
+    Проверка исполнения fa-b8 (решение диспетчера, вариант (а)): третьего круга нет; судится
+    только исполнение B1 и B2 записи 113ca48a… на редакции fa4ff26f… по предикату задания.
+    Вне B1/B2 переоткрытий нет; minor записи круга 2 остаются в силе.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/sc-kaname @ fb2abe283 → fa4ff26f…bb21757e (совпало с заданием);
+    git show 7673c2bd2:<док> | sha256sum → 113ca48a… (база дельты подтверждена)
+  measurement_revisions: >-
+    kaname — дерево fb2abe283; kacho — git grep / git show @2ec6e1e3d.
+
+verdict: APPROVED
+verdict_note: проверка исполнения fa-b8 — B1 и B2 круга 2 исполнены, лишнего в дельте нет
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T02:01:48+03:00'
+
+execution_check:
+  delta: >-
+    git diff 7673c2bd2 fb2abe283 → один файл (документ), +100/−26; ханки: шапка (история
+    вердиктов, редакция 3), Р6 (абзац о слое аутентификации), П3, SC-30, SC-45, SC-32, SC-33,
+    таблица производителей (строка SC-30…34 дополнена фикстурами, новая строка SC-30, 31, 33,
+    45), DoD S3 (обе полосы), раздел «Редакция 3: что закрыто». Каждый ханк — исполнение B1
+    или B2 либо его учёт; сценариев не добавлено и не снято (49 SC), ID не менялись.
+  predicates:
+    - check: NewAuthInterceptor в П3 ≥ 1
+      command: awk '/^- \*\*П3\*\*/,/^- \*\*П4\*\*/' <док> | grep -c NewAuthInterceptor
+      result: 1
+    - check: строка заказа слоя аутентификации в таблице производителей
+      result: >-
+        есть — «SC-30, 31, 33, 45 | слой аутентификации, обе полосы: проход без удостоверения
+        только для строки с признаком Р6, без именованной личности … — заказан (S3)»
+    - check: «И» SC-30 про метаданные принципала
+      result: >-
+        есть — MetaPrincipalType/MetaPrincipalID (нативная) и HeaderGRPCMetaPrincipalType/
+        HeaderGRPCMetaPrincipalID (REST) отсутствуют; близнец — вошедший usr-B, тип user, id usr-B
+  B1_CONSTRUCTIBILITY: >-
+    исполнен — П3 = NewAuthInterceptor(AuthModeProduction, "secret", &fakeLookup{},
+    authTestLogger()).WithVerifier(rs256Verifier(…)) → buildAuthzMiddleware → обработчик, обе
+    полосы (auth.Unary()→mw.Unary(); auth.HTTP(mw.HTTP(…))), маркер system/anonymous и dev
+    исключены; «Когда» SC-30/32/33/45 — без authorization через цепочку; SC-32/SC-45
+    сравнивают с authnrefusal.Err()/writeAuthnRefusal; SC-33 — отказ проверяющего подписи.
+  B2_PRODUCER: исполнен — см. predicates; Р6 называет слой аутентификации обеих полос и Инвариант 2.
+  coordinates_remeasured_at_kacho_2ec6e1e3d:
+    - auth.go :230 NewAuthInterceptor, :353 WithVerifier, :393 Unary, :417 authorize, :663 authorizeViaLookup, :951 writeAuthnRefusal, :1017 HTTP, :1072 refuseUncredentialed
+    - auth_test.go :30 fakeLookup, :39 authTestLogger; auth_jwks_test.go :62 rs256Verifier, :75 issuerClaims; jwt_verifier_test.go :53 newJWKSFixture
+    - anonymity_not_an_identity_test.go :50 — NewAuthInterceptor(AuthModeProduction, "secret", &fakeLookup{}, authTestLogger())
+    - authz_util.go :206 resolveRestFQN; principalmeta/keys.go :98–99, :116–117; authnrefusal.go :93 Err
+    - authz.go :669 return authnrefusal.Status() — отказ посредника прав анониму теми же байтами уже производится (SC-32 (а)/(б))
+
+summary:
+  scenarios: 49
+  producer_named: 49 of 49
+  twin_named_for_negatives: все
+  blocking: 0
+  blocking_kinds: []
+
+minor:
+  - kind: FORMAT
+    note: minor круга 2 (порядок SC-19, исполнитель-учётка SC-27, пара края SC-18) редакцией 3 не тронуты и остаются к учёту в S2/S3.
+
+constructibility:
+  method: >-
+    Посев не ставился — изоляции для посева задание не назвало. П3 — названная фикстура:
+    все помощники цепочки существуют @2ec6e1e3d (перемерено); П1/П2 — как в круге 2; П4/П5 —
+    стенд не поднимался.
+  seeded: 0
+  of: 5
+  named_fixture: 3
+  not_constructible: 0
+  not_executed: 2
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: true
+  issued_at: '2026-10-14T23:29:24Z'
+  ban1_lifted: false
+  reason: одобрение вступает в силу внешним событием; до публикации — not_performed
+
+event_body: "acceptance-reviewer · APPROVED · sha256 fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: performed
+  published: true
+  database_id: 6180766780
+  node_id: IC_kwDOUO26pM8AAAABcGcEPA
+  url: https://github.com/PRO-Robotech/kaname/issues/829#issuecomment-6180766780
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6180766780
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/829
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-14T23:29:24Z'
+  body_sha256: 7fd4058cd8b23dfd3bf8f505404ec8ed0f6315e05204b03f2df4e5f45ef47bfd
+  subject_sha256: fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e
+  subject_revision: fb2abe283b4a86a3a67885cbd598681c3ef23ffa
+  verdict: APPROVED
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml

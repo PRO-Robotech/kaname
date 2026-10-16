@@ -617,6 +617,7 @@ jobs:
           ./scripts/run.sh --service kaname-own-rest-front \
             --service iam-permission-catalog \
             --service iam-system-grant-visibility \
+            --service iam-system-class-subjects \
             --service iam-rbac-rules-labels \
             --service iam-role-redesign \
             --service iam-role \

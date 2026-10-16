@@ -381,3 +381,11 @@ func (*rlRoleWtr) RetireRole(_ context.Context, _ domain.RoleID, _, _, _ string)
 }
 
 func (*rlRoleWtr) ReviveRole(_ context.Context, _ domain.RoleID) (bool, error) { return false, nil }
+
+// BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *rlRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
+	return false, nil
+}
+
+// GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }

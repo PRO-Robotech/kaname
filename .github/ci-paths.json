@@ -185,7 +185,8 @@
    "id": "integration",
    "why": "интеграция на Postgres в контейнерах: репозитории, миграции, схема",
    "jobs": [
-    "ci.yml:integration"
+    "ci.yml:integration",
+    "ci.yml:integrationshard"
    ],
    "paths": [
     "**/*.go",
@@ -195,7 +196,8 @@
     "**/*.sql",
     "**/migrations/**",
     ".github/scripts/run-integration.sh",
-    ".github/scripts/classify-integration-outcome.sh"
+    ".github/scripts/classify-integration-outcome.sh",
+    ".github/integration-shard-weights.txt"
    ],
    "local": [
     {

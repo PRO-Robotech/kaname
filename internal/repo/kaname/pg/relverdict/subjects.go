@@ -151,6 +151,7 @@ named(subject) AS (
       JOIN kaname.role_verb rv
         ON rv.role_id = b.role_id AND rv.object_type = $9::text
        AND rv.verb = ANY ($8::text[])
+       AND ` + classVerbFilterSQL + `
       JOIN kaname.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
       JOIN scope_distinct sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id

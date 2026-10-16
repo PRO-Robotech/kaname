@@ -63,7 +63,7 @@ type (
 	Permission  string
 	Permissions []Permission
 
-	// SubjectType — enum: user|service_account|group.
+	// SubjectType — enum: user|service_account|group|system_class.
 	SubjectType string
 	// ResourceType — ЯКОРЬ ОБЛАСТИ привязки: один из трёх ярусов иерархии
 	// (`cluster`/`account`/`project`). Вокабуляр объявлен ОДИН раз —
@@ -278,10 +278,10 @@ func (p Permissions) validateGrammarAndCap() error {
 // Validate — SubjectType — enum check.
 func (s SubjectType) Validate() error {
 	switch s {
-	case SubjectTypeUser, SubjectTypeServiceAccount, SubjectTypeGroup:
+	case SubjectTypeUser, SubjectTypeServiceAccount, SubjectTypeGroup, SubjectTypeSystemClass:
 		return nil
 	default:
-		return fmt.Errorf("Illegal argument subject_type %q (allowed: user|service_account|group)", string(s))
+		return fmt.Errorf("Illegal argument subject_type %q (allowed: user|service_account|group|system_class)", string(s))
 	}
 }
 
