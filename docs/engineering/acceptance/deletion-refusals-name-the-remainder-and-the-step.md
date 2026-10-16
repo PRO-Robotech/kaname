@@ -16,7 +16,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 >   отпечаток считает `sha256sum` этого файла
 > - редакция 2 — 2026-10-15 — круг 2 — APPROVED — `b7a49bb0…846d5f0` —
 >   `docs/specs/reviews/deletion-refusals-name-the-remainder-and-the-step/b7a49bb043e611e774b689c800391dd9cfc42c37bdb09b37e50bae535846d5f0.yaml`
-> - редакция 3 — 2026-10-16 — только §0.4: предикат потребителей в `PRO-Robotech/kacho` записан формой
+> - редакция 3 — 2026-10-16 — правка ПОСЛЕ вердикта круга 2: вердикт `b7a49bb0…` на неё не переносится; только §0.4: предикат потребителей в `PRO-Robotech/kacho` записан формой
 >   названного дома с ревизией `a95248464` (гейт `TestAcceptancePathCoordinateResolves`); вывод тот же,
 >   утверждения не меняются; отпечаток считает `sha256sum` этого файла
 > **Дата:** 2026-10-15
