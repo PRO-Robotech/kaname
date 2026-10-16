@@ -654,15 +654,36 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 перечень происхождений консоли, перечень алгоритмов (`-7` ES256, `-8` EdDSA, `-257` RS256) —
 объявляет посадка ручками `authn.access-keys.*`; их смена делает существующие ключи негодными.
 
-Отказы полосы регистрации и снятия различимы по `reason`: `SESSION_NOT_FRESH` (403),
-`CHALLENGE_NOT_ISSUED` · `CHALLENGE_ALREADY_PRESENTED` · `CHALLENGE_EXPIRED` ·
-`ORIGIN_NOT_ALLOWED` · `RP_ID_MISMATCH` · `USER_NOT_PRESENT` · `ALGORITHM_NOT_ALLOWED` ·
-`CREDENTIAL_NOT_DISCOVERABLE` (400 на приёме результата), `LAST_SIGN_IN_METHOD` (400 на
-снятии), `AlreadyExists` на удостоверении, уже принятом, отказ потолка с действующей величиной
-и следующим шагом. Отказ **утверждения** — один на все причины и без подробностей:
-`400` `access key assertion is not accepted`; какая именно — видно только оператору по
-счётчикам. Малформный `accessKeyId` — `400` `invalid access key id '…'` первым стейтментом;
-чужой и несуществующий ключ на снятии — одинаковое `404`.
+Отказы регистрации и снятия различимы по `reason`, и каждый называет следующий шаг после
+двоеточия: начать регистрацию заново — и с чем именно — либо повторить позже. Шаг верен при любом
+состоянии прежнего испытания: новое `beginRegistration` выдаёт новое.
+
+<table>
+  <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
+  <tbody>
+    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>выдача испытания, приём результата, снятие ключа — при предъявлении старше окна свежести; освежает <a href="#refresh">повышение</a>; одна из <a href="/api/rest-surface#forbidden-reasons">причин <code>403</code></a></td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration challenge was not issued: begin registration again</code></td><td><code>CHALLENGE_NOT_ISSUED</code></td><td>приём результата над испытанием, которого этому вызывающему не выдавали</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration challenge was already presented: begin registration again</code></td><td><code>CHALLENGE_ALREADY_PRESENTED</code></td><td>повтор результата над уже предъявленным испытанием</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration challenge expired: begin registration again</code></td><td><code>CHALLENGE_EXPIRED</code></td><td>срок испытания (5 минут) вышел</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential origin is not in the declared list: begin registration again from a declared origin, or ask the operator to declare this origin</code></td><td><code>ORIGIN_NOT_ALLOWED</code></td><td>происхождение церемонии вне перечня <code>authn.access-keys.*</code> посадки</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential was created for another relying party: begin registration again and create the credential for the relying party named in the challenge</code></td><td><code>RP_ID_MISMATCH</code></td><td>удостоверение создано для другого имени доверяющей стороны</td></tr>
+    <tr><td>400</td><td>3</td><td><code>authenticator did not report user presence: begin registration again and confirm presence on the authenticator</code></td><td><code>USER_NOT_PRESENT</code></td><td>аутентификатор не сообщил присутствия человека</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential public key algorithm is not in the declared list: begin registration again with an algorithm named in the challenge</code></td><td><code>ALGORITHM_NOT_ALLOWED</code></td><td>алгоритм открытого ключа вне перечня испытания</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential is not discoverable: begin registration again with a discoverable credential</code></td><td><code>CREDENTIAL_NOT_DISCOVERABLE</code></td><td>браузер сообщил <code>credProps.rk</code> = <code>false</code></td></tr>
+    <tr><td>400</td><td>3</td><td><code>Illegal argument credential.client_data_json: credential result is malformed: begin registration again</code></td><td>—</td><td>результат церемонии не разбирается либо его байты расходятся с испытанием</td></tr>
+    <tr><td>400</td><td>9</td><td><code>last sign-in method cannot be revoked: enrol another sign-in method first</code></td><td><code>LAST_SIGN_IN_METHOD</code></td><td>снятие последнего способа входа человека</td></tr>
+    <tr><td>400</td><td>9</td><td><code>access keys are turned off on this installation</code></td><td><code>ACCESS_KEYS_DISABLED</code></td><td>перечень происхождений посадки пуст</td></tr>
+    <tr><td>503</td><td>14</td><td><code>access key service temporarily unavailable: retry later</code></td><td>—</td><td>хранилище либо окно свежести не ответили; ни форма, ни испытание вызывающего не виноваты, состояние не изменено</td></tr>
+  </tbody>
+</table>
+
+Удостоверение, уже принятое, — `AlreadyExists`; отказ потолка называет действующую величину и
+следующий шаг. Отказ **утверждения** — один на все четырнадцать причин и без подробностей:
+`400` `access key assertion is not accepted: begin the assertion again`; какая именно — видно
+только оператору по счётчикам. Шаг верен на каждой причине: новое
+`POST /iam/v1/accessKeys:beginAssertion` выдаёт новое испытание при любом состоянии прежнего.
+Малформный `accessKeyId` — `400` `invalid access key id '…'` первым стейтментом; чужой и
+несуществующий ключ на снятии — одинаковое `404`.
 
 ### Свои сессии — `GET /iam/v1/auth/sessions`, `POST …/sessions/{end,end-others}` {#own-sessions}
 
