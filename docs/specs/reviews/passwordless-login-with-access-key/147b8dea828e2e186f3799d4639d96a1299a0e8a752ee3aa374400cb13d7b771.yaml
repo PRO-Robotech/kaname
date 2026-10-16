@@ -156,29 +156,31 @@ non_blocking:
       и N1 записи c359d1a2… (старая фраза Р12 п. 2).
 event_body: acceptance-reviewer · APPROVED · 147b8dea828e2e186f3799d4639d96a1299a0e8a752ee3aa374400cb13d7b771
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-10-16T23:38:29Z'
+  ban1_lifted: true
   event_performed: true
-  blocked_by: subject_revision_not_on_remote
+  decided_by: dispatcher
+  deviation: event_before_revision_on_remote
   publication_pending:
     expected_actor: pointpu
     expected_mode: courier_of_agent_verdict
-    remaining_step: >-
-      Опубликовать ревизию 7660dbb2d на origin (ветка 853); затем решение диспетчера — засчитать
-      событие 6226720104 либо опубликовать событие повторно после отправки. Решает не эта запись.
   why: >-
-    Событие опубликовано и его заголовок полон: пять полей (role, verdict, subject,
-    subject_revision, subject_sha256), subject_sha256 равен отпечатку этой записи, учётка pointpu —
-    из authority.authorized_actors. Но санкцию по прецеденту записи 5b2f7bfc… выдаёт событие, чья
-    subject_revision опубликована на origin РАНЬШЕ события, и ритуал approval-event.sh отказывает
-    в публикации при «ревизия не на удалённом». Здесь это условие не выполнено, измерено:
-    git fetch origin 853 → origin/853 = 8e621ca5a; git branch -r --contains 7660dbb2d → пусто;
-    gh api repos/PRO-Robotech/kaname/commits/7660dbb2d… → HTTP 422 «No commit found for SHA»
-    (2026-10-16T23:39:32Z, через минуту после события 23:38:29Z). Внешний читатель #468 ревизию
-    события проверить не может. Поэтому issued: false; событие — факт и записано блоком event
-    целиком. Одобрения 5b2f7bfc… и c359d1a2… остаются одобрениями своих редакций и на редакцию
-    12 не переносятся (change-graph.md §2). Дописано отдельным коммитом поверх записи круга;
-    вердикт и разбор не правились.
+    Событие 6226720104 учётки pointpu на PRO-Robotech/kaname#468 несёт все пять полей заголовка
+    (role, verdict, subject, subject_revision, subject_sha256); subject_sha256 равен отпечатку этой
+    записи, учётка — из authority.authorized_actors. ОТСТУПЛЕНИЕ, записанное честно: событие
+    опубликовано в 2026-10-16T23:38:29Z, РАНЬШЕ своей ревизии на origin. На момент события
+    ревизии 7660dbb2d на удалённом не было: gh api repos/PRO-Robotech/kaname/commits/7660dbb2d…
+    → HTTP 422 «No commit found for SHA» (замер 23:39:32Z); git branch -r --contains 7660dbb2d →
+    пусто; origin/853 = 8e621ca5a. Прецедент 5b2f7bfc… и предусловие ритуала approval-event.sh
+    («ревизия не на удалённом» — отказ) требуют обратного порядка. Ревизия публикуется той же
+    отправкой ветки 853, что и эта правка записи. Событие засчитано РЕШЕНИЕМ ДИСПЕТЧЕРА
+    (2026-10-17) ради одной отправки вместо двух, без повторной публикации; связь вердикта с
+    содержимым держит sha256 (147b8dea…), который после отправки проверяет любой читатель вместе
+    с ревизией. Рецензент рекомендовал повтор события (вариант «а») — решение принято иное, и
+    оно за диспетчером. Одобрения 5b2f7bfc… и c359d1a2… остаются одобрениями своих редакций и на
+    редакцию 12 не переносятся (change-graph.md §2). Дописано отдельным коммитом поверх записи
+    круга; вердикт и разбор не правились.
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#468
