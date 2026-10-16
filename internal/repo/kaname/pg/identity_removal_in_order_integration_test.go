@@ -203,7 +203,8 @@ func TestKN664_31_PersonWhoStillOwnsTheAccountIsRefused(t *testing.T) {
 	uid, acc := e.emptied(t, "31")
 	digest := e.seedSession(t, uid, 6631)
 
-	require.Equal(t, opOutcome{code: 9, msg: "User " + string(uid) + " owns accounts and cannot be deleted"},
+	require.Equal(t, opOutcome{code: 9, msg: "User " + string(uid) + " owns accounts and cannot be deleted: delete Account " +
+		string(acc) + " first (accounts owned: 1)"},
 		e.deleteUser(t, uid, uid))
 
 	require.Equal(t, 1, e.userRow(t, uid))
@@ -294,7 +295,8 @@ func TestKN664_36_46_47_RevokedBindingDoesNotHoldThePerson(t *testing.T) {
 				require.Zero(t, e.userRow(t, uid))
 				return
 			}
-			require.Equal(t, opOutcome{code: 9, msg: "User " + string(uid) + " has active access bindings and cannot be deleted"}, got)
+			require.Equal(t, opOutcome{code: 9, msg: "User " + string(uid) + " has active access bindings and cannot be deleted: AccessBinding " +
+				string(ab) + " on project " + string(prjB) + " is revoked by an administrator of that project (active bindings: 1)"}, got)
 			require.Equal(t, 1, e.userRow(t, uid), "строка U на месте")
 		})
 	}
@@ -500,7 +502,8 @@ func TestKN664_40_PersonRemovalRacesAccountCreation(t *testing.T) {
 		alive := e.userRow(t, person)
 
 		switch {
-		case created == opOutcome{} && del == opOutcome{code: 9, msg: "User " + string(person) + " owns accounts and cannot be deleted"}:
+		case created == opOutcome{} && del == opOutcome{code: 9, msg: "User " + string(person) + " owns accounts and cannot be deleted: delete Account " +
+			ownedAccountOf(t, e.pool, person) + " first (accounts owned: 1)"}:
 			counts["а: аккаунт создан, снятие отвергнуто"]++
 		case del == opOutcome{} && created == opOutcome{code: 9, msg: "User " + string(person) + " not found"}:
 			counts["в: личность снята, создание — «User not found»"]++
