@@ -5495,9 +5495,99 @@
       ]
     },
     {
-      "name": "IAM-ACC-DL-NEG-HAS-CHILDREN — Delete account with active projects → Operation.error FAILED_PRECONDITION (9)",
+      "name": "IAM-ACC-DL-NEG-HAS-CHILDREN — Delete account with active projects → Operation.error FAILED_PRECONDITION (9), the refusal names the first project and the count",
       "description": "class:NEG | class:STATE | priority:P1",
       "item": [
+        {
+          "name": "IAM-ACC-DL-NEG-HAS-CHILDREN :: read-account-a-projects",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects?accountId={{accountAId}}&pageSize=1000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects?accountId={{accountAId}}&pageSize=1000"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/projects?accountId={{accountAId}}&pageSize=1000');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const ps = j.projects || [];",
+                  "pm.test('account A carries at least one project — the condition of the refusal', () => pm.expect(ps.length, JSON.stringify(j)).to.be.above(0));",
+                  "pm.test('every listed project belongs to account A', () => pm.expect(ps.every(p => p.accountId === pm.environment.get('accountAId')), JSON.stringify(j)).to.eql(true));",
+                  "pm.test('the list is one page — the count is the whole set', () => pm.expect(j.nextPageToken || '', JSON.stringify(j)).to.eql(''));",
+                  "const ids = ps.map(p => p.id).sort();",
+                  "pm.environment.set('accHasChildrenFirstPrjId', ids.length ? ids[0] : '');",
+                  "pm.environment.set('accHasChildrenPrjCount', String(ids.length));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "IAM-ACC-DL-NEG-HAS-CHILDREN :: delete-with-children",
           "request": {
@@ -5687,7 +5777,7 @@
                   "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const opMsg = (j.error && j.error.message) || '';",
-                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('accountAId') + ' contains projects and cannot be deleted');",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('accountAId') + ' contains projects and cannot be deleted: delete Project ' + pm.environment.get('accHasChildrenFirstPrjId') + ' first (projects: ' + pm.environment.get('accHasChildrenPrjCount') + ')');",
                   "});"
                 ]
               }
