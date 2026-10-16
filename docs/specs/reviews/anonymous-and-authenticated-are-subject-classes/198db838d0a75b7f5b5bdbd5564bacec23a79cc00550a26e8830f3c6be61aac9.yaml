@@ -113,20 +113,27 @@ authority:
 
 effective_approval:
   issued: false
-  reason: одобрение вступает в силу внешним событием; до публикации — not_performed
+  reason: >-
+    событие опубликовано (event.status performed); одобрение вступает в силу этим событием
 
 event_body: "acceptance-reviewer · APPROVED · sha256 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9 · ред. 10, проверка исполнения N1 (вариант (а)): исполнено, блокирующих 0"
 
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#856
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6224877091
+  node_id: IC_kwDOUO26pM8AAAABcwgWIw
+  url: https://github.com/PRO-Robotech/kaname/issues/856#issuecomment-6224877091
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6224877091
+  published_at: '2026-10-16T21:17:43Z'
+  published_by: pointpu
 
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
-  publishing_actor: none
+  publishing_actor: pointpu
   publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
   history_is_appended_not_rewritten: true
