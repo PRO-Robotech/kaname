@@ -7,7 +7,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -126,7 +125,7 @@ func Render(r manifest.Resource) ([]byte, error) {
 		if len(sources) == 0 {
 			sources = []string{previous}
 		}
-		define(tier.Name, "["+strings.Join(subjectWords(subjects), ", ")+"] or "+strings.Join(sources, " or "))
+		define(tier.Name, "["+strings.Join(subjects, ", ")+"] or "+strings.Join(sources, " or "))
 		previous = tier.Name
 	}
 	writeAuthoredRelations(r, "beforeVerbs", define)
@@ -153,45 +152,11 @@ func Render(r manifest.Resource) ([]byte, error) {
 			sources = verb.From
 		}
 		define(manifest.VerbRelationName(verb.Name),
-			"["+strings.Join(subjectWords(subjects), ", ")+"] or "+strings.Join(sources, " or "))
+			"["+strings.Join(subjects, ", ")+"] or "+strings.Join(sources, " or "))
 	}
 	writeAuthoredRelations(r, "afterVerbs", define)
 
 	return []byte(b.String()), nil
-}
-
-// publicWildcardWord — прежнее слово публичного чтения в составе субъектов
-// манифеста платформы.
-const publicWildcardWord = "user:*"
-
-// subjectWords — состав субъектов отношения в словах модели.
-//
-// Перевод ВРЕМЕННЫЙ, и его основание — внешний факт, а не выбор этого пакета:
-// манифест registry ствола kacho объявляет публичное чтение репозитория словом
-// `user:*`, а канон после классов субъектов (kaname#829) несёт на том же месте
-// `system_class`. Блок типа канона обязан совпадать с манифестом побайтово, а
-// kacho закрепляет kaname в go.mod и сверяет свои манифесты ЭТИМ сборщиком —
-// поэтому переход манифеста раньше пина ломает kacho, а пин раньше перевода
-// ломает сверку здесь. Перевод снимает эту взаимную блокировку.
-//
-// Переводится ТОЛЬКО запись субъекта, равная слову целиком, и только в
-// позиции субъекта порождаемого отношения: проза примечаний и текст авторских
-// отношений воспроизводятся дословно, как и прежде. Допуск переводом не
-// ослабляется: класс в новом типе модуля по-прежнему находка Д3, как и само
-// слово `user:*`.
-//
-// Предикат снятия: манифест registry kacho переведён на `system_class` и kacho
-// поднял пин kaname (PRO-Robotech/kacho#3251); снятие — kaname#836 снятие
-// перевода.
-func subjectWords(subjects []string) []string {
-	out := make([]string, len(subjects))
-	for i, s := range subjects {
-		if s == publicWildcardWord {
-			s = string(domain.SubjectTypeSystemClass)
-		}
-		out[i] = s
-	}
-	return out
 }
 
 // writeAuthoredRelations — авторские отношения ОДНОГО места, в порядке манифеста.
