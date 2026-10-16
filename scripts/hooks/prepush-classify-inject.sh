@@ -245,6 +245,11 @@ build_module() { # build_module <каталог> <тело пробы>
     # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
     cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
     cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
+    # Хук выбирает классы до отправки по тронутым путям (kaname#822): без
+    # помощника и карты выбора он отказывает кодом 2.
+    cp "$ROOT/scripts/hooks/prepush-classes.py" "$d/scripts/hooks/" || return 1
+    cp "$ROOT/.github/scripts/affected.py" "$d/.github/scripts/" || return 1
+    cp "$ROOT/.github/ci-paths.json" "$d/.github/" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/mask\n\ngo 1.21\n' > "$d/go.mod"
     cat > "$d/mask_test.go" <<GO

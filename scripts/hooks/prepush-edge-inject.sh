@@ -160,7 +160,10 @@ echo "ось H — хук без клона"
 mod="$work/mod"
 mkdir -p "$mod/.github/scripts" "$mod/scripts/hooks"
 cp "$ROOT/.github/scripts/go-test-verdict.py" "$mod/.github/scripts/"
-for f in pre-push prepush-classify.sh prepush-rule.sh branch-rule.sh prepush-edge.sh; do cp "$ROOT/scripts/hooks/$f" "$mod/scripts/hooks/"; done
+for f in pre-push prepush-classify.sh prepush-rule.sh branch-rule.sh prepush-edge.sh prepush-classes.py; do cp "$ROOT/scripts/hooks/$f" "$mod/scripts/hooks/"; done
+# Выбор классов (kaname#822): карта и её читатель. Модуль без удалённого —
+# тронутым считается всё дерево, и сверка с краем выбирается.
+cp "$ROOT/.github/scripts/affected.py" "$mod/.github/scripts/" && cp "$ROOT/.github/ci-paths.json" "$mod/.github/"
 chmod +x "$mod/scripts/hooks/"*
 printf 'module probe.invalid/edge\n\ngo 1.21\n' > "$mod/go.mod"
 printf 'package edge\n\nimport "testing"\n\nfunc TestEdgeProbe(t *testing.T) {}\n' > "$mod/edge_test.go"

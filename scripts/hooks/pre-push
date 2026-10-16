@@ -29,6 +29,12 @@
 # края, форма манифестов и канон модели доступов
 # (`scripts/hooks/prepush-edge.sh`, kaname#822; клона нет — «не выполнилось»
 # строкой в переписи и в перечне непроверенного).
+# Классы красных кругов конвейера за 14 суток (kaname#822) — правило запроса по
+# диапазону база..вершина и по заголовку открытого запроса, записи ревью против
+# событий трекера, долг сквозного набора — судятся по ТРОНУТЫМ путям, выбор и
+# база ссылки — `scripts/hooks/prepush-classes.py`; сверка с краем заводится
+# тем же выбором. Записи ревью и правило запроса судят КОММИТ вершины, а не
+# рабочую копию.
 # Форма у них ТА ЖЕ, что в конвейере, и там, где рецепт уже объявляет цель,
 # зовётся цель, а не инструмент напрямую.
 #
@@ -143,6 +149,7 @@ executed=0
 # edge_note — что стало со сверкой с краем. Умолчание — для путей выхода ДО
 # групп: там её не спрашивали вовсе.
 edge_note="каталог прав и канон модели — не спрошены (выход до групп)"
+classes_note="правило запроса · записи ревью · долг набора — не спрошены (выход до групп)"
 
 not_run_notice() {
     {
@@ -153,6 +160,7 @@ not_run_notice() {
         echo "  интеграция на контейнерах · самостоятельный клон · buf breaking против ствола ·"
         echo "  govulncheck · gosec · вердикт ствола"
         echo "  сверка с краем: $edge_note"
+        echo "  классы до отправки: $classes_note"
     } >&2
 }
 
@@ -428,6 +436,26 @@ group_edge() {
     return "$rc"
 }
 
+# КЛАССЫ КРАСНЫХ КРУГОВ КОНВЕЙЕРА (kaname#822) — правило запроса, записи ревью,
+# долг сквозного набора. Выбор по тронутым путям и база ссылки — в
+# scripts/hooks/prepush-classes.py (план пишется до групп, в каталог прогона);
+# судят те же файлы, что конвейер. Код 3 помощника — «суд не исполнялся».
+CLASSES_PY="$ROOT/scripts/hooks/prepush-classes.py"
+plan_dir=""
+group_class() {
+    local cls="$1" label="$2" rc=0
+    need python3 || return "$UNMET_RC"
+    python3 "$CLASSES_PY" "$cls" "$plan_dir" || rc=$?
+    if [ "$rc" -eq "$UNMET_RC" ]; then
+        declare_unmet "$label: суд не исполнялся (строки выше)"
+        return "$UNMET_RC"
+    fi
+    return "$rc"
+}
+group_request() { group_class request "правило запроса"; }
+group_reviews() { group_class reviews "записи ревью"; }
+group_debt() { group_class debt "долг сквозного набора"; }
+
 # Ведомость групп — ЕДИНСТВЕННЫЙ источник и перечня, и числа.
 groups=(
     "сборка|go build ./...|group_build"
@@ -438,21 +466,7 @@ groups=(
     "listfilter|make audit-list-filter|group_listfilter"
 )
 
-# Сверка с краем входит в ведомость ТОЛЬКО при найденном клоне платформы. Нет
-# клона — это не красное и не зелёное: строка в переписи и в перечне
-# непроверенного называет, где искали. Названный KACHO_MONOREPO принимается
-# поиском без проверки — негодный путь судит сама группа, и там это третий
-# исход с кодом 2, а не тишина.
 edge_clone=""
-if [ ! -f "$EDGE" ]; then
-    edge_note="НЕ ВЫПОЛНИЛОСЬ — нет $EDGE"
-elif edge_clone="$(bash "$EDGE" --locate 2>&1)"; then
-    groups+=("сверка с краем|каталог прав и канон модели против $edge_clone|group_edge")
-    edge_note="исполнялась группой «сверка с краем» (клон $edge_clone) — исход в переписи"
-else
-    edge_note="НЕ ВЫПОЛНИЛОСЬ — $edge_clone"
-    edge_clone=""
-fi
 
 declared=0
 green=0
@@ -548,6 +562,41 @@ if [ -n "$enclosing" ]; then
         "  Назовите TMPDIR вне всякого репозитория и повторите отправку."
 fi
 
+# ── ВЫБОР КЛАССОВ ПО ТРОНУТЫМ ПУТЯМ (kaname#822) ───────────────────────────
+#
+# Нет помощника, нет python3, выбор не установлен — отказ с кодом 2: без выбора
+# хук не знает, какие из четырёх классов судить, и молча не судить ни одного
+# значило бы вернуть ровно ту дыру, ради которой выбор заведён.
+[ -f "$CLASSES_PY" ] || finish 2 "pre-push: НЕ ВЫПОЛНИЛОСЬ — нет $CLASSES_PY: классы до отправки выбирать нечем"
+command -v python3 >/dev/null 2>&1 || finish 2 "pre-push: НЕ ВЫПОЛНИЛОСЬ — python3 не найден: классы до отправки не выбраны"
+plan_dir="$scratch/classes"
+plan_out="$(python3 "$CLASSES_PY" plan --out "$plan_dir" --remote "${1:-origin}" <<< "$push_input" 2>&1)"
+plan_rc=$?
+printf '%s\n' "$plan_out" >&2
+[ "$plan_rc" -eq 0 ] || finish 2 "pre-push: НЕ ВЫПОЛНИЛОСЬ — классы до отправки не выбраны (код $plan_rc). Отправка остановлена."
+classes_note="$(grep -c . "$plan_dir/classes" 2>/dev/null || echo 0) из 4 выбрано по тронутым путям — строки «классы до отправки» выше"
+has_class() { grep -qx "$1" "$plan_dir/classes"; }
+has_class request && groups+=("правило запроса|.github/scripts/pr-rule-check.sh по диапазону база..вершина|group_request")
+has_class reviews && groups+=("записи ревью|.github/scripts/review-event-silence.py --rev <вершина>|group_reviews")
+has_class debt && groups+=("долг набора|.github/scripts/newman-suite-debt.py|group_debt")
+
+# Сверка с краем входит в ведомость, когда тронутые пути выбирают задания
+# catalogparity или authzartifacts И найден клон платформы. Нет клона — это не
+# красное и не зелёное: строка в переписи и в перечне непроверенного называет,
+# где искали. Названный KACHO_MONOREPO принимается поиском без проверки —
+# негодный путь судит сама группа, и там это третий исход с кодом 2, а не тишина.
+if ! has_class edge; then
+    edge_note="не выбрана — тронутые пути не выбирают заданий ci.yml:catalogparity и ci.yml:authzartifacts"
+elif [ ! -f "$EDGE" ]; then
+    edge_note="НЕ ВЫПОЛНИЛОСЬ — нет $EDGE"
+elif edge_clone="$(bash "$EDGE" --locate 2>&1)"; then
+    groups+=("сверка с краем|каталог прав и канон модели против $edge_clone|group_edge")
+    edge_note="исполнялась группой «сверка с краем» (клон $edge_clone) — исход в переписи"
+else
+    edge_note="НЕ ВЫПОЛНИЛОСЬ — $edge_clone"
+    edge_clone=""
+fi
+
 for entry in "${groups[@]}"; do
     IFS='|' read -r gname gdesc gfunc <<< "$entry"
     declared=$((declared + 1))
@@ -628,6 +677,7 @@ fi
     echo "осей не спрошено    : ${#axes_names[@]}  (внутри ИСПОЛНЕННЫХ групп; из вердикта не вычитается)"
     echo "память              : $memory_cap · параллелизм Go $GO_PARALLEL"
     echo "сверка с краем      : $edge_note"
+    echo "классы до отправки  : $classes_note"
     [ "${#red_names[@]}" -eq 0 ] || echo "красные             : ${red_names[*]}"
     [ "${#unmet_names[@]}" -eq 0 ] || echo "без условия         : ${unmet_names[*]}"
     [ "${#undecided_names[@]}" -eq 0 ] || echo "без категории       : ${undecided_names[*]}"
