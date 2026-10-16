@@ -261,9 +261,9 @@ resources:
 // авторским отношением загрузчик не позволяет (имя порождается глаголом того же
 // ресурса): возможность была объявлена и неисполнима ни одним входом.
 //
-// Манифест платформы пишет на месте класса само слово `system_class`
-// (PRO-Robotech/kacho#3251), и сборщик переносит его дословно: перевода
-// `user:*` → `system_class` больше нет (снят kaname#836).
+// Манифест платформы пишет на месте класса прежнее слово `user:*`, и сборщик
+// переводит его в `system_class` (kaname#829; снятие перевода — kaname#836),
+// поэтому вход ниже несёт слово, а порождённая строка — класс.
 func TestMODMR33AVerbRelationMayCarryItsOwnSubjectsAndSources(t *testing.T) {
 	block := renderFromYAML(t, `apiVersion: iam/v1
 module: registry
@@ -276,7 +276,7 @@ resources:
     relations:
       - {name: owner, definition: "[user, service_account]"}
     verbs:
-      - {name: get, subjects: [system_class, user, service_account, "group#member"], from: [owner, super_admin]}
+      - {name: get, subjects: ["user:*", user, service_account, "group#member"], from: [owner, super_admin]}
       - {name: list, from: [owner, super_admin]}
       - {name: update, from: [owner, super_admin]}
       - {name: delete, from: [owner, super_admin]}
