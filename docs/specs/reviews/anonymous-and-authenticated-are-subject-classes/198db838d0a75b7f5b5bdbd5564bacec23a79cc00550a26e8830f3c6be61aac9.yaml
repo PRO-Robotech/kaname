@@ -1,0 +1,141 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9
+  revision: 10
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: d3431156f
+  content_commit: 63f08746958182f4b6ba9f9c238d87318634a3ae
+  branch: '856'
+  pull_request: PRO-Robotech/kaname#859
+  task: PRO-Robotech/kaname#856
+  related_tasks: [PRO-Robotech/kaname#857, PRO-Robotech/kaname#858, PRO-Robotech/kacho#3274]
+  lines: 1733
+  round: 2
+  round_scope: >-
+    Проверка исполнения N1 записи 24e554b7… (fa-b8; не новый круг). Решение диспетчера —
+    вариант (а): public_reader пишется, только если правило роли покрывает тип-ребёнок
+    контейнера. Судится только дельта git diff d3431156f 63f087469 по документу (+63/−9).
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d.yaml
+  fingerprint_predicate: >-
+    git fetch origin 856; голова origin/856 = 63f087469 (= PR #859 headRefOid);
+    sha256sum <док> → 198db838…6be61aac9 (совпало с заданием).
+  measurement_revisions: >-
+    kaname — дерево 63f087469; трекер — gh pr view 859 на 2026-10-17.
+  neighbours_note: соседи в дельте не правились — отпечатки как в записи 24e554b7… (fa-b7)
+
+verdict: APPROVED
+verdict_note: >-
+  проверка исполнения N1 — исполнено: правило «public_reader только при правиле роли над
+  типом-ребёнком» записано во всех местах, где механизм описан, отрицание SC-73 с близнецом и
+  производителем добавлено, поверхность названа заново; решение владельца 1 держится и для
+  класса. Блокирующих 0. Вердикт относится к редакции 10 целиком (S1–S4 — одобренные
+  редакции 3–7 без изменений по существу; S5 — круги 1, 2 и эта проверка).
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-17T00:55:00+03:00'
+
+execution_check:
+  - item: >-
+      1. public_reader только при правиле роли над типом-ребёнком
+    result: >-
+      исполнено — Р9 У1 (строки 326-329), «Сужение по цели», пункт «системный класс»
+      (346-352: без правила — только покрытое на самом контейнере, ни одного потомка), SC-65
+      «И» на фикстуре probemod (обе стороны: с правилом над probemod_item пишется, без — нет).
+  - item: >-
+      2. близнец SC-65 приведён
+    result: >-
+      исполнено — строки 1221-1228: rol-proj-reg-read на X анониму принимается, реестр —
+      true, …01/app — false; противоречие с решением владельца 1 снято.
+  - item: >-
+      3. новое отрицание SC-73
+    result: >-
+      исполнено — строки 1160-1175: rol-reg-get анониму на X; контроль живости (v_get на X
+      true), …01/app и …01/late — false; близнец SC-60; строка производителя (1421) —
+      заказано S5 вместе с public_reader; DoD (1562 шаблон -run с 73, newman с 73).
+      Конструируемость: rol-reg-get уже в П6 (строка 567), правило только чтения — ворота
+      класса Р4 пропускают; ворота 3 пропускают (покрывает registry.registries).
+  - item: >-
+      4. абзац о поверхности
+    result: >-
+      исполнено — строки 398-401: потомков открывает только роль с правилом над
+      типом-ребёнком; rol-reg-get и rol-proj-reg-read потомков классу не открывают.
+  - item: >-
+      гейты координат
+    result: >-
+      go test ./internal/check/ -run TestAcceptance -count=1 @63f087469 → ok (11.2 s).
+
+remarks_non_blocking:
+  - id: R1
+    kind: FORMAT
+    note: >-
+      строка 67 шапки — «редакция: 9», а история (строки 61-66) и раздел «Редакция 10»
+      называют редакцию 10. Поправить следующей правкой; на вердикт не влияет — вердикт
+      привязан к отпечатку.
+  - id: R2
+    kind: TWIN
+    note: >-
+      близнец SC-73 (SC-60) отличается ролью, а роли расходятся в двух фактах: правило над
+      registry.repositories и глагол list над registry.registries. На утверждении v_get по
+      …01/app второй факт не сказывается, поэтому не блокирует; в пробе SC-73 сравнивать
+      именно v_get.
+  - id: R3
+    kind: FORMAT
+    note: >-
+      DoD S5, строка 1561: «по SC-60…67 и SC-69», а шаблон -run включает 73 — дописать 73 в прозу.
+
+summary:
+  scenarios_total: 63
+  blocking: 0
+  constructibility: >-
+    посева нет (изоляция заданием не названа); SC-73 строится фикстурами П6 (rol-reg-get,
+    X, …01/app, …01/late), ворота пропускают — прочитано structural_gates.go и порядок Execute.
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: одобрение вступает в силу внешним событием; до публикации — not_performed
+
+event_body: "acceptance-reviewer · APPROVED · sha256 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9 · ред. 10, проверка исполнения N1 (вариант (а)): исполнено, блокирующих 0"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#856
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+    - 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - 447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml
+    - 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d.yaml
