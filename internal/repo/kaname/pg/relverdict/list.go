@@ -317,17 +317,9 @@ SELECT c.object_id,
          WHERE b.status = 'ACTIVE'
            AND (b.expires_at IS NULL OR b.expires_at > now())
            AND b.revoked_at IS NULL
-           AND (
-                 rs.arm = 'anchor'
-              OR (rs.arm = 'names'  AND c.object_id = ANY (rs.resource_names))
-              -- Проверки на отсутствие метки здесь больше нет, и это не
-              -- послабление: она стерегла ПРОМАХ внешнего соединения, которого
-              -- теперь не бывает by construction — кандидат и есть строка
-              -- зеркала, а колонка меток объявлена NOT NULL. Оставить её значило
-              -- бы держать ветвь, которая не может быть ложной, и следующий
-              -- читатель искал бы случай, когда она срабатывает.
-              OR (rs.arm = 'labels' AND c.labels @> rs.match_labels)
-           )
+           -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
+           -- вопроса (grantArmPredicate, grantarm.go).
+           AND ({{arm_predicate}})
        ) AS allowed
   FROM candidate c
  ORDER BY c.object_id`
@@ -335,7 +327,9 @@ SELECT c.object_id,
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
 // (довод — у expandQuerySQL).
 func listQuerySQL(labelTable string) string {
-	return strings.Replace(listSQL, candidateFromMark,
+	sql := strings.Replace(listSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "c.object_id", "c.labels"), 1)
+	return strings.Replace(sql, candidateFromMark,
 		candidateFrom(labelTable, "$9", "$3", "$4"), 1)
 }
 

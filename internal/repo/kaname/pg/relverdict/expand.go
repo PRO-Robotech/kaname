@@ -180,11 +180,9 @@ ground(kind, subject, detail, scope_type, scope_id) AS (
      WHERE b.status = 'ACTIVE'
        AND (b.expires_at IS NULL OR b.expires_at > now())
        AND b.revoked_at IS NULL
-       AND (
-             rs.arm = 'anchor'
-          OR (rs.arm = 'names'  AND $2::text = ANY (rs.resource_names))
-          OR (rs.arm = 'labels' AND m.labels IS NOT NULL AND m.labels @> rs.match_labels)
-       )
+       -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
+       -- вопроса (grantArmPredicate, grantarm.go).
+       AND ({{arm_predicate}})
 )
 SELECT g.kind, g.subject, g.detail, g.scope_type, g.scope_id FROM ground g
 UNION
@@ -202,7 +200,9 @@ SELECT 'group'::text,
 // сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
 // ровно потому, что он подставляет свой.
 func expandQuerySQL(labelTable string) string {
-	sql := strings.Replace(expandSQL, labelsJoinMark,
+	sql := strings.Replace(expandSQL, armPredicateMark,
+		grantArmPredicate("$7::text", "$2::text", "m.labels"), 1)
+	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$7", "$2"), 1)
 	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("g.subject"), 1)
 }

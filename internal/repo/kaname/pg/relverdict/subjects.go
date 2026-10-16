@@ -161,11 +161,9 @@ named(subject) AS (
      WHERE b.status = 'ACTIVE'
        AND (b.expires_at IS NULL OR b.expires_at > now())
        AND b.revoked_at IS NULL
-       AND (
-             rs.arm = 'anchor'
-          OR (rs.arm = 'names'  AND $2::text = ANY (rs.resource_names))
-          OR (rs.arm = 'labels' AND m.labels IS NOT NULL AND m.labels @> rs.match_labels)
-       )
+       -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
+       -- вопроса (grantArmPredicate, grantarm.go).
+       AND ({{arm_predicate}})
 ),
 granted(subject) AS (
     SELECT n.subject FROM named n
@@ -184,7 +182,9 @@ SELECT g.subject
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
 func subjectsQuerySQL(labelTable string) string {
-	sql := strings.Replace(subjectsSQL, labelsJoinMark,
+	sql := strings.Replace(subjectsSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "$2::text", "m.labels"), 1)
+	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$9", "$2"), 1)
 	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("n.subject"), 1)
 }
