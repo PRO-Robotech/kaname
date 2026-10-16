@@ -113,7 +113,10 @@ composition root, `cmd/migrator/main.go` — отдельный CLI миграц
 - `clients/`           — исходящие порты службы: письмо приглашения (`invite_mail.go`),
                          проверка пароля по утечкам (`breachcheck/`) и порты вопроса
                          о доступе (`relations.go`); реализация портов доступа — своя
-                         база, не сетевой сосед.
+                         база, не сетевой сосед. Исходящих рёбер службы три, все к
+                         инфраструктуре: Postgres, почтовый узел и — при
+                         `authn.login.breach-check: enabled` — авторитет утечек
+                         ([обзор архитектуры](docs/content/architecture/overview.mdx)).
 - `migrations/`        — Postgres goose-миграции (sequential, `0001_initial.sql` — baseline).
 - `errors/`            — sentinel errors + `WrapPgErr` (SQLSTATE → service.Err\*).
 
