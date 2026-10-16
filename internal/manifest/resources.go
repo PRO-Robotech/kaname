@@ -28,7 +28,8 @@ import (
 // человек, и перегенерация обязана сохранить вторые.
 //
 //	порождается    name · objectType · parents[] · verbs[]
-//	объявляется    notes[] · relations[] · subjects[] · tiers[] · cascade[]
+//	объявляется    notes[] · relations[] · subjects[] · tiers[] · cascade[] ·
+//	               publicReadToChildren
 //
 // Вид ключей записи называет сама запись — ключом `producer` из закрытого набора
 // `derived | authored`. Он не порождается и ресурс не описывает: он говорит, чем
