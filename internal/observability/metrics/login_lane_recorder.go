@@ -50,6 +50,10 @@ const (
 	// Ф13-30): наружу отказы неразличимы, и это единственное место, где
 	// причина видна.
 	AccessKeyLoginOutcomesMetric = Namespace + "_access_key_login_outcomes_total"
+	// StepUpAccessKeyOutcomesMetric — исходы ветви ключа церемонии повышения
+	// (kaname#827, Р10): словарь клеток полосы входа ключом с меткой полосы
+	// повышения — вызывающему суждённые отказы неразличимы.
+	StepUpAccessKeyOutcomesMetric = Namespace + "_step_up_access_key_outcomes_total"
 	// Подтверждение адреса (kaname#456, П13): исходы глаголов подтверждения и
 	// отказы положения на путях полосы.
 	AddressVerificationOutcomesMetric = Namespace + "_address_verification_outcomes_total"
@@ -88,10 +92,14 @@ type LoginLaneRecorder struct {
 	sfRefuse     *prometheus.CounterVec
 	sfEvent      *prometheus.CounterVec
 	akLogin      *prometheus.CounterVec
+	akStepUp     *prometheus.CounterVec
 	addrVerify   *prometheus.CounterVec
 	emailChange  *prometheus.CounterVec
 	storeFailure *prometheus.CounterVec
 	shareFull    prometheus.Counter
+	// keys — приёмник ключей доступа того же реестра: сигнал клонирования у
+	// ветви ключа повышения — тот же счётчик, что у проверки утверждения Ф7.
+	keys *AccessKeyRecorder
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -200,6 +208,12 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Help: "Access-key sign-in lane outcomes by reason: the caller sees one refusal for all of them, " +
 					"so this is where the reason lives. Revoked keys and keys that never existed share one cell.",
 			}, []string{"outcome"}),
+			akStepUp: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: StepUpAccessKeyOutcomesMetric,
+				Help: "Access-key branch of the in-session step-up ceremony by outcome: challenge issued, judged " +
+					"refusals by reason, challenge refusals, store failures. The caller sees one refusal for every " +
+					"judged reason, so this is where the reason lives.",
+			}, []string{"outcome"}),
 			addrVerify: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: AddressVerificationOutcomesMetric,
 				Help: "Outcomes of the address-verification verbs and position refusals: letter queued or paced, " +
@@ -229,7 +243,7 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
 			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent,
-			rec.addrVerify, rec.akLogin, rec.emailChange, rec.storeFailure, rec.shareFull)
+			rec.addrVerify, rec.akLogin, rec.akStepUp, rec.emailChange, rec.storeFailure, rec.shareFull)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -277,6 +291,9 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		for _, o := range humansession.AccessKeyLoginOutcomes() {
 			rec.akLogin.WithLabelValues(string(o)).Add(0)
 		}
+		for _, o := range humansession.StepUpAccessKeyOutcomes() {
+			rec.akStepUp.WithLabelValues(string(o)).Add(0)
+		}
 		for _, o := range humansession.SecondFactorEvents() {
 			rec.sfEvent.WithLabelValues(string(o)).Add(0)
 		}
@@ -289,6 +306,7 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		for _, v := range humansession.StoreFailureVerbs() {
 			rec.storeFailure.WithLabelValues(string(v)).Add(0)
 		}
+		rec.keys = r.AccessKeyRecorder()
 		r.loginLane = rec
 	})
 	return r.loginLane
@@ -362,6 +380,15 @@ func (l *LoginLaneRecorder) SecondFactorRefusalObserved(o humansession.SecondFac
 func (l *LoginLaneRecorder) AccessKeyLoginObserved(o humansession.AccessKeyLoginOutcome) {
 	l.akLogin.WithLabelValues(string(o)).Inc()
 }
+
+// StepUpAccessKeyObserved — клетка исхода ветви ключа повышения (kaname#827).
+func (l *LoginLaneRecorder) StepUpAccessKeyObserved(o humansession.AccessKeyLoginOutcome) {
+	l.akStepUp.WithLabelValues(string(o)).Inc()
+}
+
+// SignCountRegressionObserved — сигнал клонирования ветви ключа повышения: тот
+// же счётчик реестра, что у проверки утверждения Ф7 (Р10).
+func (l *LoginLaneRecorder) SignCountRegressionObserved() { l.keys.SignCountRegressionObserved() }
 
 func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFactorEvent) {
 	l.sfEvent.WithLabelValues(string(o)).Inc()

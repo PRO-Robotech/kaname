@@ -47,7 +47,7 @@ type AccessKeyRepo struct{ pool *pgxpool.Pool }
 // NewAccessKeyRepo — построение над пулом.
 func NewAccessKeyRepo(pool *pgxpool.Pool) *AccessKeyRepo { return &AccessKeyRepo{pool: pool} }
 
-const accessKeyCols = `id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, last_used_at`
+const accessKeyCols = `id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, last_used_at, discoverability`
 
 func scanAccessKey(row pgx.Row) (domain.AccessKey, error) {
 	var (
@@ -56,7 +56,7 @@ func scanAccessKey(row pgx.Row) (domain.AccessKey, error) {
 		used      *time.Time
 	)
 	if err := row.Scan(&k.ID, &k.UserID, &k.CredentialID, &k.PublicKey, &k.Algorithm, &signCount, &k.UserHandle,
-		&k.Name, &k.Description, &k.CreatedAt, &used); err != nil {
+		&k.Name, &k.Description, &k.CreatedAt, &used, &k.Discoverability); err != nil {
 		return domain.AccessKey{}, err
 	}
 	// Схема держит счётчик в `[0, 2^32-1]`, поэтому сужение без потерь.
@@ -225,6 +225,25 @@ func (r *AccessKeyRepo) Writer(ctx context.Context) (access_keys.Writer, error) 
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, mapErr(err, "AccessKey.Writer", "")
+	}
+	return &accessKeyWriter{tx: tx}, nil
+}
+
+// RegistrationWriter — транзакция завершения регистрации ключа (см. порт):
+// открыта тем же уровнем, что `Writer` (записей сессии она не пишет), и
+// ПЕРВЫМ оператором взята строка личности ключевым замком
+// (`lockUserForKeySQL`) — раньше рукоятки церемонии и испытания (kaname#775).
+func (r *AccessKeyRepo) RegistrationWriter(ctx context.Context, userID domain.UserID) (access_keys.Writer, error) {
+	if userID == "" {
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id: required")
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, mapErr(err, "AccessKey.RegistrationWriter", "")
+	}
+	if _, err := tx.Exec(ctx, lockUserForKeySQL, string(userID)); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, mapErr(err, "User", string(userID))
 	}
 	return &accessKeyWriter{tx: tx}, nil
 }
@@ -462,11 +481,11 @@ func (w *accessKeyWriter) InsertKey(ctx context.Context, k domain.AccessKey) (do
 		handle = k.UserHandle
 	}
 	row := w.tx.QueryRow(ctx, `
-		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO user_access_keys (id, user_id, credential_id, public_key, algorithm, sign_count, user_handle, name, description, created_at, discoverability)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+accessKeyCols,
 		string(k.ID), string(k.UserID), k.CredentialID, k.PublicKey, k.Algorithm, int64(k.SignCount), handle,
-		string(k.Name), string(k.Description), k.CreatedAt)
+		string(k.Name), string(k.Description), k.CreatedAt, string(k.Discoverability))
 	got, err := scanAccessKey(row)
 	if err != nil {
 		return domain.AccessKey{}, mapErr(err, "AccessKey.Insert", "")
@@ -507,17 +526,33 @@ func (w *accessKeyWriter) DeleteOwnedByID(ctx context.Context, userID domain.Use
 }
 
 // AdvanceSignCount — атомарный сдвиг с условием на прежнее значение (Р6):
-// проигравший конкуренции получает ноль строк. При `0 → 0` двигается только
-// момент предъявления (ноль не судится, Ф7-19).
+// проигравший конкуренции получает ноль строк. Оператор — общий
+// (`advanceSignCountTx`).
 func (w *accessKeyWriter) AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (bool, error) {
+	return advanceSignCountTx(ctx, w.tx, id, expected, reported, usedAt)
+}
+
+// advanceSignCountTx — ЕДИНСТВЕННЫЙ оператор сдвига счётчика подписи и
+// момента предъявления ключа (Ф7 Р6), исполняемый транзакцией вызывающего:
+// писатель ключей (проверка утверждения Ф7, вход ключом Ф13) и писатель
+// сессии (ветвь ключа церемонии повышения, kaname#827 — сдвиг внутри
+// транзакции предъявления, и откат предъявления снимает его тоже).
+//
+// Две ветви, и обе — часть одного оператора:
+//
+//   - `0 → 0` — аутентификатор счётчика не ведёт, ноль не судится (Ф7-19):
+//     двигается только момент, и только у строки, чей счётчик всё ещё ноль;
+//   - иначе — сдвиг с условием на прежнее значение и рост: ноль строк —
+//     сдвиг перехвачен другим утверждением того же ключа либо строки нет.
+func advanceSignCountTx(ctx context.Context, tx pgx.Tx, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (bool, error) {
 	var (
 		tag interface{ RowsAffected() int64 }
 		err error
 	)
 	if expected == 0 && reported == 0 {
-		tag, err = w.tx.Exec(ctx, `UPDATE user_access_keys SET last_used_at = $2 WHERE id = $1 AND sign_count = 0`, string(id), usedAt)
+		tag, err = tx.Exec(ctx, `UPDATE user_access_keys SET last_used_at = $2 WHERE id = $1 AND sign_count = 0`, string(id), usedAt)
 	} else {
-		tag, err = w.tx.Exec(ctx, `
+		tag, err = tx.Exec(ctx, `
 			UPDATE user_access_keys SET sign_count = $3, last_used_at = $4
 			 WHERE id = $1 AND sign_count = $2 AND $3 > sign_count`, string(id), int64(expected), int64(reported), usedAt)
 	}

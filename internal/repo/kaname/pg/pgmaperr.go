@@ -716,6 +716,12 @@ func integrityText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// имя ограничения и значения, то есть разведка схемы.
 		return "Role is retired and cannot receive a new access binding"
 	}
+	if pgErr.ConstraintName == "access_binding_subjects_system_class_reads_only" {
+		// Роль приходит ДЕТАЛЬЮ отказа: её ставит сам страж, и это идентификатор
+		// из запроса вызывающего, а не разведка схемы. Текст — тот же, что у
+		// синхронного отказа (SC-21): один производитель на обе полосы.
+		return domain.RoleNotReadOnlyForClassText(domain.RoleID(pgErr.Detail))
+	}
 	if isMembershipCarriesRights(pgErr, kindHint) {
 		user, account, _ := splitBindingHint(idHint)
 		if user != "" && account != "" {

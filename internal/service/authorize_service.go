@@ -240,7 +240,7 @@ type CheckRequest struct {
 	// `required_relation` annotation so admin-only RPCs (e.g.
 	// `vpc.address_pools.list` with `required_relation=system_admin`) gate
 	// on the explicit relation instead of the auto-derived `viewer` which
-	// would slip through `cluster.viewer = user:*`.
+	// would slip through `cluster.viewer` (выдано классу «вошедшие»).
 	RequiredRelation string
 	Context          map[string]any // optional CEL-context
 }
@@ -431,7 +431,7 @@ func (s *AuthorizeService) checkInPass(ctx context.Context, req CheckRequest, ca
 			result.Allowed = true
 			return result, nil
 		}
-		result.DenyReasons = []string{p.denyReason}
+		result.DenyReasons = pathDenyReasons(p.subject, func() string { return p.denyReason })
 		return result, nil
 	}
 
@@ -444,8 +444,10 @@ func (s *AuthorizeService) checkInPass(ctx context.Context, req CheckRequest, ca
 	}
 	result.Allowed = allowed
 	if !allowed {
-		result.DenyReasons = []string{denyReasonText(p.subject, p.relation, p.object, p.action,
-			s.readSubjectRelations(ctx, p.subject, p.object))}
+		result.DenyReasons = pathDenyReasons(p.subject, func() string {
+			return denyReasonText(p.subject, p.relation, p.object, p.action,
+				s.readSubjectRelations(ctx, p.subject, p.object))
+		})
 	}
 	return result, nil
 }
@@ -489,6 +491,12 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		p.invalid = fmt.Errorf("Illegal argument subject: required")
 		return p
 	}
+	// Говорящим бывает не всякий субъект (Р3, SC-14, SC-15): разборщик ОДИН на
+	// все методы, принимающие говорящего, — его же зовёт CheckRelation.
+	if err := domain.SpeakerRefusal(req.Subject); err != nil {
+		p.invalid = err
+		return p
+	}
 	if req.Resource.Type == "" || req.Resource.ID == "" {
 		p.invalid = fmt.Errorf("Illegal argument resource: required")
 		return p
@@ -521,8 +529,8 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 	// scope_extractor: {object_type: cluster, from_request_field: '*'} →
 	// api-gateway / compute internal authz middleware шлют Resource.ID == "*".
 	// Substitute на singleton id перед общим wildcard-reject (ниже), чтобы
-	// FGA-cascade `define viewer: [user, user:*]` на cluster действительно
-	// работал. (api-gateway тоже substitute'ит локально — этот fix покрывает
+	// отношение `viewer` на cluster (выдано классу «вошедшие») действительно
+	// работало. (api-gateway тоже substitute'ит локально — этот fix покрывает
 	// прямые service→IAM caller'ы compute/vpc.)
 	if req.Resource.Type == "cluster" && req.Resource.ID == "*" {
 		req.Resource.ID = domain.ClusterSingletonID
@@ -744,6 +752,9 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	if req.Subject == "" {
 		return result, fmt.Errorf("Illegal argument subject: required")
 	}
+	if err := domain.SpeakerRefusal(req.Subject); err != nil {
+		return result, err
+	}
 	if req.Relation == "" {
 		return result, fmt.Errorf("Illegal argument relation: required")
 	}
@@ -771,7 +782,9 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	if !allowed {
 		// CheckRelation is the gateway/internal path — same rich-deny format as the
 		// public Check (no `action` available here, so the action segment is omitted).
-		result.DenyReasons = []string{s.formatDenyReason(ctx, req.Subject, req.Relation, req.Object, "")}
+		result.DenyReasons = pathDenyReasons(req.Subject, func() string {
+			return s.formatDenyReason(ctx, req.Subject, req.Relation, req.Object, "")
+		})
 	}
 	return result, nil
 }
@@ -1131,7 +1144,8 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 				out[i] = &CheckResult{Allowed: true, CheckedAt: now}
 				continue
 			}
-			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{plans[i].denyReason}, CheckedAt: now}
+			reason := plans[i].denyReason
+			out[i] = &CheckResult{Allowed: false, DenyReasons: pathDenyReasons(plans[i].subject, func() string { return reason }), CheckedAt: now}
 		}
 		return nil
 	}
@@ -1176,13 +1190,18 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 	if len(denied) == 0 {
 		return nil
 	}
-	tails := s.readSubjectRelationsMany(ctx, run.subject, run.objectType, deniedIDs)
+	var tails map[string][]string
+	if run.subject != domain.SpeakerAnonymous {
+		tails = s.readSubjectRelationsMany(ctx, run.subject, run.objectType, deniedIDs)
+	}
 	for _, i := range denied {
 		p := plans[i]
 		out[i] = &CheckResult{
-			Allowed:     false,
-			DenyReasons: []string{denyReasonText(p.subject, p.relation, p.object, p.action, tails[p.objectID])},
-			CheckedAt:   now,
+			Allowed: false,
+			DenyReasons: pathDenyReasons(p.subject, func() string {
+				return denyReasonText(p.subject, p.relation, p.object, p.action, tails[p.objectID])
+			}),
+			CheckedAt: now,
 		}
 	}
 	return nil
@@ -1351,4 +1370,19 @@ func resolveActionToRelation(action string) string {
 	// empty relation → InvalidArgument). New verbs must be added to a mapping
 	// above before they can authorize.
 	return ""
+}
+
+// pathDenyReasons — причины отказа «пути нет».
+//
+// Вызывающему без личности (`system_class:anonymous`) причин не называется:
+// «пути нет» выражается их ОТСУТСТВИЕМ (SC-10). Текст причины перечисляет
+// отношения говорящего к объекту и тем самым говорит о самом объекте; анониму
+// это не положено, и отказ ему не различает «есть, но закрыто» и «нет»
+// (Инвариант 5 приёмки). Текст строится лениво: у анонима не читается и то,
+// из чего он складывается.
+func pathDenyReasons(subject string, reason func() string) []string {
+	if subject == domain.SpeakerAnonymous {
+		return nil
+	}
+	return []string{reason()}
 }

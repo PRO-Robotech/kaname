@@ -123,7 +123,7 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	}); err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, in.Factor.Method, bearer.Digest(), now)
+	rec, err := presentInSession(ctx, w, resolved.Session, codePresentation(in.Factor.Method), bearer.Digest(), now)
 	if err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}

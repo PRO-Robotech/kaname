@@ -156,6 +156,12 @@ type ReaderIface interface {
 	// applies the legacy single-subject fallback).
 	ListSubjectsForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error)
 
+	// GrantorLastPresentedAt — самое свежее предъявление среди ЖИВЫХ сессий
+	// человека-выдающего (окно свежести выдачи системному классу, Р5, SC-25).
+	// found=false — живых сессий нет. Граница «живая» — та же, что у окна
+	// свежести ключа доступа: сессия не завершена и не истекла.
+	GrantorLastPresentedAt(ctx context.Context, userID domain.UserID) (at time.Time, found bool, err error)
+
 	// ListMaterializedAtForBindings batch-loads, for MANY bindings in one query,
 	// the instant each one's per-object access last became live: MAX(updated_at)
 	// over its ACTIVE rows in access_binding_target_members (the reconciler's

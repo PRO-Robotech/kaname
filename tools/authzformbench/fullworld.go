@@ -259,7 +259,7 @@ func buildWorld(m *Model) (*fmWorld, error) {
 	// ветвь модели не была бы спрошена ни разу.
 	if pub, ok := w.publicRepoObject(m); ok {
 		add(pub)
-		w.Facts = append(w.Facts, fmFact{Object: pub.Ref(), Relation: "v_get", Subject: "user:*"})
+		w.Facts = append(w.Facts, fmFact{Object: pub.Ref(), Relation: domain.PublicationRelation, Subject: domain.PublicationSubject})
 	}
 
 	// Строки фактов. Каждая — то, что iam хранит у себя, а движок кортежем.
@@ -286,13 +286,14 @@ func buildWorld(m *Model) (*fmWorld, error) {
 			w.Facts = append(w.Facts, fmFact{Object: g, Relation: "member", Subject: mem})
 		}
 	}
-	// Подстановочное чтение справочника: `cluster:<root>#viewer@user:*` — то, что
-	// бутстрап кластера пишет намеренно (каждый аутентифицированный арендатор
-	// обязан читать глобальный справочник). Без этой строки ветвь `user:*` у
-	// `cluster.viewer` не была бы спрошена ни разу, а она — ровно тот случай, где
-	// отношение выполнимо подстановкой и не сужает ничего.
+	// Чтение справочника каждым вошедшим: `cluster:<root>#viewer@system_class:
+	// authenticated` — то, что системная выдача платформы держит намеренно (каждый
+	// аутентифицированный арендатор обязан читать глобальный справочник). Без этой
+	// строки ветвь класса у `cluster.viewer` не была бы спрошена ни разу, а она —
+	// ровно тот случай, где отношение выполнимо «каждым вошедшим» и не сужает
+	// ничего.
 	if cl := m.Type("cluster"); cl != nil && cl.Rel("viewer") != nil {
-		w.Facts = append(w.Facts, fmFact{Object: fmClusterObj, Relation: "viewer", Subject: "user:*"})
+		w.Facts = append(w.Facts, fmFact{Object: fmClusterObj, Relation: "viewer", Subject: domain.SpeakerAuthenticated})
 	}
 
 	// Положительная сторона КАЖДОГО отношения, решающего доступ.
@@ -378,7 +379,7 @@ func unconditionedSubject(r *Relation) string {
 			continue
 		}
 		for _, d := range term.Direct {
-			if d.Condition != "" || d.Wildcard || d.Userset != "" {
+			if d.Condition != "" || d.Wildcard || d.Userset != "" || isClassRecord(d) {
 				continue
 			}
 			switch d.Type {
@@ -406,7 +407,7 @@ func (w *fmWorld) publicRepoObject(m *Model) (fmObject, bool) {
 					continue
 				}
 				for _, d := range term.Direct {
-					if !d.Wildcard {
+					if !d.Wildcard && !isClassRecord(d) {
 						continue
 					}
 					src, ok := w.byRef[t.Name+":"+fmt.Sprintf("obj-%s-%s", t.Name, tenantHome)]
@@ -617,19 +618,17 @@ type relRows struct {
 // метода не осталось ни одного. Тип `relRows` выше ЖИВ: его продолжает называть
 // проба узкой и полномодельной формы, у которой обе стороны свои.
 
-// subjectSeeds — что считается «этим субъектом» на входе вердикта: он сам и, для
-// пользователя, подстановочная форма своего типа. Членство в группах добирается
-// рекурсивно уже в запросе.
+// subjectSeeds — что считается «этим субъектом» на входе вердикта: он сам и его
+// системные классы. Членство в группах добирается рекурсивно уже в запросе.
 //
-// Подстановка типизирована: `user:*` не накрывает служебную учётку. Ошибка здесь
-// была бы не косметической — она отдала бы публичное чтение машинному
-// принципалу, которому модель его не давала.
+// Классы берутся у ТОГО ЖЕ производителя, что у формы вердикта
+// (`domain.SpeakerClasses`): эталон, правящий классификацию сам, разошёлся бы с
+// формой молча — так и было, пока здесь стояла подстановка своего типа (`user:*`
+// не накрывал служебную учётку, а форма добавляла её всякому говорящему). Решение
+// приёмки (Р2): учётка с личностью получает оба класса, как человек (kaname#829,
+// разбор CE-02).
 func subjectSeeds(subject string) []string {
-	st, _, err := splitObject(subject)
-	if err != nil {
-		return []string{subject}
-	}
-	return []string{subject, st + ":*"}
+	return append([]string{subject}, domain.SpeakerClasses(subject)...)
 }
 
 // describeWorld — перепись мира для отчёта.
@@ -651,4 +650,10 @@ func countEdges(w *fmWorld) int {
 		n += len(o.Pointers)
 	}
 	return n
+}
+
+// isClassRecord — запись прямого списка называет системный класс: отношение
+// выполнимо «каждым вошедшим» либо «каждым без входа», как прежде подстановкой.
+func isClassRecord(d DirectSubject) bool {
+	return d.Type == string(domain.SubjectTypeSystemClass)
 }

@@ -74,9 +74,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/PRO-Robotech/corelib/authz/proxytuple"
-
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // EventTypeWrite / EventTypeDelete — the two event types this table carries.
@@ -126,7 +125,13 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 }
 
 // EmitPublicationTx кладёт строку журнала ПУБЛИКАЦИИ объекта для анонимного
-// чтения — кортеж `user:* #v_get @<object>`, — упорядоченную ВЕРСИЕЙ ВЛАДЕЛЬЦА.
+// чтения — кортеж `system_class:anonymous #v_get @<object>`, — упорядоченную
+// ВЕРСИЕЙ ВЛАДЕЛЬЦА.
+//
+// Хранимый субъект публикации — системный класс `anonymous`, а не входное слово
+// соседа (`user:*`): перевод одного в другое живёт ОДНИМ написанием,
+// `domain.PublicationSubject`, и его же называют снятие публикации, разбор
+// остаточных фактов и миграция переезда (kaname#829, SC-12, SC-13).
 //
 // # Чем эта строка отличается от всех остальных, и почему отличие несущее
 //
@@ -143,8 +148,8 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 //     выдача — её объявляет владелец ресурса, — и без факта её нет нигде.
 //
 // Поэтому функция принимает ТОЛЬКО объект: субъект и отношение она берёт у
-// правила приёма (`proxytuple.PublicReadSubject` / `PublicReadRelation`), а не у
-// вызывающего. Строку другой формы с этим полем положить нельзя by construction,
+// перевода входного слова (`domain.PublicationSubject` / `PublicationRelation`),
+// а не у вызывающего. Строку другой формы с этим полем положить нельзя by construction,
 // и глагол, выведенный из выдачи, мимо запрета проекции не проедет.
 //
 // # Кто зовёт
@@ -182,7 +187,7 @@ func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object st
 		 VALUES ($1, jsonb_build_object('user', $2::text, 'relation', $3::text,
 		                                'object', $4::text, 'source_version', $5::timestamptz),
 		         now())`,
-		eventType, proxytuple.PublicReadSubject, string(proxytuple.PublicReadRelation), object, ownerVersion,
+		eventType, domain.PublicationSubject, domain.PublicationRelation, object, ownerVersion,
 	); err != nil {
 		return fmt.Errorf("fga_outbox: insert publication %s: %w", eventType, err)
 	}

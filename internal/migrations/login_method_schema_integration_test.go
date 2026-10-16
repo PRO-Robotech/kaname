@@ -168,6 +168,11 @@ func requirePgRefusal(t *testing.T, err error, code, constraint, why string) {
 // что у `lmDeclaredConstraints`: зелёная проба означает «лишних колонок ноль
 // при объявленных шести», а не «состав не менялся». Столкновение ожиданий,
 // из которого это выведено, — kaname#230.
+//
+// Седьмая — решение приёмки SUA (kaname#827, Р6; миграция
+// `20261015100100_second_factor_method_carries_its_last_use.sql`): момент
+// последнего принятого предъявления способа второго фактора — NULL, пока не
+// использовали; материала не несёт, у пароля невыразим проверкой схемы.
 var lmDeclaredColumns = map[string]string{
 	"user_id":            "NO",
 	"kind":               "NO",
@@ -175,6 +180,7 @@ var lmDeclaredColumns = map[string]string{
 	"created_at":         "NO",
 	"state":              "NO",
 	"last_accepted_step": "YES",
+	"last_used_at":       "YES",
 }
 
 // lmKindOutsideEveryVocabulary — вид, которого нет НИ В ОДНОМ словаре:
@@ -210,7 +216,7 @@ func TestIntegration_LoginMethodIsARowNotAColumn(t *testing.T) {
 
 	require.Equal(t, lmDeclaredColumns, got,
 		"F4d-13: строка несёт владельца, вид, проверочный материал, состояние (Ф12 Р1) и последний "+
-			"принятый шаг (Ф12 Р5); пуст бывает только шаг. Уровня доверия в строке нет и не будет (Ф11 Р1). "+
+			"принятый шаг (Ф12 Р5) и момент последнего использования (SUA Р6); пусты бывают только шаг и момент. Уровня доверия в строке нет и не будет (Ф11 Р1). "+
 			"Колонка сверх объявленных — решение приёмки, а не молчаливый проход")
 
 	// Колонки для самой человеческой почты у строки способа нет: адрес живёт

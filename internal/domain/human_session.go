@@ -400,6 +400,11 @@ const (
 	// фактора, ветвью пароля (Ф11-09), и признак семейства ей не годится.
 	FormSecondFactor FormKind = "second-factor"
 	FormStepUp       FormKind = "step-up"
+	// FormStepUpAccessKeyBegin — выдача испытания повышения ключом доступа под
+	// живой сессией (kaname#827, приёмка SUA Р2): свой вид, а не вид
+	// церемонии — выдача меняет состояние (заводит испытание сессии), и признак
+	// церемонии на форме выдачи не предъявим, и наоборот.
+	FormStepUpAccessKeyBegin FormKind = "step-up-access-key-begin"
 	// Подтверждение адреса (kaname#456, Р6; имена ратифицированы — Ф6 Р15):
 	// запрос письма и предъявление кода — две формы, два вида, и признак одного
 	// другому не годится.
@@ -430,7 +435,7 @@ const (
 )
 
 var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete,
-	FormSecondFactor, FormStepUp, FormVerifyEmail, FormVerifyEmailConfirm, FormAccessKeyBegin, FormAccessKeyLogin,
+	FormSecondFactor, FormStepUp, FormStepUpAccessKeyBegin, FormVerifyEmail, FormVerifyEmailConfirm, FormAccessKeyBegin, FormAccessKeyLogin,
 	FormPasswordEnroll, FormEmailChange, FormEmailChangeConfirm, FormSessionEnd}
 
 // FormKinds — закрытый перечень видов формы, копией.

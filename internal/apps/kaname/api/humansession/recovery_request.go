@@ -179,6 +179,12 @@ func (uc *RequestRecoveryUseCase) mintAndEnqueue(ctx context.Context, user domai
 			uc.observer.RecoveryRequestObserved(RecoveryRequestRecipientPaced)
 			return
 		}
+		if errors.Is(err, ErrRecoveryAddressMoved) {
+			// Адрес на момент записи личности уже не принадлежит (Р4): тот же
+			// случай, что у полосы чтения, — адреса нет ни у кого (Д3).
+			uc.observer.RecoveryRequestObserved(RecoveryRequestNoRow)
+			return
+		}
 		uc.observer.RecoveryRequestObserved(RecoveryRequestStoreFailed)
 		uc.logger.Error("recovery request: code and letter not recorded", "err", err.Error(), "user_id", string(user.ID))
 		return
@@ -186,20 +192,28 @@ func (uc *RequestRecoveryUseCase) mintAndEnqueue(ctx context.Context, user domai
 	uc.observer.RecoveryRequestObserved(RecoveryRequestQueued)
 }
 
-// write — одна транзакция записи (Ф5-09), открытая ключевым замком строки
-// личности (`Store.PersonWriter`, kaname#770): строка личности берётся РАНЬШЕ
-// строк кода. Строки кода личности снимают и писатели, держащие её строку
-// замком `FOR UPDATE`, — исход смены адреса (`EmailChangeWriter`) и удаление
-// личности (каскадом); вставка кода берёт личность проверкой внешнего ключа
-// (`FOR KEY SHARE`), с этим замком несовместимой. Запрос, снявший коды до
-// личности, держал бы их и ждал личность навстречу им — взаимная блокировка в
-// 3 прогонах из 3 у каждой пары (`recovery_request_lock_order_integration_test.go`
-// в `internal_iam`). Ключевой замок — та сила, что взяла бы сама проверка
-// внешнего ключа: с выдачей входа и писателями нескольких сессий он
-// совместим, а ждёт только держателей строки личности `FOR UPDATE` — удаление
-// и глаголы, решающие по заведённому, — и ждёт их, ещё ничего не держа.
+// write — одна транзакция записи (Ф5-09), открытая замком писателя
+// нескольких сессий на строке личности (`Store.SessionSetWriter`,
+// `FOR NO KEY UPDATE`): строка личности берётся РАНЬШЕ строк кода (kaname#770)
+// и сила замка СОВМЕСТИМА ЛИШЬ С КЛЮЧЕВЫМ (kaname#776).
+//
+// Почему не ключевой замок (`PersonWriter`, `FOR KEY SHARE`), стоявший здесь
+// до kaname#776: он совместим сам с собой и одновременных запросов одной
+// личности не упорядочивал — каждый снимал коды своим снимком, не видя кода
+// соседа, и живых кодов оставалось больше одного (RCL-02). Этот замок
+// конфликтует сам с собой, поэтому запросы одной личности идут по одному, и
+// снятие кодов следующего видит код предыдущего; запросы РАЗНЫХ личностей
+// друг друга не ждут — замок на строке своей личности (Р2). С исходом смены
+// адреса и удалением личности (`FOR UPDATE`) он конфликтует так же, как
+// прежний, и ждёт их, ещё ничего не держа: порядок «личность → коды» не
+// меняется. Цена — ожидание выдачи входа той же личности (её захват
+// `FOR SHARE`) на время этой короткой транзакции.
+//
+// Адрес письма судится этой же транзакцией после замка (`EmitRecoveryMail`,
+// Р4): смена адреса, зафиксированная до замка, видна оператору проверки, а
+// пришедшая позже ждёт фиксации запроса и снимает его код сама.
 func (uc *RequestRecoveryUseCase) write(ctx context.Context, user domain.User, code domain.RecoveryCode, value domain.RecoveryCodeValue) error {
-	w, err := uc.store.PersonWriter(ctx, user.ID)
+	w, err := uc.store.SessionSetWriter(ctx, user.ID)
 	if err != nil {
 		return err
 	}

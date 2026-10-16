@@ -698,8 +698,8 @@ type Relation struct {
 //
 // Умолчание — `[user, service_account, group#member] or super_admin`, и его
 // несут 24 модульных блока канона из 27. Остальные три несут иное:
-// `registry_repository` — `[user:*, user, service_account, group#member] or owner
-// or super_admin` (анонимное чтение публичного репозитория), `registry_registry`
+// `registry_repository` — `[system_class, user, service_account, group#member] or
+// owner or super_admin` (анонимное чтение публичного репозитория), `registry_registry`
 // — вывод от `owner`, `nlb_target_group` — вывод от другого ДЕЙСТВИЯ (`v_update`).
 // Ни одно из трёх не порождалось умолчательной формой, а объявить `v_*`
 // авторским отношением загрузчик не позволяет (имя порождается глаголом того же

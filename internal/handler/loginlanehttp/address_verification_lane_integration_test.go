@@ -200,7 +200,7 @@ func TestEV12_SecondFactorAndStepUpAreRefusedOnEachOfSixPaths(t *testing.T) {
 	// носителем судило бы носитель, а не положение.
 	anchor := send(b, calls[0])
 	require.Equal(t, http.StatusOK, anchor.status, "EV-12 (б) якорь: чтение состояния фактора — 200: %s", anchor.body)
-	require.JSONEq(t, `{"totp":{"enrolled":false}}`, anchor.body)
+	require.JSONEq(t, `{"totp":{"enrolled":false},"accessKeys":{"available":true},"stepUpMethods":[]}`, anchor.body)
 	for _, c := range calls {
 		r := send(b, c)
 		if r.status >= 400 {

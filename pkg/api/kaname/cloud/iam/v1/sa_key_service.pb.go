@@ -226,8 +226,11 @@ type TrustedSubject struct {
 	//	https://kubernetes.default.svc.cluster.local  (in-cluster k8s SAs)
 	//	https://idp.example.com/<tenant>/v2.0          (external OIDC IdP)
 	Issuer string `protobuf:"bytes,1,opt,name=issuer,proto3" json:"issuer,omitempty"`
-	// RE2 regex the external `sub` claim must match. Anchor with ^ and $ to
-	// avoid substring footguns. Examples:
+	// Exact subject the external `sub` claim must equal, written as `^<subject>$`.
+	// The value is a literal, not a pattern: the enclosed subject carries none of
+	// the characters . \ * + ? ( ) [ ] { } | ^ $ and is compared with `sub` byte
+	// for byte. Any other form is refused with INVALID_ARGUMENT at issuance.
+	// Examples:
 	//
 	//	^repo:acme/infra:ref:refs/heads/main$
 	//	^system:serviceaccount:kacho-prod:ci-runner$

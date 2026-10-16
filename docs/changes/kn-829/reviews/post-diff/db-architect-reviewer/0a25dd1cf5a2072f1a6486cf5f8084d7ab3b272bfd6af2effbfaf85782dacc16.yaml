@@ -1,0 +1,51 @@
+# Пост-дифф ревью схемы — роль db-architect-reviewer по kaname#829, новый
+# дайджест после фикса SD-829-1 (system-design-reviewer). Прежняя запись
+# c8086fa4… (✅ @993b99f01, base origin/829) не правится; эта судит дельту
+# 993b99f01..ea31742e8 (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/db-architect-reviewer
+owner: db-architect-reviewer
+mode: review
+round: delta-from-own-accept
+subject: >-
+  Миграция 20261015120000, п. 4: свёртка kaname.relation_fact_fold_row
+  переобъявлена — снятие (fga.tuple.delete) с субъектом user:* снимает
+  хранимого субъекта по переводу п. 3 (v_get — system_class:anonymous, прочее —
+  system_class:authenticated); запись подстановки по-прежнему отвергается
+  23514 relation_fact_subject_not_wildcard. Down возвращает тело 20261011120000.
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: "829-impl"
+  base: c032a0274449435513963ff705259bc41740844d   # origin/746 (merge-base bbbe33524)
+  head: ea31742e8c22e44ceb56ee67e8ad09547f299160    # задание называло 9ef6786c26b4 — перемерено, голова другая
+  files_touched: 113
+content_digest: sha256:0a25dd1cf5a2072f1a6486cf5f8084d7ab3b272bfd6af2effbfaf85782dacc16
+digest_command: git diff --full-index origin/746...HEAD | sha256sum
+delta_from_prior_accept: "993b99f01..ea31742e8 — 2 файла: миграция 20261015120000 (+265), system_class_old_writer_unpublish_integration_test.go (+109)"
+verdict: accepted
+migrations_touched: 1   # internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
+repo_sql_touched: 28    # пути internal/repo/** в диффе от origin/746; дельтой от прежнего ✅ не тронуты
+evidence:
+  - "Up-тело свёртки против последнего переобъявления (20261011120000, последнее по сортировке до 20261015120000): diff — ровно v_stored и ветка перевода в fga.tuple.delete; ветка записи, порядок отношений (COLLATE \"C\"), версия владельца, фильтр глаголов — дословно"
+  - "Down-тело и COMMENT — дословно 20261011120000 (diff пуст); стоят в Down до возврата подстановки, так что после отката снятие user:* снова снимает user:*"
+  - "перевод снятия совпадает с переписью п. 3 (строки 288-289: CASE f.relation = 'v_get' → anonymous, иначе authenticated); source_version <= v_version сохранён — снятие «не новее» факта не снимает"
+  - "перевод только сужает: ветка записи не тронута, user:* на записи → 23514; поверхность не растёт"
+  - "замки: строка снятия публикации — один оператор одной строки (EmitPublicationTx); перевод меняет имя блокируемой строки, а не порядок внутри оператора"
+  - "миграция в линии не применена: git cat-file -e — нет в origin/main, origin/746, origin/829; правка не нарушает запрет #5"
+  - "многоинструкционные тела обёрнуты StatementBegin/StatementEnd в Up и Down"
+probes_run:
+  - "мной @ea31742e8, heavy-slot integration, код 0: 6 PASS — SD8291_OldWriterUnpublishAfterMove, SC43, RelationFactRefuses…, JournalProjectionRefuses…, EmittedTuplesRefuse…, DownLifts…"
+concurrent_probe: >-
+  Предмет дельты — ветка функции, не CAS/UNIQUE/EXCLUDE/SKIP LOCKED;
+  конкурентной пробы не требует. Замки SC-22 (порядок правки роли и выдачи
+  классу под FOR SHARE access_bindings_role_is_live_trg) дельтой не тронуты.
+findings: []
+orders:
+  - "integration-tester (исполнитель полосы): проба на ветку authenticated перевода снятия — fga.tuple.delete user:* по НЕ-глагольному отношению (снятие системной выдачи прежним подом) снимает факт system_class:authenticated; сейчас проба покрывает лишь v_get. Код ветки сверен чтением; не блокирует."
+notes_non_blocking:
+  - "SD8291: ветка «отвергнута» засчитывает ЛЮБУЮ ошибку базы (pgErrorOf != nil), не 23514 relation_fact_subject_not_wildcard — регрессия, роняющая вставку по другой причине, прошла бы зелёной. Сейчас путь не достигается (снятие принято)."
+distributed_overlap: true   # снятие прежним писателем во время выкатки — предмет SD-829-1, system-design-reviewer
+runs_pending:
+  - "инъекция (Up-снятие возвращено к subject = v_user в копии git archive @ea31742e8) — SD8291 ожидается красной; отсоединённо, слот занят, исход не прочитан к записи"
+  - "SC-22 (4 пробы TestSystemClass_SC22_*) @ea31742e8 — отсоединённо, исход не прочитан к записи; дельтой не тронуты, вердикт на них не опирается"

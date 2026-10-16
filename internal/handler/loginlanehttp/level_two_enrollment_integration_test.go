@@ -217,7 +217,10 @@ func requireStoreRefusal(t *testing.T, r reply, what string) {
 	require.Equalf(t, refusalWire(14, humansession.TextRequestNotPerformed), r.body, "%s: тело отказа хранилища", what)
 }
 
-const kn747NotEnrolled = `{"totp":{"enrolled":false}}`
+// kn747NotEnrolled — состояние личности с ключом и без заведённого кода: с
+// kaname#827 (SUA Р6) тело несёт доступность ключей и способы повышения, и у
+// такой личности способ один — ключ.
+const kn747NotEnrolled = `{"accessKeys":{"available":true},"stepUpMethods":["webauthn"],"totp":{"enrolled":false}}`
 
 // TestKN747_05_PasswordOnlyPersonEnrollsFromLevelOne — положительный близнец
 // KN747-06: у личности без ключа свежая «1» заводит код (Ф12 Р8 без правки).

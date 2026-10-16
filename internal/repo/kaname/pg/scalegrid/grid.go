@@ -58,8 +58,10 @@ const (
 	RecruitFactSelf Recruit = "фактом лично"
 	// RecruitFactGroup — факт назван на группу, в которой субъект состоит.
 	RecruitFactGroup Recruit = "фактом через группу"
-	// RecruitFactWildcard — факт назван подстановкой `user:*`.
-	RecruitFactWildcard Recruit = "фактом подстановкой user:*"
+	// RecruitFactClass — факт назван системным классом
+	// `system_class:authenticated`, в котором субъект состоит как вошедший
+	// (прежде — подстановкой `user:*`, kaname#829).
+	RecruitFactClass Recruit = "фактом классом system_class:authenticated"
 )
 
 // Point — одна точка сетки: четыре величины и способ набора.
@@ -148,10 +150,10 @@ var fullF = []Point{
 	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 1, Recruit: RecruitFactSelf},
 	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 10, Recruit: RecruitFactSelf},
 	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 10, Recruit: RecruitFactGroup},
-	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 10, Recruit: RecruitFactWildcard},
+	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 10, Recruit: RecruitFactClass},
 	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 100, Recruit: RecruitFactSelf},
 	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 100, Recruit: RecruitFactGroup},
-	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 100, Recruit: RecruitFactWildcard},
+	{Axis: AxisF, N: 1000, B: 1000, R: 9, F: 100, Recruit: RecruitFactClass},
 }
 
 // Full — полная сетка четырёх осей, в порядке прогона.

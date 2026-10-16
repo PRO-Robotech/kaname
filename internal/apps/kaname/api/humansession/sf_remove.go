@@ -125,7 +125,7 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonSecondFactorRemoved); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, in.Factor.Method, bearer.Digest(), now)
+	rec, err := presentInSession(ctx, w, resolved.Session, codePresentation(in.Factor.Method), bearer.Digest(), now)
 	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}

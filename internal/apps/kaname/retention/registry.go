@@ -121,6 +121,10 @@ const (
 	// SubjectAccessKeyLoginChallenges — испытания ПОЛОСЫ ВХОДА ключом (Ф13,
 	// kaname#613): своя таблица, привязанная к контексту формы.
 	SubjectAccessKeyLoginChallenges = "access_key_login_challenges"
+	// SubjectAccessKeyStepUpChallenges — испытания ПОВЫШЕНИЯ ключом внутри
+	// живой сессии (kaname#827, замысел §2.1 п. 6): своя таблица, привязанная к
+	// записи сессии. Темп задаёт сам человек: живое испытание у сессии одно.
+	SubjectAccessKeyStepUpChallenges = "access_key_step_up_challenges"
 	// SubjectVerificationCodes — коды подтверждения адреса (kaname#456, Р7,
 	// Р9): строки старше окна писем, которые ни предъявление, ни предел писем
 	// уже не прочтут. Темп задаёт человек: строку заводит письмо подтверждения.
@@ -159,6 +163,10 @@ type HumanSessionReapers struct {
 	// kaname#613); nil — полоса входа ключом не провязана, и предмета уборки
 	// у реестра нет (таблица пустует by construction).
 	LoginChallenges AccessKeyLoginChallengeReaper
+	// StepUpChallenges — уборщик испытаний ПОВЫШЕНИЯ ключом (kaname#827);
+	// порог — ChallengeTTL. nil — ветвь ключа церемонии не провязана, и
+	// предмета уборки у реестра нет.
+	StepUpChallenges AccessKeyStepUpChallengeReaper
 	// Подтверждение адреса (kaname#456): коды, окна источника, письма с
 	// истёкшим кодом; LetterWindow — окно писем подтверждения, SourceWindow —
 	// окно обращений источника.
@@ -223,6 +231,12 @@ type AccessKeyChallengeReaper interface {
 // испытаний полосы входа ключом.
 type AccessKeyLoginChallengeReaper interface {
 	SweepUnservableLoginChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// AccessKeyStepUpChallengeReaper — порт уборщика истёкших и предъявленных
+// испытаний повышения ключом.
+type AccessKeyStepUpChallengeReaper interface {
+	SweepUnservableStepUpChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
@@ -316,6 +330,18 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			// ради различимости незачем.
 			Grace: 0,
 			Sweep: r.LoginChallenges.SweepUnservableLoginChallenges,
+		})
+	}
+	if r.StepUpChallenges != nil {
+		subjects = append(subjects, Subject{
+			Name: SubjectAccessKeyStepUpChallenges,
+			// Порог — срок испытания, НЕ ноль: три состояния испытания
+			// повышения наружу различимы (приёмка SUA Р3 — не выдавалось · уже
+			// предъявлено · истекло), и различимость держит только хранение
+			// строки — снятая читалась бы «не выдавалось». Тот же довод, что у
+			// испытаний церемоний Ф7.
+			Grace: r.ChallengeTTL,
+			Sweep: r.StepUpChallenges.SweepUnservableStepUpChallenges,
 		})
 	}
 	return subjects

@@ -49,6 +49,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
@@ -79,9 +80,14 @@ func publicReadRig(t *testing.T) (*internal_iam.RegisterResourceUseCase, *pgxpoo
 }
 
 const (
+	// publicReadSubject — ВХОДНОЕ слово публикации соседа (`user:*`), которым
+	// реестр её доставляет; оно не меняется.
 	publicReadSubject  = "user:*"
 	publicReadRelation = "v_get"
 	publicReadType     = "registry_repository"
+	// storedPublicSubject — ХРАНИМЫЙ субъект публикации и говорящий анонимного
+	// чтения: системный класс `anonymous` (kaname#829, SC-12).
+	storedPublicSubject = domain.PublicationSubject
 )
 
 func publicReadObject(id string) string { return publicReadType + ":" + id }
@@ -122,7 +128,8 @@ func withdrawE(uc *internal_iam.RegisterResourceUseCase, id string, v time.Time)
 }
 
 // anonymousRead — вопрос, который задаёт плоскость данных реестра на анонимном
-// pull: субъект `user:*`, отношение `v_get`. Отвечает форма E, как в проде.
+// pull: субъект `system_class:anonymous`, отношение `v_get`. Отвечает форма E,
+// как в проде.
 func anonymousRead(t *testing.T, pool *pgxpool.Pool, id string) relverdict.Verdict {
 	t.Helper()
 	ctx := context.Background()
@@ -130,7 +137,7 @@ func anonymousRead(t *testing.T, pool *pgxpool.Pool, id string) relverdict.Verdi
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	v, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
-		Subject: publicReadSubject, ObjectType: publicReadType, ObjectID: id, Relation: publicReadRelation,
+		Subject: domain.SpeakerAnonymous, ObjectType: publicReadType, ObjectID: id, Relation: publicReadRelation,
 	})
 	require.NoError(t, err, "вопрос об анонимном чтении обязан получить ответ, а не ошибку")
 	return v
@@ -144,7 +151,7 @@ func publicFact(t *testing.T, pool *pgxpool.Pool, id string) bool {
 	require.NoError(t, pool.QueryRow(context.Background(), `
 		SELECT count(*) FROM kaname.relation_fact
 		 WHERE object_type = $1 AND object_id = $2 AND relation = $3 AND subject = $4`,
-		publicReadType, id, publicReadRelation, publicReadSubject).Scan(&n))
+		publicReadType, id, publicReadRelation, storedPublicSubject).Scan(&n))
 	return n == 1
 }
 
@@ -407,7 +414,7 @@ func TestPublicRead_ProjectionFoldsOnlyTheOwnerOrderedVerb(t *testing.T) {
 	_, err := pool.Exec(ctx, `
 		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		VALUES ('fga.tuple.write', jsonb_build_object('user', $1::text, 'relation', $2::text, 'object', $3::text), now())`,
-		publicReadSubject, publicReadRelation, publicReadObject(derived))
+		storedPublicSubject, publicReadRelation, publicReadObject(derived))
 	require.NoError(t, err)
 	requirePrivate(t, pool, derived, "глагол без версии владельца (копия выдачи) сложен в прямой факт")
 
@@ -415,7 +422,7 @@ func TestPublicRead_ProjectionFoldsOnlyTheOwnerOrderedVerb(t *testing.T) {
 		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		VALUES ('fga.tuple.write', jsonb_build_object('user', $1::text, 'relation', $2::text, 'object', $3::text,
 		                                              'source_version', now()), now())`,
-		publicReadSubject, publicReadRelation, publicReadObject(owned))
+		storedPublicSubject, publicReadRelation, publicReadObject(owned))
 	require.NoError(t, err)
 	requirePublic(t, pool, owned, "строка, упорядоченная владельцем, не сложена в прямой факт")
 
@@ -423,7 +430,7 @@ func TestPublicRead_ProjectionFoldsOnlyTheOwnerOrderedVerb(t *testing.T) {
 		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		VALUES ('fga.tuple.write', jsonb_build_object('user', $1::text, 'relation', $2::text, 'object', $3::text,
 		                                              'source_version', 'not-a-version'), now())`,
-		publicReadSubject, publicReadRelation, publicReadObject(broken))
+		storedPublicSubject, publicReadRelation, publicReadObject(broken))
 	require.Error(t, err, "неразбираемая версия владельца обязана ронять строку, а не подменяться меткой журнала")
 	requirePrivate(t, pool, broken, "строка с неразбираемой версией оставила факт")
 }

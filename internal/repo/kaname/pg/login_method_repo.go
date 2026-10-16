@@ -145,7 +145,7 @@ func getLoginMethod(ctx context.Context, q loginMethodQuerier, userID domain.Use
 	if err := kind.Validate(); err != nil {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
-	sql := `SELECT verifier, state, last_accepted_step, created_at FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2`
+	sql := `SELECT verifier, state, last_accepted_step, created_at, last_used_at FROM ` + loginMethodsTable + ` WHERE user_id = $1 AND kind = $2`
 	m, err := scanLoginMethod(q.QueryRow(ctx, sql, string(userID), string(kind)), userID, kind)
 	if stderrors.Is(err, pgx.ErrNoRows) {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrNotFound, "Login method %s of user %s not found", kind, userID)
@@ -157,11 +157,11 @@ func getLoginMethod(ctx context.Context, q loginMethodQuerier, userID domain.Use
 }
 
 // scanLoginMethod — строка способа из ряда `verifier, state, last_accepted_step,
-// created_at`. Отказ базы (в том числе `pgx.ErrNoRows`) уходит вызывающему как
+// created_at, last_used_at`. Отказ базы (в том числе `pgx.ErrNoRows`) уходит вызывающему как
 // есть; строка, не проходящая тип, — НАШ дефект.
 func scanLoginMethod(row pgx.Row, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
 	var f loginMethodFields
-	if err := row.Scan(&f.material, &f.state, &f.step, &f.created); err != nil {
+	if err := row.Scan(&f.material, &f.state, &f.step, &f.created, &f.lastUsed); err != nil {
 		return domain.LoginMethod{}, err
 	}
 	return f.build(userID, kind)
@@ -175,6 +175,9 @@ type loginMethodFields struct {
 	state    string
 	step     *int64
 	created  time.Time
+	// lastUsed — момент последнего принятого предъявления (kaname#827); nil —
+	// не использовали.
+	lastUsed *time.Time
 }
 
 // build — строка способа в своём типе. Строка, не проходящая тип, — НАШ дефект.
@@ -189,6 +192,9 @@ func (f loginMethodFields) build(userID domain.UserID, kind domain.LoginMethodKi
 	m := domain.LoginMethod{UserID: userID, Kind: kind, Verifier: verifier, State: domain.LoginMethodState(f.state), CreatedAt: f.created}
 	if f.step != nil {
 		m.AcceptedStep, m.StepAccepted = *f.step, true
+	}
+	if f.lastUsed != nil {
+		m.LastUsedAt, m.LastUsed = f.lastUsed.UTC(), true
 	}
 	if err := m.Validate(); err != nil {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInternal, "stored login method is malformed")
@@ -421,7 +427,8 @@ func upsertPendingTOTPTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) (
 	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier, state, last_accepted_step, created_at)
 	      VALUES ($1, $2, $3, $4, NULL, $5)
 	      ON CONFLICT (user_id, kind) DO UPDATE
-	         SET verifier = EXCLUDED.verifier, state = EXCLUDED.state, last_accepted_step = NULL, created_at = EXCLUDED.created_at
+	         SET verifier = EXCLUDED.verifier, state = EXCLUDED.state, last_accepted_step = NULL, created_at = EXCLUDED.created_at,
+	             last_used_at = NULL
 	       WHERE ` + loginMethodsTable + `.state <> 'active'`
 	tag, err := tx.Exec(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal(), string(m.State), m.CreatedAt)
 	if err != nil {
@@ -450,6 +457,8 @@ func activateTOTPTx(ctx context.Context, tx pgx.Tx, userID domain.UserID, pendin
 
 // replaceLookupSetTx — набор запасных кодов целиком: вставка либо замена
 // строки `lookup_secret` (Ф12 Р6). Материал уходит оператору аргументом.
+// Момент траты новый набор не наследует (kaname#827, SUA-61): выпуск — момент
+// строки, момент последней траты гасится.
 func replaceLookupSetTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) error {
 	if err := m.Validate(); err != nil {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
@@ -457,10 +466,11 @@ func replaceLookupSetTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) er
 	if m.Kind != domain.LoginMethodLookupSecret || m.CreatedAt.IsZero() {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method: lookup set row must be a lookup_secret row with its moment")
 	}
-	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier, state, created_at)
-	      VALUES ($1, $2, $3, $4, $5)
+	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier, state, created_at, last_used_at)
+	      VALUES ($1, $2, $3, $4, $5, NULL)
 	      ON CONFLICT (user_id, kind) DO UPDATE
-	         SET verifier = EXCLUDED.verifier, state = EXCLUDED.state, created_at = EXCLUDED.created_at`
+	         SET verifier = EXCLUDED.verifier, state = EXCLUDED.state, created_at = EXCLUDED.created_at,
+	             last_used_at = NULL`
 	if _, err := tx.Exec(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal(), string(m.State), m.CreatedAt); err != nil {
 		return mapErr(err, "LoginMethod.ReplaceLookupSet", loginMethodHint(m.UserID, m.Kind))
 	}
@@ -473,7 +483,7 @@ func lockLookupSetTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (doma
 	if userID == "" {
 		return domain.LoginMethod{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method.user_id: required")
 	}
-	q := `SELECT verifier, state, last_accepted_step, created_at FROM ` + loginMethodsTable + `
+	q := `SELECT verifier, state, last_accepted_step, created_at, last_used_at FROM ` + loginMethodsTable + `
 	       WHERE user_id = $1 AND kind = $2 FOR UPDATE`
 	m, err := scanLoginMethod(tx.QueryRow(ctx, q, string(userID), string(domain.LoginMethodLookupSecret)), userID, domain.LoginMethodLookupSecret)
 	if stderrors.Is(err, pgx.ErrNoRows) {
@@ -490,14 +500,17 @@ func lockLookupSetTx(ctx context.Context, tx pgx.Tx, userID domain.UserID) (doma
 // элемент узнаётся ровно с обеими запятыми и подстрока элемента элементом не
 // является. Значение приходит от проверяющего, вычислившего его из
 // предъявленного кода, — материала строки в аргументах нет.
-func consumeLookupElementTx(ctx context.Context, tx pgx.Tx, userID domain.UserID, element string) (bool, error) {
+func consumeLookupElementTx(ctx context.Context, tx pgx.Tx, userID domain.UserID, element string, at time.Time) (bool, error) {
 	if userID == "" || element == "" || strings.ContainsRune(element, ',') {
 		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument lookup element: required and without a separator")
 	}
+	if at.IsZero() {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument lookup element: moment of use required")
+	}
 	q := `UPDATE ` + loginMethodsTable + `
-	         SET verifier = replace(verifier, ',' || $3 || ',', ',')
+	         SET verifier = replace(verifier, ',' || $3 || ',', ','), last_used_at = $4
 	       WHERE user_id = $1 AND kind = $2 AND position(',' || $3 || ',' in verifier) > 0`
-	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodLookupSecret), element)
+	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodLookupSecret), element, at)
 	if err != nil {
 		return false, mapErr(err, "LoginMethod.ConsumeLookupElement", loginMethodHint(userID, domain.LoginMethodLookupSecret))
 	}
@@ -507,16 +520,21 @@ func consumeLookupElementTx(ctx context.Context, tx pgx.Tx, userID domain.UserID
 // recordAcceptedStepTx — условная запись принятого шага (Ф12 Р5, Ф12-22):
 // только `active` и только шаг старше последнего принятого. Условие — арбитр
 // двух одновременных предъявлений одной ступени: второй ждёт замка строки и
-// видит уже записанный шаг.
-func recordAcceptedStepTx(ctx context.Context, tx pgx.Tx, userID domain.UserID, step int64) (bool, error) {
+// видит уже записанный шаг. Момент предъявления at ложится тем же оператором
+// и только на принятом шаге (kaname#827, SUA Р6): подтверждение заведения
+// (`activateTOTPTx`) момента использования не пишет.
+func recordAcceptedStepTx(ctx context.Context, tx pgx.Tx, userID domain.UserID, step int64, at time.Time) (bool, error) {
 	if userID == "" {
 		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method.user_id: required")
 	}
+	if at.IsZero() {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_method: moment of use required")
+	}
 	q := `UPDATE ` + loginMethodsTable + `
-	         SET last_accepted_step = $3
+	         SET last_accepted_step = $3, last_used_at = $4
 	       WHERE user_id = $1 AND kind = $2 AND state = 'active'
 	         AND (last_accepted_step IS NULL OR last_accepted_step < $3)`
-	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodTOTP), step)
+	tag, err := tx.Exec(ctx, q, string(userID), string(domain.LoginMethodTOTP), step, at)
 	if err != nil {
 		return false, mapErr(err, "LoginMethod.RecordAcceptedStep", loginMethodHint(userID, domain.LoginMethodTOTP))
 	}
@@ -594,7 +612,7 @@ func (r *LoginMethodRepo) TOTPSecretsAfter(ctx context.Context, after domain.Use
 	if limit <= 0 {
 		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page size: must be positive")
 	}
-	q := `SELECT user_id, verifier, state, last_accepted_step, created_at FROM ` + loginMethodsTable + `
+	q := `SELECT user_id, verifier, state, last_accepted_step, created_at, last_used_at FROM ` + loginMethodsTable + `
 	       WHERE kind = $1 AND user_id > $2
 	       ORDER BY user_id
 	       LIMIT $3`
@@ -609,7 +627,7 @@ func (r *LoginMethodRepo) TOTPSecretsAfter(ctx context.Context, after domain.Use
 			user string
 			f    loginMethodFields
 		)
-		if err := rows.Scan(&user, &f.material, &f.state, &f.step, &f.created); err != nil {
+		if err := rows.Scan(&user, &f.material, &f.state, &f.step, &f.created, &f.lastUsed); err != nil {
 			return nil, mapErr(err, "LoginMethod.TOTPSecretsAfter", "")
 		}
 		m, err := f.build(domain.UserID(user), domain.LoginMethodTOTP)

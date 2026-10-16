@@ -91,7 +91,9 @@ func (x *ResourceRef) GetId() string {
 type AuthorizeCheckRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
-	// / "group:<grp…>#member"). Required.
+	// / "group:<grp…>#member" / "system_class:anonymous"). Required.
+	// "system_class:authenticated" and the wildcard "user:*" are not speakers →
+	// INVALID_ARGUMENT.
 	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
 	// Resource the action is being checked against.
 	Resource *ResourceRef `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`

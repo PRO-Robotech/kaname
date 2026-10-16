@@ -149,6 +149,11 @@ spec:
               + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
               + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
               + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_address_verification_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_email_change_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_email_change_outcomes_total{outcome="mark-not-reapplied"}[10m]))
+              + sum(increase(kaname_access_key_login_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_step_up_access_key_outcomes_total{outcome="store-failed"}[10m]))
               + sum(increase(kaname_second_factor_refusals_total{reason="unavailable"}[10m]))
               + sum(increase(kaname_self_service_store_failures_total[10m]))
               + sum(increase(kaname_password_verification_outcomes_total{outcome="format-not-in-registry"}[10m]))
@@ -156,7 +161,7 @@ spec:
               + sum(increase(kaname_password_verification_outcomes_total{outcome="params-above-ceiling"}[10m])) > 0
           for: 5m
           annotations:
-            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище). Негодное хранимое значение пароля либо секрета клиента считает ряд проверяющего — у всех, кто сверяет им: вход, повышение уровня, смена пароля, церемония; неудачный вход пишет его и в verifier-issue, это одно событие, а не два. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
+            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище, проверяющий пароля либо материал второго фактора; человек видит один отказ, причина в outcome, reason и verb (verb — глагол своих данных под сессией, которому не ответило хранилище, в том числе перечень и выход из своих сессий). Хранилище считают и подтверждение адреса, смена адреса (с mark-not-reapplied), вход ключом и ветвь ключа повышения. Негодное хранимое значение пароля либо секрета клиента считает ряд проверяющего — у всех, кто сверяет им: вход, повышение уровня, смена пароля, церемония; неудачный вход пишет его и в verifier-issue, это одно событие, а не два. Рост reason=unavailable после смены ключа обёртки — прежний ключ снят из перечня раньше переобёртки: вернуть его в перечень, затем kaname second-factor-key rewrap"
 
         - alert: KanameLoginVerifierCapacityExhausted
           expr: |
@@ -167,6 +172,18 @@ spec:
           for: 5m
           annotations:
             summary: "ёмкость проверяющего пароля исчерпана — отказано по нагрузке. Проверяющий один: вход паролем, повышение уровня паролем, сверка секрета клиента церемонией и запасной код второго фактора; причина — в outcome и method. Величина authn.login.verifier-capacity. Если растёт только kaname_password_verifier_ceremony_share_exhausted_total — занята доля церемонии на токен-эндпоинте, людям вход сохранён: смотреть обращения за токеном церемонии, а не поднимать ёмкость входа"
+
+        # ПОЧТОВАЯ ПОЛОСА (kaname#733). Через узел уходят коды подтверждения
+        # адреса, восстановления доступа и смены адреса: письмо, которое не ушло,
+        # оставляет человека на экране подтверждения либо без доступа, и сам он
+        # причины не видит. Ряд по виду письма заведён с нулём до первого письма,
+        # поэтому слагаемое не пропадает; сданные (`sent`) правило не читает.
+        - alert: KanameMailUndeliverable
+          expr: |
+            sum by (kind) (increase(kaname_mail_outcomes_total{outcome=~"transient|misconfigured"}[10m])) > 0
+          for: 10m
+          annotations:
+            summary: "письма вида {{ "{{ $labels.kind }}" }} не уходят почтовому узлу — коды подтверждения адреса, восстановления доступа и смены адреса до людей не доходят. outcome=misconfigured — по адресу узла не почтовый узел либо он отверг удостоверение: чинить invite-mail.relay и удостоверение, временем это не проходит; outcome=transient — узел недоступен либо не принял письмо: смотреть узел и сеть до него"
 
         - alert: KanameExpiredCredentialReclaimStalled
           # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.

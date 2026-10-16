@@ -9,7 +9,7 @@ package access_binding
 // ExpandAccess answers "who can do <relation> on <object>", resolving group
 // usersets down to concrete people and machine accounts. Its catalog entry asks
 // `viewer` on the cluster singleton — a relation the cluster bootstrap
-// deliberately grants to `user:*` so the global reference catalog (regions,
+// deliberately grants to the system class `authenticated` so the global reference catalog (regions,
 // zones, disk types) is readable by anyone authenticated. That question is
 // therefore answered by EVERY authenticated subject, and this use-case's own
 // gate is the only thing standing between a tenant and the cluster's

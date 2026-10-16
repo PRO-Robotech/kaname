@@ -30,7 +30,7 @@
 | `golangci-lint (пин v2.12.2)` | `lint` | ci |
 | `gosec (пин v2.28.0)` | `gosec` | ci |
 | `govulncheck` | `govulncheck` | ci |
-| `интеграция (Postgres в контейнерах)` | `integration` | ci |
+| `интеграция (Postgres в контейнерах)` | `integration` (сводный исход шардов `integrationshard`) | ci |
 | `listauthz — списочные методы сужены по объекту` | `listfilter` | ci |
 | `набор — оснастка, пробы, покрытие, долг` | `suite` | e2e-newman |
 | `автономный стенд — служба без платформы` | `stand` | e2e-newman |

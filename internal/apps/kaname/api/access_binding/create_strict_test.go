@@ -444,3 +444,13 @@ func (*strictDupRoleReader) Lifecycles(_ context.Context, _ []domain.RoleID) (
 	map[domain.RoleID]domain.RoleLifecycle, error) {
 	return nil, nil
 }
+
+// GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *strictDupABReader) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+// BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *strictDupRoleReader) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
+	return false, nil
+}

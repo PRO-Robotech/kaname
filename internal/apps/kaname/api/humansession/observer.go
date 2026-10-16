@@ -102,6 +102,20 @@ func AccessKeyLoginOutcomes() []AccessKeyLoginOutcome {
 	}
 }
 
+// StepUpAccessKeyOutcomes — клетки ветви ключа церемонии повышения
+// (kaname#827, Р10): подмножество словаря полосы входа ключом, которое ветвь
+// ПРОИЗВОДИТ. «Выдана сессия» и «блокировка» здесь не растут: сессия уже
+// разрешена, и сессии ветвь не выдаёт; принятое предъявление считает клетка
+// `webauthn × matched` предъявлений второго фактора.
+func StepUpAccessKeyOutcomes() []AccessKeyLoginOutcome {
+	return []AccessKeyLoginOutcome{
+		AccessKeyLoginChallengeIssued,
+		AccessKeyLoginSignature, AccessKeyLoginCredentialUnknown, AccessKeyLoginOrigin, AccessKeyLoginRPIDHash,
+		AccessKeyLoginPresence, AccessKeyLoginCounter, AccessKeyLoginChallenge, AccessKeyLoginUserHandle,
+		AccessKeyLoginStoreFailed,
+	}
+}
+
 // RewriteOutcome — исход переписывания материала при успешной проверке
 // (Ф3-43; ID-PW-1 PWV-08…11, 19): переписано · не требовалось · отказ записи ·
 // не переписывается по причине (72 байта · нулевой байт).
@@ -223,6 +237,11 @@ const (
 	StoreFailureBackupCodesRegenerate StoreFailureVerb = "backup-codes-regenerate"
 	StoreFailurePasswordChange        StoreFailureVerb = "password-change"
 	StoreFailurePasswordEnroll        StoreFailureVerb = "password-enroll"
+	// Свои сессии (kaname#735): перечень, выход из выбранной и выход из всех,
+	// кроме текущей. Прежде их сбой хранилища не считал ни один ряд.
+	StoreFailureOwnSessionsList      StoreFailureVerb = "own-sessions-list"
+	StoreFailureOwnSessionEnd        StoreFailureVerb = "own-session-end"
+	StoreFailureOwnSessionsEndOthers StoreFailureVerb = "own-sessions-end-others"
 )
 
 // StoreFailureVerbs — закрытый перечень: приёмник засевает им клетки нулём до
@@ -232,6 +251,7 @@ func StoreFailureVerbs() []StoreFailureVerb {
 		StoreFailureStepUp, StoreFailureSecondFactorEnroll, StoreFailureSecondFactorConfirm,
 		StoreFailureSecondFactorStatus, StoreFailureSecondFactorRemove, StoreFailureBackupCodesRegenerate,
 		StoreFailurePasswordChange, StoreFailurePasswordEnroll,
+		StoreFailureOwnSessionsList, StoreFailureOwnSessionEnd, StoreFailureOwnSessionsEndOthers,
 	}
 }
 
@@ -272,6 +292,15 @@ type Observer interface {
 	// StoreFailureObserved — глагол своих данных отказал, потому что хранилище
 	// не ответило (kaname#691).
 	StoreFailureObserved(verb StoreFailureVerb)
+	// StepUpAccessKeyObserved — исход ветви ключа церемонии повышения
+	// (kaname#827, Р10): словарь клеток полосы входа ключом (`AccessKeyLoginOutcome`)
+	// с меткой полосы повышения — второго словаря причин у ключа нет.
+	StepUpAccessKeyObserved(outcome AccessKeyLoginOutcome)
+	// SignCountRegressionObserved — сигнал клонирования (Ф7 Р6, kaname#827
+	// Р10): утверждение ключа отвергнуто, потому что счётчик подписи не вырос
+	// против прочитанного. Тот же сигнал, что у проверки утверждения Ф7; у
+	// проигранного сдвига его нет.
+	SignCountRegressionObserved()
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
@@ -292,3 +321,5 @@ func (NopObserver) SecondFactorRefusalObserved(SecondFactorRefusal)             
 func (NopObserver) SecondFactorEventObserved(SecondFactorEvent)                            {}
 func (NopObserver) AccessKeyLoginObserved(AccessKeyLoginOutcome)                           {}
 func (NopObserver) StoreFailureObserved(StoreFailureVerb)                                  {}
+func (NopObserver) StepUpAccessKeyObserved(AccessKeyLoginOutcome)                          {}
+func (NopObserver) SignCountRegressionObserved()                                           {}

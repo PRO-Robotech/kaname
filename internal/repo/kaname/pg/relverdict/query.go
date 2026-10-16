@@ -338,10 +338,18 @@ speaker_pair(s_type, s_id, via) AS (
      WHERE gm.member_type = split_part($1::text, ':', 1)
        AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION ALL
-    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
-    -- аутентифицированный) и потому перечислена явно, а не выведена из формы
-    -- имени.
-    SELECT 'user', '*', 'wildcard'
+    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
+    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
+    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
+    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
+    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
+    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class'
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class'
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -358,7 +366,9 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'user:*'
+    SELECT 'system_class:' || $10::text
+  UNION
+    SELECT 'system_class:' || $11::text
 ),
 fact_atom(parent_type, relation) AS (
     -- Источники-факты плана: где искать и что искать. Пустой тип предка означает
@@ -507,16 +517,29 @@ const grantArmSQL = `
     --
     -- Обращений — не больше, чем произведение мощностей speaker_pair и scope,
     -- и каждое возвращает выдачи ровно этого субъекта ровно в этой области.
+    --
+    -- Обращение — ВБОК, по паре на строку, и это ДЕРЖИТ обещание абзацем выше,
+    -- а не надеется на план. Обычное соединение оставляло порядок планировщику,
+    -- и он менял его по оценке числа строк говорящего: при трёх строках
+    -- (говорящий и два его системных класса, kaname#829) он предпочитал полный
+    -- просмотр субъектов выдач с хэшем, и стоимость вопроса шла за числом выдач
+    -- в базе (замер — проба объёма матрицы и сетка масштаба). OFFSET 0 не даёт
+    -- подзапросу раствориться в соединении: он и есть ограда порядка.
     SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm
       FROM speaker_pair sp
       {{scope_join}}
-      JOIN kaname.access_binding_subjects bs
-        ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
-       AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
+      CROSS JOIN LATERAL (
+             SELECT s.binding_id, s.subject_type
+               FROM kaname.access_binding_subjects s
+              WHERE s.subject_type  = sp.s_type AND s.subject_id  = sp.s_id
+                AND s.resource_type = sc.s_type AND s.resource_id = sc.s_id
+             OFFSET 0
+           ) bs
       JOIN kaname.access_bindings b ON b.id = bs.binding_id
       JOIN kaname.role_verb rv
         ON rv.role_id = b.role_id AND rv.object_type = $9::text
        AND rv.verb = ANY ($6::text[])
+       AND ` + classVerbFilterSQL + `
       JOIN kaname.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
       -- Метки нужны только ветви меток, и лежат они там, где велит ТИП: у чужого
@@ -655,7 +678,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType,
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
@@ -873,9 +896,18 @@ speaker_pair(s_type, s_id, via) AS (
      WHERE gm.member_type = split_part($1::text, ':', 1)
        AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION ALL
-    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
-    -- аутентифицированный) и потому перечислена явно.
-    SELECT 'user', '*', 'wildcard'
+    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
+    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
+    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
+    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
+    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
+    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class'
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class'
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов. Обе формы имени группы: канонический
@@ -886,7 +918,9 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'user:*'
+    SELECT 'system_class:' || $10::text
+  UNION
+    SELECT 'system_class:' || $11::text
 ),
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($4::text[], $5::text[])
@@ -984,7 +1018,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	rows, err := q.Query(ctx, verdictManyQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType,
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)

@@ -62,7 +62,7 @@ func (r *rsfRace) enrollAccessKey(t *testing.T) {
 	_, err = w.InsertKey(r.ctx, domain.AccessKey{
 		ID: domain.AccessKeyID(ids.NewHyphenID(ids.PrefixAccessKeyHyphen)), UserID: r.subject,
 		CredentialID: auth.CredentialID(), PublicKey: auth.COSEPublicKey(t), Algorithm: auth.Algorithm(),
-		UserHandle: handle.Bytes(), Name: "list-scene-key", CreatedAt: time.Now().UTC(),
+		UserHandle: handle.Bytes(), Name: "list-scene-key", CreatedAt: time.Now().UTC(), Discoverability: domain.DiscoverabilityConfirmed,
 	})
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка ключа писателем продукта")
 	require.NoError(t, w.Commit(r.ctx))

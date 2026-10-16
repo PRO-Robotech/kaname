@@ -145,10 +145,18 @@ WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
      WHERE gm.member_type = split_part($1::text, ':', 1)
        AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION ALL
-    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
-    -- аутентифицированный) и потому перечислена явно, а не выведена из формы
-    -- имени.
-    SELECT 'user', '*', 'wildcard'
+    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
+    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
+    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
+    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
+    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
+    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class'
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class'
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -165,7 +173,9 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'user:*'
+    SELECT 'system_class:' || $10::text
+  UNION
+    SELECT 'system_class:' || $11::text
 ),
 candidate(object_id, labels) AS (
     -- ЗДЕСЬ СХОДЯТСЯ ДВА СВОЙСТВА, И НИ ОДНО ИЗ НИХ НЕ ВЫВОДИТСЯ ИЗ ДРУГОГО.
@@ -286,15 +296,22 @@ SELECT c.object_id,
           -- Заход с пары «субъект + область»: оба предиката сужают набор ДО
           -- чтения строк, и оба стоят теперь на ОДНОМ отношении (миграция
           -- 732001). Склейка субъекта выводила колонки из-под индекса.
+          -- Обращение ВБОК — по паре «субъект + область» на строку, с оградой
+          -- OFFSET 0: довод у ветви выдач прямого вопроса (grantArmSQL).
           FROM speaker_pair sp
           JOIN scope_distinct sc ON sc.object_id = c.object_id
-          JOIN kaname.access_binding_subjects bs
-            ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
-           AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
+          CROSS JOIN LATERAL (
+                 SELECT s.binding_id, s.subject_type
+                   FROM kaname.access_binding_subjects s
+                  WHERE s.subject_type  = sp.s_type AND s.subject_id  = sp.s_id
+                    AND s.resource_type = sc.s_type AND s.resource_id = sc.s_id
+                 OFFSET 0
+               ) bs
           JOIN kaname.access_bindings b ON b.id = bs.binding_id
           JOIN kaname.role_verb rv
             ON rv.role_id = b.role_id AND rv.object_type = $9::text
            AND rv.verb = ANY ($8::text[])
+           AND ` + classVerbFilterSQL + `
           JOIN kaname.role_rule_selectors rs
             ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
          WHERE b.status = 'ACTIVE'
@@ -424,7 +441,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType)
+		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

@@ -1,0 +1,213 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package domain
+
+// system_class.go — системный класс субъекта: «аноним» и «вошедший»
+// (приёмка anonymous-and-authenticated-are-subject-classes.md, kaname#829).
+//
+// Класс — именованный субъект ЗАКРЫТОГО словаря, а не подстановка: арендатор
+// выдаёт и отзывает его поимённо теми же глаголами, что выдачу человеку (Р1).
+// Здесь живут ТРИ правила, и у каждого ровно одно написание в дереве:
+//
+//   - словарь имён класса (Р1, SC-02);
+//   - классификация говорящего — какие классы получает вопрос от имени
+//     данного субъекта (Р2, SC-10, SC-11). Её читают все три формы вопроса к
+//     модели (прямой, страничный, перечень) и эталон формы; три независимых
+//     написания разошлись бы молча — перечень отдал бы то, что вопрос
+//     отвергает;
+//   - кто говорящим НЕ бывает (Р3, SC-14, SC-15).
+
+import (
+	"fmt"
+	"strings"
+)
+
+// SubjectTypeSystemClass — вид субъекта «системный класс» (Р1).
+const SubjectTypeSystemClass SubjectType = "system_class"
+
+// Имена классов закрытого словаря.
+const (
+	// ClassAnonymous — любой вызывающий, в том числе без личности.
+	ClassAnonymous SubjectID = "anonymous"
+	// ClassAuthenticated — любой принципал кластера с личностью, из любого
+	// аккаунта: выдача этому классу видна за границей арендатора (Р5).
+	ClassAuthenticated SubjectID = "authenticated"
+)
+
+// Субъекты классов в записи модели прав (`тип:идентификатор`).
+const (
+	SpeakerAnonymous     = string(SubjectTypeSystemClass) + ":" + string(ClassAnonymous)
+	SpeakerAuthenticated = string(SubjectTypeSystemClass) + ":" + string(ClassAuthenticated)
+)
+
+// classReadVerbs — единственные глаголы, которые класс получает (Р4).
+var classReadVerbs = map[string]bool{"get": true, "list": true}
+
+// IsClassReadVerb — глагол чтения, допустимый у выдачи классу (Р4, SC-23).
+func IsClassReadVerb(verb string) bool { return classReadVerbs[NormalizeVerb(verb)] }
+
+// IsSystemClassName — имя из закрытого словаря классов.
+func IsSystemClassName(id SubjectID) bool {
+	return id == ClassAnonymous || id == ClassAuthenticated
+}
+
+// validateSystemClassName — отказ формы имени класса (SC-02). Пустое имя
+// отвергается раньше, общим для всех видов текстом (SC-03).
+func validateSystemClassName(id SubjectID) error {
+	if IsSystemClassName(id) {
+		return nil
+	}
+	return fmt.Errorf("Illegal argument subject id %q for subject type %s (allowed: %s|%s)",
+		string(id), SubjectTypeSystemClass, ClassAnonymous, ClassAuthenticated)
+}
+
+// IsSystemClass — субъект есть системный класс.
+func (s Subject) IsSystemClass() bool { return s.Type == SubjectTypeSystemClass }
+
+// HasSystemClass — среди субъектов выдачи есть системный класс.
+func HasSystemClass(subjects []Subject) bool {
+	for _, s := range subjects {
+		if s.IsSystemClass() {
+			return true
+		}
+	}
+	return false
+}
+
+// SpeakerClasses — классы, которые получает вопрос от имени `speaker`, СВЕРХ
+// самого говорящего (Р2).
+//
+// Правило перечисляет виды, которым классы положены, а ветви «все прочие» у
+// него нет:
+//
+//   - человек и сервисная учётка (`user:<id>`, `service_account:<id>`) —
+//     вошедший: оба класса. Вход не отнимает прав, поэтому выданное анониму
+//     читает и вошедший;
+//   - `system_class:anonymous` — вызывающий без личности: классов сверх себя у
+//     него нет. Обратного вывода нет никогда: у анонима нет `authenticated`
+//     (SC-10);
+//   - подстановка `user:*` — ПЕРЕХОДНОЕ отображение: так сегодня спрашивает
+//     плоскость данных реестра о вызывающем без личности, и до перевода её на
+//     класс этот вопрос значит «аноним» (разбор CE-03 (в), CE-10 (а)).
+//     Снимается тем же изменением, что вводит отказ SC-15;
+//   - группа (`group:<id>`, `group:<id>#member`) и всё прочее — ничего: группа
+//     говорящим-личностью не является (SC-11).
+//
+// Безымянность — значение входа (`system_class:anonymous`), а не вывод из
+// формы строки: пустой и нераспознанный говорящий отвергаются раньше, разбором
+// [SpeakerRefusal].
+func SpeakerClasses(speaker string) []string {
+	if speaker == wildcardUserSpeaker {
+		return []string{SpeakerAnonymous}
+	}
+	kind, id, ok := strings.Cut(speaker, ":")
+	if !ok || id == "" || strings.ContainsAny(id, "#*") {
+		return []string{}
+	}
+	switch SubjectType(kind) {
+	case SubjectTypeUser, SubjectTypeServiceAccount:
+		return []string{SpeakerAuthenticated, SpeakerAnonymous}
+	default:
+		return []string{}
+	}
+}
+
+// wildcardUserSpeaker — подстановка, которой спрашивает плоскость данных
+// реестра о вызывающем без личности (переход, см. [SpeakerClasses]).
+const wildcardUserSpeaker = "user:*"
+
+// SpeakerRefusal — отказ говорящему, который говорящим не бывает (Р3).
+//
+// Один разборщик на все методы, принимающие говорящего (`Check`, `BatchCheck`,
+// `CheckRelation`): отказ в одном из них оставил бы соседний спрашивающим от
+// имени «вошедшего без личности».
+//
+//   - `system_class:authenticated` — «вошедший» без названной личности есть
+//     противоречие (SC-14); любое имя класса, кроме `anonymous`, — тем же
+//     отказом;
+//   - подстановка любого вида, кроме переходной `user:*` (см.
+//     [SpeakerClasses]), — не говорящий (SC-15).
+//
+// nil — говорящий допустим.
+func SpeakerRefusal(speaker string) error {
+	kind, id, ok := strings.Cut(speaker, ":")
+	if !ok {
+		return nil
+	}
+	if SubjectType(kind) == SubjectTypeSystemClass {
+		if SubjectID(id) == ClassAnonymous {
+			return nil
+		}
+		return fmt.Errorf("Illegal argument subject: system class %s is not a speaker", id)
+	}
+	if id == "*" && speaker != wildcardUserSpeaker {
+		return fmt.Errorf("Illegal argument subject: wildcard is not a speaker")
+	}
+	return nil
+}
+
+// PublicationSubject — ХРАНИМЫЙ субъект публикации объекта для чтения без
+// входа (Р8, SC-12).
+//
+// Входное слово соседа не меняется: владелец ресурса публикует парой `user:*`
+// + `v_get` (`register-resource-checks-the-module-vocabulary.md`). Здесь —
+// ЕДИНСТВЕННЫЙ перевод этого слова в субъекта, которого хранит служба. Его
+// зовут запись и снятие публикации, разбор остаточных фактов и миграция
+// переезда: снятие, назвавшее другое написание, удалило бы несуществующий факт,
+// и чтение анонимом устояло бы (SC-13).
+const PublicationSubject = SpeakerAnonymous
+
+// PublicationRelation — отношение хранимой публикации.
+const PublicationRelation = "v_get"
+
+// IsStoredPublication — хранимый факт есть публикация для чтения без входа.
+// Узнаётся по идентичности хранимой пары, а не по входному слову: после
+// переезда входное слово (`user:*`) в фактах не встречается.
+func IsStoredPublication(subject, relation string) bool {
+	return subject == PublicationSubject && relation == PublicationRelation
+}
+
+// GrantsReadsOnly — каждый глагол роли — `get` либо `list` (Р4, SC-21).
+//
+// Судится АВТОРСКОЕ написание, а не раскрытый набор: глагол `*` раскрывается
+// в набор ТИПА, который растёт вместе с каталогом, и роль, читающая сегодня,
+// завтра писала бы — поэтому `*` пишущим считается всегда. Роль без правил
+// судится по своей хранимой проекции прав (`<модуль>.<ресурс>.<…>.<глагол>`),
+// и в ней действует то же правило.
+//
+// То же правило держит база (`kaname.role_grants_reads_only`) — на пути
+// записи, где у выдачи и правки роли последнее слово (ban #10); здесь оно
+// ради синхронного отказа до заведения операции.
+func (r Role) GrantsReadsOnly() bool {
+	if len(r.Rules) > 0 {
+		for _, rule := range r.Rules {
+			for _, v := range rule.Verbs {
+				if !IsClassReadVerb(v) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for _, p := range r.Permissions {
+		s := string(p)
+		i := strings.LastIndexByte(s, '.')
+		if i < 0 || !IsClassReadVerb(s[i+1:]) {
+			return false
+		}
+	}
+	return true
+}
+
+// RoleBoundToSystemClassText — текст отказа правке роли, выданной классу
+// (SC-22). Один производитель на синхронный отказ и на отказ записи.
+func RoleBoundToSystemClassText(id RoleID) string {
+	return "Role " + string(id) + " is bound to a system class subject; it accepts read verbs only"
+}
+
+// RoleNotReadOnlyForClassText — текст отказа выдаче классу роли с пишущим
+// глаголом (SC-21). Один производитель на синхронный отказ и на отказ записи.
+func RoleNotReadOnlyForClassText(id RoleID) string {
+	return "Role " + string(id) + " grants verbs beyond get and list; a system class subject accepts read-only roles"
+}

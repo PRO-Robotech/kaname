@@ -1,0 +1,39 @@
+# Пост-дифф ревью формы контракта — роль proto-api-reviewer. Запись не правится:
+# вердикт привязан к отпечатку (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/proto-api-reviewer
+owner: proto-api-reviewer
+mode: review
+subject: >-
+  kaname#829 — новый вид субъекта SUBJECT_TYPE_SYSTEM_CLASS = 4 (anonymous | authenticated),
+  комментарии пяти контрактов iam/v1, регенерация pkg/api.
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: 829-proto
+  base: 797031968   # origin/829, эпик
+  head: 1a398bdd8
+  files_touched: 13   # proto 5 · pkg/api 8
+proto_files_touched: 5
+content_digest: sha256:cb420e68d738dd5638bfef76ed2de5e82e33dc46008b8ffe1215c6ec0bc997f2
+digest_command: git diff --full-index 797031968...1a398bdd8 | sha256sum
+verdict: accepted
+blocking: false
+evidence:
+  - "строк диффа вне комментариев одна: + SUBJECT_TYPE_SYSTEM_CLASS = 4 (git diff 797031968..1a398bdd8 -- proto | grep -E '^[+-][^+-]' | grep -vE '^[+-]\\s*//')"
+  - "форма по Р1 приёмки anonymous-and-authenticated-are-subject-classes.md:97-112 — значение перечисления, не поле; ClusterGrantSubjectType не тронут"
+  - "buf lint (из proto/) — код 0; buf breaking против 797031968 и bbbe33524 — код 0 (мой прогон @1a398bdd8)"
+  - "аннотаций прав, http-отображений, RPC, сервисов не добавлено и не изменено; Internal-проекций новых нет; инфра-полей нет"
+  - "имён чужих продуктов в диффе 0"
+findings:
+  - severity: note
+    where: proto/kaname/cloud/iam/v1/access_binding.proto (AccessBinding.system), authorize_service.proto (AuthorizeCheckRequest.subject)
+    text: >-
+      комментарии описывают целевое состояние (системная выдача уже классом, user:* и
+      system_class:authenticated → INVALID_ARGUMENT), которое наступит только с S1 rpc-implementer;
+      до посадки S1 в ту же ветку эпика текст опережает дерево. Не блокирует: эпик садится целиком.
+  - severity: note
+    where: proto/kaname/cloud/iam/v1/access_binding_service.proto (CreateAccessBindingRequest)
+    text: >-
+      ограничения выдачи классу (только чтение Р4; anonymous — только target.resources, allInScope
+      отвергается) в комментарии запроса не названы; держатель — приёмка SC-19/SC-24 и S1.

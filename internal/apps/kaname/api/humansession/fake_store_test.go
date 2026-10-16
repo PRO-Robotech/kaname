@@ -995,9 +995,12 @@ func (w *fakeWriter) LockLookupSet(_ context.Context, userID domain.UserID) (dom
 	return *row, true, nil
 }
 
-func (w *fakeWriter) ConsumeLookupElement(_ context.Context, userID domain.UserID, element string) (bool, error) {
+func (w *fakeWriter) ConsumeLookupElement(_ context.Context, userID domain.UserID, element string, at time.Time) (bool, error) {
 	if userID == "" || element == "" || strings.ContainsRune(element, ',') {
 		return false, errFakeArg("Illegal argument lookup element: required and without a separator")
+	}
+	if at.IsZero() {
+		return false, errFakeArg("Illegal argument lookup element: moment of use required")
 	}
 	w.store.trip()
 	if err := w.fail("consume"); err != nil {
@@ -1018,13 +1021,17 @@ func (w *fakeWriter) ConsumeLookupElement(_ context.Context, userID domain.UserI
 		if err == nil {
 			cur.Verifier = v
 		}
+		cur.LastUsedAt, cur.LastUsed = at, true
 	})
 	return true, nil
 }
 
-func (w *fakeWriter) RecordAcceptedStep(_ context.Context, userID domain.UserID, step int64) (bool, error) {
+func (w *fakeWriter) RecordAcceptedStep(_ context.Context, userID domain.UserID, step int64, at time.Time) (bool, error) {
 	if userID == "" {
 		return false, errFakeArg("Illegal argument login_method.user_id: required")
+	}
+	if at.IsZero() {
+		return false, errFakeArg("Illegal argument login_method: moment of use required")
 	}
 	w.store.trip()
 	if err := w.fail("record-step"); err != nil {
@@ -1039,9 +1046,24 @@ func (w *fakeWriter) RecordAcceptedStep(_ context.Context, userID domain.UserID,
 	w.ops = append(w.ops, func() {
 		if cur, ok := w.factorRow(userID, domain.LoginMethodTOTP); ok && cur.State == domain.LoginMethodStateActive && (!cur.StepAccepted || cur.AcceptedStep < step) {
 			cur.AcceptedStep, cur.StepAccepted = step, true
+			cur.LastUsedAt, cur.LastUsed = at, true
 		}
 	})
 	return true, nil
+}
+
+// AdvanceSignCount — сдвиг счётчика ключа ЭТОЙ транзакцией (kaname#827):
+// одним оператором, как адаптер; счётчика дублёр не ведёт, и ответ — «строка
+// ключа есть». Строки нет — ноль строк, как у адаптера.
+func (w *fakeWriter) AdvanceSignCount(_ context.Context, id domain.AccessKeyID, _, _ uint32, _ time.Time) (bool, error) {
+	w.store.trip()
+	if err := w.fail("advance-sign-count"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	_, ok := w.store.accessKeyRows[id]
+	return ok, nil
 }
 
 func (w *fakeWriter) RemoveSecondFactor(_ context.Context, userID domain.UserID) (bool, error) {
@@ -1147,6 +1169,9 @@ type countingObserver struct {
 	akLogin map[humansession.AccessKeyLoginOutcome]int
 	// storeFailures — сбои хранилища у глаголов своих данных (kaname#691).
 	storeFailures map[humansession.StoreFailureVerb]int
+	// Ветвь ключа повышения (kaname#827): исходы и сигнал клонирования.
+	akStepUp    map[humansession.AccessKeyLoginOutcome]int
+	regressions int
 }
 
 func newCountingObserver() *countingObserver {
@@ -1161,7 +1186,20 @@ func newCountingObserver() *countingObserver {
 		sfEvents:           map[humansession.SecondFactorEvent]int{},
 		akLogin:            map[humansession.AccessKeyLoginOutcome]int{},
 		storeFailures:      map[humansession.StoreFailureVerb]int{},
+		akStepUp:           map[humansession.AccessKeyLoginOutcome]int{},
 	}
+}
+
+func (o *countingObserver) StepUpAccessKeyObserved(x humansession.AccessKeyLoginOutcome) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.akStepUp[x]++
+}
+
+func (o *countingObserver) SignCountRegressionObserved() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.regressions++
 }
 
 func (o *countingObserver) StoreFailureObserved(x humansession.StoreFailureVerb) {

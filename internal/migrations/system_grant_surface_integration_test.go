@@ -123,6 +123,7 @@ func upAllIAMMigrations(t *testing.T, dsn string) *sql.DB {
 const subjectRefSQL = `CASE b.subject_type
                          WHEN 'service_account' THEN 'service_account:' || b.subject_id
                          WHEN 'group'           THEN 'group:' || b.subject_id || '#member'
+                         WHEN 'system_class'    THEN 'system_class:' || b.subject_id
                          ELSE                        'user:' || b.subject_id
                        END`
 

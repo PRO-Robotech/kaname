@@ -229,7 +229,8 @@ func NewListOwnSessionsUseCase(d OwnSessionsDeps) (*ListOwnSessionsUseCase, erro
 
 // Execute — порядок: страница → носитель → чтение. Страница судится до
 // хранилища.
-func (uc *ListOwnSessionsUseCase) Execute(ctx context.Context, in ListOwnSessionsInput) (ListOwnSessionsOutput, error) {
+func (uc *ListOwnSessionsUseCase) Execute(ctx context.Context, in ListOwnSessionsInput) (_ ListOwnSessionsOutput, err error) {
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureOwnSessionsList, err) }()
 	if err := in.Page.validate(); err != nil {
 		return ListOwnSessionsOutput{}, err
 	}
@@ -280,7 +281,8 @@ func NewEndOwnSessionUseCase(d OwnSessionsDeps) (*EndOwnSessionUseCase, error) {
 // Execute — порядок: форма → носитель → свежесть → «это текущая» → замок
 // личности → живость действующей → снятие с условием субъекта, живости и срока
 // → событие → фиксация.
-func (uc *EndOwnSessionUseCase) Execute(ctx context.Context, in EndOwnSessionInput) (EndOwnSessionOutput, error) {
+func (uc *EndOwnSessionUseCase) Execute(ctx context.Context, in EndOwnSessionInput) (_ EndOwnSessionOutput, err error) {
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureOwnSessionEnd, err) }()
 	if _, ok := domain.ParseHumanSessionID(string(in.SessionID)); !ok {
 		if in.SessionID == "" {
 			return EndOwnSessionOutput{}, FieldRequired("sessionId")
@@ -340,7 +342,8 @@ func NewEndOtherOwnSessionsUseCase(d OwnSessionsDeps) (*EndOtherOwnSessionsUseCa
 // Execute — порядок: носитель → свежесть → замок личности → живость
 // действующей → снятие прочих живых → событие (если снято хоть что-то) →
 // фиксация.
-func (uc *EndOtherOwnSessionsUseCase) Execute(ctx context.Context, in EndOtherOwnSessionsInput) (EndOtherOwnSessionsOutput, error) {
+func (uc *EndOtherOwnSessionsUseCase) Execute(ctx context.Context, in EndOtherOwnSessionsInput) (_ EndOtherOwnSessionsOutput, err error) {
+	defer func() { err = observeStoreFailure(uc.deps.Observer, StoreFailureOwnSessionsEndOthers, err) }()
 	now := uc.deps.Now().UTC()
 	acting, err := uc.deps.actingSession(ctx, in.Bearer, now)
 	if err != nil {
