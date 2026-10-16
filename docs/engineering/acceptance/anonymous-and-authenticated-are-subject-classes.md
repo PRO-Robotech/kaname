@@ -52,7 +52,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     SC-01…53 и стадии S1–S4 не изменены. Последний вердикт `14fba0c2…` относится к
     редакции 6 и на эту редакцию не переносится. Что добавлено — раздел «Редакция 8: что
     добавлено»
-- **Дата:** 2026-10-16 · **редакция:** 8 (S5 — раздел «Редакция 8: что добавлено»). Редакция 2 закрыла возврат круга 1 (B1–B5 и
+  - 2026-10-16 · круг 1 дельты S5 · CHANGES_REQUESTED · `447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc` ·
+    `docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml`
+  - 2026-10-17 · правка ПОСЛЕ вердикта `447e8264…` · редакция 9: закрыты B1–B6 и M1–M4
+    записи круга 1 дельты S5 по решениям диспетчера; добавлен SC-72. Вердикт `447e8264…`
+    относится к редакции 8 и на эту редакцию не переносится. Что закрыто — раздел
+    «Редакция 9: что закрыто»
+- **Дата:** 2026-10-17 · **редакция:** 9 (S5 — разделы «Редакция 8: что добавлено» и «Редакция 9: что закрыто»). Редакция 2 закрыла возврат круга 1 (B1–B5 и
   замечания), редакция 3 — B1 и B2 круга 2, редакция 4 — шесть вопросов красной фазы к
   одобренной редакции 3, редакция 5 — решения Д1–Д7 к одобренной редакции 4, редакция 6 — K3 (DoD S1) к одобренной
   редакции 5, редакция 7 — исход краевой половины SC-18 к одобренной редакции 6. Что где
@@ -132,8 +138,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | `retired-resource-names-its-successor.md` | аноним на витрине каталога отвергается (IAM-SUC-08) | витрина пола «0» не объявляет и анонима по-прежнему отвергает (SC-36) |
 | `model-generated-from-manifest.md` | блок модели порождается из записи ресурса манифеста | новый ключ записи порождает три следствия в блоках контейнера и детей; модуль класс по-прежнему не называет (Р9, SC-71) |
 | `module-manifest-roles-and-seed-grants.md` | роль модуля объявляется разделом `roles` его манифеста | роль `registry.public.read` объявляет манифест registry (Р9 п. 4, П6) |
+| `model-composes-at-boot-from-delivered-manifests.md` | канон неприкосновенен (§2 п. 2, IAM-MB-1-03): блок типа, объявленного каноном, равен рендеру манифеста побайтово, иначе отказ пуска | **исключение, срок — до `kaname#858`:** для `registry_registry` и `registry_repository` рендер равен канону ЛИБО прежней редакции, определённой побайтово в Р10; третья форма — отказ (SC-70 (в), (г)); после `#858` — снова одна форма (SC-72). Действующая модель — всегда канон |
 
 Отпечатки соседей рецензент снимает тем же заходом: `sha256sum` по семи путям этой таблицы
+(у `model-composes-at-boot-from-delivered-manifests.md` строк две: опора S1–S4 и исключение S5)
 в `docs/engineering/acceptance/` на ревизии ревью. Сменилась редакция соседа — опора
 перепроверяется до вердикта (fa-b7).
 
@@ -319,13 +327,24 @@ SC-18 и предупреждение SC-51 остаются без измене
 - **У4. Решение принимает один запрос `relverdict`** из двух ветвей: ветви выдач по
   правилам роли и ветви фактов материализатора. Отдельного движка нет;
   `proto/kaname/cloud/iam/v1/fga_model.fga` — канон модели. Производитель «Тогда» в S5 —
-  путь `relverdict`. Сужение по цели (SC-68) — первое в порядке реализации S5.
+  путь `relverdict`. Сужение по цели (SC-68) — первое в порядке реализации S5: его
+  реализация и проба — задача `PRO-Robotech/kaname#857`, и она идёт раньше прочих полос
+  S5.
 
 **Сужение по цели — свойство решения.** Выдача с `target.resources: [X]` даёт право на X. На
-потомков X она его даёт, только если тип X объявлен контейнером публичного чтения. Другим
-объектам области выдачи она не даёт ничего: ни соседним реестрам проекта, ни их
+потомков X она его даёт, только если тип X объявлен контейнером публичного чтения, и путь
+к потомкам у двух видов субъекта разный:
+
+- **системный класс** достаёт до потомков через отношение `public_reader` на X (ветвь
+  фактов); правило роли над типом-ребёнком для этого не требуется;
+- **человек, учётка, группа** достают до потомка X только ветвью выдач, и только если
+  правило роли покрывает тип-ребёнок (у `registry.public.read` — `registry.repositories`).
+  `public_reader` принимает лишь `system_class`, поэтому выдача человеку его не пишет.
+
+Другим объектам области выдачи она не даёт ничего: ни соседним реестрам проекта, ни их
 репозиториям. Это свойство ответа `relverdict`, из какой бы ветви ни пришло основание, а не
-только свойство того, что пишет материализатор (SC-68).
+только свойство того, что пишет материализатор (SC-68). Выдача с `allInScope` по-прежнему
+достаёт до всей области (близнец SC-68).
 
 **Способ (решение 7): правка генератора, а не авторское отношение.** Запись ресурса
 манифеста получает ключ `publicReadToChildren: true`. Генератор блоков модели выводит из
@@ -376,8 +395,8 @@ SC-18 и предупреждение SC-51 остаются без измене
 `proto/kaname/cloud/iam/v1/fga_model.fga` kaname байт в байт. Вшитая копия
 `internal/authzmodel/fga_model.fga` совпадает с каноном так же. Совпадение судят те же
 исполнители, что сегодня: на старте kaname — `internal/modelcompose` (отказ пуска), в
-дереве kacho — `TestModelCanonAgreesWithPlatformManifests` (`internal/repohygiene`,
-исполнитель `tools/modelcanoncheck` из пина kaname). Порядок:
+дереве kacho — `PRO-Robotech/kacho:TestModelCanonAgreesWithPlatformManifests`
+(исполнитель `tools/modelcanoncheck` из пина kaname). Порядок:
 
 1. Выкатывается kaname новой версии. Она стартует с манифестом registry, доставленным
    ПРЕЖНЕЙ kacho (редакция ствола kacho `a95248464`), — SC-70 (а). Публичное чтение
@@ -386,14 +405,38 @@ SC-18 и предупреждение SC-51 остаются без измене
 2. Выкатывается kacho с манифестом registry новой редакции: ключ `publicReadToChildren` на
    `registries` и роль `registry.public.read` (`PRO-Robotech/kacho#3274`). Блоки совпадают с
    каноном побайтово, kaname стартует — SC-70 (б).
-3. Манифест registry в любой третьей форме, расходящейся с каноном, — отказ пуска, как
-   сегодня, — SC-70 (в).
+3. Манифест registry в третьей форме — отказ, как сегодня: на загрузке, если форма
+   нарушает правило ключа (SC-70 (в), текст SC-71 (б)), и на сборке модели, если загрузку
+   она проходит, а её блоки не равны ни канону, ни прежней редакции (SC-70 (г)).
+4. Задача-преемник `PRO-Robotech/kaname#858` снимает приём прежней редакции после шага 2.
+   С этого момента манифест прежней редакции — отказ пуска, новой — старт (SC-72).
 
-**Допущение автора** (вопрос в возврате диспетчеру): шаг 1 требует, чтобы kaname новой
-версии приняла прежнюю редакцию блоков registry. Это переходное признание с предикатом
-снятия, по образцу перевода `user:*` → `system_class`, который снимает
-`PRO-Robotech/kaname#836`. Признание снимается задачей-преемником, когда манифест новой
-редакции выкачен (шаг 2).
+**Решение диспетчера (вариант (а) Р10): переходный приём прежней редакции.** Шаг 1
+возможен только при том, что kaname новой версии принимает блоки registry прежней
+редакции. Это решение, а не допущение, и у него четыре границы:
+
+- **Что такое «прежняя редакция» — побайтово.** Это ровно два блока канона kaname
+  @`a7a726802`: `registry_registry` — строки 1303–1332 файла
+  `proto/kaname/cloud/iam/v1/fga_model.fga` (sha256
+  `b115c3c18f6ffdda0c22c1c742da50fbecd1a1f888d28810663429a97b240359`), `registry_repository`
+  — строки 1334–1355 (sha256
+  `d2aafdbdba912a2680d636230bf6e046f7434b057ec77f3070968b35de7aaa69`). Предикат:
+  `git show a7a726802:proto/kaname/cloud/iam/v1/fga_model.fga | sed -n 1303,1332p | sha256sum`
+  и то же с `1334,1355p`. Рендер манифеста registry kacho @`a95248464` даёт эти байты, иначе
+  kaname сегодня не стартовала бы (сверка `Compose` побайтовая).
+- **Что принимается.** Для этих двух типов и только для них рендер доставленного
+  манифеста равен либо блоку канона новой версии, либо блоку прежней редакции. Третья
+  форма — отказ (SC-70 (в), (г)). Действует при этом всегда канон новой версии: прежняя
+  редакция только допускается к сверке и в модель не попадает.
+- **Чем кончается.** Задача `PRO-Robotech/kaname#858` (по образцу `kaname#836`) снимает
+  приём после шага 2. Условие её старта: манифест новой редакции в стволе kacho
+  (`git grep -c 'publicReadToChildren' <голова ствола kacho>` по
+  `PRO-Robotech/kacho:services/registry/manifest.yaml` — не меньше 1) и выкачен на стенды.
+  Предикат снятия — сценарий SC-72:
+  `go test ./internal/modelcompose/ -run '^TestCompose_SC72_' -count=1` — `ok`. Проба приёма прежней редакции (SC-70 (а))
+  снимается тем же изменением.
+- **Исключение из «канон неприкосновенен»** названо в таблице соседей
+  (`model-composes-at-boot-from-delivered-manifests.md`) и действует до `kaname#858`.
 
 ## Как строится «Дано»
 
@@ -492,15 +535,19 @@ SC-18 и предупреждение SC-51 остаются без измене
     `internal/manifest/testdata/registry.public-read-fixture.yaml` — по образцу
     `internal/manifest/testdata/vpc.resources-fixture.yaml`. Содержимое фикстуры — та
     редакция манифеста, которую вносит `kacho#3274`, а равенство её блоков канону судит SC-70 (б);
-  - реестры `reg00000000000000001` (X) и `reg00000000000000002` (Y) в `prj-A`. Владелец
-    `usr-A` регистрирует их через `InternalIAMService.RegisterResource`, тем же путём, что
-    пробы `register_resource_integration_test.go`;
+  - реестры `reg00000000000000001` (X) и `reg00000000000000002` (Y) в `prj-A`. Их
+    регистрирует служба-владелец (registry) по внутреннему ребру
+    `InternalIAMService.RegisterResource`; `usr-A` — владелец объекта в поле владельца
+    запроса. Путь тот же, что у проб `register_resource_integration_test.go`;
   - репозитории `registry_repository:reg00000000000000001/app` (в X) и
     `registry_repository:reg00000000000000002/app` (в Y), зарегистрированные до выдачи, с
     указателем `parent` на свой реестр. Репозиторий
     `registry_repository:reg00000000000000001/late` регистрируется ПОСЛЕ выдачи — шагом
     сценария;
-  - человек `usr-D` — член `acc-A` без выдач (SC-68);
+  - человек `usr-D` — член `acc-A` без выдач (SC-65, SC-68);
+  - роль `rol-proj-reg-read` (`effectiveVerbs = [get, list]` над `iam.project` и
+    `registry.registries`, правило без имён и меток) — роль чтения, покрывающая и тип
+    проекта, и его тип-ребёнок (SC-65);
   - роль `rol-reg-get` (`effectiveVerbs = [get]` над `registry.registries`, правило без
     имён и меток), выданная `usr-B` на `prj-A` с целью
     `{"resources":{"resources":[{"type":"registry.registries","id":"reg00000000000000001"}]}}` —
@@ -1058,8 +1105,9 @@ SC-07 создана, текста отказа нет. Отличие — од�
 
 ### S5. Публичное чтение контейнера (kaname, затем kacho; `kaname#856`, `kacho#3274`)
 
-Порядок реализации внутри стадии: SC-68 первым (уточнение У4), затем SC-71 и SC-70, затем
-прочие. Порядок выкатки — Р10.
+Порядок реализации внутри стадии: SC-68 первым — задача `PRO-Robotech/kaname#857` (уточнение
+У4), затем SC-71 и SC-70, затем прочие; SC-72 — задача `PRO-Robotech/kaname#858` после
+выкатки kacho. Порядок выкатки — Р10.
 
 #### SC-60 — одна выдача анониму открывает реестр и все его репозитории, включая будущие
 
@@ -1072,8 +1120,8 @@ SC-07 создана, текста отказа нет. Отличие — од�
   выдачи);
 - `v_get` и `v_list` на `registry_registry:reg00000000000000001` (Р9 п. 2).
 
-**И** затем `usr-A` регистрирует `registry_repository:reg00000000000000001/late` (указатель
-`parent` → X, `RegisterResource`), выдача не меняется. После материализации `Check` от
+**И** затем служба-владелец регистрирует `registry_repository:reg00000000000000001/late`
+(`RegisterResource`, указатель `parent` → X, владелец объекта `usr-A`); выдача не меняется. После материализации `Check` от
 `system_class:anonymous` на `v_get` и `v_list` `…/late` → `allowed = true`. Репозиторий,
 созданный после выдачи, читается без второй выдачи.
 **И** тот же вопрос через внутреннее ребро `InternalIAMService.Check` (им спрашивает
@@ -1128,17 +1176,23 @@ SC-07 создана, текста отказа нет. Отличие — од�
 
 #### SC-65 — цель обязана быть объявленным контейнером; необъявленный — отказ с причиной
 
-**Дано** П6.
-**Когда** тело «выдача ПЧ», в котором цель —
+**Дано** П6. Роль — `rol-proj-reg-read`: её правило покрывает и тип цели (`iam.project`), и
+его тип-ребёнок (`registry.registries`, указатель `registries` называет `project`). Поэтому
+ворота покрытия цели правилом роли выдачу пропускают, и до отказа класса она доходит.
+**Когда** `usr-A` шлёт тело «выдача ПЧ» с `"roleId":"rol-proj-reg-read"` и целью
 `{"resources":{"resources":[{"type":"iam.project","id":"prj-A"}]}}`. Проект — контейнер
-реестров (указатель `registries` называет `project`), но передающим публичное чтение
-детям он НЕ объявлен.
+реестров, но передающим публичное чтение детям он НЕ объявлен.
 **Тогда** синхронно `FAILED_PRECONDITION` (HTTP 400), текст
-`Type iam.project does not pass public read to its children; role rolb1325b011aa17211d covers its child type registry.registries`;
+`Type iam.project does not pass public read to its children; role rol-proj-reg-read covers its child type registry.registries`;
 `Operation` не создана, выдачи нет.
-**Близнец:** SC-60 — то же тело с целью `registry.registries` X, тип которого объявлен
-(`publicReadToChildren`) → принято. Отличие — один факт: объявлен ли тип цели контейнером
-публичного чтения.
+**Близнец:** то же тело (роль `rol-proj-reg-read`, субъект `anonymous`) с целью
+`{"resources":{"resources":[{"type":"registry.registries","id":"reg00000000000000001"}]}}` —
+X, тип которого объявлен (`publicReadToChildren`), → `Operation`, `done=true` без `error`.
+Отличие — один факт: объявлен ли тип цели контейнером публичного чтения.
+**Контроль:** SC-60 (роль `registry.public.read`, цель X) — принято.
+**И (человеку отказа нет):** то же тело, что в «Когда» (роль `rol-proj-reg-read`, цель
+`iam.project` `prj-A`), с субъектом `{"type":"SUBJECT_TYPE_USER","id":"usr-D"}` →
+`Operation`, `done=true` без `error`. Отличие — один факт: вид субъекта.
 **И (механизм общий, У1):** имени модуля в механизме нет. Это утверждается на фикстуре
 модуля, отличного от registry: манифест `probemod` с контейнером `boxes` (`probemod_box`) и
 ребёнком `items` (`probemod_item`, указатель на `probemod_box`). С ключом
@@ -1149,7 +1203,7 @@ SC-07 создана, текста отказа нет. Отличие — од�
 Сфера отказа: только выдача системному классу, только роль, покрывающая тип-ребёнок типа
 цели, и только цель, тип которой не объявлен. Выдача классу роли, покрывающей лишь тип
 самой цели (SC-01, SC-07: `rol-read` на `vpc.network`), принимается как сегодня. Выдача
-человеку отказа не получает.
+человеку отказа не получает («И» выше).
 
 #### SC-66 — предел 256 объектов цели и свежесть сессии выдающего — как сейчас
 
@@ -1179,26 +1233,41 @@ SC-07 создана, текста отказа нет. Отличие — од�
 
 #### SC-68 — сужение по цели: выдача на X не даёт ничего другим объектам области
 
-Обязательный «Тогда» стадии и первый в порядке её реализации (уточнение У4). Производитель
-— путь решения о доступе `relverdict`, из какой бы ветви ни пришло основание: ветви выдач по
-правилам роли или ветви фактов материализатора.
+Обязательный «Тогда» стадии и первый в порядке её реализации (уточнение У4). Реализация и
+проба — задача `PRO-Robotech/kaname#857`; доказательство SC-68 — её комментарий
+`DoD-proof`. Производитель — путь решения о доступе `relverdict`, из какой бы ветви ни пришло
+основание: ветви выдач по правилам роли или ветви фактов материализатора. Сценарий
+утверждается в двух мирах, и в каждом ответ может дать только та выдача, о которой
+спрашивают.
 
-**Дано** П6; выдача ПЧ (область — проект `prj-A`, цель — только X) материализована. Затем
-`usr-A` выдаёт `usr-D` ту же роль `rolb1325b011aa17211d` на ту же область с той же целью
-(тело «выдача ПЧ» с субъектом `{"type":"SUBJECT_TYPE_USER","id":"usr-D"}`), и она тоже
-материализована.
-**Когда** вопросы `Check` от `system_class:anonymous` и от `user:usr-D`.
-**Тогда** для каждого из двух субъектов:
-- `v_get` на `registry_registry:reg00000000000000002` (Y, другой реестр того же проекта) →
-  `allowed = false`;
-- `v_get` и `v_list` на `registry_repository:reg00000000000000002/app` → `allowed = false`.
+**Часть А — класс.** **Дано** П6; выдача ПЧ (субъект `anonymous`, область — проект `prj-A`,
+цель — только X) материализована; других выдач классам нет.
+**Когда** вопросы `Check` от `system_class:anonymous`.
+**Тогда** `v_get` на `registry_registry:reg00000000000000002` (Y, другой реестр того же
+проекта) → `allowed = false`; `v_get` и `v_list` на
+`registry_repository:reg00000000000000002/app` → `allowed = false`.
+**И** `AuthorizeService.BatchCheck` от `system_class:anonymous` по четырём объектам (`v_get`):
+X, `…01/app`, Y, `…02/app` — ответы `[true, true, false, false]` в порядке запроса.
+**Близнец:** `v_get` на X и на `…01/app` от `system_class:anonymous` → `allowed = true`.
+Отличие — один факт: объект в цели (или её объявленный потомок) против объекта вне цели в
+той же области.
 
-**И** `AuthorizeService.BatchCheck` от каждого из двух субъектов по четырём объектам
-(`v_get`): X, `…01/app`, Y, `…02/app` — ответы `[true, true, false, false]` в порядке
-запроса. Постраничная форма решения сужает так же, как прямая.
-**Близнец:** `v_get` на X и на `…01/app` от тех же субъектов → `allowed = true`. Отличие —
-один факт: объект названной цели (или его потомок) против объекта вне цели в той же
-области.
+**Часть Б — человек, в мире БЕЗ выдачи ПЧ.** Выдачи классам нет вовсе, поэтому класс
+`anonymous`, который несёт `usr-D` (Р2), ему ничего не даёт.
+- **Б0 (основа).** **Дано** П6 без выдачи ПЧ; у `usr-D` выдач нет. **Когда** `Check` от
+  `user:usr-D`, `v_get` на X и на `…01/app`. **Тогда** оба → `allowed = false`.
+- **Б1 (собственная выдача на X).** **Дано** Б0, затем `usr-A` выдаёт `usr-D` роль
+  `rolb1325b011aa17211d` на `prj-A` с целью X (тело «выдача ПЧ» с субъектом
+  `{"type":"SUBJECT_TYPE_USER","id":"usr-D"}`), выдача материализована. **Тогда** от
+  `user:usr-D`: `v_get` на X и на `…01/app` → `allowed = true`; `v_get` на Y и `v_get`,
+  `v_list` на `…02/app` → `allowed = false`. `BatchCheck` по X, `…01/app`, Y, `…02/app` —
+  `[true, true, false, false]`. Отличие от Б0 — один факт: собственная выдача `usr-D`.
+- **Б2 (законный близнец — `allInScope`).** **Дано** Б0, затем `usr-D` получает ту же роль на
+  ту же область с целью `{"allInScope":{}}` вместо X, выдача материализована. **Тогда** от
+  `user:usr-D`: `v_get` на Y и на `…02/app` → `allowed = true`; `BatchCheck` по тем же
+  четырём объектам — `[true, true, true, true]`. Отличие от Б1 — один факт: вид цели. Этим
+  же показано, что Y и `…02/app` живы и достижимы выдачей, а отказ в Б1 дало сужение по
+  цели, а не отсутствие объекта.
 
 #### SC-69 — выдача `authenticated` открывает контейнер вошедшим и не открывает анониму
 
@@ -1214,25 +1283,36 @@ SC-07 создана, текста отказа нет. Отличие — од�
 
 #### SC-70 — выкатка: kaname первой стартует с прежним манифестом, затем с новым; третья форма — отказ
 
-**Дано** сборка модели kaname новой версии на старте (`internal/modelcompose`, `Compose`),
-канон — `fga_model.fga` этой версии.
+**Дано** старт kaname новой версии до `kaname#858`: загрузка доставленных манифестов
+(`internal/manifest`, `LoadDelivered`), затем сборка модели (`internal/modelcompose`,
+`Compose`); канон — `fga_model.fga` этой версии.
 **Когда** доставлен манифест registry:
 - (а) прежней редакции — `services/registry/manifest.yaml` kacho @`a95248464`, без ключа и
-  без роли;
+  без роли; его блоки — «прежняя редакция» Р10, побайтово;
 - (б) новой редакции — с ключом `publicReadToChildren: true` на `registries` и ролью
   `registry.public.read` (`kacho#3274`);
-- (в) третьей формы — ключ стоит на `repositories` вместо `registries`.
+- (в) третьей формы, нарушающей правило ключа: манифест (б), в котором ключ стоит на
+  `repositories` (`resources[1]`) вместо `registries`;
+- (г) третьей формы, проходящей загрузку: манифест (б), в котором изменено одно слово
+  авторского примечания ресурса `registries` (примечание переносится в блок дословно), —
+  рендер `registry_registry` не равен ни канону, ни прежней редакции.
 
 **Тогда** (а) старт успешен; поштучная публикация работает (SC-67); выдача ПЧ синхронно
 отвергается `FAILED_PRECONDITION` с сегодняшним текстом `Role rolb1325b011aa17211d not found`
-(`create.go`): роль ещё не доставлена. (б) старт успешен; блоки
-`registry_registry` и `registry_repository` в переписи `Reaffirmed`: их рендер равен блокам
-канона байт в байт. (в) отказ пуска сегодняшним текстом расхождения: тип, модуль и обе
-длины («канон неприкосновенен, и расхождение обязано быть решено, а не сглажено»).
+(`create.go`): роль ещё не доставлена.
+(б) старт успешен; блоки `registry_registry` и `registry_repository` в переписи
+`Reaffirmed`: их рендер равен блокам канона байт в байт.
+(в) отказ пуска на ЗАГРУЗКЕ, раньше сборки модели: находка правила SC-71 (б) дословно —
+`resources[1].publicReadToChildren: на тип registry_repository не указывает ни один ресурс модуля registry — объявление без следствия`
+— в составе сегодняшнего отказа доставки (`LoadDelivered`: «каталог доставки <каталог>:
+манифестов прочитано <N>, находок 1»).
+(г) отказ пуска на сборке модели сегодняшним текстом расхождения (`compose.go`):
+`modelcompose: тип "registry_registry" объявлен и каноном, и модулем "registry", а их блоки расходятся побайтово (канон <N> Б, рендер <M> Б) — канон неприкосновенен, и расхождение обязано быть решено, а не сглажено`.
 **И** в дереве kacho с манифестом (б) и пином kaname новой версии
 `go test ./internal/repohygiene/ -run TestModelCanonAgreesWithPlatformManifests -count=1` —
-зелёный; с манифестом (в) — красный с именем типа.
-**Близнец:** (б) для (в) — одно поле: тип, на котором стоит ключ.
+зелёный; с манифестом (в) или (г) — красный.
+**Близнецы:** (б) для (в) — одно поле: ресурс, на котором стоит ключ; (б) для (г) — одно
+слово примечания.
 
 #### SC-71 — ключ манифеста порождает ровно три следствия; неисполнимое объявление отвергается
 
@@ -1246,10 +1326,26 @@ SC-07 создана, текста отказа нет. Отличие — од�
 `system_class` стоит в составе `v_get` и `v_list`. Рендер `repositories` несёт `or
 public_reader from parent` в правой части `v_get` и `v_list`. В `v_update`, `v_delete`,
 `v_create`, ярусах и каскаде изменений нет: дифф рендера (а) против рендера манифеста
-@`a95248464` — ровно эти строки. (б) загрузка отвергает манифест с именем модуля, ресурса и
-ключа: объявление без следствия. (в) загрузка отвергает манифест с именем ключа: значение
-выражается только `true`. (г) отказ SC-37, как сегодня.
+@`a95248464` — ровно эти строки.
+(б) загрузка отвергает манифест находкой
+`resources[<i>].publicReadToChildren: на тип <тип модели> не указывает ни один ресурс модуля <модуль> — объявление без следствия`
+(`<i>` — номер ресурса в манифесте).
+(в) загрузка отвергает манифест находкой
+`resources[<i>].publicReadToChildren: значение false не принимается — ключ либо отсутствует, либо равен true`.
+(г) отказ SC-37, как сегодня.
 **Близнец:** (а) для (б) — наличие ребёнка; манифест без ключа для (в) — ключ отсутствует.
+
+#### SC-72 — конец перехода: после `kaname#858` прежняя редакция — отказ пуска, новая — старт
+
+**Дано** старт kaname той версии, в которую влита задача `PRO-Robotech/kaname#858` (приём
+прежней редакции снят); канон тот же, что в SC-70.
+**Когда** доставлен манифест registry (а) прежней редакции либо (б) новой редакции — те же
+два документа, что в SC-70.
+**Тогда** (а) отказ пуска на сборке модели сегодняшним текстом расхождения (текст SC-70 (г),
+тип `registry_registry`): исключение из «канон неприкосновенен» кончилось.
+(б) старт успешен, блоки в переписи `Reaffirmed`.
+**Близнец:** (б) для (а) — одно: редакция манифеста. Эта же пара — предикат снятия Р10:
+`go test ./internal/modelcompose/ -run '^TestCompose_SC72_' -count=1` — `ok`.
 
 ## Сценарий → производитель
 
@@ -1286,12 +1382,13 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
 | SC-60, 61, 63, 69 | ответ `Check` / `InternalIAMService.Check` на реестр и репозитории после выдачи, отзыва и регистрации нового репозитория | решение — `relverdict` (`internal/repo/kaname/pg/relverdict/query.go`: ветвь выдач `grantArmSQL`, ветвь фактов `factArmSQL`; поиск факта на предке названного типа — `fact_atom`, «непустой тип — на предке этого типа») — уже производит для фактов на предке; компиляция `public_reader from parent` в источник плана (`internal/authzplan`) и сами отношения в каноне — **заказаны** (S5). Факт `public_reader` пишет разворачивание выдачи (`internal/apps/kaname/api/access_binding/reconcile/tuples.go`, `ruleObjectTuples` — сегодня `v_*` и ярус на названном объекте) — **заказан** для типа с объявлением; отзыв факта вместе с выдачей — тем же путём, что отзыв `v_*` (`revoke.go`) — **заказан** для `public_reader`. Роль `registry.public.read` — раздел `roles` манифеста registry (`kacho#3274`), в kaname — фикстура П6 | прочитано @`a7a726802`; `git grep -c 'public_reader\|publicReadToChildren' a7a726802 -- .` → 0 попаданий |
 | SC-62 | отказ записи классу | канон: у `registry_registry` и `registry_repository` `v_update`, `v_delete`, `v_create` не принимают `system_class` и не выводятся из `public_reader` — уже производит (`fga_model.fga` строки 1328–1332, 1352–1355 @`a7a726802`); ключ их не трогает (SC-71 (а)) | прочитано |
 | SC-64 | отказ `allInScope` анониму | `systemClassTargetGate` (`internal/apps/kaname/api/access_binding/system_class_gates.go`, текст `textAnonymousAllInScope`) — уже производит | прочитано @`a7a726802` |
-| SC-65 | отказ необъявленного контейнера; механизм без имени модуля | **заказан** (S5): ворота выдачи классу рядом с `systemClassTargetGate` — после права выдавать, до создания `Operation`; источник «тип объявлен» — живой каталог из доставленных манифестов, а не литерал с именем модуля | — |
+| SC-65 | отказ необъявленного контейнера; человеку отказа нет; механизм без имени модуля | ворота покрытия цели правилом роли (ворота 3, `RoleCoversType`, `internal/apps/kaname/api/access_binding/structural_gates.go`) стоят раньше ворот класса и выдачу с ролью `rol-proj-reg-read` пропускают — уже производит. Отказ класса — **заказан** (S5): ворота выдачи классу рядом с `systemClassTargetGate`, после ворот 3 и права выдавать, до создания `Operation`; источник «тип объявлен» — живой каталог из доставленных манифестов, а не литерал с именем модуля | прочитано `structural_gates.go` и порядок `Execute` в `create.go` @`a7a726802` |
 | SC-66 | предел цели; окно свежести; пол уровня | `domain.MaxTargetResourcesPerBinding` = 256 (`internal/domain/access_binding_target.go:53`); `systemClassFreshnessGate`, `ClassGrantFreshness` = 15 мин (`system_class_gates.go`); пол `required_acr_min = "2"` у `AccessBindingService.Create` — уже производит | прочитано @`a7a726802` |
 | SC-67 | поштучная публикация | порт `publicReadPublisher` (`internal/apps/kaname/api/internal_iam/register_resource.go`) — уже производит | прочитано @`a7a726802` |
-| SC-68 | сужение по цели в решении, прямая и постраничная формы | решение — `relverdict`: `Ask` и постраничная форма раскладываются одной функцией (`sourcesOf`) и одним телом ветвей (`grantArmSQL`, `factArmSQL`); утверждение «выдача с целью `resources` не достаёт до объектов вне цели и её объявленных потомков» держит проба **заказанная** S5 первой | прочитано `query.go` @`a7a726802` |
-| SC-70 | старт с прежним и новым манифестом; отказ третьей формы | `internal/modelcompose/compose.go` (`Compose`: побайтовая сверка, `Reaffirmed`, отказ пуска) — уже производит для (б) и (в); признание прежней редакции (а) — **заказано** (S5, переходное, с предикатом снятия); kacho — `TestModelCanonAgreesWithPlatformManifests` (`internal/repohygiene`) — уже производит | прочитано @`a7a726802`; `git grep -n 'func TestModelCanonAgreesWithPlatformManifests' a95248464 -- internal/repohygiene` (kacho) |
-| SC-71 | ключ манифеста и три следствия; отказы загрузки | загрузка `internal/manifest/resources.go` (структура `Resource`; ключа нет) и генератор `internal/modelrender/render.go` (связь «X from <указатель>» — только каскад, строка 232) — **заказаны** (S5); отказ (г) — сборка модели по соседу `composed-model-admits-only-what-it-owns.md` — уже производит | прочитано @`a7a726802` |
+| SC-68 | сужение по цели в решении, прямая (`Check`) и постраничная (`BatchCheck`) формы | решение — `relverdict`: `Ask` и постраничная форма раскладываются одной функцией (`sourcesOf`) и одним телом ветвей (`grantArmSQL`, `factArmSQL`). Утверждение «выдача с целью `resources` не достаёт до объектов вне цели и её объявленных потомков, `allInScope` — до всей области» — работа задачи `PRO-Robotech/kaname#857` (реализация и проба, первой в S5); доказательство — её `DoD-proof` | прочитано `query.go` @`a7a726802`; `gh issue view 857 -R PRO-Robotech/kaname` — OPEN |
+| SC-70 | старт с прежним и новым манифестом; отказ третьей формы на загрузке (в) и на сборке (г) | `internal/manifest/delivery.go` (`LoadDelivered`: находки — отказ старта) и `internal/modelcompose/compose.go` (`Compose`: побайтовая сверка, `Reaffirmed`, отказ пуска) — уже производят для (б) и (г); находка (в) — правило SC-71 (б), **заказано**; приём прежней редакции (а) — **заказан** (S5, переходный, снимает `kaname#858`); kacho — `PRO-Robotech/kacho:TestModelCanonAgreesWithPlatformManifests` — уже производит | прочитано @`a7a726802`; `git grep -n 'func TestModelCanonAgreesWithPlatformManifests' a95248464` по `PRO-Robotech/kacho@a95248464:internal/repohygiene/modelcanonpin_test.go` → строка 40 |
+| SC-71 | ключ манифеста и три следствия; находки загрузки (б), (в) | загрузка `internal/manifest/resources.go` (структура `Resource`; ключа нет; находки формы `resources[<i>].<поле>: …`) и генератор `internal/modelrender/render.go` (связь «X from <указатель>» — только каскад, строка 232) — **заказаны** (S5); отказ (г) — сборка модели по соседу `composed-model-admits-only-what-it-owns.md` — уже производит | прочитано @`a7a726802` |
+| SC-72 | конец перехода: прежняя редакция — отказ пуска, новая — старт | **заказан** задачей `PRO-Robotech/kaname#858`: снятие приёма прежней редакции; отказ — сегодняшний текст `Compose` (уже производит) | `gh issue view 858 -R PRO-Robotech/kaname` — OPEN |
 
 Сценариев без производителя, у которых производитель не заказан стадией, — 0.
 
@@ -1308,7 +1405,8 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
    чтение классу через отдельное отношение, и только от типа, объявленного манифестом
    (SC-61, SC-65).
 7. Выдача с целью `resources` не достаёт до объектов вне цели и её объявленных потомков —
-   ни в одной форме решения (SC-68).
+   ни в прямой форме решения (`Check`), ни в постраничной (`BatchCheck`) (SC-68,
+   `kaname#857`).
 
 ## DoD
 
@@ -1405,64 +1503,57 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
 - проба playwright в `ui-future/e2e/specs/` по каждому из SC-50, 51, 52, 53, ссылка на задачу
   внутри `test(…)`, `retries: 0`.
 
-**S5 (kaname#856, затем kacho#3274)** — SC-60…71. Порядок реализации — SC-68 первым;
-порядок выкатки — kaname, затем kacho (Р10).
+**S5 (kaname#856, kaname#857, kaname#858, затем kacho#3274)** — SC-60…72. Порядок
+реализации — SC-68 первым: задача `PRO-Robotech/kaname#857` идёт раньше прочих полос S5;
+порядок выкатки — kaname, затем kacho, затем `kaname#858` (Р10).
+
+Пробы S5 ещё не написаны, поэтому ниже они названы командой с шаблоном `-run` или прозой,
+а не координатой; имена встают координатами, когда красные пробы лягут в дерево (так сделан
+DoD S1).
+
 - канон `proto/kaname/cloud/iam/v1/fga_model.fga` и вшитая копия
   `internal/authzmodel/fga_model.fga` правятся одним коммитом; `cmp` двух файлов — пусто;
-- integration kaname (`testcontainers`, посев П6) — файл
-  `internal/apps/kaname/api/access_binding/public_container_read_integration_test.go`:
-  - `TestPublicContainerRead_SC60_OneClassGrantReadsEveryRepositoryIncludingLater`;
-  - `TestPublicContainerRead_SC61_RegistryGetHolderDoesNotReadRepositories`;
-  - `TestPublicContainerRead_SC62_ClassGetsNoWriteOnContainerOrChildren`;
-  - `TestPublicContainerRead_SC63_RevokeRemovesReadFromEveryRepository`;
-  - `TestPublicContainerRead_SC64_AnonymousAllInScopeStillRejected`;
-  - `TestPublicContainerRead_SC65_UndeclaredContainerIsRejectedWithReason`;
-  - `TestPublicContainerRead_SC66_TargetCeilingAndFreshnessUnchanged`;
-  - `TestPublicContainerRead_SC67_SingleRepositoryPublicationUnchanged`;
-  - `TestPublicContainerRead_SC69_AuthenticatedGrantOpensSignedInOnly`.
-
-  Предикат задачи: пробы SC-60 и SC-63 на `origin/main` kaname @`a7a726802` красные
-  (наследования чтения от реестра там нет), на голове стадии — зелёные. Оба вывода идут в
-  `DoD-proof`;
-- integration kaname на пути решения, SC-68 — файл
-  `internal/repo/kaname/pg/relverdict/target_narrowing_integration_test.go`:
-  `TestAsk_SC68_TargetResourcesDoNotReachOtherObjectsOfTheScope` (прямая форма) и
-  `TestBatch_SC68_TargetResourcesNarrowEveryObjectOfThePage` (постраничная форма). Проба
-  спрашивает `relverdict` напрямую и через `AuthorizeService`, и её вывод идёт в
-  `DoD-proof`;
-- unit kaname, механизм без имени модуля (SC-65 «И», SC-71):
-  `internal/modelrender/public_read_children_test.go` —
-  `TestRender_SC71_DeclaredContainerPassesPublicReadToChildren`,
-  `TestRender_SC71_DeclarationWithoutChildIsRefused`,
-  `TestRender_SC71_FalseIsNotASecondWayToSayNo`,
-  `TestRender_SC65_ForeignModuleContainerRendersTheSameThreeConsequences` (фикстура
-  `probemod`); `internal/apps/kaname/api/access_binding/reconcile/public_reader_test.go` —
-  `TestRuleObjectTuples_SC65_DeclaredTypeGetsPublicReaderUndeclaredDoesNot`;
-- unit kaname, выкатка SC-70: `internal/modelcompose/public_read_rollout_test.go` —
-  `TestCompose_SC70_PreviousRegistryManifestStillComposes`,
-  `TestCompose_SC70_NewRegistryManifestMatchesCanonByteForByte`,
-  `TestCompose_SC70_ThirdFormIsRefused`;
+- **SC-68 — задача `kaname#857`, первой.** Integration на пути решения:
+  `go test -tags=integration ./internal/repo/kaname/pg/relverdict/ -run '^Test(Ask|Batch)_SC68_' -count=1`
+  — прямая форма (`Ask`) и постраничная (`BatchCheck`), обе части сценария: класс (часть А)
+  и человек в мире без выдачи ПЧ с близнецами Б0, Б1, Б2. Проба спрашивает `relverdict`
+  напрямую и через `AuthorizeService`; её вывод — в комментарии `DoD-proof` задачи `#857`,
+  и он же — доказательство SC-68 для S5;
+- integration kaname (`testcontainers`, посев П6) по SC-60…67 и SC-69:
+  `go test -tags=integration ./internal/apps/kaname/api/access_binding/ -run '^TestPublicContainerRead_SC(6[0-7]|69)_' -count=1`
+  — по пробе на ID. Предикат задачи: пробы SC-60 и SC-63 на `origin/main` kaname
+  @`a7a726802` красные (наследования чтения от реестра там нет), на голове стадии — зелёные.
+  Оба вывода идут в `DoD-proof`;
+- unit kaname, механизм без имени модуля (SC-65 «И», SC-71): генератор —
+  `go test ./internal/modelrender/ -run '^TestRender_SC(65|71)_' -count=1` (ключ на
+  фикстуре `probemod` и на манифесте registry; находки (б), (в) SC-71 дословно); разворачивание
+  выдачи — `go test ./internal/apps/kaname/api/access_binding/reconcile/ -run '^TestRuleObjectTuples_SC65_' -count=1`
+  (объявленный тип получает `public_reader`, необъявленный — нет);
+- unit kaname, выкатка SC-70 (все четыре формы, отказ (в) — на загрузке, (г) — на сборке):
+  `go test ./internal/modelcompose/ ./internal/manifest/ -run '^Test(Compose|LoadDelivered)_SC70_' -count=1`;
+- **SC-72 — задача `kaname#858`, после выкатки kacho.**
+  `go test ./internal/modelcompose/ -run '^TestCompose_SC72_' -count=1` — `ok`; тем же
+  изменением снимаются проба и приём SC-70 (а). Это предикат снятия Р10;
 - проба kacho, плоскость данных реестра (анонимный поток включён посадкой фикстуры, как
-  SC-39) — `services/registry/internal/dataplane/public_registry_read_test.go`:
-  `TestPublicRegistryRead_SC60_AnonymousPullsEveryRepositoryIncludingLater`,
-  `TestPublicRegistryRead_SC62_AnonymousPushIsDenied`,
-  `TestPublicRegistryRead_SC63_RevokeEndsAnonymousPull`,
-  `TestPublicRegistryRead_SC68_OtherRegistryOfTheProjectStaysClosed`;
-- побайтовое совпадение блоков (Р10, SC-70 (б)) в kacho —
+  SC-39), в дереве `PRO-Robotech/kacho`:
+  `go test ./services/registry/internal/dataplane/ -run '^TestPublicRegistryRead_SC(60|62|63|68)_' -count=1`
+  — анонимное чтение всех репозиториев реестра включая поздний, отказ анонимной записи,
+  конец чтения после отзыва, закрытый соседний реестр проекта;
+- побайтовое совпадение блоков (Р10, SC-70 (б)) в дереве `PRO-Robotech/kacho` —
   `go test ./internal/repohygiene/ -run TestModelCanonAgreesWithPlatformManifests -count=1`
   на манифесте новой редакции и пине kaname этой стадии, зелёный;
-- newman на стенде платформы kacho (задача `kacho#3274`), коллекция
-  `services/registry/tests/newman/cases/registry-public-read.py`, с парой «статус + `code`»
-  по каждому из ID: SC-60, 61, 62, 63, 64, 65, 66 (а), 67, 68, 69. Вопросы `Check` задаёт
-  кластерный администратор через край. Запись ведомости производителя для новой коллекции.
-  На автономном стенде kaname сценарии S5 не конструируемы, причина та же, что у SC-10:
-  реестр регистрирует его владелец, а владельца реестра на стенде службы без платформы нет;
+- newman на стенде платформы kacho (задача `kacho#3274`), новая коллекция модуля registry
+  `registry-public-read` в `PRO-Robotech/kacho:services/registry/tests/newman/cases/`, с
+  парой «статус + `code`» по каждому из ID: SC-60, 61, 62, 63, 64, 65, 66 (а), 67, 68, 69.
+  Вопросы `Check` задаёт кластерный администратор через край. Запись ведомости
+  производителя для новой коллекции. На автономном стенде kaname сценарии S5 не
+  конструируемы, причина та же, что у SC-10: реестр регистрирует его владелец, а владельца
+  реестра на стенде службы без платформы нет;
 - только unit или integration, с причиной: SC-66 (в), (г) — возраст предъявления на стенде
   не управляется, окно судится часами фикстуры; SC-66 (д) — форма пола службы (как SC-26);
-  SC-70, SC-71 — отказ загрузки и старта, запроса нет;
-- признание прежней редакции блоков (Р10, шаг 1) несёт предикат снятия и задачу-преемника,
-  заведённую и привязанную к эпику до вливания S5;
-- `make lint` и полный хук отправки зелёные; комментарий `DoD-proof @<sha>` в задаче.
+  SC-70, SC-71, SC-72 — отказ загрузки и старта, запроса нет;
+- `make lint` и полный хук отправки зелёные; комментарий `DoD-proof @<sha>` в каждой задаче
+  стадии (`#856`, `#857`, `#858`).
 
 **Изменение целиком:** стенд по снятию `make stand-ns-down` чист (перепись остатков 0);
 записки vault по `AccessBinding`, `AuthorizeService.Check` и ребру край → kaname обновлены.
@@ -1554,7 +1645,7 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
 |---|---|---|
 | решение 1 | отдельное отношение `public_reader`; у репозитория `v_get`/`v_list … or public_reader from parent`; общего `v_get from parent` нет | Р9 п. 1, «Способ»; SC-61, SC-71 (а); инвариант 6 |
 | решение 2 | `registries.get` и `registries.list` принимают `system_class` | Р9 п. 2, «Способ»; SC-60 (`v_get`/`v_list` на реестре), SC-71 (а) |
-| решение 3 | только чтение: `update`, `delete`, `push` не наследуются | Р9 п. 3; SC-62; проба kacho `TestPublicRegistryRead_SC62_AnonymousPushIsDenied` |
+| решение 3 | только чтение: `update`, `delete`, `push` не наследуются | Р9 п. 3; SC-62; проба kacho плоскости данных реестра «анонимная запись отвергается» (DoD S5) |
 | решение 4 | роль `registry.public.read`, только чтение, не `registry.token.*` | Р9 п. 4; П6; соседи (`module-manifest-roles-and-seed-grants.md`) |
 | решение 5 | поштучная публикация работает | Р9 п. 5; SC-67 |
 | решение 6 | канон kaname и манифест kacho — одно согласованное изменение, расхождение — отказ пуска | Р9 п. 6; Р10; SC-70; DoD S5 (канон и вшитая копия одним коммитом) |
@@ -1566,3 +1657,23 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
 | задание: держатели | интеграционные пробы kaname и пробы kacho с именами | DoD S5 |
 | задание: выкатка | сначала kaname, затем kacho | Р10; SC-70 |
 | задание: побайтовое совпадение | блоки манифеста kacho равны блокам канона `fga_model.fga` | Р10; SC-70 (б); DoD S5 |
+
+## Редакция 9: что закрыто
+
+Возврат круга 1 дельты S5 — запись
+`docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml`.
+Это второй и последний круг (fa-b8): решения диспетчера по каждому замечанию окончательны.
+Число сценариев — 62: добавлен SC-72 (конец перехода Р10). SC-01…53 и S1–S4 не изменены.
+
+| замечание | решение диспетчера | где закрыто |
+|---|---|---|
+| B1 · FORMAT | пробы kacho — с домом `PRO-Robotech/kacho:…`; ещё не написанные пробы S5 — командой с `-run '<шаблон>'` или прозой; предикат производителя SC-70 — по корню, который резолвится; гейты координат и путей — зелёные до отправки | Р10 (`PRO-Robotech/kacho:TestModelCanonAgreesWithPlatformManifests`); строка производителя SC-70 (путь с домом `PRO-Robotech/kacho@a95248464:…`); DoD S5 (все пробы — шаблоном `-run`, пробы kacho — в дереве `PRO-Robotech/kacho`); таблица «Редакция 8», решение 3 (прозой) |
+| B2 · CONSTRUCTIBILITY | охват узкий; в SC-65 — роль, покрывающая и тип цели, и тип-ребёнок | П6 (`rol-proj-reg-read`: `iam.project` и `registry.registries`); SC-65 («Когда» на этой роли, близнец — та же роль с целью X, контроль — SC-60); строка производителя SC-65 (порядок ворот) |
+| B3 · CONSTRUCTIBILITY | SC-70 (в) — отказ на загрузке по правилу SC-71 (б) с его текстом | SC-71 (б), (в) — тексты находок; SC-70 (в) — находка загрузки дословно; SC-70 (г) — третья форма, проходящая загрузку, отказ сборки модели; строки производителя SC-70, SC-71 |
+| B4 · COVERAGE | вариант (а) — решение; преемник `kaname#858`, предикат снятия, сценарий конца перехода, побайтовое определение прежней редакции, исключение в таблице соседей со сроком | Р10 (шаги 3–4, абзац «Решение диспетчера» с четырьмя границами: sha256 двух блоков и предикат командой `git show`, `sed -n`, `sha256sum`); SC-72; строка производителя SC-72; таблица соседей (`model-composes-at-boot-from-delivered-manifests.md`, исключение до `#858`); DoD S5 |
+| B5 · PRODUCER | `kaname#857` — в У4, SC-68, строке производителя и DoD S5; производитель SC-68 — работа `#857` | Р9 У4; вводная S5; SC-68; строка производителя SC-68; инвариант 7; DoD S5 |
+| B6 · TWIN | близнецы в мире без выдачи анониму: собственная выдача `usr-D` на X → «да» на X, «нет» на Y; та же роль с `allInScope` → «да» на Y | SC-68 часть Б: Б0 (без выдач — «нет» на X), Б1 (выдача на X), Б2 (`allInScope`); часть А — класс отдельно |
+| M1 | пути к потомкам у класса и у человека назвать явно | Р9 «Сужение по цели» (два пути) |
+| M2 | инвариант 7 сузить до утверждаемых форм | инвариант 7 (`Check` и `BatchCheck`) |
+| M3 | «человеку отказа нет» — сценарием | SC-65 «И (человеку отказа нет)» |
+| M4 | регистрацию делает служба-владелец по внутреннему ребру | П6 (реестры); SC-60 («И» про `…/late`) |
