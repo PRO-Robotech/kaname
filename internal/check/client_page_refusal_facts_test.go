@@ -23,6 +23,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // Факты об отказах на клиентских страницах службы, которые выводятся из
@@ -572,4 +573,138 @@ func TestFreshnessRefusalAgreesOnBothPages(t *testing.T) {
 	al, err := os.ReadFile(platformtree.RequirePath(t, refusalFactsAuthLaneRel)) // #nosec G304 -- путь собран из корня собственного модуля
 	require.NoError(t, err)
 	require.Empty(t, auditFreshnessAgreement(string(rs), string(al)))
+}
+
+// ---------------------------------------------------------------------------
+// AKS-10: утверждение ключа доступа на двух поверхностях.
+
+// assertionSurfaceRows — строки Р1 таблицы различия: первая ячейка дословно.
+var assertionSurfaceRows = []string{
+	"форма",
+	"кодировка байтов",
+	"<code>userHandle</code>",
+	"отказ по существу",
+	"испытание после отказа",
+}
+
+// assertionLoginFields — поля сериализации браузера на полосе входа и поле
+// сообщения `AssertionCredential`, которому каждое соответствует. Сторона
+// REST сверяется с дескриптором сообщения.
+var assertionLoginFields = map[string]string{
+	"response.clientDataJSON":    "client_data_json",
+	"response.authenticatorData": "authenticator_data",
+	"response.signature":         "signature",
+	"response.userHandle":        "user_handle",
+	"rawId / id":                 "id",
+}
+
+func auditAssertionSurfaces(page string) []string {
+	section, n, ok := sectionAfter(page, assertionSurfacesAnchor)
+	if !ok {
+		return []string{fmt.Sprintf("на странице %s нет таблицы «утверждение на двух поверхностях» (якорь %s)",
+			refusalFactsAuthLaneRel, assertionSurfacesAnchor)}
+	}
+	var findings []string
+	if n != 1 {
+		findings = append(findings, fmt.Sprintf("якорь %s стоит %d раз — таблица различия обязана быть одна",
+			assertionSurfacesAnchor, n))
+	}
+	rows := map[string][]string{}
+	mapping := map[string]string{}
+	for _, cells := range tableRows(section) {
+		if len(cells) == 3 {
+			rows[cells[0]] = cells
+		}
+		if len(cells) == 2 {
+			l, r := codesIn(cells[0]), codesIn(cells[1])
+			if len(l) == 1 && len(r) == 1 {
+				mapping[l[0]] = r[0]
+			}
+		}
+	}
+	for _, label := range assertionSurfaceRows {
+		if rows[label] == nil {
+			findings = append(findings, fmt.Sprintf("в таблице различия нет строки %q", label))
+		}
+	}
+	if r := rows["отказ по существу"]; r != nil {
+		login, rest := r[1], r[2]
+		if !hasCode(rest, "400") || !hasCode(rest, "3") || !hasCode(rest, access_keys.TextAssertionNotAccepted) {
+			findings = append(findings, fmt.Sprintf("строка «отказ по существу»: REST обязан быть 400 · 3 · %q, на странице %q",
+				access_keys.TextAssertionNotAccepted, rest))
+		}
+		if hasCode(rest, "401") || hasCode(rest, "16") {
+			findings = append(findings, "строка «отказ по существу»: у REST назван 401/16 — это код полосы входа")
+		}
+		if !hasCode(login, "401") || !hasCode(login, "16") || !hasCode(login, humansession.TextAuthenticationFailed) {
+			findings = append(findings, fmt.Sprintf("строка «отказ по существу»: полоса входа обязана быть 401 · 16 · %q, на странице %q",
+				humansession.TextAuthenticationFailed, login))
+		}
+	}
+	// Поля REST — из дескриптора сообщения контракта, в обе стороны.
+	fields := (&iamv1.AssertionCredential{}).ProtoReflect().Descriptor().Fields()
+	json := map[string]string{}
+	for i := 0; i < fields.Len(); i++ {
+		json[string(fields.Get(i).Name())] = fields.Get(i).JSONName()
+	}
+	mapped := map[string]bool{}
+	for login, protoName := range assertionLoginFields {
+		want, ok := json[protoName]
+		if !ok {
+			findings = append(findings, fmt.Sprintf("поля %s в AssertionCredential нет — перечень соответствия устарел", protoName))
+			continue
+		}
+		mapped[protoName] = true
+		if mapping[login] != want {
+			findings = append(findings, fmt.Sprintf("соответствие полей: %s → %s обязано стоять строкой таблицы, на странице %q",
+				login, want, mapping[login]))
+		}
+	}
+	for name := range json {
+		if !mapped[name] {
+			findings = append(findings, fmt.Sprintf("поле %s сообщения AssertionCredential не названо в соответствии полей", name))
+		}
+	}
+	sort.Strings(findings)
+	return findings
+}
+
+// TestAccessKeyAssertionSurfacesTableMatchesTheProducers — AKS-10.
+func TestAccessKeyAssertionSurfacesTableMatchesTheProducers(t *testing.T) {
+	page, err := os.ReadFile(platformtree.RequirePath(t, refusalFactsAuthLaneRel)) // #nosec G304 -- путь собран из корня собственного модуля
+	require.NoError(t, err)
+	require.Empty(t, auditAssertionSurfaces(string(page)))
+}
+
+// TestAccessKeyAssertionSurfacesInjection — AKS-10 близнец: строка «отказ REST
+// — 401» краснит с именем строки; верная таблица молчит.
+func TestAccessKeyAssertionSurfacesInjection(t *testing.T) {
+	row := func(rest string) string {
+		return "<tr><td>отказ по существу</td><td><code>401</code>, код <code>16</code>, <code>" +
+			humansession.TextAuthenticationFailed + "</code></td><td>" + rest + "</td></tr>\n"
+	}
+	good := "<code>400</code>, код <code>3</code>, <code>" + access_keys.TextAssertionNotAccepted + "</code>"
+	page := func(rest string) string {
+		var b strings.Builder
+		b.WriteString("#### Утверждение на двух поверхностях " + assertionSurfacesAnchor + "\n\n<table>\n")
+		for _, l := range assertionSurfaceRows {
+			if l == "отказ по существу" {
+				b.WriteString(row(rest))
+				continue
+			}
+			b.WriteString("<tr><td>" + l + "</td><td>…</td><td>…</td></tr>\n")
+		}
+		b.WriteString("</table>\n\n<table>\n")
+		b.WriteString("<tr><td><code>response.clientDataJSON</code></td><td><code>clientDataJson</code></td></tr>\n")
+		b.WriteString("<tr><td><code>response.authenticatorData</code></td><td><code>authenticatorData</code></td></tr>\n")
+		b.WriteString("<tr><td><code>response.signature</code></td><td><code>signature</code></td></tr>\n")
+		b.WriteString("<tr><td><code>response.userHandle</code></td><td><code>userHandle</code></td></tr>\n")
+		b.WriteString("<tr><td><code>rawId / id</code></td><td><code>id</code></td></tr>\n</table>\n\n### Дальше\n")
+		return b.String()
+	}
+	require.Empty(t, auditAssertionSurfaces(page(good)), "законный близнец: таблица верна")
+	got := strings.Join(auditAssertionSurfaces(page("<code>401</code>, код <code>16</code>, <code>"+access_keys.TextAssertionNotAccepted+"</code>")), "\n")
+	require.Contains(t, got, "строка «отказ по существу»: у REST назван 401/16")
+	require.Contains(t, strings.Join(auditAssertionSurfaces(strings.Replace(page(good), "<tr><td>кодировка байтов</td><td>…</td><td>…</td></tr>\n", "", 1)), "\n"),
+		`нет строки "кодировка байтов"`)
 }

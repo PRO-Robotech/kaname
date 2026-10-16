@@ -647,7 +647,8 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 `credProps.rk`, если браузер его сообщил (сообщённое `false` отвергается: ключ обязан быть
 обнаруживаемым). Форма имени и описания судится **до** результата церемонии и испытание не
 гасит. Утверждение — `{ "credential": { "id", "clientDataJson", "authenticatorData",
-"signature", "userHandle" } }`; ответ — `{ "userId", "accessKeyId", "flags": { "userPresent",
+"signature", "userHandle" } }` (чем оно отличается от утверждения полосы входа —
+[таблица ниже](#assertion-surfaces)); ответ — `{ "userId", "accessKeyId", "flags": { "userPresent",
 "userVerified", "backupEligible", "backupState" } }`, и `userId` всегда равен вызывающему.
 
 Число ключей человека ограничено потолком `own-ceilings.access-keys-per-user` (ноль — «ключей
@@ -685,6 +686,37 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 `POST /iam/v1/accessKeys:beginAssertion` выдаёт новое испытание при любом состоянии прежнего.
 Малформный `accessKeyId` — `400` `invalid access key id '…'` первым стейтментом; чужой и
 несуществующий ключ на снятии — одинаковое `404`.
+
+#### Утверждение на двух поверхностях {#assertion-surfaces}
+
+Одно и то же утверждение ключа служба принимает на двух поверхностях, и они различаются: на
+[полосе входа](#access-key-login) утверждение **есть** удостоверение ещё никем не названного
+вызывающего, на REST-фронте — полезная нагрузка вызова живой сессии. Различие объявлено здесь,
+и других его описаний нет.
+
+<table>
+  <thead><tr><th>свойство</th><th>полоса входа <code>POST /iam/v1/auth/access-key/login</code></th><th>REST <code>POST /iam/v1/accessKeys:finishAssertion</code></th></tr></thead>
+  <tbody>
+    <tr><td>форма</td><td><code>credential.response.&#123;clientDataJSON, authenticatorData, signature, userHandle&#125;</code> — сериализация браузера без <code>clientExtensionResults</code> и <code>authenticatorAttachment</code>; лишнее поле — <code>400</code> с его именем</td><td><code>credential.&#123;id, clientDataJson, authenticatorData, signature, userHandle&#125;</code> — сообщение <code>AssertionCredential</code>, плоское; сериализация браузера — отказ формы <code>Illegal argument credential.client_data_json: required</code> до сверки, испытание не тратится</td></tr>
+    <tr><td>кодировка байтов</td><td>base64url без дополнения</td><td>base64 и base64url, с дополнением и без</td></tr>
+    <tr><td><code>userHandle</code></td><td>обязателен: испытание не называет человека</td><td>необязателен: испытание выдано вызывающему; пустой — «не прислан», присланный сверяется</td></tr>
+    <tr><td>отказ по существу</td><td><code>401</code>, код <code>16</code>, <code>authentication failed</code></td><td><code>400</code>, код <code>3</code>, <code>access key assertion is not accepted: begin the assertion again</code>, <code>details</code> пуст</td></tr>
+    <tr><td>испытание после отказа</td><td>погашено при любом исходе предъявления</td><td>гасится только принятым утверждением; после отказа живо до своего срока</td></tr>
+  </tbody>
+</table>
+
+Поля браузера переходят в поля сообщения одним переименованием:
+
+<table>
+  <thead><tr><th>полоса входа</th><th>REST</th></tr></thead>
+  <tbody>
+    <tr><td><code>response.clientDataJSON</code></td><td><code>clientDataJson</code></td></tr>
+    <tr><td><code>response.authenticatorData</code></td><td><code>authenticatorData</code></td></tr>
+    <tr><td><code>response.signature</code></td><td><code>signature</code></td></tr>
+    <tr><td><code>response.userHandle</code></td><td><code>userHandle</code></td></tr>
+    <tr><td><code>rawId / id</code></td><td><code>id</code></td></tr>
+  </tbody>
+</table>
 
 ### Свои сессии — `GET /iam/v1/auth/sessions`, `POST …/sessions/{end,end-others}` {#own-sessions}
 
