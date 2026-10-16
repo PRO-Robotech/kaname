@@ -4,8 +4,7 @@
 package pg
 
 // deletion_hold.go — отказ снятия по содержимому называет остаток и шаг
-// (kaname#725, приёмка `deletion-refusals-name-the-remainder-and-the-step.md`,
-// Р1–Р3).
+// (приёмка задачи kaname#725, Р1–Р3).
 //
 // # Один отказ — одна форма на любом рубеже
 //

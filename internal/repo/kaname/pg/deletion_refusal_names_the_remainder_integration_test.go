@@ -188,7 +188,7 @@ func TestDRS11_EachAccountHolderKindHasItsOwnRefusal(t *testing.T) {
 			domain.PrefixServiceAccount, "contains service accounts", "ServiceAccount", "service accounts", "service_account", "drs11-sa"},
 		{`INSERT INTO kaname.groups (id, account_id, name) VALUES ($1, $2, $3)`,
 			domain.PrefixGroup, "contains groups", "Group", "groups", "group", "drs11-group"},
-		{`INSERT INTO kaname.roles (id, account_id, name, permissions) VALUES ($1, $2, $3, '[]'::jsonb)`,
+		{`INSERT INTO kaname.roles (id, account_id, name, description, permissions) VALUES ($1, $2, $3, 'drs11', '["iam.users.*.read"]'::jsonb)`,
 			domain.PrefixRole, "contains custom roles", "Role", "custom roles", "role", "drs11_role"},
 	} {
 		t.Run(k.metaType, func(t *testing.T) {
