@@ -942,7 +942,9 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 		}
 		out = append(out, dm)
 	}
-	return out
+	// Публичное чтение детям (kaname#856): тот же вывод, что у полного прохода
+	// (desiredRuleMembers), — иначе два пути разошлись бы в составе.
+	return withPublicReaders(cat, bs, subject, out)
 }
 
 // desiredMembers computes the desired member set + containment verdict for a
@@ -1113,7 +1115,10 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			out = append(out, dm)
 		}
 	}
-	return out, nil
+	// Публичное чтение детям (kaname#856): член `public_reader` на каждом
+	// объявленном контейнере, который выдача уже даёт действующим членом, — тот
+	// же вывод, что у прямого пути по объекту (desiredMembersForObject).
+	return withPublicReaders(r.cat.Facts(), bs, subject, out), nil
 }
 
 // desiredMemberForObject computes the DesiredMember a materializing selector produces

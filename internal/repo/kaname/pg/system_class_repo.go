@@ -95,3 +95,28 @@ func (r *abReader) GrantorLastPresentedAt(ctx context.Context, userID domain.Use
 	}
 	return at.UTC(), true, nil
 }
+
+// publicReadContainerQ — признак контейнера у живой строки типа и живые типы,
+// чей указатель называет его тип модели. Строки детей берутся тем же отбором
+// `live`, каким определено живое множество каталога.
+const publicReadContainerQ = `
+SELECT c.public_read_to_children,
+       coalesce(array_agg(ch.dotted ORDER BY ch.dotted) FILTER (WHERE ch.dotted IS NOT NULL), '{}')
+  FROM kaname.catalog_resource c
+  LEFT JOIN kaname.catalog_resource ch
+         ON ch.live AND c.object_type = ANY (ch.parent_types)
+ WHERE c.dotted = $1 AND c.live
+ GROUP BY c.public_read_to_children`
+
+// PublicReadContainer — см. access_binding.ReaderIface.
+func (r *abReader) PublicReadContainer(ctx context.Context, dottedType string) (domain.PublicReadContainer, error) {
+	var out domain.PublicReadContainer
+	err := r.tx.QueryRow(ctx, publicReadContainerQ, dottedType).Scan(&out.Declared, &out.ChildTypes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.PublicReadContainer{}, nil
+	}
+	if err != nil {
+		return domain.PublicReadContainer{}, mapErr(err, "", "")
+	}
+	return out, nil
+}

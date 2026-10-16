@@ -162,6 +162,12 @@ type ReaderIface interface {
 	// свежести ключа доступа: сессия не завершена и не истекла.
 	GrantorLastPresentedAt(ctx context.Context, userID domain.UserID) (at time.Time, found bool, err error)
 
+	// PublicReadContainer — что ЖИВОЙ каталог говорит о точечном типе цели выдачи
+	// системному классу: объявлен ли он контейнером публичного чтения и какие
+	// живые типы указывают на него (ворота SC-65, kaname#856). Тип, которого в
+	// каталоге нет, — нулевое значение: не объявлен, детей нет.
+	PublicReadContainer(ctx context.Context, dottedType string) (domain.PublicReadContainer, error)
+
 	// ListMaterializedAtForBindings batch-loads, for MANY bindings in one query,
 	// the instant each one's per-object access last became live: MAX(updated_at)
 	// over its ACTIVE rows in access_binding_target_members (the reconciler's

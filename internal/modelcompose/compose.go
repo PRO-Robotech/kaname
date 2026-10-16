@@ -22,6 +22,8 @@ package modelcompose
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 
@@ -44,12 +46,59 @@ type Report struct {
 	// Reaffirmed — имена типов, которые канон уже объявляет и рендер которых
 	// совпал с каноническим блоком побайтово.
 	Reaffirmed []string
+	// PriorEdition — имена типов, чей рендер равен не канону, а ПРЕЖНЕЙ
+	// редакции, принимаемой переходно (Р10, [priorEditions]). Действует при
+	// этом канон: прежняя редакция только допущена к сверке.
+	PriorEdition []string
 }
 
 // Census — перепись одной строкой.
 func (r Report) Census() string {
-	return fmt.Sprintf("манифестов %d, ресурсов %d, типов канона %d, добавлено %d %v, подтверждено %d",
-		r.ManifestsSeen, r.ResourcesSeen, r.CanonTypes, len(r.Composed), r.Composed, len(r.Reaffirmed))
+	return fmt.Sprintf("манифестов %d, ресурсов %d, типов канона %d, добавлено %d %v, подтверждено %d, прежней редакции %d %v",
+		r.ManifestsSeen, r.ResourcesSeen, r.CanonTypes, len(r.Composed), r.Composed, len(r.Reaffirmed),
+		len(r.PriorEdition), r.PriorEdition)
+}
+
+// priorEditions — ПЕРЕХОДНЫЙ приём прежней редакции блоков (Р10 приёмки
+// anonymous-and-authenticated-are-subject-classes.md, решение диспетчера,
+// вариант (а)): тип → sha256 его блока в прежней редакции.
+//
+// # Почему исключение из «канон неприкосновенен» вообще есть
+//
+// Публичное чтение контейнера (kaname#856) меняет блоки registry в каноне, а
+// манифест registry доставляет kacho. Выкатка идёт сначала kaname, затем kacho:
+// kaname новой версии обязана стартовать с манифестом ПРЕЖНЕЙ kacho (ствол
+// @a95248464). Поэтому для этих двух типов и только для них рендер доставленного
+// манифеста равен либо канону, либо прежней редакции; третья форма — отказ, как
+// всегда. Действует при этом канон: прежняя редакция в модель не попадает.
+//
+// # Что такое «прежняя редакция» — побайтово
+//
+// Ровно два блока канона kaname @a7a726802: `registry_registry` — строки
+// 1303–1332, `registry_repository` — строки 1334–1355 файла
+// proto/kaname/cloud/iam/v1/fga_model.fga. Предикат —
+// `git show a7a726802:proto/kaname/cloud/iam/v1/fga_model.fga | sed -n 1303,1332p | sha256sum`
+// и то же с `1334,1355p`.
+//
+// # Чем кончается
+//
+// Приём снимает задача PRO-Robotech/kaname#858 после выкатки kacho с манифестом
+// новой редакции; её предикат — `go test ./internal/modelcompose/ -run
+// '^TestCompose_SC72_' -count=1` — `ok`. Тем же изменением снимается проба
+// приёма прежней редакции (SC-70 (а)).
+var priorEditions = map[string]string{
+	"registry_registry":   "b115c3c18f6ffdda0c22c1c742da50fbecd1a1f888d28810663429a97b240359",
+	"registry_repository": "d2aafdbdba912a2680d636230bf6e046f7434b057ec77f3070968b35de7aaa69",
+}
+
+// isPriorEdition — блок типа равен его прежней редакции побайтово.
+func isPriorEdition(typ string, blk []byte) bool {
+	want, ok := priorEditions[typ]
+	if !ok {
+		return false
+	}
+	sum := sha256.Sum256(blk)
+	return hex.EncodeToString(sum[:]) == want
 }
 
 // Compose собирает текст модели процесса.
@@ -108,6 +157,12 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 			if cb, inCanon := byType[res.ObjectType]; inCanon {
 				// НОРМА 2: канон неприкосновенен. Блок не композируется; расхождение
 				// называет тип и ОБЕ длины.
+				if !bytes.Equal(cb.Body, blk) && isPriorEdition(res.ObjectType, blk) {
+					// Р10: прежняя редакция допущена к сверке, действует канон —
+					// его блок уже в модели, рендер в неё не идёт.
+					rep.PriorEdition = append(rep.PriorEdition, res.ObjectType)
+					continue
+				}
 				if !bytes.Equal(cb.Body, blk) {
 					return "", rep, fmt.Errorf("modelcompose: тип %q объявлен и каноном, и модулем %q, "+
 						"а их блоки расходятся побайтово (канон %d Б, рендер %d Б) — канон "+
@@ -125,6 +180,7 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 	}
 	sort.Strings(rep.Composed)
 	sort.Strings(rep.Reaffirmed)
+	sort.Strings(rep.PriorEdition)
 
 	// НОРМА 4: мощность И множество разобранной модели.
 	m, err := authzplan.ParseModel(out.String())
