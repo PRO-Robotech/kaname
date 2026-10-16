@@ -241,7 +241,9 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
 `authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled`. Вход **без** поля отвечает прежним `authentication failed`. Это не оракул:
 форму запроса знает сам вызывающий, и текст различает присланное, а не найденное. Если фактор
 не заведён, войдите без `secondFactor` и прочитайте его состояние
-[`GET /iam/v1/auth/second-factor`](#second-factor). Попытка с кодом при незаведённом факторе
+[`GET /iam/v1/auth/second-factor`](#second-factor). Шаг после отказа входа без поля тот же для
+каждой причины: проверить адрес и пароль; забытый пароль возвращает восстановление по адресу —
+`POST /iam/v1/auth/recovery`, затем `POST /iam/v1/auth/recovery/complete` с новым паролем. Попытка с кодом при незаведённом факторе
 окно частоты тратит так же, как неверный пароль: иначе темп окна выдавал бы, совпал ли пароль.
 
 Успех — `200`, печенья `kaname_session` и **новое** `kaname_form`:
