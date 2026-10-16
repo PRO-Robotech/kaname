@@ -24,9 +24,11 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 //
 // **Subject binding** — every RPC takes a subject identifier in the form
 // `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member` /
-// `system_class:anonymous` (the caller without an identity). Neither
-// `system_class:authenticated` nor the wildcard `user:*` is a speaker: a question
-// on their behalf is INVALID_ARGUMENT.
+// `system_class:anonymous` (the caller without an identity).
+// `system_class:authenticated` говорящим не бывает: вопрос от его имени —
+// INVALID_ARGUMENT. Подстановка `user:*` до полосы kaname#832 отвечается
+// ПЕРЕХОДНО как вопрос от `system_class:anonymous` и ничего сверх него не
+// получает; отказ INVALID_ARGUMENT ей вводит kaname#832.
 // **Who may ask about whom is decided HERE, in this service, not at the
 // api-gateway.** The edge authenticates the caller and stops: the subject and the
 // queried resource arrive as request fields (the resource as a nested
@@ -215,8 +217,9 @@ message ResourceRef {
 message AuthorizeCheckRequest {
   // FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
   // / "group:<grp…>#member" / "system_class:anonymous"). Required.
-  // "system_class:authenticated" and the wildcard "user:*" are not speakers →
-  // INVALID_ARGUMENT.
+  // "system_class:authenticated" говорящим не бывает → INVALID_ARGUMENT.
+  // Подстановка "user:*" до kaname#832 переходно отвечается как
+  // "system_class:anonymous"; отказ ей вводит kaname#832.
   string subject = 1;
 
   // Resource the action is being checked against.
@@ -247,7 +250,8 @@ message AuthorizeCheckRequest {
   // server uses this relation verbatim instead of deriving from `action`'s
   // verb. Required for admin-only RPCs whose verb (`get`/`list`) would
   // otherwise resolve to `viewer` — letting any authenticated user through
-  // the cluster.viewer (`user:*`) cascade. The api-gateway authz middleware
+  // the cluster.viewer cascade (системная выдача `viewer` на кластере классу
+  // `system_class:authenticated`, kaname#829). The api-gateway authz middleware
   // populates this from the permission catalog's `required_relation` field,
   // which proto annotations declare per-RPC. Empty = legacy behaviour
   // (action-verb derivation). 1-32 chars.
@@ -414,7 +418,8 @@ message WhoAmIResponse {
 
   // True when the caller resolves `viewer` on the singleton cluster object
   // — typically `true` for every authenticated principal via the
-  // `cluster.viewer = user:*` cascade. Surfaced explicitly so the UI can
+  // cluster.viewer cascade (системная выдача `viewer` на кластере классу
+  // `system_class:authenticated`, kaname#829). Surfaced explicitly so the UI can
   // distinguish "authenticated tenant" from "system admin" without a
   // second Check round-trip.
   bool cluster_viewer = 6;

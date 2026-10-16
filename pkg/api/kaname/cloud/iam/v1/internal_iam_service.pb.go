@@ -283,8 +283,10 @@ type CheckRequest struct {
 	//	"system_class:anonymous" — вызывающий без личности (край спрашивает им на
 	//	  методе, допускающем анонима).
 	//
-	// "system_class:authenticated" и подстановка "user:*" говорящими не бывают →
-	// INVALID_ARGUMENT.
+	// "system_class:authenticated" говорящим не бывает → INVALID_ARGUMENT.
+	// Подстановка "user:*" до kaname#832 переходно отвечается как
+	// "system_class:anonymous" и ничего сверх него не получает; отказ
+	// INVALID_ARGUMENT ей вводит kaname#832.
 	SubjectId string `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	// FGA-relation: "viewer" | "editor" | "admin" | "use" | "member" | etc.
 	// Допустимые значения зависят от authorization-model.
