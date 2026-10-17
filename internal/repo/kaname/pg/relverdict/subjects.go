@@ -182,8 +182,8 @@ SELECT g.subject
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
 func subjectsQuerySQL(labelTable string) string {
-	sql := strings.Replace(subjectsSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "m.labels"), 1)
+	sql := replaceOnce(subjectsSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "$2::text", "m.labels"))
 	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$9", "$2"), 1)
 	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("n.subject"), 1)

@@ -200,8 +200,8 @@ SELECT 'group'::text,
 // сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
 // ровно потому, что он подставляет свой.
 func expandQuerySQL(labelTable string) string {
-	sql := strings.Replace(expandSQL, armPredicateMark,
-		grantArmPredicate("$7::text", "$2::text", "m.labels"), 1)
+	sql := replaceOnce(expandSQL, armPredicateMark,
+		grantArmPredicate("$7::text", "$2::text", "m.labels"))
 	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$7", "$2"), 1)
 	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("g.subject"), 1)

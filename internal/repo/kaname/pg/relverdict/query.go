@@ -608,8 +608,8 @@ const (
 // отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
 // один из них.
 func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string) {
-	grant = strings.Replace(grantArmSQL, armPredicateMark,
-		grantArmPredicate("$9::text", objectIDExpr, "m.labels"), 1)
+	grant = replaceOnce(grantArmSQL, armPredicateMark,
+		grantArmPredicate("$9::text", objectIDExpr, "m.labels"))
 	grant = strings.Replace(grant, scopeJoinMark, scopeJoinGrant, 1)
 	fact = strings.Replace(factArmSQL, scopeJoinMark, scopeJoinFact, 1)
 	return grant, fact

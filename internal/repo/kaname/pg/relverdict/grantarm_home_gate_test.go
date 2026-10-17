@@ -12,114 +12,51 @@ package relverdict
 // правка одного места не доезжает до второго, и расходятся они в сторону
 // лишнего доступа.
 //
-// Гейт читает ИСПОЛНЯЕМОЕ: строковые литералы непробных файлов пакета, разбором
-// синтаксиса, с отброшенными SQL-комментариями. Комментарий Go и комментарий
-// внутри запроса домом предиката не считаются. Единица счёта — объявление
-// верхнего уровня (функция, константа, переменная), а не литерал: тело одного
-// предиката законно разбито на несколько литералов вокруг подставленных
-// выражений.
+// ЧТО ГЕЙТ ИСПОЛНЯЕТ (распознаватель — grantarm_scan_test.go).
 //
-// Распознаватель — от класса, а не от одного написания: любое сравнение ветви
-// (`x.arm = …`, `… = x.arm`, `arm IN (…)`, с любым псевдонимом и без него) и любое
-// упоминание колонок селектора. Перепись печатается, пустой обход — не зелёный.
+// Единица счёта — функция либо одно имя в объявлении константы/переменной
+// пакета. У каждой единицы выводятся тексты её строковых выражений: литерал,
+// склейка оператором «+» в порядке исходника, fmt.Sprintf с подстановкой %s %v
+// %q %d по порядку, имя строковой константы либо переменной ЭТОГО пакета (из
+// любого его файла) — её значение подставляется. Невыводимое (параметр, вызов
+// функции, константа другого пакета, индексированный глагол формата) становится
+// отдельной лексемой-заглушкой и с соседями не склеивается.
+//
+// Текст разбирается лексером SQL: комментарии «--» и «/* */» (с вложенностью)
+// отброшены, строки в одинарных кавычках, имена в двойных и тела в долларовых
+// кавычках прочитаны целиком — «--» внутри строки комментарием не считается.
+//
+// Класс — ЛЮБОЕ употребление столбца селектора (`arm`, `resource_names`,
+// `match_labels`, с псевдонимом таблицы и без, в кавычках и без, любым
+// регистром), кроме трёх положений: определение псевдонима (после AS); проза
+// либо псевдоним без AS (перед словом стоит идентификатор, не являющийся словом
+// SQL из sqlLeadKeywords); наблюдение — столбец в перечне вывода (слева
+// SELECT, DISTINCT, «,» или «||», справа, за приведением типа, AS, FROM, «,»,
+// «||» либо конец текста). Сравнение любым оператором, CASE … WHEN, IN, NOT IN,
+// LIKE, BETWEEN, IS DISTINCT FROM, ANY — решение.
+//
+// Аргументы fmt.Errorf, errors.New, fmt.Print*/Fprint*, вызовов пакетов log и
+// slog не читаются: это текст наружу либо журнал. Комментарии Go не читаются
+// вовсе. Пробные файлы не читаются.
+//
+// Константа либо переменная, которую подставляет другая единица, — осколок:
+// её текст засчитан у единицы-потребителя и отдельным домом не считается.
+//
+// ГРАНИЦА (что гейт НЕ видит): значения, собранные во время исполнения
+// (strings.Builder, strings.Join/Replace, конкатенация в цикле, результат
+// вызова функции), константы ДРУГИХ пакетов, индексированные глаголы формата
+// и тела в долларовых кавычках. Копия, собранная этими средствами, гейтом не
+// ловится; держит её только ревью.
+//
+// Перепись печатается, пустой обход — не зелёный.
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 	"testing"
 )
-
-// grantArmText — признак текста ветви выдач в SQL-литерале.
-var grantArmText = regexp.MustCompile(
-	`(?i)\barm\s*(=|<>|!=|\bin\b)|(=|<>|!=)\s*(\w+\.)?arm\b|\bresource_names\b|\bmatch_labels\b`)
-
-// sqlLineComment — комментарий внутри запроса: о предикате не свидетельствует.
-var sqlLineComment = regexp.MustCompile(`--[^\n]*`)
-
-type grantArmHome struct {
-	pos  string // файл:строка объявления
-	decl string // имя объявления
-}
-
-type grantArmCensus struct {
-	files    int // прочитано непробных .go
-	literals int // прочитано строковых литералов
-}
-
-// scanGrantArmHomes обходит непробные .go каталога и называет объявления
-// верхнего уровня, в чьих строковых литералах стоит текст ветви выдач.
-func scanGrantArmHomes(dir string) (grantArmCensus, []grantArmHome, error) {
-	var c grantArmCensus
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return c, nil, err
-	}
-	fset := token.NewFileSet()
-	var homes []grantArmHome
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
-		if err != nil {
-			return c, nil, fmt.Errorf("разбор %s: %w", name, err)
-		}
-		c.files++
-		for _, d := range f.Decls {
-			hit := false
-			ast.Inspect(d, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				c.literals++
-				text, err := strconv.Unquote(lit.Value)
-				if err != nil {
-					text = lit.Value
-				}
-				if grantArmText.MatchString(sqlLineComment.ReplaceAllString(text, "")) {
-					hit = true
-				}
-				return true
-			})
-			if hit {
-				homes = append(homes, grantArmHome{
-					pos:  fmt.Sprintf("%s:%d", name, fset.Position(d.Pos()).Line),
-					decl: declName(d),
-				})
-			}
-		}
-	}
-	sort.Slice(homes, func(i, j int) bool { return homes[i].pos < homes[j].pos })
-	return c, homes, nil
-}
-
-func declName(d ast.Decl) string {
-	switch d := d.(type) {
-	case *ast.FuncDecl:
-		return d.Name.Name
-	case *ast.GenDecl:
-		var names []string
-		for _, s := range d.Specs {
-			if vs, ok := s.(*ast.ValueSpec); ok {
-				for _, n := range vs.Names {
-					names = append(names, n.Name)
-				}
-			}
-		}
-		return strings.Join(names, ",")
-	}
-	return "?"
-}
 
 // judgeGrantArmHomes — вердикт по переписи: ровно один дом, и это функция
 // grantArmPredicate. Пустой обход и ноль домов — отказ предпосылки, а не зелёное.
@@ -148,7 +85,8 @@ func TestGrantArmPredicateHasASingleHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("перепись: файлов %d · литералов %d · домов текста ветви выдач %d", c.files, c.literals, len(homes))
+	t.Logf("перепись: файлов %d · литералов %d · выведенных текстов %d · домов текста ветви выдач %d",
+		c.files, c.literals, c.texts, len(homes))
 	if err := judgeGrantArmHomes(c, homes); err != nil {
 		t.Fatal(err)
 	}
@@ -238,5 +176,117 @@ func TestGrantArmHomeInjection_EmptyWalkIsNotAVerdict(t *testing.T) {
 	_, _, err = injJudge(t, map[string]string{"x.go": "package p\n\nconst q = `SELECT 1`\n"})
 	if err == nil || !strings.Contains(err.Error(), "предпосылка") {
 		t.Fatalf("обход без текста ветви дал %v — ждали отказ предпосылки", err)
+	}
+}
+
+// grantArmForms — каждая законная форма записи употребления столбцов селектора
+// (`arm`, `resource_names`, `match_labels`) в решающей позиции и её законный
+// близнец той же формы, где столбец лишь наблюдается (выводится в ответ) либо
+// стоит в комментарии. Копия обязана краснеть, близнец — молчать.
+var grantArmForms = []struct {
+	name, copySrc, twinSrc string
+}{
+	{"одним литералом",
+		"package p\n\nconst q = `WHERE rs.arm = 'anchor'`\n",
+		"package p\n\nconst q = `SELECT rs.arm AS arm FROM t`\n"},
+	{"конкатенация литералов",
+		"package p\n\nconst q = \"WHERE rs.arm \" + \"= 'anchor'\"\n",
+		"package p\n\nconst q = \"SELECT rs.arm \" + \"AS arm FROM t\"\n"},
+	{"конкатенация рассекает имя столбца",
+		"package p\n\nconst q = \"WHERE x = ANY (sel.resource_\" + \"names)\"\n",
+		"package p\n\nconst q = \"WHERE x = ANY (sel.resource_\" + \"ids)\"\n"},
+	{"имя столбца константой",
+		"package p\n\nconst col = \"arm\"\n\nconst q = \"WHERE rs.\" + col + \" = 'anchor'\"\n",
+		"package p\n\nconst col = \"arm\"\n\nconst q = \"SELECT rs.\" + col + \" AS arm FROM t\"\n"},
+	{"fmt.Sprintf",
+		"package p\n\nimport \"fmt\"\n\nvar q = fmt.Sprintf(\"WHERE rs.%s = 'anchor'\", \"arm\")\n",
+		"package p\n\nimport \"fmt\"\n\nvar q = fmt.Sprintf(\"SELECT rs.%s AS arm FROM t\", \"arm\")\n"},
+	{"'--' внутри строкового литерала SQL",
+		"package p\n\nconst q = `WHERE x <> '--' AND rs.arm = 'anchor'`\n",
+		"package p\n\nconst q = `WHERE x <> 1 -- AND rs.arm = 'anchor'\n`\n"},
+	{"блочный комментарий перед столбцом",
+		"package p\n\nconst q = `WHERE /* c */ rs.arm = 'anchor'`\n",
+		"package p\n\nconst q = `SELECT 1 /* rs.arm = 'x' */ FROM t`\n"},
+	{"приведение типа",
+		"package p\n\nconst q = `WHERE rs.arm::text = 'anchor'`\n",
+		"package p\n\nconst q = `SELECT rs.arm::text AS arm FROM t`\n"},
+	{"перенос строк вокруг оператора",
+		"package p\n\nconst q = `WHERE rs.arm\n  =\n 'anchor'`\n",
+		"package p\n\nconst q = `SELECT rs.arm\n  AS arm\n FROM t`\n"},
+	{"CASE … WHEN",
+		"package p\n\nconst q = `SELECT CASE rs.arm WHEN 'anchor' THEN true END`\n",
+		"package p\n\nconst q = `SELECT rs.arm, CASE WHEN x THEN true END FROM t`\n"},
+	{"IS DISTINCT FROM",
+		"package p\n\nconst q = `WHERE rs.arm IS DISTINCT FROM 'labels'`\n",
+		"package p\n\nconst q = `SELECT x IS DISTINCT FROM y, rs.arm FROM t`\n"},
+	{"= ANY (ARRAY …)",
+		"package p\n\nconst q = `WHERE rs.arm = ANY (ARRAY['anchor'])`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE x = ANY (ARRAY['anchor'])`\n"},
+	{"LIKE",
+		"package p\n\nconst q = `WHERE rs.arm LIKE 'a%'`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE x LIKE 'a%'`\n"},
+	{"NOT IN",
+		"package p\n\nconst q = `WHERE rs.arm NOT IN ('labels')`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE x NOT IN ('labels')`\n"},
+	{"BETWEEN",
+		"package p\n\nconst q = `WHERE rs.arm BETWEEN 'a' AND 'z'`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE x BETWEEN 'a' AND 'z'`\n"},
+	{"сравнение справа",
+		"package p\n\nconst q = `WHERE 'labels' = rs.arm`\n",
+		"package p\n\nconst q = `SELECT 'labels' AS l, rs.arm FROM t`\n"},
+	{"неравенство",
+		"package p\n\nconst q = `WHERE rs.arm <> 'labels'`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE x <> 'labels'`\n"},
+	{"столбец в кавычках",
+		"package p\n\nconst q = `WHERE rs.\"arm\" = 'anchor'`\n",
+		"package p\n\nconst q = `SELECT rs.\"arm\" AS arm FROM t`\n"},
+	{"заглавными",
+		"package p\n\nconst q = `WHERE RS.ARM = 'anchor'`\n",
+		"package p\n\nconst q = `SELECT RS.ARM AS ARM FROM T`\n"},
+	{"без псевдонима таблицы",
+		"package p\n\nconst q = `WHERE arm IN ('names')`\n",
+		"package p\n\nconst q = `SELECT arm FROM t`\n"},
+	{"только колонка меток",
+		"package p\n\nvar q = `WHERE m.labels @> sel.match_labels`\n",
+		"package p\n\nvar q = `SELECT sel.match_labels AS ml FROM t`\n"},
+	{"внутри тела функции",
+		"package p\n\nfunc f() string { return \"WHERE rs.arm = 'anchor'\" }\n",
+		"package p\n\nfunc f() string { return \"SELECT rs.arm AS arm FROM t\" }\n"},
+	{"внутри блока констант",
+		"package p\n\nconst (\n\ta = 1\n\tq = `WHERE rs.arm = 'anchor'`\n)\n",
+		"package p\n\nconst (\n\ta = 1\n\tq = `SELECT rs.arm AS arm FROM t`\n)\n"},
+}
+
+func TestGrantArmHomeInjection_EveryFormIsFoundAndItsTwinIsSilent(t *testing.T) {
+	for _, f := range grantArmForms {
+		t.Run(f.name, func(t *testing.T) {
+			_, homes, err := injJudge(t, map[string]string{"shared.go": injShared, "copy.go": f.copySrc})
+			if err == nil || !strings.Contains(err.Error(), "copy.go:") {
+				t.Errorf("копия не найдена либо без координаты: %v (дома %v)", err, homes)
+			}
+			_, homes, err = injJudge(t, map[string]string{"shared.go": injShared, "copy.go": f.twinSrc})
+			if err != nil {
+				t.Errorf("законный близнец дал находку: %v (дома %v)", err, homes)
+			}
+		})
+	}
+}
+
+// Текст наружу и комментарии домом не бывают: строка ошибки, где слово `arm`
+// стоит рядом со знаком равенства, блочный комментарий SQL, комментарий Go.
+func TestGrantArmHomeInjection_ProseAndCommentsAreSilent(t *testing.T) {
+	for name, src := range map[string]string{
+		"переменная с текстом ошибки": "package p\n\nvar e = \"unknown arm = \"\n",
+		"fmt.Errorf": "package p\n\nimport \"fmt\"\n\nfunc f(x string) error { return fmt.Errorf(\"rs.arm = %s\", x) }\n",
+		"errors.New": "package p\n\nimport \"errors\"\n\nvar e = errors.New(\"rs.arm = 'names'\")\n",
+		"блочный комментарий SQL": "package p\n\nconst q = `SELECT 1 /* rs.arm = 'x' /* вложенный */ AND rs.arm = 'y' */ FROM t`\n",
+		"комментарий Go":          "package p\n\n// rs.arm = 'names'\nconst q = `SELECT 1`\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, homes, err := injJudge(t, map[string]string{"shared.go": injShared, "copy.go": src})
+			if err != nil {
+				t.Errorf("находка на тексте, который запросом не является: %v (дома %v)", err, homes)
+			}
+		})
 	}
 }

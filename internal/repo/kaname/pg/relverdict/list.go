@@ -327,8 +327,8 @@ SELECT c.object_id,
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
 // (довод — у expandQuerySQL).
 func listQuerySQL(labelTable string) string {
-	sql := strings.Replace(listSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "c.object_id", "c.labels"), 1)
+	sql := replaceOnce(listSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "c.object_id", "c.labels"))
 	return strings.Replace(sql, candidateFromMark,
 		candidateFrom(labelTable, "$9", "$3", "$4"), 1)
 }
