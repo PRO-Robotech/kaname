@@ -1,0 +1,77 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: b0d2209bbaf87df799983fd0def6d576bf3251f663e2b307e386df6f1789664c
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: ede94db30 (редакция 18, c6ea4897…)
+  content_commit: 3b4ea39a007c9414a4fb473890fa4dc085ff3453
+  branch: 777-w9-kn-acc
+  worktree: tmp/w9/kn-acc
+  task: PRO-Robotech/kaname#777
+  lines: 2975
+  round: 16
+  round_note: Круг 1 из 2 редакции 19 (fa-b8); по дельте к одобренной редакции 18 (fa-b1).
+  predecessor_record: docs/specs/reviews/second-factor-totp-and-recovery-codes/c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md @ 3b4ea39a0 →
+    b0d2209b…664c; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15'
+publication_mode: courier_of_agent_verdict
+scope_of_round: >-
+  git diff ede94db30 3b4ea39a0 -- <приёмка>: история (редакция 19), Р4 «Порядок проверок» (одно
+  предложение), заголовок и абзац Р8 «Условие уровня у личности с ключом», «Наблюдаемое» Р8, «Дано»
+  Ф12-01, строки GET состояния Ф12-01 и Ф12-02. Сценариев 46, ID без правки.
+blocking: []
+checks:
+  r8_matches_neighbour: >-
+    Р8 повторяет level-two Р4 (41723d6b…) без переоткрытия: условие «2 либо перечень прочитан и
+    пуст», форма 401/16 дословно (internal/errors/step_up.go:29 TextStepUpRequired), 503/14 при
+    нечитаемом перечне, порядок сессия → уровень → свежесть → состояние.
+  r8_producer: >-
+    internal/apps/kaname/api/humansession/sf_enroll_level.go:83 requireEnrollmentLevel — уровень
+    раньше чтения перечня, ошибка чтения → ErrStoreUnavailable, ключ есть → StepUpRequiredError.
+  f12_01_given: >-
+    «ключей доступа нет» — отличающий факт против KN747-06; Ф12-09 и прочие «Дано» полосы заведения
+    ключа не несут (grep '**Given**' … | grep 'ключ' — только Ф12-01, 34, 37, 39, последние три — о
+    ключе обёртки/настройки, не о ключе доступа).
+  state_lines: Ф12-01/02 сужены до ключей totp.* и backupCodes.*; полное тело — у handler.go:964-968.
+  constructibility: Новых «Дано» с посевом нет; посева не было — стенда в задании нет.
+non_blocking:
+  - >-
+    Новый сосед `step-up-with-any-enrolled-method.md` (Р6) назван без отпечатка (fa-b7); его
+    одобренная редакция — 35224856…d683. Сам сосед в §0.1 пинит Ф12 редакцией 18 (c6ea4897…) —
+    его опора сменилась; перепроверка — работа автора соседа (строка «нужен следующий»).
+event_body: acceptance-reviewer · APPROVED · b0d2209bbaf87df799983fd0def6d576bf3251f663e2b307e386df6f1789664c
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#777
+  status: not_performed
+  published: false
+effective_approval:
+  issued: false
+  why: Санкцию выпускает внешнее событие курьера, а не эта запись.
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  note: >-
+    Блок дописан поверх записи круга отдельной правкой (kaname#853): запись не называла учётку
+    события — ни effective_approval.publication_pending.expected_actor, ни
+    authority.authorized_actors, — и гейт review-event-silence не мог её судить (исход
+    «не выполнилось»). Учётка выведена из политики по полю policy_field; отпечаток политики —
+    sha256 файла на голове воркспейса. Вердикт, разбор, блок event и effective_approval не тронуты.

@@ -1,0 +1,85 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md
+  sha256: 76edcd5b074b01b0607d4a5ddb655135d9113f01c311fd10c7aa5c940d7a3972
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке документа — статическая форма объявления, а не вердикт (change-graph.md
+    §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: ede94db30 (редакция 4, 41723d6b…)
+  content_commit: 8f48acaed177f5eb0f74a33b135876e51a19d177
+  branch: 777-w9-kn-acc
+  worktree: tmp/w9/kn-acc
+  task: PRO-Robotech/kaname#777
+  related: [PRO-Robotech/kaname#833, PRO-Robotech/kaname#747]
+  lines: 571
+  round: 5
+  round_note: >-
+    Круг 1 из 2 этой редакции (fa-b8); по дельте к одобренной редакции 4 (fa-b1).
+  predecessor_record: docs/specs/reviews/level-two-is-enrolled-at-level-two/41723d6b6369c8987a12477db36b24012a85c5f680d4ae7d40333625072dee65.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md @ 3b4ea39a0 →
+    76edcd5b…3972; совпал с отпечатком задания
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15'
+publication_mode: courier_of_agent_verdict
+scope_of_round: >-
+  git diff ede94db30 3b4ea39a0 -- <приёмка>: +36/−14 — история (круг 4, редакция 5), «Дано» и тело
+  состояния KN747-06, строки состояния KN747-07, -08, -17, -18, §4 последний абзац, §5 строка
+  KN747-06/-07, §9 п. 4 и п. 8. Число сценариев (18) и ID — без правки.
+blocking: []
+checks:
+  kn747_06_body: >-
+    Тело `{"accessKeys":{"available":true},"stepUpMethods":["webauthn"],"totp":{"enrolled":false}}`
+    производится internal/handler/loginlanehttp/handler.go:964-968 (ключи accessKeys/stepUpMethods
+    всегда) и sf_status.go:94 (available = !Binding.Disabled; stepUpMethods — totp/webauthn по
+    presentableMethods, пароль не способ); у человека без строки totp ключа pendingUntil нет.
+    Кейс newman — tests/newman/cases/kaname-access-keys.py:3499, тот же литерал.
+  kn747_05_08_home: grep -ln 'KN747-0[5-8]' tests/newman/cases/*.py → kaname-access-keys.py (единственный)
+  twins: KN747-07↔08, -17↔06, -18↔07 — сужение до ключей totp.* не меняет отличающий факт
+  producer_twin_constructibility: >-
+    Новых сценариев нет; «Дано» KN747-06 строит кейс: _human(factor=True) → _register_key →
+    _remove_factor → _login (kaname-access-keys.py:3489-3492). Посева не было — стенда в задании нет.
+non_blocking:
+  - >-
+    Новый сосед `step-up-with-any-enrolled-method.md` (Р6, Р7) назван трижды без отпечатка и
+    отсутствует в таблице §0.1 (fa-b7). Действующая одобренная редакция соседа —
+    35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683 (запись APPROVED, событие
+    kaname#827). Дописать строку §0.1 с отпечатком при следующей правке.
+  - >-
+    Перенесено и не снято: абзац под таблицей §4 называет носителей Ф7 и Ф12, но не Ф13
+    (Ф13-25 «Тогда» (4)–(5)); носитель — следующая редакция passwordless-login-with-access-key.md.
+  - >-
+    KN747-06 получил «Дано» «ключи на установке включены», которого нет у близнеца KN747-05:
+    это посылка окружения, общая обоим, а не отличающий факт; при правке сказать «общее обоим».
+event_body: acceptance-reviewer · APPROVED · 76edcd5b074b01b0607d4a5ddb655135d9113f01c311fd10c7aa5c940d7a3972
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#777
+  status: not_performed
+  published: false
+effective_approval:
+  issued: false
+  why: Санкцию выпускает внешнее событие курьера, а не эта запись.
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  note: >-
+    Блок дописан поверх записи круга отдельной правкой (kaname#853): запись не называла учётку
+    события — ни effective_approval.publication_pending.expected_actor, ни
+    authority.authorized_actors, — и гейт review-event-silence не мог её судить (исход
+    «не выполнилось»). Учётка выведена из политики по полю policy_field; отпечаток политики —
+    sha256 файла на голове воркспейса. Вердикт, разбор, блок event и effective_approval не тронуты.

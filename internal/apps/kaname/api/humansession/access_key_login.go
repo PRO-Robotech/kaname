@@ -67,7 +67,8 @@ type AccessKeyLoginDeps struct {
 	// Keys — испытания полосы, строки ключей и люди по ним.
 	Keys AccessKeyLoginStore
 	// Methods — подтверждённость адреса для состава ответа (поле то же, что у
-	// входа паролем — Ф3-01) и ось «заведено» для обнуления счёта по адресу.
+	// входа паролем — Ф3-01). Ось «заведено» для обнуления счёта по адресу
+	// отсюда НЕ читается: её даёт удержанный ключ (`keyLoginEnrollment`, Р6).
 	Methods loginmethod.Store
 	// Binding — три ручки посадки Ф7: имя доверяющей стороны, происхождения,
 	// алгоритмы. Своих ручек Ф13 не заводит (Р9).
@@ -505,8 +506,6 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 	if err != nil {
 		return LoginOutput{}, issueFailed
 	}
-	// Ось «заведено» — ДО транзакции записи (шапка `completed_login.go`).
-	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return LoginOutput{}, issueFailed
@@ -545,9 +544,11 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 		return LoginOutput{}, issueFailed
 	}
 	// Успешный вход обнуляет счёт по адресу человека — как всякий успешный
-	// вход (Р9, Ф3 Р10); решает единственный писатель обнуления.
+	// вход (Р9, Ф3 Р10); решает единственный писатель обнуления. Ось
+	// «заведено» — ключ, удержанный этой транзакцией выше (`keyLoginEnrollment`):
+	// строк способов входа, и пароля среди них, полоса не читает (Р6).
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
-		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		Enrolled: keyLoginEnrollment(), EnrolledKnown: true,
 		AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 	}); err != nil {
 		return LoginOutput{}, issueFailed

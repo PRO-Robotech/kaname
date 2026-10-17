@@ -1232,7 +1232,8 @@ CASES.append(Case(
 CASES.append(Case(
     id="IAM-USR-DL-NEG-ACTIVE-BINDINGS",
     title="Delete a user that holds active AccessBindings and owns no account → Operation.error "
-          "FAILED_PRECONDITION (9) 'has active access bindings and cannot be deleted'",
+          "FAILED_PRECONDITION (9) 'has active access bindings and cannot be deleted', "
+          "the refusal names the binding, its scope and the step",
     classes=["NEG"],
     priority="P1",
     steps=[
@@ -1295,10 +1296,15 @@ CASES.append(Case(
         )),
         # Текст владельца ЦЕЛИКОМ: «has active access bindings and cannot be deleted»
         # несут отказы User, Group и ServiceAccount, и утверждение об общей части не
-        # различало, ЧЕЙ отказ пришёл (kacho#1748).
+        # различало, ЧЕЙ отказ пришёл (kacho#1748). Хвост — остаток и шаг (приёмка
+        # `deletion-refusals-name-the-remainder-and-the-step.md`, Р1, APPROVED на
+        # `b7a49bb0…`, kaname#725): держит человека ровно одна выдача — заведённая
+        # этим кейсом на аккаунте A, — и снимает её администратор того аккаунта.
         assert_op_error(9, "FAILED_PRECONDITION",
                         msg_text="User {{boundUserId}} has active access bindings "
-                                 "and cannot be deleted",
+                                 "and cannot be deleted: AccessBinding {{boundUserBindingId}} "
+                                 "on account {{accountAId}} is revoked by an administrator of "
+                                 "that account (active bindings: 1)",
                         op_var="boundDelOpId"),
         # Уборка: отозванная выдача человека не держит (Р10), после неё снятие проходит.
         Step(
@@ -1411,7 +1417,8 @@ CASES.append(Case(
 CASES.append(Case(
     id="IAM-USR-DL-NEG-OWNS-ACCOUNTS",
     title="Delete a user that still owns an account → Operation.error FAILED_PRECONDITION (9) "
-          "'owns accounts and cannot be deleted' (ownership is checked before bindings)",
+          "'owns accounts and cannot be deleted' (ownership is checked before bindings), "
+          "the refusal names the account to delete first",
     classes=["NEG"],
     priority="P1",
     steps=[
@@ -1427,9 +1434,13 @@ CASES.append(Case(
             ],
         ),
         # Опрос идёт тем же предъявителем `jwtHumanCeremonyStepUp` — он наследуется
-        # от шага, заведшего операцию.
+        # от шага, заведшего операцию. Хвост — остаток и шаг (приёмка
+        # `deletion-refusals-name-the-remainder-and-the-step.md`, Р1, APPROVED на
+        # `b7a49bb0…`, kaname#725): человек церемонии владеет ровно одним
+        # аккаунтом — личным аккаунтом посева `ceremonyAccountId`.
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_text="User {{ceremonyUserId}} owns accounts and cannot be deleted",
+                        msg_text="User {{ceremonyUserId}} owns accounts and cannot be deleted: "
+                                 "delete Account {{ceremonyAccountId}} first (accounts owned: 1)",
                         op_var="ownerDelOpId"),
         # KN664-31 «And»: отказ ничего не снял — токен человека по-прежнему принимается
         # и строка на месте.
@@ -1548,12 +1559,18 @@ def _kn664_delete(name: str, path: str, auth: str, op_var: str) -> Step:
 
 
 def _kn664_account_refused_with_project(tag: str, auth: str) -> list:
-    """KN664-11: аккаунт с проектом не снимается, и ничего не снято."""
+    """KN664-11: аккаунт с проектом не снимается, и ничего не снято.
+
+    Отказ называет остаток и шаг (приёмка
+    `deletion-refusals-name-the-remainder-and-the-step.md`, Р1, APPROVED на
+    `b7a49bb0…`, kaname#725): проект в личном аккаунте ровно один — проект по
+    умолчанию, его `id` шаг `<tag>-default-project` прочитал у края."""
     return [
         _kn664_delete(f"{tag}-delete-account-with-project", "/iam/v1/accounts/{{" + tag + "AccId}}",
                       auth, f"{tag}AccRefOpId"),
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_text="Account {{" + tag + "AccId}} contains projects and cannot be deleted",
+                        msg_text="Account {{" + tag + "AccId}} contains projects and cannot be deleted: "
+                                 "delete Project {{" + tag + "PrjId}} first (projects: 1)",
                         op_var=f"{tag}AccRefOpId"),
         Step(
             name=f"{tag}-account-still-there",
@@ -1696,8 +1713,13 @@ CASES.append(Case(
         assert_op_success(op_var="kn664LGrantOpId"),
         _kn664_delete("kn664L-delete-self-with-foreign-grant", "/iam/v1/users/{{" + _klu + "}}",
                       _kl2, "kn664LUsrRefOpId"),
+        # Хвост — остаток и шаг (приёмка `deletion-refusals-name-the-remainder-and-the-step.md`,
+        # Р1, APPROVED на `b7a49bb0…`, kaname#725): свой аккаунт снят, держит ровно
+        # одна выдача — чужого аккаунта A, заведённая шагом выше.
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_text="User {{" + _klu + "}} has active access bindings and cannot be deleted",
+                        msg_text="User {{" + _klu + "}} has active access bindings and cannot be deleted: "
+                                 "AccessBinding {{kn664LBindingId}} on account {{accountAId}} is revoked "
+                                 "by an administrator of that account (active bindings: 1)",
                         op_var="kn664LUsrRefOpId"),
         Step(
             name="kn664L-self-still-there",

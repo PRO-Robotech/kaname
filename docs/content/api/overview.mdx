@@ -305,7 +305,7 @@ Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC
 
 :::warning Разделителей ТРИ, и подставить не тот — значит получить `INVALID_ARGUMENT`
 Форма зависит от ресурса, и в таблице ниже она названа у каждого. Копируя идентификатор из
-примера, берите его целиком: `acc…` без разделителя, `lim-…` через дефис и `cag_…` через
+примера, берите его целиком: `acc…` без разделителя, `mbr-…` через дефис и `cag_…` через
 подчёркивание — это **разные** формы, а не варианты записи одной.
 
 Особенно это касается **идентификатора операции**: он слитный (`iop` + 17), и край
@@ -327,6 +327,7 @@ Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC
     <tr><td>UserOAuthClient (токен)</td><td><code>uoc&lt;17&gt;</code></td></tr>
     <tr><td>ServiceAccountOAuthClient (ключ)</td><td><code>soc&lt;17&gt;</code></td></tr>
     <tr><td><a href="/api/membership">Membership</a></td><td><code>mbr-&lt;17&gt;</code> — <strong>через дефис</strong></td></tr>
+    <tr><td><a href="/api/cluster">ClusterAdminGrant</a></td><td><code>cag_&lt;17&gt;</code> — <strong>через подчёркивание</strong></td></tr>
   </tbody>
 </table>
 
