@@ -34,7 +34,9 @@ func TestSystemClass_VerbFilterMatchesTheDomainRule(t *testing.T) {
 	}
 	// Каждая ветвь выдач несёт фильтр: четыре соединения с проекцией глаголов.
 	for name, sql := range map[string]string{
-		"вопрос": verdictQuerySQL(""), "страница": verdictManyQuerySQL(""), "перечень": listQuerySQL(""),
+		"вопрос":   mustAssemble(verdictQuerySQL)(""),
+		"страница": mustAssemble(verdictManyQuerySQL)(""),
+		"перечень": mustAssemble(listQuerySQL)(""),
 	} {
 		if !strings.Contains(sql, classVerbFilterSQL) {
 			t.Errorf("форма «%s»: ветвь выдач без фильтра класса", name)
