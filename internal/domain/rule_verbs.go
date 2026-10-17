@@ -230,7 +230,9 @@ func (r RoleRuleRef) Dotted() string { return r.Module + "." + r.Resource }
 func RuleRefsOf(rules Rules) []RoleRuleRef {
 	seen := make(map[RoleRuleRef]bool)
 	out := make([]RoleRuleRef, 0, len(rules))
-	for _, r := range rules {
+	// Вложенные правила объявляют свои сегменты так же, как правила верхнего
+	// уровня (kaname#874): «объявленных сегментов» роли не меньше, чем она даёт.
+	for _, r := range withEffectiveChildren(rules) {
 		if r.Module == "*" {
 			continue
 		}
@@ -261,6 +263,21 @@ func refsOfRule(r Rule, res string) []RoleRuleRef {
 	out := make([]RoleRuleRef, 0, len(r.Verbs))
 	for _, v := range r.Verbs {
 		out = append(out, RoleRuleRef{Module: r.Module, Resource: res, Verb: NormalizeVerb(v)})
+	}
+	return out
+}
+
+// withEffectiveChildren — правила роли и их вложенные правила одним перечнем, в
+// порядке объявления (владелец, затем его вложенные), каждое вложенное — с
+// модулем владельца. Для проекций, которым безразлично, откуда пришёл сегмент.
+func withEffectiveChildren(rules Rules) Rules {
+	if !rules.HasChildren() {
+		return rules
+	}
+	out := make(Rules, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, r)
+		out = append(out, r.EffectiveChildren()...)
 	}
 	return out
 }

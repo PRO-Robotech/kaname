@@ -793,6 +793,36 @@ func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, err
 	return out, rows.Err()
 }
 
+// AncestorObjects — предки объекта из его зарегистрированной цепи, которые есть в
+// зеркале (kaname#874): по ним материализатор решает вложенное правило на пути по
+// объекту.
+func (s *reconcileStore) AncestorObjects(ctx context.Context, objectType, objectID string) ([]domain.MirrorObject, error) {
+	rows, err := resource_mirror.AncestorsOf(ctx, s.tx, objectType, objectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mirrorRowToDomain(row))
+	}
+	return out, nil
+}
+
+// MatchDescendants — объекты типов `types`, лежащие под контейнерами
+// `containerType` с идентификаторами `containerIDs` на любой глубине (kaname#874):
+// кандидаты вложенного правила на полном проходе выдачи.
+func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string) ([]domain.MirrorObject, error) {
+	rows, err := resource_mirror.DescendantsOf(ctx, s.tx, types, containerType, containerIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mirrorRowToDomain(row))
+	}
+	return out, nil
+}
+
 // GetMirrorObject returns one mirror row (byName containment / PENDING verify).
 func (s *reconcileStore) GetMirrorObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error) {
 	row, ok, err := resource_mirror.GetByObject(ctx, s.tx, objectType, objectID)

@@ -10,8 +10,9 @@ import "fmt"
 //
 // Тип объявляет в манифесте своего модуля, что публичное чтение переходит на его
 // детей (`publicReadToChildren: true`). Выдача системному классу на объект такого
-// типа ролью, правило которой покрывает тип-ребёнок, разворачивается в отношение
-// `public_reader` на этом объекте; дети читают его формой
+// типа ролью, у правила которой над этим типом есть ВЛОЖЕННОЕ правило над прямым
+// ребёнком, читающее его целиком (kaname#874, nested_rule.go), разворачивается в
+// отношение `public_reader` на этом объекте; дети читают его формой
 // `or public_reader from <указатель>` в своих `v_get` и `v_list`. Имени модуля в
 // механизме нет: признак контейнера и связь «ребёнок → контейнер» приходят из
 // живого каталога, куда их кладёт доставленный манифест.
@@ -25,6 +26,9 @@ const PublicReaderRelation = "public_reader"
 
 // PublicReadContainer — что живой каталог говорит о типе цели выдачи классу.
 type PublicReadContainer struct {
+	// Type — точечный тип, о котором ответ (kaname#874): по нему ворота находят
+	// вложенные правила, стоящие под этим типом.
+	Type string
 	// Declared — тип объявлен контейнером публичного чтения.
 	Declared bool
 	// ChildTypes — точечные типы живых строк каталога, чей указатель называет
@@ -34,11 +38,25 @@ type PublicReadContainer struct {
 
 // CoveredChild — первый (в порядке ChildTypes) тип-ребёнок, чтение которого роль
 // открывает ЦЕЛИКОМ ([Rule.ReadsWholeType]); ok=false — такого ребёнка нет.
+//
+// Читаются ОБЕ формы (kaname#874, M1 круга 1): правило верхнего уровня над
+// ребёнком (исход SC-65 соседа не меняется) и вложенное правило под правилом
+// над ЭТИМ типом (ND-05 (в)). Прежде ворота читали только верхний уровень, и
+// роль, открывающая детей вложенным правилом, проходила на необъявленный
+// контейнер молча.
 func (c PublicReadContainer) CoveredChild(rules Rules) (string, bool) {
 	for _, child := range c.ChildTypes {
 		for _, r := range rules {
 			if r.ReadsWholeType(child) {
 				return child, true
+			}
+			if c.Type == "" || r.OwnerType() != c.Type {
+				continue
+			}
+			for _, nested := range r.EffectiveChildren() {
+				if nested.ReadsWholeType(child) {
+					return child, true
+				}
 			}
 		}
 	}

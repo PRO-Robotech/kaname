@@ -110,10 +110,13 @@ SELECT c.public_read_to_children,
 
 // PublicReadContainer — см. access_binding.ReaderIface.
 func (r *abReader) PublicReadContainer(ctx context.Context, dottedType string) (domain.PublicReadContainer, error) {
-	var out domain.PublicReadContainer
+	// Тип, о котором ответ, едет в ответе (kaname#874): по нему ворота находят
+	// вложенные правила, стоящие под ЭТИМ типом. Тип вне каталога — ответ «не
+	// объявлен» о том же типе, а не пустой.
+	out := domain.PublicReadContainer{Type: dottedType}
 	err := r.tx.QueryRow(ctx, publicReadContainerQ, dottedType).Scan(&out.Declared, &out.ChildTypes)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.PublicReadContainer{}, nil
+		return domain.PublicReadContainer{Type: dottedType}, nil
 	}
 	if err != nil {
 		return domain.PublicReadContainer{}, mapErr(err, "", "")

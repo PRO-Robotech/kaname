@@ -719,12 +719,23 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 }
 
 // reResourceAttrUpdate — оператор правки строк каталога ресурса: таблица (с
-// псевдонимом или без) и ТЕКСТ раздела SET до FROM либо WHERE.
+// псевдонимом или без) и ТЕКСТ раздела SET до первого FROM либо WHERE.
+//
+// Ленивое `(.+?)` обрывает раздел на ПЕРВОМ FROM/WHERE, в том числе на FROM
+// подзапроса внутри SET. Поэтому вырезанный текст сам по себе ещё не раздел
+// SET: признание формы требует, чтобы он ЦЕЛИКОМ совпал с перечнем простых
+// присваиваний ([reAttrAssignment]), где ни скобок, ни ключевых слов нет —
+// обрыв внутри подзапроса оставляет незакрытую скобку, и форма не признаётся
+// (kaname#870).
 var reResourceAttrUpdate = regexp.MustCompile(
 	`(?is)^UPDATE\s+kaname\.catalog_resource(?:\s+[a-z_][a-z0-9_]*)?\s+SET\s+(.+?)\s+(?:FROM|WHERE)\s`)
 
-// reSetTarget — имя колонки слева от присваивания в разделе SET.
-var reSetTarget = regexp.MustCompile(`(?i)(?:^|,)\s*([a-z_][a-z0-9_.]*)\s*=`)
+// reAttrAssignment — ОДНО присваивание раздела SET признанной формы, целиком:
+// `<колонка> = <псевдоним>.<колонка>`. Слева — голое имя колонки, справа —
+// ссылка на колонку источника; выражение, литерал, вызов, скобки и подзапрос
+// этой формой не являются.
+var reAttrAssignment = regexp.MustCompile(
+	`(?i)^\s*([a-z_][a-z0-9_]*)\s*=\s*[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\s*$`)
 
 // resourceAttributeColumns — колонки строки ресурса, которые свод цепочки НЕ
 // судит: они не меняют ни членства ресурса в каталоге, ни его живости, ни имени
@@ -738,21 +749,20 @@ var resourceAttributeColumns = map[string]bool{
 // из [resourceAttributeColumns]. Такой оператор посева не меняет, и свод цепочки
 // его законно пропускает; присваивание любой иной колонки (живость, снятие, тип,
 // имя) — не эта форма.
+//
+// Признание — по ПОЛНОМУ совпадению раздела SET: каждый элемент перечня через
+// запятую обязан целиком совпасть с [reAttrAssignment] и назвать колонку из
+// закрытого перечня. Всё прочее — неизвестная форма, и вызывающий даёт по ней
+// находку: признать лишнее значит молча пропустить снятие, а не признать — лишь
+// назвать оператор, который разбор не читает.
 func resourceAttributeOnlyUpdate(st string) bool {
 	m := reResourceAttrUpdate.FindStringSubmatch(st)
 	if m == nil {
 		return false
 	}
-	targets := reSetTarget.FindAllStringSubmatch(m[1], -1)
-	if len(targets) == 0 {
-		return false
-	}
-	for _, tg := range targets {
-		col := strings.ToLower(tg[1])
-		if i := strings.LastIndexByte(col, '.'); i >= 0 {
-			col = col[i+1:]
-		}
-		if !resourceAttributeColumns[col] {
+	for _, item := range strings.Split(m[1], ",") {
+		a := reAttrAssignment.FindStringSubmatch(item)
+		if a == nil || !resourceAttributeColumns[strings.ToLower(a[1])] {
 			return false
 		}
 	}

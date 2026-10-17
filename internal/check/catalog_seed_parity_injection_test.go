@@ -695,6 +695,10 @@ $$;
 // ресурса только колонок, которые посев не судит (указатели и признак
 // контейнера, kaname#856), — признанная форма: находки нет. Близнец той же
 // формы, присваивающий ещё и живость, — неизвестная форма, находка.
+//
+// Форма признаётся лишь при ПОЛНОМ совпадении раздела SET (kaname#870):
+// подзапрос внутри SET обрывал раздел на своём FROM, и присваивания живости и
+// снятия за ним разбор не видел; скобки в правой части — тоже не эта форма.
 func TestIAMCT114_Injection_Chain_AttributeOnlyUpdateIsKnown(t *testing.T) {
 	const lawful = `
 -- +goose Up
@@ -704,12 +708,26 @@ UPDATE kaname.catalog_resource c
  WHERE c.module = v.module AND c.resource = v.resource;
 `
 	twin := strings.Replace(lawful, "SET parent_types = v.parents", "SET parent_types = v.parents, live = false", 1)
+	both := strings.Replace(lawful, "SET parent_types = v.parents",
+		"SET parent_types = v.parents, public_read_to_children = v.container", 1)
+	const subquery = `
+-- +goose Up
+UPDATE kaname.catalog_resource SET parent_types = (SELECT p FROM x WHERE y), live = false, retired_at = now() WHERE module = 'vpc';
+`
+	parens := strings.Replace(lawful, "SET parent_types = v.parents", "SET parent_types = (v.parents)", 1)
+	// Та же форма присваивания, но колонка вне закрытого перечня: судит перечень,
+	// а не только форма правой части.
+	liveFromSource := strings.Replace(lawful, "SET parent_types = v.parents", "SET parent_types = v.parents, live = v.live", 1)
 	for _, tc := range []struct {
 		name, body string
 		finding    bool
 	}{
 		{"только указатели", lawful, false},
+		{"указатели и признак контейнера", both, false},
 		{"указатели и живость", twin, true},
+		{"подзапрос в SET и живость", subquery, true},
+		{"указатели в скобках", parens, true},
+		{"живость из источника той же формой", liveFromSource, true},
 	} {
 		corpus := []catalogSeedMigration{
 			{Name: "0001_initial.sql", Body: goodSeed},
@@ -717,7 +735,7 @@ UPDATE kaname.catalog_resource c
 		}
 		_, _, findings := catalogCorpus(corpus)
 		if got := containsSub(findings, "форма которого разбору НЕИЗВЕСТНА"); got != tc.finding {
-			t.Fatalf("%s: находка неизвестной формы %v, ждали %v; находки: %v", tc.name, got, tc.finding, findings)
+			t.Errorf("%s: находка неизвестной формы %v, ждали %v; находки: %v", tc.name, got, tc.finding, findings)
 		}
 	}
 }

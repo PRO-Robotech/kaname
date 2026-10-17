@@ -98,8 +98,8 @@ const catalogStaleRoleVerbPredicate = `EXISTS (SELECT 1 FROM kaname.roles r
 //
 // Объявляет два отношения, и оба читают обе стороны:
 //
-//	touched(role_id, rule_fp, was, alive)   строки, пересекающиеся со снимаемым
-//	changed                                 из них те, у которых состав изменился
+//	touched(role_id, rule_fp, was, container, alive)   строки, пересекающиеся со снимаемым
+//	changed                                            из них те, у которых состав изменился
 //
 // Из `changed` обе стороны производят ТРИ величины одинаково: `cardinality(alive)
 // > 0` — строка укорачивается, `= 0` — снимается целиком (пустой массив запрещён
@@ -136,18 +136,47 @@ const catalogStaleRoleVerbPredicate = `EXISTS (SELECT 1 FROM kaname.roles r
 // Пересечение считается по агрегату `stale_dotted`, свёрнутому в массив: на
 // пустом снятии он даёт пустой массив, `&&` ложно, и `touched` пусто — то есть
 // вход «снимать нечего» даёт нули без отдельной ветви в коде.
+//
+// # Ссылок на каталог у строки ДВЕ — и снятие судит обе (kaname#874)
+//
+// Вложенный селектор называет каталог ещё и типом КОНТЕЙНЕРА (`container_type`),
+// и страж живости судит его наравне с `object_types`. Читай вырезание один
+// `object_types`, снятие типа-контейнера давало бы два исхода, и оба неверны:
+// при живых `object_types` строка оставалась бы называть снятый контейнер
+// (повисший, и всякая её правка отвергалась бы стражем), а при снятии рядом и
+// одного из `object_types` укорачивающее обновление судил бы страж — 23514, и
+// применение каталога откатывалось бы целиком.
+//
+// Вложенный селектор без живого контейнера не укорачивается, а СНИМАЕТСЯ:
+// без контейнера он стал бы селектором верхнего уровня — правом на все объекты
+// типа вместо потомков названного контейнера. Поэтому `alive` у такой строки
+// пуст, и обе стороны разводят её в «снята целиком» тем же признаком, что и
+// строку без живых типов. Мёртвый контейнер судится тем же двухконъюнктным
+// правилом, что и элемент, — по той же причине независимости от момента.
+//
+// Строка попадает в `touched` по любой из двух ссылок; вторая ветвь идёт
+// частичным индексом `role_rule_selectors_container_type_idx`, поэтому цена
+// по-прежнему зависит от размера снятого, а не от таблицы.
 const catalogSelectorPruneCTE = `touched AS (
-		  SELECT s.role_id, s.rule_fp, s.object_types AS was,
-		         (SELECT coalesce(array_agg(t ORDER BY t), ARRAY[]::text[])
-		            FROM unnest(s.object_types) AS t
-		           WHERE EXISTS (SELECT 1 FROM kaname.catalog_resource cr
-		                          WHERE cr.dotted = t AND cr.live)
-		             AND NOT EXISTS (SELECT 1 FROM stale_dotted d WHERE d.dotted = t)) AS alive
+		  SELECT s.role_id, s.rule_fp, s.object_types AS was, s.container_type AS container,
+		         CASE WHEN s.container_type IS NOT NULL
+		               AND (NOT EXISTS (SELECT 1 FROM kaname.catalog_resource cr
+		                                 WHERE cr.dotted = s.container_type AND cr.live)
+		                    OR EXISTS (SELECT 1 FROM stale_dotted d WHERE d.dotted = s.container_type))
+		              THEN ARRAY[]::text[]
+		              ELSE (SELECT coalesce(array_agg(t ORDER BY t), ARRAY[]::text[])
+		                      FROM unnest(s.object_types) AS t
+		                     WHERE EXISTS (SELECT 1 FROM kaname.catalog_resource cr
+		                                    WHERE cr.dotted = t AND cr.live)
+		                       AND NOT EXISTS (SELECT 1 FROM stale_dotted d WHERE d.dotted = t))
+		         END AS alive
 		    FROM kaname.role_rule_selectors s
 		    JOIN kaname.roles r ON r.id = s.role_id
 		   WHERE r.is_system = false
-		     AND s.object_types && coalesce(
-		           (SELECT array_agg(d.dotted) FROM stale_dotted d), ARRAY[]::text[])
+		     AND (s.object_types && coalesce(
+		            (SELECT array_agg(d.dotted) FROM stale_dotted d), ARRAY[]::text[])
+		       OR s.container_type = ANY (coalesce(
+		            (SELECT array_agg(d.dotted) FROM stale_dotted d), ARRAY[]::text[])))
 		), changed AS (
 		  SELECT * FROM touched WHERE alive IS DISTINCT FROM was
 		)`

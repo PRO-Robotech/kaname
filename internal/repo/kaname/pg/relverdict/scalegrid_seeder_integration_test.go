@@ -37,6 +37,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
@@ -87,8 +88,12 @@ func TestScaleGridSeeder_RowForRowMatchesTheProducer(t *testing.T) {
 	bySeeder := openParityDB(t, ctx)
 
 	// ── путь 1: производитель, по объекту за раз ─────────────────────────────
+	//
+	// Транзакция производителя — под счётчиком: число его операторов и есть
+	// ожидание для посевщика ниже.
+	producerTx := &statementCountingTx{Tx: byProducer, statements: new(int64)}
 	for _, row := range parityRows() {
-		if _, err := resource_mirror.UpsertTx(ctx, byProducer, resource_mirror.Row{
+		if _, err := resource_mirror.UpsertTx(ctx, producerTx, resource_mirror.Row{
 			ObjectType:      row.ObjectType,
 			ObjectID:        row.ObjectID,
 			ParentProjectID: row.ParentProjectID,
@@ -113,25 +118,37 @@ func TestScaleGridSeeder_RowForRowMatchesTheProducer(t *testing.T) {
 
 	// Свойство КОДА, а не машины: пообъектного обмена нет.
 	//
-	// Стейтментов на объект — 3 + длина ЕГО цепи, а не константа: у листа три
-	// предка, у его деда один. Ожидание считается ПО НАБОРУ, потому что
-	// константа здесь была бы верна лишь для однородной цепи — и первая
-	// редакция этой пробы на ней и упала, объявив расхождением собственную
-	// арифметику.
+	// Стейтментов ожидается РОВНО СТОЛЬКО, сколько подал производитель на тот же
+	// набор, — счётом его транзакции, а не формулой. Формула здесь стояла дважды
+	// и дважды лгала: первая редакция взяла константу на объект и упала на
+	// цепях разной длины; вторая взяла «3 + длина цепи» и покраснела, едва
+	// производитель завёл замок строки до сверки (kaname#874), — то есть проба
+	// мерила свою арифметику, а не посевщика. Счёт производителя за продуктом
+	// следует сам: оператор, который продукт добавит или снимет, сдвинет
+	// ожидание тем же изменением.
+	//
+	// Предпосылка счёта — цепь набора приходит словарём МОДЕЛИ (как её шлёт
+	// владелец ресурса), и перевод производителя (`modelTypeName`) к базе не
+	// обращается. Цепь словарём каталога добавила бы производителю по чтению на
+	// звено, которого у посевщика нет, — и проба покраснела бы, назвав оба
+	// числа: формы тогда действительно разные, и молчать об этом она не вправе.
 	objects := int64(len(parityRows()))
-	var wantStatements int64
-	for _, r := range parityRows() {
-		wantStatements += int64(3 + len(r.ParentChain))
+	wantStatements := *producerTx.statements
+	if wantStatements < objects {
+		t.Fatalf("счётчик производителя видит %d операторов на %d объектов — меньше одного на "+
+			"объект: счёт слеп к форме, которой производитель обращается к базе, и ожидание "+
+			"ниже беспредметно", wantStatements, objects)
 	}
 	maxExchanges := (objects+scalegrid.BatchObjects-1)/scalegrid.BatchObjects + 1
-	t.Logf("посевщик: объектов %d, стейтментов %d, обменов с БД %d (предел по сценарию R7-1-01: %d)",
-		s.Objects(), s.Statements(), s.Exchanges(), maxExchanges)
+	t.Logf("производитель: объектов %d, операторов %d · посевщик: объектов %d, стейтментов %d, "+
+		"обменов с БД %d (предел по сценарию R7-1-01: %d)",
+		objects, wantStatements, s.Objects(), s.Statements(), s.Exchanges(), maxExchanges)
 	if s.Exchanges() > maxExchanges {
 		t.Errorf("обменов с БД %d при пределе %d: подача перестала быть конвейерной, "+
 			"и посев миллиона стоил бы миллиона круговых обменов", s.Exchanges(), maxExchanges)
 	}
 	if s.Statements() != wantStatements {
-		t.Errorf("стейтментов подано %d, у производителя их 3+len(цепь) на объект — по набору %d: "+
+		t.Errorf("стейтментов подано %d, производитель на тот же набор подал %d: "+
 			"расхождение означает, что посевщик выпускает НЕ ТУ форму, а не ту же быстрее",
 			s.Statements(), wantStatements)
 	}
@@ -186,6 +203,52 @@ func parityRows() []scalegrid.MirrorRow {
 		})
 	}
 	return rows
+}
+
+// statementCountingTx — транзакция производителя, считающая его операторы.
+//
+// Считаются ВСЕ формы, которыми через `pgx.Tx` подают оператор: `Exec`,
+// `Query`, `QueryRow`, пачка (по оператору на элемент) и `CopyFrom` (одним).
+// Вложенная транзакция (`Begin` — точка сохранения) возвращается под тем же
+// счётчиком: иначе операторы внутри неё прошли бы мимо счёта молча. Мимо
+// счёта идёт лишь `Conn()` — голое соединение; производитель его не берёт, и
+// если возьмёт, счёт окажется меньше подачи посевщика и проба покраснеет.
+type statementCountingTx struct {
+	pgx.Tx
+	statements *int64
+}
+
+func (c *statementCountingTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	*c.statements++
+	return c.Tx.Exec(ctx, sql, args...)
+}
+
+func (c *statementCountingTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	*c.statements++
+	return c.Tx.Query(ctx, sql, args...)
+}
+
+func (c *statementCountingTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	*c.statements++
+	return c.Tx.QueryRow(ctx, sql, args...)
+}
+
+func (c *statementCountingTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
+	*c.statements += int64(b.Len())
+	return c.Tx.SendBatch(ctx, b)
+}
+
+func (c *statementCountingTx) CopyFrom(ctx context.Context, table pgx.Identifier, columns []string, src pgx.CopyFromSource) (int64, error) {
+	*c.statements++
+	return c.Tx.CopyFrom(ctx, table, columns, src)
+}
+
+func (c *statementCountingTx) Begin(ctx context.Context) (pgx.Tx, error) {
+	inner, err := c.Tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &statementCountingTx{Tx: inner, statements: c.statements}, nil
 }
 
 func openParityDB(t *testing.T, ctx context.Context) pgx.Tx {
