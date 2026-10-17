@@ -130,3 +130,22 @@ func TestSpellingDivergenceJudgeCatchesAnEntryWithoutASubject(t *testing.T) {
 		})
 	}
 }
+
+// Контроль: запись перечня без службы — ключ таблицы, находок ноль.
+func TestWithoutServiceKeyJudgeIsSilentOnATableKey(t *testing.T) {
+	_, keys, without := spellingFixture()
+	if faults := judgeWithoutServiceKeysInTable(without, keys); len(faults) != 0 {
+		t.Fatalf("законная запись отвергнута: %v", faults)
+	}
+}
+
+// Инъекция: запись, чьего ключа в таблице нет, — находка, и она называет ключ.
+func TestWithoutServiceKeyJudgeCatchesAKeyOutsideTheTable(t *testing.T) {
+	_, keys, without := spellingFixture()
+	without["registry.repository"] = "написание вне таблицы"
+
+	faults := judgeWithoutServiceKeysInTable(without, keys)
+	if len(faults) != 1 || !strings.Contains(faults[0], "registry.repository:") {
+		t.Fatalf("запись вне таблицы не названа ровно одной находкой: %v", faults)
+	}
+}
