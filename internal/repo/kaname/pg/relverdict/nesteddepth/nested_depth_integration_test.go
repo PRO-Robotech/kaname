@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 type p3 struct {
@@ -78,10 +79,28 @@ func newP3(t *testing.T) *p3 {
 		t.Fatalf("применение каталога П3: %v", err)
 	}
 
-	w.exec(`INSERT INTO kaname.clusters (id, name) VALUES ('cluster_root', 'kacho') ON CONFLICT DO NOTHING`)
-	w.exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ('acc-1', 'acc', 'usr-1')`)
-	w.exec(`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ('usr-1', 'ext-1', 'usr-1@kacho.local', 'acc-1')`)
-	w.exec(`INSERT INTO kaname.projects (id, account_id, name) VALUES ('prj-1', 'acc-1', 'prj')`)
+	// Арендная обвязка — ОДНОЙ транзакцией: владелец аккаунта — отложенный
+	// внешний ключ, а действующей личности нужен способ входа (kaname#608); оба
+	// судятся на фиксации.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("транзакция посева: %v", err)
+	}
+	for _, q := range []string{
+		`INSERT INTO kaname.clusters (id, name) VALUES ('cluster_root', 'kacho') ON CONFLICT DO NOTHING`,
+		`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ('acc-1', 'acc', 'usr-1')`,
+		`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ('usr-1', 'ext-1', 'usr-1@kacho.local', 'acc-1')`,
+		`INSERT INTO kaname.projects (id, account_id, name) VALUES ('prj-1', 'acc-1', 'prj')`,
+	} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("посев (%s): %v", q, err)
+		}
+	}
+	activewayin.Seed(t, ctx, tx)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("фиксация посева: %v", err)
+	}
 
 	up := [][2]string{{"account", "acc-1"}}
 	// Цепь — как её шлёт владелец: ближайший предок первым.
