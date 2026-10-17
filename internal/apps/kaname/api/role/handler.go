@@ -17,6 +17,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/dto"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
 
@@ -216,16 +217,21 @@ func rulesFromProto(in []*iamv1.Rule) domain.Rules {
 	return out
 }
 
+// roleToPb — роль в ответе ЧТЕНИЯ (`Get`, `List`).
+//
+// Вычисленное состояние — целость, состояния правил (и вложенных, kaname#874),
+// жизненное состояние, ведомости — сюда приложил `attachIntegrity` ЭТОГО же
+// чтения, и оно едет в ответ. Проекция ответа ОПЕРАЦИИ (`marshalRole`,
+// `domain.Role.WithoutComputedState`) его обнуляет намеренно — у мутации оно
+// посчитано не на том снимке, — и прежде она стояла и здесь: `declaredSegments`,
+// `health` и `ruleStates` на чтении были нулевыми всегда, то есть «не
+// вычислено» там, где вычислено.
 func roleToPb(r domain.Role) (*iamv1.Role, error) {
-	any, err := marshalRole(r)
-	if err != nil {
-		return nil, err
+	var dst *iamv1.Role
+	if err := dto.Transfer(dto.FromTo(r, &dst)); err != nil {
+		return nil, fmt.Errorf("dto.Transfer Role: %w", err)
 	}
-	var pb iamv1.Role
-	if err := any.UnmarshalTo(&pb); err != nil {
-		return nil, err
-	}
-	return &pb, nil
+	return dst, nil
 }
 
 // textNestedRulesNotOnInput — отказ входа с вложенными правилами (kaname#874,
