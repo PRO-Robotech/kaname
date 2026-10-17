@@ -311,6 +311,9 @@ jobs:
         with:
           name: unit-plan
           path: unit-plan.json
+          # Перезапуск задания плана заливает план под тем же именем: без
+          # перезаписи загрузка отказала бы, и перезапуск краснел бы не по предмету.
+          overwrite: true
 
   unitshard:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitshard') }}
