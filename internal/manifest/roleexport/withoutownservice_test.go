@@ -7,9 +7,16 @@
 // # Вход — НАСТОЯЩИЙ
 //
 // Манифест — фикстура registry новой редакции (kacho#3274), та самая, на которой
-// судья формы отверг роль `registry.public.read`: правило `[get, list]` над
-// `registries` и `repositories`. Каталог прав — встроенный, тот, что читает
-// посев; факт модели — тот же снимок, которым его берёт сборочная команда.
+// судья формы отверг роль `registry.public.read`, в форме kaname#874: правило
+// `[get, list]` над `registries` с ВЛОЖЕННЫМ `[get, list]` над `repositories`.
+// Пробные роли kaname#874 вычеркнуты (`publicreadfixture.OnlyPublicReadRole`):
+// числа переписи ниже — свойство одной роли, а не состава фикстуры. Каталог
+// прав — встроенный, тот, что читает посев; факт модели — тот же снимок,
+// которым его берёт сборочная команда.
+//
+// Ресурс без своей службы назван ВЛОЖЕННЫМ правилом, поэтому каждая пара ниже
+// держит и шов kaname#872 × kaname#874: вложенное правило судится глаголами
+// модели наравне с верхним.
 //
 // # Пары держатся близнецами, каждый меняет РОВНО ОДИН факт
 //
@@ -46,7 +53,7 @@ const (
 	withoutServiceModule   = "registry"
 	withoutServiceResource = "repositories"
 	withoutServiceType     = "registry_repository"
-	publicReadRule         = "        classes: [get, list]"
+	publicReadRule         = "            classes: [get, list]"
 )
 
 // requireWithoutServicePremise — предпосылка проб файла: ресурс объявлен без
@@ -73,6 +80,10 @@ func requireWithoutServicePremise(t *testing.T) {
 func publicReadEdition(t *testing.T, old, repl string) *manifest.Manifest {
 	t.Helper()
 	data, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	if err != nil {
+		t.Fatalf("фикстура новой редакции: %v", err)
+	}
+	data, err = publicreadfixture.OnlyPublicReadRole(data)
 	if err != nil {
 		t.Fatalf("фикстура новой редакции: %v", err)
 	}
@@ -125,6 +136,11 @@ func TestRuleOnResourceWithoutOwnServiceIsJudgedByModelVerbs(t *testing.T) {
 	}
 	// Два ресурса по два класса; из них по глаголам модели — ровно пары
 	// repositories. Ноль здесь значил бы, что предмет не судился вовсе.
+	// repositories назван только вложенным правилом: правил два — верхнее и
+	// вложенное, и пары по модели могли прийти лишь от вложенного.
+	if rep.Rules.RulesRead != 2 {
+		t.Errorf("правил прочитано %d, ожидалось 2 (верхнее и вложенное)", rep.Rules.RulesRead)
+	}
 	if rep.Rules.PairsJudged != 4 {
 		t.Errorf("пар (ресурс, класс) осмотрено %d, правило называет 4", rep.Rules.PairsJudged)
 	}
@@ -144,7 +160,7 @@ func TestRuleOnResourceWithoutOwnServiceIsJudgedByModelVerbs(t *testing.T) {
 // пообъектного отношения на репозитории не имеет, и правило его не выдаёт.
 func TestRuleOnResourceWithoutOwnServiceRefusesAClassOutsideModelVerbs(t *testing.T) {
 	requireWithoutServicePremise(t)
-	m := publicReadEdition(t, publicReadRule, "        classes: [get, list, create]")
+	m := publicReadEdition(t, publicReadRule, "            classes: [get, list, create]")
 
 	faults, census := roleexport.CheckRoleRules(catalogfixture.Facts(), m, mustActions(t))
 	t.Logf("перепись: %s", census.Summary())
@@ -320,15 +336,19 @@ func TestRuleOnResourceWithoutOwnServiceJudgesTheClassADeprecatedVerbResolvesTo(
 		t.Fatal("предпосылка не держится: в фикстуре уже есть раздел deprecatedVerbs — " +
 			"дописанный второй дал бы документ, который загрузчик судит иначе")
 	}
+	data, err = publicreadfixture.OnlyPublicReadRole(data)
+	if err != nil {
+		t.Fatalf("фикстура новой редакции: %v", err)
+	}
 	base := string(data) + deprecatedVerbsSection
 
 	judge := func(t *testing.T, classes string) []roleexport.Finding {
 		t.Helper()
-		const old = "        classes: [get, list]"
+		const old = publicReadRule
 		if n := strings.Count(base, old); n != 1 {
 			t.Fatalf("близнец: заменяемая строка встречается %d раз, нужна ровно одна", n)
 		}
-		doc := strings.Replace(base, old, "        classes: "+classes, 1)
+		doc := strings.Replace(base, old, "            classes: "+classes, 1)
 		oracle, err := manifestoracle.Canon()
 		if err != nil {
 			t.Fatalf("канон модели прав не разобран: %v", err)
@@ -375,7 +395,7 @@ func TestRuleOnResourceWithoutOwnServiceJudgesTheClassADeprecatedVerbResolvesTo(
 // никто не считал.
 func TestNamedFormOnResourceWithoutOwnServiceKeepsThePriorRefusal(t *testing.T) {
 	requireWithoutServicePremise(t)
-	m := publicReadEdition(t, publicReadRule, "        verbs: [get, list]")
+	m := publicReadEdition(t, publicReadRule, "            verbs: [get, list]")
 
 	faults, census := roleexport.CheckRoleRules(catalogfixture.Facts(), m, mustActions(t))
 	t.Logf("перепись: %s", census.Summary())

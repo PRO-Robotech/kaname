@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
@@ -41,9 +42,17 @@ func pcrRegistriesRule() domain.Rule {
 	return domain.Rule{Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get", "list"}}
 }
 
-// pcrRepositoriesRule — правило над ребёнком без сужения.
+// pcrRepositoriesRule — ВЛОЖЕННОЕ правило над ребёнком без сужения (редакция 11
+// соседа, kaname#874): модуль берётся у правила-владельца.
 func pcrRepositoriesRule() domain.Rule {
-	return domain.Rule{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"get", "list"}}
+	return domain.Rule{Resources: []string{"repositories"}, Verbs: []string{"get", "list"}}
+}
+
+// pcrWithChild — правило над контейнером с вложенным правилом над ребёнком.
+func pcrWithChild(child domain.Rule) domain.Rules {
+	r := pcrRegistriesRule()
+	r.Children = []domain.Rule{child}
+	return domain.Rules{r}
 }
 
 // publicReaderFacts — прямые факты `public_reader` на реестре id.
@@ -119,71 +128,75 @@ func (p *pcrWorld) updateRules(rid domain.RoleID, rules domain.Rules, why string
 	require.Nilf(p.t, awaitOp(p.t, p.ctx, p.ops, op.ID).Error, "%s: операция правки роли", why)
 }
 
-// TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants — правило над
-// ребёнком, суженное метками либо одним глаголом чтения, `public_reader` не
-// пишет, и сужение доходит до решения. Близнец — то же правило без сужения.
+// TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants — вложенное
+// правило над ребёнком, суженное метками либо одним глаголом чтения, классу не
+// выдаётся: ворота класса отвергают его синхронно (Р5 приёмки
+// `nested-rule-reaches-descendants-of-a-named-container.md`, ND-05), и
+// `public_reader` не пишется. Близнец — то же вложенное правило без сужения.
 //
-// Сужение ИМЕНАМИ здесь не строится: имя репозитория несёт `/`, и роль с таким
-// правилом посев не принимает (`invalid argument: value violates a
-// constraint`). Его держат пробы уровня разворачивания и домена
-// (`TestPublicReaderMember_NarrowedChildRuleWritesNothing`,
-// `TestReadsWholeTypeIsOneJudgementForRuleAndSelector`). Правило по меткам над
+// Сужение ИМЕНАМИ здесь не строится: имя репозитория несёт `/`; его держит
+// ND-05 (б) на роли манифеста и пробы уровня разворачивания и домена
+// (`TestReadsWholeTypeIsOneJudgementForRuleAndSelector`). Правило по меткам над
 // репозиторием глаголом правки роли недостижимо («type registry.repositories is
 // not selectable (no resource feed)»), посев его кладёт напрямую — так
-// утверждается предикат разворачивания на состоянии, которое мог бы оставить
-// иной путь записи.
+// утверждаются ворота на состоянии, которое мог бы оставить иной путь записи.
 func TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants(t *testing.T) {
 	twin := newPCRWorld(t)
 	twin.deliverNewEdition("сужение: близнец")
-	twin.grantClassRole("pcr_whole", domain.Rules{pcrRegistriesRule(), pcrRepositoriesRule()}, "близнец: [get, list] без сужения")
-	twin.pollPublicReaderFacts(pcrX, 1, "близнец: несуженное правило над ребёнком пишет public_reader")
+	twin.grantClassRole("pcr_whole", pcrWithChild(pcrRepositoriesRule()), "близнец: [get, list] без сужения")
+	twin.pollPublicReaderFacts(pcrX, 1, "близнец: несуженное вложенное правило пишет public_reader")
 	twin.pollAsk(pcrAnon, "v_get", pcrRepoType, pcrXApp, true, "близнец: v_get на ребёнке")
 	twin.pollAsk(pcrAnon, "v_list", pcrRepoType, pcrXApp, true, "близнец: v_list на ребёнке")
 
 	for _, tc := range []struct {
-		name     string
-		child    func(domain.Rule) domain.Rule
-		relation string // глагол на ребёнке, которого правило не даёт ни одной ветвью
+		name  string
+		child func(domain.Rule) domain.Rule
 	}{
-		{"по меткам", func(r domain.Rule) domain.Rule { r.MatchLabels = map[string]string{"tier": "gold"}; return r }, "v_get"},
-		{"только list", func(r domain.Rule) domain.Rule { r.Verbs = []string{"list"}; return r }, "v_get"},
-		{"только get", func(r domain.Rule) domain.Rule { r.Verbs = []string{"get"}; return r }, "v_list"},
+		{"по меткам", func(r domain.Rule) domain.Rule { r.MatchLabels = map[string]string{"tier": "gold"}; return r }},
+		{"только list", func(r domain.Rule) domain.Rule { r.Verbs = []string{"list"}; return r }},
+		{"только get", func(r domain.Rule) domain.Rule { r.Verbs = []string{"get"}; return r }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPCRWorld(t)
 			p.deliverNewEdition("сужение: " + tc.name)
-			p.grantClassRole("pcr_narrow", domain.Rules{pcrRegistriesRule(), tc.child(pcrRepositoriesRule())}, "сужение: "+tc.name)
-			p.pollAsk(pcrAnon, "v_get", pcrRegType, pcrX, true, "сужение "+tc.name+": выдача действует на X")
+			rid := p.seedRole("pcr_narrow", pcrWithChild(tc.child(pcrRepositoriesRule())))
+			op, err := p.ab.Create(asUser(p.ctx, p.usrA), p.grantRequest(classSubject("anonymous"), rid, pcrXTarget()))
+			require.Nilf(t, op, "сужение %s: Operation не создаётся", tc.name)
+			requireSyncRefusal(t, err, codes.FailedPrecondition, fmt.Sprintf("Role %s nests a rule over registry.repositories "+
+				"that does not read it whole (get and list, without resourceNames or matchLabels); a system class reads children only whole", rid),
+				"сужение "+tc.name)
 			require.Equalf(t, 0, p.publicReaderFacts(pcrX), "сужение %s: public_reader написан", tc.name)
-			p.requireAsk(pcrAnon, tc.relation, pcrRepoType, pcrXApp, false, "сужение "+tc.name+": ребёнок без основания")
 		})
 	}
 }
 
 // TestPublicContainerRead_RoleUpdateWithdrawsPublicReader — правка роли снимает
-// `public_reader`, когда правило над ребёнком снято либо сужено; v_* на самом
-// реестре остаются. Близнец — правило над ребёнком переписано (слито с правилом
-// над контейнером), но не снято: кортеж выживает.
+// `public_reader`, когда вложенное правило над ребёнком снято либо сужено; v_* на
+// самом реестре остаются. Близнец — правила роли переписаны (добавлено правило
+// по имени реестра), вложенное не снято: кортеж выживает.
 func TestPublicContainerRead_RoleUpdateWithdrawsPublicReader(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		rules domain.Rules
 		want  int
 	}{
-		{"близнец: правило над ребёнком переписано, не снято",
-			domain.Rules{{Module: "registry", Resources: []string{"registries", "repositories"}, Verbs: []string{"get", "list"}}}, 1},
-		{"правило над ребёнком снято", domain.Rules{pcrRegistriesRule()}, 0},
-		{"правило над ребёнком сужено до одного глагола",
-			domain.Rules{pcrRegistriesRule(), func() domain.Rule {
+		{"близнец: правила переписаны, вложенное не снято",
+			append(pcrWithChild(pcrRepositoriesRule()), domain.Rule{
+				Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get"},
+				ResourceNames: []string{pcrX},
+			}), 1},
+		{"вложенное правило снято", domain.Rules{pcrRegistriesRule()}, 0},
+		{"вложенное правило сужено до одного глагола",
+			pcrWithChild(func() domain.Rule {
 				r := pcrRepositoriesRule()
 				r.Verbs = []string{"get"}
 				return r
-			}()}, 0},
+			}()), 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPCRWorld(t)
 			p.deliverNewEdition("правка роли: " + tc.name)
-			rid, id := p.grantClassRole("pcr_upd", domain.Rules{pcrRegistriesRule(), pcrRepositoriesRule()}, "правка роли: Дано")
+			rid, id := p.grantClassRole("pcr_upd", pcrWithChild(pcrRepositoriesRule()), "правка роли: Дано")
 			p.pollPublicReaderFacts(pcrX, 1, "правка роли: Дано — public_reader написан")
 
 			p.updateRules(rid, tc.rules, tc.name)

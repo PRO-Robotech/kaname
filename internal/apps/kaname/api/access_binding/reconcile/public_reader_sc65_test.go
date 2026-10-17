@@ -4,11 +4,11 @@
 package reconcile
 
 // public_reader_sc65_test.go — разворачивание выдачи классу пишет
-// `public_reader` на объект объявленного контейнера, и только при правиле роли
-// над типом-ребёнком (задача PRO-Robotech/kaname#856).
+// `public_reader` на объект объявленного контейнера, и только при ВЛОЖЕННОМ
+// правиле роли над типом-ребёнком (задачи PRO-Robotech/kaname#856, kaname#874).
 //
 // Приёмка docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md,
-// редакция 10, отпечаток 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9:
+// редакция 12, отпечаток bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6:
 // SC-65 «И (механизм общий, У1)» — половина разворачивания; Р9 «Сужение по цели»
 // (решение по N1, вариант (а)); SC-73 — то же условие на модуле registry
 // утверждают интеграционные пробы `TestPublicContainerRead_SC73_…`.
@@ -97,7 +97,7 @@ func sc65BoxObject() domain.MirrorObject {
 // sc65Tuples — все кортежи, которые разворачивание выдачи даёт объекту.
 func sc65Tuples(cat *catalog.Facts, bs BindingScope) map[domain.MembershipTuple]bool {
 	out := map[domain.MembershipTuple]bool{}
-	for _, dm := range desiredMembersForObject(cat, bs, sc65BoxObject()) {
+	for _, dm := range desiredMembersForObject(cat, bs, sc65BoxObject(), nil) {
 		for _, tu := range dm.Tuples {
 			out[tu] = true
 		}
@@ -106,8 +106,13 @@ func sc65Tuples(cat *catalog.Facts, bs BindingScope) map[domain.MembershipTuple]
 }
 
 var (
-	sc65ReadBoth = domain.Rules{{Module: "probemod", Resources: []string{"boxes", "items"}, Verbs: []string{"get", "list"}}}
-	sc65ReadBox  = domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"}}}
+	// sc65ReadBoth — роль с ВЛОЖЕННЫМ правилом над ребёнком (редакция 11 соседа,
+	// kaname#874): правило над ящиками `[get, list]`, под ним — над предметами
+	// `[get, list]`. Прежняя форма — одно правило над обоими типами — потомков
+	// классу больше не открывает (ND-07 (б)).
+	sc65ReadBoth = domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"},
+		Children: []domain.Rule{{Resources: []string{"items"}, Verbs: []string{"get", "list"}}}}}
+	sc65ReadBox = domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"}}}
 )
 
 const sc65Anon = "system_class:anonymous"
@@ -137,7 +142,7 @@ func sc65Control(t *testing.T) (keyed []byte, keyless *catalog.Facts) {
 }
 
 // TestRuleObjectTuples_SC65_DeclaredContainerGetsPublicReader — объявленный тип
-// получает `public_reader` при выдаче классу ролью с правилом над ребёнком.
+// получает `public_reader` при выдаче классу ролью с вложенным правилом над ребёнком.
 // Близнец — тот же манифест без ключа: `public_reader` нет. Один факт — ключ.
 func TestRuleObjectTuples_SC65_DeclaredContainerGetsPublicReader(t *testing.T) {
 	doc, keyless := sc65Control(t)
@@ -148,24 +153,24 @@ func TestRuleObjectTuples_SC65_DeclaredContainerGetsPublicReader(t *testing.T) {
 	keyed := sc65Facts(t, doc)
 	got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth))
 	if !got[sc65PublicReader()] {
-		t.Fatalf("SC-65: выдача классу на объявленный контейнер ролью с правилом над ребёнком обязана писать %v; получено %v",
+		t.Fatalf("SC-65: выдача классу на объявленный контейнер ролью с вложенным правилом над ребёнком обязана писать %v; получено %v",
 			sc65PublicReader(), got)
 	}
 }
 
 // TestRuleObjectTuples_SC65_RoleWithoutAChildRuleWritesNoPublicReader — та же
-// роль без правила над типом-ребёнком `public_reader` не пишет (Р9 «Сужение по
-// цели», решение по N1). Близнец — предыдущая проба. Один факт — правило роли
-// над ребёнком.
+// роль без вложенного правила над типом-ребёнком `public_reader` не пишет (Р9 «Сужение по
+// цели», решение по N1). Близнец — предыдущая проба. Один факт — вложенное
+// правило роли над ребёнком.
 func TestRuleObjectTuples_SC65_RoleWithoutAChildRuleWritesNoPublicReader(t *testing.T) {
 	doc, _ := sc65Control(t)
 	keyed := sc65Facts(t, doc)
 
 	if got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth)); !got[sc65PublicReader()] {
-		t.Fatalf("SC-65 близнец: роль с правилом над ребёнком обязана писать %v; получено %v", sc65PublicReader(), got)
+		t.Fatalf("SC-65 близнец: роль с вложенным правилом над ребёнком обязана писать %v; получено %v", sc65PublicReader(), got)
 	}
 	if got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBox)); got[sc65PublicReader()] {
-		t.Fatalf("SC-65: роль без правила над ребёнком `public_reader` писать не вправе; получено %v", got)
+		t.Fatalf("SC-65: роль без вложенного правила над ребёнком `public_reader` писать не вправе; получено %v", got)
 	}
 }
 

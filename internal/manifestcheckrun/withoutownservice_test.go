@@ -59,6 +59,12 @@ func newEditionDoc(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("фикстура новой редакции: %v", err)
 	}
+	// Пробные роли kaname#874 вычеркнуты: перепись ниже — свойство роли
+	// `registry.public.read`, а не состава фикстуры.
+	doc, err = publicreadfixture.OnlyPublicReadRole(doc)
+	if err != nil {
+		t.Fatalf("фикстура новой редакции: %v", err)
+	}
 	return doc
 }
 
@@ -89,7 +95,8 @@ func TestRegistryNewEditionPassesTheManifestJudge(t *testing.T) {
 // класс `create` над repositories даёт находку и код 1.
 func TestRegistryRuleWithAClassOutsideModelVerbsFailsTheManifestJudge(t *testing.T) {
 	doc := newEditionDoc(t)
-	const old, repl = "        classes: [get, list]", "        classes: [get, list, create]"
+	// Заменяется класс ВЛОЖЕННОГО правила над repositories (форма kaname#874).
+	const old, repl = "            classes: [get, list]", "            classes: [get, list, create]"
 	if n := bytes.Count(doc, []byte(old)); n != 1 {
 		t.Fatalf("близнец: заменяемая строка встречается %d раз, нужна ровно одна", n)
 	}

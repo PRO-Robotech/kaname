@@ -38,6 +38,15 @@ const probeObjectID = "repo-0000000"
 func askAndExplain(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCapture,
 	objectID string) (relverdict.Verdict, planrows.Measurement) {
 	t.Helper()
+	return askAndExplainAs(t, ctx, tx, cap, objectID, relverdict.VerdictQuerySQLForTest)
+}
+
+// askAndExplainAs — то же, со сверкой по тексту формы `want` (kaname#874: у
+// вопроса две формы сборки — без вложенных правил над типом и с ними, — и
+// проба называет, какую ждёт).
+func askAndExplainAs(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCapture,
+	objectID string, want func(labelTable string) string) (relverdict.Verdict, planrows.Measurement) {
+	t.Helper()
 	cap.reset()
 	v, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 		Subject:    probeSubject,
@@ -52,7 +61,7 @@ func askAndExplain(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCap
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}
-	stmts := cap.matching(relverdict.VerdictQuerySQLForTest(axis))
+	stmts := cap.matching(want(axis))
 	if len(stmts) != 1 {
 		t.Fatalf("захвачено %d операторов, тождественных запросу вердикта, ожидался один: "+
 			"ноль означает, что продукт исполняет другой текст, больше одного — что мерятся два вопроса",
