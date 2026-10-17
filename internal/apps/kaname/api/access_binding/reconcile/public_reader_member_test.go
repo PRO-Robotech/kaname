@@ -27,7 +27,7 @@ func TestPublicReaderMember_KeyFollowsTheChildRule(t *testing.T) {
 	cat := sc65Facts(t, doc)
 	twoRules := domain.Rules{
 		{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"}},
-		{Module: "probemod", Resources: []string{"items"}, Verbs: []string{"get"}},
+		{Module: "probemod", Resources: []string{"items"}, Verbs: []string{"get", "list"}},
 	}
 	members := func(rules domain.Rules) []DesiredMember {
 		return desiredMembersForObject(cat, sc65Scope("system_class", "anonymous", rules), sc65BoxObject())
@@ -71,4 +71,40 @@ func hasRelation(m DesiredMember, rel string) bool {
 		}
 	}
 	return false
+}
+
+// TestPublicReaderMember_NarrowedChildRuleWritesNothing — публичное чтение
+// наследует сужение правила роли: правило над ребёнком по меткам, по именам либо
+// с одним глаголом чтения `public_reader` не пишет. Близнец — то же правило без
+// сужения, `[get, list]`: пишет. Отличие каждой строки от близнеца — один факт.
+func TestPublicReaderMember_NarrowedChildRuleWritesNothing(t *testing.T) {
+	doc, err := publicreadfixture.Read(publicreadfixture.ProbemodFile)
+	if err != nil {
+		t.Fatalf("фикстура: %v", err)
+	}
+	cat := sc65Facts(t, doc)
+	box := domain.Rule{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"}}
+	written := func(child domain.Rule) bool {
+		rules := domain.Rules{box, child}
+		for _, m := range desiredMembersForObject(cat, sc65Scope("system_class", "anonymous", rules), sc65BoxObject()) {
+			if hasRelation(m, domain.PublicReaderRelation) {
+				return true
+			}
+		}
+		return false
+	}
+	whole := domain.Rule{Module: "probemod", Resources: []string{"items"}, Verbs: []string{"get", "list"}}
+	if !written(whole) {
+		t.Fatal("близнец: несуженное правило [get, list] над ребёнком обязано писать public_reader")
+	}
+	for name, child := range map[string]domain.Rule{
+		"по меткам":   {Module: "probemod", Resources: []string{"items"}, Verbs: []string{"get", "list"}, MatchLabels: map[string]string{"tier": "gold"}},
+		"по именам":   {Module: "probemod", Resources: []string{"items"}, Verbs: []string{"get", "list"}, ResourceNames: []string{"itm0000000000000one"}},
+		"только get":  {Module: "probemod", Resources: []string{"items"}, Verbs: []string{"get"}},
+		"только list": {Module: "probemod", Resources: []string{"items"}, Verbs: []string{"list"}},
+	} {
+		if written(child) {
+			t.Errorf("правило над ребёнком %s сужено, а public_reader написан", name)
+		}
+	}
 }

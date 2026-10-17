@@ -32,15 +32,71 @@ type PublicReadContainer struct {
 	ChildTypes []string
 }
 
-// CoveredChild — первый (в порядке ChildTypes) тип-ребёнок, который покрывает
-// правило роли; ok=false — роль не покрывает ни одного ребёнка.
+// CoveredChild — первый (в порядке ChildTypes) тип-ребёнок, чтение которого роль
+// открывает ЦЕЛИКОМ ([Rule.ReadsWholeType]); ok=false — такого ребёнка нет.
 func (c PublicReadContainer) CoveredChild(rules Rules) (string, bool) {
 	for _, child := range c.ChildTypes {
-		if rules.CoversType(child) {
-			return child, true
+		for _, r := range rules {
+			if r.ReadsWholeType(child) {
+				return child, true
+			}
 		}
 	}
 	return "", false
+}
+
+// publicReadVerbsOfChild — глаголы, которые публичное чтение открывает на детях
+// контейнера: `public_reader from <указатель>` стоит и в `v_get`, и в `v_list`.
+var publicReadVerbsOfChild = []string{"get", "list"}
+
+// readsWhole — ЕДИНСТВЕННЫЙ предикат «правило открывает чтение типа целиком»:
+// правило не сужено (вид — якорь, без имён и меток) и даёт ВСЕ глаголы, которые
+// публичное чтение открывает на детях.
+//
+// Публичное чтение наследует сужение правила роли: отношение `public_reader`
+// открывает детей целиком, включая будущих, поэтому писать его вправе только
+// правило, которое и само открывает их целиком. Правило по меткам, по именам
+// либо с одним глаголом чтения разворачивается обычным путём — в отношения
+// `v_*` на тех объектах и с теми глаголами, которые оно называет.
+func readsWhole(arm Arm, verbs []string) bool {
+	if arm != ArmAnchor {
+		return false
+	}
+	for _, want := range publicReadVerbsOfChild {
+		found := false
+		for _, v := range verbs {
+			if NormalizeVerb(v) == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// ReadsWholeType — правило называет тип `dotted` и открывает его чтение целиком
+// ([readsWhole]). Им судят ворота выдачи классу (SC-65).
+func (r Rule) ReadsWholeType(dotted string) bool {
+	if !Rules([]Rule{r}).CoversType(dotted) {
+		return false
+	}
+	return readsWhole(r.Arm(), r.Verbs)
+}
+
+// ReadsWholeType — то же правило в форме селектора материализации ([readsWhole]).
+// Им судит разворачивание выдачи, когда решает, писать ли `public_reader`.
+func (s RuleSelector) ReadsWholeType(dotted string) bool {
+	named := false
+	for _, t := range s.ObjectTypes {
+		if t == dotted {
+			named = true
+			break
+		}
+	}
+	return named && readsWhole(s.Arm, s.Verbs)
 }
 
 // UndeclaredContainerText — текст отказа выдачи классу на объект типа, не

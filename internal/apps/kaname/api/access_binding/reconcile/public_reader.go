@@ -14,9 +14,11 @@ package reconcile
 //     открывает только ветвь выдач по правилу над типом-ребёнком;
 //   - тип объекта объявлен контейнером в ЖИВОМ каталоге — источник признака
 //     доставленный манифест, имени модуля здесь нет (У1);
-//   - правило роли покрывает тип-ребёнок контейнера (решение диспетчера по N1,
-//     вариант (а)): роль чтения самого контейнера (`registries:get`) потомков не
-//     открывает ни человеку, ни классу (SC-73).
+//   - правило роли открывает чтение типа-ребёнка контейнера ЦЕЛИКОМ (решение
+//     диспетчера по N1, вариант (а); `domain.RuleSelector.ReadsWholeType`): роль
+//     чтения самого контейнера (`registries:get`) потомков не открывает ни
+//     человеку, ни классу (SC-73), а суженное правило над ребёнком — по меткам,
+//     по именам, с одним глаголом чтения — `public_reader` не пишет.
 //
 // # Отдельный член состава, а не лишний кортеж у соседа
 //
@@ -56,7 +58,7 @@ func publicReaderMember(cat *catalog.Facts, bs BindingScope, subject, objectType
 	}
 	var fps []string
 	for _, sel := range bs.Selectors {
-		if selectorCoversAny(sel, children) {
+		if selectorReadsAnyWhole(sel, children) {
 			fps = append(fps, sel.RuleFP)
 		}
 	}
@@ -79,13 +81,13 @@ func publicReaderMember(cat *catalog.Facts, bs BindingScope, subject, objectType
 	}, true
 }
 
-// selectorCoversAny — правило-селектор называет хотя бы один из типов.
-func selectorCoversAny(sel domain.RuleSelector, types []string) bool {
-	for _, t := range sel.ObjectTypes {
-		for _, want := range types {
-			if t == want {
-				return true
-			}
+// selectorReadsAnyWhole — правило-селектор открывает чтение хотя бы одного из
+// типов-детей ЦЕЛИКОМ (`domain.RuleSelector.ReadsWholeType`): публичное чтение
+// наследует сужение правила роли, и суженное правило `public_reader` не пишет.
+func selectorReadsAnyWhole(sel domain.RuleSelector, types []string) bool {
+	for _, t := range types {
+		if sel.ReadsWholeType(t) {
+			return true
 		}
 	}
 	return false
