@@ -139,7 +139,12 @@ func CheckNamedVerbs(facts VerbFacts, m *manifest.Manifest, actions []Action) ([
 	for i := range m.Roles {
 		role := &m.Roles[i]
 		census.Roles++
+		// Вложенные правила (kaname#874) — с модулем владельца, той же меркой.
+		var all []manifest.Rule
 		for _, rule := range role.Rules {
+			all = append(all, withChildren(rule)...)
+		}
+		for _, rule := range all {
 			census.Rules++
 			named, isNamed := rule.Right()
 			if !isNamed {

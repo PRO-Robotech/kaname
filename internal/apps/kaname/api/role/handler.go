@@ -6,6 +6,7 @@ package role
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -48,6 +49,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 	if len(req.GetPermissions()) > 0 { //nolint:staticcheck // A-02: deprecated field read solely to reject it
 		return nil, shared.InvalidArg("permissions", "Illegal argument permissions (compiled/output-only)")
 	}
+	if err := refuseNestedRulesOnInput(req.GetRules()); err != nil {
+		return nil, err
+	}
 	r, err := roleFromCreateReq(req)
 	if err != nil {
 		return nil, err
@@ -60,6 +64,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateRoleRequest) (*operationpb.Operation, error) {
+	if err := refuseNestedRulesOnInput(req.GetRules()); err != nil {
+		return nil, err
+	}
 	in := UpdateRoleInput{
 		ID:              domain.RoleID(req.GetRoleId()),
 		ResourceVersion: req.GetResourceVersion(),
@@ -219,4 +226,23 @@ func roleToPb(r domain.Role) (*iamv1.Role, error) {
 		return nil, err
 	}
 	return &pb, nil
+}
+
+// textNestedRulesNotOnInput — отказ входа с вложенными правилами (kaname#874,
+// ND-04 (ж)). Контракт тона — дословно приёмочный.
+const textNestedRulesNotOnInput = "Illegal argument children (nested rules are declared by a module manifest)"
+
+// refuseNestedRulesOnInput — в этой фазе вложенное правило объявляет только
+// манифест модуля (приёмка `nested-rule-reaches-descendants-of-a-named-container.md`,
+// Р4): непустое `children` на входе `Create` и `Update` — синхронный
+// INVALID_ARGUMENT с полем `rules[<i>].children`, а не молчаливый пропуск. Поле
+// контракта на входе то же, что `permissions` (вывод) — отказ стоит рядом и в
+// той же форме, до заведения операции.
+func refuseNestedRulesOnInput(rules []*iamv1.Rule) error {
+	for i, r := range rules {
+		if len(r.GetChildren()) > 0 {
+			return shared.InvalidArg(fmt.Sprintf("rules[%d].children", i), textNestedRulesNotOnInput)
+		}
+	}
+	return nil
 }
