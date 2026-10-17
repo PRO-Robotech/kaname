@@ -120,8 +120,18 @@ func (p *pcrWorld) updateRules(rid domain.RoleID, rules domain.Rules, why string
 }
 
 // TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants — правило над
-// ребёнком, суженное метками, именами либо одним глаголом чтения, `public_reader`
-// не пишет, и сужение доходит до решения. Близнец — то же правило без сужения.
+// ребёнком, суженное метками либо одним глаголом чтения, `public_reader` не
+// пишет, и сужение доходит до решения. Близнец — то же правило без сужения.
+//
+// Сужение ИМЕНАМИ здесь не строится: имя репозитория несёт `/`, и роль с таким
+// правилом посев не принимает (`invalid argument: value violates a
+// constraint`). Его держат пробы уровня разворачивания и домена
+// (`TestPublicReaderMember_NarrowedChildRuleWritesNothing`,
+// `TestReadsWholeTypeIsOneJudgementForRuleAndSelector`). Правило по меткам над
+// репозиторием глаголом правки роли недостижимо («type registry.repositories is
+// not selectable (no resource feed)»), посев его кладёт напрямую — так
+// утверждается предикат разворачивания на состоянии, которое мог бы оставить
+// иной путь записи.
 func TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants(t *testing.T) {
 	twin := newPCRWorld(t)
 	twin.deliverNewEdition("сужение: близнец")
@@ -136,7 +146,6 @@ func TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants(t *testing.T) {
 		relation string // глагол на ребёнке, которого правило не даёт ни одной ветвью
 	}{
 		{"по меткам", func(r domain.Rule) domain.Rule { r.MatchLabels = map[string]string{"tier": "gold"}; return r }, "v_get"},
-		{"по именам", func(r domain.Rule) domain.Rule { r.ResourceNames = []string{pcrX + "/other"}; return r }, "v_get"},
 		{"только list", func(r domain.Rule) domain.Rule { r.Verbs = []string{"list"}; return r }, "v_get"},
 		{"только get", func(r domain.Rule) domain.Rule { r.Verbs = []string{"get"}; return r }, "v_list"},
 	} {
@@ -164,10 +173,10 @@ func TestPublicContainerRead_RoleUpdateWithdrawsPublicReader(t *testing.T) {
 		{"близнец: правило над ребёнком переписано, не снято",
 			domain.Rules{{Module: "registry", Resources: []string{"registries", "repositories"}, Verbs: []string{"get", "list"}}}, 1},
 		{"правило над ребёнком снято", domain.Rules{pcrRegistriesRule()}, 0},
-		{"правило над ребёнком сужено метками",
+		{"правило над ребёнком сужено до одного глагола",
 			domain.Rules{pcrRegistriesRule(), func() domain.Rule {
 				r := pcrRepositoriesRule()
-				r.MatchLabels = map[string]string{"tier": "gold"}
+				r.Verbs = []string{"get"}
 				return r
 			}()}, 0},
 	} {
