@@ -204,8 +204,18 @@ func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
 	// Тождество теперь построением: объявление одно (kacho#1890). Ответы обоих
 	// операторов посевщик по-прежнему отбрасывает — вердикт о том, легли ли
 	// строки, выносит перепись (3), и это её предмет, а не его.
+	// Цепь в словаре модели — тем же образом, каким её ниже кладут рёбра; полоса
+	// сдвига версии сверяет с ней хранимые рёбра (kaname#874).
+	edgeChain := make([]string, 0, len(row.ParentChain))
+	for _, ancestor := range row.ParentChain {
+		typ, id, ok := splitObjectRef(ancestor)
+		if !ok {
+			return fmt.Errorf("scalegrid: непонятая форма предка %q (ожидается \"<type>:<id>\")", ancestor)
+		}
+		edgeChain = append(edgeChain, edgeParentType(typ)+":"+id)
+	}
 	s.batch.Queue(resource_mirror.StmtVersionOnlyBump,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, edgeChain)
 	s.batch.Queue(resource_mirror.StmtInsertOrSupersede,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
 
