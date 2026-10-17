@@ -202,6 +202,39 @@ func WithoutRoles(doc []byte) ([]byte, error) {
 	return append([]byte(nil), doc[:i+1]...), nil
 }
 
+// OnlyPublicReadRole — документ, в разделе `roles` которого осталась одна роль
+// `registry.public.read`: вычеркнуты пробные роли kaname#874, стоящие после неё
+// (их kacho#3274 не вносит). Это редакция ровно в том составе, в каком её
+// доставляет kacho#3274: правило `[get, list]` над `registries` с вложенным
+// `[get, list]` над `repositories`.
+//
+// Нужен пробам, чьи числа — свойство этой одной роли: пробные роли добавили бы
+// к переписи свои пары, и число мерило бы состав фикстуры, а не предмет.
+func OnlyPublicReadRole(doc []byte) ([]byte, error) {
+	head := []byte("\n  - id: " + PublicReadRoleName + "\n")
+	if n := bytes.Count(doc, head); n != 1 {
+		return nil, fmt.Errorf("publicreadfixture: роль %s в документе встречается %d раз, нужна ровно одна",
+			PublicReadRoleName, n)
+	}
+	start := bytes.Index(doc, head) + len(head)
+	out := doc
+	if next := bytes.Index(doc[start:], []byte("\n  - id: ")); next >= 0 {
+		out = append([]byte(nil), doc[:start+next+1]...)
+	}
+	// Вычеркнуть разрешено только роли: раздел верхнего уровня после `roles`
+	// ушёл бы вместе с ними молча.
+	for _, l := range strings.Split(string(doc[len(out):]), "\n") {
+		if l != "" && l[0] != ' ' && l[0] != '#' {
+			return nil, fmt.Errorf("publicreadfixture: после ролей стоит раздел верхнего уровня %q — "+
+				"вычёркивание сняло бы и его", l)
+		}
+	}
+	if n := bytes.Count(out, []byte("\n  - id: ")); n != 1 {
+		return nil, fmt.Errorf("publicreadfixture: после вычёркивания ролей осталось %d, нужна одна", n)
+	}
+	return out, nil
+}
+
 // requireDelta — вычисленная разница обязана совпасть с объявленной.
 func requireDelta(base, twin []byte, wantRemoved, wantAdded []string) error {
 	r, a := Delta(base, twin)
