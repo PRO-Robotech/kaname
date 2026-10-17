@@ -15,6 +15,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -101,4 +102,45 @@ func TestAnonymousPrincipal_DeclaredValueReachesTheLoadedSetting(t *testing.T) {
 	got, err = cfg.APIServer.RegistryToken.AnonymousPrincipal()
 	require.NoError(t, err)
 	require.Empty(t, got, "незаданная ручка обязана давать пустое — поток выключен")
+}
+
+// Граница длины — парой, которая отличается ОДНИМ знаком: 63 знака объявленной
+// формы принимаются, 64 той же формы — отказ в старте с именем ручки. Обе
+// строки — одно и то же имя из двух слов, удлинённое во втором слове, поэтому
+// отказ на 64 приходит от длины, а не от формы.
+func TestAnonymousPrincipal_LengthBoundaryIsSixtyThreeCharacters(t *testing.T) {
+	atLimit := "a-" + strings.Repeat("b", 61)
+	overLimit := "a-" + strings.Repeat("b", 62)
+	require.Len(t, atLimit, 63)
+	require.Len(t, overLimit, 64)
+
+	_, err := loadRegistryLane(t, atLimit)
+	require.NoError(t, err, "имя объявленной формы длиной ровно 63 знака обязано приниматься")
+
+	_, err = loadRegistryLane(t, overLimit)
+	require.Error(t, err, "имя объявленной формы длиной 64 знака обязано отказывать в старте")
+	require.Contains(t, err.Error(), anonPrincipalKey,
+		"отказ по длине обязан называть РУЧКУ: %v", err)
+	require.Contains(t, err.Error(), "at most 63 characters",
+		"отказ по длине обязан называть предел: %v", err)
+}
+
+// Законный близнец отказа «порождённый идентификатор через дефис»: тот же
+// префикс `ak-` и те же знаки crockford-base32, но 16 знаков вместо 17 —
+// порождённым идентификатором продукта это быть не может, и имя объявленной
+// формы принимается. Пара отделяет страж формы порождённого идентификатора от
+// стража общей формы: без близнеца отказ на `ak-…17` был бы неотличим от отказа
+// на любом имени с префиксом `ak-`.
+func TestAnonymousPrincipal_GeneratedShapeTwinOneCharacterShortIsAccepted(t *testing.T) {
+	const twin = "ak-0123456789abcdef"
+	const generated = twin + "g"
+	require.Len(t, strings.TrimPrefix(twin, "ak-"), 16)
+	require.Len(t, strings.TrimPrefix(generated, "ak-"), 17)
+
+	_, err := loadRegistryLane(t, twin)
+	require.NoError(t, err, "имя с 16 знаками после `ak-` — не порождённый идентификатор и обязано приниматься")
+
+	_, err = loadRegistryLane(t, generated)
+	require.Error(t, err, "имя с 17 знаками после `ak-` — форма порождённого идентификатора, отказ")
+	require.Contains(t, err.Error(), anonPrincipalKey, "отказ обязан называть РУЧКУ: %v", err)
 }
