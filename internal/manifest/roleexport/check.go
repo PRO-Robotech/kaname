@@ -16,6 +16,13 @@ import (
 // check.go — целостность правил роли: покрывает ли каждый названный класс хотя
 // бы одно ПРИГОДНОЕ действие названного ресурса (приёмка §4.1, MOD-RL-05).
 //
+// Ветвей у вердикта ДВЕ. Ресурс с действиями в каталоге прав судится ими —
+// это общий случай. Ресурс, объявленный без собственной службы
+// (`authzmap.CatalogResourcesWithoutOwnService`), действий в каталоге не имеет
+// by construction, и правило в форме `classes` над ним судится глаголами
+// модели его типа (`judgeByModelVerbs`, kaname#872). Поимённая форма над таким
+// ресурсом получает прежний отказ: сводить имена к классу не по чему.
+//
 // # Почему отказ, а не молчание
 //
 // Молча принятое пустое право применилось бы миграцией, легло бы строкой в
@@ -189,36 +196,49 @@ func CheckRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) ([]
 	return faults, census
 }
 
-// judgeResource — вердикт по одному ресурсу правила; вторым значением — сколько
-// пар (ресурс, класс) осмотрено, третьим — судились ли они глаголами модели.
+// judgeResource — вердикт по одному ресурсу правила.
+//
+// `judged` — сколько пар (ресурс, класс) осмотрено; `byModel` — судились ли они
+// глаголами модели типа, а не действиями каталога.
 func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule manifest.Rule,
 	resource string,
-	byResource map[string][]Action) ([]error, int, bool) {
+	byResource map[string][]Action) (faults []error, judged int, byModel bool) {
 
 	own := byResource[rule.Module+"."+resource]
 	if len(own) == 0 {
-		if _, without := authzmap.CatalogResourcesWithoutOwnService()[rule.Module+"."+resource]; without {
-			found, judged := judgeByModelVerbs(facts, m, roleID, rule, resource)
-			return found, judged, true
+		_, without := authzmap.CatalogResourcesWithoutOwnService()[rule.Module+"."+resource]
+		_, named := rule.Right()
+		if without && !named {
+			faults, judged = judgeByModelVerbs(facts, m, roleID, rule, resource)
+			return faults, judged, true
+		}
+		// Поимённая форма над ресурсом без своей службы — тот же отказ, что у
+		// ресурса, которого каталог не знает: имена действий сводятся к классу
+		// по действиям каталога (MOD-RL-18), а их у такого ресурса нет. Молчать
+		// с нулём пар значило бы принять перечень, полноту которого никто не
+		// считал.
+		detail := fmt.Sprintf(
+			"роль %q: правило называет ресурс %q модуля %q, а каталог прав не приписывает "+
+				"этому ресурсу ни одного действия. Право по нему пусто при любом классе; "+
+				"проверь написание ресурса — оно ДОСЛОВНО то же, каким ресурс назван "+
+				"ключом закрытой таблицы типов (числа у написания нет: `securityGroup` "+
+				"у vpc, `targetGroups` у балансировщика)",
+			roleID, resource, rule.Module)
+		if without {
+			detail += ". Ресурс объявлен без собственной службы: правило в форме `classes` " +
+				"над ним судится глаголами модели его типа, а поимённую форму `verbs` " +
+				"свести к классу не по чему — назови право классами"
 		}
 		return []error{Finding{
 			Kind:     ErrRuleResourceUnknownToCatalog,
 			Role:     roleID,
 			Module:   rule.Module,
 			Resource: resource,
-			Detail: fmt.Sprintf(
-				"роль %q: правило называет ресурс %q модуля %q, а каталог прав не приписывает "+
-					"этому ресурсу ни одного действия. Право по нему пусто при любом классе; "+
-					"проверь написание ресурса — оно ДОСЛОВНО то же, каким ресурс назван "+
-					"ключом закрытой таблицы типов (числа у написания нет: `securityGroup` "+
-					"у vpc, `targetGroups` у балансировщика)",
-				roleID, resource, rule.Module),
+			Detail:   detail,
 		}}, 0, false
 	}
 
 	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
-	var faults []error
-	judged := 0
 	for _, verb := range rule.Classes {
 		class := classOf(m, verb)
 		judged++
@@ -256,7 +276,9 @@ func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule ma
 // (`GrantedVerbs` с набором типа), поэтому «покрыт» здесь значит «правило
 // действительно пишет на объекте этого типа хотя бы одно глагольное отношение».
 // Запасного словаря у этой ветви нет: тип без собственного набора глаголов не
-// покрывается ни одним классом — fail-closed, как и пара вне закрытой таблицы.
+// покрывается ни одним классом — fail-closed. Тип есть у каждой записи перечня:
+// это предусловие держит проба `TestResourcesWithoutOwnServiceAreClosedTableKeys`,
+// поэтому ветви «пара вне закрытой таблицы» здесь нет.
 // Ярус в покрытие не входит: без действий каталога неизвестно, спрашивает ли
 // его хоть один гейт, и вывод «покрыто ярусом» был бы предположением.
 //
@@ -265,16 +287,18 @@ func judgeByModelVerbs(facts VerbFacts, m *manifest.Manifest, roleID string, rul
 	resource string) ([]error, int) {
 
 	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
-	var typeVerbs []string
-	if fgaType != "" {
-		typeVerbs = facts.VerbsOfType(fgaType)
-	}
+	typeVerbs := facts.VerbsOfType(fgaType)
 	var faults []error
 	judged := 0
 	for _, verb := range rule.Classes {
 		class := classOf(m, verb)
 		judged++
-		if len(typeVerbs) > 0 && len(facts.GrantedVerbs(fgaType, []string{class}, typeVerbs)) > 0 {
+		// Отдельной охраны «набор типа пуст» здесь нет намеренно: `GrantedVerbs`
+		// сверяет каждый глагол, включая удаление, которое влечёт правка, с
+		// набором типа, и на пустом наборе отдаёт пусто на любом пути. Охрана
+		// была бы эквивалентным мутантом, а исход «тип без глаголов — находка»
+		// держит проба (TestRuleOnResourceWithoutOwnServiceRefusesATypeWithoutModelVerbs).
+		if len(facts.GrantedVerbs(fgaType, []string{class}, typeVerbs)) > 0 {
 			continue
 		}
 		faults = append(faults, Finding{
@@ -302,10 +326,6 @@ func modelVerbsDetail(roleID, module, resource, verb, class, fgaType string, typ
 		"него нет by construction, поэтому право по нему судится глаголами модели типа, " +
 		"которые правило роли пишет на объекте. ")
 	switch {
-	case fgaType == "":
-		fmt.Fprintf(&b, "У пары (%q, %q) нет типа объекта в закрытой таблице модели прав — "+
-			"правило не пишет на таком ресурсе ни одного кортежа ни при каком классе.",
-			module, resource)
 	case len(typeVerbs) == 0:
 		fmt.Fprintf(&b, "Тип %q не объявляет в модели ни одного глагола — ролью модуля "+
 			"ресурс не выдаётся ни при каком классе.", fgaType)

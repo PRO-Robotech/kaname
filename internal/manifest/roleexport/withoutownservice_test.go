@@ -17,6 +17,7 @@
 //	+ класс `create` в правиле              → находка о `create` на repositories
 //	− действия `registries` в каталоге      → прежний отказ о ресурсе
 //	модель без `get`/`list` у типа          → находки о `get` и `list`
+//	`verbs:` вместо `classes:`              → прежний отказ о ресурсе
 //
 // Второй близнец доказывает, что исключение не всеразрешающее: класс вне
 // глаголов типа по-прежнему отвергается. Третий — что ресурс СО своей службой
@@ -122,7 +123,7 @@ func TestRuleOnResourceWithoutOwnServiceIsJudgedByModelVerbs(t *testing.T) {
 		t.Fatalf("стадии не исполнялись: правила %v, поимённая форма %v — "+
 			"«находок 0» без исполнения не вердикт", rep.RulesJudged, rep.NamedJudged)
 	}
-	// Две ресурса по два класса; из них по глаголам модели — ровно пары
+	// Два ресурса по два класса; из них по глаголам модели — ровно пары
 	// repositories. Ноль здесь значил бы, что предмет не судился вовсе.
 	if rep.Rules.PairsJudged != 4 {
 		t.Errorf("пар (ресурс, класс) осмотрено %d, правило называет 4", rep.Rules.PairsJudged)
@@ -239,5 +240,154 @@ func TestRuleOnResourceWithoutOwnServiceReadsModelVerbsThroughThePort(t *testing
 	if len(got) != 2 || !classes["get"] || !classes["list"] {
 		t.Fatalf("на модели без get/list ожидались две находки (get, list) о %s, получено %v",
 			withoutServiceResource, got)
+	}
+}
+
+// TestRuleOnResourceWithoutOwnServiceRefusesATypeWithoutModelVerbs — тип, не
+// объявляющий в модели ни одного глагола, не покрывается НИ ОДНИМ классом.
+//
+// Запасного словаря у ветви нет: подмени она пустой набор общим словарём, обе
+// пары молчали бы. Две находки, по одной на класс, и текст называет причину.
+func TestRuleOnResourceWithoutOwnServiceRefusesATypeWithoutModelVerbs(t *testing.T) {
+	requireWithoutServicePremise(t)
+	m := publicReadEdition(t, "", "")
+	facts := narrowedFacts{Facts: catalogfixture.Facts(), fgaType: withoutServiceType, verbs: nil}
+
+	faults, census := roleexport.CheckRoleRules(facts, m, mustActions(t))
+	t.Logf("перепись: %s", census.Summary())
+
+	got := findingsOn(faults, withoutServiceResource)
+	classes := map[string]bool{}
+	for _, f := range got {
+		if !errors.Is(f, roleexport.ErrClassIsNotAModelVerbOfType) {
+			t.Errorf("находка не того вида: %v", f)
+			continue
+		}
+		if !strings.Contains(f.Detail, "не объявляет в модели ни одного глагола") {
+			t.Errorf("отказ не называет причину «у типа нет глаголов»: %s", f.Detail)
+		}
+		classes[f.Class] = true
+	}
+	if len(got) != 2 || !classes["get"] || !classes["list"] {
+		t.Fatalf("на типе без глаголов модели ожидались две находки (get, list) о %s, получено %v",
+			withoutServiceResource, got)
+	}
+}
+
+// deprecatedVerbsSection — раздел снятых глаголов, дописываемый в конец
+// фикстуры: `read` разрешается в `get` (глагол модели репозитория), `make` — в
+// `create` (его у типа репозитория нет).
+const deprecatedVerbsSection = `
+deprecatedVerbs:
+  read:
+    class: get
+    since: "2026-08-23"
+    reason: >
+      Синоним чтения из прежней грамматики. Ни одного RPC не адресует;
+      проецируется в отношение чтения наравне с get и list.
+    removeWhen: >
+      Ни одна выданная привязка не ссылается на роль, чьи права содержат
+      сегмент чтения прежней грамматики. Предикат: выдач с таким правом ноль.
+  make:
+    class: create
+    since: "2026-08-23"
+    reason: >
+      Синоним создания из прежней грамматики. Ни одного RPC не адресует;
+      проецируется в класс создания и пообъектного отношения не имеет.
+    removeWhen: >
+      Ни одна выданная привязка не ссылается на роль, чьи права содержат
+      сегмент создания прежней грамматики. Предикат: выдач с таким правом ноль.
+`
+
+// TestRuleOnResourceWithoutOwnServiceJudgesTheClassADeprecatedVerbResolvesTo —
+// снятый глагол в правиле судится КЛАССОМ, в который он разрешается, а не
+// своим именем.
+//
+// Оба случая отличаются от общей основы ровно одним фактом — глаголом правила:
+//
+//	classes: [read]  → read разрешается в get → находок о repositories 0
+//	classes: [make]  → make разрешается в create → одна находка о классе create
+//
+// Мутант, судящий имя глагола вместо класса, краснеет на обоих: `read` не
+// глагол модели, а находка о `make` назвала бы класс "make".
+func TestRuleOnResourceWithoutOwnServiceJudgesTheClassADeprecatedVerbResolvesTo(t *testing.T) {
+	requireWithoutServicePremise(t)
+	data, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	if err != nil {
+		t.Fatalf("фикстура новой редакции: %v", err)
+	}
+	if strings.Contains(string(data), "deprecatedVerbs:") {
+		t.Fatal("предпосылка не держится: в фикстуре уже есть раздел deprecatedVerbs — " +
+			"дописанный второй дал бы документ, который загрузчик судит иначе")
+	}
+	base := string(data) + deprecatedVerbsSection
+
+	judge := func(t *testing.T, classes string) []roleexport.Finding {
+		t.Helper()
+		const old = "        classes: [get, list]"
+		if n := strings.Count(base, old); n != 1 {
+			t.Fatalf("близнец: заменяемая строка встречается %d раз, нужна ровно одна", n)
+		}
+		doc := strings.Replace(base, old, "        classes: "+classes, 1)
+		oracle, err := manifestoracle.Canon()
+		if err != nil {
+			t.Fatalf("канон модели прав не разобран: %v", err)
+		}
+		m, err := manifest.Load([]byte(doc), manifest.WithRelationOracle(oracle))
+		if err != nil {
+			t.Fatalf("близнец отвергнут загрузчиком: %v", err)
+		}
+		faults, census := roleexport.CheckRoleRules(catalogfixture.Facts(), m, mustActions(t))
+		t.Logf("classes %s · перепись: %s", classes, census.Summary())
+		if census.PairsJudgedByModelVerbs != 1 {
+			t.Fatalf("пар по глаголам модели %d, ожидалась 1 — repositories не судился моделью",
+				census.PairsJudgedByModelVerbs)
+		}
+		return findingsOn(faults, withoutServiceResource)
+	}
+
+	t.Run("read разрешается в get и молчит", func(t *testing.T) {
+		if got := judge(t, "[read]"); len(got) != 0 {
+			t.Fatalf("снятый read (класс get) отвергнут на repositories: %v", got)
+		}
+	})
+	t.Run("make разрешается в create и даёт находку", func(t *testing.T) {
+		got := judge(t, "[make]")
+		if len(got) != 1 {
+			t.Fatalf("находок о repositories %d, ожидалась одна (класс create): %v", len(got), got)
+		}
+		f := got[0]
+		if !errors.Is(f, roleexport.ErrClassIsNotAModelVerbOfType) || f.Class != "create" {
+			t.Fatalf("находка не та: вид %v, класс %q — ожидался класс create", f.Kind, f.Class)
+		}
+		if !strings.Contains(f.Detail, `глагол "make" объявлен снятым и разрешается в класс "create"`) {
+			t.Errorf("отказ не называет разрешение снятого глагола: %s", f.Detail)
+		}
+	})
+}
+
+// TestNamedFormOnResourceWithoutOwnServiceKeepsThePriorRefusal — близнец:
+// поимённая форма (`verbs:` вместо `classes:`) над ресурсом без своей службы
+// получает прежний отказ, а не молчание с нулём пар.
+//
+// Имена действий сводятся к классу по действиям каталога, а их у такого
+// ресурса нет: принять перечень значило бы принять право, полноту которого
+// никто не считал.
+func TestNamedFormOnResourceWithoutOwnServiceKeepsThePriorRefusal(t *testing.T) {
+	requireWithoutServicePremise(t)
+	m := publicReadEdition(t, publicReadRule, "        verbs: [get, list]")
+
+	faults, census := roleexport.CheckRoleRules(catalogfixture.Facts(), m, mustActions(t))
+	t.Logf("перепись: %s", census.Summary())
+
+	got := findingsOn(faults, withoutServiceResource)
+	if len(got) != 1 || !errors.Is(got[0], roleexport.ErrRuleResourceUnknownToCatalog) {
+		t.Fatalf("поимённая форма над %s не получила прежнего отказа: %v", withoutServiceResource, got)
+	}
+	if !strings.Contains(got[0].Detail, "поимённую форму `verbs`") {
+		t.Errorf("отказ не называет причину для ресурса без своей службы: %s", got[0].Detail)
+	}
+	if census.PairsJudgedByModelVerbs != 0 {
+		t.Errorf("поимённая форма засчитана судимой по модели: пар %d", census.PairsJudgedByModelVerbs)
 	}
 }
