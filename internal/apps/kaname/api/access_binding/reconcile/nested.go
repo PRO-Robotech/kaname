@@ -113,6 +113,20 @@ func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, s
 	return out, nil
 }
 
+// hasNestedSelector — у выдачи есть вложенный селектор, который к ней
+// применяется (субъект не класс).
+func hasNestedSelector(bs BindingScope) bool {
+	if isClassBinding(bs) {
+		return false
+	}
+	for _, sel := range bs.Selectors {
+		if sel.Container != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // nestsUnder — у выдачи есть вложенный селектор с контейнером типа `objectType`,
 // то есть изменение объекта этого типа меняет охват его потомков.
 func nestsUnder(bs BindingScope, objectType string) bool {

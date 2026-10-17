@@ -705,13 +705,11 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if err != nil {
 			return fmt.Errorf("get object %s:%s: %w", objectType, objectID, err)
 		}
-		// Предки объекта — ОДИН раз на веер (kaname#874): по ним каждая выдача
-		// решает свои вложенные правила. Чтение — текущей цепи, поэтому перенос
-		// объекта под другой контейнер (ND-09) переносит и члены.
-		ancestors, err := r.ancestorsOf(ctx, s, objectType, objectID, objPresent)
-		if err != nil {
-			return err
-		}
+		// Предки объекта — не более ОДНОГО раза на веер и лишь по спросу выдачи с
+		// вложенным правилом (kaname#874): по ним каждая такая выдача решает свои
+		// вложенные правила. Чтение — текущей цепи, поэтому перенос объекта под
+		// другой контейнер (ND-09) переносит и члены.
+		ancestors := r.ancestorsOf(ctx, s, objectType, objectID, objPresent)
 
 		// Fan out over the de-duplicated union; the per-binding pass is an idempotent
 		// diff of THIS OBJECT's membership, so reconciling a binding once is enough
@@ -875,7 +873,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 // the object stopped appearing in MatchAllInScope.
 func (r *Reconciler) reconcileBindingForObject(
 	ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID,
-	objectType, objectID string, obj domain.MirrorObject, objPresent bool, ancestors []domain.MirrorObject,
+	objectType, objectID string, obj domain.MirrorObject, objPresent bool, ancestors *ancestorMemo,
 	col *syncFGACollector,
 ) error {
 	// ЗАМОК ЭТОЙ ВЫДАЧИ УЖЕ ВЗЯТ ВЫЗЫВАЮЩИМ — вместе со всеми остальными замками
@@ -912,7 +910,11 @@ func (r *Reconciler) reconcileBindingForObject(
 
 	var desired []DesiredMember
 	if objPresent {
-		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, ancestors)
+		anc, err := ancestors.forBinding(bs)
+		if err != nil {
+			return err
+		}
+		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
 	}
 
 	// The NARROW diff base: this binding's members ON THIS OBJECT only.
@@ -1492,16 +1494,42 @@ func dedupSortBindingIDs(sets ...[]domain.AccessBindingID) []domain.AccessBindin
 	return out
 }
 
-// ancestorsOf — предки объекта пути по объекту (kaname#874). Объекту, ушедшему из
-// источника, и собственному объекту iam предки не читаются: первому желаемых
-// членов нет вовсе, второй контейнера-предка в зеркале не имеет.
-func (r *Reconciler) ancestorsOf(ctx context.Context, s ReconcileStore, objectType, objectID string, present bool) ([]domain.MirrorObject, error) {
-	if !present || domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
+// ancestorsOf — предки объекта пути по объекту (kaname#874), читаемые ЛЕНИВО: не
+// более одного раза на веер и только когда их спросила выдача с вложенным
+// селектором. Без вложенных правил путь по объекту не платит лишним обращением.
+// Объекту, ушедшему из источника, и собственному объекту iam предки не читаются:
+// первому желаемых членов нет вовсе, второй контейнера-предка в зеркале не имеет.
+func (r *Reconciler) ancestorsOf(ctx context.Context, s ReconcileStore, objectType, objectID string, present bool) *ancestorMemo {
+	return &ancestorMemo{load: func() ([]domain.MirrorObject, error) {
+		if !present || domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
+			return nil, nil
+		}
+		out, err := s.AncestorObjects(ctx, objectType, objectID)
+		if err != nil {
+			return nil, fmt.Errorf("ancestors of %s:%s: %w", objectType, objectID, err)
+		}
+		return out, nil
+	}}
+}
+
+// ancestorMemo — предки одного объекта, прочитанные не более одного раза. Живёт в
+// одном проходе одной горутины.
+type ancestorMemo struct {
+	load func() ([]domain.MirrorObject, error)
+	done bool
+	out  []domain.MirrorObject
+	err  error
+}
+
+// forBinding — предки объекта, если выдача `bs` их спрашивает (у неё есть
+// вложенный селектор и её субъект не класс); иначе пусто без обращения к базе.
+func (m *ancestorMemo) forBinding(bs BindingScope) ([]domain.MirrorObject, error) {
+	if !hasNestedSelector(bs) {
 		return nil, nil
 	}
-	out, err := s.AncestorObjects(ctx, objectType, objectID)
-	if err != nil {
-		return nil, fmt.Errorf("ancestors of %s:%s: %w", objectType, objectID, err)
+	if !m.done {
+		m.out, m.err = m.load()
+		m.done = true
 	}
-	return out, nil
+	return m.out, m.err
 }

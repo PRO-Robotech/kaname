@@ -96,6 +96,8 @@ type fakeStore struct {
 	// ней); ancestors — предки объекта из его цепи регистрации, ключ memberKey.
 	target    domain.AccessTarget
 	ancestors map[string][]domain.MirrorObject
+	// ancestorReads — обращений за предками (путь по объекту читает их лениво).
+	ancestorReads int
 }
 
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {

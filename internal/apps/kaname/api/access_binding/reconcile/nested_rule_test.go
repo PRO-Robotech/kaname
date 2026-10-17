@@ -49,6 +49,7 @@ func (f *fakeStore) MatchDescendants(_ context.Context, types []string, containe
 
 // AncestorObjects — предки объекта из его цепи.
 func (f *fakeStore) AncestorObjects(_ context.Context, objectType, objectID string) ([]domain.MirrorObject, error) {
+	f.ancestorReads++
 	return f.ancestors[memberKey(objectType, objectID)], nil
 }
 
@@ -282,5 +283,36 @@ func TestReconcileNested_ND08_ContainerLabelChangeRecomputesDescendants(t *testi
 				t.Errorf("член на t1 снят = %v, ждали %v (удалено %v)", got, c.removed, g.deletes)
 			}
 		})
+	}
+}
+
+// Путь по объекту читает предков ЛЕНИВО: выдача без вложенных правил не платит
+// обращением за ними, выдача с вложенным правилом — одним. Близнец — та же
+// выдача с вложенным правилом над ярлыками: обращение одно и член на t1 есть.
+func TestReconcileNested_ObjectPassReadsAncestorsOnlyWhenANestedRuleAsks(t *testing.T) {
+	ctx := context.Background()
+	flat := domain.Rules{{Module: "probemod", Resources: []string{"tags"}, Verbs: []string{"get"}}}
+	f := ndStore("user", "usrnd08", flat, domain.AccessTarget{AllInScope: true})
+	f.selectorBindings = []domain.AccessBindingID{"acb0000000000000nd08"}
+	if err := New(fakeRunner{s: f}, nil, catalog.Fixed{F: ndFacts(t)}).ReconcileObject(ctx, "probemod.tags", "t1"); err != nil {
+		t.Fatalf("проход по объекту: %v", err)
+	}
+	if f.ancestorReads != 0 {
+		t.Errorf("выдача без вложенных правил: обращений за предками %d, ждали 0", f.ancestorReads)
+	}
+	if got := ndMembers(f, "probemod_tag"); !slices.Equal(got, []string{"t1"}) {
+		t.Fatalf("выдача без вложенных правил: v_get на ярлыках = %v, ждали [t1] — сравнивать не с чем", got)
+	}
+
+	twin := ndStore("user", "usrnd08", ndReaderRules(nil, nil, "tags"), ndBoxTarget("b1"))
+	twin.selectorBindings = []domain.AccessBindingID{"acb0000000000000nd08"}
+	if err := New(fakeRunner{s: twin}, nil, catalog.Fixed{F: ndFacts(t)}).ReconcileObject(ctx, "probemod.tags", "t1"); err != nil {
+		t.Fatalf("проход по объекту (близнец): %v", err)
+	}
+	if twin.ancestorReads != 1 {
+		t.Errorf("выдача с вложенным правилом: обращений за предками %d, ждали 1", twin.ancestorReads)
+	}
+	if got := ndMembers(twin, "probemod_tag"); !slices.Equal(got, []string{"t1"}) {
+		t.Errorf("выдача с вложенным правилом: v_get на ярлыках = %v, ждали [t1]", got)
 	}
 }
