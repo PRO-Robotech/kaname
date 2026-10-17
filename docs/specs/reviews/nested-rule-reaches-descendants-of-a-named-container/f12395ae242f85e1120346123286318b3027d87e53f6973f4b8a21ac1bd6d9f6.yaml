@@ -144,7 +144,8 @@ authority:
   expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-17T19:37:14Z"
   reason: событие не опубликовано (event.status not_performed); одобрение вступает в силу событием
 
 event_body: "acceptance-reviewer · APPROVED · sha256 f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6 · ред. 2, круг 2: B1–B4 и M1–M7 закрыты, блокирующих 0"
@@ -152,10 +153,21 @@ event_body: "acceptance-reviewer · APPROVED · sha256 f12395ae242f85e1120346123
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#874
-  status: not_performed
-  published: false
-  note: публикует курьер; до публикации блок честно not_performed
-
+  status: performed
+  published: true
+  database_id: 6239719810
+  node_id: "IC_kwDOUO26pM8AAAABc-qRgg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/874#issuecomment-6239719810"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6239719810"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-17T19:37:14Z"
+  body_sha256: "8e22f938f771e5b5fb78c9a0e052c31b5ecc95de700d70ace446d37af742f27b"
+  subject_sha256: "f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6"
+  subject_revision_commit: "f311fa3afa6d904bb316e00104be4eb953d8b110"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
