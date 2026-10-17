@@ -1,0 +1,167 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/nested-rule-reaches-descendants-of-a-named-container.md
+  sha256: f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 422d1bc6f
+  content_commit: null
+  content_commit_note: документ не закоммичен (неотслеживаемый файл копии tmp/kaname-874-acceptance)
+  branch: acceptance/874-container-target-covers-descendants
+  task: PRO-Robotech/kaname#874
+  related_tasks: [PRO-Robotech/kaname#857, PRO-Robotech/kaname#856, PRO-Robotech/kacho#3274]
+  lines: 555
+  round: 2
+  round_scope: >-
+    Второй и последний круг (fa-b8). Судится только закрытие B1–B4 и M1–M7 записи
+    49242817… и новое: ND-11, ND-12, ND-08 «И», а также следствия решения В6 (B1 = (б)) в
+    Р3. Решения В1–В6 не переоткрываются.
+  predecessor_record: docs/specs/reviews/nested-rule-reaches-descendants-of-a-named-container/492428179d619f7a0accaf2a8d2d99d0cec0ae532654ed9d76a75df82d127062.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kaname-874-acceptance @ 422d1bc6f → f12395ae…bd6d9f6
+    (совпало с заданием).
+  measurement_revisions: >-
+    kaname — git show 422d1bc6f; трекер — gh issue view на 2026-10-17.
+  neighbours_pinned:
+    anonymous-and-authenticated-are-subject-classes.md: bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6
+    module-manifest-roles-and-seed-grants.md: fc75beed6e2b2006774ae9156307f3c1f543111801e929aac10e8be1a48fffb5
+  neighbours_note: >-
+    сосед одобрен этим же заходом на bd6325e3… (соседняя запись); таблица «Опора» называет
+    отпечаток редакции 10 и говорит «правится редакциями 11–12» — допустимо, R2 ниже.
+
+verdict: APPROVED
+verdict_note: >-
+  Все блокирующие круга 1 закрыты, новых блокирующих нет. Вердикт относится к редакции 2
+  целиком.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-17T16:10:00+03:00'
+
+execution_check:
+  - item: B1 · SCOPE
+    result: >-
+      закрыт решением В6 (строка 535): на allInScope и пустой цели вложенное правило
+      охватывает потомков всех контейнеров области, которые проходит ветвь правила-владельца
+      (Р3 п. 2, строки 133-142). SC-68 Б2 соседа теперь исполним дословно; ND-11 его держит
+      (близнец без children → [true, false, true, false]).
+  - item: B2 · COVERAGE
+    result: >-
+      закрыт: (1) ND-11 (а) allInScope, (б) {} и {"resources":[]} хранимыми формами — вход
+      Create пустую цель отвергает (handler.go:141, F8), поэтому строкой, как близнецы #857;
+      (2) ND-12 — текст ворот 3 сверен с кодом дословно (structural_gates.go, «role %s does not
+      grant verbs on %s; target type must be covered by role.rules»); id цели с «/» входом
+      принимается (AccessTarget.Validate проверяет только непустоту); (3) ND-04 (ж) — и PATCH;
+      (4) ND-10 (б) — класс authenticated.
+  - item: B3 · PRODUCER
+    result: >-
+      закрыт: Р5 (строки 216-222) и редакция 12 соседа называют одних держателей SC-68 —
+      ^TestTarget_ (8 функций, перемерено прогоном: 8 из 8 PASS), ND-02, ND-11.
+  - item: B4 · CONSTRUCTIBILITY
+    result: >-
+      закрыт: ND-09 — регистрации с source_version T1, повторная — T2 > T1, оба вызова;
+      близнец — повторная с T1. Близнец подтверждён посевом круга 1 (без более новой версии
+      рёбра прежние). Положительная сторона — по коду (emitter.go:301-310 и условие
+      source_version < EXCLUDED.source_version); посев T2 > T1 — см. constructibility.
+  - item: M1–M7
+    result: >-
+      закрыты все семь: строка производителя ND-05/ND-10 называет заказ чтения вложенных
+      правил в CoveredChild, GrantsReadsOnly и обоих стражах базы; ND-05 (в) — «П1, затем
+      deliverPriorEdition»; отпечаток fc75beed…; emitter.go:354 и :381; П2 одним кодом;
+      ND-10 — полный проход ReconcileBinding; ND-04 (ж) — field_violations[0].field =
+      rules[0].children.
+  - item: ND-08 «И»
+    result: >-
+      годен: пара ролей probemod.reader / probemod.reader_b1 отличается одним фактом
+      (resourceNames у правила-владельца); исходы t1/t3 следуют из Р3 п. 2.
+
+remarks_non_blocking:
+  - id: R1
+    kind: OPEN-QUESTION
+    note: >-
+      Р3 п. 2 (строка 133): «c проходит ветвь P (якорь либо имена)». Ветвь меток у
+      правила-владельца не названа, а Р1 её не запрещает (registry.registries — тип с метками).
+      Дефолт рецензента, фиксируется здесь: контейнер выбран, если проходит селектор P в
+      ЛЮБОЙ его ветви, метки включительно — иначе ключ children под правилом с matchLabels был
+      бы принят и не действовал бы. Держатель — проба того же вида, что ND-08 «И», с
+      matchLabels у правила-владельца (пара: метка совпала / нет).
+  - id: R2
+    kind: FORMAT
+    note: >-
+      DoD, строка 520: «соседу — редакция 11 (Р5)» — по тексту документа уже 11–12.
+  - id: R3
+    kind: FORMAT
+    note: >-
+      ND-11 (а) и ND-02 держат SC-68 Б2 и Б1 соседа ролью registry.reader (rolb812…), а SC-68
+      спрашивает registry.public.read (rolb1325…). Правила ролей совпадают (таблица П1), id нет;
+      в пробе держателя назвать это или задать Б1/Б2 той же ролью.
+
+summary:
+  scenarios_total: 12
+  scenarios_by_group: {positive: 5, negative: 4, edge: 3}
+  producers_named: 12 of 12
+  twins_named: 12 of 12
+  blocking: 0
+  constructibility: >-
+    посеяно 4 «Дано» из 10 нетривиальных (круг 1: мир П1 — 14 из 14 TestPublicContainerRead_,
+    ось #857 — 8 из 8 TestTarget_, ND-05 (в)/ND-10 — роль жива и отказ текстом SC-65, близнец
+    ND-09 — рёбра без новой версии прежние); названной фикстурой — П2 (код изменения, фикстура
+    прежней формы), П3 и ND-11 (б) (форма tgSeedTopology строкой); не выполнилось — форма
+    children на стволе отвергается схемой, ожидаемо до кода. Посев ND-09 с T2 > T1 — исход в
+    constructibility_runs.
+  constructibility_runs:
+    - command: heavy-slot.sh integration -- go test ./internal/repo/kaname/pg/relverdict/ -run '^TestTarget_' -count=1 -v
+      revision: 9981c4ad2 (= 422d1bc6f + файл посева)
+      result: код 0; PASS 8, FAIL 0
+    - command: heavy-slot.sh integration -- go test ./internal/apps/kaname/api/access_binding/ -run '^(TestSeedND874_|TestPublicContainerRead_)' -count=1 -v
+      revision: 9981c4ad2
+      result: код 1; PASS 15, FAIL 1 (посев ND-09 без новой версии — опроверг «Дано» редакции 1)
+    - command: heavy-slot.sh integration -- go test ./internal/apps/kaname/api/access_binding/ -run '^TestSeedND874_ReRegister' -count=1 -v
+      revision: e6e5421df (посев с source_version = now() у повторной регистрации)
+      result: >-
+        не выполнилось (код 143): Job встал на скачивании образа postgres:16-alpine в dind
+        дольше 4 минут, прогон снят сигналом TERM, ns t874-heavy-integration-1e45 снято
+        ловушкой; функция не исполнялась — ни зелёного, ни красного. Положительная сторона
+        ND-09 держится кодом (условие версии) и пробой ND-09 полосы.
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: событие не опубликовано (event.status not_performed); одобрение вступает в силу событием
+
+event_body: "acceptance-reviewer · APPROVED · sha256 f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6 · ред. 2, круг 2: B1–B4 и M1–M7 закрыты, блокирующих 0"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#874
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации блок честно not_performed
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 492428179d619f7a0accaf2a8d2d99d0cec0ae532654ed9d76a75df82d127062.yaml
