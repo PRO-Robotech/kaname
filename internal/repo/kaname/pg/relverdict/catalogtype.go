@@ -86,7 +86,19 @@ import (
 // (`catalog_resource_dotted_form`). Проверять её вторично значило бы завести
 // второе место об одном предмете.
 
-// catalogTypeName — имя типа в словаре КАТАЛОГА по ЖИВЫМ строкам каталога.
+// catalogTypeName — имя типа в словаре КАТАЛОГА по ЖИВЫМ строкам каталога и
+// ПРИЗНАК ВЛОЖЕННОСТИ: есть ли хоть один селектор вложенного правила над этим
+// типом (kaname#874). Признак едет тем же обращением — второго круга к базе нет
+// — и подставляется в предикат ветви выдач параметром (довод и замер — в шапке
+// `grantArmPredicate`, «ПРИЗНАК ВЛОЖЕННОСТИ — ПАРАМЕТРОМ»). Читается он по
+// частичному индексу `role_rule_selectors_nested_object_types_idx`: строк в нём
+// столько, сколько вложенных селекторов, а не селекторов вообще.
+//
+// Промах каталога отдаёт признак ЛОЖЬЮ: селектор называет тип живым именем
+// каталога, и тип вне каталога вложенным правилом не адресуется. Ложь — сторона
+// отказа: без признака предикат не пускает вложенную строку вовсе.
+//
+// Имя типа:
 //
 // ТОТАЛЬНА, и это не небрежность. Тип вне каталога законен, и таких два вида:
 // вершина иерархии `cluster` (кластер не ресурс, строки у него нет и не будет) и
@@ -125,20 +137,22 @@ import (
 // назвал это чтение неограниченным, хотя предел у него есть. Форма приведена к
 // той, какую гейт читает, а не гейт научен новой: второй формы записи на этом
 // пути не заводится.
-func catalogTypeName(ctx context.Context, q pgx.Tx, modelType string) (string, error) {
-	var dotted string
-	err := q.QueryRow(ctx,
-		`SELECT r.dotted
+func catalogTypeName(ctx context.Context, q pgx.Tx, modelType string) (dotted string, nesting bool, err error) {
+	err = q.QueryRow(ctx,
+		`SELECT r.dotted,
+		        EXISTS (SELECT 1
+		                  FROM kaname.role_rule_selectors ns
+		                 WHERE ns.container_type IS NOT NULL
+		                   AND ns.object_types @> ARRAY[r.dotted])
 		   FROM kaname.catalog_resource r
 		  WHERE r.object_type = $1::text
 		  ORDER BY r.live DESC, r.dotted
-		  LIMIT 1`, modelType).Scan(&dotted)
+		  LIMIT 1`, modelType).Scan(&dotted, &nesting)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		// Типа в каталоге нет — см. «тотальна» выше.
-		return modelType, nil
+		return modelType, false, nil
 	case err != nil:
-		return "", fmt.Errorf("relverdict: имя типа %q в словаре каталога: %w", modelType, err)
+		return "", false, fmt.Errorf("relverdict: имя типа %q в словаре каталога: %w", modelType, err)
 	}
-	return dotted, nil
+	return dotted, nesting, nil
 }

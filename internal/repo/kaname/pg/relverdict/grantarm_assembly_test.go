@@ -59,15 +59,23 @@ func TestEveryAssembledQueryCarriesTheGrantPredicateOnce(t *testing.T) {
 	// Пара «тип, id» цели внутри одного предиката сверяется ЧЕТЫРЕЖДЫ: контейнер у
 	// вложенной строки, объект у строки верхнего уровня, объект и контейнер в
 	// опускаемом условии привязки (разложение — в шапке grantArmPredicate).
-	const predicateHead = "(rs.container_type IS NULL OR (bs.subject_type <> 'system_class'"
+	// Признак вложенности стоит ТРИЖДЫ — по разу в каждой части — и это параметр
+	// своей формы: номер у форм разный, а перепутанный номер связал бы признак
+	// с чужим значением.
+	const predicateHead = "AND bs.subject_type <> 'system_class' AND EXISTS ("
 	const targetAxis = "b.target -> 'resources' @>"
-	for name, build := range map[string]func(string) (string, error){
-		"прямой вопрос":     verdictQuerySQL,
-		"вопрос о странице": verdictManyQuerySQL,
-		"перечень":          listQuerySQL,
-		"кто имеет право":   subjectsQuerySQL,
-		"разбор оснований":  expandQuerySQL,
+	type form struct {
+		build   func(string) (string, error)
+		nesting string
+	}
+	for name, f := range map[string]form{
+		"прямой вопрос":     {verdictQuerySQL, "$12::boolean"},
+		"вопрос о странице": {verdictManyQuerySQL, "$12::boolean"},
+		"перечень":          {listQuerySQL, "$12::boolean"},
+		"кто имеет право":   {subjectsQuerySQL, "$10::boolean"},
+		"разбор оснований":  {expandQuerySQL, "$8::boolean"},
 	} {
+		build := f.build
 		sql, err := build("")
 		if err != nil {
 			t.Errorf("%s: сборка: %v", name, err)
@@ -81,6 +89,9 @@ func TestEveryAssembledQueryCarriesTheGrantPredicateOnce(t *testing.T) {
 		}
 		if n := strings.Count(sql, targetAxis); n != 4 {
 			t.Errorf("%s: пара цели сверяется %d раз, ждали 4 (одного предиката)", name, n)
+		}
+		if n := strings.Count(sql, f.nesting); n != 3 {
+			t.Errorf("%s: признак вложенности %s стоит %d раз, ждали 3 (по разу в каждой части)", name, f.nesting, n)
 		}
 	}
 }

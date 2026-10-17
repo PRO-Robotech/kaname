@@ -183,7 +183,7 @@ SELECT g.subject
 // меток (довод — у expandQuerySQL).
 func subjectsQuerySQL(labelTable string) (string, error) {
 	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels"))
+		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", "$10::boolean"))
 	if err != nil {
 		return "", err
 	}
@@ -210,7 +210,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	// порождённой сборкой (kacho#1986, catalogtype.go). Читается ПЕРЕД выбором
 	// оси: ось выбирается по этому же имени (kacho#2036), и второго чтения
 	// каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
@@ -226,7 +226,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	}
 	rows, err := q.Query(ctx, sql,
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType)
+		factParents, factRelations, bindVerbs, catalogType, nesting)
 	if err != nil {
 		return nil, "", fmt.Errorf("relverdict: перечисление субъектов: %w", err)
 	}

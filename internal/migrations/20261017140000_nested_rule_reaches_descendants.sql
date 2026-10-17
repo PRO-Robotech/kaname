@@ -10,7 +10,7 @@
 -- решения Р1, Р3, Р5; заказ производителей M1 круга 1 — стражи базы читают
 -- вложенные правила.
 --
--- ЧТО МЕНЯЕТСЯ — ТРИ СТРАЖА И ОДНА ПРОЕКЦИЯ, данных не трогает ни одна строка:
+-- ЧТО МЕНЯЕТСЯ — ТРИ СТРАЖА, ОДНА ПРОЕКЦИЯ И ОДИН ИНДЕКС, данных не трогает ни одна строка:
 --
 --   1. `kaname.role_rule_selectors` — КОНТЕЙНЕР вложенного селектора: тип и
 --      ветвь отбора правила-владельца (`container_type`, `container_arm`,
@@ -33,6 +33,11 @@
 --      судит загрузчик (ND-04 (а)).
 --   4. `kaname.role_grants_reads_only(jsonb, jsonb)` — «классу только чтение»
 --      читает глаголы вложенных правил наравне с верхним уровнем (SC-21, M1).
+--   5. `role_rule_selectors_nested_object_types_idx` — частичный индекс по типам
+--      объекта ТОЛЬКО вложенных селекторов. Им решение о доступе читает признак
+--      «над этим типом есть вложенное правило» тем же обращением, что имя типа
+--      в каталоге (`relverdict/catalogtype.go`): строк в нём столько, сколько
+--      вложенных селекторов, и при их отсутствии чтение не трогает ни одной.
 --
 -- ПОЧЕМУ НЕ ЗАМЕНА ТАБЛИЦЫ. Вложенный селектор — та же строка селектора роли
 -- (тот же ключ «роль, отпечаток», тот же индекс по типам объекта), что и
@@ -74,6 +79,12 @@ ALTER TABLE kaname.role_rule_selectors
 COMMENT ON COLUMN kaname.role_rule_selectors.container_type IS 'Тип контейнера вложенного правила (точечная форма каталога, `registry.registries`): селектор охватывает объекты своих object_types, у которых среди предков есть контейнер этого типа, прошедший отбор container_arm и входящий в цель выдачи. NULL — селектор правила верхнего уровня. kaname#874.';
 COMMENT ON COLUMN kaname.role_rule_selectors.container_object_type IS 'Тип контейнера в форме модели (`registry_registry`) — тем написанием, каким тип предка лежит в resource_parent_edge. Выводит страж role_rule_selector_types_live из живой строки каталога; писатель его не пишет. kaname#874.';
 COMMENT ON COLUMN kaname.role_rule_selectors.container_arm IS 'Ветвь отбора правила-владельца: anchor — все контейнеры типа, names — container_resource_names, labels — метки контейнера содержат container_match_labels. kaname#874.';
+
+CREATE INDEX role_rule_selectors_nested_object_types_idx
+    ON kaname.role_rule_selectors USING gin (object_types)
+ WHERE container_type IS NOT NULL;
+
+COMMENT ON INDEX kaname.role_rule_selectors_nested_object_types_idx IS 'Типы объекта вложенных селекторов (container_type непуст). Решение о доступе читает по нему признак «над типом есть вложенное правило» и подставляет его в предикат ветви выдач параметром: без вложенных правил над типом планировщик видит прежний предикат. kaname#874.';
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.role_rule_selector_types_live() RETURNS trigger
@@ -402,6 +413,8 @@ $$;
 -- +goose StatementEnd
 
 COMMENT ON FUNCTION kaname.role_rule_selector_types_live() IS 'Референт ТРЕТЬЕЙ поверхности проекции правила: каждый элемент role_rule_selectors.object_types обязан называть живую строку kaname.catalog_resource. Внешний ключ на элемент массива невыразим, проверка в коде запрещена (ban #10) — поэтому триггер. Проверяется КАЖДЫЙ элемент; отказ 23514 называет элемент и роль. Локальная переменная названа declared_type, а не именем колонки catalog_resource: совпадение имён даёт 42702 на КАЖДОЙ записи селектора. Строка каталога читается ПОД FOR KEY SHARE — тем же замком, который взял бы внешний ключ: без него снятие строки и запись селектора расходятся по своим снимкам (перекос записи, #1985).';
+
+DROP INDEX kaname.role_rule_selectors_nested_object_types_idx;
 
 ALTER TABLE kaname.role_rule_selectors
     DROP CONSTRAINT role_rule_selectors_container_not_own_type,

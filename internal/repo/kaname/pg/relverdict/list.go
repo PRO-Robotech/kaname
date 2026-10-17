@@ -328,7 +328,7 @@ SELECT c.object_id,
 // (довод — у expandQuerySQL).
 func listQuerySQL(labelTable string) (string, error) {
 	sql, err := replaceOnce(listSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels"))
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", "$12::boolean"))
 	if err != nil {
 		return "", err
 	}
@@ -375,7 +375,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	// ОДИН раз на вызов, как и сборка запроса: заходов у обхода несколько, а тип у
 	// них один. Стоит ПЕРЕД выбором оси: ось выбирается по этому же имени
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
@@ -402,7 +402,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	after := in.AfterID
 	for {
 		allowed, scanned, last, err := listSweep(ctx, q, sql, in, after, limit,
-			factParents, factRelations, bindVerbs, catalogType)
+			factParents, factRelations, bindVerbs, catalogType, nesting)
 		if err != nil {
 			return nil, "", err
 		}
@@ -437,11 +437,11 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 // живущие в собственных таблицах iam, — то есть перечислял бы пустоту, называя
 // это отказом в правах.
 func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after string, size int,
-	factParents, factRelations, bindVerbs []string, catalogType string,
+	factParents, factRelations, bindVerbs []string, catalogType string, nesting bool,
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1))
+		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), nesting)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

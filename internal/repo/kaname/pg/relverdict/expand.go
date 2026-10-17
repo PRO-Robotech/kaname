@@ -201,7 +201,7 @@ SELECT 'group'::text,
 // ровно потому, что он подставляет свой.
 func expandQuerySQL(labelTable string) (string, error) {
 	sql, err := replaceOnce(expandSQL, armPredicateMark,
-		grantArmPredicate("$7::text", "$1::text", "$2::text", "m.labels"))
+		grantArmPredicate("$7::text", "$1::text", "$2::text", "m.labels", "$8::boolean"))
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +223,7 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986). Читается
 	// ПЕРЕД выбором оси: ось выбирается по этому же имени (kacho#2036), и второго
 	// чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, objectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, objectType)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 		return nil, err
 	}
 	rows, err := q.Query(ctx, sql, objectType, objectID, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType)
+		factParents, factRelations, bindVerbs, catalogType, nesting)
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)
 	}

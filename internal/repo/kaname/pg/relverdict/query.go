@@ -609,7 +609,7 @@ const (
 // один из них.
 func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string, err error) {
 	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels"))
+		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", "$12::boolean"))
 	if err != nil {
 		return "", "", err
 	}
@@ -651,7 +651,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return Unknown, g, err
 	}
@@ -669,7 +669,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), nesting,
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
@@ -999,7 +999,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1016,7 +1016,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), nesting,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)
