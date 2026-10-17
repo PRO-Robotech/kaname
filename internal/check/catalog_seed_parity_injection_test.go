@@ -690,3 +690,34 @@ $$;
 		t.Fatalf("чтение каталога в блоке находкой не является; получено: %v", findings)
 	}
 }
+
+// TestIAMCT114_Injection_Chain_AttributeOnlyUpdateIsKnown — правка у строк
+// ресурса только колонок, которые посев не судит (указатели и признак
+// контейнера, kaname#856), — признанная форма: находки нет. Близнец той же
+// формы, присваивающий ещё и живость, — неизвестная форма, находка.
+func TestIAMCT114_Injection_Chain_AttributeOnlyUpdateIsKnown(t *testing.T) {
+	const lawful = `
+-- +goose Up
+UPDATE kaname.catalog_resource c
+   SET parent_types = v.parents
+  FROM (VALUES ('alpha', 'thing', ARRAY['project']::text[])) AS v(module, resource, parents)
+ WHERE c.module = v.module AND c.resource = v.resource;
+`
+	twin := strings.Replace(lawful, "SET parent_types = v.parents", "SET parent_types = v.parents, live = false", 1)
+	for _, tc := range []struct {
+		name, body string
+		finding    bool
+	}{
+		{"только указатели", lawful, false},
+		{"указатели и живость", twin, true},
+	} {
+		corpus := []catalogSeedMigration{
+			{Name: "0001_initial.sql", Body: goodSeed},
+			{Name: "20261017020000_attr.sql", Body: tc.body},
+		}
+		_, _, findings := catalogCorpus(corpus)
+		if got := containsSub(findings, "форма которого разбору НЕИЗВЕСТНА"); got != tc.finding {
+			t.Fatalf("%s: находка неизвестной формы %v, ждали %v; находки: %v", tc.name, got, tc.finding, findings)
+		}
+	}
+}
