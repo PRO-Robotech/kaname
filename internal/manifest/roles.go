@@ -295,6 +295,10 @@ type Rule struct {
 	Verbs         []string          `yaml:"verbs"`
 	ResourceNames []string          `yaml:"resourceNames"`
 	MatchLabels   map[string]string `yaml:"matchLabels"`
+	// Children — вложенные правила (kaname#874, rolechildren.go): правила над
+	// типами, лежащими под ЕДИНСТВЕННЫМ ресурсом этого правила по объявленным
+	// `parents`, на любой глубине. nil — ключа нет; пустой перечень — находка.
+	Children []ChildRule `yaml:"children"`
 }
 
 // ruleKeyToDomainField — СЛОВАРЬ объявленных расхождений «ключ манифеста → поле
@@ -336,6 +340,7 @@ func (r Rule) DomainRule() domain.Rule {
 		Verbs:         r.Classes,
 		ResourceNames: r.ResourceNames,
 		MatchLabels:   r.MatchLabels,
+		Children:      domainChildren(r.Children, false),
 	}
 }
 
@@ -368,6 +373,7 @@ func (r Rule) formRule() domain.Rule {
 		Verbs:         values,
 		ResourceNames: r.ResourceNames,
 		MatchLabels:   r.MatchLabels,
+		Children:      domainChildren(r.Children, true),
 	}
 }
 
@@ -403,6 +409,14 @@ func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []erro
 				faults = append(faults, formFaults...)
 				continue
 			}
+			// Форма вложенности — РАНЬШЕ судьи домена: её находки называют
+			// причину с координатой, а домен на той же форме ответил бы своим
+			// общим текстом (у `*` владельца — «подстановка только системная»),
+			// не сказав, что не так с вложенностью (kaname#874, ND-04).
+			if nestFaults := validateRuleChildren(m, rule, doc, i, j); len(nestFaults) > 0 {
+				faults = append(faults, nestFaults...)
+				continue
+			}
 			if err := rule.formRule().Validate(domain.TenantPolicy(), modules); err != nil {
 				faults = append(faults, linkFault{
 					kind:   ErrRoleRuleInvalid,
@@ -417,6 +431,12 @@ func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []erro
 			}
 			faults = append(faults, validateRuleOwnership(role, rule, m.Module, doc, i, j)...)
 			faults = append(faults, validateRuleNamedVerbs(m, rule, role.ID, doc, i, j)...)
+			for k, child := range rule.Children {
+				faults = append(faults, validateNamedVerbsAt(m,
+					Rule{Module: rule.Module, Resources: child.Resources, Verbs: child.Verbs}, role.ID, doc,
+					fmt.Sprintf("roles[%d].rules[%d].children[%d]", i, j, k),
+					"roles", i, "rules", j, "children", k)...)
+			}
 		}
 	}
 	return faults

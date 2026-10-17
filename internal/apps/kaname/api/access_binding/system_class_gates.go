@@ -66,6 +66,9 @@ func (u *CreateAccessBindingUseCase) validateSystemClassGates(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	if err := u.systemClassNestedRuleGate(ctx, b, role); err != nil {
+		return err
+	}
 	if err := u.systemClassContainerGate(ctx, b, role); err != nil {
 		return err
 	}
@@ -125,6 +128,8 @@ func (u *CreateAccessBindingUseCase) systemClassRoleGate(ctx context.Context, b 
 
 // systemClassContainerGate — цель выдачи классу ролью, покрывающей тип-ребёнок,
 // обязана быть объявленным контейнером публичного чтения (SC-65, kaname#856).
+// «Покрывающей» — правилом верхнего уровня над ребёнком либо вложенным правилом
+// под правилом над типом цели (`PublicReadContainer.CoveredChild`, kaname#874).
 //
 // Сфера отказа узкая и названа приёмкой: только выдача классу, только роль,
 // чьё правило покрывает тип-ребёнок типа цели, и только цель, тип которой не
@@ -161,6 +166,47 @@ func (u *CreateAccessBindingUseCase) systemClassContainerGate(ctx context.Contex
 		if child, covers := c.CoveredChild(role.Rules); covers {
 			return status.Error(codes.FailedPrecondition, domain.UndeclaredContainerText(ref.Type, b.RoleID, child))
 		}
+	}
+	return nil
+}
+
+// systemClassNestedRuleGate — роль с вложенными правилами классу выдаётся,
+// только если КАЖДОЕ вложенное правило открывает детей так, как их открывает
+// `public_reader` (kaname#874, приёмка
+// `nested-rule-reaches-descendants-of-a-named-container.md`, Р5, ND-05):
+// контейнер объявлен, тип вложенного — его прямой ребёнок, ровно `get` и
+// `list`, без сужения. Иначе выдача принималась бы и давала классу меньше (или
+// иначе), чем называет роль, и выдающий узнал бы об этом лишь по отказу чтения.
+//
+// Судятся ВСЕ вложенные правила роли, а не только стоящие под типом цели: роль,
+// выданная классу, — обещание о каждом своём правиле. Источник «объявлен» и
+// «прямой ребёнок» — живой каталог из доставленных манифестов.
+func (u *CreateAccessBindingUseCase) systemClassNestedRuleGate(ctx context.Context, b domain.AccessBinding, role domain.Role) error {
+	if !role.Rules.HasChildren() {
+		return nil
+	}
+	rd, err := u.repo.Reader(ctx)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	containers := map[string]domain.PublicReadContainer{}
+	for _, r := range role.Rules {
+		owner := r.OwnerType()
+		if len(r.Children) == 0 || owner == "" {
+			continue
+		}
+		if _, judged := containers[owner]; judged {
+			continue
+		}
+		c, err := rd.AccessBindings().PublicReadContainer(ctx, owner)
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		containers[owner] = c
+	}
+	if text, refused := domain.ClassNestedRuleRefusal(b.RoleID, role.Rules, containers); refused {
+		return status.Error(codes.FailedPrecondition, text)
 	}
 	return nil
 }

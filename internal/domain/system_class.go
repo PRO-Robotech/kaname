@@ -181,7 +181,9 @@ func IsStoredPublication(subject, relation string) bool {
 // ради синхронного отказа до заведения операции.
 func (r Role) GrantsReadsOnly() bool {
 	if len(r.Rules) > 0 {
-		for _, rule := range r.Rules {
+		// Вложенные правила читаются наравне с верхним уровнем (kaname#874, M1):
+		// пишущий глагол во вложенном — пишущий глагол роли.
+		for _, rule := range withEffectiveChildren(r.Rules) {
 			for _, v := range rule.Verbs {
 				if !IsClassReadVerb(v) {
 					return false

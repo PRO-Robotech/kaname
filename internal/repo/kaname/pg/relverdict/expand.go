@@ -199,9 +199,9 @@ SELECT 'group'::text,
 // запроса появляется второй читатель — гейт словарей. Гейт, собирающий запрос
 // сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
 // ровно потому, что он подставляет свой.
-func expandQuerySQL(labelTable string) (string, error) {
+func expandQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(expandSQL, armPredicateMark,
-		grantArmPredicate("$7::text", "$2::text", "m.labels"))
+		grantArmPredicate("$7::text", "$1::text", "$2::text", "m.labels", nesting))
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +223,7 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986). Читается
 	// ПЕРЕД выбором оси: ось выбирается по этому же имени (kacho#2036), и второго
 	// чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, objectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, objectType)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	if err != nil {
 		return nil, err
 	}
-	sql, err := expandQuerySQL(labelTable)
+	sql, err := expandQuerySQL(labelTable, nesting)
 	if err != nil {
 		return nil, err
 	}
