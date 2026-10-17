@@ -66,7 +66,7 @@ ALTER TABLE kaname.role_rule_selectors
     ADD CONSTRAINT role_rule_selectors_container_labels_obj
         CHECK (jsonb_typeof(container_match_labels) = 'object'),
     ADD CONSTRAINT role_rule_selectors_container_labels_valid
-        CHECK (kaname.kacho_labels_valid(container_match_labels)),
+        CHECK (kaname.labels_valid(container_match_labels)),
     -- Сам себе тип потомком не является (Р1 п. 3).
     ADD CONSTRAINT role_rule_selectors_container_not_own_type
         CHECK (container_type IS NULL OR NOT (container_type = ANY (object_types)));
