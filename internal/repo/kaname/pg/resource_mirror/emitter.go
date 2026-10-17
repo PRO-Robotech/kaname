@@ -118,8 +118,14 @@ const (
 	// под другой контейнер ТОГО ЖЕ проекта не меняет ни проекта, ни аккаунта, ни
 	// меток — и без сверки цепи эта полоса сдвигала одну версию, рёбра оставались
 	// прежними, а путь регистрации шёл аддитивно и не снимал права, оставшегося у
-	// прежнего контейнера. $7 — присланная цепь в словаре МОДЕЛИ (тем словарём,
-	// каким её хранят рёбра), в порядке глубины; совпадение — массивом целиком.
+	// прежнего контейнера. $7 — присланная цепь КАК ЕСТЬ (`"<тип>:<id>"`, тип —
+	// в словаре каталога либо модели), в порядке глубины. Перевод в словарь
+	// модели — тем же правилом, каким цепь пишут рёбра (`modelTypeName`: имя с
+	// точкой — строка каталога, без точки — уже модель), но ВНУТРИ оператора:
+	// отдельное обращение за каждым предком стояло бы на каждой регистрации.
+	// Предок, которого каталог не знает, или непонятая форма не совпадают ни с
+	// чем — полоса не срабатывает, и отказ называет полоса вставки, как прежде.
+	// Совпадение — массивом целиком.
 	StmtVersionOnlyBump = `UPDATE kaname.resource_mirror
 		    SET source_version = $6, updated_at = now()
 		  WHERE object_type       = $1
@@ -130,7 +136,15 @@ const (
 		    AND source_version    < $6
 		    AND EXISTS (SELECT 1 FROM kaname.catalog_resource cr
 		                 WHERE cr.dotted = $1 AND cr.live)
-		    AND $7::text[] = ARRAY(
+		    AND ARRAY(
+		            SELECT coalesce(pc.object_type, split_part(u.ref, ':', 1))
+		                   || ':' || substr(u.ref, strpos(u.ref, ':') + 1)
+		              FROM unnest($7::text[]) WITH ORDINALITY AS u(ref, n)
+		              LEFT JOIN kaname.catalog_resource pc
+		                ON strpos(split_part(u.ref, ':', 1), '.') > 0
+		               AND pc.dotted = split_part(u.ref, ':', 1)
+		             ORDER BY u.n)
+		      = ARRAY(
 		            SELECT pe.parent_type || ':' || pe.parent_id
 		              FROM kaname.catalog_resource co
 		              JOIN kaname.resource_parent_edge pe
@@ -233,13 +247,6 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("resource_mirror: marshal labels: %w", err)
 	}
 	version := versionOr(row.SourceVersion)
-	// Присланная цепь в словаре модели — для сверки полосы (1) с хранимыми рёбрами.
-	// Перевод — тот же, каким цепь пишется (`modelTypeName`): разные словари у
-	// сверки и записи не совпали бы НИКОГДА и молча.
-	modelChain, err := modelChainOf(ctx, tx, row.ParentChain)
-	if err != nil {
-		return Outcome{}, err
-	}
 	// (1) VERSION-ONLY BUMP. Matches exactly when a row already exists, the incoming
 	// version is strictly newer, AND nothing a selector reads has changed. `labels =
 	// $5::jsonb` is jsonb equality — key order and whitespace do not make a projection
@@ -252,7 +259,7 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	// уже лежит. Ноль затронутых строк здесь ничего не скрывает: вердикт о
 	// каталоге выносит оператор (2), и он различает «не принято» и «не новее».
 	tag, err := tx.Exec(ctx, StmtVersionOnlyBump,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, modelChain,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, row.ParentChain,
 	)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: bump source version: %w", err)
@@ -406,28 +413,6 @@ func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, objectType strin
 		}
 	}
 	return nil
-}
-
-// modelChainOf — цепь предков в словаре модели прав, в порядке присланного
-// (ближайший предок первым), в форме `"<тип модели>:<id>"` — той, какой цепь
-// читается из рёбер. Пустая цепь — пустой (не NULL) перечень: NULL не равен
-// ничему, и сверка полосы (1) молча не совпала бы даже с пустыми рёбрами.
-// Непонятая форма — ОТКАЗ, как у записи рёбер.
-func modelChainOf(ctx context.Context, tx pgx.Tx, chain []string) ([]string, error) {
-	out := make([]string, 0, len(chain))
-	for _, ancestor := range chain {
-		typ, id, ok := splitObjectRef(ancestor)
-		if !ok {
-			return nil, fmt.Errorf("resource_parent_edge: непонятая форма предка %q "+
-				"(ожидается \"<type>:<id>\")", ancestor)
-		}
-		modelType, err := modelTypeName(ctx, tx, typ)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, modelType+":"+id)
-	}
-	return out, nil
 }
 
 // splitObjectRef разбирает `"<type>:<id>"`. Разделитель — ПЕРВОЕ двоеточие:

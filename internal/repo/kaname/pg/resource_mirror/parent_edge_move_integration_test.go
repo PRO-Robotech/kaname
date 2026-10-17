@@ -14,7 +14,8 @@ package resource_mirror_test
 // метки — цепь оставалась старой, а путь регистрации считал проекцию
 // неизменной и шёл аддитивно, не снимая устаревшего.
 //
-// Близнец — та же цепь со строго новой версией: это и есть сдвиг одной версии.
+// Близнец — та же цепь со строго новой версией: это и есть сдвиг одной версии,
+// в каком бы словаре — модели или каталога — цепь ни прислали.
 
 import (
 	"context"
@@ -78,4 +79,12 @@ func TestParentEdges_ND09_MoveWithinTheProjectReplacesTheChain(t *testing.T) {
 	stale := upsert(row(inX, v1.Add(2*time.Second)))
 	require.False(t, stale.Applied, "регистрация не новее применена (%+v)", stale)
 	require.Equal(t, inY, readParentChain(t, ctx, pool, "registry_repository", repo), "не новее — цепь прежняя")
+
+	// Та же цепь, присланная словарём КАТАЛОГА: сверка переводит её тем же
+	// правилом, каким цепь пишут рёбра, — это сдвиг одной версии, а не перенос.
+	inYDotted := []string{"registry.registries:reg00000000000000002", "project:prj-P", "account:acc-A"}
+	again := upsert(row(inYDotted, v1.Add(3*time.Second)))
+	require.True(t, again.Applied && again.ProjectionUnchanged,
+		"та же цепь словарём каталога названа переносом (%+v): сверка цепи не переводит словарь", again)
+	require.Equal(t, inY, readParentChain(t, ctx, pool, "registry_repository", repo), "цепь прежняя")
 }
