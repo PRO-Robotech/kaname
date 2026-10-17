@@ -36,17 +36,23 @@ func ndPgCode(err error) (string, string) {
 	return "", ""
 }
 
+// ndSeedTenant — арендная обвязка ОДНОЙ транзакцией: владелец аккаунта —
+// отложенный внешний ключ (`accounts_owner_fk`), он судится на фиксации.
 func ndSeedTenant(t *testing.T, db *sql.DB) {
 	t.Helper()
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
 	for _, q := range []string{
 		`INSERT INTO kaname.clusters (id, name) VALUES ('cluster_root', 'kacho') ON CONFLICT DO NOTHING`,
 		`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ('acc-nd', 'acc', 'usr-nd')`,
 		`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ('usr-nd', 'ext-nd', 'usr-nd@kacho.local', 'acc-nd')`,
 		`INSERT INTO kaname.projects (id, account_id, name) VALUES ('prj-nd', 'acc-nd', 'prj')`,
 	} {
-		_, err := db.Exec(q)
+		_, err := tx.Exec(q)
 		require.NoErrorf(t, err, "посев: %s", q)
 	}
+	require.NoError(t, tx.Commit(), "посев: фиксация")
 }
 
 func ndInsertRole(db *sql.DB, id, rules string) error {
