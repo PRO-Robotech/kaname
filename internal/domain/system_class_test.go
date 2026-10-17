@@ -22,7 +22,10 @@ func TestSystemClass_SpeakerClassesByKind(t *testing.T) {
 		{"user:usr-1", both},
 		{"service_account:sva-1", both},
 		{SpeakerAnonymous, []string{}},
-		{"user:*", []string{SpeakerAnonymous}},
+		// Подстановка классов не получает (SC-15): переходного отображения в
+		// аноним больше нет, а до вопроса её не пускает [SpeakerRefusal].
+		{"user:*", []string{}},
+		{"service_account:*", []string{}},
 		{"group:grp-1", []string{}},
 		{"group:grp-1#member", []string{}},
 		{"user", []string{}},
@@ -46,9 +49,12 @@ func TestSystemClass_SpeakerRefusalTexts(t *testing.T) {
 		{SpeakerAuthenticated, "Illegal argument subject: system class authenticated is not a speaker"},
 		{"system_class:everyone", "Illegal argument subject: system class everyone is not a speaker"},
 		{"group:*", "Illegal argument subject: wildcard is not a speaker"},
+		// SC-15: подстановка любого вида говорящим не бывает — в том числе
+		// прежняя переходная `user:*` реестра (полоса L6, kaname#832).
+		{"user:*", "Illegal argument subject: wildcard is not a speaker"},
+		{"service_account:*", "Illegal argument subject: wildcard is not a speaker"},
 		{SpeakerAnonymous, ""},
 		{"user:usr-1", ""},
-		{"user:*", ""}, // переход реестра до L6 (разбор CE-10)
 	} {
 		err := SpeakerRefusal(c.speaker)
 		got := ""

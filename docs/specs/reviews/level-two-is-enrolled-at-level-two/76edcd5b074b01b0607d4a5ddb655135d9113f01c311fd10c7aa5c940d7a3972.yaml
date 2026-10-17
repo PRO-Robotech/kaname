@@ -70,3 +70,16 @@ attribution:
   publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
   history_is_appended_not_rewritten: true
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  note: >-
+    Блок дописан поверх записи круга отдельной правкой (kaname#853): запись не называла учётку
+    события — ни effective_approval.publication_pending.expected_actor, ни
+    authority.authorized_actors, — и гейт review-event-silence не мог её судить (исход
+    «не выполнилось»). Учётка выведена из политики по полю policy_field; отпечаток политики —
+    sha256 файла на голове воркспейса. Вердикт, разбор, блок event и effective_approval не тронуты.
