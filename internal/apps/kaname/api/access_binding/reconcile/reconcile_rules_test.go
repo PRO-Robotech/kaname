@@ -91,6 +91,11 @@ type fakeStore struct {
 	// binding's own scope anchor (account:<X>/project:<X>). Empty ⇒ no scope-self member
 	// (the default for the content-selector slices).
 	scopeSelfVerbs []string
+
+	// target — цель выдачи (kaname#874: вложенное правило выбирает контейнеры по
+	// ней); ancestors — предки объекта из его цепи регистрации, ключ memberKey.
+	target    domain.AccessTarget
+	ancestors map[string][]domain.MirrorObject
 }
 
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
@@ -123,6 +128,7 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 		SubjectID:      f.subjectID,
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Target:         f.target,
 		Active:         f.active,
 	}, true, nil
 }
@@ -140,6 +146,7 @@ func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBin
 		SubjectID:      f.subjectID,
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Target:         f.target,
 		Active:         f.active,
 	}, true, nil
 }
@@ -160,6 +167,7 @@ func (f *fakeStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.Acces
 			SubjectID:      f.subjectID,
 			Selectors:      f.selectors,
 			ScopeSelfVerbs: f.scopeSelfVerbs,
+			Target:         f.target,
 			Active:         f.active,
 		}
 	}

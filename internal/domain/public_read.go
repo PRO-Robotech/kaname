@@ -25,6 +25,8 @@ const PublicReaderRelation = "public_reader"
 
 // PublicReadContainer — что живой каталог говорит о типе цели выдачи классу.
 type PublicReadContainer struct {
+	// Type — точечный тип, о котором ответ (kaname#874).
+	Type string
 	// Declared — тип объявлен контейнером публичного чтения.
 	Declared bool
 	// ChildTypes — точечные типы живых строк каталога, чей указатель называет
@@ -105,4 +107,9 @@ func (s RuleSelector) ReadsWholeType(dotted string) bool {
 func UndeclaredContainerText(targetType string, role RoleID, childType string) string {
 	return fmt.Sprintf("Type %s does not pass public read to its children; role %s covers its child type %s",
 		targetType, role, childType)
+}
+
+// ClassNestedRuleRefusal — заготовка ворот класса для вложенных правил (kaname#874).
+func ClassNestedRuleRefusal(role RoleID, rules Rules, containers map[string]PublicReadContainer) (string, bool) {
+	return "", false
 }

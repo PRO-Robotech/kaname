@@ -39,6 +39,8 @@ type Rule struct {
 	Verbs         []string
 	ResourceNames []string
 	MatchLabels   map[string]string
+	// Children — вложенные правила (kaname#874). Пусто у правила без вложенных.
+	Children []Rule
 }
 
 const (

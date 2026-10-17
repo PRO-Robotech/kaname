@@ -42,6 +42,10 @@ const (
 	PriorEditionFile = "registry.prior-edition-fixture.yaml"
 	// ProbemodFile — модуль, отличный от registry (SC-65 «И»).
 	ProbemodFile = "probemod.public-read-fixture.yaml"
+	// ChildrenProbemodFile — модуль трёх уровней родства (П3 приёмки
+	// `nested-rule-reaches-descendants-of-a-named-container.md`, kaname#874):
+	// глубину вложенного правила утверждают на нём (ND-08).
+	ChildrenProbemodFile = "probemod.children-fixture.yaml"
 )
 
 // Ключ и его единственная законная форма (Р9 «Способ»: ключ либо отсутствует,

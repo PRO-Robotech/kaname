@@ -5,12 +5,20 @@
 # (`registry.prior-edition-fixture.yaml`, kacho @a95248464) ровно двумя
 # правками:
 #   1. ключ `publicReadToChildren: true` на ресурсе `registries` (Р9 «Способ»);
-#   2. раздел `roles` с ролью `registry.public.read` (Р9 п. 4): правило
-#      `[get, list]` над `registry.registries` и `registry.repositories`,
+#   2. раздел `roles` с ролью `registry.public.read` (Р9 п. 4, редакция 11):
+#      правило `[get, list]` над `registry.registries` с ВЛОЖЕННЫМ правилом
+#      (`children`) `[get, list]` над `registry.repositories`,
 #      id `rolb1325b011aa17211d` = 'rol' || substr(md5(имя), 1, 17).
 #
+# Прочие роли раздела — ПРОБНЫЕ, их `kacho#3274` не вносит (П1 приёмки
+# `nested-rule-reaches-descendants-of-a-named-container.md`, kaname#874):
+# `registry.reader` (то же, что `registry.public.read`), `registry.viewer` (без
+# вложенного), `registry.reader_get` (у вложенного только `get`),
+# `registry.reader_named` (у вложенного `resourceNames: [app]`). Id каждой —
+# той же формулой от имени.
+#
 # Приёмка docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md,
-# П6, SC-60…73; равенство блоков канону судит SC-70 (б).
+# П6, SC-60…73; равенство блоков канону судит SC-70 (б), роли его не трогают.
 #
 # Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
 # базовым именем, и фикстура, названная так, судилась бы как манифест модуля.
@@ -98,5 +106,55 @@ roles:
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: registry
-        resources: [registries, repositories]
+        resources: [registries]
         classes: [get, list]
+        children:
+          - resources: [repositories]
+            classes: [get, list]
+
+  - id: registry.reader
+    description: >
+      Пробная роль: чтение реестра и каждого его репозитория, включая
+      созданные позже.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, list]
+        children:
+          - resources: [repositories]
+            classes: [get, list]
+
+  - id: registry.viewer
+    description: >
+      Пробная роль: чтение самого реестра, без его репозиториев.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, list]
+
+  - id: registry.reader_get
+    description: >
+      Пробная роль: как registry.reader, но вложенное правило даёт только get.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, list]
+        children:
+          - resources: [repositories]
+            classes: [get]
+
+  - id: registry.reader_named
+    description: >
+      Пробная роль: как registry.reader, но вложенное правило сужено именами.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [registries]
+        classes: [get, list]
+        children:
+          - resources: [repositories]
+            classes: [get, list]
+            resourceNames: [app]

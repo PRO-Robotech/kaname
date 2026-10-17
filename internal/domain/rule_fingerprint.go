@@ -138,6 +138,16 @@ type RuleSelector struct {
 	ResourceNames []string          // ARM_NAMES only
 	MatchLabels   map[string]string // ARM_LABELS only
 	Verbs         []string
+	// Container — контейнер вложенного правила (kaname#874); nil у правила верхнего уровня.
+	Container *ContainerSelector
+}
+
+// ContainerSelector — тип и отбор правила-владельца вложенного правила (kaname#874).
+type ContainerSelector struct {
+	Type          string
+	Arm           Arm
+	ResourceNames []string
+	MatchLabels   map[string]string
 }
 
 // MaterializingSelectors projects a role's rules to the UNIFIED selector set the

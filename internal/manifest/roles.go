@@ -295,6 +295,8 @@ type Rule struct {
 	Verbs         []string          `yaml:"verbs"`
 	ResourceNames []string          `yaml:"resourceNames"`
 	MatchLabels   map[string]string `yaml:"matchLabels"`
+	// Children — вложенные правила (kaname#874).
+	Children []Rule `yaml:"children"`
 }
 
 // ruleKeyToDomainField — СЛОВАРЬ объявленных расхождений «ключ манифеста → поле
