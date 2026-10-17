@@ -92,8 +92,9 @@ type AuthorizeCheckRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
 	// / "group:<grp…>#member" / "system_class:anonymous"). Required.
-	// "system_class:authenticated" and the wildcard "user:*" are not speakers →
-	// INVALID_ARGUMENT.
+	// "system_class:authenticated" говорящим не бывает → INVALID_ARGUMENT.
+	// Подстановка "user:*" до kaname#832 переходно отвечается как
+	// "system_class:anonymous"; отказ ей вводит kaname#832.
 	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
 	// Resource the action is being checked against.
 	Resource *ResourceRef `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
@@ -121,7 +122,8 @@ type AuthorizeCheckRequest struct {
 	// server uses this relation verbatim instead of deriving from `action`'s
 	// verb. Required for admin-only RPCs whose verb (`get`/`list`) would
 	// otherwise resolve to `viewer` — letting any authenticated user through
-	// the cluster.viewer (`user:*`) cascade. The api-gateway authz middleware
+	// the cluster.viewer cascade (системная выдача `viewer` на кластере классу
+	// `system_class:authenticated`, kaname#829). The api-gateway authz middleware
 	// populates this from the permission catalog's `required_relation` field,
 	// which proto annotations declare per-RPC. Empty = legacy behaviour
 	// (action-verb derivation). 1-32 chars.
@@ -760,7 +762,8 @@ type WhoAmIResponse struct {
 	SystemAdmin bool `protobuf:"varint,5,opt,name=system_admin,json=systemAdmin,proto3" json:"system_admin,omitempty"`
 	// True when the caller resolves `viewer` on the singleton cluster object
 	// — typically `true` for every authenticated principal via the
-	// `cluster.viewer = user:*` cascade. Surfaced explicitly so the UI can
+	// cluster.viewer cascade (системная выдача `viewer` на кластере классу
+	// `system_class:authenticated`, kaname#829). Surfaced explicitly so the UI can
 	// distinguish "authenticated tenant" from "system admin" without a
 	// second Check round-trip.
 	ClusterViewer bool `protobuf:"varint,6,opt,name=cluster_viewer,json=clusterViewer,proto3" json:"cluster_viewer,omitempty"`

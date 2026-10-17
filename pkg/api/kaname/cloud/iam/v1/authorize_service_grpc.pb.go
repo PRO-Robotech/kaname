@@ -45,9 +45,11 @@ const (
 //
 // **Subject binding** — every RPC takes a subject identifier in the form
 // `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member` /
-// `system_class:anonymous` (the caller without an identity). Neither
-// `system_class:authenticated` nor the wildcard `user:*` is a speaker: a question
-// on their behalf is INVALID_ARGUMENT.
+// `system_class:anonymous` (the caller without an identity).
+// `system_class:authenticated` говорящим не бывает: вопрос от его имени —
+// INVALID_ARGUMENT. Подстановка `user:*` до полосы kaname#832 отвечается
+// ПЕРЕХОДНО как вопрос от `system_class:anonymous` и ничего сверх него не
+// получает; отказ INVALID_ARGUMENT ей вводит kaname#832.
 // **Who may ask about whom is decided HERE, in this service, not at the
 // api-gateway.** The edge authenticates the caller and stops: the subject and the
 // queried resource arrive as request fields (the resource as a nested
@@ -223,9 +225,11 @@ func (c *authorizeServiceClient) WhoAmI(ctx context.Context, in *WhoAmIRequest, 
 //
 // **Subject binding** — every RPC takes a subject identifier in the form
 // `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member` /
-// `system_class:anonymous` (the caller without an identity). Neither
-// `system_class:authenticated` nor the wildcard `user:*` is a speaker: a question
-// on their behalf is INVALID_ARGUMENT.
+// `system_class:anonymous` (the caller without an identity).
+// `system_class:authenticated` говорящим не бывает: вопрос от его имени —
+// INVALID_ARGUMENT. Подстановка `user:*` до полосы kaname#832 отвечается
+// ПЕРЕХОДНО как вопрос от `system_class:anonymous` и ничего сверх него не
+// получает; отказ INVALID_ARGUMENT ей вводит kaname#832.
 // **Who may ask about whom is decided HERE, in this service, not at the
 // api-gateway.** The edge authenticates the caller and stops: the subject and the
 // queried resource arrive as request fields (the resource as a nested
