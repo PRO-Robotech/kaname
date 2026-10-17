@@ -107,16 +107,29 @@ type queryUnderGate struct {
 }
 
 func queriesUnderGate() []queryUnderGate {
+	var out []queryUnderGate
+	// Обе формы сборки (kaname#874): у формы С вложенными правилами свои
+	// сравнения типа — рёбра цепи и контейнер, — и судить надо и их.
+	for _, nesting := range []bool{false, true} {
+		for _, q := range queriesUnderGateOf(nesting) {
+			q.name += ", " + nestingName(nesting)
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+func queriesUnderGateOf(nesting bool) []queryUnderGate {
 	return []queryUnderGate{
-		{"вердикт", mustAssemble(verdictQuerySQL), paramDictionary{model: "$2", catalog: "$9"}},
+		{"вердикт", mustAssemble(withNesting(verdictQuerySQL, nesting)), paramDictionary{model: "$2", catalog: "$9"}},
 		// Вердикт о СТРАНИЦЕ — отдельный запрос и потому отдельный судимый:
 		// он собирает те же ветви, но своими подстановками, и словарь у него
 		// может разойтись независимо. Перечень судимых выписан, поэтому запрос,
 		// сюда не внесённый, остался бы не осмотренным молча.
-		{"вердикт о странице", mustAssemble(verdictManyQuerySQL), paramDictionary{model: "$2", catalog: "$9"}},
-		{"разбор оснований", mustAssemble(expandQuerySQL), paramDictionary{model: "$1", catalog: "$7"}},
-		{"перечисление субъектов", mustAssemble(subjectsQuerySQL), paramDictionary{model: "$1", catalog: "$9"}},
-		{"перечисление объектов", mustAssemble(listQuerySQL), paramDictionary{model: "$2", catalog: "$9"}},
+		{"вердикт о странице", mustAssemble(withNesting(verdictManyQuerySQL, nesting)), paramDictionary{model: "$2", catalog: "$9"}},
+		{"разбор оснований", mustAssemble(withNesting(expandQuerySQL, nesting)), paramDictionary{model: "$1", catalog: "$7"}},
+		{"перечисление субъектов", mustAssemble(withNesting(subjectsQuerySQL, nesting)), paramDictionary{model: "$1", catalog: "$9"}},
+		{"перечисление объектов", mustAssemble(withNesting(listQuerySQL, nesting)), paramDictionary{model: "$2", catalog: "$9"}},
 	}
 }
 

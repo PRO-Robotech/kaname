@@ -23,10 +23,10 @@ package relverdict_test
 // писатель): тип и ветвь контейнера, модельное имя типа контейнера выводит
 // страж базы.
 //
-// Здесь же — проба ПРИЗНАКА ВЛОЖЕННОСТИ (`TestNestedFlag_…`): признак едет
-// параметром из обращения к каталогу (catalogtype.go), и ложное его значение
-// обязано давать отказ по вложенной строке, а не читать её строкой верхнего
-// уровня. Запрос берётся захватом у настоящего `Ask`, а не собирается рукой.
+// Здесь же — проба ПРИЗНАКА ВЛОЖЕННОСТИ (`TestNestedFlag_…`): признак читается
+// обращением к каталогу (catalogtype.go) и выбирает форму сборки; форма без
+// вложенных правил обязана давать отказ по вложенной строке, а не читать её
+// строкой верхнего уровня. Оператор берётся захватом у настоящего `Ask`.
 
 import (
 	"context"
@@ -85,11 +85,11 @@ func TestNestedEarlyExit_AllowedVerdictDoesNotGrowWithGrounds(t *testing.T) {
 
 	f.setRNested(t, ctx, 0, few)
 	f.analyze(t, ctx)
-	vFew, mFew := askAndExplain(t, ctx, tx, cap, probeObjectID)
+	vFew, mFew := askAndExplainAs(t, ctx, tx, cap, probeObjectID, relverdict.VerdictQueryNestedSQLForTest)
 
 	f.setRNested(t, ctx, few, many)
 	f.analyze(t, ctx)
-	vMany, mMany := askAndExplain(t, ctx, tx, cap, probeObjectID)
+	vMany, mMany := askAndExplainAs(t, ctx, tx, cap, probeObjectID, relverdict.VerdictQueryNestedSQLForTest)
 
 	t.Logf("оснований с вложенным правилом %d → строк %d (%s); %d → строк %d (%s)",
 		few, mFew.Rows, vFew, many, mMany.Rows, vMany)
@@ -103,11 +103,9 @@ func TestNestedEarlyExit_AllowedVerdictDoesNotGrowWithGrounds(t *testing.T) {
 	}
 }
 
-// replayWithNesting — захваченный у настоящего `Ask` запрос вердикта, повторённый
-// с признаком вложенности `nesting`; число строк-оснований. Признак — последний
-// параметр формы (catalogtype.go), и проба сперва проверяет, каким значением его
-// связал продукт (`bound`): иначе «повтор с ложью» мог бы сравнивать ложь с ложью.
-func replayWithNesting(t *testing.T, ctx context.Context, f *gridFixture, cap *verdictCapture, bound, nesting bool) int {
+// capturedVerdict — захваченный у настоящего `Ask` оператор вердикта и то, какую
+// форму сборки исполнил продукт (`nested` — с вложенными правилами).
+func capturedVerdict(t *testing.T, ctx context.Context, f *gridFixture, cap *verdictCapture) (stmt capturedVerdictStmt, nested bool) {
 	t.Helper()
 	cap.reset()
 	if _, _, err := relverdict.Ask(ctx, f.tx, relverdict.Query{Subject: probeSubject, ObjectType: probeModelType,
@@ -118,23 +116,22 @@ func replayWithNesting(t *testing.T, ctx context.Context, f *gridFixture, cap *v
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}
-	stmts := cap.matching(relverdict.VerdictQuerySQLForTest(axis))
-	if len(stmts) != 1 {
-		t.Fatalf("захвачено %d операторов вердикта, ждали один", len(stmts))
+	flat := cap.matching(relverdict.VerdictQuerySQLForTest(axis))
+	withNested := cap.matching(relverdict.VerdictQueryNestedSQLForTest(axis))
+	switch {
+	case len(flat) == 1 && len(withNested) == 0:
+		return flat[0], false
+	case len(flat) == 0 && len(withNested) == 1:
+		return withNested[0], true
 	}
-	args := append([]any(nil), stmts[0].args...)
-	if got, ok := args[len(args)-1].(bool); !ok || got != bound {
-		t.Fatalf("продукт связал признак вложенности значением %v, ждали %v", args[len(args)-1], bound)
-	}
-	return countRows(t, ctx, f, stmts[0].sql, args, nesting)
+	t.Fatalf("захвачено операторов вердикта: без вложенных правил %d, с ними %d — ждали ровно один",
+		len(flat), len(withNested))
+	return capturedVerdictStmt{}, false
 }
 
-func countRows(t *testing.T, ctx context.Context, f *gridFixture, sql string, args []any, nesting bool) int {
+// grounds — число строк-оснований оператора `sql` с параметрами `args`.
+func grounds(t *testing.T, ctx context.Context, f *gridFixture, sql string, args []any) int {
 	t.Helper()
-	if _, ok := args[len(args)-1].(bool); !ok {
-		t.Fatalf("последний параметр вердикта — %T, а не признак вложенности", args[len(args)-1])
-	}
-	args[len(args)-1] = nesting
 	rows, err := f.tx.Query(ctx, sql, args...)
 	if err != nil {
 		t.Fatalf("повтор вердикта: %v", err)
@@ -150,17 +147,21 @@ func countRows(t *testing.T, ctx context.Context, f *gridFixture, sql string, ar
 	return n
 }
 
-// TestNestedFlag_FalseExcludesNestedSelectorsAndKeepsTopLevel — признак
-// вложенности читается отдельным обращением, и между ним и вопросом может
-// встать запись вложенного селектора. Ложный признак обязан давать ОТКАЗ по
-// вложенной строке, а не читать её строкой верхнего уровня (та дала бы тип
-// целиком по всей области). Близнец — правило верхнего уровня: при ложном
-// признаке его основание остаётся.
-func TestNestedFlag_FalseExcludesNestedSelectorsAndKeepsTopLevel(t *testing.T) {
+// TestNestedFlag_FlatFormExcludesNestedSelectorsAndKeepsTopLevel — форма сборки
+// выбирается признаком, прочитанным отдельным обращением, и между ним и вопросом
+// может встать запись вложенного селектора. Форма БЕЗ вложенных правил обязана
+// давать по вложенной строке ОТКАЗ, а не читать её строкой верхнего уровня (та
+// дала бы тип целиком по всей области). Близнец — правило верхнего уровня: в
+// форме без вложенных правил его основание остаётся.
+func TestNestedFlag_FlatFormExcludesNestedSelectorsAndKeepsTopLevel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration")
 	}
 	ctx := context.Background()
+	axis, err := relverdict.LabelAxisForTest(probeCatalogType, probeModelType)
+	if err != nil {
+		t.Fatalf("ось меток: %v", err)
+	}
 
 	t.Run("вложенное правило", func(t *testing.T) {
 		tx, cap := openProbeTx(t, ctx)
@@ -168,11 +169,15 @@ func TestNestedFlag_FalseExcludesNestedSelectorsAndKeepsTopLevel(t *testing.T) {
 		f.growN(t, ctx, 20)
 		f.setRNested(t, ctx, 0, 1)
 		f.analyze(t, ctx)
-		if n := replayWithNesting(t, ctx, f, cap, true, true); n == 0 {
-			t.Fatalf("при истинном признаке оснований 0: вложенное правило не дало права, сравнивать не с чем")
+		stmt, nested := capturedVerdict(t, ctx, f, cap)
+		if !nested {
+			t.Fatalf("над типом стоит вложенный селектор, а продукт исполнил форму без вложенных правил")
 		}
-		if n := replayWithNesting(t, ctx, f, cap, true, false); n != 0 {
-			t.Errorf("при ложном признаке оснований %d, ждали 0: вложенный селектор прочитан строкой верхнего уровня", n)
+		if n := grounds(t, ctx, f, stmt.sql, stmt.args); n == 0 {
+			t.Fatalf("в форме с вложенными правилами оснований 0: вложенное правило не дало права, сравнивать не с чем")
+		}
+		if n := grounds(t, ctx, f, relverdict.VerdictQuerySQLForTest(axis), stmt.args); n != 0 {
+			t.Errorf("в форме без вложенных правил оснований %d, ждали 0: вложенный селектор прочитан строкой верхнего уровня", n)
 		}
 	})
 	t.Run("близнец: правило верхнего уровня", func(t *testing.T) {
@@ -181,8 +186,12 @@ func TestNestedFlag_FalseExcludesNestedSelectorsAndKeepsTopLevel(t *testing.T) {
 		f.growN(t, ctx, 20)
 		f.setR(t, ctx, 1, scalegrid.RecruitDirect)
 		f.analyze(t, ctx)
-		if n := replayWithNesting(t, ctx, f, cap, false, false); n == 0 {
-			t.Errorf("при ложном признаке правило верхнего уровня потеряло основание")
+		stmt, nested := capturedVerdict(t, ctx, f, cap)
+		if nested {
+			t.Fatalf("вложенных селекторов нет, а продукт исполнил форму с вложенными правилами")
+		}
+		if n := grounds(t, ctx, f, stmt.sql, stmt.args); n == 0 {
+			t.Errorf("в форме без вложенных правил правило верхнего уровня потеряло основание")
 		}
 	})
 }

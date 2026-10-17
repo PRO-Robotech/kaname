@@ -181,9 +181,9 @@ SELECT g.subject
 
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
-func subjectsQuerySQL(labelTable string) (string, error) {
+func subjectsQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", "$10::boolean"))
+		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", nesting))
 	if err != nil {
 		return "", err
 	}
@@ -220,13 +220,13 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	sql, err := subjectsQuerySQL(labelTable)
+	sql, err := subjectsQuerySQL(labelTable, nesting)
 	if err != nil {
 		return nil, "", err
 	}
 	rows, err := q.Query(ctx, sql,
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType, nesting)
+		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {
 		return nil, "", fmt.Errorf("relverdict: перечисление субъектов: %w", err)
 	}

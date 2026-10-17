@@ -326,9 +326,9 @@ SELECT c.object_id,
 
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
 // (довод — у expandQuerySQL).
-func listQuerySQL(labelTable string) (string, error) {
+func listQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(listSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", "$12::boolean"))
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting))
 	if err != nil {
 		return "", err
 	}
@@ -394,7 +394,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	//
 	// Метка `{{labels_join}}` отсюда ушла вместе со своим предметом: метки едут
 	// колонкой кандидата, второго чтения того же места больше нет.
-	sql, err := listQuerySQL(labelTable)
+	sql, err := listQuerySQL(labelTable, nesting)
 	if err != nil {
 		return nil, "", err
 	}
@@ -402,7 +402,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	after := in.AfterID
 	for {
 		allowed, scanned, last, err := listSweep(ctx, q, sql, in, after, limit,
-			factParents, factRelations, bindVerbs, catalogType, nesting)
+			factParents, factRelations, bindVerbs, catalogType)
 		if err != nil {
 			return nil, "", err
 		}
@@ -437,11 +437,11 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 // живущие в собственных таблицах iam, — то есть перечислял бы пустоту, называя
 // это отказом в правах.
 func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after string, size int,
-	factParents, factRelations, bindVerbs []string, catalogType string, nesting bool,
+	factParents, factRelations, bindVerbs []string, catalogType string,
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), nesting)
+		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1))
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

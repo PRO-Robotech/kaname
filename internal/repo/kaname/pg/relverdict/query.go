@@ -607,9 +607,9 @@ const (
 // а расширение доступа: ветвь, соединённая с областями без сужения по строке,
 // отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
 // один из них.
-func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string, err error) {
+func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string, nesting bool) (grant, fact string, err error) {
 	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", "$12::boolean"))
+		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", nesting))
 	if err != nil {
 		return "", "", err
 	}
@@ -618,8 +618,8 @@ func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact st
 	return grant, fact, nil
 }
 
-func verdictQuerySQL(labelTable string) (string, error) {
-	grant, fact, err := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne)
+func verdictQuerySQL(labelTable string, nesting bool) (string, error) {
+	grant, fact, err := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne, nesting)
 	if err != nil {
 		return "", err
 	}
@@ -662,14 +662,14 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	g.LabelAxisTable = labelTable
 
-	sql, err := verdictQuerySQL(labelTable)
+	sql, err := verdictQuerySQL(labelTable, nesting)
 	if err != nil {
 		return Unknown, g, err
 	}
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), nesting,
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
@@ -941,8 +941,8 @@ SELECT o.ord, src.cond_name, src.cond_params, src.arm
 // verdictManyQuerySQL — ГОТОВЫЙ запрос вердикта о странице для выбранной оси
 // меток (довод — у verdictQuerySQL: собранный запрос читает не только продукт,
 // но и гейт словарей, и собирать его гейт не вправе).
-func verdictManyQuerySQL(labelTable string) (string, error) {
-	grant, fact, err := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany)
+func verdictManyQuerySQL(labelTable string, nesting bool) (string, error) {
+	grant, fact, err := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany, nesting)
 	if err != nil {
 		return "", err
 	}
@@ -1009,14 +1009,14 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		return nil, nil, err
 	}
 
-	sql, err := verdictManyQuerySQL(labelTable)
+	sql, err := verdictManyQuerySQL(labelTable, nesting)
 	if err != nil {
 		return nil, nil, err
 	}
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), nesting,
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)

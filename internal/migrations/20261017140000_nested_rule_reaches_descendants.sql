@@ -84,7 +84,7 @@ CREATE INDEX role_rule_selectors_nested_object_types_idx
     ON kaname.role_rule_selectors USING gin (object_types)
  WHERE container_type IS NOT NULL;
 
-COMMENT ON INDEX kaname.role_rule_selectors_nested_object_types_idx IS 'Типы объекта вложенных селекторов (container_type непуст). Решение о доступе читает по нему признак «над типом есть вложенное правило» и подставляет его в предикат ветви выдач параметром: без вложенных правил над типом планировщик видит прежний предикат. kaname#874.';
+COMMENT ON INDEX kaname.role_rule_selectors_nested_object_types_idx IS 'Типы объекта вложенных селекторов (container_type непуст). Решение о доступе читает по нему признак «над типом есть вложенное правило» и выбирает им форму предиката ветви выдач: без вложенных правил над типом планировщик видит прежний предикат. kaname#874.';
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.role_rule_selector_types_live() RETURNS trigger

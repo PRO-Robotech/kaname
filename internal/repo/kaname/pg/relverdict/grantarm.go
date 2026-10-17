@@ -160,36 +160,43 @@ import (
 // Замер на той же сетке после разложения: верхний уровень — 26 и 24 строки,
 // как у ствола; вложенное правило — 32 при трёх основаниях и 25 при трёхстах.
 //
-// # ПРИЗНАК ВЛОЖЕННОСТИ — ПАРАМЕТРОМ (kaname#874)
+// # ДВЕ ФОРМЫ СБОРКИ: БЕЗ ВЛОЖЕННЫХ ПРАВИЛ И С НИМИ (kaname#874)
 //
 // Разложения мало. Подзапросы частей 1 и 3 не исполняются у строки верхнего
 // уровня, но ПЛАНИРОВЩИК их цену считает всегда — «или» он оценивает суммой
 // слагаемых, — и на малых таблицах этого хватает, чтобы сменить порядок
-// соединений. Замер на голове 3de43a2a8, роль без вложенных правил:
-// перечень при доле доступных 50 % — тронуто 3 497 600 против 2 256 781 у
-// ствола (страница 500) и 13 847 034 против 8 866 083 (страница 1000): просмотр
+// соединений. Замер на голове 3de43a2a8, роль без вложенных правил: перечень
+// при доле доступных 50 % — тронуто 3 497 600 против 2 256 781 у ствола
+// (страница 500) и 13 847 034 против 8 866 083 (страница 1000): просмотр
 // областей объекта шёл дважды на кандидата; сетка прочности — 27 строк за
 // разрешённый вердикт против 23.
 //
-// Поэтому вложенная часть стоит под ПРИЗНАКОМ `nestingExpr` — параметром формы,
-// который читается тем же обращением, что имя типа в каталоге
-// (`catalogTypeName`): есть ли над типом хоть один вложенный селектор. Значение
-// параметра планировщик подставляет в план до разбора подзапросов, и ложный
-// признак сворачивает предикат к виду ствола: часть 1 — к `rs.container_type IS
-// NULL`, часть 2 — к истине, часть 3 — к прежней оси цели. Замер того же вида:
-// на всех точках перечня, сетки порядков и сетки прочности — строки, отброшенное
-// и тронутое дословно стволовые.
+// Поэтому `nesting` выбирает ФОРМУ: есть ли над типом хоть один вложенный
+// селектор, читается тем же обращением, что имя типа в каталоге
+// (`catalogTypeName`). Без вложенных правил предикат — вид ствола и отсечение
+// `rs.container_type IS NULL`; планировщик видит ровно его и на всех точках
+// перечня, сетки порядков и сетки прочности даёт стволовые строки, отброшенное и
+// тронутое. Форма с вложенными правилами — три части выше.
 //
-// Ложный признак — сторона ОТКАЗА, и это держит окно между двумя чтениями: если
-// вложенный селектор записан после чтения признака, вложенная строка не пускается
-// вовсе, а не читается строкой верхнего уровня (та дала бы тип целиком по всей
-// области). Держит проба `TestNestedFlag_FalseExcludesNestedSelectorsAndKeepsTopLevel`.
+// Форма выбирается ЗДЕСЬ, текстом, а не параметром запроса. Параметр свернул бы
+// предикат только в плане под конкретное значение; подготовленный оператор
+// после пяти исполнений вправе перейти на общий план (`plan_cache_mode = auto`),
+// где значение неизвестно, и подзапросы возвращаются в оценку — то есть в
+// продукте план роли без вложенных правил мог бы разойтись с тем, что измерено.
+// Две формы — два оператора, у каждого свой план.
+//
+// Форма без вложенных правил — сторона ОТКАЗА, и это держит окно между двумя
+// чтениями: если вложенный селектор записан после чтения признака, вложенная
+// строка не пускается вовсе, а не читается строкой верхнего уровня (та дала бы
+// тип целиком по всей области). Держит проба
+// `TestNestedFlag_FlatFormExcludesNestedSelectorsAndKeepsTopLevel`; обе формы у
+// каждого вопроса держит гейт `TestEveryAssembledQueryCarriesTheGrantPredicateOnce`.
 //
 // `objectModelTypeExpr` — тип объекта в словаре МОДЕЛИ: им названы рёбра цепи
 // (`resource_parent_edge.object_type`), тогда как `objectTypeExpr` — словарь
 // каталога, которым тип записан в цели. Двух словарей в одном сравнении нет:
 // каждое выражение сравнивается со своим.
-func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr, nestingExpr string) string {
+func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr string, nesting bool) string {
 	// Ветвь правила роли на самом объекте — у правила любого уровня.
 	arm := `(
              rs.arm = 'anchor'
@@ -197,10 +204,19 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
           OR (rs.arm = 'labels' AND ` + labelsExpr + ` IS NOT NULL
                                 AND ` + labelsExpr + ` @> rs.match_labels)
          )`
-	// Часть 1 — вложенная строка (точно). Без признака вложенности — только
-	// строка верхнего уровня.
+	// Без признака вложенности — вид ствола: только строка верхнего уровня, ось
+	// цели — на привязке. Вложенная строка не пускается вовсе (сторона отказа).
+	if !nesting {
+		return arm + `
+     AND rs.container_type IS NULL
+     AND NULLIF(
+             ` + wholeScopeTarget + `
+          OR ` + namedInTarget(objectTypeExpr, objectIDExpr) + `,
+         false) IS NOT NULL`
+	}
+	// Часть 1 — вложенная строка (точно).
 	nested := `
-     AND (rs.container_type IS NULL OR (` + nestingExpr + ` AND bs.subject_type <> 'system_class' AND EXISTS (
+     AND (rs.container_type IS NULL OR (bs.subject_type <> 'system_class' AND EXISTS (
              SELECT 1
                FROM kaname.resource_parent_edge ce
               WHERE ce.object_type = ` + objectModelTypeExpr + ` AND ce.object_id = ` + objectIDExpr + `
@@ -213,10 +229,9 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                                AND cm.labels @> rs.container_match_labels)))
                 AND (` + wholeScopeTarget + `
                      OR ` + namedInTarget("rs.container_type", "ce.parent_id") + `))))`
-	// Часть 2 — строка верхнего уровня (точно). Без признака вложенности её
-	// суд целиком у части 3: строк, кроме верхнего уровня, часть 1 не пускает.
+	// Часть 2 — строка верхнего уровня (точно).
 	top := `
-     AND (NOT ` + nestingExpr + ` OR rs.container_type IS NOT NULL OR NULLIF(
+     AND (rs.container_type IS NOT NULL OR NULLIF(
              ` + wholeScopeTarget + `
           OR ` + namedInTarget(objectTypeExpr, objectIDExpr) + `,
          false) IS NOT NULL)`
@@ -225,7 +240,7 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
      AND NULLIF(
              ` + wholeScopeTarget + `
           OR ` + namedInTarget(objectTypeExpr, objectIDExpr) + `
-          OR (` + nestingExpr + ` AND EXISTS (
+          OR EXISTS (
                  SELECT 1
                    FROM kaname.role_rule_selectors ns
                    JOIN kaname.resource_parent_edge ce
@@ -233,7 +248,7 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                     AND ce.parent_type = ns.container_object_type
                   WHERE ns.role_id = b.role_id AND ns.container_type IS NOT NULL
                     AND ` + objectTypeExpr + ` = ANY (ns.object_types)
-                    AND ` + namedInTarget("ns.container_type", "ce.parent_id") + `)),
+                    AND ` + namedInTarget("ns.container_type", "ce.parent_id") + `),
          false) IS NOT NULL`
 	return arm + nested + top + binding
 }
