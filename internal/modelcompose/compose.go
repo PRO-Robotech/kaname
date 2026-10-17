@@ -44,12 +44,17 @@ type Report struct {
 	// Reaffirmed — имена типов, которые канон уже объявляет и рендер которых
 	// совпал с каноническим блоком побайтово.
 	Reaffirmed []string
+	// PriorEdition — имена типов, чей рендер равен не канону, а ПРЕЖНЕЙ
+	// редакции, принимаемой переходно (Р10, [modelrender.IsPriorEdition]).
+	// Действует при этом канон: прежняя редакция только допущена к сверке.
+	PriorEdition []string
 }
 
 // Census — перепись одной строкой.
 func (r Report) Census() string {
-	return fmt.Sprintf("манифестов %d, ресурсов %d, типов канона %d, добавлено %d %v, подтверждено %d",
-		r.ManifestsSeen, r.ResourcesSeen, r.CanonTypes, len(r.Composed), r.Composed, len(r.Reaffirmed))
+	return fmt.Sprintf("манифестов %d, ресурсов %d, типов канона %d, добавлено %d %v, подтверждено %d, прежней редакции %d %v",
+		r.ManifestsSeen, r.ResourcesSeen, r.CanonTypes, len(r.Composed), r.Composed, len(r.Reaffirmed),
+		len(r.PriorEdition), r.PriorEdition)
 }
 
 // Compose собирает текст модели процесса.
@@ -108,6 +113,12 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 			if cb, inCanon := byType[res.ObjectType]; inCanon {
 				// НОРМА 2: канон неприкосновенен. Блок не композируется; расхождение
 				// называет тип и ОБЕ длины.
+				if !bytes.Equal(cb.Body, blk) && modelrender.IsPriorEdition(res.ObjectType, blk) {
+					// Р10: прежняя редакция допущена к сверке, действует канон —
+					// его блок уже в модели, рендер в неё не идёт.
+					rep.PriorEdition = append(rep.PriorEdition, res.ObjectType)
+					continue
+				}
 				if !bytes.Equal(cb.Body, blk) {
 					return "", rep, fmt.Errorf("modelcompose: тип %q объявлен и каноном, и модулем %q, "+
 						"а их блоки расходятся побайтово (канон %d Б, рендер %d Б) — канон "+
@@ -125,6 +136,7 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 	}
 	sort.Strings(rep.Composed)
 	sort.Strings(rep.Reaffirmed)
+	sort.Strings(rep.PriorEdition)
 
 	// НОРМА 4: мощность И множество разобранной модели.
 	m, err := authzplan.ParseModel(out.String())

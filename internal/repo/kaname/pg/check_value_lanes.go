@@ -180,13 +180,15 @@ var checkValueLanes = map[string]*checkTableLanes{
 		caller:  []string{"catalog_module_nonempty", "catalog_module_undotted"},
 		service: []string{"catalog_module_live_matches_retired"},
 	},
-	// Каталог ресурса: модуль, ресурс и тип модели — из манифеста; точечное имя
-	// склеивает служба, живость, снятие и преемника ставит служба.
+	// Каталог ресурса: модуль, ресурс, тип модели и типы указателей — из
+	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
+	// ставит служба.
 	"catalog_resource": {
 		caller: []string{
 			"catalog_resource_module_undotted",
 			"catalog_resource_nonempty",
 			"catalog_resource_object_type_form",
+			"catalog_resource_parent_types_form",
 			"catalog_resource_resource_undotted",
 		},
 		service: []string{

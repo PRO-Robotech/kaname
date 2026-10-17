@@ -463,6 +463,7 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 		return nil, errors.Join(faults...)
 	}
 	m.linkage = census
+	linkPublicRead(&m)
 	return &m, nil
 }
 

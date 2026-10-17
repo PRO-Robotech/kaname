@@ -700,6 +700,9 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 			if strings.HasPrefix(strings.ToUpper(st), "INSERT INTO KANAME.CATALOG_") {
 				continue // посев — предмет разбора вставок
 			}
+			if resourceAttributeOnlyUpdate(st) {
+				continue // членства и живости не трогает — свод цепочки от него не зависит
+			}
 			key, ok := retiredVerbOf(st)
 			if !ok {
 				findings = append(findings, fmt.Sprintf(
@@ -713,6 +716,47 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 		}
 	}
 	return body.String(), retired, findings
+}
+
+// reResourceAttrUpdate — оператор правки строк каталога ресурса: таблица (с
+// псевдонимом или без) и ТЕКСТ раздела SET до FROM либо WHERE.
+var reResourceAttrUpdate = regexp.MustCompile(
+	`(?is)^UPDATE\s+kaname\.catalog_resource(?:\s+[a-z_][a-z0-9_]*)?\s+SET\s+(.+?)\s+(?:FROM|WHERE)\s`)
+
+// reSetTarget — имя колонки слева от присваивания в разделе SET.
+var reSetTarget = regexp.MustCompile(`(?i)(?:^|,)\s*([a-z_][a-z0-9_.]*)\s*=`)
+
+// resourceAttributeColumns — колонки строки ресурса, которые свод цепочки НЕ
+// судит: они не меняют ни членства ресурса в каталоге, ни его живости, ни имени
+// типа. Перечень закрыт; правка любой другой колонки остаётся неизвестной формой.
+var resourceAttributeColumns = map[string]bool{
+	"parent_types":            true, // указатели ресурса (kaname#856)
+	"public_read_to_children": true, // признак контейнера публичного чтения (kaname#856)
+}
+
+// resourceAttributeOnlyUpdate — оператор правит у строк ресурса ТОЛЬКО колонки
+// из [resourceAttributeColumns]. Такой оператор посева не меняет, и свод цепочки
+// его законно пропускает; присваивание любой иной колонки (живость, снятие, тип,
+// имя) — не эта форма.
+func resourceAttributeOnlyUpdate(st string) bool {
+	m := reResourceAttrUpdate.FindStringSubmatch(st)
+	if m == nil {
+		return false
+	}
+	targets := reSetTarget.FindAllStringSubmatch(m[1], -1)
+	if len(targets) == 0 {
+		return false
+	}
+	for _, tg := range targets {
+		col := strings.ToLower(tg[1])
+		if i := strings.LastIndexByte(col, '.'); i >= 0 {
+			col = col[i+1:]
+		}
+		if !resourceAttributeColumns[col] {
+			return false
+		}
+	}
+	return true
 }
 
 // retiredVerbOf — снимает ли оператор ровно одну строку словаря глаголов.
