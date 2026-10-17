@@ -59,8 +59,8 @@ import (
 // Ось стоит ВНУТРИ того же предиката, а не отдельной ветвью союза: иначе у
 // вложенного правила была бы своя копия оси цели и своя копия запрета для
 // класса, и они разошлись бы с этими. Селектор верхнего уровня проходит прежнюю
-// ось цели ДОСЛОВНО, а подзапрос рёбер не исполняется вовсе — исполнитель
-// останавливает «и» на первой лжи (`rs.container_type IS NOT NULL`).
+// ось цели ДОСЛОВНО, а подзапрос рёбер у него не исполняется вовсе —
+// исполнитель останавливает «или» на первой истине (`rs.container_type IS NULL`).
 //
 // К выдаче СИСТЕМНОМУ КЛАССУ вложенное правило НЕ применяется (Р5, ND-10): у
 // класса одна дорога к потомкам — `public_reader` объявленного контейнера, и
@@ -135,42 +135,91 @@ import (
 // с метками, колонка объявлена NOT NULL, и проверка там всегда истинна — цена
 // единого текста, а не второй смысл.
 //
+// # ВЛОЖЕННОСТЬ ЗАПИСАНА ТАК, ЧТОБЫ ОСЬ ЦЕЛИ ОСТАЛАСЬ НА ПРИВЯЗКЕ (kaname#874)
+//
+// Условие цели прежде ссылалось ТОЛЬКО на привязку и константы, и планировщик
+// опускал его в просмотр `access_bindings`. Ось вложенности ссылается на
+// селектор (`rs`) и субъект (`bs`); вписанная в то же условие, она делала его
+// неопускаемым — и порядок соединений менялся: замер `TestR7_1_13` дал 71 строку
+// за разрешённый вердикт при трёх основаниях против 26 (при трёхстах — 24 и 24).
+//
+// Поэтому условие разложено на ТРИ части; точные — первые две:
+//
+//  1. уровень селектора, ВЛОЖЕННАЯ строка: класс — нет; среди предков объекта
+//     есть контейнер типа владельца, он проходит ветвь владельца и цель (вся
+//     область либо назван парой «тип, id»). Подзапрос рёбер исполняется только у
+//     вложенной строки: «или» останавливается на `rs.container_type IS NULL`;
+//  2. уровень селектора, строка ВЕРХНЕГО уровня: цель называет сам объект либо
+//     она — вся область (точное сравнение, как после kaname#857);
+//  3. уровень ПРИВЯЗКИ — НЕОБХОДИМОЕ условие обеих: цель — вся область, либо
+//     называет объект, либо называет контейнер-предка объекта из вложенного
+//     селектора роли. Ссылается только на привязку и константы, поэтому
+//     опускается в просмотр привязок, как прежде. Достаточным оно не является и
+//     быть не обязано: точный суд — части 1 и 2.
+//
+// Замер на той же сетке после разложения: верхний уровень — 26 и 24 строки,
+// как у ствола; вложенное правило — 32 при трёх основаниях и 25 при трёхстах.
+//
 // `objectModelTypeExpr` — тип объекта в словаре МОДЕЛИ: им названы рёбра цепи
 // (`resource_parent_edge.object_type`), тогда как `objectTypeExpr` — словарь
 // каталога, которым тип записан в цели. Двух словарей в одном сравнении нет:
 // каждое выражение сравнивается со своим.
 func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr string) string {
-	return `(
+	// Ветвь правила роли на самом объекте — у правила любого уровня.
+	arm := `(
              rs.arm = 'anchor'
           OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
           OR (rs.arm = 'labels' AND ` + labelsExpr + ` IS NOT NULL
                                 AND ` + labelsExpr + ` @> rs.match_labels)
-         )
+         )`
+	// Часть 1 — вложенная строка (точно).
+	nested := `
+     AND (rs.container_type IS NULL OR (bs.subject_type <> 'system_class' AND EXISTS (
+             SELECT 1
+               FROM kaname.resource_parent_edge ce
+              WHERE ce.object_type = ` + objectModelTypeExpr + ` AND ce.object_id = ` + objectIDExpr + `
+                AND ce.parent_type = rs.container_object_type
+                AND (   rs.container_arm = 'anchor'
+                     OR (rs.container_arm = 'names' AND ce.parent_id = ANY (rs.container_resource_names))
+                     OR (rs.container_arm = 'labels' AND EXISTS (
+                            SELECT 1 FROM kaname.resource_mirror cm
+                             WHERE cm.object_type = rs.container_type AND cm.object_id = ce.parent_id
+                               AND cm.labels @> rs.container_match_labels)))
+                AND (` + wholeScopeTarget + `
+                     OR ` + namedInTarget("rs.container_type", "ce.parent_id") + `))))`
+	// Часть 2 — строка верхнего уровня (точно).
+	top := `
+     AND (rs.container_type IS NOT NULL OR NULLIF(
+             ` + wholeScopeTarget + `
+          OR ` + namedInTarget(objectTypeExpr, objectIDExpr) + `,
+         false) IS NOT NULL)`
+	// Часть 3 — необходимое условие на привязке (опускаемое).
+	binding := `
      AND NULLIF(
-             (rs.container_type IS NULL AND (
-                 (jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
-              OR b.target -> 'resources' = '[]'::jsonb
-              OR b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
-                     'type', ` + objectTypeExpr + `, 'id', ` + objectIDExpr + `))))
-          OR (rs.container_type IS NOT NULL
-              AND bs.subject_type <> 'system_class'
-              AND EXISTS (
-                  SELECT 1
-                    FROM kaname.resource_parent_edge ce
-                    LEFT JOIN kaname.resource_mirror cm
-                      ON rs.container_arm = 'labels'
-                     AND cm.object_type = rs.container_type AND cm.object_id = ce.parent_id
-                   WHERE ce.object_type = ` + objectModelTypeExpr + ` AND ce.object_id = ` + objectIDExpr + `
-                     AND ce.parent_type = rs.container_object_type
-                     AND (   rs.container_arm = 'anchor'
-                          OR (rs.container_arm = 'names'  AND ce.parent_id = ANY (rs.container_resource_names))
-                          OR (rs.container_arm = 'labels' AND cm.labels IS NOT NULL
-                                                          AND cm.labels @> rs.container_match_labels))
-                     AND (   (jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
-                          OR b.target -> 'resources' = '[]'::jsonb
-                          OR b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
-                                 'type', rs.container_type, 'id', ce.parent_id))))),
+             ` + wholeScopeTarget + `
+          OR ` + namedInTarget(objectTypeExpr, objectIDExpr) + `
+          OR EXISTS (
+                 SELECT 1
+                   FROM kaname.role_rule_selectors ns
+                   JOIN kaname.resource_parent_edge ce
+                     ON ce.object_type = ` + objectModelTypeExpr + ` AND ce.object_id = ` + objectIDExpr + `
+                    AND ce.parent_type = ns.container_object_type
+                  WHERE ns.role_id = b.role_id AND ns.container_type IS NOT NULL
+                    AND ` + objectTypeExpr + ` = ANY (ns.object_types)
+                    AND ` + namedInTarget("ns.container_type", "ce.parent_id") + `),
          false) IS NOT NULL`
+	return arm + nested + top + binding
+}
+
+// wholeScopeTarget — цель «вся область»: корень-объект без ключа `resources`
+// либо пустой перечень (довод о незнакомых формах — в шапке предиката).
+const wholeScopeTarget = `(jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
+          OR b.target -> 'resources' = '[]'::jsonb`
+
+// namedInTarget — цель называет пару «тип, id» (тип — в словаре каталога).
+func namedInTarget(typeExpr, idExpr string) string {
+	return `b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
+                 'type', ` + typeExpr + `, 'id', ` + idExpr + `))`
 }
 
 // errTemplateMark — метка шаблона запроса стоит в нём не ровно один раз.
