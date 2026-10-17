@@ -39,7 +39,10 @@ type Rule struct {
 	Verbs         []string
 	ResourceNames []string
 	MatchLabels   map[string]string
-	// Children — вложенные правила (kaname#874). Пусто у правила без вложенных.
+	// Children — вложенные правила (kaname#874, nested_rule.go): правила над
+	// типами, лежащими под типом-контейнером этого правила. nil — вложенных нет;
+	// пустой непустой срез формой не является (второй способ сказать «нет»).
+	// У вложенного правила Module пуст (берётся у владельца) и своих Children нет.
 	Children []Rule
 }
 
@@ -166,6 +169,11 @@ func (r Rule) Validate(policy RulePolicy, modules ModuleSet) error {
 	if len(r.MatchLabels) > 0 {
 		errs = multierr.Append(errs, r.validateFeedGate())
 	}
+
+	// Форма вложенности (kaname#874): владелец, модуль и глубина вложенных
+	// правил; сами вложенные правила судятся этой же функцией с модулем
+	// владельца.
+	errs = multierr.Append(errs, r.validateChildren(policy, modules))
 
 	return errs
 }

@@ -42,6 +42,9 @@ func (r Rule) Fingerprint() string {
 	writeSortedList(h, "v", r.Verbs)
 	writeSortedList(h, "n", r.ResourceNames)
 	writeSortedLabels(h, r.MatchLabels)
+	// Вложенные правила — своей секцией и ТОЛЬКО когда они есть: отпечаток
+	// правила без вложенных не сдвигается ни на байт (kaname#874).
+	writeChildren(h, r.Children)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -138,16 +141,27 @@ type RuleSelector struct {
 	ResourceNames []string          // ARM_NAMES only
 	MatchLabels   map[string]string // ARM_LABELS only
 	Verbs         []string
-	// Container — контейнер вложенного правила (kaname#874); nil у правила верхнего уровня.
+	// Container — контейнер вложенного правила (kaname#874); nil у правила
+	// верхнего уровня. Селектор с контейнером охватывает объекты своих
+	// ObjectTypes, у которых среди предков есть объект типа Container.Type,
+	// прошедший отбор Container и входящий в цель выдачи.
 	Container *ContainerSelector
 }
 
-// ContainerSelector — тип и отбор правила-владельца вложенного правила (kaname#874).
+// ContainerSelector — тип и отбор правила-владельца вложенного правила
+// (kaname#874). Ветвь — та же, что у правила верхнего уровня: якорь выбирает
+// все контейнеры типа, имена — названные, метки — с совпавшими метками.
 type ContainerSelector struct {
-	Type          string
+	// Type — точечный тип контейнера (`registry.registries`), словарь каталога.
+	Type string
+	// OwnerFP — отпечаток правила-владельца: его селектор и выбирает контейнер.
+	// По нему разворачивание выдачи классу узнаёт, что контейнер в составе выдачи
+	// ИМЕННО этим правилом (а не соседним), прежде чем писать `public_reader`.
+	// В хранимую строку селектора не едет: решению о доступе он не нужен.
+	OwnerFP       string
 	Arm           Arm
-	ResourceNames []string
-	MatchLabels   map[string]string
+	ResourceNames []string          // ArmNames only
+	MatchLabels   map[string]string // ArmLabels only
 }
 
 // MaterializingSelectors projects a role's rules to the UNIFIED selector set the
@@ -208,6 +222,10 @@ func (rs Rules) materializingSelectors(expandWildcard bool) []RuleSelector {
 			sel.MatchLabels = ml
 		}
 		out = append(out, sel)
+		// Вложенные правила — СВОИМИ селекторами над своими типами, каждый с
+		// контейнером владельца (kaname#874). От области выдачи они не зависят:
+		// владелец называет один конкретный тип, подстановки у него нет.
+		out = append(out, nestedSelectors(r)...)
 	}
 	return out
 }
