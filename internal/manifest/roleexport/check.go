@@ -90,6 +90,12 @@ var (
 	// «класс пуст»: чинится он другим — именем ресурса, а не именем класса.
 	ErrRuleResourceUnknownToCatalog = errors.New(
 		"roleexport: каталог прав не знает у модуля такого ресурса")
+	// ErrClassIsNotAModelVerbOfType — право пусто: ресурс объявлен без
+	// собственной службы, и класс правила не даёт ни одного глагола модели его
+	// типа. Отдельный отказ, а не «класс не покрывает действия»: действий у
+	// такого ресурса в каталоге нет by construction, и судит его модель.
+	ErrClassIsNotAModelVerbOfType = errors.New(
+		"roleexport: класс не даёт ни одного глагола модели типа ресурса без собственной службы")
 )
 
 // Finding — находка о правиле роли.
@@ -131,6 +137,10 @@ type Census struct {
 	RulesRead int
 	// PairsJudged — пар (ресурс, класс), по которым вынесен вердикт.
 	PairsJudged int
+	// PairsJudgedByModelVerbs — из них пар над ресурсом без собственной службы,
+	// судимых глаголами модели его типа, а не действиями каталога. Отдельным
+	// числом: иначе «находок 0» по такой паре неотличимо от «судилась каталогом».
+	PairsJudgedByModelVerbs int
 	// FindingsFound — находок.
 	FindingsFound int
 }
@@ -138,8 +148,10 @@ type Census struct {
 // Summary — перепись строкой.
 func (c Census) Summary() string {
 	return fmt.Sprintf(
-		"действий каталога %d · ролей %d · правил %d · пар (ресурс, класс) %d · находок %d",
-		c.ActionsAttributed, c.RolesRead, c.RulesRead, c.PairsJudged, c.FindingsFound)
+		"действий каталога %d · ролей %d · правил %d · пар (ресурс, класс) %d · "+
+			"из них по глаголам модели %d · находок %d",
+		c.ActionsAttributed, c.RolesRead, c.RulesRead, c.PairsJudged,
+		c.PairsJudgedByModelVerbs, c.FindingsFound)
 }
 
 // CheckRoleRules судит правила ролей манифеста против каталога действий.
@@ -164,9 +176,12 @@ func CheckRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) ([]
 		for _, rule := range role.Rules {
 			census.RulesRead++
 			for _, resource := range rule.Resources {
-				found, judged := judgeResource(facts, m, role.ID, rule, resource, byResource)
+				found, judged, byModel := judgeResource(facts, m, role.ID, rule, resource, byResource)
 				faults = append(faults, found...)
 				census.PairsJudged += judged
+				if byModel {
+					census.PairsJudgedByModelVerbs += judged
+				}
 			}
 		}
 	}
@@ -175,13 +190,17 @@ func CheckRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) ([]
 }
 
 // judgeResource — вердикт по одному ресурсу правила; вторым значением — сколько
-// пар (ресурс, класс) осмотрено.
+// пар (ресурс, класс) осмотрено, третьим — судились ли они глаголами модели.
 func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule manifest.Rule,
 	resource string,
-	byResource map[string][]Action) ([]error, int) {
+	byResource map[string][]Action) ([]error, int, bool) {
 
 	own := byResource[rule.Module+"."+resource]
 	if len(own) == 0 {
+		if _, without := authzmap.CatalogResourcesWithoutOwnService()[rule.Module+"."+resource]; without {
+			found, judged := judgeByModelVerbs(facts, m, roleID, rule, resource)
+			return found, judged, true
+		}
 		return []error{Finding{
 			Kind:     ErrRuleResourceUnknownToCatalog,
 			Role:     roleID,
@@ -194,7 +213,7 @@ func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule ma
 					"ключом закрытой таблицы типов (числа у написания нет: `securityGroup` "+
 					"у vpc, `targetGroups` у балансировщика)",
 				roleID, resource, rule.Module),
-		}}, 0
+		}}, 0, false
 	}
 
 	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
@@ -215,7 +234,88 @@ func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule ma
 			Detail:   emptyClassDetail(facts, roleID, rule.Module, resource, verb, class, fgaType, own),
 		})
 	}
+	return faults, judged, false
+}
+
+// judgeByModelVerbs — вердикт по ресурсу, объявленному без собственной службы
+// (`authzmap.CatalogResourcesWithoutOwnService`).
+//
+// # Почему судит модель, а не каталог
+//
+// Действий у такого ресурса в каталоге нет by construction: службы нет, и
+// привязке записей не из чего вывести его написание. Гейт его объекта задаёт
+// обработчик чужой службы, спрашивая пообъектное отношение `v_<глагол>` на типе
+// ресурса, — то есть ровно те кортежи, которые пишет правило роли. Поэтому
+// единственный вопрос, на который здесь есть ответ: даёт ли класс правила хотя
+// бы один глагол модели этого типа. Пустое множество действий каталога для
+// такого ресурса не означает «право пусто»; пустое множество ГЛАГОЛОВ — означает.
+//
+// # Чем это не ослабление
+//
+// Ответ даёт тот же предикат, которым эмиттер кортежей строит набор глаголов
+// (`GrantedVerbs` с набором типа), поэтому «покрыт» здесь значит «правило
+// действительно пишет на объекте этого типа хотя бы одно глагольное отношение».
+// Запасного словаря у этой ветви нет: тип без собственного набора глаголов не
+// покрывается ни одним классом — fail-closed, как и пара вне закрытой таблицы.
+// Ярус в покрытие не входит: без действий каталога неизвестно, спрашивает ли
+// его хоть один гейт, и вывод «покрыто ярусом» был бы предположением.
+//
+// Решение о доступе это не меняет: правится только проверка формы при сборке.
+func judgeByModelVerbs(facts VerbFacts, m *manifest.Manifest, roleID string, rule manifest.Rule,
+	resource string) ([]error, int) {
+
+	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
+	var typeVerbs []string
+	if fgaType != "" {
+		typeVerbs = facts.VerbsOfType(fgaType)
+	}
+	var faults []error
+	judged := 0
+	for _, verb := range rule.Classes {
+		class := classOf(m, verb)
+		judged++
+		if len(typeVerbs) > 0 && len(facts.GrantedVerbs(fgaType, []string{class}, typeVerbs)) > 0 {
+			continue
+		}
+		faults = append(faults, Finding{
+			Kind:     ErrClassIsNotAModelVerbOfType,
+			Role:     roleID,
+			Module:   rule.Module,
+			Resource: resource,
+			Class:    class,
+			Detail:   modelVerbsDetail(roleID, rule.Module, resource, verb, class, fgaType, typeVerbs),
+		})
+	}
 	return faults, judged
+}
+
+// modelVerbsDetail — отказ целиком: ЧТО пусто · ПОЧЕМУ судит модель · ЧЕМ
+// чинится (глаголы модели типа, которые класс вправе назвать).
+func modelVerbsDetail(roleID, module, resource, verb, class, fgaType string, typeVerbs []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "роль %q: класс %q на ресурсе %q модуля %q не даёт ни одного глагола "+
+		"модели его типа", roleID, class, resource, module)
+	if class != verb {
+		fmt.Fprintf(&b, " (глагол %q объявлен снятым и разрешается в класс %q)", verb, class)
+	}
+	b.WriteString(". Ресурс объявлен без собственной службы, действий в каталоге прав у " +
+		"него нет by construction, поэтому право по нему судится глаголами модели типа, " +
+		"которые правило роли пишет на объекте. ")
+	switch {
+	case fgaType == "":
+		fmt.Fprintf(&b, "У пары (%q, %q) нет типа объекта в закрытой таблице модели прав — "+
+			"правило не пишет на таком ресурсе ни одного кортежа ни при каком классе.",
+			module, resource)
+	case len(typeVerbs) == 0:
+		fmt.Fprintf(&b, "Тип %q не объявляет в модели ни одного глагола — ролью модуля "+
+			"ресурс не выдаётся ни при каком классе.", fgaType)
+	default:
+		sorted := append([]string(nil), typeVerbs...)
+		sort.Strings(sorted)
+		fmt.Fprintf(&b, "Глаголы модели типа %q: %s. Годный способ: назови класс из этого "+
+			"перечня.", fgaType, strings.Join(sorted, ", "))
+	}
+	return b.String()
 }
 
 // classOf — класс, которым правило распоряжается на самом деле.
