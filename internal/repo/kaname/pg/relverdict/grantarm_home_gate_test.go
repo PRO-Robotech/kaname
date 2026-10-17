@@ -16,8 +16,9 @@ package relverdict
 //
 // Единица счёта — функция либо одно имя в объявлении константы/переменной
 // пакета. У каждой единицы выводятся тексты её строковых выражений: литерал,
-// склейка оператором «+» в порядке исходника, fmt.Sprintf с подстановкой %s %v
-// %q %d по порядку, имя строковой константы либо переменной ЭТОГО пакета (из
+// склейка оператором «+» в порядке исходника, fmt.Sprintf и fmt.Fprintf с
+// подстановкой %s %v %q %d по порядку, fmt.Fprint/Fprintln склейкой операндов,
+// имя строковой константы либо переменной ЭТОГО пакета (из
 // любого его файла) — её значение подставляется. Невыводимое (параметр, вызов
 // функции, константа другого пакета, индексированный глагол формата) становится
 // отдельной лексемой-заглушкой и с соседями не склеивается.
@@ -35,8 +36,10 @@ package relverdict
 // «||» либо конец текста). Сравнение любым оператором, CASE … WHEN, IN, NOT IN,
 // LIKE, BETWEEN, IS DISTINCT FROM, ANY — решение.
 //
-// Аргументы fmt.Errorf, errors.New, fmt.Print*/Fprint*, вызовов пакетов log и
-// slog не читаются: это текст наружу либо журнал. Комментарии Go не читаются
+// Аргументы fmt.Errorf, errors.New, fmt.Print*, вызовов пакетов log и slog не
+// читаются: это текст наружу либо журнал. fmt.Fprint* читается (запись в
+// strings.Builder — это сборка запроса) и молчит только при писателе
+// os.Stdout, os.Stderr либо io.Discard. Комментарии Go не читаются
 // вовсе. Пробные файлы не читаются.
 //
 // Константа либо переменная, которую подставляет другая единица, — осколок:
@@ -288,6 +291,20 @@ var grantArmForms = []struct {
 	{"G9: полная копия после литерала '--'",
 		"package p\n\nconst q = `WHERE note <> '--' AND (rs.arm = 'anchor' OR (rs.arm = 'names' AND x = ANY (rs.resource_names)))`\n",
 		"package p\n\nconst q = `WHERE note <> '--' -- AND (rs.arm = 'anchor' OR (rs.arm = 'names' AND x = ANY (rs.resource_names)))\n`\n"},
+	// Остаток go-style-reviewer: обратный порядок DISTINCT FROM и запись в
+	// strings.Builder через fmt.Fprintf.
+	{"IS DISTINCT FROM, столбец справа",
+		"package p\n\nconst q = `WHERE 'labels' IS DISTINCT FROM rs.arm`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE 'labels' IS DISTINCT FROM x`\n"},
+	{"IS NOT DISTINCT FROM, столбец справа",
+		"package p\n\nconst q = `WHERE 'anchor' IS NOT DISTINCT FROM rs.arm`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE 'anchor' IS NOT DISTINCT FROM x`\n"},
+	{"fmt.Fprintf в strings.Builder",
+		"package p\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\nfunc f(v string) string {\n\tvar b strings.Builder\n\tfmt.Fprintf(&b, \"WHERE rs.arm = %s\", v)\n\treturn b.String()\n}\n",
+		"package p\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\nfunc f(v string) string {\n\tvar b strings.Builder\n\tfmt.Fprintf(&b, \"SELECT rs.arm AS arm FROM %s\", v)\n\treturn b.String()\n}\n"},
+	{"fmt.Fprint в strings.Builder, столбец аргументом",
+		"package p\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\nfunc f() string {\n\tvar b strings.Builder\n\tfmt.Fprint(&b, \"WHERE rs.\", \"arm = 'anchor'\")\n\treturn b.String()\n}\n",
+		"package p\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\nfunc f() string {\n\tvar b strings.Builder\n\tfmt.Fprint(&b, \"SELECT rs.\", \"arm AS arm FROM t\")\n\treturn b.String()\n}\n"},
 	{"внутри блока констант",
 		"package p\n\nconst (\n\ta = 1\n\tq = `WHERE rs.arm = 'anchor'`\n)\n",
 		"package p\n\nconst (\n\ta = 1\n\tq = `SELECT rs.arm AS arm FROM t`\n)\n"},
@@ -317,6 +334,8 @@ func TestGrantArmHomeInjection_ProseAndCommentsAreSilent(t *testing.T) {
 		"errors.New": "package p\n\nimport \"errors\"\n\nvar e = errors.New(\"rs.arm = 'names'\")\n",
 		"блочный комментарий SQL":                "package p\n\nconst q = `SELECT 1 /* rs.arm = 'x' /* вложенный */ AND rs.arm = 'y' */ FROM t`\n",
 		"комментарий Go":                         "package p\n\n// rs.arm = 'names'\nconst q = `SELECT 1`\n",
+		"fmt.Fprintf в os.Stderr":                "package p\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc f(v string) { fmt.Fprintf(os.Stderr, \"rs.arm = %s\\n\", v) }\n",
+		"fmt.Fprintln в io.Discard":              "package p\n\nimport (\n\t\"fmt\"\n\t\"io\"\n)\n\nfunc f() { fmt.Fprintln(io.Discard, \"rs.arm = 'names'\") }\n",
 		"L3: полная копия в блочном комментарии": "package p\n\nconst q = `SELECT 1 /* WHERE (rs.arm = 'anchor' OR (rs.arm = 'names' AND x = ANY (rs.resource_names))) */ FROM t`\n",
 	} {
 		t.Run(name, func(t *testing.T) {

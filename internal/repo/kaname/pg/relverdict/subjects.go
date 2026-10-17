@@ -181,12 +181,15 @@ SELECT g.subject
 
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
-func subjectsQuerySQL(labelTable string) string {
-	sql := replaceOnce(subjectsSQL, armPredicateMark,
+func subjectsQuerySQL(labelTable string) (string, error) {
+	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
 		grantArmPredicate("$9::text", "$2::text", "m.labels"))
+	if err != nil {
+		return "", err
+	}
 	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$9", "$2"), 1)
-	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("n.subject"), 1)
+	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("n.subject"), 1), nil
 }
 
 // Subjects отдаёт страницу субъектов, имеющих отношение на объекте.
@@ -217,7 +220,11 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := q.Query(ctx, subjectsQuerySQL(labelTable),
+	sql, err := subjectsQuerySQL(labelTable)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := q.Query(ctx, sql,
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
 		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {

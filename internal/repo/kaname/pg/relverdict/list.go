@@ -326,11 +326,14 @@ SELECT c.object_id,
 
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
 // (довод — у expandQuerySQL).
-func listQuerySQL(labelTable string) string {
-	sql := replaceOnce(listSQL, armPredicateMark,
+func listQuerySQL(labelTable string) (string, error) {
+	sql, err := replaceOnce(listSQL, armPredicateMark,
 		grantArmPredicate("$9::text", "c.object_id", "c.labels"))
+	if err != nil {
+		return "", err
+	}
 	return strings.Replace(sql, candidateFromMark,
-		candidateFrom(labelTable, "$9", "$3", "$4"), 1)
+		candidateFrom(labelTable, "$9", "$3", "$4"), 1), nil
 }
 
 // List отдаёт страницу доступных объектов и курсор следующей.
@@ -391,7 +394,10 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	//
 	// Метка `{{labels_join}}` отсюда ушла вместе со своим предметом: метки едут
 	// колонкой кандидата, второго чтения того же места больше нет.
-	sql := listQuerySQL(labelTable)
+	sql, err := listQuerySQL(labelTable)
+	if err != nil {
+		return nil, "", err
+	}
 
 	after := in.AfterID
 	for {

@@ -607,20 +607,26 @@ const (
 // а расширение доступа: ветвь, соединённая с областями без сужения по строке,
 // отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
 // один из них.
-func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string) {
-	grant = replaceOnce(grantArmSQL, armPredicateMark,
+func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string, err error) {
+	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
 		grantArmPredicate("$9::text", objectIDExpr, "m.labels"))
+	if err != nil {
+		return "", "", err
+	}
 	grant = strings.Replace(grant, scopeJoinMark, scopeJoinGrant, 1)
 	fact = strings.Replace(factArmSQL, scopeJoinMark, scopeJoinFact, 1)
-	return grant, fact
+	return grant, fact, nil
 }
 
-func verdictQuerySQL(labelTable string) string {
-	grant, fact := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne)
+func verdictQuerySQL(labelTable string) (string, error) {
+	grant, fact, err := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne)
+	if err != nil {
+		return "", err
+	}
 	sql := strings.Replace(verdictSQL, "{{grant_arm}}", grant, 1)
 	sql = strings.Replace(sql, "{{fact_arm}}", fact, 1)
 	return strings.ReplaceAll(sql, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$9", "$3"))
+		labelsJoinPinned(labelTable, "$9", "$3")), nil
 }
 
 func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
@@ -656,7 +662,11 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	g.LabelAxisTable = labelTable
 
-	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
+	sql, err := verdictQuerySQL(labelTable)
+	if err != nil {
+		return Unknown, g, err
+	}
+	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
 		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
@@ -931,15 +941,18 @@ SELECT o.ord, src.cond_name, src.cond_params, src.arm
 // verdictManyQuerySQL — ГОТОВЫЙ запрос вердикта о странице для выбранной оси
 // меток (довод — у verdictQuerySQL: собранный запрос читает не только продукт,
 // но и гейт словарей, и собирать его гейт не вправе).
-func verdictManyQuerySQL(labelTable string) string {
-	grant, fact := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany)
+func verdictManyQuerySQL(labelTable string) (string, error) {
+	grant, fact, err := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany)
+	if err != nil {
+		return "", err
+	}
 	sql := strings.Replace(verdictManySQL, "{{grant_arm}}", grant, 1)
 	sql = strings.Replace(sql, "{{fact_arm}}", fact, 1)
 	// Метки объекта присоединяются К СТРОКЕ партии, а не к параметру запроса:
 	// объект у каждой строки свой. Строитель — тот же самый; расходиться двум
 	// представлениям о том, где лежат метки, негде.
 	return strings.ReplaceAll(sql, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$9", "o.object_id"))
+		labelsJoinPinned(labelTable, "$9", "o.object_id")), nil
 }
 
 // AskMany задаёт форме вопрос о СТРАНИЦЕ объектов одного типа — одним запросом.
@@ -996,7 +1009,11 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		return nil, nil, err
 	}
 
-	rows, err := q.Query(ctx, verdictManyQuerySQL(labelTable),
+	sql, err := verdictManyQuerySQL(labelTable)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
 		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),

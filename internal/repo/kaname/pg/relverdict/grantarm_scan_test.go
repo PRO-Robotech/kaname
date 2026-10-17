@@ -28,12 +28,28 @@ const exprMark = "\x00"
 // есть решение «достаёт ли выдача до объекта».
 var selectorColumns = map[string]bool{"arm": true, "resource_names": true, "match_labels": true}
 
-// silencedCalls — вызовы, чьи строки уходят в текст ошибки или в журнал, а не
-// в запрос. Их аргументы не читаются.
+// silencedCalls — вызовы, чьи строки уходят в текст ошибки или на стандартный
+// вывод, а не в запрос. Их аргументы не читаются.
 var silencedCalls = map[string]bool{
 	"fmt.Errorf": true, "errors.New": true,
 	"fmt.Print": true, "fmt.Printf": true, "fmt.Println": true,
-	"fmt.Fprint": true, "fmt.Fprintf": true, "fmt.Fprintln": true,
+}
+
+// fprintCalls — запись форматом в писателя. Писатель может быть буфером, в
+// котором собирается запрос (strings.Builder, bytes.Buffer), поэтому вызов
+// читается; молчит он только при писателе из silencedWriters.
+var fprintCalls = map[string]bool{"fmt.Fprint": true, "fmt.Fprintf": true, "fmt.Fprintln": true}
+
+// silencedWriters — писатели, в которые запрос не собирается.
+var silencedWriters = map[string]bool{"os.Stdout": true, "os.Stderr": true, "io.Discard": true}
+
+func writerName(x ast.Expr) string {
+	if sel, ok := x.(*ast.SelectorExpr); ok {
+		if id, ok := sel.X.(*ast.Ident); ok {
+			return id.Name + "." + sel.Sel.Name
+		}
+	}
+	return ""
 }
 
 // silencedPkgs — пакеты журнала: любые их вызовы молчат.
@@ -192,7 +208,10 @@ func (ev *grantArmEval) texts(x ast.Node) []string {
 			if silencedCalls[full] || silencedPkgs[pkg] {
 				return false
 			}
-			if full == "fmt.Sprintf" {
+			if fprintCalls[full] && len(n.Args) > 0 && silencedWriters[writerName(n.Args[0])] {
+				return false
+			}
+			if full == "fmt.Sprintf" || fprintCalls[full] {
 				out = append(out, ev.eval(n))
 				return false
 			}
@@ -245,15 +264,27 @@ func (ev *grantArmEval) eval(x ast.Expr) string {
 			return ev.eval(u.value)
 		}
 	case *ast.CallExpr:
-		if _, full := callName(x); full == "fmt.Sprintf" && len(x.Args) > 0 {
-			args := make([]string, 0, len(x.Args)-1)
-			for _, a := range x.Args[1:] {
-				args = append(args, ev.eval(a))
-			}
-			return sprintfLike(ev.eval(x.Args[0]), args)
+		_, full := callName(x)
+		switch {
+		case full == "fmt.Sprintf" && len(x.Args) > 0:
+			return sprintfLike(ev.eval(x.Args[0]), ev.evalAll(x.Args[1:]))
+		case full == "fmt.Fprintf" && len(x.Args) > 1:
+			return sprintfLike(ev.eval(x.Args[1]), ev.evalAll(x.Args[2:]))
+		case full == "fmt.Fprint" && len(x.Args) > 1:
+			return strings.Join(ev.evalAll(x.Args[1:]), "")
+		case full == "fmt.Fprintln" && len(x.Args) > 1:
+			return strings.Join(ev.evalAll(x.Args[1:]), " ")
 		}
 	}
 	return exprMark
+}
+
+func (ev *grantArmEval) evalAll(xs []ast.Expr) []string {
+	out := make([]string, 0, len(xs))
+	for _, a := range xs {
+		out = append(out, ev.eval(a))
+	}
+	return out
 }
 
 // sprintfLike подставляет %s %v %q %d по порядку; индексированные и прочие
@@ -461,6 +492,11 @@ func decidingUse(text string) bool {
 			p -= 2 // квалификатор таблицы: смотрим на то, что перед ним
 		}
 		prev := at(p)
+		// «IS [NOT] DISTINCT FROM столбец» — FROM здесь оператор сравнения, а не
+		// начало перечня таблиц.
+		if prev.kind == 'i' && prev.text == "from" && at(p-1).text == "distinct" {
+			prev = sqlTok{'o', "is distinct from"}
+		}
 		if prev.kind == 'i' && prev.text == "as" {
 			continue
 		}

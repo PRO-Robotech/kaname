@@ -18,6 +18,7 @@ package relverdict
 // `TestGrantArmPredicateHasASingleHome`.
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -114,20 +115,23 @@ func grantArmPredicate(objectTypeExpr, objectIDExpr, labelsExpr string) string {
          false) IS NOT NULL`
 }
 
+// errTemplateMark — метка шаблона запроса стоит в нём не ровно один раз.
+var errTemplateMark = errors.New("метка шаблона запроса стоит не ровно один раз")
+
 // replaceOnce подставляет val на место метки, которая стоит в шаблоне РОВНО
-// один раз, и иначе останавливает сборку.
+// один раз, а иначе возвращает ошибку и запроса не собирает.
 //
 // Молчаливая подстановка (strings.Replace) на шаблоне без метки собрала бы
 // запрос БЕЗ предиката ветви выдач — то есть выдачу без сужения, — и ничем бы
-// себя не выдала. Шаблоны — константы пакета, поэтому отказ здесь — ошибка
-// сборки дерева, а не данных: её ловит проба
-// TestEveryAssembledQueryCarriesTheGrantPredicateOnce, собирающая каждую форму
-// вопроса, до того как запрос куда-либо уйдёт. Паника, дошедшая до вызова,
-// обрывает вопрос ошибкой, а не ответом.
-func replaceOnce(tmpl, mark, val string) string {
+// себя не выдала. Ошибка идёт тем же путём, что ошибка самого запроса: вопрос
+// получает «не знаю» с ошибкой, а не отказ и не разрешение. Шаблоны —
+// константы пакета, поэтому это ошибка сборки дерева, а не данных: её ловит
+// проба TestEveryAssembledQueryCarriesTheGrantPredicateOnce, собирающая каждую
+// форму вопроса.
+func replaceOnce(tmpl, mark, val string) (string, error) {
 	if n := strings.Count(tmpl, mark); n != 1 {
-		panic(fmt.Sprintf("relverdict: метка %q стоит в шаблоне %d раз, ждали ровно один — "+
-			"запрос собрался бы без предиката либо с меткой в тексте", mark, n))
+		return "", fmt.Errorf("relverdict: метка %q стоит в шаблоне %d раз, ждали ровно один: %w",
+			mark, n, errTemplateMark)
 	}
-	return strings.Replace(tmpl, mark, val, 1)
+	return strings.Replace(tmpl, mark, val, 1), nil
 }

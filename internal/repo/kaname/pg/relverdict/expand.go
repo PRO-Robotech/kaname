@@ -199,12 +199,15 @@ SELECT 'group'::text,
 // запроса появляется второй читатель — гейт словарей. Гейт, собирающий запрос
 // сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
 // ровно потому, что он подставляет свой.
-func expandQuerySQL(labelTable string) string {
-	sql := replaceOnce(expandSQL, armPredicateMark,
+func expandQuerySQL(labelTable string) (string, error) {
+	sql, err := replaceOnce(expandSQL, armPredicateMark,
 		grantArmPredicate("$7::text", "$2::text", "m.labels"))
+	if err != nil {
+		return "", err
+	}
 	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$7", "$2"), 1)
-	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("g.subject"), 1)
+	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("g.subject"), 1), nil
 }
 
 // Expand перечисляет основания права на объекте.
@@ -230,7 +233,11 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.Query(ctx, expandQuerySQL(labelTable), objectType, objectID, MaxAncestorDepth,
+	sql, err := expandQuerySQL(labelTable)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, sql, objectType, objectID, MaxAncestorDepth,
 		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)

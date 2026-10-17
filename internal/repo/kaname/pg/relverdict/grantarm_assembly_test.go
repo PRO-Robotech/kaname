@@ -6,44 +6,68 @@ package relverdict
 // grantarm_assembly_test.go — метка предиката ветви выдач расходуется ровно
 // один раз (kaname#857). Шаблон без метки — запрос без предиката, то есть
 // выдача без сужения; с двумя метками — вторая осталась бы текстом. Обе формы
-// обязаны остановить сборку, а не собрать запрос.
+// обязаны вернуть ошибку сборки, а не собрать запрос.
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
 
-func mustPanic(t *testing.T, why string, f func()) {
-	t.Helper()
-	defer func() {
-		if recover() == nil {
-			t.Errorf("%s: сборка прошла молча", why)
+// mustAssemble — сборщик запроса для проб и гейтов: ошибка сборки здесь —
+// ошибка дерева, и проба падает на ней сразу.
+func mustAssemble(build func(labelTable string) (string, error)) func(string) string {
+	return func(labelTable string) string {
+		sql, err := build(labelTable)
+		if err != nil {
+			panic(err)
 		}
-	}()
-	f()
-}
-
-func TestReplaceOnce_RefusesAnAbsentOrRepeatedMark(t *testing.T) {
-	mustPanic(t, "метки нет", func() { replaceOnce("WHERE true", armPredicateMark, "x") })
-	mustPanic(t, "метка дважды", func() {
-		replaceOnce("("+armPredicateMark+") AND ("+armPredicateMark+")", armPredicateMark, "x")
-	})
-	if got := replaceOnce("WHERE ("+armPredicateMark+")", armPredicateMark, "p"); got != "WHERE (p)" {
-		t.Errorf("метка ровно один раз: %q", got)
+		return sql
 	}
 }
 
-// Каждый сборщик формы вопроса несёт предикат ровно один раз и метки не
-// оставляет.
+func TestReplaceOnce_RefusesAnAbsentOrRepeatedMark(t *testing.T) {
+	for name, c := range map[string]struct {
+		tmpl  string
+		count string
+	}{
+		"метки нет":    {"WHERE true", "0 раз"},
+		"метка дважды": {"(" + armPredicateMark + ") AND (" + armPredicateMark + ")", "2 раз"},
+	} {
+		got, err := replaceOnce(c.tmpl, armPredicateMark, "x")
+		if !errors.Is(err, errTemplateMark) {
+			t.Errorf("%s: ошибка %v, ждали errTemplateMark", name, err)
+			continue
+		}
+		if got != "" {
+			t.Errorf("%s: вместе с ошибкой отдан текст %q", name, got)
+		}
+		if msg := err.Error(); !strings.Contains(msg, armPredicateMark) || !strings.Contains(msg, c.count) {
+			t.Errorf("%s: ошибка не называет метку и число вхождений: %q", name, msg)
+		}
+	}
+	got, err := replaceOnce("WHERE ("+armPredicateMark+")", armPredicateMark, "p")
+	if err != nil || got != "WHERE (p)" {
+		t.Errorf("метка ровно один раз: %q, %v", got, err)
+	}
+}
+
+// Каждый сборщик формы вопроса собирается без ошибки, несёт предикат ровно один
+// раз и метки не оставляет.
 func TestEveryAssembledQueryCarriesTheGrantPredicateOnce(t *testing.T) {
 	const targetAxis = "b.target -> 'resources' @>"
-	for name, sql := range map[string]string{
-		"прямой вопрос":     verdictQuerySQL(""),
-		"вопрос о странице": verdictManyQuerySQL(""),
-		"перечень":          listQuerySQL(""),
-		"кто имеет право":   subjectsQuerySQL(""),
-		"разбор оснований":  expandQuerySQL(""),
+	for name, build := range map[string]func(string) (string, error){
+		"прямой вопрос":     verdictQuerySQL,
+		"вопрос о странице": verdictManyQuerySQL,
+		"перечень":          listQuerySQL,
+		"кто имеет право":   subjectsQuerySQL,
+		"разбор оснований":  expandQuerySQL,
 	} {
+		sql, err := build("")
+		if err != nil {
+			t.Errorf("%s: сборка: %v", name, err)
+			continue
+		}
 		if strings.Contains(sql, armPredicateMark) {
 			t.Errorf("%s: метка предиката осталась в запросе", name)
 		}
