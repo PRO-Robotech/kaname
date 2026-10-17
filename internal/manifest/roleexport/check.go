@@ -162,11 +162,15 @@ func CheckRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) ([]
 		role := &m.Roles[i]
 		census.RolesRead++
 		for _, rule := range role.Rules {
-			census.RulesRead++
-			for _, resource := range rule.Resources {
-				found, judged := judgeResource(facts, m, role.ID, rule, resource, byResource)
-				faults = append(faults, found...)
-				census.PairsJudged += judged
+			// Вложенные правила (kaname#874) судятся наравне с правилом верхнего
+			// уровня — с модулем владельца: право, которое они дают, то же право.
+			for _, r := range withChildren(rule) {
+				census.RulesRead++
+				for _, resource := range r.Resources {
+					found, judged := judgeResource(facts, m, role.ID, r, resource, byResource)
+					faults = append(faults, found...)
+					census.PairsJudged += judged
+				}
 			}
 		}
 	}
@@ -378,4 +382,17 @@ func wayOut(own []Action, fgaType string) string {
 		return "Годный способ: назови класс, покрывающий действие этого ресурса."
 	}
 	return "Годный способ: " + strings.Join(parts, "; ") + "."
+}
+
+// withChildren — правило и его вложенные правила (с модулем владельца) одним
+// перечнем.
+func withChildren(rule manifest.Rule) []manifest.Rule {
+	out := []manifest.Rule{rule}
+	for _, c := range rule.Children {
+		out = append(out, manifest.Rule{
+			Module: rule.Module, Resources: c.Resources, Classes: c.Classes, Verbs: c.Verbs,
+			ResourceNames: c.ResourceNames, MatchLabels: c.MatchLabels,
+		})
+	}
+	return out
 }
