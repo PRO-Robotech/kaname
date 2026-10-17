@@ -97,7 +97,7 @@ func sc65BoxObject() domain.MirrorObject {
 // sc65Tuples — все кортежи, которые разворачивание выдачи даёт объекту.
 func sc65Tuples(cat *catalog.Facts, bs BindingScope) map[domain.MembershipTuple]bool {
 	out := map[domain.MembershipTuple]bool{}
-	for _, dm := range desiredMembersForObject(cat, bs, sc65BoxObject()) {
+	for _, dm := range desiredMembersForObject(cat, bs, sc65BoxObject(), nil) {
 		for _, tu := range dm.Tuples {
 			out[tu] = true
 		}

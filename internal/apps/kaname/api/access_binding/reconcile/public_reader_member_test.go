@@ -33,7 +33,7 @@ func TestPublicReaderMember_KeyFollowsTheChildRule(t *testing.T) {
 	}
 	plain := domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"}}}
 	members := func(rules domain.Rules) []DesiredMember {
-		return desiredMembersForObject(cat, sc65Scope("system_class", "anonymous", rules), sc65BoxObject())
+		return desiredMembersForObject(cat, sc65Scope("system_class", "anonymous", rules), sc65BoxObject(), nil)
 	}
 
 	var pr []DesiredMember
@@ -99,7 +99,7 @@ func TestPublicReaderMember_NarrowedChildRuleWritesNothing(t *testing.T) {
 	written := func(child domain.Rule) bool {
 		rules := domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"},
 			Children: []domain.Rule{child}}}
-		for _, m := range desiredMembersForObject(cat, sc65Scope("system_class", "anonymous", rules), sc65BoxObject()) {
+		for _, m := range desiredMembersForObject(cat, sc65Scope("system_class", "anonymous", rules), sc65BoxObject(), nil) {
 			if hasRelation(m, domain.PublicReaderRelation) {
 				return true
 			}

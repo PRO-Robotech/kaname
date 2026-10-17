@@ -397,6 +397,11 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 			// present; a stray call simply defers to the async backstop.
 			return nil
 		}
+		// Предки объекта — для вложенных правил выдач (kaname#874), один раз на веер.
+		ancestors, err := r.ancestorsOf(ctx, s, objectType, objectID, ok)
+		if err != nil {
+			return fmt.Errorf("forward: %w", err)
+		}
 		// Candidate bindings whose selector matches this object, INCLUDING bindings with no
 		// member row yet (the brand-new-object case). This is the SAME fast-path source the
 		// full ReconcileObject uses (feed-agnostic verdict downstream). NOTE (doc-truthfulness,
@@ -437,7 +442,7 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 			if !ok || !bs.Active {
 				continue // удалена / не ACTIVE — материализовать нечего (тот же исход, что был)
 			}
-			if err := r.forwardObjectForBinding(ctx, s, bs, obj, col, w); err != nil {
+			if err := r.forwardObjectForBinding(ctx, s, bs, obj, ancestors, col, w); err != nil {
 				return err
 			}
 		}
@@ -467,7 +472,8 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 // no-op; выдачи, которой уже нет или которая не ACTIVE, вызывающий сюда не приносит.
 // Non-ACTIVE per-object verdicts (REJECTED containment) are LEFT to the async full
 // backstop — the additive path never writes a non-grant.
-func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject, col *syncFGACollector, w *forwardWriteSet) error {
+func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject,
+	ancestors []domain.MirrorObject, col *syncFGACollector, w *forwardWriteSet) error {
 	// The object's desired members under this binding — derived by the SHARED
 	// desiredMembersForObject (per-object target least-priv, arm match, containment
 	// verdict, scope-self anchor), so the forward fast-path, the object-narrowed full
@@ -475,7 +481,7 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	// `*.*` binding carries selectors with EMPTY ObjectTypes (the D-9 flat short-circuit
 	// owns cluster super-admin), so nothing matches → no per-object materialization on
 	// cluster (short-circuit preserved).
-	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj) {
+	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj, ancestors) {
 		if dm.Status != domain.VerificationActive {
 			// A REJECTED containment verdict: the additive forward path materializes only
 			// ACTIVE grants; the async full backstop owns the REJECTED member row +
