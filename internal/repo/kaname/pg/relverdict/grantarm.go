@@ -42,8 +42,34 @@ import (
 // одного идентификатора не годится: объект другого типа с тем же id стал бы
 // доступен выдачей, которая его не называет.
 //
-// Сравнение ТОЧНОЕ: объекты, лежащие под названным контейнером, целью не
-// охватываются.
+// Сравнение ТОЧНОЕ у правила верхнего уровня: объекты, лежащие под названным
+// контейнером, целью такого правила не охватываются (#857).
+//
+// # ТРЕТЬЯ ОСЬ — ВЛОЖЕННОСТЬ, И ОНА ЖИВЁТ ЗДЕСЬ ЖЕ (kaname#874)
+//
+// Селектор ВЛОЖЕННОГО правила (`rs.container_type` непуст) охватывает объект
+// своего типа, когда среди его предков есть КОНТЕЙНЕР типа владельца, который
+// (1) проходит ветвь правила-владельца — якорь, имена либо метки контейнера — и
+// (2) входит в цель выдачи: назван парой «тип, id» либо цель — вся область
+// (приёмка `nested-rule-reaches-descendants-of-a-named-container.md`, Р3).
+// Предки читаются РЁБРАМИ ОБЪЕКТА по ключу (`resource_parent_edge`): владелец
+// присылает всю цепь с глубиной, поэтому «контейнер среди предков» — одно
+// чтение при любой глубине, а будущий потомок охвачен в момент регистрации.
+//
+// Ось стоит ВНУТРИ того же предиката, а не отдельной ветвью союза: иначе у
+// вложенного правила была бы своя копия оси цели и своя копия запрета для
+// класса, и они разошлись бы с этими. Селектор верхнего уровня проходит прежнюю
+// ось цели ДОСЛОВНО, а подзапрос рёбер не исполняется вовсе — исполнитель
+// останавливает «и» на первой лжи (`rs.container_type IS NOT NULL`).
+//
+// К выдаче СИСТЕМНОМУ КЛАССУ вложенное правило НЕ применяется (Р5, ND-10): у
+// класса одна дорога к потомкам — `public_reader` объявленного контейнера, и
+// снятие объявления обязано снимать чтение. Ветвь выдач, дающая классу потомков
+// по вложенному правилу, была бы второй дорогой, переживающей это снятие.
+//
+// Метки контейнера берутся из зеркала: контейнер — ресурс модуля (ярусы иерархии
+// владельцем вложенного правила быть не могут, Р1 п. 2), а метки собственных
+// объектов iam ни один владелец не объявляет контейнером.
 //
 // # НЕЗНАКОМАЯ ФОРМА ЦЕЛИ — ОТКАЗ, А НЕ ВСЯ ОБЛАСТЬ
 //
@@ -100,7 +126,12 @@ import (
 // соединением (промах соединения даёт NULL); у перечня кандидат и есть строка
 // с метками, колонка объявлена NOT NULL, и проверка там всегда истинна — цена
 // единого текста, а не второй смысл.
-func grantArmPredicate(objectTypeExpr, objectIDExpr, labelsExpr string) string {
+//
+// `objectModelTypeExpr` — тип объекта в словаре МОДЕЛИ: им названы рёбра цепи
+// (`resource_parent_edge.object_type`), тогда как `objectTypeExpr` — словарь
+// каталога, которым тип записан в цели. Двух словарей в одном сравнении нет:
+// каждое выражение сравнивается со своим.
+func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr string) string {
 	return `(
              rs.arm = 'anchor'
           OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
@@ -108,10 +139,29 @@ func grantArmPredicate(objectTypeExpr, objectIDExpr, labelsExpr string) string {
                                 AND ` + labelsExpr + ` @> rs.match_labels)
          )
      AND NULLIF(
-             (jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
-          OR b.target -> 'resources' = '[]'::jsonb
-          OR b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
-                 'type', ` + objectTypeExpr + `, 'id', ` + objectIDExpr + `)),
+             (rs.container_type IS NULL AND (
+                 (jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
+              OR b.target -> 'resources' = '[]'::jsonb
+              OR b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
+                     'type', ` + objectTypeExpr + `, 'id', ` + objectIDExpr + `))))
+          OR (rs.container_type IS NOT NULL
+              AND bs.subject_type <> 'system_class'
+              AND EXISTS (
+                  SELECT 1
+                    FROM kaname.resource_parent_edge ce
+                    LEFT JOIN kaname.resource_mirror cm
+                      ON rs.container_arm = 'labels'
+                     AND cm.object_type = rs.container_type AND cm.object_id = ce.parent_id
+                   WHERE ce.object_type = ` + objectModelTypeExpr + ` AND ce.object_id = ` + objectIDExpr + `
+                     AND ce.parent_type = rs.container_object_type
+                     AND (   rs.container_arm = 'anchor'
+                          OR (rs.container_arm = 'names'  AND ce.parent_id = ANY (rs.container_resource_names))
+                          OR (rs.container_arm = 'labels' AND cm.labels IS NOT NULL
+                                                          AND cm.labels @> rs.container_match_labels))
+                     AND (   (jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
+                          OR b.target -> 'resources' = '[]'::jsonb
+                          OR b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
+                                 'type', rs.container_type, 'id', ce.parent_id))))),
          false) IS NOT NULL`
 }
 

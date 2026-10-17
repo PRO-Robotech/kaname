@@ -183,7 +183,7 @@ SELECT g.subject
 // меток (довод — у expandQuerySQL).
 func subjectsQuerySQL(labelTable string) (string, error) {
 	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "m.labels"))
+		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels"))
 	if err != nil {
 		return "", err
 	}

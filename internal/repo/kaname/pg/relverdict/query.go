@@ -609,7 +609,7 @@ const (
 // один из них.
 func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string, err error) {
 	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
-		grantArmPredicate("$9::text", objectIDExpr, "m.labels"))
+		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels"))
 	if err != nil {
 		return "", "", err
 	}
