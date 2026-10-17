@@ -8,7 +8,8 @@ package nesteddepth_test
 // docs/engineering/acceptance/nested-rule-reaches-descendants-of-a-named-container.md,
 // редакция 2).
 //
-// П3: ящики b1, b2 (контейнер, указатель на проект), предметы i1 в b1 и i3 в b2,
+// П3: ящики b1, b2 (контейнер; указатель на аккаунт — почему, сказано у
+// `probemodManifest`), предметы i1 в b1 и i3 в b2,
 // ярлыки t1 в i1 и t3 в i3. Роль `probemod.reader` — `boxes [get, list]` с
 // вложенным правилом над ВНУКОМ `tags`; `probemod.reader_b1` — то же, у
 // правила-владельца имена `[b1]`. Каталог применён применителем манифеста, роль
@@ -50,8 +51,8 @@ func (w *p3) exec(sql string, args ...any) {
 
 func (w *p3) object(model, dotted, id string, chain ...[2]string) {
 	w.t.Helper()
-	w.exec(`INSERT INTO kaname.resource_mirror (object_type, object_id, parent_project_id, parent_account_id)
-	        VALUES ($1, $2, 'prj-1', 'acc-1')`, dotted, id)
+	w.exec(`INSERT INTO kaname.resource_mirror (object_type, object_id, parent_account_id)
+	        VALUES ($1, $2, 'acc-1')`, dotted, id)
 	for i, c := range chain {
 		w.exec(`INSERT INTO kaname.resource_parent_edge (object_type, object_id, parent_type, parent_id, depth)
 		        VALUES ($1, $2, $3, $4, $5)`, model, id, c[0], c[1], i+1)
@@ -82,7 +83,8 @@ func newP3(t *testing.T) *p3 {
 	w.exec(`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ('usr-1', 'ext-1', 'usr-1@kacho.local', 'acc-1')`)
 	w.exec(`INSERT INTO kaname.projects (id, account_id, name) VALUES ('prj-1', 'acc-1', 'prj')`)
 
-	up := [][2]string{{"project", "prj-1"}, {"account", "acc-1"}}
+	up := [][2]string{{"account", "acc-1"}}
+	// Цепь — как её шлёт владелец: ближайший предок первым.
 	w.object("probemod_box", "probemod.boxes", "b1", up...)
 	w.object("probemod_box", "probemod.boxes", "b2", up...)
 	w.object("probemod_item", "probemod.items", "i1", append([][2]string{{"probemod_box", "b1"}}, up...)...)
@@ -137,7 +139,7 @@ func (w *p3) role(id string, rules domain.Rules) {
 func (w *p3) bind(id, role, target string) {
 	w.t.Helper()
 	w.exec(`INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
-	        VALUES ($1, 'user', 'usr-1', $2, 'project', 'prj-1', 'ACTIVE', $3::jsonb)`, id, role, target)
+	        VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`, id, role, target)
 	w.exec(`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id) VALUES ($1, 'user', 'usr-1')`, id)
 }
 

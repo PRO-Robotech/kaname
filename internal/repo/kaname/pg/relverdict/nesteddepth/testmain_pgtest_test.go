@@ -18,6 +18,7 @@ package nesteddepth_test
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
@@ -41,13 +42,36 @@ func TestMain(m *testing.M) {
 	}))
 }
 
-// probemodManifest — манифест фикстуры П3.
+// probemodManifest — манифест фикстуры П3 в форме, которую ДОПУСКАЕТ модель
+// процесса, с двумя вычисленными правками:
+//
+//   - ящики указывают на АККАУНТ, а не на проект. Замер: собранная модель с
+//     ящиками под проектом допуском отвергается — у ярлыка цепь указателей до
+//     кластера `tag → item → box → project → account → cluster` глубже предела
+//     обхода 4 (`relverdict.MaxAncestorDepth`), и планы `probemod_tag.v_*`
+//     невыразимы (находки Д5′). Три уровня под проектом сегодня не доставляются
+//     вовсе; под аккаунтом цепь ярлыка — ровно 4;
+//   - без ключа `publicReadToChildren`: допуск отвергает подстановочную запись
+//     субъекта `system_class` в блоке модуля вне канона (находки Д3). Публичное
+//     чтение здесь не предмет — его держат пробы материализатора и мира П1.
+//
+// Предмет ND-08 — глубина вложенного правила — от обеих правок не зависит:
+// контейнер остаётся предком внука на глубине 2.
 func probemodManifest() (*manifest.Manifest, error) {
 	doc, err := publicreadfixture.Read(publicreadfixture.ChildrenProbemodFile)
 	if err != nil {
 		return nil, err
 	}
-	return manifest.Load(doc)
+	keyless, err := publicreadfixture.WithoutKey(doc)
+	if err != nil {
+		return nil, err
+	}
+	const underProject = "    objectType: probemod_box\n    parents: [project]\n"
+	if strings.Count(string(keyless), underProject) != 1 {
+		return nil, fmt.Errorf("фикстура П3: указатель ящиков на проект не найден ровно один раз")
+	}
+	return manifest.Load([]byte(strings.Replace(string(keyless), underProject,
+		"    objectType: probemod_box\n    parents: [account]\n", 1)))
 }
 
 func installProbemodModel() error {
