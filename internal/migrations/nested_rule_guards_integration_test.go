@@ -22,6 +22,7 @@ package migrations_test
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -77,6 +78,7 @@ func TestIntegration_ND04_RulesGuardJudgesTheNesting(t *testing.T) {
 	db := freshIamSchema(t)
 	ndSeedTenant(t, db)
 	require.NoError(t, ndInsertRole(db, "rol-ndok", ndWholeRule), "близнец: годная вложенность")
+	bad := 0
 
 	for name, rules := range map[string]string{
 		"владелец над двумя ресурсами": `[{"module":"registry","resources":["registries","repositories"],"verbs":["get"],
@@ -92,8 +94,12 @@ func TestIntegration_ND04_RulesGuardJudgesTheNesting(t *testing.T) {
 		"вложенное без глаголов": `[{"module":"registry","resources":["registries"],"verbs":["get"],
 		                             "children":[{"resources":["repositories"]}]}]`,
 	} {
+		bad++
+		id := fmt.Sprintf("rol-ndbad%d", bad)
 		t.Run(name, func(t *testing.T) {
-			err := ndInsertRole(db, "rol-ndbad", rules)
+			// Своя роль на каждую строку: принятая строка (красное) не должна
+			// ронять соседей отказом первичного ключа вместо отказа формы.
+			err := ndInsertRole(db, id, rules)
 			code, cons := ndPgCode(err)
 			require.Equalf(t, "23514", code, "ждали отказ CHECK, получено %v", err)
 			require.Equal(t, "roles_rules_valid", cons)
