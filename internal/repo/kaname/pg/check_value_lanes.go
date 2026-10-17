@@ -364,15 +364,23 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// присланного типа судит триггер, поднимающий отказ по имени
 	// `role_rule_selectors_types_live`: таблицы он сегодня не называет, но
 	// назвавший её отказ обязан остаться вводом.
+	//
+	// Контейнер вложенного селектора (kaname#874) делится так же: тип, ветвь,
+	// имена и метки контейнера — из присланного правила-владельца (манифест
+	// модуля), форму объекта его меток ставит служба.
 	"role_rule_selectors": {
 		caller: []string{
 			"role_rule_selectors_arm_shape",
+			"role_rule_selectors_container_labels_valid",
+			"role_rule_selectors_container_not_own_type",
+			"role_rule_selectors_container_shape",
 			"role_rule_selectors_labels_valid",
 			"role_rule_selectors_types_live",
 			"role_rule_selectors_types_nonempty",
 		},
 		service: []string{
 			"role_rule_selectors_arm_valid",
+			"role_rule_selectors_container_labels_obj",
 			"role_rule_selectors_fp_nonempty",
 			"role_rule_selectors_labels_obj",
 			"role_rule_selectors_live_true",
