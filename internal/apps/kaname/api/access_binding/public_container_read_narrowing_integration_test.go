@@ -172,20 +172,19 @@ func TestPublicContainerRead_NarrowedChildRuleOpensNoDescendants(t *testing.T) {
 
 // TestPublicContainerRead_RoleUpdateWithdrawsPublicReader — правка роли снимает
 // `public_reader`, когда вложенное правило над ребёнком снято либо сужено; v_* на
-// самом реестре остаются. Близнец — правило-владелец переписано, вложенное не
-// снято: кортеж выживает.
+// самом реестре остаются. Близнец — правила роли переписаны (добавлено правило
+// по имени реестра), вложенное не снято: кортеж выживает.
 func TestPublicContainerRead_RoleUpdateWithdrawsPublicReader(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		rules domain.Rules
 		want  int
 	}{
-		{"близнец: правило-владелец переписано, вложенное не снято",
-			func() domain.Rules {
-				rs := pcrWithChild(pcrRepositoriesRule())
-				rs[0].Verbs = []string{"get"}
-				return rs
-			}(), 1},
+		{"близнец: правила переписаны, вложенное не снято",
+			append(pcrWithChild(pcrRepositoriesRule()), domain.Rule{
+				Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get"},
+				ResourceNames: []string{pcrX},
+			}), 1},
 		{"вложенное правило снято", domain.Rules{pcrRegistriesRule()}, 0},
 		{"вложенное правило сужено до одного глагола",
 			pcrWithChild(func() domain.Rule {

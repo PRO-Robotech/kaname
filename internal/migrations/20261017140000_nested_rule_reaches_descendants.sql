@@ -56,7 +56,7 @@ ALTER TABLE kaname.role_rule_selectors
     ADD CONSTRAINT role_rule_selectors_container_shape CHECK (
         (container_type IS NULL AND container_object_type IS NULL AND container_arm IS NULL
          AND cardinality(container_resource_names) = 0 AND container_match_labels = '{}'::jsonb)
-     OR (container_type IS NOT NULL AND container_object_type IS NOT NULL AND (
+     OR (container_type IS NOT NULL AND container_object_type IS NOT NULL AND container_arm IS NOT NULL AND (
             (container_arm = 'anchor' AND cardinality(container_resource_names) = 0
              AND container_match_labels = '{}'::jsonb)
          OR (container_arm = 'names' AND cardinality(container_resource_names) >= 1

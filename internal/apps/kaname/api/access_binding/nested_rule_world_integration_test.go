@@ -67,6 +67,9 @@ func newNDWorld(t *testing.T, sc string, doc []byte) *ndWorld {
 	p := newPCRWorld(t)
 	w := &ndWorld{pcrWorld: p}
 	w.usrE = mustSeedUser(t, p.ctx, p.pool, "nde")
+	// Адрес подтверждён, как у людей мира П6: без него дверь решения отказывает
+	// человеку за пределами входа, и проба мерила бы не вложенное правило.
+	verifyAddresses(t, p.ctx, p.pool)
 	if doc == nil {
 		p.deliverNewEdition(sc)
 	} else {
