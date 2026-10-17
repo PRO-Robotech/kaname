@@ -48,6 +48,10 @@ type grantArmCensus struct {
 	files    int // прочитано непробных .go
 	literals int // прочитано строковых литералов
 	texts    int // выведено текстов (склеек выражений)
+	joins    int // текстов, читающих и привязки, и селекторы правил
+	// unmarked — единицы, чей текст читает привязки и селекторы правил, но
+	// метки предиката ветви выдач не несёт (вне комментария и строки).
+	unmarked []grantArmHome
 }
 
 // grantArmUnit — единица счёта: функция либо одно имя в объявлении
@@ -137,11 +141,21 @@ func scanGrantArmHomes(dir string) (grantArmCensus, []grantArmHome, error) {
 		if u.body == nil {
 			continue
 		}
+		missing := false
 		for _, text := range ev.texts(u.body) {
 			c.texts++
 			if decidingUse(text) {
 				u.hit = true
 			}
+			if joins, marked := joinsBindingsAndSelectors(text); joins {
+				c.joins++
+				if !marked {
+					missing = true
+				}
+			}
+		}
+		if missing {
+			c.unmarked = append(c.unmarked, grantArmHome{pos: u.pos, decl: u.name})
 		}
 	}
 
@@ -382,6 +396,33 @@ func lexSQL(s string) []sqlTok {
 		}
 	}
 	return out
+}
+
+// joinsBindingsAndSelectors — читает ли текст обе таблицы (привязки и
+// селекторы правил) и несёт ли он метку предиката ветви выдач. Метка
+// опознаётся лексемами вне комментариев и строк: метка в комментарии
+// подставилась бы туда же, и предикат ушёл бы в комментарий.
+func joinsBindingsAndSelectors(text string) (joins, marked bool) {
+	toks := lexSQL(text)
+	var bindings, selectors bool
+	for i, t := range toks {
+		if t.kind != 'i' {
+			continue
+		}
+		switch t.text {
+		case "access_bindings":
+			bindings = true
+		case "role_rule_selectors":
+			selectors = true
+		case "arm_predicate":
+			if i >= 2 && i+2 < len(toks) &&
+				toks[i-2].text == "{" && toks[i-1].text == "{" &&
+				toks[i+1].text == "}" && toks[i+2].text == "}" {
+				marked = true
+			}
+		}
+	}
+	return bindings && selectors, marked
 }
 
 // sqlLeadKeywords — слова SQL, после которых может стоять ссылка на столбец.

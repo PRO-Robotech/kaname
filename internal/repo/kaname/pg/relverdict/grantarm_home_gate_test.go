@@ -69,6 +69,14 @@ func judgeGrantArmHomes(c grantArmCensus, homes []grantArmHome) error {
 		return fmt.Errorf("предпосылка: текст ветви выдач не найден ни в одном объявлении " +
 			"(файлов прочитано больше нуля) — распознаватель не читает своего предмета, вердикта нет")
 	}
+	if len(c.unmarked) > 0 {
+		var b strings.Builder
+		for _, h := range c.unmarked {
+			fmt.Fprintf(&b, "\n  %s %s", h.pos, h.decl)
+		}
+		return fmt.Errorf("запрос читает привязки и селекторы правил, но метки {{arm_predicate}} не несёт "+
+			"(%d) — ветвь выдач без общего предиката:%s", len(c.unmarked), b.String())
+	}
 	if len(homes) == 1 && homes[0].decl == "grantArmPredicate" {
 		return nil
 	}
@@ -85,8 +93,13 @@ func TestGrantArmPredicateHasASingleHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("перепись: файлов %d · литералов %d · выведенных текстов %d · домов текста ветви выдач %d",
-		c.files, c.literals, c.texts, len(homes))
+	t.Logf("перепись: файлов %d · литералов %d · выведенных текстов %d · текстов, читающих привязки и "+
+		"селекторы, %d (без метки %d) · домов текста ветви выдач %d",
+		c.files, c.literals, c.texts, c.joins, len(c.unmarked), len(homes))
+	if c.joins == 0 {
+		t.Fatal("предпосылка: ни один текст пакета не читает привязки и селекторы правил — " +
+			"положительное условие о метке не прочитало ничего, вердикта нет")
+	}
 	if err := judgeGrantArmHomes(c, homes); err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +265,29 @@ var grantArmForms = []struct {
 	{"внутри тела функции",
 		"package p\n\nfunc f() string { return \"WHERE rs.arm = 'anchor'\" }\n",
 		"package p\n\nfunc f() string { return \"SELECT rs.arm AS arm FROM t\" }\n"},
+	// Формы из разбора check-verifier (G1a, G1c, G2b, G2c, G4b, G4d, G9);
+	// G4a и G4e — «приведение типа» и «столбец в кавычках» выше.
+	{"G1a: склейка открывающей скобки и сравнения",
+		"package p\n\nconst q = `(rs.arm` + ` = 'anchor' OR x)`\n",
+		"package p\n\nconst q = `SELECT rs.arm` + ` AS arm FROM t`\n"},
+	{"G1c: склейка resource_ + names",
+		"package p\n\nconst q = \"x = ANY (rs.resource_\" + \"names)\"\n",
+		"package p\n\nconst q = \"SELECT rs.resource_\" + \"names AS n FROM t\"\n"},
+	{"G2b: Sprintf, колонка аргументом-константой",
+		"package p\n\nimport \"fmt\"\n\nconst col = \"arm\"\n\nvar q = fmt.Sprintf(\"WHERE rs.%s = 'anchor'\", col)\n",
+		"package p\n\nimport \"fmt\"\n\nconst col = \"arm\"\n\nvar q = fmt.Sprintf(\"SELECT rs.%s AS a FROM t\", col)\n"},
+	{"G2c: Sprintf, столбец с псевдонимом аргументом",
+		"package p\n\nimport \"fmt\"\n\nvar q = fmt.Sprintf(\"WHERE %s = %q\", \"rs.arm\", \"anchor\")\n",
+		"package p\n\nimport \"fmt\"\n\nvar q = fmt.Sprintf(\"SELECT %s FROM t\", \"rs.arm\")\n"},
+	{"G4b: функция над столбцом",
+		"package p\n\nconst q = `WHERE lower(rs.arm) = 'anchor'`\n",
+		"package p\n\nconst q = `SELECT rs.arm, lower(x) FROM t`\n"},
+	{"G4d: IS NOT DISTINCT FROM",
+		"package p\n\nconst q = `WHERE rs.arm IS NOT DISTINCT FROM 'anchor'`\n",
+		"package p\n\nconst q = `SELECT rs.arm FROM t WHERE x IS NOT DISTINCT FROM y`\n"},
+	{"G9: полная копия после литерала '--'",
+		"package p\n\nconst q = `WHERE note <> '--' AND (rs.arm = 'anchor' OR (rs.arm = 'names' AND x = ANY (rs.resource_names)))`\n",
+		"package p\n\nconst q = `WHERE note <> '--' -- AND (rs.arm = 'anchor' OR (rs.arm = 'names' AND x = ANY (rs.resource_names)))\n`\n"},
 	{"внутри блока констант",
 		"package p\n\nconst (\n\ta = 1\n\tq = `WHERE rs.arm = 'anchor'`\n)\n",
 		"package p\n\nconst (\n\ta = 1\n\tq = `SELECT rs.arm AS arm FROM t`\n)\n"},
@@ -279,13 +315,92 @@ func TestGrantArmHomeInjection_ProseAndCommentsAreSilent(t *testing.T) {
 		"переменная с текстом ошибки": "package p\n\nvar e = \"unknown arm = \"\n",
 		"fmt.Errorf": "package p\n\nimport \"fmt\"\n\nfunc f(x string) error { return fmt.Errorf(\"rs.arm = %s\", x) }\n",
 		"errors.New": "package p\n\nimport \"errors\"\n\nvar e = errors.New(\"rs.arm = 'names'\")\n",
-		"блочный комментарий SQL": "package p\n\nconst q = `SELECT 1 /* rs.arm = 'x' /* вложенный */ AND rs.arm = 'y' */ FROM t`\n",
-		"комментарий Go":          "package p\n\n// rs.arm = 'names'\nconst q = `SELECT 1`\n",
+		"блочный комментарий SQL":                "package p\n\nconst q = `SELECT 1 /* rs.arm = 'x' /* вложенный */ AND rs.arm = 'y' */ FROM t`\n",
+		"комментарий Go":                         "package p\n\n// rs.arm = 'names'\nconst q = `SELECT 1`\n",
+		"L3: полная копия в блочном комментарии": "package p\n\nconst q = `SELECT 1 /* WHERE (rs.arm = 'anchor' OR (rs.arm = 'names' AND x = ANY (rs.resource_names))) */ FROM t`\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, homes, err := injJudge(t, map[string]string{"shared.go": injShared, "copy.go": src})
 			if err != nil {
 				t.Errorf("находка на тексте, который запросом не является: %v (дома %v)", err, homes)
+			}
+		})
+	}
+}
+
+// livePackageCopy — непробные .go пакета во временном каталоге: инъекции в
+// НАСТОЯЩЕЕ дерево, а не в синтетику.
+func livePackageCopy(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		n++
+	}
+	if n == 0 {
+		t.Fatal("предпосылка: в пакете не найдено ни одного непробного .go")
+	}
+	return dir
+}
+
+func mutateLive(t *testing.T, dir, file, from, to string) {
+	t.Helper()
+	p := filepath.Join(dir, file)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(b), from) != 1 {
+		t.Fatalf("предпосылка инъекции: в %s фрагмент %q стоит не ровно один раз", file, from)
+	}
+	if err := os.WriteFile(p, []byte(strings.Replace(string(b), from, to, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// G5 и G5b из разбора check-verifier — на копии настоящего пакета: метка в
+// list.go заменена на «true» либо на свою копию предиката. Законный близнец —
+// та же копия без правки.
+func TestGrantArmHomeInjection_LivePackageMutations(t *testing.T) {
+	const mark = "AND ({{arm_predicate}})"
+	for _, c := range []struct {
+		name, to string
+		red      bool
+	}{
+		{"близнец: копия без правки", mark, false},
+		{"G5: метка заменена на true", "AND (true)", true},
+		{"G5b: своя копия вместо метки", "AND (rs.arm::text = 'anchor')", true},
+		{"метка ушла в комментарий", "AND (true) -- {{arm_predicate}}", true},
+		{"метка ушла в строку", "AND ('{{arm_predicate}}' <> '')", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := livePackageCopy(t)
+			mutateLive(t, dir, "list.go", mark, c.to)
+			cen, homes, err := scanGrantArmHomes(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict := judgeGrantArmHomes(cen, homes)
+			if c.red && (verdict == nil || !strings.Contains(verdict.Error(), "list.go:")) {
+				t.Errorf("правка list.go не найдена либо без координаты: %v", verdict)
+			}
+			if !c.red && verdict != nil {
+				t.Errorf("законный близнец дал находку: %v", verdict)
 			}
 		})
 	}
