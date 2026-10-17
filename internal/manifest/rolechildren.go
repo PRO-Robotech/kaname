@@ -41,10 +41,6 @@ import (
 // ErrRoleRuleNestingMalformed — вложенность правила роли не той формы.
 var ErrRoleRuleNestingMalformed = errors.New("manifest: role rule nesting is malformed")
 
-// tierObjectTypes — типы модели, являющиеся ярусами иерархии: под ними выбирает
-// область выдачи, а не вложенное правило.
-var tierObjectTypes = map[string]bool{"cluster": true, "account": true, "project": true}
-
 // ChildRule — вложенное правило роли манифеста (kaname#874). Те же ключи права,
 // что у [Rule], без `module` (берётся у владельца) и без `children` (глубину
 // выражает тип).
@@ -174,7 +170,10 @@ func validateRuleChildren(m *Manifest, rule Rule, doc *yaml.Node, i, j int) []er
 			"называет ресурс, а не «*»", i, j), "resources")}
 	}
 	byName := resourcesByName(m)
-	if r, ok := byName[owner]; ok && tierObjectTypes[r.ObjectType] {
+	// Ярус иерархии — из ОДНОГО закрытого словаря якорей области (`scopeAnchors`):
+	// своя копия здесь разошлась бы с ним молча, и ярус, добавленный туда, судья
+	// вложенности не узнал бы.
+	if r, ok := byName[owner]; ok && contains(scopeAnchors, r.ObjectType) {
 		return []error{fault(fmt.Sprintf("roles[%d].rules[%d].resources: %q — ярус иерархии; "+
 			"под ярусом выбирает область выдачи, children у него нет", i, j, owner), "resources")}
 	}
