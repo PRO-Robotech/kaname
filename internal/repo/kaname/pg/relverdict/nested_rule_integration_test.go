@@ -276,7 +276,7 @@ func TestNested_ND02_NestedRuleReachesDescendantsInEveryForm(t *testing.T) {
 }
 
 // ND-07 (б) на уровне решения: правило верхнего уровня над репозиториями
-// сравнивает точно — цель [X] репозиториям X не даёт ничего (поведение #857).
+// сравнивает точно — цель [X] репозиториям X не даёт ничего (поведение kaname#857).
 func TestNested_ND07_TopLevelRuleStaysExact(t *testing.T) {
 	pool, ctx, a := ndWorld(t, "{}", "{}")
 	ndSeedRole(t, ctx, pool, "rol-nd-flat", ndFlatRules())

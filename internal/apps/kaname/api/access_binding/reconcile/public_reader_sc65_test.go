@@ -5,7 +5,7 @@ package reconcile
 
 // public_reader_sc65_test.go — разворачивание выдачи классу пишет
 // `public_reader` на объект объявленного контейнера, и только при ВЛОЖЕННОМ
-// правиле роли над типом-ребёнком (задачи PRO-Robotech/kaname#856, #874).
+// правиле роли над типом-ребёнком (задачи PRO-Robotech/kaname#856, kaname#874).
 //
 // Приёмка docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md,
 // редакция 12, отпечаток bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6:
