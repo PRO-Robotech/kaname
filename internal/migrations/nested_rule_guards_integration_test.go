@@ -26,6 +26,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 func ndPgCode(err error) (string, string) {
@@ -52,6 +54,9 @@ func ndSeedTenant(t *testing.T, db *sql.DB) {
 		_, err := tx.Exec(q)
 		require.NoErrorf(t, err, "посев: %s", q)
 	}
+	// Действующей личности нужен способ входа (kaname#608) — его отметку кладёт
+	// общий посев фикстур цепочки миграций перед фиксацией.
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit(), "посев: фиксация")
 }
 
