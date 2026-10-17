@@ -65,13 +65,12 @@ func (f *gridFixture) setRNested(t *testing.T, ctx context.Context, from, target
 }
 
 // TestNestedEarlyExit_AllowedVerdictDoesNotGrowWithGrounds — строк за
-// разрешённый вердикт при трёхстах основаниях с вложенным правилом не больше,
-// чем при трёх (с тем же запасом на дребезг, что у R7-1-13).
+// разрешённый вердикт при трёхстах основаниях с вложенным правилом НЕ БОЛЬШЕ,
+// чем при трёх (DoD приёмки: «не больше», без запаса).
 func TestNestedEarlyExit_AllowedVerdictDoesNotGrowWithGrounds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration")
 	}
-	const groundsCeiling = 16
 	const few, many = 3, 300
 
 	ctx := context.Background()
@@ -92,9 +91,9 @@ func TestNestedEarlyExit_AllowedVerdictDoesNotGrowWithGrounds(t *testing.T) {
 	if vFew != relverdict.Allow || vMany != relverdict.Allow {
 		t.Fatalf("раскладки дали %s и %s: вложенное правило не дало права, и сравнивались бы разные вопросы", vFew, vMany)
 	}
-	if d := mMany.Rows - mFew.Rows; d > groundsCeiling {
-		t.Errorf("строк за РАЗРЕШЁННЫЙ вердикт с вложенным правилом: %d при %d основаниях против %d при %d, "+
-			"прирост %d при потолке %d — ось вложенности читается на всём наборе, а не на первой строке",
-			mMany.Rows, many, mFew.Rows, few, d, groundsCeiling)
+	if mMany.Rows > mFew.Rows {
+		t.Errorf("строк за РАЗРЕШЁННЫЙ вердикт с вложенным правилом: %d при %d основаниях против %d при %d — "+
+			"стоимость растёт с числом оснований: ось вложенности читается на всём наборе, а не на первой строке",
+			mMany.Rows, many, mFew.Rows, few)
 	}
 }
