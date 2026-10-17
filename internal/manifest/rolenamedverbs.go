@@ -91,6 +91,14 @@ func validateRuleRightForm(rule Rule, doc *yaml.Node, i, j int) []error {
 // а не по нарушению. Молчание здесь названо, а не подразумевается: манифест без
 // ресурсов судит своя проверка, у неё своя единица.
 func validateRuleNamedVerbs(m *Manifest, rule Rule, roleID string, doc *yaml.Node, i, j int) []error {
+	return validateNamedVerbsAt(m, rule, roleID, doc, fmt.Sprintf("roles[%d].rules[%d]", i, j),
+		"roles", i, "rules", j)
+}
+
+// validateNamedVerbsAt — тело [validateRuleNamedVerbs] для правила по адресу
+// `label` (шаги `steps` до правила). Вложенное правило (kaname#874) судится тем
+// же телом под своим адресом и с модулем владельца.
+func validateNamedVerbsAt(m *Manifest, rule Rule, roleID string, doc *yaml.Node, label string, steps ...any) []error {
 	if len(rule.Verbs) == 0 || len(m.Resources) == 0 {
 		return nil
 	}
@@ -115,14 +123,14 @@ func validateRuleNamedVerbs(m *Manifest, rule Rule, roleID string, doc *yaml.Nod
 		}
 		faults = append(faults, linkFault{
 			kind:  ErrRoleRuleVerbUnknownToContract,
-			coord: locate(doc, "roles", i, "rules", j, "verbs"),
-			detail: fmt.Sprintf("roles[%d].rules[%d].verbs: роль %q модуля %q называет на ресурсе "+
+			coord: locate(doc, append(append([]any{}, steps...), "verbs")...),
+			detail: fmt.Sprintf("%s.verbs: роль %q модуля %q называет на ресурсе "+
 				"%s действие %q, а контракт его не объявляет: ни раздел `resources` этого "+
 				"манифеста, ни его `deprecatedVerbs` такого действия не несут. Право, "+
 				"ссылающееся на несуществующее действие, применилось бы, легло бы строкой "+
 				"роли и ВЫГЛЯДЕЛО БЫ действующим — отличить его от работающего можно было "+
 				"бы только вызовом. Объявленные действия этих ресурсов: %s",
-				i, j, roleID, rule.Module, strings.Join(rule.Resources, ", "), verb,
+				label, roleID, rule.Module, strings.Join(rule.Resources, ", "), verb,
 				strings.Join(known, ", ")),
 		})
 	}

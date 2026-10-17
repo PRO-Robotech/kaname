@@ -607,9 +607,9 @@ const (
 // а расширение доступа: ветвь, соединённая с областями без сужения по строке,
 // отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
 // один из них.
-func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string, err error) {
+func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string, nesting bool) (grant, fact string, err error) {
 	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
-		grantArmPredicate("$9::text", objectIDExpr, "m.labels"))
+		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", nesting))
 	if err != nil {
 		return "", "", err
 	}
@@ -618,8 +618,8 @@ func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact st
 	return grant, fact, nil
 }
 
-func verdictQuerySQL(labelTable string) (string, error) {
-	grant, fact, err := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne)
+func verdictQuerySQL(labelTable string, nesting bool) (string, error) {
+	grant, fact, err := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne, nesting)
 	if err != nil {
 		return "", err
 	}
@@ -651,7 +651,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return Unknown, g, err
 	}
@@ -662,7 +662,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	g.LabelAxisTable = labelTable
 
-	sql, err := verdictQuerySQL(labelTable)
+	sql, err := verdictQuerySQL(labelTable, nesting)
 	if err != nil {
 		return Unknown, g, err
 	}
@@ -941,8 +941,8 @@ SELECT o.ord, src.cond_name, src.cond_params, src.arm
 // verdictManyQuerySQL — ГОТОВЫЙ запрос вердикта о странице для выбранной оси
 // меток (довод — у verdictQuerySQL: собранный запрос читает не только продукт,
 // но и гейт словарей, и собирать его гейт не вправе).
-func verdictManyQuerySQL(labelTable string) (string, error) {
-	grant, fact, err := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany)
+func verdictManyQuerySQL(labelTable string, nesting bool) (string, error) {
+	grant, fact, err := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany, nesting)
 	if err != nil {
 		return "", err
 	}
@@ -999,7 +999,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1009,7 +1009,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		return nil, nil, err
 	}
 
-	sql, err := verdictManyQuerySQL(labelTable)
+	sql, err := verdictManyQuerySQL(labelTable, nesting)
 	if err != nil {
 		return nil, nil, err
 	}

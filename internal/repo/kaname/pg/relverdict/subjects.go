@@ -181,9 +181,9 @@ SELECT g.subject
 
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
-func subjectsQuerySQL(labelTable string) (string, error) {
+func subjectsQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "m.labels"))
+		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", nesting))
 	if err != nil {
 		return "", err
 	}
@@ -210,7 +210,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	// порождённой сборкой (kacho#1986, catalogtype.go). Читается ПЕРЕД выбором
 	// оси: ось выбирается по этому же имени (kacho#2036), и второго чтения
 	// каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
@@ -220,7 +220,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	sql, err := subjectsQuerySQL(labelTable)
+	sql, err := subjectsQuerySQL(labelTable, nesting)
 	if err != nil {
 		return nil, "", err
 	}

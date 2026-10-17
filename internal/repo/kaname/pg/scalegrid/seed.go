@@ -54,7 +54,8 @@ import (
 //
 //  1. подаются ТЕ ЖЕ стейтменты, что выпускает производитель, — не их редакция
 //     и не её копия: текст объявлен ОДИН раз у него
-//     (`resource_mirror.StmtVersionOnlyBump`, `.StmtInsertOrSupersede`), и
+//     (`resource_mirror.StmtLockMirrorRow`, `.StmtVersionOnlyBump`,
+//     `.StmtInsertOrSupersede`), и
 //     посевщик подаёт в пачку ЭТИ константы;
 //  2. ПОСТРОЧНАЯ СВЕРКА с производителем на малой точке: N посажено обоими
 //     путями, содержимое обеих таблиц сверено по всем колонкам. Без неё быстрый
@@ -204,8 +205,21 @@ func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
 	// Тождество теперь построением: объявление одно (kacho#1890). Ответы обоих
 	// операторов посевщик по-прежнему отбрасывает — вердикт о том, легли ли
 	// строки, выносит перепись (3), и это её предмет, а не его.
+	// Цепь в словаре модели — тем же образом, каким её ниже кладут рёбра; полоса
+	// сдвига версии сверяет с ней хранимые рёбра (kaname#874).
+	edgeChain := make([]string, 0, len(row.ParentChain))
+	for _, ancestor := range row.ParentChain {
+		typ, id, ok := splitObjectRef(ancestor)
+		if !ok {
+			return fmt.Errorf("scalegrid: непонятая форма предка %q (ожидается \"<type>:<id>\")", ancestor)
+		}
+		edgeChain = append(edgeChain, edgeParentType(typ)+":"+id)
+	}
+	// Замок строки до сверки — тот же оператор, что у производителя (kaname#874):
+	// без него пачка подавала бы на один оператор меньше, чем продукт выпускает.
+	s.batch.Queue(resource_mirror.StmtLockMirrorRow, row.ObjectType, row.ObjectID)
 	s.batch.Queue(resource_mirror.StmtVersionOnlyBump,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, edgeChain)
 	s.batch.Queue(resource_mirror.StmtInsertOrSupersede,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
 

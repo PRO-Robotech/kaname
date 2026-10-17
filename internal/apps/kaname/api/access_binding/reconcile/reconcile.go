@@ -230,6 +230,14 @@ type ReconcileStore interface {
 	// a specific member on a mirror-change event / byName ref). ok=false ⇒ not in
 	// mirror ⇒ PENDING_VERIFICATION.
 	GetMirrorObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
+	// AncestorObjects — предки объекта из его зарегистрированной цепи, которые
+	// есть в зеркале, с метками (kaname#874). По ним путь по объекту решает,
+	// охватывает ли объект вложенное правило.
+	AncestorObjects(ctx context.Context, objectType, objectID string) ([]domain.MirrorObject, error)
+	// MatchDescendants — объекты типов `types`, у которых среди предков есть
+	// контейнер типа `containerType` с идентификатором из `containerIDs`, на любой
+	// глубине (kaname#874): кандидаты вложенного правила на полном проходе.
+	MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string) ([]domain.MirrorObject, error)
 
 	// GetIAMDirectObject returns the same-DB own-table projection (containment
 	// parents + labels) of ONE iam-native object (iam.project / iam.account + the
@@ -697,6 +705,11 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if err != nil {
 			return fmt.Errorf("get object %s:%s: %w", objectType, objectID, err)
 		}
+		// Предки объекта — не более ОДНОГО раза на веер и лишь по спросу выдачи с
+		// вложенным правилом (kaname#874): по ним каждая такая выдача решает свои
+		// вложенные правила. Чтение — текущей цепи, поэтому перенос объекта под
+		// другой контейнер (ND-09) переносит и члены.
+		ancestors := r.ancestorsOf(ctx, s, objectType, objectID, objPresent)
 
 		// Fan out over the de-duplicated union; the per-binding pass is an idempotent
 		// diff of THIS OBJECT's membership, so reconciling a binding once is enough
@@ -730,7 +743,7 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 			return fmt.Errorf("acquire binding locks for object %s:%s: %w", objectType, objectID, err)
 		}
 		for _, bID := range union {
-			if err := r.reconcileBindingForObject(ctx, s, bID, objectType, objectID, obj, objPresent, col); err != nil {
+			if err := r.reconcileBindingForObject(ctx, s, bID, objectType, objectID, obj, objPresent, ancestors, col); err != nil {
 				return err
 			}
 		}
@@ -860,7 +873,8 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 // the object stopped appearing in MatchAllInScope.
 func (r *Reconciler) reconcileBindingForObject(
 	ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID,
-	objectType, objectID string, obj domain.MirrorObject, objPresent bool, col *syncFGACollector,
+	objectType, objectID string, obj domain.MirrorObject, objPresent bool, ancestors *ancestorMemo,
+	col *syncFGACollector,
 ) error {
 	// ЗАМОК ЭТОЙ ВЫДАЧИ УЖЕ ВЗЯТ ВЫЗЫВАЮЩИМ — вместе со всеми остальными замками
 	// веера и ДО первой записи прохода (ReconcileObject, AcquireBindingLocks).
@@ -878,9 +892,29 @@ func (r *Reconciler) reconcileBindingForObject(
 		return nil
 	}
 
+	// Изменился КОНТЕЙНЕР вложенного правила этой выдачи (метки, удаление):
+	// от него зависит охват всех его потомков, а не только он сам (kaname#874).
+	// Сужение до одного объекта здесь неверно — выдача пересчитывается целиком,
+	// под уже взятым замком, тем же путём, что полный проход.
+	if nestsUnder(bs, objectType) {
+		desired, err := r.desiredMembers(ctx, s, bs)
+		if err != nil {
+			return err
+		}
+		current, err := s.CurrentMembers(ctx, bindingID)
+		if err != nil {
+			return fmt.Errorf("current members %s: %w", bindingID, err)
+		}
+		return r.applyDiff(ctx, s, bs, desired, current, col)
+	}
+
 	var desired []DesiredMember
 	if objPresent {
-		desired = desiredMembersForObject(r.cat.Facts(), bs, obj)
+		anc, err := ancestors.forBinding(bs)
+		if err != nil {
+			return err
+		}
+		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
 	}
 
 	// The NARROW diff base: this binding's members ON THIS OBJECT only.
@@ -913,7 +947,8 @@ func (r *Reconciler) reconcileBindingForObject(
 // — a project/account label update reaches it through the iam-direct feed. Suppressed for
 // a per-object target, matching desiredRuleMembers (granting the whole scope anchor
 // contradicts a least-priv per-object grant).
-func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject) []DesiredMember {
+func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
+	ancestors []domain.MirrorObject) []DesiredMember {
 	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
 	perObject := len(bs.Target.Resources) > 0
 
@@ -926,12 +961,15 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 	}
 	// Per-object target least-priv (F8, IAM-1-21): a rule may only grant an object the
 	// binding's target also lists. Uniform across all arms, exactly as
-	// matchSelectorObjects intersects the matched set.
-	if perObject && !bs.Target.Contains(o.ObjectType, o.ObjectID) {
-		return out
-	}
+	// matchSelectorObjects intersects the matched set. Вложенное правило (kaname#874)
+	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
+	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
 	for _, sel := range bs.Selectors {
-		if !selectorMatchesObject(sel, o) {
+		if sel.Container != nil {
+			if !nestedCoversObject(sel, bs, o, ancestors) {
+				continue
+			}
+		} else if !inTarget || !selectorMatchesObject(sel, o) {
 			continue
 		}
 		dm, ok := desiredMemberForObject(cat, subject, sel, o, bs.Scope)
@@ -1097,6 +1135,23 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	}
 
 	for _, sel := range bs.Selectors {
+		if sel.Container != nil {
+			// Вложенное правило (kaname#874): потомки контейнеров, выбранных
+			// выдачей; у выдачи классу — ни одного (ND-10, nested.go).
+			if isClassBinding(bs) {
+				continue
+			}
+			matched, err := r.matchNestedObjects(ctx, s, sel, bs)
+			if err != nil {
+				return nil, err
+			}
+			for _, o := range matched {
+				if dm, ok := desiredMemberForObject(cat, subject, sel, o, bs.Scope); ok {
+					out = append(out, dm)
+				}
+			}
+			continue
+		}
 		// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
 		// per the target (by-id when per-object; O(scope) push-down otherwise), and every
 		// arm's matches are intersected with the target. IsContainedIn below stays the
@@ -1437,4 +1492,44 @@ func dedupSortBindingIDs(sets ...[]domain.AccessBindingID) []domain.AccessBindin
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+// ancestorsOf — предки объекта пути по объекту (kaname#874), читаемые ЛЕНИВО: не
+// более одного раза на веер и только когда их спросила выдача с вложенным
+// селектором. Без вложенных правил путь по объекту не платит лишним обращением.
+// Объекту, ушедшему из источника, и собственному объекту iam предки не читаются:
+// первому желаемых членов нет вовсе, второй контейнера-предка в зеркале не имеет.
+func (r *Reconciler) ancestorsOf(ctx context.Context, s ReconcileStore, objectType, objectID string, present bool) *ancestorMemo {
+	return &ancestorMemo{load: func() ([]domain.MirrorObject, error) {
+		if !present || domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
+			return nil, nil
+		}
+		out, err := s.AncestorObjects(ctx, objectType, objectID)
+		if err != nil {
+			return nil, fmt.Errorf("ancestors of %s:%s: %w", objectType, objectID, err)
+		}
+		return out, nil
+	}}
+}
+
+// ancestorMemo — предки одного объекта, прочитанные не более одного раза. Живёт в
+// одном проходе одной горутины.
+type ancestorMemo struct {
+	load func() ([]domain.MirrorObject, error)
+	done bool
+	out  []domain.MirrorObject
+	err  error
+}
+
+// forBinding — предки объекта, если выдача `bs` их спрашивает (у неё есть
+// вложенный селектор и её субъект не класс); иначе пусто без обращения к базе.
+func (m *ancestorMemo) forBinding(bs BindingScope) ([]domain.MirrorObject, error) {
+	if !hasNestedSelector(bs) {
+		return nil, nil
+	}
+	if !m.done {
+		m.out, m.err = m.load()
+		m.done = true
+	}
+	return m.out, m.err
 }

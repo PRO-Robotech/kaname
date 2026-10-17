@@ -609,6 +609,10 @@ var (
 // ли её основной запрос. Свойство держит проба на живой базе
 // (`selector_pruning_leaves_a_ledger_integration_test.go`), а не эта строка.
 //
+// Причина у вырезанного живого типа — причина снятия КОНТЕЙНЕРА (kaname#874):
+// живой элемент вырезается только вместе со строкой вложенного селектора, чей
+// контейнер снят, и своей причины у него нет.
+//
 // Четвёртой величины наружу оператор не отдаёт НАМЕРЕННО: перепись применения
 // уже несёт число вырезанных элементов, а число записанных строк от него
 // отличается лишь на повторы, которых у необратимого вырезания не бывает.
@@ -655,11 +659,13 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		), recorded AS (
 		  INSERT INTO kaname.role_selector_prune
 		         (role_id, rule_fp, object_type, outcome, retired_reason, applied_by)
-		  SELECT k.role_id, k.rule_fp, t, k.outcome, cr.retired_reason, $6
+		  SELECT k.role_id, k.rule_fp, t, k.outcome,
+		         CASE WHEN coalesce(cr.live, false) THEN cc.retired_reason ELSE cr.retired_reason END, $6
 		    FROM cut k
 		    JOIN changed c ON c.role_id = k.role_id AND c.rule_fp = k.rule_fp
 		    CROSS JOIN LATERAL unnest(c.was) AS t
 		    LEFT JOIN kaname.catalog_resource cr ON cr.dotted = t
+		    LEFT JOIN kaname.catalog_resource cc ON cc.dotted = c.container
 		   WHERE NOT (t = ANY (c.alive))
 		  ON CONFLICT (role_id, rule_fp, object_type) DO NOTHING
 		  RETURNING 1
