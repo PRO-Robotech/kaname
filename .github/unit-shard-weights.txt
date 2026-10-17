@@ -1,73 +1,70 @@
 # Веса пакетов юнитов `-race -short` для раскладки по шардам (kaname#873).
 #
 # Строка: <секунды> <путь импорта пакета>. Секунды — ЗАМЕР, а не оценка:
-# `Elapsed` события исхода пакета в `go test ./... -race -short -count=1 -json`
-# одним прогоном (ревизия 6a360b423, 2026-10-17, 186 пакетов, проб исполнено
-# 11183), округление вверх; пакет без проб — 0.
+# `Elapsed` события исхода пакета в потоках шардов CI (PR #875, прогон
+# 39039147809, ревизия 113dbddee, исполнители GitHub ubuntu-latest); у
+# распиленного пакета — сумма его частей; округление вверх; пакет без проб — 0.
 #
-# Предмет ведомости — ТОЛЬКО раскладка: на сколько частей резать пакет
-# (⌈вес / бюджет⌉, бюджет — `BUDGET` в `.github/scripts/unit-shards.py`) и с
-# кем он делит шард. Состав прогона она не задаёт: раздаётся каждый пакет
-# `go list ./...`, пакет без строки — с весом по умолчанию и строкой «вес не
-# замерен» в переписи плана. Строка о пакете, которого нет в дереве, — находка
-# плана: запись, пережившая предмет, раскладывала бы пустоту.
+# Предмет ведомости — ТОЛЬКО раскладка: на сколько частей резать пакет и с кем он
+# делит шард (`SHARDS`, `PIECE_FRACTION` в `.github/scripts/unit-shards.py`).
+# Состав прогона она не задаёт: раздаётся каждый пакет `go list ./...`, пакет без
+# строки — с весом по умолчанию и строкой «вес не замерен» в переписи плана.
+# Строка о пакете, которого нет в дереве, — находка плана: запись, пережившая
+# предмет, раскладывала бы пустоту.
+#
+# Строка «<секунды> <пакет> <Проба>» — крупная проба верхнего уровня (≥ 20 с в
+# том же прогоне): она неделима, и её вес достаётся той части пакета, куда её
+# кладёт разрез `sha256(имя) mod N`; остаток пакета делится между частями поровну.
 #
 # Перемер — по описям шардов прогона (артефакты `unit-shard-*`): `Elapsed`
-# исхода пакета в потоке шарда; у распиленного пакета — сумма его частей.
-1256 github.com/PRO-Robotech/kaname/internal/check
-735 github.com/PRO-Robotech/kaname/internal/supplyhygiene
-638 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession
-461 github.com/PRO-Robotech/kaname/internal/apps/kaname/config
-301 github.com/PRO-Robotech/kaname/deploy
-185 github.com/PRO-Robotech/kaname/internal/passwordverify
-182 github.com/PRO-Robotech/kaname/internal/release
-71 github.com/PRO-Robotech/kaname/internal/domain
-67 github.com/PRO-Robotech/kaname/internal/authzmap
-64 github.com/PRO-Robotech/kaname/tools
-62 github.com/PRO-Robotech/kaname/internal/ceremonyport
-53 github.com/PRO-Robotech/kaname/internal/errors
-50 github.com/PRO-Robotech/kaname/internal/lockclaims
-43 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg
-40 github.com/PRO-Robotech/kaname/tests/newman/scripts/storedvaluemint
-35 github.com/PRO-Robotech/kaname/internal/apps/kaname/shared
-29 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations
-25 github.com/PRO-Robotech/kaname/internal/manifest
-25 github.com/PRO-Robotech/kaname/internal/testsupport/accesssnapshot
-21 github.com/PRO-Robotech/kaname/internal/authzguard
-21 github.com/PRO-Robotech/kaname/tools/operatordocs
-20 github.com/PRO-Robotech/kaname/internal/migrations
-19 github.com/PRO-Robotech/kaname/cmd/kaname
-17 github.com/PRO-Robotech/kaname/internal/observability/metrics
-15 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys
-15 github.com/PRO-Robotech/kaname/tools/subjectstategate
-14 github.com/PRO-Robotech/kaname/internal/modelrender
-13 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid
-12 github.com/PRO-Robotech/kaname/internal/refusaldomain
-10 github.com/PRO-Robotech/kaname/internal/manifestcheckrun
-9 github.com/PRO-Robotech/kaname/internal/authzmodel
-8 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict
-8 github.com/PRO-Robotech/kaname/tools/clagate
-7 github.com/PRO-Robotech/kaname/internal/apps/kaname/api
-7 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys
-7 github.com/PRO-Robotech/kaname/internal/authzfilter
-7 github.com/PRO-Robotech/kaname/internal/publicauthzcensus
+# исхода пакета в потоке шарда, у распиленного — сумма по шардам.
+718 github.com/PRO-Robotech/kaname/internal/check
+454 github.com/PRO-Robotech/kaname/internal/supplyhygiene
+299 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession
+207 github.com/PRO-Robotech/kaname/deploy
+124 github.com/PRO-Robotech/kaname/internal/apps/kaname/config
+122 github.com/PRO-Robotech/kaname/internal/passwordverify
+110 github.com/PRO-Robotech/kaname/internal/release
+34 github.com/PRO-Robotech/kaname/internal/apps/kaname/shared
+34 github.com/PRO-Robotech/kaname/internal/authzmap
+33 github.com/PRO-Robotech/kaname/internal/errors
+33 github.com/PRO-Robotech/kaname/tools
+32 github.com/PRO-Robotech/kaname/internal/domain
+26 github.com/PRO-Robotech/kaname/tests/newman/scripts/storedvaluemint
+24 github.com/PRO-Robotech/kaname/internal/lockclaims
+20 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations
+19 github.com/PRO-Robotech/kaname/internal/ceremonyport
+16 github.com/PRO-Robotech/kaname/cmd/kaname
+16 github.com/PRO-Robotech/kaname/internal/manifest
+11 github.com/PRO-Robotech/kaname/internal/migrations
+11 github.com/PRO-Robotech/kaname/internal/observability/metrics
+10 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys
+10 github.com/PRO-Robotech/kaname/tools/operatordocs
+9 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg
+9 github.com/PRO-Robotech/kaname/internal/testsupport/accesssnapshot
+8 github.com/PRO-Robotech/kaname/internal/apps/kaname/api
+8 github.com/PRO-Robotech/kaname/internal/authzfilter
+8 github.com/PRO-Robotech/kaname/internal/refusaldomain
 7 github.com/PRO-Robotech/kaname/internal/tokensigner
-6 github.com/PRO-Robotech/kaname/internal/apps/kaname/seed
-6 github.com/PRO-Robotech/kaname/internal/failurewindow
-6 github.com/PRO-Robotech/kaname/internal/manifest/roleexport
-5 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys
+6 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys
+6 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys
+6 github.com/PRO-Robotech/kaname/internal/manifestcheckrun
 5 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam
-5 github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp
-5 github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp
-5 github.com/PRO-Robotech/kaname/internal/revocationpolicy
-4 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile
-4 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration
-4 github.com/PRO-Robotech/kaname/internal/clientassertion
-4 github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp
-4 github.com/PRO-Robotech/kaname/internal/servicemanifest
+5 github.com/PRO-Robotech/kaname/internal/apps/kaname/seed
+5 github.com/PRO-Robotech/kaname/internal/authzmodel
+5 github.com/PRO-Robotech/kaname/internal/modelrender
+5 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid
+4 github.com/PRO-Robotech/kaname/internal/publicauthzcensus
+4 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict
+4 github.com/PRO-Robotech/kaname/internal/revocationpolicy
+4 github.com/PRO-Robotech/kaname/tools/subjectstategate
+3 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile
+3 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration
+3 github.com/PRO-Robotech/kaname/internal/authzguard
+3 github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp
 3 github.com/PRO-Robotech/kaname/internal/handler/diagnostics
-3 github.com/PRO-Robotech/kaname/internal/restfront
-3 github.com/PRO-Robotech/kaname/internal/webauthnverify
+3 github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp
+3 github.com/PRO-Robotech/kaname/tools/clagate
 2 github.com/PRO-Robotech/kaname/cmd/migrator
 2 github.com/PRO-Robotech/kaname/internal/admission
 2 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding
@@ -108,6 +105,7 @@
 2 github.com/PRO-Robotech/kaname/internal/authzplan
 2 github.com/PRO-Robotech/kaname/internal/bootstraptokenwire
 2 github.com/PRO-Robotech/kaname/internal/catalog
+2 github.com/PRO-Robotech/kaname/internal/clientassertion
 2 github.com/PRO-Robotech/kaname/internal/clients
 2 github.com/PRO-Robotech/kaname/internal/clients/breachcheck
 2 github.com/PRO-Robotech/kaname/internal/clienttokenwire
@@ -116,7 +114,9 @@
 2 github.com/PRO-Robotech/kaname/internal/dto/toproto
 2 github.com/PRO-Robotech/kaname/internal/edgecredential
 2 github.com/PRO-Robotech/kaname/internal/exchangepace
+2 github.com/PRO-Robotech/kaname/internal/failurewindow
 2 github.com/PRO-Robotech/kaname/internal/fuzz
+2 github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp
 2 github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp
 2 github.com/PRO-Robotech/kaname/internal/handler/methodrefusal
 2 github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp
@@ -125,6 +125,7 @@
 2 github.com/PRO-Robotech/kaname/internal/issuingsource
 2 github.com/PRO-Robotech/kaname/internal/keywrap
 2 github.com/PRO-Robotech/kaname/internal/mailaddr
+2 github.com/PRO-Robotech/kaname/internal/manifest/roleexport
 2 github.com/PRO-Robotech/kaname/internal/manifestoracle
 2 github.com/PRO-Robotech/kaname/internal/modelcompose
 2 github.com/PRO-Robotech/kaname/internal/moduleroleparity
@@ -138,8 +139,10 @@
 2 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/planrows
 2 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror
 2 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/schemasnapshot
+2 github.com/PRO-Robotech/kaname/internal/restfront
 2 github.com/PRO-Robotech/kaname/internal/scopesourcecensus
 2 github.com/PRO-Robotech/kaname/internal/service
+2 github.com/PRO-Robotech/kaname/internal/servicemanifest
 2 github.com/PRO-Robotech/kaname/internal/subscriptionjournal
 2 github.com/PRO-Robotech/kaname/internal/testsupport/activewayin
 2 github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner
@@ -149,6 +152,7 @@
 2 github.com/PRO-Robotech/kaname/internal/tokenrevocation
 2 github.com/PRO-Robotech/kaname/internal/totpverify
 2 github.com/PRO-Robotech/kaname/internal/treeposture
+2 github.com/PRO-Robotech/kaname/internal/webauthnverify
 2 github.com/PRO-Robotech/kaname/pkg/ownerregister
 2 github.com/PRO-Robotech/kaname/pkg/subjectchange
 2 github.com/PRO-Robotech/kaname/tests/newman/scripts/credsecretmint
@@ -157,11 +161,9 @@
 2 github.com/PRO-Robotech/kaname/tools/declaredbreak
 2 github.com/PRO-Robotech/kaname/tools/newmanverdict
 2 github.com/PRO-Robotech/kaname/tools/standalonetargets
-1 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/clusterpublic
-1 github.com/PRO-Robotech/kaname/tools/auditlistfilter/cmd/audit-list-filter
-1 github.com/PRO-Robotech/kaname/tools/surfaceroster
 0 github.com/PRO-Robotech/kaname/cmd/authzmap-tables
 0 github.com/PRO-Robotech/kaname/cmd/iamctl
+0 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/clusterpublic
 0 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod
 0 github.com/PRO-Robotech/kaname/internal/authztypes
 0 github.com/PRO-Robotech/kaname/internal/callerorigin
@@ -188,14 +190,41 @@
 0 github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest
 0 github.com/PRO-Robotech/kaname/internal/testsupport/issuinglistener
 0 github.com/PRO-Robotech/kaname/internal/testsupport/momentclock
+0 github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture
 0 github.com/PRO-Robotech/kaname/internal/testsupport/refusaltext
 0 github.com/PRO-Robotech/kaname/internal/testsupport/rightsfixture
 0 github.com/PRO-Robotech/kaname/internal/treeroot
 0 github.com/PRO-Robotech/kaname/internal/webauthnverify/webauthntest
 0 github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1
+0 github.com/PRO-Robotech/kaname/tools/auditlistfilter/cmd/audit-list-filter
 0 github.com/PRO-Robotech/kaname/tools/catalogparity
 0 github.com/PRO-Robotech/kaname/tools/declaredbreak/cmd/adjudicate-declared-breaks
 0 github.com/PRO-Robotech/kaname/tools/knownfailingexpiry
 0 github.com/PRO-Robotech/kaname/tools/modelcanoncheck
 0 github.com/PRO-Robotech/kaname/tools/modulemanifestcheck
 0 github.com/PRO-Robotech/kaname/tools/operatordocs/cmd/operator-docs
+0 github.com/PRO-Robotech/kaname/tools/surfaceroster
+364 github.com/PRO-Robotech/kaname/internal/supplyhygiene TestPlatformMintingClaimIsNotDeniedByTheTreeThatMintsIt
+205 github.com/PRO-Robotech/kaname/internal/check TestNoDeferredWorkInTheTree
+156 github.com/PRO-Robotech/kaname/internal/check TestCeremonySurfaceInjections
+111 github.com/PRO-Robotech/kaname/internal/apps/kaname/config TestOwnCeilingCountLivesOnlyInTheTable
+108 github.com/PRO-Robotech/kaname/internal/release TestExternalConsumerCanBuildTheServiceModule
+61 github.com/PRO-Robotech/kaname/internal/passwordverify TestVerify_ParametersAboveTheCeilingAreRefusedWithoutComputing
+58 github.com/PRO-Robotech/kaname/internal/passwordverify TestVerify_RefusalAboveTheCeilingDoesNotStartTheComputation
+50 github.com/PRO-Robotech/kaname/internal/check TestCeremonySurfaceTwinsAreSilent
+49 github.com/PRO-Robotech/kaname/internal/check TestEC24_ASecondAddressWriterIsRedAndTheLawfulOneIsSilent
+44 github.com/PRO-Robotech/kaname/internal/passwordverify TestVerify_EveryOutcomeIsObserved
+38 github.com/PRO-Robotech/kaname/internal/supplyhygiene TestKanameShowcaseNamesItsOwnMigrator
+34 github.com/PRO-Robotech/kaname/internal/check TestHistoryQuestionsAreAskedOfTheTrunk
+31 github.com/PRO-Robotech/kaname/internal/passwordverify TestVerify_ChoiceOfVerifierFollowsTheStoredValue
+29 github.com/PRO-Robotech/kaname/internal/check TestCeremonySurfaceResolveBudgetIsNotAVerdict
+26 github.com/PRO-Robotech/kaname/internal/check TestCeremonySurfaceManualRoutingForms
+25 github.com/PRO-Robotech/kaname/tests/newman/scripts/storedvaluemint TestMintedStoredValueIsReadByTheProductVerifier
+25 github.com/PRO-Robotech/kaname/internal/check TestRetiredVendorBindingsDoNotGrow
+25 github.com/PRO-Robotech/kaname/internal/check TestLimitAuthorityIsGoneFromTheTree
+25 github.com/PRO-Robotech/kaname/internal/passwordverify TestMeetsDeclared_FormatAndEveryParameterAreOneRequirement
+24 github.com/PRO-Robotech/kaname/internal/apps/kaname/shared TestFixtureIdentifiersPassTheProductFormCheck
+24 github.com/PRO-Robotech/kaname/tools TestModelCanonCheckIsSilentWhenEveryOwnedBlockIsRendered
+24 github.com/PRO-Robotech/kaname/internal/check TestCeremonySurfaceManualRoutingTwinsAreSilent
+23 github.com/PRO-Robotech/kaname/internal/check TestEveryNamedInjectionProofExists
+23 github.com/PRO-Robotech/kaname/internal/lockclaims TestForwardPathCommentsDoNotClaimALockItDoesNotTake

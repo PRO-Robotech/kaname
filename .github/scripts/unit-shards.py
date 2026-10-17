@@ -29,14 +29,37 @@
 
 Значит снять `-race` с гейтов нельзя: стена опускается распилом пакета ПО ПРОБАМ.
 
+КРИТЕРИЙ СТЕНЫ — ОТ СОЗДАНИЯ ЗАДАНИЯ ПЛАНА ДО КОНЦА СВОДА
+--------------------------------------------------------
+Мерится `created_at` задания `unitplan` → `completed_at` задания `unit` одного
+прогона (`gh api …/actions/runs/<id>/jobs`), и сравнивается с прежним
+`created_at` → `completed_at` задания `unit` на ревизии-основании. Исполнение
+шарда без ожидания исполнителя — НЕ стена: на первом круге (PR #875, прогон
+39039147809) двенадцать шардов исполнялись 2:32…8:02, а ждали исполнителя
+7:15…23:30, и стена вышла 33:44 против 28:05 одного задания при «исполнении»
+19:47. Вторая мера — минуты исполнителей (сумма длительностей заданий): шардов
+не больше, чем окупает их ожидание.
+
+Нижняя граница стены шарда — самая долгая НЕДЕЛИМАЯ проба: на первом круге
+`internal/supplyhygiene` TestPlatformMintingClaimIsNotDeniedByThe… — 363 с из
+459 с пакета. Разрез по пробам её не делит; её сокращение — предмет владельца
+пакета, а не раскладки.
+
 ДВЕ ЕДИНИЦЫ РАЗДАЧИ
 -------------------
   * пакет целиком — всякий пакет `go list ./...`, включая пакеты без проб: так
     шарды осматривают РОВНО то же множество, что и прежний `go test ./...`;
-  * часть пакета — пакет, чей замеренный вес больше бюджета шарда, режется на
-    N = ⌈вес / бюджет⌉ частей. Проба верхнего уровня (имя из `go test -list`)
-    попадает в часть `sha256(имя) mod N`. Это чистая функция имени: части
-    вычисляются независимо в разных заданиях и сходятся без обмена.
+  * часть пакета — пакет тяжелее порога (`PIECE_FRACTION` среднего шарда)
+    режется на N = ⌈вес / порог⌉ частей. Проба верхнего уровня (имя из
+    `go test -list`) попадает в часть `sha256(имя) mod N`. Это чистая функция
+    имени: части вычисляются независимо в разных заданиях и сходятся без обмена.
+    Вес части — крупные пробы ведомости, попавшие в неё, плюс остаток поровну.
+    Части одного пакета в одном шарде идут ОДНИМ `go test`, вызовы шарда —
+    одновременно, как пакеты внутри `go test ./...`.
+
+ЕДИНИЦА СЧЁТА СВОДА — ПАКЕТ: у распиленного пакета в объединённом потоке один
+исход (`fail`, если упала хоть одна часть), поэтому «пакетов осмотрено» равно
+`go list ./...`, как у прежнего прогона.
 
 ПОЧЕМУ ВЕСА — ВЕДОМОСТЬ, И ПОЧЕМУ ЭТО БЕЗОПАСНО
 -----------------------------------------------
@@ -84,10 +107,18 @@ ROOT = Path(__file__).resolve().parents[2]
 WEIGHTS = ROOT / ".github" / "unit-shard-weights.txt"
 VERDICT = ROOT / ".github" / "scripts" / "go-test-verdict.py"
 
-# Бюджет шарда — в единицах ведомости весов (секунды пакета в прогоне `-race`).
-# Предмет — стена шарда не больше 6 мин (kaname#873): из них подготовка и сборка
-# под `-race` — около минуты на прогретом кэше, остальное — пробы.
-BUDGET = 420
+# ЧИСЛО ШАРДОВ — ЗАМЕР ПЕРВОГО КРУГА (PR #875, прогон 39039147809 @113dbddee).
+# Двенадцать шардов исполнялись 2:32…8:02 каждый, но ЖДАЛИ ИСПОЛНИТЕЛЯ 7:15…23:30,
+# и свод — ещё 6:08: стена от создания плана до конца свода 33:44 против 28:05
+# одного задания, минуты исполнителей ≈52 против ≈25. Предел здесь — число
+# исполнителей, а не процессор шарда, поэтому шардов столько, сколько их можно
+# получить разом рядом с остальными заданиями процесса. Сумма замеренных весов
+# 2575 с на пять шардов — около 540 с каждому до параллелизма внутри шарда.
+SHARDS = 5
+# Доля среднего шарда, больше которой пакет режется на части. Мелкие части
+# усредняют неровность хэша: на первом круге две части `supplyhygiene` по
+# хэшу имён дали 385 и 68 с — делёж по числу проб не делит время.
+PIECE_FRACTION = 0.25
 # Вес пакета без строки в ведомости. Он решает только раскладку (см. шапку).
 DEFAULT_WEIGHT = 10
 
@@ -178,6 +209,11 @@ def tree_packages() -> list[str]:
 
 
 def read_weights(path: Path) -> tuple[dict[str, int], list[str]]:
+    """Ведомость: «<секунды> <пакет>» — вес пакета; «<секунды> <пакет> <Проба>» —
+    вес КРУПНОЙ пробы верхнего уровня. Крупная проба неделима: на первом круге
+    одна проба `supplyhygiene` шла 363 с из 459 с пакета, и делёж пакета поровну
+    по числу проб ставил её часть рядом с чужой нагрузкой. Ключ пробы в словаре —
+    «<пакет> <Проба>»."""
     weights: dict[str, int] = {}
     bad: list[str] = []
     if not path.is_file():
@@ -187,41 +223,48 @@ def read_weights(path: Path) -> tuple[dict[str, int], list[str]]:
         if not s or s.startswith("#"):
             continue
         f = s.split()
-        if len(f) != 2 or not f[0].isdigit():
-            bad.append(f"{path.name}:{i}: строка не в форме «<секунды> <пакет>»: {s[:120]}")
+        if len(f) not in (2, 3) or not f[0].isdigit() or (
+                len(f) == 3 and not TOP_NAME_RE.match(f[2])):
+            bad.append(f"{path.name}:{i}: строка не в форме «<секунды> <пакет> [<Проба>]»: "
+                       f"{s[:120]}")
             continue
-        if f[1] in weights:
-            bad.append(f"{path.name}:{i}: пакет {f[1]} назван дважды")
-        weights[f[1]] = int(f[0])
+        key = " ".join(f[1:])
+        if key in weights:
+            bad.append(f"{path.name}:{i}: {key} назван дважды")
+        weights[key] = int(f[0])
     return weights, bad
 
 
-def build_plan(tree: list[str], weights: dict[str, int], budget: int) -> dict:
-    """Раскладка: тяжёлые пакеты режутся на части, затем LPT — самая тяжёлая
-    единица в наименее загруженный шард; шардов — наименьшее число, при котором
-    самый загруженный не выходит за бюджет (либо за самую тяжёлую единицу)."""
+def build_plan(tree: list[str], weights: dict[str, int], shards_n: int = SHARDS,
+               fraction: float = PIECE_FRACTION) -> dict:
+    """Раскладка ровно на `shards_n` шардов: пакет тяжелее доли среднего шарда
+    режется на части, затем LPT — самая тяжёлая единица в наименее загруженный
+    шард. Части одного пакета в одном шарде гоняются ОДНИМ `go test`."""
     units: list[tuple[int, dict]] = []
+    total_w = sum(weights.get(p, DEFAULT_WEIGHT) for p in tree)
+    budget = max(1, math.ceil(total_w / max(1, shards_n) * fraction))
     for pkg in tree:
         w = weights.get(pkg, DEFAULT_WEIGHT)
         parts = max(1, math.ceil(w / budget))
         if parts == 1:
             units.append((w, {"pkg": pkg}))
-        else:
-            for k in range(parts):
-                units.append((math.ceil(w / parts), {"pkg": pkg, "part": k, "parts": parts}))
+            continue
+        # Вес части — крупные пробы, которые в неё попадают тем же разрезом, плюс
+        # поровну остаток пакета. Разрез — по имени, поэтому оценка части
+        # вычисляется без перечня проб и без сборки.
+        big = {k.split(" ", 1)[1]: v for k, v in weights.items()
+               if k.startswith(pkg + " ")}
+        rest = max(0, w - sum(big.values())) / parts
+        for k in range(parts):
+            pw = rest + sum(v for n, v in big.items() if part_of(n, parts) == k)
+            units.append((math.ceil(pw), {"pkg": pkg, "part": k, "parts": parts}))
     units.sort(key=lambda u: (-u[0], u[1]["pkg"], u[1].get("part", -1)))
-    total = sum(w for w, _ in units)
-    cap = max(budget, units[0][0] if units else 0)
-    n = max(1, math.ceil(total / budget))
-    while True:
-        bins: list[list] = [[0, []] for _ in range(n)]
-        for w, u in units:
-            b = min(bins, key=lambda x: x[0])
-            b[0] += w
-            b[1].append(u)
-        if max(b[0] for b in bins) <= cap or n >= len(units):
-            break
-        n += 1
+    n = max(1, min(shards_n, len(units)))
+    bins: list[list] = [[0, []] for _ in range(n)]
+    for w, u in units:
+        b = min(bins, key=lambda x: x[0])
+        b[0] += w
+        b[1].append(u)
     bins.sort(key=lambda b: -b[0])
     width = max(2, len(str(n)))
     shards = [{"id": f"u{i + 1:0{width}d}", "weight": w,
@@ -282,7 +325,7 @@ def plan_census_text(plan: dict, weights: dict[str, int]) -> str:
         f"  пакетов в дереве:      {len(plan['tree_packages'])}",
         f"  роздано целиком:       {whole}",
         f"  распилено по пробам:   {len(split)}",
-        f"  шардов:                {len(plan['shards'])} (бюджет {plan['budget']} с веса)",
+        f"  шардов:                {len(plan['shards'])} (порог разреза {plan['budget']} с веса)",
         f"  без замеренного веса:  {len(unweighed)} (вес по умолчанию {DEFAULT_WEIGHT})",
     ]
     for sh in plan["shards"]:
@@ -316,6 +359,10 @@ def list_tests(pkg: str) -> list[str]:
 
 
 def run_shard(plan: dict, shard_id: str, out_dir: Path, attempt: str) -> int:
+    """Пакеты шарда — одним `go test`, каждый распиленный пакет — своим, с
+    выборкой, равной объединению его частей в этом шарде. Вызовы идут
+    ОДНОВРЕМЕННО, как пакеты внутри одного `go test ./...`: последовательные
+    вызовы складывали бы время там, где прежний прогон его перекрывал."""
     shard = next((s for s in plan.get("shards", []) if s["id"] == shard_id), None)
     if shard is None:
         sys.stderr.write(f"ОТКАЗ: шарда {shard_id} в плане нет; есть: "
@@ -329,39 +376,56 @@ def run_shard(plan: dict, shard_id: str, out_dir: Path, attempt: str) -> int:
     findings: list[str] = []
     not_done = False
 
-    def go_test(args: list[str]) -> None:
-        cmd = ["go", "test", *args]
-        print("+ " + " ".join(a if len(a) < 160 else a[:150] + f"…({len(a)} симв.)" for a in cmd),
-              flush=True)
-        with stream_path.open("a", encoding="utf-8") as fh:
-            rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT).returncode
-        census["go_test_rc"].append(rc)
-        print(f"  go test завершился с кодом {rc} (вердикт выносит прогонщик ниже)", flush=True)
-
-    stream_path.write_text("", encoding="utf-8")
+    calls: list[list[str]] = []
     whole = [u["pkg"] for u in shard["units"] if "part" not in u]
     census["whole"] = whole
     if whole:
-        go_test([*BUILD_FLAGS, *RUN_FLAGS, "-json", *whole])
+        calls.append([*BUILD_FLAGS, *RUN_FLAGS, "-json", *whole])
+    split: dict[str, list[dict]] = {}
     for u in (u for u in shard["units"] if "part" in u):
-        rec = {"pkg": u["pkg"], "part": u["part"], "parts": u["parts"]}
+        split.setdefault(u["pkg"], []).append(u)
+    for pkg, us in sorted(split.items()):
         try:
-            names = list_tests(u["pkg"])
+            names = list_tests(pkg)
         except Unmeasured as e:
             findings.append(str(e))
             not_done = True
-            census["parts"].append({**rec, "listed": [], "selected": [], "error": str(e)})
+            for u in us:
+                census["parts"].append({"pkg": pkg, "part": u["part"], "parts": u["parts"],
+                                        "listed": [], "selected": [], "error": str(e)})
             continue
-        chosen = select(names, u["part"], u["parts"])
-        rec.update(listed=names, selected=chosen)
-        census["parts"].append(rec)
-        print(f"часть {u['part'] + 1}/{u['parts']} пакета {short(u['pkg'])}: проб в перечне "
-              f"{len(names)}, в этой части {len(chosen)}", flush=True)
-        if not chosen:
-            # Пустая часть законна (мало проб, неровный хэш), но `-run` с пустой
-            # альтернативой взял бы ВСЁ — поэтому пакет здесь не зовётся вовсе.
-            continue
-        go_test([*BUILD_FLAGS, *RUN_FLAGS, "-json", "-run", run_regex(chosen), u["pkg"]])
+        chosen: list[str] = []
+        for u in us:
+            sel = select(names, u["part"], u["parts"])
+            chosen += sel
+            census["parts"].append({"pkg": pkg, "part": u["part"], "parts": u["parts"],
+                                    "listed": names, "selected": sel})
+        print(f"пакет {short(pkg)}: проб в перечне {len(names)}, части "
+              f"{[u['part'] + 1 for u in us]} из {us[0]['parts']} — в этом шарде {len(chosen)}",
+              flush=True)
+        if chosen:
+            # Пустая выборка законна (мало проб, неровный хэш), но `-run` с пустой
+            # альтернативой взял бы ВСЁ — поэтому пакет тогда не зовётся вовсе.
+            calls.append([*BUILD_FLAGS, *RUN_FLAGS, "-json", "-run", run_regex(sorted(chosen)), pkg])
+
+    procs = []
+    for i, args in enumerate(calls):
+        part_path = out_dir / f".{shard_id}.a{attempt}.{i}.part"
+        cmd = ["go", "test", *args]
+        print("+ " + " ".join(x if len(x) < 160 else x[:150] + f"…({len(x)} симв.)" for x in cmd),
+              flush=True)
+        fh = part_path.open("w", encoding="utf-8")
+        procs.append((subprocess.Popen(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT),
+                      fh, part_path))
+    with stream_path.open("w", encoding="utf-8") as out:
+        for proc, fh, part_path in procs:
+            rc = proc.wait()
+            fh.close()
+            census["go_test_rc"].append(rc)
+            print(f"  go test #{len(census['go_test_rc'])} завершился с кодом {rc} "
+                  f"(вердикт выносит прогонщик ниже)", flush=True)
+            out.write(part_path.read_text(encoding="utf-8", errors="replace"))
+            part_path.unlink()
     census_path.write_text(json.dumps(census, ensure_ascii=False, indent=1) + "\n",
                            encoding="utf-8")
 
@@ -425,7 +489,13 @@ def aggregate_findings(plan: dict, reports: dict[str, tuple[dict, list[dict]]]) 
     nparts: dict[str, int] = {}
     executed_by_part: dict[tuple[str, int], set[str]] = {}
     for sid, (census, events) in sorted(reports.items()):
-        part_of_pkg = {p["pkg"]: p for p in census.get("parts", [])}
+        # Части одного пакета в шарде идут ОДНИМ `go test`, поэтому исполненная
+        # проба относится к части тем же разрезом, которым выбиралась.
+        own_parts: dict[str, tuple[int, set[int]]] = {}
+        for p in census.get("parts", []):
+            n, ks = own_parts.get(p["pkg"], (p["parts"], set()))
+            ks.add(p["part"])
+            own_parts[p["pkg"]] = (n, ks)
         for e in events:
             pkg = e.get("Package")
             if not pkg:
@@ -434,8 +504,14 @@ def aggregate_findings(plan: dict, reports: dict[str, tuple[dict, list[dict]]]) 
                 seen_pkgs.setdefault(pkg, set()).add(sid)
             t = e.get("Test")
             if t and "/" not in t and e.get("Action") in ("pass", "fail", "skip") \
-                    and pkg in part_of_pkg:
-                executed_by_part.setdefault((pkg, part_of_pkg[pkg]["part"]), set()).add(t)
+                    and pkg in own_parts:
+                n, ks = own_parts[pkg]
+                k = part_of(t, n)
+                if k in ks:
+                    executed_by_part.setdefault((pkg, k), set()).add(t)
+                else:
+                    out.append(f"{pkg}: шард {sid} исполнил {t} — пробу части {k + 1}/{n}, "
+                               f"которой ему не раздавали")
         for p in census.get("parts", []):
             listed.setdefault(p["pkg"], {})[p["part"]] = p.get("listed", [])
             selected.setdefault(p["pkg"], {})[p["part"]] = p.get("selected", [])
@@ -473,6 +549,41 @@ def aggregate_findings(plan: dict, reports: dict[str, tuple[dict, list[dict]]]) 
     return out, numbers
 
 
+def combined_events(reports: dict[str, tuple[dict, list[dict]]]) -> list[dict]:
+    """Объединённый поток для прогонщика — ЕДИНИЦА СЧЁТА ПАКЕТ, а не вызов.
+
+    Распиленный пакет исполняется в нескольких шардах, и каждый вызов шлёт свои
+    события начала и исхода пакета: прогонщик насчитал бы его столько раз,
+    сколько шардов его гоняли (первый круг: «прошло 148 · без проб 43» при 186
+    пакетах). Здесь у распиленного пакета остаётся ОДНО начало и ОДИН исход —
+    `fail`, если упала хоть одна часть (с её `FailedBuild`), иначе `pass`;
+    события проб и вывод не трогаются."""
+    split = {p["pkg"] for c, _ in reports.values() for p in c.get("parts", [])}
+    out: list[dict] = []
+    ends: dict[str, list[dict]] = {}
+    for sid in sorted(reports):
+        for e in reports[sid][1]:
+            pkg = e.get("Package")
+            if pkg in split and "Test" not in e and e.get("Action") in (
+                    "start", "pass", "fail", "skip"):
+                if e.get("Action") != "start":
+                    ends.setdefault(pkg, []).append(e)
+                continue
+            out.append(e)
+    for pkg in sorted(split):
+        out.append({"Action": "start", "Package": pkg})
+        got = ends.get(pkg, [])
+        if not got:
+            continue  # исхода нет — прогонщик назовёт пакет начатым и не завершённым
+        failed = [e for e in got if e.get("Action") == "fail"]
+        end = dict(failed[0]) if failed else {
+            "Action": "pass" if any(e.get("Action") == "pass" for e in got) else "skip",
+            "Package": pkg}
+        end["Elapsed"] = max((e.get("Elapsed") or 0) for e in got)
+        out.append(end)
+    return out
+
+
 def aggregate(plan_path: Path, dirpath: Path, plan_result: str, shard_result: str) -> int:
     print(f"исход задания плана: {plan_result} · исход шардов: {shard_result}")
     try:
@@ -492,10 +603,9 @@ def aggregate(plan_path: Path, dirpath: Path, plan_result: str, shard_result: st
     print(f"  пакетов в дереве плана: {num['tree']} · осмотрено шардами: {num['seen']} · "
           f"распилено по пробам: {num['split']}")
     combined = dirpath / "unit-combined.json"
-    latest = latest_reports(dirpath)
     with combined.open("w", encoding="utf-8") as fh:
-        for sid in sorted(reports):
-            fh.write(latest[sid][1].read_text(encoding="utf-8", errors="replace"))
+        for e in combined_events(reports):
+            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
     with combined.open(encoding="utf-8") as fh:
         vrc = subprocess.run([sys.executable, str(VERDICT)], stdin=fh,
                              capture_output=True, text=True)
@@ -559,18 +669,24 @@ def self_test() -> int:
             f"{MOD}/cmd/kaname", f"{MOD}/pkg/api"]
     weights = {f"{MOD}/internal/check": 1000, f"{MOD}/internal/domain": 70,
                f"{MOD}/deploy": 300}
-    plan = build_plan(tree, weights, 240)
+    plan = build_plan(tree, weights, 3)
 
     # Ось 1 — законная раскладка молчит; тяжёлый пакет распилен, лёгкие целиком.
     ok &= _case("контроль: законный план → зелено", False, plan_findings(plan))
     chk = [u for s in plan["shards"] for u in s["units"] if u["pkg"] == f"{MOD}/internal/check"]
-    good = len(chk) == 5 and sorted(u["part"] for u in chk) == list(range(5))
-    print(f"  [{'OK ' if good else 'ОТКАЗ'}] вес 1000 при бюджете 240 → 5 частей: "
-          f"{sorted(u.get('part') for u in chk)}")
+    want = math.ceil(1000 / plan["budget"])
+    good = len(chk) == want and sorted(u["part"] for u in chk) == list(range(want))
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] вес 1000 при пороге {plan['budget']} → {want} "
+          f"частей: {len(chk)}")
     ok &= good
-    top = max(s["weight"] for s in plan["shards"])
-    good = top <= 240
-    print(f"  [{'OK ' if good else 'ОТКАЗ'}] самый загруженный шард {top} ≤ бюджета 240")
+    good = len(plan["shards"]) == 3
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] шардов ровно столько, сколько задано: "
+          f"{len(plan['shards'])} из 3")
+    ok &= good
+    ws = [s["weight"] for s in plan["shards"]]
+    good = max(ws) - min(ws) <= plan["budget"]
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] разброс загрузки {max(ws) - min(ws)} ≤ порога "
+          f"разреза {plan['budget']}: {ws}")
     ok &= good
 
     # Ось 2 — ПАКЕТ ВЫПАЛ из раздачи: класс, ради которого распил опасен.
@@ -591,12 +707,13 @@ def self_test() -> int:
 
     # Ось 4 — часть пакета роздана дважды / не роздана.
     twice = json.loads(json.dumps(plan))
-    twice["shards"][0]["units"].append({"pkg": f"{MOD}/internal/check", "part": 0, "parts": 5})
+    twice["shards"][0]["units"].append({"pkg": f"{MOD}/internal/check", "part": 0,
+                                        "parts": want})
     ok &= _case("часть пакета роздана дважды → красно", True, plan_findings(twice), "ровно один")
     gone = json.loads(json.dumps(plan))
     for s in gone["shards"]:
         s["units"] = [u for u in s["units"]
-                      if not (u["pkg"] == f"{MOD}/internal/check" and u.get("part") == 4)]
+                      if not (u["pkg"] == f"{MOD}/internal/check" and u.get("part") == 1)]
     ok &= _case("часть пакета не роздана → красно", True, plan_findings(gone), "ровно один")
 
     # Ось 5 — пустые входы — отказ, а не идеал.
@@ -637,7 +754,7 @@ def self_test() -> int:
                 partition_findings("p", 5, lst2, sel), "РАЗНЫЕ")
 
     # Ось 7 — СВОД по отчётам: молчание шарда, потерянный пакет, проба вне выборки.
-    small = build_plan([f"{MOD}/a", f"{MOD}/b", f"{MOD}/heavy"], {f"{MOD}/heavy": 500}, 240)
+    small = build_plan([f"{MOD}/a", f"{MOD}/b", f"{MOD}/heavy"], {f"{MOD}/heavy": 500}, 2)
     hn = ["TestA", "TestB", "TestC", "TestD", "BenchmarkX"]
     reports: dict[str, tuple[dict, list[dict]]] = {}
     for s in small["shards"]:
@@ -669,15 +786,30 @@ def self_test() -> int:
             cut[sid] = (c, [e for e in evs if e["Package"] != f"{MOD}/a"])
     ok &= _case("свод: пакет без событий в потоке → красно", True,
                 aggregate_findings(small, cut)[0], "НЕ ОСМОТРЕНЫ")
-    # проба исполнена вне выборки своей части (сломанный `-run`)
+    # проба чужой части исполнена шардом (сломанный `-run`)
     wide = json.loads(json.dumps(reports))
+    injected = False
     for sid, (c, evs) in wide.items():
-        for p in c["parts"]:
-            if p["part"] == 0:
-                evs.append(_ev(p["pkg"], "pass", next(n for n in hn if n not in p["selected"]
-                                                      and not n.startswith("Benchmark"))))
-    ok &= _case("свод: проба исполнена вне выборки → красно", True,
-                aggregate_findings(small, wide)[0], "ВНЕ выборки")
+        owned = {p["part"] for p in c["parts"]}
+        n = c["parts"][0]["parts"] if c["parts"] else 0
+        stray = [t for t in hn if n and not t.startswith("Benchmark")
+                 and part_of(t, n) not in owned]
+        if stray:
+            evs.append(_ev(c["parts"][0]["pkg"], "pass", stray[0]))
+            injected = True
+            break
+    ok &= _case(f"свод: исполнена проба чужой части → красно (инъекция поставлена: "
+                f"{injected})", True, aggregate_findings(small, wide)[0], "не раздавали")
+    # выборка части подменена: исполненное не лежит в объявленной выборке
+    tamper = json.loads(json.dumps(reports))
+    for sid, (c, evs) in tamper.items():
+        p0 = next((p for p in c["parts"]
+                   if any(not n.startswith("Benchmark") for n in p["selected"])), None)
+        if p0:
+            p0["selected"] = [n for n in p0["selected"] if n.startswith("Benchmark")]
+            break
+    ok &= _case("свод: выборка части не совпала с исполненным → красно", True,
+                aggregate_findings(small, tamper)[0], "ВНЕ выборки")
     # выбранная проба не исполнена (а замер — законно не исполнен)
     miss = json.loads(json.dumps(reports))
     for sid, (c, evs) in miss.items():
@@ -688,6 +820,32 @@ def self_test() -> int:
                 break
     ok &= _case("свод: выбранная проба не исполнена → красно", True,
                 aggregate_findings(small, miss)[0], "НЕ ИСПОЛНЕНЫ")
+    # Единица счёта свода — ПАКЕТ: распиленный пакет, исполненный несколькими
+    # шардами, даёт в объединённом потоке ровно один исход.
+    comb = combined_events(reports)
+    ends = [e["Package"] for e in comb if "Test" not in e
+            and e["Action"] in ("pass", "fail", "skip")]
+    heavy_runs = sum(1 for c, _ in reports.values()
+                     if any(p["pkg"] == f"{MOD}/heavy" for p in c["parts"]))
+    good = sorted(ends) == sorted(small["tree_packages"]) and heavy_runs > 1
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] объединённый поток: исходов пакетов {len(ends)} "
+          f"при дереве {len(small['tree_packages'])} (распиленный гонялся шардами: "
+          f"{heavy_runs})")
+    ok &= good
+    failed = json.loads(json.dumps(reports))
+    for sid, (c, evs) in failed.items():
+        if any(p["pkg"] == f"{MOD}/heavy" for p in c["parts"]):
+            for e in evs:
+                if e.get("Package") == f"{MOD}/heavy" and "Test" not in e \
+                        and e["Action"] == "pass":
+                    e["Action"] = "fail"
+            break
+    fe = [e for e in combined_events(failed) if e.get("Package") == f"{MOD}/heavy"
+          and "Test" not in e and e["Action"] in ("pass", "fail")]
+    good = [e["Action"] for e in fe] == ["fail"]
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] упала одна часть — исход пакета в своде «fail»: "
+          f"{[e['Action'] for e in fe]}")
+    ok &= good
     has_bench = any("BenchmarkX" in p["selected"] for c, _ in reports.values()
                     for p in c["parts"])
     print(f"  [{'OK ' if has_bench else 'ОТКАЗ'}] близнец: замер в выборке без исполнения "
@@ -705,6 +863,25 @@ def self_test() -> int:
     print(f"  [{'OK ' if good else 'ОТКАЗ'}] строка о пакете вне дерева — находка: {stale}")
     ok &= good
 
+    # Ось 9 — КРУПНАЯ ПРОБА неделима: её вес достаётся ровно той части, куда
+    # её кладёт разрез, а не делится поровну.
+    bp = build_plan([f"{MOD}/x", f"{MOD}/y"],
+                    {f"{MOD}/x": 1000, f"{MOD}/x TestBig": 600, f"{MOD}/y": 200}, 2)
+    xs = [(s["weight"], u) for s in bp["shards"] for u in s["units"]
+          if u["pkg"] == f"{MOD}/x"]
+    n = xs[0][1]["parts"] if xs and "parts" in xs[0][1] else 1
+    big_shard = next(s for s in bp["shards"] for u in s["units"]
+                     if u["pkg"] == f"{MOD}/x" and u.get("part") == part_of("TestBig", n))
+    others = [s["weight"] for s in bp["shards"] if s is not big_shard]
+    good = n > 1 and big_shard["weight"] >= 600 and all(w < big_shard["weight"] for w in others)
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] крупная проба (600 из 1000) лежит в своей части: "
+          f"шард с ней {big_shard['weight']}, прочие {others}, частей {n}")
+    ok &= good
+    stale = stale_weights({f"{MOD}/x TestBig": 5, f"{MOD}/gone TestOld": 3}, [f"{MOD}/x"])
+    good = stale == [f"{MOD}/gone TestOld"]
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] строка пробы о пакете вне дерева — находка: {stale}")
+    ok &= good
+
     print("самопроба:", "ПРОЙДЕНА" if ok else "ПРОВАЛЕНА")
     return 0 if ok else 1
 
@@ -718,7 +895,7 @@ def _weights_from_text(text: str) -> tuple[dict[str, int], list[str]]:
 
 
 def stale_weights(weights: dict[str, int], tree: list[str]) -> list[str]:
-    return sorted(set(weights) - set(tree))
+    return sorted(k for k in weights if k.split(" ", 1)[0] not in set(tree))
 
 
 # ─── точка входа ────────────────────────────────────────────────────────────
@@ -757,7 +934,7 @@ def main() -> int:
             print(f"НЕ ВЫПОЛНИЛОСЬ: {e}")
             return 2
         stale = stale_weights(weights, tree)
-        plan = build_plan(tree, weights, BUDGET)
+        plan = build_plan(tree, weights)
         findings = plan_findings(plan) + bad + [
             f"{WEIGHTS.name}: строка о пакете, которого нет в дереве: {p} — запись пережила "
             f"предмет; снять её" for p in stale]
