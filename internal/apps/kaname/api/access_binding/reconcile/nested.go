@@ -112,3 +112,17 @@ func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, s
 	}
 	return out, nil
 }
+
+// nestsUnder — у выдачи есть вложенный селектор с контейнером типа `objectType`,
+// то есть изменение объекта этого типа меняет охват его потомков.
+func nestsUnder(bs BindingScope, objectType string) bool {
+	if isClassBinding(bs) {
+		return false
+	}
+	for _, sel := range bs.Selectors {
+		if sel.Container != nil && sel.Container.Type == objectType {
+			return true
+		}
+	}
+	return false
+}

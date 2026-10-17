@@ -894,6 +894,22 @@ func (r *Reconciler) reconcileBindingForObject(
 		return nil
 	}
 
+	// Изменился КОНТЕЙНЕР вложенного правила этой выдачи (метки, удаление):
+	// от него зависит охват всех его потомков, а не только он сам (kaname#874).
+	// Сужение до одного объекта здесь неверно — выдача пересчитывается целиком,
+	// под уже взятым замком, тем же путём, что полный проход.
+	if nestsUnder(bs, objectType) {
+		desired, err := r.desiredMembers(ctx, s, bs)
+		if err != nil {
+			return err
+		}
+		current, err := s.CurrentMembers(ctx, bindingID)
+		if err != nil {
+			return fmt.Errorf("current members %s: %w", bindingID, err)
+		}
+		return r.applyDiff(ctx, s, bs, desired, current, col)
+	}
+
 	var desired []DesiredMember
 	if objPresent {
 		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, ancestors)

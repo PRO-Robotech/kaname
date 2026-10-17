@@ -246,3 +246,41 @@ func TestReconcileNested_ND03_PublicReaderComesFromTheNestedRuleOnly(t *testing.
 		t.Errorf("вложенное правило над внуком пишет public_reader: до внука он не доходит")
 	}
 }
+
+// R1 на пути по объекту: изменились метки КОНТЕЙНЕРА — ветвь меток владельца его
+// больше не выбирает, и члены выдачи на его потомках снимаются тем же событием,
+// а не следующим обходом. Близнец — метки не изменились: член на месте.
+func TestReconcileNested_ND08_ContainerLabelChangeRecomputesDescendants(t *testing.T) {
+	ctx := context.Background()
+	rules := ndReaderRules(nil, map[string]string{"team": "a"}, "tags")
+	f := ndStore("user", "usrnd08", rules, domain.AccessTarget{AllInScope: true})
+	ndReconcile(t, f)
+	if got := ndMembers(f, "probemod_tag"); !slices.Equal(got, []string{"t1"}) {
+		t.Fatalf("Дано: v_get на ярлыках = %v, ждали [t1]", got)
+	}
+	for name, c := range map[string]struct {
+		team    string
+		removed bool
+	}{"метка сменилась": {"b", true}, "близнец: метка прежняя": {"a", false}} {
+		t.Run(name, func(t *testing.T) {
+			g := ndStore("user", "usrnd08", rules, domain.AccessTarget{AllInScope: true})
+			g.mirror["probemod.boxes"][0].Labels = map[string]string{"team": c.team}
+			for _, k := range []string{memberKey("probemod.items", "i1"), memberKey("probemod.tags", "t1")} {
+				for i := range g.ancestors[k] {
+					if g.ancestors[k][i].ObjectID == "b1" {
+						g.ancestors[k][i].Labels = map[string]string{"team": c.team}
+					}
+				}
+			}
+			g.current = f.upserts
+			g.bindingsForObject = []domain.AccessBindingID{"acb0000000000000nd08"}
+			rec := New(fakeRunner{s: g}, nil, catalog.Fixed{F: ndFacts(t)})
+			if err := rec.ReconcileObject(ctx, "probemod.boxes", "b1"); err != nil {
+				t.Fatalf("проход по контейнеру: %v", err)
+			}
+			if got := slices.Contains(g.deletes, memberKey("probemod.tags", "t1")); got != c.removed {
+				t.Errorf("член на t1 снят = %v, ждали %v (удалено %v)", got, c.removed, g.deletes)
+			}
+		})
+	}
+}
