@@ -264,13 +264,71 @@ jobs:
         run: python3 .github/scripts/review-event-silence.py
 
   # ── ЮНИТЫ ───────────────────────────────────────────────────────────────────
-  unit:
-    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit') }}
+  #
+  # ПЛАН → ШАРДЫ → СВОДНЫЙ ВЕРДИКТ (kaname#873). Одним заданием юниты шли
+  # 1192…1852 с (ствол 422d1bc6f — 1484 с): пакеты внутри `go test ./...` идут
+  # параллельно, и стена прогона — время САМОГО ДОЛГОГО пакета (`internal/check`
+  # 1255 с). Распил по пакетам её не опускает; опускает распил ПАКЕТА по пробам.
+  # Раздачу, её перепись и свод держит `.github/scripts/unit-shards.py`, довод и
+  # замеры — в его шапке; `-race` остаётся у всех пакетов, гейтов дерева тоже:
+  # конкурентность в них ИЗМЕРЕНА (параллельные пробы, горутины кода модуля).
+  #
+  # Имя сводного задания — ПРЕЖНЕЕ: «пробы -race -short (числовой вердикт)» —
+  # обязательный контекст защиты ствола (`.github/TRUNK-VERDICT.md`). Шарды несут
+  # производные от дерева имена и в защиту не идут.
+  unitplan:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitplan') }}
     needs: [changes]
-    name: пробы -race -short (числовой вердикт)
+    name: юниты — план шардов · перепись полноты
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # САМОПРОБЫ — ДО ПЛАНА: раздатчик и прогонщик сами выносят часть вердикта,
+      # и их способность упасть доказывается до того, как им поверят.
+      - name: раздача, разрез по пробам и свод способны упасть (самопроба инъекцией)
+        run: python3 .github/scripts/unit-shards.py --self-test
+
+      - name: прогонщик вердикта способен упасть (самопроба инъекцией)
+        run: python3 .github/scripts/go-test-verdict.py --self-test
+
+      # ПЕРЕПИСЬ СТОИТ ДО ВЫДАЧИ МАТРИЦЫ: гейт полноты после неё судил бы уже
+      # разосланное.
+      - name: ПЛАН И ПЕРЕПИСЬ ПОЛНОТЫ — в дереве N, роздано M
+        id: plan
+        run: python3 .github/scripts/unit-shards.py --plan --out unit-plan.json --github-output "$GITHUB_OUTPUT"
+
+      - name: план — артефакт для шардов и свода
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: unit-plan
+          path: unit-plan.json
+          # Перезапуск задания плана заливает план под тем же именем: без
+          # перезаписи загрузка отказала бы, и перезапуск краснел бы не по предмету.
+          overwrite: true
+
+  unitshard:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitshard') }}
+    needs: [changes, unitplan]
+    name: юниты · шард ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Красный шард не снимает соседей: вердикт нужен о КАЖДОМ пакете, а снятые
+      # пришли бы в свод третьей категорией по причине вне своего предмета.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.unitplan.outputs.matrix) }}
+    steps:
+      # Полная история — предпосылка гейтов дерева (`internal/check` судит
+      # `origin/main...HEAD`), а не удобство; как и у прежнего задания.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
@@ -280,26 +338,62 @@ jobs:
           cache: true
       - run: go mod download
 
-      # ПРОГОНЩИК ВЫНОСИТ ЧАСТЬ ВЕРДИКТА, значит его способность УПАСТЬ обязана
-      # быть доказана ДО того, как его вердикту поверят: иначе он сам стал бы
-      # формой без содержания — тем самым классом, ради которого заведён.
-      # Инъекция идёт по каждой оси в ОБЕ стороны, включая законных близнецов.
-      - name: прогонщик вердикта способен упасть (самопроба инъекцией)
-        run: python3 .github/scripts/go-test-verdict.py --self-test
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v6
+        with:
+          name: unit-plan
+          path: unit-plan
 
-      # `-short` ОБЯЗАТЕЛЕН: без него сюда затягиваются контейнерные пробы,
-      # поднимающие Postgres на каждом пакете, и задание упирается в предел
-      # времени. Контейнерные гоняет отдельное задание ниже.
+      # `-short` обязателен: контейнерные пробы гоняет задание `integration`.
+      # Раздатчик зовёт `go test -json` по пакетам шарда и частям распиленных,
+      # сверяет выборку частей с разрезом и выносит вердикт прогонщиком; код
+      # `go test` — данные, а не исход шага.
       #
-      # Код `go test` берётся ДАННЫМИ: под `-e` ненулевой оборвал бы шаг до
-      # прогонщика, и вердикта — числа исполненного, отказов и пропущенного —
-      # не было бы вовсе. Роняет шаг ПРОГОНЩИК, а не `go test`.
-      - name: пробы (-race -short)
-        run: |
-          rc=0
-          go test ./... -race -short -count=1 -timeout 25m -json > test.json 2>&1 || rc=$?
-          echo "go test завершился с кодом $rc (вердикт выносит прогонщик ниже)"
-          python3 .github/scripts/go-test-verdict.py < test.json
+      # ИМЯ ОПИСИ НЕСЁТ НОМЕР ПОПЫТКИ: перезапущенный шард заливает опись рядом с
+      # прежней, и свод берёт самую свежую, а не ту, что легла последней.
+      - name: юниты шарда (-race -short)
+        env:
+          SHARD: ${{ matrix.shard }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: python3 .github/scripts/unit-shards.py --run "$SHARD" --plan unit-plan/unit-plan.json --out-dir unit-out --attempt "$ATTEMPT"
+
+      # Опись уезжает и с КРАСНОГО шарда: иначе падение продукта приходило бы в
+      # свод как «шард не отчитался», и разбор начинался бы не с той находки.
+      - name: опись шарда — артефакт для сводного вердикта
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: unit-shard-${{ matrix.shard }}-a${{ github.run_attempt }}
+          path: unit-out/
+
+  # СВОДНЫЙ ВЕРДИКТ — единственное место, где про юниты говорят «зелено»: работа
+  # матрицы без упавших шагов выходит success и тогда, когда шардов исполнилось
+  # ноль. `!cancelled()` — несущая часть: пропущенное обязательное задание не
+  # краснеет, а молчит.
+  unit:
+    if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit')) }}
+    needs: [changes, unitplan, unitshard]
+    name: пробы -race -short (числовой вердикт)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+
+      # `continue-on-error` — не поблажка: отсутствие описей само есть предмет
+      # свода ниже, и отказ скачивания подменил бы его находку своим.
+      - name: скачать план и описи шардов
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v6
+        with:
+          pattern: unit-*
+          path: unit-in
+          merge-multiple: true
+
+      - name: СВОДНЫЙ ВЕРДИКТ
+        run: python3 .github/scripts/unit-shards.py --aggregate --plan unit-in/unit-plan.json --dir unit-in --plan-result '${{ needs.unitplan.result }}' --shard-result '${{ needs.unitshard.result }}'
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:
@@ -1012,6 +1106,8 @@ jobs:
     needs:
       - build
       - unit
+      - unitplan
+      - unitshard
       - lint
       - proto
       - standalone
@@ -1053,6 +1149,8 @@ jobs:
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.build.result }}" \
             "${{ needs.unit.result }}" \
+            "${{ needs.unitplan.result }}" \
+            "${{ needs.unitshard.result }}" \
             "${{ needs.lint.result }}" \
             "${{ needs.proto.result }}" \
             "${{ needs.standalone.result }}" \
@@ -1079,7 +1177,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (ci)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit]
+    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit, unitplan, unitshard]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
