@@ -26,6 +26,7 @@ package publicreadfixture
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,7 +74,13 @@ func Read(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(filepath.Join(dir, name))
+	// Чтение — из ФИКСИРОВАННОГО корня фикстур через `os.DirFS`: имя проверяется
+	// как локальное (`fs.ValidPath` — без `..` и абсолютного пути), и выйти за
+	// каталог `testdata` им нельзя.
+	if !fs.ValidPath(name) {
+		return nil, fmt.Errorf("publicreadfixture: имя фикстуры %q не локальное", name)
+	}
+	b, err := fs.ReadFile(os.DirFS(dir), name)
 	if err != nil {
 		return nil, fmt.Errorf("publicreadfixture: фикстура %s не прочитана: %w", name, err)
 	}

@@ -151,6 +151,9 @@ type Census struct {
 	BlocksOwned int
 	// Waived — модулей, прощённых ведомостью позаписно.
 	Waived int
+	// BlocksPriorEdition — блоков, чей рендер равен ПРЕЖНЕЙ редакции, принимаемой
+	// переходно (Р10, [IsPriorEdition]); в «сверено» они не входят.
+	BlocksPriorEdition int
 	// CanonPath — файл, ИЗ КОТОРОГО сняты величины выше.
 	//
 	// Возвращается обходом, а не складывается вызывающим из корня и постоянной
@@ -169,9 +172,9 @@ func (c Census) String() string {
 	return fmt.Sprintf(
 		"модулей набора %d · манифестов найдено %d · прощено ведомостью %d · "+
 			"блоков сверено %d из %d принадлежащих модулям · байт сверено %d · "+
-			"блоков вне модулей %d",
+			"блоков вне модулей %d · прежней редакции (Р10) %d",
 		c.ModulesInSet, c.ManifestsFound, c.Waived,
-		c.BlocksCompared, c.BlocksOwned, c.BytesCompared, c.BlocksOutsideModules)
+		c.BlocksCompared, c.BlocksOwned, c.BytesCompared, c.BlocksOutsideModules, c.BlocksPriorEdition)
 }
 
 // Finding — находка обхода, названная стороной и координатой.
@@ -338,6 +341,7 @@ func Sweep(resources []catalog.ResourceRow, root string, waivers []Waiver) (Cens
 		findings = append(findings, fs...)
 		census.BlocksCompared += cmp.BlocksCompared
 		census.BytesCompared += cmp.BytesCompared
+		census.BlocksPriorEdition += cmp.BlocksPriorEdition
 	}
 
 	// САМОСТОЯТЕЛЬНАЯ ПОСТАВКА МОДУЛЯ — «условие не создано», а не находка.
@@ -449,6 +453,13 @@ func compareModule(treeRoot *os.Root, root, module, path string,
 			findings = append(findings, Finding{Module: module, Type: r.ObjectType,
 				Side:   SideRenderedBeyondCanon,
 				Detail: "манифест порождает тип, которого в каноне НЕТ — это лишнее право"})
+			continue
+		}
+		if !bytes.Equal(rendered, block.Body) && IsPriorEdition(r.ObjectType, rendered) {
+			// Р10: манифест прежней редакции блока допущен к сверке до kaname#858 —
+			// тем же правилом, что у сборки модели на старте. Считается отдельно:
+			// «сверено» о нём не говорит, побайтово с каноном он не равен.
+			census.BlocksPriorEdition++
 			continue
 		}
 		if !bytes.Equal(rendered, block.Body) {

@@ -41,6 +41,46 @@ ALTER TABLE kaname.catalog_resource
     ADD COLUMN parent_types text[] NOT NULL DEFAULT '{}'::text[],
     ADD COLUMN public_read_to_children boolean NOT NULL DEFAULT false;
 
+-- ПОСЕВ КАТАЛОГА — В ПАРИТЕТЕ С ПОСТАВЛЯЕМЫМИ МАНИФЕСТАМИ. Строки, посеянные
+-- миграциями, обязаны совпадать с тем, что пишет применитель каталога из
+-- доставленных манифестов (`TestModuleCatalogApplierAgreesWithTheSeededCatalog`):
+-- иначе первое применение на старте «изменило» бы каждую строку. Указатели
+-- выведены `modulecatalog.RowsOf` из манифестов модулей платформы (kacho
+-- @a952484649, services/*/manifest.yaml) и манифеста iam этого дерева; признак
+-- контейнера у посева — false (манифест registry прежней редакции ключа не несёт).
+UPDATE kaname.catalog_resource c
+   SET parent_types = v.parents
+  FROM (VALUES
+        ('compute', 'guestAccessKey', ARRAY['project']::text[]),
+        ('compute', 'instance', ARRAY['project']::text[]),
+        ('compute', 'placementGroup', ARRAY['project']::text[]),
+        ('iam', 'accessBinding', ARRAY['project', 'account', 'cluster']::text[]),
+        ('iam', 'account', ARRAY['cluster']::text[]),
+        ('iam', 'group', ARRAY['account']::text[]),
+        ('iam', 'project', ARRAY['account', 'cluster']::text[]),
+        ('iam', 'role', ARRAY['account']::text[]),
+        ('iam', 'serviceAccount', ARRAY['account']::text[]),
+        ('iam', 'user', ARRAY['account']::text[]),
+        ('loadbalancer', 'listeners', ARRAY['project']::text[]),
+        ('loadbalancer', 'networkLoadBalancers', ARRAY['project']::text[]),
+        ('loadbalancer', 'targetGroups', ARRAY['project']::text[]),
+        ('registry', 'registries', ARRAY['project']::text[]),
+        ('registry', 'repositories', ARRAY['registry_registry']::text[]),
+        ('storage', 'images', ARRAY['project']::text[]),
+        ('storage', 'snapshots', ARRAY['project']::text[]),
+        ('storage', 'volumes', ARRAY['project']::text[]),
+        ('vpc', 'address', ARRAY['project']::text[]),
+        ('vpc', 'addressPool', ARRAY['cluster']::text[]),
+        ('vpc', 'cidrGroup', ARRAY['project']::text[]),
+        ('vpc', 'gateway', ARRAY['project']::text[]),
+        ('vpc', 'network', ARRAY['project']::text[]),
+        ('vpc', 'networkInterface', ARRAY['project']::text[]),
+        ('vpc', 'routeTable', ARRAY['project']::text[]),
+        ('vpc', 'securityGroup', ARRAY['project']::text[]),
+        ('vpc', 'subnet', ARRAY['project']::text[])
+       ) AS v(module, resource, parents)
+ WHERE c.module = v.module AND c.resource = v.resource;
+
 -- Форма каждого элемента — имя типа модели (та же грамматика, что у
 -- `catalog_resource_object_type_form`). Склейка идёт ЗАПЯТОЙ, и образец требует
 -- непустого имени между запятыми: пустой элемент (`{''}`, `{'a',''}`) и элемент
