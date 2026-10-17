@@ -30,7 +30,9 @@ import (
 // поверхность пакета ради пробы — то есть заплатить прод-контрактом за оснастку.
 
 // VerdictQuerySQLForTest — готовый текст запроса вердикта для выбранной оси меток.
-func VerdictQuerySQLForTest(labelTable string) string { return verdictQuerySQL(labelTable) }
+func VerdictQuerySQLForTest(labelTable string) string {
+	return mustAssemble(verdictQuerySQL)(labelTable)
+}
 
 // LabelAxisForTest — ось меток, выбранная по типу объекта.
 //
@@ -58,7 +60,7 @@ const MaxConditionRowsForTest = maxConditionRows
 // 0 %), и считать их можно только по захваченным операторам: сам `List` их не
 // возвращает, а завести счётчик внутри него значило бы править прод-код ради
 // прибора.
-func ListQuerySQLForTest(labelTable string) string { return listQuerySQL(labelTable) }
+func ListQuerySQLForTest(labelTable string) string { return mustAssemble(listQuerySQL)(labelTable) }
 
 // RollbackForTest — снятие транзакции чтения так, как его делает адаптер.
 //

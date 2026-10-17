@@ -180,11 +180,9 @@ ground(kind, subject, detail, scope_type, scope_id) AS (
      WHERE b.status = 'ACTIVE'
        AND (b.expires_at IS NULL OR b.expires_at > now())
        AND b.revoked_at IS NULL
-       AND (
-             rs.arm = 'anchor'
-          OR (rs.arm = 'names'  AND $2::text = ANY (rs.resource_names))
-          OR (rs.arm = 'labels' AND m.labels IS NOT NULL AND m.labels @> rs.match_labels)
-       )
+       -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
+       -- вопроса (grantArmPredicate, grantarm.go).
+       AND ({{arm_predicate}})
 )
 SELECT g.kind, g.subject, g.detail, g.scope_type, g.scope_id FROM ground g
 UNION
@@ -201,10 +199,15 @@ SELECT 'group'::text,
 // запроса появляется второй читатель — гейт словарей. Гейт, собирающий запрос
 // сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
 // ровно потому, что он подставляет свой.
-func expandQuerySQL(labelTable string) string {
-	sql := strings.Replace(expandSQL, labelsJoinMark,
+func expandQuerySQL(labelTable string) (string, error) {
+	sql, err := replaceOnce(expandSQL, armPredicateMark,
+		grantArmPredicate("$7::text", "$2::text", "m.labels"))
+	if err != nil {
+		return "", err
+	}
+	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$7", "$2"), 1)
-	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("g.subject"), 1)
+	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("g.subject"), 1), nil
 }
 
 // Expand перечисляет основания права на объекте.
@@ -230,7 +233,11 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.Query(ctx, expandQuerySQL(labelTable), objectType, objectID, MaxAncestorDepth,
+	sql, err := expandQuerySQL(labelTable)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, sql, objectType, objectID, MaxAncestorDepth,
 		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)
