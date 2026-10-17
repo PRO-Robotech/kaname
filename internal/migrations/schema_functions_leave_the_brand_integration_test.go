@@ -76,14 +76,18 @@ type schemaFunctionTransition struct {
 }
 
 // schemaFunctionTransitions — пять собственных функций службы. Числа зависимых
-// сняты с графа свода: десять ограничений CHECK на проверке меток;
+// сняты с графа свода: десять ограничений CHECK на проверке меток и
+// одиннадцатое — метки контейнера вложенного селектора
+// (`role_rule_selectors_container_labels_valid`, kaname#874, миграция
+// 20261017140000), заведённое ПОСЛЕ переименования и стоящее здесь как
+// зависимый объявленного имени;
 // триггеры списания у аккаунтов, у двух таблиц клиентов и у таблицы ключей
 // доступа (Ф7, kacho#1273 — четвёртый зависимый заведён ПОСЛЕ переименования,
 // своей миграцией, и стоит здесь как зависимый объявленного имени); жизненный
 // цикл носителя у людей и служебных учёток; отложенный триггер темпа у
 // аккаунтов; отказ темпа зовётся из тела счётчика, а не объектом.
 var schemaFunctionTransitions = []schemaFunctionTransition{
-	{previous: "kacho_labels_valid", declared: "labels_valid", signature: "(jsonb)", dependents: 10},
+	{previous: "kacho_labels_valid", declared: "labels_valid", signature: "(jsonb)", dependents: 11},
 	{previous: "kacho_quota_count", declared: "quota_count", signature: "()", dependents: 4},
 	{previous: "kacho_quota_carrier_lifecycle", declared: "quota_carrier_lifecycle", signature: "()", dependents: 2},
 	{previous: "kacho_admission_rate_count", declared: "admission_rate_count", signature: "()", dependents: 1},
