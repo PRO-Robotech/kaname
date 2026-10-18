@@ -130,11 +130,13 @@ func absSeed(t *testing.T, db *sql.DB, tag string) absBinding {
 	return absBinding{id: "acb" + strings.Repeat("0", 17-len(tag)) + tag, person: person}
 }
 
-// absInsertBinding — оператор вставки выдачи на исполнителе `ex`.
-func absInsertBinding(ctx context.Context, ex interface {
+// absExecer — исполнитель оператора: база либо открытая транзакция.
+type absExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, b absBinding,
-) error {
+}
+
+// absInsertBinding — оператор вставки выдачи на исполнителе `ex`.
+func absInsertBinding(ctx context.Context, ex absExecer, b absBinding) error {
 	_, err := ex.ExecContext(ctx, `INSERT INTO kaname.access_bindings
 	    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 	  SELECT $1, 'user', u.id, 'rol' || substr(md5('owner'), 1, 17), 'account', u.account_id, 'ACTIVE'
@@ -143,10 +145,7 @@ func absInsertBinding(ctx context.Context, ex interface {
 }
 
 // absInsertSubject — строка набора выдачи.
-func absInsertSubject(ctx context.Context, ex interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, binding, person string, ordinal int,
-) error {
+func absInsertSubject(ctx context.Context, ex absExecer, binding, person string, ordinal int) error {
 	_, err := ex.ExecContext(ctx, `INSERT INTO kaname.access_binding_subjects
 	    (binding_id, subject_type, subject_id, ordinal) VALUES ($1, 'user', $2, $3)`, binding, person, ordinal)
 	return err
