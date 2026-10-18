@@ -12,22 +12,32 @@
 // выдач решения о доступе и материализатор — расходились: первая давала
 // отказ, второй читал `null` как всю область либо ломался на загрузке.
 //
-// Пробы две, и порядок в каждой несущий:
+// Пробы три, и порядок в каждой несущий:
 //
 //  1. ГОЛОВА КАТАЛОГА отвергает форму вне контракта — вставкой и обновлением,
 //     по имени ограничения, SQLSTATE 23514; законный близнец той же строки
 //     проходит. До испытуемого проба красная: база форму пропускает.
-//  2. ИСПЫТУЕМЫЙ накатывается на базу с живыми строками без отказа: строки
+//  2. ЗАВЕДЕНИЕ И ПРОВЕРКА РАЗНЕСЕНЫ по двум миграциям: заведение — `NOT
+//     VALID`, проверка лежащих строк — отдельным файлом `VALIDATE CONSTRAINT`
+//     без заведения. goose ведёт каждую миграцию своей транзакцией, поэтому
+//     проход по таблице идёт под `SHARE UPDATE EXCLUSIVE`, а не под
+//     исключительным замком заведения (находка ревью DB-863-2).
+//  3. ИСПЫТУЕМЫЕ накатываются на базу с живыми строками без отказа: строки
 //     посева цепи и строки каждой законной формы. Перепись нарушителей на
-//     версии до испытуемого — ноль, и это печатается числом. Близнец — база с
-//     одной строкой вне формы: накат отказывает тем же ограничением, то есть
-//     ограничение судит лежащие строки, а не только будущие. Откат снимает
-//     ограничение, повторный накат проходит.
+//     версии до испытуемого — ноль, и это печатается числом. Накат проверки
+//     держит на таблице `SHARE UPDATE EXCLUSIVE` и не держит исключительного
+//     замка — это читается из `pg_locks` транзакции наката. Близнец — база с
+//     одной строкой вне формы: заведение ложится, а накат проверки отказывает
+//     тем же ограничением, то есть ограничение судит лежащие строки, а не
+//     только будущие. Откат проверки возвращает непроверенное ограничение,
+//     откат заведения снимает его, повторный накат проходит.
 //
-// # Испытуемый ищется по содержанию
+// # Испытуемые ищутся по содержанию
 //
-// Первая по возрастанию версий миграция, чей накат называет ограничение
-// `access_bindings_target_form_ck`; «версия до» — старшая ниже него.
+// Заведение — первая по возрастанию версий миграция, чей накат называет
+// ограничение `access_bindings_target_form_ck`; «версия до» — старшая ниже
+// него. Проверка — первая миграция, чей накат несёт `VALIDATE CONSTRAINT
+// access_bindings_target_form_ck`.
 package migrations_test
 
 import (
@@ -63,11 +73,20 @@ var atfLegal = []string{
 	`{"resources": [{"type": "vpc.network", "id": "enp863"}]}`,
 }
 
-// atfCatalog — каталог миграций, испытуемый и голова.
+// atfValidate — оператор проверки лежащих строк, дословно.
+const atfValidate = "VALIDATE CONSTRAINT " + atfConstraint
+
+// atfCatalog — каталог миграций, испытуемые и голова.
 type atfCatalog struct {
 	versions []int64
 	subject  int64
 	file     string
+	// subjectUp — исполняемая часть наката заведения.
+	subjectUp string
+	// validator — миграция проверки лежащих строк; 0 — её нет.
+	validator     int64
+	validatorFile string
+	validatorUp   string
 }
 
 func (c atfCatalog) head() int64 {
@@ -107,9 +126,13 @@ func atfReadCatalog(t *testing.T) atfCatalog {
 		c.versions = append(c.versions, v)
 		body, err := fs.ReadFile(migrations.FS, name)
 		require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): тело миграции %s", name)
-		if strings.Contains(migrations.MigrationUpSection(string(body)), atfConstraint) &&
-			(c.subject == 0 || v < c.subject) {
-			c.subject, c.file = v, name
+		up := migrations.MigrationUpSection(string(body))
+		if strings.Contains(up, atfConstraint) && (c.subject == 0 || v < c.subject) {
+			c.subject, c.file, c.subjectUp = v, name, up
+		}
+		if strings.Contains(strings.Join(strings.Fields(up), " "), atfValidate) &&
+			(c.validator == 0 || v < c.validator) {
+			c.validator, c.validatorFile, c.validatorUp = v, name, up
 		}
 	}
 	require.NotEmpty(t, c.versions, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): каталог миграций пуст — судить нечего")
@@ -198,18 +221,78 @@ func TestAccessBindingTargetForm_HeadRefusesTheFormOutsideTheContract(t *testing
 	require.NoError(t, err, "обновление в законную форму проходит")
 }
 
-// TestAccessBindingTargetForm_MigrationAppliesOnLiveRows — испытуемый
-// накатывается на базу с живыми строками; нарушителей до наката ноль; близнец
-// со строкой вне формы отвергается накатом; откат и повторный накат проходят.
+// atfRequireSplit — заведение и проверка разнесены: заведение несёт `NOT
+// VALID` и проверки не несёт, проверка — отдельный файл позже заведения и
+// ограничения не заводит.
+func atfRequireSplit(t *testing.T, c atfCatalog) {
+	t.Helper()
+	if c.subject == 0 {
+		t.Fatalf("ИСПЫТУЕМОГО НЕТ: в каталоге из %d миграций (голова %d) нет миграции, чей накат называет %s",
+			len(c.versions), c.head(), atfConstraint)
+	}
+	if c.validator == 0 {
+		t.Fatalf("ПРОВЕРКИ НЕТ: в каталоге из %d миграций нет наката с %q — проход по таблице "+
+			"идёт в транзакции заведения под исключительным замком (%s)", len(c.versions), atfValidate, c.file)
+	}
+	require.NotEqual(t, c.file, c.validatorFile, "проверка — отдельный файл, а не та же транзакция, что заведение")
+	require.Greater(t, c.validator, c.subject, "проверка накатывается после заведения")
+	require.Contains(t, strings.Join(strings.Fields(c.subjectUp), " "), "NOT VALID",
+		"заведение %s ложится без прохода по таблице — NOT VALID", c.file)
+	require.NotContains(t, c.validatorUp, "ADD CONSTRAINT",
+		"проверка %s ограничения не заводит — только проверяет лежащие строки", c.validatorFile)
+}
+
+// atfLockModes — замки, которые держит на `access_bindings` транзакция,
+// исполнившая up; транзакция откатывается.
+func atfLockModes(t *testing.T, db *sql.DB, up string) []string {
+	t.Helper()
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.Exec(up)
+	require.NoError(t, err, "накат исполняется в транзакции пробы")
+	rows, err := tx.Query(`SELECT mode FROM pg_locks
+	  WHERE locktype = 'relation' AND relation = 'kaname.access_bindings'::regclass
+	    AND pid = pg_backend_pid() AND granted ORDER BY mode`)
+	require.NoError(t, err)
+	defer rows.Close()
+	var modes []string
+	for rows.Next() {
+		var m string
+		require.NoError(t, rows.Scan(&m))
+		modes = append(modes, m)
+	}
+	require.NoError(t, rows.Err())
+	return modes
+}
+
+// atfValidated — проверено ли ограничение формы (`pg_constraint.convalidated`).
+func atfValidated(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	var ok bool
+	require.NoError(t, db.QueryRow(`SELECT convalidated FROM pg_constraint
+	  WHERE conrelid = 'kaname.access_bindings'::regclass AND conname = $1`, atfConstraint).Scan(&ok))
+	return ok
+}
+
+// TestAccessBindingTargetForm_ValidationIsSplitFromTheAddition — заведение
+// ограничения и проверка лежащих строк разнесены по двум миграциям.
+func TestAccessBindingTargetForm_ValidationIsSplitFromTheAddition(t *testing.T) {
+	c := atfReadCatalog(t)
+	atfRequireSplit(t, c)
+	t.Logf("заведение %s, проверка %s", c.file, c.validatorFile)
+}
+
+// TestAccessBindingTargetForm_MigrationAppliesOnLiveRows — испытуемые
+// накатываются на базу с живыми строками; нарушителей до наката ноль; проверка
+// держит SHARE UPDATE EXCLUSIVE, а не исключительный замок; близнец со строкой
+// вне формы отвергается накатом проверки; откат и повторный накат проходят.
 func TestAccessBindingTargetForm_MigrationAppliesOnLiveRows(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	c := atfReadCatalog(t)
-	if c.subject == 0 {
-		t.Fatalf("ИСПЫТУЕМОГО НЕТ: в каталоге из %d миграций (голова %d) нет миграции, чей накат называет %s",
-			len(c.versions), c.head(), atfConstraint)
-	}
+	atfRequireSplit(t, c)
 
 	db := serOpenAt(t, c.preceding())
 	role := atfRole(t, db)
@@ -222,19 +305,37 @@ func TestAccessBindingTargetForm_MigrationAppliesOnLiveRows(t *testing.T) {
 	require.Zero(t, outside, "Дано: нарушителей до наката ноль — обратного заполнения не требуется")
 
 	require.NoError(t, goose.UpTo(db, ".", c.subject), "накат %s на живые строки", c.file)
+	require.False(t, atfValidated(t, db), "после заведения ограничение не проверено — NOT VALID")
+	require.Error(t, atfInsert(t, db, role, 150, `{"resources": null}`),
+		"непроверенное ограничение уже судит новые строки")
+
+	// Замок проверки: проход по таблице — под SHARE UPDATE EXCLUSIVE, без
+	// исключительного замка; чтение и запись выдач при этом идут.
+	modes := atfLockModes(t, db, c.validatorUp)
+	t.Logf("замки наката %s на access_bindings: %v", c.validatorFile, modes)
+	require.Contains(t, modes, "ShareUpdateExclusiveLock", "проверка берёт SHARE UPDATE EXCLUSIVE")
+	require.NotContains(t, modes, "AccessExclusiveLock", "проверка не берёт исключительного замка")
+
+	require.NoError(t, goose.UpTo(db, ".", c.validator), "накат %s на живые строки", c.validatorFile)
+	require.True(t, atfValidated(t, db), "после проверки ограничение проверено")
 	after, _ := atfViolators(t, db)
 	require.Equal(t, total, after, "накат не трогает ни одной строки")
 
+	require.NoError(t, goose.DownTo(db, ".", c.subject), "откат %s", c.validatorFile)
+	require.False(t, atfValidated(t, db), "откат проверки возвращает непроверенное ограничение")
 	require.NoError(t, goose.DownTo(db, ".", c.preceding()), "откат %s", c.file)
 	require.NoError(t, atfInsert(t, db, role, 200, `{"resources": null}`), "после отката ограничения нет")
 	_, err := db.Exec(`DELETE FROM kaname.access_bindings WHERE id = 'acbatf8830'`)
 	require.NoError(t, err)
-	require.NoError(t, goose.UpTo(db, ".", c.subject), "повторный накат")
+	require.NoError(t, goose.UpTo(db, ".", c.validator), "повторный накат")
+	require.True(t, atfValidated(t, db), "повторный накат проверяет ограничение")
 
-	// Близнец: та же цепь, одна строка вне формы — накат отказывает.
+	// Близнец: та же цепь, одна строка вне формы — заведение ложится, накат
+	// проверки отказывает.
 	twin := serOpenAt(t, c.preceding())
 	require.NoError(t, atfInsert(t, twin, atfRole(t, twin), 300, `{"resources": null}`))
-	err = goose.UpTo(twin, ".", c.subject)
-	require.Error(t, err, "близнец: строка вне формы останавливает накат")
+	require.NoError(t, goose.UpTo(twin, ".", c.subject), "близнец: заведение NOT VALID лежащих строк не читает")
+	err = goose.UpTo(twin, ".", c.validator)
+	require.Error(t, err, "близнец: строка вне формы останавливает накат проверки")
 	require.Contains(t, err.Error(), atfConstraint, "близнец: отказ называет ограничение формы")
 }
