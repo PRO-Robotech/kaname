@@ -139,7 +139,12 @@ func CheckNamedVerbs(facts VerbFacts, m *manifest.Manifest, actions []Action) ([
 	for i := range m.Roles {
 		role := &m.Roles[i]
 		census.Roles++
+		// Вложенные правила (kaname#874) — с модулем владельца, той же меркой.
+		var all []manifest.Rule
 		for _, rule := range role.Rules {
+			all = append(all, withChildren(rule)...)
+		}
+		for _, rule := range all {
 			census.Rules++
 			named, isNamed := rule.Right()
 			if !isNamed {
@@ -241,9 +246,19 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 		rules := make([]domain.Rule, 0, len(role.Rules))
 		roleFaults := 0
 		for _, rule := range role.Rules {
+			// Вложенные правила (kaname#874) сводятся тем же судьёй полноты, что и
+			// правило верхнего уровня: модуль — владельца, ресурсы — свои.
+			children, childFaults := reduceChildren(facts, m, role.ID, rule, byResource, &census)
+			if len(childFaults) > 0 {
+				roleFaults += len(childFaults)
+				faults = append(faults, childFaults...)
+				continue
+			}
 			named, isNamed := rule.Right()
 			if !isNamed {
-				rules = append(rules, rule.DomainRule())
+				dr := rule.DomainRule()
+				dr.Children = children
+				rules = append(rules, dr)
 				continue
 			}
 			census.Named++
@@ -265,6 +280,7 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 			census.Reduced++
 			reduced := rule.DomainRule()
 			reduced.Verbs = classes
+			reduced.Children = children
 			rules = append(rules, reduced)
 		}
 		if roleFaults > 0 {
@@ -277,6 +293,46 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 		out[role.ID] = rules
 	}
 	return out, faults, census
+}
+
+// reduceChildren — вложенные правила правила-владельца в форме домена; поимённое
+// право вложенного сводится к классу так же, как у верхнего уровня, и неполный
+// перечень — находка (роль не производится целиком). nil — ключа нет.
+func reduceChildren(facts VerbFacts, m *manifest.Manifest, roleID string, owner manifest.Rule,
+	byResource map[string][]Action, census *ExportCensus) ([]domain.Rule, []error) {
+	if owner.Children == nil {
+		return nil, nil
+	}
+	out := make([]domain.Rule, 0, len(owner.Children))
+	var faults []error
+	for _, child := range owner.Children {
+		named, isNamed := child.Right()
+		dr := child.DomainRule()
+		if !isNamed {
+			out = append(out, dr)
+			continue
+		}
+		census.Named++
+		synth := manifest.Rule{Module: owner.Module, Resources: child.Resources, Verbs: child.Verbs}
+		classes, missing := reduceNamed(facts, m, synth, named, byResource)
+		if len(missing) > 0 {
+			census.Findings++
+			faults = append(faults, Finding{
+				Kind:     ErrNamedVerbsIncompleteForClass,
+				Role:     roleID,
+				Module:   owner.Module,
+				Resource: strings.Join(child.Resources, ", "),
+				Class:    strings.Join(classes, ", "),
+				Detail: incompleteDetail(roleID, owner.Module, child.Resources,
+					named, classes, missing),
+			})
+			continue
+		}
+		census.Reduced++
+		dr.Verbs = classes
+		out = append(out, dr)
+	}
+	return out, faults
 }
 
 // reduceNamed — классы, к которым сводится поимённый перечень, и НЕДОСТАЮЩИЕ

@@ -72,7 +72,8 @@ const CatalogLockKey = "kaname.module_catalog"
 // # Состав ВЫВЕДЕН из `WHERE` писателя, а не выбран
 //
 //	`catalog_module`    `live` — оживление модуля есть изменение
-//	`catalog_resource`  `resource`, `object_type`, `live` — ровно то, что читает
+//	`catalog_resource`  `resource`, `object_type`, `parent_types`,
+//	                    `public_read_to_children`, `live` — ровно то, что читает
 //	                    условие изменения `UpsertResource`, плюс ключ снятия
 //	`catalog_verb`      `resource`, `verb`, `per_object`, `live` — ровно условие
 //	                    изменения `UpsertVerb`, плюс ключ снятия
@@ -106,7 +107,8 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 	    SELECT 'm:' || module || ':' || live::text
 	      FROM kaname.catalog_module WHERE module = $1
 	    UNION ALL
-	    SELECT 'r:' || resource || ':' || object_type || ':' || live::text
+	    SELECT 'r:' || resource || ':' || object_type || ':' || array_to_string(parent_types, ',')
+	           || ':' || public_read_to_children::text || ':' || live::text
 	      FROM kaname.catalog_resource WHERE module = $1
 	    UNION ALL
 	    SELECT 'v:' || resource || '.' || verb || ':' || live::text || ':' || per_object::text
@@ -212,7 +214,8 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 
 	resRows, err := w.tx.Query(ctx,
-		`SELECT module, resource, object_type FROM kaname.catalog_resource
+		`SELECT module, resource, object_type, parent_types, public_read_to_children
+		   FROM kaname.catalog_resource
 		  WHERE module = $1 AND live
 		  ORDER BY resource`, module)
 	if err != nil {
@@ -220,7 +223,7 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 	out.Resources, err = pgx.CollectRows(resRows, func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
 		var r catalog.ResourceRow
-		return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType)
+		return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.PublicReadToChildren)
 	})
 	if err != nil {
 		return out, fmt.Errorf("прочитать ресурсы модуля %s: %w", module, err)
@@ -305,16 +308,30 @@ func (w catalogWriter) UpsertModule(ctx context.Context, module string) (bool, e
 // (какое отношение `v_*` адресует ресурс). Правка манифеста, меняющая
 // `objectType`, обязана доезжать до строки; иначе она была бы принята и
 // проигнорирована.
+//
+// Указатели и признак контейнера публичного чтения (kaname#856) входят в
+// условие по той же причине: снятый с манифеста ключ, не доехавший до строки,
+// оставил бы контейнер открытым для новых выдач классу.
 func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow) (bool, error) {
+	parents := r.ParentTypes
+	if parents == nil {
+		// Пустой перечень, а не NULL: колонка NOT NULL, и «указателей нет»
+		// выражается в ней одним способом.
+		parents = []string{}
+	}
 	return w.changed(ctx, `
-		INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type)
-		VALUES ($1, $2, $1 || '.' || $2, $3)
+		INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types, public_read_to_children)
+		VALUES ($1, $2, $1 || '.' || $2, $3, $4, $5)
 		ON CONFLICT (module, resource) DO UPDATE
 		   SET retired_at = NULL, live = true, retired_reason = NULL, superseded_by = NULL,
-		       object_type = EXCLUDED.object_type
+		       object_type = EXCLUDED.object_type,
+		       parent_types = EXCLUDED.parent_types,
+		       public_read_to_children = EXCLUDED.public_read_to_children
 		 WHERE catalog_resource.live IS DISTINCT FROM true
 		    OR catalog_resource.object_type IS DISTINCT FROM EXCLUDED.object_type
-		RETURNING 1`, r.Module, r.Resource, r.ObjectType)
+		    OR catalog_resource.parent_types IS DISTINCT FROM EXCLUDED.parent_types
+		    OR catalog_resource.public_read_to_children IS DISTINCT FROM EXCLUDED.public_read_to_children
+		RETURNING 1`, r.Module, r.Resource, r.ObjectType, parents, r.PublicReadToChildren)
 }
 
 // UpsertVerb заводит, оживляет либо приводит признак словаря.
@@ -592,6 +609,10 @@ var (
 // ли её основной запрос. Свойство держит проба на живой базе
 // (`selector_pruning_leaves_a_ledger_integration_test.go`), а не эта строка.
 //
+// Причина у вырезанного живого типа — причина снятия КОНТЕЙНЕРА (kaname#874):
+// живой элемент вырезается только вместе со строкой вложенного селектора, чей
+// контейнер снят, и своей причины у него нет.
+//
 // Четвёртой величины наружу оператор не отдаёт НАМЕРЕННО: перепись применения
 // уже несёт число вырезанных элементов, а число записанных строк от него
 // отличается лишь на повторы, которых у необратимого вырезания не бывает.
@@ -638,11 +659,13 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		), recorded AS (
 		  INSERT INTO kaname.role_selector_prune
 		         (role_id, rule_fp, object_type, outcome, retired_reason, applied_by)
-		  SELECT k.role_id, k.rule_fp, t, k.outcome, cr.retired_reason, $6
+		  SELECT k.role_id, k.rule_fp, t, k.outcome,
+		         CASE WHEN coalesce(cr.live, false) THEN cc.retired_reason ELSE cr.retired_reason END, $6
 		    FROM cut k
 		    JOIN changed c ON c.role_id = k.role_id AND c.rule_fp = k.rule_fp
 		    CROSS JOIN LATERAL unnest(c.was) AS t
 		    LEFT JOIN kaname.catalog_resource cr ON cr.dotted = t
+		    LEFT JOIN kaname.catalog_resource cc ON cc.dotted = c.container
 		   WHERE NOT (t = ANY (c.alive))
 		  ON CONFLICT (role_id, rule_fp, object_type) DO NOTHING
 		  RETURNING 1

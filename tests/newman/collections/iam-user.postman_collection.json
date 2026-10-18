@@ -4801,7 +4801,7 @@
       ]
     },
     {
-      "name": "IAM-USR-DL-NEG-ACTIVE-BINDINGS — Delete a user that holds active AccessBindings and owns no account → Operation.error FAILED_PRECONDITION (9) 'has active access bindings and cannot be deleted'",
+      "name": "IAM-USR-DL-NEG-ACTIVE-BINDINGS — Delete a user that holds active AccessBindings and owns no account → Operation.error FAILED_PRECONDITION (9) 'has active access bindings and cannot be deleted', the refusal names the binding, its scope and the step",
       "description": "class:NEG | priority:P1",
       "item": [
         {
@@ -5775,7 +5775,7 @@
                   "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const opMsg = (j.error && j.error.message) || '';",
-                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('boundUserId') + ' has active access bindings and cannot be deleted');",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('boundUserId') + ' has active access bindings and cannot be deleted: AccessBinding ' + pm.environment.get('boundUserBindingId') + ' on account ' + pm.environment.get('accountAId') + ' is revoked by an administrator of that account (active bindings: 1)');",
                   "});"
                 ]
               }
@@ -6465,7 +6465,7 @@
       ]
     },
     {
-      "name": "IAM-USR-DL-NEG-OWNS-ACCOUNTS — Delete a user that still owns an account → Operation.error FAILED_PRECONDITION (9) 'owns accounts and cannot be deleted' (ownership is checked before bindings)",
+      "name": "IAM-USR-DL-NEG-OWNS-ACCOUNTS — Delete a user that still owns an account → Operation.error FAILED_PRECONDITION (9) 'owns accounts and cannot be deleted' (ownership is checked before bindings), the refusal names the account to delete first",
       "description": "class:NEG | priority:P1",
       "item": [
         {
@@ -6662,7 +6662,7 @@
                   "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const opMsg = (j.error && j.error.message) || '';",
-                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('ceremonyUserId') + ' owns accounts and cannot be deleted');",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('ceremonyUserId') + ' owns accounts and cannot be deleted: delete Account ' + pm.environment.get('ceremonyAccountId') + ' first (accounts owned: 1)');",
                   "});"
                 ]
               }
@@ -7202,7 +7202,7 @@
                   "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const opMsg = (j.error && j.error.message) || '';",
-                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('kn664LAccId') + ' contains projects and cannot be deleted');",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('kn664LAccId') + ' contains projects and cannot be deleted: delete Project ' + pm.environment.get('kn664LPrjId') + ' first (projects: 1)');",
                   "});"
                 ]
               }
@@ -8691,7 +8691,7 @@
                   "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const opMsg = (j.error && j.error.message) || '';",
-                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('humanKn664LeaveUserId') + ' has active access bindings and cannot be deleted');",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('humanKn664LeaveUserId') + ' has active access bindings and cannot be deleted: AccessBinding ' + pm.environment.get('kn664LBindingId') + ' on account ' + pm.environment.get('accountAId') + ' is revoked by an administrator of that account (active bindings: 1)');",
                   "});"
                 ]
               }
@@ -10386,7 +10386,7 @@
                   "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  const opMsg = (j.error && j.error.message) || '';",
-                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('kn664CAccId') + ' contains projects and cannot be deleted');",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('kn664CAccId') + ' contains projects and cannot be deleted: delete Project ' + pm.environment.get('kn664CPrjId') + ' first (projects: 1)');",
                   "});"
                 ]
               }

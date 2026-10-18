@@ -56,6 +56,7 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 			Verbs:         rl.Verbs,
 			ResourceNames: rl.ResourceNames,
 			MatchLabels:   rl.MatchLabels,
+			Children:      childRulesToPb(rl.Children),
 		})
 	}
 	return &iamv1.Role{
@@ -260,6 +261,27 @@ func ruleStatesToPb(in []domain.RuleState) []*iamv1.RuleState {
 			Segments:          safeconv.ClampNonNegInt32(int64(s.Segments)),
 			LostSegments:      safeconv.ClampNonNegInt32(int64(s.Lost)),
 			ExplainedSegments: safeconv.ClampNonNegInt32(int64(s.Explained)),
+			// Состояния вложенных правил (kaname#874); у вложенного своих нет.
+			Children: ruleStatesToPb(s.Children),
+		})
+	}
+	return out
+}
+
+// childRulesToPb — вложенные правила роли на чтении (kaname#874, Р4). Модуль
+// вложенного пуст — он берётся у правила-владельца, и ответ говорит это же,
+// что хранит роль; своих вложенных у вложенного нет (форма плоская).
+func childRulesToPb(in []domain.Rule) []*iamv1.Rule {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*iamv1.Rule, 0, len(in))
+	for _, c := range in {
+		out = append(out, &iamv1.Rule{
+			Resources:     c.Resources,
+			Verbs:         c.Verbs,
+			ResourceNames: c.ResourceNames,
+			MatchLabels:   c.MatchLabels,
 		})
 	}
 	return out

@@ -87,20 +87,17 @@ func HasSystemClass(subjects []Subject) bool {
 //   - `system_class:anonymous` — вызывающий без личности: классов сверх себя у
 //     него нет. Обратного вывода нет никогда: у анонима нет `authenticated`
 //     (SC-10);
-//   - подстановка `user:*` — ПЕРЕХОДНОЕ отображение: так сегодня спрашивает
-//     плоскость данных реестра о вызывающем без личности, и до перевода её на
-//     класс этот вопрос значит «аноним» (разбор CE-03 (в), CE-10 (а)).
-//     Снимается тем же изменением, что вводит отказ SC-15;
-//   - группа (`group:<id>`, `group:<id>#member`) и всё прочее — ничего: группа
-//     говорящим-личностью не является (SC-11).
+//   - группа (`group:<id>`, `group:<id>#member`), подстановка любого вида
+//     (`user:*`, SC-15) и всё прочее — ничего: группа говорящим-личностью не
+//     является (SC-11), подстановка говорящим не бывает вовсе. Вопрос о
+//     вызывающем без личности задаётся классом `system_class:anonymous`, а не
+//     подстановкой: плоскость данных реестра kacho переведена на класс
+//     (SC-39), и переходного отображения подстановки в аноним нет.
 //
 // Безымянность — значение входа (`system_class:anonymous`), а не вывод из
 // формы строки: пустой и нераспознанный говорящий отвергаются раньше, разбором
 // [SpeakerRefusal].
 func SpeakerClasses(speaker string) []string {
-	if speaker == wildcardUserSpeaker {
-		return []string{SpeakerAnonymous}
-	}
 	kind, id, ok := strings.Cut(speaker, ":")
 	if !ok || id == "" || strings.ContainsAny(id, "#*") {
 		return []string{}
@@ -113,10 +110,6 @@ func SpeakerClasses(speaker string) []string {
 	}
 }
 
-// wildcardUserSpeaker — подстановка, которой спрашивает плоскость данных
-// реестра о вызывающем без личности (переход, см. [SpeakerClasses]).
-const wildcardUserSpeaker = "user:*"
-
 // SpeakerRefusal — отказ говорящему, который говорящим не бывает (Р3).
 //
 // Один разборщик на все методы, принимающие говорящего (`Check`, `BatchCheck`,
@@ -126,8 +119,8 @@ const wildcardUserSpeaker = "user:*"
 //   - `system_class:authenticated` — «вошедший» без названной личности есть
 //     противоречие (SC-14); любое имя класса, кроме `anonymous`, — тем же
 //     отказом;
-//   - подстановка любого вида, кроме переходной `user:*` (см.
-//     [SpeakerClasses]), — не говорящий (SC-15).
+//   - подстановка любого вида, `user:*` в том числе, — не говорящий (SC-15):
+//     она называет множество, а не того, кто спрашивает.
 //
 // nil — говорящий допустим.
 func SpeakerRefusal(speaker string) error {
@@ -141,7 +134,7 @@ func SpeakerRefusal(speaker string) error {
 		}
 		return fmt.Errorf("Illegal argument subject: system class %s is not a speaker", id)
 	}
-	if id == "*" && speaker != wildcardUserSpeaker {
+	if id == "*" {
 		return fmt.Errorf("Illegal argument subject: wildcard is not a speaker")
 	}
 	return nil
@@ -181,7 +174,9 @@ func IsStoredPublication(subject, relation string) bool {
 // ради синхронного отказа до заведения операции.
 func (r Role) GrantsReadsOnly() bool {
 	if len(r.Rules) > 0 {
-		for _, rule := range r.Rules {
+		// Вложенные правила читаются наравне с верхним уровнем (kaname#874, M1):
+		// пишущий глагол во вложенном — пишущий глагол роли.
+		for _, rule := range withEffectiveChildren(r.Rules) {
 			for _, v := range rule.Verbs {
 				if !IsClassReadVerb(v) {
 					return false

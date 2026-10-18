@@ -83,8 +83,8 @@ type Row struct {
 // negInfinity — the sentinel a zero/legacy SourceVersion maps to ('-infinity'),
 // so an older producer's empty version still applies (back-compat with a
 // producer that emits no version).
-// StmtVersionOnlyBump и StmtInsertOrSupersede — ДВА оператора зеркала,
-// объявленные ОДИН раз.
+// StmtLockMirrorRow, StmtVersionOnlyBump и StmtInsertOrSupersede — ТРИ оператора
+// зеркала, объявленные ОДИН раз.
 //
 // # Почему экспортируются
 //
@@ -101,17 +101,61 @@ type Row struct {
 //
 // # Порядок параметров — часть объявления
 //
-// Оба оператора принимают $1..$6 в одном и том же порядке: тип объекта,
+// Операторы принимают параметры в одном и том же порядке: тип объекта,
 // идентификатор, проект-родитель, аккаунт-родитель, метки (jsonb), версия
-// источника. Вызывающий передаёт их так же — иначе оператор один, а смысл
-// разный.
+// источника; замок — первые два из них, сдвиг версии — ещё цепь седьмым.
+// Вызывающий передаёт их так же — иначе оператор один, а смысл разный.
 const (
+	// StmtLockMirrorRow — ЗАМОК строки зеркала ДО сверки полосы сдвига версии
+	// (kaname#874, находка ревью круга 1).
+	//
+	// Полоса сдвига версии сверяет цепь предков подзапросом по ЧУЖОЙ таблице
+	// (`resource_parent_edge`). В READ COMMITTED после ожидания замка строки
+	// Postgres перепроверяет условие только по колонкам самой обновляемой строки,
+	// а подзапрос остаётся на снимке, взятом до ожидания. Старшая доставка с цепью
+	// B держит строку, новейшая с цепью A ждёт её, сверяет A с рёбрами СТАРОГО
+	// снимка (A), видит совпадение и сдвигает одну версию: версия новейшая, рёбра
+	// старшей доставки, объект под чужим контейнером.
+	//
+	// Отдельный оператор — потому что снимок берётся на ОПЕРАТОР: дождавшись
+	// замка здесь, следующий оператор (сверка) берёт новый снимок, в котором
+	// зафиксированная старшая доставка уже видна целиком — и строка, и её рёбра.
+	// Сила замка — та же, что берёт сам сдвиг версии (`FOR NO KEY UPDATE`):
+	// новой конкуренции он не вводит, он лишь переносит ожидание ДО сверки.
+	// Строки нет — замка нет, и это законно: вставку сериализует первичный ключ
+	// в полосе (2), а рёбра пишутся ПОСЛЕ неё отдельными операторами.
+	//
+	// Цена — одно обращение к базе на регистрацию; держать цепь второй колонкой
+	// строки зеркала значило бы завести второе место одного факта (рёбра уже его
+	// держат) и миграцию ради копии.
+	StmtLockMirrorRow = `SELECT 1 FROM kaname.resource_mirror
+		  WHERE object_type = $1 AND object_id = $2
+		    FOR NO KEY UPDATE`
+
 	// StmtVersionOnlyBump — полоса СДВИГА ВЕРСИИ: строка уже лежит, входящая
 	// версия строго новее, и ничего из читаемого отбором не изменилось.
 	//
 	// УСЛОВИЕ ПРИЁМА СТОИТ И ЗДЕСЬ: полоса срабатывает на существующей строке и
 	// вставки не делает, поэтому без своего EXISTS она давала бы обход — тип снят
 	// с платформы, а регистрация им проходит только потому, что строка уже лежит.
+	//
+	// ЦЕПЬ ПРЕДКОВ — ТОЖЕ ЧАСТЬ ПРОЕКЦИИ (kaname#874). Её читает вложенное правило
+	// роли: объект охвачен, если среди предков есть выбранный контейнер. Перенос
+	// под другой контейнер ТОГО ЖЕ проекта не меняет ни проекта, ни аккаунта, ни
+	// меток — и без сверки цепи эта полоса сдвигала одну версию, рёбра оставались
+	// прежними, а путь регистрации шёл аддитивно и не снимал права, оставшегося у
+	// прежнего контейнера. $7 — присланная цепь КАК ЕСТЬ (`"<тип>:<id>"`, тип —
+	// в словаре каталога либо модели), в порядке глубины. Перевод в словарь
+	// модели — тем же правилом, каким цепь пишут рёбра (`modelTypeName`: имя с
+	// точкой — строка каталога, без точки — уже модель), но ВНУТРИ оператора:
+	// отдельное обращение за каждым предком стояло бы на каждой регистрации.
+	// Предок, которого каталог не знает, или непонятая форма не совпадают ни с
+	// чем — полоса не срабатывает, и отказ называет полоса вставки, как прежде.
+	// Совпадение — массивом целиком.
+	//
+	// Сверка цепи верна ТОЛЬКО под замком `StmtLockMirrorRow`, взятым ПРЕДЫДУЩИМ
+	// оператором: подзапрос по рёбрам при ожидании замка внутри этого оператора
+	// не перечитывается (шапка `StmtLockMirrorRow`).
 	StmtVersionOnlyBump = `UPDATE kaname.resource_mirror
 		    SET source_version = $6, updated_at = now()
 		  WHERE object_type       = $1
@@ -121,7 +165,22 @@ const (
 		    AND labels            = $5::jsonb
 		    AND source_version    < $6
 		    AND EXISTS (SELECT 1 FROM kaname.catalog_resource cr
-		                 WHERE cr.dotted = $1 AND cr.live)`
+		                 WHERE cr.dotted = $1 AND cr.live)
+		    AND ARRAY(
+		            SELECT coalesce(pc.object_type, split_part(u.ref, ':', 1))
+		                   || ':' || substr(u.ref, strpos(u.ref, ':') + 1)
+		              FROM unnest($7::text[]) WITH ORDINALITY AS u(ref, n)
+		              LEFT JOIN kaname.catalog_resource pc
+		                ON strpos(split_part(u.ref, ':', 1), '.') > 0
+		               AND pc.dotted = split_part(u.ref, ':', 1)
+		             ORDER BY u.n)
+		      = ARRAY(
+		            SELECT pe.parent_type || ':' || pe.parent_id
+		              FROM kaname.catalog_resource co
+		              JOIN kaname.resource_parent_edge pe
+		                ON pe.object_type = co.object_type AND pe.object_id = $2
+		             WHERE co.dotted = $1 AND co.live
+		             ORDER BY pe.depth)`
 
 	// StmtInsertOrSupersede — полоса ВСТАВКИ ПОД УСЛОВИЕМ ПРИЁМА, отвечающая
 	// ТРЕМЯ значениями: принят ли тип, его имя в словаре модели, число
@@ -188,13 +247,23 @@ type Outcome struct {
 // SAME source_version is likewise a no-op (`<` is strict). Equal/newer in-order
 // register applies and advances source_version.
 //
-// TWO STATEMENTS, ONE TRANSACTION, NO CHECK-THEN-ACT. The version-only bump is tried
-// FIRST as a conditional UPDATE whose WHERE also demands that every selector-relevant
-// column already equal the incoming value. Postgres re-evaluates that WHERE after
-// waiting on a concurrent writer's row lock (READ COMMITTED), so the comparison is made
-// against the row as actually committed — not against a snapshot read earlier and acted
-// on later (ban #10). Only when it matches nothing does the ordinary UPSERT run. Both
-// statements are atomic in themselves and commit with the caller's tx.
+// ТРИ ОПЕРАТОРА В ОДНОЙ ТРАНЗАКЦИИ: ЗАМОК, СДВИГ ВЕРСИИ, ВСТАВКА.
+//
+// Сдвиг версии сверяет с хранимым всё, что читает отбор: проект, аккаунт и метки —
+// колонками самой строки, цепь предков — подзапросом по `resource_parent_edge`.
+// Перепроверка условия после ожидания замка (READ COMMITTED) читает ЗАНОВО только
+// колонки самой строки; подзапрос по рёбрам остаётся на снимке, взятом до ожидания.
+// Здесь прежде стояло обратное — что сравнение идёт с тем, что действительно
+// зафиксировано, — и это было неверно для цепи: старшая доставка с цепью B держала
+// строку, новейшая с цепью A сверялась со старыми рёбрами A и сдвигала одну версию
+// (версия новейшая, рёбра — старшей доставки; проба
+// TestParentEdges_ND09_ReorderedDeliveriesLeaveTheNewestChain).
+//
+// Поэтому замок строки берётся ОТДЕЛЬНЫМ оператором ДО сверки (`StmtLockMirrorRow`):
+// снимок берётся на оператор, и сверка, идущая после замка, видит зафиксированную
+// конкурирующую доставку целиком — строку и её рёбра. Сверка и запись остаются
+// одним оператором под замком, то есть чтения-и-действия нет (ban #10). Только
+// когда сдвиг версии не совпал ни с чем, идёт обычная вставка-или-замена.
 //
 // The two cannot be folded into one statement: two data-modifying CTEs over the same
 // table would either see a pre-UPDATE snapshot or touch the same row twice.
@@ -218,6 +287,10 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("resource_mirror: marshal labels: %w", err)
 	}
 	version := versionOr(row.SourceVersion)
+	// (0) ЗАМОК СТРОКИ — до сверки, отдельным оператором (шапка StmtLockMirrorRow).
+	if _, err := tx.Exec(ctx, StmtLockMirrorRow, row.ObjectType, row.ObjectID); err != nil {
+		return Outcome{}, fmt.Errorf("resource_mirror: lock mirror row: %w", err)
+	}
 	// (1) VERSION-ONLY BUMP. Matches exactly when a row already exists, the incoming
 	// version is strictly newer, AND nothing a selector reads has changed. `labels =
 	// $5::jsonb` is jsonb equality — key order and whitespace do not make a projection
@@ -230,7 +303,7 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	// уже лежит. Ноль затронутых строк здесь ничего не скрывает: вердикт о
 	// каталоге выносит оператор (2), и он различает «не принято» и «не новее».
 	tag, err := tx.Exec(ctx, StmtVersionOnlyBump,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, row.ParentChain,
 	)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: bump source version: %w", err)

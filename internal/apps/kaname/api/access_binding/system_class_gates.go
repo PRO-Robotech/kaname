@@ -62,7 +62,14 @@ func (u *CreateAccessBindingUseCase) validateSystemClassGates(ctx context.Contex
 	if err := systemClassTargetGate(b); err != nil {
 		return err
 	}
-	if err := u.systemClassRoleGate(ctx, b); err != nil {
+	role, err := u.systemClassRoleGate(ctx, b)
+	if err != nil {
+		return err
+	}
+	if err := u.systemClassNestedRuleGate(ctx, b, role); err != nil {
+		return err
+	}
+	if err := u.systemClassContainerGate(ctx, b, role); err != nil {
 		return err
 	}
 	return u.systemClassFreshnessGate(ctx)
@@ -100,21 +107,106 @@ func systemClassTargetGate(b domain.AccessBinding) error {
 // (`kaname.access_binding_subject_class_reads_only`) судит правила роли под
 // замком её строки, так что правка роли, прошедшая между этим чтением и
 // вставкой выдачи, мимо не проходит (разбор CE-17).
-func (u *CreateAccessBindingUseCase) systemClassRoleGate(ctx context.Context, b domain.AccessBinding) error {
+func (u *CreateAccessBindingUseCase) systemClassRoleGate(ctx context.Context, b domain.AccessBinding) (domain.Role, error) {
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
-		return shared.MapRepoErr(err)
+		return domain.Role{}, shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 	role, err := rd.Roles().Get(ctx, b.RoleID)
 	if err != nil {
 		if stderrors.Is(err, iamerr.ErrNotFound) {
-			return status.Errorf(codes.FailedPrecondition, "Role %s not found", b.RoleID)
+			return domain.Role{}, status.Errorf(codes.FailedPrecondition, "Role %s not found", b.RoleID)
 		}
-		return shared.MapRepoErr(err)
+		return domain.Role{}, shared.MapRepoErr(err)
 	}
 	if !role.GrantsReadsOnly() {
-		return status.Error(codes.FailedPrecondition, domain.RoleNotReadOnlyForClassText(b.RoleID))
+		return domain.Role{}, status.Error(codes.FailedPrecondition, domain.RoleNotReadOnlyForClassText(b.RoleID))
+	}
+	return role, nil
+}
+
+// systemClassContainerGate — цель выдачи классу ролью, покрывающей тип-ребёнок,
+// обязана быть объявленным контейнером публичного чтения (SC-65, kaname#856).
+// «Покрывающей» — правилом верхнего уровня над ребёнком либо вложенным правилом
+// под правилом над типом цели (`PublicReadContainer.CoveredChild`, kaname#874).
+//
+// Сфера отказа узкая и названа приёмкой: только выдача классу, только роль,
+// чьё правило покрывает тип-ребёнок типа цели, и только цель, тип которой не
+// объявлен. Роль, покрывающая лишь тип самой цели (SC-01: `rol-read` на
+// `vpc.network`), проходит как сегодня; человеку отказа нет вовсе — эти ворота
+// зовутся только у выдачи с классом.
+//
+// Без ворот такая выдача принималась бы и не давала потомкам НИЧЕГО (кортеж
+// `public_reader` пишется только на объявленном контейнере), и выдающий узнал бы
+// об этом лишь по отказу чтения. Источник «тип объявлен» — живой каталог из
+// доставленных манифестов, а не литерал с именем модуля.
+func (u *CreateAccessBindingUseCase) systemClassContainerGate(ctx context.Context, b domain.AccessBinding, role domain.Role) error {
+	if len(b.Target.Resources) == 0 || len(role.Rules) == 0 {
+		return nil
+	}
+	rd, err := u.repo.Reader(ctx)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	judged := map[string]bool{}
+	for _, ref := range b.Target.Resources {
+		if judged[ref.Type] {
+			continue
+		}
+		judged[ref.Type] = true
+		c, err := rd.AccessBindings().PublicReadContainer(ctx, ref.Type)
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		if c.Declared {
+			continue
+		}
+		if child, covers := c.CoveredChild(role.Rules); covers {
+			return status.Error(codes.FailedPrecondition, domain.UndeclaredContainerText(ref.Type, b.RoleID, child))
+		}
+	}
+	return nil
+}
+
+// systemClassNestedRuleGate — роль с вложенными правилами классу выдаётся,
+// только если КАЖДОЕ вложенное правило открывает детей так, как их открывает
+// `public_reader` (kaname#874, приёмка
+// `nested-rule-reaches-descendants-of-a-named-container.md`, Р5, ND-05):
+// контейнер объявлен, тип вложенного — его прямой ребёнок, ровно `get` и
+// `list`, без сужения. Иначе выдача принималась бы и давала классу меньше (или
+// иначе), чем называет роль, и выдающий узнал бы об этом лишь по отказу чтения.
+//
+// Судятся ВСЕ вложенные правила роли, а не только стоящие под типом цели: роль,
+// выданная классу, — обещание о каждом своём правиле. Источник «объявлен» и
+// «прямой ребёнок» — живой каталог из доставленных манифестов.
+func (u *CreateAccessBindingUseCase) systemClassNestedRuleGate(ctx context.Context, b domain.AccessBinding, role domain.Role) error {
+	if !role.Rules.HasChildren() {
+		return nil
+	}
+	rd, err := u.repo.Reader(ctx)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	containers := map[string]domain.PublicReadContainer{}
+	for _, r := range role.Rules {
+		owner := r.OwnerType()
+		if len(r.Children) == 0 || owner == "" {
+			continue
+		}
+		if _, judged := containers[owner]; judged {
+			continue
+		}
+		c, err := rd.AccessBindings().PublicReadContainer(ctx, owner)
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		containers[owner] = c
+	}
+	if text, refused := domain.ClassNestedRuleRefusal(b.RoleID, role.Rules, containers); refused {
+		return status.Error(codes.FailedPrecondition, text)
 	}
 	return nil
 }

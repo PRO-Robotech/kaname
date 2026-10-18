@@ -123,8 +123,17 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		// имя типа сам (`manifest.Resource.ObjectType`, поле обязательное).
 		// Потеряй деривация это поле — ресурс доехал бы до строки безымянным, и
 		// читатель пропустил бы его молча при действующей на вид роли (kacho#1816).
+		// Указатели и признак контейнера публичного чтения — тоже ДОСЛОВНО: по
+		// ним разворачивание выдачи классу решает, писать ли `public_reader`, и
+		// ворота выдачи — объявлен ли тип цели (kaname#856). Источник «тип
+		// объявлен» — живой каталог из доставленных манифестов, а не литерал.
+		parentTypes := make([]string, 0, len(r.Parents))
+		for _, p := range r.Parents {
+			parentTypes = append(parentTypes, p.Type)
+		}
 		out.Resources = append(out.Resources, catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
+			ParentTypes: parentTypes, PublicReadToChildren: r.PassesPublicRead(),
 		})
 
 		// declaredBy — токен → имя, каким его написал манифест. Нужен ИМЕННО для

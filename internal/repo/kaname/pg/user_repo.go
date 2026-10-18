@@ -815,31 +815,34 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 		deleted                                             int
 		userExists, ownsAccounts, hasBindings, hasGroupMems bool
 	)
-	err := w.tx.QueryRow(ctx, q, string(id)).Scan(&deleted, &userExists, &ownsAccounts, &hasBindings, &hasGroupMems)
-	if err != nil {
-		return mapErr(err, "User.Delete", string(id))
-	}
-	if deleted == 1 {
-		return nil
-	}
-	if !userExists {
+	// Оператор — под точкой сохранения (`deleteUnderSavepoint`): отказ схемы
+	// на нём (ключ `accounts_owner_fk`, триггер выдач) отменяется до точки, и
+	// остаток дочитывается на живой транзакции той же формой, что у охраны
+	// (kaname#725, Р2).
+	return deleteUnderSavepoint(ctx, w.tx, "User.Delete", string(id), func(sp pgx.Tx) error {
+		err := sp.QueryRow(ctx, q, string(id)).Scan(&deleted, &userExists, &ownsAccounts, &hasBindings, &hasGroupMems)
+		if err != nil {
+			return mapErr(err, "User.Delete", string(id))
+		}
+		if deleted == 1 {
+			return nil
+		}
+		if !userExists {
+			return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+		}
+		// Полоса всех трёх — «ещё ссылаются» с видом держащего, та же, что у
+		// ветвей схемы в `fkText`: один отказ — одна полоса и одна форма, каким
+		// бы рубежом он ни пришёл (kaname#725, Р2, Р3). Порядок видов — прежний.
+		switch {
+		case ownsAccounts:
+			return heldRefusal(iamerr.HoldAccountsOwned, string(id))
+		case hasBindings:
+			return heldRefusal(iamerr.HoldActiveBindings, string(id))
+		case hasGroupMems:
+			return heldRefusal(iamerr.HoldGroupMembership, string(id))
+		}
 		return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
-	}
-	switch {
-	case ownsAccounts:
-		// Полоса — «ещё ссылаются» (`ErrReferenceInUse`, вложена в
-		// FailedPrecondition), та же, что у ветви ключа `accounts_owner_fk`
-		// в `fkText`: один отказ — одна полоса, каким бы рубежом он ни пришёл.
-		return iamerr.Wrapf(iamerr.ErrReferenceInUse,
-			"User %s owns accounts and cannot be deleted", id)
-	case hasBindings:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
-			"User %s has active access bindings and cannot be deleted", id)
-	case hasGroupMems:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
-			"User %s is a member of one or more groups and cannot be deleted", id)
-	}
-	return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+	})
 }
 
 // LockForRemoval — см. порт. Замок строки — ПЕРВЫМ оператором транзакции, перечень

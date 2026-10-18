@@ -107,6 +107,29 @@ func TestDeclaredSpellingDivergencesStillHaveASubject(t *testing.T) {
 	}
 }
 
+// TestResourcesWithoutOwnServiceAreClosedTableKeys — каждая запись перечня
+// ресурсов без собственной службы есть ключ закрытой таблицы типов.
+//
+// Правило роли над таким ресурсом судится глаголами модели ЕГО ТИПА
+// (`judgeByModelVerbs`, kaname#872), и тип берётся у закрытой таблицы. Запись
+// вне таблицы типа не имела бы, и судья отвечал бы на неё вопросом о пустом
+// типе — то есть ветвь, которой в коде нет. Держит это предусловие эта проба,
+// а не ветвь судьи.
+func TestResourcesWithoutOwnServiceAreClosedTableKeys(t *testing.T) {
+	without := authzmap.CatalogResourcesWithoutOwnService()
+	if len(without) == 0 {
+		t.Skip("исключений не объявлено — сверять нечего")
+	}
+	keys := authzmap.CatalogKeys()
+	faults := judgeWithoutServiceKeysInTable(without, keys)
+
+	t.Logf("перепись: исключений %d · ключей таблицы %d", len(without), len(keys))
+
+	if len(faults) > 0 {
+		t.Fatalf("исключения вне закрытой таблицы (%d):\n  %s", len(faults), strings.Join(faults, "\n  "))
+	}
+}
+
 // TestResourcesWithoutOwnServiceAreStillUnreachable — исключение истекает само.
 //
 // Запись, чьё написание привязка всё же производит, больше нечего исключать: без
@@ -190,6 +213,24 @@ func judgeSpellingDivergences(div map[string]string, keys map[string]struct{}) [
 			faults = append(faults, "запись "+from+" → "+to+
 				": ИСТОЧНИК сам является ключом таблицы, то есть приведение "+
 				"переписывает годное написание в другое")
+		}
+	}
+	sort.Strings(faults)
+	return faults
+}
+
+// judgeWithoutServiceKeysInTable — записи перечня без собственной службы, чей
+// ключ не является ключом закрытой таблицы типов.
+func judgeWithoutServiceKeysInTable(without map[string]string, keys []string) []string {
+	inTable := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		inTable[k] = struct{}{}
+	}
+	var faults []string
+	for key := range without {
+		if _, ok := inTable[key]; !ok {
+			faults = append(faults, "исключение "+key+": ключа нет в закрытой таблице типов — "+
+				"тип ресурса не определён, и судить правило роли глаголами модели не по чему")
 		}
 	}
 	sort.Strings(faults)

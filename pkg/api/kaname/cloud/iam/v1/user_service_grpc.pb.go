@@ -157,10 +157,14 @@ type UserServiceClient interface {
 	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
 	// access keys, recovery codes, personal tokens and memberships go in the same
 	// transaction, and every credential issued to it up to that moment is refused
-	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
-	// the declared revocation window after the deletion commits. Records that
-	// only attribute an act to the person (who issued a service-account key, who
-	// granted a binding) keep the identifier; it is never issued again.
+	// on presentation with UNAUTHENTICATED no later than the declared revocation
+	// window after the deletion commits. The body is the refusing surface's own:
+	// this service's public front answers "credential is not accepted", while a
+	// request through the platform edge — the path a person takes — gets the
+	// edge's single authentication refusal, described by the edge, not here.
+	// Records that only attribute an act to the person (who issued a
+	// service-account key, who granted a binding) keep the identifier; it is
+	// never issued again.
 	//
 	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
 	// irreversible removal is never cheaper than the reversible operations on the
@@ -243,9 +247,9 @@ type UserServiceClient interface {
 	// never ADDED to UpdateUserRequest, not a description of a bug that was there:
 	// an empty `update_mask` means full-object replacement by platform convention,
 	// and a proto3 enum cannot say "not sent", so the obvious design — one more
-	// maskable field — would let a client block a membership by simply not filling
+	// maskable field — would let a client block a person by simply not filling
 	// it in. The state that decides whether a person still has access must not be
-	// reachable by forgetting something. It is also an EVENT ("this membership was
+	// reachable by forgetting something. It is also an EVENT ("this person was
 	// suspended"), not the editing of an attribute, and the audit trail has to be
 	// able to say so.
 	//
@@ -285,8 +289,8 @@ type UserServiceClient interface {
 	// platform-wide. He simply has his own verb now instead of a substitute.
 	//
 	// IDEMPOTENT: the argument is the STATE, not a transition. Blocking a
-	// membership that is already blocked succeeds and reports it blocked — the
-	// safe direction of this control must never be the one that fails on retry.
+	// person who is already blocked succeeds and reports him blocked — the safe
+	// direction of this control must never be the one that fails on retry.
 	//
 	// A PENDING invitation cannot be blocked: it carries no external identity yet
 	// (DB CHECK `users_invite_status_consistency`), so there is nothing to refuse
@@ -316,12 +320,14 @@ type UserServiceClient interface {
 	// is scoped to credentials this service issues; it makes no claim about
 	// credentials minted by any other issuer.
 	Block(ctx context.Context, in *BlockUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
-	// Unblocks the specified User membership: it may authenticate into that
-	// Account again.
+	// Unblocks the specified person: the identity may authenticate anywhere on
+	// the platform again — in EVERY Account the person is in, because the state
+	// is one per person, exactly as Block wrote it. Memberships were not touched
+	// by Block and are not touched here.
 	//
 	// The counterpart of Block, and it exists for the same reason the state is a
-	// column rather than a deletion — a suspended membership has to be able to
-	// come back. A one-way control is one an operator will not reach for, and a
+	// column rather than a deletion — a suspended person has to be able to come
+	// back. A one-way control is one an operator will not reach for, and a
 	// person with no administrative way back is locked out permanently: self-serve
 	// password recovery deliberately does NOT lift a block (it proves ownership of
 	// a mailbox, which is not what the administrator called into question).
@@ -332,7 +338,7 @@ type UserServiceClient interface {
 	// fresh sign-in yields working credentials.
 	//
 	// Same shape throughout: action not field, Operation, step-up, idempotent
-	// (unblocking an active membership succeeds). A PENDING invitation is refused
+	// (unblocking a person who is not blocked succeeds). A PENDING invitation is refused
 	// here too — turning an unconfirmed invitee into an active member is
 	// activation by address confirmation on the service's sign-in lane, a
 	// different path with a different subject.
@@ -659,10 +665,14 @@ type UserServiceServer interface {
 	// EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
 	// access keys, recovery codes, personal tokens and memberships go in the same
 	// transaction, and every credential issued to it up to that moment is refused
-	// on presentation (UNAUTHENTICATED "credential is not accepted") no later than
-	// the declared revocation window after the deletion commits. Records that
-	// only attribute an act to the person (who issued a service-account key, who
-	// granted a binding) keep the identifier; it is never issued again.
+	// on presentation with UNAUTHENTICATED no later than the declared revocation
+	// window after the deletion commits. The body is the refusing surface's own:
+	// this service's public front answers "credential is not accepted", while a
+	// request through the platform edge — the path a person takes — gets the
+	// edge's single authentication refusal, described by the edge, not here.
+	// Records that only attribute an act to the person (who issued a
+	// service-account key, who granted a binding) keep the identifier; it is
+	// never issued again.
 	//
 	// IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
 	// irreversible removal is never cheaper than the reversible operations on the
@@ -745,9 +755,9 @@ type UserServiceServer interface {
 	// never ADDED to UpdateUserRequest, not a description of a bug that was there:
 	// an empty `update_mask` means full-object replacement by platform convention,
 	// and a proto3 enum cannot say "not sent", so the obvious design — one more
-	// maskable field — would let a client block a membership by simply not filling
+	// maskable field — would let a client block a person by simply not filling
 	// it in. The state that decides whether a person still has access must not be
-	// reachable by forgetting something. It is also an EVENT ("this membership was
+	// reachable by forgetting something. It is also an EVENT ("this person was
 	// suspended"), not the editing of an attribute, and the audit trail has to be
 	// able to say so.
 	//
@@ -787,8 +797,8 @@ type UserServiceServer interface {
 	// platform-wide. He simply has his own verb now instead of a substitute.
 	//
 	// IDEMPOTENT: the argument is the STATE, not a transition. Blocking a
-	// membership that is already blocked succeeds and reports it blocked — the
-	// safe direction of this control must never be the one that fails on retry.
+	// person who is already blocked succeeds and reports him blocked — the safe
+	// direction of this control must never be the one that fails on retry.
 	//
 	// A PENDING invitation cannot be blocked: it carries no external identity yet
 	// (DB CHECK `users_invite_status_consistency`), so there is nothing to refuse
@@ -818,12 +828,14 @@ type UserServiceServer interface {
 	// is scoped to credentials this service issues; it makes no claim about
 	// credentials minted by any other issuer.
 	Block(context.Context, *BlockUserRequest) (*operation.Operation, error)
-	// Unblocks the specified User membership: it may authenticate into that
-	// Account again.
+	// Unblocks the specified person: the identity may authenticate anywhere on
+	// the platform again — in EVERY Account the person is in, because the state
+	// is one per person, exactly as Block wrote it. Memberships were not touched
+	// by Block and are not touched here.
 	//
 	// The counterpart of Block, and it exists for the same reason the state is a
-	// column rather than a deletion — a suspended membership has to be able to
-	// come back. A one-way control is one an operator will not reach for, and a
+	// column rather than a deletion — a suspended person has to be able to come
+	// back. A one-way control is one an operator will not reach for, and a
 	// person with no administrative way back is locked out permanently: self-serve
 	// password recovery deliberately does NOT lift a block (it proves ownership of
 	// a mailbox, which is not what the administrator called into question).
@@ -834,7 +846,7 @@ type UserServiceServer interface {
 	// fresh sign-in yields working credentials.
 	//
 	// Same shape throughout: action not field, Operation, step-up, idempotent
-	// (unblocking an active membership succeeds). A PENDING invitation is refused
+	// (unblocking a person who is not blocked succeeds). A PENDING invitation is refused
 	// here too — turning an unconfirmed invitee into an active member is
 	// activation by address confirmation on the service's sign-in lane, a
 	// different path with a different subject.

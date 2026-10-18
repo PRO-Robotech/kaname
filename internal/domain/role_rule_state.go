@@ -95,6 +95,10 @@ type RuleState struct {
 	// Необъяснённые выводятся вычитанием: третье поле, равное разности двух
 	// соседних, разошлось бы с ними при первой же правке.
 	Explained int
+	// Children — состояния вложенных правил ЭТОГО правила (kaname#874), в
+	// порядке `Rule.Children`; RuleIndex у записи — индекс в Children. Пусто у
+	// правила без вложенных.
+	Children []RuleState
 }
 
 // RuleRefsByRule — объявленные сегменты, разложенные ПО ПРАВИЛАМ.
@@ -169,27 +173,38 @@ func RuleStatesOf(rules Rules, unresolved []RoleSegment, withdrawn []WithdrawnGr
 	byRule := RuleRefsByRule(rules)
 	out := make([]RuleState, len(rules))
 	for i, refs := range byRule {
-		st := RuleState{RuleIndex: i, Segments: len(refs)}
-		for _, ref := range refs {
-			if !lostSet[ref] {
-				continue
-			}
-			st.Lost++
-			if explained[ref] {
-				st.Explained++
+		out[i] = ruleStateOf(i, refs, lostSet, explained)
+		if children := rules[i].EffectiveChildren(); len(children) > 0 {
+			out[i].Children = make([]RuleState, len(children))
+			for j, refs := range RuleRefsByRule(children) {
+				out[i].Children[j] = ruleStateOf(j, refs, lostSet, explained)
 			}
 		}
-		switch {
-		case st.Lost == 0:
-			st.State = RuleLifecycleActive
-		case st.Explained == st.Lost:
-			st.State = RuleLifecycleWithdrawn
-		default:
-			st.State = RuleLifecycleUnresolved
-		}
-		out[i] = st
 	}
 	return out
+}
+
+// ruleStateOf — состояние одного правила по его сегментам.
+func ruleStateOf(index int, refs []RoleRuleRef, lostSet, explained map[RoleRuleRef]bool) RuleState {
+	st := RuleState{RuleIndex: index, Segments: len(refs)}
+	for _, ref := range refs {
+		if !lostSet[ref] {
+			continue
+		}
+		st.Lost++
+		if explained[ref] {
+			st.Explained++
+		}
+	}
+	switch {
+	case st.Lost == 0:
+		st.State = RuleLifecycleActive
+	case st.Explained == st.Lost:
+		st.State = RuleLifecycleWithdrawn
+	default:
+		st.State = RuleLifecycleUnresolved
+	}
+	return st
 }
 
 // refOfSegment — сегмент в форме ссылки правила. Точечное имя разбирается ТЕМ
