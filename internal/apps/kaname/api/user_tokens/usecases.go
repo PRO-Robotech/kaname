@@ -251,8 +251,10 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 		}
 		secretTTL = ttl
 	}
-	if len(in.Description) > 256 {
-		return nil, status.Error(codes.InvalidArgument, "description too long (max 256)")
+	// Предел описания судит ДОМЕННЫЙ тип — в знаках, как ограничение схемы;
+	// `len()` здесь мерил бы байты и отвергал кириллицу вдвое раньше (kaname#864).
+	if err := domain.Description(in.Description).Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	// Форма имени на пути СОЗДАНИЯ: пустая строка законна и означает «назови
 	// сам» — до записи её заменит умолчание, производное от идентификатора
