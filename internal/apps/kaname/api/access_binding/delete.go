@@ -51,7 +51,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
 type DeleteAccessBindingUseCase struct {
@@ -257,6 +256,12 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	if err != nil {
 		return err
 	}
+	// Перечень субъектов — ДО удаления: дочерние строки уходят каскадом той же
+	// транзакцией, и после удаления перечень вырождается в первого субъекта.
+	subjects, err := bindingSubjectsOf(ctx, w.AccessBindings().ListSubjects, deletedBinding)
+	if err != nil {
+		return err
+	}
 	// F3/#178 — SYMMETRIC revoke from the PERSISTED emitted-set, NOT a re-derive
 	// from the binding's CURRENT role. The role's permissions may have changed
 	// (Role.Update) between grant and revoke; re-deriving would emit
@@ -315,9 +320,9 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	// Emit subject_change_outbox row in the same TX as the deletion: a rollback
 	// of this TX will not leave an orphan outbox row (atomicity guarantee).
 	// НА КАЖДОГО субъекта привязки, а не на легаси-одиночку: см.
-	// emitSubjectChangeForEverySubject.
-	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
-		deletedBinding, "binding_revoke", "binding_delete"); err != nil {
+	// emitSubjectChangeForEverySubject; перечень прочитан до удаления.
+	if err := emitSubjectChangeFor(ctx, w.AccessBindingsW().EmitSubjectChangeEvent, subjects,
+		"binding_revoke", "binding_delete"); err != nil {
 		return err
 	}
 
@@ -330,17 +335,7 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	if revokeActor == "" {
 		revokeActor = string(deletedBinding.GrantedByUserID)
 	}
-	if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
-		EventType:       abrepo.AuditEventTypeRevoked,
-		Actor:           revokeActor,
-		SubjectType:     string(deletedBinding.SubjectType),
-		SubjectID:       string(deletedBinding.SubjectID),
-		ResourceType:    string(deletedBinding.ResourceType),
-		ResourceID:      deletedBinding.ResourceID,
-		RoleID:          string(deletedBinding.RoleID),
-		BindingID:       string(deletedBinding.ID),
-		TenantAccountID: auditTenantAccountID(deletedBinding),
-	}); err != nil {
+	if err := revokedAuditFor(ctx, w.AccessBindingsW().EmitAuditEvent, subjects, revokeActor, deletedBinding); err != nil {
 		return err
 	}
 	if err := w.Commit(ctx); err != nil {
