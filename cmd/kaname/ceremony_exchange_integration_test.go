@@ -19,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 )
 
@@ -226,7 +227,35 @@ func (w *ceremonyWorld) raceExchange(c *ceremonyClient, forms []url.Values) []*h
 	}
 	close(start)
 	wg.Wait()
+	w.logOperationRefusals(out)
 	return out
+}
+
+// logOperationRefusals — на отказе ОПЕРАЦИИ (5xx) печатает записи полосы
+// «ceremony token refused» с их причиной: наружу ответ несёт только слово
+// словаря, и без журнала отказ 503 не называл бы слоя, который его дал
+// (kaname#818). Записей нет при 5xx — отказ дан до полосы церемонии, на
+// поверхности токен-эндпоинта (потолок одновременных обменов). Секретов в
+// причине нет: тексты отказов полосы называют клиента и исход.
+func (w *ceremonyWorld) logOperationRefusals(recs []*httptest.ResponseRecorder) {
+	w.t.Helper()
+	failed := 0
+	for _, rec := range recs {
+		if rec.Code >= http.StatusInternalServerError {
+			failed++
+		}
+	}
+	if failed == 0 {
+		return
+	}
+	var refusals []string
+	for _, line := range strings.Split(w.logs.String(), "\n") {
+		if strings.Contains(line, `"msg":"ceremony token refused"`) && strings.Contains(line, `"outcome":"`+string(ceremonyhttp.OutcomeExchangeUnavailable)+`"`) {
+			refusals = append(refusals, line)
+		}
+	}
+	w.t.Logf("%s: отказов операции %d из %d; записей полосы об отказе операции %d (нет записей — отказ дан до полосы):\n%s",
+		w.id, failed, len(recs), len(refusals), strings.Join(refusals, "\n"))
 }
 
 // requireExactlyOneWinner — ровно один 200, прочие — invalid_grant/400.
