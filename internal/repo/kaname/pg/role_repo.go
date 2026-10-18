@@ -1200,12 +1200,19 @@ func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.Rol
 		if err != nil {
 			return err
 		}
+		// Строка с тем же набором не переписывается: холостая запись родила бы
+		// строковое событие на каждом подъёме (проба
+		// TestIntegration_RoleCompositionIsObservableThroughTheRoleRow).
 		if _, err := w.tx.Exec(ctx,
 			`UPDATE kaname.role_rule_selectors s
 			    SET verbs_by_type = (SELECT coalesce(jsonb_object_agg(g.k, g.v), '{}'::jsonb)
 			                           FROM jsonb_each($3::jsonb) AS g(k, v)
 			                          WHERE g.k = ANY (s.object_types))
-			  WHERE s.role_id = $1 AND s.rule_fp = $2`,
+			  WHERE s.role_id = $1 AND s.rule_fp = $2
+			    AND s.verbs_by_type IS DISTINCT FROM
+			        (SELECT coalesce(jsonb_object_agg(g.k, g.v), '{}'::jsonb)
+			           FROM jsonb_each($3::jsonb) AS g(k, v)
+			          WHERE g.k = ANY (s.object_types))`,
 			string(roleID), sel.RuleFP, grants); err != nil {
 			return mapErr(err, "", string(roleID))
 		}
