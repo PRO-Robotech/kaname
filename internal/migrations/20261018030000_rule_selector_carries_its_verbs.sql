@@ -23,7 +23,9 @@
 --      решение о доступе давало до этой миграции, — доступа миграция не
 --      отнимает и не добавляет. Точный набор по правилу вычисляет только код
 --      (глаголы правила зависят от каталога и от развёртки подстановок), поэтому:
---   3. `kaname.role_selector_verbs_pending` — очередь ролей, чьи строки несут
+--   3. Страж живости типов селектора будится записью тех колонок, которые он
+--      судит (`object_types`, `container_type`), а не любой записью строки.
+--   4. `kaname.role_selector_verbs_pending` — очередь ролей, чьи строки несут
 --      набор, выведенный здесь. Пересчёт на старте службы
 --      (`seed.ReseedSystemRoleVerbs`) пишет точный набор по отпечатку правила и
 --      снимает роль из очереди; правка роли (`ReplaceRuleSelectors`) снимает её
@@ -40,6 +42,18 @@
 -- +goose Up
 ALTER TABLE kaname.role_rule_selectors
     ADD COLUMN verbs_by_type jsonb;
+
+-- Страж живости типов (`role_rule_selectors_types_live`) судит ССЫЛКИ строки на
+-- каталог — элементы `object_types` и тип контейнера. Запись одной карты
+-- глаголов ссылок не меняет, и будить на ней стража значило бы отвергать
+-- пересчёт глаголов у строки, чей тип снят каталогом позже её записи: такие
+-- строки законны (у системной роли применитель каталога селекторы не
+-- укорачивает), и заполнение ниже упало бы на них. Поэтому страж будится
+-- записью тех колонок, которые он судит.
+DROP TRIGGER role_rule_selectors_types_live ON kaname.role_rule_selectors;
+CREATE TRIGGER role_rule_selectors_types_live
+    BEFORE INSERT OR UPDATE OF object_types, container_type ON kaname.role_rule_selectors
+    FOR EACH ROW EXECUTE FUNCTION kaname.role_rule_selector_types_live();
 
 UPDATE kaname.role_rule_selectors s
    SET verbs_by_type = coalesce((
@@ -71,6 +85,11 @@ SELECT DISTINCT s.role_id FROM kaname.role_rule_selectors s;
 
 -- +goose Down
 DROP TABLE kaname.role_selector_verbs_pending;
+
+DROP TRIGGER role_rule_selectors_types_live ON kaname.role_rule_selectors;
+CREATE TRIGGER role_rule_selectors_types_live
+    BEFORE INSERT OR UPDATE ON kaname.role_rule_selectors
+    FOR EACH ROW EXECUTE FUNCTION kaname.role_rule_selector_types_live();
 
 COMMENT ON TABLE kaname.role_verb IS 'Проекция «роль → тип объекта × глагол» — то, из чего цепь вердикта собирает ответ «разрешено ли действие». АВТОР один — role_repo.ReplaceRoleVerbs: форму строки объявляет только тот, кто её вносит. Снимать вправе и не-автор (применитель каталога, когда снят ресурс, на который ссылается role_verb_type_fk), но снятое он обязан ПЕРЕСЕЛИТЬ в role_grant_orphan тем же оператором.';
 

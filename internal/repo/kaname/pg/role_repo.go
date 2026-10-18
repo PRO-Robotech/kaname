@@ -1089,8 +1089,14 @@ func splitRuleRefHint(hint string) (resource, verb string) {
 // (`catalog_applier_lock_order_integration_test.go`), — прочитать порядок
 // нельзя, он есть свойство исполнения.
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
-	if err := w.lockSelectorCatalogRows(ctx, roleID, selectors); err != nil {
-		return err
+	if types := lockedCatalogTypesOf(selectors); len(types) > 0 {
+		if _, err := w.tx.Exec(ctx, `
+			SELECT 1 FROM kaname.catalog_resource
+			 WHERE dotted = ANY($1) AND live
+			 ORDER BY dotted
+			   FOR KEY SHARE`, types); err != nil {
+			return mapErr(err, "", string(roleID))
+		}
 	}
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kaname.role_rule_selectors WHERE role_id = $1`, string(roleID)); err != nil {
@@ -1173,14 +1179,11 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 // уже сняла строку F (тогда обновлять нечего), либо положила строку F с тем же
 // набором.
 //
-// Замки на строки каталога берутся ВПЕРЁД и в том же порядке, что у
-// ReplaceRuleSelectors: оператор обновления будит стража живости типов, и без
-// замка вперёд он брал бы их в порядке обхода — та самая инверсия порядка с
-// применителем каталога.
+// Ссылок строки на каталог запись карты глаголов не меняет, и страж живости
+// типов на ней не будится (миграция 20261018030000): строка, чей тип каталог
+// снял после её записи, пересчитывается, а не отвергается. Замков на строки
+// каталога поэтому не нужно.
 func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
-	if err := w.lockSelectorCatalogRows(ctx, roleID, selectors); err != nil {
-		return err
-	}
 	for _, sel := range selectors {
 		if len(sel.ObjectTypes) == 0 {
 			continue
@@ -1199,24 +1202,6 @@ func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.Rol
 		}
 	}
 	return w.dequeueSelectorVerbs(ctx, roleID)
-}
-
-// lockSelectorCatalogRows — замки на строки каталога, которые возьмёт страж
-// живости типов селекторов, ВПЕРЁД и в порядке `dotted` (довод — у
-// ReplaceRuleSelectors).
-func (w *roleWriter) lockSelectorCatalogRows(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
-	types := lockedCatalogTypesOf(selectors)
-	if len(types) == 0 {
-		return nil
-	}
-	if _, err := w.tx.Exec(ctx, `
-			SELECT 1 FROM kaname.catalog_resource
-			 WHERE dotted = ANY($1) AND live
-			 ORDER BY dotted
-			   FOR KEY SHARE`, types); err != nil {
-		return mapErr(err, "", string(roleID))
-	}
-	return nil
 }
 
 // dequeueSelectorVerbs — роль снимается из очереди пересчёта глаголов правил.
