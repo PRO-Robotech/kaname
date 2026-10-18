@@ -11,6 +11,7 @@
 #   ./scripts/run.sh --service a --service b  # несколько коллекций, ОДИН вердикт
 #   ./scripts/run.sh --service disk --bail # прерывать после первого fail
 #   ./scripts/run.sh --delay 100           # задержка между запросами (ms)
+#   ./scripts/run.sh --remint-bootstrap …  # jwtBootstrap переиздаётся перед КАЖДОЙ коллекцией
 #
 # Exit-код: 0 ТОЛЬКО если каждая ожидаемая коллекция произвела отчёт И в нём
 # assertions.failed==0 И собственный exit-код newman==0 (плюс coverage-гейт ниже).
@@ -126,6 +127,7 @@ EXTRA=()
 SSL_CLIENT_CERT=""
 SSL_CLIENT_KEY=""
 SSL_EXTRA_CA=""
+REMINT_BOOTSTRAP=0
 
 # `--help` ОТВЕЧАЕТ И НЕ ГОНЯЕТ. Прежде его не было вовсе, и неизвестный флаг
 # уезжал в EXTRA: `run.sh --help` доходил до `newman run` и пытался обратиться к
@@ -140,7 +142,7 @@ SSL_EXTRA_CA=""
 _usage() {
   awk 'NR < 6 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
   echo
-  echo "Флаги: --service <stem> (можно повторить) | --bail | --delay <мс> | --jobs <n> (принимается и игнорируется) | --help"
+  echo "Флаги: --service <stem> (можно повторить) | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --help"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -159,6 +161,14 @@ while [[ $# -gt 0 ]]; do
       SERVICES+=("$2"); shift 2 ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
+    # СРОК БУТСТРАПА КОРОЧЕ ВОЛНЫ (kaname#868). Бутстрап живёт 15 минут (`MaxTTL`
+    # службы, мал намеренно), а волна автономного стенда идёт дольше: последняя
+    # коллекция получала «credential is not accepted». С флагом прогонщик перед
+    # каждой коллекцией переиздаёт `jwtBootstrap` посевом
+    # (`seed_own_stand.py --remint-bootstrap`: та же чеканка и то же утверждение
+    # приёма фронтом, что у шага 1 посева). Флаг — только у прогона против
+    # автономного стенда, где чеканка доступна по имени сертификата посева.
+    --remint-bootstrap) REMINT_BOOTSTRAP=1; shift ;;
     # --jobs: принят для паритета с vpc/nlb/compute run.sh + newman-parallel.sh
     # (директива #1). iam-суиты гоняются СЕРИЙНО намеренно (jit-pending reseed +
     # порядковые зависимости между матрицами) — флаг consume-and-ignore, а НЕ
@@ -232,6 +242,19 @@ run_one() {
     return 0
   fi
   echo "===== ${res} ====="
+  # Переиздание — ДО коллекции, и его отказ коллекцию не запускает: прогон под
+  # просроченным бутстрапом дал бы красное по неверной причине. Отчёта нет —
+  # вердикт называет коллекцию MISSING, а строка ниже — причину.
+  if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
+    local rrc=0
+    python3 "$NEWMAN_DIR/../authz-fixtures/seed_own_stand.py" --remint-bootstrap \
+      --env-file "$NEWMAN_DIR/$ENV" || rrc=$?
+    if [[ "$rrc" -ne 0 ]]; then
+      echo "[remint] ${res}: jwtBootstrap НЕ переиздан (код ${rrc}) — коллекция не запускалась, условие не создано" >&2
+      echo "remint-${rrc}" > "out/${res}.rc"
+      return 0
+    fi
+  fi
   # Берём PIPESTATUS[0] (newman), а НЕ статус tee и НЕ `|| true`: проглоченный код
   # возврата newman = ложный GREEN при красных проверках.
   set +e

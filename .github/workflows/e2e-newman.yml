@@ -614,7 +614,8 @@ jobs:
         timeout-minutes: 15
         run: |
           cd tests/newman
-          ./scripts/run.sh --service kaname-own-rest-front \
+          ./scripts/run.sh --remint-bootstrap \
+            --service kaname-own-rest-front \
             --service iam-permission-catalog \
             --service iam-system-grant-visibility \
             --service iam-system-class-subjects \
@@ -855,7 +856,9 @@ jobs:
   # ПОЧЕМУ ОТДЕЛЬНОЕ ЗАДАНИЕ, А НЕ ШАГ В `stand`. Прогонщик начинает с чистого
   # `out/`, и второй вызов в том же задании стёр бы отчёт первого до выкладывания;
   # а сложенные в один вызов, два перечня не уложились бы в срок предъявителей
-  # посева. Срок токена стенда — 25 минут (`stand-own.sh`,
+  # посева. Бутстрап (`jwtBootstrap`, 15 минут — `MaxTTL` службы) этот бюджет не
+  # держит: прогонщик переиздаёт его перед каждой коллекцией (`--remint-bootstrap`,
+  # kaname#868). Срок токена стенда — 25 минут (`stand-own.sh`,
   # `KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL`), и он обязан пережить остаток обоих
   # посевов и прогон: 5 + 5 + 15 = 25 (`timeout-minutes` трёх шагов ниже). Замер на
   # автономном стенде 2026-09-30: машинный посев 64 с, посев церемонии 14 с, прогон
@@ -978,7 +981,8 @@ jobs:
         timeout-minutes: 15
         run: |
           cd tests/newman
-          ./scripts/run.sh --service authz-deny \
+          ./scripts/run.sh --remint-bootstrap \
+            --service authz-deny \
             --service iam-account \
             --service iam-account-redesign \
             --service iam-membership-mine \
