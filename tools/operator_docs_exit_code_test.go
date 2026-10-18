@@ -30,6 +30,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/execstub"
 )
 
 // stubGo кладёт на PATH подставной `go`, чья `build -C … -o <bin> …` создаёт
@@ -53,10 +55,7 @@ if [[ -z "$out" ]]; then echo "подставной сборщик: ключ -o 
 printf '#!/usr/bin/env bash\nexit ` + itoa(want) + `\n' > "$out"
 chmod +x "$out"
 `
-	path := filepath.Join(dir, "go")
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	execstub.Write(t, filepath.Join(dir, "go"), body)
 	return dir
 }
 
