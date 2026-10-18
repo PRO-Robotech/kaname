@@ -106,7 +106,7 @@ func seedRulesRoleWithSelectors(t *testing.T, ctx context.Context, repo *kanamep
 		Rules:       rules, Permissions: compiled,
 	})
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, inserted.Rules.MaterializingSelectors()))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
 	require.NoError(t, w.Commit(ctx))
 	return rid
 }
