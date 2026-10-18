@@ -204,10 +204,16 @@ func TestSelectorVerbsDrain_AFailedRegrainIsRetriedUntilTheQueueIsEmpty(t *testi
 	var passes []seed.SelectorVerbsCensus
 	dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	err := seed.DrainSelectorVerbsQueue(dctx, repo, pool, catalogfixture.Source(), 20*time.Millisecond,
-		func(c seed.SelectorVerbsCensus, _ error) { passes = append(passes, c) })
-	require.NoError(t, err, "очередь не опустела до срока")
-	require.Len(t, passes, 3, "ждали два сорванных прохода и третий, закрывший окно: %v", passes)
+	// Разбор живёт, пока жив переходный механизм: здесь его останавливает проба,
+	// как только проход назвал пустую очередь.
+	_ = seed.DrainSelectorVerbsQueue(dctx, repo, pool, catalogfixture.Source(), 20*time.Millisecond,
+		func(c seed.SelectorVerbsCensus, _ error) {
+			passes = append(passes, c)
+			if c.Pending == 0 {
+				cancel()
+			}
+		})
+	require.GreaterOrEqual(t, len(passes), 3, "ждали два сорванных прохода и третий, закрывший окно: %v", passes)
 	require.Equal(t, 1, passes[0].Failed)
 	require.Equal(t, 1, passes[0].Pending)
 	require.Equal(t, 0, passes[2].Pending)
@@ -234,10 +240,14 @@ func TestSelectorVerbsDrain_ReplicasAndARoleEditConverge(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
-			errs <- seed.DrainSelectorVerbsQueue(dctx, kanamepg.New(pool, nil), pool, catalogfixture.Source(),
+			err := seed.DrainSelectorVerbsQueue(dctx, kanamepg.New(pool, nil), pool, catalogfixture.Source(),
 				10*time.Millisecond, nil)
+			if errors.Is(err, context.DeadlineExceeded) {
+				err = nil // разбор живёт до отмены — срок пробы и есть отмена
+			}
+			errs <- err
 		}()
 	}
 	wg.Add(1)
@@ -280,4 +290,107 @@ func editRoleRules(ctx context.Context, pool *pgxpool.Pool, id string, rules dom
 		return err
 	}
 	return w.Commit(ctx)
+}
+
+// Разбор не кончается на пустой очереди: строка, вставленная писателем прежней
+// версии ПОСЛЕ того, как очередь опустела (переходный страж кладёт верхнюю
+// границу и ставит роль в очередь), получает точную карту без перезапуска, и
+// перепись печатается и на пустой очереди.
+func TestSelectorVerbsDrain_KeepsServingAfterTheQueueEmpties(t *testing.T) {
+	if testing.Short() {
+		t.Skip("нужен Postgres")
+	}
+	ctx, pool := newReseedPool(t)
+	_, accID := seedProbeAccountWithoutOwnerBinding(t, ctx, pool, "dr4")
+	clearQueue(t, ctx, pool)
+
+	var (
+		mu      sync.Mutex
+		passes  []seed.SelectorVerbsCensus
+		emptied = make(chan struct{})
+		once    sync.Once
+	)
+	dctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = seed.DrainSelectorVerbsQueue(dctx, kanamepg.New(pool, nil), pool, catalogfixture.Source(),
+			20*time.Millisecond, func(c seed.SelectorVerbsCensus, _ error) {
+				mu.Lock()
+				passes = append(passes, c)
+				mu.Unlock()
+				if c.Pending == 0 {
+					once.Do(func() { close(emptied) })
+				}
+			})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+
+	select {
+	case <-emptied:
+	case <-time.After(10 * time.Second):
+		t.Fatal("разбор не опустошил очередь за 10 с")
+	}
+
+	// Писатель прежней версии: роль и строки селекторов БЕЗ карты.
+	const id = "rol-dr4-late"
+	rules := drainRules()
+	raw, err := domain.EncodeRules(rules)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO kaname.roles (id, account_id, name, permissions, rules)
+	                          VALUES ($1, $2, 'probe_dr4_late', '[]'::jsonb, $3::jsonb)`, id, accID, raw)
+	require.NoError(t, err)
+	for _, s := range rules.MaterializingSelectors() {
+		arm, names := "anchor", []string{}
+		if s.Arm == domain.ArmNames {
+			arm, names = "names", s.ResourceNames
+		}
+		_, err := pool.Exec(ctx, `INSERT INTO kaname.role_rule_selectors
+		                            (role_id, rule_fp, arm, object_types, resource_names, match_labels)
+		                          VALUES ($1, $2, $3, $4, $5, '{}'::jsonb)`, id, s.RuleFP, arm, s.ObjectTypes, names)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, queueLen(t, ctx, pool), "КОНТРОЛЬ: переходный страж роль в очередь не поставил")
+	mu.Lock()
+	before := len(passes)
+	mu.Unlock()
+
+	require.Eventually(t, func() bool { return queueLen(t, ctx, pool) == 0 }, 10*time.Second, 50*time.Millisecond,
+		"роль, поставленная после опустения очереди, не разобрана без перезапуска")
+	require.Equal(t, exactMaps(rules), storedMaps(t, ctx, pool, id))
+
+	// Перепись печатается и на пустой очереди: проходы идут после разбора.
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(passes) >= before+2 && passes[len(passes)-1].Pending == 0
+	}, 10*time.Second, 50*time.Millisecond, "на пустой очереди проходы с переписью не продолжились")
+}
+
+// Паритет верхней границы: для каждого живого типа платформы (правило `*.*`,
+// подстановка глаголов) точный набор глаголов правила — подмножество верхней
+// границы, которую кладут досев системной роли и переходный страж. Иначе роль в
+// очереди теряла бы доступ, а не держала прежний.
+func TestSelectorVerbsUpperBound_CoversTheExactGrants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("нужен Postgres")
+	}
+	ctx, pool := newReseedPool(t)
+	rules := domain.Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}
+	sels := catalogfixture.Facts().GrantSelectors(rules.MaterializingSelectors())
+	checked := 0
+	for _, s := range sels {
+		var raw []byte
+		require.NoError(t, pool.QueryRow(ctx, `SELECT kaname.role_selector_verbs_upper_bound($1)`, s.ObjectTypes).Scan(&raw))
+		bound := map[string][]string{}
+		require.NoError(t, json.Unmarshal(raw, &bound))
+		for typ, verbs := range s.Grants {
+			for _, v := range verbs {
+				require.Containsf(t, bound[typ], v, "тип %s: глагол %s точного набора вне верхней границы %v", typ, v, bound[typ])
+				checked++
+			}
+		}
+	}
+	require.Greater(t, checked, 50, "сверено пар «тип × глагол» %d — проба беспредметна", checked)
+	t.Logf("сверено пар «тип × глагол»: %d", checked)
 }
