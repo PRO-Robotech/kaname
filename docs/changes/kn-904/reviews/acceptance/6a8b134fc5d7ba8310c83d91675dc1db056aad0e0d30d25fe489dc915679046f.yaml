@@ -1,0 +1,134 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-target-names-live-catalog-types.md
+  sha256: 6a8b134fc5d7ba8310c83d91675dc1db056aad0e0d30d25fe489dc915679046f
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: b800272d5341
+  content_commit: none (документ не закоммичен на момент ревью)
+  branch: '904'
+  task: PRO-Robotech/kaname#904
+  related_tasks: [PRO-Robotech/kaname#746, PRO-Robotech/kaname#866, PRO-Robotech/kaname#874]
+  round: 1
+  round_scope: >-
+    Первый круг: вся редакция 1 (решение (а) диспетчера 2026-10-19 — цель выдачи принимает
+    типы, живые в каталоге).
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/w13-kn904 → 6a8b134f…046f (совпало с заданием).
+  measurement_revisions: >-
+    kaname — b800272d5341 (рабочее дерево копии: grep, чтение кода, проба в одноразовой
+    worktree --detach, снята); kacho — fd9f1793e7 (git ls-tree, git grep).
+
+verdict: RETURNED
+verdict_note: >-
+  Один блокирующий (род DoD): держатели стадии S2 (ATC-E1, ATC-E2) и ссылка П4 указывают в
+  репозиторий, где этого набора кейсов нет. Остальное — сценарии, близнецы, производители,
+  тексты отказа, критерии продукта — годно; замечания ниже не блокируют.
+publication_mode: >-
+  Запись создана файлом в копии полосы и не закоммичена; внешнее событие публикует курьер.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T12:00:00+03:00'
+
+blocking:
+  - id: B1
+    kind: DoD
+    claim: >-
+      Стадия S2 «край (`PRO-Robotech/kacho`, newman)», DoD S2 п.1–3, таблица держателей (строка
+      ATC-E1, -E2) и П4 называют `tests/newman/cases/` в kacho и кейс
+      `IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG` там же. В kacho на fd9f1793e7 такого каталога нет,
+      кейс живёт в kaname.
+    predicate: >-
+      git -C project/kacho ls-tree --name-only fd9f1793e7 tests/newman/cases/ → пусто;
+      git -C project/kacho grep -n 'target.resources\[\]' fd9f1793e7 → 0 попаданий;
+      kacho tools/mixedoutcomeaudit/mixed_outcome_audit.py:1596 @fd9f1793e7 — кейс «ушёл вместе
+      с [iam] в самостоятельный продукт»;
+      kaname tests/newman/cases/iam-access-binding-redesign.py:243 @b800272d5341 — id кейса,
+      утверждение `to.include('Illegal argument target.resources[].type')` (вхождение — верно);
+      kaname tests/newman/scripts/run.sh:36-41 и .github/workflows/e2e-newman.yml (job `stand`) —
+      набор kaname гонится к краю платформы на собственном стенде kaname.
+    consequence: >-
+      DoD S2 неисполним в названном месте (п.3 требует зелени кейса, которого в kacho нет), а
+      заказ «задача kacho на S2» уводит держателя края в чужой репозиторий за пересборкой с
+      пином, хотя набор kaname уже гонит голову kaname через край.
+    fix: >-
+      Перенести ATC-E1, ATC-E2 в kaname `tests/newman/cases/iam-access-binding-redesign.py`
+      (тот же файл, что соседний NEG-кейс); DoD S2 переписать на kaname и e2e-newman его CI;
+      снять условие «после влития S1 и пересборки края с пином», если оно не нужно (контракт
+      меняется лишь комментарием, Р6); поправить координату в П4.
+
+non_blocking:
+  - id: N1
+    kind: TWIN
+    note: >-
+      ATC-12: близнец отличается двумя фактами — область (prj-B→prj-A) и получатель
+      (usr-D→usr-E). Получатель нужен, чтобы оба исхода жили в одном мире; либо назвать это
+      явно, либо развести на два мира с одним получателем.
+  - id: N2
+    kind: DoD
+    note: >-
+      DoD S1 п.6 (256 элементов разных типов) требует 256 живых типов и роль, покрывающую их
+      все; назвать фикстуру (порождённый манифест модуля и правило `{<module>, ["*"]}`).
+  - id: N3
+    kind: COVERAGE
+    note: >-
+      ATC-02 утверждает «выдач у usr-D — 0» через List, а держатель у него только unit;
+      либо внести ATC-02 в integration-строку, либо держать утверждение отсутствием записи у
+      порта.
+  - id: N4
+    kind: OPEN-QUESTION
+    note: >-
+      Выбор кодов (синхронно INVALID_ARGUMENT, в транзакции FAILED_PRECONDITION) принят как
+      дефолт: совпадает со словарём кодов (`api-conventions.md` api-error-codes-vocab —
+      FAILED_PRECONDITION о состоянии).
+
+checks:
+  - id: premise
+    result: pass
+    evidence: >-
+      Собственная проба (одноразовая worktree --detach @b800272d5341, снята): факт = seed.LiteralRows()
+      + probemod.boxes/items → closed=26 live=29 closedNotLive=[]
+      liveOutside=[probemod.boxes probemod.items vpc.addressPool]; probemod.boxes и
+      vpc.addressPool живые, ValidTargetType=false; compute.instance — true; compute.disk,
+      probemod.nope, vpc.address_pool, `*`, `probemod.*`, `probemod` — не живые и false.
+  - id: constructibility
+    result: partial
+    evidence: >-
+      М1 посеян пробой (выше). М2/М3 — названные фикстуры существуют (`git grep` @b800272d5341):
+      pcrWorld, seedProjectInAccount, mustSeedUser, applyDelivered, registerRegistry, seedRole,
+      probemod.public-read-fixture.yaml, modulecatalog.TxRunner (apply.go:236), ApplyAll.
+      Снятие ресурса переносит проекции правил (role_rule_ref, role_verb) и не трогает
+      roles.rules и строки выдач (catalog_writer.go:455, catalog_consequence_sql.go:214-247),
+      поэтому Gate 3 у ATC-09/10 проходит синхронно и отказ приходит в транзакции — Given
+      достижим. Integration-посев М2/М3 не ставился (бюджет шага 60 с, нужен слот) —
+      «не выполнилось», не зачтено.
+  - id: existing_texts
+    result: pass
+    evidence: >-
+      structural_gates.go:132 («role %s does not grant verbs on %s; …»), domain/system_class.go:207
+      («Role … grants verbs beyond get and list; …»), delta_input.go:59-60 (нынешний префикс Т1),
+      domain/rule.go:194 (CatalogEndpoint).
+  - id: producers
+    result: pass
+    evidence: таблица «Сценарий → производитель» покрывает все 16 ID; новое — только ATC-09/10 (заказан).
+  - id: twins
+    result: pass_with_note
+    evidence: у каждого отрицания назван близнец; ATC-12 — см. N1.
+  - id: kacho_consumers
+    result: pass
+    evidence: >-
+      terraform/internal/provider/iam_access_binding_resource.go:531 validateTargetResources и
+      ui-future/iam/…/AccessBindingCreateForm.tsx:978 @fd9f1793e7 — закрытого перечня нет.
+  - id: product_criteria
+    result: pass
+    evidence: таблица ban #18 заполнена; расширение поверхности названо (26 → все живые).
+
+event_body: acceptance-reviewer · RETURNED · 6a8b134fc5d7ba8310c83d91675dc1db056aad0e0d30d25fe489dc915679046f
+event:
+  status: not_performed
+  note: публикует курьер (git-operator); тем же заходом блок приводится к факту.

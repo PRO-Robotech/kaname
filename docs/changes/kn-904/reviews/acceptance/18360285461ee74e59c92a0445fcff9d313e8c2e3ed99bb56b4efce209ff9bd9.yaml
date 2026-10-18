@@ -1,0 +1,114 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-target-names-live-catalog-types.md
+  sha256: 18360285461ee74e59c92a0445fcff9d313e8c2e3ed99bb56b4efce209ff9bd9
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена рецензентом.
+  base_commit: b800272d5341
+  content_commit: none (документ не закоммичен на момент ревью)
+  branch: '904'
+  task: PRO-Robotech/kaname#904
+  related_tasks: [PRO-Robotech/kaname#746, PRO-Robotech/kaname#866, PRO-Robotech/kaname#874]
+  round: 2
+  round_scope: >-
+    Только дельта по замечаниям круга 1: блокирующее B1 (род DoD) и неблокирующие N1–N3;
+    новые блокирующие — лишь от правки. Сценарии S1, Р1–Р6, Т1/Т2 автор объявил нетронутыми;
+    рецензент их не переоткрывал (fa-b1-reanalysis-delta-only).
+  predecessor_record: >-
+    docs/changes/kn-904/reviews/acceptance/6a8b134fc5d7ba8310c83d91675dc1db056aad0e0d30d25fe489dc915679046f.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/w13-kn904 → 18360285…9bd9 (совпало с заданием).
+  measurement_revisions: >-
+    kaname — b800272d5341 (рабочее дерево копии: grep, sed, git grep); kacho — fd9f1793e7
+    (git ls-tree).
+
+verdict: APPROVED
+verdict_note: >-
+  B1 снят: стадия S2 целиком в kaname, держатели ATC-E1/E2 адресованы в существующий модуль
+  набора и исполняющее его задание `stand`; П4 разведён. N1–N3 учтены. Новых блокирующих
+  правка не внесла.
+publication_mode: >-
+  Запись создана файлом в копии полосы и не закоммичена; внешнее событие публикует курьер.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T15:00:00+03:00'
+
+blocking: []
+
+closed_from_previous:
+  - id: B1
+    kind: DoD
+    result: closed
+    predicate: >-
+      git -C project/kacho ls-tree --name-only fd9f1793e7 tests/newman/cases/ | wc -l → 0;
+      в документе «kacho» осталось 5 строк, все — история ревью, П4 (клиенты и отсутствие набора),
+      строка 498 «ребра в kacho нет»; держатель S2 —
+      kaname tests/newman/cases/iam-access-binding-redesign.py (строка 243 — id соседнего
+      NEG-кейса, 263 — утверждение `to.include('Illegal argument target.resources[].type')`);
+      помощники М4 существуют: `_seed_role` :72, `_cleanup_role` :92, `_acb_body` :103,
+      `_cleanup_binding` :125, `address_own_front` :764; задание `stand`
+      (.github/workflows/e2e-newman.yml :447–865), шаг «коллекции собственного REST-фронта
+      гоняются» :613 гоняет `--service iam-access-binding-redesign` :628; шаг генератора :248,
+      validate-cases :265; tests/newman/docs/CASES-INDEX.md и коллекция
+      iam-access-binding-redesign.postman_collection.json существуют.
+  - id: N1
+    kind: TWIN
+    result: closed
+    note: ATC-12 явно объясняет второго получателя (наблюдаемость отрицательного исхода).
+  - id: N2
+    kind: DoD
+    result: closed
+    predicate: >-
+      internal/domain/rule.go: wildcard `*` запрещён у собственной роли (шапка), maxRuleElems=16,
+      MaxRules=64, MaxCompiledPermissions=1024; access_binding_target.go:53
+      MaxTargetResourcesPerBinding=256; grep -rn -i 'max.*resource|cardinality'
+      internal/manifest/*.go без _test → 0. 16×16×1 = 256 ≤ 1024 — фикстура `probeperf`
+      укладывается в пределы.
+  - id: N3
+    kind: COVERAGE
+    result: closed
+    note: ATC-02 внесён в integration-строку таблицы проб-держателей с чтением через List.
+  - id: N4
+    kind: OPEN-QUESTION
+    result: closed
+    note: >-
+      Решение диспетчера 2026-10-19: коды как в документе — синхронно INVALID_ARGUMENT (Т1),
+      в транзакции FAILED_PRECONDITION (Т2).
+
+non_blocking:
+  - id: N5
+    kind: FORMAT
+    note: >-
+      `scripts/gen.py`, `scripts/validate-cases.py` (DoD S2 п.1) и `scripts/own_front_env_test.py`
+      (М4) даны относительно tests/newman; в дереве — tests/newman/scripts/…. Однозначно
+      восстановимо (workflow делает `cd tests/newman`), при следующей правке — полным путём.
+
+checks:
+  - id: s2_constructibility
+    result: pass_by_named_fixture
+    evidence: >-
+      vpc.addressPool живой в посеве стенда (0001_initial.sql:3254, live=true) с глаголом get
+      (:3349, per_object=true) — правило роли `{vpc,[addressPool],[get]}` строится `_seed_role`;
+      тип в закрытом перечне отсутствует (П1), значит ATC-E1 красен до кода по исходу (400).
+      Фронт: internal/restfront/mux.go:38 WithErrorHandler(stepUpErrorHandler), который для всего,
+      кроме указания step-up (Unauthenticated), зовёт runtime.DefaultHTTPErrorHandler
+      (stepup.go:53-55) → INVALID_ARGUMENT = 400, message дословно (ATC-E2 исполним).
+      Гейта уровня роли или области по родительскому виду ресурса в коде ручек нет
+      (`parentKinds` в не-тестовом Go — 0 попаданий). Стенд не поднимался — «не выполнилось»,
+      не зачтено.
+  - id: s2_neighbour_case
+    result: pass
+    evidence: >-
+      git grep предиката DoD S2 п.3 по модулю → строки 14 57 177 213 244 245 249 — совпадает с П4.
+  - id: scenario_count
+    result: pass
+    evidence: grep -cE '^#### ATC-' → 16 (S1 14, S2 2).
+
+event_body: acceptance-reviewer · APPROVED · 18360285461ee74e59c92a0445fcff9d313e8c2e3ed99bb56b4efce209ff9bd9
+event:
+  status: not_performed
+  note: публикует курьер (git-operator); тем же заходом блок приводится к факту.
