@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // seedAccountWithProjects заводит аккаунт, его владельца и n проектов.
@@ -141,12 +142,11 @@ func grantProjectRead(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	exec(`INSERT INTO kaname.role_rule_selectors
 	        (role_id, rule_fp, arm, object_types, match_labels)
 	      VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, dotted)
-	exec(`INSERT INTO kaname.access_bindings
+	// Выдача и строка её набора — одним оператором (kaname#902).
+	exec(bindingset.With(`INSERT INTO kaname.access_bindings
 	        (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-	      VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+	      VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		bindingID, userID, roleID, projectID)
-	exec(`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-	      VALUES ($1, 'user', $2)`, bindingID, userID)
 }
 
 func TestIntegration_GrantDoesNotReachAcrossAccounts(t *testing.T) {

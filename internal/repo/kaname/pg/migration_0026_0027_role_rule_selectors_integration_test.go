@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // seedCustomRoleSQL inserts a minimal custom (account-scoped) role directly so the
@@ -135,9 +136,9 @@ func TestMigration0027_TargetMembersRekey(t *testing.T) {
 	prj := seedProject(t, ctx, repo, acc.ID, "tmrk-prj")
 	roleID := seedCustomRoleSQL(t, ctx, pool, acc.ID, "tmrk_role")
 	bindingID := "acb_tmrk_1"
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		bindingID, string(owner), string(roleID), string(prj.ID))
 	require.NoError(t, err)
 

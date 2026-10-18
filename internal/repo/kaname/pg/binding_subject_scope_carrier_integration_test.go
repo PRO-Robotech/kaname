@@ -47,6 +47,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // scopeCarrierFixture — минимальная обвязка: аккаунт, пользователь, проекты,
@@ -83,7 +84,8 @@ func newScopeCarrierFixture(t *testing.T, ctx context.Context) *scopeCarrierFixt
 	// отказ пришёл бы ОТ НЕГО, и «чужая область отвергнута» стало бы зелёным,
 	// не сказав об области ничего.
 	exec(`INSERT INTO kaname.users (id, external_id, email, account_id)
-	      VALUES ('usr-1', 'ext-1', 'usr-1@kacho.local', 'acc-1'),
+	      VALUES ('usr-0', 'ext-0', 'usr-0@kacho.local', 'acc-1'),
+	             ('usr-1', 'ext-1', 'usr-1@kacho.local', 'acc-1'),
 	             ('usr-2', 'ext-2', 'usr-2@kacho.local', 'acc-1')`)
 	exec(`INSERT INTO kaname.projects (id, account_id, name)
 	      VALUES ('prj-home', 'acc-1', 'home'), ('prj-other', 'acc-1', 'other')`)
@@ -95,9 +97,14 @@ func newScopeCarrierFixture(t *testing.T, ctx context.Context) *scopeCarrierFixt
 	                  'module', 'probe', 'resources', jsonb_build_array('*'),
 	                  'verbs',  jsonb_build_array('get'))),
 	              'cluster_root')`)
+	// Субъект пары выдачи — usr-0, и его строку набора фикстура пишет той же
+	// транзакцией: выдачу без набора база на фиксации отвергает (kaname#902).
+	// Строки субъектов usr-1 и usr-2 — предмет проб ниже, поэтому парой они не
+	// служат.
 	exec(`INSERT INTO kaname.access_bindings
 	        (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-	      VALUES ('acb-1', 'user', 'usr-1', 'rol-1', 'project', 'prj-home', 'ACTIVE')`)
+	      VALUES ('acb-1', 'user', 'usr-0', 'rol-1', 'project', 'prj-home', 'ACTIVE')`)
+	bindingset.Seed(t, ctx, tx)
 	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return &scopeCarrierFixture{pool: pool}

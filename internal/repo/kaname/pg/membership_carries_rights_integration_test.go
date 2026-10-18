@@ -46,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // grantAccountScoped кладёт ACTIVE-выдачу на сам аккаунт: субъект — человек,
@@ -56,15 +57,11 @@ func grantAccountScoped(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 ) string {
 	t.Helper()
 	bindingID := ids.NewID("acb")
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`),
 		bindingID, string(userID), roleID, string(accID))
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		VALUES ($1, 'user', $2, 0)`, bindingID, string(userID))
 	require.NoError(t, err)
 	return bindingID
 }
@@ -158,10 +155,10 @@ func TestIntegration_MembershipRemovalIgnoresRevokedAndForeignGrants(t *testing.
 
 	// (а) ОТОЗВАННАЯ выдача носителем не является.
 	revoked := ids.NewID("acb")
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, revoked_at)
-		VALUES ($1, 'user', $2, $3, 'account', $4, 'REVOKED', now())`,
+		VALUES ($1, 'user', $2, $3, 'account', $4, 'REVOKED', now())`),
 		revoked, string(userID), role, string(accID))
 	require.NoError(t, err)
 

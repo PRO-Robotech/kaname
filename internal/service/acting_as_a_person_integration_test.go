@@ -43,6 +43,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -266,10 +267,9 @@ func seedRoleGrantingUserRead(t *testing.T, w *ciWorld, roleID, bindingID, subje
 	w.exec(t, `INSERT INTO kaname.role_rule_selectors
 	             (role_id, rule_fp, arm, object_types, match_labels)
 	           VALUES ($1, 'fp-actas', 'anchor', ARRAY['iam.user'::text], '{}'::jsonb)`, roleID)
-	w.exec(t, `INSERT INTO kaname.access_bindings
+	// Выдача и строка её набора — одним оператором (kaname#902).
+	w.exec(t, bindingset.With(`INSERT INTO kaname.access_bindings
 	             (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-	           VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
+	           VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`),
 		bindingID, subjectID, roleID, accountID)
-	w.exec(t, `INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-	           VALUES ($1, 'user', $2)`, bindingID, subjectID)
 }

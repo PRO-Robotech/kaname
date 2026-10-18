@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -116,16 +117,13 @@ func anyAssignableRole(t *testing.T, db *sql.DB) string {
 // держать любого писателя леджера, а не только use-case.
 func grantOn(t *testing.T, db *sql.DB, bindingID, subjectUserID, roleID, resType, resID string) string {
 	t.Helper()
-	_, err := db.Exec(`
+	// Выдача и строка её набора — одним оператором (kaname#902).
+	_, err := db.Exec(bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`),
 		bindingID, subjectUserID, roleID, resType, resID)
-	require.NoError(t, err, "посев выдачи %s", bindingID)
-	_, err = db.Exec(`
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		VALUES ($1, 'user', $2, 0)`, bindingID, subjectUserID)
-	require.NoError(t, err, "посев субъекта выдачи %s", bindingID)
+	require.NoError(t, err, "посев выдачи %s и её набора", bindingID)
 	return bindingID
 }
 
