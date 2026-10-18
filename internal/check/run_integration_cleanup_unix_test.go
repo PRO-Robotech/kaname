@@ -28,6 +28,18 @@
 // себе через именованный канал и ждёт, пока проба не пошлёт сигнал. Ожидания
 // по часам нет.
 //
+// ДИСПОЗИЦИЯ СИГНАЛОВ — СВОЯ, А НЕ УНАСЛЕДОВАННАЯ (задача PRO-Robotech/kaname#898).
+// Сигнал, игнорируемый на входе в неинтерактивный bash, нельзя ни перехватить,
+// ни сбросить: `trap 'exit 129' HUP` сценария тогда молча ничего не ставит.
+// Игнор наследуется через exec — от шелла под `nohup` или `trap "" HUP`
+// через `go test` и бинарь пробы до сценария, — и проба краснела строкой
+// «код выхода 0, ожидался 129», судя не сценарий, а то, как запущен прогон.
+// Поэтому сценарий стартует через `env --default-signal`: каждый сигнал,
+// которым проба прерывает прогон, приходит к нему с действием по умолчанию.
+// Средствами Go это не сделать: среда исполнения после fork сбрасывает лишь
+// те сигналы, которые ловит сама, а унаследованный игнор HUP и INT
+// сохраняет, и в SysProcAttr ручки диспозиции нет.
+//
 // Способность упасть — `run_integration_cleanup_injection_unix_test.go`.
 package check_test
 
@@ -39,6 +51,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +72,36 @@ const runIntegrationRel = ".github/scripts/run-integration.sh"
 // мгновенно; срок нужен, чтобы зависший сценарий дал отказ пробы с координатой,
 // а не таймаут пакета.
 const runIntegrationTimeout = 60 * time.Second
+
+// runIntegrationSignals — сигналы, которыми проба прерывает прогон; к
+// сценарию каждый приходит с действием по умолчанию, что бы ни унаследовал
+// бинарь пробы.
+const runIntegrationSignals = "HUP,INT,TERM"
+
+// runIntegrationLaunch — как сценарий стартует: чем сбрасывается диспозиция
+// сигналов и что унаследовано от родителя пробы.
+type runIntegrationLaunch struct {
+	// reset — префикс запуска, ставящий сигналам действие по умолчанию;
+	// пустой — сценарий получает диспозицию бинаря пробы как есть.
+	reset []string
+	// inheritIgnored — родитель игнорирует HUP, INT и TERM, как шелл под
+	// `nohup` или `trap "" HUP`, и этот игнор наследуется через exec.
+	inheritIgnored bool
+}
+
+// runIntegrationDefaultLaunch — запуск несущей пробы: диспозиция своя.
+var runIntegrationDefaultLaunch = runIntegrationLaunch{
+	reset: []string{"env", "--default-signal=" + runIntegrationSignals},
+}
+
+// argv — команда запуска сценария по пути scriptPath.
+func (l runIntegrationLaunch) argv(scriptPath string) []string {
+	argv := append(slices.Clone(l.reset), "bash", scriptPath)
+	if l.inheritIgnored {
+		argv = append([]string{"bash", "-c", `trap '' HUP INT TERM; exec "$@"`, "inherit-ignored"}, argv...)
+	}
+	return argv
+}
 
 // fakeGo — двойник `go`. Отвечает на три вызова сценария так, как отвечает
 // настоящий, и на каждом вызове записывает, сколько записей лежит в TMPDIR.
@@ -141,8 +184,9 @@ func writeExecutable(t *testing.T, path, body string) {
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o700)) // #nosec G306 -- исполняемый двойник в t.TempDir()
 }
 
-// runIntegrationIn — исполняет `script` в песочнице по пути `p`.
-func runIntegrationIn(t *testing.T, script string, p runIntegrationPath) runIntegrationOutcome {
+// runIntegrationIn — исполняет `script` в песочнице по пути `p`, запуская его
+// способом `launch`.
+func runIntegrationIn(t *testing.T, script string, p runIntegrationPath, launch runIntegrationLaunch) runIntegrationOutcome {
 	t.Helper()
 	box := t.TempDir()
 	root := filepath.Join(box, "root")
@@ -173,7 +217,15 @@ func runIntegrationIn(t *testing.T, script string, p runIntegrationPath) runInte
 
 	ctx, cancel := context.WithTimeout(context.Background(), runIntegrationTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", filepath.Join(root, filepath.FromSlash(runIntegrationRel))) // #nosec G204 -- путь в t.TempDir()
+	if len(launch.reset) > 0 {
+		// Предпосылка: префикс сброса исполним здесь. Без неё отказ `env` на
+		// незнакомом ключе читался бы находкой о сценарии.
+		pre := exec.Command(launch.reset[0], append(slices.Clone(launch.reset[1:]), "true")...) // #nosec G204 -- префикс постоянный
+		preOut, preErr := pre.CombinedOutput()
+		require.NoErrorf(t, preErr, "проверка НЕ ИСПОЛНЯЛАСЬ: сброс диспозиции сигналов %v здесь не исполним:\n%s", launch.reset, preOut)
+	}
+	argv := launch.argv(filepath.Join(root, filepath.FromSlash(runIntegrationRel)))
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- путь в t.TempDir(), префикс постоянный
 	cmd.Env = env
 	cmd.WaitDelay = 5 * time.Second
 	// Вывод читается и до выхода сценария (в тексте отказа), поэтому буфер
@@ -266,8 +318,15 @@ func readFIFO(ctx context.Context, path string) (string, error) {
 // одного следа ни на одном пути; перепись — по строке на путь.
 func auditRunIntegration(t *testing.T, script string) (findings, census []string) {
 	t.Helper()
+	return auditRunIntegrationLaunched(t, script, runIntegrationDefaultLaunch)
+}
+
+// auditRunIntegrationLaunched — то же, что auditRunIntegration, при запуске
+// сценария способом `launch`.
+func auditRunIntegrationLaunched(t *testing.T, script string, launch runIntegrationLaunch) (findings, census []string) {
+	t.Helper()
 	for _, p := range runIntegrationPaths {
-		o := runIntegrationIn(t, script, p)
+		o := runIntegrationIn(t, script, p, launch)
 		census = append(census, fmt.Sprintf("%s: код %d · вызовов go %d · следов во время прогона %d · следов после %d",
 			p.name, o.rc, o.calls, o.during, len(o.left)))
 		// Предпосылка: временные файлы заведены там, куда смотрит проба.
@@ -296,4 +355,23 @@ func TestRunIntegrationLeavesNoTracesOnAnyExitPath(t *testing.T) {
 	}
 	require.Len(t, census, len(runIntegrationPaths), "осмотрены не все пути выхода")
 	require.Emptyf(t, findings, "следы и коды по путям выхода:\n%s", strings.Join(findings, "\n"))
+}
+
+// TestRunIntegrationProbeIgnoresInheritedSignalDisposition — проба судит
+// СЦЕНАРИЙ, а не то, как запущен её бинарь: родитель, игнорирующий HUP, INT и
+// TERM (шелл под `nohup`, `trap "" HUP`, фоновое задание), не меняет ни одного
+// исхода. Без этого отправка из такого шелла краснела ложно (kaname#882,
+// kaname#894). Что игнор родителя действительно доходит до сценария, когда
+// диспозиция не сброшена, — близнец в
+// TestRunIntegrationCleanupProbeCanFail.
+func TestRunIntegrationProbeIgnoresInheritedSignalDisposition(t *testing.T) {
+	t.Parallel()
+	launch := runIntegrationDefaultLaunch
+	launch.inheritIgnored = true
+	findings, census := auditRunIntegrationLaunched(t, runIntegrationSource(t), launch)
+	for _, line := range census {
+		t.Log("перепись под унаследованным игнором: " + line)
+	}
+	require.Len(t, census, len(runIntegrationPaths), "осмотрены не все пути выхода")
+	require.Emptyf(t, findings, "исход зависит от диспозиции сигналов родителя пробы:\n%s", strings.Join(findings, "\n"))
 }
