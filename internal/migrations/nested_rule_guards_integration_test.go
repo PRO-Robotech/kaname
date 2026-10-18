@@ -147,9 +147,9 @@ func TestIntegration_ND02_SelectorContainerIsGuarded(t *testing.T) {
 	ins := func(fp, ctype, carm, cnames, clabels string) error {
 		_, err := db.Exec(`INSERT INTO kaname.role_rule_selectors
 		    (role_id, rule_fp, arm, object_types, match_labels,
-		     container_type, container_arm, container_resource_names, container_match_labels)
+		     container_type, container_arm, container_resource_names, container_match_labels, verbs_by_type)
 		    VALUES ('rol-ndsel', $1, 'anchor', ARRAY['registry.repositories'], '{}'::jsonb,
-		            NULLIF($2, ''), NULLIF($3, ''), $4::text[], $5::jsonb)`, fp, ctype, carm, cnames, clabels)
+		            NULLIF($2, ''), NULLIF($3, ''), $4::text[], $5::jsonb, '{}'::jsonb)`, fp, ctype, carm, cnames, clabels)
 		return err
 	}
 	require.NoError(t, ins("fp-ok", "registry.registries", "anchor", "{}", "{}"), "близнец: контейнер якорем")

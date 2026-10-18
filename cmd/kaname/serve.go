@@ -2174,6 +2174,35 @@ func runServe(cfg config.Config) error {
 		return nil
 	})
 
+	// Пересчёт ОЧЕРЕДИ глаголов правил (kaname#878) — своя задача, а не шаг
+	// досева: он идёт, пока жив процесс (очередь пополняется и после опустения —
+	// перекатка, сорванный пересчёт на старте), и досев за ним не ждёт. Пока роль в очереди, её строки селекторов несут верхнюю границу
+	// глаголов («по роли»), и окно миграции открыто — поэтому перепись КАЖДОГО
+	// прохода печатается с длиной очереди, а отказ прохода — уровнем Error.
+	// Старт он не роняет: отказ роли оставляет её в очереди до следующего
+	// прохода, а не отнимает доступ. Снимается вместе с переходным стражем схемы
+	// при пустой очереди на всех установках (шапка `seed/selector_verbs_queue.go`).
+	tasks = append(tasks, func() error {
+		derr := seed.DrainSelectorVerbsQueue(taskCtx, kanameRepo, pool, catalogSnapshot,
+			selectorVerbsQueueRetry, func(c seed.SelectorVerbsCensus, perr error) {
+				attrs := []any{
+					slog.Int("roles_examined", c.Examined),
+					slog.Int("roles_regrained", c.Regrained),
+					slog.Int("roles_failed", c.Failed),
+					slog.Int("queue_pending", c.Pending),
+				}
+				if perr != nil {
+					logger.Error("пересчёт очереди глаголов правил отказал", append(attrs, slog.Any("err", perr))...)
+					return
+				}
+				logger.Info("перепись пересчёта очереди глаголов правил", attrs...)
+			})
+		if derr != nil && taskCtx.Err() == nil {
+			logger.Error("пересчёт очереди глаголов правил остановлен", slog.Any("err", derr))
+		}
+		return nil
+	})
+
 	// Уборки по сроку — ресурсного журнала подписки (своим уборщиком, довод в
 	// `subscription_wiring.go`) и таблиц службы — запускаются ЗДЕСЬ: после
 	// последнего отказа старта и на корневом контексте задач (#253, шапка

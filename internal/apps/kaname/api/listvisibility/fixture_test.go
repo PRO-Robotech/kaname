@@ -467,8 +467,9 @@ func (e *env) probeRole(t *testing.T, objectType, verb string) string {
 	// пробел фикстуры. Ветвь ЯКОРНАЯ: она разрешает тип в области независимо от
 	// меток, а метки в предмете этих проб не участвуют.
 	_, err = e.pool.Exec(ctx, `
-		INSERT INTO role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-		VALUES ($1, 'fp-probe', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, id, catalog)
+		INSERT INTO role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		VALUES ($1, 'fp-probe', 'anchor', ARRAY[$2::text], '{}'::jsonb,
+		        jsonb_build_object($2::text, jsonb_build_array($3::text)))`, id, catalog, verb)
 	require.NoError(t, err, "seed role_rule_selectors")
 
 	e.probeRoles[key] = id
