@@ -328,7 +328,7 @@ SELECT c.object_id,
 // (довод — у expandQuerySQL).
 func listQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(listSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", "$8::text[]", nesting))
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting))
 	if err != nil {
 		return "", err
 	}

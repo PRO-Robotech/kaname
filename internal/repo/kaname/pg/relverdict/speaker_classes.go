@@ -30,13 +30,7 @@ import (
 //
 // Набор глаголов совпадает с `domain.IsClassReadVerb`; равенство держит
 // проба пакета.
-const classVerbFilterSQL = `(bs.subject_type <> 'system_class' OR rv.verb = ANY ('{` + classReadVerbsList + `}'::text[]))`
-
-// classReadVerbsList — глаголы чтения, которые выдача системному классу
-// раздаёт, через запятую. Источник ОДИН на оба места, где класс сужается: фильтр
-// проекции роли (classVerbFilterSQL) и глаголы правила в предикате ветви выдач
-// (ruleVerbSQL, kaname#878).
-const classReadVerbsList = `get,list`
+const classVerbFilterSQL = `(bs.subject_type <> 'system_class' OR rv.verb = ANY ('{get,list}'::text[]))`
 
 // classSlot — имя i-го класса говорящего (без вида) либо пустая строка.
 //
