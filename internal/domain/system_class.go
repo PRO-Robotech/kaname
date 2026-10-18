@@ -47,6 +47,28 @@ var classReadVerbs = map[string]bool{"get": true, "list": true}
 // IsClassReadVerb — глагол чтения, допустимый у выдачи классу (Р4, SC-23).
 func IsClassReadVerb(verb string) bool { return classReadVerbs[NormalizeVerb(verb)] }
 
+// LegacyPublicWildcardWord — прежнее слово публичного чтения в составе субъектов
+// манифеста. Рендер блока переводит его в класс (`modelrender.subjectWords`), и
+// поэтому оно — одно из написаний класса ([IsClassSubjectWord]).
+const LegacyPublicWildcardWord = "user:*"
+
+// IsClassSubjectWord — слово состава субъектов называет системный класс:
+// `system_class`, `system_class:<класс>` либо прежнее слово
+// [LegacyPublicWildcardWord], которое рендер переводит в класс.
+//
+// Единственное написание правила (kaname#866, CE-03): его читают загрузчик
+// манифеста (Р2 — класс в действии чтения ресурса с ключом) и допуск собранной
+// модели (Д3 — запись класса в блоке нового типа). Узнаётся по ВИДУ слова, а не
+// по имени класса: имена — закрытый словарь, и запись с незнакомым именем
+// обязана дойти до отказа, а не проскочить мимо него.
+func IsClassSubjectWord(word string) bool {
+	if word == LegacyPublicWildcardWord {
+		return true
+	}
+	kind, _, _ := strings.Cut(word, ":")
+	return SubjectType(kind) == SubjectTypeSystemClass
+}
+
 // IsSystemClassName — имя из закрытого словаря классов.
 func IsSystemClassName(id SubjectID) bool {
 	return id == ClassAnonymous || id == ClassAuthenticated
