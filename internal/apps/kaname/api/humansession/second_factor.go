@@ -57,7 +57,8 @@ type TOTPVerifier interface {
 // SetVerifier — проверяющий набора запасных кодов (порт по проверяющему
 // пароля: та же ёмкость — Р6).
 type SetVerifier interface {
-	SetCandidate(stored domain.LoginVerifier, presented string) passwordverify.SetCandidate
+	// SetCandidate — ошибка только конец вызова до места вычисления.
+	SetCandidate(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.SetCandidate, error)
 	MatchSet(stored domain.LoginVerifier, c passwordverify.SetCandidate) passwordverify.SetMatch
 	SetSize(stored domain.LoginVerifier) (int, bool)
 }

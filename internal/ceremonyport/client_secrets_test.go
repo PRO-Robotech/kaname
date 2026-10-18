@@ -254,8 +254,8 @@ func TestClientSecrets_StoreFailureIsAnOperationFailure(t *testing.T) {
 // stubChecker — проверяющий, отвечающий названным исходом.
 type stubChecker struct{ outcome passwordverify.Outcome }
 
-func (s stubChecker) VerifyPresented(domain.LoginVerifier, passwordverify.Presented) passwordverify.Result {
-	return passwordverify.Result{Outcome: s.outcome}
+func (s stubChecker) VerifyPresented(context.Context, domain.LoginVerifier, passwordverify.Presented) (passwordverify.Result, error) {
+	return passwordverify.Result{Outcome: s.outcome}, nil
 }
 
 func (stubChecker) Aligned() bool { return true }

@@ -29,7 +29,9 @@ type SecretVerifierStore interface {
 // значение секрета чеканит тот же хешер, что пишет пароли, и сверяет тот же
 // проверяющий.
 type SecretChecker interface {
-	VerifyPresented(stored domain.LoginVerifier, presented passwordverify.Presented) passwordverify.Result
+	// VerifyPresented — ошибка только конец вызова до места вычисления
+	// (контекст вызывающего): сверка не состоялась, вердикта нет.
+	VerifyPresented(ctx context.Context, stored domain.LoginVerifier, presented passwordverify.Presented) (passwordverify.Result, error)
 	// Aligned — полоса «материала нет» вычисляется против выравнивающего
 	// значения, а не отвечает мгновенно.
 	Aligned() bool
@@ -139,7 +141,13 @@ func (c *ClientSecrets) VerifyClientSecret(ctx context.Context, clientID string,
 		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
 			"the ceremony share of the checker is at capacity: %w", clientID, domain.ErrVerifierAtCapacity)
 	}
-	res := c.checker.VerifyPresented(stored, presented)
+	res, err := c.checker.VerifyPresented(ctx, stored, presented)
+	if err != nil {
+		// Срок операции кончился, пока сверка ждала места вычисления: порт
+		// отказывает к сроку, а не после него (kaname#892).
+		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
+			"the call ended before a computation place of the checker was free: %w", clientID, err)
+	}
 	switch res.Outcome {
 	case passwordverify.OutcomeMatched:
 		return oauthceremony.SecretMatched, nil
