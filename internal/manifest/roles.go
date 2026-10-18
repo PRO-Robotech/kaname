@@ -162,6 +162,12 @@ var (
 	// — часть контракта отказа, и переименование его без смены предмета сделало
 	// бы ложью каждое место, которое на него ссылается.
 	ErrRoleDescriptionTooShort = errors.New("manifest: role description is shorter than the declared bound")
+	// ErrRoleDescriptionTooLong — назначение роли длиннее предела доменного
+	// типа. Судья — `domain.Description`, тот же, что у применителя ролей:
+	// загрузчик, принявший такое назначение, отдал бы доставку, которая не
+	// применится, и отказ пришёл бы на старте службы, а не автору манифеста
+	// (kaname#867).
+	ErrRoleDescriptionTooLong = errors.New("manifest: role description is longer than the domain bound")
 	// ErrRoleRulesRequired — роль не несёт ни одного правила: выданная, она не
 	// даёт НИ ОДНОГО права.
 	ErrRoleRulesRequired = errors.New("manifest: role grants nothing")
@@ -621,6 +627,18 @@ func validateRoleProse(role *Role, doc *yaml.Node, i int) []error {
 				"объявлением роль лишилась бы назначения, которое у неё есть",
 				i, utf8.RuneCountInString(strings.TrimSpace(role.Description)),
 				minRoleDescriptionRunes),
+		})
+	}
+	// Верхний предел судит ДОМЕННЫЙ тип — тот же судья, что у применителя ролей
+	// (`domain.Role.Validate`), в тех же единицах (знаки). Второй предел здесь
+	// не выписывается: разошёлся бы с доменным молча (kaname#867).
+	if err := domain.Description(role.Description).Validate(); err != nil {
+		faults = append(faults, linkFault{
+			kind:  ErrRoleDescriptionTooLong,
+			coord: locate(doc, "roles", i),
+			detail: fmt.Sprintf("roles[%d].description: %d знаков, допускается не более %d — "+
+				"применитель ролей отверг бы такое назначение на старте службы: %v",
+				i, utf8.RuneCountInString(role.Description), domain.DescriptionMax, err),
 		})
 	}
 	return faults
