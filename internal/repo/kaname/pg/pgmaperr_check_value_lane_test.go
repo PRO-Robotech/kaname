@@ -145,6 +145,7 @@ var cvCallerValueSpec = map[string]struct{}{
 	"authorization_codes_challenge_form_ck":                {},
 	"authorization_codes_challenge_method_ck":              {},
 	"authorization_codes_redirect_uri_ck":                  {},
+	"catalog_module_applied_revision_positive":             {},
 	"catalog_module_nonempty":                              {},
 	"catalog_module_undotted":                              {},
 	"catalog_resource_module_undotted":                     {},
