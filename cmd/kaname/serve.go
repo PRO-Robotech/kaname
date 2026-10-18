@@ -323,7 +323,7 @@ func runServe(cfg config.Config) error {
 	// Отказ ФАТАЛЕН на каждом звене: собранная модель, не прошедшая допуск, —
 	// это данные оператора, расширяющие модель прав установки, и мягкий проход
 	// здесь означал бы контроль, который не откажет ни разу.
-	if cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
+	if _, cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
 		return cErr
 	}
 
@@ -351,7 +351,7 @@ func runServe(cfg config.Config) error {
 	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
 	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
 	// и страж ниже судят доставку целиком, как прежде.
-	appliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+	appliedManifests, _, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
 	if aErr != nil {
 		return aErr
 	}

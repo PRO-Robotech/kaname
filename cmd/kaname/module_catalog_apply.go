@@ -95,14 +95,14 @@ func applyDeliveredManifests(
 	logger *slog.Logger,
 	applier *modulecatalog.Applier,
 	manifests []*manifest.Manifest,
-) ([]*manifest.Manifest, error) {
+) ([]*manifest.Manifest, []modulecatalog.RevisionSkip, error) {
 	if len(manifests) == 0 {
 		// Законное состояние ровно одно: доставка посадкой не объявлена.
 		// «Объявлена и сорвана» сюда не доходит — её отверг читатель доставки.
 		// Молчать нельзя по той же причине, по какой не молчит читатель: снаружи
 		// «применять нечего» неотличимо от «применили и ничего не изменилось».
 		logger.Info("применение каталога модуля: доставленных манифестов нет, применять нечего")
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	started := time.Now()
@@ -135,9 +135,9 @@ func applyDeliveredManifests(
 		slog.Int("pruned_selector_types", census.PrunedSelectorTypes),
 		slog.Bool("changed", census.Changed()))
 	if err != nil {
-		return nil, fmt.Errorf("каталог модуля: применение доставленных манифестов: %w", err)
+		return nil, nil, fmt.Errorf("каталог модуля: применение доставленных манифестов: %w", err)
 	}
-	return census.AppliedManifests, nil
+	return census.AppliedManifests, census.NotApplied, nil
 }
 
 // revisionAttrs — поля записи пропуска либо отказа по редакции. Номер, которого

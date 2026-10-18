@@ -674,52 +674,94 @@ func TestConnectRefusalNeverPrintsAnEmptyAddress(t *testing.T) {
 
 // --- редакция манифеста (kaname#865) -------------------------------------------
 
-// Вердикты редакции и вердикт, клиенту неизвестный, — НАХОДКА, а не схождение:
-// ни кода 0, ни подсказки `apply` на плане, который служба отвергнет. Близнец —
-// `TestPlanPrintsTheCensusAndTheFingerprint` (WOULD_APPLY даёт код 0 и подсказку).
-func TestPlanRevisionVerdictsAreFindingsNotConvergence(t *testing.T) {
-	applied, manifest := int64(5), int64(3)
+// Test865_37_RevisionVerdictsAreFindingsNotConvergence — клиент
+// администрирования не выдаёт вердикт редакции за схождение (kaname#865,
+// приёмка `module-manifest-revision-only-moves-forward.md`, Д11, сценарий
+// 865-37): схождение — ТОЛЬКО `WOULD_APPLY`; вердикты редакции и значение,
+// клиенту неизвестное, — находка с кодом `1`. Близнец — `WOULD_APPLY`.
+func Test865_37_RevisionVerdictsAreFindingsNotConvergence(t *testing.T) {
+	const module = "probemod"
+	dR5false := "sha256:" + strings.Repeat("a", 64)
+	dR5true := "sha256:" + strings.Repeat("b", 64)
+	i64 := func(n int64) *int64 { return &n }
+	str := func(s string) *string { return &s }
 	cases := []struct {
-		name    string
-		verdict iamv1.ModulePlanVerdict
-		names   []string
+		name string
+		resp *iamv1.PlanModuleResponse
+		// subject — что находка обязана назвать в потоке ошибок.
+		subject []string
 	}{
-		{"stale", iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION, []string{"3", "5"}},
-		{"conflict", iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT, []string{"sha256:aa", "sha256:bb"}},
-		{"unknown", iamv1.ModulePlanVerdict(99), []string{"99"}},
+		{"(а) младшая редакция", &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict:          iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION,
+			ManifestRevision: i64(3), AppliedRevision: i64(5),
+		}, []string{"3", "5"}},
+		{"(б) конфликт содержимого", &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict:          iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT,
+			ManifestRevision: i64(5), AppliedRevision: i64(5),
+			ManifestDigest: str(dR5false), AppliedDigest: str(dR5true),
+		}, []string{dR5false, dR5true}},
+		{"(в) неизвестное значение", &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict: iamv1.ModulePlanVerdict(99),
+		}, []string{"99"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ad, md := "sha256:aa", "sha256:bb"
-			svc := &stubService{planResp: &iamv1.PlanModuleResponse{
-				Module: "vpc", ExpectedState: "sha256:dead", Verdict: c.verdict,
-				AppliedRevision: &applied, ManifestRevision: &manifest,
-				AppliedDigest: &ad, ManifestDigest: &md,
-			}}
-			got := exercise(t, depsWith(t, svc), "plan", "vpc")
+			got := exercise(t, depsWith(t, &stubService{planResp: c.resp}), "plan", module)
 			if got.code != ExitFinding {
-				t.Fatalf("код: получено %d, ожидалось %d\n%s", got.code, ExitFinding, got.both())
+				t.Fatalf("plan: код получено %d, ожидалось %d\n%s", got.code, ExitFinding, got.both())
 			}
-			if strings.Contains(got.both(), "iamctl apply") {
-				t.Fatalf("на отвергаемом плане клиент подсказывает apply:\n%s", got.both())
+			mustContain(t, got.stderr, "НАХОДКА", "находка — в поток ошибок")
+			for _, n := range c.subject {
+				mustContain(t, got.stderr, n, "находка обязана назвать предмет")
 			}
-			for _, n := range c.names {
-				mustContain(t, got.both(), n, "находка обязана назвать предмет")
+			for _, banned := range []string{"iamctl apply", "вердикт: применение сойдётся с якорем"} {
+				if strings.Contains(got.both(), banned) {
+					t.Fatalf("plan: на вердикте, отличном от WOULD_APPLY, вывод несёт %q:\n%s", banned, got.both())
+				}
 			}
 
 			doc := &stubService{
 				listResp: &iamv1.ListModulesResponse{Modules: []*iamv1.ModuleSummary{
-					{Module: "vpc", LiveResourceCount: 7, LiveVerbCount: 31},
+					{Module: module, LiveResourceCount: 2, LiveVerbCount: 4},
 				}},
-				planResp: svc.planResp,
+				planResp: c.resp,
 			}
 			dgot := exercise(t, depsWith(t, doc), "doctor")
 			if dgot.code != ExitFinding {
 				t.Fatalf("doctor: код получено %d, ожидалось %d\n%s", dgot.code, ExitFinding, dgot.both())
 			}
-			if strings.Contains(dgot.stdout, "сходится") {
-				t.Fatalf("doctor назвал отвергаемый план схождением:\n%s", dgot.both())
+			if strings.Contains(dgot.stdout, "каталог сходится с доставленным манифестом") {
+				t.Fatalf("doctor назвал вердикт, отличный от WOULD_APPLY, схождением:\n%s", dgot.both())
 			}
 		})
 	}
+
+	t.Run("близнец: WOULD_APPLY", func(t *testing.T) {
+		resp := &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict:          iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_APPLY,
+			ManifestRevision: i64(5), AppliedRevision: i64(3),
+		}
+		got := exercise(t, depsWith(t, &stubService{planResp: resp}), "plan", module)
+		if got.code != ExitOK {
+			t.Fatalf("plan: код получено %d, ожидалось %d\n%s", got.code, ExitOK, got.both())
+		}
+		mustContain(t, got.stdout, "вердикт: применение сойдётся с якорем", "схождение названо")
+		mustContain(t, got.both(), "iamctl apply "+module+" -expected-state=", "подсказка применения")
+
+		doc := &stubService{
+			listResp: &iamv1.ListModulesResponse{Modules: []*iamv1.ModuleSummary{
+				{Module: module, LiveResourceCount: 2, LiveVerbCount: 4},
+			}},
+			planResp: resp,
+		}
+		dgot := exercise(t, depsWith(t, doc), "doctor")
+		if dgot.code != ExitOK {
+			t.Fatalf("doctor: код получено %d, ожидалось %d\n%s", dgot.code, ExitOK, dgot.both())
+		}
+		mustContain(t, dgot.stdout, "каталог сходится с доставленным манифестом", "doctor называет схождение")
+	})
 }

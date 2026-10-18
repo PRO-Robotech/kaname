@@ -165,3 +165,58 @@ func Reformatted(doc []byte) ([]byte, error) {
 	}
 	return []byte(quoted), nil
 }
+
+// WithRoleDescription заменяет текст описания роли id на description (документ
+// `I~(n)` приёмки: равный номер, иное содержимое без типов вне канона).
+// Значение пишется строкой в двойных кавычках (`strconv.Quote`), отступ берётся
+// у заменяемой строки. Роль ищется по строке `- id: <id>` раздела `roles`, а
+// строка описания — внутри её элемента, до следующего элемента; отсутствие
+// роли, её описания либо повтор роли — отказ фикстуры, а не правка «где
+// нашлось». Разность с исходником — ровно строка `description` этой роли.
+func WithRoleDescription(doc []byte, id, description string) ([]byte, error) {
+	lines := strings.SplitAfter(string(doc), "\n")
+	itemLine := "- id: " + id
+	at := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) != itemLine {
+			continue
+		}
+		if at >= 0 {
+			return nil, fmt.Errorf("publicreadfixture: роль %q объявлена дважды", id)
+		}
+		at = i
+	}
+	if at < 0 {
+		return nil, fmt.Errorf("publicreadfixture: роли %q в документе нет", id)
+	}
+	itemIndent := len(lines[at]) - len(strings.TrimLeft(lines[at], " "))
+	desc := -1
+	for i := at + 1; i < len(lines); i++ {
+		l := lines[i]
+		body := strings.TrimLeft(l, " ")
+		if strings.TrimSpace(l) == "" || strings.HasPrefix(body, "#") {
+			continue
+		}
+		indent := len(l) - len(body)
+		if indent <= itemIndent {
+			break
+		}
+		if indent == itemIndent+2 && strings.HasPrefix(body, "description:") {
+			desc = i
+			break
+		}
+	}
+	if desc < 0 {
+		return nil, fmt.Errorf("publicreadfixture: у роли %q нет строки description", id)
+	}
+	old := lines[desc]
+	indent := old[:len(old)-len(strings.TrimLeft(old, " "))]
+	repl := indent + "description: " + strconv.Quote(description) + "\n"
+	lines[desc] = repl
+	out := []byte(strings.Join(lines, ""))
+	if err := requireDelta(doc, out,
+		[]string{strings.TrimSuffix(old, "\n")}, []string{strings.TrimSuffix(repl, "\n")}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

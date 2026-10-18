@@ -43,7 +43,7 @@ import (
 // Перепись обеих ступеней печатается ВСЕГДА, независимо от исхода: без неё
 // «добавлено 0» неотличимо от «прочитано 0», а «находок 0» — от «судить не о
 // чем».
-func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) error {
+func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (modelcompose.Report, error) {
 	composed, rep, err := modelcompose.Compose(authzmodel.DSL, manifests)
 	logger.Info("перепись композиции модели прав",
 		slog.Int("manifests_seen", rep.ManifestsSeen),
@@ -53,7 +53,7 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) e
 		slog.Any("reaffirmed", rep.Reaffirmed),
 		slog.Any("prior_edition", rep.PriorEdition))
 	if err != nil {
-		return fmt.Errorf("композиция модели прав: %w", err)
+		return rep, fmt.Errorf("композиция модели прав: %w", err)
 	}
 
 	admission, err := authzmodel.Admit(composed)
@@ -65,7 +65,7 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) e
 		// либо собранный текст не разобрался. Это НЕ «находок ноль» — отчёт при
 		// ней несуждён и отвечает «не допущено» сам (kacho#2000), но проверяется err
 		// ПЕРВЫМ: он называет стадию, а отчёт её назвать не может.
-		return fmt.Errorf("допуск собранной модели прав: %w", err)
+		return rep, fmt.Errorf("допуск собранной модели прав: %w", err)
 	}
 
 	// Исходов допуска ТРИ, и здесь законны два — но по разным причинам, поэтому
@@ -74,7 +74,7 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) e
 	case len(admission.Findings) > 0:
 		// Находка — отказ ПУСКА. Перечисляются ВСЕ: названная первая заставила
 		// бы оператора чинить их по одной, по выкатке на каждую.
-		return fmt.Errorf("допуск собранной модели прав отверг её (%s):%s",
+		return rep, fmt.Errorf("допуск собранной модели прав отверг её (%s):%s",
 			admission.Census(), formatFindings(admission.Findings))
 	case admission.NothingToJudge:
 		// Доставка не добавила НИ ОДНОГО типа: судить некого. Для допуска это
@@ -87,12 +87,12 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) e
 	}
 
 	if err := authzmodel.Install(composed); err != nil {
-		return fmt.Errorf("установка модели процесса: %w", err)
+		return rep, fmt.Errorf("установка модели процесса: %w", err)
 	}
 	logger.Info("модель процесса установлена",
 		slog.Int("types_seen", admission.TypesSeen),
 		slog.Int("types_new", admission.TypesNew))
-	return nil
+	return rep, nil
 }
 
 // formatFindings — находки допуска списком, каждая со своей строки.

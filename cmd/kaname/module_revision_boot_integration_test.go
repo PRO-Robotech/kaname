@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,7 +36,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/modelcompose"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/servicemanifest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogstate"
@@ -52,7 +55,40 @@ const (
 	bootStaleMsg         = "применение каталога модуля: редакция старше применённой — модуль пропущен"
 	bootConflictMsg      = "применение каталога модуля: редакция совпадает с применённой, содержимое другое — модуль не применён"
 	bootRolesCensusMsg   = "перепись применения ролей модуля"
+	// bootParityCensusMsg / bootSeedCensusMsg — переписи стража паритета и
+	// применителя посева: шаг Д10 стоит раньше обоих (порядок в `serve.go`
+	// держит гейт `model_catalog_agreement_wiring_test.go`).
+	bootParityCensusMsg = "перепись каталога модуля"
+	bootSeedCensusMsg   = "перепись применения посева"
+	// bootEditedRole / bootEditedDescription — правка документа `I~(n)`.
+	bootEditedRole        = "iam.access_binding.admin"
+	bootEditedDescription = "Admin AccessBinding (edited)"
 )
+
+// d10Line — строка отказа пуска шага Д10 (текст Д7 приёмки), собранная здесь
+// по шаблону приёмки, а не формирователем продукта: проба судит его текст.
+// delivered == "" — манифест редакцию не объявил.
+func d10Line(module, delivered string, applied int64, appliedDigest, types string) string {
+	d := "доставлена редакция не объявлена"
+	if delivered != "" {
+		d = "доставлена редакция " + delivered
+	}
+	return "модель доступа: модуль " + module + " каталог не применил — " + d +
+		", применена " + strconv.FormatInt(applied, 10) + " (отпечаток " + appliedDigest + "); его типы вне канона " +
+		types + " собраны в модель процесса из этого документа — модель доступа не может быть собрана " +
+		"из документа, который каталог отверг"
+}
+
+// d10Lines — строки отказа шага Д10 в тексте ошибки.
+func d10Lines(err error) []string {
+	var out []string
+	for _, l := range strings.Split(err.Error(), "\n") {
+		if strings.HasPrefix(l, "модель доступа: модуль ") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
 
 // bootDoc — документы общего «Дано» приёмки.
 type bootDoc struct {
@@ -99,6 +135,14 @@ func (d bootDoc) i(n int64) []byte {
 	return doc
 }
 
+// iTilde — I~(n): I(n) с иным описанием роли `iam.access_binding.admin`.
+func (d bootDoc) iTilde(n int64) []byte {
+	d.t.Helper()
+	doc, err := publicreadfixture.WithRoleDescription(d.i(n), bootEditedRole, bootEditedDescription)
+	require.NoError(d.t, err)
+	return doc
+}
+
 // load — документ, разобранный загрузчиком.
 func (d bootDoc) load(doc []byte) *manifest.Manifest {
 	d.t.Helper()
@@ -134,19 +178,35 @@ func newBootRevisionStand(t *testing.T) *bootRevisionStand {
 	}
 }
 
-// start — один старт: каталог, затем роли тем перечнем, который вернул
-// применитель каталога. Возвращает этот перечень (его же корень подаёт
-// посеву) и исход применителя каталога.
-func (s *bootRevisionStand) start(docs ...[]byte) ([]*manifest.Manifest, error) {
+// bootOutcome — исход одного старта: перечень, поданный применителям ролей и
+// посева, отказ применителя каталога и отказ шага «модель против каталога».
+type bootOutcome struct {
+	applied    []*manifest.Manifest
+	catalogErr error
+	modelErr   error
+}
+
+// start — один старт тем порядком, каким шаги стоят в `serve.go`: композиция
+// модели над доставкой (чистая, без установки модели процесса), применитель
+// каталога, шаг Д10 с отчётом той композиции, затем роли тем перечнем, который
+// вернул применитель каталога. Отказ любого шага останавливает старт, как в
+// корне: до ролей он тогда не доходит.
+func (s *bootRevisionStand) start(docs ...[]byte) bootOutcome {
 	s.t.Helper()
 	delivered := make([]*manifest.Manifest, 0, len(docs))
 	for _, d := range docs {
 		delivered = append(delivered, s.doc.load(d))
 	}
+	_, composed, cerr := modelcompose.Compose(authzmodel.DSL, delivered)
+	require.NoError(s.t, cerr, "композиция доставки обязана пройти — иначе шагу Д10 судить нечего")
+
 	applier := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(s.pool))
-	applied, err := applyDeliveredManifests(s.ctx, s.log, applier, delivered)
+	applied, notApplied, err := applyDeliveredManifests(s.ctx, s.log, applier, delivered)
 	if err != nil {
-		return applied, err
+		return bootOutcome{applied: applied, catalogErr: err}
+	}
+	if merr := assertModelAgreesWithCatalog(s.log, notApplied, composed); merr != nil {
+		return bootOutcome{applied: applied, modelErr: merr}
 	}
 
 	live, lerr := kanamepg.NewCatalogRepo(s.pool).ReadLiveCatalog(s.ctx)
@@ -158,7 +218,16 @@ func (s *bootRevisionStand) start(docs ...[]byte) ([]*manifest.Manifest, error) 
 	roles := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanamepg.New(s.pool, nil)), rights)
 	require.NoError(s.t, applyDeliveredModuleRoles(s.ctx, s.log, roles, applied),
 		"применение ролей применённого перечня обязано пройти")
-	return applied, nil
+	return bootOutcome{applied: applied}
+}
+
+// mustStart — старт, который обязан пройти целиком.
+func (s *bootRevisionStand) mustStart(docs ...[]byte) []*manifest.Manifest {
+	s.t.Helper()
+	o := s.start(docs...)
+	require.NoError(s.t, o.catalogErr, "применитель каталога не вправе отказать")
+	require.NoError(s.t, o.modelErr, "шаг Д10 не вправе остановить этот пуск")
+	return o.applied
 }
 
 // records — записи журнала с текстом msg, в порядке появления.
@@ -248,12 +317,11 @@ func i64(n int64) *int64 { return &n }
 // Test865_01_StaleRevisionIsSkippedAtBoot — обратный порядок на старте.
 func Test865_01_StaleRevisionIsSkippedAtBoot(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.r(5, true))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(5, true))
 	s.reset()
 
-	_, err = s.start(s.doc.r(3, false))
-	require.NoError(t, err, "младшая редакция — не отказ применителя: applyDeliveredManifests возвращает nil")
+	o := s.start(s.doc.r(3, false))
+	require.NoError(t, o.catalogErr, "младшая редакция — не отказ применителя: applyDeliveredManifests возвращает nil")
 
 	require.True(t, s.container(), "признак контейнера обязан остаться значением старшей редакции")
 	require.Equal(t, i64(5), s.appliedRevision(bootRevisionModule))
@@ -268,17 +336,18 @@ func Test865_01_StaleRevisionIsSkippedAtBoot(t *testing.T) {
 	require.Equal(t, bootRevisionModule, warn["module"])
 	require.EqualValues(t, 3, num(t, warn, "delivered_revision"))
 	require.EqualValues(t, 5, num(t, warn, "applied_revision"))
+
+	require.Error(t, o.modelErr, "пуск затем останавливает шаг Д10: probemod несёт типы вне канона (текст — 865-34)")
+	require.Len(t, d10Lines(o.modelErr), 1)
 }
 
 // Test865_02_NewerRevisionAppliesAtBoot — прямой порядок, близнец 865-01.
 func Test865_02_NewerRevisionAppliesAtBoot(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.r(3, false))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(3, false))
 	s.reset()
 
-	_, err = s.start(s.doc.r(5, true))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(5, true))
 	require.True(t, s.container())
 	require.Equal(t, i64(5), s.appliedRevision(bootRevisionModule))
 	census := s.last(bootCatalogCensusMsg)
@@ -291,13 +360,11 @@ func Test865_02_NewerRevisionAppliesAtBoot(t *testing.T) {
 // Test865_03_SameRevisionIsIdempotentAtBoot — та же редакция повторно.
 func Test865_03_SameRevisionIsIdempotentAtBoot(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.r(5, true))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(5, true))
 	before := catalogstate.Fingerprint(t, s.ctx, s.pool)
 	s.reset()
 
-	_, err = s.start(s.doc.r(5, true))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(5, true))
 	require.Equal(t, before, catalogstate.Fingerprint(t, s.ctx, s.pool))
 	require.Equal(t, i64(5), s.appliedRevision(bootRevisionModule))
 	census := s.last(bootCatalogCensusMsg)
@@ -310,12 +377,10 @@ func Test865_03_SameRevisionIsIdempotentAtBoot(t *testing.T) {
 // по номеру.
 func Test865_04_RollbackIsANewerRevision(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.r(5, true))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(5, true))
 	s.reset()
 
-	_, err = s.start(s.doc.r(6, false))
-	require.NoError(t, err)
+	s.mustStart(s.doc.r(6, false))
 	require.False(t, s.container())
 	require.Equal(t, i64(6), s.appliedRevision(bootRevisionModule))
 	census := s.last(bootCatalogCensusMsg)
@@ -324,53 +389,59 @@ func Test865_04_RollbackIsANewerRevision(t *testing.T) {
 	require.Equal(t, true, census["changed"])
 }
 
-// Test865_07_RolesAndSeedDoNotGetTheSkippedModule — пропущенный модуль не
-// получают ни роли, ни посев; младшая первой в доставке не останавливает
-// второй модуль.
+// Test865_07_RolesAndSeedDoNotGetTheSkippedModule — пропущенный модуль (`iam`,
+// типов вне канона не несёт) не получают ни роли, ни посев; младшая первой в
+// доставке не останавливает второй модуль, шаг Д10 молчит.
 func Test865_07_RolesAndSeedDoNotGetTheSkippedModule(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.q(5, true))
-	require.NoError(t, err)
-	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID), "Дано: роль живая после применения Q(5, true)")
+	s.mustStart(s.doc.i(3), s.doc.q(5, true))
+	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID), "Дано: роль живая после применения I(3) и Q(5, true)")
 	s.reset()
 
-	applied, err := s.start(s.doc.e(3, false), s.doc.i(1))
-	require.NoError(t, err)
-
-	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID), "пропущенный модуль не снимает своих ролей")
-	roles := s.last(bootRolesCensusMsg)
-	require.EqualValues(t, 1, num(t, roles, "delivered"))
-	require.NotContains(t, strs(t, roles, "modules"), bootRevisionModule)
-	require.Equal(t, []string{"iam"}, modulesOf(applied), "перечень, поданный корнем посеву")
+	o := s.start(s.doc.i(1), s.doc.e(6, false))
+	require.NoError(t, o.catalogErr)
 
 	census := s.last(bootCatalogCensusMsg)
 	require.EqualValues(t, 2, num(t, census, "delivered"))
 	require.EqualValues(t, 1, num(t, census, "applied"))
 	require.EqualValues(t, 1, num(t, census, "skipped_stale"))
 	require.EqualValues(t, 0, num(t, census, "refused_conflict"))
-	require.Equal(t, []string{"iam"}, strs(t, census, "modules"))
+	require.Equal(t, []string{bootRevisionModule}, strs(t, census, "modules"))
+
+	require.NoError(t, o.modelErr, "шаг Д10 пуск не останавливает: у iam типов вне канона нет")
+
+	roles := s.last(bootRolesCensusMsg)
+	require.EqualValues(t, 1, num(t, roles, "delivered"))
+	require.Equal(t, []string{bootRevisionModule}, strs(t, roles, "modules"), "iam в переписи ролей нет")
+	require.False(t, s.roleLive(publicreadfixture.ViewerRoleID), "раздел roles объявлен и пуст — роль снята")
+	require.Equal(t, []string{bootRevisionModule}, modulesOf(o.applied), "перечень, поданный корнем посеву")
 }
 
 // Test865_08_CensusAddsUp — близнец 865-07 по номеру: перепись складывается.
 func Test865_08_CensusAddsUp(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.q(5, true))
-	require.NoError(t, err)
+	s.mustStart(s.doc.i(3), s.doc.q(5, true))
 	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID))
 	s.reset()
 
-	applied, err := s.start(s.doc.e(6, false), s.doc.i(1))
-	require.NoError(t, err)
+	o := s.start(s.doc.i(4), s.doc.e(6, false))
+	require.NoError(t, o.catalogErr)
+	require.NoError(t, o.modelErr, "шаг Д10 пуск не останавливает")
 
-	require.False(t, s.roleLive(publicreadfixture.ViewerRoleID),
-		"раздел roles объявлен и пуст — применитель ролей снимает роль")
 	census := s.last(bootCatalogCensusMsg)
 	require.EqualValues(t, 2, num(t, census, "delivered"))
 	require.EqualValues(t, 2, num(t, census, "applied"))
 	require.EqualValues(t, 0, num(t, census, "skipped_stale"))
 	require.EqualValues(t, 0, num(t, census, "refused_conflict"))
-	require.Equal(t, []string{bootRevisionModule, "iam"}, strs(t, census, "modules"))
-	require.Equal(t, []string{bootRevisionModule, "iam"}, modulesOf(applied))
+	require.Equal(t, []string{"iam", bootRevisionModule}, strs(t, census, "modules"))
+
+	roles := s.last(bootRolesCensusMsg)
+	require.EqualValues(t, 2, num(t, roles, "delivered"))
+	require.Equal(t, []string{"iam", bootRevisionModule}, strs(t, roles, "modules"))
+	require.False(t, s.roleLive(publicreadfixture.ViewerRoleID),
+		"раздел roles объявлен и пуст — применитель ролей снимает роль")
+	require.Equal(t, []string{"iam", bootRevisionModule}, modulesOf(o.applied))
+
 	_, hasElapsed := census["elapsed"]
 	require.True(t, hasElapsed, "перепись несёт длительность применения (Д8)")
 	t.Logf("длительность применения каталога (Д8): %v нс", census["elapsed"])
@@ -382,12 +453,12 @@ func Test865_08_CensusAddsUp(t *testing.T) {
 // Test865_09_UndeclaredRevisionIsOlderThanAny — ключ не объявлен (только S1).
 func Test865_09_UndeclaredRevisionIsOlderThanAny(t *testing.T) {
 	s := newBootRevisionStand(t)
-	_, err := s.start(s.doc.r(5, true))
-	require.NoError(t, err)
+	r5 := s.doc.r(5, true)
+	s.mustStart(r5)
 	s.reset()
 
-	_, err = s.start(s.doc.r(0, false))
-	require.NoError(t, err)
+	o := s.start(s.doc.r(0, false))
+	require.NoError(t, o.catalogErr)
 	require.True(t, s.container())
 	require.Equal(t, i64(5), s.appliedRevision(bootRevisionModule))
 	warn := s.last(bootStaleMsg)
@@ -395,10 +466,16 @@ func Test865_09_UndeclaredRevisionIsOlderThanAny(t *testing.T) {
 	require.False(t, has, "номера нет — поле опускается, а не пишется нулём (CE-12)")
 	require.EqualValues(t, 5, num(t, warn, "applied_revision"))
 
+	require.Error(t, o.modelErr, "шаг Д10 останавливает пуск")
+	require.Equal(t,
+		[]string{d10Line(bootRevisionModule, "", 5, s.doc.load(r5).Digest(), "probemod_box, probemod_item")},
+		d10Lines(o.modelErr))
+
 	t.Run("близнец: модуль без применённой редакции", func(t *testing.T) {
 		s := newBootRevisionStand(t)
-		_, err := s.start(s.doc.r(0, false))
-		require.NoError(t, err)
+		o := s.start(s.doc.r(0, false))
+		require.NoError(t, o.catalogErr)
+		require.NoError(t, o.modelErr, "шаг Д10 пуск не останавливает")
 		require.False(t, s.container())
 		require.Nil(t, s.appliedRevision(bootRevisionModule))
 		require.EqualValues(t, 0, num(t, s.last(bootCatalogCensusMsg), "skipped_stale"))
@@ -406,26 +483,24 @@ func Test865_09_UndeclaredRevisionIsOlderThanAny(t *testing.T) {
 }
 
 // Test865_24_EqualRevisionOtherContentIsRefusedAtBoot — равный номер, иное
-// содержимое на старте.
+// содержимое на старте: модуль не применён, пуск остановлен шагом Д10.
 func Test865_24_EqualRevisionOtherContentIsRefusedAtBoot(t *testing.T) {
 	s := newBootRevisionStand(t)
 	q5 := s.doc.q(5, true)
-	_, err := s.start(q5)
-	require.NoError(t, err)
+	s.mustStart(q5, s.doc.i(1))
 	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID))
 	traces := catalogstate.AppliedTraces(t, s.ctx, s.pool, modulecatalog.AppliedEventType, bootRevisionModule)
+	before := catalogstate.Fingerprint(t, s.ctx, s.pool)
 	s.reset()
 
 	e5 := s.doc.e(5, false)
-	applied, err := s.start(e5, s.doc.i(1))
-	require.NoError(t, err, "конфликт содержимого — не отказ применителя: applyDeliveredManifests возвращает nil")
+	o := s.start(e5, s.doc.i(1))
+	require.NoError(t, o.catalogErr, "конфликт содержимого — не отказ применителя: applyDeliveredManifests возвращает nil")
 
 	dQ, dE := s.doc.load(q5).Digest(), s.doc.load(e5).Digest()
 	require.True(t, s.container())
 	require.Equal(t, i64(5), s.appliedRevision(bootRevisionModule))
 	require.Equal(t, &dQ, s.appliedDigest(bootRevisionModule))
-	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID))
-	require.Equal(t, []string{"iam"}, modulesOf(applied))
 
 	census := s.last(bootCatalogCensusMsg)
 	require.EqualValues(t, 2, num(t, census, "delivered"))
@@ -445,16 +520,114 @@ func Test865_24_EqualRevisionOtherContentIsRefusedAtBoot(t *testing.T) {
 		catalogstate.AppliedTraces(t, s.ctx, s.pool, modulecatalog.AppliedEventType, bootRevisionModule),
 		"отвергнутое применение следа не оставляет")
 
+	require.Error(t, o.modelErr, "шаг Д10 останавливает пуск")
+	require.Equal(t,
+		[]string{d10Line(bootRevisionModule, "5 (отпечаток "+dE+")", 5, dQ, "probemod_box, probemod_item")},
+		d10Lines(o.modelErr))
+	require.Empty(t, s.records(bootRolesCensusMsg), "до применителя ролей старт не дошёл")
+	require.Empty(t, s.records(bootSeedCensusMsg), "до применителя посева старт не дошёл")
+	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID))
+	require.Equal(t, before, catalogstate.Fingerprint(t, s.ctx, s.pool), "отпечаток шести таблиц равен снятому")
+
 	t.Run("близнец: побайтово тот же документ", func(t *testing.T) {
 		s.reset()
-		applied, err := s.start(q5, s.doc.i(1))
-		require.NoError(t, err)
+		o := s.start(q5, s.doc.i(1))
+		require.NoError(t, o.catalogErr)
+		require.NoError(t, o.modelErr, "шаг Д10 пуск не останавливает")
 		census := s.last(bootCatalogCensusMsg)
 		require.EqualValues(t, 2, num(t, census, "applied"))
 		require.EqualValues(t, 0, num(t, census, "refused_conflict"))
 		require.Equal(t, false, census["changed"])
 		require.True(t, s.roleLive(publicreadfixture.ViewerRoleID))
-		require.Equal(t, []string{bootRevisionModule, "iam"}, modulesOf(applied))
+		require.Equal(t, []string{bootRevisionModule, "iam"}, modulesOf(o.applied))
 		require.Empty(t, s.records(bootConflictMsg))
+	})
+}
+
+// Test865_34_StaleRevisionWithOutOfCanonTypesStopsTheBoot — младшая редакция с
+// типами вне канона: пуск остановлен шагом Д10 до стража, ролей и посева.
+func Test865_34_StaleRevisionWithOutOfCanonTypesStopsTheBoot(t *testing.T) {
+	s := newBootRevisionStand(t)
+	r5 := s.doc.r(5, true)
+	s.mustStart(r5)
+	before := catalogstate.Fingerprint(t, s.ctx, s.pool)
+	s.reset()
+
+	r3 := s.doc.r(3, false)
+	o := s.start(r3)
+	require.NoError(t, o.catalogErr, "применитель каталога не отказал")
+	require.EqualValues(t, 1, num(t, s.last(bootCatalogCensusMsg), "skipped_stale"))
+
+	require.Error(t, o.modelErr, "шаг Д10 останавливает пуск")
+	require.Equal(t,
+		[]string{d10Line(bootRevisionModule, "3 (отпечаток "+s.doc.load(r3).Digest()+")", 5,
+			s.doc.load(r5).Digest(), "probemod_box, probemod_item")},
+		d10Lines(o.modelErr), "отказ содержит ровно одну строку Д10")
+	require.Empty(t, s.records(bootRolesCensusMsg), "шаг стоит раньше применителя ролей")
+	require.Empty(t, s.records(bootSeedCensusMsg), "шаг стоит раньше применителя посева")
+	require.Empty(t, s.records(bootParityCensusMsg), "шаг стоит раньше стража паритета")
+	require.True(t, s.container())
+	require.Equal(t, i64(5), s.appliedRevision(bootRevisionModule))
+	require.Equal(t, before, catalogstate.Fingerprint(t, s.ctx, s.pool), "отпечаток шести таблиц равен снятому")
+
+	t.Run("близнец по исходу редакции: R(6, false)", func(t *testing.T) {
+		s.reset()
+		o := s.start(s.doc.r(6, false))
+		require.NoError(t, o.catalogErr)
+		require.NoError(t, o.modelErr, "модуль применён — шаг Д10 пуск не останавливает")
+		require.EqualValues(t, 0, num(t, s.last(bootCatalogCensusMsg), "skipped_stale"))
+		require.Equal(t, i64(6), s.appliedRevision(bootRevisionModule))
+	})
+}
+
+// Test865_35_ConflictWithoutOutOfCanonTypesBootContinues — конфликт
+// содержимого без типов вне канона: пуск продолжается, роли и посев без модуля.
+func Test865_35_ConflictWithoutOutOfCanonTypesBootContinues(t *testing.T) {
+	s := newBootRevisionStand(t)
+	i3 := s.doc.i(3)
+	q5 := s.doc.q(5, true)
+	s.mustStart(i3, q5)
+	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID), "Дано: роль живая")
+	s.reset()
+
+	it3 := s.doc.iTilde(3)
+	o := s.start(it3, q5)
+	require.NoError(t, o.catalogErr)
+
+	census := s.last(bootCatalogCensusMsg)
+	require.EqualValues(t, 2, num(t, census, "delivered"))
+	require.EqualValues(t, 1, num(t, census, "applied"))
+	require.EqualValues(t, 0, num(t, census, "skipped_stale"))
+	require.EqualValues(t, 1, num(t, census, "refused_conflict"))
+	require.Equal(t, []string{bootRevisionModule}, strs(t, census, "modules"))
+
+	rec := s.last(bootConflictMsg)
+	require.Equal(t, "ERROR", rec["level"])
+	require.Equal(t, "iam", rec["module"])
+	require.EqualValues(t, 3, num(t, rec, "delivered_revision"))
+	require.Equal(t, s.doc.load(it3).Digest(), rec["delivered_digest"])
+	require.EqualValues(t, 3, num(t, rec, "applied_revision"))
+	require.Equal(t, s.doc.load(i3).Digest(), rec["applied_digest"])
+
+	require.NoError(t, o.modelErr, "шаг Д10 пуск не останавливает: у iam типов вне канона нет")
+	roles := s.last(bootRolesCensusMsg)
+	require.EqualValues(t, 1, num(t, roles, "delivered"))
+	require.Equal(t, []string{bootRevisionModule}, strs(t, roles, "modules"))
+	require.True(t, s.roleLive(publicreadfixture.ViewerRoleID))
+	require.Equal(t, []string{bootRevisionModule}, modulesOf(o.applied), "перечень, поданный корнем посеву")
+
+	t.Run("близнец: I(3) вместо I~(3)", func(t *testing.T) {
+		s.reset()
+		o := s.start(i3, q5)
+		require.NoError(t, o.catalogErr)
+		require.NoError(t, o.modelErr)
+		census := s.last(bootCatalogCensusMsg)
+		require.EqualValues(t, 2, num(t, census, "applied"))
+		require.EqualValues(t, 0, num(t, census, "refused_conflict"))
+		require.Empty(t, s.records(bootConflictMsg))
+		roles := s.last(bootRolesCensusMsg)
+		require.EqualValues(t, 2, num(t, roles, "delivered"))
+		require.Equal(t, []string{"iam", bootRevisionModule}, strs(t, roles, "modules"))
+		require.Equal(t, []string{"iam", bootRevisionModule}, modulesOf(o.applied))
 	})
 }

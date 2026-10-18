@@ -99,6 +99,12 @@ type Census struct {
 	// RefusedConflict — модули, чьё применение отвергнуто КОНФЛИКТОМ
 	// содержимого: номер равен применённому, отпечаток иной (Д3).
 	RefusedConflict []RevisionSkip
+	// NotApplied — оба вида разом (младшая редакция и конфликт содержимого) в
+	// порядке доставки: вход шага корня старта «модель против каталога»
+	// (kaname#865, Д10), который отказ пуска называет строками в порядке
+	// доставки. Из того же решения, что и два перечня выше, а не вторым
+	// сравнением.
+	NotApplied []RevisionSkip
 }
 
 // RevisionSkip — модуль, не применённый по исходу сравнения редакций, и обе
@@ -134,10 +140,14 @@ func (c Census) String() string {
 func (c *Census) add(m *manifest.Manifest, rep Report) {
 	switch rep.Revision.Outcome {
 	case RevisionStale:
-		c.SkippedStale = append(c.SkippedStale, RevisionSkip{Module: rep.Module, RevisionReport: rep.Revision})
+		skip := RevisionSkip{Module: rep.Module, RevisionReport: rep.Revision}
+		c.SkippedStale = append(c.SkippedStale, skip)
+		c.NotApplied = append(c.NotApplied, skip)
 		return
 	case RevisionConflict:
-		c.RefusedConflict = append(c.RefusedConflict, RevisionSkip{Module: rep.Module, RevisionReport: rep.Revision})
+		skip := RevisionSkip{Module: rep.Module, RevisionReport: rep.Revision}
+		c.RefusedConflict = append(c.RefusedConflict, skip)
+		c.NotApplied = append(c.NotApplied, skip)
 		return
 	}
 	c.Applied++
