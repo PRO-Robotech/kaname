@@ -51,7 +51,7 @@ func IsPriorEdition(typ string, blk []byte) bool {
 	if !ok {
 		return false
 	}
-	// Блок мог уже пройти [TranslateNoteProse]: закреплены байты с прежней
+	// Блок мог уже пройти [translateNoteProse]: закреплены байты с прежней
 	// прозой, поэтому проза приводится к ней, а закрепление не пересчитывается.
 	sum := sha256.Sum256(mapBlockLines(blk, newNoteProse))
 	return hex.EncodeToString(sum[:]) == want

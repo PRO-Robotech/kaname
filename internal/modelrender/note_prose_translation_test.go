@@ -202,7 +202,7 @@ func TestPriorEditionStaysRecognisedAfterTheProseTranslation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("рендер %s: %v", r.ObjectType, err)
 		}
-		translated := modelrender.TranslateNoteProse(raw)
+		translated := modelrender.TranslateNoteProseForTest(raw)
 		if r.ObjectType == "registry_repository" && string(raw) == string(translated) {
 			t.Fatalf("фикстура не несёт прежней прозы: перевод её не тронул, пробе нечего судить")
 		}

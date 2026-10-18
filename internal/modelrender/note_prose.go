@@ -25,9 +25,12 @@ import (
 // воспроизводится дословно. Допуск переводом не ослабляется: канон несёт только
 // новую прозу, и сверка судит перевод, а не прежнюю запись.
 //
-// Предикат снятия: манифесты registry и nlb kacho несут новую прозу и kacho
-// поднял пин kaname (PRO-Robotech/kacho#3272); снятие — kaname#836 вместе со
-// снятием перевода слова записи субъекта.
+// Условие снятия: манифесты registry и nlb kacho несут новую прозу и kacho
+// поднял пин kaname (PRO-Robotech/kacho#3272). Снятие — задача
+// PRO-Robotech/kaname#836 вместе со снятием перевода слова записи субъекта; её
+// предикат — вывод `git grep -nE
+// 'priorNoteProse|newNoteProse|translateNoteProse|RenderForCanon' -- internal`
+// пуст, и сборка модели со сверкой дерева зовут [Render].
 var priorNoteProse = map[string]string{
 	"    # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.": "    # RG-1 D-7: `system_class:anonymous` public-read subject — anonymous pull of a PUBLIC repo.",
 	"    # The wildcard grants v_get ONLY on repos that ALSO carry an explicit":        "    # The class grants v_get ONLY on repos that ALSO carry an explicit",
@@ -62,17 +65,18 @@ func mapBlockLines(blk []byte, table map[string]string) []byte {
 	return []byte(strings.Join(lines, "\n"))
 }
 
-// TranslateNoteProse — блок с прозой примечаний в записи после перевода.
-func TranslateNoteProse(blk []byte) []byte { return mapBlockLines(blk, priorNoteProse) }
+// translateNoteProse — блок с прозой примечаний в записи после перевода.
+func translateNoteProse(blk []byte) []byte { return mapBlockLines(blk, priorNoteProse) }
 
 // RenderForCanon — блок манифеста в виде, в котором его судят против канона:
-// [Render] плюс [TranslateNoteProse]. Единственный вход обоих судей совпадения
+// [Render] плюс [translateNoteProse]. Единственный вход обоих судей совпадения
 // канона с манифестом — сборки модели на старте и сверки дерева: разойдясь, они
-// принимали бы разную прозу.
+// принимали бы разную прозу. Каждого судью держит своя проба: сборку —
+// `modelcompose` (SC-829, SC-70), сверку — sweep_note_prose_test.go.
 func RenderForCanon(r manifest.Resource) ([]byte, error) {
 	b, err := Render(r)
 	if err != nil {
 		return nil, err
 	}
-	return TranslateNoteProse(b), nil
+	return translateNoteProse(b), nil
 }
