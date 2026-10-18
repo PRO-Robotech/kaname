@@ -74,7 +74,7 @@ func (w *recordingWriter) AdvanceRevision(_ context.Context, module string,
 	if module == w.lieAboutWrite {
 		write = !write
 	}
-	if write {
+	if write && declared != nil {
 		if w.applied == nil {
 			w.applied = map[string]*modulecatalog.Edition{}
 		}
