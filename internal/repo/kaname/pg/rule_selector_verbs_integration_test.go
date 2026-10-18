@@ -91,7 +91,7 @@ func svSystemRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, seg
 	t.Helper()
 	_, err := pool.Exec(ctx,
 		`INSERT INTO kaname.roles (id, name, permissions, rules, cluster_id)
-		 VALUES ($1, $2, '[]'::jsonb, '[]'::jsonb, 'cluster_root')`, id, applierProbeModule+"."+segment)
+		 VALUES ($1, $2, '["iam.role.*.get"]'::jsonb, '[]'::jsonb, 'cluster_root')`, id, applierProbeModule+"."+segment)
 	require.NoErrorf(t, err, "посев системной роли %s", id)
 	return domain.RoleID(id)
 }
@@ -130,8 +130,8 @@ func TestSelectorVerbs_RoleEditLeavesTheQueue(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	_, err := applierOver(t, pool).Apply(ctx, probeManifest(probeResource("svedit", "get")))
 	require.NoError(t, err)
-	edited := catalogRole(t, ctx, pool, "sveditA")
-	idle := catalogRole(t, ctx, pool, "sveditB")
+	edited := catalogRole(t, ctx, pool, "svedita")
+	idle := catalogRole(t, ctx, pool, "sveditb")
 	for _, r := range []domain.RoleID{edited, idle} {
 		_, err := pool.Exec(ctx, `INSERT INTO kaname.role_selector_verbs_pending (role_id) VALUES ($1)`, string(r))
 		require.NoError(t, err)
@@ -278,8 +278,8 @@ func TestSelectorVerbs_LegacyInsertGetsTheUpperBoundAndTheQueue(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	_, err := applierOver(t, pool).Apply(ctx, probeManifest(probeResource("svold", "get", "update", "delete")))
 	require.NoError(t, err)
-	legacy := catalogRole(t, ctx, pool, "svoldA")
-	current := catalogRole(t, ctx, pool, "svoldB")
+	legacy := catalogRole(t, ctx, pool, "svolda")
+	current := catalogRole(t, ctx, pool, "svoldb")
 	typ := applierProbeModule + ".svold"
 
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.role_rule_selectors
