@@ -400,8 +400,12 @@ const singleUseRacers = 16
 // по-прежнему разносит обмены во времени — то есть ослабляет ровно способность
 // пробы упасть на погашении чтением-затем-записью. Публичный клиент сверки не
 // несёт, и обмены доходят до погашения разом (тот же довод — у проб пула,
-// kaname#423). Срок при очереди сверок держит своя проба
-// (`TestKN882_ConfidentialExchangesOfTheWholeShareOnOneProcessorMeetTheDeadline`).
+// kaname#423). Срок при очереди сверок держат пробы формулы срока
+// (`TestCeremonyOperationDeadline_CoversAFullQueueOfChecks`), проводки
+// стоимости проверки от полосы входа
+// (`TestLoginLaneSecretCheckCost_IsTheCalibratedEnvelopeFloor`) и порядка
+// прихода к месту вычисления
+// (`passwordverify.TestProcessorGate_WaitersTakeTheSlotInArrivalOrder`).
 //
 // Близнец — те же шестнадцать одновременных обменов того же клиента, но
 // РАЗНЫМИ кодами: все обязаны пройти. Он отличает «узел не обслуживает

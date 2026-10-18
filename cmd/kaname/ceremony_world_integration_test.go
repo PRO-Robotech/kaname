@@ -625,8 +625,11 @@ func (w *ceremonyWorld) buildSurface() {
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
 	source := issuingsource.New(cfg.AuthN.TrustDomain())
+	// Проверяющий и стоимость проверки церемония берёт у полосы входа тем же
+	// путём, что корень (`serve.go`): стоимость — `loginLane.secretCheckCost`.
 	checker := ceremonySecretChecker(w)
-	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, checker, ceremonySecretCheckCost(w, checker),
+	lane := &loginLane{verifier: checker, envelope: ceremonySecretEnvelope(w, checker)}
+	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, lane.secretChecker(), lane.secretCheckCost(),
 		metrics.NewRegistry().LoginLaneRecorder(), source, logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
@@ -676,12 +679,11 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	return v
 }
 
-// ceremonySecretCheckCost — стоимость одной проверки на этих процессорах тем же
-// путём, что у корня: потолок огибающей над проверяющим мира, откалиброванной
-// по классу, которым пишется секрет клиента (`ceremonySecretHasher`). Мера —
-// настенные часы, как у корня: срок операции мира тогда о тех же процессорах,
-// что и его обмены.
-func ceremonySecretCheckCost(w *ceremonyWorld, checker *passwordverify.Verifier) time.Duration {
+// ceremonySecretEnvelope — огибающая над проверяющим мира, откалиброванная по
+// классу, которым пишется секрет клиента (`ceremonySecretHasher`), как
+// огибающая полосы входа у корня. Мера — настенные часы, как у корня: срок
+// операции мира тогда о тех же процессорах, что и его обмены.
+func ceremonySecretEnvelope(w *ceremonyWorld, checker *passwordverify.Verifier) *passwordverify.Envelope {
 	w.t.Helper()
 	envelope, err := passwordverify.NewEnvelope(checker, passwordverify.NopEnvelopeObserver{}, passwordverify.WallClockCostMeter)
 	if err != nil {
@@ -691,7 +693,7 @@ func ceremonySecretCheckCost(w *ceremonyWorld, checker *passwordverify.Verifier)
 	if _, err := envelope.Admit(w.ctx, declared, passwordverify.EnvelopeTriggerStartup); err != nil {
 		w.fixture("калибровка класса секрета клиента: %v", err)
 	}
-	return envelope.Floor()
+	return envelope
 }
 
 // ceremonySecretClassParams — параметры класса секрета клиента мира: пол службы

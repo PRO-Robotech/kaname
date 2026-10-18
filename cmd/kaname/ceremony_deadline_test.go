@@ -13,10 +13,13 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
 // TestCeremonyOperationDeadline_CoversAFullQueueOfChecks — срок — два предела
@@ -50,4 +53,33 @@ func TestCeremonyOperationDeadline_RefusesWhatItCannotCount(t *testing.T) {
 		_, err := ceremonyOperationDeadline(c.capacity, c.cost)
 		require.Errorf(t, err, "ёмкость %d, стоимость %v: срок без очереди собран", c.capacity, c.cost)
 	}
+}
+
+// TestLoginLaneSecretCheckCost_IsTheCalibratedEnvelopeFloor — стоимость
+// проверки, из которой корень выводит срок операции церемонии, — потолок
+// огибающей полосы входа, откалиброванный при старте, а не иная величина. Мера
+// пробы назначает классу стоимость 40 мс: потолок с запасом в четверть — 50 мс,
+// и ровно его полоса отдаёт церемонии. Полоса без огибающей либо с пустой
+// огибающей отдаёт ноль, и срок из него не собирается
+// (TestCeremonyOperationDeadline_RefusesWhatItCannotCount).
+func TestLoginLaneSecretCheckCost_IsTheCalibratedEnvelopeFloor(t *testing.T) {
+	class := argon2ClassOf(8, 1, 1)
+	costs := map[string]time.Duration{class.Key(): 40 * time.Millisecond}
+	e := envelopeForProbe(t, costs)
+	_, err := e.Admit(context.Background(), class, passwordverify.EnvelopeTriggerStartup)
+	require.NoError(t, err)
+
+	lane := &loginLane{envelope: e}
+	require.Equal(t, 50*time.Millisecond, lane.secretCheckCost(),
+		"стоимость проверки для срока церемонии — потолок огибающей (40 мс с запасом в четверть)")
+	deadline, err := ceremonyOperationDeadline(16, lane.secretCheckCost())
+	require.NoError(t, err)
+	require.Equal(t, 2*credentialLanePeerTimeout+16*50*time.Millisecond, deadline,
+		"срок операции корня — из стоимости, которую отдаёт полоса входа")
+
+	require.Zero(t, (&loginLane{envelope: envelopeForProbe(t, costs)}).secretCheckCost(),
+		"пустая огибающая: стоимость не откалибрована")
+	require.Zero(t, (&loginLane{}).secretCheckCost(), "огибающей нет — стоимости нет")
+	var none *loginLane
+	require.Zero(t, none.secretCheckCost(), "полосы нет — стоимости нет")
 }
