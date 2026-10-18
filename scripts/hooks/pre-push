@@ -242,8 +242,28 @@ if [ "$rule_rc" -ne 0 ]; then
     finish 1 "pre-push ОТКАЗ: правило ветки и коммита нарушено — отправка остановлена"
 fi
 
+# НОВЫЕ BLOB'Ы — ВТОРЫМИ, ТОЖЕ ДО ОБХОДА (#894).
+#
+# Бинарь и файл больше 1 МБ среди blob'ов, которые отправка вносит в публичную
+# историю (добавление, правка, переименование с правкой — любой статус), — отказ
+# с именем файла (scripts/hooks/prepush-added-files.sh, перечень исключений —
+# prepush-added-files.allow). Класс тот же, что у правила ветки: опубликованное не
+# отзывается, ветка на удалённом публична, обход снимает проверки, а не правило.
+# Признак — kacho#3284: ELF края на 39 МБ в коммите ветки поймало ревью, а не хук.
+# Стража нет либо он не смог судить — ОТКАЗ. Держит это
+# scripts/hooks/prepush-added-files-inject.sh.
+added_guard="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/prepush-added-files.sh"
+if [ ! -f "$added_guard" ]; then
+    finish 1 "pre-push ОТКАЗ: стража добавленных файлов нет ($added_guard) — судить нечем, отправка остановлена"
+fi
+bash "$added_guard" "${1:-origin}" <<< "$push_input" >&2
+added_rc=$?
+if [ "$added_rc" -ne 0 ]; then
+    finish 1 "pre-push ОТКАЗ: добавленные файлы отвергнуты либо не судимы (код стража $added_rc) — отправка остановлена до проверок и до обхода"
+fi
+
 if [ "${KANAME_SKIP_PREPUSH:-0}" = "1" ]; then
-    finish 0 "pre-push: проверки пропущены по KANAME_SKIP_PREPUSH=1 — страж правила исполнен, локальные проверки НЕ выполнялись"
+    finish 0 "pre-push: проверки пропущены по KANAME_SKIP_PREPUSH=1 — стражи правила и новых blob'ов исполнены, локальные проверки НЕ выполнялись"
 fi
 
 CLASSIFY="$ROOT/scripts/hooks/prepush-classify.sh"
