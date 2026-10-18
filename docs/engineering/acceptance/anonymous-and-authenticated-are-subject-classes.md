@@ -80,12 +80,28 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     `kaname#874`: вложенное правило на `allInScope` охватывает потомков всех контейнеров
     области, и исход SC-68 Б2 верен без правки. Вердикт `c3fda648…` относится к редакции 11
     и на эту редакцию не переносится. Что закрыто — раздел «Редакция 12: что закрыто»
-- **Дата:** 2026-10-17 · **редакция:** 11 (S5 — разделы «Редакция 8: что добавлено», «Редакция 9: что закрыто», «Редакция 10: правка N1», «Редакция 11: что изменено» и «Редакция 12: что закрыто»). Редакция 2 закрыла возврат круга 1 (B1–B5 и
+  - 2026-10-16 · проверка исполнения Д8 (редакция 7) · APPROVED · `2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14` ·
+    `docs/changes/kn-829/reviews/acceptance/2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14.yaml`
+    (строка дописана 2026-10-17: запись существовала, строки в истории не было)
+  - 2026-10-17 · правка ПОСЛЕ вердикта `c3fda648…` (редакция 12 ствола) · редакция 13: SC-39 приведён к
+    решению kaname#495 — анонимный поток выдачи токена реестра включается ручкой
+    `api-server.registry-token.anonymous-client-id`, по умолчанию выключен, страж формы
+    отвергает значения формы порождённого идентификатора. Добавлены случаи SC-39 (а)–(в),
+    прежнее тело — SC-39 (г). Изменены SC-39, его строки таблицы производителей и DoD S1,
+    S3. Правка подготовлена на ветке задачи как редакция 8 одновременно с редакциями 8–10
+    стадии S5 и при первом слиянии со стволом перенумерована в 11, при слиянии со стволом
+    @`efac3adf7` — в 13 (перенумерация при слиянии, содержание SC-39 без изменений). Прежние вердикты на эту редакцию
+    не переносятся. Что исправлено — раздел «Редакция 13: что исправлено»
+- **Дата:** 2026-10-17 · **редакция:** 13 (S5 — разделы «Редакция 8: что добавлено», «Редакция 9: что закрыто», «Редакция 10: правка N1», «Редакция 11: что изменено» и «Редакция 12: что закрыто»; SC-39 — раздел «Редакция 13: что исправлено»). Редакция 2 закрыла возврат круга 1 (B1–B5 и
   замечания), редакция 3 — B1 и B2 круга 2, редакция 4 — шесть вопросов красной фазы к
   одобренной редакции 3, редакция 5 — решения Д1–Д7 к одобренной редакции 4, редакция 6 — K3 (DoD S1) к одобренной
-  редакции 5, редакция 7 — исход краевой половины SC-18 к одобренной редакции 6. Что где
-  закрыто — разделы «Редакция 2: что закрыто», «Редакция 3: что закрыто», «Редакция 4: что
-  исправлено», «Редакция 5: что исправлено» и «Редакция 7: что исправлено»
+  редакции 5, редакция 7 — исход краевой половины SC-18 к одобренной редакции 6, редакции
+  8–10 — стадия S5, редакции 11–12 — вложенное правило `children` (S5, kaname#874), редакция 13 —
+  включение анонимного потока реестра ручкой службы (SC-39,
+  kaname#495). Что где закрыто — разделы «Редакция 2: что закрыто», «Редакция 3: что
+  закрыто», «Редакция 4: что исправлено», «Редакция 5: что исправлено», «Редакция 7: что
+  исправлено», «Редакция 8: что добавлено», «Редакция 9: что закрыто», «Редакция 10: правка
+  N1», «Редакция 11: что изменено», «Редакция 12: что закрыто» и «Редакция 13: что исправлено»
 - **Эпик:** `PRO-Robotech/kaname#829` (родитель `#746`); зеркало края и консоли —
   `PRO-Robotech/kacho#3238` (родитель `#3172`)
 - **Решение владельца 2026-10-15, дословно:** «Что нужно сделать что бы у нас появился
@@ -1046,7 +1062,74 @@ SC-21. Единственная выдача классу на кластере 
 
 #### SC-39 — данные реестра спрашивают о публичном объекте анонимом нового вида
 
-**Дано** П1, публикация SC-12; анонимный поток реестра включён в посадке фикстуры.
+Анонимный поток выдачи токена реестра в kaname включается **ручкой службы**
+`api-server.registry-token.anonymous-client-id` (переменная окружения
+`KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID`). Её значение — публичный
+принципал анонимного чтения, субъект выпускаемого токена; то же имя оператор объявляет
+приёмной стороне реестра. Умолчание — пусто, то есть поток **выключен**: умолчания,
+которое открывало бы выдачу без решения оператора, нет. Форма значения закрыта:
+`^[a-z][a-z0-9]*(-[a-z0-9]+)+$`, не длиннее 63 знаков и не формы идентификатора,
+порождаемого продуктом (префикс вида, необязательный разделитель и 17 знаков
+crockford-base32). Субъект анонимного токена не вправе совпасть с настоящим принципалом.
+Иное значение страж старта отвергает.
+
+Случаи (а)–(в) — выдача токена в kaname (kaname#495). «Дано» их строит **настройка
+службы**: переменная окружения → `config.Load` → страж старта → переложение настройки во
+вход сборки полосы → сборка полосы, то есть тот путь, которым идёт процесс. Поле входа
+сборки фикстура сама не заполняет: проба, заполняющая его в обход настройки, зеленела бы
+и на посадке без ручки. Адресат токена — `registry.probe.local`; подписант — фикстура
+подписанта полосы. Вход без удостоверения — `GET /iam/token?service=registry.probe.local&scope=repository:pub/app:pull`
+без заголовка `Authorization` (`docker pull` публичного репозитория без входа).
+
+##### SC-39 (а) — ручка задана: аноним получает токен только чтения
+
+**Дано** ручка = `registry-anonymous`.
+**Когда** вход без удостоверения.
+**Тогда** HTTP `200`, тело несёт `token`. Токен выпущен нашим подписантом: `iss` и `kid`
+заголовка — подписанта полосы. Утверждения: `sub = "registry-anonymous"`,
+`scope = "registry:pull"` (записи анонимный токен не просит никогда), `aud` — ровно
+`["registry.probe.local"]`.
+**Близнец:** тот же собранный обработчик, тот же запрос с `Authorization: Basic <учётные
+данные служебной учётки>` (посев на живой базе): HTTP `200`, `sub` — id этой учётки, а не
+`registry-anonymous`. Отличие — один факт: удостоверение предъявлено. Включённая ручка
+субъект предъявленного входа не подменяет, и обе ветви живы в одной полосе одновременно.
+
+##### SC-39 (б) — ручка пуста: поток выключен, прежний вызов на вход
+
+**Дано** ручка не задана (умолчание) либо задана пустой строкой.
+**Когда** старт службы, затем вход без удостоверения.
+**Тогда** страж старта значение принимает: пустое — законное состояние «поток выключен»,
+а не ошибка настройки.
+**И** вход получает HTTP `401` с непустым заголовком `WWW-Authenticate`. Токена в ответе
+нет.
+**Близнец:** SC-39 (а). Отличие — один факт: ручка задана.
+
+##### SC-39 (в) — форма неверна: отказ в старте с именем ручки
+
+**Дано** ручка = одно из значений иной формы:
+- форма порождённого идентификатора: служебной учётки `sva0000000000000bat1`, человека
+  `usr0000000000000bat1`, прежняя форма с подчёркиванием `sva_0000000000000bat1`,
+  через дефис `ak-0123456789abcdefg`;
+- говорящий модели прав `system_class:anonymous` и подстановка `user:*`;
+- `Registry-Anonymous` (верхний регистр), `anonymous` (одно слово), `" registry-anonymous"`
+  (пробел по краю), `"   "` (одни пробелы), `registry-` (дефис в конце);
+- имя объявленной формы длиной 64 знака.
+
+**Когда** старт службы: `config.Config.Validate` до подъёма слушателей.
+**Тогда** старт отвергнут, процесс выходит с кодом `1`. Текст отказа называет ручку
+`api-server.registry-token.anonymous-client-id` и переменную окружения
+`KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID`. Значение не обрезается и не
+исправляется догадкой: обрезанное ушло бы в токен не тем, что объявлено приёмной стороне.
+**Близнец:** `registry-anonymous`, `public-pull`, `kacho-registry-anon-1`, имя
+объявленной формы длиной 63 знака и `ak-0123456789abcdef` (16 знаков после `ak-`: на
+один знак короче формы порождённого идентификатора) страж принимает. Принятое значение
+доезжает до загруженной настройки без изменений. Отличие — один факт: форма значения;
+пары, отличные одним знаком, — 63 против 64 знаков и `ak-…` с 16 против 17 знаков.
+
+##### SC-39 (г) — плоскость данных реестра спрашивает анонимом нового вида
+
+**Дано** П1, публикация SC-12; анонимный поток включён, как в SC-39 (а): ручка kaname
+задана, и то же имя объявлено приёмной стороне реестра в посадке фикстуры.
 **Когда** плоскость данных реестра решает анонимное чтение `r1`.
 **Тогда** вопрос к модели — субъектом `system_class:anonymous`, ответ — чтение разрешено.
 **И** запись в `r1` тем же токеном — HTTP `403`, код ошибки реестра `DENIED`: тот же отказ,
@@ -1452,7 +1535,9 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
 | SC-35 | отказ строк каталога, включая нераспознанный пол | **заказан** (S3): загрузка каталога края (`permission_catalog.go`, `LoadFromBytes`); сегодня нераспознанное значение молча ранжируется нулём (`acrlevel.Rank`, ветвь по умолчанию) | прочитано corelib v1.14.0 `acrlevel/acrlevel.go` |
 | SC-36 | перепись пола двумя предикатами | дерево: по написанию «0» — 0 строк каталога и 0 опций proto в обоих стволах; по рангу 0 — 29 строк каталога (22 `<exempt>`, 7 `scope_filtered`), нераспознанных — 0 | разбор `gateway/internal/middleware/embed/permission_catalog.json` @`2ec6e1e3d` по полю `required_acr_min`: значения `"1"` — 292, `"2"` — 38, поле отсутствует — 29, всего 359; `git grep -h -o -E 'required_acr_min\) *= *"0"' -- proto` → 0 (kaname @`c753d1ee4`) и 0 (kacho @`2ec6e1e3d`) |
 | SC-37 | отказ манифеста с классом | разбор манифеста модуля по соседу `composed-model-admits-only-what-it-owns.md` — производит для `user:*`; класс — **заказан** (S1) | прочитано |
-| SC-39 | субъект плоскости данных реестра; отказ записи `403 DENIED` | два места, оба несут анонимный субъект `user:*` и оба **заказаны**: kaname `internal/apps/kaname/api/registry_token/token.go` (`AnonymousSubject`, `AnonymousReadScope = "registry:pull"` — запись анонимным токеном не запрашивается) — S1; kacho `services/registry/internal/apps/kacho/config/config.go` (резолв анонимной личности в `user:*`) — S3. Поток в kaname выключен в сборке, фикстура включает его | `git grep -l 'AnonymousSubject' -- internal` → 1 файл (kaname); `git grep -n 'user:\*' 2ec6e1e3d` по `PRO-Robotech/kacho:services/registry/internal/apps/kacho/config/config.go` → строки 422, 424, 425 |
+| SC-39 (а), (б) | выдача анонимного токена из настройки службы: `200` и токен нашего подписанта за объявленного принципала, только `registry:pull`; при пустой ручке — `401` с `WWW-Authenticate`; близнец — токен за учётку предъявленного входа | kaname: умолчание ручки — `internal/apps/kaname/config/defaults.go` (`api-server.registry-token.anonymous-client-id` = `""`); поле `RegistryTokenConfig.AnonymousClientID` и разбор `AnonymousPrincipal` — `internal/apps/kaname/config/registry_token.go:139`; единственное переложение настройки во вход сборки — `registryTokenBuildConfig`, `cmd/kaname/serve.go:2363`; выдача — `ExecuteAnonymous`, `internal/apps/kaname/api/registry_token/token.go:470` (`Subject` — `:486`, `Scope: AnonymousReadScope` — `:490`); выключенный поток — 401-вызов обработчика полосы — уже производит (kaname#495). Пробы-держатели: `TestAnonymousRegistryToken_DeclaredPrincipalGetsOurReadOnlyToken`, `TestAnonymousRegistryToken_UnsetKnobKeepsTheChallenge` (`cmd/kaname/serve_registry_token_anonymous_test.go`), близнец `TestAnonymousRegistryToken_OwnerCredentialStillGetsItsOwnToken` (`cmd/kaname/serve_registry_token_anonymous_integration_test.go`). Ручка в чарте `deploy/` — `apiServer.registryToken.anonymousClientId`, умолчание `""` (`deploy/values.yaml:276`); ключ `anonymous-client-id` рендерится в настройку службы только при заданном значении (`deploy/templates/configmap.yaml:151`–`152`) — уже производит (kaname#495, `fb04bf0e7`). Пробы рендера: `TestProdProfile_RenderedRegistryTokenAnonymousIsOffWhenSilent`, `TestProdProfile_RenderedRegistryTokenAnonymousReachesTheProcess` (`deploy/registry_token_anonymous_render_test.go`). Newman (б) — `IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG` (`tests/newman/cases/docker-lane-credential-kind.py:370`) | `git grep -n 'func registryTokenBuildConfig' -- cmd/kaname/serve.go` → `:2363`; `git grep -n 'func (u \*IssueRegistryTokenUseCase) ExecuteAnonymous' -- internal` → `token.go:470` @`55b27e57a`; `git grep -n 'anonymousClientId: ""' -- deploy/values.yaml` → `:276`; `git grep -n 'anonymous-client-id:' -- deploy/templates/configmap.yaml` → `:152`; `git grep -n 'IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG' -- tests/newman/cases` → `docker-lane-credential-kind.py:370` @`b1b4543c4` |
+| SC-39 (в) | отказ в старте с именем ручки и переменной окружения; близнец — значения объявленной формы приняты и доезжают до настройки | kaname: страж `RegistryTokenConfig.AnonymousPrincipal` — форма `AnonymousPrincipalForm` (`registry_token.go:108`), предел `anonymousPrincipalMaxLen = 63` (`:110`), отказ формы порождённого идентификатора; его зовёт `RegistryTokenConfig.Validate` (`:237`), её — `config.Config.Validate`, её — `main` до `runServe` с выходом кодом `1` (`cmd/kaname/main.go:63`–`65`) — уже производит (kaname#495). Пробы-держатели: `TestAnonymousPrincipal_OtherFormRefusesToStartNamingTheKnob`, `TestAnonymousPrincipal_DeclaredFormIsAccepted`, `TestAnonymousPrincipal_UnsetIsAccepted`, `TestAnonymousPrincipal_DeclaredValueReachesTheLoadedSetting`, граница длины 63/64 — `TestAnonymousPrincipal_LengthBoundaryIsSixtyThreeCharacters`, близнец `ak-0123456789abcdef` (16 знаков — принят, 17 — отказ) — `TestAnonymousPrincipal_GeneratedShapeTwinOneCharacterShortIsAccepted` (`internal/apps/kaname/config/registry_token_anonymous_principal_test.go`, `b1b4543c4`) | `git grep -n 'const AnonymousPrincipalForm\|anonymousPrincipalMaxLen = \|func (c RegistryTokenConfig) Validate' -- internal/apps/kaname/config/registry_token.go` → `:108`, `:110`, `:237`; `git grep -n 'cfg.Validate()' -- cmd/kaname/main.go` → `:63` @`55b27e57a`; `git grep -n '^func TestAnonymousPrincipal_' -- internal/apps/kaname/config/registry_token_anonymous_principal_test.go` → 6 проб @`b1b4543c4` |
+| SC-39 (г) | субъект плоскости данных реестра; отказ записи `403 DENIED` | kaname: субъект модели анонима `AnonymousSubject = domain.SpeakerAnonymous` (`system_class:anonymous`), `AnonymousReadScope = "registry:pull"` в `internal/apps/kaname/api/registry_token/token.go` — уже производит (S1); запись анонимным токеном не запрашивается. kacho `services/registry/internal/apps/kacho/config/config.go` (резолв анонимной личности, сегодня в `user:*`) — **заказан** (S3). Включение потока в фикстуре — ручка SC-39 (а) | `git grep -n 'AnonymousSubject *=' -- internal ':!*_test.go'` → `token.go:178` @`55b27e57a`; `git grep -n 'user:\*' 2ec6e1e3d` по `PRO-Robotech/kacho:services/registry/internal/apps/kacho/config/config.go` → строки 422, 424, 425 |
 | SC-40…44 | миграция переезда | **заказан** (S1): новая миграция; до неё — посев `0001_initial.sql`: выдача (`access_bindings`), субъект выдачи (`access_binding_subjects`), выпущенный факт (`access_binding_emitted_tuples`, `fga_user = 'user:*'`), факт модели (`relation_fact`) | `git grep -n "'user', '\*'" -- internal/migrations` → 2 строки (выдача и её субъект); `git grep -n "user:\*" -- internal/migrations/0001_initial.sql` → строки 3161 (выпущенный факт), 3454 (журнал), 3620 (факт модели) |
 | SC-50…53 | консоль | `PRO-Robotech/kacho:ui-future/iam/src/components/organisms/iam/AccessBindingCreateForm/AccessBindingCreateForm.tsx` (закрытый `SUBJECT_TYPES` из трёх видов) — **заказан** (S4); перечень `AccessBindingsPage.tsx` (срез аккаунта) и страница `ui-future/shared/src/pages/system/ClusterAdminsPage.tsx` (`/system/cluster/admins`, `clusterApi.listAdmins`) — уже производят; показ субъекта-класса без ссылки — **заказан** (S4) | прочитано @`2ec6e1e3d` |
 | SC-60, 61, 63, 69 | ответ `Check` / `InternalIAMService.Check` на реестр и репозитории после выдачи, отзыва и регистрации нового репозитория | решение — `relverdict` (`internal/repo/kaname/pg/relverdict/query.go`: ветвь выдач `grantArmSQL`, ветвь фактов `factArmSQL`; поиск факта на предке названного типа — `fact_atom`, «непустой тип — на предке этого типа») — уже производит для фактов на предке; компиляция `public_reader from parent` в источник плана (`internal/authzplan`) и сами отношения в каноне — **заказаны** (S5). Факт `public_reader` пишет разворачивание выдачи (`internal/apps/kaname/api/access_binding/reconcile/tuples.go`, `ruleObjectTuples` — сегодня `v_*` и ярус на названном объекте) — **заказан** для типа с объявлением; отзыв факта вместе с выдачей — тем же путём, что отзыв `v_*` (`revoke.go`) — **заказан** для `public_reader`. Роль `registry.public.read` — раздел `roles` манифеста registry (`kacho#3274`), в kaname — фикстура П6 | прочитано @`a7a726802`; `git grep -c 'public_reader\|publicReadToChildren' a7a726802 -- .` → 0 попаданий |
@@ -1492,7 +1577,7 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
 не видим, у его ID названа причина (`#edge-internal-consequence`). Ниже — по каждому ID
 стадии.
 
-**S1 (kaname#829)** — SC-01…18, SC-37, SC-40…44:
+**S1 (kaname#829)** — SC-01…18, SC-37, SC-39 (а)–(в), SC-40…44:
 - proto + regen; `buf lint` зелёный; `buf breaking --against '.git#branch=origin/main'` —
   находок 0 (вывод в доказательстве);
 - новая миграция (применённые не правятся), ссылается на эту приёмку в одобренной редакции;
@@ -1529,6 +1614,29 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
   - SC-42 — снимок «до миграции» есть только на П2: стенд поднимается уже с переездом;
   - SC-43 — перепись строк базы, краем не отдаётся;
   - SC-44 — повтор шага миграции, запроса нет;
+- SC-39 (а)–(в), выдача анонимного токена (kaname#495, стадия S1): полоса собирается из
+  настройки службы (переменная окружения → `config.Load` → страж → `registryTokenBuildConfig`
+  → `registrytokenwire.Build`), поле входа сборки проба не заполняет сама. Пробы:
+  - (а) — `TestAnonymousRegistryToken_DeclaredPrincipalGetsOurReadOnlyToken`; близнец —
+    integration `TestAnonymousRegistryToken_OwnerCredentialStillGetsItsOwnToken`;
+  - (б) — `TestAnonymousRegistryToken_UnsetKnobKeepsTheChallenge` и
+    `TestAnonymousPrincipal_UnsetIsAccepted`;
+  - (в) — `TestAnonymousPrincipal_OtherFormRefusesToStartNamingTheKnob` с каждым значением
+    перечня (в); близнец — `TestAnonymousPrincipal_DeclaredFormIsAccepted` с тремя
+    значениями (в) и `TestAnonymousPrincipal_DeclaredValueReachesTheLoadedSetting`; граница
+    длины 63 — принят, 64 — отказ: `TestAnonymousPrincipal_LengthBoundaryIsSixtyThreeCharacters`;
+    `ak-0123456789abcdef` (16 знаков) — принят, `ak-0123456789abcdefg` (17) — отказ:
+    `TestAnonymousPrincipal_GeneratedShapeTwinOneCharacterShortIsAccepted`;
+  - ручка в чарте `deploy/` — `apiServer.registryToken.anonymousClientId`, умолчание пусто;
+    ключ `anonymous-client-id` в настройке службы рендерится только при заданном значении.
+    Пробы рендера: `TestProdProfile_RenderedRegistryTokenAnonymousIsOffWhenSilent` (незадано —
+    ключа нет), `TestProdProfile_RenderedRegistryTokenAnonymousReachesTheProcess` (задано —
+    равен значению);
+  - newman — кейс (б) `IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG` в коллекции докерной полосы kaname
+    (`tests/newman/collections/docker-lane-credential-kind.postman_collection.json`): стенд
+    поднимается с умолчанием, вход без удостоверения — `401` с `WWW-Authenticate`. Кейс (а)
+    — только integration, причина: стенд держит умолчание (поток выключен), а включение —
+    решение оператора посадки; (в) — только unit, причина: отказ в старте, запроса нет;
 - `make lint` и полный хук отправки зелёные; комментарий `DoD-proof @<sha>` в задаче.
 
 **S2 (kaname#829)** — SC-19…29:
@@ -1545,14 +1653,14 @@ public_reader from parent` в правой части `v_get` и `v_list`. В `v
     раньше службы и отвечает своей формой, а её утверждает набор края платформы;
   - SC-29 — утверждается содержимое записи журнала аудита службы, а не ответ края.
 
-**S3 (kacho#3238)** — SC-30…36, SC-38, SC-39, SC-41, SC-45 и краевая половина SC-18:
+**S3 (kacho#3238)** — SC-30…36, SC-38, SC-39 (г), SC-41, SC-45 и краевая половина SC-18:
 - integration цепочки края в процессе (П3: слой аутентификации, затем посредник прав) по
   каждому из SC-30, 31, 32, 33, 34, 35, 38, 45; сценарии вызова без удостоверения — на обеих
   полосах, нативной и REST. Инъекция для SC-35: все виды (а)–(г) красные, близнецы зелёные. Newman у этих ID нет,
   причина: в стволе нет метода с полом «0» (SC-36), а его объявление вне предмета (Что НЕ
   входит п. 1). На развёрнутом крае нет строки, на которой сценарий воспроизводим;
-- SC-39 — integration плоскости данных реестра (kacho `services/registry`) с включённым
-  анонимным потоком. Newman нет, причина: анонимный поток включается посадкой и по
+- SC-39 (г) — integration плоскости данных реестра (kacho `services/registry`) с включённым
+  анонимным потоком: ручка kaname SC-39 (а) задана, то же имя объявлено приёмной стороне. Newman нет, причина: анонимный поток включается посадкой и по
   умолчанию выключен (`config.go`: пустое значение — поток выключен);
 - newman на стенде П4 с парой «статус + `code`» по каждому из ID:
   - SC-36 — 9 запросов анонима, 9 вошедшего;
@@ -1802,3 +1910,25 @@ B1–B6 и M1–M4 закрыты, одно новое блокирующее N1
 | M1 | фикстура: `resources` и `registry.public.read` — из `kacho#3274`, четыре прочие роли — пробные | П6 |
 | M2 | близнец SC-73 называет оба различия ролей; сравнение — только `v_get` | SC-73 |
 | M3 | шаблон `-run` и подпись DoD S5 согласованы: SC-60…67, SC-69 и SC-73 | DoD S5 |
+
+## Редакция 13: что исправлено
+
+Правка сделана на редакции 10, вердикта на которой нет; последний вердикт — `24e554b7…`
+(CHANGES_REQUESTED, редакция 9). Подготовлена на ветке задачи после вердикта `2b89df3e…`
+(запись `docs/changes/kn-829/reviews/acceptance/2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14.yaml`)
+как редакция 8 — одновременно с редакциями 8–10 стадии S5 на стволе; при слиянии со
+стволом перенумерована в 11, при слиянии со стволом @`efac3adf7` — в 13, после редакций 11 и
+12 стадии S5 (перенумерация при слиянии, содержание SC-39 без изменений); история ствола
+сохранена целиком. Вход — задача kaname#495
+(анонимный поток выдачи токена реестра не включался ни одной настройкой: поле входа сборки
+полосы не задавал никто, и вход без удостоверения на любой посадке получал `401`).
+Прежняя строка производителя SC-39 говорила «поток в kaname выключен в сборке, фикстура
+включает его»: включения настройкой не было, и фикстура заполняла вход сборки в обход
+настройки. Число сценариев — 63 (SC-01…45, SC-50…53 и SC-60…73) — и стадии S1–S5 не
+изменились: случаи (а)–(г) — части SC-39, нового ID нет. SC-60…73 и S5 эта правка не
+трогает.
+
+| № | предмет | решение | где исправлено |
+|---|---|---|---|
+| Д9 | как включается анонимный поток реестра в kaname | ручкой службы `api-server.registry-token.anonymous-client-id`; умолчание пусто — поток выключен; страж старта принимает только объявленную форму и отвергает форму порождённого идентификатора, говорящего модели, подстановку и прочее с именем ручки | SC-39: вводный абзац, случаи (а) ручка задана, (б) ручка пуста, (в) форма неверна; прежнее тело — (г), «Дано» включает поток ручкой (а); таблица производителей — строки SC-39 (а), (б) · (в) · (г); DoD S1 — пункт SC-39 (а)–(в), DoD S3 — SC-39 (г) |
+| Д10 | производители, бывшие на ветке «заказанными», вошли в дерево | строки производителей и DoD приведены к дереву: ручка в чарте есть (`fb04bf0e7`); граница длины 63/64 и близнец `ak-0123456789abcdef` — 16 знаков принимается, 17 отвергается — пробами (`b1b4543c4`); newman (б) — кейс `IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG` (`e20554d87`) | SC-39 (в), близнец; таблица производителей — строки SC-39 (а), (б) и (в); DoD S1 — пункт SC-39 (а)–(в) |
