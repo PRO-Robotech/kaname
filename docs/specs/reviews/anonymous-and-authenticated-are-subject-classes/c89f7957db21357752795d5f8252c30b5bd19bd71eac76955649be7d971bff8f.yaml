@@ -178,7 +178,8 @@ authority:
   expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-18T15:49:28Z"
   reason: >-
     Вердикт — APPROVED на c89f7957…. Одобрение вступает в силу событием, а оно не опубликовано
     (event.status not_performed). Курьер тем же заходом приводит этот блок к факту.
@@ -188,10 +189,21 @@ event_body: "acceptance-reviewer · APPROVED · sha256 c89f7957db21357752795d5f8
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#893
-  status: not_performed
-  published: false
-  note: публикует курьер; до публикации блок честно not_performed
-
+  status: performed
+  published: true
+  database_id: 6251898010
+  node_id: "IC_kwDOUO26pM8AAAABdKRkmg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/893#issuecomment-6251898010"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6251898010"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T15:49:28Z"
+  body_sha256: "72499e85073fb25f0359c3f2f445101761e5ca18fe52710aec5da481fdb7e12b"
+  subject_sha256: "c89f7957db21357752795d5f8252c30b5bd19bd71eac76955649be7d971bff8f"
+  subject_revision_commit: "a129b6a1650c14d5e41b38d506623d7fb3ff4641"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
