@@ -141,7 +141,11 @@ func (c *ClientSecrets) VerifyClientSecret(ctx context.Context, clientID string,
 		return oauthceremony.SecretVerdictUnspecified, fmt.Errorf("ceremonyport: client %s: secret not verified: "+
 			"the ceremony share of the checker is at capacity: %w", clientID, domain.ErrVerifierAtCapacity)
 	}
-	res, err := c.checker.VerifyPresented(ctx, stored, presented)
+	// Места вычисления сверка ждёт под сроком ОПЕРАЦИИ, а не под сроком этого
+	// вызова порта (`OperationScope`): срок порта — предел одного оператора
+	// базы, а очередь проверяющего длиннее его, и срок операции посчитан с
+	// ней (kaname#892).
+	res, err := c.checker.VerifyPresented(operationOf(ctx), stored, presented)
 	if err != nil {
 		// Срок операции кончился, пока сверка ждала места вычисления: порт
 		// отказывает к сроку, а не после него (kaname#892).

@@ -74,7 +74,11 @@ import (
 //     вычисления на тех же процессорах, и под ней очередь движется медленнее.
 //     Предел — сам этот срок: ожидание места прерывается контекстом операции
 //     (kaname#892), и сверка, не дождавшаяся места, кончается отказом к сроку,
-//     а не ответом после него. Стоимость —
+//     а не ответом после него. Мост фундамента зовёт порт сверки со сроком
+//     ОДНОГО вызова (`Config.PortTimeout`, credentialLanePeerTimeout), и этот
+//     срок короче очереди; сверка ждёт места под сроком операции, который ей
+//     видим через обёртку обмена (`ceremonyport.OperationScope`), а под сроком
+//     порта идёт только чтение проверочного значения из базы. Стоимость —
 //     потолок огибающей полосы входа (`passwordverify.Envelope.Floor`):
 //     калибровка при старте самого дорогого класса среди лежащих в хранилище
 //     и класса, которым пишутся и пароли, и секрет клиента, с запасом в
@@ -251,8 +255,16 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
+	// Обмен — под сроком операции, видимым порту сверки секрета: мост
+	// фундамента даёт порту срок одного вызова, а сверка ждёт места
+	// вычисления до срока операции (kaname#892). Величина — та же, что у
+	// церемонии (Config.OperationTimeout).
+	exchange, err := ceremonyport.NewOperationScope(engine, operationDeadline)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
 	exchangeUC, err := ceremonyapp.NewExchangeUseCase(ceremonyapp.ExchangeDeps{
-		Engine: engine, Units: vaults, SettleTimeout: credentialLanePeerTimeout,
+		Engine: exchange, Units: vaults, SettleTimeout: credentialLanePeerTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
