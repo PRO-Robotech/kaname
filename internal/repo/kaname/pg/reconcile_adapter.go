@@ -128,8 +128,8 @@ func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID doma
 }
 
 // LoadBindingsUnlocked loads the SAME BindingScope facts as LoadBindingUnlocked for a
-// WHOLE SET of bindings — in TWO round-trips total (one for the binding rows, one for
-// their DISTINCT roles), instead of two PER BINDING.
+// WHOLE SET of bindings — in THREE round-trips total (one for the binding rows, one for
+// their subjects, one for their DISTINCT roles), instead of three PER BINDING.
 //
 // ЗАЧЕМ. Веер материализации адресуется числом ВЫДАЧ, совпавших с одним объектом, а не
 // числом объектов: меняется ровно один объект, но кандидатов у него столько, сколько
@@ -186,6 +186,20 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
 
+	// Субъекты — ОДНИМ обращением на весь набор: разворачивание судит каждого
+	// субъекта выдачи, а не проекцию первого (kaname#880).
+	bindingIDs := make([]domain.AccessBindingID, 0, len(bindings))
+	for _, b := range bindings {
+		bindingIDs = append(bindingIDs, b.ID)
+	}
+	subjects, err := (&abReader{tx: s.tx}).ListSubjectsForBindings(ctx, bindingIDs)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: load binding subjects batch: %w", err)
+	}
+	for i := range bindings {
+		bindings[i].Subjects = subjects[bindings[i].ID]
+	}
+
 	// Роли — ОДНИМ обращением по различным идентификаторам. Их у веера заметно меньше,
 	// чем выдач (на стенде при 227 кандидатах различных ролей 194, при медианных 9 —
 	// четыре), но главное здесь не сжатие, а то, что число обращений перестаёт зависеть
@@ -227,6 +241,11 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 			return reconcile.BindingScope{}, false, nil
 		}
 		return reconcile.BindingScope{}, false, err
+	}
+	// Субъекты — весь перечень (kaname#880): строка выдачи несёт лишь проекцию
+	// первого. Чтение — в той же транзакции и после строчного замка полного пути.
+	if b.Subjects, err = r.ListSubjects(ctx, bindingID); err != nil {
+		return reconcile.BindingScope{}, false, fmt.Errorf("load binding subjects %s: %w", bindingID, err)
 	}
 
 	// Role permissions (verb-bundle) — read inside the tx so the tier derivation
@@ -348,21 +367,16 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 	}
 	selectors := role.Rules.MaterializingSelectorsInScope(b.Scope)
 	scopeSelf := role.Rules.ScopeSelfVerbs(string(b.ResourceType), scopeTypeVerbs(cat, string(b.ResourceType)))
-	// Выдача СИСТЕМНОМУ КЛАССУ материализует только чтение (Р4, SC-23), какими
-	// бы ни были правила роли СЕЙЧАС: роль может получить пишущий глагол путём,
-	// который правкой роли не является (поставка модулем), и страж правки его не
-	// видит. Сужение — здесь, в единственной точке вывода состава, поэтому
-	// пакетный и поштучный пути не расходятся; форма вердикта несёт то же
-	// правило на каждой ветви выдач (`relverdict.classVerbFilterSQL`).
-	if b.SubjectType == domain.SubjectTypeSystemClass {
-		selectors = classReadSelectors(selectors)
-		scopeSelf = classReadVerbs(scopeSelf)
-	}
+	// Сужение СИСТЕМНОМУ КЛАССУ до чтения (Р4, SC-23) делает разворачивание —
+	// по КАЖДОМУ субъекту выдачи (reconcile/subjects.go, kaname#880), той же
+	// границей, что форма вердикта на строке субъекта
+	// (`relverdict.classVerbFilterSQL`). Здесь сужать по выдаче целиком нельзя:
+	// человек той же выдачи потерял бы глаголы правила, а признак «выдача
+	// классу» по первому субъекту зависел бы от порядка перечня.
 	return reconcile.BindingScope{
-		BindingID:   b.ID,
-		Scope:       scopeAnchorFor(b),
-		SubjectType: string(b.SubjectType),
-		SubjectID:   string(b.SubjectID),
+		BindingID: b.ID,
+		Scope:     scopeAnchorFor(b),
+		Subjects:  bindingSubjects(b),
 		// RBAC explicit-model 2026 P4 (КФ-3): the dynamic membership source is the
 		// role's UNIFIED materializing selectors — ARM_ANCHOR(all) + ARM_NAMES +
 		// ARM_LABELS. Empty for a thin (legacy permissions-only) role → no
@@ -1587,28 +1601,12 @@ func scopeTypeVerbs(cat *catalog.Facts, scopeType string) []string {
 	return cat.AllVerbVocabulary()
 }
 
-// classReadVerbs — только глаголы чтения (Р4); `*` чтением не считается: он
-// раскрывается в набор типа, а набор растёт.
-func classReadVerbs(verbs []string) []string {
-	out := make([]string, 0, len(verbs))
-	for _, v := range verbs {
-		if domain.IsClassReadVerb(v) {
-			out = append(out, v)
-		}
+// bindingSubjects — весь перечень субъектов выдачи. Пустой перечень — выдача,
+// заведённая до дочерней таблицы субъектов: её субъект — одиночная пара строки
+// (та же замена, что у чтения и у веера отзыва, `revoke_subject_fanout.go`).
+func bindingSubjects(b domain.AccessBinding) []domain.Subject {
+	if len(b.Subjects) > 0 {
+		return b.Subjects
 	}
-	return out
-}
-
-// classReadSelectors — селекторы, сужённые до глаголов чтения; селектор, у
-// которого чтения не осталось, не материализует ничего и снимается целиком.
-func classReadSelectors(in []domain.RuleSelector) []domain.RuleSelector {
-	out := make([]domain.RuleSelector, 0, len(in))
-	for _, sel := range in {
-		sel.Verbs = classReadVerbs(sel.Verbs)
-		if len(sel.Verbs) == 0 {
-			continue
-		}
-		out = append(out, sel)
-	}
-	return out
+	return []domain.Subject{{Type: b.SubjectType, ID: b.SubjectID}}
 }

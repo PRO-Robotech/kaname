@@ -98,6 +98,18 @@ type fakeStore struct {
 	ancestors map[string][]domain.MirrorObject
 	// ancestorReads — обращений за предками (путь по объекту читает их лениво).
 	ancestorReads int
+
+	// subjects — перечень субъектов выдачи (kaname#880); пусто — один субъект
+	// subjectType/subjectID.
+	subjects []domain.Subject
+}
+
+// bindingSubjects — перечень субъектов, который двойник отдаёт в BindingScope.
+func (f *fakeStore) bindingSubjects() []domain.Subject {
+	if len(f.subjects) > 0 {
+		return f.subjects
+	}
+	return []domain.Subject{{Type: domain.SubjectType(f.subjectType), ID: domain.SubjectID(f.subjectID)}}
 }
 
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
@@ -126,8 +138,7 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 	return BindingScope{
 		BindingID:      id,
 		Scope:          f.scope,
-		SubjectType:    f.subjectType,
-		SubjectID:      f.subjectID,
+		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
 		Target:         f.target,
@@ -144,8 +155,7 @@ func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBin
 	return BindingScope{
 		BindingID:      id,
 		Scope:          f.scope,
-		SubjectType:    f.subjectType,
-		SubjectID:      f.subjectID,
+		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
 		Target:         f.target,
@@ -165,8 +175,7 @@ func (f *fakeStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.Acces
 		out[id] = BindingScope{
 			BindingID:      id,
 			Scope:          f.scope,
-			SubjectType:    f.subjectType,
-			SubjectID:      f.subjectID,
+			Subjects:       f.bindingSubjects(),
 			Selectors:      f.selectors,
 			ScopeSelfVerbs: f.scopeSelfVerbs,
 			Target:         f.target,

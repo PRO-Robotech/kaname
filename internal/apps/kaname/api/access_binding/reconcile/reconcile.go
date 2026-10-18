@@ -40,11 +40,14 @@ import (
 // binding is thin; the only dynamic membership source is the role's ARM_LABELS
 // rules (LabelSelectors).
 type BindingScope struct {
-	BindingID   domain.AccessBindingID
-	Scope       domain.ScopeAnchor
-	SubjectType string
-	SubjectID   string
-	RoleID      string
+	BindingID domain.AccessBindingID
+	Scope     domain.ScopeAnchor
+	// Subjects — ВЕСЬ перечень субъектов выдачи (`access_binding_subjects`), в
+	// порядке запроса. Разворачивание судит каждого (subjects.go, kaname#880):
+	// одиночной пары «вид, идентификатор» здесь нет намеренно — она была
+	// проекцией первого субъекта, и выдача разворачивалась ему одному.
+	Subjects []domain.Subject
+	RoleID   string
 	// Selectors — the role's UNIFIED materializing selectors (flat explicit
 	// RBAC model): ARM_ANCHOR(all) + ARM_NAMES + ARM_LABELS. When non-empty the
 	// binding has dynamic per-rule membership: each selector (rule_fp) is matched
@@ -949,13 +952,12 @@ func (r *Reconciler) reconcileBindingForObject(
 // contradicts a least-priv per-object grant).
 func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
 	ancestors []domain.MirrorObject) []DesiredMember {
-	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
 	perObject := len(bs.Target.Resources) > 0
 
 	var out []DesiredMember
 	if len(bs.ScopeSelfVerbs) > 0 && !perObject &&
 		o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		if sm, ok := scopeSelfMember(cat, subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
+		if sm, ok := scopeSelfMember(cat, grantees(bs, bs.ScopeSelfVerbs, false), bs.Scope.Type, bs.Scope.ID); ok {
 			out = append(out, sm)
 		}
 	}
@@ -965,6 +967,10 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
 	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
 	for _, sel := range bs.Selectors {
+		gs := selectorGrantees(bs, sel)
+		if len(gs) == 0 {
+			continue
+		}
 		if sel.Container != nil {
 			if !nestedCoversObject(sel, bs, o, ancestors) {
 				continue
@@ -972,7 +978,7 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 		} else if !inTarget || !selectorMatchesObject(sel, o) {
 			continue
 		}
-		dm, ok := desiredMemberForObject(cat, subject, sel, o, bs.Scope)
+		dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
 		if !ok {
 			// A type the model has no FGA object for → no tuple → skip the object
 			// (fail-closed: a typo'd type never grants).
@@ -982,7 +988,7 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 	}
 	// Публичное чтение детям (kaname#856): тот же вывод, что у полного прохода
 	// (desiredRuleMembers), — иначе два пути разошлись бы в составе.
-	return withPublicReaders(cat, bs, subject, out)
+	return withPublicReaders(cat, bs, out)
 }
 
 // desiredMembers computes the desired member set + containment verdict for a
@@ -1101,7 +1107,6 @@ func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTa
 // object is REJECTED (no tuple + audit, cross-scope defence). The SAME object
 // matched by two rules yields two desired members keyed by distinct rule_fp.
 func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
-	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
 	var out []DesiredMember
 	// Каталожный факт берётся ОДИН раз на проход: обновление снимка подменяет
 	// указатель, и три чтения могли бы увидеть два разных каталога — член
@@ -1129,24 +1134,28 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// lists specific content objects, not the scope anchor. So a per-object target never
 	// materializes the scope-self member (over-grant guard, IAM-1-21).
 	if len(bs.ScopeSelfVerbs) > 0 && !perObject {
-		if sm, ok := scopeSelfMember(cat, subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
+		if sm, ok := scopeSelfMember(cat, grantees(bs, bs.ScopeSelfVerbs, false), bs.Scope.Type, bs.Scope.ID); ok {
 			out = append(out, sm)
 		}
 	}
 
 	for _, sel := range bs.Selectors {
+		// Субъекты, которым правило что-то даёт: классу — только чтение, а
+		// вложенное правило классу не применяется вовсе (subjects.go). Никому —
+		// правило не материализует ничего и кандидатов не ищет.
+		gs := selectorGrantees(bs, sel)
+		if len(gs) == 0 {
+			continue
+		}
 		if sel.Container != nil {
 			// Вложенное правило (kaname#874): потомки контейнеров, выбранных
-			// выдачей; у выдачи классу — ни одного (ND-10, nested.go).
-			if isClassBinding(bs) {
-				continue
-			}
+			// выдачей; классам выдачи — ни одного (ND-10, nested.go).
 			matched, err := r.matchNestedObjects(ctx, s, sel, bs)
 			if err != nil {
 				return nil, err
 			}
 			for _, o := range matched {
-				if dm, ok := desiredMemberForObject(cat, subject, sel, o, bs.Scope); ok {
+				if dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope); ok {
 					out = append(out, dm)
 				}
 			}
@@ -1165,7 +1174,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// (desiredMemberForObject), so the full recompute and the forward path
 			// derive BYTE-IDENTICAL tuples (idempotency: forward + async full both
 			// emit the same set, and the read-delta FGA writer skips duplicates).
-			dm, ok := desiredMemberForObject(cat, subject, sel, o, bs.Scope)
+			dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
 			if !ok {
 				// A type the model has no FGA object for → no tuple → skip the object
 				// (fail-closed: a typo'd type never grants).
@@ -1177,7 +1186,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// Публичное чтение детям (kaname#856): член `public_reader` на каждом
 	// объявленном контейнере, который выдача уже даёт действующим членом, — тот
 	// же вывод, что у прямого пути по объекту (desiredMembersForObject).
-	return withPublicReaders(cat, bs, subject, out), nil
+	return withPublicReaders(cat, bs, out), nil
 }
 
 // desiredMemberForObject computes the DesiredMember a materializing selector produces
@@ -1194,15 +1203,25 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 //     excluded from CompileRules, so the tuples come from the rule verbs, not RolePerms.
 //   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
 //     grants, fail-closed).
-func desiredMemberForObject(cat *catalog.Facts, subject string, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
 	if !o.IsContainedIn(scope) {
 		return DesiredMember{
 			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 			Status: domain.VerificationRejected,
 		}, true
 	}
-	tuples, ok := ruleObjectTuples(cat, subject, sel.Verbs, o.ObjectType, o.ObjectID)
-	if !ok {
+	// Кортежи — объединение по субъектам `gs`, каждому со своими глаголами
+	// (subjects.go, kaname#880). Отказ «у типа нет объекта модели» от субъекта
+	// не зависит: первый же отказ — отказ всего члена.
+	var tuples []domain.MembershipTuple
+	for _, g := range gs {
+		t, ok := ruleObjectTuples(cat, g.subject, g.verbs, o.ObjectType, o.ObjectID)
+		if !ok {
+			return DesiredMember{}, false
+		}
+		tuples = append(tuples, t...)
+	}
+	if len(tuples) == 0 {
 		return DesiredMember{}, false
 	}
 	return DesiredMember{
