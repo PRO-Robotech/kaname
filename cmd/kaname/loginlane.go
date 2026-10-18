@@ -57,7 +57,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
-	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
@@ -134,7 +133,7 @@ type loginLane struct {
 }
 
 // secretChecker — проверяющий секрета клиента церемонии; nil — полосы нет.
-func (l *loginLane) secretChecker() ceremonyport.SecretChecker {
+func (l *loginLane) secretChecker() ceremonySecretVerifier {
 	if l == nil || l.verifier == nil {
 		return nil
 	}

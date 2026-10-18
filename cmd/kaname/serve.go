@@ -1266,7 +1266,7 @@ func runServe(cfg config.Config) error {
 		// слушателя, при котором край вообще узнаваем, требует страж
 		// requireIssuingListenerAsksForACertificate выше.
 		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
-		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
+		ceremony, cerr := buildCeremonySurface(ctx, pool, cfg, tokenSigner,
 			ceremonyKeySource(signingKeystore), lane.secretChecker(), metricsReg.LoginLaneRecorder(), issuingSource, logger)
 		if cerr != nil {
 			return fmt.Errorf("ceremony: %w", cerr)

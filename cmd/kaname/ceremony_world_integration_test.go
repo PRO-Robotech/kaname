@@ -625,7 +625,7 @@ func (w *ceremonyWorld) buildSurface() {
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
 	source := issuingsource.New(cfg.AuthN.TrustDomain())
-	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w),
+	ceremony, err := buildCeremonySurface(w.ctx, w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w),
 		metrics.NewRegistry().LoginLaneRecorder(), source, logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)

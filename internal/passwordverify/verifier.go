@@ -224,6 +224,17 @@ func (v *Verifier) MeetsDeclared(stored domain.LoginVerifier, declared Declared)
 	return true, nil
 }
 
+// decoyClass — класс стоимости выравнивающего значения: разбор без
+// вычисления, наружу — формат и параметры, а не материал. Пустой класс — значения
+// нет либо оно не разбирается (SetDecoy такого не ставит).
+func (v *Verifier) decoyClass() domain.PasswordCostClass {
+	if v.decoy.IsZero() {
+		return domain.PasswordCostClass{}
+	}
+	res := inspectAndCompare(v.decoy.Reveal(), "", false)
+	return domain.PasswordCostClass{Format: res.Format, Params: res.Params}
+}
+
 // observed — исход уходит своему счётчику и возвращается вызывающему. Один
 // путь на все исходы: второй оставил бы какой-нибудь из них без счётчика.
 func (v *Verifier) observed(res Result) Result {
