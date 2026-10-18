@@ -11,6 +11,7 @@
 #   ./scripts/run.sh --service a --service b  # несколько коллекций, ОДИН вердикт
 #   ./scripts/run.sh --service disk --bail # прерывать после первого fail
 #   ./scripts/run.sh --delay 100           # задержка между запросами (ms)
+#   ./scripts/run.sh --remint-bootstrap …  # jwtBootstrap переиздаётся перед КАЖДОЙ коллекцией
 #
 # Exit-код: 0 ТОЛЬКО если каждая ожидаемая коллекция произвела отчёт И в нём
 # assertions.failed==0 И собственный exit-код newman==0 (плюс coverage-гейт ниже).
@@ -126,6 +127,7 @@ EXTRA=()
 SSL_CLIENT_CERT=""
 SSL_CLIENT_KEY=""
 SSL_EXTRA_CA=""
+REMINT_BOOTSTRAP=0
 
 # `--help` ОТВЕЧАЕТ И НЕ ГОНЯЕТ. Прежде его не было вовсе, и неизвестный флаг
 # уезжал в EXTRA: `run.sh --help` доходил до `newman run` и пытался обратиться к
@@ -140,7 +142,7 @@ SSL_EXTRA_CA=""
 _usage() {
   awk 'NR < 6 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
   echo
-  echo "Флаги: --service <stem> (можно повторить) | --bail | --delay <мс> | --jobs <n> (принимается и игнорируется) | --help"
+  echo "Флаги: --service <stem> (можно повторить) | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --help"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -159,6 +161,14 @@ while [[ $# -gt 0 ]]; do
       SERVICES+=("$2"); shift 2 ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
+    # СРОК БУТСТРАПА КОРОЧЕ ВОЛНЫ (kaname#868). Бутстрап живёт 15 минут (`MaxTTL`
+    # службы, мал намеренно), а волна автономного стенда идёт дольше: последняя
+    # коллекция получала «credential is not accepted». С флагом прогонщик перед
+    # каждой коллекцией переиздаёт `jwtBootstrap` посевом
+    # (`seed_own_stand.py --remint-bootstrap`: та же чеканка и то же утверждение
+    # приёма фронтом, что у шага 1 посева). Флаг — только у прогона против
+    # автономного стенда, где чеканка доступна по имени сертификата посева.
+    --remint-bootstrap) REMINT_BOOTSTRAP=1; shift ;;
     # --jobs: принят для паритета с vpc/nlb/compute run.sh + newman-parallel.sh
     # (директива #1). iam-суиты гоняются СЕРИЙНО намеренно (jit-pending reseed +
     # порядковые зависимости между матрицами) — флаг consume-and-ignore, а НЕ
@@ -200,6 +210,12 @@ _was_run() {
   return 1
 }
 
+# _remint_bootstrap — переиздание jwtBootstrap посевом (kaname#868); код — посева.
+_remint_bootstrap() {
+  python3 "$NEWMAN_DIR/../authz-fixtures/seed_own_stand.py" --remint-bootstrap \
+    --env-file "$NEWMAN_DIR/$ENV"
+}
+
 # run_one — прогон одной коллекции. Пишет out/<res>.json|.cli|.rc.
 run_one() {
   RAN_STEMS+=("$1")
@@ -232,6 +248,18 @@ run_one() {
     return 0
   fi
   echo "===== ${res} ====="
+  # Переиздание — ДО коллекции, и его отказ коллекцию не запускает: прогон под
+  # просроченным бутстрапом дал бы красное по неверной причине. Отчёта нет —
+  # вердикт называет коллекцию MISSING, а строка ниже — причину.
+  if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
+    local rrc=0
+    _remint_bootstrap || rrc=$?
+    if [[ "$rrc" -ne 0 ]]; then
+      echo "[remint] ${res}: jwtBootstrap НЕ переиздан (код ${rrc}) — коллекция не запускалась, условие не создано" >&2
+      echo "remint-${rrc}" > "out/${res}.rc"
+      return 0
+    fi
+  fi
   # Берём PIPESTATUS[0] (newman), а НЕ статус tee и НЕ `|| true`: проглоченный код
   # возврата newman = ложный GREEN при красных проверках.
   set +e
@@ -433,6 +461,19 @@ _is_delegated() {
 #
 # ТРИ ИСХОДА, И КОД ЧИТАЕТСЯ КАК ДАННЫЕ, а не как условие продолжения: `set -e`
 # оборвал бы прогонщик молча, до развилки.
+# С `--remint-bootstrap` предполёт спрашивает фронт ПЕРЕИЗДАННЫМ бутстрапом: его
+# предмет — годность посева к прогону, а бутстрап посева к этому моменту законно
+# старше своего срока (kaname#868); иначе предполёт отверг бы волну по сроку,
+# который прогонщик и так снимает перед каждой коллекцией.
+if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
+  _remint_rc=0
+  _remint_bootstrap || _remint_rc=$?
+  if [[ "$_remint_rc" -ne 0 ]]; then
+    echo "ПРОГОН НЕ СОСТОЯЛСЯ: jwtBootstrap не переиздан перед предполётом (код $_remint_rc) —" >&2
+    echo "условие не создано, вердикта о дереве нет НИ ОДНОГО." >&2
+    exit 75
+  fi
+fi
 _preflight_rc=0
 python3 "$NEWMAN_DIR/scripts/seed_preflight.py" \
   --env "$ENV" \

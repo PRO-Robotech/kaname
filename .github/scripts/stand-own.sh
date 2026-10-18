@@ -877,6 +877,7 @@ ROUTE_FILE="$RUNDIR/route"
 ROUTE_LOG="$RUNDIR/route.log"
 FORWARD_PID="$RUNDIR/forward.pid"
 FORWARD_LOG="$RUNDIR/forward.log"
+FORWARD_ON="$RUNDIR/forward.on"
 EXT_KCFG=""; EXT_CTX=""; EXT_PROF=""; EXT_TASK=""; EXT_NS=""
 ROUTE=local; WHY=""; PROOF=""
 # Префикс исполнения наката: пустой — накатчик машины; внешний путь подставляет exec пода.
@@ -1311,31 +1312,67 @@ ext_start_service() {
   return 1
 }
 
+# ext_unforward — сначала снимается отметка (держатели перестают перезапускать),
+# затем каждый держатель — группой: держатель и его kubectl. Номера групп — из
+# файла, который пишет только ext_forward; чужих процессов он не называет.
 ext_unforward() {
+  local pg
+  rm -f "$FORWARD_ON"
   if [ -f "$FORWARD_PID" ]; then
-    kill "$(cat "$FORWARD_PID")" 2>/dev/null
+    while read -r pg; do
+      [ -n "$pg" ] && kill -- "-$pg" 2>/dev/null
+    done < "$FORWARD_PID"
     rm -f "$FORWARD_PID"
   fi
 }
 
+# ext_forward_keep ПОРТ — держатель проброса одного порта: пока стоит отметка
+# FORWARD_ON, вышедший kubectl поднимается заново.
+#
+# ПОЧЕМУ ПО ПОРТУ И С ПЕРЕЗАПУСКОМ (kaname#869). Проброс был один на все порты, а
+# проверка службы (`stand-assert.py`, «рукопожатие без сертификата») НАМЕРЕННО
+# рвёт соединение отказом взаимного TLS. Сброс одного потока завершает весь
+# `kubectl port-forward`, и все следующие запросы на любой порт получали «код
+# None, тело ''» — находки о стенде, а не о службе (2 прогона из 3). Теперь отказ
+# рукопожатия гасит проброс ТОЛЬКО своего порта, и держатель его поднимает;
+# окно перезапуска покрывает ожидание слушателя у самой проверки.
+# shellcheck disable=SC2329  # зовётся телом держателя в своей сессии (ext_forward)
+ext_forward_keep() {
+  local p="$1"
+  while [ -f "$FORWARD_ON" ]; do
+    kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" -n "$EXT_NS" port-forward \
+      --address 127.0.0.1 "pod/$EXT_POD" "$p" >> "$FORWARD_LOG" 2>&1 < /dev/null
+    [ -f "$FORWARD_ON" ] || break
+    printf 'проброс :%s завершился — поднимаю заново\n' "$p" >> "$FORWARD_LOG"
+    sleep 0.5
+  done
+}
+
 # ext_forward — слушатели службы и чтение писем на 127.0.0.1 машины теми же
-# номерами. Готовность пода уже доказана таблицей сокетов: проброс принимает
-# соединение и без слушателя за ним, поэтому здесь судится только сам проброс.
+# номерами, каждый порт — своим держателем (ext_forward_keep). Готовность пода уже
+# доказана таблицей сокетов: проброс принимает соединение и без слушателя за ним,
+# поэтому здесь судится только сам проброс.
 ext_forward() {
   local i p up
   ext_unforward
-  # shellcheck disable=SC2086  # перечень портов — словами
-  nohup kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" -n "$EXT_NS" port-forward \
-    --address 127.0.0.1 "pod/$EXT_POD" $PORTS "$MAIL_HTTP_PORT" > "$FORWARD_LOG" 2>&1 < /dev/null &
-  echo $! > "$FORWARD_PID"
+  : > "$FORWARD_LOG"
+  : > "$FORWARD_PID"
+  touch "$FORWARD_ON"
+  for p in $PORTS $MAIL_HTTP_PORT; do
+    # Своя сессия — своя группа процессов: снятие гасит держателя вместе с его
+    # kubectl одним сигналом группе.
+    # shellcheck disable=SC2016  # тело держателя раскрывает свои аргументы само
+    setsid bash -c "$(declare -f ext_forward_keep)"'; FORWARD_ON="$1" FORWARD_LOG="$2" EXT_KCFG="$3" EXT_CTX="$4" EXT_NS="$5" EXT_POD="$6" ext_forward_keep "$7"' \
+      _ "$FORWARD_ON" "$FORWARD_LOG" "$EXT_KCFG" "$EXT_CTX" "$EXT_NS" "$EXT_POD" "$p" < /dev/null > /dev/null 2>&1 &
+    echo $! >> "$FORWARD_PID"
+  done
   for i in $(seq 1 30); do
-    kill -0 "$(cat "$FORWARD_PID")" 2>/dev/null || break
     up=1
     for p in $PORTS $MAIL_HTTP_PORT; do
       (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null || { up=0; break; }
     done
     if [ "$up" -eq 1 ]; then
-      say "проброс поднят: слушатели службы и чтение писем на 127.0.0.1 машины, попытка $i"
+      say "проброс поднят: держателей по порту $(wc -l < "$FORWARD_PID"), слушатели службы и чтение писем на 127.0.0.1 машины, попытка $i"
       return 0
     fi
     sleep 1
@@ -2004,7 +2041,7 @@ EOF
         ( PATH="$TMP/kc:$PATH"; kc_reset
           EXT_KCFG="$TMP/kc-u--prof.yaml"; EXT_CTX="u--prof-client"; EXT_TASK=841; EXT_NS="t841-kaname-own"
           RUNDIR="$TMP/run-ext"; rm -rf "$RUNDIR"; mkdir -p "$RUNDIR"
-          ROUTE_FILE="$RUNDIR/route"; FORWARD_PID="$RUNDIR/forward.pid"
+          ROUTE_FILE="$RUNDIR/route"; FORWARD_PID="$RUNDIR/forward.pid"; FORWARD_ON="$RUNDIR/forward.on"
           "$1" )
     }
     ext_down_own()      { echo own > "$SELFTEST_KC/ns/$EXT_NS"; ext_down && ext_census; }
