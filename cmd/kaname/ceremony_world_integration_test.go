@@ -644,6 +644,11 @@ func (w *ceremonyWorld) buildSurface() {
 	w.surfaceAuth = issuingSurfaceAuthOf(mux)
 }
 
+// ceremonyWorldCheckerCapacity — ёмкость проверяющего секрета мира (см.
+// `ceremonySecretChecker`); половина её — места сверки церемонии, ширина пробы
+// очереди проверок kaname#882.
+const ceremonyWorldCheckerCapacity = 32
+
 // ceremonySecretChecker — проверяющий секрета клиента мира: паролей службы,
 // выровненный приманкой объявленного класса секрета (argon2id, пол службы).
 func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
@@ -656,7 +661,7 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	// больше половины ёмкости (доля рядом с полосой входа,
 	// `ceremonyport.ClientSecrets`), поэтому ёмкость — не меньше удвоенной
 	// наибольшей одновременности.
-	v, err := passwordverify.New(32, silentVerifyObserver{})
+	v, err := passwordverify.New(ceremonyWorldCheckerCapacity, silentVerifyObserver{})
 	if err != nil {
 		w.fixture("проверяющий секрета клиента: %v", err)
 	}
