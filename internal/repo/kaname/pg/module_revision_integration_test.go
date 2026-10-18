@@ -240,6 +240,7 @@ func Test865_25_ReformattedDocumentIsNotAConflict(t *testing.T) {
 	require.False(t, census.Changed())
 	require.Equal(t, before, catalogstate.Fingerprint(t, ctx, pool))
 	_, digest := rev865Applied(t, ctx, pool)
+	require.NotNil(t, digest, "пара не записана")
 	require.Equal(t, m.Digest(), *digest)
 }
 
