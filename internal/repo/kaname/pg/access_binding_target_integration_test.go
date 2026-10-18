@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // insertBindingWithTarget Inserts+Commits one ACTIVE binding carrying the given
@@ -41,7 +42,7 @@ func insertBindingWithTarget(t *testing.T, ctx context.Context, repo *kanamepg.R
 	t.Helper()
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	out, ierr := w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	out, ierr := bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
 		Target: tgt,

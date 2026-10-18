@@ -34,6 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // seedRulesRole inserts a PROJECT-scoped custom role whose rules[] is the supplied
@@ -79,7 +80,7 @@ func insertThinBinding(t *testing.T, ctx context.Context, repo *kanamepg.Reposit
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: bid, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(subject),
 		RoleID: roleID, ResourceType: "project", ResourceID: string(prj),
 		Scope: domain.ScopeProject, Status: domain.AccessBindingStatusActive,
@@ -422,7 +423,7 @@ func insertThinBindingScope(t *testing.T, ctx context.Context, repo *kanamepg.Re
 	// erased, and so is every other failure in the package. Rollback after a
 	// successful Commit is a no-op.
 	defer func() { _ = w.Rollback(ctx) }()
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: bid, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(subject),
 		RoleID: roleID, ResourceType: domain.ResourceType(resType), ResourceID: resID,
 		Scope: scope, Status: domain.AccessBindingStatusActive,
