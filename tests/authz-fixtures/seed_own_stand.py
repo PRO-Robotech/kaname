@@ -1102,6 +1102,41 @@ def write_env(patch: dict, env_file: pathlib.Path, template: pathlib.Path) -> in
     return replaced
 
 
+# ─────────────────────────── переиздание бутстрапа ───────────────────────────
+#
+# СРОК БУТСТРАПА КОРОЧЕ ВОЛНЫ (kaname#868). Бутстрап чеканится на первом шаге
+# посева сроком `MaxTTL` службы — 15 минут, и этот срок мал НАМЕРЕННО: токен несёт
+# кластерного администратора и нужен ради первого доступа. Коллекции волны читают
+# `jwtBootstrap` до её конца, а волна на внешнем стенде идёт 14–16,5 минут:
+# последняя коллекция получала «credential is not accepted». Срок службы не
+# меняется — меняется момент выпуска: прогонщик (`run.sh --remint-bootstrap`)
+# переиздаёт бутстрап ПЕРЕД КАЖДОЙ коллекцией, и каждая получает токен, выпущенный
+# непосредственно перед ней.
+#
+# Переиздание — тот же глагол чеканки и то же утверждение приёма, что у шага 1
+# посева: токен, который фронт не принял, в окружение не пишется. Пишется РОВНО
+# один ключ — `jwtBootstrap`; остальное окружение (идентификаторы, предъявители
+# людей и машин) — результат посева, и переиздание его не трогает. Окружения нет —
+# посева не было: «условие не создано», а не новый файл из шаблона.
+
+
+def remint_bootstrap(args: argparse.Namespace, mint=mint_bootstrap, accept=assert_bootstrap_accepted,
+                     http=None) -> int:
+    env_file = pathlib.Path(args.env_file)
+    if not env_file.is_file():
+        raise Unmet(f"окружения {env_file} нет — посева не было, переиздавать нечего")
+    pki = pathlib.Path(args.pki)
+    public = f"https://{args.host}:{args.port_public}"
+    boot = mint(pki, args.host, args.port_grpc)
+    accept(http or Http(pki), public, boot)
+    replaced = write_env({"jwtBootstrap": boot}, env_file, pathlib.Path(args.env_template))
+    if replaced != 1:
+        raise Finding(f"переиздание: в окружении посева ключа jwtBootstrap не было (заменено {replaced}) — "
+                      f"окружение писал не этот посев")
+    say("jwtBootstrap переиздан непосредственно перед коллекцией и принят собственным фронтом")
+    return 0
+
+
 # ─────────────────────────── прогон посева ───────────────────────────────────
 
 
@@ -1842,6 +1877,48 @@ def self_test() -> int:
             _c(label, failed == must_fail,
                f"ожидалось падение={must_fail}, получено={failed}")
 
+    # ── Ось 10: ПЕРЕИЗДАНИЕ БУТСТРАПА (kaname#868) ───────────────────────────
+    #
+    # Инъекция в обе стороны на одном факте — приёме фронтом: принятый токен
+    # заменяет ТОЛЬКО jwtBootstrap, остальное окружение не тронуто; отвергнутый —
+    # находка, и окружение остаётся прежним. Окружения нет — «условие не создано».
+    import tempfile as _tf
+    with _tf.TemporaryDirectory(prefix="seed-remint-") as td:
+        tmp = pathlib.Path(td)
+        envf, tmpl = tmp / "e.json", tmp / "t.json"
+        tmpl.write_text(json.dumps({"values": []}), encoding="utf-8")
+        before = {"values": [{"key": "jwtBootstrap", "value": "old"},
+                             {"key": "jwtSAA", "value": "keep"}]}
+        ns = argparse.Namespace(env_file=str(envf), env_template=str(tmpl), pki=str(tmp),
+                                host="localhost", port_public=1, port_grpc=2)
+
+        def _ok(_h, _p, _t):
+            return None
+
+        def _reject(_h, _p, _t):
+            raise Finding("фронт не принял")
+
+        for label, accept, want_boot, must_fail in (
+                ("переиздание: принятый токен заменяет только jwtBootstrap", _ok, "new", False),
+                ("переиздание: отвергнутый фронтом токен — находка, окружение прежнее",
+                 _reject, "old", True)):
+            envf.write_text(json.dumps(before), encoding="utf-8")
+            try:
+                remint_bootstrap(ns, mint=lambda *_a: "new", accept=accept, http=object())
+                failed = False
+            except Finding:
+                failed = True
+            got = {v["key"]: v["value"] for v in json.loads(envf.read_text(encoding="utf-8"))["values"]}
+            _c(label, failed == must_fail and got == {"jwtBootstrap": want_boot, "jwtSAA": "keep"},
+               f"падение={failed}, окружение={got}")
+        envf.unlink()
+        try:
+            remint_bootstrap(ns, mint=lambda *_a: "new", accept=_ok, http=object())
+            _c("переиздание без окружения посева — условие не создано", False, "прошло молча")
+        except Unmet:
+            _c("переиздание без окружения посева — условие не создано", not envf.exists(),
+               "окружение создано из шаблона")
+
     # Ось 6: запись окружения ДОБАВЛЯЕТ ключ, которого в шаблоне нет.
     import tempfile
     with tempfile.TemporaryDirectory(prefix="seed-selftest-") as td:
@@ -1900,6 +1977,9 @@ def main() -> int:
                     help="напечатать ПОВЕРХНОСТЬ, для которой этот посев куёт, "
                          "и выйти: имя ключа совпадает через разные стенды, "
                          "а предъявитель не переносится")
+    ap.add_argument("--remint-bootstrap", action="store_true",
+                    help="переиздать jwtBootstrap в окружении уже прошедшего посева и "
+                         "выйти: срок бутстрапа короче волны (kaname#868)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.minted_keys:
@@ -1912,6 +1992,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
     try:
+        if args.remint_bootstrap:
+            return remint_bootstrap(args)
         return run(args)
     except Unmet as e:
         print(f"УСЛОВИЕ НЕ СОЗДАНО: {e}", file=sys.stderr)
