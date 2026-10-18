@@ -197,20 +197,37 @@ func bindingNamesSubject(ab string, typePos, idPos int) string {
 		ab, typePos, idPos)
 }
 
-// bindingNamesSubjectOnAxis — тот же вопрос, что у bindingNamesSubject, но по
-// ОДНОЙ оси субъекта: только вид (фильтр вида у ListByAccount) либо только
-// идентификатор (фильтр `subject` у List). Такое чтение ведёт не субъект, а
-// область выдачи или курсор, поэтому набор спрашивается по строке-кандидату:
-// `EXISTS` по первичному ключу `access_binding_subjects_pk` (binding_id, …).
+// bindingNamesSubjectID — тот же вопрос, что у bindingNamesSubject, но по одному
+// идентификатору субъекта без вида (фильтр `subject` у List): выдача называет
+// субъекта $pos в паре или в наборе.
 //
-// col — литерал вызывающего, один из двух столбцов оси; значения запроса сюда
-// не попадают, они идут параметром $pos.
-func bindingNamesSubjectOnAxis(col string, pos int) string {
+// Форма — та же `id = ANY (ARRAY(подзапрос))`, и это замерено, а не выбрано
+// вкусом (kaname#888, EXPLAIN на 20000 выдачах с двумя субъектами каждая): с
+// `EXISTS` планировщик исполнял набор хэшированным подпланом с полным чтением
+// access_binding_subjects и обходил всю таблицу выдач по курсору — 8,1 мс против
+// 1,2 мс у прежней одиночной пары. Ведущего столбца subject_id нет ни у одного
+// индекса обеих таблиц, поэтому обе ветви идут полным проходом индекса
+// (access_bindings_subject_idx и access_binding_subjects_subject_scope_idx) с
+// условием на втором столбце — линейно по числу строк, как и прежняя пара.
+func bindingNamesSubjectID(pos int) string {
 	return fmt.Sprintf(
-		`(%[1]s = $%[2]d
+		`(subject_id = $%[1]d
+		   OR id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                       WHERE s.subject_id = $%[1]d)))`,
+		pos)
+}
+
+// bindingHasSubjectType — выдача несёт субъекта вида $pos в паре или в наборе
+// (фильтр вида у ListByAccount). Такое чтение ведёт область аккаунта и курсор, а
+// набор спрашивается `EXISTS` по строке-кандидату; планировщик волен исполнить
+// его один раз хэшированным подпланом по access_binding_subjects_subject_scope_idx
+// (замер kaname#888 — так и делает).
+func bindingHasSubjectType(pos int) string {
+	return fmt.Sprintf(
+		`(subject_type = $%[1]d
 		   OR EXISTS (SELECT 1 FROM access_binding_subjects s
-		               WHERE s.binding_id = access_bindings.id AND s.%[1]s = $%[2]d))`,
-		col, pos)
+		               WHERE s.binding_id = access_bindings.id AND s.subject_type = $%[1]d))`,
+		pos)
 }
 
 // List — единое чтение (redesign-2026 F11). Собирает WHERE из тех
@@ -247,7 +264,7 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 	}
 	// Субъект — любой из субъектов выдачи, а не только первый (kaname#888).
 	if f.SubjectID != "" {
-		conditions = append(conditions, bindingNamesSubjectOnAxis("subject_id", argIdx))
+		conditions = append(conditions, bindingNamesSubjectID(argIdx))
 		args = append(args, f.SubjectID)
 		argIdx++
 	}
@@ -413,7 +430,7 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 
 	// Вид — любого из субъектов выдачи, а не только первого (kaname#888).
 	if f.SubjectTypeFilter != "" {
-		conditions = append(conditions, bindingNamesSubjectOnAxis("subject_type", argIdx))
+		conditions = append(conditions, bindingHasSubjectType(argIdx))
 		args = append(args, f.SubjectTypeFilter)
 		argIdx++
 	}
