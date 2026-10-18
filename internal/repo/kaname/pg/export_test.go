@@ -63,3 +63,19 @@ func WriterTx(w kaname.Writer) interface {
 } {
 	return w.(*writeTx).tx
 }
+
+// BindingNamesSubjectIDSQL и BindingNamesSubjectSQL — предикаты фильтра
+// субъекта у List и у ListBySubject, ТЕ САМЫЕ тексты, которые исполняет
+// чтение (kaname#888): проба плана, переписавшая предикат своей рукой,
+// мерила бы другой запрос.
+func BindingNamesSubjectIDSQL(pos int) string { return bindingNamesSubjectID(pos) }
+
+// BindingNamesSubjectSQL — см. BindingNamesSubjectIDSQL.
+func BindingNamesSubjectSQL(ab string, typePos, idPos int) string {
+	return bindingNamesSubject(ab, typePos, idPos)
+}
+
+// BindingHasSubjectTypeInAccountSQL — предикат фильтра вида у ListByAccount.
+func BindingHasSubjectTypeInAccountSQL(typePos, accountPos int) string {
+	return bindingHasSubjectTypeInAccount(typePos, accountPos)
+}
