@@ -79,3 +79,14 @@ func BindingNamesSubjectSQL(ab string, typePos, idPos int) string {
 func BindingHasSubjectTypeInAccountSQL(typePos, accountPos int) string {
 	return bindingHasSubjectTypeInAccount(typePos, accountPos)
 }
+
+// BindingSubjectKinds — закрытый словарь вида субъекта, которым чтение без
+// вида называет ведущий столбец индекса (kaname#888); проба сверяет его со
+// схемой.
+func BindingSubjectKinds() []string {
+	out := make([]string, len(bindingSubjectKinds))
+	for i, k := range bindingSubjectKinds {
+		out[i] = string(k)
+	}
+	return out
+}

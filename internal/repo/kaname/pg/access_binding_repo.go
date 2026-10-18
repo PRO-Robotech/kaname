@@ -205,22 +205,46 @@ func bindingNamesSubject(ab string, typePos, idPos int) string {
 // идентификатору субъекта без вида (фильтр `subject` у List): выдача называет
 // субъекта $pos в паре или в наборе.
 //
-// Форма — та же `id = ANY (ARRAY(подзапрос))`, и это замерено, а не выбрано
-// вкусом (kaname#888, EXPLAIN ANALYZE на 20000 выдачах с двумя субъектами
-// каждая): с `EXISTS` планировщик исполнял набор хэшированным подпланом и
-// обходил всю таблицу выдач по курсору — 8,1 мс; с этой формой выдачи читаются
-// BitmapOr по access_bindings_subject_idx и первичному ключу — 6,0 мс. Прежняя
-// одиночная пара стоила 1,2 мс и была неверна. Цена названа: ведущего столбца
-// subject_id нет ни у одного индекса набора, поэтому подзапрос читает
-// access_binding_subjects целиком (40010 строк — 5 мс из 6) — линейно по числу
-// субъектов всех выдач. Индекс набора по subject_id — предмет миграции, а не
-// этого чтения.
+// Вид вопросу не известен, а оба индекса субъекта ведутся видом
+// (`access_bindings_subject_idx` и `access_binding_subjects_subject_scope_idx`
+// — subject_type, subject_id). Голое `subject_id = $pos` ведущего столбца не
+// называет, и подзапрос набора читал access_binding_subjects целиком —
+// субъектов всех арендаторов на каждый запрос (kaname#888: 40010 строк, 5 мс
+// из 6 на 20000 выдачах). Поэтому вид назван закрытым словарём
+// bindingSubjectKindsSQL: `subject_type = ANY (словарь) AND subject_id = $pos`
+// — индексное условие по обоим столбцам, по одному спуску на вид. Словарь
+// сверен со схемой пробой (TestSubjectFilterPlan): новый вид в ограничении
+// без него в словаре — красное, а не молча выпавшие выдачи.
+//
+// Форма набора — та же `id = ANY (ARRAY(подзапрос))`: с `EXISTS` планировщик
+// исполнял набор хэшированным подпланом и обходил всю таблицу выдач по курсору.
 func bindingNamesSubjectID(pos int) string {
 	return fmt.Sprintf(
-		`(subject_id = $%[1]d
+		`((subject_type = ANY (%[2]s) AND subject_id = $%[1]d)
 		   OR id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
-		                       WHERE s.subject_id = $%[1]d)))`,
-		pos)
+		                       WHERE s.subject_type = ANY (%[2]s) AND s.subject_id = $%[1]d)))`,
+		pos, bindingSubjectKindsSQL())
+}
+
+// bindingSubjectKinds — закрытый словарь вида субъекта выдачи: тот же набор,
+// что держат ограничения `access_bindings_subject_ck` и
+// `access_binding_subjects_type_ck`. Нужен чтению, не знающему вида
+// (bindingNamesSubjectID), чтобы назвать ведущий столбец индекса субъекта.
+var bindingSubjectKinds = []domain.SubjectType{
+	domain.SubjectTypeUser,
+	domain.SubjectTypeServiceAccount,
+	domain.SubjectTypeGroup,
+	domain.SubjectTypeSystemClass,
+}
+
+// bindingSubjectKindsSQL — словарь литералом массива. Значения — константы
+// домена без кавычек внутри, вход вызывающего сюда не попадает.
+func bindingSubjectKindsSQL() string {
+	quoted := make([]string, len(bindingSubjectKinds))
+	for i, k := range bindingSubjectKinds {
+		quoted[i] = "'" + string(k) + "'"
+	}
+	return "ARRAY[" + strings.Join(quoted, ", ") + "]::text[]"
 }
 
 // bindingHasSubjectTypeInAccount — выдача несёт субъекта вида $typePos в паре
@@ -238,10 +262,9 @@ func bindingNamesSubjectID(pos int) string {
 //
 // Цена названа: подзапрос строит массив ВСЕХ выдач аккаунта с субъектом этого
 // вида, и для частого вида он линеен по числу выдач аккаунта, хотя странице
-// нужно 50 строк. Прежняя пара была дешевле и неверна. Снять цену может только
-// схема (полный набор субъектов у каждой выдачи — тогда пара из предиката
-// уходит, и полусоединение по набору планировщик оценивает сам); это предмет
-// миграции, а не этого чтения.
+// нужно 50 строк. Граница этой цены — один аккаунт: подзапрос сужен его
+// областью, и выдачи других арендаторов в массив не входят, сколько бы их ни
+// было. Прежняя пара была дешевле и неверна.
 func bindingHasSubjectTypeInAccount(typePos, accountPos int) string {
 	return fmt.Sprintf(
 		`(subject_type = $%[1]d

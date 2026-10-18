@@ -29,6 +29,9 @@ package pg_test
 //     до правки и после неё; отличающий факт один — вид известен. Близнец
 //     доказывает, что проба способна быть зелёной на этой посадке, и красное
 //     отрицательной — не от посадки;
+//   - словарь вида, которым чтение без вида называет ведущий столбец индекса,
+//     совпадает с закрытым набором ограничений схемы: вид, добавленный в
+//     ограничение и не добавленный в словарь, выпал бы из ответа молча;
 //   - положительный контроль обеих: план вообще обращается к набору — иначе
 //     «последовательного чтения нет» было бы правдой о плане, набора не
 //     читающем.
@@ -37,6 +40,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -241,4 +245,40 @@ func TestSubjectFilterPlan(t *testing.T) {
 		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "фильтр subject: обе выдачи субъекта")
 		requireSubjectsReadByIndex(t, "List subject", explainNodes(t, f, stmt, args...))
 	})
+}
+
+// kindLiteral — значение вида в тексте ограничения: `'user'::text`.
+var kindLiteral = regexp.MustCompile(`'([a-z_]+)'::text`)
+
+func TestSubjectFilterPlan_KindDictionaryMatchesTheSchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: requires Postgres container")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	for _, c := range []struct{ table, constraint string }{
+		{"access_bindings", "access_bindings_subject_ck"},
+		{"access_binding_subjects", "access_binding_subjects_type_ck"},
+	} {
+		var def string
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT pg_get_constraintdef(c.oid)
+			  FROM pg_constraint c
+			  JOIN pg_class r ON r.oid = c.conrelid
+			  JOIN pg_namespace n ON n.oid = r.relnamespace
+			 WHERE n.nspname = 'kaname' AND r.relname = $1 AND c.conname = $2`,
+			c.table, c.constraint).Scan(&def), "ограничение %s не найдено", c.constraint)
+		var schema []string
+		for _, m := range kindLiteral.FindAllStringSubmatch(def, -1) {
+			schema = append(schema, m[1])
+		}
+		t.Logf("%s: видов в схеме %d %v, в словаре чтения %d %v",
+			c.constraint, len(schema), schema, len(kanamepg.BindingSubjectKinds()), kanamepg.BindingSubjectKinds())
+		require.NotEmpty(t, schema, "разбор ограничения %s не нашёл ни одного вида — сверка беспредметна: %s", c.constraint, def)
+		require.ElementsMatch(t, schema, kanamepg.BindingSubjectKinds(),
+			"словарь вида чтения без вида разошёлся с %s — выдачи нового вида выпадут из фильтра subject", c.constraint)
+	}
 }
