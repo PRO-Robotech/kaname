@@ -147,9 +147,19 @@ event_body: "acceptance-reviewer · APPROVED · sha256 06b3ef605bc41112a6e88b987
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#866
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6254854244
+  node_id: "IC_kwDOUO26pM8AAAABdNGAZA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/866#issuecomment-6254854244"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6254854244"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T20:37:12Z"
+  body_sha256: "8e03137ff9c143f910dfacb1610e3e161725244f2bc3859239361022b465fa72"
   subject_sha256: "06b3ef605bc41112a6e88b987694450d07b2c80eb4bed5fc578891f95868c621"
+  subject_revision_commit: "62c6735ca7b1f5d7ca49d3be2cc2a71b3b83678e"
   verdict: "APPROVED"
   publication_mode: scripts/rituals/approval-event.sh
 attribution:
