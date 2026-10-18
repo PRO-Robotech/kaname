@@ -21,7 +21,7 @@
 // возврате полосы).
 //
 // Run: `go test ./internal/handler/loginlanehttp/ -run 'TestSUAX' -count=1`
-// (Docker). Skipped under -short.
+// (нужен Docker); под -short пропускается.
 package loginlanehttp_test
 
 import (
