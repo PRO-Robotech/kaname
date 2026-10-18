@@ -328,9 +328,13 @@ type AuthNConfig struct {
 	SecondFactorEncryptionKeyHex    string `mapstructure:"second-factor-encryption-key-hex"`
 	SecondFactorEncryptionKeyHexEnv string `mapstructure:"second-factor-encryption-key-hex-env"`
 	// SelfServiceFreshness — окно свежести правки своих данных (Ф1 §4.1 «15
-	// мин», Ф11 Р6 — от момента последнего предъявления; Ф12 Р8). Не больше
-	// окна с последнего предъявления требуют девять путей (перечень — таблицы
-	// `docs/content/api/auth-lane.mdx`): `POST /iam/v1/auth/password/enroll`,
+	// мин», Ф11 Р6 — от момента последнего предъявления; Ф12 Р8): заведение и
+	// подтверждение второго фактора, заведение первого пароля, запрос смены
+	// адреса почты, регистрация и снятие ключа доступа, выход из выбранной
+	// сессии и из всех, кроме текущей, требуют, чтобы с последнего предъявления
+	// прошло не больше окна; окно одно на все эти глаголы. Это девять путей
+	// (перечень — таблицы `docs/content/api/auth-lane.mdx`):
+	// `POST /iam/v1/auth/password/enroll`,
 	// `POST /iam/v1/auth/second-factor/enroll`,
 	// `POST /iam/v1/auth/second-factor/confirm`,
 	// `POST /iam/v1/auth/email-change`,

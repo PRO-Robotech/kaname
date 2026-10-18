@@ -86,7 +86,10 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 	for _, m := range manifests {
 		for _, res := range m.Resources {
 			rep.ResourcesSeen++
-			blk, err := modelrender.Render(res)
+			// Перевод прозы примечаний применяется и к блокам вне канона, идущим в
+			// модель: таблица перевода ключуется строкой прозы registry и nlb
+			// целиком, и блок без такой строки она не меняет; форма одна у обоих судей.
+			blk, err := modelrender.RenderForCanon(res)
 			if err != nil {
 				return "", rep, fmt.Errorf("modelcompose: модуль %q, ресурс %q: рендер блока: %w",
 					m.Module, res.Name, err)

@@ -1208,7 +1208,7 @@ type nlb_network_load_balancer
     # announce-state (BGP session up/down, route/VRF id, kernel-programming
     # status, numeric infra id). That state is infra-sensitive (security.md) and
     # tenants neither produce nor read it. Hence, deliberately:
-    #   * `[service_account]` ONLY — no `user`, no `group#member`, no `user:*`.
+    #   * `[service_account]` ONLY — no `user`, no `group#member`, no `system_class`.
     #     A human/tenant principal cannot even be WRITTEN as the subject of this
     #     tuple (the engine rejected the write), so it can never be handed out via a
     #     custom role or a group;
@@ -1346,13 +1346,13 @@ type registry_repository
     define admin: [user, service_account, group#member] or super_admin
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
-    # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.
-    # The wildcard grants v_get ONLY on repos that ALSO carry an explicit
-    # `user:* v_get` tuple emitted by the registry overlay (visibility=PUBLIC);
-    # absent that tuple `user:*` has no access → uniform 404. ONLY v_get gains
-    # the wildcard — no write relation does (anon is a read-only floor, B14).
+    # RG-1 D-7: `system_class:anonymous` public-read subject — anonymous pull of a PUBLIC repo.
+    # The class grants v_get ONLY on repos that ALSO carry an explicit
+    # `system_class:anonymous v_get` tuple emitted by the registry overlay (visibility=PUBLIC);
+    # absent that tuple the class has no access → uniform 404. ONLY v_get gains
+    # the class — no write relation does (anon is a read-only floor, B14).
     # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
-    # the repo owner fully manages their own repository; `user:*` wildcard stays
+    # the repo owner fully manages their own repository; the `system_class` subject stays
     # on v_get ONLY (anonymous public-read floor, B14).
     define v_get: [system_class, user, service_account, group#member] or owner or super_admin or public_reader from parent
     define v_list: [user, service_account, group#member] or owner or super_admin or public_reader from parent

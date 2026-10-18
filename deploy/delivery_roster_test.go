@@ -109,6 +109,8 @@ var deliveryRoster = []string{
 	"operator_supplied_roster_test.go",
 	"outbound_lane_has_an_operator_knob_injection_test.go",
 	"outbound_lane_has_an_operator_knob_test.go",
+	"own_lane_cpu_supply_injection_test.go",
+	"own_lane_cpu_supply_test.go",
 	"own_lane_knobs_declared_injection_test.go",
 	"own_lane_knobs_declared_test.go",
 	"own_lane_memory_ceiling_injection_test.go",

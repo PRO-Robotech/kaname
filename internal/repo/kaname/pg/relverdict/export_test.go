@@ -78,3 +78,11 @@ func ListQuerySQLForTest(labelTable string) string {
 // `pgx.Tx.Rollback` вообще: проба обязана звать тот же код, что исполняется на
 // пути чтения, иначе она утверждала бы про свою копию.
 func RollbackForTest(ctx context.Context, tx pgx.Tx) error { return rollback(ctx, tx) }
+
+// WholeScopeTargetSQL и NamedInTargetSQL — SQL-прочтение цели привязки для
+// табличной пробы форм (`target_forms_integration_test.go`): та же константа и
+// та же функция, что подставляет `grantArmPredicate`, а не копия их текста.
+var (
+	WholeScopeTargetSQL = wholeScopeTarget
+	NamedInTargetSQL    = namedInTarget
+)

@@ -511,7 +511,11 @@ authn:
   #                                   # выдачи, не выше tokenpolicy.MaxRefreshTokenFamilyTTL
   #                                   # (KANAME_AUTHN__CEREMONY__REFRESH_TTL)
   #   selfServiceFreshness: 15m       # окно свежести правки своих данных (Ф12 Р8):
-  #                                   # свежей сессии требуют
+  #                                   # заведение и подтверждение второго фактора,
+  #                                   # заведение первого пароля, запрос смены адреса
+  #                                   # почты, регистрация и снятие ключа доступа,
+  #                                   # выход из выбранной сессии и из всех, кроме
+  #                                   # текущей — свежей сессии требуют
   #                                   # `POST /iam/v1/auth/password/enroll`,
   #                                   # `POST /iam/v1/auth/second-factor/enroll`,
   #                                   # `POST /iam/v1/auth/second-factor/confirm`,
@@ -521,8 +525,8 @@ authn:
   #                                   # `DELETE /iam/v1/users/{user_id}/accessKeys/{access_key_id}`,
   #                                   # `POST /iam/v1/auth/sessions/end`,
   #                                   # `POST /iam/v1/auth/sessions/end-others`;
-  #                                   # тем же окном ограничен срок
-  #                                   # неподтверждённого заведения второго фактора
+  #                                   # им же ограничен срок неподтверждённого
+  #                                   # заведения второго фактора
   #   accessKeys:                     # привязка ключей доступа WebAuthn (Ф7 Р2, Ф7-13)
   #     rpId: access.example.invalid  # имя доверяющей стороны — доменное имя установки
   #                                   # строчными, без схемы и порта (KANAME_AUTHN__ACCESS_KEYS__RP_ID)
