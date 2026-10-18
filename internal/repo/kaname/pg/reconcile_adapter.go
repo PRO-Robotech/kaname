@@ -1238,6 +1238,31 @@ func (s *reconcileStore) LedgerTuplesForObject(ctx context.Context, bindingID do
 	return out, rows.Err()
 }
 
+// LedgerTuples — весь реестр выпущенного одной выдачей, одним обращением по
+// префиксу первичного ключа (binding_id, fga_user, relation, object). Читает его
+// полный проход выдачи нескольким субъектам, чтобы дописать неизменному члену
+// кортежи, которых в реестре нет (reconcile/emitted_completion.go, kaname#880).
+func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.MembershipTuple, error) {
+	rows, err := s.tx.Query(ctx,
+		`SELECT fga_user, relation, object
+		   FROM kaname.access_binding_emitted_tuples
+		  WHERE binding_id = $1`,
+		string(bindingID))
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: ledger tuples of binding %s: %w", bindingID, err)
+	}
+	defer rows.Close()
+	var out []domain.MembershipTuple
+	for rows.Next() {
+		var t domain.MembershipTuple
+		if err := rows.Scan(&t.User, &t.Relation, &t.Object); err != nil {
+			return nil, fmt.Errorf("reconcile: scan binding ledger tuple: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // TuplesStillClaimedByOtherBindings returns the subset of `tuples` still recorded in
 // the emitted-tuple ledger of an ACTIVE binding OTHER than excludeBinding. The ledger
 // PK is (binding_id, fga_user, relation, object) — per binding — so two bindings of the

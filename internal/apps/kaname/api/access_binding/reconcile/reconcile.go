@@ -304,6 +304,12 @@ type ReconcileStore interface {
 	// ledger set (revoke the saved tuple-set, do not re-derive).
 	LedgerTuplesForObject(ctx context.Context, bindingID domain.AccessBindingID, object string) ([]domain.MembershipTuple, error)
 
+	// LedgerTuples — весь реестр выпущенного одной выдачей
+	// (access_binding_emitted_tuples WHERE binding_id=…), одним обращением. Читает
+	// его полный проход, чтобы довести неизменного члена выдачи нескольким
+	// субъектам до полного набора кортежей (emitted_completion.go, kaname#880).
+	LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.MembershipTuple, error)
+
 	// TuplesStillClaimedByOtherBindings returns the SUBSET of `tuples` still recorded
 	// in the emitted-tuple ledger of an ACTIVE binding OTHER than excludeBinding (same
 	// subject — the tuples carry the subject as fga_user, so a different binding of a
@@ -852,7 +858,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 		return fmt.Errorf("current members %s: %w", bindingID, err)
 	}
 
-	return r.applyDiff(ctx, s, bs, desired, current, col)
+	return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID), col)
 }
 
 // reconcileBindingForObject is the OBJECT-NARROWED twin of reconcileBinding: it diffs
@@ -908,7 +914,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		if err != nil {
 			return fmt.Errorf("current members %s: %w", bindingID, err)
 		}
-		return r.applyDiff(ctx, s, bs, desired, current, col)
+		return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID), col)
 	}
 
 	var desired []DesiredMember
@@ -926,7 +932,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		return fmt.Errorf("current members for object %s %s:%s: %w", bindingID, objectType, objectID, err)
 	}
 
-	return r.applyDiff(ctx, s, bs, desired, current, col)
+	return r.applyDiff(ctx, s, bs, desired, current, r.objectEmitted(s, bindingID, objectType, objectID), col)
 }
 
 // desiredMembersForObject derives the members ONE binding wants ON ONE OBJECT. It is
@@ -1234,7 +1240,7 @@ func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSel
 // UPSERTs members whose status changed, emits/eager-revokes the per-object FGA
 // tuple on ACTIVE transitions, writes the containment audit on REJECTED, and
 // removes members no longer in the desired set (eager-revoke their tuple).
-func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, current []domain.TargetMember, col *syncFGACollector) error {
+func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, current []domain.TargetMember, emitted *emittedView, col *syncFGACollector) error {
 	// Key by (rule_fp, object): a member is attributed to the role.rules rule that
 	// produced it, so the SAME object under two rules is two members
 	// and a removed rule eager-revokes ONLY its members.
@@ -1267,7 +1273,15 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			prevStatus = prev.VerificationStatus
 		}
 		if existed && prevStatus == d.Status {
-			continue // no change — idempotent
+			// Ключ и статус совпали. У выдачи нескольким субъектам ключ не несёт
+			// субъектов, и член мог быть записан прежде не всем им — недостающее
+			// дописывается по реестру выпущенного (emitted_completion.go, kaname#880).
+			if d.Status == domain.VerificationActive {
+				if err := r.completeMemberTuples(ctx, s, bs, d, emitted, col); err != nil {
+					return err
+				}
+			}
+			continue
 		}
 
 		// Persist the new member status (UPSERT keyed by the full rule coordinate).
