@@ -1,0 +1,214 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: c89f7957db21357752795d5f8252c30b5bd19bd71eac76955649be7d971bff8f
+  revision: 14
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписано туда при правке. Вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: e0f69f3ef
+  content_commit: null
+  content_commit_note: >-
+    Правка не закоммичена: изменённый отслеживаемый файл копии tmp/kn-893-acc, ветка 893-acc.
+    Ляжет только поверх кода kaname e36fd21a6 (ветка 893): пробы S6 есть только там.
+  branch: 893-acc
+  task: PRO-Robotech/kaname#893
+  related_tasks: [PRO-Robotech/corelib#116, PRO-Robotech/kacho#3287, PRO-Robotech/kaname#836, PRO-Robotech/kaname#858]
+  lines: 2039
+  round: 2
+  round_scope: >-
+    Круг 2 дельты S6 — проверка исполнения B1–B3 и R1–R2 записи круга 1 (80edd84b…). Текста
+    редакции 13 нет, поэтому предмет — git diff HEAD по документу (база — одобренная редакция
+    12, bd6325e3…). Хунков 13, все в областях, которые перечислены кругом 1 и разделом
+    «Редакция 14: что закрыто»: история и шапка, «Что НЕ входит» п. 2, опора о соседе, SC-12,
+    SC-15, SC-67, S6, производители S6, инвариант 8, DoD S6, разделы редакций 13 и 14. Вне
+    этих областей правок нет. Вне дельты ничего не переоткрыто. Третьего круга нет (fa-b8).
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/80edd84b01feb554f9da285da70a334911e50713226c597b6d9ef50abd07e345.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kn-893-acc → c89f7957…bff8f, совпало с заданием. git show
+    HEAD:<док> | sha256sum → bd6325e3…79b67fd6. git diff -U0 HEAD | grep '^@@' → 13 хунков.
+  measurement_revisions: >-
+    corelib 7ffb6873c (ветка 116-public-read-anonymous); kaname e36fd21a6 (ветка 893);
+    kacho a95248464 (origin/main); трекер — gh issue view 3287 (kacho), 836 (kaname),
+    gh issue list -R PRO-Robotech/corelib на 2026-10-18.
+  neighbours_pinned:
+    register-resource-checks-the-module-vocabulary.md: 3236ea00c5d3be71b23792beec7b04178a4537b56dfad0a8f78ac03f73d8f6b8
+  neighbours_note: >-
+    Сосед не правился: sha256sum в копии → 3236ea00…f8b6, его одобряет существующая запись
+    docs/specs/reviews/register-resource-checks-the-module-vocabulary/3236ea00….yaml. Новой
+    записи на тот же отпечаток рецензент не пишет. Опора перепроверена (fa-b7).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T15:52:00+03:00'
+
+delta_check:
+  - item: B1 [TWIN] — SC-76 (и), домен вызывающего
+    result: >-
+      Закрыто. Строка (з) переименована: «тип чужого домена, не публикуемый», проверяемый
+      пункт — тип. Добавлена (и): учётка службы vpc, system_class:anonymous, v_get,
+      registry_repository:r1. Против SC-74 меняется ровно один факт — вызывающий; близнец
+      SC-74. Та же строка словом user:* дана с близнецом SC-12. Посев рецензента на копии
+      corelib@7ffb6873c: vpc со словом класса, vpc с user:*, nlb со словом класса — отказ;
+      registry с обоими словами — принято; (з) — отказ. После инъекции (policy.go, ветвь
+      `if callerDomain != ""` заменена на `if callerDomain != "" && hierarchical`) красных 3
+      из 3, все в строках (и), а (з) зелёная. Собственные пробы пакета под инъекцией остаются
+      зелёными, поэтому заказанный держатель нужен. Документ называет его верно: строки в
+      TestValidateTuple_PublicReadAcceptsTheAnonymousClass (corelib#116, оба слова) и в
+      TestRegisterResource_PublicationAcceptsTheAnonymousClass (kaname#893). Обе функции есть
+      (git grep @7ffb6873c, @e36fd21a6). Шаблоны -run DoD S6 их включают. Карта строк
+      (а)…(з) по пробам сверена построчно: corelib — 16 строк функции, kaname — 9 строк.
+  - item: B2 [PRODUCER] — носитель снятия user:*
+    result: >-
+      Закрыто как дефолт. kaname#836 носителем больше не названа (её заголовок: «iam: снять
+      перевод user:* → system_class из сборщика модели»). Носитель описан: задача
+      PRO-Robotech/corelib с названием, DoD (перечень из одного слова, отказ user:* с
+      близнецом словом класса, подъём пина) и порядком (после трёх частей условия SC-77).
+      В трекере её пока нет: gh issue list -R PRO-Robotech/corelib --state all --search
+      'anonymous OR publicReadSubjects OR "user:*"' → 5 задач, задачи снятия среди них нет.
+      Это шаг вне предмета S6: S6 утверждает только переходный приём. Вопрос дефолтабелен, и
+      дефолт зафиксирован ниже (Q1). Завести задачу — дело диспетчера (R1).
+  - item: B3 [CONSTRUCTIBILITY] — условие конца перехода
+    result: >-
+      Закрыто. Условие взято по предмету и состоит из трёх частей. Замер на kacho @a95248464:
+      git grep -n 'SubjectID: *FGASubjectPublicWildcard' -- ':!*_test.go' → 1
+      (fga_intent.go:436). Контроль формы 'SubjectID: *FGASubject' → та же 1 строка.
+      FGARepoPublicGetTuple — 4 строки: комментарий :431, объявление :434, вызовы :450 и :461.
+      Строка :309 (FGASubjectForPrincipalID) по имени та же, но предмет у неё другой, и
+      оговорка автора о ней верна. Условие достижимо одной правкой kacho#3287, и чужие гейты
+      оно не задевает. Ограничение формы — R3.
+  - item: R1, R2 круга 1
+    result: >-
+      Стали пунктами DoD S6 (kaname#893). R1: строка словом класса в
+      TestSystemClass_SC12_SC13_PublicationIsAGrantToAnonymous, шаблон -run '^TestSystemClass_SC12_SC13_'
+      её покрывает. R2: проба через обработчик UnregisterResource — без имени функции (R2 ниже).
+  - item: история, шапка, инвариант 8, раздел «Редакция 14»
+    result: >-
+      Исполнено. Строка круга 1 ссылается на существующую запись 80edd84b….yaml. Инвариант 8
+      дополнен условием «когда домен известен», и оно согласовано с «И (домен вызывающего
+      неизвестен)» SC-76.
+
+defaults_fixed:
+  - id: Q1
+    question: кто несёт исключение user:* из перечня входных слов публикации
+    decision: >-
+      Вариант (б): отдельная задача PRO-Robotech/corelib «authz/proxytuple: снять user:* из
+      перечня входных слов публикации». Ссылки — kacho#3287 и kaname#893. Порядок — после
+      трёх частей условия SC-77. Вариант (а), шаг в DoD kaname#836, отклонён: её предмет —
+      переводы в сборщике модели.
+
+blocking: []
+
+important:
+  - id: R1
+    kind: OPEN-QUESTION
+    note: >-
+      Задачу-носителя Q1 заводит диспетчер (или git-operator по его заданию) до вливания
+      kaname#893. Вписать её номер в SC-77 — это правка документа, новый отпечаток и
+      проверка исполнения одной строки: одобрение c89f7957… на неё не переносится. Дешевле
+      связать задачу ссылками с kaname#893 и kacho#3287 и документ не править: SC-77 уже
+      называет носителя заголовком.
+  - id: R2
+    kind: DoD
+    note: >-
+      Пункт DoD S6 «проба kaname, вызывающая RPC снятия с отказной тройкой» не называет ни
+      функцию, ни команду. Шаблон -run kaname в DoD S6 закреплён на трёх именах
+      (`^TestRegisterResource_(…)$`), и новая проба в него не попадёт. При сдаче #893
+      назвать функцию и дописать её в команду DoD-proof.
+  - id: R3
+    kind: CONSTRUCTIBILITY
+    note: >-
+      Часть 2 условия SC-77 привязана к ИМЕНИ константы. Если kacho#3287 сменит значение
+      FGASubjectPublicWildcard, а не заведёт отдельную константу субъекта публикации, то
+      часть 2 останется 1. Кроме того, сменится субъект вопроса плоскости данных
+      (fga_intent.go:309), а это предмет SC-39 и SC-15. Конъюнкция при этом цела: часть 3 по
+      предмету держит субъект. Рекомендация для #3287 — отдельная константа.
+  - id: R4
+    kind: FORMAT
+    note: >-
+      Шапка соседа (3236ea00…) отсылает к «SC-77 … (редакция 13)», а в редакции 14 условие и
+      носитель SC-77 другие. Номер сценария при этом тот же, и ссылка ведёт куда надо.
+      Править соседа ради этого не нужно: правка сменила бы его одобренный отпечаток.
+  - id: R5
+    kind: FORMAT
+    note: >-
+      R3 круга 1 в трекере не исполнен: DoD kacho#3287 по-прежнему несёт предикат по всему
+      дереву (`git grep -n 'user:\*' -- . ':!docs/archive'` → 0), а он недостижим (135 строк,
+      54 файла @a95248464). Поправить задачу тремя частями условия SC-77 должен диспетчер,
+      а не этот документ.
+
+summary:
+  scenarios_total: 67
+  scenarios_in_delta: правлены SC-76 (строка (и), колонки) и SC-77 (условие, носитель); новых сценариев нет
+  blocking: 0
+  producer_named: >-
+    67 из 67. Заказаны две ячейки: SC-76 (и) — corelib#116 и kaname#893; снятие слова в SC-77 —
+    носитель Q1.
+  twins: 4 из 4 сценариев S6 с близнецом, отличающимся одним фактом; у SC-76 (и) близнецы SC-74 и SC-12
+  constructibility: >-
+    Посеяно на копии corelib@7ffb6873c (git worktree, GOWORK=off, unit без слота).
+    go test -run '^Test(ReviewerSeed_SC76|ValidateTuple_PublicRead|PublicReadGrant_|PublicReadSubjects_)'
+    → 44 PASS, 0 FAIL; из них 6 — строки посева рецензента: (и) ×3, близнецы SC-74 и SC-12, (з).
+    Инъекция (привязка к домену снята для публикаций): весь пакет — FAIL только в 3 строках (и)
+    посева рецензента. Сценарии S6 посеяны на уровне фундамента 4 из 4: SC-74, SC-75 (крест —
+    AcceptanceAndRemovalAgreeOnBothWords), SC-76, SC-77 «сейчас». Путь порт → Check в kaname
+    (integration, Docker) рецензент прочитал, а не прогнал: «не выполнилось» 1. Гейты приёмок
+    kaname@e36fd21a6 с обоими документами этой редакции: go test ./internal/check/
+    ./internal/modelrender/ ./internal/manifest/ ./internal/authzmap/ -run Acceptance → 20 PASS,
+    0 FAIL. Повтор TestAcceptanceProbeCoordinateResolves с KACHO_HOME_CORELIB и KACHO_HOME_KACHO
+    дал 1260 координат, в чужом доме проверено 154, находок 0, не проверено 0. Копии сняты.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: >-
+    Вердикт — APPROVED на c89f7957…. Одобрение вступает в силу событием, а оно не опубликовано
+    (event.status not_performed). Курьер тем же заходом приводит этот блок к факту.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 c89f7957db21357752795d5f8252c30b5bd19bd71eac76955649be7d971bff8f · ред. 14, круг 2 дельты S6 (проверка исполнения к 80edd84b…): B1–B3 закрыты, блокирующих 0; сосед 3236ea00… одобрен прежней записью"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#893
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации блок честно not_performed
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+    - 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - 447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml
+    - 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d.yaml
+    - 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9.yaml
+    - c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc.yaml
+    - bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6.yaml
+    - 80edd84b01feb554f9da285da70a334911e50713226c597b6d9ef50abd07e345.yaml
