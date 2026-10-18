@@ -170,6 +170,49 @@ func accountScopePredicate(argPos int) string {
 		argPos)
 }
 
+// bindingNamesSubject — предикат «выдача `ab` называет субъекта ($typePos,
+// $idPos)», где бы он в выдаче ни стоял (kaname#888, остаток класса
+// kaname#880).
+//
+// У выдачи ДВЕ проекции субъектов: одиночная пара строки `access_bindings`
+// (subject_type, subject_id) — это её ПЕРВЫЙ субъект — и набор
+// `access_binding_subjects`, где назван КАЖДЫЙ. Чтение по одной паре видит
+// только первого: второму выдача не показана, хотя права по ней у него есть.
+// Пара не снимается из предиката, потому что выдача, заведённая до набора,
+// строк в нём не имеет (`ListSubjects`: «ноль строк — легаси-выдача»), и её
+// единственный субъект назван только парой.
+//
+// Форма — `id = ANY (ARRAY(подзапрос))`, а не `EXISTS` и не `IN`: подзапрос
+// без ссылок наружу исполняется ОДИН раз (InitPlan) по индексу
+// `access_binding_subjects_subject_scope_idx`, и обе ветви дизъюнкции остаются
+// индексными — `access_bindings_subject_idx` для пары и первичный ключ для
+// набора, — поэтому чтение, которое субъект и ведёт, не сползает в обход
+// таблицы выдач. `EXISTS` под `OR` не поднимается в полусоединение и
+// исполнялся бы на каждой строке-кандидате.
+func bindingNamesSubject(ab string, typePos, idPos int) string {
+	return fmt.Sprintf(
+		`((%[1]s.subject_type = $%[2]d AND %[1]s.subject_id = $%[3]d)
+		   OR %[1]s.id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                             WHERE s.subject_type = $%[2]d AND s.subject_id = $%[3]d)))`,
+		ab, typePos, idPos)
+}
+
+// bindingNamesSubjectOnAxis — тот же вопрос, что у bindingNamesSubject, но по
+// ОДНОЙ оси субъекта: только вид (фильтр вида у ListByAccount) либо только
+// идентификатор (фильтр `subject` у List). Такое чтение ведёт не субъект, а
+// область выдачи или курсор, поэтому набор спрашивается по строке-кандидату:
+// `EXISTS` по первичному ключу `access_binding_subjects_pk` (binding_id, …).
+//
+// col — литерал вызывающего, один из двух столбцов оси; значения запроса сюда
+// не попадают, они идут параметром $pos.
+func bindingNamesSubjectOnAxis(col string, pos int) string {
+	return fmt.Sprintf(
+		`(%[1]s = $%[2]d
+		   OR EXISTS (SELECT 1 FROM access_binding_subjects s
+		               WHERE s.binding_id = access_bindings.id AND s.%[1]s = $%[2]d))`,
+		col, pos)
+}
+
 // List — the unified read (redesign-2026 F11). Builds the WHERE from whatever
 // optional predicates the filter carries (subject/role/scope-type/scope-id),
 // then keyset-paginates by (created_at, id) ASC. Read VISIBILITY is NOT a
@@ -201,8 +244,11 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 		args = append(args, val)
 		argIdx++
 	}
+	// Субъект — любой из субъектов выдачи, а не только первый (kaname#888).
 	if f.SubjectID != "" {
-		addEq("subject_id", f.SubjectID)
+		conditions = append(conditions, bindingNamesSubjectOnAxis("subject_id", argIdx))
+		args = append(args, f.SubjectID)
+		argIdx++
 	}
 	if f.RoleID != "" {
 		addEq("role_id", f.RoleID)
@@ -313,9 +359,12 @@ func (r *abReader) ListByScope(ctx context.Context, resourceType domain.Resource
 		[]any{string(resourceType), resourceID})
 }
 
+// ListBySubject — выдачи, называющие субъекта, где бы он в выдаче ни стоял
+// (kaname#888): предикат bindingNamesSubject ссылается на оба параметра дважды,
+// поэтому условие собрано здесь готовым, а не шаблоном listWithConds.
 func (r *abReader) ListBySubject(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, f access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
-	return r.listWithConds(ctx, f,
-		[]string{"subject_type = $%d", "subject_id = $%d"},
+	return r.listWhere(ctx, f,
+		[]string{bindingNamesSubject("access_bindings", 1, 2)},
 		[]any{string(subjectType), string(subjectID)})
 }
 
@@ -360,8 +409,9 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 		conditions = append(conditions, `status <> 'REVOKED'`)
 	}
 
+	// Вид — любого из субъектов выдачи, а не только первого (kaname#888).
 	if f.SubjectTypeFilter != "" {
-		conditions = append(conditions, fmt.Sprintf("subject_type = $%d", argIdx))
+		conditions = append(conditions, bindingNamesSubjectOnAxis("subject_type", argIdx))
 		args = append(args, f.SubjectTypeFilter)
 		argIdx++
 	}
@@ -423,8 +473,9 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 // the row — the binding is returned with role_name="" (graceful).
 //
 // Only PENDING/ACTIVE rows are returned (status <> 'REVOKED' — parity with
-// ListByAccount.include_revoked=false). v1 is DIRECT-only — subject_id literally
-// equals the requested subject.
+// ListByAccount.include_revoked=false). A binding is the subject's when it names
+// the subject — or a group the subject is a member of — ANYWHERE in its subject
+// set, not only as its first subject (kaname#888).
 //
 // Ordering & keyset cursor match ListBySubject: (created_at, id) ASC with an
 // opaque base64 (created_at, id) page_token; (created_at, id) > (prev) predicate.
@@ -442,20 +493,30 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	}
 
 	// Subject-match: DIRECT (the binding names the subject) OR GROUP-derived (the
-	// binding names a group the subject belongs to). Both branches are equality
-	// predicates on (subject_type, subject_id), so access_bindings_subject_idx
-	// serves them as a BitmapOr — the read stays index-driven, no seq-scan.
+	// binding names a group the subject belongs to) — each against BOTH
+	// projections of the binding's subjects: the row's single pair (its FIRST
+	// subject) and the access_binding_subjects set (EVERY subject). Asking the
+	// pair alone hid a binding from everyone it named second (kaname#888).
+	//
+	// Every arm is an equality / `= ANY(InitPlan array)` predicate: the pair arms
+	// are served by access_bindings_subject_idx, the set arm by the primary key
+	// over the ids the set yields via access_binding_subjects_subject_scope_idx,
+	// so the read stays index-driven (BitmapOr), no seq-scan of access_bindings.
 	//
 	// The group side reads kaname.group_members via group_members_member_idx.
 	// Groups do NOT nest (group_members_type_check allows only user /
 	// service_account), so this is exactly ONE hop and cannot recurse: when the
-	// REQUESTED subject is itself a group the sub-select is empty and only the
+	// REQUESTED subject is itself a group the carrier set is empty and only the
 	// DIRECT branch applies.
+	const carrierGroups = `ARRAY(SELECT gm.group_id FROM group_members gm
+		                         WHERE gm.member_type = $1 AND gm.member_id = $2)`
+	direct := bindingNamesSubject("ab", 1, 2)
 	conditions := []string{
-		`(   (ab.subject_type = $1 AND ab.subject_id = $2)
-		  OR (ab.subject_type = 'group' AND ab.subject_id IN (
-		        SELECT gm.group_id FROM group_members gm
-		         WHERE gm.member_type = $1 AND gm.member_id = $2)) )`,
+		`(   ` + direct + `
+		  OR (ab.subject_type = 'group' AND ab.subject_id = ANY (` + carrierGroups + `))
+		  OR ab.id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                         WHERE s.subject_type = 'group'
+		                           AND s.subject_id = ANY (` + carrierGroups + `))) )`,
 		"ab.status <> 'REVOKED'",
 	}
 	args := []any{string(subjectType), string(subjectID)}
@@ -483,23 +544,38 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	// весь домен; для такой строки LEFT JOIN не находит роли, и role_name тоже "".
 	//
 	// The last two columns attribute the row: `is_direct` is true when the binding
-	// names the subject itself; otherwise it was reached through the group named by
-	// `via_group_id`. A binding that is BOTH direct and group-carried resolves to
-	// DIRECT (the stronger, self-evident attribution) and yields ONE row — the
-	// predicate is a disjunction on the same row, never a join, so cardinality stays
-	// one-row-per-binding and the (created_at, id) keyset cursor stays valid.
+	// names the subject itself (in either projection); otherwise it was reached
+	// through the group named by `via_group_id`. A binding that is BOTH direct and
+	// group-carried resolves to DIRECT (the stronger, self-evident attribution) and
+	// yields ONE row — the predicate is a disjunction on the same row, never a join,
+	// so cardinality stays one-row-per-binding and the (created_at, id) keyset
+	// cursor stays valid.
+	//
+	// `via_group_id` names a group the subject IS a member of — the first such one
+	// in the binding's subject order (the pair is ordinal 0). Naming the binding's
+	// first subject merely because it is a group would send the administrator to
+	// remove a membership the subject does not have, when the carrying group
+	// stands second.
 	q := fmt.Sprintf(`
 		SELECT ab.id, COALESCE(ab.role_id, ''), COALESCE(r.name, ''),
 		       ab.resource_type, ab.resource_id, ab.scope, ab.status,
 		       ab.created_at, ab.granted_by_user_id, ab.expires_at,
-		       (ab.subject_type = $1 AND ab.subject_id = $2) AS is_direct,
-		       CASE WHEN ab.subject_type = 'group' AND NOT (ab.subject_type = $1 AND ab.subject_id = $2)
-		            THEN ab.subject_id ELSE '' END AS via_group_id
+		       %[1]s AS is_direct,
+		       CASE WHEN %[1]s THEN ''
+		            ELSE COALESCE(
+		                   CASE WHEN ab.subject_type = 'group' AND ab.subject_id = ANY (%[2]s)
+		                        THEN ab.subject_id END,
+		                   (SELECT s.subject_id FROM access_binding_subjects s
+		                     WHERE s.binding_id = ab.id AND s.subject_type = 'group'
+		                       AND s.subject_id = ANY (%[2]s)
+		                     ORDER BY s.ordinal ASC, s.subject_id ASC
+		                     LIMIT 1),
+		                   '') END AS via_group_id
 		  FROM access_bindings ab
 		  LEFT JOIN roles r ON ab.role_id = r.id
-		 WHERE %s
+		 WHERE %[3]s
 		 ORDER BY ab.created_at ASC, ab.id ASC
-		 LIMIT $%d`, strings.Join(conditions, " AND "), argIdx)
+		 LIMIT $%[4]d`, direct, carrierGroups, strings.Join(conditions, " AND "), argIdx)
 	args = append(args, pageSize+1)
 
 	rows, err := r.tx.Query(ctx, q, args...)
@@ -594,6 +670,18 @@ func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 // Два смежных капкана той же строки: шаблон без `%d` молча вставит в SQL
 // `%!(EXTRA int=…)`, а шаблон с `%s` съест номер плейсхолдера как текст.
 func (r *abReader) listWithConds(ctx context.Context, f access_binding.PageFilter, condTmpls []string, condArgs []any) ([]domain.AccessBinding, string, error) {
+	conditions := make([]string, 0, len(condTmpls))
+	for i, tmpl := range condTmpls {
+		conditions = append(conditions, fmt.Sprintf(tmpl, i+1))
+	}
+	return r.listWhere(ctx, f, conditions, condArgs)
+}
+
+// listWhere — страница выдач по готовым условиям: conditions уже ссылаются на
+// $1..$len(args), курсор и предел страницы встают следующими номерами. Тот же
+// запрет, что у listWithConds: в условие не попадает значение запроса, только
+// номер параметра.
+func (r *abReader) listWhere(ctx context.Context, f access_binding.PageFilter, conditions []string, condArgs []any) ([]domain.AccessBinding, string, error) {
 	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
 	// answers 200 OK with a page shorter than asked for, and nothing in the
 	// response tells that apart from a complete answer.
@@ -601,15 +689,9 @@ func (r *abReader) listWithConds(ctx context.Context, f access_binding.PageFilte
 	if err != nil {
 		return nil, "", err
 	}
-
-	conditions := []string{}
-	args := []any{}
-	argIdx := 1
-	for i, tmpl := range condTmpls {
-		conditions = append(conditions, fmt.Sprintf(tmpl, argIdx))
-		args = append(args, condArgs[i])
-		argIdx++
-	}
+	conditions = append([]string(nil), conditions...)
+	args := append([]any(nil), condArgs...)
+	argIdx := len(args) + 1
 	if f.PageToken != "" {
 		ts, id, err := decodePageToken(f.PageToken)
 		if err != nil {

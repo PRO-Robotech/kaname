@@ -310,8 +310,13 @@ func (r *userReader) FindActiveByEmail(ctx context.Context, email domain.Email) 
 //	    источник самостоятельный, а не следствие первого
 //	UNION
 //	(3) аккаунты, на которые у principal есть ACTIVE AccessBinding
-//	    (resource_type='account', subject_type='user', subject_id=$1) — сюда
-//	    попадает приглашённый, чьё членство ещё «приглашён»
+//	    (resource_type='account', субъект — 'user' $1) — сюда попадает
+//	    приглашённый, чьё членство ещё «приглашён». Субъект — ЛЮБОЙ из субъектов
+//	    выдачи (kaname#888): одиночная пара строки выдачи называет только первого,
+//	    поэтому источник читается двумя ветвями — пара (выдача, заведённая до
+//	    набора субъектов, названа только ею) и набор `access_binding_subjects`,
+//	    чьи столбцы области ведёт индекс `access_binding_subjects_subject_scope_idx`
+//	    (subject_type, subject_id, resource_type, resource_id)
 //
 // UNION автоматически устраняет дубли.
 //
@@ -340,7 +345,13 @@ func (r *userReader) ListAccountsForUser(ctx context.Context, userID domain.User
 		UNION
 		SELECT resource_id FROM access_bindings
 		  WHERE subject_type = 'user' AND subject_id = $1
-		    AND resource_type = 'account' AND status = 'ACTIVE'`,
+		    AND resource_type = 'account' AND status = 'ACTIVE'
+		UNION
+		SELECT s.resource_id
+		  FROM access_binding_subjects s
+		  JOIN access_bindings b ON b.id = s.binding_id
+		 WHERE s.subject_type = 'user' AND s.subject_id = $1
+		   AND s.resource_type = 'account' AND b.status = 'ACTIVE'`,
 		string(userID))
 	if err != nil {
 		return nil, mapErr(err, "", string(userID))
