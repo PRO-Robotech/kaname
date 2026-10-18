@@ -13,14 +13,27 @@ package check_test
 //
 // Поля берутся из ДЕСКРИПТОРА файла контракта, а не перечнем: новое поле
 // попадает под суд тем же изменением, которым его заводят. Сообщение,
-// оканчивающееся на `Request`, — вход: поле обязано читаться (`.GetX()` либо
-// `.X` не слева от присваивания). Прочие сообщения — выход: поле обязано
+// оканчивающееся на `Request`, — вход: поле обязано читаться (`r.GetX()` либо
+// `r.X` не слева от присваивания) у получателя `r`, чей тип в исходнике
+// объявлен ЭТИМ сообщением. Прочие сообщения — выход: поле обязано
 // писаться (ключ составного литерала этого сообщения либо присваивание
 // `….X = …`).
 //
 // # Чем ограничен разбор — слепые зоны названы
 //
-// Разбор синтаксический, без типов: присваивание `x.X = …` не знает, какому
+// Разбор синтаксический, без типов. Чтение засчитывается полю запроса только
+// у идентификатора, чей тип объявлен сообщением запроса: параметр или
+// результат функции (и объемлющей — для замыкания), `var r T`, `r := &pkg.T{…}`.
+// Замер, из-за которого правило такое (CV-865-1): чтение того же имени у
+// любого получателя закрывало поле, и замена `req.GetExpectedState()`
+// литералом в обработчике оставляла гейт зелёным на восьми чтениях
+// одноимённого поля в соседних пакетах. Цена — ложная находка там, где запрос
+// читается через выражение без объявленного типа (`f().GetX()`, поле
+// структуры, `r := f()`): такая находка закрывается переходом на
+// типизированный идентификатор, а не послаблением. Блоков разбор не различает:
+// затенение внутри вложенного блока действует до конца функции.
+//
+// Присваивание `x.X = …` не знает, какому
 // сообщению принадлежит `x`. Поэтому присваивание засчитывается ТОЛЬКО полю,
 // чьё имя Go единственно среди выходных сообщений контракта; у одноимённых
 // полей разных сообщений (`AppliedRevision` есть у плана, применения и
@@ -128,10 +141,91 @@ func goFieldNames(rt reflect.Type) map[string]string {
 // fieldEnds — где в исходниках у имён полей есть концы.
 type fieldEnds struct {
 	files int
-	// written[сообщение.ПолеGo] / assigned[ПолеGo] / read[ПолеGo] — места.
+	// written[сообщение.ПолеGo] / assigned[ПолеGo] / read[сообщение.ПолеGo] —
+	// места. Чтение ключуется СООБЩЕНИЕМ получателя: засчитывается только у
+	// идентификатора, чей тип объявлен в исходнике (`readerScope`).
 	written  map[string][]string
 	assigned map[string][]string
 	read     map[string][]string
+}
+
+// readerScope — идентификаторы с объявленным типом сообщения: параметры и
+// именованные результаты функции, `var x T` в её теле, и то же у объемлющих
+// функций (замыкание видит их переменные). Значение — имя сообщения.
+type readerScope map[string]string
+
+// messageOfType — имя сообщения типа `pkg.M` либо `*pkg.M`; иначе "".
+func messageOfType(e ast.Expr) string {
+	if st, ok := e.(*ast.StarExpr); ok {
+		e = st.X
+	}
+	if sel, ok := e.(*ast.SelectorExpr); ok {
+		return sel.Sel.Name
+	}
+	return ""
+}
+
+// with — область, расширенная полями списка (параметры, результаты, `var`).
+func (s readerScope) with(names []*ast.Ident, typ ast.Expr) readerScope {
+	msg := messageOfType(typ)
+	out := make(readerScope, len(s)+len(names))
+	for k, v := range s {
+		out[k] = v
+	}
+	for _, n := range names {
+		if msg == "" {
+			delete(out, n.Name) // затенение именем без типа сообщения
+			continue
+		}
+		out[n.Name] = msg
+	}
+	return out
+}
+
+// declare — объявление в теле (`var`, `:=`) расширяет ТЕКУЩУЮ область: тип
+// сообщения берётся из объявленного типа либо из составного литерала справа
+// (`r := &iamv1.M{…}`); прочее значение затеняет имя.
+func (s readerScope) declare(names []*ast.Ident, typ ast.Expr, values []ast.Expr) {
+	for i, n := range names {
+		msg := messageOfType(typ)
+		if typ == nil && len(values) == len(names) {
+			if lit, ok := unparen(values[i]).(*ast.CompositeLit); ok {
+				msg = messageOfType(literalType(lit))
+			}
+		}
+		if msg == "" {
+			delete(s, n.Name)
+			continue
+		}
+		s[n.Name] = msg
+	}
+}
+
+// unparen — выражение без `&` и скобок.
+func unparen(e ast.Expr) ast.Expr {
+	for {
+		switch x := e.(type) {
+		case *ast.ParenExpr:
+			e = x.X
+		case *ast.UnaryExpr:
+			e = x.X
+		default:
+			return e
+		}
+	}
+}
+
+// withFields — область, расширенная параметрами и результатами функции.
+func (s readerScope) withFields(lists ...*ast.FieldList) readerScope {
+	for _, l := range lists {
+		if l == nil {
+			continue
+		}
+		for _, f := range l.List {
+			s = s.with(f.Names, f.Type)
+		}
+	}
+	return s
 }
 
 // scanFieldEnds разбирает исходники и собирает концы.
@@ -151,48 +245,92 @@ func scanFieldEnds(t *testing.T, sources map[string]string) fieldEnds {
 		}
 		ends.files++
 		lhs := map[ast.Expr]bool{}
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.AssignStmt:
-				for _, l := range x.Lhs {
-					if sel, ok := l.(*ast.SelectorExpr); ok {
-						lhs[sel] = true
-						ends.assigned[sel.Sel.Name] = append(ends.assigned[sel.Sel.Name], fset.Position(sel.Pos()).String())
-					}
-				}
-			case *ast.CompositeLit:
-				typ := x.Type
-				if u, ok := typ.(*ast.UnaryExpr); ok {
-					typ = u.X
-				}
-				sel, ok := typ.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				for _, el := range x.Elts {
-					kv, ok := el.(*ast.KeyValueExpr)
-					if !ok {
-						continue
-					}
-					if key, ok := kv.Key.(*ast.Ident); ok {
-						k := sel.Sel.Name + "." + key.Name
-						ends.written[k] = append(ends.written[k], fset.Position(kv.Pos()).String())
-					}
-				}
-			case *ast.SelectorExpr:
-				if lhs[x] {
-					return true
-				}
-				name := strings.TrimPrefix(x.Sel.Name, "Get")
-				ends.read[name] = append(ends.read[name], fset.Position(x.Pos()).String())
-				if name != x.Sel.Name {
-					ends.read[x.Sel.Name] = append(ends.read[x.Sel.Name], fset.Position(x.Pos()).String())
-				}
+		var visit func(scope readerScope) func(ast.Node) bool
+		visit = func(scope readerScope) func(ast.Node) bool {
+			return func(n ast.Node) bool {
+				return scanNode(fset, &ends, lhs, scope, visit, n)
 			}
-			return true
-		})
+		}
+		ast.Inspect(file, visit(readerScope{}))
 	}
 	return ends
+}
+
+// scanNode — один узел обхода `scanFieldEnds`. Функция и замыкание открывают
+// свою область (параметры и результаты), `var` расширяет текущую до конца
+// обхода функции — разбор без типов не знает блоков, слепая зона названа в
+// шапке.
+func scanNode(fset *token.FileSet, ends *fieldEnds, lhs map[ast.Expr]bool, scope readerScope,
+	visit func(readerScope) func(ast.Node) bool, n ast.Node) bool {
+	switch x := n.(type) {
+	case *ast.FuncDecl:
+		if x.Body != nil {
+			ast.Inspect(x.Body, visit(scope.withFields(x.Recv, x.Type.Params, x.Type.Results)))
+		}
+		return false
+	case *ast.FuncLit:
+		ast.Inspect(x.Body, visit(scope.withFields(x.Type.Params, x.Type.Results)))
+		return false
+	case *ast.ValueSpec:
+		scope.declare(x.Names, x.Type, x.Values)
+	case *ast.AssignStmt:
+		if x.Tok == token.DEFINE {
+			names := make([]*ast.Ident, 0, len(x.Lhs))
+			for _, l := range x.Lhs {
+				if id, ok := l.(*ast.Ident); ok {
+					names = append(names, id)
+				}
+			}
+			scope.declare(names, nil, x.Rhs)
+		}
+		for _, l := range x.Lhs {
+			if sel, ok := l.(*ast.SelectorExpr); ok {
+				lhs[sel] = true
+				ends.assigned[sel.Sel.Name] = append(ends.assigned[sel.Sel.Name], fset.Position(sel.Pos()).String())
+			}
+		}
+	case *ast.CompositeLit:
+		sel, ok := literalType(x).(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		for _, el := range x.Elts {
+			kv, ok := el.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); ok {
+				k := sel.Sel.Name + "." + key.Name
+				ends.written[k] = append(ends.written[k], fset.Position(kv.Pos()).String())
+			}
+		}
+	case *ast.SelectorExpr:
+		if lhs[x] {
+			return true
+		}
+		recv, ok := x.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		msg, ok := scope[recv.Name]
+		if !ok {
+			return true
+		}
+		pos := fset.Position(x.Pos()).String()
+		ends.read[msg+"."+x.Sel.Name] = append(ends.read[msg+"."+x.Sel.Name], pos)
+		if name := strings.TrimPrefix(x.Sel.Name, "Get"); name != x.Sel.Name {
+			ends.read[msg+"."+name] = append(ends.read[msg+"."+name], pos)
+		}
+	}
+	return true
+}
+
+// literalType — тип составного литерала без `&`.
+func literalType(x *ast.CompositeLit) ast.Expr {
+	if u, ok := x.Type.(*ast.UnaryExpr); ok {
+		return u.X
+	}
+	return x.Type
 }
 
 // judgeFieldEnds — находки: поле без конца и запись послабления без предмета.
@@ -215,7 +353,7 @@ func judgeFieldEnds(fields []descriptorField, ends fieldEnds, exemptions []descr
 		seen[key] = true
 		var has bool
 		if f.input {
-			has = len(ends.read[f.goName]) > 0
+			has = len(ends.read[f.message+"."+f.goName]) > 0
 		} else {
 			has = len(ends.written[f.message+"."+f.goName]) > 0 ||
 				(outputs[f.goName] == 1 && len(ends.assigned[f.goName]) > 0)
@@ -288,6 +426,7 @@ func TestEveryDescriptorFieldHasAReader_InternalModuleService(t *testing.T) {
 	for _, f := range fields {
 		if f.input {
 			inputs++
+			t.Logf("вход %s.%s: чтений у получателя своего сообщения %d", f.message, f.field, len(ends.read[f.message+"."+f.goName]))
 		}
 	}
 	t.Logf("перепись: файлов прочитано %d · полей контракта %d (вход %d, выход %d) · по ведомости %d · находок %d",
@@ -302,8 +441,10 @@ func TestEveryDescriptorFieldHasAReader_InternalModuleService(t *testing.T) {
 
 // TestEveryDescriptorFieldHasAReader_JudgeFallsAndStaysSilent — инъекция в обе
 // стороны на синтетике: поле ответа без записи и поле запроса без чтения —
-// находки; запись литералом, присваиванием и чтение геттером — молчание;
-// послабление с концом и без предмета — находки.
+// находки; чтение одноимённого поля у получателя чужого сообщения либо без
+// объявленного типа — находка; запись литералом, присваиванием и чтение
+// геттером у получателя своего сообщения (параметр, замыкание, `var`) —
+// молчание; послабление с концом и без предмета — находки.
 func TestEveryDescriptorFieldHasAReader_JudgeFallsAndStaysSilent(t *testing.T) {
 	fields := []descriptorField{
 		{message: "PlanModuleResponse", field: "applied_revision", goName: "AppliedRevision"},
@@ -354,6 +495,40 @@ func f(resp *iamv1.PlanModuleResponse) { resp.AppliedDigest = nil; _ = &iamv1.Mo
 `}), nil)
 	if len(findings) != 1 || !strings.Contains(findings[0], "PlanModuleResponse.applied_digest") {
 		t.Fatalf("присваивание одноимённого поля засчитано не тому сообщению: %v", findings)
+	}
+
+	// Одноимённое поле запроса: чтение того же имени у получателя ДРУГОГО
+	// сообщения либо у получателя без объявленного типа поле не закрывает
+	// (CV-865-1: `req.GetExpectedState()` заменён литералом, а гейт молчал на
+	// восьми чтениях того же имени в соседних пакетах). Близнец — чтение через
+	// параметр своего сообщения внутри замыкания и через `var` — молчит.
+	reqFields := []descriptorField{
+		{message: "PlanModuleRequest", field: "module", goName: "Module", input: true},
+		{message: "ApplyModuleRequest", field: "expected_state", goName: "ExpectedState", input: true},
+	}
+	findings, _ = judgeFieldEnds(reqFields, scanFieldEnds(t, map[string]string{"a.go": `package a
+func f(other *iamv1.GetModuleRequest, req *iamv1.ApplyModuleRequest, st *catalog.State) {
+	_ = other.GetModule()
+	_ = st.ExpectedState
+	_ = x.GetModule()
+	_ = req.GetModule()
+}
+`}), nil)
+	if len(findings) != 2 || !strings.Contains(findings[0], "PlanModuleRequest.module") ||
+		!strings.Contains(findings[1], "ApplyModuleRequest.expected_state") {
+		t.Fatalf("чтение одноимённого поля чужого получателя засчитано полю запроса: %v", findings)
+	}
+	findings, _ = judgeFieldEnds(reqFields, scanFieldEnds(t, map[string]string{"a.go": `package a
+func f(req *iamv1.PlanModuleRequest) {
+	go func() { _ = req.GetModule() }()
+}
+func g() {
+	var r iamv1.ApplyModuleRequest
+	_ = r.ExpectedState
+}
+`}), nil)
+	if len(findings) != 0 {
+		t.Fatalf("законный близнец (параметр в замыкании, var своего сообщения) дал находки: %v", findings)
 	}
 
 	findings, exempted := judgeFieldEnds(fields, scanFieldEnds(t, lawful), []descriptorFieldExemption{
