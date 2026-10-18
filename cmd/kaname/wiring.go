@@ -960,12 +960,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	moduleApplier := modulecatalog.NewVerbApplier(kanamepg.NewCatalogWriteRepo(pool))
 	modulePlanState := kanamepg.NewCatalogPlanRepo(pool)
 	moduleDelivery := newManifestDeliverySource(cfg.Manifests)
+	// Применённая пара редакции модуля (kaname#865) — над ТЕМ ЖЕ пулом, что
+	// писатель: `Get` показывает то, что записал оператор сравнения-и-записи.
+	moduleEditions := kanamepg.NewCatalogRepo(pool)
 	moduleHandler := moduleapp.NewHandler(
 		moduleapp.NewPlanUseCase(moduleDelivery, catalogRows, modulePlanState).
 			WithAdminChecker(relationStore),
 		moduleapp.NewApplyUseCase(moduleDelivery, moduleApplier, opsRepo, logger).
 			WithAdminChecker(relationStore),
-		moduleapp.NewGetUseCase(catalogRows).WithAdminChecker(relationStore),
+		moduleapp.NewGetUseCase(catalogRows, moduleEditions).WithAdminChecker(relationStore),
 		moduleapp.NewListUseCase(catalogRows).WithAdminChecker(relationStore),
 	)
 

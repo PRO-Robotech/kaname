@@ -54,6 +54,34 @@ type recordingWriter struct {
 	// записан в строку» — разные факты, и первый проверяется здесь, без базы.
 	resettleAuthor string
 	pruneAuthor    string
+	// applied — применённые пары редакций по модулю, как их держала бы
+	// колонка `catalog_module.applied_*` (kaname#865).
+	applied map[string]*modulecatalog.Edition
+	// lieAboutWrite — модуль, на котором подставной оператор сравнения-и-записи
+	// отвечает «записал» обратно тому, что записал бы: проба расхождения
+	// решателя и оператора.
+	lieAboutWrite string
+}
+
+// AdvanceRevision — подставной оператор сравнения-и-записи. Условие записи —
+// то же, что у оператора базы (`advanceRevisionSQL`): пусто либо старше. Само
+// оператор базы проверяет интеграционная проба над живой Postgres.
+func (w *recordingWriter) AdvanceRevision(_ context.Context, module string,
+	declared *modulecatalog.Edition) (modulecatalog.RevisionWrite, error) {
+	w.calls = append(w.calls, "revision:"+module)
+	prev := w.applied[module]
+	write := declared != nil && (prev == nil || declared.Revision > prev.Revision)
+	if module == w.lieAboutWrite {
+		write = !write
+	}
+	if write {
+		if w.applied == nil {
+			w.applied = map[string]*modulecatalog.Edition{}
+		}
+		d := *declared
+		w.applied[module] = &d
+	}
+	return modulecatalog.RevisionWrite{Previous: prev, Written: write}, nil
 }
 
 var errWriterRefused = errors.New("подставной писатель отказал")

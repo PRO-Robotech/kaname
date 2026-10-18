@@ -85,6 +85,27 @@ type Census struct {
 	PrunedSelectorRows        int
 	PrunedSelectorRowsDropped int
 	PrunedSelectorTypes       int
+
+	// AppliedManifests — манифесты, применённые ПОЛНОСТЬЮ, в порядке
+	// применения (kaname#865, Д3). Это и есть перечень, который корень подаёт
+	// следующим применителям старта — ролей и посева: модуль, пропущенный как
+	// младшая редакция либо отвергнутый конфликтом содержимого, они не получают.
+	// Перечень приходит ЗНАЧЕНИЕМ отсюда, а не вторым сравнением редакций у
+	// корня: второй решатель разошёлся бы с первым молча.
+	AppliedManifests []*manifest.Manifest
+	// SkippedStale — модули, пропущенные как МЛАДШАЯ редакция (Д3): каталог
+	// модуля не тронут, применитель отказа не вернул.
+	SkippedStale []RevisionSkip
+	// RefusedConflict — модули, чьё применение отвергнуто КОНФЛИКТОМ
+	// содержимого: номер равен применённому, отпечаток иной (Д3).
+	RefusedConflict []RevisionSkip
+}
+
+// RevisionSkip — модуль, не применённый по исходу сравнения редакций, и обе
+// пары, о которых этот исход судил.
+type RevisionSkip struct {
+	Module string
+	RevisionReport
 }
 
 // Changed — применение доставки сдвинуло каталог хоть в одном модуле.
@@ -99,19 +120,29 @@ func (c Census) String() string {
 	return fmt.Sprintf(
 		"применено манифестов %d (%v) · изменивших каталог %d · записано ресурсов %d "+
 			"глаголов %d · снято ресурсов %d глаголов %d · переселено правил %d выдач %d · "+
-			"селекторов укорочено %d снято %d элементов вырезано %d · изменения %t",
+			"селекторов укорочено %d снято %d элементов вырезано %d · изменения %t · "+
+			"пропущено младших редакций %d · отвергнуто конфликтом содержимого %d",
 		c.Applied, c.Modules, c.ChangedModules,
 		c.WrittenResources, c.WrittenVerbs,
 		c.RetiredResources, c.RetiredVerbs,
 		c.Resettled.RuleRefs, c.Resettled.RoleVerbs,
 		c.PrunedSelectorRows, c.PrunedSelectorRowsDropped, c.PrunedSelectorTypes,
-		c.Changed())
+		c.Changed(), len(c.SkippedStale), len(c.RefusedConflict))
 }
 
 // add складывает перепись одного модуля в общую.
-func (c *Census) add(rep Report) {
+func (c *Census) add(m *manifest.Manifest, rep Report) {
+	switch rep.Revision.Outcome {
+	case RevisionStale:
+		c.SkippedStale = append(c.SkippedStale, RevisionSkip{Module: rep.Module, RevisionReport: rep.Revision})
+		return
+	case RevisionConflict:
+		c.RefusedConflict = append(c.RefusedConflict, RevisionSkip{Module: rep.Module, RevisionReport: rep.Revision})
+		return
+	}
 	c.Applied++
 	c.Modules = append(c.Modules, rep.Module)
+	c.AppliedManifests = append(c.AppliedManifests, m)
 	if rep.Changed() {
 		c.ChangedModules++
 	}
@@ -142,9 +173,12 @@ func (a *Applier) ApplyAll(ctx context.Context, manifests []*manifest.Manifest) 
 			// by construction (`manifest/delivery.go`, «почему имя судится иначе»).
 			return census, fmt.Errorf(
 				"применение манифеста модуля %q (по счёту %d, применено до него %d): %w",
-				m.Module, census.Applied+1, census.Applied, err)
+				m.Module, census.Applied+len(census.SkippedStale)+len(census.RefusedConflict)+1,
+				census.Applied, err)
 		}
-		census.add(rep)
+		// Младшая редакция и конфликт содержимого — исход, а не отказ (Д3):
+		// модуль называется своей строкой переписи, и обход идёт дальше.
+		census.add(m, rep)
 	}
 	return census, nil
 }

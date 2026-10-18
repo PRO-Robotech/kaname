@@ -347,7 +347,12 @@ func runServe(cfg config.Config) error {
 	// вызову конструктора в правой части, и цепочка увела бы применителя
 	// из-под его наблюдения — молча.
 	catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
-	if aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests); aErr != nil {
+	// Применённые ПОЛНОСТЬЮ — ровно они едут применителям ролей и посева ниже
+	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
+	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
+	// и страж ниже судят доставку целиком, как прежде.
+	appliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+	if aErr != nil {
 		return aErr
 	}
 
@@ -429,7 +434,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("роли модуля: %w", rrErr)
 	}
 	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
-	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, deliveredManifests); raErr != nil {
+	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
 		return raErr
 	}
 
@@ -445,17 +450,24 @@ func runServe(cfg config.Config) error {
 	// службы; своё доставкой не связано.
 	//
 	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
-	// доводом — в перечень `deliveredManifests` он не подмешивается: тот
-	// читают пятеро, а получатель у своего манифеста ровно один (Р3 приёмки
-	// MRW-1). Довод о месте, порядке и о том, почему отказ фатален, — шапка
-	// `module_seed_apply.go`; порядок и раздельность доводов держит гейт
+	// доводом — в перечень доставки он не подмешивается: доставку читают
+	// несколько потребителей старта, а получатель у своего манифеста ровно один
+	// (Р3 приёмки MRW-1). Довод о месте, порядке и о том, почему отказ фатален,
+	// — шапка `module_seed_apply.go`; порядок и раздельность доводов держит гейт
 	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+	//
+	// Доставленные едут сюда ПРИМЕНЁННЫМИ (kaname#865, Д3): модуль доставки,
+	// пропущенный как младшая редакция либо отвергнутый конфликтом, посева не
+	// получает. Свой манифест службы этим отбором НЕ сужается и подаётся всегда:
+	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
+	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
+	// разных входа.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
 		return omErr
 	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, deliveredManifests); seErr != nil {
+	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
 		return seErr
 	}
 

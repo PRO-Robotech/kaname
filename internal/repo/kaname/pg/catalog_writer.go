@@ -282,6 +282,79 @@ func (w catalogWriter) ReadCatalog(ctx context.Context) (modulecatalog.CatalogSt
 	return modulecatalog.NewCatalogState(live, retired), nil
 }
 
+// advanceRevisionSQL — сравнение-и-запись пары редакции ОДНИМ оператором
+// (kaname#865, приёмка `module-manifest-revision-only-moves-forward.md`, Д2).
+//
+// `$1` — модуль, `$2` — объявленный номер, `$3` — объявленный отпечаток; оба
+// `NULL`, если документ ключа `revision` не несёт. Строки таблицы Д2 и обе
+// строки переходной ветки S1 записаны предикатами явно:
+//
+//	строки нет,  d объявлена   вставка: первая редакция
+//	строки нет,  d не объявлена вставки нет (`WHERE $2 IS NOT NULL`)
+//	a пусто,     d объявлена   запись: первая редакция
+//	a есть,      d > a         запись: старшая редакция
+//	a есть,      d ≤ a         записи нет: повтор, младшая либо конфликт
+//	d не объявлена             записи нет ни при каком a
+//
+// Различать повтор, младшую и конфликт — дело решателя
+// (`modulecatalog.JudgeRevision`): оператор отдаёт прежнюю пару и признак
+// записи, а применитель сверяет, что решатель назвал тот же исход.
+//
+// `prev` читает строку ДО записи: подзапросы `WITH` видят один снимок, и
+// изменение `written` в нём не видно. Второго писателя между ними нет — его не
+// пускает консультативный замок каталога, взятый первым оператором транзакции.
+// Обновляются только `applied_*`, ключ строки не меняется, поэтому оператор
+// берёт `FOR NO KEY UPDATE`, а не `FOR UPDATE`: соседний ключ живости
+// (`catalog_resource_module_live_fk`) он не блокирует.
+const advanceRevisionSQL = `
+	WITH prev AS (
+	  SELECT applied_revision, applied_digest
+	    FROM kaname.catalog_module
+	   WHERE module = $1
+	), written AS (
+	  INSERT INTO kaname.catalog_module (module, applied_revision, applied_digest)
+	  SELECT $1, $2::bigint, $3::text
+	   WHERE $2::bigint IS NOT NULL AND $3::text IS NOT NULL
+	  ON CONFLICT (module) DO UPDATE
+	     SET applied_revision = EXCLUDED.applied_revision,
+	         applied_digest = EXCLUDED.applied_digest
+	   WHERE catalog_module.applied_revision IS NULL
+	      OR (catalog_module.applied_revision IS NOT NULL
+	          AND EXCLUDED.applied_revision > catalog_module.applied_revision)
+	  RETURNING 1
+	)
+	SELECT EXISTS (SELECT 1 FROM prev),
+	       (SELECT applied_revision FROM prev),
+	       (SELECT applied_digest FROM prev),
+	       EXISTS (SELECT 1 FROM written)`
+
+// AdvanceRevision — сравнение-и-запись пары редакции (см. `advanceRevisionSQL`).
+func (w catalogWriter) AdvanceRevision(
+	ctx context.Context, module string, declared *modulecatalog.Edition,
+) (modulecatalog.RevisionWrite, error) {
+	var (
+		revision *int64
+		digest   *string
+	)
+	if declared != nil {
+		revision, digest = &declared.Revision, &declared.Digest
+	}
+	var (
+		existed, written bool
+		prevRev          *int64
+		prevDigest       *string
+	)
+	if err := w.tx.QueryRow(ctx, advanceRevisionSQL, module, revision, digest).
+		Scan(&existed, &prevRev, &prevDigest, &written); err != nil {
+		return modulecatalog.RevisionWrite{}, err
+	}
+	prev, err := editionOf(prevRev, prevDigest)
+	if err != nil {
+		return modulecatalog.RevisionWrite{}, fmt.Errorf("строка модуля %s: %w", module, err)
+	}
+	return modulecatalog.RevisionWrite{Previous: prev, RowCreated: !existed && written, Written: written}, nil
+}
+
 // UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля.
 //
 // Оживление, а не вставка новой строки: снятая строка занимает первичный ключ, и

@@ -28,6 +28,7 @@
 //  0. АКТОР — до транзакции: кто применяет, есть предусловие глагола
 //  1. глобальный консультативный замок
 //  2. ПОДТВЕРЖДЕНИЕ состояния модуля — одним оператором, только у глагола
+//     2р. СРАВНЕНИЕ-И-ЗАПИСЬ редакции — одним оператором, первым пишущим
 //     2а. ЗАМКИ на строки ресурсов модуля — одним оператором, в порядке базы
 //  3. чтение живых строк ЭТОГО модуля
 //  4. оживление/заведение: модуль → ресурсы → глаголы
@@ -43,6 +44,13 @@
 // не может, поэтому вердикт подтверждения относится к состоянию, которое
 // доживёт до коммита. Стой оно до замка — это был бы обычный check-then-act с
 // окном ровно там, где оно опасно. Довод целиком — `confirm.go`.
+//
+// Шаг 2р (kaname#865) — ПЕРВЫЙ пишущий оператор транзакции: сравнение пары
+// (номер редакции, отпечаток) с применённой и её запись ОДНИМ оператором под
+// замком каталога. Младшая редакция и конфликт содержимого не успевают
+// записать ни одной строки, и отказ по редакции наступает раньше отказа опоры
+// (шаг 10). Довод целиком — `revision.go`. Своего номера шаг, как и 2а, не
+// получил по той же причине: номера цитируются извне.
 //
 // Шаг 2а НЕ ПОЛУЧИЛ своего номера намеренно: номера шагов цитируются отсюда
 // четырьмя файлами, и сдвиг сделал бы ложными все ссылки разом — при том что
@@ -163,6 +171,12 @@ type CatalogWriter interface {
 	// строкой, а `CatalogState` требует обе позиционно — пропустить снятую
 	// сторону нечем.
 	ReadCatalog(ctx context.Context) (CatalogState, error)
+	// AdvanceRevision сравнивает объявленную пару редакции с применённой и
+	// записывает её ОДНИМ оператором (Д2 приёмки kaname#865): пишет ровно
+	// тогда, когда применённой нет либо объявленная старше. `declared == nil`
+	// (документ без ключа) не пишет ничего и только читает применённую пару.
+	// Отдаёт пару, стоявшую ДО оператора, и что он сделал.
+	AdvanceRevision(ctx context.Context, module string, declared *Edition) (RevisionWrite, error)
 	// UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля. `changed` ложно, когда
 	// объявленное состояние уже стоит в строке.
 	UpsertModule(ctx context.Context, module string) (bool, error)
@@ -273,6 +287,10 @@ type Report struct {
 	PrunedSelectorRows        int
 	PrunedSelectorRowsDropped int
 	PrunedSelectorTypes       int
+	// Revision — исход сравнения редакций (revision.go). Сдвиг пары редакции
+	// изменением каталога НЕ считается (Д2): `Changed` говорит о строках
+	// модуля, ресурсов и глаголов, а пара едет этим полем.
+	Revision RevisionReport
 }
 
 // Changed — применение изменило хоть одну строку.
@@ -292,14 +310,14 @@ func (r Report) String() string {
 	return fmt.Sprintf(
 		"модуль %s · объявлено ресурсов %d глаголов %d · записано %d/%d · без изменений %d/%d · "+
 			"снято %d/%d · переселено правил %d выдач %d · селекторов укорочено %d "+
-			"снято %d элементов вырезано %d · изменения %t",
+			"снято %d элементов вырезано %d · изменения %t · редакция %s",
 		r.Module, r.DeclaredResources, r.DeclaredVerbs,
 		r.WrittenResources, r.WrittenVerbs,
 		r.UnchangedResources, r.UnchangedVerbs,
 		r.RetiredResources, r.RetiredVerbs,
 		r.Resettled.RuleRefs, r.Resettled.RoleVerbs,
 		r.PrunedSelectorRows, r.PrunedSelectorRowsDropped, r.PrunedSelectorTypes,
-		r.Changed())
+		r.Changed(), r.Revision.Outcome)
 }
 
 // applyLane — ПОЛОСА применения. Их две, и обязанности у них разные.
@@ -404,7 +422,19 @@ func (v *VerbApplier) Apply(ctx context.Context, req Request) (Report, error) {
 	if err != nil {
 		return Report{Module: moduleNameOf(req.Manifest)}, err
 	}
-	return v.core.apply(ctx, req.Manifest, conf)
+	rep, err := v.core.apply(ctx, req.Manifest, conf)
+	if err != nil {
+		return rep, err
+	}
+	// Исход редакции становится ОТКАЗОМ здесь и только здесь: на полосе
+	// старта младшая редакция и конфликт — строки переписи, а не отказ пуска
+	// (Д3), на полосе глагола — `FAILED_PRECONDITION` с текстом Д7 (Д4).
+	// Транзакция при этом уже закрыта и не записала ничего: сравнение пары —
+	// первый пишущий оператор, и на этих исходах он не пишет.
+	if rerr := refusalOf(rep.Module, rep.Revision); rerr != nil {
+		return rep, rerr
+	}
+	return rep, nil
 }
 
 // Apply приводит строки каталога модуля к объявленному манифестом состоянию.
@@ -480,6 +510,35 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 					"повторите `Plan` и пришлите показанное им состояние (kacho#1034, IAM-MA-1-14)",
 					ErrStateMoved, declared.Module)
 			}
+		}
+
+		// Шаг 2р — СРАВНЕНИЕ-И-ЗАПИСЬ РЕДАКЦИИ (kaname#865), первым пишущим
+		// оператором транзакции.
+		//
+		// Решает ОПЕРАТОР (его `WHERE`), а решатель здесь пересчитывает, что он
+		// обязан был сделать: разошлись — значит предикат базы и решатель
+		// описывают разное, и выбрать одного молча нельзя.
+		declaredEdition := DeclaredEdition(m)
+		wr, rerr := w.AdvanceRevision(ctx, declared.Module, declaredEdition)
+		if rerr != nil {
+			return fmt.Errorf("%w: редакция модуля %s: %w", ErrWriteFailed, declared.Module, rerr)
+		}
+		outcome := JudgeRevision(wr.Previous, declaredEdition)
+		if outcome.Writes() != wr.Written {
+			return fmt.Errorf("%w: редакция модуля %s: решатель назвал исход %s, а оператор "+
+				"сравнения-и-записи записал пару: %t", ErrWriteFailed, declared.Module, outcome, wr.Written)
+		}
+		rep.Revision = RevisionReport{Outcome: outcome, Declared: declaredEdition, Previous: wr.Previous}
+		// Строка модуля, заведённая оператором редакции, — изменение каталога
+		// (условие CE-08): без этой строки модуля не было, и `UpsertModule`
+		// ниже найдёт её уже живой.
+		if wr.RowCreated {
+			rep.ModuleWritten = true
+		}
+		if outcome.Refused() {
+			// Младшая редакция либо конфликт содержимого: оператор не записал
+			// ничего, и дальше не пишется ничего. Транзакция закрывается пустой.
+			return nil
 		}
 
 		// Шаг 2а — ЗАМКИ НА СТРОКИ РЕСУРСОВ, до первой записи (kacho#2012).

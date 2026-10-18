@@ -217,6 +217,11 @@ func applyOperationPayload(module string, rep modulecatalog.Report) (meta, resp 
 		PrunedSelectorRows:        safeconv.IntToInt32(rep.PrunedSelectorRows),
 		PrunedSelectorRowsDropped: safeconv.IntToInt32(rep.PrunedSelectorRowsDropped),
 		PrunedSelectorTypes:       safeconv.IntToInt32(rep.PrunedSelectorTypes),
+		// Пара редакции — ОТДЕЛЬНЫМИ полями: её сдвиг изменением каталога не
+		// считается (Д2), и `changed` по-прежнему говорит о строках (kaname#865).
+		AppliedRevision:         revisionOf(rep.Revision.Applied()),
+		AppliedDigest:           digestOf(rep.Revision.Applied()),
+		PreviousAppliedRevision: revisionOf(rep.Revision.Previous),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("operation response: %w", err)
@@ -233,4 +238,22 @@ func intFromOptional(v *int32) *int {
 	}
 	n := int(*v)
 	return &n
+}
+
+// revisionOf / digestOf — поля пары на проводе: отсутствие пары — отсутствие
+// поля, а не ноль (Д5).
+func revisionOf(e *modulecatalog.Edition) *int64 {
+	if e == nil {
+		return nil
+	}
+	n := e.Revision
+	return &n
+}
+
+func digestOf(e *modulecatalog.Edition) *string {
+	if e == nil {
+		return nil
+	}
+	d := e.Digest
+	return &d
 }

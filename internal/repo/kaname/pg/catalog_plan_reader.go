@@ -131,6 +131,14 @@ func (r *CatalogPlanRepo) PlanState(
 			"прочитать отпечаток состояния каталога модуля %s: %w", module, err)
 	}
 
+	// Применённая пара редакции — той же транзакцией, то есть из того же
+	// снимка, что отпечаток (kaname#865, условие CE-14).
+	applied, err := readAppliedEdition(ctx, tx, module)
+	if err != nil {
+		return moduleapp.PlanState{}, err
+	}
+	out.Applied = applied
+
 	resModules, resNames, verbModules, verbResources, verbNames :=
 		staleRowArrays(staleResources, staleVerbs)
 

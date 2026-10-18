@@ -671,3 +671,55 @@ func TestConnectRefusalNeverPrintsAnEmptyAddress(t *testing.T) {
 		mustContain(t, got.stderr, "iam-internal.kacho.svc:9091", "заданный адрес обязан быть назван")
 	})
 }
+
+// --- редакция манифеста (kaname#865) -------------------------------------------
+
+// Вердикты редакции и вердикт, клиенту неизвестный, — НАХОДКА, а не схождение:
+// ни кода 0, ни подсказки `apply` на плане, который служба отвергнет. Близнец —
+// `TestPlanPrintsTheCensusAndTheFingerprint` (WOULD_APPLY даёт код 0 и подсказку).
+func TestPlanRevisionVerdictsAreFindingsNotConvergence(t *testing.T) {
+	applied, manifest := int64(5), int64(3)
+	cases := []struct {
+		name    string
+		verdict iamv1.ModulePlanVerdict
+		names   []string
+	}{
+		{"stale", iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION, []string{"3", "5"}},
+		{"conflict", iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT, []string{"sha256:aa", "sha256:bb"}},
+		{"unknown", iamv1.ModulePlanVerdict(99), []string{"99"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ad, md := "sha256:aa", "sha256:bb"
+			svc := &stubService{planResp: &iamv1.PlanModuleResponse{
+				Module: "vpc", ExpectedState: "sha256:dead", Verdict: c.verdict,
+				AppliedRevision: &applied, ManifestRevision: &manifest,
+				AppliedDigest: &ad, ManifestDigest: &md,
+			}}
+			got := exercise(t, depsWith(t, svc), "plan", "vpc")
+			if got.code != ExitFinding {
+				t.Fatalf("код: получено %d, ожидалось %d\n%s", got.code, ExitFinding, got.both())
+			}
+			if strings.Contains(got.both(), "iamctl apply") {
+				t.Fatalf("на отвергаемом плане клиент подсказывает apply:\n%s", got.both())
+			}
+			for _, n := range c.names {
+				mustContain(t, got.both(), n, "находка обязана назвать предмет")
+			}
+
+			doc := &stubService{
+				listResp: &iamv1.ListModulesResponse{Modules: []*iamv1.ModuleSummary{
+					{Module: "vpc", LiveResourceCount: 7, LiveVerbCount: 31},
+				}},
+				planResp: svc.planResp,
+			}
+			dgot := exercise(t, depsWith(t, doc), "doctor")
+			if dgot.code != ExitFinding {
+				t.Fatalf("doctor: код получено %d, ожидалось %d\n%s", dgot.code, ExitFinding, dgot.both())
+			}
+			if strings.Contains(dgot.stdout, "сходится") {
+				t.Fatalf("doctor назвал отвергаемый план схождением:\n%s", dgot.both())
+			}
+		})
+	}
+}
