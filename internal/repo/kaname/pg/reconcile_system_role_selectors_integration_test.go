@@ -241,8 +241,8 @@ func TestSysRoleSel_04_Idempotent_SelfHeal(t *testing.T) {
 	// Self-heal: inject a STALE selector row (a fingerprint no current rule produces).
 	_, err = pool.Exec(ctx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, resource_names, match_labels)
-		 VALUES ($1, 'deadbeefstalefp', 'anchor', ARRAY['vpc.network']::text[], '{}'::text[], '{}'::jsonb)`,
+		   (role_id, rule_fp, arm, object_types, resource_names, match_labels, verbs_by_type)
+		 VALUES ($1, 'deadbeefstalefp', 'anchor', ARRAY['vpc.network']::text[], '{}'::text[], '{}'::jsonb, '{}'::jsonb)`,
 		string(editRole))
 	require.NoError(t, err)
 	require.NoError(t, bootSeedRuleSides(ctx, pool))

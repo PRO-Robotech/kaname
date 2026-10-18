@@ -273,8 +273,9 @@ func seedProbeRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID, roleNam
 		`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 		roleID, probeCatalogType, probeVerb)
 	exec(t, ctx, tx,
-		`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, probeCatalogType)
+		`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb, jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+		roleID, probeCatalogType, probeVerb)
 }
 
 // growN — досыпать объектов зеркала до target.
@@ -370,8 +371,9 @@ func (f *gridFixture) growB(t *testing.T, ctx context.Context, target int) {
 			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 			roleID, probeCatalogType, probeVerb))
 		must(t, s.QueueRaw(ctx,
-			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, probeCatalogType))
+			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb, jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+			roleID, probeCatalogType, probeVerb))
 	}
 	if wantRoles > f.seedBRoles {
 		f.seedBRoles = wantRoles
@@ -428,8 +430,9 @@ func (f *gridFixture) setR(t *testing.T, ctx context.Context, target int, rec sc
 			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 			roleID, probeCatalogType, probeVerb))
 		must(t, s.QueueRaw(ctx,
-			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, probeCatalogType))
+			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb, jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+			roleID, probeCatalogType, probeVerb))
 	}
 	if target > f.seedRoles {
 		f.seedRoles = target

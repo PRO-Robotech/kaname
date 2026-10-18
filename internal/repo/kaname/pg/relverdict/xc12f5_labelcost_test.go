@@ -176,9 +176,9 @@ func (r *relLabelForm) ApplyRule(ctx context.Context) (bench.Counters, int, erro
 		rows++
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO kaname.role_rule_selectors
-		  (role_id, rule_fp, arm, object_types, match_labels)
-		VALUES ($1, 'fp-f5', 'labels', ARRAY[$2::text], $3::jsonb)`,
-		f5Role, f5CatalogType, labelJSON(r.sc)); err != nil {
+		  (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		VALUES ($1, 'fp-f5', 'labels', ARRAY[$2::text], $3::jsonb, jsonb_build_object($2::text, $4::jsonb))`,
+		f5Role, f5CatalogType, labelJSON(r.sc), jsonArray(r.sc.Verbs)); err != nil {
 		return bench.Counters{StmtSQL: w.Close()}, rows, fmt.Errorf("правило-селектор: %w", err)
 	}
 	rows++
