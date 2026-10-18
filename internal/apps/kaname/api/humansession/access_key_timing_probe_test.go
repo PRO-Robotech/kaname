@@ -40,7 +40,12 @@
 // (Ф1-50). Потолок — ПОЛОВИНА откалиброванной стоимости одной сверки: при
 // размахе не выше неё различие в одну сверку выходит за размах вдвое, и
 // инъекция Ф1-49 краснеет; выше — различие в одну сверку неотличимо от шума, и
-// зелёный ничего бы не значил.
+// зелёный ничего бы не значил. Потолок и его судья — общие с Ф3-31
+// (timingFitnessCeiling, timingCeilingFault): потолок не ниже различия —
+// красное, дефект пробы. «Не выполнилось» подаётся `t.Skip` с меткой
+// timingNotPerformed, а не `t.Fatalf`, и вердикт ручного прогона читает
+// прогонщик `.github/scripts/go-test-verdict.py`: 0 · 1 · 2 «не выполнилось»
+// (kaname#861).
 //
 // # Инъекция Ф1-49 — способность критерия упасть
 //
@@ -54,7 +59,7 @@
 // словами. Способность критерия упасть на синтетике держит
 // `timing_probe_verdict_test.go` на каждой отправке.
 //
-//	KACHO_LOGIN_ACCESS_KEY_TIMING=1 KACHO_LOGIN_ACCESS_KEY_TIMING_INJECT='(б) удостоверения нет' go test ./internal/apps/kaname/api/humansession/ -run TestAccessKeyLogin_F13_06_RefusalTimeIsIndistinguishableAcrossCredentialStates -count=1 -v
+//	KACHO_LOGIN_ACCESS_KEY_TIMING=1 KACHO_LOGIN_ACCESS_KEY_TIMING_INJECT='(б) удостоверения нет' go test ./internal/apps/kaname/api/humansession/ -run TestAccessKeyLogin_F13_06_RefusalTimeIsIndistinguishableAcrossCredentialStates -count=1 -json > ak-timing.json; python3 .github/scripts/go-test-verdict.py < ak-timing.json
 //
 // # Почему ручной прогон
 //
@@ -63,7 +68,7 @@
 // же причине), и в наборе отправки такой прогон был бы жребием. Прогон — ручкой,
 // как у соседних измерительных проб:
 //
-//	KACHO_LOGIN_ACCESS_KEY_TIMING=1 go test ./internal/apps/kaname/api/humansession/ -run TestAccessKeyLogin_F13_06 -count=1 -v
+//	KACHO_LOGIN_ACCESS_KEY_TIMING=1 go test ./internal/apps/kaname/api/humansession/ -run TestAccessKeyLogin_F13_06 -count=1 -json > ak-timing.json; python3 .github/scripts/go-test-verdict.py < ak-timing.json
 package humansession_test
 
 import (
@@ -93,7 +98,8 @@ const (
 	// замера вносится одна лишняя сверка утверждения проверяющим Ф7.
 	akTimingInjectEnv  = "KACHO_LOGIN_ACCESS_KEY_TIMING_INJECT"
 	akTimingRunCommand = "KACHO_LOGIN_ACCESS_KEY_TIMING=1 go test ./internal/apps/kaname/api/humansession/ " +
-		"-run TestAccessKeyLogin_F13_06 -count=1 -v"
+		"-run TestAccessKeyLogin_F13_06 -count=1 -json > ak-timing.json; " +
+		"python3 .github/scripts/go-test-verdict.py < ak-timing.json"
 	// akTimingLaneN — обращений на полосу; нижняя граница Ф1-48 — 10. Одно
 	// обращение стоит доли миллисекунды, поэтому N объявлено с запасом над
 	// границей: медиана тысячи обращений устойчива к редким выбросам планировщика
@@ -228,10 +234,12 @@ func TestAccessKeyLogin_F13_06_RefusalTimeIsIndistinguishableAcrossCredentialSta
 		require.Error(t, verr, "калибровка: подпись чужого ключа обязана не сойтись — иначе сверка не прошла целиком")
 	}
 	verifyCost := akMedian(calib)
-	ceiling := verifyCost / 2
+	ceiling := timingFitnessCeiling(verifyCost)
 	t.Logf("калибровка: стоимость одной сверки проверяющим Ф7 (ES256) — медиана %v из %d · потолок годности IQR %v (половина)",
 		verifyCost, akTimingCalibrationN, ceiling)
-	require.Positive(t, ceiling, "стоимость сверки не откалибрована — потолку годности не из чего взяться")
+	if err := timingCeilingFault(ceiling, verifyCost); err != nil {
+		t.Fatalf("Ф1-50: %v", err)
+	}
 
 	// Инъекция Ф1-49 — по ручке, в одну названную полосу.
 	injectName := os.Getenv(akTimingInjectEnv)
@@ -249,8 +257,8 @@ func TestAccessKeyLogin_F13_06_RefusalTimeIsIndistinguishableAcrossCredentialSta
 			names = append(names, strconv.Quote(l.lane.name))
 		}
 		if names != nil {
-			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ: ручка %s называет полосу %q, а такой полосы нет; законные: %s",
-				akTimingInjectEnv, injectName, strings.Join(names, ", "))
+			t.Skipf("%s: ручка %s называет полосу %q, а такой полосы нет; законные: %s",
+				timingNotPerformed, akTimingInjectEnv, injectName, strings.Join(names, ", "))
 		}
 		t.Logf("инъекция Ф1-49: полоса %q · одна лишняя сверка проверяющим Ф7 внутри замера (≈ %v)", injectName, verifyCost)
 	}
@@ -277,10 +285,9 @@ func TestAccessKeyLogin_F13_06_RefusalTimeIsIndistinguishableAcrossCredentialSta
 		m, q := l.lane.stats()
 		rows = append(rows, timingRow{lane: l.lane, median: m, iqr: q})
 		t.Logf("полоса %-28s медиана %10v · IQR %10v · n=%d · потолок годности %v", l.lane.name, m, q, len(l.lane.samples), ceiling)
-		if q > ceiling {
-			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ (Ф1-50): размах полосы %q %v выше потолка годности %v — стенд шумит сильнее "+
-				"различия в одну сверку, вердикта нет", l.lane.name, q, ceiling)
-		}
+	}
+	if text, unfit := timingUnfitLane(rows, ceiling); unfit {
+		t.Skip(text)
 	}
 	failures, lines := timingPairFailures(rows)
 	for _, line := range lines {
