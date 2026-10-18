@@ -17,9 +17,9 @@ package pg_test
 //
 // # Посадка
 //
-// 20000 выдач в одном аккаунте, у каждой два субъекта-человека: выдача i
-// называет парой человека i, набором — i и i+1. Спрашиваемый человек стоит
-// в двух выдачах: в своей — первым, в соседней — вторым.
+// 20000 выдач в одном аккаунте, у каждой два субъекта-человека: 2000 людей ×
+// 10 ролей, выдача называет парой человека u, набором — u и u+1. Спрашиваемый
+// человек стоит в двадцати выдачах: в десяти — первым, в десяти — вторым.
 //
 // # Пробы
 //
@@ -53,9 +53,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
-// subjectPlanBindings — размер посадки: тот, на котором цена была замерена
-// автором (kaname#888).
-const subjectPlanBindings = 20000
+// subjectPlanPeople × subjectPlanRoles — размер посадки: 20000 выдач, тот, на
+// котором цена была замерена (kaname#888).
+const (
+	subjectPlanPeople   = 2000
+	subjectPlanRoles    = 10
+	subjectPlanBindings = subjectPlanPeople * subjectPlanRoles
+)
 
 // subjectsTable — таблица набора, чьё последовательное чтение — предмет пробы.
 const subjectsTable = "access_binding_subjects"
@@ -77,7 +81,7 @@ type subjectPlanFixture struct {
 	pool    *pgxpool.Pool
 	acc     domain.AccountID
 	subject string
-	// expected — выдачи, называющие субъекта: своя (первым) и соседняя (вторым).
+	// expected — выдачи, называющие субъекта: где он первый и где второй.
 	expected []string
 }
 
@@ -94,34 +98,50 @@ func seedSubjectPlanFixture(t *testing.T) subjectPlanFixture {
 	repo := kanamepg.New(pool, nil)
 	owner := mustSeedUser(t, ctx, pool, "sbjpln")
 	acc := seedAccount(t, ctx, repo, "acc-sbjpln", owner)
-	role := seedAccountRole(t, ctx, pool, acc.ID, "sbjpln_role")
+	roles := make([]string, subjectPlanRoles)
+	for r := range roles {
+		roles[r] = string(seedAccountRole(t, ctx, pool, acc.ID, fmt.Sprintf("sbjpln_role_%02d", r)))
+	}
+
+	// Посев — одной транзакцией без потолка исполнения оператора: потолок пула
+	// (30 с) — предел запроса продукта, а не посадки, и 40000 строк набора под
+	// триггерами существования его не обязаны помещать.
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SET LOCAL statement_timeout = 0`)
+	require.NoError(t, err)
 
 	const userPrefix, bindingPrefix = "usr-sbjpln-", "acb-sbjpln-"
-	_, err = pool.Exec(ctx, activewayin.WithWayIn(`
+	_, err = tx.Exec(ctx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1 || lpad(i::text, 6, '0'), $2, $1 || lpad(i::text, 6, '0'),
 		       $1 || lpad(i::text, 6, '0') || '@kacho.local', 'p', 'ACTIVE'
-		  FROM generate_series(1, $3::int) AS i`), userPrefix, string(acc.ID), subjectPlanBindings)
+		  FROM generate_series(1, $3::int) AS i`), userPrefix, string(acc.ID), subjectPlanPeople)
 	require.NoError(t, err, "посев людей")
 
-	_, err = pool.Exec(ctx, `
+	// Выдача i: человек (i-1) mod 2000 + 1, роль (i-1) div 2000.
+	_, err = tx.Exec(ctx, `
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		SELECT $1 || lpad(i::text, 6, '0'), 'user', $2 || lpad(i::text, 6, '0'),
-		       $3, 'account', $4, 'ACTIVE'
-		  FROM generate_series(1, $5::int) AS i`,
-		bindingPrefix, userPrefix, string(role), string(acc.ID), subjectPlanBindings)
+		SELECT $1 || lpad(i::text, 6, '0'), 'user', $2 || lpad(((i - 1) % $5::int + 1)::text, 6, '0'),
+		       ($3::text[])[(i - 1) / $5::int + 1], 'account', $4, 'ACTIVE'
+		  FROM generate_series(1, $6::int) AS i`,
+		bindingPrefix, userPrefix, roles, string(acc.ID), subjectPlanPeople, subjectPlanBindings)
 	require.NoError(t, err, "посев выдач")
 
-	_, err = pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
 		SELECT $1 || lpad(i::text, 6, '0'), 'user',
 		       $2 || lpad(((i - 1 + k) % $3::int + 1)::text, 6, '0'), k
-		  FROM generate_series(1, $3::int) AS i, generate_series(0, 1) AS k`,
-		bindingPrefix, userPrefix, subjectPlanBindings)
+		  FROM generate_series(1, $4::int) AS i, generate_series(0, 1) AS k`,
+		bindingPrefix, userPrefix, subjectPlanPeople, subjectPlanBindings)
 	require.NoError(t, err, "посев набора")
+	require.NoError(t, tx.Commit(ctx))
 
-	_, err = pool.Exec(ctx, `ANALYZE kaname.access_bindings; ANALYZE kaname.access_binding_subjects`)
+	_, err = pool.Exec(ctx, `ANALYZE kaname.access_bindings`)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `ANALYZE kaname.access_binding_subjects`)
 	require.NoError(t, err)
 
 	var subjectRows int
@@ -132,11 +152,18 @@ func seedSubjectPlanFixture(t *testing.T) subjectPlanFixture {
 		t.Fatalf("условие замера не создано: строк набора %d при %d выдачах", subjectRows, subjectPlanBindings)
 	}
 
-	// Человек 500 стоит первым в выдаче 500 и вторым в выдаче 499.
+	// Человек 500 стоит первым в выдачах 500 + 2000·r и вторым — в 499 + 2000·r.
+	const person = 500
+	var expected []string
+	for r := 0; r < subjectPlanRoles; r++ {
+		expected = append(expected,
+			fmt.Sprintf("%s%06d", bindingPrefix, person+subjectPlanPeople*r),
+			fmt.Sprintf("%s%06d", bindingPrefix, person-1+subjectPlanPeople*r))
+	}
 	return subjectPlanFixture{
 		ctx: ctx, pool: pool, acc: acc.ID,
-		subject:  userPrefix + "000500",
-		expected: []string{bindingPrefix + "000499", bindingPrefix + "000500"},
+		subject:  fmt.Sprintf("%s%06d", userPrefix, person),
+		expected: expected,
 	}
 }
 
@@ -234,7 +261,7 @@ func TestSubjectFilterPlan(t *testing.T) {
 	t.Run("typed_subject_reads_the_set_by_index", func(t *testing.T) {
 		stmt := listShape(kanamepg.BindingNamesSubjectSQL("access_bindings", 1, 2), 3)
 		args := []any{string(domain.SubjectTypeUser), f.subject, 51}
-		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "близнец: обе выдачи субъекта")
+		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "близнец: все выдачи субъекта")
 		requireSubjectsReadByIndex(t, "ListBySubject", explainNodes(t, f, stmt, args...))
 	})
 
@@ -242,7 +269,7 @@ func TestSubjectFilterPlan(t *testing.T) {
 	t.Run("untyped_subject_reads_the_set_by_index", func(t *testing.T) {
 		stmt := listShape(kanamepg.BindingNamesSubjectIDSQL(1), 2)
 		args := []any{f.subject, 51}
-		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "фильтр subject: обе выдачи субъекта")
+		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "фильтр subject: все выдачи субъекта")
 		requireSubjectsReadByIndex(t, "List subject", explainNodes(t, f, stmt, args...))
 	})
 }
