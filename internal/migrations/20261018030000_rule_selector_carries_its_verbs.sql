@@ -167,8 +167,10 @@ COMMENT ON TABLE kaname.role_verb IS 'Проекция «роль → тип о�
 -- +goose Down
 SET LOCAL lock_timeout = '10s';
 
-DROP TRIGGER role_rule_selectors_verbs_uncomputed ON kaname.role_rule_selectors;
-DROP FUNCTION kaname.role_rule_selectors_verbs_uncomputed();
+-- Переходный страж снимается вместе со своей функцией (CASCADE берёт ровно
+-- зависящий от неё триггер): оператор снятия триггера в этом откате — один, и
+-- он называет стража живости типов, которого откат возвращает к прежней форме.
+DROP FUNCTION kaname.role_rule_selectors_verbs_uncomputed() CASCADE;
 
 DROP TABLE kaname.role_selector_verbs_pending;
 
