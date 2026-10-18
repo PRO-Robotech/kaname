@@ -204,7 +204,7 @@ func buildCeremonySurface(
 		"secret_checker_capacity", secrets.Capacity(),
 		"secret_check_cost", secretCheckCost.String(),
 		"operation_deadline", operationDeadline.String())
-	engine, err := oauthceremony.New(oauthceremony.Config{
+	engine, exchangeUC, err := ceremonyExchange(oauthceremony.Config{
 		AuthorizationEndpoint: authorizeURL,
 		TokenEndpoint:         tokenURL,
 		// Срок токена доступа — тот же, что у машинных полос этого эндпоинта:
@@ -232,9 +232,9 @@ func buildCeremonySurface(
 		AccessTokenIssuer:  issuer,
 		ClientSecrets:      clientSecrets,
 		Transaction:        vaults,
-	})
+	}, vaults, credentialLanePeerTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("ceremony: %w", err)
+		return nil, err
 	}
 
 	resolve, err := humansession.NewResolveUseCase(kanamepg.NewHumanSessionRepo(pool), nil, time.Now)
@@ -251,20 +251,6 @@ func buildCeremonySurface(
 	authorizeUC, err := ceremonyapp.NewAuthorizeUseCase(ceremonyapp.AuthorizeDeps{
 		Engine: engine, Clients: vaults, Authority: authority, Clock: time.Now,
 		CallTimeout: credentialLanePeerTimeout, FamilyTTL: lifespans.RefreshTTL,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ceremony: %w", err)
-	}
-	// Обмен — под сроком операции, видимым порту сверки секрета: мост
-	// фундамента даёт порту срок одного вызова, а сверка ждёт места
-	// вычисления до срока операции (kaname#892). Величина — та же, что у
-	// церемонии (Config.OperationTimeout).
-	exchange, err := ceremonyport.NewOperationScope(engine, operationDeadline)
-	if err != nil {
-		return nil, fmt.Errorf("ceremony: %w", err)
-	}
-	exchangeUC, err := ceremonyapp.NewExchangeUseCase(ceremonyapp.ExchangeDeps{
-		Engine: exchange, Units: vaults, SettleTimeout: credentialLanePeerTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
@@ -304,6 +290,37 @@ func buildCeremonySurface(
 		slog.Int("authorize_per_source_per_sec", cfg.AuthN.ClientToken.AuthorizePerSourcePerSec),
 		slog.Int("authorize_in_flight_ceiling", cfg.AuthN.ClientToken.AuthorizeInFlightCeiling))
 	return &ceremonySurface{Authorize: authorize, Discovery: discovery, Token: token, Census: census}, nil
+}
+
+// ceremonyExchange собирает церемонию фундамента и обмен над ней.
+//
+// Обмен идёт под сроком операции, видимым порту сверки секрета: мост
+// фундамента даёт порту срок одного вызова, а сверка ждёт места вычисления до
+// срока операции (kaname#892). Срок обёртки берётся из той же настройки, что
+// срок операции церемонии (`Config.OperationTimeout`): две записи одного срока
+// разошлись бы молча. Урегулирование запроса обмена — под сроком settle.
+//
+// Отделено от сборки поверхности затем, чтобы привязка обмена к сроку операции
+// судилась без базы (ceremony_exchange_scope_test.go): обмен мимо обёртки
+// оставлял бы зелёными и пробу обёртки, и пробы корня на одном процессоре.
+func ceremonyExchange(cfg oauthceremony.Config, ports oauthceremony.Ports, units ceremonyapp.RequestUnits,
+	settle time.Duration,
+) (*oauthceremony.Ceremony, *ceremonyapp.ExchangeUseCase, error) {
+	engine, err := oauthceremony.New(cfg, ports)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ceremony: %w", err)
+	}
+	exchange, err := ceremonyport.NewOperationScope(engine, cfg.OperationTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ceremony: %w", err)
+	}
+	exchangeUC, err := ceremonyapp.NewExchangeUseCase(ceremonyapp.ExchangeDeps{
+		Engine: exchange, Units: units, SettleTimeout: settle,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("ceremony: %w", err)
+	}
+	return engine, exchangeUC, nil
 }
 
 // ceremonyAuthorizePace — оси точки авторизации из настройки (приёмка
