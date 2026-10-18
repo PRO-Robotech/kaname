@@ -23,7 +23,7 @@ erDiagram
   accounts ||--o{ roles : "accountId (custom)"
   groups ||--o{ group_members : "groupId"
   roles ||--o{ access_bindings : "roleId"
-  access_bindings ||--o{ access_binding_subjects : "bindingId"
+  access_bindings ||--|{ access_binding_subjects : "bindingId"
   service_accounts ||--o| service_account_oauth_clients : "svaId"
   users ||--o{ user_oauth_clients : "userId"
 ```
@@ -38,7 +38,7 @@ erDiagram
     <tr><td><code>service_accounts</code></td><td>Машинные субъекты</td><td>UNIQUE имя per-Account; <code>enabled</code></td></tr>
     <tr><td><code>groups</code> · <code>group_members</code></td><td>Группы и их члены</td><td>UNIQUE имя per-Account; членство (type, id)</td></tr>
     <tr><td><code>roles</code> · <code>role_rule_selectors</code></td><td>Роли и правила (rules)</td><td>partial-UNIQUE имя per-scope; CHECK <code>roles_scope_xor</code>; OCC <code>xmin</code></td></tr>
-    <tr><td><code>access_bindings</code> · <code>access_binding_subjects</code></td><td>Привязки доступа + мульти-субъекты</td><td>UNIQUE активного гранта; <code>status</code>; <code>deletion_protection</code></td></tr>
+    <tr><td><code>access_bindings</code> · <code>access_binding_subjects</code></td><td>Привязки доступа + мульти-субъекты</td><td>UNIQUE активного гранта; <code>status</code>; <code>deletion_protection</code>; у выдачи ≥1 строка набора — отложенная до коммита проверка <code>access_bindings_carry_a_subject</code></td></tr>
     <tr><td><code>service_account_oauth_clients</code></td><td>Ключи SA. Своя строка ключа; клиент называется её идентификатором</td><td>UNIQUE <code>sva_id</code>; FK <code>ON DELETE RESTRICT</code></td></tr>
     <tr><td><code>user_oauth_clients</code></td><td>Персональные токены User (открытая половина ключа; клиент называется идентификатором строки)</td><td>N:1; FK <code>ON DELETE CASCADE</code></td></tr>
     <tr><td><code>operations</code></td><td>LRO-журнал (async-мутации)</td><td>corelib operations-таблица; denormalized <code>account_id</code></td></tr>
