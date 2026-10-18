@@ -116,22 +116,28 @@ func atfReadCatalog(t *testing.T) atfCatalog {
 	return c
 }
 
-// atfRole — роль из посева цепи: строка выдачи ссылается на неё внешним ключом.
+// atfRole — системная роль владельца аккаунта из посева цепи (та же, что у
+// обратного заполнения владельцев): выдача на аккаунт — её законная область.
 func atfRole(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var id string
-	require.NoError(t, db.QueryRow(`SELECT id FROM kaname.roles ORDER BY id LIMIT 1`).Scan(&id),
-		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев цепи несёт хотя бы одну роль")
+	require.NoError(t, db.QueryRow(`SELECT id FROM kaname.roles WHERE id = 'rol' || substr(md5('owner'), 1, 17)`).Scan(&id),
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев цепи несёт роль владельца аккаунта")
 	return id
 }
 
-// atfInsert вставляет выдачу с данной целью; i различает строки.
-func atfInsert(db *sql.DB, role string, i int, target string) error {
-	tag := strconv.Itoa(8630 + i)
+// atfInsert вставляет выдачу с данной целью; i различает строки. Субъект —
+// живая личность, область — её аккаунт: стражи ссылок выдачи судят обе
+// ссылки на вставке, и фикстура строит то, что строит продукт.
+func atfInsert(t *testing.T, db *sql.DB, role string, i int, target string) error {
+	t.Helper()
+	tag := "atf" + strconv.Itoa(8630+i)
+	person := serSeedPerson(t, db, tag)
+	acc := "acc" + strings.Repeat("0", 17-len(tag)) + tag
 	_, err := db.Exec(`INSERT INTO kaname.access_bindings
 	    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
 	  VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5::jsonb)`,
-		"acbatf"+tag, "usratf"+tag, role, "accatf"+tag, target)
+		"acb"+tag, person, role, acc, target)
 	return err
 }
 
@@ -166,10 +172,10 @@ func TestAccessBindingTargetForm_HeadRefusesTheFormOutsideTheContract(t *testing
 	role := atfRole(t, db)
 
 	for i, legal := range atfLegal {
-		require.NoError(t, atfInsert(db, role, i, legal), "законная цель %s принимается", legal)
+		require.NoError(t, atfInsert(t, db, role, i, legal), "законная цель %s принимается", legal)
 	}
 	for i, bad := range atfOutside {
-		err := atfInsert(db, role, 100+i, bad)
+		err := atfInsert(t, db, role, 100+i, bad)
 		if err == nil {
 			t.Errorf("вставка: база на версии %d ПРИНЯЛА цель %s вне контракта — форму держит только писатель",
 				c.head(), bad)
@@ -208,7 +214,7 @@ func TestAccessBindingTargetForm_MigrationAppliesOnLiveRows(t *testing.T) {
 	db := serOpenAt(t, c.preceding())
 	role := atfRole(t, db)
 	for i, legal := range atfLegal {
-		require.NoError(t, atfInsert(db, role, i, legal), "Дано: законная цель %s лежит до наката", legal)
+		require.NoError(t, atfInsert(t, db, role, i, legal), "Дано: законная цель %s лежит до наката", legal)
 	}
 	total, outside := atfViolators(t, db)
 	t.Logf("перепись на версии %d: строк выдач %d, из них вне формы %d", c.preceding(), total, outside)
@@ -220,14 +226,14 @@ func TestAccessBindingTargetForm_MigrationAppliesOnLiveRows(t *testing.T) {
 	require.Equal(t, total, after, "накат не трогает ни одной строки")
 
 	require.NoError(t, goose.DownTo(db, ".", c.preceding()), "откат %s", c.file)
-	require.NoError(t, atfInsert(db, role, 200, `{"resources": null}`), "после отката ограничения нет")
+	require.NoError(t, atfInsert(t, db, role, 200, `{"resources": null}`), "после отката ограничения нет")
 	_, err := db.Exec(`DELETE FROM kaname.access_bindings WHERE id = 'acbatf8830'`)
 	require.NoError(t, err)
 	require.NoError(t, goose.UpTo(db, ".", c.subject), "повторный накат")
 
 	// Близнец: та же цепь, одна строка вне формы — накат отказывает.
 	twin := serOpenAt(t, c.preceding())
-	require.NoError(t, atfInsert(twin, atfRole(t, twin), 300, `{"resources": null}`))
+	require.NoError(t, atfInsert(t, twin, atfRole(t, twin), 300, `{"resources": null}`))
 	err = goose.UpTo(twin, ".", c.subject)
 	require.Error(t, err, "близнец: строка вне формы останавливает накат")
 	require.Contains(t, err.Error(), atfConstraint, "близнец: отказ называет ограничение формы")

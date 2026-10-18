@@ -65,9 +65,10 @@ func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
+	// Роль владельца аккаунта из посева цепи: выдача на аккаунт — её законная область.
 	var role string
-	if err := pool.QueryRow(ctx, `SELECT id FROM kaname.roles ORDER BY id LIMIT 1`).Scan(&role); err != nil {
-		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев цепи несёт хотя бы одну роль: %v", err)
+	if err := pool.QueryRow(ctx, `SELECT id FROM kaname.roles WHERE id = 'rol' || substr(md5('owner'), 1, 17)`).Scan(&role); err != nil {
+		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев цепи несёт роль владельца аккаунта: %v", err)
 	}
 
 	var judged int
@@ -78,6 +79,19 @@ func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(ctx) }()
+
+			// Субъект и область — живые: стражи ссылок выдачи судят их на
+			// вставке. Аккаунт раньше владельца — отложенный ключ владельца
+			// проверяется на фиксации, которой здесь нет (транзакция откатывается).
+			tenant := fmt.Sprintf("atf%04d", i)
+			acc, usr := "acc"+tenant, "usr"+tenant
+			if _, err := tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $1, $2)`, acc, usr); err != nil {
+				t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура): аккаунт: %v", err)
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO kaname.users (id, external_id, email, account_id)
+			    VALUES ($1, $1, $1 || '@example.invalid', $2)`, usr, acc); err != nil {
+				t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура): личность: %v", err)
+			}
 
 			// Решение о доступе — на законной форме.
 			if f.legal {
@@ -106,7 +120,7 @@ func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 				_, err = tx.Exec(ctx, `INSERT INTO kaname.access_bindings
 				    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
 				  VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5::jsonb)`,
-					id, "usratf"+id, role, "accatf"+id, target)
+					id, usr, role, acc, target)
 				if err != nil {
 					_, _ = tx.Exec(ctx, `ROLLBACK TO SAVEPOINT f`)
 				}
