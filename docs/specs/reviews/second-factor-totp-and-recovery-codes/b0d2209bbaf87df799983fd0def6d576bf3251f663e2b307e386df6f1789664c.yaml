@@ -51,10 +51,24 @@ event_body: acceptance-reviewer · APPROVED · b0d2209bbaf87df799983fd0def6d576b
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#777
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6244540747
+  node_id: "IC_kwDOUO26pM8AAAABdDQhSw"
+  url: "https://github.com/PRO-Robotech/kaname/issues/777#issuecomment-6244540747"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6244540747"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T02:04:58Z"
+  body_sha256: "b1df0e0b4374f29f16be2df92e551506141b2b08ad821ffb26cbf1b902cf6c35"
+  subject_sha256: "b0d2209bbaf87df799983fd0def6d576bf3251f663e2b307e386df6f1789664c"
+  subject_revision_commit: "abbf65c8577dc46d6d15f9b213e6d335704eae29"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-18T02:04:58Z"
   why: Санкцию выпускает внешнее событие курьера, а не эта запись.
 attribution:
   reviewer_kind: claude_agent
