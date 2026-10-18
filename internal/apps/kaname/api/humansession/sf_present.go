@@ -135,9 +135,15 @@ func (p presenter) prepare(ctx context.Context, userID domain.UserID, in SecondF
 				return out, serr
 			}
 		}
-		cand := p.deps.Sets.SetCandidate(stored, in.Code)
+		cand, cerr := p.deps.Sets.SetCandidate(ctx, stored, in.Code)
 		if !enrolled {
 			out.verdict = verdictNotEnrolled
+			return out, nil
+		}
+		if cerr != nil {
+			// Вызов кончился до места вычисления: сверка не состоялась — как
+			// исчерпание ёмкости, предъявлением это не судится (kaname#892).
+			out.verdict, out.outcome = verdictCapacity, PresentationCapacityExhausted
 			return out, nil
 		}
 		if !cand.Ready() {

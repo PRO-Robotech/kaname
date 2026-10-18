@@ -4,10 +4,11 @@
 // processor_gate_order_test.go — место вычисления достаётся ждущим В ПОРЯДКЕ
 // ПРИХОДА (kaname#882).
 //
-// На этом порядке держится предел ожидания одной проверки, который учитывает
-// срок операции церемонии (`ceremonyOperationDeadline`): ждущих не больше
-// ёмкости, и при порядке прихода каждый ждёт не дольше ёмкость × стоимость
-// одной проверки. При «последний пришедший — первым» ранний ждущий под
+// На этом порядке держится оценка ожидания одной проверки, из которой
+// считается срок операции церемонии (`ceremonyOperationDeadline`): ждущих не
+// больше ёмкости, и при порядке прихода каждый ждёт около ёмкость × стоимость
+// одной проверки (оценка, а не предел: чеканка хеша идёт мимо мест, а предел —
+// контекст вызывающего, kaname#892). При «последний пришедший — первым» ранний ждущий под
 // непрерывным потоком проверок обгоняется каждым новым, и его ожидание
 // предела не имеет. Пробы окончаний (`processor_gate_test.go`) этого не
 // различают: шесть разом пришедших кончаются по одной при любом порядке.
@@ -19,6 +20,7 @@
 package passwordverify
 
 import (
+	"context"
 	"slices"
 	"sync"
 	"testing"
@@ -35,7 +37,10 @@ func TestProcessorGate_WaitersTakeTheSlotInArrivalOrder(t *testing.T) {
 		if got := cap(g.slots); got != 1 {
 			t.Fatalf("предпосылка: мест вычисления %d, ожидалось одно", got)
 		}
-		holder := g.acquire()
+		holder, err := g.acquire(context.Background())
+		if err != nil {
+			t.Fatalf("предпосылка: свободное место не занято: %v", err)
+		}
 
 		const waiters = 8
 		var (
@@ -44,7 +49,11 @@ func TestProcessorGate_WaitersTakeTheSlotInArrivalOrder(t *testing.T) {
 		)
 		for i := range waiters {
 			go func() {
-				release := g.acquire()
+				release, err := g.acquire(context.Background())
+				if err != nil {
+					t.Errorf("ждущий %d без отмены не получил места: %v", i, err)
+					return
+				}
 				mu.Lock()
 				got = append(got, i)
 				mu.Unlock()

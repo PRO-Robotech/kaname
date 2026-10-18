@@ -50,7 +50,7 @@ func TestVerify_ComputationsBeyondTheProcessorsFinishOneByOne(t *testing.T) {
 	stored := verifierOf(t, argon2idValue(t, rightPassword, 65536, 1, 4, 32))
 	// Прогрев: первое вычисление процесса платит ещё и за первое касание
 	// памяти, и без прогрева первое окончание стояло бы дальше от остальных.
-	require.Equal(t, passwordverify.OutcomeMatched, v.Verify(stored, rightPassword).Outcome, "прогрев")
+	require.Equal(t, passwordverify.OutcomeMatched, verify(t, v, stored, rightPassword).Outcome, "прогрев")
 
 	const n = 6
 	start := make(chan struct{})
@@ -62,7 +62,7 @@ func TestVerify_ComputationsBeyondTheProcessorsFinishOneByOne(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			res := v.Verify(stored, rightPassword)
+			res := verify(t, v, stored, rightPassword)
 			finished[i] = time.Since(t0)
 			if res.Outcome != passwordverify.OutcomeMatched {
 				t.Errorf("проверка %d: исход %s, ожидался «совпал»", i, res.Outcome)
