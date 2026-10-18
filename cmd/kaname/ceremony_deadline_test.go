@@ -5,11 +5,11 @@
 // проверок секрета на процессоре (kaname#882).
 //
 // Проверка секрета клиента — вычисление argon2id, отмены не знающее. Все места
-// ёмкости проверяющего (вход людей и сверка церемонии) делят процессор; занятые
-// разом, они кончаются не раньше, чем ёмкость × стоимость одной проверки,
-// измеренной в одиночку на том же процессоре. Срок операции, считавший каждый
-// вызов «оператором базы порядка миллисекунды», отказывал по сроку всем
-// одновременным обменам разом.
+// ёмкости проверяющего (вход людей и сверка церемонии) ждут места вычисления по
+// очереди; занятые разом, они кончаются не позже, чем ёмкость × стоимость одной
+// проверки, измеренной в одиночку на тех же процессорах. Срок операции,
+// считавший каждый вызов «оператором базы порядка миллисекунды», отказывал по
+// сроку всем одновременным обменам разом.
 package main
 
 import (
@@ -19,9 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCeremonyOperationDeadline_CoversAFullQueueOfChecks — срок не короче двух
-// пределов вызова базы плюс ёмкость × стоимость одной проверки, с запасом;
-// растёт с ёмкостью и со стоимостью.
+// TestCeremonyOperationDeadline_CoversAFullQueueOfChecks — срок — два предела
+// вызова базы плюс ёмкость × стоимость одной проверки (запас уже в стоимости:
+// потолок огибающей); растёт с ёмкостью и со стоимостью.
 func TestCeremonyOperationDeadline_CoversAFullQueueOfChecks(t *testing.T) {
 	const cost = 200 * time.Millisecond
 	for _, capacity := range []int{1, 2, 8, 32} {
@@ -30,8 +30,8 @@ func TestCeremonyOperationDeadline_CoversAFullQueueOfChecks(t *testing.T) {
 		queue := time.Duration(capacity) * cost
 		require.GreaterOrEqualf(t, got, 2*credentialLanePeerTimeout+queue,
 			"ёмкость %d: срок %v не покрывает очередь проверок %v сверх двух пределов вызова базы", capacity, got, queue)
-		require.Equalf(t, 2*credentialLanePeerTimeout+queue+queue/ceremonyCheckCostHeadroomDivisor, got,
-			"ёмкость %d: срок — два предела вызова базы плюс очередь с запасом в 1/%d", capacity, ceremonyCheckCostHeadroomDivisor)
+		require.Equalf(t, 2*credentialLanePeerTimeout+queue, got,
+			"ёмкость %d: срок — два предела вызова базы плюс очередь проверок", capacity)
 	}
 	small, err := ceremonyOperationDeadline(2, cost)
 	require.NoError(t, err)

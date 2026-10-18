@@ -625,7 +625,8 @@ func (w *ceremonyWorld) buildSurface() {
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
 	source := issuingsource.New(cfg.AuthN.TrustDomain())
-	ceremony, err := buildCeremonySurface(w.ctx, w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w),
+	checker := ceremonySecretChecker(w)
+	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, checker, ceremonySecretCheckCost(w, checker),
 		metrics.NewRegistry().LoginLaneRecorder(), source, logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
@@ -675,15 +676,39 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	return v
 }
 
+// ceremonySecretCheckCost — стоимость одной проверки на этих процессорах тем же
+// путём, что у корня: потолок огибающей над проверяющим мира, откалиброванной
+// по классу, которым пишется секрет клиента (`ceremonySecretHasher`). Мера —
+// настенные часы, как у корня: срок операции мира тогда о тех же процессорах,
+// что и его обмены.
+func ceremonySecretCheckCost(w *ceremonyWorld, checker *passwordverify.Verifier) time.Duration {
+	w.t.Helper()
+	envelope, err := passwordverify.NewEnvelope(checker, passwordverify.NopEnvelopeObserver{}, passwordverify.WallClockCostMeter)
+	if err != nil {
+		w.fixture("огибающая проверяющего: %v", err)
+	}
+	declared := domain.PasswordCostClass{Format: domain.PasswordHashFormatArgon2id, Params: ceremonySecretClassParams()}
+	if _, err := envelope.Admit(w.ctx, declared, passwordverify.EnvelopeTriggerStartup); err != nil {
+		w.fixture("калибровка класса секрета клиента: %v", err)
+	}
+	return envelope.Floor()
+}
+
+// ceremonySecretClassParams — параметры класса секрета клиента мира: пол службы
+// (`interactive_clients_secret_verifier_form_ck`).
+func ceremonySecretClassParams() map[domain.PasswordHashCostParam]uint32 {
+	return map[domain.PasswordHashCostParam]uint32{
+		domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4,
+	}
+}
+
 // ceremonySecretHasher — хешер секрета клиента: argon2id разметкой PHC на полу
 // службы (`interactive_clients_secret_verifier_form_ck`).
 func ceremonySecretHasher(w *ceremonyWorld) *passwordverify.Hasher {
 	w.t.Helper()
 	hasher, err := passwordverify.NewHasher(passwordverify.Declared{
 		Format: domain.PasswordHashFormatArgon2id,
-		Params: map[domain.PasswordHashCostParam]uint32{
-			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4,
-		},
+		Params: ceremonySecretClassParams(),
 	})
 	if err != nil {
 		w.fixture("хешер секрета клиента: %v", err)
