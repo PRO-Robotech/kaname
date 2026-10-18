@@ -2,7 +2,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Проба стража НОВЫХ BLOB'ОВ отправки (#894; образец — kacho-workspace#1189):
+# Проба стража НОВЫХ BLOB'ОВ отправки (kaname#894; образец — kacho-workspace#1189):
 # хук отправки отвергает БИНАРЬ и файл БОЛЬШЕ 1 МБ среди blob'ов, которые
 # отправка вносит в публичную историю, и называет файл.
 #
@@ -203,7 +203,7 @@ expect_refuse() {  # <что обязан назвать> <описание> <в
     res="$(judge "$3")"
     if [ "$(head -1 <<< "$res")" -ne 1 ]; then
         fail "$2 — страж вышел $(head -1 <<< "$res") вместо 1: файл уехал бы в публичную историю"
-    elif ! tail -n +2 <<< "$res" | grep -qF -- "$1"; then
+    elif ! grep -qF -- "$1" <<< "$(tail -n +2 <<< "$res")"; then
         fail "$2 — отказ не называет «$1»"
     fi
 }
@@ -214,7 +214,7 @@ hook_refuse() {  # <что обязан назвать> <описание> <вх
     res="$(hook "$in" "$@")"
     if [ "$(head -1 <<< "$res")" -ne 1 ]; then
         fail "$d — хук вышел $(head -1 <<< "$res") вместо 1: файл уехал бы в публичную историю"
-    elif ! tail -n +2 <<< "$res" | grep -qF -- "$name"; then
+    elif ! grep -qF -- "$name" <<< "$(tail -n +2 <<< "$res")"; then
         fail "$d — отказ хука не называет «$name»"
     fi
 }

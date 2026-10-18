@@ -2,7 +2,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Страж НОВЫХ BLOB'ОВ отправки (#894; образец и родитель —
+# Страж НОВЫХ BLOB'ОВ отправки (kaname#894; образец и родитель —
 # kacho-workspace#1189). Зовёт его scripts/hooks/pre-push вторым, после стража
 # правила, — до обхода KANAME_SKIP_PREPUSH. Проба —
 # scripts/hooks/prepush-added-files-inject.sh.
