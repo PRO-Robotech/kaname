@@ -160,6 +160,16 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// производителю. Числа здесь больше нет намеренно — у выписанного числа
 		// нет владельца, и переживает свой замер оно молча; сегодняшнее печатает
 		// перепись гейта (задача kacho#2018).
+		//
+		// Исключение класса — проверка «у выдачи есть строка набора субъектов»
+		// (`access_bindings_carry_a_subject`, kaname#902). Запрос без субъектов
+		// отвергается до записи, и каждый путь записи выдачи пишет набор в той же
+		// транзакции; сработавшая проверка значит «служба записала выдачу без
+		// набора». Вызывающему исправить нечего — ответ фиксированный INTERNAL, а
+		// сообщение сервера (в нём идентификатор выдачи) наружу не идёт.
+		if pgErr.ConstraintName == bindingCarriesASubjectConstraint {
+			return iamerr.Wrapf(iamerr.ErrInternal, "access binding subject set")
+		}
 		return iamerr.Wrapf(integritySentinel(pgErr, kindHint), "%s", integrityText(pgErr, kindHint, idHint))
 	case pgfault.Unique: // unique_violation
 		// Реестр выданных идентификаторов людей (kaname#664, Р11): вставка строки
@@ -683,6 +693,11 @@ func IsDeletingVerb(verb string) bool {
 func isMembershipCarriesRights(pgErr *pgconn.PgError, kindHint string) bool {
 	return pgErr.ConstraintName == "membership_carrying_rights_is_kept" || kindHint == "Membership.Remove"
 }
+
+// bindingCarriesASubjectConstraint — имя отложенной проверки «у выдачи есть
+// строка набора субъектов» (миграция
+// `20261018214804_access_binding_carries_a_subject.sql`, kaname#902).
+const bindingCarriesASubjectConstraint = "access_bindings_carry_a_subject"
 
 // integritySentinel — какой полосе принадлежит отказ 23000.
 //
