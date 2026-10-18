@@ -323,7 +323,12 @@ func runServe(cfg config.Config) error {
 	// Отказ ФАТАЛЕН на каждом звене: собранная модель, не прошедшая допуск, —
 	// это данные оператора, расширяющие модель прав установки, и мягкий проход
 	// здесь означал бы контроль, который не откажет ни разу.
-	if _, cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
+	//
+	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
+	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
+	// (kaname#865, Д10) — второй композиции для этого не заводится.
+	composedReport, cErr := installComposedModel(logger, deliveredManifests)
+	if cErr != nil {
 		return cErr
 	}
 
@@ -351,9 +356,20 @@ func runServe(cfg config.Config) error {
 	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
 	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
 	// и страж ниже судят доставку целиком, как прежде.
-	appliedManifests, _, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
 	if aErr != nil {
 		return aErr
+	}
+
+	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
+	// паритета, ролей и посева (kaname#865, Д10). Модель процесса выше собрана
+	// из всей доставки; модуль, документ которого каталог пропустил либо
+	// отверг и который принёс в модель тип вне канона, останавливает пуск:
+	// модель доступа не собирается из документа, который каталог отверг. Довод
+	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
+	// `model_catalog_agreement_wiring_test.go`.
+	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
+		return mcErr
 	}
 
 	catalogRepo := kanamepg.NewCatalogRepo(pool)

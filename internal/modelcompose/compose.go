@@ -144,10 +144,19 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 			out.WriteString("\n")
 			out.Write(blk)
 			rep.Composed = append(rep.Composed, res.ObjectType)
+			// Отнесение — здесь же, где блок добавлен: тип вне канона принадлежит
+			// модулю, из документа которого собран (kaname#865, Д10).
+			if rep.ComposedBy == nil {
+				rep.ComposedBy = make(map[string][]string)
+			}
+			rep.ComposedBy[m.Module] = append(rep.ComposedBy[m.Module], res.ObjectType)
 			declared[res.ObjectType] = struct{}{}
 		}
 	}
 	sort.Strings(rep.Composed)
+	for _, types := range rep.ComposedBy {
+		sort.Strings(types)
+	}
 	sort.Strings(rep.Reaffirmed)
 	sort.Strings(rep.PriorEdition)
 
