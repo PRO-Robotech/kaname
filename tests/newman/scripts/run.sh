@@ -210,6 +210,12 @@ _was_run() {
   return 1
 }
 
+# _remint_bootstrap — переиздание jwtBootstrap посевом (kaname#868); код — посева.
+_remint_bootstrap() {
+  python3 "$NEWMAN_DIR/../authz-fixtures/seed_own_stand.py" --remint-bootstrap \
+    --env-file "$NEWMAN_DIR/$ENV"
+}
+
 # run_one — прогон одной коллекции. Пишет out/<res>.json|.cli|.rc.
 run_one() {
   RAN_STEMS+=("$1")
@@ -247,8 +253,7 @@ run_one() {
   # вердикт называет коллекцию MISSING, а строка ниже — причину.
   if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
     local rrc=0
-    python3 "$NEWMAN_DIR/../authz-fixtures/seed_own_stand.py" --remint-bootstrap \
-      --env-file "$NEWMAN_DIR/$ENV" || rrc=$?
+    _remint_bootstrap || rrc=$?
     if [[ "$rrc" -ne 0 ]]; then
       echo "[remint] ${res}: jwtBootstrap НЕ переиздан (код ${rrc}) — коллекция не запускалась, условие не создано" >&2
       echo "remint-${rrc}" > "out/${res}.rc"
@@ -456,6 +461,19 @@ _is_delegated() {
 #
 # ТРИ ИСХОДА, И КОД ЧИТАЕТСЯ КАК ДАННЫЕ, а не как условие продолжения: `set -e`
 # оборвал бы прогонщик молча, до развилки.
+# С `--remint-bootstrap` предполёт спрашивает фронт ПЕРЕИЗДАННЫМ бутстрапом: его
+# предмет — годность посева к прогону, а бутстрап посева к этому моменту законно
+# старше своего срока (kaname#868); иначе предполёт отверг бы волну по сроку,
+# который прогонщик и так снимает перед каждой коллекцией.
+if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
+  _remint_rc=0
+  _remint_bootstrap || _remint_rc=$?
+  if [[ "$_remint_rc" -ne 0 ]]; then
+    echo "ПРОГОН НЕ СОСТОЯЛСЯ: jwtBootstrap не переиздан перед предполётом (код $_remint_rc) —" >&2
+    echo "условие не создано, вердикта о дереве нет НИ ОДНОГО." >&2
+    exit 75
+  fi
+fi
 _preflight_rc=0
 python3 "$NEWMAN_DIR/scripts/seed_preflight.py" \
   --env "$ENV" \
