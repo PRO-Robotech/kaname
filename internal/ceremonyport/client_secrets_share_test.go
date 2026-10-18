@@ -44,7 +44,7 @@ func newHoldingChecker(capacity int) *holdingChecker {
 	return &holdingChecker{capacity: capacity, entered: make(chan struct{}, 64), release: make(chan struct{})}
 }
 
-func (c *holdingChecker) VerifyPresented(domain.LoginVerifier, passwordverify.Presented) passwordverify.Result {
+func (c *holdingChecker) VerifyPresented(context.Context, domain.LoginVerifier, passwordverify.Presented) (passwordverify.Result, error) {
 	c.mu.Lock()
 	c.inFlight++
 	if c.inFlight > c.peak {
@@ -56,7 +56,7 @@ func (c *holdingChecker) VerifyPresented(domain.LoginVerifier, passwordverify.Pr
 	c.mu.Lock()
 	c.inFlight--
 	c.mu.Unlock()
-	return passwordverify.Result{Outcome: passwordverify.OutcomeMismatched}
+	return passwordverify.Result{Outcome: passwordverify.OutcomeMismatched}, nil
 }
 
 func (c *holdingChecker) Aligned() bool { return true }

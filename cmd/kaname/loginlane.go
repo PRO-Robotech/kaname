@@ -128,6 +128,10 @@ type loginLane struct {
 	// Им же сверяет секрет клиента церемония (`ceremony.go`): один пул
 	// вычислений под один бюджет памяти (`login.ValidateMemoryBudget`).
 	verifier *passwordverify.Verifier
+	// envelope — огибающая полосы входа над тем же проверяющим; её потолок —
+	// стоимость одной проверки на этих процессорах, из которой церемония
+	// выводит срок операции (`ceremonyOperationDeadline`, kaname#882).
+	envelope *passwordverify.Envelope
 	// letterWindow — окно писем подтверждения адреса (kaname#456, Р9): порог
 	// уборки строк кодов, по которым считается предел писем.
 	letterWindow time.Duration
@@ -139,6 +143,16 @@ func (l *loginLane) secretChecker() ceremonyport.SecretChecker {
 		return nil
 	}
 	return l.verifier
+}
+
+// secretCheckCost — стоимость одной проверки проверяющего на этих процессорах:
+// потолок огибающей, откалиброванный при старте (с запасом огибающей). Ноль —
+// полосы нет либо огибающая пуста; сборка церемонии такой срок отвергает.
+func (l *loginLane) secretCheckCost() time.Duration {
+	if l == nil || l.envelope == nil {
+		return 0
+	}
+	return l.envelope.Floor()
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -785,7 +799,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		freshness: cfg.AuthN.SelfServiceFreshness,
 		keys:      accessKeys, keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
 		loginChallenges: loginChallenges, stepUpChallenges: stepUpChallenges,
-		verifier: verifier, letterWindow: login.VerificationResendWindow,
+		verifier: verifier, envelope: envelope, letterWindow: login.VerificationResendWindow,
 	}, nil
 }
 

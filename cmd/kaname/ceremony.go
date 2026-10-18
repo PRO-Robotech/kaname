@@ -24,6 +24,10 @@
 //     занимает не больше половины его ёмкости (`ceremonyport.ClientSecrets`):
 //     поток на токен-эндпоинте не отнимает мест у входа людей, а ёмкость
 //     меньше двух под церемонией — отказ старта.
+//   - СРОК операции — из ёмкости проверяющего и стоимости одной проверки,
+//     откалиброванной при старте огибающей полосы входа
+//     (`ceremonyOperationDeadline`): сверки ждут места вычисления по очереди,
+//     и срок учитывает очередь (kaname#882).
 package main
 
 import (
@@ -51,13 +55,55 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
-// ceremonyOperationTimeout — срок ВСЕЙ операции церемонии (выдачи кода,
-// обмена, оборота). Вызовы портов операции идут подряд, и каждый — один оператор
-// базы порядка миллисекунды; предел одного вызова — credentialLanePeerTimeout.
-// Операции отведено два таких предела: один вызов вправе исчерпать свой, и
-// остальные укладываются во второй. Дольше — хранилище не отвечает, и клиент
-// повторяет запрос, а не ждёт.
-const ceremonyOperationTimeout = 2 * credentialLanePeerTimeout
+// ceremonyOperationDeadline — срок ВСЕЙ операции церемонии (выдачи кода,
+// обмена, оборота): два предела вызова базы плюс очередь проверок секрета на
+// процессоре (kaname#882).
+//
+// Слагаемых два, и они о разном:
+//
+//   - вызовы портов хранения идут подряд, и каждый — один оператор базы порядка
+//     миллисекунды; предел одного вызова — credentialLanePeerTimeout. Им
+//     отведено два таких предела: один вызов вправе исчерпать свой, и
+//     остальные укладываются во второй;
+//   - сверка секрета клиента — вычисление argon2id; начатое, оно отмены не
+//     знает. Сверки и проверки входа людей ждут места вычисления по очереди
+//     (мест не больше, чем процессоров, — `passwordverify`, места процессора),
+//     и все места ёмкости, занятые разом, кончаются за ёмкость × стоимость
+//     одной проверки, измеренной в одиночку на тех же процессорах. Это ОЦЕНКА,
+//     а не предел: чеканка хеша (`passwordverify.Hasher`) идёт мимо мест
+//     вычисления на тех же процессорах, и под ней очередь движется медленнее.
+//     Предел — сам этот срок: ожидание места прерывается контекстом операции
+//     (kaname#892), и сверка, не дождавшаяся места, кончается отказом к сроку,
+//     а не ответом после него. Мост фундамента зовёт порт сверки со сроком
+//     ОДНОГО вызова (`Config.PortTimeout`, credentialLanePeerTimeout), и этот
+//     срок короче очереди; сверка ждёт места под сроком операции, который ей
+//     видим через обёртку обмена (`ceremonyport.OperationScope`), а под сроком
+//     порта идёт только чтение проверочного значения из базы. Стоимость —
+//     потолок огибающей полосы входа (`passwordverify.Envelope.Floor`):
+//     калибровка при старте самого дорогого класса среди лежащих в хранилище
+//     и класса, которым пишутся и пароли, и секрет клиента, с запасом в
+//     четверть. Класс, допущенный огибающей позже старта, срок не двигает.
+//
+// Срок без второго слагаемого считал каждый вызов «оператором базы» и
+// отказывал по сроку всем одновременным обменам конфиденциального клиента
+// разом: 0 из 16 под `-race` на узле кластера (kaname#818) и на одном
+// процессоре (kaname#882, отказ `port_deadline` на выборке кода — срок
+// операции съели сверки). Ёмкость — допуск по памяти — до числа процессоров не
+// урезается: память проверки она уже держит, а на одном процессоре у сверки
+// церемонии рядом с входом людей не осталось бы ни одного места. До числа
+// процессоров урезаны места ВЫЧИСЛЕНИЯ: сверки сверх них не делят процессор
+// и не кончаются все разом, а идут по одной, и операции за ними выходят к
+// базе порознь, а не толпой на занятом процессоре.
+// Дольше срока — хранилище не отвечает, и клиент повторяет запрос, а не ждёт.
+func ceremonyOperationDeadline(capacity int, checkCost time.Duration) (time.Duration, error) {
+	switch {
+	case capacity <= 0:
+		return 0, fmt.Errorf("ceremony: the secret checker capacity %d is not positive; the queue of checks is not counted", capacity)
+	case checkCost <= 0:
+		return 0, fmt.Errorf("ceremony: the cost of one secret check %v is not positive; the queue of checks is not counted", checkCost)
+	}
+	return 2*credentialLanePeerTimeout + time.Duration(capacity)*checkCost, nil
+}
 
 // ceremonySurface — собранная поверхность церемонии.
 type ceremonySurface struct {
@@ -90,6 +136,7 @@ func buildCeremonySurface(
 	signer *tokensigner.Signer,
 	keys ceremonyport.KeySetSource,
 	secrets ceremonyport.SecretChecker,
+	secretCheckCost time.Duration,
 	share ceremonyport.ShareObserver,
 	source *issuingsource.Rule,
 	logger *slog.Logger,
@@ -147,6 +194,16 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
+	// Срок операции учитывает очередь проверок на процессоре: без неё
+	// одновременные обмены отказывали бы по сроку разом.
+	operationDeadline, err := ceremonyOperationDeadline(secrets.Capacity(), secretCheckCost)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("ceremony operation deadline",
+		"secret_checker_capacity", secrets.Capacity(),
+		"secret_check_cost", secretCheckCost.String(),
+		"operation_deadline", operationDeadline.String())
 	engine, err := oauthceremony.New(oauthceremony.Config{
 		AuthorizationEndpoint: authorizeURL,
 		TokenEndpoint:         tokenURL,
@@ -164,7 +221,7 @@ func buildCeremonySurface(
 		RefreshTokenIssuance: oauthceremony.RefreshTokenIssuanceAlways,
 		MinParameterEntropy:  ceremonyhttp.StateFloor,
 		PortTimeout:          credentialLanePeerTimeout,
-		OperationTimeout:     ceremonyOperationTimeout,
+		OperationTimeout:     operationDeadline,
 		NewGrantID:           ceremonyport.NewGrantID,
 	}, oauthceremony.Ports{
 		Clients:            vaults,
@@ -198,8 +255,16 @@ func buildCeremonySurface(
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
 	}
+	// Обмен — под сроком операции, видимым порту сверки секрета: мост
+	// фундамента даёт порту срок одного вызова, а сверка ждёт места
+	// вычисления до срока операции (kaname#892). Величина — та же, что у
+	// церемонии (Config.OperationTimeout).
+	exchange, err := ceremonyport.NewOperationScope(engine, operationDeadline)
+	if err != nil {
+		return nil, fmt.Errorf("ceremony: %w", err)
+	}
 	exchangeUC, err := ceremonyapp.NewExchangeUseCase(ceremonyapp.ExchangeDeps{
-		Engine: engine, Units: vaults, SettleTimeout: credentialLanePeerTimeout,
+		Engine: exchange, Units: vaults, SettleTimeout: credentialLanePeerTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ceremony: %w", err)
