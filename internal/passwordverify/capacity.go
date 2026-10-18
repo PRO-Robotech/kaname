@@ -23,6 +23,7 @@ package passwordverify
 import (
 	"context"
 	"fmt"
+	"runtime"
 )
 
 // capacityGate — ёмкость как набор мест.
@@ -91,3 +92,40 @@ func (g *capacityGate) acquireWait(ctx context.Context) (func(), error) {
 // читает полоса, делящая проверяющего с полосой входа (сверка секрета клиента
 // церемонии), чтобы занимать не больше своей доли.
 func (v *Verifier) Capacity() int { return cap(v.capacity.slots) }
+
+// processorGate — места ВЫЧИСЛЕНИЯ: не больше, чем процессоров у процесса, и
+// не больше ёмкости (kaname#882).
+//
+// Ёмкость — предел допуска по памяти. Вычисление упирается в процессор, и
+// сверх числа процессоров одновременные вычисления только делят его: все
+// кончаются вместе и позже всех, а следующее за проверкой действие (оператор
+// базы со своим сроком) начинается у всех разом на занятом процессоре —
+// одновременные операции отказывали по сроку разом. Вычисление сверх мест
+// ждёт своего в порядке прихода (ожидающие отправители канала будятся по
+// очереди; держит `TestProcessorGate_WaitersTakeTheSlotInArrivalOrder`) и
+// кончается по одному: пропускная способность та же, задержка каждого — не
+// больше.
+//
+// Срока ожидания у места нет намеренно, как нет отмены у самого вычисления:
+// ждущих не больше ёмкости, и ожидание ограничено ёмкостью × стоимость одной
+// проверки. Эту величину учитывает срок операции вызывающего (церемония —
+// `ceremonyOperationDeadline`). Число процессоров читается при построении
+// (`runtime.GOMAXPROCS`): процессоры, отведённые процессу позже, места не
+// добавят.
+type processorGate struct {
+	slots chan struct{}
+}
+
+func newProcessorGate(capacity int) *processorGate {
+	n := min(runtime.GOMAXPROCS(0), capacity)
+	return &processorGate{slots: make(chan struct{}, max(n, 1))}
+}
+
+// acquire занимает место процессора, дождавшись его; возвращает освобождение.
+func (g *processorGate) acquire() (release func()) {
+	g.slots <- struct{}{}
+	return func() { <-g.slots }
+}
+
+// ProcessorSlots — мест вычисления: меньшее из процессоров процесса и ёмкости.
+func (v *Verifier) ProcessorSlots() int { return cap(v.processor.slots) }

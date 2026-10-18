@@ -27,7 +27,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/login</code></td><td>вход паролем, необязательно — с кодом второго фактора</td><td><code>login</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/logout</code></td><td>выход: запись сессии гасится на стороне сервера</td><td><code>logout</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/password</code></td><td>смена пароля с подтверждением текущим; все прочие сессии человека завершаются</td><td><code>password</code></td><td>да</td></tr>
-    <tr><td><code>POST /iam/v1/auth/password/enroll</code></td><td>заведение первого пароля из свежей сессии человеком, у которого пароля нет; сессии не трогаются</td><td><code>password-enroll</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/password/enroll</code></td><td>заведение первого пароля из свежей сессии человеком, у которого пароля нет; сессии не трогаются</td><td><code>password-enroll</code></td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/auth/recovery</code></td><td>запрос кода восстановления письмом</td><td><code>recovery</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/recovery/complete</code></td><td>предъявление кода с новым паролем; отвечает как вход</td><td><code>recovery-complete</code></td><td>нет</td></tr>
     <tr><td><code>GET /iam/v1/auth/second-factor</code></td><td>состояние второго фактора</td><td>—</td><td>да</td></tr>

@@ -20,12 +20,15 @@ package passwordverify
 //
 // # Порядок внутри проверки — несущий, а не стилистический
 //
-//	ёмкость   →  материал есть?  →  признак формата  →  разбор тела и
-//	области допустимости  →  потолок  →  вычисление
+//	ёмкость   →  место процессора  →  материал есть?  →  признак формата  →
+//	разбор тела и области допустимости  →  потолок  →  вычисление
 //
 //   - ёмкость занимается ПЕРВОЙ: иначе полоса «материала нет» её не занимала
 //     бы, и под нагрузкой отказ по ёмкости сообщал бы, есть ли у личности
 //     пароль (15.4);
+//   - место процессора — сразу за ёмкостью и тоже ДО вопроса о материале:
+//     ожидание места не зависит от того, есть ли материал (kaname#882,
+//     `capacity.go`);
 //   - разбор идёт РАНЬШЕ сверки с потолком: значение за нижней границей
 //     допустимости обязано давать «тело не разбирается», а не «выше потолка», —
 //     библиотека на части таких значений падает, а при памяти ниже `8·p` молча
@@ -82,7 +85,10 @@ type Result struct {
 // смена настройки молча сделала бы нечитаемой уже лежащую популяцию.
 type Verifier struct {
 	capacity *capacityGate
-	observer Observer
+	// processor — места вычисления (не больше процессоров): занимается после
+	// ёмкости на всё время разбора и вычисления (`capacity.go`).
+	processor *processorGate
+	observer  Observer
 	// decoy — значение, против которого ВЫЧИСЛЯЕТСЯ проверка при отсутствии
 	// материала (PWV-06, Ф1-48): без него полоса «материала нет» отвечала бы
 	// мгновенно, и время отказа было бы оракулом существования личности. Исход
@@ -105,7 +111,7 @@ func New(capacity int, observer Observer) (*Verifier, error) {
 		return nil, fmt.Errorf("password_verifier.observer: required — " +
 			"проверяющий без приёмника исходов молчит обо всех отказах разом")
 	}
-	return &Verifier{capacity: gate, observer: observer}, nil
+	return &Verifier{capacity: gate, processor: newProcessorGate(capacity), observer: observer}, nil
 }
 
 // SetDecoy — значение объявленного класса записи, которым выравнивается полоса
@@ -150,6 +156,7 @@ func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result 
 		return v.observed(Result{Outcome: OutcomeCapacityExhausted})
 	}
 	defer release()
+	defer v.processor.acquire()()
 
 	// Отсутствие материала — ОТДЕЛЬНЫЙ исход, и оно не приводится к пустой
 	// строке: сравнение пустого с пустым дало бы «совпал» у человека, пароля не
@@ -188,6 +195,7 @@ func (v *Verifier) VerifyPresented(stored domain.LoginVerifier, presented Presen
 // сама, на всё время прогона; исход ей не событие полосы — сосчитанный, он
 // читался бы как поток неверных паролей при каждом старте.
 func (v *Verifier) compute(stored domain.LoginVerifier, presented string) Result {
+	defer v.processor.acquire()()
 	return inspectAndCompare(stored.Reveal(), presented, true)
 }
 
@@ -536,6 +544,7 @@ func (v *Verifier) SetCandidate(stored domain.LoginVerifier, presented string) S
 		return SetCandidate{refusal: OutcomeCapacityExhausted}
 	}
 	defer release()
+	defer v.processor.acquire()()
 	if stored.IsZero() {
 		if !v.decoy.IsZero() {
 			_ = inspectAndCompare(v.decoy.Reveal(), presented, true)
