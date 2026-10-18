@@ -270,30 +270,55 @@ func Test865_31_RaceOfTwoContentsUnderOneRevision(t *testing.T) {
 	t.Logf("исходы 20 прогонов (открытый/закрытый): %v", seen)
 }
 
-// TestFingerprintSeesTheAppliedPair — отпечаток шести таблиц видит колонку
-// `applied_digest` (условие CE-18): инъекция «младшая пишет только отпечаток»
-// краснит равенство, которым пробы утверждают «ничего не изменилось».
-func TestFingerprintSeesTheAppliedPair(t *testing.T) {
+// TestFingerprintSeesEveryColumnTheApplierWrites — отпечаток шести таблиц
+// видит КАЖДУЮ колонку, которую пишет применитель и которую называет условие
+// CE-18: применённую пару (`applied_revision`, `applied_digest`) строки модуля
+// и имя типа, указатели и признак контейнера (`object_type`, `parent_types`,
+// `public_read_to_children`) строки ресурса. Каждая колонка меняется ОДНА, от
+// состояния после предыдущей: равенство отпечатков, которым пробы утверждают
+// «ничего не изменилось», обязано краснеть на любой из них.
+//
+// Проба держит СОСТАВ отпечатка: снятие любой из пяти колонок из
+// `catalogstate.Fingerprint` краснит её строку, называя колонку (CV-865-2:
+// проба, менявшая только `applied_digest`, оставалась зелёной при снятом
+// `applied_revision`).
+func TestFingerprintSeesEveryColumnTheApplierWrites(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	_, err := applierOver(t, pool).Apply(ctx, rev865R(t, 5, true))
 	require.NoError(t, err)
-	before := catalogstate.Fingerprint(t, ctx, pool)
 
-	_, err = pool.Exec(ctx, `UPDATE kaname.catalog_module SET applied_digest = 'sha256:' || repeat('f', 64)
-		WHERE module = $1`, rev865Module)
-	require.NoError(t, err)
-	require.NotEqual(t, before, catalogstate.Fingerprint(t, ctx, pool),
-		"отпечаток не видит отпечатка применённой редакции")
-
-	_, err = pool.Exec(ctx, `UPDATE kaname.catalog_resource SET public_read_to_children = false
-		WHERE module = $1 AND resource = $2`, rev865Module, rev865Resource)
-	require.NoError(t, err)
-	mid := catalogstate.Fingerprint(t, ctx, pool)
-	_, err = pool.Exec(ctx, `UPDATE kaname.catalog_resource SET public_read_to_children = true
-		WHERE module = $1 AND resource = $2`, rev865Module, rev865Resource)
-	require.NoError(t, err)
-	require.NotEqual(t, mid, catalogstate.Fingerprint(t, ctx, pool),
-		"отпечаток не видит признака контейнера публичного чтения")
+	const (
+		moduleRow   = `WHERE module = $1`
+		resourceRow = `WHERE module = $1 AND resource = $2`
+	)
+	cases := []struct {
+		column, update string
+		args           []any
+	}{
+		{"catalog_module.applied_revision",
+			`UPDATE kaname.catalog_module SET applied_revision = applied_revision + 1 ` + moduleRow,
+			[]any{rev865Module}},
+		{"catalog_module.applied_digest",
+			`UPDATE kaname.catalog_module SET applied_digest = 'sha256:' || repeat('f', 64) ` + moduleRow,
+			[]any{rev865Module}},
+		{"catalog_resource.object_type",
+			`UPDATE kaname.catalog_resource SET object_type = object_type || '_probe' ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+		{"catalog_resource.parent_types",
+			`UPDATE kaname.catalog_resource SET parent_types = parent_types || 'probe_parent'::text ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+		{"catalog_resource.public_read_to_children",
+			`UPDATE kaname.catalog_resource SET public_read_to_children = NOT public_read_to_children ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+	}
+	for _, c := range cases {
+		before := catalogstate.Fingerprint(t, ctx, pool)
+		tag, err := pool.Exec(ctx, c.update, c.args...)
+		require.NoError(t, err, c.column)
+		require.EqualValues(t, 1, tag.RowsAffected(), "%s: изменена не одна строка — колонка не тронута", c.column)
+		require.NotEqual(t, before, catalogstate.Fingerprint(t, ctx, pool),
+			"отпечаток не видит колонки %s", c.column)
+	}
 }
 
 // TestAppliedEditionReaderReadsWhatTheWriterWrote — читатель пары `Get`
