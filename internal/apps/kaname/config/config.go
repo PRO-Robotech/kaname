@@ -328,10 +328,18 @@ type AuthNConfig struct {
 	SecondFactorEncryptionKeyHex    string `mapstructure:"second-factor-encryption-key-hex"`
 	SecondFactorEncryptionKeyHexEnv string `mapstructure:"second-factor-encryption-key-hex-env"`
 	// SelfServiceFreshness — окно свежести правки своих данных (Ф1 §4.1 «15
-	// мин», Ф11 Р6 — от момента последнего предъявления; Ф12 Р8): заведение и
-	// подтверждение второго фактора требуют, чтобы с последнего предъявления
-	// прошло не больше окна; тем же окном ограничен срок неподтверждённого
-	// заведения. Умолчания нет: величина объявляется профилем.
+	// мин», Ф11 Р6 — от момента последнего предъявления; Ф12 Р8). Не больше
+	// окна с последнего предъявления требуют девять путей (перечень — таблицы
+	// `docs/content/api/auth-lane.mdx`): `POST /iam/v1/auth/password/enroll`,
+	// `POST /iam/v1/auth/second-factor/enroll`,
+	// `POST /iam/v1/auth/second-factor/confirm`,
+	// `POST /iam/v1/auth/email-change`,
+	// `POST /iam/v1/users/{user_id}/accessKeys:beginRegistration`,
+	// `POST /iam/v1/users/{user_id}/accessKeys`,
+	// `DELETE /iam/v1/users/{user_id}/accessKeys/{access_key_id}`,
+	// `POST /iam/v1/auth/sessions/end`, `POST /iam/v1/auth/sessions/end-others`.
+	// Тем же окном ограничен срок неподтверждённого заведения второго
+	// фактора. Умолчания нет: величина объявляется профилем.
 	SelfServiceFreshness time.Duration `mapstructure:"self-service-freshness"`
 	// TokenSigning — СВОЯ чеканка токенов (задача kacho#897): издатель, алгоритм,
 	// перечень допустимых алгоритмов приёма, путь нашей записи публикуемого
