@@ -261,10 +261,10 @@ func TestABSubjectExists_ConcurrentDeleteVsCreate_NoDangling(t *testing.T) {
 			_ = txInsert.Rollback(ctx)
 		}
 	}()
-	_, err = txInsert.Exec(ctx, `
+	_, err = txInsert.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 			(id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		padOrTrim20("acb00000abse7"), member, roleID, prjID)
 	require.NoError(t, err)
 
