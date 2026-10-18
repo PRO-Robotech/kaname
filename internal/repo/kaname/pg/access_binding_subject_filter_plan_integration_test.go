@@ -23,8 +23,14 @@ package pg_test
 //
 // # Пробы
 //
-//   - отрицательная: план фильтра `subject` не содержит последовательного чтения
-//     набора, и ответ — ровно две выдачи (вторая находится);
+//   - отрицательная: план фильтра `subject` не читает набор последовательно И
+//     читает не больше страниц, чем вдвое против близнеца; ответ — все выдачи
+//     субъекта (где он второй — тоже). Одного «последовательного чтения нет»
+//     мало: на этой посадке прежний предикат планировщик исполнял полным
+//     обходом индекса набора — Index Scan без ведущего столбца, та же линейная
+//     цена в другой форме (контрольный прогон kaname#888: план прежнего
+//     предиката с узлом Index Scan, последовательно 0). Поэтому мера — страницы
+//     плана (EXPLAIN BUFFERS), а не вид узла;
 //   - законный близнец: тот же вопрос С видом (ListBySubject) — план индексный
 //     до правки и после неё; отличающий факт один — вид известен. Близнец
 //     доказывает, что проба способна быть зелёной на этой посадке, и красное
@@ -63,6 +69,11 @@ const (
 
 // subjectsTable — таблица набора, чьё последовательное чтение — предмет пробы.
 const subjectsTable = "access_binding_subjects"
+
+// subjectPlanBlockRatio — во сколько раз чтение без вида вправе стоить дороже
+// близнеца с видом: по спуску индекса на каждый вид словаря вместо одного, а
+// не обход индекса целиком.
+const subjectPlanBlockRatio = 2
 
 // planNode — узел плана: вид и таблица, если узел её читает.
 type planNode struct {
@@ -175,8 +186,10 @@ func listShape(predicate string, limitPos int) string {
 		 ORDER BY created_at ASC, id ASC LIMIT $%d`, predicate, limitPos)
 }
 
-// explainNodes снимает план оператора и возвращает его узлы.
-func explainNodes(t *testing.T, f subjectPlanFixture, statement string, args ...any) []planNode {
+// explainNodes снимает план оператора и возвращает его узлы и страницы
+// (общие буферы корня: прочитанные и найденные в кэше — вместе со всеми узлами
+// под ним, включая InitPlan набора).
+func explainNodes(t *testing.T, f subjectPlanFixture, statement string, args ...any) ([]planNode, int) {
 	t.Helper()
 	tx, err := f.pool.Begin(f.ctx)
 	require.NoError(t, err)
@@ -185,7 +198,7 @@ func explainNodes(t *testing.T, f subjectPlanFixture, statement string, args ...
 	require.NoError(t, err)
 
 	var raw []byte
-	require.NoError(t, tx.QueryRow(f.ctx, `EXPLAIN (ANALYZE, FORMAT JSON) `+statement, args...).Scan(&raw))
+	require.NoError(t, tx.QueryRow(f.ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+statement, args...).Scan(&raw))
 	var plans []struct {
 		Plan map[string]any `json:"Plan"`
 	}
@@ -210,7 +223,14 @@ func explainNodes(t *testing.T, f subjectPlanFixture, statement string, args ...
 		}
 	}
 	walk(plans[0].Plan)
-	return out
+	blocks := 0
+	for _, k := range []string{"Shared Hit Blocks", "Shared Read Blocks"} {
+		v, ok := plans[0].Plan[k].(float64)
+		require.True(t, ok, "в плане нет %q — мерить нечего", k)
+		blocks += int(v)
+	}
+	require.NotZero(t, blocks, "план не прочитал ни одной страницы — мера беспредметна")
+	return out, blocks
 }
 
 // requireSubjectsReadByIndex — набор прочитан, и прочитан не последовательно.
@@ -256,21 +276,31 @@ func queryIDs(t *testing.T, f subjectPlanFixture, statement string, args ...any)
 
 func TestSubjectFilterPlan(t *testing.T) {
 	f := seedSubjectPlanFixture(t)
+	var typedBlocks int
 
 	// Законный близнец: вид известен — ListBySubject.
 	t.Run("typed_subject_reads_the_set_by_index", func(t *testing.T) {
 		stmt := listShape(kanamepg.BindingNamesSubjectSQL("access_bindings", 1, 2), 3)
 		args := []any{string(domain.SubjectTypeUser), f.subject, 51}
 		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "близнец: все выдачи субъекта")
-		requireSubjectsReadByIndex(t, "ListBySubject", explainNodes(t, f, stmt, args...))
+		nodes, blocks := explainNodes(t, f, stmt, args...)
+		requireSubjectsReadByIndex(t, "ListBySubject", nodes)
+		typedBlocks = blocks
+		t.Logf("ListBySubject: страниц плана %d", blocks)
 	})
 
 	// Предмет: вид не известен — фильтр `subject` у List.
 	t.Run("untyped_subject_reads_the_set_by_index", func(t *testing.T) {
+		require.NotZero(t, typedBlocks, "близнец не измерен — сравнивать не с чем")
 		stmt := listShape(kanamepg.BindingNamesSubjectIDSQL(1), 2)
 		args := []any{f.subject, 51}
 		require.ElementsMatch(t, f.expected, queryIDs(t, f, stmt, args...), "фильтр subject: все выдачи субъекта")
-		requireSubjectsReadByIndex(t, "List subject", explainNodes(t, f, stmt, args...))
+		nodes, blocks := explainNodes(t, f, stmt, args...)
+		requireSubjectsReadByIndex(t, "List subject", nodes)
+		t.Logf("List subject: страниц плана %d, у близнеца %d, предел %d", blocks, typedBlocks, subjectPlanBlockRatio*typedBlocks)
+		require.LessOrEqual(t, blocks, subjectPlanBlockRatio*typedBlocks,
+			"фильтр subject читает %d страниц против %d у того же вопроса с видом — индекс субъекта обходится целиком: %v",
+			blocks, typedBlocks, nodes)
 	})
 }
 
