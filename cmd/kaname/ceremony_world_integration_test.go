@@ -625,7 +625,11 @@ func (w *ceremonyWorld) buildSurface() {
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
 	source := issuingsource.New(cfg.AuthN.TrustDomain())
-	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, ceremonySecretChecker(w),
+	// Проверяющий и стоимость проверки церемония берёт у полосы входа тем же
+	// путём, что корень (`serve.go`): стоимость — `loginLane.secretCheckCost`.
+	checker := ceremonySecretChecker(w)
+	lane := &loginLane{verifier: checker, envelope: ceremonySecretEnvelope(w, checker)}
+	ceremony, err := buildCeremonySurface(w.pool, cfg, signer, ceremonyPublished{w: w}, lane.secretChecker(), lane.secretCheckCost(),
 		metrics.NewRegistry().LoginLaneRecorder(), source, logger)
 	if err != nil || ceremony == nil {
 		w.fixture("сборка церемонии: собрана %v, ошибка %v", ceremony != nil, err)
@@ -644,6 +648,11 @@ func (w *ceremonyWorld) buildSurface() {
 	w.surfaceAuth = issuingSurfaceAuthOf(mux)
 }
 
+// ceremonyWorldCheckerCapacity — ёмкость проверяющего секрета мира (см.
+// `ceremonySecretChecker`); половина её — места сверки церемонии, ширина пробы
+// очереди проверок kaname#882.
+const ceremonyWorldCheckerCapacity = 32
+
 // ceremonySecretChecker — проверяющий секрета клиента мира: паролей службы,
 // выровненный приманкой объявленного класса секрета (argon2id, пол службы).
 func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
@@ -656,7 +665,7 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	// больше половины ёмкости (доля рядом с полосой входа,
 	// `ceremonyport.ClientSecrets`), поэтому ёмкость — не меньше удвоенной
 	// наибольшей одновременности.
-	v, err := passwordverify.New(32, silentVerifyObserver{})
+	v, err := passwordverify.New(ceremonyWorldCheckerCapacity, silentVerifyObserver{})
 	if err != nil {
 		w.fixture("проверяющий секрета клиента: %v", err)
 	}
@@ -670,15 +679,38 @@ func ceremonySecretChecker(w *ceremonyWorld) *passwordverify.Verifier {
 	return v
 }
 
+// ceremonySecretEnvelope — огибающая над проверяющим мира, откалиброванная по
+// классу, которым пишется секрет клиента (`ceremonySecretHasher`), как
+// огибающая полосы входа у корня. Мера — настенные часы, как у корня: срок
+// операции мира тогда о тех же процессорах, что и его обмены.
+func ceremonySecretEnvelope(w *ceremonyWorld, checker *passwordverify.Verifier) *passwordverify.Envelope {
+	w.t.Helper()
+	envelope, err := passwordverify.NewEnvelope(checker, passwordverify.NopEnvelopeObserver{}, passwordverify.WallClockCostMeter)
+	if err != nil {
+		w.fixture("огибающая проверяющего: %v", err)
+	}
+	declared := domain.PasswordCostClass{Format: domain.PasswordHashFormatArgon2id, Params: ceremonySecretClassParams()}
+	if _, err := envelope.Admit(w.ctx, declared, passwordverify.EnvelopeTriggerStartup); err != nil {
+		w.fixture("калибровка класса секрета клиента: %v", err)
+	}
+	return envelope
+}
+
+// ceremonySecretClassParams — параметры класса секрета клиента мира: пол службы
+// (`interactive_clients_secret_verifier_form_ck`).
+func ceremonySecretClassParams() map[domain.PasswordHashCostParam]uint32 {
+	return map[domain.PasswordHashCostParam]uint32{
+		domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4,
+	}
+}
+
 // ceremonySecretHasher — хешер секрета клиента: argon2id разметкой PHC на полу
 // службы (`interactive_clients_secret_verifier_form_ck`).
 func ceremonySecretHasher(w *ceremonyWorld) *passwordverify.Hasher {
 	w.t.Helper()
 	hasher, err := passwordverify.NewHasher(passwordverify.Declared{
 		Format: domain.PasswordHashFormatArgon2id,
-		Params: map[domain.PasswordHashCostParam]uint32{
-			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4,
-		},
+		Params: ceremonySecretClassParams(),
 	})
 	if err != nil {
 		w.fixture("хешер секрета клиента: %v", err)
