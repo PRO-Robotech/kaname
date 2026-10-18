@@ -1,0 +1,153 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/backup-code-set-has-one-form.md
+  sha256: c6e042f38106b49bedddc3abeef2af6dd0a647d8e555c1848d22e7a6774e21c6
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строки истории в шапке — статическая форма объявления; шапка не правлена
+    намеренно (change-graph.md §2). Действующий вердикт о редакции c6e042f3… — эта запись и
+    внешнее событие; прежняя запись 7f950ca3… не тронута.
+  base_commit: db8bcb7e87f11b267bb1470894bf033b3c033e78
+  content_commit: null
+  content_commit_note: >-
+    Редакция не закоммичена: файл неотслеживаемый в копии tmp/w13-kn297 (ветка 297 от db8bcb7e);
+    судится содержимое по отпечатку.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 617
+  scenarios: 29
+  round: 2
+  round_scope: delta_only — снятие блокирующих круга 1 (B1, B2, B3) и соответствие решениям диспетчера
+  predecessor_record: docs/specs/reviews/backup-code-set-has-one-form/7f950ca3f0709ac5b05558ae8deb441d7c9bd36df91fbe24253b7aa43347c81f.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/backup-code-set-has-one-form.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T22:52:41Z'
+effective_approval:
+  issued: false
+  note: >-
+    Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
+    not_performed. Правка документа после этой записи вердикт не переносит.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: not_performed
+  published: false
+  publication_mode: courier_of_agent_verdict
+  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/backup-code-set-has-one-form.md · sha256 c6e042f38106b49bedddc3abeef2af6dd0a647d8e555c1848d22e7a6774e21c6
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/backup-code-set-has-one-form/7f950ca3f0709ac5b05558ae8deb441d7c9bd36df91fbe24253b7aa43347c81f.yaml
+premise:
+  status: confirmed
+  predicate: >-
+    sha256sum документа → c6e042f3… (равен заданному); опоры перемерены
+    `git show db8bcb7e:<путь> | sha256sum` → Ф12 c6ea4897…, SUA 35224856… (совпадают с шапкой);
+    grep -c '^\*\*ID:\*\*' → 29
+blocking_closed:
+  - id: B1
+    kind: COVERAGE
+    closed: true
+    in_document: >-
+      Р2 (строки 131-133: сводка только о прочитанном наборе, без заглушек), строка Р4 :144,
+      уточнение «ноль — ровно одно» :153-157, Р-8 :76, сценарии BCS-50 :427-437 и BCS-51
+      :439-450 (близнец BCS-01, Go integration), производитель :547, допущение Д-4 :611-617
+    predicate: >-
+      git show db8bcb7e:internal/apps/kaname/api/humansession/sf_status.go — :106 сводка создаётся
+      до чтения, :112-120 нечитаемый/отсутствующий набор только в журнал (координаты производителя
+      верны); :158-168 setHasCodes → false при isNotFound и при !ok SetSize — «Тогда»
+      «stepUpMethods без lookup_secret» уже производится сегодня; passwordverify/verifier.go:580-589
+      SetSize → (0,false) на нечитаемом материале
+    constructibility: >-
+      по названной фикстуре, чтением @db8bcb7e: обвязка step_up_any_method_harness_integration_test.go
+      есть; ReplaceLookupSet — address_claim_integration_test.go:554; unreadableStored —
+      verifier_our_side_callers_test.go:33 ("$unknown-format$…"); схема удаление строки
+      lookup_secret при живой totp допускает: user_login_methods — PK (user_id, kind), CHECK вида,
+      FK users(id, expected_login_kind) ссылается только на вид password
+      (20261005030000_active_identity_has_a_way_in.sql:97-110); Ф12 §13 :2827-2829 то же.
+      Посев не выполнялся (Go integration с testcontainers > 60 с на вызов) — «не выполнилось».
+  - id: B2
+    kind: COVERAGE
+    closed: true
+    in_document: >-
+      Р5 :159-165 называет двух производителей; BCS-17 :383-393 (повышение, близнец BCS-06),
+      BCS-18 :395-405 (перечеканка, близнец BCS-05); строки производителей :555-556
+    predicate: >-
+      handler.go@db8bcb7e:1077 JudgeStepUpForm → second_factor.go:233-234 JudgeCodeForm("code", …);
+      handler.go:1029 parseSecondFactorField("", …) → :862-876 field("code") = "code";
+      second_factor.go:284-285 правило "must be 10 characters of the backup-code alphabet";
+      refusals.go:93 "Illegal argument %s: %s" — текст BCS-17/18 дословно производим; порядок у
+      повышения: признак формы (:1057) → допуск (:1060) → суд формы (:1077) до глагола
+  - id: B3
+    kind: TWIN
+    closed: true
+    in_document: >-
+      BCS-16 :372-381 (вход живым C1 → 200, ключи ровно user, session) — близнец BCS-14 (:370);
+      у BCS-12 близнец BCS-11 (:350); BCS-13 переименован в соседний отказ (:352, :359)
+    predicate: >-
+      handler.go@db8bcb7e:636-647 вход с secondFactor, :670-673 тело {user, session};
+      sessionJSON :1411 "assuranceLevel" (строка, domain/human_session.go:204);
+      Ф12-12 на second-factor-totp-and-recovery-codes.md:1648 @db8bcb7e, отпечаток c6ea4897… совпадает;
+      коллекция tests/newman/cases/kaname-login-lane.py существует
+non_blocking_closed:
+  - id: N1
+    closed: true
+    note: строки потребителей :98-99 (kacho @a952484649 не перемерялись этим кругом — вне блокирующих)
+  - id: N2
+    closed: true
+    note: строка производителей :559 — держатель у опоры Ф12 Р4
+new_blocking_from_delta: []
+dispatcher_decisions_conformance:
+  - decision: В-1 (а) три этапа S1→S2→S3
+    conforms: true
+    where: §«Совместимость» таблица :198-204; сосуществование BCS-20…22 :452-476; Д-1 :604
+  - decision: В-2 принять — снятие выражает «набора нет» отсутствием ключа
+    conforms: true
+    where: Р4 :149; «Что ломается» п.3 :184; BCS-10/11 :328, :337; Д-2 :606
+  - decision: В-3 имя backupCodeSet
+    conforms: true
+    where: Р2 :127; Д-3 :609
+  - decision: Д-4 (а) 200 без backupCodeSet
+    conforms: true
+    where: Р4 :144; BCS-50/51 :434, :446; Д-4 :611
+defaults_recorded:
+  - q: Д-1 / В-1
+    default: три этапа S1→S2→S3 — решено диспетчером (а); BCS-20…22 остаются в силе
+  - q: Д-2 / В-2
+    default: отсутствие ключа у снятия вместо 0 — решено диспетчером (принять); инвариант kaname#275 держит BCS-11
+  - q: Д-3 / В-3
+    default: backupCodeSet — решено диспетчером
+  - q: Д-4
+    default: 200 без backupCodeSet — решено диспетчером (а)
+non_blocking:
+  - id: M1
+    kind: FORMAT
+    summary: >-
+      Текст документа ещё называет выбор открытым («Выбор — за диспетчером», :213; «снимаются
+      ответом диспетчера», :602). Решения совпадают с допущениями и зафиксированы этой записью;
+      правка текста сменит отпечаток и потребует нового круга — вносить её, только если документ
+      правится по иной причине.
+  - id: M2
+    kind: FORMAT
+    summary: BCS-15 стоит после BCS-18 (порядок ID в S1 нарушен) — косметика трассировки.
+checks:
+  scope: без изменений против круга 1 — пройдено
+  producer: 29 из 29 «Тогда» с производителем; заказанные (BCS-12…14, 17, 18, 32, 50, 51) названы
+  twin: >-
+    у каждого отказа назван положительный близнец: 02↔01, 09↔06, 12↔11, 14↔16, 17↔06, 18↔05,
+    50↔01, 51↔01, 30↔03; BCS-13 — соседний отказ, близнец BCS-11
+  constructibility: >-
+    посеяно 0 из 2 новых Given (BCS-50/51 — Go integration, не укладывается в 60 с на вызов) —
+    «не выполнилось»; названная фикстура и допустимость состояния схемой подтверждены чтением @db8bcb7e;
+    Given BCS-16/17/18 — G0 (фикстура kaname-second-factor.py:832-881, прочитана в круге 1)
+  format: GWT, ID, payload, пара статус/code у отказов — пройдено
+  conventions: camelCase, без чужих облаков, без proto — пройдено
+  dod: п.1 ссылается на BCS-01…18, 20…22, 50, 51 — пройдено
