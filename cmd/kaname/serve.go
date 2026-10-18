@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
@@ -54,6 +55,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -1189,18 +1191,36 @@ func runServe(cfg config.Config) error {
 	// материал в поле пароля снят задачей kacho#1143 и принимается лишь пока открыто
 	// объявленное оператором окно перехода (ручка ниже).
 	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
-	// Мгновение окна перехода берётся у настройки РАЗОБРАННЫМ. Неразборчивое
-	// значение сюда не доходит: его отвергает страж старта
+	// Вход сборки полосы ПЕРЕЛАГАЕТСЯ из настройки одной функцией
+	// (registryTokenBuildConfig ниже): всякая ручка полосы доезжает до сборки
+	// через неё, и проба переложения судит ровно то, что получает сборка.
+	//
+	// Неразборчивое значение сюда не доходит: его отвергает страж старта
 	// `RegistryTokenConfig.Validate` — его зовёт `config.Config.Validate`, а её,
 	// в свою очередь, `main` ДО `runServe`, и на её отказе процесс выходит
 	// кодом 1. Отказ ниже поэтому недостижим на живой посадке и стоит здесь
 	// затем, чтобы значение не оказалось использовано неразобранным, если
 	// когда-нибудь эту функцию позовут в обход `main`.
-	registryTokenKeyMaterialWindow, kmwErr := cfg.APIServer.RegistryToken.KeyMaterialWindowUntil()
-	if kmwErr != nil {
-		return fmt.Errorf("registry token shim: %w", kmwErr)
+	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
+		logger: logger,
+		// НАШ подписант — единственный издатель полосы. Выключенная своя
+		// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
+		// выхода (kaname#494): другого издателя у полосы нет.
+		signer: tokenSigner,
+		// Счётчик исходов провязывается БЕЗУСЛОВНО, а не вместе с окном:
+		// он обязан считать и отказы прежнему виду, то есть работать именно
+		// на посадке БЕЗ окна — иначе оператор, у которого обновление
+		// сломало вход арендаторам, узнаёт об этом из жалобы.
+		credentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
+		// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
+		// же, что у полос выдачи токена: оператор этой полосы для строки
+		// человека читает и отсечку отзыва-всех (kaname#379).
+		basicCredentialTimeout: credentialLanePeerTimeout,
+	})
+	if rtErr != nil {
+		return fmt.Errorf("registry token shim: %w", rtErr)
 	}
-	if !registryTokenKeyMaterialWindow.IsZero() {
+	if registryTokenKeyMaterialWindow := registryTokenBuild.KeyMaterialWindowUntil; !registryTokenKeyMaterialWindow.IsZero() {
 		// Открытое окно — ОСЛАБЛЕНИЕ ПОСАДКИ, и оно обязано быть заметно в
 		// самоотчёте процесса: посадка, о которой процесс молчит, отличима от
 		// строгой только чтением настройки, а её при разборе инцидента читают
@@ -1215,31 +1235,7 @@ func runServe(cfg config.Config) error {
 	}
 	var registryTokenHandler http.Handler
 	if registryTokenAddr != "" {
-		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
-			Realm:   cfg.APIServer.RegistryToken.TokenIssuer(),
-			Service: cfg.APIServer.RegistryToken.TokenService(),
-			Logger:  logger,
-			// НАШ подписант — единственный издатель полосы. Выключенная своя
-			// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
-			// выхода (kaname#494): другого издателя у полосы нет.
-			Signer:   tokenSigner,
-			TokenTTL: cfg.APIServer.RegistryToken.TokenTTL(),
-			// ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ kacho#1143 — уже РАЗОБРАННОЕ выше:
-			// сборка полосы получает мгновение, а не строку, и своего разбора
-			// не заводит. Второй разборщик того же значения разошёлся бы с
-			// первым молча — и разошёлся бы именно там, где расхождение не
-			// видно, потому что на годном входе оба отвечают одинаково.
-			KeyMaterialWindowUntil: registryTokenKeyMaterialWindow,
-			// Счётчик исходов провязывается БЕЗУСЛОВНО, а не вместе с окном:
-			// он обязан считать и отказы прежнему виду, то есть работать именно
-			// на посадке БЕЗ окна — иначе оператор, у которого обновление
-			// сломало вход арендаторам, узнаёт об этом из жалобы.
-			CredentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
-			// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
-			// же, что у полос выдачи токена: оператор этой полосы для строки
-			// человека читает и отсечку отзыва-всех (kaname#379).
-			BasicCredentialTimeout: credentialLanePeerTimeout,
-		})
+		mux, berr := registrytokenwire.Build(pool, registryTokenBuild)
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
@@ -2373,4 +2369,52 @@ func requireRegistryTokenTLS(productionMode bool, addr string, mtlsCfg config.MT
 			addr)
 	}
 	return nil
+}
+
+// registryTokenRuntime — входы сборки докерной полосы, которые даёт не
+// настройка, а композиционный корень: журнал, подписант, счётчик исходов и
+// предел обращения авторитета к базе.
+type registryTokenRuntime struct {
+	logger                 *slog.Logger
+	signer                 *tokensigner.Signer
+	credentialKindObserver registrytokenuc.CredentialKindObserver
+	basicCredentialTimeout time.Duration
+}
+
+// registryTokenBuildConfig — ЕДИНСТВЕННОЕ переложение настройки докерной полосы
+// в вход её сборки.
+//
+// Функция отдельна от runServe затем, чтобы проба переложения судила тот самый
+// вход, который получает сборка на живой посадке: ручка, объявленная в
+// настройке и не переложенная сюда, — ручка без читателя (контроль на вид
+// есть, предмета у него нет), и увидеть это можно только исходом сборки,
+// собранной из настройки.
+func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRuntime) (registrytokenwire.BuildConfig, error) {
+	// Мгновение окна перехода берётся у настройки РАЗОБРАННЫМ: сборка полосы
+	// получает мгновение, а не строку, и своего разбора не заводит. Второй
+	// разборщик того же значения разошёлся бы с первым молча — и разошёлся бы
+	// именно там, где расхождение не видно, потому что на годном входе оба
+	// отвечают одинаково.
+	window, err := rt.KeyMaterialWindowUntil()
+	if err != nil {
+		return registrytokenwire.BuildConfig{}, err
+	}
+	// Публичный принципал анонимного чтения (kaname#495) — тоже разобранным
+	// стражем формы. Пустое — анонимный поток выключен, и вход без
+	// удостоверения получает 401-вызов (fail-closed).
+	anonymous, err := rt.AnonymousPrincipal()
+	if err != nil {
+		return registrytokenwire.BuildConfig{}, err
+	}
+	return registrytokenwire.BuildConfig{
+		AnonymousClientID:      anonymous,
+		Realm:                  rt.TokenIssuer(),
+		Service:                rt.TokenService(),
+		Logger:                 run.logger,
+		Signer:                 run.signer,
+		TokenTTL:               rt.TokenTTL(),
+		KeyMaterialWindowUntil: window,
+		CredentialKindObserver: run.credentialKindObserver,
+		BasicCredentialTimeout: run.basicCredentialTimeout,
+	}, nil
 }

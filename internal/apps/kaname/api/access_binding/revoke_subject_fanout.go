@@ -46,19 +46,63 @@ func emitSubjectChangeForEverySubject(
 	binding domain.AccessBinding,
 	eventType, op string,
 ) error {
-	subjects, err := listSubjects(ctx, binding.ID)
+	subjects, err := bindingSubjectsOf(ctx, listSubjects, binding)
 	if err != nil {
 		return err
+	}
+	return emitSubjectChangeFor(ctx, emit, subjects, eventType, op)
+}
+
+// bindingSubjectsOf — весь перечень субъектов выдачи; пустой перечень (выдача,
+// записанная до многосубъектной модели) — её одиночная пара.
+//
+// Снятие, удаляющее строку выдачи, зовёт его ДО удаления: дочерние строки
+// субъектов уходят каскадом в той же транзакции, и прочитанный после удаления
+// перечень пуст — откат на одиночку отдал бы ровно первого субъекта
+// (kaname#880).
+func bindingSubjectsOf(ctx context.Context, listSubjects subjectLister, binding domain.AccessBinding) ([]domain.Subject, error) {
+	subjects, err := listSubjects(ctx, binding.ID)
+	if err != nil {
+		return nil, err
 	}
 	if len(subjects) == 0 {
 		subjects = []domain.Subject{{Type: binding.SubjectType, ID: binding.SubjectID}}
 	}
+	return subjects, nil
+}
+
+// emitSubjectChangeFor — строка журнала смены субъекта на каждого из `subjects`.
+func emitSubjectChangeFor(ctx context.Context, emit subjectChangeEmitter, subjects []domain.Subject, eventType, op string) error {
 	for _, s := range subjects {
 		if err := emit(ctx, abrepo.SubjectChangeEvent{
 			SubjectID:   string(s.ID),
 			SubjectType: string(s.Type),
 			EventType:   eventType,
 			Op:          op,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// revokedAuditFor — строка аудита «отозвано» на каждого из `subjects`, симметрично
+// строке «выдано», которую создание пишет на каждого (`create.go`). Строка на
+// одного первого оставляла бы в следе выдачу субъектам со второго по N-й
+// неснятой (kaname#880).
+func revokedAuditFor(ctx context.Context, emit func(context.Context, abrepo.AuditEvent) error,
+	subjects []domain.Subject, actor string, binding domain.AccessBinding) error {
+	for _, s := range subjects {
+		if err := emit(ctx, abrepo.AuditEvent{
+			EventType:       abrepo.AuditEventTypeRevoked,
+			Actor:           actor,
+			SubjectType:     string(s.Type),
+			SubjectID:       string(s.ID),
+			ResourceType:    string(binding.ResourceType),
+			ResourceID:      binding.ResourceID,
+			RoleID:          string(binding.RoleID),
+			BindingID:       string(binding.ID),
+			TenantAccountID: auditTenantAccountID(binding),
 		}); err != nil {
 			return err
 		}

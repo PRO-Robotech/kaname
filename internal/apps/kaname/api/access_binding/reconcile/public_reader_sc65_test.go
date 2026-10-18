@@ -76,11 +76,10 @@ func sc65Facts(t *testing.T, doc []byte) *catalog.Facts {
 // цель — один контейнер.
 func sc65Scope(subjectType, subjectID string, rules domain.Rules) BindingScope {
 	return BindingScope{
-		BindingID:   "acb0000000000000sc65",
-		Scope:       domain.ScopeAnchor{Type: "project", ID: sc65Project},
-		SubjectType: subjectType,
-		SubjectID:   subjectID,
-		Selectors:   rules.MaterializingSelectorsInScope(domain.ScopeProject),
+		BindingID: "acb0000000000000sc65",
+		Scope:     domain.ScopeAnchor{Type: "project", ID: sc65Project},
+		Subjects:  []domain.Subject{{Type: domain.SubjectType(subjectType), ID: domain.SubjectID(subjectID)}},
+		Selectors: rules.MaterializingSelectorsInScope(domain.ScopeProject),
 		Target: domain.AccessTarget{Resources: []domain.ResourceRef{
 			{Type: "probemod.boxes", ID: sc65Box},
 		}},
