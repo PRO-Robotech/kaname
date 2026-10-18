@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package public_read — публикация объекта для АНОНИМНОГО ЧТЕНИЯ (вход соседа
-// `user:* #v_get`, хранимый факт `system_class:anonymous #v_get`, kaname#829),
+// `user:*` либо `system_class:anonymous` + `v_get`, kaname#893; хранимый факт
+// `system_class:anonymous #v_get`, kaname#829),
 // упорядоченная версией владельца (kaname#107).
 //
 // # Предмет
