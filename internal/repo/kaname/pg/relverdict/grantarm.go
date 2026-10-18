@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/accesstarget"
 )
 
 // grantArmPredicate — правило роли И цель привязки ОДНИМ предикатом.
@@ -82,12 +84,15 @@ import (
 // # НЕЗНАКОМАЯ ФОРМА ЦЕЛИ — ОТКАЗ, А НЕ ВСЯ ОБЛАСТЬ
 //
 // Всю область дают ровно три формы: корень — объект без ключа `resources`
-// (`{}`, `{"allInScope": true}`) либо `resources` — пустой перечень. Схема
-// других форм не запрещает: корень-массив (`[]`), корень-строка, `resources`
-// — null, объект или строка. Для них «-> 'resources'» даёт NULL либо не
-// перечень, и сравнение не совпадает ни с одним объектом. Проверять ОТСУТСТВИЕ
-// ключа через «-> 'resources' IS NULL» нельзя: у корня-не-объекта NULL даёт и
-// это выражение, и такая цель читалась бы как вся область.
+// (`{}`, `{"allInScope": true}`) либо `resources` — пустой перечень. Других
+// форм схема с kaname#863 не принимает — корень-массив, корень-строку,
+// `resources` null, объектом или строкой отвергает ограничение
+// `access_bindings_target_form_ck`. Предикат остаётся закрытым и без него: для
+// таких форм «-> 'resources'» даёт NULL либо не перечень, и сравнение не
+// совпадает ни с одним объектом. Проверять ОТСУТСТВИЕ ключа через
+// «-> 'resources' IS NULL» нельзя: у корня-не-объекта NULL даёт и это
+// выражение, и такая цель читалась бы как вся область. Текст обоих прочтений
+// цели — здесь и у материализатора — один: `accesstarget`.
 //
 // # РАЗДЕЛЯТЬ ВЕТВИ ПРАВИЛА НА ДВА ЗАПРОШЕННЫХ АРМА НЕЛЬЗЯ, и это измерено
 //
@@ -257,15 +262,14 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
 	return arm + nested + top + binding
 }
 
-// wholeScopeTarget — цель «вся область»: корень-объект без ключа `resources`
-// либо пустой перечень (довод о незнакомых формах — в шапке предиката).
-const wholeScopeTarget = `(jsonb_typeof(b.target) = 'object' AND NOT (b.target ? 'resources'))
-          OR b.target -> 'resources' = '[]'::jsonb`
+// wholeScopeTarget — цель «вся область». Прочтение формы цели у решения о
+// доступе и у материализатора одно — `accesstarget` (kaname#863); здесь оно
+// подставлено, а не повторено.
+var wholeScopeTarget = accesstarget.WholeScopeSQL("b.target")
 
 // namedInTarget — цель называет пару «тип, id» (тип — в словаре каталога).
 func namedInTarget(typeExpr, idExpr string) string {
-	return `b.target -> 'resources' @> jsonb_build_array(jsonb_build_object(
-                 'type', ` + typeExpr + `, 'id', ` + idExpr + `))`
+	return accesstarget.NamedSQL("b.target", typeExpr, idExpr)
 }
 
 // errTemplateMark — метка шаблона запроса стоит в нём не ровно один раз.
