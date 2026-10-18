@@ -154,7 +154,11 @@ func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindin
 // ОДНО написание на двух вызывающих — `List` (поле AccountID, kacho#1737) и
 // `ListByAccount`. Прежде их было два, и приёмка требует от них ОДИНАКОВОГО
 // охвата; держать это требование на двух написаниях значило бы завести два
-// ответа на вопрос «чья это привязка», которые разойдутся молча.
+// ответа на вопрос «чья это привязка», которые разойдутся молча. Третье место
+// того же написания — подзапрос набора в bindingHasSubjectTypeInAccount
+// (kaname#888): там неквалифицированные resource_type/resource_id разрешаются в
+// столбцы области строки access_binding_subjects, и вопрос «в области ли этого
+// аккаунта» задаётся набору тем же текстом, что и выдаче.
 //
 // Третье написание в этом файле — `membershipHoldingBindingsPredicate` (kacho#1686) —
 // сюда НЕ сводится: копия там объявлена копией НАМЕРЕННО, чтобы правка одной
@@ -219,17 +223,22 @@ func bindingNamesSubjectID(pos int) string {
 		pos)
 }
 
-// bindingHasSubjectType — выдача несёт субъекта вида $pos в паре или в наборе
-// (фильтр вида у ListByAccount). Такое чтение ведёт область аккаунта и курсор, а
-// набор спрашивается `EXISTS` по строке-кандидату; планировщик волен исполнить
-// его один раз хэшированным подпланом по access_binding_subjects_subject_scope_idx
-// (замер kaname#888 — так и делает).
-func bindingHasSubjectType(pos int) string {
+// bindingHasSubjectTypeInAccount — выдача несёт субъекта вида $typePos в паре
+// или в наборе (фильтр вида у ListByAccount); $accountPos — аккаунт области.
+//
+// Набор спрашивается той же формой `id = ANY (ARRAY(подзапрос))`, а подзапрос
+// сужен той же областью аккаунта, что и само чтение (accountScopePredicate по
+// столбцам области строки набора — их держит триггер набора), поэтому массив не
+// шире выдач этого аккаунта. Замер kaname#888 (EXPLAIN ANALYZE, 20000 выдач в
+// одном аккаунте, первые субъекты — люди, фильтр group): прежняя пара — 0,07 мс
+// индексом access_bindings_subject_idx; `EXISTS` под `OR` — 5,7 мс обходом всех
+// выдач по курсору; эта форма возвращает чтение к BitmapOr по индексам.
+func bindingHasSubjectTypeInAccount(typePos, accountPos int) string {
 	return fmt.Sprintf(
 		`(subject_type = $%[1]d
-		   OR EXISTS (SELECT 1 FROM access_binding_subjects s
-		               WHERE s.binding_id = access_bindings.id AND s.subject_type = $%[1]d))`,
-		pos)
+		   OR id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                       WHERE s.subject_type = $%[1]d AND %[2]s)))`,
+		typePos, accountScopePredicate(accountPos))
 }
 
 // List — единое чтение (redesign-2026 F11). Собирает WHERE из тех
@@ -432,7 +441,7 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 
 	// Вид — любого из субъектов выдачи, а не только первого (kaname#888).
 	if f.SubjectTypeFilter != "" {
-		conditions = append(conditions, bindingHasSubjectType(argIdx))
+		conditions = append(conditions, bindingHasSubjectTypeInAccount(argIdx, 1))
 		args = append(args, f.SubjectTypeFilter)
 		argIdx++
 	}
