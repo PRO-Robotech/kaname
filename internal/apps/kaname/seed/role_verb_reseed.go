@@ -148,8 +148,12 @@ func ReseedSystemRoleVerbs(
 
 	var failures []error
 	for _, rr := range roles {
-		pairs := cat.RoleVerbsFromSelectors(rr.rules.MaterializingSelectors())
-		if rerr := replaceRoleVerbsInOwnTx(ctx, repo, rr.id, pairs); rerr != nil {
+		sels := cat.GrantSelectors(rr.rules.MaterializingSelectors())
+		var pairs []domain.RoleVerb
+		if rr.ownProjection {
+			pairs = cat.RoleVerbsFromSelectors(sels)
+		}
+		if rerr := replaceRoleVerbsInOwnTx(ctx, repo, rr, pairs, sels); rerr != nil {
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
@@ -184,17 +188,32 @@ func ReseedSystemRoleVerbs(
 // сервиса, поэтому в журнал приезжает не текст драйвера, а фиксированный. Полосу
 // это не размывает — транзиентную от структурной отличает ПЕРЕПИСЬ (сколько ролей
 // осмотрено против скольких закоммичено), а не текст отказа.
+//
+// Глаголы ПРАВИЛ (`RegrainSelectorVerbs`, kaname#878) пересчитываются в той же
+// транзакции у КАЖДОЙ роли перечня: селектор системной роли, впервые положенный
+// досевом селекторов, несёт пустую карту, а роль из очереди пересчёта — набор,
+// выведенный миграцией из проекции роли (то есть объединение по роли). Проекцию
+// роли (`role_verb`) пересчитывает только живая системная роль: у роли
+// арендатора её пишет правка роли, и пересчёт отсюда по прочитанным вне
+// транзакции правилам мог бы переписать свежую проекцию устаревшей. Глаголам
+// правил это не грозит — они функция отпечатка правила (довод — у порта).
 func replaceRoleVerbsInOwnTx(
 	ctx context.Context,
 	repo kanamerepo.Repository,
-	roleID string,
+	rr systemRoleRules,
 	pairs []domain.RoleVerb,
+	sels []domain.RuleSelector,
 ) error {
 	if err := shared.DoWithWriteTxVoid(ctx, repo,
 		func(ctx context.Context, w kanamerepo.Writer) error {
-			return w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), pairs)
+			if rr.ownProjection {
+				if err := w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(rr.id), pairs); err != nil {
+					return err
+				}
+			}
+			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(rr.id), sels)
 		}); err != nil {
-		return fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
+		return fmt.Errorf("пересчёт проекции роли %s: %w", rr.id, err)
 	}
 	return nil
 }
@@ -216,12 +235,22 @@ func listMaterializingSystemRoles(ctx context.Context, pool *pgxpool.Pool) ([]sy
 		//
 		// Пропуск, а не обработка отказа: у снятой роли проекции быть НЕ ДОЛЖНО,
 		// и ключ здесь работает как задуман. Неверен был отбор.
-		`SELECT id, rules FROM kaname.roles
-		  WHERE is_system = true
-		    AND live
-		    AND rules IS NOT NULL
-		    AND jsonb_typeof(rules) = 'array'
-		    AND jsonb_array_length(rules) > 0`)
+		//
+		// Роль из ОЧЕРЕДИ пересчёта глаголов правил (kaname#878) входит в перечень
+		// при любой живости и любых правилах: у снятой роли и у роли без правил
+		// строк селекторов нет, обновлять нечего, и пересчёт лишь снимает её из
+		// очереди. Проекцию роли (`own`) пересчитывает только живая системная
+		// роль с правилами — прежний отбор.
+		`SELECT r.id, CASE WHEN jsonb_typeof(r.rules) = 'array' THEN r.rules ELSE '[]'::jsonb END,
+		        coalesce(r.is_system AND r.live AND jsonb_typeof(r.rules) = 'array'
+		                 AND jsonb_array_length(r.rules) > 0, false) AS own
+		   FROM kaname.roles r
+		  WHERE (r.is_system = true
+		         AND r.live
+		         AND r.rules IS NOT NULL
+		         AND jsonb_typeof(r.rules) = 'array'
+		         AND jsonb_array_length(r.rules) > 0)
+		     OR EXISTS (SELECT 1 FROM kaname.role_selector_verbs_pending p WHERE p.role_id = r.id)`)
 	if err != nil {
 		return nil, fmt.Errorf("пересчёт проекции глаголов роли: перечислить системные роли: %w", err)
 	}
@@ -231,15 +260,16 @@ func listMaterializingSystemRoles(ctx context.Context, pool *pgxpool.Pool) ([]sy
 		var (
 			id  string
 			raw []byte
+			own bool
 		)
-		if serr := rows.Scan(&id, &raw); serr != nil {
+		if serr := rows.Scan(&id, &raw, &own); serr != nil {
 			return nil, fmt.Errorf("пересчёт проекции глаголов роли: разобрать строку роли: %w", serr)
 		}
 		parsed, derr := domain.DecodeRules(raw)
 		if derr != nil {
 			return nil, fmt.Errorf("пересчёт проекции глаголов роли: разобрать правила %s: %w", id, derr)
 		}
-		out = append(out, systemRoleRules{id: id, rules: parsed})
+		out = append(out, systemRoleRules{id: id, rules: parsed, ownProjection: own})
 	}
 	if rerr := rows.Err(); rerr != nil {
 		return nil, fmt.Errorf("пересчёт проекции глаголов роли: обойти системные роли: %w", rerr)

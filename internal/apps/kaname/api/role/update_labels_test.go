@@ -265,6 +265,9 @@ func (w *rlRoleWtr) Delete(context.Context, domain.RoleID) error { return nil }
 func (w *rlRoleWtr) ReplaceRuleSelectors(context.Context, domain.RoleID, []domain.RuleSelector) error {
 	return nil
 }
+func (w *rlRoleWtr) RegrainSelectorVerbs(context.Context, domain.RoleID, []domain.RuleSelector) error {
+	return nil
+}
 
 // ReplaceRoleVerbs — дублёр умеет то же, что настоящий писатель: проекция
 // глаголов пишется рядом с селекторами. Дублёр, не умеющий метода, делает

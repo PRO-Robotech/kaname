@@ -198,7 +198,16 @@ type WriterIface interface {
 	// mirror-change event affects (forward-materialization). A legacy
 	// permissions-only role clears its selectors (DELETE then no INSERT). Idempotent
 	// re-sync (same rules → same set).
+	//
+	// Каждый селектор обязан нести глаголы своего правила (`RuleSelector.Grants`,
+	// заполняет `catalog.Facts.GrantSelectors`); селектор без них отвергается
+	// (kaname#878). Роль снимается из очереди пересчёта глаголов правил.
 	ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
+
+	// RegrainSelectorVerbs пересчитывает глаголы правил у существующих строк
+	// селекторов роли (по отпечатку) и снимает роль из очереди пересчёта
+	// (kaname#878). Охват правил не трогает.
+	RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
 
 	// ReplaceRoleVerbs syncs kaname.role_verb — проекцию «роль → тип объекта ×
 	// глагол», которой отвечает форма E.

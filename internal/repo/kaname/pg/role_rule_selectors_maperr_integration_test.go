@@ -53,6 +53,7 @@ func TestDB2_ReplaceRuleSelectors_CheckViolation_MapsInvalidArgument(t *testing.
 		Arm:         domain.ArmLabels,
 		ObjectTypes: []string{"compute.instance"},
 		MatchLabels: map[string]string{"BAD KEY": "v"},
+		Grants:      map[string][]string{},
 	}}
 	rerr := w.RolesW().ReplaceRuleSelectors(ctx, roleID, bad)
 	require.Error(t, rerr, "invalid match_labels must violate the CHECK")

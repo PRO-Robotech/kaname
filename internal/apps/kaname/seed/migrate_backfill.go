@@ -265,6 +265,10 @@ type pgxQuerierExecer interface {
 type systemRoleRules struct {
 	id    string
 	rules domain.Rules
+	// ownProjection — пересчитывать ли проекцию роли (`role_verb`): только у
+	// живой системной роли с правилами (kaname#878, довод — у
+	// replaceRoleVerbsInOwnTx).
+	ownProjection bool
 }
 
 // syncAllSystemRoleSelectorsTx projects EVERY materializing system-role's rules[] into
@@ -383,6 +387,13 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 	// Контейнер вложенного правила (kaname#874) — та же форма строки, что у
 	// `ReplaceRuleSelectors`: тип и ветвь NULL у правила верхнего уровня,
 	// модельное имя типа контейнера выводит страж базы.
+	//
+	// Глаголы правила (`verbs_by_type`, kaname#878) здесь НЕ вычисляются: у этого
+	// досева нет каталожного факта. Новая строка ложится пустой картой — правило
+	// не даёт ничего, сторона отказа, — а существующая сохраняет свою: отпечаток
+	// есть хэш всего правила, и строка с прежним отпечатком несёт прежний набор.
+	// Вычисляет их пересчёт проекции глаголов (ReseedSystemRoleVerbs), который на
+	// старте идёт следом за этим досевом и обходит КАЖДУЮ системную роль.
 	var containerType, containerArm *string
 	containerNames, containerLabels := []string{}, []byte("{}")
 	if c := sel.Container; c != nil {
@@ -403,8 +414,8 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		`INSERT INTO kaname.role_rule_selectors
 		   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 		    container_type, container_arm, container_resource_names, container_match_labels,
-		    created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, now(), now())
+		    verbs_by_type, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, '{}'::jsonb, now(), now())
 		 ON CONFLICT (role_id, rule_fp) DO UPDATE
 		    SET arm                      = EXCLUDED.arm,
 		        object_types             = EXCLUDED.object_types,

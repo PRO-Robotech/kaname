@@ -1089,14 +1089,8 @@ func splitRuleRefHint(hint string) (resource, verb string) {
 // (`catalog_applier_lock_order_integration_test.go`), — прочитать порядок
 // нельзя, он есть свойство исполнения.
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
-	if types := lockedCatalogTypesOf(selectors); len(types) > 0 {
-		if _, err := w.tx.Exec(ctx, `
-			SELECT 1 FROM kaname.catalog_resource
-			 WHERE dotted = ANY($1) AND live
-			 ORDER BY dotted
-			   FOR KEY SHARE`, types); err != nil {
-			return mapErr(err, "", string(roleID))
-		}
+	if err := w.lockSelectorCatalogRows(ctx, roleID, selectors); err != nil {
+		return err
 	}
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kaname.role_rule_selectors WHERE role_id = $1`, string(roleID)); err != nil {
@@ -1129,6 +1123,10 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 		if err != nil {
 			return err
 		}
+		grants, err := grantsColumnOf(roleID, sel)
+		if err != nil {
+			return err
+		}
 		// Контейнер вложенного правила (kaname#874) — четыре колонки; модельное
 		// имя типа контейнера выводит страж базы (`role_rule_selector_types_live`)
 		// из живой строки каталога, писатель его не пишет.
@@ -1136,8 +1134,8 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			`INSERT INTO kaname.role_rule_selectors
 			   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 			    container_type, container_arm, container_resource_names, container_match_labels,
-			    created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, now(), now())
+			    verbs_by_type, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, now(), now())
 			 ON CONFLICT (role_id, rule_fp) DO UPDATE
 			    SET arm                      = EXCLUDED.arm,
 			        object_types             = EXCLUDED.object_types,
@@ -1147,9 +1145,10 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			        container_arm            = EXCLUDED.container_arm,
 			        container_resource_names = EXCLUDED.container_resource_names,
 			        container_match_labels   = EXCLUDED.container_match_labels,
+			        verbs_by_type            = EXCLUDED.verbs_by_type,
 			        updated_at               = now()`,
 			string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
-			cont.typ, cont.arm, cont.names, cont.labels,
+			cont.typ, cont.arm, cont.names, cont.labels, grants,
 		); err != nil {
 			// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
 			// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
@@ -1157,7 +1156,94 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			return mapErr(err, "", string(roleID))
 		}
 	}
+	// Глаголы правил роли записаны ВЫЧИСЛЕННЫМИ — роль из очереди пересчёта
+	// снимается тем же оператором транзакции (kaname#878).
+	return w.dequeueSelectorVerbs(ctx, roleID)
+}
+
+// RegrainSelectorVerbs пересчитывает глаголы правил (`verbs_by_type`) у
+// СУЩЕСТВУЮЩИХ строк селекторов роли и снимает роль из очереди пересчёта
+// (kaname#878).
+//
+// Пишется ТОЛЬКО колонка глаголов строки с тем же отпечатком: охват правила не
+// трогается, строки не снимаются и не заводятся. Поэтому вызов безопасен рядом
+// с правкой роли без замка на её строку: отпечаток — хэш ВСЕГО правила, включая
+// глаголы и вложенные, и глаголы строки с отпечатком F есть функция F и
+// каталога, а не прочих правил роли. Правка роли, переписавшая селекторы, либо
+// уже сняла строку F (тогда обновлять нечего), либо положила строку F с тем же
+// набором.
+//
+// Замки на строки каталога берутся ВПЕРЁД и в том же порядке, что у
+// ReplaceRuleSelectors: оператор обновления будит стража живости типов, и без
+// замка вперёд он брал бы их в порядке обхода — та самая инверсия порядка с
+// применителем каталога.
+func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
+	if err := w.lockSelectorCatalogRows(ctx, roleID, selectors); err != nil {
+		return err
+	}
+	for _, sel := range selectors {
+		if len(sel.ObjectTypes) == 0 {
+			continue
+		}
+		grants, err := grantsColumnOf(roleID, sel)
+		if err != nil {
+			return err
+		}
+		if _, err := w.tx.Exec(ctx,
+			`UPDATE kaname.role_rule_selectors
+			    SET verbs_by_type = $3::jsonb
+			  WHERE role_id = $1 AND rule_fp = $2
+			    AND verbs_by_type IS DISTINCT FROM $3::jsonb`,
+			string(roleID), sel.RuleFP, grants); err != nil {
+			return mapErr(err, "", string(roleID))
+		}
+	}
+	return w.dequeueSelectorVerbs(ctx, roleID)
+}
+
+// lockSelectorCatalogRows — замки на строки каталога, которые возьмёт страж
+// живости типов селекторов, ВПЕРЁД и в порядке `dotted` (довод — у
+// ReplaceRuleSelectors).
+func (w *roleWriter) lockSelectorCatalogRows(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
+	types := lockedCatalogTypesOf(selectors)
+	if len(types) == 0 {
+		return nil
+	}
+	if _, err := w.tx.Exec(ctx, `
+			SELECT 1 FROM kaname.catalog_resource
+			 WHERE dotted = ANY($1) AND live
+			 ORDER BY dotted
+			   FOR KEY SHARE`, types); err != nil {
+		return mapErr(err, "", string(roleID))
+	}
 	return nil
+}
+
+// dequeueSelectorVerbs — роль снимается из очереди пересчёта глаголов правил.
+func (w *roleWriter) dequeueSelectorVerbs(ctx context.Context, roleID domain.RoleID) error {
+	if _, err := w.tx.Exec(ctx,
+		`DELETE FROM kaname.role_selector_verbs_pending WHERE role_id = $1`, string(roleID)); err != nil {
+		return mapErr(err, "", string(roleID))
+	}
+	return nil
+}
+
+// errSelectorGrantsNotComputed — селектор пришёл без вычисленных глаголов
+// правила. Это ошибка вызывающего (глаголы заполняет
+// `catalog.Facts.GrantSelectors`), а не вход арендатора: записанная молча, она
+// стала бы правилом, не дающим ничего, — отказом, неотличимым от честного.
+var errSelectorGrantsNotComputed = errors.New("role_rule_selectors: глаголы правила не вычислены")
+
+// grantsColumnOf — значение `verbs_by_type` строки селектора.
+func grantsColumnOf(roleID domain.RoleID, sel domain.RuleSelector) ([]byte, error) {
+	if sel.Grants == nil {
+		return nil, fmt.Errorf("%w (роль %s, отпечаток %s)", errSelectorGrantsNotComputed, roleID, sel.RuleFP)
+	}
+	raw, err := json.Marshal(sel.Grants)
+	if err != nil {
+		return nil, fmt.Errorf("role_rule_selectors: глаголы правила %s: %w", sel.RuleFP, err)
+	}
+	return raw, nil
 }
 
 // lockedCatalogTypesOf — точечные имена, чьи строки каталога возьмёт страж
