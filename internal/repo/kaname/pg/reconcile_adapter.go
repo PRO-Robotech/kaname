@@ -382,7 +382,7 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 		// Target — the per-object least-privilege selection (F8, IAM-1-21). When
 		// Target.Resources is non-empty the reconciler materializes ONLY the listed
 		// objects (never the whole scope). Read from the persisted access_bindings.target
-		// column by scanAB (accesstarget.Decode). AllInScope/empty ⇒ whole-anchor grant.
+		// column by scanAB (relverdict.DecodeTarget). AllInScope/empty ⇒ whole-anchor grant.
 		Target: b.Target,
 		RoleID: string(b.RoleID),
 		Active: b.Status == domain.AccessBindingStatusActive,

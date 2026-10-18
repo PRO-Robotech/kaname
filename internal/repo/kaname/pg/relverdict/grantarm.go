@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/accesstarget"
 )
 
 // grantArmPredicate — правило роли И цель привязки ОДНИМ предикатом.
@@ -92,7 +90,7 @@ import (
 // совпадает ни с одним объектом. Проверять ОТСУТСТВИЕ ключа через
 // «-> 'resources' IS NULL» нельзя: у корня-не-объекта NULL даёт и это
 // выражение, и такая цель читалась бы как вся область. Текст обоих прочтений
-// цели — здесь и у материализатора — один: `accesstarget`.
+// цели — здесь и у материализатора — один: `target.go` этого пакета.
 //
 // # РАЗДЕЛЯТЬ ВЕТВИ ПРАВИЛА НА ДВА ЗАПРОШЕННЫХ АРМА НЕЛЬЗЯ, и это измерено
 //
@@ -260,16 +258,6 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                     AND ` + namedInTarget("ns.container_type", "ce.parent_id") + `),
          false) IS NOT NULL`
 	return arm + nested + top + binding
-}
-
-// wholeScopeTarget — цель «вся область». Прочтение формы цели у решения о
-// доступе и у материализатора одно — `accesstarget` (kaname#863); здесь оно
-// подставлено, а не повторено.
-var wholeScopeTarget = accesstarget.WholeScopeSQL("b.target")
-
-// namedInTarget — цель называет пару «тип, id» (тип — в словаре каталога).
-func namedInTarget(typeExpr, idExpr string) string {
-	return accesstarget.NamedSQL("b.target", typeExpr, idExpr)
 }
 
 // errTemplateMark — метка шаблона запроса стоит в нём не ровно один раз.

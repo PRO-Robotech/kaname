@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package accesstarget_test
+package relverdict_test
 
-// forms_integration_test.go — та же таблица форм (forms_test.go), судимая базой
+// target_forms_integration_test.go — та же таблица форм (target_forms_test.go), судимая базой
 // и SQL-прочтением решения о доступе (kaname#863).
 //
 // По каждой строке:
@@ -11,10 +11,10 @@ package accesstarget_test
 //   - база: законная форма вставляется и становится значением обновления,
 //     форма вне контракта отвергается и вставкой, и обновлением — ограничением
 //     `access_bindings_target_form_ck`, SQLSTATE 23514;
-//   - решение о доступе: на каждой ЗАКОННОЙ форме `WholeScopeSQL` и `NamedSQL`
-//     дают тот же класс, что `Decode`, по каждой паре из `probes`.
+//   - решение о доступе: на каждой ЗАКОННОЙ форме `wholeScopeTarget` и `namedInTarget`
+//     дают тот же класс, что `DecodeTarget`, по каждой паре из `tfProbes`.
 //
-// Вместе с unit-частью это даёт замкнутое утверждение: `Decode` принимает
+// Вместе с unit-частью это даёт замкнутое утверждение: `DecodeTarget` принимает
 // ровно то, что принимает база (вне контракта — `ErrForm` и отказ базы на
 // одних и тех же строках), а на всём, что база принимает, оба прочтения
 // говорят одно. Класс SQL-прочтения на форме вне контракта не обещается и не
@@ -32,20 +32,20 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/accesstarget"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
-// sqlReading — ответ SQL-прочтения: вся область и названность каждой пары.
-func sqlReading(ctx context.Context, tx pgx.Tx, target string) (whole bool, named []bool, err error) {
-	q := `SELECT COALESCE(` + accesstarget.WholeScopeSQL("b.target") + `, false)`
+// tfSQLReading — ответ SQL-прочтения: вся область и названность каждой пары.
+func tfSQLReading(ctx context.Context, tx pgx.Tx, target string) (whole bool, named []bool, err error) {
+	q := `SELECT COALESCE(` + relverdict.WholeScopeTargetSQL + `, false)`
 	args := []any{target}
-	for i, p := range probes {
-		q += fmt.Sprintf(`, COALESCE(`+accesstarget.NamedSQL("b.target", "$%d::text", "$%d::text")+`, false)`,
+	for i, p := range tfProbes {
+		q += fmt.Sprintf(`, COALESCE(`+relverdict.NamedInTargetSQL("$%d::text", "$%d::text")+`, false)`,
 			2+2*i, 3+2*i)
 		args = append(args, p.Type, p.ID)
 	}
 	q += ` FROM (SELECT $1::jsonb AS target) AS b`
-	named = make([]bool, len(probes))
+	named = make([]bool, len(tfProbes))
 	dest := []any{&whole}
 	for i := range named {
 		dest = append(dest, &named[i])
@@ -54,7 +54,7 @@ func sqlReading(ctx context.Context, tx pgx.Tx, target string) (whole bool, name
 	return whole, named, err
 }
 
-func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
+func TestTargetFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
@@ -72,7 +72,7 @@ func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 	}
 
 	var judged int
-	for i, f := range forms {
+	for i, f := range tfForms {
 		t.Run(f.name, func(t *testing.T) {
 			tx, err := pool.Begin(ctx)
 			if err != nil {
@@ -95,16 +95,16 @@ func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 
 			// Решение о доступе — на законной форме.
 			if f.legal {
-				whole, named, err := sqlReading(ctx, tx, f.json)
+				whole, named, err := tfSQLReading(ctx, tx, f.json)
 				if err != nil {
 					t.Fatalf("SQL-прочтение %s: %v", f.json, err)
 				}
 				if whole != f.whole {
-					t.Errorf("WholeScopeSQL(%s) = %v, ждали %v (как Decode)", f.json, whole, f.whole)
+					t.Errorf("wholeScopeTarget(%s) = %v, ждали %v (как DecodeTarget)", f.json, whole, f.whole)
 				}
-				for j, p := range probes {
+				for j, p := range tfProbes {
 					if named[j] != f.wantNamed(p) {
-						t.Errorf("NamedSQL(%s, %s, %s) = %v, ждали %v (как Decode)", f.json, p.Type, p.ID, named[j], f.wantNamed(p))
+						t.Errorf("namedInTarget(%s, %s, %s) = %v, ждали %v (как DecodeTarget)", f.json, p.Type, p.ID, named[j], f.wantNamed(p))
 					}
 				}
 			}
@@ -149,29 +149,29 @@ func TestEveryFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 				}
 				return
 			}
-			refused(t, "вставка", f.json, ins(f.json))
+			tfRefused(t, "вставка", f.json, ins(f.json))
 			if err := ins(legalRow); err != nil {
 				t.Fatalf("близнец: законная %s вставляется: %v", legalRow, err)
 			}
-			refused(t, "обновление", f.json, upd(f.json))
+			tfRefused(t, "обновление", f.json, upd(f.json))
 		})
 		judged++
 	}
-	t.Logf("перепись: форм таблицы %d, судимых базой и обоими прочтениями %d", len(forms), judged)
-	if judged != len(forms) || judged == 0 {
-		t.Fatalf("предпосылка: судимых %d из %d", judged, len(forms))
+	t.Logf("перепись: форм таблицы %d, судимых базой и обоими прочтениями %d", len(tfForms), judged)
+	if judged != len(tfForms) || judged == 0 {
+		t.Fatalf("предпосылка: судимых %d из %d", judged, len(tfForms))
 	}
 }
 
-// refused — отказ базы именно ограничением формы, SQLSTATE 23514.
-func refused(t *testing.T, op, target string, err error) {
+// tfRefused — отказ базы именно ограничением формы, SQLSTATE 23514.
+func tfRefused(t *testing.T, op, target string, err error) {
 	t.Helper()
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		t.Fatalf("%s %s: база ПРИНЯЛА форму вне контракта (ошибка %v)", op, target, err)
 	}
-	if pgErr.ConstraintName != accesstarget.ConstraintName || pgErr.Code != "23514" {
+	if pgErr.ConstraintName != relverdict.TargetFormConstraint || pgErr.Code != "23514" {
 		t.Fatalf("%s %s: ждали %s/23514, получено %s/%s: %v", op, target,
-			accesstarget.ConstraintName, pgErr.ConstraintName, pgErr.Code, err)
+			relverdict.TargetFormConstraint, pgErr.ConstraintName, pgErr.Code, err)
 	}
 }

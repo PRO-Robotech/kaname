@@ -22,7 +22,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/accesstarget"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
@@ -54,8 +53,8 @@ func tgSeedBindingRefused(t *testing.T, ctx context.Context, tx pgx.Tx, target s
 		 VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`,
 		tgBinding, tgRole, target)
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.ConstraintName != accesstarget.ConstraintName {
-		t.Fatalf("цель %s: ждали отказ ограничением %s, получено %v", target, accesstarget.ConstraintName, err)
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != relverdict.TargetFormConstraint {
+		t.Fatalf("цель %s: ждали отказ ограничением %s, получено %v", target, relverdict.TargetFormConstraint, err)
 	}
 	exec(t, ctx, tx, `ROLLBACK TO SAVEPOINT tg_refused`)
 }

@@ -56,8 +56,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/accesstarget"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 type abReader struct {
@@ -688,7 +688,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	// F8: persist the object-selection (target) + its set-based digest. The digest
 	// is a key column of the active-grant partial UNIQUE (identical target →
 	// collision, distinct per-object targets coexist). Empty/whole-anchor → "all".
-	targetJSON, err := accesstarget.Encode(b.Target)
+	targetJSON, err := relverdict.EncodeTarget(b.Target)
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())
 	}
@@ -1007,7 +1007,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
-	ab.Target, err = accesstarget.Decode(targetJSON)
+	ab.Target, err = relverdict.DecodeTarget(targetJSON)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
