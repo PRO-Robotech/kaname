@@ -126,6 +126,7 @@ var deliveryRoster = []string{
 	"prod_profile_render_test.go",
 	"prod_profile_test.go",
 	"profile_sources_test.go",
+	"registry_token_anonymous_render_test.go",
 	"release_namespace_test.go",
 	"render-guard.sh",
 	"retired_posture_key_test.go",

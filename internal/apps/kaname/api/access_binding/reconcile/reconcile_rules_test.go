@@ -98,6 +98,20 @@ type fakeStore struct {
 	ancestors map[string][]domain.MirrorObject
 	// ancestorReads — обращений за предками (путь по объекту читает их лениво).
 	ancestorReads int
+	// ledgerReads — обращений за реестром выдачи целиком (LedgerTuples).
+	ledgerReads int
+
+	// subjects — перечень субъектов выдачи (kaname#880); пусто — один субъект
+	// subjectType/subjectID.
+	subjects []domain.Subject
+}
+
+// bindingSubjects — перечень субъектов, который двойник отдаёт в BindingScope.
+func (f *fakeStore) bindingSubjects() []domain.Subject {
+	if len(f.subjects) > 0 {
+		return f.subjects
+	}
+	return []domain.Subject{{Type: domain.SubjectType(f.subjectType), ID: domain.SubjectID(f.subjectID)}}
 }
 
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
@@ -126,8 +140,7 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 	return BindingScope{
 		BindingID:      id,
 		Scope:          f.scope,
-		SubjectType:    f.subjectType,
-		SubjectID:      f.subjectID,
+		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
 		Target:         f.target,
@@ -144,8 +157,7 @@ func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBin
 	return BindingScope{
 		BindingID:      id,
 		Scope:          f.scope,
-		SubjectType:    f.subjectType,
-		SubjectID:      f.subjectID,
+		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
 		Target:         f.target,
@@ -165,8 +177,7 @@ func (f *fakeStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.Acces
 		out[id] = BindingScope{
 			BindingID:      id,
 			Scope:          f.scope,
-			SubjectType:    f.subjectType,
-			SubjectID:      f.subjectID,
+			Subjects:       f.bindingSubjects(),
 			Selectors:      f.selectors,
 			ScopeSelfVerbs: f.scopeSelfVerbs,
 			Target:         f.target,
@@ -334,6 +345,17 @@ func (f *fakeStore) LedgerTuplesForObject(ctx context.Context, id domain.AccessB
 				out = append(out, t)
 			}
 		}
+	}
+	return out, nil
+}
+
+// LedgerTuples — весь реестр выдачи: засеянное плюс записанное проходом (той же
+// формой, что LedgerTuplesForObject).
+func (f *fakeStore) LedgerTuples(ctx context.Context, id domain.AccessBindingID) ([]domain.MembershipTuple, error) {
+	f.ledgerReads++
+	out := append([]domain.MembershipTuple(nil), f.ledger...)
+	for _, batch := range f.recorded {
+		out = append(out, batch...)
 	}
 	return out, nil
 }

@@ -46,6 +46,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // Test 01 — FAST-MATERIALIZE (IAM-FMB-01). A single create-forward pass materializes the
@@ -252,7 +253,7 @@ func TestReconcileBindingForward_05_CreateVsConcurrentRevoke(t *testing.T) {
 		// Precompute the compiled permissions + selectors OUTSIDE the goroutine (mustCompile
 		// uses require and must run on the test goroutine, not a spawned one).
 		getOnlyPerms := mustCompile(t, domain.Rules{getOnly})
-		getOnlySelectors := domain.Rules{getOnly}.MaterializingSelectors()
+		getOnlySelectors := catalogfixture.Facts().GrantSelectors(domain.Rules{getOnly}.MaterializingSelectors())
 
 		var wg sync.WaitGroup
 		errCh := make(chan error, 2)
@@ -376,7 +377,7 @@ func TestReconcileBindingForward_08_FanoutRevokeSticks(t *testing.T) {
 		Rules: domain.Rules{getOnly}, Permissions: mustCompile(t, domain.Rules{getOnly}), IsSystem: false}
 	_, err = w.RolesW().Update(ctx, updated, []string{"rules"})
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, updated.Rules.MaterializingSelectors()))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, catalogfixture.Facts().GrantSelectors(updated.Rules.MaterializingSelectors())))
 	require.NoError(t, w.Commit(ctx))
 	require.NoError(t, rec.ReconcileBinding(ctx, bid))
 

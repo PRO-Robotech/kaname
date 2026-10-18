@@ -50,7 +50,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
 type RevokeAccessBindingUseCase struct {
@@ -217,22 +216,17 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	// Subject-change outbox (authz-cache invalidation — access removed).
 	// НА КАЖДОГО субъекта привязки, а не на легаси-одиночку: см.
 	// emitSubjectChangeForEverySubject.
-	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
-		binding, "binding_revoke", "binding_delete"); err != nil {
+	subjects, err := bindingSubjectsOf(ctx, w.AccessBindings().ListSubjects, binding)
+	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// Durable compliance audit event in the SAME writer-tx (ban #10).
-	if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
-		EventType:       abrepo.AuditEventTypeRevoked,
-		Actor:           revokeActor,
-		SubjectType:     string(binding.SubjectType),
-		SubjectID:       string(binding.SubjectID),
-		ResourceType:    string(binding.ResourceType),
-		ResourceID:      binding.ResourceID,
-		RoleID:          string(binding.RoleID),
-		BindingID:       string(binding.ID),
-		TenantAccountID: auditTenantAccountID(binding),
-	}); err != nil {
+	if err := emitSubjectChangeFor(ctx, w.AccessBindingsW().EmitSubjectChangeEvent, subjects,
+		"binding_revoke", "binding_delete"); err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	// Durable compliance audit event in the SAME writer-tx (ban #10) — на каждого
+	// субъекта, симметрично аудиту создания.
+	if err := revokedAuditFor(ctx, w.AccessBindingsW().EmitAuditEvent, subjects, revokeActor, binding); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	if err := w.Commit(ctx); err != nil {

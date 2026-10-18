@@ -1,0 +1,121 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/register-resource-checks-the-module-vocabulary.md
+  sha256: 3236ea00c5d3be71b23792beec7b04178a4537b56dfad0a8f78ac03f73d8f6b8
+  revision: поправка 2026-10-18 (kaname#893) к редакции круга 4
+  static_status: APPROVED
+  static_status_note: >-
+    Слово APPROVED в шапке относится к кругу 4 (§19) и к прежней редакции. Вердикт о ЭТОМ
+    содержимом выводится из этой записи и внешнего события (`change-graph.md` §2). Шапку
+    документа рецензент намеренно не правил.
+  base_commit: e0f69f3ef
+  content_commit: null
+  content_commit_note: >-
+    Правка не закоммичена: изменённый отслеживаемый файл копии tmp/kn-893-acc, ветка 893-acc.
+    Ляжет только поверх кода kaname e36fd21a6 (ветка 893).
+  branch: 893-acc
+  task: PRO-Robotech/kaname#893
+  related_tasks: [PRO-Robotech/corelib#116]
+  lines: 3513
+  round: 1
+  round_scope: >-
+    Правка после вердикта: git diff HEAD по документу (+57/−0 по существу). Строка шапки,
+    поправка под замером §0.3, утверждение §2.4, IAM-MV-20, IAM-MV-21, второй контроль
+    IAM-MV-08, две строки §5.4 и примечание к счёту круга 4. Вне дельты ничего не
+    переоткрыто.
+  predecessor_record: >-
+    Отдельной записи нет: вердикты кругов 1–4 записаны в самом документе (§13–§19), круг 4
+    — APPROVED.
+  fingerprint_predicate: >-
+    sha256sum <док> → 3236ea00…f8b6, совпало с заданием. git show HEAD:<док> | sha256sum →
+    e7d64c5e…a3fc.
+  measurement_revisions: corelib 7ffb6873c; kaname e36fd21a6.
+
+verdict: APPROVED
+verdict_note: >-
+  Дельта верна и держится пробами. IAM-MV-20: принятие слова класса и отсутствие строки
+  зеркала держат corelib TestValidateTuple_PublicReadAcceptsTheAnonymousClass (строка
+  «anonymous class publishes own repository») и kaname TestRegisterResource_AnonymousWordIsAPublication
+  (mirror upserts 0, вызов порта). Близнец — IAM-MV-03. IAM-MV-21: отказ authenticated с
+  дословным текстом держат обе пробы; близнец — IAM-MV-20, отличие в одном факте. Поправка
+  §0.3 стоит ПОД записью замера и запись не переписывает. Утверждение §2.4 о закрытом
+  перечне подтверждено по policy.go@7ffb6873c:140 и :265. Прочие отказы слова класса сосед
+  отдаёт SC-76 приёмки классов; блокирующее по SC-76 (з) живёт там (запись
+  80edd84b….yaml, B1), а не здесь.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T15:42:00+03:00'
+
+remarks_non_blocking:
+  - id: R1
+    kind: FORMAT
+    note: >-
+      Ссылка шапки «переходный срок user:*, его условие и предикат снятия — SC-77»
+      остаётся верной при любом исправлении B2/B3 приёмки классов, если номер сценария не
+      изменится.
+  - id: R2
+    kind: DoD
+    note: >-
+      §5.4 называет пробы kaname, которых на origin/main ещё нет. Гейт
+      TestAcceptanceProbeCoordinateResolves зелёный только на дереве 893, поэтому документ
+      коммитится вместе с кодом ветки 893 или после неё.
+
+summary:
+  scenarios_in_delta: 2 новых (IAM-MV-20, IAM-MV-21) и 1 правленый контроль (IAM-MV-08)
+  blocking: 0
+  constructibility: >-
+    Посеяно на копии corelib@7ffb6873c: строки IAM-MV-20 и IAM-MV-21 в
+    TestValidateTuple_PublicReadAcceptsTheAnonymousClass — PASS. Пробы kaname прочитаны
+    @e36fd21a6, рецензент их не прогонял. Автор сообщил о зелёном прогоне трёх гейтов
+    приёмок на дереве 893.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-18T15:49:30Z"
+  reason: событие не опубликовано (event.status not_performed); одобрение вступает в силу событием
+
+event_body: "acceptance-reviewer · APPROVED · sha256 3236ea00c5d3be71b23792beec7b04178a4537b56dfad0a8f78ac03f73d8f6b8 · поправка 2026-10-18 (kaname#893): IAM-MV-20, IAM-MV-21, §2.4, блокирующих 0"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#893
+  status: performed
+  published: true
+  database_id: 6251898407
+  node_id: "IC_kwDOUO26pM8AAAABdKRmJw"
+  url: "https://github.com/PRO-Robotech/kaname/issues/893#issuecomment-6251898407"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6251898407"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T15:49:30Z"
+  body_sha256: "44524275a104022321d23c98a163406c7b77126a07da73602e78f5ff9157f41b"
+  subject_sha256: "3236ea00c5d3be71b23792beec7b04178a4537b56dfad0a8f78ac03f73d8f6b8"
+  subject_revision_commit: "a129b6a1650c14d5e41b38d506623d7fb3ff4641"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

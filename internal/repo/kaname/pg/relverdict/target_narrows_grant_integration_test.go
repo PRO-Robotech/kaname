@@ -70,8 +70,9 @@ func tgSeedTopology(t *testing.T, ctx context.Context, tx pgx.Tx) {
 		tgRole, subnet)
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-2', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, tgRole, subnet)
+		   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-2', 'anchor', ARRAY[$2::text], '{}'::jsonb,
+		         jsonb_build_object($2::text, jsonb_build_array('get')))`, tgRole, subnet)
 
 	for _, o := range []struct{ model, id string }{
 		{"vpc_network", tgObjX}, {"vpc_network", tgObjY}, {"vpc_subnet", tgObjX},

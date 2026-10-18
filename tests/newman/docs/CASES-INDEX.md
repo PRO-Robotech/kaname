@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 875
+Всего кейсов: 876
 
 ## Перепись по модулям
 
@@ -36,7 +36,7 @@
 | `cases/authz-deny.py` | 293 |
 | `cases/authz-failclosed.py` | 3 |
 | `cases/basic-access-token.py` | 2 |
-| `cases/docker-lane-credential-kind.py` | 1 |
+| `cases/docker-lane-credential-kind.py` | 2 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 17 |
@@ -395,11 +395,12 @@
 - `IAM-BAT-SECRET-LIFECYCLE-OK`
 - `IAM-BAT-SECRET-TTL-ABOVE-CEILING-NEG`
 
-## `cases/docker-lane-credential-kind.py` — 1 кейсов
+## `cases/docker-lane-credential-kind.py` — 2 кейсов
 
 > Case-set docker-lane-credential-kind — ДОКЕР-ПОЛОСА ПРИНИМАЕТ ОДИН ВИД (kacho#1143).
 
 - `IAM-DOCKER-LANE-BASIC-TOKEN-ONLY`
+- `IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG`
 
 ## `cases/iam-access-binding-account-scope.py` — 9 кейсов
 

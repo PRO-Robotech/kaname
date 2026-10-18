@@ -265,6 +265,9 @@ func (w *rlRoleWtr) Delete(context.Context, domain.RoleID) error { return nil }
 func (w *rlRoleWtr) ReplaceRuleSelectors(context.Context, domain.RoleID, []domain.RuleSelector) error {
 	return nil
 }
+func (w *rlRoleWtr) RegrainSelectorVerbs(context.Context, domain.RoleID, []domain.RuleSelector) error {
+	return nil
+}
 
 // ReplaceRoleVerbs — дублёр умеет то же, что настоящий писатель: проекция
 // глаголов пишется рядом с селекторами. Дублёр, не умеющий метода, делает
@@ -389,3 +392,7 @@ func (_ *rlRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, er
 
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
+
+func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, bool, error) {
+	return nil, false, nil
+}

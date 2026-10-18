@@ -26,10 +26,12 @@ package reconcile
 //
 // # Классу — не применяется
 //
-// Выдаче СИСТЕМНОМУ КЛАССУ вложенное правило членов `v_*` на потомках не даёт
+// СИСТЕМНОМУ КЛАССУ вложенное правило членов `v_*` на потомках не даёт
 // (Р5, ND-10): у класса одна дорога к потомкам — `public_reader` объявленного
 // контейнера, и снятие объявления обязано снимать чтение. Вложенное правило у
-// класса служит только основанием `public_reader` (public_reader.go).
+// класса служит только основанием `public_reader` (public_reader.go). Суждение —
+// по КАЖДОМУ субъекту выдачи (subjects.go, kaname#880): человеку той же выдачи
+// вложенное правило применяется, классу — нет.
 
 import (
 	"context"
@@ -37,11 +39,6 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
-
-// isClassBinding — субъект выдачи — системный класс.
-func isClassBinding(bs BindingScope) bool {
-	return bs.SubjectType == string(domain.SubjectTypeSystemClass)
-}
 
 // ownerSelectorOf — отбор правила-владельца вложенного селектора в форме
 // селектора над типом контейнера.
@@ -72,7 +69,7 @@ func containerSelected(sel domain.RuleSelector, bs BindingScope, a domain.Mirror
 // nestedCoversObject — путь по объекту: вложенный селектор охватывает объект `o`
 // с предками `ancestors`.
 func nestedCoversObject(sel domain.RuleSelector, bs BindingScope, o domain.MirrorObject, ancestors []domain.MirrorObject) bool {
-	if isClassBinding(bs) || !selectorMatchesObject(sel, o) {
+	if !hasNonClassSubject(bs) || !selectorMatchesObject(sel, o) {
 		return false
 	}
 	for _, a := range ancestors {
@@ -114,9 +111,9 @@ func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, s
 }
 
 // hasNestedSelector — у выдачи есть вложенный селектор, который к ней
-// применяется (субъект не класс).
+// применяется (среди субъектов есть не-класс).
 func hasNestedSelector(bs BindingScope) bool {
-	if isClassBinding(bs) {
+	if !hasNonClassSubject(bs) {
 		return false
 	}
 	for _, sel := range bs.Selectors {
@@ -130,7 +127,7 @@ func hasNestedSelector(bs BindingScope) bool {
 // nestsUnder — у выдачи есть вложенный селектор с контейнером типа `objectType`,
 // то есть изменение объекта этого типа меняет охват его потомков.
 func nestsUnder(bs BindingScope, objectType string) bool {
-	if isClassBinding(bs) {
+	if !hasNonClassSubject(bs) {
 		return false
 	}
 	for _, sel := range bs.Selectors {

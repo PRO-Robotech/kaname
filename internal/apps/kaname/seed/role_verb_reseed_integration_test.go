@@ -328,7 +328,9 @@ func TestIAMRV104_TwoReseedRunsAgreeAndDoNotInventTypes(t *testing.T) {
 //
 // Границу держит `WHERE is_system = true` в выборке досева. Её потеря переписывала
 // бы проекции ролей арендатора на каждом старте — то есть отзывала бы права,
-// которые он выдал себе сам, и делала бы это молча.
+// которые он выдал себе сам, и делала бы это молча. Глаголы правил на строках
+// селекторов роли арендатора досев тоже не трогает: их пересчитывает своя полоса
+// по очереди (DrainSelectorVerbsQueue, kaname#878), и проекции роли она не пишет.
 func TestIAMRV105_ReseedLeavesTenantRolesAlone(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужен Postgres")

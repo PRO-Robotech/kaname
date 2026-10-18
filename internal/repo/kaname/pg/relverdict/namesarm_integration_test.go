@@ -106,7 +106,8 @@ func seedRoleNames(t *testing.T, ctx context.Context, tx pgx.Tx, roleID, objType
 		roleID, objType, verb)
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels, resource_names)
-		 VALUES ($1, 'fp-names', 'names', ARRAY[$2::text], '{}'::jsonb, $3::text[])`,
-		roleID, objType, names)
+		   (role_id, rule_fp, arm, object_types, match_labels, resource_names, verbs_by_type)
+		 VALUES ($1, 'fp-names', 'names', ARRAY[$2::text], '{}'::jsonb, $3::text[],
+		         jsonb_build_object($2::text, jsonb_build_array($4::text)))`,
+		roleID, objType, names, verb)
 }
