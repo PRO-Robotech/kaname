@@ -49,6 +49,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/execstub"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -135,21 +136,15 @@ type runIntegrationOutcome struct {
 	left   []string // что осталось в TMPDIR по выходе
 }
 
-func writeExecutable(t *testing.T, path, body string) {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
-	require.NoError(t, os.WriteFile(path, []byte(body), 0o700)) // #nosec G306 -- исполняемый двойник в t.TempDir()
-}
-
 // runIntegrationIn — исполняет `script` в песочнице по пути `p`.
 func runIntegrationIn(t *testing.T, script string, p runIntegrationPath) runIntegrationOutcome {
 	t.Helper()
 	box := t.TempDir()
 	root := filepath.Join(box, "root")
-	writeExecutable(t, filepath.Join(root, filepath.FromSlash(runIntegrationRel)), script)
-	writeExecutable(t, filepath.Join(root, ".github", "scripts", "classify-integration-outcome.sh"), fakeClassifier)
+	execstub.Write(t, filepath.Join(root, filepath.FromSlash(runIntegrationRel)), script)
+	execstub.Write(t, filepath.Join(root, ".github", "scripts", "classify-integration-outcome.sh"), fakeClassifier)
 	bin := filepath.Join(box, "bin")
-	writeExecutable(t, filepath.Join(bin, "go"), fakeGo)
+	execstub.Write(t, filepath.Join(bin, "go"), fakeGo)
 	traces := filepath.Join(box, "tmp")
 	require.NoError(t, os.Mkdir(traces, 0o700))
 	census := filepath.Join(box, "census")
