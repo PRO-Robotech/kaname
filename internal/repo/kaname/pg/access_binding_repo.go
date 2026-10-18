@@ -57,6 +57,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 type abReader struct {
@@ -687,7 +688,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	// F8: persist the object-selection (target) + its set-based digest. The digest
 	// is a key column of the active-grant partial UNIQUE (identical target →
 	// collision, distinct per-object targets coexist). Empty/whole-anchor → "all".
-	targetJSON, err := marshalTarget(b.Target)
+	targetJSON, err := relverdict.EncodeTarget(b.Target)
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())
 	}
@@ -742,54 +743,6 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		return domain.AccessBinding{}, mapErr(err, "", idHint)
 	}
 	return out, nil
-}
-
-// targetPersistJSON is the JSONB persistence shape of AccessBinding.target (F8).
-type targetPersistJSON struct {
-	AllInScope bool                    `json:"allInScope,omitempty"`
-	Resources  []targetResourceRefJSON `json:"resources,omitempty"`
-}
-
-type targetResourceRefJSON struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
-}
-
-// marshalTarget serializes the domain target to its JSONB persistence shape. A
-// per-object set is written as {"resources":[…]}; AllInScope OR the empty
-// whole-anchor zero value is written as {"allInScope":true}.
-func marshalTarget(t domain.AccessTarget) ([]byte, error) {
-	tj := targetPersistJSON{}
-	if len(t.Resources) > 0 {
-		tj.Resources = make([]targetResourceRefJSON, 0, len(t.Resources))
-		for _, r := range t.Resources {
-			tj.Resources = append(tj.Resources, targetResourceRefJSON{Type: r.Type, ID: r.ID})
-		}
-	} else {
-		tj.AllInScope = true
-	}
-	return json.Marshal(tj)
-}
-
-// unmarshalTarget parses the JSONB persistence shape back to the domain target.
-// An empty/NULL column (defensive — every row is backfilled by migration 0055) →
-// the whole-anchor AllInScope grant.
-func unmarshalTarget(b []byte) (domain.AccessTarget, error) {
-	if len(b) == 0 {
-		return domain.AccessTarget{AllInScope: true}, nil
-	}
-	var tj targetPersistJSON
-	if err := json.Unmarshal(b, &tj); err != nil {
-		return domain.AccessTarget{}, err
-	}
-	if len(tj.Resources) > 0 {
-		out := make([]domain.ResourceRef, 0, len(tj.Resources))
-		for _, r := range tj.Resources {
-			out = append(out, domain.ResourceRef{Type: r.Type, ID: r.ID})
-		}
-		return domain.AccessTarget{Resources: out}, nil
-	}
-	return domain.AccessTarget{AllInScope: true}, nil
 }
 
 // Delete — простой DELETE. 0 rows → NotFound. Used by paths that have already
@@ -1054,7 +1007,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
-	ab.Target, err = unmarshalTarget(targetJSON)
+	ab.Target, err = relverdict.DecodeTarget(targetJSON)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
