@@ -23,6 +23,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -81,6 +82,77 @@ type RegistryTokenConfig struct {
 	// registry_token/key_material_window.go — здесь она не пересказывается,
 	// чтобы два места об одном предмете не разошлись.
 	KeyMaterialWindowUntilRaw string `mapstructure:"key-material-window-until"`
+
+	// AnonymousClientID — ПУБЛИЧНЫЙ ПРИНЦИПАЛ АНОНИМНОГО ЧТЕНИЯ (kaname#495):
+	// субъект токена, который наш подписант выпускает на вход без
+	// удостоверения (`docker pull` публичного репозитория без входа). Приёмная
+	// сторона реестра резолвит этот субъект в системный класс `anonymous`, у
+	// которого есть только чтение публикованных репозиториев.
+	//
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID
+	// Пример значения: registry-anonymous
+	//
+	// УМОЛЧАНИЕ — ПУСТО, ТО ЕСТЬ АНОНИМНЫЙ ПОТОК ВЫКЛЮЧЕН: вход без
+	// удостоверения получает 401-вызов. Умолчания, которое тихо открывало бы
+	// выдачу, нет: включает поток только оператор, объявив принципала, и то же
+	// имя он объявляет приёмной стороне реестра.
+	//
+	// Форма значения закрыта (AnonymousPrincipalForm), и иная отвергается
+	// стражем старта — разбор формы и цена её нарушения в AnonymousPrincipal.
+	AnonymousClientID string `mapstructure:"anonymous-client-id"`
+}
+
+// AnonymousPrincipalForm — объявленная форма публичного принципала анонимного
+// чтения: слова из строчных латинских букв и цифр через дефис, не меньше двух
+// слов, длина до 63 знаков.
+const AnonymousPrincipalForm = `^[a-z][a-z0-9]*(-[a-z0-9]+)+$`
+
+const anonymousPrincipalMaxLen = 63
+
+var (
+	anonymousPrincipalRe = regexp.MustCompile(AnonymousPrincipalForm)
+	// generatedIDShapeRe — форма идентификатора, который порождает сам продукт:
+	// короткий префикс вида, необязательный разделитель и 17 знаков
+	// crockford-base32 (`sva…`, `usr…`, `soc_…`, `ak-…`). Публичный принципал
+	// такой формы иметь не вправе — см. AnonymousPrincipal.
+	generatedIDShapeRe = regexp.MustCompile(`^[a-z]{2,4}[-_]?[0-9a-hjkmnp-tv-z]{17}$`)
+)
+
+// AnonymousPrincipal — объявленный публичный принципал анонимного чтения.
+//
+// Пустое + nil — анонимный поток выключен (умолчание). Ошибка — значение
+// написано, но не объявленной формы, и тогда исход ОДИН — отказ в старте:
+//
+//   - субъект, совпадающий по форме с порождённым идентификатором (служебная
+//     учётка `sva…`, человек `usr…`), превратил бы анонимный токен в токен
+//     настоящего принципала — то есть выдал бы его права всякому без
+//     удостоверения. Двухсловное имя через дефис с такими идентификаторами не
+//     совпадает по построению, а форма порождённого отвергается сверх того —
+//     на случай вида, чей префикс пишется через дефис;
+//   - пробел по краю, верхний регистр, говорящий модели прав
+//     (`system_class:anonymous`) и подстановка (`user:*`) — значения, которые
+//     приёмная сторона прочтёт иначе, чем выпущено, либо не той сущностью;
+//     догадка в любую сторону даёт посадку, которой оператор не выбирал.
+//
+// Обрезки пробелов здесь нет намеренно: обрезанное значение ушло бы в токен
+// не тем, что объявлено приёмной стороне.
+func (c RegistryTokenConfig) AnonymousPrincipal() (string, error) {
+	v := c.AnonymousClientID
+	if v == "" {
+		return "", nil
+	}
+	if len(v) > anonymousPrincipalMaxLen || !anonymousPrincipalRe.MatchString(v) ||
+		generatedIDShapeRe.MatchString(v) {
+		return "", fmt.Errorf(
+			"api-server.registry-token.anonymous-client-id %q is not of the declared form %s "+
+				"(at most %d characters, and never shaped like a generated identifier) — it is the "+
+				"subject of the read-only token minted for a caller WITHOUT credentials, and a value "+
+				"that can coincide with a real principal would hand that principal's access to anyone. "+
+				"Example: registry-anonymous. Unset (env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID "+
+				"empty) keeps anonymous pull OFF",
+			v, AnonymousPrincipalForm, anonymousPrincipalMaxLen)
+	}
+	return v, nil
 }
 
 // KeyMaterialWindowUntil — разобранное мгновение окна перехода.
@@ -172,6 +244,12 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
 	// полос, а страж, молчащий о ней при выключенном слушателе, оставил бы
 	// опечатку доживать до включения.
 	if _, err := c.KeyMaterialWindowUntil(); err != nil {
+		return err
+	}
+	// Публичный принципал анонимного чтения — по той же причине и тем же
+	// порядком: написанное значение не той формы есть ошибка настройки при
+	// любом составе полос (kaname#495).
+	if _, err := c.AnonymousPrincipal(); err != nil {
 		return err
 	}
 	if c.ListenAddress() == "" {

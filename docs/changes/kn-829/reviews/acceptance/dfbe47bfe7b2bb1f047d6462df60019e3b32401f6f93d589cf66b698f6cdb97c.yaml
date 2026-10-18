@@ -1,0 +1,175 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: dfbe47bfe7b2bb1f047d6462df60019e3b32401f6f93d589cf66b698f6cdb97c
+  revision: 13
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: efac3adf7891ad003c6908da238094f0751340dd
+  content_commit: b87a82b3eeac8138bdb5437ffcb1a053641fc6bb
+  merge_commit: b87a82b3eeac8138bdb5437ffcb1a053641fc6bb
+  branch: 495-anon-registry-token
+  task: PRO-Robotech/kaname#495
+  related_tasks: [PRO-Robotech/kaname#829, PRO-Robotech/kaname#856, PRO-Robotech/kaname#874, PRO-Robotech/kacho#3238]
+  lines: 1934
+  round: 3
+  round_scope: >-
+    Проверка исполнения перенумерации при слиянии ветки kaname#495 со стволом @efac3adf7
+    (редакции 11–12 ствола, kaname#874): содержание SC-39 против одобренной редакции 11 ветки
+    (запись 7585d2e4…), сохранность истории ствола. Не новый круг по содержанию: предмет —
+    дельта слияния; принятое в стволе (редакции 8–12, S5) не переоткрывается.
+  predecessor_records:
+    - docs/changes/kn-829/reviews/acceptance/7585d2e41e00ff8daf7100ff10dc08b92916949b794b1b5e998feda680991de2.yaml
+    - docs/changes/kn-829/reviews/acceptance/a01d921cadb9c2c078a2e23260200d8592822dbc1e20e6c0293da54b1be3c95b.yaml
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kaname-495-anon → dfbe47bf…b97c; git show b87a82b3e:<док> |
+    sha256sum → тот же отпечаток; git show 9d1f725aa:<док> | sha256sum → 7585d2e4…1de2
+    (одобренная редакция 11 ветки); git show origin/main(efac3adf7):<док> | sha256sum → bd6325e3….
+  measurement_revisions: >-
+    kaname @b87a82b3e (документ, производители, пробы); сравнение — против 9d1f725aa (редакция
+    11 ветки), 422d1bc6f (прежняя база ветки) и efac3adf7 (ствол).
+
+verdict: APPROVED
+verdict_note: >-
+  Дельта слияния годна. Тело SC-39 (все четыре случая), строки таблицы производителей SC-39 и
+  DoD S1/S3 побайтово равны редакции 11 ветки (7585d2e4…); строки, удалённые из ствола, —
+  ровно те, что ветка удаляла из прежней базы; разделы и строки истории ствола (редакции 11–12)
+  на месте. Изменились только нумерация (11 → 13), абзац «Дата», строка истории ветки и раздел
+  «Редакция 13: что исправлено». Важное замечание прежней записи о ложной строке провенанса не
+  исполнено и повторено ниже — не блокирует (ban19-block-criterion: провенанс вердикта, не
+  корректность контракта).
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T00:00:00+03:00'
+
+execution_check:
+  delta: >-
+    git diff origin/main(efac3adf7) b87a82b3e -- <док>: +127 строк, −8 строк. Повтор правки
+    ветки: diff -u 422d1bc6f:<док> 9d1f725aa:<док> | patch на efac3adf7:<док> — 5 из 7 кусков
+    встали со сдвигом, 2 (история и раздел в конце) не встали; остаток против b87a82b3e — только
+    строки истории, «Дата», абзац «Что где закрыто» и раздел «Редакция 13».
+  checks:
+    - id: sc39_body_identical
+      result: pass
+      evidence: >-
+        awk-выборка от '^#### SC-39' до следующего заголовка: 77 строк в 9d1f725aa и в b87a82b3e,
+        diff пуст.
+    - id: producer_rows_identical
+      result: pass
+      evidence: >-
+        diff <(grep '^| SC-39' 9d1f725aa:<док>) <(grep '^| SC-39' b87a82b3e:<док>) пуст;
+        строки (а),(б) · (в) · (г) — b87a82b3e:<док>:1538–1540.
+    - id: dod_s1_s3_identical
+      result: pass
+      evidence: >-
+        выборки '**S1 (kaname#829)**'…'**S2' и '**S3 (kacho#3238)**'…'**S4' в обеих ревизиях —
+        diff пуст.
+    - id: trunk_preserved
+      result: pass
+      evidence: >-
+        перечень удалённых строк diff 422d1bc6f→9d1f725aa и efac3adf7→b87a82b3e совпал (diff
+        перечней пуст, 8 строк: прежние SC-39 «Дано», строка производителя, заголовки S1/S3,
+        абзац «Что где закрыто», строка newman). Разделы «Редакция 11: что изменено» (:1881) и
+        «Редакция 12: что закрыто» (:1900) ствола на месте; строки истории 198db838… и c3fda648…
+        ствола на месте.
+    - id: added_lines_only_renumbering
+      result: pass
+      evidence: >-
+        diff перечней добавленных строк (422d1bc6f→9d1f725aa против efac3adf7→b87a82b3e):
+        32 строки, все — нумерация 11→13, абзац «Дата», строка истории ветки и раздел
+        «Редакция 13»; ни одной строки SC-39, таблицы производителей или DoD.
+    - id: counts
+      result: pass
+      evidence: grep -c '^#### SC-' → 63; grep -c '^##### SC-39' → 4; новых ID нет.
+    - id: producers_at_head
+      result: pass
+      evidence: >-
+        defaults.go:70 SetDefault(anonymous-client-id, ""); values.yaml:276 anonymousClientId: "";
+        configmap.yaml:152 anonymous-client-id; token.go:178 AnonymousSubject;
+        git grep -c '^func TestAnonymousPrincipal_' → 6; newman IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG —
+        cases/docker-lane-credential-kind.py:370, коллекция :857, CASES-INDEX.md:403.
+    - id: disclosure
+      result: pass
+      evidence: grep -icE '<перечень раскрытия>' <док> → 0 (перечень — в правиле раскрытия, вне публичного дерева).
+    - id: history_truth
+      result: fail_non_blocking
+      evidence: >-
+        Раздел «Редакция 13: что исправлено» (b87a82b3e:<док>:1916–1917) по-прежнему пишет
+        «Правка сделана на редакции 10, вердикта на которой нет; последний вердикт — 24e554b7…
+        (CHANGES_REQUESTED, редакция 9)». В том же документе строка истории ствола называет
+        редакцию 10 одобренной (198db838…, APPROVED), а строка ветки — «правка ПОСЛЕ вердикта
+        c3fda648…». Строк об одобрениях ветки (a01d921c…, 7585d2e4…) в истории нет:
+        grep -c 7585d2e4 <док> → 0, grep -c a01d921c <док> → 0.
+
+summary:
+  blocking: 0
+  kinds: []
+important:
+  - >-
+    Ложная строка провенанса повторена в разделе «Редакция 13» и теперь противоречит строке
+    истории того же документа: правка ветки сделана поверх одобренной редакции 10 (198db838…), а
+    после слияния — поверх редакции 12 ствола; последний вердикт ствола — c3fda648… (CHANGES_REQUESTED, редакция 11 ствола), закрытый редакцией 12. При
+    следующей правке снять «вердикта на которой нет … 24e554b7…» и дописать строки истории об
+    одобрениях ветки a01d921c… (редакция 8 ветки) и 7585d2e4… (редакция 11 ветки). Вердикт
+    выводится из записей, поэтому контракт SC-39 это не портит.
+minor:
+  - >-
+    «(редакция 12 ствола)» в строке истории ветки рядом с «ПОСЛЕ вердикта c3fda648…»
+    двусмысленно: c3fda648… — вердикт о редакции 11 ствола; точнее «поверх редакции 12 ствола,
+    последний вердикт — c3fda648… (редакция 11)».
+constructibility:
+  seeded: 11
+  of: 11
+  not_performed: 0
+  note: >-
+    Отдельная копия git worktree @b87a82b3e (tmp/kaname-495-rv-b87a82b), внешний кластер
+    (heavy-slot integration, KACHO_TASK=495, ns t495-heavy-integration-356a создано и снято):
+    go test -count=1 -v -run 'TestAnonymousPrincipal_|TestAnonymousRegistryToken_|TestProdProfile_RenderedRegistryTokenAnonymous'
+    ./internal/apps/kaname/config/ ./cmd/kaname/ ./deploy/ → код 0, верхних PASS 11, FAIL 0,
+    SKIP 0 (6 стража формы, 3 выдачи включая integration-близнеца (а), 2 рендера чарта) — после
+    слияния со стволом держатели те же и зелёные. Newman (б) на стенде не гонялся: предмет —
+    контракт, кейс назван и собран. (г) — стадия S3, kacho.
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: >-
+    yes — ручка открывает выдачу токена без удостоверения; закрыта пустым умолчанием, стражем
+    формы и пробами рендера чарта (содержание не менялось против 7585d2e4…)
+
+event_body: "acceptance-reviewer · APPROVED · sha256 dfbe47bfe7b2bb1f047d6462df60019e3b32401f6f93d589cf66b698f6cdb97c · SC-39 (а)–(г), ред. 13 (перенумерация слиянием, kaname#495)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#495
+  status: performed
+  published: true
+  url: https://github.com/PRO-Robotech/kaname/issues/495#issuecomment-6243664075
+  published_at: '2026-10-18T00:21:15Z'
+  published_by: pointpu
+  body_fields:
+    role: acceptance-reviewer
+    verdict: APPROVED
+    subject_revision: b87a82b3eeac8138bdb5437ffcb1a053641fc6bb
+    subject_sha256: dfbe47bfe7b2bb1f047d6462df60019e3b32401f6f93d589cf66b698f6cdb97c
+  note: опубликовал курьер (go-implementer); тело — event_body дословно; блок приведён к факту по ответу API комментария
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: pointpu (курьер go-implementer)
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/changes/kn-829/reviews/acceptance/7585d2e41e00ff8daf7100ff10dc08b92916949b794b1b5e998feda680991de2.yaml
+    - docs/changes/kn-829/reviews/acceptance/a01d921cadb9c2c078a2e23260200d8592822dbc1e20e6c0293da54b1be3c95b.yaml
+    - docs/changes/kn-829/reviews/acceptance/2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14.yaml
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9.yaml
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc.yaml

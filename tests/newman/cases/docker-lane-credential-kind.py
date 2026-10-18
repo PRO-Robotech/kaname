@@ -38,6 +38,10 @@
                                 `insecure_tls`: предмет пробы — ЧТО ОТДАЁТСЯ,
                                 а не цепочка доверия туннеля.
 
+ВТОРОЙ КЕЙС — SC-39 (б) приёмки классов субъектов (kaname#495): анонимная
+выдача токена реестра выключена пустой ручкой службы, вход без удостоверения
+получает вызов и не получает токена. Разбор — у самого кейса.
+
 Идемпотентность: удостоверение выпускается своё на прогон и отзывается тем же
 кейсом. За собой не остаётся ничего.
 """
@@ -320,6 +324,181 @@ CASES.append(Case(
             name="revoke-the-credential",
             method="DELETE",
             path="/iam/v1/serviceAccounts/{{svaAId}}/keys/{{dockerLaneKeyId}}",
+            auth="jwtBootstrap",
+            test_script=[
+                *assert_answered("SAKeyService.Revoke"),
+                *assert_status(200),
+                *assert_operation_envelope(),
+                *save_from_response("pm.response.json().id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtBootstrap"),
+    ],
+))
+
+# ── SC-39 (б): РУЧКА АНОНИМНОГО ПРИНЦИПАЛА ПУСТА — ПОТОК ВЫКЛЮЧЕН ─────────
+#
+# Приёмка `docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md`,
+# редакция 8, SC-39 (б) и пункт DoD S1 «newman — кейс (б) в коллекции докерной
+# полосы kaname». Анонимная выдача токена реестра включается ТОЛЬКО ручкой службы
+# `api-server.registry-token.anonymous-client-id`; умолчание пусто, и стенд
+# поднимается с умолчанием. Вход без удостоверения обязан получить `401` с
+# непустым `WWW-Authenticate` и без токена в ответе.
+#
+# ЗАПРОС — ТОТ, ЧТО В ПРИЁМКЕ, КРОМЕ АДРЕСАТА. Путь и область —
+# `/iam/token?service=…&scope=repository:pub/app:pull` дословно. Адресат приёмки
+# `registry.probe.local` — имя фикстуры integration-пробы; посадка стенда его не
+# объявляет, и запрос к нему получил бы `401` по причине «адресат вне перечня», то
+# есть зеленел бы и на включённом потоке. Поэтому адресат спрашивается у полосы,
+# как в соседнем кейсе (см. комментарий у `_TOKEN_PATH`).
+#
+# БЛИЗНЕЦ — ТОТ ЖЕ ЗАПРОС С УДОСТОВЕРЕНИЕМ. Приёмка называет близнецом (б) случай
+# (а) «ручка задана»; на стенде он не конструируем — стенд держит умолчание, а
+# включение — решение оператора посадки (DoD S1: (а) только integration). Здесь
+# близнец отличается одним фактом — предъявлено удостоверение: тот же путь, тот же
+# адресат, та же область отвечают `200` с токеном. Без него `401` зеленел бы и на
+# полосе, отвергающей этот адресат или эту область для всех, то есть ничего не
+# говорил бы о ручке. Близнец стоит ПЕРВЫМ, как и положительный контроль соседа.
+#
+# Техники: классы эквивалентности входа (без удостоверения ∣ с удостоверением),
+# один изменённый факт против близнеца, таблица решений приёмки «ручка пуста →
+# 401 + вызов, токена нет».
+_ANON_PATH = ("/iam/token?service={{dockerAnonServiceAud}}"
+              "&scope=repository:pub/app:pull")
+
+CASES.append(Case(
+    id="IAM-DOCKER-LANE-ANON-KNOB-UNSET-NEG",
+    title=(
+        "SC-39 (б): ручка анонимного принципала пуста — анонимный запрос токена "
+        "реестра получает 401 с вызовом и без токена, тот же запрос с "
+        "удостоверением — токен"
+    ),
+    classes=["AUTHN", "CONF", "NEG"],
+    priority="P1",
+    steps=[
+        Step(
+            name="anon-ask-the-lane-which-audience-it-serves",
+            method="GET",
+            path="/iam/token",
+            auth="anonymous",
+            insecure_tls=True,
+            pre_script=require_env_url(
+                "iamRegistryTokenBaseUrl", "/iam/token",
+                "докер-полоса — у неё же и спрашиваем, кому она чеканит",
+            ),
+            test_script=[
+                *assert_answered("вызов полосы на аутентификацию"),
+                "const _wa = pm.response.headers.get('WWW-Authenticate') || '';",
+                "const _m = _wa.match(/service=\"([^\"]+)\"/);",
+                "pm.test('вызов НАЗЫВАЕТ адресата, которому полоса чеканит', () => {",
+                "  pm.expect(_m && _m[1], 'HTTP ' + pm.response.code + ', WWW-Authenticate: ' + _wa)",
+                "    .to.be.a('string').with.length.greaterThan(0);",
+                "});",
+                # Пустое не записывается: о пропаже говорит страж незакреплённой
+                # подстановки по имени, а не чужой отказ чужим кодом.
+                "if (_m && _m[1]) { pm.environment.set('dockerAnonServiceAud', _m[1]); }",
+            ],
+        ),
+
+        Step(
+            name="anon-issue-secret-credential-for-the-twin",
+            method="POST",
+            path="/iam/v1/serviceAccounts/{{svaAId}}/keys",
+            auth="jwtBootstrap",
+            # `createdByUserId` не шлётся: у служебного предъявителя оно
+            # отвергается синхронно с именем поля (см. соседний кейс).
+            body={
+                "serviceAccountId": "{{svaAId}}",
+                "description": "docker lane anonymous knob unset {{runId}}",
+                "credentialKind": "CREDENTIAL_KIND_SECRET",
+                "ttlSeconds": 2592000,
+            },
+            test_script=[
+                *assert_answered("SAKeyService.Issue вида SECRET"),
+                *assert_status(200),
+                "pm.test('операция завершена в ответе самого Issue (done=true, без error)', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.done, 'operation.done').to.eql(true);",
+                "  pm.expect(j.error, 'operation.error: ' + JSON.stringify(j.error)).to.be.undefined;",
+                "});",
+                "const _r = pm.response.json().response || {};",
+                "pm.test('ответ несёт строку секрета объявленной формы', () => {",
+                "  pm.expect(_r.secret, 'response.secret').to.be.a('string')",
+                f"    .and.to.match(/{credential_secret_pattern('serviceAccountKey', where='docker-lane/anon-issue-secret-credential')}/);",
+                "});",
+                "const _p = String(_r.secret).split('_');",
+                "const _credId = _p.slice(1, _p.length - 1).join('_');",
+                "pm.test('строка называет своё удостоверение', () => {",
+                "  pm.expect(_credId, 'идентификатор из строки').to.be.a('string').with.length.greaterThan(0);",
+                "});",
+                "if (_r.secret) { pm.environment.set('dockerAnonSecret', _r.secret); }",
+                "if (_credId) { pm.environment.set('dockerAnonCredId', _credId); }",
+                "const _keyId = _r.keyId || (_r.key && _r.key.id) || _credId;",
+                "if (_keyId) { pm.environment.set('dockerAnonKeyId', _keyId); }",
+            ],
+        ),
+
+        # ── БЛИЗНЕЦ: тот же запрос, предъявлено удостоверение ──────────────
+        Step(
+            name="anon-twin-same-request-with-a-credential-gets-a-token",
+            method="GET",
+            path=_ANON_PATH,
+            auth="anonymous",
+            insecure_tls=True,
+            pre_script=require_env_url(
+                "iamRegistryTokenBaseUrl", _ANON_PATH,
+                "докер-полоса — близнец SC-39 (б) с удостоверением",
+            ) + [
+                "pm.request.headers.upsert({key: 'Authorization', value: 'Basic ' +",
+                "  CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(",
+                "    pm.environment.get('dockerAnonCredId') + ':' + pm.environment.get('dockerAnonSecret')))});",
+            ],
+            test_script=[
+                *assert_answered("докер-вход базовым токеном доступа, путь SC-39"),
+                "pm.test('тот же адресат и та же область с удостоверением — 200', () => {",
+                "  pm.expect(pm.response.code, 'тело: ' + pm.response.text()).to.eql(200);",
+                "});",
+                "pm.test('с удостоверением выдан токен реестра', () => {",
+                "  let j = null; try { j = pm.response.json(); } catch (e) { j = null; }",
+                "  pm.expect(j && j.token, 'token').to.be.a('string').with.length.greaterThan(0);",
+                "});",
+            ],
+        ),
+
+        # ── SC-39 (б): вход без удостоверения при пустой ручке ─────────────
+        Step(
+            name="anon-request-without-credential-is-challenged",
+            method="GET",
+            path=_ANON_PATH,
+            auth="anonymous",
+            insecure_tls=True,
+            pre_script=require_env_url(
+                "iamRegistryTokenBaseUrl", _ANON_PATH,
+                "докер-полоса — анонимный вход SC-39 (б), ручка пуста",
+            ),
+            test_script=[
+                *assert_answered("анонимный запрос токена реестра"),
+                "pm.test('SC-39 (б): вход без удостоверения при пустой ручке — 401', () => {",
+                "  pm.expect(pm.response.code, '200 означал бы включённый анонимный поток '",
+                "    + 'на стенде с умолчанием. Тело: ' + pm.response.text()).to.eql(401);",
+                "});",
+                "pm.test('SC-39 (б): отказ несёт непустой WWW-Authenticate', () => {",
+                "  pm.expect(pm.response.headers.get('WWW-Authenticate') || '', 'WWW-Authenticate')",
+                "    .to.be.a('string').with.length.greaterThan(0);",
+                "});",
+                "pm.test('SC-39 (б): токена в ответе нет', () => {",
+                "  let j = null; try { j = pm.response.json(); } catch (e) { j = null; }",
+                "  pm.expect(j && j.token, 'token: ' + JSON.stringify(j)).to.be.oneOf([undefined, null]);",
+                "  pm.expect(j && j.access_token, 'access_token: ' + JSON.stringify(j)).to.be.oneOf([undefined, null]);",
+                "});",
+            ],
+        ),
+
+        # ── уборка: удостоверение живёт ровно этот прогон ──────────────────
+        Step(
+            name="anon-revoke-the-credential",
+            method="DELETE",
+            path="/iam/v1/serviceAccounts/{{svaAId}}/keys/{{dockerAnonKeyId}}",
             auth="jwtBootstrap",
             test_script=[
                 *assert_answered("SAKeyService.Revoke"),
