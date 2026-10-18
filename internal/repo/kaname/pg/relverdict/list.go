@@ -317,26 +317,23 @@ SELECT c.object_id,
          WHERE b.status = 'ACTIVE'
            AND (b.expires_at IS NULL OR b.expires_at > now())
            AND b.revoked_at IS NULL
-           AND (
-                 rs.arm = 'anchor'
-              OR (rs.arm = 'names'  AND c.object_id = ANY (rs.resource_names))
-              -- Проверки на отсутствие метки здесь больше нет, и это не
-              -- послабление: она стерегла ПРОМАХ внешнего соединения, которого
-              -- теперь не бывает by construction — кандидат и есть строка
-              -- зеркала, а колонка меток объявлена NOT NULL. Оставить её значило
-              -- бы держать ветвь, которая не может быть ложной, и следующий
-              -- читатель искал бы случай, когда она срабатывает.
-              OR (rs.arm = 'labels' AND c.labels @> rs.match_labels)
-           )
+           -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
+           -- вопроса (grantArmPredicate, grantarm.go).
+           AND ({{arm_predicate}})
        ) AS allowed
   FROM candidate c
  ORDER BY c.object_id`
 
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
 // (довод — у expandQuerySQL).
-func listQuerySQL(labelTable string) string {
-	return strings.Replace(listSQL, candidateFromMark,
-		candidateFrom(labelTable, "$9", "$3", "$4"), 1)
+func listQuerySQL(labelTable string, nesting bool) (string, error) {
+	sql, err := replaceOnce(listSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting))
+	if err != nil {
+		return "", err
+	}
+	return strings.Replace(sql, candidateFromMark,
+		candidateFrom(labelTable, "$9", "$3", "$4"), 1), nil
 }
 
 // List отдаёт страницу доступных объектов и курсор следующей.
@@ -378,7 +375,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	// ОДИН раз на вызов, как и сборка запроса: заходов у обхода несколько, а тип у
 	// них один. Стоит ПЕРЕД выбором оси: ось выбирается по этому же имени
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
@@ -397,7 +394,10 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	//
 	// Метка `{{labels_join}}` отсюда ушла вместе со своим предметом: метки едут
 	// колонкой кандидата, второго чтения того же места больше нет.
-	sql := listQuerySQL(labelTable)
+	sql, err := listQuerySQL(labelTable, nesting)
+	if err != nil {
+		return nil, "", err
+	}
 
 	after := in.AfterID
 	for {

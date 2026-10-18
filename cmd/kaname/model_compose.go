@@ -50,7 +50,8 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) e
 		slog.Int("resources_seen", rep.ResourcesSeen),
 		slog.Int("canon_types", rep.CanonTypes),
 		slog.Any("composed", rep.Composed),
-		slog.Any("reaffirmed", rep.Reaffirmed))
+		slog.Any("reaffirmed", rep.Reaffirmed),
+		slog.Any("prior_edition", rep.PriorEdition))
 	if err != nil {
 		return fmt.Errorf("композиция модели прав: %w", err)
 	}

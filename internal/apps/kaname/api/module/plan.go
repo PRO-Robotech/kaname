@@ -286,7 +286,8 @@ func rowsOfModule(all catalog.Rows, module string) catalog.Rows {
 //
 // Считается по тому же признаку, по которому применитель отличает «записано» от
 // «уже стояло»: строка нова, если её ключа нет среди живых ЛИБО её форма
-// (имя типа модели / признак словаря) отличается от объявленной.
+// (имя типа модели, указатели и признак контейнера — `ResourceRow.SameForm`;
+// признак словаря у действия) отличается от объявленной.
 func writtenCounts(live catalog.Rows, declared modulecatalog.Declared) (int32, int32) {
 	liveRes := make(map[string]catalog.ResourceRow, len(live.Resources))
 	for _, r := range live.Resources {
@@ -300,7 +301,7 @@ func writtenCounts(live catalog.Rows, declared modulecatalog.Declared) (int32, i
 	var res, verbs int32
 	for _, r := range declared.Resources {
 		cur, ok := liveRes[dottedResource(r)]
-		if !ok || cur.ObjectType != r.ObjectType {
+		if !ok || !cur.SameForm(r) {
 			res++
 		}
 	}

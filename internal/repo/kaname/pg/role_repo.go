@@ -1125,17 +1125,31 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 		if resourceNames == nil {
 			resourceNames = []string{}
 		}
+		cont, err := containerColumnsOf(sel)
+		if err != nil {
+			return err
+		}
+		// Контейнер вложенного правила (kaname#874) — четыре колонки; модельное
+		// имя типа контейнера выводит страж базы (`role_rule_selector_types_live`)
+		// из живой строки каталога, писатель его не пишет.
 		if _, err := w.tx.Exec(ctx,
 			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, resource_names, match_labels, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, now(), now())
+			   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
+			    container_type, container_arm, container_resource_names, container_match_labels,
+			    created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, now(), now())
 			 ON CONFLICT (role_id, rule_fp) DO UPDATE
-			    SET arm            = EXCLUDED.arm,
-			        object_types   = EXCLUDED.object_types,
-			        resource_names = EXCLUDED.resource_names,
-			        match_labels   = EXCLUDED.match_labels,
-			        updated_at     = now()`,
+			    SET arm                      = EXCLUDED.arm,
+			        object_types             = EXCLUDED.object_types,
+			        resource_names           = EXCLUDED.resource_names,
+			        match_labels             = EXCLUDED.match_labels,
+			        container_type           = EXCLUDED.container_type,
+			        container_arm            = EXCLUDED.container_arm,
+			        container_resource_names = EXCLUDED.container_resource_names,
+			        container_match_labels   = EXCLUDED.container_match_labels,
+			        updated_at               = now()`,
 			string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
+			cont.typ, cont.arm, cont.names, cont.labels,
 		); err != nil {
 			// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
 			// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
@@ -1165,6 +1179,12 @@ func lockedCatalogTypesOf(selectors []domain.RuleSelector) []string {
 		for _, t := range sel.ObjectTypes {
 			seen[t] = struct{}{}
 		}
+		// Строку типа контейнера страж берёт тем же замком (kaname#874), и она
+		// входит в тот же упорядоченный набор — иначе порядок замков снова
+		// назначала бы вставка, а не база.
+		if sel.Container != nil {
+			seen[sel.Container.Type] = struct{}{}
+		}
 	}
 	if len(seen) == 0 {
 		return nil
@@ -1175,6 +1195,37 @@ func lockedCatalogTypesOf(selectors []domain.RuleSelector) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// selectorContainer — колонки контейнера вложенного селектора (kaname#874).
+// У селектора правила верхнего уровня тип и ветвь — NULL, перечни пусты: так
+// их ждёт ограничение формы `role_rule_selectors_container_shape`.
+type selectorContainer struct {
+	typ    *string
+	arm    *string
+	names  []string
+	labels []byte
+}
+
+// containerColumnsOf — колонки контейнера селектора.
+func containerColumnsOf(sel domain.RuleSelector) (selectorContainer, error) {
+	out := selectorContainer{names: []string{}, labels: []byte("{}")}
+	if sel.Container == nil {
+		return out, nil
+	}
+	typ, arm := sel.Container.Type, armText(sel.Container.Arm)
+	out.typ, out.arm = &typ, &arm
+	if sel.Container.ResourceNames != nil {
+		out.names = sel.Container.ResourceNames
+	}
+	if len(sel.Container.MatchLabels) > 0 {
+		raw, err := json.Marshal(sel.Container.MatchLabels)
+		if err != nil {
+			return out, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument matchLabels: %s", err.Error())
+		}
+		out.labels = raw
+	}
+	return out, nil
 }
 
 // armText maps the domain Arm to the role_rule_selectors.arm enum text.

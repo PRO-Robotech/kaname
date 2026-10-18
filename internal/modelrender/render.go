@@ -131,6 +131,15 @@ func Render(r manifest.Resource) ([]byte, error) {
 	}
 	writeAuthoredRelations(r, "beforeVerbs", define)
 
+	// Публичное чтение детям (Р9 «Способ», kaname#856): ключ контейнера даёт ему
+	// отношение `public_reader` — последним перед действиями, — а действиям
+	// чтения контейнера и детей — по одному следствию ниже. Пишущие глаголы,
+	// ярусы и каскад ключ не трогает.
+	if r.PassesPublicRead() {
+		define(domain.PublicReaderRelation, "["+string(domain.SubjectTypeSystemClass)+"]")
+	}
+	inherits := r.PublicReadPointers()
+
 	// Порядок глаголов задаёт КАНОН, а не манифест: перестановка ресурсов и
 	// глаголов в YAML рендер не меняет (B-04). Субъекты здесь умолчательные —
 	// сужение ключом `subjects` РЕСУРСА трогает ярусы и не трогает глаголы, —
@@ -152,12 +161,56 @@ func Render(r manifest.Resource) ([]byte, error) {
 		if len(verb.From) > 0 {
 			sources = verb.From
 		}
+		words := subjectWords(subjects)
+		if publicReadVerb(verb) {
+			if r.PassesPublicRead() {
+				words = withClassFirst(words)
+			}
+			for _, ptr := range inherits {
+				sources = append(append([]string(nil), sources...),
+					domain.PublicReaderRelation+" from "+ptr)
+			}
+		}
 		define(manifest.VerbRelationName(verb.Name),
-			"["+strings.Join(subjectWords(subjects), ", ")+"] or "+strings.Join(sources, " or "))
+			"["+strings.Join(words, ", ")+"] or "+strings.Join(sources, " or "))
 	}
 	writeAuthoredRelations(r, "afterVerbs", define)
 
 	return []byte(b.String()), nil
+}
+
+// publicReadVerbs — действия, которые наследуют публичное чтение контейнера:
+// метаданные объекта и перечень (Р9 п. 2). Пишущие — нет (Р9 п. 3).
+var publicReadVerbs = []string{"get", "list"}
+
+// publicReadVerb — действие порождает отношение, которого касается публичное
+// чтение. Судится ИМЯ действия, а не класс: следствие ключа касается ровно
+// отношений `v_get` и `v_list` (Р9 «Способ»), а их порождают действия с этими
+// именами; собственное действие с классом чтения пишет своё отношение, и
+// публичное чтение его не открывает.
+func publicReadVerb(v manifest.Verb) bool {
+	name := strings.ToLower(v.Name)
+	for _, c := range publicReadVerbs {
+		if name == c {
+			return true
+		}
+	}
+	return false
+}
+
+// withClassFirst — состав субъектов с классом `system_class` первым, без повтора:
+// так его пишет канон (`[system_class, user, …]`), и состав, где класс уже есть
+// (перевод слова `user:*`), не получает второй записи.
+func withClassFirst(words []string) []string {
+	class := string(domain.SubjectTypeSystemClass)
+	out := make([]string, 0, len(words)+1)
+	out = append(out, class)
+	for _, w := range words {
+		if w != class {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // publicWildcardWord — прежнее слово публичного чтения в составе субъектов

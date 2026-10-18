@@ -1071,8 +1071,13 @@ type RuleState struct {
 	// Четвёртое значение («частично отозвано») рассмотрено и отвергнуто: у него
 	// нет ни своего действия у арендатора, ни своего производителя.
 	ExplainedSegments int32 `protobuf:"varint,5,opt,name=explained_segments,json=explainedSegments,proto3" json:"explained_segments,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Состояния вложенных правил ЭТОГО правила (kaname#874), в порядке
+	// `Rule.children`. `rule_index` у записи — индекс в `children`, а не в
+	// `Role.rules`. Только вывод; у правила без вложенных — пусто. Вложенность
+	// плоская: у записи здесь своих `children` нет.
+	Children      []*RuleState `protobuf:"bytes,6,rep,name=children,proto3" json:"children,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RuleState) Reset() {
@@ -1138,6 +1143,13 @@ func (x *RuleState) GetExplainedSegments() int32 {
 		return x.ExplainedSegments
 	}
 	return 0
+}
+
+func (x *RuleState) GetChildren() []*RuleState {
+	if x != nil {
+		return x.Children
+	}
+	return nil
 }
 
 // PrunedSelectorType — точечный тип, ВЫРЕЗАННЫЙ из отбора правила роли при
@@ -1463,7 +1475,27 @@ type Rule struct {
 	// (в custom-роли → INVALID_ARGUMENT). `(size)` не переносится из
 	// прежнего repeated `modules` — это cardinality repeated-поля, у scalar ее
 	// нет. tag 6 — первый свободный (1–5 заняты).
-	Module        string `protobuf:"bytes,6,opt,name=module,proto3" json:"module,omitempty"`
+	Module string `protobuf:"bytes,6,opt,name=module,proto3" json:"module,omitempty"`
+	// Вложенные правила (kaname#874, приёмка
+	// `nested-rule-reaches-descendants-of-a-named-container.md`, Р1, Р4).
+	//
+	// ТОЛЬКО ВЫВОД. Вложенное правило объявляет манифест модуля; на входе
+	// `Create` и `Update` непустое поле отвергается синхронно — INVALID_ARGUMENT с
+	// полем `rules[<i>].children`, а не молчаливым пропуском (ND-04 (ж)). Чтение
+	// поле заполняет, потому что ответ, скрывающий вложенные правила, показывал бы
+	// администратору меньше, чем роль даёт.
+	//
+	// ФОРМА ПЛОСКАЯ — ОДИН УРОВЕНЬ. Правило-владелец называет ровно один ресурс —
+	// тип-контейнер; каждое вложенное правило — тип, лежащий под ним по
+	// объявленным `parents` манифеста, на любой глубине. У вложенного правила
+	// `module` пуст (оно берёт модуль правила-владельца) и своих `children` нет:
+	// глубину выражает тип, а не структура роли.
+	//
+	// Смысл: вложенное правило даёт свои глаголы на объекты своего типа, у
+	// которых среди предков есть контейнер, выбранный правилом-владельцем и целью
+	// выдачи, — включая созданные позже. Правило верхнего уровня сравнивает
+	// точно, как прежде.
+	Children      []*Rule `protobuf:"bytes,7,rep,name=children,proto3" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1531,6 +1563,13 @@ func (x *Rule) GetModule() string {
 		return x.Module
 	}
 	return ""
+}
+
+func (x *Rule) GetChildren() []*Rule {
+	if x != nil {
+		return x.Children
+	}
+	return nil
 }
 
 type CreateRoleMetadata struct {
@@ -1722,14 +1761,15 @@ const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"retired_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tretiredAt\x12%\n" +
 	"\x0eretired_reason\x18\x03 \x01(\tR\rretiredReason\x12\x1d\n" +
 	"\n" +
-	"retired_by\x18\x04 \x01(\tR\tretiredBy\"\xd4\x01\n" +
+	"retired_by\x18\x04 \x01(\tR\tretiredBy\"\x90\x02\n" +
 	"\tRuleState\x12\x1d\n" +
 	"\n" +
 	"rule_index\x18\x01 \x01(\x05R\truleIndex\x128\n" +
 	"\x05state\x18\x02 \x01(\x0e2\".kaname.cloud.iam.v1.RuleLifecycleR\x05state\x12\x1a\n" +
 	"\bsegments\x18\x03 \x01(\x05R\bsegments\x12#\n" +
 	"\rlost_segments\x18\x04 \x01(\x05R\flostSegments\x12-\n" +
-	"\x12explained_segments\x18\x05 \x01(\x05R\x11explainedSegments\"\xea\x01\n" +
+	"\x12explained_segments\x18\x05 \x01(\x05R\x11explainedSegments\x12:\n" +
+	"\bchildren\x18\x06 \x03(\v2\x1e.kaname.cloud.iam.v1.RuleStateR\bchildren\"\xea\x01\n" +
 	"\x12PrunedSelectorType\x12\x1f\n" +
 	"\vobject_type\x18\x01 \x01(\tR\n" +
 	"objectType\x12C\n" +
@@ -1750,13 +1790,14 @@ const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"\x05cause\x18\a \x01(\x0e2(.kaname.cloud.iam.v1.WithdrawnGrantCauseR\x05cause\"F\n" +
 	"\x0eDefinitionTier\x12\x1b\n" +
 	"\ttier_type\x18\x01 \x01(\tR\btierType\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\tR\x06tierId\"\x97\x02\n" +
+	"\atier_id\x18\x02 \x01(\tR\x06tierId\"\xce\x02\n" +
 	"\x04Rule\x12\x1c\n" +
 	"\tresources\x18\x02 \x03(\tR\tresources\x12\x14\n" +
 	"\x05verbs\x18\x03 \x03(\tR\x05verbs\x12%\n" +
 	"\x0eresource_names\x18\x04 \x03(\tR\rresourceNames\x12M\n" +
 	"\fmatch_labels\x18\x05 \x03(\v2*.kaname.cloud.iam.v1.Rule.MatchLabelsEntryR\vmatchLabels\x12\x16\n" +
-	"\x06module\x18\x06 \x01(\tR\x06module\x1a>\n" +
+	"\x06module\x18\x06 \x01(\tR\x06module\x125\n" +
+	"\bchildren\x18\a \x03(\v2\x19.kaname.cloud.iam.v1.RuleR\bchildren\x1a>\n" +
 	"\x10MatchLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x02R\amodules\"-\n" +
@@ -1845,17 +1886,19 @@ var file_kaname_cloud_iam_v1_role_proto_depIdxs = []int32{
 	0,  // 11: kaname.cloud.iam.v1.RoleLifecycle.state:type_name -> kaname.cloud.iam.v1.RoleLifecycleState
 	19, // 12: kaname.cloud.iam.v1.RoleLifecycle.retired_at:type_name -> google.protobuf.Timestamp
 	1,  // 13: kaname.cloud.iam.v1.RuleState.state:type_name -> kaname.cloud.iam.v1.RuleLifecycle
-	2,  // 14: kaname.cloud.iam.v1.PrunedSelectorType.outcome:type_name -> kaname.cloud.iam.v1.SelectorPruneOutcome
-	19, // 15: kaname.cloud.iam.v1.PrunedSelectorType.pruned_at:type_name -> google.protobuf.Timestamp
-	4,  // 16: kaname.cloud.iam.v1.WithdrawnGrant.source:type_name -> kaname.cloud.iam.v1.WithdrawnGrantSource
-	19, // 17: kaname.cloud.iam.v1.WithdrawnGrant.withdrawn_at:type_name -> google.protobuf.Timestamp
-	3,  // 18: kaname.cloud.iam.v1.WithdrawnGrant.cause:type_name -> kaname.cloud.iam.v1.WithdrawnGrantCause
-	18, // 19: kaname.cloud.iam.v1.Rule.match_labels:type_name -> kaname.cloud.iam.v1.Rule.MatchLabelsEntry
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	8,  // 14: kaname.cloud.iam.v1.RuleState.children:type_name -> kaname.cloud.iam.v1.RuleState
+	2,  // 15: kaname.cloud.iam.v1.PrunedSelectorType.outcome:type_name -> kaname.cloud.iam.v1.SelectorPruneOutcome
+	19, // 16: kaname.cloud.iam.v1.PrunedSelectorType.pruned_at:type_name -> google.protobuf.Timestamp
+	4,  // 17: kaname.cloud.iam.v1.WithdrawnGrant.source:type_name -> kaname.cloud.iam.v1.WithdrawnGrantSource
+	19, // 18: kaname.cloud.iam.v1.WithdrawnGrant.withdrawn_at:type_name -> google.protobuf.Timestamp
+	3,  // 19: kaname.cloud.iam.v1.WithdrawnGrant.cause:type_name -> kaname.cloud.iam.v1.WithdrawnGrantCause
+	18, // 20: kaname.cloud.iam.v1.Rule.match_labels:type_name -> kaname.cloud.iam.v1.Rule.MatchLabelsEntry
+	12, // 21: kaname.cloud.iam.v1.Rule.children:type_name -> kaname.cloud.iam.v1.Rule
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_role_proto_init() }

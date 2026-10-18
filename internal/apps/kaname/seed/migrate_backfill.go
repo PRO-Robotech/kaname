@@ -380,17 +380,43 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 	if resourceNames == nil {
 		resourceNames = []string{}
 	}
+	// Контейнер вложенного правила (kaname#874) — та же форма строки, что у
+	// `ReplaceRuleSelectors`: тип и ветвь NULL у правила верхнего уровня,
+	// модельное имя типа контейнера выводит страж базы.
+	var containerType, containerArm *string
+	containerNames, containerLabels := []string{}, []byte("{}")
+	if c := sel.Container; c != nil {
+		typ, arm := c.Type, selectorArmText(c.Arm)
+		containerType, containerArm = &typ, &arm
+		if c.ResourceNames != nil {
+			containerNames = c.ResourceNames
+		}
+		if len(c.MatchLabels) > 0 {
+			raw, merr := json.Marshal(c.MatchLabels)
+			if merr != nil {
+				return fmt.Errorf("sync system role selectors: marshal container match_labels for %s: %w", roleID, merr)
+			}
+			containerLabels = raw
+		}
+	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, resource_names, match_labels, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, now(), now())
+		   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
+		    container_type, container_arm, container_resource_names, container_match_labels,
+		    created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, now(), now())
 		 ON CONFLICT (role_id, rule_fp) DO UPDATE
-		    SET arm            = EXCLUDED.arm,
-		        object_types   = EXCLUDED.object_types,
-		        resource_names = EXCLUDED.resource_names,
-		        match_labels   = EXCLUDED.match_labels,
-		        updated_at     = now()`,
+		    SET arm                      = EXCLUDED.arm,
+		        object_types             = EXCLUDED.object_types,
+		        resource_names           = EXCLUDED.resource_names,
+		        match_labels             = EXCLUDED.match_labels,
+		        container_type           = EXCLUDED.container_type,
+		        container_arm            = EXCLUDED.container_arm,
+		        container_resource_names = EXCLUDED.container_resource_names,
+		        container_match_labels   = EXCLUDED.container_match_labels,
+		        updated_at               = now()`,
 		roleID, sel.RuleFP, selectorArmText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
+		containerType, containerArm, containerNames, containerLabels,
 	); err != nil {
 		return fmt.Errorf("sync system role selectors: upsert selector %s/%s: %w", roleID, sel.RuleFP, err)
 	}

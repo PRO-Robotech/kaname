@@ -408,6 +408,12 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	if err := refuseNullSeed(doc); err != nil {
 		return nil, err
 	}
+	// Ключи `module` и `children` у вложенного правила роли — по сырому узлу,
+	// ДО строгого разбора: он отверг бы их общим «неизвестное поле», не назвав
+	// причины (kaname#874, rolechildren.go).
+	if err := refuseNestedChildKeys(doc); err != nil {
+		return nil, err
+	}
 	// ЗДЕСЬ СТОЯЛ пред-разборный отказ по ключу `verbs` в правиле роли. Он снят
 	// ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (kacho#1844): поимённая форма права вернулась —
 	// вместе с проверкой её полноты по классу, как и предписывал §10 п. 2
@@ -463,6 +469,7 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 		return nil, errors.Join(faults...)
 	}
 	m.linkage = census
+	linkPublicRead(&m)
 	return &m, nil
 }
 

@@ -176,15 +176,18 @@ var (
 	// множество определено в схеме: `live` есть производная `retired_at IS NULL`,
 	// и согласие этих двух держит проверка колонки, а не читатель.
 	liveCatalogHalf = catalogHalf{
-		what:      "каталог",
-		modules:   `SELECT module FROM kaname.catalog_module WHERE live`,
-		resources: `SELECT module, resource, object_type FROM kaname.catalog_resource WHERE live`,
-		verbs:     `SELECT module, resource, verb, per_object FROM kaname.catalog_verb WHERE live`,
+		what:    "каталог",
+		modules: `SELECT module FROM kaname.catalog_module WHERE live`,
+		resources: `SELECT module, resource, object_type, parent_types, public_read_to_children
+		              FROM kaname.catalog_resource WHERE live`,
+		verbs: `SELECT module, resource, verb, per_object FROM kaname.catalog_verb WHERE live`,
 		// Преемника живая половина НЕ выбирает: у живой строки он невыразим в
 		// базе, и колонка в выборке объявляла бы величину, которой не бывает.
+		// Указатели и признак контейнера — выбирает: по ним разворачивание
+		// выдачи классу решает о `public_reader` (kaname#856).
 		scanResource: func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
 			var r catalog.ResourceRow
-			return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType)
+			return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.PublicReadToChildren)
 		},
 	}
 	// retiredCatalogHalf — СНЯТОЕ множество: `retired_at` проставлен, `live`

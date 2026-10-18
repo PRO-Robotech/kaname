@@ -29,8 +29,18 @@ import (
 // Экспортировать `verdictQuerySQL` из `query.go` значило бы расширить публичную
 // поверхность пакета ради пробы — то есть заплатить прод-контрактом за оснастку.
 
-// VerdictQuerySQLForTest — готовый текст запроса вердикта для выбранной оси меток.
-func VerdictQuerySQLForTest(labelTable string) string { return verdictQuerySQL(labelTable) }
+// VerdictQuerySQLForTest — готовый текст запроса вердикта для выбранной оси меток
+// в форме БЕЗ вложенных правил над типом (kaname#874) — той, что исполняется,
+// пока над типом нет ни одного вложенного селектора.
+func VerdictQuerySQLForTest(labelTable string) string {
+	return mustAssemble(withNesting(verdictQuerySQL, false))(labelTable)
+}
+
+// VerdictQueryNestedSQLForTest — тот же запрос в форме С вложенными правилами:
+// её исполняет продукт, когда над типом есть вложенный селектор.
+func VerdictQueryNestedSQLForTest(labelTable string) string {
+	return mustAssemble(withNesting(verdictQuerySQL, true))(labelTable)
+}
 
 // LabelAxisForTest — ось меток, выбранная по типу объекта.
 //
@@ -58,7 +68,9 @@ const MaxConditionRowsForTest = maxConditionRows
 // 0 %), и считать их можно только по захваченным операторам: сам `List` их не
 // возвращает, а завести счётчик внутри него значило бы править прод-код ради
 // прибора.
-func ListQuerySQLForTest(labelTable string) string { return listQuerySQL(labelTable) }
+func ListQuerySQLForTest(labelTable string) string {
+	return mustAssemble(withNesting(listQuerySQL, false))(labelTable)
+}
 
 // RollbackForTest — снятие транзакции чтения так, как его делает адаптер.
 //

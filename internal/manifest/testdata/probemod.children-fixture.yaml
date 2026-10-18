@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Фикстура П3 приёмки
+# docs/engineering/acceptance/nested-rule-reaches-descendants-of-a-named-container.md
+# (kaname#874): модуль с ТРЕМЯ уровнями родства. В каноне модели контейнер вне
+# ярусов один (`registry.registries`), и внуков у него нет (замер Р2), поэтому
+# глубину вложенного правила утверждают здесь (ND-08):
+#   boxes (`probemod_box`, указатель на проект, контейнер публичного чтения)
+#     └ items (`probemod_item`, указатель `box`)
+#         └ tags (`probemod_tag`, указатель `item`).
+#
+# Роли:
+#   - `probemod.reader` (`rol533113283eb982de5`) — `boxes [get, list]` с
+#     вложенным правилом над ВНУКОМ `tags [get, list]`;
+#   - `probemod.reader_b1` (`rol6c35afc8ab2c75066`) — то же, у правила над
+#     `boxes` ещё `resourceNames: [b1]` (близнец ND-08 «И»: отличие — имена у
+#     правила-владельца).
+# Id — 'rol' || substr(md5(имя), 1, 17).
+#
+# Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
+# базовым именем, и фикстура, названная так, судилась бы как манифест модуля.
+
+apiVersion: iam/v1
+module: probemod
+
+resources:
+
+  - name: boxes
+    objectType: probemod_box
+    parents: [project]
+    producer: derived
+    publicReadToChildren: true
+    verbs: [get, list, create, update, delete]
+
+  - name: items
+    objectType: probemod_item
+    parents:
+      - {name: box, type: probemod_box}
+    producer: derived
+    verbs: [get, list, update, delete]
+
+  - name: tags
+    objectType: probemod_tag
+    parents:
+      - {name: item, type: probemod_item}
+    producer: derived
+    verbs: [get, list, update, delete]
+
+roles:
+
+  - id: probemod.reader
+    description: >
+      Пробная роль: чтение ящика и каждого ярлыка под ним на любой глубине.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: probemod
+        resources: [boxes]
+        classes: [get, list]
+        children:
+          - resources: [tags]
+            classes: [get, list]
+
+  - id: probemod.reader_b1
+    description: >
+      Пробная роль: как probemod.reader, но правило над ящиками сужено именем b1.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: probemod
+        resources: [boxes]
+        classes: [get, list]
+        resourceNames: [b1]
+        children:
+          - resources: [tags]
+            classes: [get, list]

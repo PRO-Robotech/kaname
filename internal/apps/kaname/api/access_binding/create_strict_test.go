@@ -450,6 +450,12 @@ func (_ *strictDupABReader) GrantorLastPresentedAt(context.Context, domain.UserI
 	return time.Time{}, false, nil
 }
 
+// PublicReadContainer — публичное чтение контейнера (kaname#856) этим дублёром не
+// судится: тип цели не объявлен, детей нет.
+func (_ *strictDupABReader) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
+	return domain.PublicReadContainer{}, nil
+}
+
 // BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *strictDupRoleReader) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
 	return false, nil

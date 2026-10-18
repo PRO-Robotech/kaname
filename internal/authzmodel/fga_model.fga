@@ -1298,6 +1298,10 @@ type nlb_listener
 # прямые, развязаны от tier. `project` линкует реестр к проекту, `owner` несёт
 # creator-tuple (registry пишет owner через RegisterResource). Репозиторий —
 # child реестра (`parent`), доступ материализуется per-object реконсайлером.
+# Реестр — КОНТЕЙНЕР публичного чтения (ключ манифеста publicReadToChildren,
+# kaname#856): `public_reader` реестра пишет разворачивание выдачи системному
+# классу ролью с правилом над registry.repositories, и репозитории читают его
+# формой `public_reader from parent` в v_get и v_list. Только чтение.
 # ---------------------------------------------------------------------------
 
 type registry_registry
@@ -1308,6 +1312,7 @@ type registry_registry
     define admin: [user, service_account, group#member] or super_admin
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
+    define public_reader: [system_class]
     # #64 Defect A: v_* derive from `owner` so a registry's CREATOR/OWNER (the
     # RegisterResource `owner` tuple) holds the full CRUD verb-set on their own
     # registry — esp. v_create (create repositories). Without this the owner got
@@ -1325,8 +1330,8 @@ type registry_registry
     # and creating a resource inside a scope is authorized by the write tier on that
     # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the
     # type name if a reader-less carrier reappears.
-    define v_get: [user, service_account, group#member] or owner or super_admin
-    define v_list: [user, service_account, group#member] or owner or super_admin
+    define v_get: [system_class, user, service_account, group#member] or owner or super_admin
+    define v_list: [system_class, user, service_account, group#member] or owner or super_admin
     define v_create: [user, service_account, group#member] or owner or super_admin
     define v_update: [user, service_account, group#member] or owner or super_admin
     define v_delete: [user, service_account, group#member] or owner or super_admin
@@ -1349,8 +1354,8 @@ type registry_repository
     # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
     # the repo owner fully manages their own repository; `user:*` wildcard stays
     # on v_get ONLY (anonymous public-read floor, B14).
-    define v_get: [system_class, user, service_account, group#member] or owner or super_admin
-    define v_list: [user, service_account, group#member] or owner or super_admin
+    define v_get: [system_class, user, service_account, group#member] or owner or super_admin or public_reader from parent
+    define v_list: [user, service_account, group#member] or owner or super_admin or public_reader from parent
     define v_update: [user, service_account, group#member] or owner or super_admin
     define v_delete: [user, service_account, group#member] or owner or super_admin
 

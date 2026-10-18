@@ -3,35 +3,31 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ========================================================================================================================================================================================================================================================
 
 ПРОВЕНАНС
-  снято               2026-10-15 16:22:34 MSK
-  ревизия дерева      b2b8edfb523fba27b93e0cbe69e0d951549a14ac
-  состояние дерева    чистое по предмету замера: несохранённых правок среди
-                      файлов под отпечатком нет — ревизия описывает
-                      исполнявшийся КОД целиком.
-                      Вне предмета правок 1 — на измеряемую стоимость они не
-                      влияют; принадлежность выведена из перечня файлов под
-                      отпечатком ниже, а не из выписанного исключения:
-                        вне предмета    internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt
+  снято               2026-10-17 20:52:52 MSK
+  ревизия дерева      c9a94e5d7032e1ee4b1af958f576bdfe4c2e943d
+  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
+                      исполнявшееся дерево целиком
   машина              AMD Ryzen 9 5950X 16-Core Processor, ядер 32
   Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
-  отпечаток состава     de2b7bfa816975c7
-  отпечаток содержимого 4ad99786ab039e72
-  файлов под отпечатком 30, таблиц выведено 18 (kaname.access_binding_subjects, kaname.access_bindings, kaname.accounts, kaname.catalog_resource, kaname.clusters, kaname.group_members, kaname.groups, kaname.memberships, kaname.projects, kaname.relation_fact, kaname.resource_mirror, kaname.resource_parent_edge, kaname.resource_scope_edge, kaname.role_rule_selectors, kaname.role_verb, kaname.roles, kaname.service_accounts, kaname.users)
+  отпечаток состава     dc9425dbf1510726
+  отпечаток содержимого f7973f23ef99c70a
+  файлов под отпечатком 33, таблиц выведено 18 (kaname.access_binding_subjects, kaname.access_bindings, kaname.accounts, kaname.catalog_resource, kaname.clusters, kaname.group_members, kaname.groups, kaname.memberships, kaname.projects, kaname.relation_fact, kaname.resource_mirror, kaname.resource_parent_edge, kaname.resource_scope_edge, kaname.role_rule_selectors, kaname.role_verb, kaname.roles, kaname.service_accounts, kaname.users)
   предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kaname/pg/relverdict и services/iam/internal/repo/kaname/pg/scalegrid; те .sql каталога services/iam/internal/migrations, у которых хотя бы один оператор определения имеет СУБЪЕКТОМ таблицу, которую читает запрос вердикта, — то есть таблица стоит на месте того, что оператор ИЗМЕНЯЕТ, а не того, на что он ссылается: оператор РАЗБИРАЕТСЯ (глагол, вид объекта, имена в грамматически определённых позициях), а не ищется подстрокой; границы операторов тоже разбираются — точка с запятой внутри литерала (обычного и с экранированием E'…\'…'), внутри имени в кавычках и внутри тела в долларовых кавычках оператора не кончает; комментарий не исполняется и субъектом не бывает; DDL над временным объектом, над функцией и над последовательностью субъектом ТАБЛИЦЫ не является by construction, а безвредность вида объекта НЕ ОБЪЯВЛЯЕТСЯ, а доказывается парой операторов с положительным контролем; СВЕРХ ОПРЕДЕЛЕНИЯ судятся формы, меняющие план не будучи им, — расширенная статистика, политика построчной безопасности, наследование, ANALYZE/REINDEX/CLUSTER/VACUUM; исполняемый SQL (EXECUTE) разбирается ТЕМ ЖЕ разбором, второго перечня глаголов нет — выписанный оператор судится ТОЧНО по своему субъекту, а подстановка format(%I) делает имя подстановочным и совпадает с любой измеряемой таблицей В ТОМ ПОЛЕ, где стоит; индекс и расширенная статистика, названные по имени, связываются с таблицей по словарю, ВЫВЕДЕННОМУ обходом того же каталога, а неизвестное имя и незнакомый вид объекта судятся ОСТОРОЖНО — «задевает», потому что молчание на них было бы слепотой; ОТБОР ЧИТАЕТ ФАЙЛ ЦЕЛИКОМ, включая раздел ОТКАТА, который в работе не исполняется: миграция попадает под отпечаток и за оператор, стоящий только там; имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны; БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля, координата модуля в дереве платформы либо путь, начинающийся с каталога верхнего уровня ПОСТАВКИ МОДУЛЯ), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает, а словарь координат выведен из поставки модуля и потому ОДИН В ОБЕИХ ПОСАДКАХ; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (хэш · тождество · путь на момент замера)
     28ccc0b674e6ac55  вердикт/asker.go  services/iam/internal/repo/kaname/pg/relverdict/asker.go
     8a5df9cd8d0a346e  вердикт/asker_gate.go  services/iam/internal/repo/kaname/pg/relverdict/asker_gate.go
-    44feeb9469eb14bc  вердикт/catalogtype.go  services/iam/internal/repo/kaname/pg/relverdict/catalogtype.go
+    fc0a996b3aae0c42  вердикт/catalogtype.go  services/iam/internal/repo/kaname/pg/relverdict/catalogtype.go
     26004fc4746102cd  вердикт/condition.go  services/iam/internal/repo/kaname/pg/relverdict/condition.go
-    adcca25af73ad703  вердикт/expand.go  services/iam/internal/repo/kaname/pg/relverdict/expand.go
+    54bda5dbeb33b13a  вердикт/expand.go  services/iam/internal/repo/kaname/pg/relverdict/expand.go
+    62a7f7c38252842c  вердикт/grantarm.go  services/iam/internal/repo/kaname/pg/relverdict/grantarm.go
     80e119935fa750c3  вердикт/labelaxis.go  services/iam/internal/repo/kaname/pg/relverdict/labelaxis.go
-    d17d8bd86c2c2c02  вердикт/list.go  services/iam/internal/repo/kaname/pg/relverdict/list.go
+    44e86f459c029132  вердикт/list.go  services/iam/internal/repo/kaname/pg/relverdict/list.go
     3b3ea697e22783c0  вердикт/membership.go  services/iam/internal/repo/kaname/pg/relverdict/membership.go
-    116279b89209f1e1  вердикт/query.go  services/iam/internal/repo/kaname/pg/relverdict/query.go
+    58847ee39a2f6bb1  вердикт/query.go  services/iam/internal/repo/kaname/pg/relverdict/query.go
     e83c1cc8152e8b7a  вердикт/speaker_classes.go  services/iam/internal/repo/kaname/pg/relverdict/speaker_classes.go
-    11780e996492ac99  вердикт/subjects.go  services/iam/internal/repo/kaname/pg/relverdict/subjects.go
+    d5955410c980a426  вердикт/subjects.go  services/iam/internal/repo/kaname/pg/relverdict/subjects.go
     5ed0b860ed8e8607  миграции/0001_initial.sql  services/iam/internal/migrations/0001_initial.sql
     ee18772d31c05f47  миграции/20260904135459_role_owner_module_needs_a_liveness_key.sql  services/iam/internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
     390bfdb71548b903  миграции/20260905020423_roles_carry_a_time_of_last_edit.sql  services/iam/internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
@@ -45,10 +41,12 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
     4b245a0b43b2eee1  миграции/20261011061435_own_account_and_identity_are_removed_in_order.sql  services/iam/internal/migrations/20261011061435_own_account_and_identity_are_removed_in_order.sql
     d7e131e7bdd27001  миграции/20261015120000_anonymous_and_authenticated_are_subject_classes.sql  services/iam/internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
     29ad815a089f3e24  миграции/20261015140000_subject_class_fact_is_a_read.sql  services/iam/internal/migrations/20261015140000_subject_class_fact_is_a_read.sql
+    e5fbf42fa1c57b5c  миграции/20261017020000_container_passes_public_read_to_its_children.sql  services/iam/internal/migrations/20261017020000_container_passes_public_read_to_its_children.sql
+    5a289679ac78efd3  миграции/20261017140000_nested_rule_reaches_descendants.sql  services/iam/internal/migrations/20261017140000_nested_rule_reaches_descendants.sql
     cba312c09c5cc18f  сетка/census.go  services/iam/internal/repo/kaname/pg/scalegrid/census.go
     58879bd6de1a3d96  сетка/dictionary.go  services/iam/internal/repo/kaname/pg/scalegrid/dictionary.go
     b7bbcaf493e5b87e  сетка/grid.go  services/iam/internal/repo/kaname/pg/scalegrid/grid.go
-    90e89714c215b4e7  сетка/seed.go  services/iam/internal/repo/kaname/pg/scalegrid/seed.go
+    7cfa5e434107a932  сетка/seed.go  services/iam/internal/repo/kaname/pg/scalegrid/seed.go
     521cb8174a079a16  сетка/strength.go  services/iam/internal/repo/kaname/pg/scalegrid/strength.go
     f6e9c85169896050  сетка/strength_census.go  services/iam/internal/repo/kaname/pg/scalegrid/strength_census.go
 
@@ -82,14 +80,14 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ N
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-100        прямыми выдачами             46       103      149        104      3    1.19ms   5.929ms      7
-1000       прямыми выдачами             46       101      147        171      3   1.011ms   1.142ms      7
-10000      прямыми выдачами             46       101      147        171      3     995µs   1.607ms      7
-100000     прямыми выдачами             46       101      147        171      3   1.061ms   1.718ms      7
-1000000    прямыми выдачами             46       101      147        171      3     988µs   1.285ms      7
+100        прямыми выдачами             46       103      149        119      3   1.276ms   5.013ms      7
+1000       прямыми выдачами             46       101      147        186      3   1.057ms   1.256ms      7
+10000      прямыми выдачами             46       101      147        186      3   1.095ms   1.553ms      7
+100000     прямыми выдачами             46       101      147        186      3   1.063ms   1.102ms      7
+1000000    прямыми выдачами             46       101      147        186      3    1.11ms    1.24ms      7
 
   отношение к нижней точке (несущая): 100→1.00  1000→1.00  10000→1.00  100000→1.00  1000000→1.00  
-  отношение сверочная/несущая по точкам: 100→2.26  1000→3.72  10000→3.72  100000→3.72  1000000→3.72  
+  отношение сверочная/несущая по точкам: 100→2.59  1000→4.04  10000→4.04  100000→4.04  1000000→4.04  
   вердикт в каждой точке: 100→allow  1000→allow  10000→allow  100000→allow  1000000→allow  
   план по точкам:
     100        [Index Only Scan→resource_parent_edge Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→memberships Index Scan→resource_parent_edge Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→resource_mirror Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
@@ -113,12 +111,12 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ B
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-100        прямыми выдачами             23       577      600        631      3   1.511ms   5.185ms      7
-1000       прямыми выдачами             46       101      147        115      3     918µs   1.129ms      7
-1000000    прямыми выдачами             21        15       36         83      3     952µs   1.167ms      7
+100        прямыми выдачами             23       577      600        646      3   1.545ms   5.104ms      7
+1000       прямыми выдачами             46       101      147        130      3   1.076ms    1.11ms      7
+1000000    прямыми выдачами             21        15       36         83      3   1.099ms   1.325ms      7
 
   отношение к нижней точке (несущая): 100→1.00  1000→2.00  1000000→0.91  
-  отношение сверочная/несущая по точкам: 100→27.43  1000→2.50  1000000→3.95  
+  отношение сверочная/несущая по точкам: 100→28.09  1000→2.83  1000000→3.95  
   вердикт в каждой точке: 100→allow  1000→allow  1000000→allow  
   план по точкам:
     100        [Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→memberships Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
@@ -140,17 +138,17 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ R
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-1          прямыми выдачами             30        37       67         82      3     1.1ms   5.021ms      7
-9          прямыми выдачами             46       101      147        171      3   1.079ms   1.251ms      7
-100        прямыми выдачами             21        15       36       2376      3   1.531ms   1.872ms      7
-100        через группы                 21        15       36       2376      3    1.56ms   2.698ms      7
-227        прямыми выдачами             21        15       36         75      3   1.038ms   1.269ms      7
-227        через группы                 21        15       36         75      3   1.006ms   1.386ms      7
-1000       прямыми выдачами             21        15       36         69      3     952µs   1.013ms      7
-1000       через группы                 21        15       36         69      3   1.002ms   1.072ms      7
+1          прямыми выдачами             30        37       67         89      3   1.198ms   4.944ms      7
+9          прямыми выдачами             46       101      147        186      3   1.036ms   1.078ms      7
+100        прямыми выдачами             21        15       36        180      3   1.028ms   1.759ms      7
+100        через группы                 21        15       36        180      3   1.018ms   1.159ms      7
+227        прямыми выдачами             21        15       36         75      3   1.076ms   1.342ms      7
+227        через группы                 21        15       36         75      3    1.08ms   1.118ms      7
+1000       прямыми выдачами             21        15       36         69      3   1.058ms   1.137ms      7
+1000       через группы                 21        15       36         69      3   1.126ms   1.195ms      7
 
   отношение к нижней точке (несущая): 1→1.00  9→1.53  100→0.70  100→0.70  227→0.70  227→0.70  1000→0.70  1000→0.70  
-  отношение сверочная/несущая по точкам: 1→2.73  9→3.72  100→113.14  100→113.14  227→3.57  227→3.57  1000→3.29  1000→3.29  
+  отношение сверочная/несущая по точкам: 1→2.97  9→4.04  100→8.57  100→8.57  227→3.57  227→3.57  1000→3.29  1000→3.29  
   вердикт в каждой точке: 1→allow  9→allow  100→allow  100→allow  227→allow  227→allow  1000→allow  1000→allow  
   план по точкам:
     1          [Index Only Scan→resource_parent_edge Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→memberships Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
@@ -177,17 +175,17 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ F
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-0          фактом лично                 45        89      134         99      3   1.148ms   5.248ms      7
-1          фактом лично                 46       101      147        171      3   1.009ms   1.461ms      7
-10         фактом лично                 55       204      259        198      3   1.001ms   1.188ms      7
-10         фактом через группу          55       164      219        185      3   1.029ms   1.367ms      7
-10         фактом классом system_class:authenticated       55       121      176        185      3     999µs   1.489ms      7
-100        фактом лично                145      1194     1339        468      3   1.072ms   1.381ms      7
-100        фактом через группу         145       794      939        468      3   1.058ms   1.312ms      7
-100        фактом классом system_class:authenticated      145       326      471        468      3   1.013ms   1.355ms      7
+0          фактом лично                 45        89      134        114      3    1.16ms   4.932ms      7
+1          фактом лично                 46       101      147        186      3   1.091ms   1.338ms      7
+10         фактом лично                 55       122      177        213      3   1.076ms   1.109ms      7
+10         фактом через группу          55       118      173        200      3    1.06ms   1.108ms      7
+10         фактом классом system_class:authenticated       55       121      176        200      3   1.047ms   1.346ms      7
+100        фактом лично                145      1294     1439        483      3   1.112ms   1.176ms      7
+100        фактом через группу         145       894     1039        483      3   1.132ms   1.568ms      7
+100        фактом классом system_class:authenticated      145       330      475        483      3   1.098ms   1.139ms      7
 
   отношение к нижней точке (несущая): 0→1.00  1→1.02  10→1.22  10→1.22  10→1.22  100→3.22  100→3.22  100→3.22  
-  отношение сверочная/несущая по точкам: 0→2.20  1→3.72  10→3.60  10→3.36  10→3.36  100→3.23  100→3.23  100→3.23  
+  отношение сверочная/несущая по точкам: 0→2.53  1→4.04  10→3.87  10→3.64  10→3.64  100→3.33  100→3.33  100→3.33  
   вердикт в каждой точке: 0→allow  1→allow  10→allow  10→allow  10→allow  100→allow  100→allow  100→allow  
   план по точкам:
     0          [Index Only Scan→resource_parent_edge Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→memberships Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
@@ -212,7 +210,7 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 
 
 ОБЪЁМ ОСМОТРЕННОГО
-  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 17m51s
+  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 19m27s
 
 ПЕРЕПИСЬ ПРИБОРА В ВЕРХНЕЙ ТОЧКЕ ОСИ N (доля неотнесённого печатается всегда)
 ПРАВИЛО ОТНЕСЕНИЯ (объявлено до прогона; перепись печатает его дословно из кода)
@@ -270,8 +268,8 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
     из них перепроверкой потерявшего точность bitmap 0
     из них соединением (по узлам)                90
   тронуто (отдано + отброшено)                   147
-  по всем узлам плана, включая неотнесённые      331
-  строк на неотнесённых узлах                    285
+  по всем узлам плана, включая неотнесённые      332
+  строк на неотнесённых узлах                    286
   Heap Fetches                                   0
   Workers Launched                               0
 

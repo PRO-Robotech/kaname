@@ -359,5 +359,11 @@ func (_ *fakeABRdr) GrantorLastPresentedAt(context.Context, domain.UserID) (time
 	return time.Time{}, false, nil
 }
 
+// PublicReadContainer — публичное чтение контейнера (kaname#856) этим дублёром не
+// судится: тип цели не объявлен, детей нет.
+func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
+	return domain.PublicReadContainer{}, nil
+}
+
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *fakeRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
