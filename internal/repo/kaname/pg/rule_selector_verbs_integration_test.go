@@ -286,8 +286,17 @@ func TestSelectorVerbs_LegacyInsertGetsTheUpperBoundAndTheQueue(t *testing.T) {
 	                           (role_id, rule_fp, arm, object_types, match_labels)
 	                         VALUES ($1, 'fp-old', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, string(legacy), typ)
 	require.NoError(t, err, "вставка писателя прежней версии отвергнута")
+	// Верхняя граница — ВСЕ живые глаголы типа в каталоге, а не выписанный
+	// перечень: манифест-проба добавляет к объявленным и свои.
+	var live []string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT array_agg(DISTINCT lower(btrim(cv.verb)) ORDER BY lower(btrim(cv.verb)))
+		  FROM kaname.catalog_resource cr
+		  JOIN kaname.catalog_verb cv ON cv.module = cr.module AND cv.resource = cr.resource
+		 WHERE cr.dotted = $1 AND cr.live AND cv.live`, typ).Scan(&live))
+	require.Subset(t, live, []string{"delete", "get", "update"}, "КОНТРОЛЬ: каталог не знает объявленных глаголов")
 	got, _ := svVerbs(t, ctx, pool, legacy, "fp-old")
-	require.Equal(t, map[string][]string{typ: {"delete", "get", "update"}}, got)
+	require.Equal(t, map[string][]string{typ: live}, got)
 	require.True(t, svPending(t, ctx, pool, legacy), "роль с верхней границей не поставлена в очередь")
 
 	require.NoError(t, svWrite(ctx, pool, current, []domain.RuleSelector{{RuleFP: "fp-cur", Arm: domain.ArmAnchor,
