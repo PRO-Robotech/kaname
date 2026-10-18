@@ -111,6 +111,15 @@ func storedMaps(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id string
 	return out
 }
 
+// clearQueue — очередь базы пробы до сцены пуста: миграция ставит в неё и
+// системные роли посева, и без этого перепись прохода считала бы чужие роли.
+func clearQueue(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	c, err := seed.RegrainQueuedSelectorVerbs(ctx, kanamepg.New(pool, nil), pool, catalogfixture.Facts())
+	require.NoError(t, err)
+	require.Zero(t, c.Pending, "очередь базы пробы не опустела до сцены")
+}
+
 func queueLen(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
 	t.Helper()
 	var n int
@@ -165,6 +174,7 @@ func TestSelectorVerbsDrain_OneRoleFailureDoesNotStopThePass(t *testing.T) {
 	}
 	ctx, pool := newReseedPool(t)
 	_, accID := seedProbeAccountWithoutOwnerBinding(t, ctx, pool, "dr1")
+	clearQueue(t, ctx, pool)
 	stageStaleTenantRole(t, ctx, pool, "rol-dr1-fail", accID, drainRules())
 	stageStaleTenantRole(t, ctx, pool, "rol-dr1-good", accID, drainRules())
 	left := &atomic.Int32{}
@@ -185,6 +195,7 @@ func TestSelectorVerbsDrain_AFailedRegrainIsRetriedUntilTheQueueIsEmpty(t *testi
 	}
 	ctx, pool := newReseedPool(t)
 	_, accID := seedProbeAccountWithoutOwnerBinding(t, ctx, pool, "dr2")
+	clearQueue(t, ctx, pool)
 	stageStaleTenantRole(t, ctx, pool, "rol-dr2-flak", accID, drainRules())
 	left := &atomic.Int32{}
 	left.Store(2)
@@ -212,6 +223,7 @@ func TestSelectorVerbsDrain_ReplicasAndARoleEditConverge(t *testing.T) {
 	}
 	ctx, pool := newReseedPool(t)
 	_, accID := seedProbeAccountWithoutOwnerBinding(t, ctx, pool, "dr3")
+	clearQueue(t, ctx, pool)
 	const id = "rol-dr3-race"
 	stageStaleTenantRole(t, ctx, pool, id, accID, drainRules())
 	edited := append(drainRules(), domain.Rule{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"list"}})

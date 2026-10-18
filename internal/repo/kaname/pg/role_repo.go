@@ -1172,17 +1172,25 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 // (kaname#878).
 //
 // Пишется ТОЛЬКО колонка глаголов строки с тем же отпечатком: охват правила не
-// трогается, строки не снимаются и не заводятся. Поэтому вызов безопасен рядом
-// с правкой роли без замка на её строку: отпечаток — хэш ВСЕГО правила, включая
-// глаголы и вложенные, и глаголы строки с отпечатком F есть функция F и
-// каталога, а не прочих правил роли. Правка роли, переписавшая селекторы, либо
-// уже сняла строку F (тогда обновлять нечего), либо положила строку F с тем же
-// набором.
+// трогается, строки не снимаются и не заводятся. Глаголы строки с отпечатком F
+// есть функция F (хэш ВСЕГО правила, включая глаголы и вложенные) и каталога, а
+// не прочих правил роли: правка роли, переписавшая селекторы, либо уже сняла
+// строку F (обновлять нечего), либо положила её с тем же набором.
 //
-// Ссылок строки на каталог запись карты глаголов не меняет, и страж живости
-// типов на ней не будится (миграция 20261018030000): строка, чей тип каталог
-// снял после её записи, пересчитывается, а не отвергается. Замков на строки
-// каталога поэтому не нужно.
+// СНЯТИЕ ИЗ ОЧЕРЕДИ — другое дело: оно утверждает «все строки роли вычислены», а
+// это верно лишь о правилах, которые вызывающий видел. Поэтому вызывающий
+// обязан прочесть правила В ЭТОЙ ЖЕ транзакции через RulesForRegrain: замок на
+// строку роли ставит пересчёт после идущей правки (и тогда читаются её правила)
+// либо правку после пересчёта (и тогда строки правки, вставленные писателем
+// прежней версии без карты, снова ставят роль в очередь стражем схемы).
+//
+// Карта пересекается с типами СТРОКИ: тип, которого строка не охватывает (снят
+// каталогом и вырезан применителем), в карту не попадает, — инвариант карты
+// держит проверка схемы `role_rule_selectors_verbs_valid`.
+//
+// Ссылок строки на каталог запись карты не меняет, и страж живости типов на ней
+// не будится (миграция 20261018030000): строка, чей тип каталог снял после её
+// записи, пересчитывается, а не отвергается. Замков на строки каталога не нужно.
 func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
 	for _, sel := range selectors {
 		if len(sel.ObjectTypes) == 0 {
@@ -1193,15 +1201,40 @@ func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.Rol
 			return err
 		}
 		if _, err := w.tx.Exec(ctx,
-			`UPDATE kaname.role_rule_selectors
-			    SET verbs_by_type = $3::jsonb
-			  WHERE role_id = $1 AND rule_fp = $2
-			    AND verbs_by_type IS DISTINCT FROM $3::jsonb`,
+			`UPDATE kaname.role_rule_selectors s
+			    SET verbs_by_type = (SELECT coalesce(jsonb_object_agg(g.k, g.v), '{}'::jsonb)
+			                           FROM jsonb_each($3::jsonb) AS g(k, v)
+			                          WHERE g.k = ANY (s.object_types))
+			  WHERE s.role_id = $1 AND s.rule_fp = $2`,
 			string(roleID), sel.RuleFP, grants); err != nil {
 			return mapErr(err, "", string(roleID))
 		}
 	}
 	return w.dequeueSelectorVerbs(ctx, roleID)
+}
+
+// RulesForRegrain читает правила роли под замком строки (FOR SHARE) — в той
+// транзакции, где затем идёт RegrainSelectorVerbs (довод — у него). `live=false`
+// — роль снята либо её нет: строк селекторов у неё нет, пересчитывать нечего.
+func (w *roleWriter) RulesForRegrain(ctx context.Context, roleID domain.RoleID) (domain.Rules, bool, error) {
+	var (
+		raw  []byte
+		live bool
+	)
+	err := w.tx.QueryRow(ctx,
+		`SELECT CASE WHEN jsonb_typeof(rules) = 'array' THEN rules ELSE '[]'::jsonb END, live
+		   FROM kaname.roles WHERE id = $1 FOR SHARE`, string(roleID)).Scan(&raw, &live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, mapErr(err, "", string(roleID))
+	}
+	rules, derr := domain.DecodeRules(raw)
+	if derr != nil {
+		return nil, false, fmt.Errorf("правила роли %s не разбираются: %w", roleID, derr)
+	}
+	return rules, live, nil
 }
 
 // dequeueSelectorVerbs — роль снимается из очереди пересчёта глаголов правил.

@@ -205,9 +205,14 @@ type WriterIface interface {
 	ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
 
 	// RegrainSelectorVerbs пересчитывает глаголы правил у существующих строк
-	// селекторов роли (по отпечатку) и снимает роль из очереди пересчёта
-	// (kaname#878). Охват правил не трогает.
+	// селекторов роли (по отпечатку, в пересечении с типами строки) и снимает
+	// роль из очереди пересчёта (kaname#878). Охват правил не трогает. Правила
+	// вызывающий читает через RulesForRegrain В ТОЙ ЖЕ транзакции.
 	RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
+
+	// RulesForRegrain — правила роли под замком строки для пересчёта глаголов
+	// правил; live=false — роль снята либо её нет (kaname#878).
+	RulesForRegrain(ctx context.Context, roleID domain.RoleID) (rules domain.Rules, live bool, err error)
 
 	// ReplaceRoleVerbs syncs kaname.role_verb — проекцию «роль → тип объекта ×
 	// глагол», которой отвечает форма E.
