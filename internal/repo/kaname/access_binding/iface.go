@@ -194,6 +194,16 @@ type WriterIface interface {
 	Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error)
 	Delete(ctx context.Context, id domain.AccessBindingID) error
 
+	// LockLiveTargetTypes — какие из типов пообъектной цели `types` имеют ЖИВУЮ
+	// строку каталога платформы, прочитанные в ЭТОЙ транзакции под замком
+	// `FOR KEY SHARE` в порядке `dotted` (kaname#904, Р2). Замок согласован с
+	// применением манифеста: применитель держит `FOR UPDATE` на строках ресурсов
+	// модуля в том же порядке, поэтому незафиксированное снятие запись дожидается
+	// и судит по его исходу, а зафиксированное до записи строку из ответа
+	// убирает. Возвращает подмножество `types` (порядок не гарантирован); пустой
+	// вход — пустой ответ без обращения к базе.
+	LockLiveTargetTypes(ctx context.Context, types []string) ([]string, error)
+
 	// DeleteGuarded — atomic CAS-delete honoring deletion_protection (RBAC
 	// explicit-model). Single-statement
 	// `DELETE … WHERE id=$1 AND deletion_protection=false`; 0 rows → re-read:

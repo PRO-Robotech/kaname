@@ -61,6 +61,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // seedTuplesClaimedByOtherActiveBindings sets the tuples some OTHER ACTIVE
@@ -130,7 +131,7 @@ func newCrossClaimFixture(t *testing.T) crossClaimFixture {
 		fga:       newRecordingFGA(),
 		subjectID: subjectID,
 	}
-	createUC := NewCreateAccessBindingUseCase(f.repo, f.opsRepo).WithRelationStore(f.fga, nil)
+	createUC := NewCreateAccessBindingUseCase(f.repo, f.opsRepo, catalogfixture.Source()).WithRelationStore(f.fga, nil)
 	_, err := createUC.Execute(newOwnerContext(ownerID), domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),

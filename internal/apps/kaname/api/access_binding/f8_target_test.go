@@ -5,8 +5,8 @@ package access_binding
 
 // f8_target_test.go — redesign-2026 F8 (IAM-1-21/22/23): AccessBinding.target is
 // REINTRODUCED as a REQUIRED first-class oneof {resources[] ResourceRef |
-// allInScope{}} (least-privilege spine). ResourceRef is the closed-table {type,id}
-// (no name); the type is validated against the closed dotted type-registry.
+// allInScope{}} (least-privilege spine). ResourceRef is the {type,id} pair
+// (no name); the type is validated against the LIVE platform catalog (kaname#904).
 //
 // Pure parse-path + domain unit tests (no Docker).
 
@@ -23,6 +23,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // IAM-1-22: Create WITHOUT target → sync INVALID_ARGUMENT, first statement,
@@ -65,37 +66,36 @@ func TestAB_IAM_1_21_TargetResources(t *testing.T) {
 	assert.Equal(t, "ins-abc", tgt.Resources[0].ID)
 }
 
-// IAM-1-23: ResourceRef is a closed table — unknown type → sync INVALID_ARGUMENT.
+// IAM-1-23: тип пообъектной цели без живой строки каталога → синхронный
+// INVALID_ARGUMENT с типом и адресом перечня (Т1, kaname#904). Судит вход ручки
+// целиком: разбор формы (`targetFromProto`) тип больше не судит, это делает
+// use-case первым оператором по снимку каталога.
 func TestAB_IAM_1_23_UnknownTargetType(t *testing.T) {
-	_, err := targetFromProto(&iamv1.AccessTarget{
-		Target: &iamv1.AccessTarget_Resources{Resources: &iamv1.AccessTargetResources{
-			Resources: []*iamv1.ResourceRef{{Type: "unknown.thing", Id: "x"}},
-		}},
-	})
-	require.Error(t, err)
-	st, ok := status.FromError(err)
-	require.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, st.Message(), "target.resources[].type")
+	h := targetJudgeHandler(catalogfixture.Facts())
+	requireT1(t, createAnon(h, ref("unknown.thing", "x")), "unknown.thing", "IAM-1-23 unknown.thing")
+	requireTypeAccepted(t, createAnon(h, ref("compute.instance", "x")), "IAM-1-23 близнец compute.instance")
 }
 
-// domain closed type-registry: a dotted <module>.<resource> is a valid target iff
-// the materialization feed emits objects under that exact string.
+// Годность типа цели — живая строка каталога (Р1 kaname#904): `ValidTargetType`
+// спрашивает каталожный факт, а не перечень в коде.
 //
 // `vpc.route_table` used to be listed here as accepted. It never was a type the
 // feed emits — the mirror spells it `vpc.routeTable` — so a binding naming it was
-// stored, reconciled, matched nothing and granted nothing. The assertion pinned
-// that, which is why it read as correct. The feed spelling is asserted below, and
-// the snake_case one now sits with the refusals; the property is held for the
-// whole vocabulary, not these examples, by
+// stored, reconciled, matched nothing and granted nothing. The feed spelling is
+// asserted below, and the snake_case one sits with the refusals; the property is
+// held for the whole vocabulary, not these examples, by
 // domain/access_binding_target_vocabulary_test.go.
 func TestAB_IAM_1_23_ValidTargetType(t *testing.T) {
-	for _, ok := range []string{"compute.instance", "vpc.network", "vpc.routeTable", "iam.account", "storage.volumes"} {
-		assert.True(t, domain.ValidTargetType(ok), ok)
+	f := catalogfixture.Facts()
+	for _, ok := range []string{"compute.instance", "vpc.network", "vpc.routeTable", "iam.account", "storage.volumes", "vpc.addressPool"} {
+		assert.True(t, domain.ValidTargetType(f, ok), ok)
 	}
-	for _, bad := range []string{"unknown.thing", "compute", "", ".instance", "compute.", "vpc.route_table"} {
-		assert.False(t, domain.ValidTargetType(bad), bad)
+	for _, bad := range []string{"unknown.thing", "compute", "", ".instance", "compute.", "vpc.route_table", "compute.disk", "*"} {
+		assert.False(t, domain.ValidTargetType(f, bad), bad)
 	}
+	// Без источника годного типа нет: отсутствие каталога — отказ, а не
+	// всеразрешение.
+	assert.False(t, domain.ValidTargetType(nil, "compute.instance"), "nil-каталог")
 }
 
 // IAM-1-21 (output): the dto projects a per-object target back as resources[]

@@ -30,13 +30,14 @@ import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // deltaHandler wires the minimal Handler needed for Create + Get round-trips
 // (other use-cases are nil — not exercised here).
 func deltaHandler(t *testing.T, repo *kanamepg.Repository, opsRepo operations.Repo) *accessbindingapp.Handler {
 	t.Helper()
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 	get := accessbindingapp.NewGetAccessBindingUseCase(repo).
 		WithRelationStore(allowRelationStore{}, nil)

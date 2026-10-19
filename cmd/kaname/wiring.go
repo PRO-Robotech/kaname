@@ -554,7 +554,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// AccessBindingService. (rsabReconciler is created above — shared with the
 	// Role.Update membership fan-out; the same instance drives Create + worker.)
-	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kanameRepo, opsRepo).
+	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kanameRepo, opsRepo, catalogSource).
 		WithRelationStore(relationStore, logger).
 		WithReconciler(rsabReconciler)
 	// abDelete — relationStore drives the grant-authority gate, and ONLY that. The
