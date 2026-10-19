@@ -164,7 +164,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// Исключение класса — проверка «у выдачи в наборе субъектов есть строка
 		// её пары» (`access_bindings_carry_a_subject`; миграции
 		// `20261018214804_access_binding_carries_a_subject.sql`, kaname#902, и
-		// `20261019091500_access_binding_pair_is_in_its_subject_set.sql`,
+		// `20261019194800_access_binding_pair_is_in_its_subject_set.sql`,
 		// kaname#907). Запрос без субъектов отвергается до записи, пара выводится
 		// из subjects[0], и каждый путь записи выдачи пишет набор в той же
 		// транзакции; сработавшая проверка значит «служба записала выдачу без
