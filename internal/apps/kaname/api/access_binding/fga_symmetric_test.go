@@ -69,6 +69,7 @@ import (
 	user_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // ─── Symmetric FGA grant/revoke ────────────────────────────────────────────
@@ -98,7 +99,7 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	ctx := newOwnerContext(ownerID)
 
 	// ── Create ────────────────────────────────────────────────────────────────
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(fga, nil)
 
 	binding := domain.AccessBinding{
@@ -191,7 +192,7 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 	fga := newRecordingFGA()
 	ctx := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	binding := domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
@@ -944,6 +945,12 @@ func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, membe
 
 // fakeABWtr — access_binding Writer; stores Insert result, clears on Delete.
 type fakeABWtr struct{ repo *abFakeRepo }
+
+// LockLiveTargetTypes — дублёр выполняет контракт настоящего тем же источником,
+// что синхронная половина проверки: живые строки каталога фикстуры.
+func (w *fakeABWtr) LockLiveTargetTypes(_ context.Context, types []string) ([]string, error) {
+	return fixtureLiveTargetTypes(types), nil
+}
 
 func (w *fakeABWtr) Insert(_ context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	w.repo.mu.Lock()

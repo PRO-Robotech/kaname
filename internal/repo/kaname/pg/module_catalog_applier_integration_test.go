@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogstate"
 )
 
 // applierProbeModule — модуль, на котором ставятся сценарии применителя.
@@ -92,40 +93,12 @@ func probeResource(name string, verbs ...string) manifest.Resource {
 	return r
 }
 
-// stateFingerprint — отпечаток ВСЕХ таблиц, которых применитель касается.
-//
-// Шесть таблиц, а не три: применитель пишет каталог и переселяет проекции, и
-// «ничего не изменилось» обязано покрывать обе половины. Отпечаток строится из
-// содержимого строк, а не из их числа: мощности сошлись бы и при подмене одной
-// строки другой — а это ровно тот исход, который атомарность обязана исключать.
+// stateFingerprint — отпечаток ВСЕХ таблиц, которых применитель касается
+// (P12). Объявлен ОДИН раз — `catalogstate.Fingerprint`: его читают пробы трёх
+// пакетов, и копия в каждом разошлась бы составом колонок молча.
 func stateFingerprint(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
 	t.Helper()
-	var fp string
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')) FROM (
-		  SELECT 'm:' || module || ':' || live::text ||
-		         ':' || coalesce(retired_reason, '') AS x
-		    FROM kaname.catalog_module
-		  UNION ALL
-		  SELECT 'r:' || dotted || ':' || live::text ||
-		         ':' || coalesce(retired_reason, '')
-		    FROM kaname.catalog_resource
-		  UNION ALL
-		  SELECT 'v:' || module || '.' || resource || '.' || verb || ':' || live::text ||
-		         ':' || per_object::text || ':' || coalesce(retired_reason, '')
-		    FROM kaname.catalog_verb
-		  UNION ALL
-		  SELECT 'rr:' || role_id || ':' || module || '.' || resource ||
-		         ':' || coalesce(verb, '')
-		    FROM kaname.role_rule_ref
-		  UNION ALL
-		  SELECT 'rv:' || role_id || ':' || object_type || ':' || verb
-		    FROM kaname.role_verb
-		  UNION ALL
-		  SELECT 'or:' || role_id || ':' || object_type || ':' || verb || ':' || source
-		    FROM kaname.role_grant_orphan
-		) s`).Scan(&fp))
-	return fp
+	return catalogstate.Fingerprint(t, ctx, pool)
 }
 
 // applierOver — применитель над своим пулом.

@@ -139,7 +139,7 @@ func newP2(t *testing.T) *p2 {
 	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	src := catalog.Fixed{F: w.facts}
 	w.rec = reconcile.New(kanamepg.NewReconcileAdapter(pool, src), nil, src)
-	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops, src).
 		WithRelationStore(door, nil).
 		WithReconciler(w.rec)
 	get := accessbindingapp.NewGetAccessBindingUseCase(w.repo).WithRelationStore(door, nil)
@@ -242,7 +242,9 @@ func (w *p2) role(name string, rules domain.Rules) domain.RoleID {
 	if err != nil {
 		w.t.Fatalf("роль %s: %v", name, err)
 	}
-	sels := r.Rules.MaterializingSelectors()
+	// Глаголы каждого правила вычисляет каталог мира (kaname#878), как в
+	// продуктовом создании роли: селектор без них писатель отвергает.
+	sels := w.facts.GrantSelectors(r.Rules.MaterializingSelectors())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", name, err)
 	}

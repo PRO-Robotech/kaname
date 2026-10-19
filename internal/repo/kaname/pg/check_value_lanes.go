@@ -183,9 +183,21 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 	},
 	// Каталог модуля: имя модуля — из манифеста; живость и снятие — служба.
+	// Номер применённой редакции — из манифеста как есть (ключ `revision`,
+	// kaname#865); отпечаток содержимого считает служба над деревом узлов
+	// документа, и пару из номера и отпечатка пишет оператор
+	// сравнения-и-записи службы.
 	"catalog_module": {
-		caller:  []string{"catalog_module_nonempty", "catalog_module_undotted"},
-		service: []string{"catalog_module_live_matches_retired"},
+		caller: []string{
+			"catalog_module_applied_revision_positive",
+			"catalog_module_nonempty",
+			"catalog_module_undotted",
+		},
+		service: []string{
+			"catalog_module_applied_digest_form",
+			"catalog_module_applied_pair",
+			"catalog_module_live_matches_retired",
+		},
 	},
 	// Каталог ресурса: модуль, ресурс, тип модели и типы указателей — из
 	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
