@@ -165,7 +165,9 @@ type ConfirmOutput struct {
 	View        SessionView
 	Bearer      domain.SessionBearer
 	BackupCodes []string
-	Assurance   AssuranceView
+	// BackupCodeSet — состояние только что выпущенного набора (kaname#297 Р4).
+	BackupCodeSet BackupCodeSetView
+	Assurance     AssuranceView
 }
 
 // ConfirmSecondFactorUseCase — подтвердить заведение.

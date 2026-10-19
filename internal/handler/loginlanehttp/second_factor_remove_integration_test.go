@@ -84,9 +84,9 @@ func TestLaneIntegration_F12_28_RemoveAlwaysReportsZeroBackupCodesRemaining(t *t
 			given, err := status.Execute(h.ctx, humansession.StatusInput{Bearer: bearer})
 			require.NoError(t, err)
 			require.True(t, given.TOTPEnrolled, "Дано: у личности заведён второй фактор")
-			require.NotNil(t, given.BackupCodes, "Дано: у заведённого фактора есть набор запасных кодов")
-			require.Equal(t, passwordverify.BackupCodeCount, given.BackupCodes.Total, "Дано: полный набор")
-			require.Equal(t, passwordverify.BackupCodeCount, given.BackupCodes.Remaining, "Дано: ни один код не потреблён")
+			require.NotNil(t, given.BackupCodeSet, "Дано: у заведённого фактора есть набор запасных кодов")
+			require.Equal(t, passwordverify.BackupCodeCount, given.BackupCodeSet.Total, "Дано: полный набор")
+			require.Equal(t, passwordverify.BackupCodeCount, given.BackupCodeSet.Remaining, "Дано: ни один код не потреблён")
 
 			// Когда: снятие годным кодом ветки tc.
 			out, err := remove.Execute(h.ctx, humansession.RemoveSecondFactorInput{
@@ -104,7 +104,7 @@ func TestLaneIntegration_F12_28_RemoveAlwaysReportsZeroBackupCodesRemaining(t *t
 			after, err := status.Execute(h.ctx, humansession.StatusInput{Bearer: out.Bearer})
 			require.NoError(t, err)
 			require.False(t, after.TOTPEnrolled, "GET после снятия — «не заведён»")
-			require.Nil(t, after.BackupCodes, "GET после снятия — набора нет")
+			require.Nil(t, after.BackupCodeSet, "GET после снятия — набора нет")
 		})
 	}
 }

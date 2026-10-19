@@ -76,6 +76,8 @@ type StepUpOutput struct {
 	Assurance AssuranceView
 	// BackupCodesRemaining — только в ответе, потребившем запасной код (Р4).
 	BackupCodesRemaining *int
+	// BackupCodeSet — состояние набора после траты (kaname#297 Р4).
+	BackupCodeSet *BackupCodeSetView
 }
 
 // StepUpUseCase — церемония.

@@ -29,7 +29,9 @@ type RegenerateBackupCodesOutput struct {
 	View        SessionView
 	Bearer      domain.SessionBearer
 	BackupCodes []string
-	Assurance   AssuranceView
+	// BackupCodeSet — состояние нового набора (kaname#297 Р4).
+	BackupCodeSet BackupCodeSetView
+	Assurance     AssuranceView
 }
 
 // RegenerateBackupCodesUseCase — перечеканка.

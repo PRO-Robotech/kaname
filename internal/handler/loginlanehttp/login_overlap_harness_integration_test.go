@@ -728,8 +728,8 @@ func (h *overlapLane) backupCodesRemaining(t *testing.T, bearer string) int {
 	t.Helper()
 	st, err := h.status.Execute(h.ctx, humansession.StatusInput{Bearer: domain.PresentedSessionBearer(bearer)})
 	require.NoError(t, err, "чтение состояния фактора")
-	require.NotNil(t, st.BackupCodes, "у заведённого фактора есть набор")
-	return st.BackupCodes.Remaining
+	require.NotNil(t, st.BackupCodeSet, "у заведённого фактора есть набор")
+	return st.BackupCodeSet.Remaining
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

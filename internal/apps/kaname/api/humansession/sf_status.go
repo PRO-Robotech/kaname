@@ -23,9 +23,10 @@ type StatusInput struct {
 	Bearer domain.SessionBearer
 }
 
-// BackupCodesView — остаток набора: величина ответа (Р6). При нуле — число,
-// не молчание.
-type BackupCodesView struct {
+// BackupCodeSetView — состояние набора запасных кодов (kaname#297 Р2): остаток,
+// размер, момент выпуска и момент последней траты; кодов и материала нет.
+// Строится только о ПРОЧИТАННОМ наборе — значений-заглушек нет.
+type BackupCodeSetView struct {
 	Remaining int
 	Total     int
 	// IssuedAt — момент выпуска набора (kaname#827, SUA Р6): момент строки
@@ -50,8 +51,8 @@ type StatusOutput struct {
 	// после подтверждения код не предъявляли, и ключа в ответе нет.
 	TOTPLastUsedAt time.Time
 	TOTPLastUsed   bool
-	// BackupCodes — есть только у заведённого фактора.
-	BackupCodes *BackupCodesView
+	// BackupCodeSet — есть только у заведённого фактора.
+	BackupCodeSet *BackupCodeSetView
 	// AccessKeysAvailable — ключи доступа на установке включены.
 	AccessKeysAvailable bool
 	// StepUpMethods — способы, которыми человек может повысить уровень этой
@@ -103,14 +104,14 @@ func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput
 	}
 	out.TOTPEnrolled, out.ConfirmedAt = true, row.CreatedAt
 	out.TOTPLastUsedAt, out.TOTPLastUsed = row.LastUsedAt, row.LastUsed
-	out.BackupCodes = &BackupCodesView{Total: passwordverify.BackupCodeCount}
+	out.BackupCodeSet = &BackupCodeSetView{Total: passwordverify.BackupCodeCount}
 	set, err := uc.deps.Methods.Get(ctx, resolved.User.ID, domain.LoginMethodLookupSecret)
 	switch {
 	case err == nil:
-		out.BackupCodes.IssuedAt = set.CreatedAt
-		out.BackupCodes.LastUsedAt, out.BackupCodes.LastUsed = set.LastUsedAt, set.LastUsed
+		out.BackupCodeSet.IssuedAt = set.CreatedAt
+		out.BackupCodeSet.LastUsedAt, out.BackupCodeSet.LastUsed = set.LastUsedAt, set.LastUsed
 		if n, ok := uc.deps.Sets.SetSize(set.Verifier); ok {
-			out.BackupCodes.Remaining = n
+			out.BackupCodeSet.Remaining = n
 		} else {
 			uc.deps.Logger.Error("second factor status: backup code set unreadable — our data, not the caller's input",
 				"user_id", string(resolved.User.ID))

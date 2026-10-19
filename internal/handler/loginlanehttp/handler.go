@@ -967,13 +967,13 @@ func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 		"accessKeys":    map[string]any{"available": out.AccessKeysAvailable},
 		"stepUpMethods": methods,
 	}
-	if out.BackupCodes != nil {
+	if out.BackupCodeSet != nil {
 		codes := map[string]any{
-			"remaining": out.BackupCodes.Remaining, "total": out.BackupCodes.Total,
-			"issuedAt": moment(out.BackupCodes.IssuedAt),
+			"remaining": out.BackupCodeSet.Remaining, "total": out.BackupCodeSet.Total,
+			"issuedAt": moment(out.BackupCodeSet.IssuedAt),
 		}
-		if out.BackupCodes.LastUsed {
-			codes["lastUsedAt"] = moment(out.BackupCodes.LastUsedAt)
+		if out.BackupCodeSet.LastUsed {
+			codes["lastUsedAt"] = moment(out.BackupCodeSet.LastUsedAt)
 		}
 		body["backupCodes"] = codes
 	}
