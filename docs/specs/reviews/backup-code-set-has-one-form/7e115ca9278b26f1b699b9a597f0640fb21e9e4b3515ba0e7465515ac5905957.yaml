@@ -1,0 +1,95 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/backup-code-set-has-one-form.md
+  sha256: 7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строки истории в шапке — статическая форма объявления; шапка не правлена
+    рецензентом намеренно (change-graph.md §2). Действующий вердикт о редакции 7e115ca9… — эта
+    запись и внешнее событие; прежние записи 7f950ca3…, c6e042f3…, a334e4da… не тронуты.
+  base_commit: ab1ee8565
+  content_commit: e9e165390
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 615
+  scenarios: 26
+  round: 4
+  round_scope: >-
+    проверка исполнения служебной дельты к редакции 3 (a334e4da…, APPROVED кругом 3): в историю
+    review дописаны строка круга 3 и строка о правке после вердикта. Содержательной дельты нет,
+    поэтому и замечаний по существу не открывается (flow-acceleration fa-b1). Это не третий круг
+    спора по ⛔ (fa-b8): круг 3 закончился APPROVED, этот круг заказан диспетчером.
+  round_note: >-
+    Вердикт a334e4da… относится к редакции 3 и на редакцию 4 не переносится; эта запись — вердикт
+    о редакции 4.
+  predecessor_record: docs/specs/reviews/backup-code-set-has-one-form/a334e4dacf5785042ac189402bd761be4c4fbaecca4628bfff9f8ae7d25b47a2.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/backup-code-set-has-one-form.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T02:05:42Z'
+effective_approval:
+  issued: false
+  note: >-
+    Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
+    not_performed. Правка документа после этой записи вердикт не переносит.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: not_performed
+  published: false
+  publication_mode: courier_of_agent_verdict
+  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/backup-code-set-has-one-form.md · sha256 7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/backup-code-set-has-one-form/7f950ca3f0709ac5b05558ae8deb441d7c9bd36df91fbe24253b7aa43347c81f.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/c6e042f38106b49bedddc3abeef2af6dd0a647d8e555c1848d22e7a6774e21c6.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/a334e4dacf5785042ac189402bd761be4c4fbaecca4628bfff9f8ae7d25b47a2.yaml
+premise:
+  status: confirmed
+  predicate: >-
+    sha256sum документа @e9e165390 → 7e115ca9… (равен заявленному);
+    `git show ab1ee8565:<путь> | sha256sum` → a334e4da… (база дельты — одобренная редакция 3);
+    `git diff --numstat ab1ee8565 e9e165390` → один файл, 6 добавлено, 0 удалено.
+delta_checks:
+  - id: D1
+    subject: дифф только служебный
+    where: шапка, §«История review» :22-27
+    result: пройдено
+    predicate: >-
+      `git diff ab1ee8565 e9e165390` → один ханк @@ -19,6 +19,12 @@, все шесть строк — внутри
+      блока истории review (цитата `> `), удалённых строк 0; `grep -c '^\*\*ID:\*\*'` → 26 и до, и
+      после; сценарии, таблица производителей, DoD, §«Решения» и предикаты не тронуты.
+  - id: D2
+    subject: строка круга 3 правдива
+    result: пройдено
+    predicate: >-
+      строка называет APPROVED, редакцию 3 a334e4da… и путь записи; запись по этому пути
+      существует и несёт verdict APPROVED, subject.sha256 a334e4da…
+  - id: D3
+    subject: гейт правки после вердикта молчит, и способен не молчать
+    result: пройдено
+    predicate: >-
+      @e9e165390: `go test -count=1 -v -run TestAcceptanceEditedAfterItsVerdictSaysSo
+      ./internal/check/` → PASS, перепись «приёмок прочитано 75 · правлено после объявления
+      состояния 57 · из них с записью о правке 57»; контроль @ab1ee8565 (временная копия,
+      GOWORK=off) → FAIL ровно на backup-code-set-has-one-form.md «записи о правке ПОСЛЕ вердикта в
+      нём нет», «с записью о правке 56» — дельта снимает именно эту находку.
+      `go test -count=1 -run Acceptance ./internal/check/` @e9e165390 → ok, 12 проверок, код 0.
+new_blocking_from_delta: []
+non_blocking: []
+checks:
+  scope: без изменений против круга 3 — дельта сценариев не трогает
+  producer: 26 из 26 — как в круге 3, таблица не тронута
+  twin: как в круге 3, отрицания не тронуты
+  constructibility: новых Given дельта не вводит (посеяно 0 из 0)
+  format: без изменений
+  conventions: без изменений
+  dod: без изменений
