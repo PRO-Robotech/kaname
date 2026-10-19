@@ -22,7 +22,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -375,13 +374,13 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig, trust grpcs
 	// реестра, и без пересыльщика ключом темпа на источник был бы адрес самого
 	// прокси — предел, общий на всех клиентов за ним.
 	if c.AnonymousLaneDeclared() && c.AnonymousForwarderSAN == "" {
-		return errors.New(
-			"api-server.registry-token.anonymous-forwarder-san must be declared while " +
-				"api-server.registry-token.anonymous-client-id is set — anonymous registry token requests reach " +
-				"this service through the registry proxy, and without a trusted forwarder the pace key is the " +
-				"proxy's own address, one pace shared by every client behind it. Declare the exact SPIFFE SAN of " +
-				"the proxy's client certificate (example: spiffe://<trust-domain>/ns/<namespace>/sa/kacho-registry). " +
-				"Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN")
+		return fmt.Errorf(
+			"api-server.registry-token.anonymous-forwarder-san must be declared while "+
+				"api-server.registry-token.anonymous-client-id is set — anonymous registry token requests reach "+
+				"this service through the registry proxy, and without a trusted forwarder the pace key is the "+
+				"proxy's own address, one pace shared by every client behind it. Declare the exact identity of "+
+				"the proxy's client certificate in the form %s<namespace>/sa/<service account>. "+
+				"Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN", trust.NamespacePrefix())
 	}
 	if c.TokenService() == "" {
 		return fmt.Errorf(
