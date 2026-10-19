@@ -101,6 +101,20 @@ type RegistryTokenConfig struct {
 	// Форма значения закрыта (AnonymousPrincipalForm), и иная отвергается
 	// стражем старта — разбор формы и цена её нарушения в AnonymousPrincipal.
 	AnonymousClientID string `mapstructure:"anonymous-client-id"`
+
+	// AnonymousPerSourcePerSec — темп анонимной выдачи: входов без
+	// удостоверения в секунду на источник, НА ПРОЦЕСС (kaname#928). Источник —
+	// по правилу адреса поверхности выдачи (Р7); запас — одна секунда темпа;
+	// превышение — 429 со сроком ожидания. Несколько реплик дают источнику до
+	// «темп × число реплик».
+	//
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC
+	// Пример значения: 20
+	//
+	// Умолчания нет: при объявленном AnonymousClientID и поднятом слушателе
+	// нулевой темп отвергается стражем старта (Validate). Ноль означал бы
+	// «без ограничения» — выдачу, ни разу не отказавшую по частоте.
+	AnonymousPerSourcePerSec int `mapstructure:"anonymous-per-source-per-sec"`
 }
 
 // AnonymousPrincipalForm — объявленная форма публичного принципала анонимного
@@ -262,6 +276,16 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
 	// оно с именем, которое реестр называет докер-клиенту; совпадения не
 	// выбирал никто. Отказ называет ОБЕ величины: свою настройку и ту сторону,
 	// из которой она выводится, — иначе оператор ищет вслепую.
+	// ТЕМП АНОНИМНОЙ ВЫДАЧИ (kaname#928): поток объявлен — темп на источник
+	// объявлен числом. Без анонимного потока величина не требуется.
+	if c.AnonymousClientID != "" && c.AnonymousPerSourcePerSec <= 0 {
+		return fmt.Errorf(
+			"api-server.registry-token.anonymous-per-source-per-sec must be declared as a positive number "+
+				"of anonymous registry token requests per second per source, per replica, while "+
+				"api-server.registry-token.anonymous-client-id is set (got %d) — zero means «no pace». "+
+				"Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC",
+			c.AnonymousPerSourcePerSec)
+	}
 	if c.TokenService() == "" {
 		return fmt.Errorf(
 			"api-server.registry-token.service is not declared while the docker lane listener is up (%s) — "+

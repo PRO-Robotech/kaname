@@ -107,21 +107,29 @@ func New(trust grpcsrv.TrustDomain) *Rule {
 
 // Of — источник запроса на точке p.
 func (r *Rule) Of(req *http.Request, p Point) string {
+	source, reason, counted := r.resolve(req)
+	if counted {
+		r.count(Cell{Point: p, Reason: reason})
+	}
+	return source
+}
+
+// resolve — пп. 1–3 правила: источник и, если источником стал адрес пира при
+// случае п. 4, причина этого.
+func (r *Rule) resolve(req *http.Request) (source string, reason Reason, counted bool) {
 	peer := peerAddress(req)
 	if authzguard.PeerIsGateway(r.trust, req.TLS) {
 		if addr, ok := oneAddress(req.Header.Values(HeaderForwardedFor)); ok {
-			return addr
+			return addr, "", false
 		}
-		r.count(Cell{Point: p, Reason: ReasonEdgeWithoutAddress})
-		return peer
+		return peer, ReasonEdgeWithoutAddress, true
 	}
 	for _, h := range forwardingHeaders {
 		if len(req.Header.Values(h)) > 0 {
-			r.count(Cell{Point: p, Reason: ReasonForwardedFromNonEdge})
-			break
+			return peer, ReasonForwardedFromNonEdge, true
 		}
 	}
-	return peer
+	return peer, "", false
 }
 
 // AuthorizePoint — источник запроса точки авторизации: форма, которую
@@ -130,6 +138,19 @@ func (r *Rule) AuthorizePoint(req *http.Request) string { return r.Of(req, Point
 
 // TokenPoint — источник запроса токен-эндпоинта.
 func (r *Rule) TokenPoint(req *http.Request) string { return r.Of(req, PointToken) }
+
+// RegistryTokenPoint — источник анонимного входа докерной полосы `/iam/token`
+// (kaname#928): ключ её темпа на источник. Выводится пп. 1–3 правила — тем же
+// кодом, что у двух точек приёмки.
+//
+// П. 4 к этой точке НЕ применяется: словарь переписи закрыт приёмкой
+// (ceremony-pace-is-named-by-number.md, Р7 п. 4, KN-PACE-37) двумя точками, и
+// счёт третьей в клетку `token` смешал бы две разные точки, а новая клетка
+// разошлась бы с одобренным словарём.
+func (r *Rule) RegistryTokenPoint(req *http.Request) string {
+	source, _, _ := r.resolve(req)
+	return source
+}
 
 // Read — снимок переписи. Читается сборщиком метрик.
 func (r *Rule) Read() map[Cell]uint64 {

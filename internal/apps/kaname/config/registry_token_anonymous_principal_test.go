@@ -35,6 +35,9 @@ func loadRegistryLane(t *testing.T, principal string) (config.Config, error) {
 	t.Helper()
 	t.Setenv(anonServiceEnv, "registry.probe.local")
 	t.Setenv(anonPrincipalEnv, principal)
+	// Темп анонимной выдачи объявлен: предмет этих проб — форма принципала, а
+	// поток без темпа страж отвергает отдельно (kaname#928).
+	t.Setenv(anonPaceEnv, "20")
 	cfg, err := config.Load("")
 	require.NoError(t, err)
 	return cfg, cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken)
