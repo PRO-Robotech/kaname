@@ -110,5 +110,9 @@ checks:
 
 event_body: acceptance-reviewer · APPROVED · 18360285461ee74e59c92a0445fcff9d313e8c2e3ed99bb56b4efce209ff9bd9
 event:
-  status: not_performed
-  note: публикует курьер (git-operator); тем же заходом блок приводится к факту.
+  status: performed
+  published: true
+  url: https://github.com/PRO-Robotech/kaname/issues/904#issuecomment-6256874839
+  published_at: '2026-10-19T00:09:10Z'
+  published_by: pointpu
+  note: опубликовал курьер (git-operator); тело — event_body дословно под заголовком; блок приведён к факту по ответу API комментария
