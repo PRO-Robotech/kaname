@@ -50,8 +50,9 @@ func NewRoleTupleReconciler() *RoleTupleReconciler { return &RoleTupleReconciler
 //     построителем, что у создания (kaname#880),
 //  2. read oldTuples = SelectEmittedTuples(binding),
 //  3. diff: removed = old\new, added = new\old,
-//  4. EmitRelationDelete(removed) + EmitRelationWrite(added) +
-//     ReplaceEmittedTuples(binding, newTuples).
+//  4. ReplaceEmittedTuples(binding, newTuples) — реестр ДО строк журнала
+//     (kaname#919: иначе выдача держит снимаемый факт сама), затем
+//     EmitRelationDelete(removed) + EmitRelationWrite(added).
 //
 // Bounded: the fan-out iterates only the ACTIVE bindings of the SINGLE mutated
 // role (ListActiveByRole), not all bindings. Idempotent: an unchanged tier
@@ -95,6 +96,17 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 		}
 
 		removed, added := diffTuples(oldTuples, newTuples)
+		if len(removed) == 0 && len(added) == 0 {
+			continue
+		}
+		// Реестр — ДО строк журнала. Строку снятия свёртка применяет, лишь когда
+		// факт не держит ни одна действующая выдача (kaname#919); выдача ACTIVE, и
+		// со старым реестром она держала бы снимаемый факт сама. Новый реестр уже
+		// без снятых кортежей, а общий кортеж, который держит ДРУГАЯ выдача,
+		// свёртка оставит — вычитать его здесь не нужно.
+		if err := w.AccessBindingsW().ReplaceEmittedTuples(ctx, b.ID, newTuples); err != nil {
+			return fmt.Errorf("replace emitted-set of binding %s: %w", b.ID, err)
+		}
 		if len(removed) > 0 {
 			if err := w.AccessBindingsW().EmitRelationDelete(ctx, removed); err != nil {
 				return fmt.Errorf("emit relation delete for binding %s: %w", b.ID, err)
@@ -103,13 +115,6 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 		if len(added) > 0 {
 			if err := w.AccessBindingsW().EmitRelationWrite(ctx, added); err != nil {
 				return fmt.Errorf("emit relation write for binding %s: %w", b.ID, err)
-			}
-		}
-		// Keep the ledger in lock-step with the new emitted projection. When the
-		// delta is empty this is a no-op swap (same set in, same set out).
-		if len(removed) > 0 || len(added) > 0 {
-			if err := w.AccessBindingsW().ReplaceEmittedTuples(ctx, b.ID, newTuples); err != nil {
-				return fmt.Errorf("replace emitted-set of binding %s: %w", b.ID, err)
 			}
 		}
 	}

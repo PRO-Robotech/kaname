@@ -63,8 +63,8 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 	// NO EXCLUSIVE advisory lock — the additive forward path removes the serialization
 	// point; it takes only the SHARE lock (coexists with sibling forwards).
 	assert.Equal(t, 0, f.locks, "forward fast-path must NOT take the EXCLUSIVE advisory lock (throughput)")
-	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "форвард прошёл аддитивным путём (unlocked-load)")
-	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "forward reads the binding via the UNLOCKED load")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "форвард прошёл аддитивным путём (чтение форварда)")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "форвард читает выдачу чтением форварда (без advisory-замка)")
 
 	// Exactly the ONE registered object is materialized ACTIVE (no full-scope recompute).
 	require.Len(t, f.upserts, 1, "only the registered object materialized")
@@ -129,8 +129,8 @@ func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLo
 
 	// (a) NO EXCLUSIVE advisory lock — additive iam-direct forward takes only SHARE.
 	assert.Equal(t, 0, f.locks, "iam-direct forward must NOT take the EXCLUSIVE advisory lock (throughput)")
-	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "iam-direct форвард прошёл аддитивным путём (unlocked-load)")
-	assert.GreaterOrEqual(t, f.unlockedLoads, 1, "iam-direct forward reads the binding via the UNLOCKED load")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "iam-direct форвард прошёл аддитивным путём (чтение форварда)")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "iam-direct форвард читает выдачу чтением форварда (без advisory-замка)")
 
 	// Exactly the ONE registered object is materialized ACTIVE.
 	require.Len(t, f.upserts, 1, "only the registered iam-direct object materialized")
@@ -312,7 +312,7 @@ func TestReconcileObjectForward_ObjectNotInMirror_NoOp(t *testing.T) {
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "compute.instance", "i-absent"))
 	assert.Empty(t, f.upserts)
 	assert.Empty(t, allWrites(f))
-	assert.Equal(t, 0, f.unlockedLoads, "no binding is loaded when the object is not in the mirror")
+	assert.Equal(t, 0, f.keyShareLoads, "no binding is loaded when the object is not in the mirror")
 }
 
 // TestReconcileObjectForward_ReRegister_DelegatesToFull_DeleteStale — the DELETE-STALE

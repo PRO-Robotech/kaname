@@ -374,13 +374,6 @@ type abFakeRepo struct {
 	// round-trip is order-stable without an unordered Go-map shuffle. A plain
 	// `map[tuple]struct{}` iterates in random order ⇒ require.Equal flakes/fails.
 	emittedTuples map[domain.AccessBindingID]*orderedTupleSet
-	// claimedByOthers — the tuples some OTHER *ACTIVE* binding also recorded in its
-	// own ledger row (the emitted-tuple ledger is keyed per binding, while the
-	// materialized fact is one row per (object, relation, subject) and is NOT
-	// refcounted). Backs the fake
-	// SelectTuplesClaimedByOtherActiveBindings probe; seeded per test via
-	// seedTuplesClaimedByOtherActiveBindings. Empty ⇒ nothing else claims anything.
-	claimedByOthers []ab_repo.RelationTuple
 	// txOps — ordered trace of the writer-tx port calls that carry a DB-level
 	// serialization contract (advisory-lock / ledger-read / status-CAS). Lets a
 	// unit test pin the ORDER those statements are issued in, which is what makes
@@ -945,6 +938,12 @@ func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, membe
 
 // fakeABWtr — access_binding Writer; stores Insert result, clears on Delete.
 type fakeABWtr struct{ repo *abFakeRepo }
+
+// GetForDeactivation — то же чтение, что у фейка читателя: замка строки у фейка нет,
+// предмет пробы здесь — набор снимаемых кортежей, а не порядок замков.
+func (w *fakeABWtr) GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return (&fakeABRdr{repo: w.repo}).Get(ctx, id)
+}
 
 // LockLiveTargetTypes — дублёр выполняет контракт настоящего тем же источником,
 // что синхронная половина проверки: живые строки каталога фикстуры.
