@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 875
+Всего кейсов: 877
 
 ## Перепись по модулям
 
@@ -39,7 +39,7 @@
 | `cases/docker-lane-credential-kind.py` | 1 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
-| `cases/iam-access-binding-redesign.py` | 17 |
+| `cases/iam-access-binding-redesign.py` | 19 |
 | `cases/iam-account-redesign.py` | 9 |
 | `cases/iam-account.py` | 58 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
@@ -422,7 +422,7 @@
 - `IAM-AB-REV-01-BY-ACCOUNT-INCLUDE-REVOKED-OK`
 - `IAM-AB-REV-02-BY-ROLE-INCLUDE-REVOKED-OK`
 
-## `cases/iam-access-binding-redesign.py` — 17 кейсов
+## `cases/iam-access-binding-redesign.py` — 19 кейсов
 
 > Case-set для AccessBindingService — IAM-1 REDESIGN (authz-core: scope+target+revoke).
 
@@ -430,6 +430,8 @@
 - `IAM-ACB-RD-CR-TARGET-RESOURCES-OK`
 - `IAM-ACB-RD-CR-NO-TARGET-NEG`
 - `IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG`
+- `IAM-ACB-RD-CR-TARGET-LIVE-CATALOG-OK`
+- `IAM-ACB-RD-CR-TARGET-MISSPELLED-TYPE-NEG`
 - `IAM-ACB-RD-CR-SCOPETYPE-REQUIRED-NEG`
 - `IAM-ACB-RD-UP-SCOPE-IMMUTABLE-NEG`
 - `IAM-ACB-RD-CR-ROLECOVERSTYPE-NEG`
