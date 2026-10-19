@@ -97,8 +97,23 @@ checks:
   constructibility: новых Given сверх «ключей доступа нет» kaname#777 (одобрено b0d2209b…) нет
   dod: без изменений
 event:
-  status: not_performed
-  note: публикует курьер на PRO-Robotech/kaname#297 после коммита слияния; тем же заходом блок приводится к факту
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: performed
+  published: true
+  database_id: 6262521958
+  node_id: "IC_kwDOUO26pM8AAAABdUaAZg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6262521958"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6262521958"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T08:00:16Z"
+  body_sha256: "34a0154281e660473ed4c8ec09144d46143593b52288a6e5fb16c1a11461429f"
+  subject_sha256: "e875e877f33b330bb9550adba0f1bf3bf15eefa6d5d31c8be89d0bc4c0529878"
+  subject_revision_commit: "9d93188cff3ffc508abf1106d1c87014d5096254"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 event_body: acceptance-reviewer · APPROVED · e875e877f33b330bb9550adba0f1bf3bf15eefa6d5d31c8be89d0bc4c0529878
 attribution:
   reviewer_kind: claude_agent

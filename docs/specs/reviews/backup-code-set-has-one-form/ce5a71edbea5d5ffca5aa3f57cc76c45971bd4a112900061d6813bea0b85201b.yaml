@@ -95,8 +95,23 @@ checks:
   constructibility: новых Given нет
   dod: п. 4 — пройдено (самопроверки код 0), п. 6 — пройдено на сведённом дереве, п. 8 — выполним
 event:
-  status: not_performed
-  note: публикует курьер на PRO-Robotech/kaname#297 после коммита слияния; тем же заходом блок приводится к факту
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: performed
+  published: true
+  database_id: 6262524150
+  node_id: "IC_kwDOUO26pM8AAAABdUaI9g"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6262524150"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6262524150"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T08:00:24Z"
+  body_sha256: "ad49cbfe284fca0dc682c8edf87c3b42554e3f85f8182dedb5f1bd9558323665"
+  subject_sha256: "ce5a71edbea5d5ffca5aa3f57cc76c45971bd4a112900061d6813bea0b85201b"
+  subject_revision_commit: "9d93188cff3ffc508abf1106d1c87014d5096254"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 event_body: acceptance-reviewer · APPROVED · ce5a71edbea5d5ffca5aa3f57cc76c45971bd4a112900061d6813bea0b85201b
 attribution:
   reviewer_kind: claude_agent
