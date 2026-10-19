@@ -377,6 +377,9 @@ func (fakeABW) Insert(_ context.Context, b domain.AccessBinding) (domain.AccessB
 }
 func (fakeABW) Delete(context.Context, domain.AccessBindingID) error        { return nil }
 func (fakeABW) DeleteGuarded(context.Context, domain.AccessBindingID) error { return nil }
+func (fakeABW) GetForDeactivation(context.Context, domain.AccessBindingID) (domain.AccessBinding, error) {
+	return domain.AccessBinding{}, nil
+}
 func (fakeABW) RevokeGuarded(context.Context, domain.AccessBindingID, domain.UserID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, nil
 }

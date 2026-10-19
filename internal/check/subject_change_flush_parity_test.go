@@ -53,8 +53,13 @@ var subjectChangeProducerRoster = map[string]int{
 	"internal/apps/kaname/api/access_binding/create.go": 1,
 	"internal/apps/kaname/api/access_binding/delete.go": 1,
 	"internal/apps/kaname/api/access_binding/revoke.go": 1,
-	"internal/apps/kaname/api/group/add_member.go":      1,
-	"internal/apps/kaname/api/group/remove_member.go":   1,
+	// Снятие выдачи сроком (kaname#920): строка той же формы, что у отзыва и
+	// удаления, на каждого субъекта. Самосброса у края здесь нет и не нужно:
+	// истечение — фоновый проход сведения, а не RPC, и реплики, обслужившей
+	// мутацию, у него нет; край узнаёт о снятии чтением очереди.
+	"internal/apps/kaname/api/access_binding/reconcile/reconcile.go": 1,
+	"internal/apps/kaname/api/group/add_member.go":                   1,
+	"internal/apps/kaname/api/group/remove_member.go":                1,
 	// Исход смены адреса (kaname#635, приёмка email-change-is-confirmed-from-the-new-address.md,
 	// Р8 п. 8, Р9): строка о человеке, `op` = `user_email_change`. Самосброс
 	// реплики края, обслужившей смену, — сторона края (приёмка F8-S5).

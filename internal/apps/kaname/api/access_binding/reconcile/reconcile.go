@@ -31,6 +31,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
 // BindingScope — the minimal binding facts the reconciler needs to materialize
@@ -156,27 +157,27 @@ type ReconcileStore interface {
 	// возвращается немедленно.
 	AcquireBindingLocks(ctx context.Context, bindingIDs []domain.AccessBindingID) error
 
-	// LoadBinding loads the minimal scope/selector/role facts for a binding.
-	// ok=false when the binding no longer exists (deleted — the reconciler then
-	// does nothing; the CASCADE already dropped its members).
+	// LoadBinding — минимальные факты выдачи: область, селекторы, роль. ok=false —
+	// выдачи больше нет (удалена: проходу делать нечего, каскад уже снял её членов).
 	//
-	// The implementation takes a `SELECT … FOR UPDATE` row-lock on the binding row so
-	// two concurrent FULL reconcile passes of the same binding serialize (the delete-
-	// stale diff must not race). The forward fast-path does NOT use this — see
-	// LoadBindingUnlocked.
+	// Реализация берёт строку выдачи `SELECT … FOR NO KEY UPDATE`: два ПОЛНЫХ прохода
+	// одной выдачи идут друг за другом, и снятие устаревшего не гонится само с собой.
+	// Аддитивный форвард этим чтением не пользуется — см. LoadBindingForForward.
 	LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
-	// LoadBindingUnlocked loads the SAME BindingScope facts as LoadBinding but WITHOUT
-	// the `FOR UPDATE` row-lock (and the forward fast-path additionally skips the
-	// advisory lock). It is the read the ADDITIVE forward path (ReconcileObjectForward)
-	// uses: because that path only ADDS the freshly-registered object's tuples (never a
-	// delete-stale diff), it needs no serialization against a concurrent pass of the
-	// same binding, so it must not take the binding row-lock that would re-serialize all
-	// registrations sharing one editor/owner binding (the throughput bottleneck this
-	// fast-path removes). ok=false when the binding no longer exists.
-	LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
+	// LoadBindingForForward — те же факты, что LoadBinding, но под замком строки
+	// `FOR KEY SHARE` (и без advisory-замка выдачи). Это чтение АДДИТИВНОГО форварда
+	// (ReconcileBindingForward): форвард только ДОБАВЛЯЕТ кортежи и устаревшего не
+	// снимает, поэтому взаимного исключения с полным проходом той же выдачи ему не
+	// нужно — `FOR KEY SHARE` совместим с `FOR NO KEY UPDATE` полного прохода, и
+	// регистрации под одной выдачей редактора или владельца в очередь за ним не встают.
+	// Держит замок другое: решение форварда «выдача жива» верно до его коммита. Снятие
+	// выдачи (LockBindingForDeactivation, `FOR UPDATE`) с ним конфликтует и не прочитает
+	// набор членов и реестр, пока форвард, увидевший выдачу ACTIVE, ещё пишет
+	// (kaname#919, kaname#923). ok=false — выдачи больше нет.
+	LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
-	// LoadBindingsUnlocked — то же чтение, что LoadBindingUnlocked, но для ЦЕЛОГО НАБОРА
+	// LoadBindingsForForward — то же чтение, что LoadBindingForForward, но для ЦЕЛОГО НАБОРА
 	// выдач за фиксированное число обращений к базе (не по два на выдачу).
 	//
 	// Веер материализации адресуется числом ВЫДАЧ, покрывающих область объекта, а не
@@ -187,8 +188,9 @@ type ReconcileStore interface {
 	//
 	// Контракт: выдача, которой в базе нет (удалена), в карте ОТСУТСТВУЕТ — ровно как
 	// ok=false у одиночного чтения; роль, удалённая из-под выдачи, даёт «нет покрытия»
-	// (пустые селекторы), а не ошибку. Блокировок не берёт — путь аддитивен.
-	LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error)
+	// (пустые селекторы), а не ошибку. Строки берутся тем же `FOR KEY SHARE`, что у
+	// одиночного чтения, одним оператором в порядке `id` (kaname#919).
+	LoadBindingsForForward(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error)
 
 	// MatchSelector returns the MIRROR objects matching a selector's
 	// types+matchLabels (labels @> matchLabels) — the consumer-owned feed
@@ -310,20 +312,6 @@ type ReconcileStore interface {
 	// субъектам до полного набора кортежей (emitted_completion.go, kaname#880).
 	LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.MembershipTuple, error)
 
-	// TuplesStillClaimedByOtherBindings returns the SUBSET of `tuples` still recorded
-	// in the emitted-tuple ledger of an ACTIVE binding OTHER than excludeBinding (same
-	// subject — the tuples carry the subject as fga_user, so a different binding of a
-	// different subject cannot match). The emitted-tuple ledger PK is keyed PER BINDING
-	// (binding_id, fga_user, relation, object — migration 0024), so two bindings of the
-	// SAME subject that materialize the IDENTICAL FGA tuple on the SAME object hold TWO
-	// ledger rows for ONE non-refcounted tuple. The eager-revoke of one binding's
-	// member must NOT delete a tuple another active binding still claims (the cross-binding
-	// shared-tuple class). The reconciler subtracts this set
-	// before emitting a tuple-delete, so the shared tuple is revoked only when the LAST
-	// owning binding releases it. The query joins against access_bindings to require the
-	// other binding be ACTIVE (a REVOKED other binding does not keep a tuple alive).
-	TuplesStillClaimedByOtherBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []domain.MembershipTuple) (map[domain.MembershipTuple]struct{}, error)
-
 	// EmitTupleWrite / EmitTupleDelete enqueue the per-object FGA tuples (+ the
 	// scope hierarchy parent-pointer is the binding-lifecycle concern handled at
 	// Create/Delete, NOT per member) into fga_outbox on the tx.
@@ -368,6 +356,24 @@ type ReconcileStore interface {
 	// expiry eager-revoke pass; the per-object tuple revokes are emitted
 	// separately by the caller via the ACTIVE members it loaded.
 	RevokeExpiredBinding(ctx context.Context, bindingID domain.AccessBindingID) (ok bool, err error)
+
+	// LockBindingForDeactivation берёт строку выдачи `FOR UPDATE` — единственный режим
+	// строки, конфликтующий с `FOR KEY SHARE` форварда (LoadBinding(s)ForForward).
+	// Снятие (истечение срока) берёт его ДО чтения набора членов: снимаемый набор
+	// включает всех членов, которых зафиксировал одновременный форвард, а форвард,
+	// пришедший позже, читает выдачу REVOKED (kaname#919). Строки нет — не ошибка:
+	// следующее LoadBinding вернёт ok=false.
+	LockBindingForDeactivation(ctx context.Context, bindingID domain.AccessBindingID) error
+
+	// EmitSubjectChangeEvent пишет строку журнала смены субъекта в транзакции прохода.
+	// Вид события и `op` выбирает вызывающий use-case, порт только пишет: так
+	// производитель журнала остаётся в слое, который обходит перепись производителей
+	// (internal/check, TestSelfFlushCoversEveryProducerOfTheSubjectChangeQueue).
+	EmitSubjectChangeEvent(ctx context.Context, evt abrepo.SubjectChangeEvent) error
+
+	// EmitAuditEvent пишет строку журнала аудита в транзакции прохода — тем же
+	// писателем, что отзыв и удаление. Содержимое строки выбирает use-case.
+	EmitAuditEvent(ctx context.Context, ev abrepo.AuditEvent) error
 }
 
 // ExpiredBindingSource lists bindings whose TTL has elapsed (expiry scan,
@@ -488,21 +494,16 @@ type syncFGACollector struct {
 	// эпик kacho#747), и накопители сняты вместе с ним: срез, который заполняют и
 	// никогда не читают, снаружи неотличим от работающего механизма.
 	seen map[SyncFGATuple]struct{}
-	// pendingDeletes — the per-binding FGA tuple-deletes the pass wants to emit,
-	// DEFERRED to the end of the pass (flushDeletes) so the cross-binding
-	// shared-tuple subtraction can run against the FULL pass write-set + the
-	// other-active-bindings ledger regardless of the order bindings reconcile in.
-	// A binding that loses a member (label swap / rule removal) collects its
-	// would-be-deletes here; flushDeletes emits only the tuples NO surviving claim
-	// (in-pass write OR another active binding's ledger) keeps alive. Without the
-	// deferral a binding revoked BEFORE its sibling binding writes the identical
-	// tuple would strip a still-valid cross-binding tuple.
+	// pendingDeletes — строки снятия выдач прохода, ОТЛОЖЕННЫЕ до его конца
+	// (flushDeletes): вычитание записанного проходом идёт по ВСЕМУ проходу, от
+	// порядка сверки выдач не завися. Факт, который держит ведомость другой действующей выдачи,
+	// оставляет свёртка строки снятия под замком строки факта (kaname#919); снимок
+	// соседей здесь не читается.
 	pendingDeletes []pendingDelete
 }
 
-// pendingDelete — one binding's deferred tuple-delete request (the eager-revoke
-// already forgot the tuple from THIS binding's ledger inline; only the
-// cross-binding-sensitive FGA delete is deferred).
+// pendingDelete — отложенные строки снятия одной выдачи (строки её реестра
+// жадный отзыв уже забыл на месте; отложена лишь строка журнала).
 type pendingDelete struct {
 	binding domain.AccessBindingID
 	tuples  []domain.MembershipTuple
@@ -536,8 +537,8 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 //
 // The per-binding LEDGER write is deliberately NOT de-duplicated by this set: the ledger
 // PK is (binding_id, fga_user, relation, object), so two bindings claiming the identical
-// tuple must each keep their OWN row — that is what makes the cross-binding revoke
-// subtraction (TuplesStillClaimedByOtherBindings) correct.
+// tuple must each keep their OWN row — по нему свёртка строки снятия и узнаёт, что
+// факт ещё держит другая действующая выдача (kaname#919).
 //
 // A nil collector (sync-FGA unwired) de-duplicates nothing and returns the input as-is.
 func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.MembershipTuple {
@@ -559,45 +560,29 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 	return fresh
 }
 
-// flushDeletes emits the pass's DEFERRED tuple-deletes inside the writer-tx, AFTER
-// every binding in the pass has reconciled (so the full pass write-set is known and
-// every active binding's emitted-tuple ledger row is committed-in-tx). For each
-// pending delete it subtracts (a) tuples WRITTEN by any member in THIS pass (a sibling
-// binding re-materialized the identical tuple — col.seen) and (b) tuples still recorded
-// in the ledger of an ACTIVE binding OTHER than the revoking one (cross-binding shared
-// claim — TuplesStillClaimedByOtherBindings). The remainder — tuples no surviving claim
-// keeps alive — is the only set safe to delete from the non-refcounted rights state.
-// This makes the cross-binding shared-tuple revoke order-independent: a binding
-// revoked before its sibling writes the same tuple no longer
-// strips it. The per-binding ledger ForgetEmittedTuples already ran inline at revoke
-// time (that bookkeeping is binding-local and correct); only the global FGA delete is
-// gated here.
+// flushDeletes кладёт ОТЛОЖЕННЫЕ строки снятия прохода в его пишущую транзакцию —
+// ПОСЛЕ сверки всех выдач прохода, когда записанное им известно целиком. Из каждого
+// набора вычитаются кортежи, ЗАПИСАННЫЕ любым членом этого же прохода (соседняя
+// выдача выпустила тот же кортеж — col.seen): строка снятия того, что эта же
+// транзакция только что записала, ничего не даёт.
+//
+// Ведомости ДРУГИХ выдач здесь не читаются. Факт, который держит ведомость другой
+// действующей выдачи, оставляет свёртка строки снятия: вопрос о держателях она задаёт
+// под замком строки факта, после коммита любого, кто держит эту строку, — свежим
+// снимком (миграция 20261019180000, kaname#919). Снимок соседей, прочитанный здесь,
+// устаревал раньше, чем применялся: два прохода, читавшие друг друга живыми, оба
+// оставляли факт без держателя. Своя строка ведомости к этому моменту уже забыта
+// (ForgetEmittedTuples в revokeMemberTuples) либо выдача снята — свой реестр факт не
+// держит.
 func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *syncFGACollector) error {
 	if c == nil || len(c.pendingDeletes) == 0 {
 		return nil
 	}
 	for _, pd := range c.pendingDeletes {
-		// Candidate tuples not re-written in this pass (a sibling binding's emit keeps
-		// the live tuple — never delete what was just (re)written).
-		var notRewritten []domain.MembershipTuple
+		// Кандидаты, не записанные этим проходом заново.
+		var revoke []domain.MembershipTuple
 		for _, t := range pd.tuples {
 			if _, written := c.seen[SyncFGATuple{User: t.User, Relation: t.Relation, Object: t.Object}]; written {
-				continue
-			}
-			notRewritten = append(notRewritten, t)
-		}
-		if len(notRewritten) == 0 {
-			continue
-		}
-		// Subtract tuples still claimed by an OTHER active binding's ledger (a binding
-		// not reconciled in this pass, or one whose member stayed ACTIVE unchanged).
-		claimed, err := s.TuplesStillClaimedByOtherBindings(ctx, pd.binding, notRewritten)
-		if err != nil {
-			return fmt.Errorf("flush deletes: still-claimed lookup for %s: %w", pd.binding, err)
-		}
-		revoke := notRewritten[:0:0]
-		for _, t := range notRewritten {
-			if _, stillClaimed := claimed[t]; stillClaimed {
 				continue
 			}
 			revoke = append(revoke, t)
@@ -620,8 +605,8 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 		if err := r.reconcileBinding(ctx, s, bindingID, col); err != nil {
 			return err
 		}
-		// Flush the deferred tuple-deletes with the cross-binding surviving-claims
-		// subtraction (a tuple another active binding still holds is not stripped).
+		// Отложенные строки снятия — в конце прохода; факт, который ещё держит
+		// другая действующая выдача, оставляет свёртка журнала (kaname#919).
 		return r.flushDeletes(ctx, s, col)
 	}); err != nil {
 		return err
@@ -663,9 +648,9 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 //     (binding_id, fga_user, relation, object): a shared row implies the SAME object.
 //     Restricting the desired set to one object therefore computes exactly the same
 //     subtraction the full set would have.
-//   - The CROSS-binding subtraction (flushDeletes → TuplesStillClaimedByOtherBindings)
-//     reads the ledger directly and does not consult the desired set at all, so it is
-//     unaffected by the narrowing.
+//   - Удержание факта, который держит ДРУГАЯ выдача, — дело свёртки журнала: она
+//     спрашивает реестр под замком строки факта (kaname#919) и желаемого набора не
+//     читает вовсе, поэтому сужение до объекта её не касается.
 //   - The fan-out itself was ALREADY object-narrowed (BindingsForObject ∪
 //     SelectorBindingsMatchingObject) — only the per-binding recompute inside it was not.
 //
@@ -756,9 +741,8 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 				return err
 			}
 		}
-		// Flush the pass's deferred tuple-deletes AFTER every binding reconciled, so
-		// the cross-binding surviving-claims subtraction sees the full write-set + the
-		// committed-in-tx ledger of every sibling binding (order-independent).
+		// Отложенные строки снятия — ПОСЛЕ сверки всех выдач прохода: вычитание
+		// записанного проходом видит его целиком, от порядка выдач не завися.
 		return r.flushDeletes(ctx, s, col)
 	}); err != nil {
 		return err
@@ -767,19 +751,50 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 	return nil
 }
 
-// ExpireBinding eager-revokes a TTL-expired binding: inside one
-// writer-tx it eager-revokes every ACTIVE member's per-object FGA tuple, then
-// CAS-transitions the binding ACTIVE→REVOKED. The CAS (ban #10) serializes with a
-// concurrent Delete/Activate: if 0 rows updated (already revoked) the tuple
-// revokes are still safe (idempotent at the FGA drainer) but we skip them to keep
-// the pass tight. binding-level status becomes REVOKED so a subsequent Check is
-// denied; the materialized member rows are removed so the reconciler does not
-// re-emit.
+// ExpireBinding снимает выдачу с истёкшим сроком в одной writer-транзакции:
+// CAS-переход ACTIVE→REVOKED, затем снятие пообъектного кортежа каждого ACTIVE-члена
+// и удаление строк членов. CAS (запрет #10) разводит истечение с одновременным
+// удалением или активацией: 0 обновлённых строк (выдачу уже сняли) — кортежи снял
+// тот путь, и проход останавливается. Выдача становится REVOKED, и следующая
+// проверка права отказывает; строки членов удаляются, чтобы реконсайлер не выпустил
+// их заново.
+//
+// ПОРЯДОК ЗАМКОВ транзакции истечения:
+//
+//	1  advisory-замок выдачи        pg_advisory_xact_lock(hashtext(id)) — против полного прохода, отзыва, удаления, второго истечения
+//	2  строка access_bindings        FOR UPDATE (LockBindingForDeactivation) — против аддитивного форварда
+//	3  строка access_bindings        FOR NO KEY UPDATE (LoadBinding) — уже покрыт шагом 2
+//	4  дочерние строки выдачи        снятие членов и реестра, строки журналов
+//
+// Шаг 2 стоит ДО чтения членов (kaname#919): форвард решает «выдача жива» под
+// `FOR KEY SHARE` и пишет членов позже, в своей транзакции; без шага 2 члены,
+// легшие после чтения набора, снимать было бы некому — полный проход и сведение
+// пропускают не-ACTIVE выдачу, а прямой факт вердикт читает и без неё. Отзыв и
+// удаление берут тот же порядок шагов 1–2 (doRevoke, deleteOnce в access_binding,
+// kaname#923), поэтому снятия одной выдачи между собой цикла не дают. Строки
+// каталога (`catalog_module`, `catalog_resource` — порядок 2р→2а→4 применителей,
+// kaname#913) транзакция не берёт вовсе, поэтому ребра ожидания с ними нет.
+//
+// Замка строки мало: исход снятия решает и ВЕРСИЯ строки журнала — свёртка в
+// прямой факт снимает факт, лишь если его версия не новее версии строки снятия.
+// Строка снятия несёт момент своей вставки, а не начало транзакции
+// (fga_outbox, deleteStamp): иначе снятие, открывшее транзакцию раньше форварда и
+// получившее строку после его коммита, писало бы строку старше факта, и факт её
+// переживал. Оба порядка начала транзакций держит
+// reconcile_deactivation_order_race_integration_test.go.
+//
+// Строку журнала смены субъекта и строку аудита снятия истечение пишет в той же
+// транзакции, той же формы, что отзыв и удаление (kaname#920): по первой край
+// сбрасывает кэш решений субъекта и закрывает его открытые потоки, вторая
+// закрывает в следе соответствия выдачу, которую туда положило создание.
 func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
 		if err := s.AcquireBindingLock(ctx, bindingID); err != nil {
 			return fmt.Errorf("expire: acquire binding lock %s: %w", bindingID, err)
+		}
+		if err := s.LockBindingForDeactivation(ctx, bindingID); err != nil {
+			return fmt.Errorf("expire: lock binding %s: %w", bindingID, err)
 		}
 		bs, ok, err := s.LoadBinding(ctx, bindingID)
 		if err != nil {
@@ -797,6 +812,12 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 		if !revoked {
 			return nil
 		}
+		if err := emitSubjectChangeOfExpiry(ctx, s, bs.Subjects); err != nil {
+			return fmt.Errorf("expire: subject change %s: %w", bindingID, err)
+		}
+		if err := emitRevokedAuditOfExpiry(ctx, s, bs); err != nil {
+			return fmt.Errorf("expire: revoked audit %s: %w", bindingID, err)
+		}
 		members, err := s.CurrentMembers(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("expire: current members %s: %w", bindingID, err)
@@ -807,8 +828,8 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 				// expiry EVERY member of THIS binding is revoked, so no member of this
 				// binding survives (within-binding survivingClaims empty). But ANOTHER
 				// active binding of the same subject may hold the identical tuple — the
-				// flush's cross-binding subtraction keeps it alive (this binding's ledger
-				// rows are still forgotten inline, binding-local).
+				// факт оставляет свёртка журнала (kaname#919): строки реестра этой
+				// выдачи забыты здесь же, и она уже REVOKED.
 				if err := r.revokeMemberTuples(ctx, s, bs, m, nil, col); err != nil {
 					return fmt.Errorf("expire: %w", err)
 				}
@@ -817,10 +838,66 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 				return fmt.Errorf("expire: delete member %s/%s:%s: %w", m.RuleFP, m.ObjectType, m.ObjectID, err)
 			}
 		}
-		// Flush the deferred deletes with the cross-binding surviving-claims subtraction.
+		// Отложенные строки снятия; факт другой действующей выдачи оставит свёртка.
 		return r.flushDeletes(ctx, s, col)
 	}); err != nil {
 		return err
+	}
+	return nil
+}
+
+// emitSubjectChangeOfExpiry — строка журнала смены субъекта на КАЖДОГО субъекта
+// снятой сроком выдачи, той же формы, что пишут отзыв и удаление (`revoke.go`,
+// `delete.go`): вид события `binding_revoke`, `op` `binding_delete`. По строке край
+// сбрасывает кэш решений субъекта и закрывает его открытые потоки; без неё снятие
+// сроком край узнавал бы лишь по бюджету потока (kaname#920). Перечень субъектов
+// уже несёт откат на легаси-одиночку (BindingScope.Subjects), поэтому выдача,
+// записанная до многосубъектной модели, строки не теряет.
+func emitSubjectChangeOfExpiry(ctx context.Context, s ReconcileStore, subjects []domain.Subject) error {
+	for _, sub := range subjects {
+		if err := s.EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
+			SubjectID:   string(sub.ID),
+			SubjectType: string(sub.Type),
+			EventType:   "binding_revoke",
+			Op:          "binding_delete",
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// expiryAuditActor — действующее лицо аудита снятия сроком. Человека у истечения
+// нет; имя называет путь, а не подставляет выдавшего, — по следу видно, что выдачу
+// сняло истечение, а не тот, кто её выдал.
+const expiryAuditActor = "system:expiry"
+
+// emitRevokedAuditOfExpiry — строка аудита «отозвано» на КАЖДОГО субъекта снятой
+// сроком выдачи, той же формы, что пишут отзыв и удаление (revokedAuditFor в
+// access_binding): вид `iam.access_binding.revoked`, область, роль, выдача, область
+// арендатора — аккаунт для выдачи на аккаунте, пусто для прочих (auditTenantAccountID
+// там же). Одинаковость формы держит не перечень, а проба: строка истечения
+// сверяется со строкой настоящего отзыва в той же базе
+// (reconcile_expiry_revoked_audit_integration_test.go).
+func emitRevokedAuditOfExpiry(ctx context.Context, s ReconcileStore, bs BindingScope) error {
+	tenant := ""
+	if bs.Scope.Type == "account" {
+		tenant = bs.Scope.ID
+	}
+	for _, sub := range bs.Subjects {
+		if err := s.EmitAuditEvent(ctx, abrepo.AuditEvent{
+			EventType:       abrepo.AuditEventTypeRevoked,
+			Actor:           expiryAuditActor,
+			SubjectType:     string(sub.Type),
+			SubjectID:       string(sub.ID),
+			ResourceType:    bs.Scope.Type,
+			ResourceID:      bs.Scope.ID,
+			RoleID:          bs.RoleID,
+			BindingID:       string(bs.BindingID),
+			TenantAccountID: tenant,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -869,7 +946,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 //
 // It keeps everything the full path does per object: the ACTIVE/REJECTED verdict, the
 // containment audit, the eager-revoke of a member that fell out, and the deferred
-// cross-binding delete flush. Взаимное исключение с параллельным проходом той же
+// delete flush. Взаимное исключение с параллельным проходом той же
 // выдачи тоже сохраняется — тем же EXCLUSIVE advisory-замком, — но берёт его
 // ВЫЗЫВАЮЩИЙ, сразу на весь веер и до первой записи прохода (см. тело функции). Only the SIZE of
 // the diffed set changes: O(1) in the scope instead of O(scope). Because the critical
@@ -1386,12 +1463,10 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 //
 // The within-binding survivingClaims handles same-binding shared tuples; the FGA
 // tuple-delete itself is DEFERRED into the collector (deferDelete) and emitted at the end
-// of the pass by flushDeletes, which additionally subtracts the CROSS-binding still-claimed
-// set (another active binding of the same subject holds the identical tuple — the
-// non-refcounted rights state must keep it alive until the LAST binding releases it).
-// The ledger ForgetEmittedTuples stays inline here because it
-// is binding-local bookkeeping (this binding no longer claims the tuple); only the global
-// FGA delete is cross-binding-sensitive and therefore deferred.
+// of the pass by flushDeletes. Факт, который держит другая действующая выдача того же
+// субъекта, оставляет свёртка строки снятия под замком строки факта (kaname#919) — для
+// этого своя строка ведомости ОБЯЗАНА уйти до строки снятия, иначе выдача держит факт
+// сама: ForgetEmittedTuples стоит здесь, inline, раньше любого flushDeletes.
 func (r *Reconciler) revokeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember, survivingClaims map[domain.MembershipTuple]struct{}, col *syncFGACollector) error {
 	tuples, ok := r.revokeTuplesFor(ctx, s, bs, m)
 	if !ok || len(tuples) == 0 {
@@ -1408,7 +1483,7 @@ func (r *Reconciler) revokeMemberTuples(ctx context.Context, s ReconcileStore, b
 	if len(revoke) == 0 {
 		return nil // every tuple is still claimed within this binding — nothing to revoke.
 	}
-	// Defer the FGA tuple-delete to the end-of-pass flush (cross-binding subtraction).
+	// Строка снятия — в конец прохода (вычитание записанного тем же проходом).
 	col.deferDelete(bs.BindingID, revoke)
 	// Forget this binding's ledger rows inline (binding-local — this binding no longer
 	// claims the tuple even if a sibling binding does; the sibling keeps its OWN row).

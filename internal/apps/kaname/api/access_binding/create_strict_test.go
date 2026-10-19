@@ -234,10 +234,6 @@ func (r *strictDupABReader) SelectEmittedTuplesBySource(context.Context, domain.
 	return nil, nil
 }
 
-// No sibling binding claims anything in this fixture (strict-create duplicate path).
-func (r *strictDupABReader) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []repoab.RelationTuple) ([]repoab.RelationTuple, error) {
-	return nil, nil
-}
 func (r *strictDupABReader) ListByRole(context.Context, domain.RoleID, repoab.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
@@ -278,6 +274,9 @@ func (w *strictDupABWriter) Delete(ctx context.Context, id domain.AccessBindingI
 }
 func (w *strictDupABWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID) error {
 	return stderrors.New("not stubbed")
+}
+func (w *strictDupABWriter) GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return domain.AccessBinding{}, stderrors.New("not stubbed")
 }
 func (w *strictDupABWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, _ domain.UserID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, stderrors.New("not stubbed")

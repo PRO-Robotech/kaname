@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
@@ -53,7 +54,7 @@ type fakeStore struct {
 	audits        []string                 // objectID audited
 	ledger        []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
 	locks         int                      // AcquireBindingLock (EXCLUSIVE) call count
-	unlockedLoads int                      // выдач, прочитанных без advisory-блокировки (форвард)
+	keyShareLoads int                      // выдач, прочитанных без advisory-блокировки (форвард)
 	batchLoads    int                      // ОБРАЩЕНИЙ пакетного чтения (не выдач) — веер за фикс. число обращений
 
 	// Producer-cost counters. An object-triggered pass must recompute ONLY the changed
@@ -148,12 +149,12 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 	}, true, nil
 }
 
-// LoadBindingUnlocked mirrors LoadBinding but records that the forward path took NO
-// advisory lock: the test asserts f.locks stays 0 across a forward pass (the throughput-
-// critical property). unlockedLoads counts the no-lock loads so a forward unit test can
-// prove it read the binding without AcquireBindingLock.
-func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
-	f.unlockedLoads++
+// LoadBindingForForward — то же, что LoadBinding, но отмечает, что форвард НЕ брал
+// advisory-замка: проба утверждает, что f.locks за проход форварда остаётся 0 (свойство
+// пропускной способности). keyShareLoads считает чтения форварда, чтобы проба форварда
+// доказала, что прочитала выдачу без AcquireBindingLock.
+func (f *fakeStore) LoadBindingForForward(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
+	f.keyShareLoads++
 	return BindingScope{
 		BindingID:      id,
 		Scope:          f.scope,
@@ -165,15 +166,15 @@ func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBin
 	}, true, nil
 }
 
-// LoadBindingsUnlocked — пакетное чтение фактов выдач (то же, что LoadBindingUnlocked,
+// LoadBindingsForForward — пакетное чтение фактов выдач (то же, что LoadBindingForForward,
 // но для набора). batchLoads считает ОБРАЩЕНИЯ (не выдачи), поэтому проба может утверждать,
-// что число обращений не растёт с размером веера; unlockedLoads по-прежнему растёт на
+// что число обращений не растёт с размером веера; keyShareLoads по-прежнему растёт на
 // каждую прочитанную выдачу, чтобы «прочитал ли вообще» осталось наблюдаемым.
-func (f *fakeStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error) {
+func (f *fakeStore) LoadBindingsForForward(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error) {
 	f.batchLoads++
 	out := make(map[domain.AccessBindingID]BindingScope, len(ids))
 	for _, id := range ids {
-		f.unlockedLoads++
+		f.keyShareLoads++
 		out[id] = BindingScope{
 			BindingID:      id,
 			Scope:          f.scope,
@@ -360,13 +361,6 @@ func (f *fakeStore) LedgerTuples(ctx context.Context, id domain.AccessBindingID)
 	return out, nil
 }
 
-// TuplesStillClaimedByOtherBindings — the fake models a SINGLE binding (no cross-
-// binding siblings), so no tuple is ever still-claimed by another binding → empty set.
-// The cross-binding suppression is exercised by the pg integration test
-// (reconcile_cross_binding_revoke_integration_test.go) with two real bindings.
-func (f *fakeStore) TuplesStillClaimedByOtherBindings(ctx context.Context, exclude domain.AccessBindingID, ts []domain.MembershipTuple) (map[domain.MembershipTuple]struct{}, error) {
-	return map[domain.MembershipTuple]struct{}{}, nil
-}
 func (f *fakeStore) EmitTupleWrite(ctx context.Context, ts []domain.MembershipTuple) error {
 	f.note()
 	f.writes = append(f.writes, ts)
@@ -424,6 +418,15 @@ func (f *fakeStore) EmitContainmentAudit(ctx context.Context, id domain.AccessBi
 }
 func (f *fakeStore) RevokeExpiredBinding(ctx context.Context, id domain.AccessBindingID) (bool, error) {
 	return false, nil
+}
+func (f *fakeStore) LockBindingForDeactivation(ctx context.Context, id domain.AccessBindingID) error {
+	return nil
+}
+func (f *fakeStore) EmitSubjectChangeEvent(ctx context.Context, evt abrepo.SubjectChangeEvent) error {
+	return nil
+}
+func (f *fakeStore) EmitAuditEvent(ctx context.Context, ev abrepo.AuditEvent) error {
+	return nil
 }
 
 // fakeRunner hands the reconciler the fake store within a "tx".
