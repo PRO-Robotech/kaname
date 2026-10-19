@@ -22,7 +22,7 @@ package publicreadmodule_test
 //     вложенного) пишет продуктовый писатель: строка, селекторы, проекция глаголов.
 //
 // «Когда» — путь ND-08 соседа: строка выдачи в `access_bindings` и
-// `access_binding_subjects`, затем полный проход `reconcile.Reconciler.ReconcileBinding`.
+// `access_binding_subjects` одним оператором, затем полный проход `reconcile.Reconciler.ReconcileBinding`.
 // Вход API выдачи цель `probemod.boxes` не принимает (`domain.ValidTargetType`,
 // п. 5 «Вне объёма», kaname#904) и в этих пробах не участвует.
 //
@@ -60,6 +60,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -139,7 +140,7 @@ func newP2(t *testing.T) *p2 {
 	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	src := catalog.Fixed{F: w.facts}
 	w.rec = reconcile.New(kanamepg.NewReconcileAdapter(pool, src), nil, src)
-	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops, src).
 		WithRelationStore(door, nil).
 		WithReconciler(w.rec)
 	get := accessbindingapp.NewGetAccessBindingUseCase(w.repo).WithRelationStore(door, nil)
@@ -242,7 +243,9 @@ func (w *p2) role(name string, rules domain.Rules) domain.RoleID {
 	if err != nil {
 		w.t.Fatalf("роль %s: %v", name, err)
 	}
-	sels := r.Rules.MaterializingSelectors()
+	// Глаголы каждого правила вычисляет каталог мира (kaname#878), как в
+	// продуктовом создании роли: селектор без них писатель отвергает.
+	sels := w.facts.GrantSelectors(r.Rules.MaterializingSelectors())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", name, err)
 	}
@@ -261,19 +264,20 @@ func (w *p2) role(name string, rules domain.Rules) domain.RoleID {
 
 // grantAnonOnB1 — строка «выдача ПЧ-м» с ролью role и разворачивание по её id;
 // отдаёт id выдачи.
+//
+// Строка выдачи и её набор субъектов ложатся ОДНИМ оператором
+// (`bindingset.With`): отложенная проверка `access_bindings_carry_a_subject`
+// (kaname#902) отвергает фиксацию, оставившую выдачу без набора, а две
+// вставки вне явной транзакции — две фиксации. Так пишет и продукт: набор —
+// той же транзакцией, что строка выдачи.
 func (w *p2) grantAnonOnB1(role domain.RoleID) domain.AccessBindingID {
 	w.t.Helper()
 	id := ids.NewID(domain.PrefixAccessBinding)
-	if _, err := w.pool.Exec(w.ctx, `
+	if _, err := w.pool.Exec(w.ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
-		VALUES ($1, 'system_class', 'anonymous', $2, 'project', $3, 'ACTIVE', $4::jsonb)`,
+		VALUES ($1, 'system_class', 'anonymous', $2, 'project', $3, 'ACTIVE', $4::jsonb)`),
 		id, string(role), w.prjA, `{"resources":[{"type":"`+pmBoxTarget+`","id":"`+pmB1+`"}]}`); err != nil {
-		w.t.Fatalf("строка выдачи: %v", err)
-	}
-	if _, err := w.pool.Exec(w.ctx, `
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-		VALUES ($1, 'system_class', 'anonymous')`, id); err != nil {
-		w.t.Fatalf("субъект выдачи: %v", err)
+		w.t.Fatalf("строка выдачи и её набор субъектов: %v", err)
 	}
 	if err := w.rec.ReconcileBinding(w.ctx, domain.AccessBindingID(id)); err != nil {
 		w.t.Fatalf("разворачивание выдачи %s завершилось ошибкой: %v", id, err)

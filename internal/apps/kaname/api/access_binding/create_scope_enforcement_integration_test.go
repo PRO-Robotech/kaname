@@ -40,6 +40,7 @@ import (
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func bindingCount(t *testing.T, ctx context.Context, repo *kanamepg.Repository, roleID domain.RoleID, resourceType, resourceID string) int {
@@ -67,7 +68,7 @@ func TestCreate_ScopeEnforcement_ListCreateParity(t *testing.T) {
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	ownerA := mustSeedUser(t, ctx, pool, "ce12a")
@@ -122,7 +123,7 @@ func TestCreate_ScopeEnforcement_ConcurrentMisScoped_BothRejected(t *testing.T) 
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	ownerA := mustSeedUser(t, ctx, pool, "ce12ba")
@@ -172,7 +173,7 @@ func TestCreate_ScopeEnforcement_AccountRoleOnCluster_FailedPrecondition(t *test
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	admin := mustSeedUser(t, ctx, pool, "ce13")
@@ -210,7 +211,7 @@ func TestCreate_RoleMissing_FailedPrecondition(t *testing.T) {
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	admin := mustSeedUser(t, ctx, pool, "cerm")

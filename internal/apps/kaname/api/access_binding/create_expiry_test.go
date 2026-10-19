@@ -33,6 +33,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 const (
@@ -49,7 +50,7 @@ func expiryRig(t *testing.T) (*Handler, *abFakeRepo, context.Context) {
 		domain.Permissions{"iam.access_bindings.get"})
 	repo.AddUser(expOwnerID, expAccountID)
 	opsRepo := newStrictFakeOpsRepo()
-	create := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
+	create := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(newRecordingFGA(), nil)
 	get := NewGetAccessBindingUseCase(repo).WithRelationStore(newRecordingFGA(), nil)
 	h := NewHandler(create, nil, get, nil, nil, nil, nil)
 	ctx := operations.WithPrincipal(context.Background(),

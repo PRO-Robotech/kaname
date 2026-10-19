@@ -14,7 +14,7 @@ package domain
 //
 // Пообъектный тип (`vpc_network`, `iam_user`) якорем не бывает НИКОГДА: он
 // называет ОБЪЕКТ ПОД якорем, и для него существует своя ось — `target` (F8),
-// чей вокабуляр судит `ValidTargetType` по ленте материализации. Принимать его
+// чей вокабуляр судит `ValidTargetType` по живому каталогу. Принимать его
 // здесь значит держать вторую, разошедшуюся копию вокабуляра: она ничего не
 // сужает, потому что производителя у такого входа нет, и молча расширит проверку
 // в тот день, когда вызывающий появится.
@@ -28,6 +28,22 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+// snakeResource re-spells a camelCase dotted resource segment in snake_case
+// ("routeTable" → "route_table"). It is how the near-miss twins of the live
+// vocabulary are produced mechanically.
+func snakeResource(resource string) string {
+	var b strings.Builder
+	for _, r := range resource {
+		if r >= 'A' && r <= 'Z' {
+			b.WriteByte('_')
+			b.WriteRune(r - 'A' + 'a')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
 
 // bareModelSpelling — голое написание модели для точечного имени каталога
 // («vpc.routeTable» → «vpc_route_table»). Так механически производятся якорные

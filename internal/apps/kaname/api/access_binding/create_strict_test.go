@@ -44,6 +44,7 @@ import (
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists.
@@ -56,7 +57,7 @@ func TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists(t *testing.T
 
 	repo := newStrictDupFakeRepo(ownerUserID, accountID)
 	opsRepo := newStrictFakeOpsRepo()
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source())
 
 	ctx := operations.WithPrincipal(context.Background(), operations.Principal{
 		Type: "user",
@@ -261,6 +262,10 @@ func (r *strictDupABReader) ListSubjectsForBindings(context.Context, []domain.Ac
 }
 
 type strictDupABWriter struct{}
+
+func (w *strictDupABWriter) LockLiveTargetTypes(_ context.Context, types []string) ([]string, error) {
+	return fixtureLiveTargetTypes(types), nil
+}
 
 func (w *strictDupABWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	// Эмулирует Insert после migration 0003: дубль активного 5-tuple → ErrAlreadyExists.

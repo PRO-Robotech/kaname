@@ -10,7 +10,9 @@ package domain
 //   - AllInScope — ALL objects under the anchor, including future ones (the
 //     broadest grant, reachable ONLY via explicit opt-in — never a default);
 //   - Resources  — a closed set of per-object ResourceRef{type,id} (no name;
-//     `type` dotted from the closed type-registry, e.g. `compute.instance`).
+//     `type` — точечное имя типа, живого в каталоге платформы, e.g.
+//     `compute.instance`; судит его ЖИВОЙ каталог, а не перечень в коде —
+//     `ValidTargetType`).
 //
 // The two arms are mutually exclusive. The zero value (both empty) is treated as
 // the whole-anchor grant for legacy / internal rows that predate F8 (matching the
@@ -27,7 +29,7 @@ import (
 	"go.uber.org/multierr"
 )
 
-// ResourceRef is the closed-table {type,id} per-object pointer (redesign-2026 F8 /
+// ResourceRef is the {type,id} per-object pointer (redesign-2026 F8 /
 // B1). Unlike a generic Referrer it carries NO name — the iam target is the strict
 // {type,id} form. `Type` is the dotted `<module>.<resource>` key.
 type ResourceRef struct {
@@ -60,8 +62,13 @@ func (t AccessTarget) IsEmpty() bool {
 }
 
 // Validate checks the target well-formedness: the two arms are mutually exclusive,
-// and every per-object ResourceRef carries a non-empty id and a type drawn from the
-// closed dotted type-registry. AllInScope / empty is always well-formed.
+// and every per-object ResourceRef carries a non-empty type and id. AllInScope /
+// empty is always well-formed.
+//
+// Членство типа в каталоге здесь НЕ судится: домен чист и каталога не видит.
+// Годность типа — вопрос живого каталога на момент записи (`ValidTargetType`,
+// `FirstNonLiveType`); его задаёт use-case создания выдачи синхронно по снимку
+// и повторно в транзакции записи (kaname#904).
 func (t AccessTarget) Validate() error {
 	if t.AllInScope && len(t.Resources) > 0 {
 		return fmt.Errorf("Illegal argument target (allInScope and resources are mutually exclusive)")
@@ -71,9 +78,9 @@ func (t AccessTarget) Validate() error {
 	}
 	var errs error
 	for i, r := range t.Resources {
-		if !ValidTargetType(r.Type) {
+		if r.Type == "" {
 			errs = multierr.Append(errs, fmt.Errorf(
-				"Illegal argument target.resources[%d].type %q", i, r.Type))
+				"Illegal argument target.resources[%d].type (empty)", i))
 		}
 		if r.ID == "" {
 			errs = multierr.Append(errs, fmt.Errorf(
@@ -175,27 +182,71 @@ func (rs Rules) CoversType(dottedType string) bool {
 	return false
 }
 
+// TargetTypeCatalog — ПОРТ живого каталога типов, каким его видит проверка цели
+// выдачи: есть ли у платформы ЖИВАЯ строка каталога с таким точечным именем.
+// Объявлен здесь, у потребителя; реализация — `catalog.Facts` (снимок живых
+// строк). Порт узкий намеренно: цели нужен ровно один факт — есть ли строка.
+type TargetTypeCatalog interface {
+	// FGAObjectType — имя типа модели для точечного имени каталога; ok=false у
+	// ресурса, чья строка снята либо которого в каталоге нет вовсе.
+	FGAObjectType(dotted string) (string, bool)
+}
+
 // ValidTargetType reports whether a dotted `<module>.<resource>` may be named as a
-// per-object AccessBinding target. The answer is membership in the materialization
-// feed (`AllMaterializableTypes`), because that is the only place a target type is
-// ever used: the reconciler calls AccessTarget.Contains with the object type taken
-// from the feed and keeps the object on an exact string match. The wildcard `*`,
-// malformed input and anything the feed does not emit are all refused.
+// per-object AccessBinding target: тогда и только тогда, когда у типа есть ЖИВАЯ
+// строка каталога платформы (Р1 приёмки
+// `access-target-names-live-catalog-types.md`, kaname#904).
 //
-// It is a lookup, not a derivation. The predicate used to re-spell the dotted form
-// into the bare scope-anchor vocabulary (`compute.instance` → `compute_instance`,
-// checked against a hand-written whitelist that has since been removed — the anchor
-// vocabulary is the three hierarchy tiers and is declared once, `scopeAnchorTiers`)
-// and claimed that kept the two in sync by
-// construction; it did not, because the two vocabularies answer different questions
-// and are spelled in different conventions. Deriving one name from another instead
-// of resolving it against the one table that owns it is the same mistake as reading
-// a region out of a zone's name — it is silently wrong for every
-// pair the two conventions disagree on, in BOTH directions: a type the feed emits is
-// refused, so the grant can only be written as the whole anchor and the check widens
-// what it appears to restrict; and a type the feed never emits is accepted, stored
-// and reconciled, matching nothing and telling the caller nothing.
-func ValidTargetType(dotted string) bool {
-	_, ok := materializableTypes[dotted]
+// Почему источник — каталог. Цель чтится в одном месте: реконсайлер сравнивает
+// её с типом объекта из зеркала точным совпадением строк
+// (`AccessTarget.Contains`), а зеркало принимает объект лишь живого типа
+// (`resource_mirror/emitter.go`, отказ «is not a live entry of the platform
+// resource catalog»). Множество типов, которые лента МОЖЕТ произвести, и есть
+// живой каталог — включая типы, заведённые манифестами модулей. Закрытый
+// перечень в коде (`materializableTypes`) отвечал на этот вопрос второй,
+// отдельно сопровождаемой копией и ошибался в обе стороны: тип модуля, живой в
+// каталоге, отвергался — и выдача на объект модуля выражалась только всей
+// областью, то есть ШИРЕ запрошенного; а тип, которого лента не производит,
+// принимался бы и не давал ничего.
+//
+// Подстановочный `*`, не-точечное имя, другое написание и снятая строка дают
+// false: ни у одного из них живой строки нет. Пустой каталог (nil) — false на
+// всё: отсутствие источника не превращается во всеразрешение.
+func ValidTargetType(cat TargetTypeCatalog, dotted string) bool {
+	if cat == nil {
+		return false
+	}
+	_, ok := cat.FGAObjectType(dotted)
 	return ok
+}
+
+// FirstNonLiveType — первый в порядке перечня тип пообъектной цели, у которого
+// нет живой строки каталога; ok=false, когда таких нет (в том числе у цели
+// «вся область», у которой типов нет вовсе). Отказ называет ПЕРВЫЙ неживой тип
+// (Р3): перечень отвергается целиком, и вызывающему нужен один исправимый адрес.
+func (t AccessTarget) FirstNonLiveType(cat TargetTypeCatalog) (string, bool) {
+	for _, r := range t.Resources {
+		if !ValidTargetType(cat, r.Type) {
+			return r.Type, true
+		}
+	}
+	return "", false
+}
+
+// DistinctTypes — различные типы пообъектной цели в порядке первого появления.
+// Им транзакция записи выдачи спрашивает каталог одним оператором.
+func (t AccessTarget) DistinctTypes() []string {
+	if len(t.Resources) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(t.Resources))
+	out := make([]string, 0, len(t.Resources))
+	for _, r := range t.Resources {
+		if _, dup := seen[r.Type]; dup {
+			continue
+		}
+		seen[r.Type] = struct{}{}
+		out = append(out, r.Type)
+	}
+	return out
 }

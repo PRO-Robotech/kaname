@@ -100,6 +100,11 @@ func TestSystemClass_CE01_ThreeFormsAgreeOnSpeakerClasses(t *testing.T) {
 			    SET verbs_by_type = jsonb_build_object($1::text, jsonb_build_array('get', 'update'))
 			  WHERE role_id = 'rol-sc'`,
 			catalogFormOf(t, "vpc_network"))
+		// Служебная учётка — СТРОКОЙ: класс выводится лишь существующей учётке
+		// (kaname#909), и говорящий без строки ниже отвечал бы «нет» по другой
+		// причине, чем та, которую проба судит.
+		exec(t, ctx, tx,
+			`INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ('sva-sc', 'acc-1', 'sc')`)
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.groups (id, account_id, name) VALUES ('grp-sc', 'acc-1', 'grp-sc')`)
 		exec(t, ctx, tx,

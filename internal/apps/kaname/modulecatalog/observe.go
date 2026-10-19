@@ -57,6 +57,13 @@ const (
 	ApplyOutcomeApplied = "applied"
 	// ApplyOutcomeFailed — применение отвергнуто; каталог остался прежним.
 	ApplyOutcomeFailed = "failed"
+	// ApplyOutcomeStaleRevision — объявленная редакция младше применённой:
+	// каталог модуля не тронут (kaname#865). На пути старта — пропуск, на пути
+	// глагола — отказ; метка одна, потому что предмет один.
+	ApplyOutcomeStaleRevision = "stale_revision"
+	// ApplyOutcomeRevisionConflict — номер равен применённому, содержимое
+	// иное: каталог модуля не тронут (kaname#865).
+	ApplyOutcomeRevisionConflict = "revision_conflict"
 )
 
 // Виды снятой строки каталога. Набор ЗАКРЫТ.
@@ -113,6 +120,14 @@ func (a *Applier) observe(rep Report, err error) {
 	}
 	if err != nil {
 		a.obs.IncCatalogApply(ApplyOutcomeFailed)
+		return
+	}
+	switch rep.Revision.Outcome {
+	case RevisionStale:
+		a.obs.IncCatalogApply(ApplyOutcomeStaleRevision)
+		return
+	case RevisionConflict:
+		a.obs.IncCatalogApply(ApplyOutcomeRevisionConflict)
 		return
 	}
 	a.obs.IncCatalogApply(ApplyOutcomeApplied)

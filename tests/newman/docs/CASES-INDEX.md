@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 876
+Всего кейсов: 885
 
 ## Перепись по модулям
 
@@ -39,7 +39,7 @@
 | `cases/docker-lane-credential-kind.py` | 2 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
-| `cases/iam-access-binding-redesign.py` | 17 |
+| `cases/iam-access-binding-redesign.py` | 19 |
 | `cases/iam-account-redesign.py` | 9 |
 | `cases/iam-account.py` | 58 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
@@ -61,20 +61,20 @@
 | `cases/iam-role.py` | 44 |
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
-| `cases/iam-system-class-subjects.py` | 20 |
+| `cases/iam-system-class-subjects.py` | 21 |
 | `cases/iam-system-grant-visibility.py` | 1 |
 | `cases/iam-token-facade-conformance.py` | 4 |
 | `cases/iam-user.py` | 47 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-authorization-code.py` | 14 |
-| `cases/kaname-login-lane.py` | 23 |
+| `cases/kaname-login-lane.py` | 24 |
 | `cases/kaname-recovery-lane.py` | 20 |
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 4 |
 | `cases/kaname-access-keys.py` | 53 |
 | `cases/kaname-cluster-admins.py` | 17 |
-| `cases/kaname-second-factor.py` | 18 |
+| `cases/kaname-second-factor.py` | 23 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
@@ -423,7 +423,7 @@
 - `IAM-AB-REV-01-BY-ACCOUNT-INCLUDE-REVOKED-OK`
 - `IAM-AB-REV-02-BY-ROLE-INCLUDE-REVOKED-OK`
 
-## `cases/iam-access-binding-redesign.py` — 17 кейсов
+## `cases/iam-access-binding-redesign.py` — 19 кейсов
 
 > Case-set для AccessBindingService — IAM-1 REDESIGN (authz-core: scope+target+revoke).
 
@@ -431,6 +431,8 @@
 - `IAM-ACB-RD-CR-TARGET-RESOURCES-OK`
 - `IAM-ACB-RD-CR-NO-TARGET-NEG`
 - `IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG`
+- `IAM-ACB-RD-CR-TARGET-LIVE-CATALOG-OK`
+- `IAM-ACB-RD-CR-TARGET-MISSPELLED-TYPE-NEG`
 - `IAM-ACB-RD-CR-SCOPETYPE-REQUIRED-NEG`
 - `IAM-ACB-RD-UP-SCOPE-IMMUTABLE-NEG`
 - `IAM-ACB-RD-CR-ROLECOVERSTYPE-NEG`
@@ -835,7 +837,7 @@
 - `IAM-ACB-LSP-VAL`
 - `IAM-ACB-LSP-PAGE-BEFORE-IDENTITY`
 
-## `cases/iam-system-class-subjects.py` — 20 кейсов
+## `cases/iam-system-class-subjects.py` — 21 кейсов
 
 > Case-set: «аноним» и «вошедший» — системный класс субъекта привязки прав.
 
@@ -849,6 +851,7 @@
 - `SC08-CLASS-NOT-GROUP-MEMBER`
 - `SC09-CLASS-NOT-CLUSTER-ADMIN`
 - `SC14-AUTHENTICATED-NOT-A-SPEAKER`
+- `SC15-WILDCARD-NOT-A-SPEAKER`
 - `SC17-LIST-BY-CLASS`
 - `SC40-SYSTEM-GRANT-MOVED`
 - `SC19-AUTHENTICATED-ALL-IN-SCOPE-REFUSED`
@@ -995,7 +998,7 @@
 - `IAM-AUTHCODE-NEG-REFRESH-REPLAY-REVOKES-FAMILY`
 - `IAM-AUTHCODE-NEG-CODE-EXPIRED`
 
-## `cases/kaname-login-lane.py` — 23 кейсов
+## `cases/kaname-login-lane.py` — 24 кейсов
 
 > Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
 > формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
@@ -1032,6 +1035,7 @@
 - `IAM-LOGINLANE-OK-STORED-FORMAT-A`
 - `IAM-LOGINLANE-OK-STORED-FORMAT-B`
 - `IAM-LOGINLANE-OK-FP12-KEY-PERSON-ENROLLS-PASSWORD`
+- `IAM-LOGINLANE-CONF-BACKUP-CODE-LOGIN`
 
 ## `cases/kaname-recovery-lane.py` — 20 кейсов
 
@@ -1221,7 +1225,7 @@
 - `IAM-EMAILCHANGE-NEG-STALE-SESSION-STEP-UP`
 - `IAM-EMAILCHANGE-NEG-LEVEL-TWO-HOLDER-STEP-UP`
 
-## `cases/kaname-second-factor.py` — 18 кейсов
+## `cases/kaname-second-factor.py` — 23 кейсов
 
 > Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
 > формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
@@ -1258,6 +1262,11 @@
 - `IAM-2FA-NEG-FIRST-FACTOR-SUCCESS-DOES-NOT-RESET`
 - `IAM-2FA-NEG-CODE-GUESSING-RATE`
 - `IAM-2FA-OK-REFUSALS-ARE-NOT-ATTEMPTS`
+- `IAM-2FA-CONF-BACKUP-CODE-SET-READ-AND-CONFIRM`
+- `IAM-2FA-CONF-BACKUP-CODE-SET-STEP-UP`
+- `IAM-2FA-CONF-BACKUP-CODE-SET-REGENERATE`
+- `IAM-2FA-CONF-BACKUP-CODE-SET-REMOVE`
+- `IAM-2FA-CONF-BACKUP-CODE-SET-ONE-TYPE-SWEEP`
 - `IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED`
 
 ## `cases/kaname-cluster-admins.py` — 17 кейсов

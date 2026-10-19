@@ -239,9 +239,10 @@ def _named_secret(key_hint: str | None) -> bool:
 #
 # ИМЯ КОДА — СЛОВО, А НЕ ПОДСТРОКА: последнее слово имени — `code` либо `codes`
 # (camelCase, `_`, `-`), за ним разве что цифры. Подстрока резала бы `encode`,
-# `opcode`, `unicode`, а `backupCodesRemaining` — остаток набора, число, которое
-# утверждает набор, — осталась бы названной кодом, хотя последнее слово в нём
-# другое.
+# `opcode`, `unicode`, а `backupCodeSet` — сводка набора, числа и моменты, которые
+# утверждает набор, — осталась бы названной кодом, хотя последнее слово в ней
+# другое (kaname#297: кодов в ней нет никогда, имени `backupCodes` — один класс,
+# коды).
 #
 # ПОД ИМЕНЕМ КОДА СТОИТ И БЕЗОБИДНОЕ: код отказа числом (`{"code": 16}` отказа
 # службы, `response.code` отчёта newman), код состояния строкой, которую набор
@@ -2334,14 +2335,19 @@ def _second_factor_report(v: dict[str, object]) -> dict:
                    {"secret": secret, "otpauthUri": otpauth, "expiresAt": "2026-09-26T10:00:00Z"}),
                 ex("second-factor/confirm", json.dumps({"code": otp, "csrfToken": ""}),
                    {"backupCodes": backup, "session": {"assuranceLevel": "2"},
+                    "backupCodeSet": {"remaining": 10, "total": 10, "issuedAt": "2026-09-26T10:00:00Z"},
                     "assurance": {"level": "2", "level2Reachable": True, "missingForLevel2": []}}),
                 ex("login", json.dumps({"email": "login-lane-2fa@stand.invalid",
                                         "secondFactor": {"method": "totp", "code": otp}}),
                    {"session": {"assuranceLevel": "2"}}),
                 ex("step-up", json.dumps({"method": "lookup_secret", "code": backup[0]}),
-                   {"session": {"assuranceLevel": "2"}, "backupCodesRemaining": 9}),
+                   {"session": {"assuranceLevel": "2"},
+                    "backupCodeSet": {"remaining": 9, "total": 10, "issuedAt": "2026-09-26T10:00:00Z",
+                                      "lastUsedAt": "2026-09-26T10:01:00Z"}}),
                 ex("second-factor", None,
-                   {"totp": {"enrolled": True}, "backupCodes": {"remaining": 10, "total": 10}}),
+                   {"totp": {"enrolled": True},
+                    "backupCodeSet": {"remaining": 9, "total": 10, "issuedAt": "2026-09-26T10:00:00Z",
+                                      "lastUsedAt": "2026-09-26T10:01:00Z"}}),
                 ex("login-refused", json.dumps({"secondFactor": {"method": "totp", "code": "404"}}),
                    {"code": 16, "message": "authentication failed", "details": []}, code=401),
             ],
@@ -2358,8 +2364,9 @@ def _self_test_second_factor_lane() -> None:
     тела ответа, `code` тела запроса, окружение), код по времени (`code` и
     `secondFactor.code` тела запроса, окружение). Инъекция: код 0 и значения нет
     нигде в выложенном. Законный близнец стоит на ТОМ ЖЕ месте: код отказа числом
-    под `code`, код состояния строкой под `code`, сводка набора `backupCodes`
-    числами, остаток `backupCodesRemaining`, ступень времени в окружении,
+    под `code`, код состояния строкой под `code`, сводка набора `backupCodeSet`
+    числами и моментами (ответы `confirm`, повышения и чтения состояния),
+    ступень времени в окружении,
     безобидный текст упавшего утверждения, алфавит base32, разорванный в
     скрипте, и системный код ошибки в её тексте — всё выжило.
     """
@@ -2415,10 +2422,15 @@ def _self_test_second_factor_lane() -> None:
         _c("близнец под `code`: код отказа числом выжил, текст отказа тоже",
            len(bodies) == 6 and bodies[5] == {"code": 16, "message": "authentication failed",
                                              "details": []}, f"{bodies[5:] if bodies else bodies}")
-        _c("близнец под `backupCodes`: сводка набора числами выжила",
-           len(bodies) == 6 and bodies[4].get("backupCodes") == {"remaining": 10, "total": 10})
-        _c("близнец рядом с именем кода: остаток `backupCodesRemaining` выжил",
-           len(bodies) == 6 and bodies[3].get("backupCodesRemaining") == 9)
+        spent = {"remaining": 9, "total": 10, "issuedAt": "2026-09-26T10:00:00Z",
+                 "lastUsedAt": "2026-09-26T10:01:00Z"}
+        _c("близнец под `backupCodeSet`: сводка набора числами и моментами выжила (чтение состояния)",
+           len(bodies) == 6 and bodies[4].get("backupCodeSet") == spent, f"{bodies[4:5]}")
+        _c("близнец под `backupCodeSet`: сводка после траты выжила (повышение)",
+           len(bodies) == 6 and bodies[3].get("backupCodeSet") == spent, f"{bodies[3:4]}")
+        _c("близнец рядом с массивом кодов: сводка нового набора выжила (confirm)",
+           len(bodies) == 6 and bodies[1].get("backupCodeSet")
+           == {"remaining": 10, "total": 10, "issuedAt": "2026-09-26T10:00:00Z"}, f"{bodies[1:2]}")
         _c("имена членов тела выжили: `secret`, `backupCodes`, `otpauthUri`",
            len(bodies) == 6 and set(bodies[0]) == {"secret", "otpauthUri", "expiresAt"}
            and "backupCodes" in bodies[1] and bodies[0].get("expiresAt") == "2026-09-26T10:00:00Z")

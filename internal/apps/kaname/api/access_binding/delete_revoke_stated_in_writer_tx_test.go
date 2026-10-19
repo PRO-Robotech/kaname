@@ -54,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // indexOfTxOp returns the position of an exact writer-tx trace mark, or -1.
@@ -86,7 +87,7 @@ func TestDeleteAccessBinding_RevokeSetIsStatedBeforeTheWriterTxCommits(t *testin
 	ctx := newOwnerContext(ownerID)
 
 	// ── Grant ───────────────────────────────────────────────────────────────
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	binding := domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
