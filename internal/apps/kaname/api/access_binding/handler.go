@@ -139,8 +139,8 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequ
 	}
 	rid := req.GetScopeId()
 	// F8: target is REQUIRED (least-privilege). A missing/empty target → sync
-	// INVALID_ARGUMENT first statement; an unknown per-object type → sync
-	// INVALID_ARGUMENT (closed-table). Before any Operation is minted.
+	// INVALID_ARGUMENT first statement. Тип пообъектной цели судит живой каталог
+	// первым оператором use-case'а (kaname#904). Before any Operation is minted.
 	tgt, err := targetFromProto(req.GetTarget())
 	if err != nil {
 		return nil, err

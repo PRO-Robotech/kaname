@@ -38,6 +38,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // Well-formed 20-char crockford-base32 role ids (shared.ValidateResourceID in
@@ -113,7 +114,7 @@ func TestFGAOrphan_178_RevokeAfterRoleDowngrade_NoResidualTuple(t *testing.T) {
 	fga := newRecordingFGA()
 	ctx := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	opCreate, err := createUC.Execute(ctx, domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
@@ -180,7 +181,7 @@ func TestFGAOrphan_178_GranularPermissionRemoved_NoResidual(t *testing.T) {
 	fga := newRecordingFGA()
 	ownerCtx := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	opCreate, err := createUC.Execute(ownerCtx, domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),

@@ -325,7 +325,12 @@ func runServe(cfg config.Config) error {
 	// Отказ ФАТАЛЕН на каждом звене: собранная модель, не прошедшая допуск, —
 	// это данные оператора, расширяющие модель прав установки, и мягкий проход
 	// здесь означал бы контроль, который не откажет ни разу.
-	if cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
+	//
+	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
+	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
+	// (kaname#865, Д10) — второй композиции для этого не заводится.
+	composedReport, cErr := installComposedModel(logger, deliveredManifests)
+	if cErr != nil {
 		return cErr
 	}
 
@@ -349,8 +354,24 @@ func runServe(cfg config.Config) error {
 	// вызову конструктора в правой части, и цепочка увела бы применителя
 	// из-под его наблюдения — молча.
 	catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
-	if aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests); aErr != nil {
+	// Применённые ПОЛНОСТЬЮ — ровно они едут применителям ролей и посева ниже
+	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
+	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
+	// и страж ниже судят доставку целиком, как прежде.
+	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+	if aErr != nil {
 		return aErr
+	}
+
+	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
+	// паритета, ролей и посева (kaname#865, Д10). Модель процесса выше собрана
+	// из всей доставки; модуль, документ которого каталог пропустил либо
+	// отверг и который принёс в модель тип вне канона, останавливает пуск:
+	// модель доступа не собирается из документа, который каталог отверг. Довод
+	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
+	// `model_catalog_agreement_wiring_test.go`.
+	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
+		return mcErr
 	}
 
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
@@ -431,7 +452,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("роли модуля: %w", rrErr)
 	}
 	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
-	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, deliveredManifests); raErr != nil {
+	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
 		return raErr
 	}
 
@@ -447,17 +468,24 @@ func runServe(cfg config.Config) error {
 	// службы; своё доставкой не связано.
 	//
 	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
-	// доводом — в перечень `deliveredManifests` он не подмешивается: тот
-	// читают пятеро, а получатель у своего манифеста ровно один (Р3 приёмки
-	// MRW-1). Довод о месте, порядке и о том, почему отказ фатален, — шапка
-	// `module_seed_apply.go`; порядок и раздельность доводов держит гейт
+	// доводом — в перечень доставки он не подмешивается: доставку читают
+	// несколько потребителей старта, а получатель у своего манифеста ровно один
+	// (Р3 приёмки MRW-1). Довод о месте, порядке и о том, почему отказ фатален,
+	// — шапка `module_seed_apply.go`; порядок и раздельность доводов держит гейт
 	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+	//
+	// Доставленные едут сюда ПРИМЕНЁННЫМИ (kaname#865, Д3): модуль доставки,
+	// пропущенный как младшая редакция либо отвергнутый конфликтом, посева не
+	// получает. Свой манифест службы этим отбором НЕ сужается и подаётся всегда:
+	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
+	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
+	// разных входа.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
 		return omErr
 	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, deliveredManifests); seErr != nil {
+	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
 		return seErr
 	}
 

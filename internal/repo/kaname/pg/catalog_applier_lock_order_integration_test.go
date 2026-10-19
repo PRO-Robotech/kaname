@@ -44,15 +44,18 @@ package pg_test
 // дублёры. Дублёр пережил бы правку оригинала молча.
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
@@ -99,18 +102,26 @@ func TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter(t *test
 	if testing.Short() {
 		t.Skip("integration: требует Postgres")
 	}
+	raceApplierAgainstRoleWriter(t, "crosslock2012",
+		probeManifest(probeResource(crossEarlyName, "get"), probeResource(crossLateName, "get")),
+		probeManifest(probeResource(crossLateName, "get")))
+}
+
+// raceApplierAgainstRoleWriter — гонка НАСТОЯЩЕГО применителя, снимающего
+// раннее имя (`withdraw`), с НАСТОЯЩЕЙ правкой правил роли по обоим типам.
+// `install` заводит оба типа живыми. Утверждения — три из шапки
+// `TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter`.
+func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw *manifest.Manifest) (context.Context, *pgxpool.Pool) {
+	t.Helper()
 	ctx, pool := catalogPool(t)
 	applier := applierOver(t, pool)
 	repo := kanamepg.New(pool, nil)
 
 	// ── ВХОД: два живых типа одного модуля ────────────────────────────────────
-	_, err := applier.Apply(ctx, probeManifest(
-		probeResource(crossEarlyName, "get"),
-		probeResource(crossLateName, "get"),
-	))
+	_, err := applier.Apply(ctx, install)
 	require.NoError(t, err)
 
-	role := catalogRole(t, ctx, pool, "crosslock2012")
+	role := catalogRole(t, ctx, pool, suffix)
 	require.NoError(t,
 		upsertSelector(ctx, pool, role, "fp-crosslock", []string{crossLockEarly, crossLockLate}),
 		"ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: оба типа живы и селектор, называющий их, записывается")
@@ -141,7 +152,7 @@ func TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter(t *test
 	// ── СТОРОНА A: НАСТОЯЩИЙ применитель, снимающий РАННЕЕ имя ────────────────
 	ares := make(chan error, 1)
 	go func() {
-		_, aerr := applier.Apply(ctx, probeManifest(probeResource(crossLateName, "get")))
+		_, aerr := applier.Apply(ctx, withdraw)
 		ares <- aerr
 	}()
 
@@ -212,6 +223,7 @@ func TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter(t *test
 		crossLockEarly).Scan(&liveEarly))
 	require.Zerof(t, liveEarly, "строка %s не снята — применитель отчитался успехом впустую",
 		crossLockEarly)
+	return ctx, pool
 }
 
 // TestLoneCatalogApplyAgainstAnIdleCatalogPasses — ПАРНЫЙ ПОЛОЖИТЕЛЬНЫЙ:
