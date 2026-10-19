@@ -20,7 +20,8 @@ package access_binding_test
 // внутреннему ребру (`RegisterResource`), когда сценарий это говорит.
 //
 // Фикстура доставляется БЕЗ ключа `publicReadToChildren` (`publicreadfixture.WithoutKey`),
-// и модель процесса собирается из неё же, как на старте (`installComposedModel`):
+// и модель процесса собирается из неё же, как на старте (`installComposedModel`;
+// здесь — `TestMain`, `installATCModel`):
 // типа `probemod_box` сборка не знает, и вопрос `Check` о нём отвечает лишь
 // модель, собранная из доставленного манифеста. Допуск модели отвергает ключ
 // публичного чтения у модуля вне канона (подстановочная запись субъекта
@@ -39,7 +40,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -115,11 +115,9 @@ func newATCWorld(t *testing.T) *atcWorld {
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 	)
-	doc, err := publicreadfixture.Read(publicreadfixture.ProbemodFile)
-	require.NoError(t, err, "М2: фикстура probemod")
-	a.doc, err = publicreadfixture.WithoutKey(doc)
+	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")
-	installATCModel(t, a.manifest(false))
+	a.doc = doc
 	p.applyDelivered("М2: доставка probemod", a.manifest(false))
 
 	a.rolBoxGet = p.seedRole("atc_box_get", domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get"}}})
@@ -157,37 +155,44 @@ func (a *atcWorld) manifest(withoutItems bool) *manifest.Manifest {
 	return m
 }
 
-// atcModelOnce — модель процесса ставится один раз на бинарь: она глобальна для
-// двери решения, а собранная из канона и probemod — надмножество канона, и
-// прочих проб пакета не меняет.
-var (
-	atcModelOnce sync.Once
-	atcModelErr  error // исход установки — для КАЖДОГО мира, а не только первого
-)
+// atcProbemodDoc — фикстура probemod М2: без ключа `publicReadToChildren` (довод
+// — шапка файла). Тот же документ доставляет мир и из него же `TestMain`
+// собирает модель процесса (`installATCModel`).
+func atcProbemodDoc() ([]byte, error) {
+	doc, err := publicreadfixture.Read(publicreadfixture.ProbemodFile)
+	if err != nil {
+		return nil, err
+	}
+	return publicreadfixture.WithoutKey(doc)
+}
 
 // installATCModel — модель процесса из канона и доставленного probemod теми же
 // глаголами, что старт (`cmd/kaname/model_compose.go`, `installComposedModel`):
-// композиция → допуск → установка.
-func installATCModel(t *testing.T, m *manifest.Manifest) {
-	t.Helper()
-	atcModelOnce.Do(func() {
-		composed, _, cerr := modelcompose.Compose(authzmodel.DSL, []*manifest.Manifest{m})
-		if cerr != nil {
-			atcModelErr = fmt.Errorf("композиция модели: %w", cerr)
-			return
-		}
-		adm, aerr := authzmodel.Admit(composed)
-		if aerr != nil {
-			atcModelErr = fmt.Errorf("допуск модели: %w", aerr)
-			return
-		}
-		if len(adm.Findings) > 0 {
-			atcModelErr = fmt.Errorf("допуск модели отверг её (%s): %v", adm.Census(), adm.Findings)
-			return
-		}
-		atcModelErr = authzmodel.Install(composed)
-	})
-	require.NoError(t, atcModelErr, "М2: модель процесса из доставленного probemod")
+// композиция → допуск → установка. Зовёт её `TestMain` ДО первой пробы: модель
+// глобальна для двери решения и после первого чтения не заменяется
+// (`authzmodel.Install`). Собранная из канона и probemod, она — надмножество
+// канона, то есть ровно то, что служба видит на старте с доставленным модулем.
+func installATCModel() error {
+	doc, err := atcProbemodDoc()
+	if err != nil {
+		return fmt.Errorf("фикстура probemod: %w", err)
+	}
+	m, err := manifest.Load(doc)
+	if err != nil {
+		return fmt.Errorf("фикстура probemod: %w", err)
+	}
+	composed, _, err := modelcompose.Compose(authzmodel.DSL, []*manifest.Manifest{m})
+	if err != nil {
+		return fmt.Errorf("композиция модели: %w", err)
+	}
+	adm, err := authzmodel.Admit(composed)
+	if err != nil {
+		return fmt.Errorf("допуск модели: %w", err)
+	}
+	if len(adm.Findings) > 0 {
+		return fmt.Errorf("допуск модели отверг её (%s): %v", adm.Census(), adm.Findings)
+	}
+	return authzmodel.Install(composed)
 }
 
 // withdrawItemsInDB — М3 в базе, ручка остаётся на прежнем снимке.
