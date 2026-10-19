@@ -36,6 +36,22 @@ effective_approval:
   issued: false
   note: >-
     Возврат. Одобрения редакции 5 нет; одобрение редакции 4 на неё не переносится.
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_revision: 8f0cb36f0
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  note: >-
+    Блок дописан после вердикта, отдельным коммитом ветки 297 (запись заведена ad31941e6 без
+    учётки события): гейт .github/scripts/review-event-silence.py ищет событие о записи без
+    исполненного события по учётке, названной записью, и без неё не выносит вердикта.
+    Учётка взята из политики, не из события: `git show origin/main:docs/changes/policy.yaml`
+    → review_authority.acceptance-reviewer: [pointpu]. Вердикт RETURNED, effective_approval и
+    блок event не изменены; событие о редакции 5 не публиковалось — её заменила редакция 6
+    (04f85af1…, APPROVED кругом 6, событие исполнено).
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#297
