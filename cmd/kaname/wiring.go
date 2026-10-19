@@ -554,7 +554,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// AccessBindingService. (rsabReconciler is created above — shared with the
 	// Role.Update membership fan-out; the same instance drives Create + worker.)
-	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kanameRepo, opsRepo).
+	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kanameRepo, opsRepo, catalogSource).
 		WithRelationStore(relationStore, logger).
 		WithReconciler(rsabReconciler)
 	// abDelete — relationStore drives the grant-authority gate, and ONLY that. The
@@ -960,12 +960,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	moduleApplier := modulecatalog.NewVerbApplier(kanamepg.NewCatalogWriteRepo(pool))
 	modulePlanState := kanamepg.NewCatalogPlanRepo(pool)
 	moduleDelivery := newManifestDeliverySource(cfg.Manifests)
+	// Применённая пара редакции модуля (kaname#865) — над ТЕМ ЖЕ пулом, что
+	// писатель: `Get` показывает то, что записал оператор сравнения-и-записи.
+	moduleEditions := kanamepg.NewCatalogRepo(pool)
 	moduleHandler := moduleapp.NewHandler(
 		moduleapp.NewPlanUseCase(moduleDelivery, catalogRows, modulePlanState).
 			WithAdminChecker(relationStore),
 		moduleapp.NewApplyUseCase(moduleDelivery, moduleApplier, opsRepo, logger).
 			WithAdminChecker(relationStore),
-		moduleapp.NewGetUseCase(catalogRows).WithAdminChecker(relationStore),
+		moduleapp.NewGetUseCase(catalogRows, moduleEditions).WithAdminChecker(relationStore),
 		moduleapp.NewListUseCase(catalogRows).WithAdminChecker(relationStore),
 	)
 

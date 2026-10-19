@@ -91,6 +91,22 @@ type PlanState struct {
 	Resettled modulecatalog.Resettled
 	// Pruned — ОЦЕНКА вырезания третьей проекции, тремя величинами.
 	Pruned modulecatalog.Pruned
+	// Applied — применённая пара редакции модуля (kaname#865), прочитанная
+	// ТОЙ ЖЕ транзакцией, что отпечаток состояния; nil — модуль не применялся
+	// с редакцией. В отпечаток состояния пара не входит: её сравнение `Apply`
+	// повторяет сам, под замком, первым пишущим оператором — и подтверждение
+	// плана для этого не нужно.
+	Applied *modulecatalog.Edition
+}
+
+// AppliedEditionSource — применённая пара редакции ОДНОГО модуля для `Get`
+// (kaname#865). Отдельный порт, а не поле живых строк: `catalog.Rows` —
+// перечень строк каталога, и пара модуля в нём была бы второй формой одного
+// предмета.
+type AppliedEditionSource interface {
+	// ReadAppliedEdition — пара модуля; nil — модуль не применялся с
+	// редакцией либо строки модуля нет.
+	ReadAppliedEdition(ctx context.Context, module string) (*modulecatalog.Edition, error)
 }
 
 // PlanStateSource — производитель плановой стороны.

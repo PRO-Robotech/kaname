@@ -1247,6 +1247,57 @@ func (w *abWriter) EmitRelationDelete(ctx context.Context, tuples []access_bindi
 	return w.emitFGAOutbox(ctx, "fga.tuple.delete", tuples)
 }
 
+// LockLiveTargetTypes реализует access_binding.WriterIface (kaname#904, Р2).
+//
+// # Почему это не чтение-и-действие (запрет #10)
+//
+// Чтение стоит в ТОЙ ЖЕ транзакции, что вставка выдачи, и берёт замок на
+// прочитанные строки: снятие типа (применитель меняет `live`, входящий в
+// уникальные ограничения, — то есть обновляет КЛЮЧ и берёт `FOR UPDATE`) с этим
+// замком конфликтует и ждёт фиксации выдачи. В обратную сторону — запись ждёт
+// незафиксированного снятия, и при READ COMMITTED перепроверяет условие `live`
+// на зафиксированной версии строки: снятая строка в ответ не попадает.
+//
+// # Почему `FOR KEY SHARE`, а не внешний ключ
+//
+// Ключ на `(dotted, live)` запретил бы СНЯТИЕ типа, пока на него есть хоть одна
+// выдача, — а лежащая выдача обязана пережить снятие своего типа (Р5, приёмка
+// ATC-14). Условие приёма новой записи и постоянный инвариант — разные
+// утверждения; здесь нужно первое. Тот же замок и тот же порядок берёт писатель
+// селекторов роли (`roleWriter.ReplaceRuleSelectors`).
+//
+// # Порядок — `ORDER BY dotted`
+//
+// Применитель запирает строки модуля одним оператором в порядке `dotted`
+// (`catalogWriter.LockModuleResources`); здесь тот же порядок назначает та же
+// власть — база, — и взаимная блокировка на паре типов непредставима.
+func (w *abWriter) LockLiveTargetTypes(ctx context.Context, types []string) ([]string, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	rows, err := w.tx.Query(ctx, `
+		SELECT dotted FROM kaname.catalog_resource
+		 WHERE dotted = ANY($1) AND live
+		 ORDER BY dotted
+		   FOR KEY SHARE`, types)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	live := make([]string, 0, len(types))
+	for rows.Next() {
+		var dotted string
+		if err := rows.Scan(&dotted); err != nil {
+			return nil, mapErr(err, "", "")
+		}
+		live = append(live, dotted)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	return live, nil
+}
+
 // InsertEmittedTuples сохраняет ТОЧНЫЕ кортежи прав, выпущенные для выдачи, в
 // kaname.access_binding_emitted_tuples в текущей пишущей транзакции, вместе с
 // парным EmitRelationWrite (запрет #10). ON CONFLICT DO NOTHING делает повторный

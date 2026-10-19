@@ -73,7 +73,7 @@ func TestPM_StartChainAdmitsAModuleContainerWithTheKey(t *testing.T) {
 		return
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := installComposedModel(logger, pmStartManifests(t, pmStartFixture(t, "", ""))); err != nil {
+	if _, err := installComposedModel(logger, pmStartManifests(t, pmStartFixture(t, "", ""))); err != nil {
 		t.Fatalf("PM-01: модуль с типом вне канона и ключом обязан стартовать, отказ: %v", err)
 	}
 	plans, err := authzmodel.Shared()
@@ -99,7 +99,7 @@ func TestPM_StartChainRefusesWhatTheKeyDoesNotCover(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := installComposedModel(logger, pmStartManifests(t, pmStartFixture(t, items, c.repl)))
+			_, err := installComposedModel(logger, pmStartManifests(t, pmStartFixture(t, items, c.repl)))
 			if err == nil {
 				t.Fatalf("%s: пуск обязан быть отвергнут", c.name)
 			}

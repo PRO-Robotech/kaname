@@ -691,8 +691,9 @@ func (*AccessTarget_Resources) isAccessTarget_Target() {}
 func (*AccessTarget_AllInScope) isAccessTarget_Target() {}
 
 // AccessTargetResources is the per-object arm of AccessTarget: a closed set of
-// polymorphic ResourceRef{type,id} (graceful-dangling; `type` is dotted from the
-// closed type-registry, e.g. `compute.instance`).
+// polymorphic ResourceRef{type,id} (graceful-dangling; `type` is the dotted name
+// of a type live in the platform resource catalog, e.g. `compute.instance`; the
+// grantable types are published by `GET /iam/v1/permissionCatalog`).
 type AccessTargetResources struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Resources     []*ResourceRef         `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
