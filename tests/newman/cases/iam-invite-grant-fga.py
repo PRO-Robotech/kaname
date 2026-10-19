@@ -531,11 +531,10 @@ CASES.append(Case(
 # RC-2 invite-activation member edge — NOT BLACK-BOX-TESTABLE HERE; covered at
 # integration level (T-I3, internal/repo/kaname/pg/upsert_invite_grant_fga_integration_test.go,
 # GREEN). RC-2 co-commits `account:<A>#account@iam_user:<invitee>` ONLY on genuine
-# activation through the provision flow
-# (InternalUserService.UpsertFromIdentity). The black-box own-front harness has
-# no provision fixture, so the member tuple is never emitted in e2e — these
-# cases asserted an activation tuple the fixture never produces (RED for a
-# test-authoring reason, not a product bug; RC-2 is 150/0 GREEN at integration).
+# activation — the invitee confirming the invited address on the sign-in lane
+# (the provider provisioning verb that used to activate is retired, kaname#929).
+# These cases asserted an activation tuple this harness never produced (RED for
+# a test-authoring reason, not a product bug; RC-2 is GREEN at integration).
 # Intentionally not reproduced here.
 # ─────────────────────────────────────────────────────────────────────────────
 

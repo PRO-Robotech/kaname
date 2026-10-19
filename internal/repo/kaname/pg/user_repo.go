@@ -205,38 +205,10 @@ func (r *userReader) FindPendingByEmail(ctx context.Context, email domain.Email)
 	return out, nil
 }
 
-// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
-// все Account'ы. Использует partial index `users_active_external_id_idx`.
-func (r *userReader) FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
-	if externalID == "" {
-		return nil, nil
-	}
-	rows, err := r.tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM users WHERE invite_status = 'ACTIVE' AND external_id = $1 ORDER BY created_at ASC`, userCols),
-		string(externalID))
-	if err != nil {
-		return nil, mapErr(err, "", string(externalID))
-	}
-	defer rows.Close()
-	var out []domain.User
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			return nil, mapErr(err, "", "")
-		}
-		out = append(out, u)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, mapErr(err, "", "")
-	}
-	return out, nil
-}
-
 // FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 // Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at ASC.
-// В отличие от FindActiveByExternalID (ACTIVE-only), видит и BLOCKED-row'ы:
-// читатели (поиск субъекта, административное заведение личности) обязаны
-// отличать заблокированную личность от отсутствующей.
+// Видит и BLOCKED-row'ы: читатель (поиск субъекта) обязан отличать
+// заблокированную личность от отсутствующей.
 // Пустой externalID / пустой statuses → nil-срез.
 func (r *userReader) FindByExternalIDInStatuses(ctx context.Context, externalID domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error) {
 	if externalID == "" || len(statuses) == 0 {

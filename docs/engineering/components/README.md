@@ -45,7 +45,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 
 ### Authorization
 - [`19-authorize.md`](19-authorize.md) — публичный `AuthorizeService` (sync-проверка, `ExpandRelations`, снятые с контракта поля).
-- [`21-internal-iam.md`](21-internal-iam.md) — InternalIAMService (UpsertFromIdentity / PollSubjectChanges / RegisterResource).
+- [`21-internal-iam.md`](21-internal-iam.md) — InternalIAMService (LookupSubject / PollSubjectChanges / RegisterResource).
 
 ### Cross-cutting / infrastructure
 - [`29-relational-verdict.md`](29-relational-verdict.md) — вердикт реляционной формой + журнал намерений + родительский указатель.

@@ -241,11 +241,6 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "калибровка по чтению означает значение, положенное мимо этого процесса; «ни разу» обязано быть видно нулём, а не отсутствием",
 	},
-	Namespace + "_invite_activations_total": {
-		Cells: len(InviteActivationOutcomes),
-		Build: func(r *Registry) { r.NewInviteActivationRecorder() },
-		Why:   "путь первого входа, умерший целиком, выглядел бы здоровее всех",
-	},
 	Namespace + "_invite_mail_intents_total": {
 		Cells: len(InviteMailIntentOutcomes),
 		Build: func(r *Registry) { r.NewInviteMailIntentRecorder() },

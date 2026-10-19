@@ -60,8 +60,8 @@ from account-scoped lists (visible per-resource + cluster-wide Internal):
 cluster-global Role, project/cluster/cross-service AccessBinding,
 SAKey-Issue/Revoke and Condition-Create/Update/Delete (narrow-scope),
 and the Internal-only op-producers (GrantClusterAdmin / ForceLogout /
-UpsertFromIdentity, session-revocation). WriteTuples and OnRecoveryCompleted
-stood in this list and are gone: both RPCs were retired with zero callers (kacho#788,
-kaname#564).
+session-revocation). WriteTuples, OnRecoveryCompleted and the identity
+provisioning verb of the external provider stood in this list and are gone: all
+three RPCs were retired with zero callers (kacho#788, kaname#564, kaname#929).
 Resolving an owning account for these would require an extra read on the
 mutation path (rejected as not cheap).

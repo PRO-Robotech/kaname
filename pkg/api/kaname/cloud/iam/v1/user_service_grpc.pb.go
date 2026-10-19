@@ -51,8 +51,7 @@ const (
 //     приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
 //     пишет на строку приглашения способ входа и сессию, но приглашение не
 //     активирует.
-//   - Create нет: личность заводят приглашение, регистрация без приглашения и
-//     внутренний `InternalUserService.UpsertFromIdentity`.
+//   - Create нет: личность заводят приглашение и регистрация без приглашения.
 type UserServiceClient interface {
 	// Returns the specified User resource.
 	Get(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*User, error)
@@ -559,8 +558,7 @@ func (c *userServiceClient) ListOperations(ctx context.Context, in *ListUserOper
 //     приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
 //     пишет на строку приглашения способ входа и сессию, но приглашение не
 //     активирует.
-//   - Create нет: личность заводят приглашение, регистрация без приглашения и
-//     внутренний `InternalUserService.UpsertFromIdentity`.
+//   - Create нет: личность заводят приглашение и регистрация без приглашения.
 type UserServiceServer interface {
 	// Returns the specified User resource.
 	Get(context.Context, *GetUserRequest) (*User, error)

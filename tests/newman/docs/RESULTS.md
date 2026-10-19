@@ -411,8 +411,8 @@ https://github.com/PRO-Robotech/kacho/actions/runs/36822830139 на `52a0c72d1b0
   10) и сущности службы сверх них не переутверждает: прежняя коллекция утверждала
   публичного клиента со способом `none`, а на посадке `own` клиент конфиденциальный.
   Повторное имя, маски правки и повтор снятия модуль несёт внутри позиций 04, 09 и 10;
-- `iam-internal-only-check` — нет 3 из 13 кейсов, всех на глаголе
-  `InternalUserService.UpsertFromIdentity` (`IAM-INT-NEG-EXT-USER-UPSERT`,
+- `iam-internal-only-check` — нет 3 из 13 кейсов, всех на глаголе заведения личности по
+  внешнему удостоверению (снят kaname#929) (`IAM-INT-NEG-EXT-USER-UPSERT`,
   `IAM-INT-OK-INT-USER-UPSERT`, `IAM-INT-OK-INT-USER-UPSERT-IDEM`). Довод — решение
   владельца 2026-09-27 (PRO-Robotech/kacho#2901): людей наборов платформы заводит только
   посев, и адреса хука в пробах платформы нет. Отрицание этого адреса на внешнем

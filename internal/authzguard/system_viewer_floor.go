@@ -95,8 +95,8 @@ const (
 //   - InternalIAMService/{RegisterResource,UnregisterResource}
 //     — fga_writer-gated mutations.
 //   - ForceLogout / Cluster GrantAdmin/RevokeAdmin / Authorize
-//     WriteTuples/ReloadModel / SessionRevocations Revoke /
-//     UpsertFromIdentity — gateway-only / admin-tier mutations.
+//     WriteTuples/ReloadModel / SessionRevocations Revoke — gateway-only /
+//     admin-tier mutations.
 func ReadFloorRPCs() []string {
 	return []string{
 		// InternalIAMService — service→service read lookups.
