@@ -44,7 +44,7 @@ func TestInternalModuleService_MA126_InternalOnly_NotOnExternalListener(t *testi
 	handler := moduleapp.NewHandler(
 		moduleapp.NewPlanUseCase(nil, nil, nil),
 		moduleapp.NewApplyUseCase(nil, nil, nil, nil),
-		moduleapp.NewGetUseCase(nil),
+		moduleapp.NewGetUseCase(nil, nil),
 		moduleapp.NewListUseCase(nil),
 	)
 	svcs := &services{moduleHandler: handler}

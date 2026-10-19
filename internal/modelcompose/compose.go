@@ -53,6 +53,13 @@ type Report struct {
 	// редакции, принимаемой переходно (Р10, [modelrender.IsPriorEdition]).
 	// Действует при этом канон: прежняя редакция только допущена к сверке.
 	PriorEdition []string
+	// ComposedBy — отнесение добавленных типов к модулю, из документа которого
+	// собран их блок (kaname#865, Д10): модуль → имена типов, отсортированно.
+	// Модуль, не добавивший ни одного типа, ключа не получает. Объединение
+	// значений равно [Report.Composed]: тип, объявленный доставкой дважды,
+	// композиция отвергает, поэтому у каждого добавленного типа модуль ровно
+	// один.
+	ComposedBy map[string][]string
 	// KeyTerms — термы, которые ключ публичного чтения вписал в блоки ДОБАВЛЕННЫХ
 	// типов (kaname#866, Р1, Р4), в порядке доставки. Это аргумент допуска
 	// (`authzmodel.Admit`), и производит его ТОТ ЖЕ вызов, что собрал текст:
@@ -62,6 +69,12 @@ type Report struct {
 	// редакции) в модель не идут, и терм, названный по ним, исключал бы то, чего
 	// допуск не судит (CE-02).
 	KeyTerms []authzmodel.KeyTerm
+}
+
+// ComposedOf — типы вне канона, блоки которых собраны из документа модуля
+// module, отсортированно; модуль, не добавивший ни одного, — пусто.
+func (r Report) ComposedOf(module string) []string {
+	return r.ComposedBy[module]
 }
 
 // Census — перепись одной строкой.
@@ -150,10 +163,19 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 			out.Write(blk)
 			rep.Composed = append(rep.Composed, res.ObjectType)
 			rep.KeyTerms = append(rep.KeyTerms, keyTerms...)
+			// Отнесение — здесь же, где блок добавлен: тип вне канона принадлежит
+			// модулю, из документа которого собран (kaname#865, Д10).
+			if rep.ComposedBy == nil {
+				rep.ComposedBy = make(map[string][]string)
+			}
+			rep.ComposedBy[m.Module] = append(rep.ComposedBy[m.Module], res.ObjectType)
 			declared[res.ObjectType] = struct{}{}
 		}
 	}
 	sort.Strings(rep.Composed)
+	for _, types := range rep.ComposedBy {
+		sort.Strings(types)
+	}
 	sort.Strings(rep.Reaffirmed)
 	sort.Strings(rep.PriorEdition)
 

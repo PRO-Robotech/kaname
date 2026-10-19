@@ -209,7 +209,7 @@ func bootComposesJudgesAndInstallsTheModel(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := installComposedModel(logger, []*manifest.Manifest{m, mNew}); err != nil {
+	if _, err := installComposedModel(logger, []*manifest.Manifest{m, mNew}); err != nil {
 		t.Fatalf("композиция → допуск → установка отвергнута на пути старта: %v", err)
 	}
 
@@ -340,7 +340,7 @@ func TestBootRefusesAModelThatDoesNotPassAdmission(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	err = installComposedModel(logger, []*manifest.Manifest{m})
+	_, err = installComposedModel(logger, []*manifest.Manifest{m})
 	if err == nil {
 		t.Fatal("собранная модель с подстановкой на НОВОМ типе пущена в старт — " +
 			"провязка штампует, а не судит: мягкий проход здесь есть контроль, " +
