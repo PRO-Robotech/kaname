@@ -40,10 +40,19 @@ effective_approval:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#297
-  status: not_performed
-  published: false
-  body: "acceptance-reviewer · APPROVED · 04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542"
+  status: performed
+  published: true
+  database_id: 6261024854
+  node_id: "IC_kwDOUO26pM8AAAABdS-oVg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6261024854"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6261024854"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T06:20:53Z"
+  body_sha256: "dfb24391453197e4b1559350c9f87d2ad41de4b2c28c3341202d2e404c3618f1"
   subject_sha256: "04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542"
+  subject_revision_commit: "ad31941e63e2c6e282a973cba8ed969bf590a2d5"
   verdict: "APPROVED"
   publication_mode: scripts/rituals/approval-event.sh
 attribution:
