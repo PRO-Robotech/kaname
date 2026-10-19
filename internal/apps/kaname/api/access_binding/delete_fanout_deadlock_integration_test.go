@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
@@ -119,7 +120,7 @@ func insertAccountBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repo
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: bid, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(subject),
 		RoleID: role, ResourceType: "account", ResourceID: string(acc),
 		Scope: domain.ScopeAccount, Status: domain.AccessBindingStatusActive,

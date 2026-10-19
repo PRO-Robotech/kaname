@@ -44,6 +44,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // kac127Setup — общий setup: testcontainers + pgxpool + return DSN-pool pair.
@@ -193,7 +194,7 @@ func kac127SeedABRow(
 	abID = padOrTrim20("acb00000kac127" + suffix)
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID:              domain.AccessBindingID(abID),
 		SubjectType:     domain.SubjectTypeUser,
 		SubjectID:       domain.SubjectID(uid),
@@ -283,7 +284,7 @@ func TestIamExtRepos_6_5_4_AccessBinding_RevokedTerminal_CAS_NoMatch(t *testing.
 	// без revoked_at), затем CAS → REVOKED.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID:              domain.AccessBindingID(abID),
 		SubjectType:     domain.SubjectTypeUser,
 		SubjectID:       domain.SubjectID(uid),
