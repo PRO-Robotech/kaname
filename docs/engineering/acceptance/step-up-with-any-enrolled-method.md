@@ -12,6 +12,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   - 2026-10-14 · круг 1 · ⛔ CHANGES_REQUESTED · редакция 1 `3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9` · запись `kacho-workspace:docs/specs/reviews/step-up-with-any-enrolled-method/3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9.yaml` (блокирующих 2: SUA-15, Р7/SUA-22)
   - 2026-10-14 · круг 2 · ✅ APPROVED · редакция 2 `c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58` · запись `docs/specs/reviews/step-up-with-any-enrolled-method/c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58.yaml`
   - 2026-10-14 · **правка после вердикта** · редакция 3 · причина — находка безопасности средней тяжести **M1** аудитора поверхности (разбор классов `docs/specs/reviews/step-up-with-any-enrolled-method-class-exposure/initial/c9224c8b…md`, «вернуть в приёмку»): в Р3 не было двух суждённых отказов счётчика подписи, в Р10 — сигнала клонирования, в §3.2 — близнеца SUA-03 по счётчику (SUA-80), в §8 п.1 — его пробы; плюс объявление нового пути в положении подтверждения (Р2) и решение о частоте `begin` (Р2, вариант «одно живое испытание на сессию»). Одобрение редакции 2 к редакции 3 не переносится: ревью — по дельте на новый отпечаток
+  - 2026-10-14 · круг 3 · ✅ APPROVED · редакция 3 `35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683` · запись `docs/specs/reviews/step-up-with-any-enrolled-method/35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683.yaml` (строка дописана редакцией 4: запись существовала, строки в истории не было)
+  - 2026-10-19 · **правка ПОСЛЕ вердикта** круга 3 · редакция 4 · причина — `PRO-Robotech/kaname#297`, DoD п. 8 приёмки `backup-code-set-has-one-form.md` (одобренная редакция 4, `7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957`): форму набора запасных кодов и остатка в ответах утверждает тот документ, а SUA-02, 12, 31, 40, 60, 61 и Р6 утверждают прежнюю. Правится только: новый §9 (отсылка по оси формы) и строка круга 3 выше. Сценарии, решения Р1…Р11, §4…§8 не тронуты. Одобрение редакции 3 к редакции 4 не переносится: ревью — по дельте на новый отпечаток
 - **Дата:** 2026-10-14
 - **Задача:** `PRO-Robotech/kaname#827` (P1), эпик `PRO-Robotech/kaname#746`, линия
   `release:identity-own-2`; зеркало у платформы — `PRO-Robotech/kacho#3230` (эпик
@@ -626,3 +628,35 @@ git show bbbe33524:.github/scripts/stand-own.sh | sed -n 295p
 4. Ведомость ответов (`ResponseObjectKeys`) и клиентская страница сверены пробой
    `internal/check/client_page_auth_lane_test.go`.
 5. Комментарий `DoD-proof @<sha>` в `kaname#827`.
+
+## §9 Форма набора запасных кодов — у `backup-code-set-has-one-form.md` (редакция 4)
+
+Ось «какой ключ, какого типа, каким путём» — представление набора запасных кодов и остатка в
+ответах раздела второго фактора — принадлежит приёмке
+`docs/engineering/acceptance/backup-code-set-has-one-form.md` (далее **BCS**; одобренная
+редакция 4, отпечаток `7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957`). По
+этой оси её решения Р1…Р4 и сценарии BCS-* вытесняют формы, названные здесь. Смысл — моменты
+набора (`issuedAt`, `lastUsedAt`), перечень `stepUpMethods`, однократность кода, перевыпуск,
+уровень — остаётся за этим документом и Ф12; BCS его не переутверждает (BCS, шапка, «Опоры»).
+Сценарии ниже не правлены: их утверждения смысла действуют как есть, утверждения формы читаются по
+BCS.
+
+Целевая форма коротко (BCS Р1…Р4): `backupCodes` — только массив из десяти кодов в ответах
+`confirm` и перечеканки; состояние набора — объект `backupCodeSet` с ключами `remaining`, `total`,
+`issuedAt` и `lastUsedAt` (последнего нет, пока из набора не тратили); остаток — одним путём
+`backupCodeSet.remaining`; плоского `backupCodesRemaining` нет ни в одном ответе раздела.
+
+| сценарий | прежняя форма здесь | форма по BCS | сценарии BCS |
+|---|---|---|---|
+| SUA-02 | ответ `step-up`: `backupCodesRemaining` = 9; `GET`: `backupCodes.remaining`, `backupCodes.total`, `backupCodes.lastUsedAt` | ответ `step-up`: `backupCodeSet` `{remaining: 9, total: 10, issuedAt, lastUsedAt}`, ключа `backupCodesRemaining` нет; `GET`: те же значения под `backupCodeSet` | BCS-06, BCS-31 |
+| SUA-12 | `GET` после отказа: `backupCodes.remaining` = 9 | тело отказа без `backupCodeSet` и `backupCodesRemaining`; `GET`: `backupCodeSet.remaining` = 9 | BCS-09 |
+| SUA-31 | `GET`: `backupCodes.remaining` = 0 (число) | `backupCodeSet.remaining` = `0` числом, ключ на месте; `stepUpMethods` без `lookup_secret` | BCS-08 |
+| SUA-40 | `GET`: `backupCodes` = `{remaining: 10, total: 10, issuedAt}`, ключа `backupCodes.lastUsedAt` нет | `backupCodeSet` `{remaining: 10, total: 10, issuedAt}`, ключа `backupCodeSet.lastUsedAt` нет; ключа `backupCodes` в `GET` нет | BCS-01, BCS-30 |
+| SUA-60 | `GET`: объект `backupCodes` — ровно `remaining`, `total`, `issuedAt` (и `lastUsedAt` после траты) | тот же закрытый набор ключей — под `backupCodeSet`; `backupCodes` — только массив ответа `confirm` | BCS-03, BCS-32 |
+| SUA-61 | перевыпуск: `backupCodes.issuedAt` сдвинут, ключа `backupCodes.lastUsedAt` нет | `backupCodeSet` ответа и следующего `GET`: `{remaining: 10, total: 10, issuedAt}`, `issuedAt` не раньше прежнего, без `lastUsedAt` | BCS-04 |
+
+Прочие места этого текста на той же оси — слова не правлены, по форме читаются через BCS: Р6,
+строки `backupCodes.issuedAt` и `backupCodes.lastUsedAt` → BCS Р2 (`backupCodeSet.issuedAt`,
+`backupCodeSet.lastUsedAt`, «когда ключа нет» — то же); §4, строка «Ф12 · Р4, ответ чтения
+состояния» (`backupCodes.{remaining, total}`, «прежние ключи без изменения») → BCS §«Совместимость»
+(объект `backupCodes` в `GET` снят, его место — `backupCodeSet`).
