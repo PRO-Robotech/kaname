@@ -160,8 +160,9 @@ func seedLabelGrantOnCatalogType(t *testing.T, ctx context.Context, tx pgx.Tx,
 		roleID, catalogType)
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, $2, 'labels', ARRAY[$3::text], $4::jsonb)`,
+		   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, $2, 'labels', ARRAY[$3::text], $4::jsonb,
+		         jsonb_build_object($3::text, jsonb_build_array('get')))`,
 		roleID, "fp-"+roleID, catalogType, labels)
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.access_bindings

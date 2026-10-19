@@ -391,6 +391,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"role_rule_selectors_fp_nonempty",
 			"role_rule_selectors_labels_obj",
 			"role_rule_selectors_live_true",
+			// Карту глаголов правила вычисляет служба из каталога (kaname#878).
+			"role_rule_selectors_verbs_valid",
 		},
 	},
 	// Сокращение селектора — следствие снятия каталога, пишет служба.

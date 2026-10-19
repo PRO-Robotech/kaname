@@ -192,14 +192,16 @@ func tgSeedArmTopology(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if arm == "names" {
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, match_labels, resource_names)
-			 VALUES ($1, 'fp-arm', 'names', ARRAY[$2::text], '{}'::jsonb, $3::text[])`,
+			   (role_id, rule_fp, arm, object_types, match_labels, resource_names, verbs_by_type)
+			 VALUES ($1, 'fp-arm', 'names', ARRAY[$2::text], '{}'::jsonb, $3::text[],
+			         jsonb_build_object($2::text, jsonb_build_array('get')))`,
 			tgRole, net, names)
 	} else {
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, 'fp-arm', 'labels', ARRAY[$2::text], $3::jsonb)`,
+			   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, 'fp-arm', 'labels', ARRAY[$2::text], $3::jsonb,
+			         jsonb_build_object($2::text, jsonb_build_array('get')))`,
 			tgRole, net, matchLabels)
 	}
 	for _, o := range []struct{ id, labels string }{{tgObjX, labelsX}, {tgObjY, labelsY}} {

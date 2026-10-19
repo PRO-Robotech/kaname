@@ -6,6 +6,7 @@ package modelrender
 import (
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -30,7 +31,7 @@ import (
 // PRO-Robotech/kaname#836 вместе со снятием перевода слова записи субъекта; её
 // предикат — вывод `git grep -nE
 // 'priorNoteProse|newNoteProse|translateNoteProse|RenderForCanon' -- internal`
-// пуст, и сборка модели со сверкой дерева зовут [Render].
+// пуст, и сборка модели со сверкой дерева зовут [RenderWithKeyTerms] и [Render].
 var priorNoteProse = map[string]string{
 	"    # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.": "    # RG-1 D-7: `system_class:anonymous` public-read subject — anonymous pull of a PUBLIC repo.",
 	"    # The wildcard grants v_get ONLY on repos that ALSO carry an explicit":        "    # The class grants v_get ONLY on repos that ALSO carry an explicit",
@@ -74,9 +75,20 @@ func translateNoteProse(blk []byte) []byte { return mapBlockLines(blk, priorNote
 // принимали бы разную прозу. Каждого судью держит своя проба: сборку —
 // `modelcompose` (SC-829, SC-70), сверку — sweep_note_prose_test.go.
 func RenderForCanon(r manifest.Resource) ([]byte, error) {
-	b, err := Render(r)
+	b, _, err := RenderForCanonWithKeyTerms(r)
+	return b, err
+}
+
+// RenderForCanonWithKeyTerms — [RenderForCanon] вместе с термами ключа
+// публичного чтения из [RenderWithKeyTerms]: сборке модели нужны оба — текст
+// блока в форме судей канона и перечень термов для допуска (kaname#866).
+// Перевод меняет только строки прозы примечаний, строк отношений не трогает,
+// поэтому термы, отмеченные проходом рендера, остаются термами переведённого
+// блока.
+func RenderForCanonWithKeyTerms(r manifest.Resource) ([]byte, []authzmodel.KeyTerm, error) {
+	b, terms, err := RenderWithKeyTerms(r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return translateNoteProse(b), nil
+	return translateNoteProse(b), terms, nil
 }

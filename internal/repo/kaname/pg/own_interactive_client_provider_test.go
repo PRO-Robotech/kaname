@@ -183,14 +183,16 @@ func TestOwnInteractiveClientSecretVerifierIsOfThatSecretAndOfTheLaneClass(t *te
 	require.NoError(t, err)
 
 	s := shownSecret(pc)
-	got := checker.Verify(pc.SecretVerifier, s)
+	got, err := checker.Verify(t.Context(), pc.SecretVerifier, s)
+	require.NoError(t, err)
 	require.Equal(t, passwordverify.OutcomeMatched, got.Outcome, "проверочное значение не этого секрета")
 	mangled := "X" + s[1:]
 	if mangled == s {
 		mangled = "Y" + s[1:]
 	}
-	require.Equal(t, passwordverify.OutcomeMismatched, checker.Verify(pc.SecretVerifier, mangled).Outcome,
-		"секрет с одним изменённым знаком прошёл сверку")
+	bad, err := checker.Verify(t.Context(), pc.SecretVerifier, mangled)
+	require.NoError(t, err)
+	require.Equal(t, passwordverify.OutcomeMismatched, bad.Outcome, "секрет с одним изменённым знаком прошёл сверку")
 
 	meets, err := checker.MeetsDeclared(pc.SecretVerifier, declared)
 	require.NoError(t, err)
@@ -198,7 +200,8 @@ func TestOwnInteractiveClientSecretVerifierIsOfThatSecretAndOfTheLaneClass(t *te
 
 	decoy, err := floorHasher(t).Hash("decoy-of-the-lane")
 	require.NoError(t, err)
-	dres := checker.Verify(decoy, "x")
+	dres, err := checker.Verify(t.Context(), decoy, "x")
+	require.NoError(t, err)
 	require.Equal(t, dres.Format, got.Format, "формат проверочного значения не тот, что у приманки")
 	require.Equal(t, dres.Params, got.Params, "параметры проверочного значения не те, что у приманки")
 }

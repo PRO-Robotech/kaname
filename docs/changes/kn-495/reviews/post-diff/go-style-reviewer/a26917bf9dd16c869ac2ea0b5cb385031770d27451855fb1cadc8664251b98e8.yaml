@@ -1,0 +1,37 @@
+# Пост-дифф ревью Go-кода — роль go-style-reviewer. Имя — content_digest. Не правится.
+schema_version: 1
+change_id: kn-495
+holder: post-diff/go-style-reviewer
+owner: go-style-reviewer
+subject: >-
+  пробы стража публичного принципала анонимного чтения: граница длины 63/64, близнец ak-…16
+  (internal/apps/kaname/config/registry_token_anonymous_principal_test.go) и рендер ручки
+  чарта до процесса (deploy/registry_token_anonymous_render_test.go).
+fingerprint:
+  repo: PRO-Robotech/kaname (копия tmp/kaname-495-anon)
+  branch: '495 (origin refs/heads/495 = b1b4543c4)'
+  base: 55b27e57a17e627d2ff82f40b0dbe50988f8cc6e
+  head: b1b4543c4f2ead70f3082a80c16a9f822eebfae7
+  note: 'без слияния main; два файла проб в b1b4543c4..e9c571fa1 не менялись'
+  shortstat: '9 файлов, +1158 / -13'
+content_digest: sha256:a26917bf9dd16c869ac2ea0b5cb385031770d27451855fb1cadc8664251b98e8
+digest_definition: git diff --full-index b1b4543c4~4...b1b4543c4 | sha256sum
+digest_two_probe_files: sha256:3fb23bfd82a76511cc7b2e3351e778326021942597a4875f8778b4b255ddbd53
+verdict: accepted
+blocks_landing: false
+timestamp: '2026-10-17T11:57:59Z'
+return_to: '—'
+checks:
+  - 'отдельный worktree @b1b4543c4: go vet ./internal/apps/kaname/config/ ./deploy/ — код 0'
+  - 'go test -count=1 -run TestAnonymousPrincipal ./internal/apps/kaname/config/ — ok, 6/6'
+  - 'go test -count=1 -run TestProdProfile_RenderedRegistryTokenAnonymous ./deploy/ (helm в PATH) — ok, 2 теста, 4 подслучая PASS'
+  - 'инъекция: снят $rt.anonymousClientId из условия блока configmap.yaml:129 — красный ровно подслучай «объявлено одно, без адресата и издателя»; откат, статус чист'
+  - 'регэксп generatedIDShapeRe (registry_token.go:118) сверен с близнецом: ak-+16 не совпадает, ak-+17 совпадает'
+critical: []
+important: []
+style:
+  - 'registry_token_anonymous_principal_test.go:124 — "at most 63 characters" стоит в общем тексте отказа всех трёх ветвей, отдельно длину не доказывает; доказательство даёт пара 63/64 одной формы — комментарий пробы это и говорит'
+deferral_markers_fresh: 0
+probes_in_same_change: true
+security_comments_contradicting_code: []
+foundation_candidates: []

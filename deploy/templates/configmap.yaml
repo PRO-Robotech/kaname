@@ -126,7 +126,7 @@ data:
         endpoint: {{ $jp.endpoint | quote }}
       {{- end }}
       {{- $rt := .Values.apiServer.registryToken | default dict }}
-      {{- if or $rt.issuer $rt.service (hasKey $rt "endpoint") }}
+      {{- if or $rt.issuer $rt.service $rt.anonymousClientId (hasKey $rt "endpoint") }}
       # Docker Registry v2 token shim. `service` — единственный адресат (`aud`)
       # токена этой полосы: `?service=`, который docker назвал отличным от него,
       # отвергается 401 и ломает login. На ключи служебных учёток значение не
@@ -141,6 +141,15 @@ data:
         {{- end }}
         {{- with $rt.service }}
         service: {{ . | quote }}
+        {{- end }}
+        {{- /* ПУБЛИЧНЫЙ ПРИНЦИПАЛ АНОНИМНОГО ЧТЕНИЯ (kaname#495). Ветвь `with`, а не
+        дословная подстановка: незаданное значение и пустая строка для процесса
+        одно и то же — анонимный поток выключен, и ключ тогда не рендерится вовсе.
+        Значение входит в условие блока выше: объявленное одно, без адресата и
+        издателя, оно иначе пропало бы из файла настроек молча. Форму значения
+        судит страж старта `RegistryTokenConfig.Validate`. */}}
+        {{- with $rt.anonymousClientId }}
+        anonymous-client-id: {{ . | quote }}
         {{- end }}
       {{- end }}
 

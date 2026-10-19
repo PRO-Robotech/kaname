@@ -63,6 +63,11 @@ func RegisterDefaults(v *viper.Viper) {
 	// TestDocumentedEnvName_KeyMaterialWindowUntil.
 	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
 	v.SetDefault("api-server.registry-token.key-material-window-until", "")
+	// ПУБЛИЧНЫЙ ПРИНЦИПАЛ АНОНИМНОГО ЧТЕНИЯ (kaname#495) — ПУСТО, ТО ЕСТЬ
+	// АНОНИМНЫЙ ПОТОК ВЫКЛЮЧЕН. Умолчание объявлено явно по той же причине, что
+	// у окна выше: без него переменная окружения до поля не доехала бы.
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID
+	v.SetDefault("api-server.registry-token.anonymous-client-id", "")
 	// Cluster-INTERNAL listener of the verification KEY SET — a SEPARATE port
 	// (default `tcp://0.0.0.0:9097`), served ONLY on the kaname-internal Service
 	// (never external, ban #6) over one-way server-TLS. It publishes ONE record
