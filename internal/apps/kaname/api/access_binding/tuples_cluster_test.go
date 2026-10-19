@@ -82,7 +82,7 @@ func TestTuplesForBinding_ClusterScope_EmitsSystemAdmin(t *testing.T) {
 		ResourceType: "cluster",
 		ResourceID:   domain.ClusterSingletonID,
 	}
-	got := tuplesForBinding(b, []authzmap.Relation{"admin"})
+	got := tuplesForBinding(b, soleSubjectOf(b), []authzmap.Relation{"admin"})
 	// With a binding ID present, cluster scope emits the direct-relation tuple
 	// PLUS the `cluster`-parent hierarchy tuple (cascade readability).
 	require.Len(t, got, 2,
@@ -106,7 +106,7 @@ func TestTuplesForBinding_ClusterScope_ServiceAccountSubject(t *testing.T) {
 		ResourceType: "cluster",
 		ResourceID:   domain.ClusterSingletonID,
 	}
-	got := tuplesForBinding(b, []authzmap.Relation{"admin"})
+	got := tuplesForBinding(b, soleSubjectOf(b), []authzmap.Relation{"admin"})
 	require.Len(t, got, 1)
 	assert.Equal(t, "service_account:sva_test_sa00000001-", got[0].User)
 	assert.Equal(t, "system_admin", got[0].Relation)
@@ -119,7 +119,7 @@ func TestTuplesForBinding_ClusterScope_ViewerEmitsSystemViewer(t *testing.T) {
 		ResourceType: "cluster",
 		ResourceID:   domain.ClusterSingletonID,
 	}
-	got := tuplesForBinding(b, []authzmap.Relation{"viewer"})
+	got := tuplesForBinding(b, soleSubjectOf(b), []authzmap.Relation{"viewer"})
 	require.Len(t, got, 1)
 	assert.Equal(t, "system_viewer", got[0].Relation,
 		"viewer on cluster → system_viewer tuple")
@@ -134,7 +134,7 @@ func TestTuplesForBinding_NonCluster_UnchangedRelation(t *testing.T) {
 		ResourceType: "account",
 		ResourceID:   "acc_test_account001-",
 	}
-	got := tuplesForBinding(b, []authzmap.Relation{"admin"})
+	got := tuplesForBinding(b, soleSubjectOf(b), []authzmap.Relation{"admin"})
 	require.Len(t, got, 1)
 	assert.Equal(t, "admin", got[0].Relation,
 		"account scope must NOT remap admin→system_admin")
