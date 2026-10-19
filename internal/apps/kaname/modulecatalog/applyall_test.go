@@ -91,6 +91,11 @@ func (w *recordingWriter) LockCatalog(context.Context) error {
 	return nil
 }
 
+func (w *recordingWriter) LockModuleRow(_ context.Context, module string) error {
+	w.calls = append(w.calls, "lock_module:"+module)
+	return nil
+}
+
 func (w *recordingWriter) LockModuleResources(_ context.Context, module string) error {
 	w.calls = append(w.calls, "lock_resources:"+module)
 	return nil

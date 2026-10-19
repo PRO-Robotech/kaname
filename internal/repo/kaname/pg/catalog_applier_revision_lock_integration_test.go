@@ -16,25 +16,27 @@ package pg_test
 // присваиваются `applied_revision` и `applied_digest`, а ни одна из них в
 // уникальные ключи строки не входит.
 //
-// Новое ребро в графе ожиданий этот замок дал бы, если бы с ним конфликтовал
-// замок, который берёт на той же строке ДРУГОЙ писатель. Остальные писатели
-// берут строку `catalog_module` только проверкой внешнего ключа — то есть
-// `FOR KEY SHARE`, — а он с `FOR NO KEY UPDATE` совместим. Утверждается это
-// здесь исполнением, а не чтением:
+// С kaname#913 шаг 2а начинается со строки модуля (`catalogWriter.LockModuleRow`,
+// `FOR UPDATE`) — раньше строк ресурсов. Значит место, где применитель ЖДЁТ
+// другого писателя первым, — строка модуля шага 2а, и замок 2р к этому моменту
+// уже взят.
 //
-//  1. пока применитель стоит на шаге 2а, строка модуля УЖЕ взята —
-//     `FOR UPDATE NOWAIT` отказывает `55P03` (замок 2р стоит раньше 2а);
-//  2. в тот же момент `FOR KEY SHARE NOWAIT` проходит — замок 2р с формой
-//     проверки ключа совместим;
+// Новое ребро в графе ожиданий замок 2р дал бы, если бы с ним конфликтовал
+// замок, который берёт на той же строке ДРУГОЙ писатель. Остальные писатели
+// берут строку `catalog_module` только ключевым замком — проверкой внешнего
+// ключа либо `roleWriter.LockOwnerModule`, то есть `FOR KEY SHARE`, — а он с
+// `FOR NO KEY UPDATE` совместим. Утверждается это здесь исполнением, а не
+// чтением. Держатель берёт строку модуля `FOR KEY SHARE` — так её держит
+// транзакция ролей модуля, — и применитель встаёт за ним на строке модуля шага
+// 2а. В этот момент:
+//
+//  1. строка модуля УЖЕ взята шагом 2р — `FOR NO KEY UPDATE NOWAIT` отказывает
+//     `55P03` (с ключевым замком держателя этот режим совместим, отказ даёт
+//     только замок 2р);
+//  2. `FOR KEY SHARE NOWAIT` проходит — замок 2р с ключевым замком совместим;
 //  3. близнец без ключа `revision` меняет ровно один факт и даёт обратное
 //     п. 1: оператор 2р не записал пары и строки не взял, и проба отличает
 //     одно от другого.
-//
-// Чего проба НЕ утверждает: применитель берёт ту же строку повторно на шаге 4
-// (`UpsertModule` присваивает `live`, входящий в `catalog_module_live_uk`, — это
-// `FOR UPDATE`, ПОСЛЕ замков 2а). Это повышение режима с замком 2р не связано и
-// было до kaname#865; его порядок против писателей, держащих строку модуля
-// ключевым замком, — шапка `apply.go`, раздел о порядке замков.
 
 import (
 	"context"
@@ -97,40 +99,40 @@ func TestCatalogApplierRevisionWriteKeepsTheLockOrderOfTheRoleWriter(t *testing.
 	require.Equal(t, int64(2), *rev, "применённая редакция — не та, что объявлена снимающим манифестом")
 }
 
-// TestRevisionStepHoldsTheModuleRowCompatiblyWhileTheApplierWaitsOnResources —
+// TestRevisionStepHoldsTheModuleRowCompatiblyWhileTheApplierWaitsOnTheModuleRow —
 // пп. 1–2 шапки: замок 2р взят РАНЬШЕ замков 2а и совместим с ключевым замком.
-func TestRevisionStepHoldsTheModuleRowCompatiblyWhileTheApplierWaitsOnResources(t *testing.T) {
+func TestRevisionStepHoldsTheModuleRowCompatiblyWhileTheApplierWaitsOnTheModuleRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: требует Postgres")
 	}
-	forUpdate, forKeyShare := probeModuleRowWhileApplierWaits(t, true)
-	require.Truef(t, isLockNotAvailable(forUpdate),
-		"строка модуля СВОБОДНА, пока применитель стоит на замках строк ресурсов (%v): "+
-			"шаг 2р не взял её раньше шага 2а — порядок, названный в шапке apply.go, ложен", forUpdate)
+	forNoKeyUpdate, forKeyShare := probeModuleRowWhileApplierWaits(t, true)
+	require.Truef(t, isLockNotAvailable(forNoKeyUpdate),
+		"строка модуля не взята шагом 2р, пока применитель стоит на строке модуля шага 2а (%v): "+
+			"шаг 2р не взял её раньше шага 2а — порядок, названный в шапке apply.go, ложен", forNoKeyUpdate)
 	require.NoErrorf(t, forKeyShare,
 		"FOR KEY SHARE на строке модуля отвергнут, пока её держит шаг 2р (%v): режим 2р "+
 			"конфликтует с проверкой внешнего ключа — у писателей ролей и ресурсов появилось ребро "+
 			"ожидания на применителя", forKeyShare)
 }
 
-// TestWithoutRevisionTheModuleRowStaysFreeWhileTheApplierWaitsOnResources —
+// TestWithoutRevisionTheModuleRowStaysFreeWhileTheApplierWaitsOnTheModuleRow —
 // близнец п. 3: тот же ход без ключа `revision`. Оператор 2р пары не пишет и
-// строки не берёт — `FOR UPDATE NOWAIT` проходит. Без близнеца п. 1 зеленел бы
-// и на пробе, где строку держит что-то другое.
-func TestWithoutRevisionTheModuleRowStaysFreeWhileTheApplierWaitsOnResources(t *testing.T) {
+// строки не берёт — `FOR NO KEY UPDATE NOWAIT` проходит. Без близнеца п. 1
+// зеленел бы и на пробе, где строку держит что-то другое.
+func TestWithoutRevisionTheModuleRowStaysFreeWhileTheApplierWaitsOnTheModuleRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: требует Postgres")
 	}
-	forUpdate, forKeyShare := probeModuleRowWhileApplierWaits(t, false)
-	require.NoErrorf(t, forUpdate, "без объявленной редакции строка модуля взята до шага 2а (%v)", forUpdate)
+	forNoKeyUpdate, forKeyShare := probeModuleRowWhileApplierWaits(t, false)
+	require.NoErrorf(t, forNoKeyUpdate, "без объявленной редакции строка модуля взята до шага 2а (%v)", forNoKeyUpdate)
 	require.NoError(t, forKeyShare)
 }
 
-// probeModuleRowWhileApplierWaits ставит применителя на шаг 2а (держатель
-// `FOR KEY SHARE` на строке раннего ресурса — применитель берёт её `FOR UPDATE`)
-// и в этот момент пробует строку модуля двумя режимами с `NOWAIT`. Отдаёт
-// исходы обеих попыток; применитель доводится до конца и обязан успеть.
-func probeModuleRowWhileApplierWaits(t *testing.T, withRevision bool) (forUpdate, forKeyShare error) {
+// probeModuleRowWhileApplierWaits ставит применителя на строку модуля шага 2а
+// (держатель `FOR KEY SHARE` на строке модуля — применитель берёт её
+// `FOR UPDATE`) и в этот момент пробует строку модуля двумя режимами с `NOWAIT`.
+// Отдаёт исходы обеих попыток; применитель доводится до конца и обязан успеть.
+func probeModuleRowWhileApplierWaits(t *testing.T, withRevision bool) (forNoKeyUpdate, forKeyShare error) {
 	t.Helper()
 	ctx, pool := catalogPool(t)
 	applier := applierOver(t, pool)
@@ -153,10 +155,10 @@ func probeModuleRowWhileApplierWaits(t *testing.T, withRevision bool) (forUpdate
 	var held int
 	require.NoError(t, holder.QueryRow(ctx, `
 		SELECT count(*) FROM (
-		  SELECT 1 FROM kaname.catalog_resource
-		   WHERE dotted = $1 AND live
-		     FOR KEY SHARE) s`, crossLockEarly).Scan(&held))
-	require.Equalf(t, 1, held, "ПРЕДПОСЫЛКА: живой строки %s нет — держать нечего", crossLockEarly)
+		  SELECT 1 FROM kaname.catalog_module
+		   WHERE module = $1 AND live
+		     FOR KEY SHARE) s`, applierProbeModule).Scan(&held))
+	require.Equalf(t, 1, held, "ПРЕДПОСЫЛКА: живой строки модуля %s нет — держать нечего", applierProbeModule)
 
 	ares := make(chan error, 1)
 	go func() {
@@ -165,20 +167,20 @@ func probeModuleRowWhileApplierWaits(t *testing.T, withRevision bool) (forUpdate
 	}()
 	select {
 	case aerr := <-ares:
-		t.Fatalf("применитель НЕ встал на строке ресурса (%v) — момент «стоит на шаге 2а» не наступил", aerr)
+		t.Fatalf("применитель НЕ встал на строке модуля (%v) — момент «стоит на шаге 2а» не наступил", aerr)
 	case <-time.After(2 * time.Second):
 	}
-	// ПРЕДПОСЫЛКА: применитель стоит именно на замке строки ресурса, а не где-то
-	// ещё — его ожидание называет держатель.
+	// ПРЕДПОСЫЛКА: применитель стоит именно на замке строки модуля шага 2а, а
+	// не где-то ещё — его ожидание называет держатель.
 	waitsOnHolder := 0
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_stat_activity
 		 WHERE $1 = ANY (pg_blocking_pids(pid))
-		   AND query LIKE '%catalog_resource%FOR UPDATE%'`, holderPID(t, ctx, holder)).Scan(&waitsOnHolder))
+		   AND query LIKE '%catalog_module%FOR UPDATE%'`, holderPID(t, ctx, holder)).Scan(&waitsOnHolder))
 	require.Equal(t, 1, waitsOnHolder,
-		"ПРЕДПОСЫЛКА: применитель стоит не на операторе шага 2а за держателем")
+		"ПРЕДПОСЫЛКА: применитель стоит не на строке модуля шага 2а за держателем")
 
-	forUpdate = tryModuleRow(ctx, pool, "FOR UPDATE NOWAIT")
+	forNoKeyUpdate = tryModuleRow(ctx, pool, "FOR NO KEY UPDATE NOWAIT")
 	forKeyShare = tryModuleRow(ctx, pool, "FOR KEY SHARE NOWAIT")
 
 	require.NoError(t, holder.Rollback(ctx))
@@ -189,7 +191,7 @@ func probeModuleRowWhileApplierWaits(t *testing.T, withRevision bool) (forUpdate
 	case <-time.After(30 * time.Second):
 		t.Fatal("применитель не завершился за 30с после снятия держателя")
 	}
-	return forUpdate, forKeyShare
+	return forNoKeyUpdate, forKeyShare
 }
 
 // tryModuleRow — одна попытка взять строку модуля режимом mode в своей
