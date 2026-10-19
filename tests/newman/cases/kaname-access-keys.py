@@ -210,6 +210,16 @@ Coverage (техники: классы эквивалентности резул
              IAM-ACCESSKEY-OK-KN747-15-16-GIVEN-SESSIONS, ПЕРВЫЙ кейс модуля:
              сессии старше окна свежести выжидает весь набор);
   KN747-16 — IAM-ACCESSKEY-NEG-KN747-16-STALE-LEVEL-ONE.
+СБРОС СПОСОБОВ ВХОДА АДМИНИСТРАТОРОМ ОБЛАКА (kaname#925, приёмка
+`cloud-administrator-resets-login-methods.md` ред. 5 и Ф12-30 приёмки второго
+фактора) — блок в конце модуля; администратор облака — надзор облака посева
+церемонии стенда чарта. Трасса «позиция — кейс»:
+  LMR-01 — IAM-ACCESSKEY-OK-LMR-01-ADMIN-RESET-REMOVES-EVERY-KEY;
+  LMR-04 — IAM-ACCESSKEY-NEG-LMR-04-NOTHING-TO-RESET;
+  LMR-05 (а) — IAM-ACCESSKEY-OK-LMR-05-RECOVERY-AFTER-RESET;
+  LMR-03, Ф12-30 — IAM-ACCESSKEY-AUTHZ-LMR-03-F12-30-ADMIN-RESET-RIGHTS.
+Позиции и половины, которые блок не утверждает (отсечка носителя на крае,
+`invalid resource id` края), названы комментарием в его шапке.
 Сценарии §3.2 (заведение кода) стоят здесь, а не в наборе второго фактора: им
 нужны ключ, вход ключом и токен человека, а подставной аутентификатор и
 церемония токена живут в этом модуле в одном экземпляре.
@@ -951,14 +961,15 @@ def _login(p, tag, *, code=False, init=()):
     ]
 
 
-def _human(p, tag, *, factor=False):
+def _human(p, tag, *, factor=False, pre_initialized=False):
     """Свой человек: регистрация → код письма → подтверждение → (код по времени) → вход → токен.
 
     `factor` — человек заводит код по времени и входит паролем с кодом: его токен
-    уровня «2», и ключ он заводит (kaname#747, Р3)."""
+    уровня «2», и ключ он заводит (kaname#747, Р3). `pre_initialized` — адрес и
+    пароли назначены раньше (приглашённый: адрес нужен приглашению до регистрации)."""
     up = tag.upper()
     return [
-        _csrf(p, f"{tag}-register-csrf", "register", init=_person_init(p, tag)),
+        _csrf(p, f"{tag}-register-csrf", "register", init=None if pre_initialized else _person_init(p, tag)),
         _lane_post(p, f"{tag}-register", _REGISTER,
                    {"email": "{{" + p + "Email}}", "password": "{{" + p + "Password}}", "csrfToken": "{{" + p + "Csrf}}"},
                    test_script=[
@@ -4134,6 +4145,521 @@ CASES.append(Case(
         _list(_U, "sua-u-cleanup-list", count=0),
     ],
 ))
+
+# ═══════════════════════════════════════════════════════════════════════════
+# СБРОС СПОСОБОВ ВХОДА АДМИНИСТРАТОРОМ ОБЛАКА (kaname#925): LMR-01, LMR-03, LMR-04,
+# LMR-05 (приёмка `cloud-administrator-resets-login-methods.md`, редакция 5) и
+# Ф12-30 (приёмка второго фактора `second-factor-totp-and-recovery-codes.md`).
+#
+# «ДАНО» СТРОИТ СТЕНД `chart-own`: администратор облака — надзор облака посева
+# церемонии (`seed_ceremony.py`: свой человек, `system_admin` на кластере, второй
+# фактор; ключи `cloudSupervisor*`). Глаголы — на собственном публичном фронте
+# (§7а `e2e-flow.md`: сущности службы — в её доме, край службы — её REST-фронт);
+# распорядители и посторонний — свои люди кейса с кодом по времени.
+#
+# ЧЕГО ЭТОТ БЛОК НЕ УТВЕРЖДАЕТ — идентификаторы КОММЕНТАРИЕМ, а не строкой:
+#   · отказ отсечённым носителям «на следующем предъявлении» (LMR-01, Ф12-30) —
+#     отказ F4d-22 производит КРАЙ платформы (`SessionCutoffOf`); слушатель формы
+#     службы отсечки не судит (замер полосы 2026-10-19: носитель после сброса
+#     узнаётся полосой), запись отсечки — уровень I;
+#   · `400 invalid resource id` от края на строке без формы (LMR-03, Ф12-30) —
+#     ответ края; здесь — ответ службы держателю отношения (`invalid user id`);
+#   · события `iam.user.*_reset`, снимок строк способа входа и вердикт по
+#     закоммиченным строкам — уровень I (`internal/service/
+#     resetting_access_keys_authz_integration_test.go`,
+#     `resetting_the_second_factor_authz_integration_test.go`).
+# ═══════════════════════════════════════════════════════════════════════════
+_LA, _LA1 = "akLa", "akLa1"
+_SUPERVISOR_KEYS = ("cloudSupervisorEmail", "cloudSupervisorPassword", "cloudSupervisorTotpSecret")
+_SUPERVISOR_WHY = ("администратор облака стенда — надзор облака посева церемонии (`stand-chart.sh "
+                   "seed-ceremony`): его адрес, пароль и секрет фактора; без них сбрасывать нечем")
+_INVITE = "/iam/v1/users:invite"
+_BINDINGS = "/iam/v1/accessBindings"
+_ME = "/iam/v1/me"
+_ROLE_ADMIN = "rol21232f297a57a5a74"
+_ABSENT_USER = "usr00000000000000000"
+_FORMLESS_USER = "zzz-notanid"
+_KEYS_NOT_ENROLLED = ("ACCESS_KEYS_NOT_ENROLLED", "user has no access key to reset")
+_FACTOR_NOT_ENROLLED = ("SECOND_FACTOR_NOT_ENROLLED", "second factor is not enrolled")
+_SF_TEXT_OK = "pm.expect(__j.totp && __j.totp.enrolled)"
+
+
+def _supervisor_init(p):
+    """Адрес, пароль и секрет фактора надзора облака — из окружения посева."""
+    missing = " || ".join(f"!{_env(k)}" for k in _SUPERVISOR_KEYS)
+    return [
+        f"if ({missing}) {{",
+        *precondition_not_met("посев стенда: " + ", ".join(_SUPERVISOR_KEYS) + " заданы", _SUPERVISOR_WHY, indent="  "),
+        "}",
+        _set(p + "Email", _env("cloudSupervisorEmail")),
+        _set(p + "Password", _env("cloudSupervisorPassword")),
+        _set(p + "TotpSecret", _env("cloudSupervisorTotpSecret")),
+        *_fresh_src(p),
+        *(f"pm.environment.unset({js_str(p + n)});" for n in (
+            "FormCookie", "SessionCookie", "Csrf", "Token", "OauthCode", "UserId")),
+    ]
+
+
+def _supervisor_fresh_step(p, name):
+    """Ступень кода по времени, начавшаяся ПОСЛЕ входа в шаг; она — «принятая» минус один.
+
+    Надзор облака входит и в других наборах того же прогона, а принятую ступень
+    служба второй раз не принимает (Ф12-15). Ступень, начавшаяся позже первого
+    исполнения шага, не предъявлялась никем. Ожидание — опросом признака формы с
+    настоящей паузой (песочница прогонщика обрывает скрипт на 30 с); предел — две
+    ступени."""
+    path = f"{_CSRF}?form=login"
+    start, polls = f"_{p}TotpFrom", f"_{p}TotpWait"
+    label = name.upper()
+    return Step(
+        name=name, method="GET", path=path,
+        pre_script=[
+            *_supervisor_init(p),
+            *require_env_url(_LANE, path, _LANE_WHY), *_src_pre(p),
+            f"if ({_env(start + 'Req')} !== pm.info.requestName) {{",
+            "  " + _set(start, "String(Math.floor(Date.now() / 30000))"),
+            "  " + _set(polls, "'0'"),
+            "  " + _set(start + "Req", "pm.info.requestName"),
+            "}",
+        ],
+        insecure_tls=True, auth="anonymous", cookie_jar=False,
+        test_script=[
+            f"const __from = parseInt({_env(start)} || '0', 10);",
+            f"const __n = parseInt({_env(polls)} || '0', 10);",
+            "if (pm.response.code === 200 && Math.floor(Date.now() / 30000) <= __from && __n < 70) {",
+            "  " + _set(polls, "String(__n + 1)"),
+            "  const _lsd = Date.now(); while (Date.now() - _lsd < 1000) { /* inter-poll delay: next TOTP step not started yet */ }",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(polls)});",
+            f"pm.environment.unset({js_str(start + 'Req')});",
+            *_status_is(200, label),
+            f"pm.test({js_str(label + ': началась ступень кода, которой до этого шага не было')}, () => "
+            "pm.expect(Math.floor(Date.now() / 30000) > __from).to.eql(true));",
+            _set(p + "LastStep", "String(__from)"),
+        ],
+    )
+
+
+def _supervisor(p, tag):
+    """Администратор облака `A`: вход паролем с кодом → «2» → токен `<p>Token`."""
+    return [_supervisor_fresh_step(p, f"{tag}-fresh-step"), *_login(p, tag, code=True)]
+
+
+def _supervisor_level_one(p, tag):
+    """`A₁` — тот же администратор второй сессией уровня «1» (вход одним паролем)."""
+    return _login(p, tag, code=False, init=_supervisor_init(p))
+
+
+def _user_path(target, suffix=""):
+    return "/iam/v1/users/{{" + target + "UserId}}" + suffix
+
+
+def _acting(p, name, method, path, *, target=None, body=None, tests=()):
+    """`p` зовёт глагол фронта над человеком `target` (его `UserId` захвачен выше)."""
+    pre = [] if target is None else _need(target + "UserId", f"{name.upper()}: цель не названа входом",
+                                          "вход цели выше не вернул user.id — путь глагола не собрать")
+    return _own(p, name, method, path, pre=pre, body=body, tests=list(tests))
+
+
+def _keys_of(p, name, target, *, count, extra=()):
+    """`p` читает перечень ключей `target`: число строк и, по выбору, сверх него."""
+    label = name.upper()
+    return _acting(p, name, "GET", _user_path(target, "/accessKeys"), target=target, tests=[
+        *_status_is(200, label),
+        *_parse_body(),
+        "const _akL = Array.isArray(__j.accessKeys) ? __j.accessKeys : [];",
+        f"pm.test({js_str(label + f': ключей у цели {count}, одной страницей')}, () => "
+        f"pm.expect([_akL.length, String(__j.nextPageToken || '')]).to.eql([{count}, '']));",
+        *extra,
+    ])
+
+
+def _reset(p, name, verb, target, slot):
+    """`p` сбрасывает `verb` у `target`: 200, операция; затем — исход без ошибки, ответ — `User` цели."""
+    return [
+        _acting(p, name, "POST", _user_path(target, ":" + verb), target=target, body={},
+                tests=_registration_accepted(slot, name.upper())),
+        _await_op(p, f"{name}-op", slot, tests=[
+            f"pm.test({js_str(name.upper() + '-OP: ответ — User цели')}, () => "
+            f"pm.expect(__j.response && __j.response.id).to.eql({_env(target + 'UserId')}));",
+        ]),
+    ]
+
+
+def _authz_denied(label, keep=None):
+    """Отказ по праву: 403, код 7, AUTHZ_DENIED; сырое тело — в `keep` для сверки."""
+    out = [
+        *_status_is(403, label),
+        *_parse_body(),
+        f"pm.test({js_str(label + ': код 7 и признак AUTHZ_DENIED')}, () => "
+        "pm.expect([__j.code, ((Array.isArray(__j.details) ? __j.details : [])"
+        ".filter((d) => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {}).reason])"
+        ".to.eql([7, 'AUTHZ_DENIED']));",
+    ]
+    if keep:
+        out.append(_set(keep, "pm.response.text()"))
+    return out
+
+
+def _nothing_to_reset(label, pair, keep):
+    """Синхронный FAILED_PRECONDITION: 400, код 9, признак и текст; операции нет."""
+    reason, text = pair
+    return [
+        *_refused(400, 9, label, reason=reason, text=text),
+        f"pm.test({js_str(label + ': операция не порождена — в ответе нет id операции')}, () => "
+        "pm.expect(__j.id === undefined && __j.done === undefined).to.eql(true));",
+        _set(keep, "pm.response.text()"),
+    ]
+
+
+def _same_as(label, keep, what):
+    return [f"pm.test({js_str(label + ': тело побайтово равно ' + what)}, () => "
+            f"pm.expect(pm.response.text()).to.eql(String({_env(keep)})));"]
+
+
+def _absent_and_formless(p, tag, verb):
+    """Держатель отношения на отсутствующем и на бесформенном `user_id` — ответы службы."""
+    up = tag.upper()
+    return [
+        _own(p, f"{tag}-absent", "POST", f"/iam/v1/users/{_ABSENT_USER}:{verb}", body={},
+             tests=_refused(404, 5, f"{up}-ABSENT", text=f"User {_ABSENT_USER} not found")),
+        _own(p, f"{tag}-formless", "POST", f"/iam/v1/users/{_FORMLESS_USER}:{verb}", body={},
+             tests=_refused(400, 3, f"{up}-FORMLESS", text=f"invalid user id '{_FORMLESS_USER}'")),
+    ]
+
+
+def _invite(inviter, invitee, tag, account_var):
+    """`inviter` приглашает `invitee` (адрес назначен `_person_init`) в свой аккаунт."""
+    up = tag.upper()
+    return [
+        _own(inviter, f"{tag}-invite", "POST", _INVITE,
+             body={"accountId": "{{" + account_var + "}}", "email": "{{" + invitee + "Email}}"},
+             pre=[*_person_init(invitee, tag), *_need(account_var, f"{up}-INVITE: аккаунт не назван",
+                                                      "снимок выше не назвал аккаунт пригласившего")],
+             tests=_registration_accepted(invitee + "I", f"{up}-INVITE")),
+        _await_op(inviter, f"{tag}-invite-op", invitee + "I", tests=[
+            f"pm.test({js_str(up + '-INVITE-OP: строка приглашения ожидает')}, () => "
+            "pm.expect(__j.response && __j.response.inviteStatus).to.eql('PENDING'));",
+            f"if (__j.response && __j.response.id) {{ {_set(invitee + 'InvitedId', '__j.response.id')} }}",
+        ]),
+    ]
+
+
+def _owned_account(p, name, into):
+    """Снимок «кто я» `p`: аккаунт, которым он владеет, — ровно один, его id — в `into`."""
+    label = name.upper()
+    return _own(p, name, "GET", _ME, tests=[
+        *_status_is(200, label),
+        *_parse_body(),
+        "const __own = (Array.isArray(__j.accounts) ? __j.accounts : [])"
+        ".filter((a) => Array.isArray(a.roles) && a.roles.includes('owner'));",
+        f"pm.test({js_str(label + ': аккаунт, которым он владеет, ровно один (фикстура)')}, () => pm.expect(__own.length).to.eql(1));",
+        f"if (__own.length === 1) {{ {_set(into, '__own[0].accountId')} }}",
+    ])
+
+
+def _sf_state(p, name, session_var, enrolled, *, keep_remaining=None, same_remaining=None):
+    """Состояние второго фактора человека на полосе его носителем: `totp.enrolled`.
+
+    `keep_remaining` — записать остаток запасных кодов; `same_remaining` — сверить
+    его с записанным раньше (состояние не тронуто)."""
+    label = name.upper()
+    rem = "String(__j.backupCodeSet && __j.backupCodeSet.remaining)"
+    return _lane(p, name, "GET", _SF_STATUS, session=session_var, tests=[
+        *_status_is(200, label),
+        *_parse_body(),
+        f"pm.test({js_str(label + ': код по времени ' + ('заведён' if enrolled else 'не заведён'))}, () => "
+        f"pm.expect(!!(__j.totp && __j.totp.enrolled)).to.eql({'true' if enrolled else 'false'}));",
+        *([_set(keep_remaining, rem)] if keep_remaining else []),
+        *([f"pm.test({js_str(label + ': остаток запасных кодов прежний')}, () => "
+           f"pm.expect({rem}).to.eql(String({_env(same_remaining)})));"] if same_remaining else []),
+    ])
+
+
+def _password_login(p, name, password_var, *, into, level="1", tests=()):
+    """Вход паролем на полосе: 200, уровень `level`, носитель — в `<p><into>`."""
+    up = name.upper()
+    return [
+        _tok(p, f"{name}-tok", "login", p + "Csrf", fresh=True),
+        _lane(p, name, "POST", _LOGIN,
+              body={"email": "{{" + p + "Email}}", "password": "{{" + password_var + "}}", "csrfToken": "{{" + p + "Csrf}}"},
+              tests=[
+                  *_status_is(200, up),
+                  *_parse_body(),
+                  f"pm.test({js_str(up + ': уровень сессии «' + level + '»')}, () => "
+                  f"pm.expect(__j.session && __j.session.assuranceLevel).to.eql({js_str(level)}));",
+                  *_capture_cookie(p, "kaname_session", into, up),
+                  *tests,
+              ]),
+    ]
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# LMR-01: у U пароль, два ключа и второй фактор; A сбрасывает ключи — сняты ВСЕ,
+# пароль цел (вход прежним паролем — 200, «1»). Положительный контроль
+# наблюдения ДО сброса: A видит два ключа, U входит паролем.
+# ───────────────────────────────────────────────────────────────────────────
+_L1 = "akL1"
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-LMR-01-ADMIN-RESET-REMOVES-EVERY-KEY",
+    title="LMR-01: администратор облака сбрасывает ключи доступа человека с паролем, двумя ключами и "
+          "вторым фактором — 200 и операция с User; ключей ноль; прежний пароль входит (сброс пароль "
+          "не трогает); до сброса A видит два ключа",
+    classes=["CRUD", "STATE"],
+    priority="P0",
+    steps=[
+        *_human(_L1, "lmr01u", factor=True),
+        *_register_key(_L1, "lmr01-key-1", "LK1"),
+        *_register_key(_L1, "lmr01-key-2", "LK2"),
+        *_password_login(_L1, "lmr01-u-password-before", _L1 + "Password", into="S1Cookie"),
+        *_supervisor(_LA, "lmr01a"),
+        _keys_of(_LA, "lmr01-a-sees-two-keys-before", _L1, count=2, extra=[
+            "pm.test('LMR01-A-SEES-TWO-KEYS-BEFORE: это ключи цели — оба id', () => "
+            f"pm.expect(_akL.map((k) => k.id).sort()).to.eql([{_env('akLK1KeyId')}, {_env('akLK2KeyId')}].sort()));",
+        ]),
+        *_reset(_LA, "lmr01-reset", "resetAccessKeys", _L1, "LR1"),
+        _keys_of(_LA, "lmr01-no-keys-after", _L1, count=0),
+        *_password_login(_L1, "lmr01-u-old-password-after", _L1 + "Password", into="S3Cookie"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# LMR-04: нечего сбрасывать — синхронный отказ, побайтово равный у человека с
+# паролем без ключей (U после сброса) и у приглашённого без единого способа (V).
+# Близнец в один факт — первый сброс того же U тем же A, пока ключ есть: 200.
+# ───────────────────────────────────────────────────────────────────────────
+_L4, _L4V = "akL4", "akL4v"
+CASES.append(Case(
+    id="IAM-ACCESSKEY-NEG-LMR-04-NOTHING-TO-RESET",
+    title="LMR-04: сброс у человека без ключей и у приглашённого без способов — 400, code 9, "
+          "ACCESS_KEYS_NOT_ENROLLED, текст «user has no access key to reset», операции нет, тела "
+          "побайтово равны; близнец — тот же A, у цели есть ключ — 200",
+    classes=["NEG", "STATE"],
+    priority="P0",
+    steps=[
+        *_human(_L4, "lmr04u", factor=True),
+        *_register_key(_L4, "lmr04-key", "LK4"),
+        *_supervisor(_LA, "lmr04a"),
+        *_reset(_LA, "lmr04-twin-has-key", "resetAccessKeys", _L4, "LR4"),
+        _acting(_LA, "lmr04-u-nothing-left", "POST", _user_path(_L4, ":resetAccessKeys"), target=_L4, body={},
+                tests=_nothing_to_reset("LMR04-U", _KEYS_NOT_ENROLLED, "akLmr04U")),
+        _keys_of(_LA, "lmr04-u-still-no-keys", _L4, count=0),
+        _owned_account(_LA, "lmr04-a-account", "akLmr04Acc"),
+        *_invite(_LA, _L4V, "lmr04v", "akLmr04Acc"),
+        Step(name="lmr04-v-nothing-at-all", method="POST", path="/iam/v1/users/{{akL4vInvitedId}}:resetAccessKeys",
+             body={}, auth=_LA + "Token", insecure_tls=True,
+             pre_script=_need("akL4vInvitedId", "LMR04-V: приглашённый не назван", "приглашение выше не вернуло id строки"),
+             test_script=[*_nothing_to_reset("LMR04-V", _KEYS_NOT_ENROLLED, "akLmr04V"),
+                          *_same_as("LMR04-V", "akLmr04U", "отказу у человека с паролем без ключей")]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# LMR-05 (а): путь возврата — после сброса U восстанавливает доступ по адресу:
+# материал пароля заменён, прежние сессии отсечены (носитель до завершения
+# полосой не узнаётся), новым паролем вход «1», прежним — 401 побайтово как
+# неверный пароль; паролем с кодом — «2», и заведён новый ключ; A видит один.
+# Ветвь (б) — человек с открытым путём — уровень I и Ф5-29/30 набора Ф5.
+# ───────────────────────────────────────────────────────────────────────────
+_L5 = "akL5"
+CASES.append(Case(
+    id="IAM-ACCESSKEY-OK-LMR-05-RECOVERY-AFTER-RESET",
+    title="LMR-05 (а): после сброса ключей человек восстанавливает доступ по адресу — новый пароль "
+          "входит, прежний — 401 побайтово как неверный, сессия до завершения не узнаётся; паролем с "
+          "кодом — «2» и новый ключ, администратор видит один",
+    classes=["CRUD", "STATE", "SEC"],
+    priority="P0",
+    steps=[
+        *_human(_L5, "lmr05u", factor=True),
+        *_register_key(_L5, "lmr05-key", "LK5"),
+        *_supervisor(_LA, "lmr05a"),
+        *_reset(_LA, "lmr05-reset", "resetAccessKeys", _L5, "LR5"),
+        _lane(_L5, "lmr05-session-before-recovery", "GET", _SF_STATUS, session=_L5 + "SessionCookie",
+              tests=_status_is(200, "LMR05-SESSION-BEFORE-RECOVERY")),
+        _tok(_L5, "lmr05-recovery-tok", "recovery", "akL5Rec", fresh=True,
+             init=[_set(_L5 + "RecoverySeen", "'0'"), *_fresh_src(_L5)]),
+        _lane(_L5, "lmr05-recovery", "POST", _RECOVERY, body={"email": "{{akL5Email}}", "csrfToken": "{{akL5Rec}}"},
+              tests=[*_status_is(200, "LMR05-RECOVERY"),
+                     "pm.test('LMR05-RECOVERY: ответ называет шаг', () => "
+                     f"pm.expect(pm.response.text()).to.eql({js_str(_RECOVERY_NEXT_STEP_BODY)}));"]),
+        _await_letter(_L5, "lmr05-letter", head=_HEAD_RECOVERY, seen="RecoverySeen", code="RecoveryCode",
+                      kind="восстановления"),
+        _tok(_L5, "lmr05-complete-tok", "recovery-complete", "akL5Done"),
+        _lane(_L5, "lmr05-complete", "POST", _RECOVERY_COMPLETE,
+              body={"email": "{{akL5Email}}", "code": "{{akL5RecoveryCode}}", "newPassword": "{{akL5NewPassword}}",
+                    "csrfToken": "{{akL5Done}}"},
+              pre=[_set(_L5 + "OldPassword", _env(_L5 + "Password")),
+                   _set(_L5 + "NewPassword", f"'Rec-' + Math.floor(Math.random() * 2176782336).toString(36) + '-' + {_env('runId')} + '-pw'")],
+              tests=[*_status_is(200, "LMR05-COMPLETE"),
+                     *_capture_cookie(_L5, "kaname_session", "RecoveredCookie", "LMR05-COMPLETE")]),
+        _lane(_L5, "lmr05-session-before-recovery-cut", "GET", _SF_STATUS, session=_L5 + "SessionCookie",
+              tests=[*_status_is(401, "LMR05-SESSION-CUT"), *_parse_body(),
+                     "pm.test('LMR05-SESSION-CUT: тело — единый отказ аутентификации', () => "
+                     f"pm.expect(__j).to.eql({_json.dumps(_AUTH_FAILED_BODY)}));"]),
+        *_password_login(_L5, "lmr05-new-password", _L5 + "NewPassword", into="NewCookie"),
+        _tok(_L5, "lmr05-wrong-tok", "login", _L5 + "Csrf", fresh=True,
+             init=[_set(_L5 + "WrongPassword", "'Wrong-' + Math.floor(Math.random() * 2176782336).toString(36)")]),
+        _lane(_L5, "lmr05-wrong-password", "POST", _LOGIN,
+              body={"email": "{{akL5Email}}", "password": "{{akL5WrongPassword}}", "csrfToken": "{{akL5Csrf}}"},
+              tests=[*_status_is(401, "LMR05-WRONG"), _set("akLmr05Wrong", "pm.response.text()")]),
+        _tok(_L5, "lmr05-old-tok", "login", _L5 + "Csrf", fresh=True),
+        _lane(_L5, "lmr05-old-password", "POST", _LOGIN,
+              body={"email": "{{akL5Email}}", "password": "{{akL5OldPassword}}", "csrfToken": "{{akL5Csrf}}"},
+              tests=[*_status_is(401, "LMR05-OLD"), *_same_as("LMR05-OLD", "akLmr05Wrong", "отказу неверному паролю"),
+                     *_no_cookies("LMR05-OLD")]),
+        # «2» паролем с кодом (фактор сброс не трогал) — новый ключ заводится.
+        Step(name="lmr05-password-is-new", method="GET", path=_SF_STATUS, auth="anonymous",
+             pre_script=[_set(_L5 + "Password", _env(_L5 + "NewPassword")),
+                         *require_env_url(_LANE, _SF_STATUS, _LANE_WHY), *_src_pre(_L5),
+                         *_with_cookies(("kaname_session", _L5 + "NewCookie"))],
+             insecure_tls=True, cookie_jar=False,
+             test_script=[*_status_is(200, "LMR05-NEW-SESSION"), *_parse_body(),
+                          "pm.test('LMR05-NEW-SESSION: фактор цел — код по времени заведён', () => "
+                          "pm.expect(!!(__j.totp && __j.totp.enrolled)).to.eql(true));"]),
+        *_login(_L5, "lmr05-level-two", code=True),
+        *_register_key(_L5, "lmr05-new-key", "LK5n"),
+        _keys_of(_LA, "lmr05-a-sees-one-key", _L5, count=1, extra=[
+            "pm.test('LMR05-A-SEES-ONE-KEY: это новый ключ', () => "
+            f"pm.expect(_akL.map((k) => k.id)).to.eql([{_env('akLK5nKeyId')}]));",
+        ]),
+        # Уборка: новый ключ снят его владельцем той же сессией «2».
+        _revoke(_L5, "lmr05-cleanup", "LK5n", tests=_registration_accepted("LK5nC", "LMR05-CLEANUP")),
+        _await_op(_L5, "lmr05-cleanup-op", "LK5nC"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# LMR-03 и Ф12-30: право на сброс — у администратора облака. Мир один: D —
+# владелец аккаунта, U и D₂ — приглашены в него, D₂ получил `admin` аккаунта
+# привязкой; O — посторонний со своим аккаунтом; V — приглашён в аккаунт D, его
+# заведение кода по времени не завершено (`pending`). У D, D₂, O, U — сессии «2».
+#
+# Отказы по праву на обоих глаголах — 403 AUTHZ_DENIED, у U ничего не изменено;
+# отказ O на отсутствующем N — побайтово тот же, что на U (оракула нет). A₁ —
+# уровень «1» — указание повысить уровень. Держатель отношения A: на N — 404, на
+# строке без формы — `invalid user id`. Положительный контроль области — A на U:
+# 200. Контроль фикстуры — D₂ читает U (держит чтение), иначе отказ ему вакуумен.
+#
+# Ф12-30 сверх того: после сброса фактора вход паролем — «1» и фактора нет;
+# повторный сброс — SECOND_FACTOR_NOT_ENROLLED; U заводит фактор заново; сброс у
+# V (`pending`) — тот же отказ побайтово, и `pending` у V не тронут: V
+# завершает своё заведение кодом.
+# ───────────────────────────────────────────────────────────────────────────
+_MD, _MD2, _MO, _MU, _MV = "akMd", "akMd2", "akMo", "akMu", "akMv"
+
+
+def _with_insecure(step):
+    """Шаг опроса фронта (`poll_request_until_status`): фронт стенда — под своим УЦ."""
+    step.insecure_tls = True
+    return step
+
+
+def _rights_matrix(verb, tag):
+    """D, D₂, O, U над U — отказ по праву; O над N — тот же отказ побайтово; A₁ — «2»."""
+    up = tag.upper()
+    path = _user_path(_MU, ":" + verb)
+    return [
+        _acting(_MD, f"{tag}-owner", "POST", path, target=_MU, body={}, tests=_authz_denied(f"{up}-D")),
+        _acting(_MD2, f"{tag}-delegated-admin", "POST", path, target=_MU, body={}, tests=_authz_denied(f"{up}-D2")),
+        _acting(_MO, f"{tag}-stranger", "POST", path, target=_MU, body={},
+                tests=_authz_denied(f"{up}-O", keep=f"akM{tag}OnU")),
+        _acting(_MU, f"{tag}-self", "POST", path, target=_MU, body={}, tests=_authz_denied(f"{up}-U")),
+        _own(_MO, f"{tag}-stranger-absent", "POST", f"/iam/v1/users/{_ABSENT_USER}:{verb}", body={},
+             tests=[*_authz_denied(f"{up}-O-ABSENT"),
+                    *_same_as(f"{up}-O-ABSENT", f"akM{tag}OnU", "отказу постороннему на существующем U")]),
+        _acting(_LA1, f"{tag}-admin-level-one", "POST", path, target=_MU, body={},
+                tests=_level_hint(f"{up}-A1", presented="1")),
+        *_absent_and_formless(_LA, f"{tag}-holder", verb),
+    ]
+
+
+CASES.append(Case(
+    id="IAM-ACCESSKEY-AUTHZ-LMR-03-F12-30-ADMIN-RESET-RIGHTS",
+    title="LMR-03, Ф12-30: сброс ключей и второго фактора — только администратору облака: владелец "
+          "аккаунта, делегированный администратор, посторонний и сам человек — 403 AUTHZ_DENIED, у "
+          "человека ничего не изменено; A₁ уровня «1» — указание повысить уровень; A на отсутствующем — "
+          "404, на бесформенном — invalid user id; A на U — 200; повторный сброс фактора и сброс у "
+          "pending — SECOND_FACTOR_NOT_ENROLLED побайтово, pending не тронут",
+    classes=["AUTHZ", "NEG", "STATE"],
+    priority="P0",
+    steps=[
+        # Мир: D, U и D₂ в аккаунте D, O со своим, V с незавершённым заведением кода.
+        *_human(_MD, "rmd", factor=True),
+        _owned_account(_MD, "rm-d-account", "akMdAcc"),
+        *_invite(_MD, _MU, "rmu", "akMdAcc"),
+        *_human(_MU, "rmu", factor=True, pre_initialized=True),
+        *_register_key(_MU, "rm-u-key", "LM3"),
+        *_invite(_MD, _MD2, "rmd2", "akMdAcc"),
+        *_human(_MD2, "rmd2", factor=True, pre_initialized=True),
+        _own(_MD, "rm-d-grants-admin", "POST", _BINDINGS,
+             body={"subjectType": "user", "subjectId": "{{akMd2UserId}}", "roleId": _ROLE_ADMIN,
+                   "scopeType": "iam.account", "scopeId": "{{akMdAcc}}", "target": {"allInScope": {}}},
+             pre=_need("akMd2UserId", "RM-D-GRANTS-ADMIN: делегат не назван", "вход D₂ выше не вернул user.id"),
+             tests=_registration_accepted("MB", "RM-D-GRANTS-ADMIN")),
+        _await_op(_MD, "rm-d-grants-admin-op", "MB"),
+        _with_insecure(poll_request_until_status(
+            "rm-d2-reads-u", "GET", _user_path(_MU), [
+                *_status_is(200, "RM-D2-READS-U"),
+                *_parse_body(),
+                "pm.test('RM-D2-READS-U: D₂ держит чтение U (контроль фикстуры: отказ ему не вакуумен)', () => "
+                f"pm.expect(__j.id).to.eql({_env(_MU + 'UserId')}));",
+            ], auth=_MD2 + "Token", retry_on=(403, 404),
+            pre_script=_need(_MU + "UserId", "RM-D2-READS-U: U не назван", "вход U выше не вернул user.id"))),
+        *_human(_MO, "rmo", factor=True),
+        *_invite(_MD, _MV, "rmv", "akMdAcc"),
+        *_human(_MV, "rmv", factor=False, pre_initialized=True),
+        _tok(_MV, "rm-v-sf-tok", "second-factor", _MV + "Csrf", session=_MV + "SessionCookie"),
+        _sf_enroll(_MV, "rm-v-sf-enroll-pending", secret_of=_MV, tests=_status_is(200, "RM-V-SF-ENROLL")),
+        *_supervisor(_LA, "rma"),
+        *_supervisor_level_one(_LA1, "rma1"),
+        # LMR-03: ключи.
+        *_rights_matrix("resetAccessKeys", "lmr03"),
+        _keys_of(_LA, "lmr03-u-key-untouched", _MU, count=1),
+        *_password_login(_MU, "lmr03-u-password-still", _MU + "Password", into="LoginCookie"),
+        *_reset(_LA, "lmr03-admin-resets", "resetAccessKeys", _MU, "MR3"),
+        _keys_of(_LA, "lmr03-u-no-keys", _MU, count=0),
+        # Ф12-30: второй фактор.
+        _sf_state(_MU, "f1230-u-factor-before", _MU + "SessionCookie", True, keep_remaining="akMuRemaining"),
+        *_rights_matrix("resetSecondFactor", "f1230"),
+        _sf_state(_MU, "f1230-u-factor-untouched", _MU + "SessionCookie", True, same_remaining="akMuRemaining"),
+        *_reset(_LA, "f1230-admin-resets", "resetSecondFactor", _MU, "MR12"),
+        *_password_login(_MU, "f1230-u-password-level-one", _MU + "Password", into="AfterCookie"),
+        _sf_state(_MU, "f1230-u-factor-gone", _MU + "AfterCookie", False),
+        _acting(_LA, "f1230-repeat", "POST", _user_path(_MU, ":resetSecondFactor"), target=_MU, body={},
+                tests=_nothing_to_reset("F1230-REPEAT", _FACTOR_NOT_ENROLLED, "akMf1230Repeat")),
+        Step(name="f1230-pending", method="POST", path="/iam/v1/users/{{akMvUserId}}:resetSecondFactor", body={},
+             auth=_LA + "Token", insecure_tls=True,
+             pre_script=_need("akMvUserId", "F1230-PENDING: V не назван", "вход V выше не вернул user.id"),
+             test_script=[*_nothing_to_reset("F1230-PENDING", _FACTOR_NOT_ENROLLED, "akMf1230Pending"),
+                          *_same_as("F1230-PENDING", "akMf1230Repeat", "повторному сбросу у U без фактора")]),
+        # `pending` у V не тронут, сессия V не гашена: V завершает заведение кодом.
+        _tok(_MV, "f1230-v-confirm-tok", "second-factor", _MV + "Csrf", session=_MV + "SessionCookie"),
+        _lane(_MV, "f1230-v-pending-intact", "POST", _SF_CONFIRM, session=_MV + "SessionCookie",
+              body={"code": "{{akMvTotpCode}}", "csrfToken": "{{akMvCsrf}}"}, pre=_totp_code_of(_MV),
+              tests=[*_status_is(200, "F1230-V-PENDING-INTACT"), *_totp_accepted(_MV), *_parse_body(),
+                     "pm.test('F1230-V-PENDING-INTACT: незавершённое заведение цело — подтверждение даёт «2»', () => "
+                     "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));"]),
+        # U заводит фактор заново (Ф12-01) носителем после сброса: заведение →
+        # подтверждение кодом → «2».
+        _tok(_MU, "f1230-u-reenroll-tok", "second-factor", _MU + "Csrf", session=_MU + "AfterCookie"),
+        _lane(_MU, "f1230-u-reenroll", "POST", _SF_ENROLL, session=_MU + "AfterCookie",
+              body={"csrfToken": "{{akMuCsrf}}"},
+              tests=[*_status_is(200, "F1230-U-REENROLL"), *_parse_body(),
+                     "pm.test('F1230-U-REENROLL: секрет base32 выдан', () => "
+                     "pm.expect(/^[A-Z2-7]{16,}$/.test(String(__j.secret || ''))).to.eql(true));",
+                     _set(_MU + "TotpSecret", "__j.secret || ''"),
+                     f"pm.environment.unset({js_str(_MU + 'LastStep')});"]),
+        _tok(_MU, "f1230-u-reconfirm-tok", "second-factor", _MU + "Csrf", session=_MU + "AfterCookie"),
+        _lane(_MU, "f1230-u-reconfirm", "POST", _SF_CONFIRM, session=_MU + "AfterCookie",
+              body={"code": "{{akMuTotpCode}}", "csrfToken": "{{akMuCsrf}}"}, pre=_totp_code_of(_MU),
+              tests=[*_status_is(200, "F1230-U-RECONFIRM"), *_totp_accepted(_MU), *_parse_body(),
+                     "pm.test('F1230-U-RECONFIRM: фактор заведён заново — сессия «2»', () => "
+                     "pm.expect(__j.session && __j.session.assuranceLevel).to.eql('2'));"]),
+    ],
+))
+
 
 CASES.insert(0, _GIVEN_STALE)
 
