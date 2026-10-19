@@ -59,7 +59,14 @@ func TestAsk_R893_PublicCatalogReadComesFromTheSystemGrant(t *testing.T) {
 				"утверждалось бы о пустоте", seeded)
 		}
 
-		const nobody = "user:usr-nobody-has-granted-me-anything"
+		// Субъект — СТРОКОЙ учётки без единой выдачи: класс «вошедшие» выводится
+		// лишь существующей учётке (kaname#909), и говорящий без строки отвечал
+		// бы «нет» не по предмету пробы.
+		seedTenant(t, ctx, tx)
+		exec(t, ctx, tx,
+			`INSERT INTO kaname.users (id, external_id, email, account_id)
+			 VALUES ('usr-nobody', 'ext-nobody', 'usr-nobody@kacho.local', 'acc-1')`)
+		const nobody = "user:usr-nobody"
 
 		// (а) Субъект без единой собственной выдачи читает справочник.
 		got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
