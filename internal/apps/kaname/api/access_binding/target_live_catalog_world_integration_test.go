@@ -19,6 +19,14 @@ package access_binding_test
 // живых строк). Объекты `probemod_box` регистрирует служба-владелец по
 // внутреннему ребру (`RegisterResource`), когда сценарий это говорит.
 //
+// Фикстура доставляется БЕЗ ключа `publicReadToChildren` (`publicreadfixture.WithoutKey`),
+// и модель процесса собирается из неё же, как на старте (`installComposedModel`):
+// типа `probemod_box` сборка не знает, и вопрос `Check` о нём отвечает лишь
+// модель, собранная из доставленного манифеста. Допуск модели отвергает ключ
+// публичного чтения у модуля вне канона (подстановочная запись субъекта
+// `system_class`, находки Д3 — тот же довод у `nesteddepth`), а публичное
+// чтение здесь не предмет: его держат пробы материализатора и мира П6.
+//
 // # М3 — снятие `probemod.items`
 //
 // Применение той же фикстуры без ресурса `items` применителем пути старта
@@ -31,6 +39,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,8 +51,10 @@ import (
 
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/modelcompose"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -106,7 +117,9 @@ func newATCWorld(t *testing.T) *atcWorld {
 	)
 	doc, err := publicreadfixture.Read(publicreadfixture.ProbemodFile)
 	require.NoError(t, err, "М2: фикстура probemod")
-	a.doc = doc
+	a.doc, err = publicreadfixture.WithoutKey(doc)
+	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")
+	installATCModel(t, a.manifest(false))
 	p.applyDelivered("М2: доставка probemod", a.manifest(false))
 
 	a.rolBoxGet = p.seedRole("atc_box_get", domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get"}}})
@@ -122,21 +135,15 @@ func newATCWorld(t *testing.T) *atcWorld {
 	return a
 }
 
-// manifest — фикстура probemod; withoutItems=true — она же без ресурса `items`
-// (М3). Вместе с `items` снимается и строка `publicReadToChildren` у `boxes`:
-// загрузчик отвергает переход публичного чтения на детей у типа, на который не
-// указывает ни один ресурс модуля, — без этой строки манифест без `items` не
-// загрузится вовсе. Живость `boxes` она не меняет. Дельта сверяется: сняты ровно
-// секция `items` и строка ключа, ничего не добавлено.
+// manifest — фикстура probemod М2; withoutItems=true — она же без ресурса
+// `items` (М3). Дельта сверяется: снята ровно секция `items`, ничего не добавлено.
 func (a *atcWorld) manifest(withoutItems bool) *manifest.Manifest {
 	a.t.Helper()
 	doc := a.doc
 	if withoutItems {
-		keyless, err := publicreadfixture.WithoutKey(a.doc)
-		require.NoError(a.t, err, "М3: близнец без ключа")
-		i := strings.Index(string(keyless), atcItemsCut)
+		i := strings.Index(string(a.doc), atcItemsCut)
 		require.Greater(a.t, i, 0, "М3: секции items в фикстуре нет")
-		doc = append([]byte{}, keyless[:i+1]...)
+		doc = append([]byte{}, a.doc[:i+1]...)
 		removed, added := publicreadfixture.Delta(a.doc, doc)
 		require.Empty(a.t, added, "М3: близнец что-то добавил")
 		require.NotEmpty(a.t, removed, "М3: близнец ничего не снял")
@@ -148,6 +155,39 @@ func (a *atcWorld) manifest(withoutItems bool) *manifest.Manifest {
 	m, err := manifest.Load(doc)
 	require.NoError(a.t, err, "загрузчик отверг фикстуру probemod (без items=%v)", withoutItems)
 	return m
+}
+
+// atcModelOnce — модель процесса ставится один раз на бинарь: она глобальна для
+// двери решения, а собранная из канона и probemod — надмножество канона, и
+// прочих проб пакета не меняет.
+var (
+	atcModelOnce sync.Once
+	atcModelErr  error // исход установки — для КАЖДОГО мира, а не только первого
+)
+
+// installATCModel — модель процесса из канона и доставленного probemod теми же
+// глаголами, что старт (`cmd/kaname/model_compose.go`, `installComposedModel`):
+// композиция → допуск → установка.
+func installATCModel(t *testing.T, m *manifest.Manifest) {
+	t.Helper()
+	atcModelOnce.Do(func() {
+		composed, _, cerr := modelcompose.Compose(authzmodel.DSL, []*manifest.Manifest{m})
+		if cerr != nil {
+			atcModelErr = fmt.Errorf("композиция модели: %w", cerr)
+			return
+		}
+		adm, aerr := authzmodel.Admit(composed)
+		if aerr != nil {
+			atcModelErr = fmt.Errorf("допуск модели: %w", aerr)
+			return
+		}
+		if len(adm.Findings) > 0 {
+			atcModelErr = fmt.Errorf("допуск модели отверг её (%s): %v", adm.Census(), adm.Findings)
+			return
+		}
+		atcModelErr = authzmodel.Install(composed)
+	})
+	require.NoError(t, atcModelErr, "М2: модель процесса из доставленного probemod")
 }
 
 // withdrawItemsInDB — М3 в базе, ручка остаётся на прежнем снимке.
