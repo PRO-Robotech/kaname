@@ -504,13 +504,20 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 предъявление сессию не гасит и не понижает. Форма кода у `totp` и `lookup_secret` судится до
 сверки, как у снятия: `Illegal argument code: must be 6 digits` либо
 `Illegal argument code: must be 10 characters of the backup-code alphabet`. Ответ —
-`{ "session", "assurance" }`, а у способа `lookup_secret` к нему добавлено состояние набора после
-траты `backupCodeSet` ([набор запасных кодов](#backup-code-set)):
+`{ "session", "assurance" }`:
 
 <CodeBlock language="json">
   {dedent`
     { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
       "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] } }
+  `}
+</CodeBlock>
+
+У способа `lookup_secret` к нему добавлено состояние набора после траты — `backupCodeSet`
+([набор запасных кодов](#backup-code-set)):
+
+<CodeBlock language="json">
+  {dedent`
     { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
       "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] },
       "backupCodeSet": { "remaining": 9, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" } }
