@@ -72,7 +72,7 @@ important:
     what: >-
       Предикат снятия перевода называет «манифест registry kacho переведён и kacho поднял
       пин», но не называет ВЕТКУ: kaname CI читает дефолтную ветку kacho
-      (platform-tree/action.yml:81). Снятие (#836) при переводе лишь в ветке эпика kacho
+      (platform-tree/action.yml:81). Снятие (kaname#836) при переводе лишь в ветке эпика kacho
       краснит сверку kaname. В строке предиката — «на origin/main kacho».
     predicate: 'git -C <kacho> show origin/main:services/registry/manifest.yaml | grep -c "subjects: \[system_class" → 1 ДО посадки kaname#836'
   - id: SD-829-3
@@ -89,7 +89,7 @@ important:
       Проза примечаний канона теперь побайтово равна прозе манифеста kacho и несёт
       `user:*`. Её правка одной стороной — та же взаимная блокировка, перевода для
       прозы нет. kacho#3251 меняет ТОЛЬКО слово субъекта; правка прозы — отдельным
-      парным шагом после #836.
+      парным шагом после kaname#836.
 
 orders:
   - 'tooling/диспетчер: в задания kacho#3251 и kaname#836 — условия SD-829-2/3/4'
