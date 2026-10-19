@@ -929,14 +929,28 @@ func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"backupCodes": out.BackupCodes,
-		"session":     sessionJSON(out.View),
-		"assurance":   assuranceJSON(out.Assurance),
+		"backupCodes":   out.BackupCodes,
+		"backupCodeSet": backupCodeSetJSON(out.BackupCodeSet),
+		"session":       sessionJSON(out.View),
+		"assurance":     assuranceJSON(out.Assurance),
 	})
 }
 
+// backupCodeSetJSON — состояние набора запасных кодов наружу (kaname#297 Р2):
+// ЕДИНСТВЕННЫЙ писатель ключа `backupCodeSet` во всех ответах раздела. Ключи
+// закрыты — `remaining`, `total`, `issuedAt` и `lastUsedAt` (нет ключа — из
+// набора не тратили); кодов и материала нет.
+func backupCodeSetJSON(v humansession.BackupCodeSetView) map[string]any {
+	set := map[string]any{"remaining": v.Remaining, "total": v.Total, "issuedAt": moment(v.IssuedAt)}
+	if v.LastUsed {
+		set["lastUsedAt"] = moment(v.LastUsedAt)
+	}
+	return set
+}
+
 // secondFactorStatus — чтение состояния (Р4): без признака; две формы тела —
-// `pending` и `active`; ключ `backupCodes` — только у заведённого.
+// `pending` и `active`; ключ `backupCodeSet` — только у заведённого фактора с
+// прочитанным набором (kaname#297 Р4: «сводки нет» — отсутствие ключа).
 func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 	if !h.admitted(w, r, PathSecondFactor, humansession.TextRequestNotPerformed) {
 		return
@@ -968,14 +982,7 @@ func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 		"stepUpMethods": methods,
 	}
 	if out.BackupCodeSet != nil {
-		codes := map[string]any{
-			"remaining": out.BackupCodeSet.Remaining, "total": out.BackupCodeSet.Total,
-			"issuedAt": moment(out.BackupCodeSet.IssuedAt),
-		}
-		if out.BackupCodeSet.LastUsed {
-			codes["lastUsedAt"] = moment(out.BackupCodeSet.LastUsedAt)
-		}
-		body["backupCodes"] = codes
+		body["backupCodeSet"] = backupCodeSetJSON(*out.BackupCodeSet)
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -1006,11 +1013,8 @@ func (h *Handler) removeSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
-	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
-	if out.BackupCodesRemaining != nil {
-		body["backupCodesRemaining"] = *out.BackupCodesRemaining
-	}
-	writeJSON(w, http.StatusOK, body)
+	// Набора после снятия нет — ключа `backupCodeSet` нет (kaname#297 Р4).
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)})
 }
 
 // regenerateBackupCodes — Ф12-25: новый набор один раз, ответ как у церемонии.
@@ -1040,9 +1044,10 @@ func (h *Handler) regenerateBackupCodes(w http.ResponseWriter, r *http.Request) 
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"backupCodes": out.BackupCodes,
-		"session":     sessionJSON(out.View),
-		"assurance":   assuranceJSON(out.Assurance),
+		"backupCodes":   out.BackupCodes,
+		"backupCodeSet": backupCodeSetJSON(out.BackupCodeSet),
+		"session":       sessionJSON(out.View),
+		"assurance":     assuranceJSON(out.Assurance),
 	})
 }
 
@@ -1085,8 +1090,8 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
-	if out.BackupCodesRemaining != nil {
-		body["backupCodesRemaining"] = *out.BackupCodesRemaining
+	if out.BackupCodeSet != nil {
+		body["backupCodeSet"] = backupCodeSetJSON(*out.BackupCodeSet)
 	}
 	writeJSON(w, http.StatusOK, body)
 }

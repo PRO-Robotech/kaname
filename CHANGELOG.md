@@ -70,6 +70,31 @@
   сносу. Порядок шагов — `INSTALL.md` §6 «Накат отказал, назвав таблицу с
   живыми строками».
 
+### Набор запасных кодов — одна форма в ответах второго фактора
+
+**ЛОМАЕТ**
+
+Состояние набора запасных кодов отдаётся одним ключом `backupCodeSet` — объект
+`{ remaining, total, issuedAt, lastUsedAt? }`, без кодов; `backupCodes` —
+только массив кодов в ответах подтверждения заведения и перечеканки. Сняты
+три прежние формы:
+
+- `GET /iam/v1/auth/second-factor`: объект `backupCodes` снят, его место —
+  `backupCodeSet`. Фактор заведён, а набор не читается — ключа нет (а не
+  `remaining: 0` и нулевой `issuedAt`).
+- `POST /iam/v1/auth/step-up` способом `lookup_secret`: плоский
+  `backupCodesRemaining` снят, остаток — `backupCodeSet.remaining`.
+- `POST /iam/v1/auth/second-factor/remove`: `backupCodesRemaining: 0` снят;
+  ответ — ровно `session` и `assurance`, «набора нет» — отсутствие ключа.
+
+Ответы `confirm` и перечеканки не ломаются: массив `backupCodes` на месте,
+`backupCodeSet` добавлен. Имя `backupCodesRemaining` в разделе не появляется
+больше нигде, `backupCodes` не означает объект никогда. Что сделать: клиент
+полосы читает остаток путём `backupCodeSet.remaining` во всех ответах, а
+отсутствие ключа понимает как «сводки набора нет» (по `totp.enrolled`: фактора
+нет либо набор не читается). Приёмка —
+`docs/engineering/acceptance/backup-code-set-has-one-form.md`. Kaname#297.
+
 ### Ключ доступа заводится и снимается сессией уровня 2
 
 **БЕЗОПАСНОСТЬ** · **ТРЕБУЕТ ДЕЙСТВИЯ**

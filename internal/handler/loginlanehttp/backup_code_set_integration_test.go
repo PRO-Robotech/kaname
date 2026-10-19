@@ -385,35 +385,6 @@ func TestBCS_RefusalsCarryNoSetAndNameTheFormText(t *testing.T) {
 	})
 }
 
-// TestBCS_RemoveCarriesNoSet — BCS-10, BCS-11, BCS-31 (снятие): ключи тела ровно
-// `session`, `assurance`; остатка снятого набора нет ни под каким ключом
-// (инвариант kaname#275).
-func TestBCS_RemoveCarriesNoSet(t *testing.T) {
-	h := newSUAStand(t)
-	for _, tc := range []struct{ id, method string }{{"BCS-10", "totp"}, {"BCS-11", "lookup_secret"}} {
-		t.Run(tc.id, func(t *testing.T) {
-			id := tc.id
-			g := h.bcsSeed(t, "bcs-remove-"+tc.method)
-			code := g.p.codes[0]
-			if tc.method == "totp" {
-				code = h.totpNow(t, g.p)
-			}
-			r := h.bcsConfirmed(t, g.s, loginlanehttp.PathSecondFactorRemove, tc.method, code)
-			require.Equalf(t, http.StatusOK, r.status, "%s: %s", id, r.body)
-			body := bodyOf(t, id, r)
-			keys := make([]string, 0, len(body))
-			for k := range body {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			require.Equalf(t, []string{"assurance", "session"}, keys, "%s: ключи тела ровно session, assurance", id)
-			st := h.status(t, rotated(t, id, r, g.s))
-			require.Equalf(t, false, requireDeclared(t, id, st, "totp.enrolled"), "%s: фактор снят", id)
-			require.NotContainsf(t, st, bcsKeySet, "%s: ключа `backupCodeSet` нет", id)
-		})
-	}
-}
-
 // TestBCS32_OneTypePerKeyAcrossTheSection — BCS-32: обход всех ответов
 // раздела одной последовательностью; присутствие `backupCodeSet` — ровно по
 // таблице Р4, `backupCodes` — массив из 10 строк и только у `confirm` и

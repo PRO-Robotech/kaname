@@ -717,14 +717,14 @@ func (h *overlapLane) enrolledFactor(t *testing.T, p overlapPerson) []string {
 	require.Len(t, out.BackupCodes, passwordverify.BackupCodeCount, "НЕ ВЫПОЛНИЛОСЬ: подтверждение не выдало полного набора")
 	// Подтверждение перевыпускает носитель сессии (Ф11 Р5): состояние читается
 	// новым.
-	require.Equal(t, passwordverify.BackupCodeCount, h.backupCodesRemaining(t, out.Bearer.CookieValue()),
+	require.Equal(t, passwordverify.BackupCodeCount, h.backupCodeSetRemaining(t, out.Bearer.CookieValue()),
 		"НЕ ВЫПОЛНИЛОСЬ: набор после заведения не полон")
 	return out.BackupCodes
 }
 
-// backupCodesRemaining — остаток набора глаголом состояния фактора из сессии
-// носителя (форма `TestLaneIntegration_F12_28_…`).
-func (h *overlapLane) backupCodesRemaining(t *testing.T, bearer string) int {
+// backupCodeSetRemaining — остаток набора (`BackupCodeSet.Remaining`) глаголом
+// состояния фактора из сессии носителя.
+func (h *overlapLane) backupCodeSetRemaining(t *testing.T, bearer string) int {
 	t.Helper()
 	st, err := h.status.Execute(h.ctx, humansession.StatusInput{Bearer: domain.PresentedSessionBearer(bearer)})
 	require.NoError(t, err, "чтение состояния фактора")

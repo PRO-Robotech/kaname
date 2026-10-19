@@ -74,9 +74,8 @@ type StepUpOutput struct {
 	View      SessionView
 	Bearer    domain.SessionBearer
 	Assurance AssuranceView
-	// BackupCodesRemaining — только в ответе, потребившем запасной код (Р4).
-	BackupCodesRemaining *int
-	// BackupCodeSet — состояние набора после траты (kaname#297 Р4).
+	// BackupCodeSet — состояние набора ПОСЛЕ траты; есть только в ответе,
+	// потребившем запасной код (kaname#297 Р4): иной способ набора не меняет.
 	BackupCodeSet *BackupCodeSetView
 }
 
@@ -233,8 +232,8 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpO
 		Assurance: assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}
 	if st.consumed {
-		remaining := st.remaining
-		out.BackupCodesRemaining = &remaining
+		set := st.set
+		out.BackupCodeSet = &set
 	}
 	return out, nil
 }

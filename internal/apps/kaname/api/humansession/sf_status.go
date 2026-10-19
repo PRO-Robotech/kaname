@@ -38,6 +38,13 @@ type BackupCodeSetView struct {
 	LastUsed   bool
 }
 
+// mintedSetView — состояние только что выпущенного набора: все коды целы,
+// момент выпуска — момент строки набора (тот же, что ляжет в
+// `ReplaceLookupSet`), трат не было. Его же отдаёт следующее чтение состояния.
+func mintedSetView(codes []string, issuedAt time.Time) BackupCodeSetView {
+	return BackupCodeSetView{Remaining: len(codes), Total: passwordverify.BackupCodeCount, IssuedAt: issuedAt}
+}
+
 // StatusOutput — состояние строки `totp` и набора, способы повышения и
 // доступность ключей (kaname#827, SUA Р6).
 type StatusOutput struct {
@@ -51,7 +58,9 @@ type StatusOutput struct {
 	// после подтверждения код не предъявляли, и ключа в ответе нет.
 	TOTPLastUsedAt time.Time
 	TOTPLastUsed   bool
-	// BackupCodeSet — есть только у заведённого фактора.
+	// BackupCodeSet — есть только у заведённого фактора и только о
+	// ПРОЧИТАННОМ наборе (kaname#297 Р2, Д-4 «а»): строки набора нет либо её
+	// материал не открывается — nil, а не нулевой остаток и нулевой момент.
 	BackupCodeSet *BackupCodeSetView
 	// AccessKeysAvailable — ключи доступа на установке включены.
 	AccessKeysAvailable bool
@@ -104,14 +113,14 @@ func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput
 	}
 	out.TOTPEnrolled, out.ConfirmedAt = true, row.CreatedAt
 	out.TOTPLastUsedAt, out.TOTPLastUsed = row.LastUsedAt, row.LastUsed
-	out.BackupCodeSet = &BackupCodeSetView{Total: passwordverify.BackupCodeCount}
 	set, err := uc.deps.Methods.Get(ctx, resolved.User.ID, domain.LoginMethodLookupSecret)
 	switch {
 	case err == nil:
-		out.BackupCodeSet.IssuedAt = set.CreatedAt
-		out.BackupCodeSet.LastUsedAt, out.BackupCodeSet.LastUsed = set.LastUsedAt, set.LastUsed
 		if n, ok := uc.deps.Sets.SetSize(set.Verifier); ok {
-			out.BackupCodeSet.Remaining = n
+			out.BackupCodeSet = &BackupCodeSetView{
+				Remaining: n, Total: passwordverify.BackupCodeCount,
+				IssuedAt: set.CreatedAt, LastUsedAt: set.LastUsedAt, LastUsed: set.LastUsed,
+			}
 		} else {
 			uc.deps.Logger.Error("second factor status: backup code set unreadable — our data, not the caller's input",
 				"user_id", string(resolved.User.ID))
