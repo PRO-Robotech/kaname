@@ -45,6 +45,10 @@ const (
 	anonLanePrincipal = "registry-anonymous"
 	// anonLanePace — темп анонимной выдачи, которого пробы пары не исчерпают.
 	anonLanePace = "50"
+	// anonLaneTrustDomain и anonLaneForwarderSAN — домен доверия пробы и
+	// объявленный в нём доверенный пересыльщик точки (kaname#930).
+	anonLaneTrustDomain  = "kacho.cloud"
+	anonLaneForwarderSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-registry"
 )
 
 // anonymousLaneFromSettings собирает докерную полосу из НАСТРОЙКИ службы: env →
@@ -60,11 +64,15 @@ func anonymousLaneFromSettings(t *testing.T, principal, pace string, pool *pgxpo
 	if pace != "" {
 		t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC", pace)
 	}
+	// Доверенный пересыльщик точки (kaname#930) — прокси реестра в домене
+	// доверия пробы: без него страж старта не пускает анонимный поток.
+	t.Setenv("KANAME_AUTHN__TRUST_DOMAIN", anonLaneTrustDomain)
+	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN", anonLaneForwarderSAN)
 	cfg, err := config.Load("")
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if err := cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken); err != nil {
+	if err := cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken, cfg.AuthN.TrustDomain()); err != nil {
 		t.Fatalf("страж старта отверг настройку пробы: %v", err)
 	}
 	bc, err := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{

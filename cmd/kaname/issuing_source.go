@@ -2,40 +2,52 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // issuing_source.go — страж режима слушателя выдачи при собранной церемонии
-// (приёмка ceremony-pace-is-named-by-number.md, Р7 п.5; kaname#315).
+// (приёмка ceremony-pace-is-named-by-number.md, Р7 п.5; kaname#315) и при
+// поднятом анонимном потоке докерной полосы (kaname#930).
 package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
 
-// requireIssuingListenerAsksForACertificate — при собранной церемонии слушатель
-// выдачи обязан ЗАПРАШИВАТЬ клиентский сертификат и проверять предъявленный
+// requireIssuingListenerAsksForACertificate — при собранной церемонии И при
+// поднятом анонимном потоке докерной полосы слушатель выдачи обязан
+// ЗАПРАШИВАТЬ клиентский сертификат и проверять предъявленный
 // (`optional-mutual`); иной режим — отказ старта.
 //
-// Адрес источника осей П3 и П4 берётся из заголовка края ТОЛЬКО у пира с
-// проверенным сертификатом края (правило `issuingsource`). В режиме
+// Адрес источника осей темпа берётся из заголовка ТОЛЬКО у пира с проверенным
+// сертификатом: края (оси П3 и П4) либо объявленного доверенного пересыльщика
+// точки анонимной выдачи (kaname#930; правило `issuingsource`). В режиме
 // `server-tls-only` сертификата не спрашивают вовсе: каждый ретранслированный
-// краем запрос получал бы ключ адреса самого края, и все люди за краем делили бы
+// запрос получал бы ключ адреса самого ретранслятора, и все за ним делили бы
 // один предел — тихо, без единого отказа старта. `mutual` отверг бы
 // вызывающих без сертификата, которым поверхность выдачи открыта.
 //
 // Судится ЭФФЕКТИВНЫЙ режим — тот, что уходит в транспорт: незаданная ручка
 // читается своим умолчанием `server-tls-only` и потому отвергается так же.
 func requireIssuingListenerAsksForACertificate(cfg config.Config, m config.MTLSConfig) error {
-	if !cfg.AuthN.CeremonyAssembled() {
+	var on []string
+	if cfg.AuthN.CeremonyAssembled() {
+		on = append(on, "the own OAuth ceremony is on")
+	}
+	if cfg.APIServer.RegistryToken.AnonymousLaneDeclared() {
+		on = append(on, "the anonymous registry token lane is on (api-server.registry-token.anonymous-client-id)")
+	}
+	if len(on) == 0 {
 		return nil
 	}
 	want := config.IssuingListenerRequestingModeName()
 	if got := m.RegistryTokenClientAuthModeValue(); got != want {
-		return fmt.Errorf("the own OAuth ceremony is on, and the issuing listener does not ask for a client "+
+		return fmt.Errorf("%s, and the issuing listener does not ask for a client "+
 			"certificate: KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE reads %q, and it must be %q — the "+
-			"source address of the pace axes is taken from the edge header only on a verified edge certificate, "+
-			"so without it everyone behind the edge would share the edge's own limit; refusing to start", got, want)
+			"source address of the pace axes is taken from a forwarded header only on a verified certificate of "+
+			"the edge or of the declared forwarder, so without it everyone behind them would share one limit; "+
+			"refusing to start", strings.Join(on, ", and "), got, want)
 	}
 	return nil
 }

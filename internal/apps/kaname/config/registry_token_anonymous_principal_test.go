@@ -38,9 +38,12 @@ func loadRegistryLane(t *testing.T, principal string) (config.Config, error) {
 	// Темп анонимной выдачи объявлен: предмет этих проб — форма принципала, а
 	// поток без темпа страж отвергает отдельно (kaname#928).
 	t.Setenv(anonPaceEnv, "20")
+	// Доверенный пересыльщик объявлен по той же причине (kaname#930).
+	t.Setenv(trustDomainEnv, probeTrustDomain)
+	t.Setenv(anonForwarderEnv, registryForwarderSAN)
 	cfg, err := config.Load("")
 	require.NoError(t, err)
-	return cfg, cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken)
+	return cfg, cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken, cfg.AuthN.TrustDomain())
 }
 
 // Половина первая: объявленная форма — имя в нижнем регистре из слов через
