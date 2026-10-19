@@ -140,7 +140,7 @@ func (w *p3) role(id string, rules domain.Rules) {
 	if err != nil {
 		w.t.Fatalf("роль %s: %v", id, err)
 	}
-	sels := r.Rules.MaterializingSelectors()
+	sels := facts.GrantSelectors(r.Rules.MaterializingSelectors())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", id, err)
 	}

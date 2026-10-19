@@ -284,10 +284,10 @@ type cancellingVerifier struct {
 	cancel context.CancelFunc
 }
 
-func (v cancellingVerifier) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
-	res := v.Verifier.Verify(stored, presented)
+func (v cancellingVerifier) Verify(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.Result, error) {
+	res, err := v.Verifier.Verify(ctx, stored, presented)
 	v.cancel()
-	return res
+	return res, err
 }
 
 // failureCounts — следов неверных предъявлений в базе по адресу личности и по

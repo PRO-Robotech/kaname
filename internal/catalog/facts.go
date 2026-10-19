@@ -474,19 +474,15 @@ func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []str
 //
 // Порознь каждое направление выполнимо портом, который не производит пар
 // НИКОГДА, — поэтому утверждаются оба.
+//
+// Проекция роли есть ОБЪЕДИНЕНИЕ глаголов её правил (`GrantSelectors`): одно
+// вычисление на обе стороны, и разойтись роль с правилом не может.
 func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
 	seen := make(map[domain.RoleVerb]bool)
 	out := make([]domain.RoleVerb, 0, len(selectors))
-	for _, sel := range selectors {
+	for _, sel := range f.GrantSelectors(selectors) {
 		for _, dotted := range sel.ObjectTypes {
-			if dotted == "" {
-				continue
-			}
-			fgaType, ok := f.FGAObjectType(dotted)
-			if !ok {
-				continue
-			}
-			for _, verb := range f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType)) {
+			for _, verb := range sel.Grants[dotted] {
 				pair := domain.RoleVerb{ObjectType: dotted, Verb: verb}
 				if seen[pair] {
 					continue
@@ -495,6 +491,45 @@ func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain
 				out = append(out, pair)
 			}
 		}
+	}
+	return out
+}
+
+// GrantSelectors — селекторы с глаголами, которые каждое ПРАВИЛО даёт на каждом
+// своём типе (`RuleSelector.Grants`), по живому каталогу (kaname#878).
+//
+// Решение о доступе судит глагол ПО ПРАВИЛУ: объект получает глагол только от
+// того правила, чей селектор его выбрал. Проекция роли (`RoleVerbsFromSelectors`)
+// — объединение этих наборов; держать глагол на уровне роли и охват на уровне
+// правила значило бы сочетать глагол одного правила с охватом другого.
+//
+// Тип, которого живой каталог не знает либо которому правило не даёт ни одного
+// глагола, ключа не получает: «тип есть в охвате, глаголов нет» и «типа нет»
+// для решения одинаковы — глагола нет. Карта при этом НЕ nil и у такого
+// селектора: nil означает «не вычислено», и писатель его отвергает.
+//
+// Возвращаются КОПИИ: вход вызывающему принадлежит, и портить его заполнением на
+// месте нельзя.
+func (f *Facts) GrantSelectors(selectors []domain.RuleSelector) []domain.RuleSelector {
+	out := make([]domain.RuleSelector, len(selectors))
+	for i, sel := range selectors {
+		grants := make(map[string][]string, len(sel.ObjectTypes))
+		for _, dotted := range sel.ObjectTypes {
+			if _, done := grants[dotted]; done || dotted == "" {
+				continue
+			}
+			fgaType, ok := f.FGAObjectType(dotted)
+			if !ok {
+				continue
+			}
+			verbs := f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType))
+			if len(verbs) == 0 {
+				continue
+			}
+			grants[dotted] = verbs
+		}
+		sel.Grants = grants
+		out[i] = sel
 	}
 	return out
 }

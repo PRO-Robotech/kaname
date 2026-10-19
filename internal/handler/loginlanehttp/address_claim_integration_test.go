@@ -987,10 +987,10 @@ type a458VerifyBarrier struct {
 	b *a458Barrier
 }
 
-func (v a458VerifyBarrier) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
-	res := v.Verifier.Verify(stored, presented)
+func (v a458VerifyBarrier) Verify(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.Result, error) {
+	res, err := v.Verifier.Verify(ctx, stored, presented)
 	v.b.pass()
-	return res
+	return res, err
 }
 
 // a458MomentBarrier — обёртка над источником моментов выдачи: отдаёт момент и

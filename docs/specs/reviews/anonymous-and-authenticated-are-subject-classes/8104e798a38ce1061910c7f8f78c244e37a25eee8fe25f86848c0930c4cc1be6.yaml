@@ -1,0 +1,159 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 8104e798a38ce1061910c7f8f78c244e37a25eee8fe25f86848c0930c4cc1be6
+  revision: 15
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписано туда при правке. Вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: e0f69f3ef
+  content_commit: 4775eb4930370cd43dae03cb955c164d3e1ff5d3
+  content_commit_note: >-
+    Коммит слияния `#893 merge main: догон ствола`, родители aa5f25f25 (ветка 893, документ
+    c89f7957…) и db8bcb7e8 (ствол, документ dfbe47bf…), общий предок e0f69f3ef (документ
+    bd6325e3…). Голова не отправлена.
+  branch: "893"
+  task: PRO-Robotech/kaname#893
+  related_tasks: [PRO-Robotech/kaname#495, PRO-Robotech/kaname#829, PRO-Robotech/corelib#116]
+  lines: 2231
+  round: 1
+  round_scope: >-
+    Круг 1 редакции 15 — только дельта слияния двух одобренных редакций: c89f7957… (ред. 14
+    ветки kaname#893, запись этого каталога) и dfbe47bf… (ред. 13 ствола, запись
+    docs/changes/kn-829/reviews/acceptance/dfbe47bf….yaml). Содержание сторон не
+    переоткрывалось: обе одобрены своими записями (verdict APPROVED, event.status performed).
+    Предмет: обе стороны целы, ничего не потеряно и не продублировано, нумерация без
+    коллизий, производители и близнецы SC-39 и SC-74…77 на месте, инварианты не противоречат.
+  predecessor_records:
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/c89f7957db21357752795d5f8252c30b5bd19bd71eac76955649be7d971bff8f.yaml
+    - docs/changes/kn-829/reviews/acceptance/dfbe47bfe7b2bb1f047d6462df60019e3b32401f6f93d589cf66b698f6cdb97c.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kn-832 @4775eb493 → 8104e798…1be6, совпало с заданием.
+    git show HEAD^1:<док> | sha256sum → c89f7957…; HEAD^2 → dfbe47bf…; e0f69f3ef → bd6325e3….
+  measurement_revisions: >-
+    kaname 4775eb493 (ветка 893, коммит слияния), aa5f25f25, db8bcb7e8, e0f69f3ef.
+  neighbours_pinned:
+    register-resource-checks-the-module-vocabulary.md: 3236ea00c5d3be71b23792beec7b04178a4537b56dfad0a8f78ac03f73d8f6b8
+  neighbours_note: >-
+    Сосед слиянием не тронут: sha256sum в копии → 3236ea00…f8b6, ствол его не менял. Его
+    одобряет существующая запись; новой записи на тот же отпечаток рецензент не пишет (fa-b7).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T19:30:00+03:00'
+
+method: >-
+  Конфликт воспроизведён: git merge-file --diff3 -p ours(HEAD^1) base(e0f69f3ef)
+  theirs(HEAD^2) → rc=2, хунков конфликта 2 (история в шапке; разделы редакций в конце).
+  Вне конфликтов текст автослияния сравнён с редакцией 15: union(ours+theirs в хунках) против
+  HEAD — отличий ровно в местах, названных разделом «Редакция 15: слияние ветвей»: четыре
+  дописанные строки истории (a01d921c, 7585d2e4, dfbe47bf, c89f7957), строка истории
+  редакции 15, строка «Дата/редакция», сводка «Редакции 13 ствола / 13–14 ветки / 15»,
+  ревизии замера SC-39 и слияния, уточнение «ветки kaname#893» в «Что НЕ входит» п. 2,
+  перенос раздела «Редакция 13: что исправлено» перед разделами ветки и новый раздел
+  «Редакция 15: слияние ветвей». Иных отличий нет.
+
+delta_check:
+  - item: обе стороны целы
+    result: >-
+      SC-39 (весь блок до SC-40) совпадает со стволом побайтово; SC-74…77 (до «Сценарий →
+      производитель») совпадают с веткой побайтово; инварианты совпадают с веткой (инвариант 8
+      есть, ствол инвариантов не менял); раздел «Редакция 13: что исправлено» совпадает со
+      стволом, «Редакция 12», «Редакция 13: входное слово публикации», «Редакция 14» — с веткой
+      (отличие — только хвостовая пустая строка перед следующим разделом).
+  - item: производители
+    result: >-
+      Таблица «Сценарий → производитель» против ветки отличается только тремя строками
+      SC-39 (а),(б) · (в) · (г) ствола вместо прежней строки SC-39; против ствола — только
+      четырьмя строками SC-74…77 ветки. Производитель у каждого «Тогда» SC-39 и SC-74…77 есть.
+  - item: DoD
+    result: >-
+      Против ветки: S1 получил SC-39 (а)–(в) и блок проб (а)–(в), S3 — SC-39 (г) (это и есть
+      дельта ствола). Против ствола: добавлен блок S6 (дельта ветки). Потерь нет.
+  - item: близнецы
+    result: >-
+      Упоминаний «близнец»: база 90, ветка 104 (+14), ствол 98 (+8), редакция 15 — 112 =
+      90+14+8. Близнецы SC-39 (а)–(в) и SC-74…77 — дословно со своих сторон.
+  - item: нумерация сценариев
+    result: >-
+      grep -cE '^#### SC-' → 67; дублей ID 0 (sort | uniq -d пусто); порядок заголовков равен
+      порядку ветки (ствол добавил только подзаголовки ##### SC-39 (а)–(г)). Коллизий нет.
+  - item: нумерация редакций
+    result: >-
+      Номер 13 занят дважды; решение автора — не перенумеровывать, различать «ствола» /
+      «ветки kaname#893», таблица соответствия в разделе редакции 15. Сверено с записями:
+      dfbe47bf revision 13, 80edd84b revision 13, c89f7957 revision 14, a01d921c revision 8,
+      7585d2e4 revision 11 — таблица верна. Соседняя приёмка (строка 185) говорит «редакция
+      13» про SC-77 — это 13 ветки, соответствие записано. Двусмысленность устранима текстом
+      и без перенумерации; перенумерация разорвала бы связь записей с текстом. Не блокирует.
+  - item: строки истории
+    result: >-
+      Дописанные строки сверены с записями: a01d921c — 2026-10-17, ред. 8, APPROVED;
+      7585d2e4 — 2026-10-17, ред. 11, APPROVED; dfbe47bf — 2026-10-18, ред. 13, APPROVED;
+      c89f7957 — 2026-10-18, ред. 14, APPROVED. Каждая запись упомянута строкой ровно раз.
+      Ревизия замера SC-39 b87a82b3e совпадает с subject_revision события dfbe47bf.
+  - item: инварианты
+    result: >-
+      Противоречия нет: SC-39 (г) спрашивает модель субъектом system_class:anonymous и
+      опирается на публикацию SC-12; S6 делает system_class:anonymous словом публикации с тем
+      же исходом, что user:*, инвариант 8 сужает публикацию до v_get на публикуемом типе
+      домена вызывающего — SC-39 (г) этим не задет.
+
+blocking: []
+minor:
+  - >-
+    История в шапке не строго хронологична: строки ствола (2026-10-16/17) стоят после строк
+    ветки до 2026-10-18, дописанные строки — после строки редакции 14. Это следствие
+    добавления без переписывания; читается по датам. Учесть, не правка.
+  - >-
+    Строки истории «редакция 13» самих ветвей (ствола — после c3fda648, ветки — после
+    bd6325e3) оставлены дословно без уточнения; уточнение дано строкой редакции 15 и таблицей.
+
+constructibility: >-
+  Новых «Дано» редакция не вводит: каждое — дословно со стороны, одобренной с посевом своей
+  записью. Посеяно 0 из 0, «не выполнилось» 0.
+
+checks_run: >-
+  KACHO_HOME_KACHO=…/project/kacho go test -count=1 -run 'Acceptance' ./internal/check/ в
+  tmp/kn-832 @4775eb493 → ok 10.908s, rc=0.
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-18T17:15:36Z"
+  reason: >-
+    Вердикт — APPROVED на 8104e798…. Одобрение вступает в силу событием, а оно не опубликовано
+    (event.status not_performed). Курьер тем же заходом приводит этот блок к факту.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 8104e798a38ce1061910c7f8f78c244e37a25eee8fe25f86848c0930c4cc1be6 · ред. 15, слияние ветки kaname#893 (c89f7957…) со стволом (dfbe47bf…): обе стороны целы, 67 сценариев без коллизий, блокирующих 0; сосед 3236ea00… не тронут"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#893
+  status: performed
+  published: true
+  database_id: 6252780417
+  node_id: "IC_kwDOUO26pM8AAAABdLHbgQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/893#issuecomment-6252780417"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6252780417"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T17:15:36Z"
+  body_sha256: "33301d981fd34aa7d7a24de410379633f64fb54457727c9080659fb7532d55ea"
+  subject_sha256: "8104e798a38ce1061910c7f8f78c244e37a25eee8fe25f86848c0930c4cc1be6"
+  subject_revision_commit: "ae8948820858f750d2538c796f1ab599e5ae13bc"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - c89f7957db21357752795d5f8252c30b5bd19bd71eac76955649be7d971bff8f.yaml
+    - ../../../changes/kn-829/reviews/acceptance/dfbe47bfe7b2bb1f047d6462df60019e3b32401f6f93d589cf66b698f6cdb97c.yaml

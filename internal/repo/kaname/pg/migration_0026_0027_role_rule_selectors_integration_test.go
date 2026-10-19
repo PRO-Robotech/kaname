@@ -77,8 +77,8 @@ func TestMigration0026_RoleRuleSelectorsTable(t *testing.T) {
 	// role_rule_selectors_arm_shape). The 0026/0027 invariants under test (column
 	// existence, FK ON DELETE CASCADE, PK uniqueness) are unchanged.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_abc', ARRAY['compute.instance'], '{"env":"prod"}'::jsonb, 'labels', '{}')`,
+		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names, verbs_by_type)
+		VALUES ($1, 'fp_abc', ARRAY['compute.instance'], '{"env":"prod"}'::jsonb, 'labels', '{}', '{}'::jsonb)`,
 		roleID)
 	require.NoError(t, err, "insert role_rule_selectors row")
 
@@ -93,8 +93,8 @@ func TestMigration0026_RoleRuleSelectorsTable(t *testing.T) {
 	// — живая строка каталога, строки по-прежнему различаются, ключ по-прежнему
 	// один.
 	_, dErr := pool.Exec(ctx, `
-		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_abc', ARRAY['storage.volumes'], '{"env":"dev"}'::jsonb, 'labels', '{}')`,
+		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names, verbs_by_type)
+		VALUES ($1, 'fp_abc', ARRAY['storage.volumes'], '{"env":"dev"}'::jsonb, 'labels', '{}', '{}'::jsonb)`,
 		roleID)
 	require.Error(t, dErr, "duplicate (role_id, rule_fp) must violate PK")
 	var pgErr *pgconn.PgError

@@ -265,8 +265,9 @@ func seedRoleGrantingUserRead(t *testing.T, w *ciWorld, roleID, bindingID, subje
 	w.exec(t, `INSERT INTO kaname.role_verb (role_id, object_type, verb)
 	           VALUES ($1, 'iam.user', 'get')`, roleID)
 	w.exec(t, `INSERT INTO kaname.role_rule_selectors
-	             (role_id, rule_fp, arm, object_types, match_labels)
-	           VALUES ($1, 'fp-actas', 'anchor', ARRAY['iam.user'::text], '{}'::jsonb)`, roleID)
+	             (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+	           VALUES ($1, 'fp-actas', 'anchor', ARRAY['iam.user'::text], '{}'::jsonb,
+	                   '{"iam.user": ["get"]}'::jsonb)`, roleID)
 	// Выдача и строка её набора — одним оператором (kaname#902).
 	w.exec(t, bindingset.With(`INSERT INTO kaname.access_bindings
 	             (id, subject_type, subject_id, role_id, resource_type, resource_id, status)

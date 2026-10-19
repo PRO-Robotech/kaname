@@ -47,6 +47,28 @@ var classReadVerbs = map[string]bool{"get": true, "list": true}
 // IsClassReadVerb — глагол чтения, допустимый у выдачи классу (Р4, SC-23).
 func IsClassReadVerb(verb string) bool { return classReadVerbs[NormalizeVerb(verb)] }
 
+// LegacyPublicWildcardWord — прежнее слово публичного чтения в составе субъектов
+// манифеста. Рендер блока переводит его в класс (`modelrender.subjectWords`), и
+// поэтому оно — одно из написаний класса ([IsClassSubjectWord]).
+const LegacyPublicWildcardWord = "user:*"
+
+// IsClassSubjectWord — слово состава субъектов называет системный класс:
+// `system_class`, `system_class:<класс>` либо прежнее слово
+// [LegacyPublicWildcardWord], которое рендер переводит в класс.
+//
+// Единственное написание правила (kaname#866, CE-03): его читают загрузчик
+// манифеста (Р2 — класс в действии чтения ресурса с ключом) и допуск собранной
+// модели (Д3 — запись класса в блоке нового типа). Узнаётся по ВИДУ слова, а не
+// по имени класса: имена — закрытый словарь, и запись с незнакомым именем
+// обязана дойти до отказа, а не проскочить мимо него.
+func IsClassSubjectWord(word string) bool {
+	if word == LegacyPublicWildcardWord {
+		return true
+	}
+	kind, _, _ := strings.Cut(word, ":")
+	return SubjectType(kind) == SubjectTypeSystemClass
+}
+
 // IsSystemClassName — имя из закрытого словаря классов.
 func IsSystemClassName(id SubjectID) bool {
 	return id == ClassAnonymous || id == ClassAuthenticated
@@ -143,9 +165,10 @@ func SpeakerRefusal(speaker string) error {
 // PublicationSubject — ХРАНИМЫЙ субъект публикации объекта для чтения без
 // входа (Р8, SC-12).
 //
-// Входное слово соседа не меняется: владелец ресурса публикует парой `user:*`
-// + `v_get` (`register-resource-checks-the-module-vocabulary.md`). Здесь —
-// ЕДИНСТВЕННЫЙ перевод этого слова в субъекта, которого хранит служба. Его
+// Входных слов у соседа два, перечень закрыт правилом приёма фундамента
+// (`corelib/authz/proxytuple.PublicReadSubjects`, kaname#893): переходное
+// `user:*` и `system_class:anonymous`, оба + `v_get`. Здесь — ЕДИНСТВЕННЫЙ
+// субъект, которого хранит служба, какое бы слово ни пришло. Его
 // зовут запись и снятие публикации, разбор остаточных фактов и миграция
 // переезда: снятие, назвавшее другое написание, удалило бы несуществующий факт,
 // и чтение анонимом устояло бы (SC-13).
@@ -156,7 +179,8 @@ const PublicationRelation = "v_get"
 
 // IsStoredPublication — хранимый факт есть публикация для чтения без входа.
 // Узнаётся по идентичности хранимой пары, а не по входному слову: после
-// переезда входное слово (`user:*`) в фактах не встречается.
+// переезда переходное слово (`user:*`) в фактах не встречается, а слово-класс
+// совпадает с хранимым лишь написанием, не происхождением.
 func IsStoredPublication(subject, relation string) bool {
 	return subject == PublicationSubject && relation == PublicationRelation
 }

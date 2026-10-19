@@ -834,7 +834,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	// F8: сохраняется выбор объектов (target) и его отпечаток по множеству.
 	// Отпечаток — ключевой столбец частичной UNIQUE действующей выдачи (одинаковая
 	// цель → столкновение, разные пообъектные цели сосуществуют). Пусто или весь
-	// якорь → "all".
+	// якорь → "all". Форма хранения одна — `relverdict.EncodeTarget`.
 	targetJSON, err := relverdict.EncodeTarget(b.Target)
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())

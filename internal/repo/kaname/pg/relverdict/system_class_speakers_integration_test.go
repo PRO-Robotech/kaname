@@ -92,6 +92,14 @@ func TestSystemClass_CE01_ThreeFormsAgreeOnSpeakerClasses(t *testing.T) {
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ('rol-sc', $1, 'update')`,
 			catalogFormOf(t, "vpc_network"))
+		// Пишущий глагол несёт и само правило роли (kaname#878): решение о
+		// доступе берёт глагол со строки селектора, и без него человек не
+		// получил бы `update` вовсе — контроль пробы потерял бы предмет.
+		exec(t, ctx, tx,
+			`UPDATE kaname.role_rule_selectors
+			    SET verbs_by_type = jsonb_build_object($1::text, jsonb_build_array('get', 'update'))
+			  WHERE role_id = 'rol-sc'`,
+			catalogFormOf(t, "vpc_network"))
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.groups (id, account_id, name) VALUES ('grp-sc', 'acc-1', 'grp-sc')`)
 		exec(t, ctx, tx,

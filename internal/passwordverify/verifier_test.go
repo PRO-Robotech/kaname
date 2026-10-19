@@ -67,6 +67,39 @@ func newVerifier(t *testing.T, capacity int, obs passwordverify.Observer) *passw
 	return v
 }
 
+// verify — проверка в контексте пробы. Ошибка проверяющего — только конец
+// вызова до места вычисления (kaname#892); у пробы, вызова не обрывающей, её
+// быть не может, и она — отказ пробы, а не исход. Отказ — через Errorf: помощник
+// зовётся и из горутин.
+func verify(t testing.TB, v *passwordverify.Verifier, stored domain.LoginVerifier, presented string) passwordverify.Result {
+	t.Helper()
+	res, err := v.Verify(t.Context(), stored, presented)
+	if err != nil {
+		t.Errorf("проверка не состоялась: %v", err)
+	}
+	return res
+}
+
+// verifyPresented — [verify] для значения, отдающего себя методом.
+func verifyPresented(t testing.TB, v *passwordverify.Verifier, stored domain.LoginVerifier, presented passwordverify.Presented) passwordverify.Result {
+	t.Helper()
+	res, err := v.VerifyPresented(t.Context(), stored, presented)
+	if err != nil {
+		t.Errorf("сверка не состоялась: %v", err)
+	}
+	return res
+}
+
+// setCandidate — кандидат набора в контексте пробы (см. [verify]).
+func setCandidate(t testing.TB, v *passwordverify.Verifier, stored domain.LoginVerifier, presented string) passwordverify.SetCandidate {
+	t.Helper()
+	c, err := v.SetCandidate(t.Context(), stored, presented)
+	if err != nil {
+		t.Errorf("кандидат набора не вычислен: %v", err)
+	}
+	return c
+}
+
 // verifierOf — значение способа входа из строки материала.
 func verifierOf(t *testing.T, material string) domain.LoginVerifier {
 	t.Helper()
@@ -157,12 +190,12 @@ func TestVerify_EachFormatOfTheRegistryIsReadByItsOwnVerifier(t *testing.T) {
 			v := newVerifier(t, 4, obs)
 			stored := verifierOf(t, c.material)
 
-			got := v.Verify(stored, rightPassword)
+			got := verify(t, v, stored, rightPassword)
 			require.Equal(t, passwordverify.OutcomeMatched, got.Outcome,
 				"верный пароль обязан давать «совпал» на своём формате")
 			require.Equal(t, c.format, got.Format, "исход обязан называть формат, по которому читали")
 
-			bad := v.Verify(stored, wrongPassword)
+			bad := verify(t, v, stored, wrongPassword)
 			require.Equal(t, passwordverify.OutcomeMismatched, bad.Outcome,
 				"неверный пароль обязан давать «не совпал», а не иной исход")
 			require.Equal(t, c.format, bad.Format)
@@ -192,7 +225,7 @@ func TestVerify_FormatOutsideTheRegistryIsOurErrorWithAPositiveControl(t *testin
 		"нет разметки вовсе",
 	}
 	for _, material := range outside {
-		got := v.Verify(verifierOf(t, material), rightPassword)
+		got := verify(t, v, verifierOf(t, material), rightPassword)
 		require.Equalf(t, passwordverify.OutcomeFormatNotInRegistry, got.Outcome,
 			"признак значения %.12q… обязан быть назван вне перечня, а не пропущен на успешный путь", material)
 		require.Truef(t, got.Outcome.IsTerminal(), "исход обязан быть терминален")
@@ -201,7 +234,7 @@ func TestVerify_FormatOutsideTheRegistryIsOurErrorWithAPositiveControl(t *testin
 	// Положительный контроль: годное значение рядом даёт «совпал» верным
 	// паролем — без него утверждения выше зеленели бы на проверяющем,
 	// отвергающем всё.
-	ok := v.Verify(verifierOf(t, bcryptValue(t, rightPassword, 10)), rightPassword)
+	ok := verify(t, v, verifierOf(t, bcryptValue(t, rightPassword, 10)), rightPassword)
 	require.Equal(t, passwordverify.OutcomeMatched, ok.Outcome, "положительный контроль не прошёл")
 
 	require.Equal(t, len(outside), obs.count(passwordverify.OutcomeFormatNotInRegistry),
@@ -242,7 +275,7 @@ func TestVerify_UnparsableBodyNeverMatches(t *testing.T) {
 
 			// Ни при каком предъявленном значении — в том числе при ПУСТОМ.
 			for _, presented := range []string{rightPassword, wrongPassword, ""} {
-				got := v.Verify(stored, presented)
+				got := verify(t, v, stored, presented)
 				require.Equalf(t, passwordverify.OutcomeBodyNotParsable, got.Outcome,
 					"неразбираемое тело обязано давать «тело не разбирается» при предъявленном %q", presented)
 				require.True(t, got.Outcome.IsOurError())
@@ -255,8 +288,8 @@ func TestVerify_UnparsableBodyNeverMatches(t *testing.T) {
 	// Положительный контроль: годное значение того же формата даёт «совпал».
 	obs := newRecordingObserver()
 	v := newVerifier(t, 4, obs)
-	require.Equal(t, passwordverify.OutcomeMatched, v.Verify(verifierOf(t, good), rightPassword).Outcome)
-	require.Equal(t, passwordverify.OutcomeMatched, v.Verify(verifierOf(t, goodArgon), rightPassword).Outcome)
+	require.Equal(t, passwordverify.OutcomeMatched, verify(t, v, verifierOf(t, good), rightPassword).Outcome)
+	require.Equal(t, passwordverify.OutcomeMatched, verify(t, v, verifierOf(t, goodArgon), rightPassword).Outcome)
 }
 
 // TestVerify_ParametersOutsideAdmissibilityAreRefusedBeforeComputing — 05.6:
@@ -278,7 +311,7 @@ func TestVerify_ParametersOutsideAdmissibilityAreRefusedBeforeComputing(t *testi
 		t.Run(c.name, func(t *testing.T) {
 			obs := newRecordingObserver()
 			v := newVerifier(t, 4, obs)
-			got := v.Verify(verifierOf(t, c.material), rightPassword)
+			got := verify(t, v, verifierOf(t, c.material), rightPassword)
 			require.Equal(t, passwordverify.OutcomeBodyNotParsable, got.Outcome,
 				"значение за границей допустимости обязано отвергаться разбором, а не вычисляться: "+
 					"библиотека на части таких значений падает, а на памяти ниже 8·p молча считает иную функцию")
@@ -297,7 +330,7 @@ func TestVerify_ParametersOutsideAdmissibilityAreRefusedBeforeComputing(t *testi
 		t.Run("близнец: "+c.name, func(t *testing.T) {
 			obs := newRecordingObserver()
 			v := newVerifier(t, 4, obs)
-			got := v.Verify(verifierOf(t, c.material), rightPassword)
+			got := verify(t, v, verifierOf(t, c.material), rightPassword)
 			require.Equal(t, passwordverify.OutcomeMatched, got.Outcome,
 				"значение РОВНО на границе допустимости обязано читаться: граница включена")
 		})
@@ -311,7 +344,7 @@ func TestVerify_ParametersOutsideAdmissibilityAreRefusedBeforeComputing(t *testi
 	// приведённая к однобайтовому типу параллельность дала бы панику.
 	obs := newRecordingObserver()
 	v := newVerifier(t, 4, obs)
-	got := v.Verify(verifierOf(t, argon2idValueWithParams(t, 65536, 1, 255)), rightPassword)
+	got := verify(t, v, verifierOf(t, argon2idValueWithParams(t, 65536, 1, 255)), rightPassword)
 	require.Equal(t, passwordverify.OutcomeParamsAboveCeiling, got.Outcome,
 		"параллельность 255 обязана дойти до сверки с потолком: тип читателя её вмещает")
 }
@@ -327,7 +360,7 @@ func TestVerify_MissingMaterialIsNotAMismatch(t *testing.T) {
 	// строке и не сравнивается с ней — сравнение пустого с пустым дало бы
 	// «совпал» у человека, пароля не заводившего.
 	for _, presented := range []string{rightPassword, wrongPassword, ""} {
-		got := v.Verify(domain.LoginVerifier{}, presented)
+		got := verify(t, v, domain.LoginVerifier{}, presented)
 		require.Equalf(t, passwordverify.OutcomeMaterialMissing, got.Outcome,
 			"отсутствие материала обязано быть своим исходом при предъявленном %q", presented)
 		require.NotEqual(t, passwordverify.OutcomeMismatched, got.Outcome,
@@ -337,7 +370,7 @@ func TestVerify_MissingMaterialIsNotAMismatch(t *testing.T) {
 	require.Zero(t, obs.count(passwordverify.OutcomeMatched), "пустой пароль не даёт совпадения на пустом материале")
 
 	// Положительный контроль: близнец, у которого материал заведён.
-	twin := v.Verify(verifierOf(t, bcryptValue(t, rightPassword, 10)), rightPassword)
+	twin := verify(t, v, verifierOf(t, bcryptValue(t, rightPassword, 10)), rightPassword)
 	require.Equal(t, passwordverify.OutcomeMatched, twin.Outcome, "близнец с материалом обязан входить")
 }
 
@@ -356,7 +389,7 @@ func TestVerify_ParametersAboveTheCeilingAreRefusedWithoutComputing(t *testing.T
 		t.Run(c.name, func(t *testing.T) {
 			obs := newRecordingObserver()
 			v := newVerifier(t, 4, obs)
-			got := v.Verify(verifierOf(t, c.material), rightPassword)
+			got := verify(t, v, verifierOf(t, c.material), rightPassword)
 			require.Equal(t, passwordverify.OutcomeParamsAboveCeiling, got.Outcome,
 				"параметр выше потолка обязан давать свой исход, отличный и от «не совпал», и от «тело не разбирается»")
 			require.True(t, got.Outcome.IsOurError())
@@ -373,7 +406,7 @@ func TestVerify_ParametersAboveTheCeilingAreRefusedWithoutComputing(t *testing.T
 		t.Run("близнец: "+c.name, func(t *testing.T) {
 			obs := newRecordingObserver()
 			v := newVerifier(t, 4, obs)
-			got := v.Verify(verifierOf(t, c.material), rightPassword)
+			got := verify(t, v, verifierOf(t, c.material), rightPassword)
 			require.Equal(t, passwordverify.OutcomeMatched, got.Outcome, "потолок включён")
 		})
 	}
@@ -396,11 +429,11 @@ func TestVerify_RefusalAboveTheCeilingDoesNotStartTheComputation(t *testing.T) {
 	aboveCeiling := verifierOf(t, bcryptValue(t, rightPassword, 15))
 
 	start := time.Now()
-	require.Equal(t, passwordverify.OutcomeMatched, v.Verify(onCeiling, rightPassword).Outcome)
+	require.Equal(t, passwordverify.OutcomeMatched, verify(t, v, onCeiling, rightPassword).Outcome)
 	onCeilingTook := time.Since(start)
 
 	start = time.Now()
-	require.Equal(t, passwordverify.OutcomeParamsAboveCeiling, v.Verify(aboveCeiling, rightPassword).Outcome)
+	require.Equal(t, passwordverify.OutcomeParamsAboveCeiling, verify(t, v, aboveCeiling, rightPassword).Outcome)
 	refusalTook := time.Since(start)
 
 	require.Lessf(t, refusalTook*10, onCeilingTook,
@@ -412,7 +445,7 @@ func TestVerify_RefusalAboveTheCeilingDoesNotStartTheComputation(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 	require.Equal(t, passwordverify.OutcomeParamsAboveCeiling,
-		v.Verify(verifierOf(t, argon2idValueWithParams(t, 1048576, 3, 4)), rightPassword).Outcome)
+		verify(t, v, verifierOf(t, argon2idValueWithParams(t, 1048576, 3, 4)), rightPassword).Outcome)
 	runtime.ReadMemStats(&after)
 
 	const claimed = uint64(1048576) * 1024 // 1 ГиБ — заявленная значением память
@@ -451,7 +484,7 @@ func TestVerify_CapacityExhaustedIsItsOwnOutcome(t *testing.T) {
 	}()
 	<-held
 
-	got := v.Verify(stored, rightPassword)
+	got := verify(t, v, stored, rightPassword)
 	require.Equal(t, passwordverify.OutcomeCapacityExhausted, got.Outcome,
 		"исчерпание обязано быть своим исходом, а не «не совпал» и не нашей ошибкой")
 	require.False(t, got.Outcome.IsOurError())
@@ -459,7 +492,7 @@ func TestVerify_CapacityExhaustedIsItsOwnOutcome(t *testing.T) {
 	// Исчерпание не зависит ни от наличия материала: полоса «материала нет»
 	// занимает ту же ёмкость (15.4) — иначе под нагрузкой отказ по ёмкости
 	// сообщал бы, что у личности есть пароль.
-	missing := v.Verify(domain.LoginVerifier{}, rightPassword)
+	missing := verify(t, v, domain.LoginVerifier{}, rightPassword)
 	require.Equal(t, passwordverify.OutcomeCapacityExhausted, missing.Outcome,
 		"полоса «материала нет» обязана занимать ту же ёмкость")
 
@@ -468,7 +501,7 @@ func TestVerify_CapacityExhaustedIsItsOwnOutcome(t *testing.T) {
 	// Положительный контроль: после освобождения та же проверка того же верного
 	// пароля даёт «совпал».
 	require.Eventually(t, func() bool {
-		return v.Verify(stored, rightPassword).Outcome == passwordverify.OutcomeMatched
+		return verify(t, v, stored, rightPassword).Outcome == passwordverify.OutcomeMatched
 	}, 5*time.Second, 10*time.Millisecond, "после освобождения ёмкости проверка обязана проходить")
 
 	require.GreaterOrEqual(t, obs.count(passwordverify.OutcomeCapacityExhausted), 2)
@@ -546,12 +579,12 @@ func TestVerify_EveryOutcomeIsObserved(t *testing.T) {
 	}
 
 	v := newVerifier(t, 1, obs)
-	v.Verify(verifierOf(t, bcryptValue(t, rightPassword, 10)), rightPassword)
-	v.Verify(verifierOf(t, bcryptValue(t, rightPassword, 10)), wrongPassword)
-	v.Verify(verifierOf(t, "$scrypt$ln=15$c2FsdA$aGFzaA"), rightPassword)
-	v.Verify(verifierOf(t, "$2a$xx$сломано"), rightPassword)
-	v.Verify(verifierOf(t, bcryptValue(t, rightPassword, 15)), rightPassword)
-	v.Verify(domain.LoginVerifier{}, rightPassword)
+	verify(t, v, verifierOf(t, bcryptValue(t, rightPassword, 10)), rightPassword)
+	verify(t, v, verifierOf(t, bcryptValue(t, rightPassword, 10)), wrongPassword)
+	verify(t, v, verifierOf(t, "$scrypt$ln=15$c2FsdA$aGFzaA"), rightPassword)
+	verify(t, v, verifierOf(t, "$2a$xx$сломано"), rightPassword)
+	verify(t, v, verifierOf(t, bcryptValue(t, rightPassword, 15)), rightPassword)
+	verify(t, v, domain.LoginVerifier{}, rightPassword)
 
 	for _, o := range []passwordverify.Outcome{
 		passwordverify.OutcomeMatched,
@@ -583,8 +616,8 @@ func TestVerify_ChoiceOfVerifierFollowsTheStoredValue(t *testing.T) {
 		argon2idValue(t, rightPassword, 131072, 10, 8, 32),
 	} {
 		stored := verifierOf(t, material)
-		require.Equal(t, first.Verify(stored, rightPassword).Outcome, second.Verify(stored, rightPassword).Outcome)
-		require.Equal(t, passwordverify.OutcomeMatched, first.Verify(stored, rightPassword).Outcome)
+		require.Equal(t, verify(t, first, stored, rightPassword).Outcome, verify(t, second, stored, rightPassword).Outcome)
+		require.Equal(t, passwordverify.OutcomeMatched, verify(t, first, stored, rightPassword).Outcome)
 	}
 }
 
@@ -607,9 +640,9 @@ func TestVerifier_F3_31_AbsentMaterialIsComputedAgainstADecoy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, v.SetDecoy(decoy))
 
-	res := v.Verify(domain.LoginVerifier{}, "decoy password of the day")
+	res := verify(t, v, domain.LoginVerifier{}, "decoy password of the day")
 	require.Equal(t, passwordverify.OutcomeMaterialMissing, res.Outcome, "пароль выравнивающего значения не открывает ничего")
-	res = v.Verify(domain.LoginVerifier{}, "anything else")
+	res = verify(t, v, domain.LoginVerifier{}, "anything else")
 	require.Equal(t, passwordverify.OutcomeMaterialMissing, res.Outcome)
 	require.Equal(t, 2, obs.count(passwordverify.OutcomeMaterialMissing), "исход считается как «материала нет», не как «не совпал»")
 	require.Zero(t, obs.count(passwordverify.OutcomeMismatched))
@@ -622,12 +655,12 @@ func TestVerifier_F3_31_AbsentMaterialIsComputedAgainstADecoy(t *testing.T) {
 	require.NoError(t, err)
 	start := time.Now()
 	for i := 0; i < 3; i++ {
-		v.Verify(real, "wrong")
+		verify(t, v, real, "wrong")
 	}
 	realCost := time.Since(start) / 3
 	start = time.Now()
 	for i := 0; i < 3; i++ {
-		v.Verify(domain.LoginVerifier{}, "wrong")
+		verify(t, v, domain.LoginVerifier{}, "wrong")
 	}
 	absentCost := time.Since(start) / 3
 	t.Logf("стоимость: настоящая %v · «материала нет» с выравниванием %v", realCost, absentCost)
@@ -654,12 +687,12 @@ func TestVerifyPresented_ComparesWhatThePresentedValueReveals(t *testing.T) {
 	stored, err := hasher.Hash(rightPassword)
 	require.NoError(t, err)
 
-	require.Equal(t, passwordverify.OutcomeMatched, v.VerifyPresented(stored, presentedValue(rightPassword)).Outcome,
+	require.Equal(t, passwordverify.OutcomeMatched, verifyPresented(t, v, stored, presentedValue(rightPassword)).Outcome,
 		"предъявленное значение хранимого не совпало")
-	require.Equal(t, passwordverify.OutcomeMismatched, v.VerifyPresented(stored, presentedValue(wrongPassword)).Outcome,
+	require.Equal(t, passwordverify.OutcomeMismatched, verifyPresented(t, v, stored, presentedValue(wrongPassword)).Outcome,
 		"чужое предъявленное значение совпало")
 	require.Equal(t, passwordverify.OutcomeMaterialMissing,
-		v.VerifyPresented(domain.LoginVerifier{}, presentedValue(rightPassword)).Outcome,
+		verifyPresented(t, v, domain.LoginVerifier{}, presentedValue(rightPassword)).Outcome,
 		"отсутствие материала сведено к другому исходу")
 	require.Equal(t, 1, obs.count(passwordverify.OutcomeMatched), "исход сверки прошёл мимо приёмника")
 	require.Equal(t, 1, obs.count(passwordverify.OutcomeMismatched), "исход сверки прошёл мимо приёмника")

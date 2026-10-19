@@ -239,9 +239,10 @@ func seedWithdrawalFixture(t *testing.T, db *sql.DB) {
 
 	_, err = db.Exec(`
 		INSERT INTO kaname.role_rule_selectors
-		       (role_id, rule_fp, arm, object_types, resource_names, match_labels)
-		VALUES ('rol_rw_probe', 'fp-rw-probe', 'labels', ARRAY[$1], '{}', '{"k":"v"}'::jsonb)`,
-		dotted)
+		       (role_id, rule_fp, arm, object_types, resource_names, match_labels, verbs_by_type)
+		VALUES ('rol_rw_probe', 'fp-rw-probe', 'labels', ARRAY[$1], '{}', '{"k":"v"}'::jsonb,
+		        jsonb_build_object($1::text, jsonb_build_array($2::text)))`,
+		dotted, verb)
 	require.NoError(t, err, "фикстура проекции селекторов не легла")
 
 	require.NoError(t, seedTargetMemberFixture(db), "фикстура состава цели не легла")

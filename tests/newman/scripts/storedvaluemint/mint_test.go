@@ -72,7 +72,10 @@ func TestMintedStoredValueIsReadByTheProductVerifier(t *testing.T) {
 			if err != nil {
 				t.Fatalf("материал не принят доменом: %v", err)
 			}
-			res := v.Verify(stored, password)
+			res, err := v.Verify(t.Context(), stored, password)
+			if err != nil {
+				t.Fatalf("проверка не состоялась: %v", err)
+			}
 			if res.Outcome != passwordverify.OutcomeMatched {
 				t.Fatalf("верный пароль: исход %s, ждали %s", res.Outcome, passwordverify.OutcomeMatched)
 			}
@@ -80,7 +83,10 @@ func TestMintedStoredValueIsReadByTheProductVerifier(t *testing.T) {
 				t.Fatalf("прочитано форматом %q, ждали %q", res.Format, tc.format)
 			}
 			// Близнец меняет ОДИН факт — пароль.
-			res = v.Verify(stored, password+"x")
+			res, err = v.Verify(t.Context(), stored, password+"x")
+			if err != nil {
+				t.Fatalf("проверка не состоялась: %v", err)
+			}
 			if res.Outcome != passwordverify.OutcomeMismatched {
 				t.Fatalf("неверный пароль: исход %s, ждали %s", res.Outcome, passwordverify.OutcomeMismatched)
 			}

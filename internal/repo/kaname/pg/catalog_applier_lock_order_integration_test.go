@@ -164,7 +164,7 @@ func TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter(t *test
 		}
 		if rerr := w.RolesW().ReplaceRuleSelectors(ctx, role, []domain.RuleSelector{{
 			RuleFP: "fp-crosslock", Arm: domain.ArmAnchor,
-			ObjectTypes: []string{crossLockEarly, crossLockLate},
+			ObjectTypes: []string{crossLockEarly, crossLockLate}, Grants: map[string][]string{},
 		}}); rerr != nil {
 			_ = w.Rollback(ctx)
 			bres <- rerr

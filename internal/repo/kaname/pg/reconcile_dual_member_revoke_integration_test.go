@@ -40,6 +40,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // TestReview1_DualRuleSameObject_RevokeOne_SurvivorKeepsAccess — review #1 BLOCKER.
@@ -102,7 +103,7 @@ func TestReview1_DualRuleSameObject_RevokeOne_SurvivorKeepsAccess(t *testing.T) 
 		Rules: domain.Rules{ruleKeep}, Permissions: mustCompile(t, domain.Rules{ruleKeep}), IsSystem: false}
 	_, err = w.RolesW().Update(ctx, updated, []string{"rules"})
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, updated.Rules.MaterializingSelectors()))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, catalogfixture.Facts().GrantSelectors(updated.Rules.MaterializingSelectors())))
 	require.NoError(t, w.Commit(ctx))
 
 	// Reconcile picks up the new role.rules: ruleGone's member falls out, ruleKeep's

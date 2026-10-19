@@ -6,8 +6,9 @@
 // anonymous-and-authenticated-are-subject-classes.md, отпечаток ae9ba373…0427f51 (редакция 4),
 // SC-12 и SC-13; задача PRO-Robotech/kaname#829).
 //
-// Вход соседа не меняется: публикация приходит парой `user:*` + `v_get` через
-// `RegisterResource`. Утверждается то, что из него выводится: вопрос от
+// Вход соседа здесь — переходное слово: публикация приходит парой `user:*` +
+// `v_get` через `RegisterResource`; второе слово, `system_class:anonymous`
+// (kaname#893), и общая хранимая форма обоих — publication_anonymous_word_test.go. Утверждается то, что из него выводится: вопрос от
 // `system_class:anonymous` и от вошедшего читает объект, вопрос анонима о чтении
 // справочников — нет; снятие публикации закрывает чтение обоим.
 package internal_iam_test
