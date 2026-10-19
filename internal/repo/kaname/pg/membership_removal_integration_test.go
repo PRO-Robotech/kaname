@@ -44,6 +44,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse — плечо 1.
@@ -302,9 +303,9 @@ func TestIntegration_MembershipCarryingRightsIsRefusedWithContractTone(t *testin
 	// Живая выдача этому человеку В ЭТОМ аккаунте — то, что страж и охраняет.
 	roleID := seedAccountRole(t, ctx, pool, accID, "rmrgtrole")
 	bindingID := ids.NewID(domain.PrefixAccessBinding)
-	_, err = pool.Exec(ctx, `INSERT INTO kaname.access_bindings
+	_, err = pool.Exec(ctx, bindingset.With(`INSERT INTO kaname.access_bindings
 	          (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-	        VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
+	        VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`),
 		bindingID, string(person), string(roleID), string(accID))
 	require.NoError(t, err)
 

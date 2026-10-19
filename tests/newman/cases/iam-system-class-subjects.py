@@ -6,12 +6,12 @@
 Приёмка: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md,
 редакция 6 (отпечаток 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c),
 задача PRO-Robotech/kaname#829. Кейсы — по DoD приёмки, второй эшелон через собственный
-публичный REST-фронт службы: S1 — SC-01…09, 14, 17, 40; S2 — SC-19, 20, 21, 22,
+публичный REST-фронт службы: S1 — SC-01…09, 14, 17, 40; L6 — SC-15; S2 — SC-19, 20, 21, 22,
 24, 27, 28; S4 — краевая половина SC-53 (перечень кластерных администраторов, который
 читает страница `/system/cluster/admins`; консольную половину держит проба браузера
 `PRO-Robotech/kacho#3238`). Каждый ID несёт пару «статус + code». Сценарии только
-integration (SC-12, 13, 23, 25, 26, 29, 37, 42, 43, 44; переход SC-15) — с причиной в
-приёмке, здесь их нет.
+integration (SC-12, 13, 23, 25, 26, 29, 37, 42, 43, 44) — с причиной в приёмке, здесь
+их нет.
 
 SC-10, 11, 16, 18 этим набором НЕ исполняются (редакция 6, DoD S1): их «Дано» — объект
 сети, зарегистрированный его владельцем, а владельца сети на автономном стенде службы без
@@ -19,10 +19,11 @@ SC-10, 11, 16, 18 этим набором НЕ исполняются (реда�
 `internal/apps/kaname/api/access_binding/system_class_s1_integration_test.go`; сквозной
 эшелон с теми же утверждениями — на стенде платформы, PRO-Robotech/kacho#3256.
 
-SC-15 (отказ подстановке говорящим) этим набором НЕ исполняется: решение диспетчера Д1
-отдаёт отказ и его пробу полосе L6 — Tests-followup: PRO-Robotech/kaname#832, условие
-старта названо в самом сценарии SC-15 приёмки. Переход до L6 краем не задаётся (вопрос
-от подстановки задаёт внутреннее ребро) и держится integration S1.
+SC-15 (отказ подстановке говорящим) исполняется этим набором с полосы L6 —
+PRO-Robotech/kaname#832 (решение диспетчера Д1): вопрос `Check` от `user:*` → `400`,
+code 3, текст дословно; близнец — тот же вопрос от человека `usr-B` отвечается по
+выдачам. Переход до L6 (вопрос от подстановки как от анонима) снят тем же изменением,
+что посадил отказ, и краем не утверждается.
 
 КАК ПОСТРОЕН КАЖДЫЙ КЕЙС. Отрицание идёт в паре с положительным близнецом: сначала
 та же выдача ЧЕЛОВЕКУ (`userNOBId`) либо выдача классу SC-01, затем предмет. Близнец
@@ -301,6 +302,12 @@ _case("SC14-AUTHENTICATED-NOT-A-SPEAKER", "SC-14: system_class:authenticated г�
           check("sc14-twin-anonymous", "system_class:anonymous", allowed=False),
           check("sc14-refused", "system_class:authenticated",
                 refused="Illegal argument subject: system class authenticated is not a speaker"),
+      ])
+
+_case("SC15-WILDCARD-NOT-A-SPEAKER", "SC-15: подстановка user:* говорящим → 400; близнец — человек usr-B отвечается",
+      ["VAL", "NEG"], [
+          check("sc15-twin-user", "user:{{userNOBId}}", allowed=False),
+          check("sc15-refused", "user:*", refused="Illegal argument subject: wildcard is not a speaker"),
       ])
 
 def _list_by_class(name, auth, klass, want_js=None, wait_for=None):

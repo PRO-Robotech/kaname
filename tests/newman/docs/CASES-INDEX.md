@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 884
+Всего кейсов: 885
 
 ## Перепись по модулям
 
@@ -61,7 +61,7 @@
 | `cases/iam-role.py` | 44 |
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
-| `cases/iam-system-class-subjects.py` | 20 |
+| `cases/iam-system-class-subjects.py` | 21 |
 | `cases/iam-system-grant-visibility.py` | 1 |
 | `cases/iam-token-facade-conformance.py` | 4 |
 | `cases/iam-user.py` | 47 |
@@ -837,7 +837,7 @@
 - `IAM-ACB-LSP-VAL`
 - `IAM-ACB-LSP-PAGE-BEFORE-IDENTITY`
 
-## `cases/iam-system-class-subjects.py` — 20 кейсов
+## `cases/iam-system-class-subjects.py` — 21 кейсов
 
 > Case-set: «аноним» и «вошедший» — системный класс субъекта привязки прав.
 
@@ -851,6 +851,7 @@
 - `SC08-CLASS-NOT-GROUP-MEMBER`
 - `SC09-CLASS-NOT-CLUSTER-ADMIN`
 - `SC14-AUTHENTICATED-NOT-A-SPEAKER`
+- `SC15-WILDCARD-NOT-A-SPEAKER`
 - `SC17-LIST-BY-CLASS`
 - `SC40-SYSTEM-GRANT-MOVED`
 - `SC19-AUTHENTICATED-ALL-IN-SCOPE-REFUSED`

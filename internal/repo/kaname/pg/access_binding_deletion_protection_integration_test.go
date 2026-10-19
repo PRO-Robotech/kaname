@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func TestAB_P6_DeletionProtection_PersistRoundTrip(t *testing.T) {
@@ -67,7 +68,7 @@ func TestAB_P6_DeletionProtection_PersistRoundTrip(t *testing.T) {
 
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	out, err := w.AccessBindingsW().Insert(ctx, b)
+	out, err := bindingset.Insert(ctx, w.AccessBindingsW(), b)
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 	assert.True(t, out.DeletionProtection, "Insert must persist deletion_protection=true")
@@ -96,7 +97,7 @@ func TestAB_P6_DeleteGuarded_RefusesProtected(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 		DeletionProtection: true,
@@ -129,7 +130,7 @@ func TestAB_P6_DeleteGuarded_DeletesUnprotected(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 		DeletionProtection: false,
@@ -187,7 +188,7 @@ func TestAB_P6_DeleteGuarded_ConcurrentCAS(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 		DeletionProtection: false,
@@ -261,7 +262,7 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 		DeletionProtection: false,
@@ -352,7 +353,7 @@ func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 		DeletionProtection: true,

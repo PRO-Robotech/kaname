@@ -60,7 +60,9 @@ func TestSystemClass_SC12_SC13_PublicationIsAGrantToAnonymous(t *testing.T) {
 	ctx := context.Background()
 	uc, probe := newRegisterUC(t)
 	a := relverdict.NewAsker(probe.pool)
-	const person = "user:usr0000000000000sc12"
+	// Вошедший — СТРОКОЙ учётки: класс выводится лишь существующей учётке
+	// (kaname#909), и говорящий без строки отвечал бы «нет» не по предмету пробы.
+	person := "user:" + string(seedForceLogoutUser(t, ctx, probe.pool))
 	obj := "registry_repository:" + scPublicRepo
 	base := time.Now()
 

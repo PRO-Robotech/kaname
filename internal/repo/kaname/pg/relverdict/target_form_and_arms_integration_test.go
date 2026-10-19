@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // tgCheckReverse сверяет обратные формы (Subjects, Sources) на X и Y.
@@ -48,9 +49,9 @@ func tgSeedBindingRefused(t *testing.T, ctx context.Context, tx pgx.Tx, target s
 	t.Helper()
 	exec(t, ctx, tx, `SAVEPOINT tg_refused`)
 	_, err := tx.Exec(ctx,
-		`INSERT INTO kaname.access_bindings
+		bindingset.With(`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
-		 VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`,
+		 VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`),
 		tgBinding, tgRole, target)
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.ConstraintName != relverdict.TargetFormConstraint {

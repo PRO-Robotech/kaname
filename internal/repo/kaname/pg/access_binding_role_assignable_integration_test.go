@@ -31,6 +31,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // seedAccountRole — INSERT an account-scoped custom role directly.
@@ -48,10 +49,10 @@ func seedAccountRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc 
 // insertBinding writes a binding the way a writer that skipped the service gate
 // would: a plain INSERT of the columns, nothing else.
 func insertBinding(ctx context.Context, pool *pgxpool.Pool, role domain.RoleID, subject domain.UserID, resourceType, resourceID string) error {
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, bindingset.With(`
 		INSERT INTO access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status)
-		VALUES ($1, 'user', $2, $3, $4, $5, $6, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, $4, $5, $6, 'ACTIVE')`),
 		ids.NewID(domain.PrefixAccessBinding), string(subject), string(role),
 		resourceType, resourceID, time.Now().UTC())
 	return err

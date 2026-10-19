@@ -183,9 +183,14 @@ func accountScopePredicate(argPos int) string {
 // (subject_type, subject_id) — это её ПЕРВЫЙ субъект — и набор
 // `access_binding_subjects`, где назван КАЖДЫЙ. Чтение по одной паре видит
 // только первого: второму выдача не показана, хотя права по ней у него есть.
-// Пара не снимается из предиката, потому что выдача, заведённая до набора,
-// строк в нём не имеет (`ListSubjects`: «ноль строк — легаси-выдача»), и её
-// единственный субъект назван только парой.
+// Строки набора есть у КАЖДОЙ выдачи: это держит база отложенной до коммита
+// проверкой `access_bindings_carry_a_subject` (kaname#902), а лежащих выдач
+// без набора нет — накат той миграции их пересчитывает и отказывает на
+// ненулевом числе. Ветвь пары тем не менее остаётся: база держит «у выдачи
+// есть строка набора», но не «пара — одна из строк набора». Что первый
+// субъект пары записан и в набор, держат писатели (`domain.NormalizeSubjects`
+// сверяет пару с subjects[0]), и снять ветвь значило бы опереть чтение на
+// инвариант, который держит только код.
 //
 // Форма — `id = ANY (ARRAY(подзапрос))`, а не `EXISTS` и не `IN`: подзапрос
 // без ссылок наружу исполняется ОДИН раз (InitPlan) по индексу
@@ -1767,8 +1772,9 @@ func (r *abReader) ListByRole(ctx context.Context, roleID domain.RoleID, f acces
 }
 
 // ListSubjects отдаёт набор субъектов ОДНОЙ выдачи в порядке (ordinal,
-// subject_type, subject_id). Ноль строк ⇒ легаси-выдача, заведённая до обратного
-// заполнения; сторона чтения тогда берёт унаследованного единственного субъекта.
+// subject_type, subject_id). У сохранённой выдачи набор непуст — это держит база
+// (`access_bindings_carry_a_subject`, kaname#902); ноль строк значит, что выдачи
+// с таким идентификатором в таблице нет.
 func (r *abReader) ListSubjects(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.Subject, error) {
 	rows, err := r.tx.Query(ctx,
 		`SELECT subject_type, subject_id FROM access_binding_subjects
@@ -1793,7 +1799,8 @@ func (r *abReader) ListSubjects(ctx context.Context, bindingID domain.AccessBind
 }
 
 // ListSubjectsForBindings пачкой читает субъектов МНОГИХ выдач одним запросом (без
-// N+1 по строкам). Выдач без строк в карте нет.
+// N+1 по строкам). У сохранённой выдачи набор непуст (`access_bindings_carry_a_subject`,
+// kaname#902), поэтому в карте нет только идентификаторов, которых нет в таблице.
 func (r *abReader) ListSubjectsForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error) {
 	out := make(map[domain.AccessBindingID][]domain.Subject, len(bindingIDs))
 	if len(bindingIDs) == 0 {
@@ -1874,7 +1881,9 @@ func (r *abReader) ListMaterializedAtForBindings(ctx context.Context, bindingIDs
 // идемпотентно (ON CONFLICT DO NOTHING — повторная вставка пуста; замок строки
 // первичного ключа выстраивает одинаковые одновременные вставки в ровно одну
 // строку, запрет #10). ordinal хранит порядок запроса, поэтому subjects[0] (=
-// унаследованная одиночная проекция) детерминирован.
+// унаследованная одиночная проекция) детерминирован. Пустой набор не пишет
+// ничего, и коммит такой выдачи база отвергает (`access_bindings_carry_a_subject`,
+// kaname#902): набор пишется в той же транзакции, что выдача.
 func (w *abWriter) InsertSubjects(ctx context.Context, bindingID domain.AccessBindingID, subjects []domain.Subject) error {
 	if len(subjects) == 0 {
 		return nil

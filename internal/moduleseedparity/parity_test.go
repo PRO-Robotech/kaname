@@ -119,6 +119,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/moduleseedparity"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/modulemanifests"
 )
 
@@ -305,11 +306,11 @@ func TestMRW13_LiveGroupDeclaredByNobodyHasNoOwner(t *testing.T) {
 			SELECT 'grp' || substr(md5($1), 1, 17), a.id, $1, 'группа, которую не объявляет никто', '{}', now()
 			  FROM kaname.accounts a WHERE a.name = 'system'
 			RETURNING id`, stray).Scan(&groupID))
-		_, err := pool.Exec(ctx, `
+		_, err := pool.Exec(ctx, bindingset.With(`
 			INSERT INTO kaname.access_bindings (id, subject_type, subject_id, granted_relation, is_system,
 			    resource_type, resource_id, status, deletion_protection, granted_by_user_id)
 			VALUES ('acb' || substr(md5('stray-grant:' || $1), 1, 17), 'group', $1, 'fga_writer', true,
-			        'cluster', 'cluster_root', 'ACTIVE', true, '')`, groupID)
+			        'cluster', 'cluster_root', 'ACTIVE', true, '')`), groupID)
 		require.NoError(t, err)
 	})
 	t.Logf("перепись: %s", census)

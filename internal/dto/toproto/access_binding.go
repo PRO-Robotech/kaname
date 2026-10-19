@@ -44,13 +44,14 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		GrantedByUserId: string(b.GrantedByUserID),
 		RevokedAt:       nullableTsTrunc(b.RevokedAt),
 		RevokedByUserId: userIDPtrToString(b.RevokedByUserID),
-		// RBAC rules-model: fill the canonical
-		// subjects[] AND the legacy single subject_type/subject_id (above) — two
-		// views of one model. When the read-side loaded the multi-subject set it
-		// is used verbatim; otherwise (a legacy binding, or a read path that did
-		// not load the child rows) it falls back to a one-element subjects[] = the
-		// legacy single subject, so subjects[] is ALWAYS populated (paritet
-		// new←legacy). The legacy single = subjects[0] holds reciprocally.
+		// Модель правил RBAC: заполняются и канонический subjects[], и
+		// унаследованная одиночная пара subject_type/subject_id (выше) — два вида
+		// одной модели. Набор, загруженный стороной чтения, отдаётся как есть.
+		// Путь, не загружавший строк набора, получает subjects[] из одного
+		// элемента — одиночной пары, — поэтому subjects[] заполнен ВСЕГДА.
+		// Сохранённых выдач без набора нет: это держит база
+		// (`access_bindings_carry_a_subject`, kaname#902). Пара = subjects[0]
+		// держится в обе стороны.
 		Subjects: domainSubjectsToProto(b),
 		// F8: surface the object-selection under the anchor on every read
 		// (allInScope | per-object resources). Legacy / whole-anchor rows project

@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func TestAB_FGAOutboxTx_FGAOutbox_CreateEmitsWriteRows(t *testing.T) {
@@ -58,7 +59,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_CreateEmitsWriteRows(t *testing.T) {
 
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, binding)
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), binding)
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, tuples))
 	require.NoError(t, w.Commit(ctx))
@@ -148,7 +149,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit(t *testing.T) {
 
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, binding)
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), binding)
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, tuples))
 	require.NoError(t, w.Rollback(ctx)) // explicit rollback
