@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/audiencepolicy"
+	"github.com/PRO-Robotech/kaname/pkg/generatedid"
 )
 
 // Built-in policy defaults. viper also registers them (defaults.go); the
@@ -109,14 +110,11 @@ const AnonymousPrincipalForm = `^[a-z][a-z0-9]*(-[a-z0-9]+)+$`
 
 const anonymousPrincipalMaxLen = 63
 
-var (
-	anonymousPrincipalRe = regexp.MustCompile(AnonymousPrincipalForm)
-	// generatedIDShapeRe — форма идентификатора, который порождает сам продукт:
-	// короткий префикс вида, необязательный разделитель и 17 знаков
-	// crockford-base32 (`sva…`, `usr…`, `soc_…`, `ak-…`). Публичный принципал
-	// такой формы иметь не вправе — см. AnonymousPrincipal.
-	generatedIDShapeRe = regexp.MustCompile(`^[a-z]{2,4}[-_]?[0-9a-hjkmnp-tv-z]{17}$`)
-)
+// anonymousPrincipalRe — объявленная форма публичного принципала. Форма
+// порождённого идентификатора, которой принципал иметь не вправе, — не здесь:
+// её определение одно, в публичном пакете `pkg/generatedid`, и его же судит
+// приёмная сторона реестра (kaname#908).
+var anonymousPrincipalRe = regexp.MustCompile(AnonymousPrincipalForm)
 
 // AnonymousPrincipal — объявленный публичный принципал анонимного чтения.
 //
@@ -142,7 +140,7 @@ func (c RegistryTokenConfig) AnonymousPrincipal() (string, error) {
 		return "", nil
 	}
 	if len(v) > anonymousPrincipalMaxLen || !anonymousPrincipalRe.MatchString(v) ||
-		generatedIDShapeRe.MatchString(v) {
+		generatedid.Matches(v) {
 		return "", fmt.Errorf(
 			"api-server.registry-token.anonymous-client-id %q is not of the declared form %s "+
 				"(at most %d characters, and never shaped like a generated identifier) — it is the "+
