@@ -58,9 +58,27 @@ package shared
 //
 // Чтения идут ДО удаления строки выдачи, пока строки ведомости ещё на месте —
 // они уходят каскадом по внешнему ключу вместе с выдачей.
+//
+// # Замки снятия — до чтения ведомости, как у отзыва, удаления и истечения
+//
+// Снос области — четвёртый путь снятия выдачи, и порядок замков у него тот же,
+// что у трёх других (access_binding/revoke.go, delete.go, reconcile.ExpireBinding):
+// advisory-замок выдачи, затем строка выдачи `FOR UPDATE`, и только потом чтение
+// ведомости. Аддитивный форвард advisory не берёт, решает «выдача жива» чтением
+// строки под `FOR KEY SHARE` и пишет члена, ведомость и строку журнала позже, в
+// своей транзакции; из режимов строки с `FOR KEY SHARE` конфликтует лишь
+// `FOR UPDATE`. Без этого замка ведомость читалась до записи форварда, и его
+// прямой факт переживал снос области (тот же класс, что kaname#919/#923).
+//
+// Выдачи страницы берутся в порядке id — в том же, в каком advisory-замки
+// берёт полный проход (AcquireBindingLocks) и строки выдач — пакетный форвард:
+// порядок захвата у всех писателей один, и цикла ожидания между ними нет. Порядок
+// общий в пределах страницы; область больше страницы — уже отказ потолка или
+// второй проход, чьи замки берутся после первого.
 
 import (
 	"context"
+	"sort"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -118,7 +136,15 @@ func RevokeBindingsInScope(
 		if len(bindings) == 0 {
 			break
 		}
+		sort.Slice(bindings, func(i, j int) bool { return bindings[i].ID < bindings[j].ID })
 		for _, b := range bindings {
+			// Замки снятия до чтения ведомости — см. шапку файла.
+			if lerr := w.AdvisoryXactLock(ctx, string(b.ID)); lerr != nil {
+				return nil, 0, MapRepoErr(lerr)
+			}
+			if _, gerr := w.AccessBindingsW().GetForDeactivation(ctx, b.ID); gerr != nil {
+				return nil, 0, MapRepoErr(gerr)
+			}
 			stored, serr := w.AccessBindings().SelectEmittedTuples(ctx, b.ID)
 			if serr != nil {
 				return nil, 0, MapRepoErr(serr)

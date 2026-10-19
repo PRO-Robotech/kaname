@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
@@ -113,23 +114,34 @@ type reconcileStore struct {
 // GetForNoKeyUpdate: он не конфликтует с `FOR KEY SHARE` дочерних вставок, поэтому
 // аддитивный форвард пути создания больше не стоит в очереди за фоновым проходом.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, true /* forUpdate — full path serializes the delete-stale diff */)
+	return s.loadBinding(ctx, bindingID, rowLockNoKeyUpdate)
 }
 
-// LoadBindingUnlocked loads the same BindingScope as LoadBinding but WITHOUT the
-// `FOR NO KEY UPDATE` row-lock — the read the ADDITIVE forward fast-path
-// (reconcile.ReconcileObjectForward) uses. Forward only WRITES the freshly-registered
-// object's tuples (never a delete-stale diff), so it needs no serialization against a
-// concurrent pass of the same binding; taking the row-lock here would re-serialize all
-// registrations sharing one editor/owner binding — the exact bottleneck the fast-path
-// removes. Correctness is preserved by the async FULL ReconcileObject backstop.
-func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, false /* no row-lock — additive forward path */)
+// LoadBindingForForward — те же факты выдачи, что LoadBinding, под замком строки
+// `FOR KEY SHARE`, — чтение аддитивного форварда (reconcile.ReconcileBindingForward).
+//
+// ЗАЧЕМ ЗАМОК (kaname#919). Форвард решает «выдача жива» этим чтением и пишет
+// члена, реестр и строку журнала позже, в той же транзакции. Снятие выдачи —
+// истечение срока — читает набор членов, чтобы снять их кортежи; члены форварда,
+// легшие после этого чтения, снимать было бы некому. Замок делает решение «жива»
+// верным до коммита: снятие берёт строку `FOR UPDATE`
+// (LockBindingForDeactivation), а это единственный режим, конфликтующий с
+// `FOR KEY SHARE`. Поэтому снятие ждёт коммита форварда и видит его членов, а
+// форвард, пришедший после снятия, дождётся его коммита и прочитает REVOKED.
+//
+// ПОЧЕМУ ИМЕННО `FOR KEY SHARE`. Полный проход держит строку `FOR NO KEY UPDATE`
+// (GetForNoKeyUpdate), и с `FOR KEY SHARE` этот режим совместим — форвард пути
+// создания по-прежнему не встаёт в очередь за фоновым полным проходом
+// (TestReconcileForward_07_DoesNotQueueBehindInFlightFullPass). Тот же режим
+// дочерние вставки форварда и так брали на этой строке проверкой внешнего ключа;
+// новым здесь стал только МОМЕНТ — до решения, а не после него.
+func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
+	return s.loadBinding(ctx, bindingID, rowLockKeyShare)
 }
 
-// LoadBindingsUnlocked loads the SAME BindingScope facts as LoadBindingUnlocked for a
-// WHOLE SET of bindings — in THREE round-trips total (one for the binding rows, one for
-// their subjects, one for their DISTINCT roles), instead of three PER BINDING.
+// LoadBindingsForForward — те же факты BindingScope, что LoadBindingForForward, для
+// ЦЕЛОГО НАБОРА выдач — за ТРИ обращения к базе всего (строки выдач, их субъекты,
+// их РАЗЛИЧНЫЕ роли), а не по три на выдачу.
 //
 // ЗАЧЕМ. Веер материализации адресуется числом ВЫДАЧ, совпавших с одним объектом, а не
 // числом объектов: меняется ровно один объект, но кандидатов у него столько, сколько
@@ -141,13 +153,18 @@ func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID doma
 // Замер (testcontainers PG16, 15 проходов на размер): 9 выдач — p50 14.6 мс, 227 выдач —
 // p50 349.1 мс, то есть ~1.5 мс на выдачу.
 //
-// ЧТО НЕ МЕНЯЕТСЯ. Ни блокировок, ни порядка: путь аддитивен и advisory-блокировки не
-// берёт (см. reconcile/forward.go «LOCK CHOICE»), а строчной блокировки у этого чтения не
-// было и раньше. Проекция BindingScope собирается тем же bindingScopeFrom, что и у
-// поштучного чтения, поэтому пакетный и одиночный пути выводят ПОБАЙТОВО те же факты.
+// ЗАМОК. Строки выдач берутся `FOR KEY SHARE` одним оператором в порядке `id` — тот
+// же режим и то же основание, что у одиночного LoadBindingForForward (kaname#919):
+// снятие выдачи (истечение срока, LockBindingForDeactivation) не может прочитать
+// набор членов, пока форвард, решивший «выдача жива», не зафиксировал своих. С полным
+// проходом (`FOR NO KEY UPDATE`) режим совместим, advisory-замка путь не берёт (см.
+// reconcile/forward.go «LOCK CHOICE»). Порядок `id` — общий для всех выдач веера, и
+// подмножества одного порядка инверсии не дают. Проекция BindingScope собирается тем
+// же bindingScopeFrom, что и у поштучного чтения, поэтому пакетный и одиночный пути
+// выводят ПОБАЙТОВО те же факты.
 // Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
 // одиночного чтения; отсутствующая роль трактуется как «нет покрытия», а не как ошибка.
-func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
+func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
 	out := make(map[domain.AccessBindingID]reconcile.BindingScope, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -162,7 +179,7 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 		raw = append(raw, string(id))
 	}
 	rows, err := s.tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC`, abCols), raw)
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC FOR KEY SHARE`, abCols), raw)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
@@ -221,20 +238,33 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 	return out, nil
 }
 
-// loadBinding is the shared reader for LoadBinding (forUpdate=true) and
-// LoadBindingUnlocked (forUpdate=false). The BindingScope projection is IDENTICAL in
-// both modes — only the row-lock differs — so the full and forward paths derive the
-// same scope/selector/subject facts.
-func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, forUpdate bool) (reconcile.BindingScope, bool, error) {
+// bindingRowLock — режим замка строки выдачи, под которым читаются её факты.
+type bindingRowLock int
+
+const (
+	// rowLockNoKeyUpdate — полный проход: взаимное исключение проходов одной выдачи.
+	rowLockNoKeyUpdate bindingRowLock = iota
+	// rowLockKeyShare — аддитивный форвард: «выдача жива» верно до коммита.
+	rowLockKeyShare
+)
+
+// loadBinding — общий читатель LoadBinding (rowLockNoKeyUpdate) и
+// LoadBindingForForward (rowLockKeyShare). Проекция BindingScope ОДИНАКОВА в обоих
+// режимах — различается лишь замок строки, — поэтому полный проход и форвард
+// выводят одни и те же факты области, селекторов и субъектов.
+func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock bindingRowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
 	var (
 		b   domain.AccessBinding
 		err error
 	)
-	if forUpdate {
+	switch lock {
+	case rowLockNoKeyUpdate:
 		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
-	} else {
-		b, err = r.Get(ctx, bindingID)
+	case rowLockKeyShare:
+		b, err = r.GetForKeyShare(ctx, bindingID)
+	default:
+		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %d", lock)
 	}
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
@@ -336,7 +366,7 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 }
 
 // bindingScopeFrom — ЕДИНСТВЕННАЯ точка вывода BindingScope из строки выдачи и её роли.
-// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsUnlocked),
+// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsForForward),
 // поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
 func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
 	// СНЯТАЯ роль даёт ровно то же, что РОЛЬ, УДАЛЁННАЯ из-под выдачи, — «нет
@@ -1263,48 +1293,6 @@ func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.Acce
 	return out, rows.Err()
 }
 
-// TuplesStillClaimedByOtherBindings returns the subset of `tuples` still recorded in
-// the emitted-tuple ledger of an ACTIVE binding OTHER than excludeBinding. The ledger
-// PK is (binding_id, fga_user, relation, object) — per binding — so two bindings of the
-// SAME subject that materialized the IDENTICAL FGA tuple on the SAME object hold TWO
-// ledger rows for ONE non-refcounted tuple. Before deleting a tuple the
-// reconciler subtracts this set so a shared cross-binding tuple is dropped only when the
-// LAST owning binding releases it (label-revoke-vpc CHANGE-01). The join to
-// access_bindings requires the other binding be ACTIVE — a REVOKED/expired binding does
-// not keep a tuple alive. Empty `tuples` → empty result (no query).
-func (s *reconcileStore) TuplesStillClaimedByOtherBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []domain.MembershipTuple) (map[domain.MembershipTuple]struct{}, error) {
-	out := make(map[domain.MembershipTuple]struct{})
-	if len(tuples) == 0 {
-		return out, nil
-	}
-	// Probe each (fga_user, relation, object) triple against the ledger of every OTHER
-	// active binding. The set is small (one member's tuple-set), so a per-tuple EXISTS
-	// is cheap and keeps the query index-friendly (PK prefix on fga_user/relation/object
-	// is not available, but the access_binding_emitted_tuples object index covers it).
-	for _, t := range tuples {
-		var exists bool
-		err := s.tx.QueryRow(ctx,
-			`SELECT EXISTS (
-			   SELECT 1
-			     FROM kaname.access_binding_emitted_tuples et
-			     JOIN kaname.access_bindings ab ON ab.id = et.binding_id
-			    WHERE et.binding_id <> $1
-			      AND et.fga_user = $2
-			      AND et.relation = $3
-			      AND et.object   = $4
-			      AND ab.status = 'ACTIVE'
-			 )`,
-			string(excludeBinding), t.User, t.Relation, t.Object).Scan(&exists)
-		if err != nil {
-			return nil, fmt.Errorf("reconcile: still-claimed probe for %s#%s@%s: %w", t.Object, t.Relation, t.User, err)
-		}
-		if exists {
-			out[t] = struct{}{}
-		}
-	}
-	return out, nil
-}
-
 // EmitTupleWrite / EmitTupleDelete enqueue per-object FGA tuples on the tx.
 func (s *reconcileStore) EmitTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
 	return fga_outbox.EmitWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
@@ -1450,6 +1438,46 @@ func (s *reconcileStore) scopeTenantAccountID(ctx context.Context, scope domain.
 		// cluster / cross-service / unknown — no single owning account.
 		return nil, nil
 	}
+}
+
+// LockBindingForDeactivation берёт строку выдачи `FOR UPDATE` — замок СНЯТИЯ.
+//
+// Это единственный режим строки, конфликтующий с `FOR KEY SHARE`, под которым
+// аддитивный форвард решает «выдача жива» (LoadBinding(s)ForForward, kaname#919).
+// Снятие, взявшее его, не прочитает набор членов, пока форвард не зафиксировал
+// своих, а форвард, пришедший после, дождётся коммита снятия и прочитает REVOKED.
+// Полному проходу этот режим не нужен: тот лишь пересчитывает членов живой выдачи,
+// и `FOR NO KEY UPDATE` держит его взаимное исключение без очереди форвардов.
+//
+// Строки нет (выдачу удалили) — не ошибка: следующее чтение вернёт ok=false.
+func (s *reconcileStore) LockBindingForDeactivation(ctx context.Context, bindingID domain.AccessBindingID) error {
+	if _, err := (&abReader{tx: s.tx}).getForUpdate(ctx, bindingID); err != nil && !errors.Is(err, iamerr.ErrNotFound) {
+		return fmt.Errorf("reconcile: lock binding for deactivation %s: %w", bindingID, err)
+	}
+	return nil
+}
+
+// EmitSubjectChangeEvent пишет строку журнала смены субъекта в транзакции прохода —
+// тем же писателем, что отзыв и удаление (abWriter.EmitSubjectChangeEvent). Вид
+// события и `op` выбирает use-case (reconcile.emitSubjectChangeOfExpiry), адаптер
+// только пишет.
+func (s *reconcileStore) EmitSubjectChangeEvent(ctx context.Context, evt access_binding.SubjectChangeEvent) error {
+	w := &abWriter{abReader{tx: s.tx}}
+	if err := w.EmitSubjectChangeEvent(ctx, evt); err != nil {
+		return fmt.Errorf("reconcile: subject change %s:%s: %w", evt.SubjectType, evt.SubjectID, err)
+	}
+	return nil
+}
+
+// EmitAuditEvent пишет строку журнала аудита в транзакции прохода — тем же
+// писателем, что отзыв и удаление (abWriter.EmitAuditEvent). Содержимое строки
+// выбирает use-case (reconcile.emitRevokedAuditOfExpiry).
+func (s *reconcileStore) EmitAuditEvent(ctx context.Context, ev access_binding.AuditEvent) error {
+	w := &abWriter{abReader{tx: s.tx}}
+	if err := w.EmitAuditEvent(ctx, ev); err != nil {
+		return fmt.Errorf("reconcile: audit %s binding %s: %w", ev.EventType, ev.BindingID, err)
+	}
+	return nil
 }
 
 // RevokeExpiredBinding CAS-transitions an ACTIVE binding to REVOKED on the tx

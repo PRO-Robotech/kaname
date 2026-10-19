@@ -148,6 +148,48 @@ func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindin
 	return out, nil
 }
 
+// GetForKeyShare — Get с замком строки выдачи `FOR KEY SHARE`: чтение аддитивного
+// форварда (reconcile LoadBindingForForward, kaname#919). Режим совместим с
+// `FOR NO KEY UPDATE` полного прохода и конфликтует лишь с `FOR UPDATE` снятия
+// выдачи — поэтому форвард не ждёт фоновой работы, а решение «выдача жива» верно до
+// его коммита. Строки нет ⇒ ErrNotFound.
+func (r *abReader) GetForKeyShare(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	row := r.tx.QueryRow(ctx,
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR KEY SHARE`, abCols), string(id))
+	out, err := scanAB(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
+		}
+		return domain.AccessBinding{}, mapErr(err, "", string(id))
+	}
+	return out, nil
+}
+
+// getForUpdate — Get с замком строки выдачи `FOR UPDATE`: замок СНЯТИЯ выдачи.
+// Единственный дом этого чтения — его берут и отзыв с удалением
+// (abWriter.GetForDeactivation), и истечение срока
+// (reconcileStore.LockBindingForDeactivation). Строки нет ⇒ ErrNotFound.
+func (r *abReader) getForUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	row := r.tx.QueryRow(ctx,
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR UPDATE`, abCols), string(id))
+	out, err := scanAB(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
+		}
+		return domain.AccessBinding{}, mapErr(err, "", string(id))
+	}
+	return out, nil
+}
+
+// GetForDeactivation — строка выдачи под замком снятия `FOR UPDATE` (контракт —
+// у порта WriterIface): отзыв и удаление ждут коммита аддитивного форварда,
+// решившего «выдача жива», и читают реестр уже с его записями (kaname#923).
+func (w *abWriter) GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return w.getForUpdate(ctx, id)
+}
+
 // accountScopePredicate — «привязка лежит в области ЭТОГО аккаунта»: либо
 // привязана к самому аккаунту, либо к любому его проекту. Один placeholder,
 // названный дважды: аккаунт и его проекты сверяются с одним и тем же значением.
@@ -1551,53 +1593,6 @@ func (r *abReader) SelectEmittedTuples(ctx context.Context, bindingID domain.Acc
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapErr(err, "", string(bindingID))
-	}
-	return out, nil
-}
-
-// SelectTuplesClaimedByOtherActiveBindings отдаёт подмножество `tuples`, которое
-// записано в реестре выпущенных кортежей и у какой-то ДРУГОЙ *ACTIVE* выдачи, —
-// кортежи, которые отзыв excludeBinding снимать НЕ должен (счётчика ссылок у
-// кортежа нет, реестр ключуется по выдаче; см. описание ReaderIface).
-//
-// ОДИН запрос на весь набор кандидатов: тройки уходят тремя параллельными
-// массивами и разворачиваются в соединение с реестром, поэтому проба стоит одного
-// обращения при любом размере набора (пообъектный EXISTS-близнец реконсайлера
-// старше её). DISTINCT — потому что тот же кортеж могут заявлять несколько других
-// выдач. Ноль строк ⇒ nil (не уцелело ничего ⇒ отзывается весь набор).
-func (r *abReader) SelectTuplesClaimedByOtherActiveBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
-	if len(tuples) == 0 {
-		return nil, nil
-	}
-	users := make([]string, len(tuples))
-	relations := make([]string, len(tuples))
-	objects := make([]string, len(tuples))
-	for i, t := range tuples {
-		users[i], relations[i], objects[i] = t.User, t.Relation, t.Object
-	}
-	rows, err := r.tx.Query(ctx,
-		`SELECT DISTINCT c.fga_user, c.relation, c.object
-		   FROM unnest($2::text[], $3::text[], $4::text[]) AS c(fga_user, relation, object)
-		   JOIN access_binding_emitted_tuples et
-		     ON et.fga_user = c.fga_user AND et.relation = c.relation AND et.object = c.object
-		   JOIN access_bindings ab ON ab.id = et.binding_id
-		  WHERE et.binding_id <> $1
-		    AND ab.status = 'ACTIVE'`,
-		string(excludeBinding), users, relations, objects)
-	if err != nil {
-		return nil, mapErr(err, "", string(excludeBinding))
-	}
-	defer rows.Close()
-	var out []access_binding.RelationTuple
-	for rows.Next() {
-		var t access_binding.RelationTuple
-		if err := rows.Scan(&t.User, &t.Relation, &t.Object); err != nil {
-			return nil, mapErr(err, "", string(excludeBinding))
-		}
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, mapErr(err, "", string(excludeBinding))
 	}
 	return out, nil
 }
