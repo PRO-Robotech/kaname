@@ -40,12 +40,13 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 
-	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -91,6 +92,11 @@ func newATCWorld(t *testing.T) *atcWorld {
 	verifyAddresses(t, w.ctx, w.pool)
 	a.prjB = seedProjectInAccount(t, w.ctx, w.pool, w.accA, "prj-atc-b")
 
+	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
+		Relations:           w.door,
+		ClusterAdminChecker: w.door,
+	})
+	p.internal = internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), svc)
 	p.reg = internaliam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),
@@ -102,7 +108,6 @@ func newATCWorld(t *testing.T) *atcWorld {
 	require.NoError(t, err, "М2: фикстура probemod")
 	a.doc = doc
 	p.applyDelivered("М2: доставка probemod", a.manifest(false))
-	a.withList()
 
 	a.rolBoxGet = p.seedRole("atc_box_get", domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get"}}})
 	a.rolBoxRead = p.seedRole("atc_box_read", domain.Rules{{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get", "list"}}})
@@ -143,12 +148,6 @@ func (a *atcWorld) manifest(withoutItems bool) *manifest.Manifest {
 	m, err := manifest.Load(doc)
 	require.NoError(a.t, err, "загрузчик отверг фикстуру probemod (без items=%v)", withoutItems)
 	return m
-}
-
-// withList — ручка дополняется списком (`applyDelivered` собирает её без него).
-func (a *atcWorld) withList() {
-	a.ab = a.ab.WithList(accessbindingapp.NewListUseCase(a.repo).
-		WithRelationStore(a.door).WithRelationQueries(a.door))
 }
 
 // withdrawItemsInDB — М3 в базе, ручка остаётся на прежнем снимке.
@@ -266,51 +265,42 @@ func (a *atcWorld) bindingsOf(user domain.UserID, prj domain.ProjectID) int {
 	return n
 }
 
-// listOf — `List` с `filter=subject="<user>"` от владельца usr-A: ids выдач.
-func (a *atcWorld) listOf(user domain.UserID) []string {
+// listOf — ветвь чтения перечня выдач (`AccessBindings().List`, та, по которой
+// `AccessBindingService.List` собирает страницу) с `subject=<user>`: выдачи с
+// целью. Видимость страницы ручки судит модель прав по объектам выдач, а в мире
+// М2 у владельца нет материализованного права перечислять выдачи — предмет
+// ATC-02/-14 не видимость, а то, что чтение цель с каталогом не сверяет (Р5).
+func (a *atcWorld) listOf(user domain.UserID) []domain.AccessBinding {
 	a.t.Helper()
-	resp, err := a.ab.List(asUser(a.ctx, a.usrA), &iamv1.ListAccessBindingsRequest{
-		PageSize: 100, Filter: `subject="` + string(user) + `"`,
-	})
+	rd, err := a.repo.Reader(a.ctx)
+	require.NoError(a.t, err)
+	defer func() { _ = rd.Rollback(a.ctx) }()
+	rows, _, err := rd.AccessBindings().List(a.ctx, repoab.ListFilter{SubjectID: string(user), PageSize: 100})
 	require.NoErrorf(a.t, err, "List(subject=%s)", user)
-	var out []string
-	for _, b := range resp.GetAccessBindings() {
-		out = append(out, b.GetId())
-	}
-	sort.Strings(out)
-	return out
+	return rows
 }
 
-// pollList — опрос `List` до появления выдачи `id` (видимость материализуется
-// асинхронно); отдаёт последний ответ.
-func (a *atcWorld) pollList(user domain.UserID, id, what string) []string {
+// requireListed — перечень выдач `user` — ровно выдача `id` с целью `want`.
+func (a *atcWorld) requireListed(user domain.UserID, id string, want []*iamv1.ResourceRef, what string) {
 	a.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		got := a.listOf(user)
-		for _, g := range got {
-			if g == id {
-				return got
-			}
-		}
-		if time.Now().After(deadline) {
-			a.t.Fatalf("%s: List(subject=%s) за 30 с не показал выдачу %s (ответ %v)", what, user, id, got)
-		}
-		time.Sleep(200 * time.Millisecond)
+	rows := a.listOf(user)
+	require.Lenf(a.t, rows, 1, "%s: List(subject=%s) — выдач %d, ожидалась одна %s", what, user, len(rows), id)
+	require.Equalf(a.t, id, string(rows[0].ID), "%s: в перечне не та выдача", what)
+	got := rows[0].Target.Resources
+	require.Lenf(a.t, got, len(want), "%s: число элементов цели в перечне", what)
+	for i := range want {
+		require.Equalf(a.t, want[i].GetType(), got[i].Type, "%s: тип элемента %d в перечне", what, i)
+		require.Equalf(a.t, want[i].GetId(), got[i].ID, "%s: id элемента %d в перечне", what, i)
 	}
 }
 
-// askBox — `AuthorizeService.Check(subject, v_get, probemod_box:<id>)`.
+// askBox — `Check(subject, v_get, probemod_box:<id>)` внутренней двери решения
+// (`InternalIAMService.Check`, `askInternal` мира П6): субъект строкой,
+// отношение — именем модели, объект — типом модели и id. Публичная дверь
+// спрашивает ещё и ДЕЙСТВИЕ из каталога методов, а у модуля пробы методов нет.
 func (a *atcWorld) askBox(subject, id string) bool {
 	a.t.Helper()
-	resp, err := a.authz.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:          subject,
-		Resource:         &iamv1.ResourceRef{Type: atcBoxType, Id: id},
-		Action:           atcBoxes + ".get",
-		RequiredRelation: "v_get",
-	})
-	require.NoErrorf(a.t, err, "Check(%s, v_get, %s:%s) не ответил", subject, atcBoxType, id)
-	return resp.GetAllowed()
+	return a.askInternal(subject, "v_get", atcBoxType, id)
 }
 
 // pollBox — опрос `askBox` раз в 200 мс до 30 с до `true`.
@@ -337,8 +327,9 @@ func TestATC01_ATC02_ModuleTypeLiveInCatalogIsAcceptedUnknownIsRefused(t *testin
 
 	a.requireSync(a.req(userSubject(a.usrD), a.rolBoxGet, a.prjA, rr("probemod.nope", "b1")),
 		codes.InvalidArgument, atcT1("probemod.nope"), "ATC-02")
-	got := a.pollList(a.usrD, id, "ATC-02 (контроль List: выдача ATC-01 видна)")
-	require.Equalf(t, []string{id}, got, "ATC-02: у usr-D есть выдача, кроме ATC-01")
+	// «Выдач у usr-D по probemod.nope — 0»: перечень usr-D — ровно выдача ATC-01
+	// (положительный контроль того же чтения), строк выдач в prj-A — одна.
+	a.requireListed(a.usrD, id, target, "ATC-02")
 	require.Equal(t, 1, a.bindingsOf(a.usrD, a.prjA), "ATC-02: в базе у usr-D в prj-A лишняя строка выдачи")
 }
 
@@ -382,7 +373,6 @@ func TestATC06_NonLiveTypeIsRefusedWithTheSameText(t *testing.T) {
 	require.Nilf(t, awaitOp(t, a.ctx, a.ops, op).Error, "ATC-06 (б) близнец: операция завершилась ошибкой")
 
 	a.applyDelivered("М3: снятие probemod.items, ручка пересобрана", a.manifest(true))
-	a.withList()
 	require.False(t, a.itemsLiveInDB(), "М3: строка probemod.items осталась живой")
 	a.requireSync(a.req(userSubject(a.usrD), a.rolItemGet, a.prjA, rr(atcItems, "i1")),
 		codes.InvalidArgument, atcT1(atcItems), "ATC-06 (б)")
@@ -538,7 +528,7 @@ func TestATC11_RoleCoverageGateAppliesToModuleTypes(t *testing.T) {
 	a := newATCWorld(t)
 	a.requireSync(a.req(userSubject(a.usrD), a.rolInstGet, a.prjA, rr(atcBoxes, atcB1)),
 		codes.FailedPrecondition,
-		fmt.Sprintf("role <%s> does not grant verbs on probemod.boxes; target type must be covered by role.rules", a.rolInstGet),
+		fmt.Sprintf("role %s does not grant verbs on probemod.boxes; target type must be covered by role.rules", a.rolInstGet),
 		"ATC-11")
 	op, _ := a.opOf(a.req(userSubject(a.usrD), a.rolBoxGet, a.prjA, rr(atcBoxes, atcB1)), "ATC-11 близнец")
 	require.Nilf(t, awaitOp(t, a.ctx, a.ops, op).Error, "ATC-11 близнец: операция завершилась ошибкой")
@@ -564,7 +554,7 @@ func TestATC13_SystemClassGateAppliesToModuleTypes(t *testing.T) {
 	a.registerBox(atcB2)
 	a.requireSync(a.req(classSubject("anonymous"), a.rolBoxUpd, a.prjA, rr(atcBoxes, atcB1)),
 		codes.FailedPrecondition,
-		fmt.Sprintf("Role <%s> grants verbs beyond get and list; a system class subject accepts read-only roles", a.rolBoxUpd),
+		fmt.Sprintf("Role %s grants verbs beyond get and list; a system class subject accepts read-only roles", a.rolBoxUpd),
 		"ATC-13 близнец")
 	op, _ := a.opOf(a.req(classSubject("anonymous"), a.rolBoxRead, a.prjA, rr(atcBoxes, atcB1)), "ATC-13")
 	require.Nilf(t, awaitOp(t, a.ctx, a.ops, op).Error, "ATC-13: операция завершилась ошибкой")
@@ -582,7 +572,7 @@ func TestATC14_StoredBindingReadsAfterItsTypeIsWithdrawn(t *testing.T) {
 
 	a.withdrawItemsInDB()
 	a.requireTargetVerbatim(id, target, "ATC-14: после снятия")
-	a.pollList(a.usrD, id, "ATC-14: List после снятия")
+	a.requireListed(a.usrD, id, target, "ATC-14: List после снятия")
 }
 
 // atcPerfReps — прогонов на каждую форму цели (DoD S1 п. 6).
@@ -603,7 +593,6 @@ func TestATCPerf_TargetCheckCostInTheWriteTx(t *testing.T) {
 	m, err := manifest.Load([]byte(b.String()))
 	require.NoError(t, err, "фикстура probeperf")
 	a.applyDelivered("доставка probeperf", m)
-	a.withList()
 
 	var rules domain.Rules
 	for r := 0; r < domain.MaxTargetResourcesPerBinding/16; r++ {
