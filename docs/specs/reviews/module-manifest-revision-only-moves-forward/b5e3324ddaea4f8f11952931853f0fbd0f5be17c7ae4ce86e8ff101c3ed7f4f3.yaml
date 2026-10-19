@@ -201,13 +201,25 @@ route_signs:
 event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3"
 
 event:
-  type: none
-  status: not_performed
+  type: issue_comment
+  target: PRO-Robotech/kaname#865
+  status: performed
+  published: true
+  database_id: 6255185671
+  node_id: "IC_kwDOUO26pM8AAAABdNaPBw"
+  url: "https://github.com/PRO-Robotech/kaname/issues/865#issuecomment-6255185671"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6255185671"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T21:10:23Z"
+  subject_sha256: "b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3"
+  verdict: "CHANGES_REQUESTED"
+  issued: false
   reason: >-
-    Событие публикует курьер (git-operator) в PRO-Robotech/kaname#865 и тем же заходом приводит
-    этот блок к факту. Тело:
-    acceptance-reviewer · CHANGES_REQUESTED · sha256 b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3
-
+    вердикт — CHANGES_REQUESTED, одобрения нет; тело события содержит event_body записи дословно.
+    Ритуал approval-event.sh неприменим: редакция 2 документа в истории не закоммичена, отпечаток
+    сверяется с event_body.
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
