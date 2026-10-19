@@ -230,8 +230,11 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
 `secondFactor` необязателен: без него сессия получает уровень `1`, даже если фактор заведён;
 с ним (`method` — `totp` либо `lookup_secret`, `code` — шесть цифр либо десять знаков
 запасного кода) — уровень `2`. Выше `2` вход паролем не поднимает; уровень `2` без второго
-фактора и уровень `3` даёт только [вход ключом доступа](#access-key-login). Форма кода судится **до** пароля: негодный код — отказ формы с
-именем поля (`Illegal argument secondFactor.code: must be 6 digits`), не попытка. Всё
+фактора и уровень `3` даёт только [вход ключом доступа](#access-key-login). Форма кода судится **до** пароля: негодный код — отказ формы
+`400` с именем поля, не попытка: `Illegal argument secondFactor.code: must be 6 digits` у кода
+по времени и `Illegal argument secondFactor.code: must be 10 characters of the backup-code alphabet`
+у запасного кода. Ответ входа сводки набора запасных кодов не несёт — остаток после входа
+запасным кодом читается [`GET …/second-factor`](#second-factor). Всё
 остальное о коде — не сошёлся, повторён, потреблён, **фактор не заведён** — отвечает тем же
 `401`, что неверный пароль **с тем же полем**, и считается попыткой: по ответу на вход нельзя
 узнать ни состояние фактора, ни то, совпал ли пароль.
@@ -410,18 +413,47 @@ with the current password`: пароль меняют через `POST /iam/v1/a
     { "totp": { "enrolled": false, "pendingUntil": "2026-09-17T10:15:00Z" },
       "accessKeys": { "available": true }, "stepUpMethods": [] }
     { "totp": { "enrolled": true, "confirmedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T08:00:00Z" },
-      "backupCodes": { "remaining": 8, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" },
+      "backupCodeSet": { "remaining": 8, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" },
       "accessKeys": { "available": true }, "stepUpMethods": ["lookup_secret", "totp", "webauthn"] }
   `}
 </CodeBlock>
 
 Моменты — UTC, до секунды. `totp.lastUsedAt` — последний принятый код (вход с кодом, повышение,
-перечеканка), `backupCodes.lastUsedAt` — последний потраченный запасной код, `issuedAt` — выпуск
+перечеканка), `backupCodeSet.lastUsedAt` — последний потраченный запасной код, `issuedAt` — выпуск
 набора; момента, которого не было, в теле **нет ключом** — сразу после подтверждения обоих
 `lastUsedAt` нет. `accessKeys.available` — включены ли ключи на установке. `stepUpMethods` —
 набор способов, которыми человек повысит **эту** сессию, по алфавиту: `totp` — у заведённого
 фактора, `lookup_secret` — пока в наборе есть коды, `webauthn` — при включённых ключах и хотя бы
 одном ключе; пароль способом повышения не считается, пусто — `[]`.
+
+#### Набор запасных кодов — два ключа, у каждого один тип {#backup-code-set}
+
+- `backupCodes` — **массив** ровно из десяти кодов только что выпущенного набора, показанных один
+  раз. Он есть только в ответах подтверждения заведения и перечеканки.
+- `backupCodeSet` — **объект** состояния набора с ключами `remaining` (остаток неиспользованных
+  кодов, число), `total` (`10`), `issuedAt` (выпуск набора) и `lastUsedAt` (последняя трата кода
+  этого набора; ключа нет, если из набора не тратили). Кодов в нём нет никогда. Остаток читается
+  одним путём — `backupCodeSet.remaining` — во всех ответах.
+
+`backupCodeSet` в ответе — состояние набора **после** глагола, и его значения совпадают со
+значениями `backupCodeSet` следующего `GET` той же сессии:
+
+| ответ `200` | `backupCodeSet` |
+|---|---|
+| `GET …/second-factor`, фактор заведён | есть — текущее состояние |
+| `GET …/second-factor`, фактора нет либо заведение не подтверждено | нет ключа |
+| `GET …/second-factor`, фактор заведён, а набор не читается | нет ключа; `totp.enrolled: true`, `stepUpMethods` без `lookup_secret` |
+| `POST …/confirm` | есть — `{ "remaining": 10, "total": 10, "issuedAt" }` |
+| `POST …/backup-codes` (перечеканка) | есть — новый набор, `{ "remaining": 10, "total": 10, "issuedAt" }` |
+| `POST /iam/v1/auth/step-up` способом `lookup_secret` | есть — остаток после траты, `lastUsedAt` — момент этой траты |
+| `POST /iam/v1/auth/step-up` способами `password`, `totp`, `webauthn` | нет ключа — набор глаголом не менялся |
+| `POST …/remove` | нет ключа — набора после снятия нет |
+| любой отказ | нет ключа |
+
+`remaining: 0` означает ровно одно — «фактор заведён, коды исчерпаны». «Сводки набора нет»
+выражается **отсутствием** ключа, а не нулём; что именно отсутствует, различает `totp.enrolled`:
+`false` — фактора нет, `true` — набор не читается (дефект хранения на стороне службы; путь
+починки — перечеканка кодом по времени).
 
 `POST …/enroll` (`{ "csrfToken" }`) отвечает `{ "secret", "otpauthUri", "expiresAt" }` — секрет
 в Base32 показывается **один раз**; печений нет. Требует **свежего** предъявления: последнее
@@ -442,7 +474,7 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 не «ключа нет». У человека без ключа условие не действует: свежая сессия `1` заводит код.
 
 `POST …/confirm` (`{ "code", "csrfToken" }`) — первым кодом с приложения; ответ
-`{ "backupCodes": [десять кодов], "session", "assurance" }` и **новый** `kaname_session`:
+`{ "backupCodes": [десять кодов], "backupCodeSet", "session", "assurance" }` и **новый** `kaname_session`:
 подтверждение — предъявление, сессия получает уровень `2`. Запасные коды показываются один раз.
 Требует **свежего** предъявления, как и заведение: иначе `403` `SESSION_NOT_FRESH`, и при
 истёкших обоих окнах — свежести и заведения — первой отвечает свежесть. Условие уровня у
@@ -451,16 +483,13 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 `POST …/remove` и `POST …/backup-codes` подтверждаются кодом — `{ "method", "code",
 "csrfToken" }` (`method`: `totp` либо `lookup_secret`), как смена пароля подтверждается текущим.
-Ответ — `200 { "session", "assurance" }` и новый носитель. У перечеканки к нему добавлен
-`backupCodes` (новый набор). Снятие несёт ещё `backupCodesRemaining: 0` — **всегда** и любым годным
-кодом, а не только потребившим запасной. Поле означает «второй фактор снят, резервных кодов не
-осталось»: снятие убирает фактор, набора запасных кодов после него нет. Успешность снятия
-подтверждают через `GET …/second-factor` по `totp.enrolled: false`, **а не** по счётчику остатка.
-Поле `backupCodesRemaining` в ответе снятия (плоское, всегда `0`) — это **не** то же, что
-`backupCodes.remaining` из `GET` заведённого фактора (вложенное, «сколько кодов ещё у живого
-фактора»): два разных нуля — у снятия `0` значит «фактора больше нет», у живого фактора
-`backupCodes.remaining: 0` значит «фактор жив, но коды исчерпаны». Без заведённого фактора —
-`400` `SECOND_FACTOR_NOT_ENROLLED`.
+Ответ снятия — `200 { "session", "assurance" }` и новый носитель, ровно эти два ключа при любом
+годном коде: набора после снятия нет, и сводки нет. Успешность снятия подтверждают через
+`GET …/second-factor` по `totp.enrolled: false`. Ответ перечеканки — тот же с ключами
+`backupCodes` (новый набор) и `backupCodeSet` (его состояние). Негодная форма кода — отказ формы
+`400`, `code` `3`, не попытка: `Illegal argument code: must be 6 digits` у кода по времени и
+`Illegal argument code: must be 10 characters of the backup-code alphabet` у запасного кода.
+Без заведённого фактора — `400` `SECOND_FACTOR_NOT_ENROLLED`.
 
 Утративший и приложение, и запасные коды сам фактор не снимет: за него это делает надзор облака
 глаголом [`UserService.ResetSecondFactor`](/api/user#reset-second-factor).
@@ -481,12 +510,26 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 `Illegal argument method: must be one of password|totp|lookup_secret|webauthn`. Поле другого
 способа отвергается по имени: `Illegal argument <поле>: not accepted with method <способ>`. Успешное предъявление кладёт способ в множество предъявленных, уровень
 пересчитывается правилом (монотонно — понижения нет), носитель перевыпускается. Неудачное
-предъявление сессию не гасит и не понижает. Ответ — `{ "session", "assurance" }`:
+предъявление сессию не гасит и не понижает. Форма кода у `totp` и `lookup_secret` судится до
+сверки, как у снятия: `Illegal argument code: must be 6 digits` либо
+`Illegal argument code: must be 10 characters of the backup-code alphabet`. Ответ —
+`{ "session", "assurance" }`:
 
 <CodeBlock language="json">
   {dedent`
     { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
       "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] } }
+  `}
+</CodeBlock>
+
+У способа `lookup_secret` к нему добавлено состояние набора после траты — `backupCodeSet`
+([набор запасных кодов](#backup-code-set)):
+
+<CodeBlock language="json">
+  {dedent`
+    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
+      "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] },
+      "backupCodeSet": { "remaining": 9, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" } }
   `}
 </CodeBlock>
 

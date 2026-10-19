@@ -1,0 +1,123 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: fb5c49ca5aa1e90a4b0543808f95334a92e7009ffc00b80df70fa4a1d635e4ff
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строки истории в шапке — статическая форма объявления; шапка не правлена
+    рецензентом намеренно (change-graph.md §2). Действующий вердикт о редакции fb5c49ca… — эта
+    запись и внешнее событие; прежние записи этого каталога не тронуты.
+  base_commit: 225428b30
+  content_commit: none
+  content_commit_note: >-
+    Редакция 19 рассмотрена незакоммиченной в рабочей копии tmp/w13-kn297-acc5 (отсоединена на
+    origin/297 @225428b30); отпечаток перемерен рецензентом sha256sum и равен заявленному.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 2989
+  scenarios: 46
+  round: 16
+  round_scope: >-
+    проверка исполнения дельты к редакции 18 (c6ea4897…, APPROVED кругом 15): запись о правке
+    после вердикта в шапке и новый §15 (отсылка по оси формы к backup-code-set-has-one-form.md,
+    редакция 4). Пункты вне дельты не переоткрываются (fa-b1). Круг заказан диспетчером по DoD
+    п. 8 приёмки BCS.
+  round_note: >-
+    Вердикт c6ea4897… относится к редакции 18 и на редакцию 19 не переносится; эта запись — вердикт
+    о редакции 19.
+  predecessor_record: docs/specs/reviews/second-factor-totp-and-recovery-codes/c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T04:49:38Z'
+effective_approval:
+  issued: true
+  issued_at: "2026-10-19T06:21:03Z"
+  note: >-
+    Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
+    not_performed. Правка документа после этой записи вердикт не переносит.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: performed
+  published: true
+  database_id: 6261027312
+  node_id: "IC_kwDOUO26pM8AAAABdS-x8A"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6261027312"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6261027312"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T06:21:03Z"
+  body_sha256: "526f55e6e6a106180161bce9b5eda7b8b5eb60edd0a9958e9311a0afb84f83a5"
+  subject_sha256: "fb5c49ca5aa1e90a4b0543808f95334a92e7009ffc00b80df70fa4a1d635e4ff"
+  subject_revision_commit: "ad31941e63e2c6e282a973cba8ed969bf590a2d5"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/second-factor-totp-and-recovery-codes/c6ea48973b048e0430bf3712e317aca39ac7df2e77dcb5e8d71e65c59aa33e2f.yaml
+premise:
+  status: confirmed
+  predicate: >-
+    sha256sum документа → fb5c49ca… (равен заявленному); `git diff --numstat` @225428b30 → 53
+    добавлено, 0 удалено; ханки — шапка :339-352 и §15 в конце файла.
+delta_checks:
+  - id: D1
+    subject: сценарии не тронуты
+    result: пройдено
+    predicate: >-
+      удалённых строк 0; заголовков сценариев Ф12-* — 46 (`grep -cE '^[#*].{0,12}Ф12-[0-9]+'`).
+  - id: D2
+    subject: §15 правдив о прежней форме
+    result: пройдено
+    predicate: >-
+      чтение «Тогда»: Ф12-02 :1519, :1530 (`backupCodes` массивом, `{"remaining":10,"total":10}`);
+      Ф12-18 :1758 (`backupCodesRemaining: 9`); Ф12-25 :1863; Ф12-26 :1880; Ф12-28 :1902; Ф12-45
+      :2004-2007 — совпадает со столбцом «прежняя форма».
+  - id: D3
+    subject: §15 правдив о целевой форме
+    result: пройдено
+    predicate: >-
+      сверка с BCS: confirm → BCS-03; GET → BCS-01, BCS-30; повышение → BCS-06, 07, 31;
+      перечеканка → BCS-04, 05; исчерпание → BCS-08; снятие → BCS-10 (ключи ровно session,
+      assurance), BCS-11 (остатка снятого нет, инвариант kaname#275). Ось смысла оставлена здесь,
+      ось формы отдана BCS — два держателя одного предмета не заведены.
+  - id: D4
+    subject: запись о правке после вердикта
+    result: пройдено
+    predicate: >-
+      шапка называет круг 15, отпечаток c6ea4897… и путь записи; запись существует, verdict
+      APPROVED, round 15. `go test -count=1 -run Acceptance ./internal/check/` → ok, код 0.
+new_blocking_from_delta: []
+non_blocking:
+  - id: N1
+    where: §15, последний перечень, пункт «§9»
+    note: >-
+      Отсылка «→ BCS DoD п. 6» указывает на п. 6 одобренной редакции 4 BCS, а в редакции 5 этот
+      пункт переписан. Держатель здесь — сценарии BCS-10, BCS-11, BCS-31, и они названы рядом, так
+      что неверной реализации отсылка не вызовет. При следующей правке опоры оставить только
+      сценарии.
+checks:
+  scope: без изменений против круга 15
+  producer: без изменений — §6 не тронут
+  twin: без изменений
+  constructibility: новых Given дельта не вводит (посеяно 0 из 0)
+  format: без изменений
+  conventions: без изменений
+  dod: без изменений
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: false
