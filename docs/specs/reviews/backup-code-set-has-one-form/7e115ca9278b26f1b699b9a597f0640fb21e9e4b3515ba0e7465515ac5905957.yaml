@@ -30,17 +30,29 @@ verdict: APPROVED
 reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-19T02:05:42Z'
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-19T02:16:38Z"
   note: >-
     Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
     not_performed. Правка документа после этой записи вердикт не переносит.
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#297
-  status: not_performed
-  published: false
-  publication_mode: courier_of_agent_verdict
-  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/backup-code-set-has-one-form.md · sha256 7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957
+  status: performed
+  published: true
+  database_id: 6258235879
+  node_id: "IC_kwDOUO26pM8AAAABdQUZ5w"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6258235879"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6258235879"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T02:16:38Z"
+  body_sha256: "fe41c6fcaf7a0c76e9011481c6ef5aeb29c98f120ae7d19678671ad2174ebbcb"
+  subject_sha256: "7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957"
+  subject_revision_commit: "e9247ea22ef50e2fc051d28496bf87053d2cf247"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
