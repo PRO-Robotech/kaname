@@ -30,6 +30,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func TestAuditEmit_CreateEmitsGranted_DeleteEmitsRevoked(t *testing.T) {
@@ -49,7 +50,7 @@ func TestAuditEmit_CreateEmitsGranted_DeleteEmitsRevoked(t *testing.T) {
 	ctx := newOwnerContext(ownerID)
 
 	// ── Create ──────────────────────────────────────────────────────────────
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(newRecordingFGA(), nil)
 	binding := domain.AccessBinding{
 		SubjectType:     "user",
 		SubjectID:       domain.SubjectID(subjectID),

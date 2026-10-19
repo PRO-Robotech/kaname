@@ -27,9 +27,14 @@ import (
 const targetRequiredMsg = "target is required; use target.allInScope{} to grant all objects under the anchor"
 
 // targetFromProto maps the required proto AccessTarget oneof to the domain target,
-// rejecting a missing/empty target sync (IAM-1-22) and an unknown per-object type
-// against the closed type-registry (IAM-1-23). First-statement gRPC errors, before
-// any Operation is minted.
+// rejecting a missing/empty target sync (IAM-1-22) and an over-long resources[]
+// list. First-statement gRPC errors, before any Operation is minted.
+//
+// Тип пообъектной цели здесь НЕ судится: годность типа — вопрос ЖИВОГО каталога
+// (IAM-1-23, kaname#904), и задаёт его use-case первым оператором по снимку
+// каталога (`CreateAccessBindingUseCase.Execute`, `refuseNonLiveTargetType`) —
+// тем же источником, которым судится правило роли. Разбор формы источника не
+// имеет и иметь не должен: второй ответ на один вопрос разошёлся бы с первым.
 func targetFromProto(t *iamv1.AccessTarget) (domain.AccessTarget, error) {
 	if t == nil {
 		return domain.AccessTarget{}, status.Error(codes.InvalidArgument, targetRequiredMsg)
@@ -55,10 +60,6 @@ func targetFromProto(t *iamv1.AccessTarget) (domain.AccessTarget, error) {
 		}
 		out := make([]domain.ResourceRef, 0, len(refs))
 		for _, r := range refs {
-			if !domain.ValidTargetType(r.GetType()) {
-				return domain.AccessTarget{}, status.Errorf(codes.InvalidArgument,
-					"Illegal argument target.resources[].type %q", r.GetType())
-			}
 			out = append(out, domain.ResourceRef{Type: r.GetType(), ID: r.GetId()})
 		}
 		return domain.AccessTarget{Resources: out}, nil

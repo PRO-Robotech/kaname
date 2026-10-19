@@ -42,6 +42,7 @@ import (
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func TestGetUser_Sync_InvalidID(t *testing.T) {
@@ -356,6 +357,19 @@ func (fakePrjW) Update(_ context.Context, p domain.Project, _ []string) (domain.
 func (fakePrjW) Delete(context.Context, domain.ProjectID) error { return nil }
 
 type fakeABW struct{}
+
+// LockLiveTargetTypes — подмножество `types`, живое в каталоге фикстуры: дублёр
+// не снисходительнее настоящего писателя.
+func (fakeABW) LockLiveTargetTypes(_ context.Context, types []string) ([]string, error) {
+	f := catalogfixture.Facts()
+	var out []string
+	for _, ty := range types {
+		if _, ok := f.FGAObjectType(ty); ok {
+			out = append(out, ty)
+		}
+	}
+	return out, nil
+}
 
 func (fakeABW) Insert(_ context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	b.CreatedAt = time.Now().UTC()
