@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // denyingRelations — RelationStore that denies every question.
@@ -148,7 +149,7 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 	abID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: abID, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: role, ResourceType: "account", ResourceID: string(acc),
 	})

@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func seedSA(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.ServiceAccount {
@@ -144,9 +145,9 @@ func TestSA_19_DeleteWithAccessBinding(t *testing.T) {
 	sa := seedSA(t, ctx, repo, acc.ID, "sa-bound")
 
 	abID := ids.NewID(domain.PrefixAccessBinding)
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id)
-		VALUES ($1, 'service_account', $2, $3, 'account', 'acc0000000000000xxxx')`,
+		VALUES ($1, 'service_account', $2, $3, 'account', 'acc0000000000000xxxx')`),
 		abID, string(sa.ID), seedSystemRoleIDIAMView,
 	)
 	require.NoError(t, err)

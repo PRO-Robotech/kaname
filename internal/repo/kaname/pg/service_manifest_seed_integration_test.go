@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/servicemanifest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // Строки свода, о которых утверждают сценарии. Идентификаторы — СИСТЕМНЫХ строк,
@@ -509,10 +510,10 @@ func TestMRW14_RoleGrantIsAdoptedByItsNaturalKey(t *testing.T) {
 			SELECT sa.id FROM kaname.service_accounts sa JOIN kaname.accounts a ON a.id = sa.account_id
 			 WHERE a.name = $1 AND sa.name = 'kacho-vpc'`, systemAccountName).Scan(&saID))
 		foreignID := ids.NewID(domain.PrefixAccessBinding)
-		_, err := pool.Exec(ctx, `
+		_, err := pool.Exec(ctx, bindingset.With(`
 			INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, is_system,
 			    resource_type, resource_id, status, deletion_protection, granted_by_user_id)
-			VALUES ($1, 'service_account', $2, 'rol6307d201bf18e6763', true, 'cluster', $3, 'ACTIVE', true, '')`,
+			VALUES ($1, 'service_account', $2, 'rol6307d201bf18e6763', true, 'cluster', $3, 'ACTIVE', true, '')`),
 			foreignID, saID, clusterAnchor)
 		require.NoError(t, err, "дом не построен: строка выдачи роли не легла")
 

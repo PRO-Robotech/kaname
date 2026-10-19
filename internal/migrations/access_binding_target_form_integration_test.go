@@ -51,6 +51,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // atfConstraint — имя ограничения формы цели, дословно.
@@ -157,9 +158,11 @@ func atfInsert(t *testing.T, db *sql.DB, role string, i int, target string) erro
 	tag := "atf" + strconv.Itoa(8630+i)
 	person := serSeedPerson(t, db, tag)
 	acc := "acc" + strings.Repeat("0", 17-len(tag)) + tag
-	_, err := db.Exec(`INSERT INTO kaname.access_bindings
+	// Выдача и строка её набора — одним оператором, как у продукта: на голове
+	// выдачу без набора база отвергает на коммите (kaname#902).
+	_, err := db.Exec(bindingset.With(`INSERT INTO kaname.access_bindings
 	    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
-	  VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5::jsonb)`,
+	  VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5::jsonb)`),
 		"acb"+tag, person, role, acc, target)
 	return err
 }

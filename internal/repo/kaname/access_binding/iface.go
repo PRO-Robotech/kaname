@@ -143,17 +143,16 @@ type ReaderIface interface {
 	// отменяет — он лишь остаётся неперечисленным.
 	ListActiveHoldingMembership(ctx context.Context, userID domain.UserID, accountID domain.AccountID, limit int) (ids []string, total int, err error)
 
-	// ListSubjects returns the multi-subject set of ONE binding ordered by
-	// (ordinal, subject_type, subject_id) (the read-projection).
-	// Zero rows ⇒ a legacy binding written before the backfill — the read-side
-	// then projects the legacy single subject as a one-element subjects[]
-	// (the use-case applies that fallback; the repo returns verbatim rows).
+	// ListSubjects отдаёт набор субъектов ОДНОЙ выдачи в порядке (ordinal,
+	// subject_type, subject_id) — проекция чтения. У сохранённой выдачи набор
+	// непуст: это держит база (`access_bindings_carry_a_subject`, kaname#902), и
+	// ноль строк значит лишь, что выдачи с таким идентификатором нет.
 	ListSubjects(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.Subject, error)
 
-	// ListSubjectsForBindings batch-loads the subjects of MANY bindings in one
-	// query (avoids per-row N+1 on List / ListByRole). Result maps binding id →
-	// ordered subjects; a binding with no rows is absent from the map (caller
-	// applies the legacy single-subject fallback).
+	// ListSubjectsForBindings пачкой читает субъектов МНОГИХ выдач одним
+	// запросом (без N+1 на List / ListByRole). Карта: идентификатор выдачи →
+	// упорядоченные субъекты. У сохранённой выдачи набор непуст (kaname#902),
+	// поэтому в карте нет только идентификаторов, которых нет в таблице.
 	ListSubjectsForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error)
 
 	// GrantorLastPresentedAt — самое свежее предъявление среди ЖИВЫХ сессий

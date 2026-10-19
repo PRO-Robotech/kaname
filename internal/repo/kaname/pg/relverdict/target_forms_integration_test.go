@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // tfSQLReading — ответ SQL-прочтения: вся область и названность каждой пары.
@@ -117,9 +118,9 @@ func TestTargetFormIsReadAlikeByTheBaseAndBothReaders(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				_, err = tx.Exec(ctx, `INSERT INTO kaname.access_bindings
+				_, err = tx.Exec(ctx, bindingset.With(`INSERT INTO kaname.access_bindings
 				    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
-				  VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5::jsonb)`,
+				  VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5::jsonb)`),
 					id, usr, role, acc, target)
 				if err != nil {
 					_, _ = tx.Exec(ctx, `ROLLBACK TO SAVEPOINT f`)

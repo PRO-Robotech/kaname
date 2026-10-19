@@ -49,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -116,16 +117,13 @@ func anyAssignableRole(t *testing.T, db *sql.DB) string {
 // держать любого писателя леджера, а не только use-case.
 func grantOn(t *testing.T, db *sql.DB, bindingID, subjectUserID, roleID, resType, resID string) string {
 	t.Helper()
-	_, err := db.Exec(`
+	// Выдача и строка её набора — одним оператором (kaname#902).
+	_, err := db.Exec(bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`),
 		bindingID, subjectUserID, roleID, resType, resID)
-	require.NoError(t, err, "посев выдачи %s", bindingID)
-	_, err = db.Exec(`
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		VALUES ($1, 'user', $2, 0)`, bindingID, subjectUserID)
-	require.NoError(t, err, "посев субъекта выдачи %s", bindingID)
+	require.NoError(t, err, "посев выдачи %s и её набора", bindingID)
 	return bindingID
 }
 
@@ -391,7 +389,7 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	db := upAllIAMMigrations(t, dsn)
 	defer func() { _ = db.Close() }()
 
-	_, acc := seedAccountWithOwner(t, db, "guardaaa")
+	owner, acc := seedAccountWithOwner(t, db, "guardaaa")
 	person := seedRowInAccount(t, db,
 		"usr"+fmt.Sprintf("%017s", "guardpp"), "guard@example.test", acc, "PENDING", "")
 	role := anyAssignableRole(t, db)
@@ -430,9 +428,21 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	// Именно это и делает миграция, поэтому её порядок стейтментов держится НЕ
 	// им. Строим состояние, где 0050 промолчать обязан (субъектной строки нет),
 	// и смотрим, поймает ли 472002 осиротевшую легаси-проекцию.
-	_, err = db.ExecContext(ctx, `
-		DELETE FROM kaname.access_binding_subjects WHERE binding_id = $1`, binding)
+	//
+	// Строку набора человека заменяет строка владельца аккаунта ОДНОЙ
+	// транзакцией: выдачу без строк набора база не фиксирует (kaname#902), а
+	// предмету формы В нужна лишь пара, называющая человека, при наборе, где
+	// его нет.
+	tx, err = db.BeginTx(ctx, nil)
 	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
+		VALUES ($1, 'user', $2, 1)`, binding, owner)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM kaname.access_binding_subjects WHERE binding_id = $1 AND subject_id = $2`, binding, person)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(), "набор выдачи без человека, но не пустой, фиксируется")
 
 	tx, err = db.BeginTx(ctx, nil)
 	require.NoError(t, err)
