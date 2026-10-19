@@ -310,8 +310,13 @@ func (r *userReader) FindActiveByEmail(ctx context.Context, email domain.Email) 
 //	    источник самостоятельный, а не следствие первого
 //	UNION
 //	(3) аккаунты, на которые у principal есть ACTIVE AccessBinding
-//	    (resource_type='account', subject_type='user', subject_id=$1) — сюда
-//	    попадает приглашённый, чьё членство ещё «приглашён»
+//	    (resource_type='account', субъект — 'user' $1) — сюда попадает
+//	    приглашённый, чьё членство ещё «приглашён». Субъект — ЛЮБОЙ из субъектов
+//	    выдачи (kaname#888): одиночная пара строки выдачи называет только первого,
+//	    поэтому источник читается двумя ветвями — пара (выдача, заведённая до
+//	    набора субъектов, названа только ею) и набор `access_binding_subjects`,
+//	    чьи столбцы области ведёт индекс `access_binding_subjects_subject_scope_idx`
+//	    (subject_type, subject_id, resource_type, resource_id)
 //
 // UNION автоматически устраняет дубли.
 //
@@ -340,7 +345,13 @@ func (r *userReader) ListAccountsForUser(ctx context.Context, userID domain.User
 		UNION
 		SELECT resource_id FROM access_bindings
 		  WHERE subject_type = 'user' AND subject_id = $1
-		    AND resource_type = 'account' AND status = 'ACTIVE'`,
+		    AND resource_type = 'account' AND status = 'ACTIVE'
+		UNION
+		SELECT s.resource_id
+		  FROM access_binding_subjects s
+		  JOIN access_bindings b ON b.id = s.binding_id
+		 WHERE s.subject_type = 'user' AND s.subject_id = $1
+		   AND s.resource_type = 'account' AND b.status = 'ACTIVE'`,
 		string(userID))
 	if err != nil {
 		return nil, mapErr(err, "", string(userID))
@@ -376,7 +387,7 @@ func membershipInAny(argIdx int) string {
 }
 
 func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User, string, error) {
-	pageSize, err := effectivePageSize(f.PageSize) // kacho-iam#184: reject >max, no silent clamp
+	pageSize, err := effectivePageSize(f.PageSize) // kacho-iam#184: сверх предела — отказ, молчаливого усечения нет
 	if err != nil {
 		return nil, "", err
 	}
@@ -410,34 +421,34 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 	}
 
 	if f.Filter != "" {
-		// Whitelist is closed; an expression outside it is refused by name rather
-		// than dropped (kacho#445). This resource dispatches on the parsed field instead
-		// of emitting ast.ToSQL, because none of the four terms is addressed as the
-		// field is written: `email` is compared case-insensitively, and `search` is
-		// not a column at all — it is a term spanning two of them. The switch is
-		// what keeps that mapping in one place. A field added to the whitelist
-		// without a case here would parse and then match nothing, so the default arm
-		// refuses instead of silently widening the page.
+		// Перечень разрешённых полей закрыт; выражение вне его отвергается по имени,
+		// а не отбрасывается (kacho#445). Ресурс ветвится по разобранному полю, а не
+		// выпускает ast.ToSQL, потому что ни один из четырёх терминов не адресуется
+		// так, как записано поле: `email` сравнивается без учёта регистра, а
+		// `search` — вовсе не столбец, а термин поверх двух столбцов. Переключатель
+		// держит это соответствие в одном месте. Поле, добавленное в перечень без
+		// ветви здесь, разобралось бы и не совпало ни с чем, поэтому ветвь по
+		// умолчанию отказывает, а не расширяет страницу молча.
 		ast, ferr := parseListFilter(f.Filter, "email", "external_id", "invite_status", "search")
 		if ferr != nil {
 			return nil, "", ferr
 		}
 		if ast != nil {
-			// The grammar carries an OPERATOR, and this switch reads only ast.Value —
-			// so before kacho#460 `email CONTAINS "acme"` was answered as `email = "acme"`:
-			// the caller asked for everyone at that domain and got the single exact
-			// match under a 200, with nothing in the response to tell the two apart.
-			// §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows
-			// implement, refuse by name, or drop from the contract; this is the second.
+			// Грамматика несёт ОПЕРАТОР, а переключатель читает только ast.Value —
+			// поэтому до kacho#460 на `email CONTAINS "acme"` отвечали как на
+			// `email = "acme"`: вызывающий спрашивал всех с этим доменом и получал
+			// единственное точное совпадение под 200, и ничто в ответе не отличало
+			// одно от другого. §«Принято-и-проигнорировано — ЗАПРЕЩЕНО» разрешает
+			// реализовать, отказать по имени либо снять из контракта; здесь второе.
 			//
-			// Refusing rather than implementing is the deliberate choice, not the cheap
-			// one: substring search on User already EXISTS and is published as
-			// `search="…"` (ListUsersRequest.filter), spanning email and id. Adding
-			// LIKE to `email` / `external_id` / `invite_status` would give one question
-			// two spellings that must then be kept in step forever, and on
-			// `invite_status` — a closed enum — a substring means nothing at all. So the
-			// message names the operator, the field, AND where substring search lives,
-			// because a caller told only "invalid" tries the same expression again.
+			// Отказ вместо реализации — намеренный выбор, а не дешёвый: поиск по
+			// подстроке у пользователя УЖЕ ЕСТЬ и опубликован как `search="…"`
+			// (ListUsersRequest.filter), по почте и идентификатору. LIKE на `email` /
+			// `external_id` / `invite_status` дал бы одному вопросу два написания,
+			// которые пришлось бы держать согласными всегда, а у `invite_status` —
+			// закрытого перечисления — подстрока не значит ничего. Поэтому сообщение
+			// называет оператор, поле И то, где живёт поиск по подстроке: вызывающий,
+			// которому сказали только «неверно», повторит то же выражение.
 			if ast.Op != filter.OpEquals {
 				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
 					`Operator %s is not supported for filter field %q. Substring search on User is spelled search="<value>"`,
@@ -783,13 +794,14 @@ func (w *userWriter) InsertActive(ctx context.Context, u domain.User) (domain.Us
 // `principal_not_referenced_as_subject`; у группы и сервисного аккаунта —
 // дословно оно же. Текст отказа говорит «active», и он обязан быть правдой.
 //
-// The access_bindings guard covers the LEGACY subjects[0] projection; the
-// access_binding_subjects guard covers subjects[1..N] — an independent grantee of a
-// multi-subject binding (RBAC rules-model, migration 0028) whose reference the
-// subjects[0]-only guard missed, orphaning a within-service ref + phantom FGA grant
-// (SEC r8, hard-rule #10). The concurrent delete-vs-add-subject window is closed at
-// the DB level by the BEFORE DELETE trigger (migration 0050); this software guard is
-// the fast common-case reject + canonical error text.
+// Гвард access_bindings покрывает ЛЕГАСИ-проекцию subjects[0]; гвард
+// access_binding_subjects — subjects[1..N], самостоятельного получателя выдачи с
+// несколькими субъектами (модель правил RBAC, миграция 0028), чью ссылку гвард
+// одного subjects[0] пропускал, оставляя висячую ссылку внутри службы и фантомную
+// выдачу в движке прав (SEC r8, запрет #10). Окно гонки «удаление против
+// добавления субъекта» закрыто на уровне базы триггером BEFORE DELETE (миграция
+// 0050); этот программный гвард — быстрый отказ частого случая и канонический
+// текст ошибки.
 func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 	const q = `
 		WITH del AS (
@@ -815,31 +827,34 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 		deleted                                             int
 		userExists, ownsAccounts, hasBindings, hasGroupMems bool
 	)
-	err := w.tx.QueryRow(ctx, q, string(id)).Scan(&deleted, &userExists, &ownsAccounts, &hasBindings, &hasGroupMems)
-	if err != nil {
-		return mapErr(err, "User.Delete", string(id))
-	}
-	if deleted == 1 {
-		return nil
-	}
-	if !userExists {
+	// Оператор — под точкой сохранения (`deleteUnderSavepoint`): отказ схемы
+	// на нём (ключ `accounts_owner_fk`, триггер выдач) отменяется до точки, и
+	// остаток дочитывается на живой транзакции той же формой, что у охраны
+	// (kaname#725, Р2).
+	return deleteUnderSavepoint(ctx, w.tx, "User.Delete", string(id), func(sp pgx.Tx) error {
+		err := sp.QueryRow(ctx, q, string(id)).Scan(&deleted, &userExists, &ownsAccounts, &hasBindings, &hasGroupMems)
+		if err != nil {
+			return mapErr(err, "User.Delete", string(id))
+		}
+		if deleted == 1 {
+			return nil
+		}
+		if !userExists {
+			return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+		}
+		// Полоса всех трёх — «ещё ссылаются» с видом держащего, та же, что у
+		// ветвей схемы в `fkText`: один отказ — одна полоса и одна форма, каким
+		// бы рубежом он ни пришёл (kaname#725, Р2, Р3). Порядок видов — прежний.
+		switch {
+		case ownsAccounts:
+			return heldRefusal(iamerr.HoldAccountsOwned, string(id))
+		case hasBindings:
+			return heldRefusal(iamerr.HoldActiveBindings, string(id))
+		case hasGroupMems:
+			return heldRefusal(iamerr.HoldGroupMembership, string(id))
+		}
 		return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
-	}
-	switch {
-	case ownsAccounts:
-		// Полоса — «ещё ссылаются» (`ErrReferenceInUse`, вложена в
-		// FailedPrecondition), та же, что у ветви ключа `accounts_owner_fk`
-		// в `fkText`: один отказ — одна полоса, каким бы рубежом он ни пришёл.
-		return iamerr.Wrapf(iamerr.ErrReferenceInUse,
-			"User %s owns accounts and cannot be deleted", id)
-	case hasBindings:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
-			"User %s has active access bindings and cannot be deleted", id)
-	case hasGroupMems:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
-			"User %s is a member of one or more groups and cannot be deleted", id)
-	}
-	return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", id)
+	})
 }
 
 // LockForRemoval — см. порт. Замок строки — ПЕРВЫМ оператором транзакции, перечень

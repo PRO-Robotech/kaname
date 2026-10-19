@@ -1,0 +1,107 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+  sha256: 4a73a495751cd10971f67d5943433bd7c916bc995ba0726c1f6e116abdbaa6df
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и история в шапке — статическая форма объявления (change-graph.md §2); рецензент
+    их не правил. Действующий вердикт о редакции 5 — эта запись и внешнее событие.
+  base_commit: 446edba4d60173a7b5aa89ecfda687e584d3d0cf (297, редакция 4 ветви kaname#297, b6d5f911…)
+  merge_head: 4477a97902c1610adda0febea9eb645b53134bcb (746, редакция 4 ветви kaname#777, 9178d6da…)
+  merge_base: db8bcb7e87f11b267bb1470894bf033b3c033e78 (редакция 3, 35224856…)
+  content_commit: none
+  content_commit_note: >-
+    Редакция 5 рассмотрена незакоммиченной в копии слияния tmp/w-297-m746; отпечаток перемерен
+    sha256sum и равен заявленному.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 667
+  scenarios: 36
+  round: 5
+  round_scope: >-
+    По дельте сведения к каждой из двух одобренных редакций 4 (fa-b1): к 9178d6da… — «Статус»,
+    история (сведённая строка круга 3, строка редакции 4 kaname#297, строки двух кругов 4, строка
+    редакции 5), предложение о редакции 20 в строке Ф12 §0.1, §9 целиком; к b6d5f911… — «Статус»,
+    история, заголовок столбца и строки Ф7, Ф12, level-two §0.1. Вне дельты не переоткрывалось.
+  predecessor_records:
+    - docs/specs/reviews/step-up-with-any-enrolled-method/9178d6da92843cf2c1690f6d5c373d0fccfef6837ea3e308f0627097e4fd0cbb.yaml
+    - docs/specs/reviews/step-up-with-any-enrolled-method/b6d5f91182f28706ac703fa217df8af8096ef6335054dea157c324361b17c577.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T06:51:40Z'
+effective_approval:
+  issued: true
+  note: Одобрена редакция 5 (4a73a495…); любая правка — новый круг по дельте.
+premise:
+  status: confirmed
+  predicate: >-
+    `git show HEAD:<путь> | sha256sum` → b6d5f911…, `git show MERGE_HEAD:<путь> | sha256sum` →
+    9178d6da…, база db8bcb7e → 35224856…; обе записи-предшественницы APPROVED на эти отпечатки
+    (у 9178d6da… event.status not_performed — строка истории круга 4 ветви kaname#777 события и не
+    называет, это правдиво).
+delta_checks:
+  - id: D1
+    subject: сохранены обе стороны
+    result: пройдено
+    predicate: >-
+      `diff MERGE_HEAD-версия WT` → «Статус», история, одно предложение в строке Ф12 §0.1, новый §9.
+      `diff HEAD-версия WT` → «Статус», история, заголовок столбца и три строки §0.1 kaname#777.
+      `git merge-file --diff3` против WT: конфликт только в истории (строка круга 3, дописанная обеими
+      ветвями), сведена в одну с пометкой; прочее — «Статус» и предложение о редакции 20 Ф12.
+  - id: D2
+    subject: сценарии и ID
+    result: пройдено
+    predicate: >-
+      `grep -oE '^\*\*ID: SUA-[0-9]+\*\*' | sort -u | md5sum` → одинаково (41c1306d) у базы, HEAD,
+      MERGE_HEAD и WT; 36 у каждой.
+  - id: D3
+    subject: противоположных «Тогда» нет
+    result: пройдено
+    predicate: >-
+      Дельта kaname#777 — пины соседей §0.1, сценариев не трогает; дельта kaname#297 — §9, отсылка по
+      оси формы, сценариев не трогает. Строки §9 (SUA-02, 12, 31, 40, 60, 61) сверены с BCS-01, 03,
+      04, 06, 08, 09, 30, 31, 32 — расхождений нет.
+  - id: D4
+    subject: строка Ф12 §0.1 правдива
+    result: пройдено
+    predicate: >-
+      Пин остаётся на одобренной редакции 19 (b0d2209b…); редакция 20 (e875e877…) отличается от неё
+      строками истории и §15 — взятое отсюда (Р4 step-up, Р5, Р6, Р7, Р9) словами не тронуто, форма
+      читается по BCS тем же образом, что и §9 этого документа.
+  - id: D5
+    subject: гейты приёмок
+    result: пройдено
+    predicate: >-
+      `go test -count=1 -run Acceptance ./internal/check/` в копии слияния → ok, код 0 (PASS 12, FAIL 0).
+new_blocking_from_delta: []
+non_blocking:
+  - id: N1
+    where: §0.1, строка Ф12
+    note: >-
+      «редакция 20 Ф12 … вердикта ещё не имеет» верно на момент редакции 5; с этим кругом у
+      e875e877… есть запись APPROVED. Перепин — следующей правкой (fa-b7), как у строки Ф13.
+  - id: N2
+    where: §0.1, строка Ф12
+    note: >-
+      Перенесено из N2 записи 9178d6da…: «Р4 глагола step-up … не тронуты», хотя раздел Р4 Ф12 получил
+      в редакции 19 предложение о порядке у enroll/confirm. Верно в своём объёме.
+checks:
+  scope: без новых предметов сверх двух одобренных редакций 4
+  producer: 36 из 36, не тронуто
+  twin: не тронуты
+  constructibility: новых Given нет
+  dod: без изменений
+event:
+  status: not_performed
+  note: публикует курьер на PRO-Robotech/kaname#297 после коммита слияния; тем же заходом блок приводится к факту
+event_body: acceptance-reviewer · APPROVED · 4a73a495751cd10971f67d5943433bd7c916bc995ba0726c1f6e116abdbaa6df
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true

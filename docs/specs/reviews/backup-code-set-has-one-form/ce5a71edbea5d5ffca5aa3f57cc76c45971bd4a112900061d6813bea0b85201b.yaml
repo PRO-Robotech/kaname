@@ -1,0 +1,107 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/backup-code-set-has-one-form.md
+  sha256: ce5a71edbea5d5ffca5aa3f57cc76c45971bd4a112900061d6813bea0b85201b
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и история в шапке — статическая форма объявления (change-graph.md §2); рецензент
+    их не правил. Действующий вердикт о редакции 7 — эта запись и внешнее событие.
+  base_commit: 446edba4d60173a7b5aa89ecfda687e584d3d0cf
+  content_commit: none
+  content_commit_note: >-
+    Редакция 7 рассмотрена незакоммиченной в копии слияния tmp/w-297-m746 (у 746 документа нет);
+    отпечаток перемерен sha256sum и равен заявленному.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 680
+  scenarios: 26
+  round: 7
+  round_scope: >-
+    Проверка исполнения дельты редакция 6 → редакция 7 (04f85af1… → ce5a71ed…): две строки истории,
+    строка «kaname, фикстуры прав» таблицы потребителей, DoD п. 4 и п. 8. Вне дельты не переоткрывалось.
+  predecessor_record: docs/specs/reviews/backup-code-set-has-one-form/04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/backup-code-set-has-one-form.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T06:51:40Z'
+effective_approval:
+  issued: true
+  note: Одобрена редакция 7 (ce5a71ed…); любая правка — новый круг по дельте.
+premise:
+  status: confirmed
+  predicate: >-
+    `git show HEAD:<путь> | sha256sum` → 04f85af1… (одобрена кругом 6); WT → ce5a71ed…; 26 сценариев,
+    ID те же (`grep -oE '^\*\*ID:\*\* BCS-[0-9]+' | sort -u | md5sum` → e0a2abc3 у обеих).
+delta_checks:
+  - id: D1
+    subject: п. 4 выполним на сведённом дереве
+    result: пройдено
+    predicate: >-
+      `python3 tests/authz-fixtures/seed_ceremony.py --self-test` → код 0 (ok 207);
+      `python3 tests/authz-fixtures/seed_key_person.py --self-test` → код 0 (ok 104), в том числе
+      «снятие второго фактора назвало набор запасных кодов — находка» (близнец с лишней backupCodeSet)
+      и обе проверки kaname#860 со стороны 746 («одна приставка…», «приставка вне объявленных…»).
+      `git diff db8bcb7e -- seed_key_person.py`: правка kaname#297 (remove_second_factor, _FakeLane)
+      и правка kaname#860 (prefixes) сведены без потерь.
+  - id: D2
+    subject: п. 6 на сведённом дереве, контроль в обе стороны
+    result: пройдено
+    predicate: >-
+      `git grep -n 'backupCodesRemaining' -- internal cmd docs/content tests .github ':(exclude)*_test.go'`
+      → 0 (рабочее дерево и `--cached`). Контроль: @db8bcb7e → 8 файлов, 25 строк; @MERGE_HEAD (746) →
+      те же 8 файлов с той же разбивкой (seed_key_person.py 2) — ветка эпика прежнюю форму не сняла,
+      ноль дают правки kaname#297. Исключение `*_test.go` → 4 файла, 8 строк, как в п. 6; перепись
+      строгости → 0 (контроль @db8bcb7e → 10).
+  - id: D3
+    subject: п. 4 не противоречит п. 6
+    result: пройдено
+    predicate: >-
+      Редакция 6 говорила «обе без правки», а п. 6 требовал tests → 0 при 2 строках seed_key_person.py
+      @db8bcb7e — противоречие было. Редакция 7 правку признаёт, п. 6 на сведённом дереве → 0.
+  - id: D4
+    subject: п. 8 выполним
+    result: пройдено
+    predicate: >-
+      Названные отпечатки перемерены: Ф12 → e875e877…, SUA → 4a73a495…; на оба этим кругом записаны
+      APPROVED (e875e877….yaml, 4a73a495….yaml); остаток пункта — внешнее событие после коммита.
+      «сценарии BCS-* в редакциях 5…7 те же» — разделы «Решение», «Общее Given»…«DoD», «Решения»
+      редакции 7 побайтово равны редакции 4 (7e115ca9…, @e9e165390).
+  - id: D5
+    subject: строка таблицы потребителей
+    result: пройдено
+    predicate: >-
+      Строка «kaname, фикстуры прав» называет и чтение снятия (remove_second_factor, _FakeLane) —
+      согласна с п. 4 и с разбивкой п. 6 (seed_key_person.py 2 @db8bcb7e).
+  - id: D6
+    subject: гейты приёмок
+    result: пройдено
+    predicate: >-
+      `go test -count=1 -run Acceptance ./internal/check/` в копии слияния → ok, код 0 (PASS 12, FAIL 0).
+new_blocking_from_delta: []
+non_blocking:
+  - id: N1
+    where: DoD п. 4 против tests/authz-fixtures/seed_key_person.py remove_second_factor
+    note: >-
+      П. 4 говорит «ключами ровно session, assurance, иначе находка», а код проверяет только лишние
+      ключи (`set(body) - {session, assurance}`): тело без assurance находкой не станет. Документ
+      верен как обязательство; исполнителю до коммита — сравнение множеств на равенство и близнец
+      «нет assurance → находка». Правка кода отпечаток документа не меняет.
+checks:
+  scope: без изменений против круга 6
+  producer: 26 из 26, таблица не тронута
+  twin: не тронуты
+  constructibility: новых Given нет
+  dod: п. 4 — пройдено (самопроверки код 0), п. 6 — пройдено на сведённом дереве, п. 8 — выполним
+event:
+  status: not_performed
+  note: публикует курьер на PRO-Robotech/kaname#297 после коммита слияния; тем же заходом блок приводится к факту
+event_body: acceptance-reviewer · APPROVED · ce5a71edbea5d5ffca5aa3f57cc76c45971bd4a112900061d6813bea0b85201b
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true

@@ -139,13 +139,15 @@ func TestSystemClass_CE01_ThreeFormsAgreeOnSpeakerClasses(t *testing.T) {
 			{"user:usr-1", false}, {"system_class:anonymous", false},
 		}, "выдача authenticated, пишущий глагол")
 
-		// Выдача анониму: читают и аноним, и вошедший (включение, Р2); переходная
-		// подстановка реестра — как аноним (разбор CE-03 (в)).
+		// Выдача анониму: читают и аноним, и вошедший (включение, Р2).
+		// Подстановка `user:*` классов не получает ни одной формой (SC-15, полоса
+		// L6 kaname#832): переходное отображение в аноним снято, и даже вопрос,
+		// миновавший отказ разбора двери, не читает выданного анониму.
 		exec(t, ctx, tx, `DELETE FROM kaname.access_binding_subjects WHERE binding_id = 'acb-sc-auth'`)
 		exec(t, ctx, tx, `DELETE FROM kaname.access_bindings WHERE id = 'acb-sc-auth'`)
 		scSeedClassGrant(t, ctx, tx, "acb-sc-anon", "anonymous")
 		scForms(t, ctx, tx, "v_get", []scSpeaker{
-			{"user:usr-1", true}, {"system_class:anonymous", true}, {"user:*", true},
+			{"user:usr-1", true}, {"system_class:anonymous", true}, {"user:*", false},
 			{"group:grp-sc#member", false},
 		}, "выдача anonymous")
 

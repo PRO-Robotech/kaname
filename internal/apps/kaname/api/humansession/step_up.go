@@ -386,7 +386,13 @@ func (uc *StepUpUseCase) verifyPassword(ctx context.Context, userID domain.UserI
 	default:
 		return "", err
 	}
-	res := uc.deps.Verifier.Verify(stored, password)
+	res, verr := uc.deps.Verifier.Verify(ctx, stored, password)
+	if verr != nil {
+		// Вызов кончился до места вычисления: проверка не состоялась — исход
+		// той же природы, что исчерпание ёмкости, попыткой не считается
+		// (kaname#892).
+		return passwordverify.OutcomeCapacityExhausted, nil
+	}
 	if res.Outcome.IsOurError() {
 		uc.deps.Logger.Error("step-up: stored password material could not be checked — our data, not the caller's input",
 			"outcome", string(res.Outcome))

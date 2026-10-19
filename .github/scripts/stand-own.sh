@@ -36,8 +36,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ЧЕГО ЭТОТ СТЕНД НЕ УТВЕРЖДАЕТ — И ГДЕ ЖИВЁТ ВТОРАЯ ПОЛОВИНА
 #
-# Он поднимает ПРОЦЕСС, а не ЧАРТ: helm, kubectl и kind в нём не встречаются ни
-# разу. Значит вердикта об установке в кластере он не даёт вовсе — ни зелёного,
+# Он поднимает ПРОЦЕСС, а не ЧАРТ: helm и kind в нём нет, kubectl — лишь путь во
+# внешний кластер (голый под, kaname#841). Вердикта об установке чарта он не даёт — ни зелёного,
 # ни красного. Вторая половина предиката M11 («helm install + rollout-ready, не
 # только helm template») живёт рядом: `.github/scripts/stand-chart.sh`.
 #
@@ -474,7 +474,7 @@ migrate() {
   # out="$(…)"` код возврата принадлежит самому `local`, то есть равен нулю
   # всегда, и отказ накатчика исчез бы вместе с величиной.
   local out rc
-  out="$("$BIN/kaname-migrator" up 2>&1)"; rc=$?
+  out="$(${MIGRATOR_RUN[@]+"${MIGRATOR_RUN[@]}"} "$BIN/kaname-migrator" up 2>&1)"; rc=$?
   printf '%s\n' "$out" | tail -3
   if [ "$rc" -eq 0 ]; then
     say "миграции накачены"
@@ -792,7 +792,7 @@ EOF
     fi
     say "контроль до свёртки: $key принят фронтом (200) после тишины — окна обоих кешей начаты этим предъявлением"
   done
-  fold_db
+  db_fold_routed
   t_ready="$(now_s)"
   if [ $(( t_ready - t0 + WAVE_MARGIN_S )) -ge "$window" ]; then
     unmet "окно свежих кешей истекло до вызовов: от прогрева прошло $(( t_ready - t0 )) с из $window с, запас $WAVE_MARGIN_S с — коллекция authz-failclosed НЕ гонялась, вердикта о дереве нет"
@@ -823,6 +823,693 @@ failclosed_judge() {
   fi
   say "коллекция завершилась: от прогрева $(( t_end - t0 )) с из окна $window с (код $rc)"
   return "$rc"
+}
+
+# ─── ВНЕШНИЙ КЛАСТЕР — ПЕРВЫМ, ЛОКАЛЬНЫЙ DOCKER — ПО ОСНОВАНИЮ (kaname#841) ───
+#
+# Стенд поднимался `docker run` машины и тогда, когда внешний кластер был
+# доступен: замер полосы kaname#829 — 7 подъёмов, 1,25 ч за сутки на машине
+# разработчика. Норма — тяжёлое во внешнем кластере, локально лишь при его
+# недоступности, и недоступность доказывается выводом проверки, а не догадкой.
+#
+# ВЫБОР ПУТИ (`route_decide`) — до первой записи куда бы то ни было:
+#   кубконфиг    KANAME_STAND_KUBECONFIG, иначе KACHO_REMOTE_KUBECONFIG, иначе
+#                первая строка личного файла `${XDG_CONFIG_HOME:-~/.config}/kacho/remote-kubeconfig`
+#                (та же координата, что у тяжёлых прогонов воркспейса); окружение
+#                KUBECONFIG и текущий контекст НЕ берутся — они могут смотреть на
+#                kind или на кластер с выкаткой, и стенд ушёл бы туда молча;
+#   контекст     ровно один контекст файла с суффиксом `-client`; явный —
+#                KANAME_STAND_CONTEXT, и только с тем же суффиксом (иначе отказ 64:
+#                ставить можно только в `-client`); current-context не читается;
+#   кластер      доказывают УЗЛЫ, а не файл: узлов ≥ 1, все `<профиль>-client-…`,
+#                ни одного `-infra-`; профиль — KANAME_STAND_PROFILE либо из имени
+#                файла `<учётка>--<профиль>.yaml`;
+#   право        `auth can-i create namespaces` отвечает `yes` за EXT_PROBE_S секунд.
+# Не сошлось любое — путь локальный, и основание (шаг и вывод проверки, адреса
+# скрыты) печатается и пишется строкой в `$RUNDIR/route.log`. Кластер доступен,
+# а номера задачи нет — отказ 64: локально стенд при доступном кластере не идёт.
+#
+# ВНЕШНИЙ ПУТЬ — тот же ПРОЦЕСС, а не чарт: один под в пространстве
+# `t<задача>-kaname-own` с тремя контейнерами, делящими сеть пода так же, как
+# локальный путь делит сеть машины (`--network host`): база на 127.0.0.1:$PG_PORT,
+# служба на своих портах, приёмник писем на своих. Посадка — та же `stand_env`,
+# с путями файлов пода (`/stand/pki`); бинари собираются здесь же и доезжают в
+# под потоком с проверкой отпечатка. Слушатели службы пробрасываются на
+# 127.0.0.1 машины теми же номерами, поэтому утверждения, посев и прогон
+# коллекций не меняются. Предел памяти службы — предел контейнера пода
+# (`SERVICE_MEMORY`), его страж полосы входа и читает.
+#
+# СНЯТИЕ — `down` той же задачей: проброс, журнал службы в `$RUNDIR/kaname.log`,
+# пространство (только помеченное этим стендом, чужое не трогается), затем
+# перепись помеченных пространств задачи — исход числом, ненулевой остаток — 1.
+# Подъём, не дошедший до конца, снимает созданное сам.
+
+EXT_PROBE_S="${KANAME_STAND_EXT_PROBE_S:-10}"
+EXT_READY_TRIES="${KANAME_STAND_EXT_READY_TRIES:-300}"
+EXT_TTL_HOURS="${KANAME_STAND_TTL_HOURS:-12}"
+EXT_POD=kaname-own
+EXT_MARK_LABEL="kaname.io/stand"
+EXT_MARK=own
+EXT_PKI=/stand/pki
+EXT_BIN=/stand/bin
+MAILBOX_IMAGE="${KANAME_STAND_MAILBOX_IMAGE:-python:3.12-alpine}"
+ROUTE_FILE="$RUNDIR/route"
+ROUTE_LOG="$RUNDIR/route.log"
+FORWARD_PID="$RUNDIR/forward.pid"
+FORWARD_LOG="$RUNDIR/forward.log"
+FORWARD_ON="$RUNDIR/forward.on"
+EXT_KCFG=""; EXT_CTX=""; EXT_PROF=""; EXT_TASK=""; EXT_NS=""
+ROUTE=local; WHY=""; PROOF=""
+# Префикс исполнения наката: пустой — накатчик машины; внешний путь подставляет exec пода.
+MIGRATOR_RUN=()
+
+refuse() { printf 'ОТКАЗ: %s\n' "$*" >&2; }
+
+# mask — адрес сервера и адреса узлов в выводе проверки не печатаются:
+# репозиторий публичный, вывод прогона уходит в задачи.
+mask() {
+  sed -E 's#[a-zA-Z][a-zA-Z0-9+.-]*://[^ )]+#<кластер>#g; s#[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]+)?#<адрес>#g'
+}
+
+# Три формы вызова кластера, все с явными файлом и контекстом: опрос (короткий
+# предел — недоступность доказывается быстро), запись и чтение (предел запроса),
+# поток (exec, проброс, журнал — предел ставит вызывающий).
+kq() { timeout "$EXT_PROBE_S" kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" --request-timeout="${EXT_PROBE_S}s" "$@"; }
+kc() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" --request-timeout=60s "$@"; }
+ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
+
+ext_kubeconfig() {
+  local f="${KANAME_STAND_KUBECONFIG:-${KACHO_REMOTE_KUBECONFIG:-}}"
+  local personal="${XDG_CONFIG_HOME:-${HOME:-}/.config}/kacho/remote-kubeconfig"
+  if [ -z "$f" ] && [ -r "$personal" ]; then
+    f="$(head -n 1 "$personal")"
+    f="${f/#\~/${HOME:-}}"
+  fi
+  if [ -z "$f" ]; then
+    WHY="кубконфиг внешнего кластера не назван (KANAME_STAND_KUBECONFIG, KACHO_REMOTE_KUBECONFIG, личный файл kacho/remote-kubeconfig)"
+    return 1
+  fi
+  [ -r "$f" ] || { WHY="названный кубконфиг внешнего кластера не читается"; return 1; }
+  EXT_KCFG="$f"
+}
+
+# ext_context — код 64: явный контекст не `-client` (ошибка вызова, не
+# недоступность); 1 — контекст не выбран, путь локальный с основанием.
+ext_context() {
+  local ctxs n
+  if [ -n "${KANAME_STAND_CONTEXT:-}" ]; then
+    case "$KANAME_STAND_CONTEXT" in
+      *-client) ;;
+      *) refuse "KANAME_STAND_CONTEXT — только контекст -client (ставить стенд можно только в него)"; return 64 ;;
+    esac
+  fi
+  ctxs="$(kubectl --kubeconfig "$EXT_KCFG" config get-contexts -o name 2>/dev/null)" || {
+    WHY="контексты кубконфига не прочитаны"; return 1; }
+  if [ -n "${KANAME_STAND_CONTEXT:-}" ]; then
+    grep -qxF -- "$KANAME_STAND_CONTEXT" <<< "$ctxs" || { WHY="названного контекста -client в кубконфиге нет"; return 1; }
+    EXT_CTX="$KANAME_STAND_CONTEXT"
+    return 0
+  fi
+  n="$(grep -c -- '-client$' <<< "$ctxs")"
+  [ "$n" -eq 1 ] || { WHY="контекстов -client в кубконфиге $n, нужен ровно один"; return 1; }
+  EXT_CTX="$(grep -- '-client$' <<< "$ctxs")"
+}
+
+ext_profile() {
+  local from_file=""
+  [[ "${EXT_KCFG##*/}" =~ --([A-Za-z0-9]+)\.ya?ml$ ]] && from_file="${BASH_REMATCH[1]}"
+  EXT_PROF="${KANAME_STAND_PROFILE:-$from_file}"
+  [ -n "$EXT_PROF" ] || { WHY="профиль кластера не назван (KANAME_STAND_PROFILE либо имя файла <учётка>--<профиль>.yaml)"; return 1; }
+  if [ -n "$from_file" ] && [ "$from_file" != "$EXT_PROF" ]; then
+    WHY="профиль KANAME_STAND_PROFILE расходится с именем кубконфига — файл мог быть подменён"
+    return 1
+  fi
+}
+
+# ext_nodes_guard — кластер доказывают узлы: файл профиля могут заменить.
+ext_nodes_guard() {
+  local out rc n all=0 good=0 infra=0
+  out="$(kq get nodes -o name 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    WHY="узлы внешнего кластера не прочитаны"
+    PROOF="kubectl get nodes: код $rc, $(printf '%s\n' "$out" | head -n 1 | mask | cut -c1-300)"
+    return 1
+  fi
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    n="${n#node/}"; all=$((all + 1))
+    case "$n" in
+      *-infra-*) infra=$((infra + 1)) ;;
+      "$EXT_PROF"-client-*) good=$((good + 1)) ;;
+    esac
+  done <<< "$out"
+  if [ "$all" -eq 0 ] || [ "$infra" -gt 0 ] || [ "$good" -ne "$all" ]; then
+    WHY="узлы не кластера профиля: всего $all, с префиксом <профиль>-client- $good, с -infra- $infra — кубконфиг мог быть подменён"
+    return 1
+  fi
+  EXT_NODES="$good"
+}
+
+# route_decide — ROUTE=external|local, основание в WHY и PROOF. Код 64 — ошибка
+# вызова; иначе 0 при любом пути.
+route_decide() {
+  local out rc
+  ROUTE=local; WHY=""; PROOF=""
+  ext_kubeconfig || return 0
+  command -v kubectl >/dev/null 2>&1 || { WHY="kubectl на машине нет — внешний кластер не спросить"; return 0; }
+  ext_context; rc=$?
+  [ "$rc" -eq 64 ] && return 64
+  [ "$rc" -eq 0 ] || return 0
+  ext_profile || return 0
+  out="$(kq auth can-i create namespaces 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(printf '%s\n' "$out" | grep -v '^Warning:' | tail -n 1)" != yes ]; then
+    WHY="внешний кластер не ответил либо заводить пространства не вправе"
+    PROOF="kubectl auth can-i create namespaces: код $rc, $(printf '%s\n' "$out" | grep -v '^Warning:' | head -n 1 | mask | cut -c1-300)"
+    return 0
+  fi
+  ext_nodes_guard || return 0
+  PROOF="контекст -client отвечает, заводить пространства вправе, узлов профиля $EXT_NODES"
+  ROUTE=external
+}
+
+# ext_name_ns — t<задача>-kaname-own; задача — KANAME_STAND_TASK либо ведущие
+# цифры имени ветки. Код 64 — назвать пространство нечем.
+ext_name_ns() {
+  local task="${KANAME_STAND_TASK:-}" br
+  if [ -z "$task" ]; then
+    br="$(git -C "$ROOT" branch --show-current 2>/dev/null)"
+    [[ "$br" =~ ^(issue-)?([0-9]+)([-_/].*)?$ ]] && task="${BASH_REMATCH[2]}"
+  fi
+  if ! [[ "$task" =~ ^[0-9]+$ ]]; then
+    refuse "внешний кластер доступен, а номера задачи нет: пространство t<задача>-kaname-own назвать нечем — KANAME_STAND_TASK=<номер> либо ветка <номер>…; локально стенд при доступном кластере не идёт"
+    return 64
+  fi
+  EXT_TASK="$task"
+  EXT_NS="${KANAME_STAND_EXT_NS:-t$task-kaname-own}"
+  if [ "${#EXT_NS}" -gt 40 ] || ! [[ "$EXT_NS" =~ ^t$task-[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+    refuse "имя пространства «$EXT_NS» не по правилу t$task-<коротко> (не длиннее 40 знаков)"
+    return 64
+  fi
+  if ! [[ "$EXT_TTL_HOURS" =~ ^[0-9]+$ ]] || [ "$EXT_TTL_HOURS" -lt 1 ] || [ "$EXT_TTL_HOURS" -gt 12 ]; then
+    refuse "KANAME_STAND_TTL_HOURS — целое от 1 до 12, получено «$EXT_TTL_HOURS»"
+    return 64
+  fi
+}
+
+record_route() {
+  mkdir -p "$RUNDIR"
+  if [ "$ROUTE" = external ]; then
+    say "маршрут стенда: внешний кластер, пространство $EXT_NS (основание: $PROOF)"
+    printf '%s\t%s\t%s\t%s\t%s\n' external "$EXT_NS" "$EXT_TASK" "$EXT_CTX" "$EXT_KCFG" > "$ROUTE_FILE"
+  else
+    say "маршрут стенда: локальный docker (основание: $WHY${PROOF:+; $PROOF})"
+    printf 'local\n' > "$ROUTE_FILE"
+  fi
+  printf '%s route=%s ns=%s why=%s proof=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$ROUTE" "${EXT_NS:--}" "${WHY:--}" "${PROOF:--}" >> "$ROUTE_LOG"
+}
+
+# route_load — 0, если идущий стенд поднят внешним путём (координаты — из файла
+# маршрута подъёма, а не заново: снимать надо то, что подняли).
+route_load() {
+  local kind
+  [ -f "$ROUTE_FILE" ] || return 1
+  IFS=$'\t' read -r kind EXT_NS EXT_TASK EXT_CTX EXT_KCFG < "$ROUTE_FILE" || return 1
+  [ "$kind" = external ] && [ -n "$EXT_NS" ]
+}
+
+# ext_mark <пространство> — метка стенда; код 3 — пространства нет, 75 — не прочитано.
+ext_mark() {
+  local out rc
+  out="$(kc get namespace "$1" -o "jsonpath={.metadata.labels.kaname\.io/stand}" 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    case "$out" in *NotFound*|*"not found"*) return 3 ;; esac
+    unmet "пространство $1 не прочитано: $(printf '%s\n' "$out" | head -n 1 | mask | cut -c1-300)"
+    return 75
+  fi
+  printf '%s' "$out"
+}
+
+# ext_claim_ns — своё пространство: заводится с метками и сроком ОДНОЙ записью
+# (`create`, не `apply`: существующее чужое не перепомечается); уже заведённое
+# этим стендом переиспользуется, предыдущий под снимается.
+ext_claim_ns() {
+  local mark rc expires
+  mark="$(ext_mark "$EXT_NS")"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    if [ "$mark" != "$EXT_MARK" ]; then
+      unmet "пространство $EXT_NS есть и заведено не этим стендом — не трогаю"
+      return 75
+    fi
+    say "пространство $EXT_NS заведено этим стендом раньше — переподнимаю в нём"
+    kc -n "$EXT_NS" delete pod "$EXT_POD" --ignore-not-found --wait=true >/dev/null 2>&1
+    kc -n "$EXT_NS" delete secret kaname-own-env kaname-own-pki --ignore-not-found >/dev/null 2>&1
+    kc -n "$EXT_NS" delete configmap kaname-own-mailbox --ignore-not-found >/dev/null 2>&1
+    return 0
+  fi
+  [ "$rc" -eq 3 ] || return 75
+  expires="$(date -u -d "+$EXT_TTL_HOURS hours" +%Y-%m-%dT%H:%M:%SZ)"
+  kc create -f - >/dev/null 2>&1 <<EOF || { unmet "пространство $EXT_NS не заведено"; return 75; }
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $EXT_NS
+  labels:
+    kacho.io/task: "$EXT_TASK"
+    kacho.io/stand: test
+    kacho.io/repo: kaname
+    kacho.io/kind: stand-own
+    $EXT_MARK_LABEL: $EXT_MARK
+  annotations:
+    kacho.io/expires: "$expires"
+EOF
+  say "пространство $EXT_NS заведено (метка задачи $EXT_TASK, срок $expires)"
+}
+
+# k8s_memory — предел контейнера той же величиной, что `docker --memory`.
+k8s_memory() {
+  [[ "$1" =~ ^([0-9]+)([mMgG])$ ]] || return 1
+  case "${BASH_REMATCH[2]}" in m|M) printf '%sMi' "${BASH_REMATCH[1]}" ;; *) printf '%sGi' "${BASH_REMATCH[1]}" ;; esac
+}
+
+# ext_put_config — посадка службы Secret-ом: каждая переменная — свой файл,
+# поэтому ключи с переводом строки доезжают целыми. Пути файлов — пода.
+ext_put_config() {
+  local d v rc=0
+  d="$(mktemp -d)" || { unmet "временный каталог посадки не создан"; return 75; }
+  ( PKI="$EXT_PKI"; stand_env
+    for v in $(compgen -e); do
+      case "$v" in KANAME_STAND_*) ;; KANAME_*) printf '%s' "${!v}" > "$d/$v" ;; esac
+    done ) || rc=1
+  if [ "$rc" -eq 0 ]; then
+    kc -n "$EXT_NS" create secret generic kaname-own-env --from-file="$d" >/dev/null 2>&1 || rc=1
+  fi
+  rm -rf "$d"
+  [ "$rc" -eq 0 ] || { unmet "посадка службы не доехала в пространство $EXT_NS"; return 75; }
+  kc -n "$EXT_NS" create secret generic kaname-own-pki \
+    --from-file=ca.crt="$PKI/ca.crt" --from-file=srv.crt="$PKI/srv.crt" --from-file=srv.key="$PKI/srv.key" \
+    --from-file=pg.crt="$PKI/pg.crt" --from-file=pg.key="$PKI/pg.key" >/dev/null 2>&1 || {
+      unmet "листы стенда не доехали в пространство $EXT_NS"; return 75; }
+  kc -n "$EXT_NS" create configmap kaname-own-mailbox --from-file=stand-mailbox.py="$HERE/stand-mailbox.py" >/dev/null 2>&1 || {
+    unmet "приёмник писем не доехал в пространство $EXT_NS"; return 75; }
+}
+
+# ext_put_pod — под стенда. Посадка безопасности пода — ограниченная: не root,
+# без повышения прав и без возможностей, профиль seccomp среды.
+#
+# База исполняется под надзирающей оболочкой: свёртка (`db-fold`) кладёт файл
+# `/ctl/fold` и останавливает postgres, и оболочка не поднимает его, пока файл
+# лежит; данные — в томе пода, поэтому возврат находит ту же базу. Так у
+# свёртки та же семантика, что `docker stop`/`docker start` локального пути.
+ext_put_pod() {
+  local mem
+  mem="$(k8s_memory "$SERVICE_MEMORY")" || { refuse "SERVICE_MEMORY «$SERVICE_MEMORY» — число с m или g"; return 64; }
+  kc create -f - >/dev/null 2>&1 <<EOF || { unmet "под стенда не заведён в пространстве $EXT_NS"; return 75; }
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $EXT_POD
+  namespace: $EXT_NS
+  labels: {app: $EXT_POD}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile: {type: RuntimeDefault}
+  volumes:
+    - {name: pki, secret: {secretName: kaname-own-pki, defaultMode: 288}}  # 0440: ключ базы — не шире группы
+    - {name: bin, emptyDir: {}}
+    - {name: pgdata, emptyDir: {}}
+    - {name: ctl, emptyDir: {}}
+    - {name: mailbox, configMap: {name: kaname-own-mailbox}}
+  containers:
+    - name: pg
+      image: "$PG_IMAGE"
+      command:
+        - sh
+        - -c
+        - >-
+          while :; do if [ -e /ctl/fold ]; then sleep 1; continue; fi;
+          docker-entrypoint.sh postgres -c port=$PG_PORT -c listen_addresses=127.0.0.1
+          -c ssl=on -c ssl_cert_file=$EXT_PKI/pg.crt -c ssl_key_file=$EXT_PKI/pg.key; sleep 1; done
+      env:
+        - {name: POSTGRES_USER, value: kaname}
+        - {name: POSTGRES_PASSWORD, value: stand}
+        - {name: POSTGRES_DB, value: kaname}
+        - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+      resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 512Mi}}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      volumeMounts:
+        - {name: pki, mountPath: $EXT_PKI, readOnly: true}
+        - {name: pgdata, mountPath: /var/lib/postgresql/data}
+        - {name: ctl, mountPath: /ctl}
+    - name: svc
+      image: "$SERVICE_IMAGE"
+      command: [sh, -c, "while [ ! -e $EXT_BIN/.start ]; do sleep 1; done; exec $EXT_BIN/kaname"]
+      envFrom: [{secretRef: {name: kaname-own-env}}]
+      resources: {requests: {cpu: 200m, memory: $mem}, limits: {memory: $mem}}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      volumeMounts:
+        - {name: pki, mountPath: $EXT_PKI, readOnly: true}
+        - {name: bin, mountPath: $EXT_BIN}
+    - name: mail
+      image: "$MAILBOX_IMAGE"
+      command: [python3, /mbx/stand-mailbox.py, serve, --host, 127.0.0.1,
+                --smtp-port, "$MAIL_SMTP_PORT", --http-port, "$MAIL_HTTP_PORT",
+                --cert, $EXT_PKI/srv.crt, --key, $EXT_PKI/srv.key]
+      resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      volumeMounts:
+        - {name: pki, mountPath: $EXT_PKI, readOnly: true}
+        - {name: mailbox, mountPath: /mbx, readOnly: true}
+EOF
+  say "под стенда заведён: база, служба (предел памяти $mem), приёмник писем"
+}
+
+# ext_wait_running — под исполняется, все контейнеры запущены. Не встал за
+# EXT_READY_TRIES секунд, образ не скачался — условие не создано (75).
+ext_wait_running() {
+  local i phase ready why
+  for i in $(seq 1 "$EXT_READY_TRIES"); do
+    phase="$(kc -n "$EXT_NS" get pod "$EXT_POD" -o 'jsonpath={.status.phase}' 2>/dev/null)"
+    ready="$(kc -n "$EXT_NS" get pod "$EXT_POD" -o 'jsonpath={.status.containerStatuses[*].ready}' 2>/dev/null)"
+    why="$(kc -n "$EXT_NS" get pod "$EXT_POD" -o 'jsonpath={.status.containerStatuses[*].state.waiting.reason}' 2>/dev/null)"
+    if [ "$phase" = Running ] && [ "$ready" = "true true true" ]; then
+      say "под стенда исполняется: три контейнера запущены, попытка $i"
+      return 0
+    fi
+    case "$phase $why" in
+      Failed*|*ErrImagePull*|*ImagePullBackOff*|*InvalidImageName*|*CreateContainerConfigError*)
+        unmet "под стенда не встал: фаза «${phase:-нет}», причина «${why:-нет}»"
+        return 75 ;;
+    esac
+    sleep 1
+  done
+  unmet "под стенда не встал за $EXT_READY_TRIES с: фаза «${phase:-нет}», причина «${why:-нет}»"
+  return 75
+}
+
+# ext_upload — бинари доезжают потоком и сверяются отпечатком: под исполняет
+# ровно то, что собрано здесь.
+ext_upload() {
+  local f want got
+  for f in kaname kaname-migrator; do
+    # shellcheck disable=SC2016  # $1 и $2 раскрывает оболочка пода
+    ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
+      'cat > "$1/.part" && chmod 0755 "$1/.part" && mv "$1/.part" "$1/$2"' sh "$EXT_BIN" "$f" \
+      < "$BIN/$f" >/dev/null 2>&1 || { unmet "бинарь $f не доехал в под"; return 75; }
+    want="$(sha256sum "$BIN/$f" | cut -d' ' -f1)"
+    got="$(ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- sha256sum "$EXT_BIN/$f" 2>/dev/null | cut -d' ' -f1)"
+    [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "отпечаток бинаря $f в поде не совпал с собранным"; return 75; }
+  done
+  say "бинари доехали в под, отпечатки совпали: kaname, kaname-migrator"
+}
+
+ext_pg_isready() {
+  ks -n "$EXT_NS" exec "$EXT_POD" -c pg -- pg_isready -h 127.0.0.1 -p "$PG_PORT" -U kaname >/dev/null 2>&1
+}
+
+ext_pg_ready() {
+  local i
+  for i in $(seq 1 "$DB_READY_TRIES"); do
+    if ext_pg_isready; then
+      say "база пода поднята и принимает соединения (шифрование включено), попытка $i"
+      return 0
+    fi
+    sleep 1
+  done
+  unmet "база пода не ответила pg_isready за $DB_READY_TRIES с"
+  kc -n "$EXT_NS" logs "$EXT_POD" -c pg --tail=20 2>&1 | mask >&2
+  return 75
+}
+
+# ext_migrate — тот же `migrate`: класс отказа называет накат своим кодом, а
+# kubectl exec отдаёт код процесса пода. Свой отказ kubectl (под недостижим) —
+# не накат, поэтому достижимость проверяется до него.
+ext_migrate() {
+  ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- true >/dev/null 2>&1 || {
+    unmet "контейнер службы пода недостижим для exec — накат не начинался"; return 75; }
+  ( BIN="$EXT_BIN"; MIGRATOR_RUN=(ks -n "$EXT_NS" exec "$EXT_POD" -c svc --); migrate )
+}
+
+ext_save_log() {
+  mkdir -p "$RUNDIR"
+  kc -n "$EXT_NS" logs "$EXT_POD" -c svc > "$RUNDIR/kaname.log.part" 2>/dev/null \
+    && mv -f "$RUNDIR/kaname.log.part" "$RUNDIR/kaname.log"
+  rm -f "$RUNDIR/kaname.log.part"
+}
+
+# listening_in <таблица сокетов> <порт> — порт в состоянии LISTEN (0A).
+listening_in() {
+  local hex
+  hex="$(printf '%04X' "$2")"
+  grep -Eq "^ *[0-9]+: [0-9A-F]+:$hex [0-9A-F]+:0000 0A " <<< "$1"
+}
+
+ext_tcp_table() { ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; }
+
+ext_listeners_up() {
+  local tcp p
+  tcp="$(ext_tcp_table)"
+  for p in $PORTS; do listening_in "$tcp" "$p" || return 1; done
+}
+
+ext_listeners_report() {
+  local tcp p
+  tcp="$(ext_tcp_table)"
+  for p in $PORTS; do
+    if listening_in "$tcp" "$p"; then printf '  :%s слушает\n' "$p"; else printf '  :%s НЕ слушает\n' "$p"; fi
+  done
+}
+
+# ext_start_service — отказ старта (контейнер службы завершился) — НАХОДКА, как
+# у локального пути; готовность — по таблице сокетов пода.
+ext_start_service() {
+  local i code
+  ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- touch "$EXT_BIN/.start" >/dev/null 2>&1 || {
+    unmet "службу пода не запустить: exec отказал"; return 75; }
+  for i in $(seq 1 "$SERVICE_TRIES"); do
+    code="$(kc -n "$EXT_NS" get pod "$EXT_POD" -o 'jsonpath={.status.containerStatuses[?(@.name=="svc")].state.terminated.exitCode}' 2>/dev/null)"
+    if [ -n "$code" ]; then
+      ext_save_log
+      fail "служба не поднялась (код $code); последняя строка журнала:"
+      tail -3 "$RUNDIR/kaname.log" >&2
+      return 1
+    fi
+    if ext_listeners_up; then
+      say "служба поднята: все $(ports_count) слушателей отвечают в поде, попытка $i"
+      return 0
+    fi
+    sleep 1
+  done
+  fail "служба жива, но за $SERVICE_TRIES с подняла не все слушатели"
+  ext_listeners_report >&2
+  return 1
+}
+
+# ext_unforward — сначала снимается отметка (держатели перестают перезапускать),
+# затем каждый держатель — группой: держатель и его kubectl. Номера групп — из
+# файла, который пишет только ext_forward; чужих процессов он не называет.
+ext_unforward() {
+  local pg
+  rm -f "$FORWARD_ON"
+  if [ -f "$FORWARD_PID" ]; then
+    while read -r pg; do
+      [ -n "$pg" ] && kill -- "-$pg" 2>/dev/null
+    done < "$FORWARD_PID"
+    rm -f "$FORWARD_PID"
+  fi
+}
+
+# ext_forward_keep ПОРТ — держатель проброса одного порта: пока стоит отметка
+# FORWARD_ON, вышедший kubectl поднимается заново.
+#
+# ПОЧЕМУ ПО ПОРТУ И С ПЕРЕЗАПУСКОМ (kaname#869). Проброс был один на все порты, а
+# проверка службы (`stand-assert.py`, «рукопожатие без сертификата») НАМЕРЕННО
+# рвёт соединение отказом взаимного TLS. Сброс одного потока завершает весь
+# `kubectl port-forward`, и все следующие запросы на любой порт получали «код
+# None, тело ''» — находки о стенде, а не о службе (2 прогона из 3). Теперь отказ
+# рукопожатия гасит проброс ТОЛЬКО своего порта, и держатель его поднимает;
+# окно перезапуска покрывает ожидание слушателя у самой проверки.
+# shellcheck disable=SC2329  # зовётся телом держателя в своей сессии (ext_forward)
+ext_forward_keep() {
+  local p="$1"
+  while [ -f "$FORWARD_ON" ]; do
+    kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" -n "$EXT_NS" port-forward \
+      --address 127.0.0.1 "pod/$EXT_POD" "$p" >> "$FORWARD_LOG" 2>&1 < /dev/null
+    [ -f "$FORWARD_ON" ] || break
+    printf 'проброс :%s завершился — поднимаю заново\n' "$p" >> "$FORWARD_LOG"
+    sleep 0.5
+  done
+}
+
+# ext_forward — слушатели службы и чтение писем на 127.0.0.1 машины теми же
+# номерами, каждый порт — своим держателем (ext_forward_keep). Готовность пода уже
+# доказана таблицей сокетов: проброс принимает соединение и без слушателя за ним,
+# поэтому здесь судится только сам проброс.
+ext_forward() {
+  local i p up
+  ext_unforward
+  : > "$FORWARD_LOG"
+  : > "$FORWARD_PID"
+  touch "$FORWARD_ON"
+  for p in $PORTS $MAIL_HTTP_PORT; do
+    # Своя сессия — своя группа процессов: снятие гасит держателя вместе с его
+    # kubectl одним сигналом группе.
+    # shellcheck disable=SC2016  # тело держателя раскрывает свои аргументы само
+    setsid bash -c "$(declare -f ext_forward_keep)"'; FORWARD_ON="$1" FORWARD_LOG="$2" EXT_KCFG="$3" EXT_CTX="$4" EXT_NS="$5" EXT_POD="$6" ext_forward_keep "$7"' \
+      _ "$FORWARD_ON" "$FORWARD_LOG" "$EXT_KCFG" "$EXT_CTX" "$EXT_NS" "$EXT_POD" "$p" < /dev/null > /dev/null 2>&1 &
+    echo $! >> "$FORWARD_PID"
+  done
+  for i in $(seq 1 30); do
+    up=1
+    for p in $PORTS $MAIL_HTTP_PORT; do
+      (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null || { up=0; break; }
+    done
+    if [ "$up" -eq 1 ]; then
+      say "проброс поднят: держателей по порту $(wc -l < "$FORWARD_PID"), слушатели службы и чтение писем на 127.0.0.1 машины, попытка $i"
+      return 0
+    fi
+    sleep 1
+  done
+  unmet "проброс слушателей пода на машину не поднялся: $(tail -n 2 "$FORWARD_LOG" 2>/dev/null | mask | tr '\n' ' ')"
+  return 75
+}
+
+# ext_teardown_ns — снимается только помеченное этим стендом.
+ext_teardown_ns() {
+  local mark rc
+  mark="$(ext_mark "$EXT_NS")"; rc=$?
+  if [ "$rc" -eq 3 ]; then say "пространства $EXT_NS нет — снимать нечего"; return 0; fi
+  [ "$rc" -eq 0 ] || return 75
+  if [ "$mark" != "$EXT_MARK" ]; then
+    unmet "пространство $EXT_NS заведено не этим стендом — не снимаю"
+    return 75
+  fi
+  kc delete namespace "$EXT_NS" --wait=true --timeout=300s >/dev/null 2>&1 || {
+    unmet "пространство $EXT_NS не снято за 300 с — его срок поймает перепись"; return 75; }
+  say "пространство $EXT_NS снято"
+}
+
+ext_down() {
+  ext_unforward
+  ext_save_log
+  ext_teardown_ns
+}
+
+# ext_census — перепись помеченных пространств задачи; остаток — число, не ноль — 1.
+ext_census() {
+  local out rc n
+  out="$(kc get namespaces -l "kacho.io/repo=kaname,$EXT_MARK_LABEL=$EXT_MARK,kacho.io/task=$EXT_TASK" -o name 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    unmet "перепись пространств не прочитана: $(printf '%s\n' "$out" | head -n 1 | mask | cut -c1-300)"
+    return 75
+  fi
+  n="$(grep -c '^namespace/' <<< "$out")"
+  say "перепись: стендов own задачи $EXT_TASK во внешнем кластере: $n"
+  [ "$n" -eq 0 ]
+}
+
+# ext_abort — подъём не дошёл до конца: журнал службы сохраняется, созданное
+# снимается тем же вызовом.
+# shellcheck disable=SC2329  # зовётся ловушкой EXIT в ext_up
+ext_abort() {
+  local rc=$?
+  trap - EXIT
+  if [ "$rc" -ne 0 ]; then
+    say "подъём во внешнем кластере не завершён (код $rc) — снимаю созданное"
+    ext_down || true
+  fi
+  exit "$rc"
+}
+
+ext_up() {
+  local rc
+  ext_claim_ns || return $?
+  trap ext_abort EXIT
+  ext_put_config || exit $?
+  ext_put_pod || exit $?
+  ext_wait_running || exit $?
+  ext_upload || exit $?
+  ext_pg_ready || exit $?
+  ext_migrate; rc=$?
+  [ "$rc" -eq 0 ] || exit "$rc"
+  ext_start_service || exit $?
+  ext_forward || exit $?
+  trap - EXIT
+}
+
+up_local() {
+  make_pki; start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
+  say "===== стенд поднят: своя база + свой УЦ, без платформы и без поставщика ====="
+  listeners_report
+}
+
+up_external() {
+  need_tool kubectl
+  make_pki; build_binaries; ext_up
+  say "===== стенд поднят во внешнем кластере ($EXT_NS): своя база + свой УЦ, без платформы и без поставщика ====="
+  ext_listeners_report
+}
+
+stand_up() {
+  local rc=0
+  say "===== автономный стенд службы: подъём ====="
+  need_tool openssl
+  route_decide || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  if [ "$ROUTE" = external ]; then
+    ext_name_ns || return $?
+  fi
+  record_route
+  if [ "$ROUTE" = external ]; then up_external; else up_local; fi
+}
+
+stand_down() {
+  local rc=0
+  if route_load; then
+    ext_down || rc=$?
+    ext_census || rc=$(( rc == 0 ? 1 : rc ))
+    [ "$rc" -eq 0 ] && rm -f "$ROUTE_FILE"
+    return "$rc"
+  fi
+  down
+}
+
+db_fold_routed() { if route_load; then ext_fold; else fold_db; fi; }
+db_unfold_routed() { if route_load; then ext_unfold; else unfold_db; fi; }
+
+# Свёртка внешнего пути: исходы те же, что у `fold_db` — не вышло остановить
+# либо база всё ещё принимает соединения — 75.
+ext_fold() {
+  # shellcheck disable=SC2016  # $PGDATA — окружение контейнера базы
+  ks -n "$EXT_NS" exec "$EXT_POD" -c pg -- sh -c 'touch /ctl/fold && pg_ctl -D "$PGDATA" stop -m fast' >/dev/null 2>&1 || {
+    unmet "базу стенда не свернуть: postgres пода не остановлен"; exit "$RC_UNMET"; }
+  if ext_pg_isready; then
+    unmet "базу стенда не свернуть: база пода по-прежнему принимает соединения"
+    exit "$RC_UNMET"
+  fi
+  say "база стенда свёрнута: postgres пода остановлен, служба оставлена жить"
+}
+
+ext_unfold() {
+  local i
+  ks -n "$EXT_NS" exec "$EXT_POD" -c pg -- rm -f /ctl/fold >/dev/null 2>&1 || {
+    unmet "базу стенда не вернуть: отметка свёртки в поде не снята"; exit "$RC_UNMET"; }
+  for i in $(seq 1 "$DB_READY_TRIES"); do
+    if ext_pg_isready; then
+      say "база стенда возвращена и принимает соединения, попытка $i"
+      return 0
+    fi
+    sleep 1
+  done
+  unmet "база стенда не ответила pg_isready за $DB_READY_TRIES с после возврата"
+  exit "$RC_UNMET"
 }
 
 # --- самопроверка: доказательство инъекцией в обе стороны ---------------------
@@ -859,6 +1546,8 @@ if [ "${1:-}" = "--self-test" ]; then
     fi
 
     TMP="$(mktemp -d)"
+    # Маршрут идущего стенда машины самопроверку не уводит: файла маршрута у неё нет.
+    ROUTE_FILE="$TMP/route-none"
     stop_fakes() {
         local f
         for f in "$TMP"/run-*/kaname.pid; do
@@ -1271,6 +1960,112 @@ EOF
     world_vol_reup_down() { vol_world vol_up_up_down; }
     world_vol_bare_rm()   { vol_world vol_bare_rm; }
 
+    # ─── миры маршрута (kaname#841): внешний кластер — первым, docker — по основанию ──
+    #
+    # Подложный kubectl отвечает из каталога состояния `SELFTEST_KC`: контексты,
+    # ответ права, узлы, пространства (файл на пространство, содержимое — метка
+    # стенда), вывод `/proc/net/tcp` пода. Ни одна проба не говорит с кластером.
+    mkdir -p "$TMP/kc" "$TMP/xdg-empty"
+    cat > "$TMP/kc/kubectl" <<'EOF'
+#!/usr/bin/env bash
+S="$SELFTEST_KC"; args=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --kubeconfig|--context|-n|--namespace|-c|-o|-l|--timeout) args+=("$1=$2"); shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]}"; line="$*"
+printf '%s\n' "$line" >> "$S/calls"
+case "$line" in
+  *"config get-contexts"*) cat "$S/contexts" ;;
+  *"auth can-i create namespaces"*)
+    if [ -e "$S/cani-fail" ]; then
+      echo "Unable to connect to the server: dial tcp 10.1.2.3:6443: i/o timeout (https://api.stand.example:6443)" >&2; exit 1
+    fi
+    echo yes ;;
+  *"get nodes"*) cat "$S/nodes" ;;
+  *"get namespace "*)
+    ns="${line#*get namespace }"; ns="${ns%% *}"
+    [ -f "$S/ns/$ns" ] || { echo "Error from server (NotFound): namespaces \"$ns\" not found" >&2; exit 1; }
+    cat "$S/ns/$ns" ;;
+  *"get namespaces"*)
+    for f in "$S"/ns/*; do [ -f "$f" ] && [ "$(cat "$f")" = own ] && echo "namespace/${f##*/}"; done; exit 0 ;;
+  *"delete namespace "*)
+    ns="${line#*delete namespace }"; ns="${ns%% *}"; rm -f "$S/ns/$ns" ;;
+  *"logs "*) echo "журнал службы из пода" ;;
+  *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
+  *) exit 0 ;;
+esac
+EOF
+    chmod +x "$TMP/kc/kubectl"
+
+    # kc_reset — состояние подложного кластера с нуля: один контекст -client,
+    # право есть, два узла профиля. Настройка мира меняет ОДИН факт.
+    kc_reset() {
+        export SELFTEST_KC="$TMP/kc-state"
+        rm -rf "$SELFTEST_KC"; mkdir -p "$SELFTEST_KC/ns"
+        printf 'u--prof-infra\nu--prof-client\n' > "$SELFTEST_KC/contexts"
+        printf 'node/prof-client-aaa-1\nnode/prof-client-aaa-2\n' > "$SELFTEST_KC/nodes"
+        : > "$SELFTEST_KC/calls"
+        : > "$TMP/kc-u--prof.yaml"
+    }
+    # route_world [настройка] — подъём целиком до выбора пути; оба пути подменены
+    # строкой, так что проба судит РЕШЕНИЕ и его запись, а не подъём.
+    route_world() {
+        ( PATH="$TMP/kc:$PATH"; kc_reset; "${1:-:}"
+          export XDG_CONFIG_HOME="$TMP/xdg-empty"
+          unset KACHO_REMOTE_KUBECONFIG KANAME_STAND_CONTEXT KANAME_STAND_PROFILE
+          export KANAME_STAND_KUBECONFIG="${SELFTEST_KCFG-$TMP/kc-u--prof.yaml}" KANAME_STAND_TASK="${SELFTEST_TASK-841}"
+          [ -n "${SELFTEST_CTX:-}" ] && export KANAME_STAND_CONTEXT="$SELFTEST_CTX"
+          RUNDIR="$TMP/run-route"; rm -rf "$RUNDIR"; ROUTE_FILE="$RUNDIR/route"; ROUTE_LOG="$RUNDIR/route.log"
+          up_external() { echo "ВНЕШНИЙ ПУТЬ: $EXT_NS"; }
+          up_local()    { echo "ЛОКАЛЬНЫЙ ПУТЬ"; }
+          rc=0; stand_up || rc=$?
+          echo "--- журнал маршрута:"; cat "$ROUTE_LOG" 2>/dev/null
+          exit "$rc" )
+    }
+    kc_cani_fail()   { : > "$SELFTEST_KC/cani-fail"; }
+    kc_infra_node()  { echo "node/prof-infra-bbb-1" >> "$SELFTEST_KC/nodes"; }
+    kc_two_clients() { echo "v--prof-client" >> "$SELFTEST_KC/contexts"; }
+    world_route_available()   { route_world; }
+    world_route_unnamed()     { ( SELFTEST_KCFG=""; route_world ); }
+    world_route_silent()      { route_world kc_cani_fail; }
+    world_route_infra_nodes() { route_world kc_infra_node; }
+    world_route_two_clients() { route_world kc_two_clients; }
+    world_route_bad_override(){ ( SELFTEST_CTX="u--prof-infra"; route_world ); }
+    world_route_no_task()     { ( SELFTEST_TASK=""; ROOT="$TMP/empty"; route_world ); }
+
+    # ext_world <действие> — снос и перепись пространства внешнего пути.
+    ext_world() {
+        ( PATH="$TMP/kc:$PATH"; kc_reset
+          EXT_KCFG="$TMP/kc-u--prof.yaml"; EXT_CTX="u--prof-client"; EXT_TASK=841; EXT_NS="t841-kaname-own"
+          RUNDIR="$TMP/run-ext"; rm -rf "$RUNDIR"; mkdir -p "$RUNDIR"
+          ROUTE_FILE="$RUNDIR/route"; FORWARD_PID="$RUNDIR/forward.pid"; FORWARD_ON="$RUNDIR/forward.on"
+          "$1" )
+    }
+    ext_down_own()      { echo own > "$SELFTEST_KC/ns/$EXT_NS"; ext_down && ext_census; }
+    ext_down_foreign()  { echo other > "$SELFTEST_KC/ns/$EXT_NS"; ext_down; }
+    ext_claim_foreign() { echo other > "$SELFTEST_KC/ns/$EXT_NS"; ext_claim_ns; }
+    ext_census_left()   { echo own > "$SELFTEST_KC/ns/$EXT_NS"; ext_census; }
+    world_ext_down_own()      { ext_world ext_down_own; }
+    world_ext_down_foreign()  { ext_world ext_down_foreign; }
+    world_ext_claim_foreign() { ext_world ext_claim_foreign; }
+    world_ext_census_left()   { ext_world ext_census_left; }
+
+    # Слушатели пода — по таблице сокетов ядра, а не по пробросу: проброс
+    # принимает соединение и тогда, когда в поде порт никто не слушает.
+    tcp_world() {
+        ( PATH="$TMP/kc:$PATH"; kc_reset
+          EXT_KCFG="$TMP/kc-u--prof.yaml"; EXT_CTX="u--prof-client"; EXT_NS="t841-kaname-own"
+          PORTS="9090 9091"
+          printf '%s\n' "  sl  local_address rem_address   st" "$@" > "$SELFTEST_KC/proc-net-tcp"
+          if ext_listeners_up; then echo "все слушатели пода на месте"; exit 0; fi
+          ext_listeners_report; exit 1 )
+    }
+    world_tcp_both() { tcp_world "   0: 00000000:2382 00000000:0000 0A 0" "   1: 00000000:2383 00000000:0000 0A 0"; }
+    world_tcp_one()  { tcp_world "   0: 00000000:2382 00000000:0000 0A 0" "   1: 0100007F:2383 0100007F:9C40 01 0"; }
+
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
 
@@ -1400,6 +2195,33 @@ EOF
     # (−) повторный подъём сносит прежний контейнер базы — тоже с его томом.
     assert 0  "(−) up → up → down: томов-сирот 0"                      world_vol_reup_down "томов-сирот после сноса: 0" "-" "томов-сирот после сноса: 1"
 
+    echo "--- ось 9: внешний кластер доступен — стенд уходит туда; docker — только по записанному основанию (kaname#841)"
+    # (−) ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ первым: кластер отвечает — внешний путь, локального нет.
+    assert 0  "(−) кластер доступен — внешний путь, пространство задачи"    world_route_available "маршрут стенда: внешний кластер" "ВНЕШНИЙ ПУТЬ: t841-kaname-own" "ЛОКАЛЬНЫЙ ПУТЬ"
+    # (+) один факт против близнеца: кубконфига нет — локально, основание в журнале.
+    assert 0  "(+) кубконфиг не назван — локальный путь, основание записано" world_route_unnamed "ЛОКАЛЬНЫЙ ПУТЬ" "route=local ns=- why=кубконфиг внешнего кластера не назван" "ВНЕШНИЙ ПУТЬ"
+    # (+) кластер не ответил — локально, вывод проверки в журнале, адреса скрыты.
+    assert 0  "(+) кластер не ответил — локальный путь с выводом проверки"   world_route_silent "ЛОКАЛЬНЫЙ ПУТЬ" "auth can-i create namespaces: код 1" "10.1.2.3"
+    assert 0  "(+) адрес сервера в выводе проверки замаскирован"            world_route_silent "<кластер>" "-" "api.stand.example"
+    # (+) узлы не того кластера: кубконфиг подменён — внешний путь не берётся.
+    assert 0  "(+) узел -infra- среди узлов — локальный путь, названо почему" world_route_infra_nodes "ЛОКАЛЬНЫЙ ПУТЬ" "с -infra- 1" "ВНЕШНИЙ ПУТЬ"
+    assert 0  "(+) два контекста -client — локальный путь, названо почему"   world_route_two_clients "ЛОКАЛЬНЫЙ ПУТЬ" "контекстов -client в кубконфиге 2" "ВНЕШНИЙ ПУТЬ"
+    # (+) явный контекст не -client — отказ 64, и тихо локально стенд не идёт.
+    assert 64 "(+) явный контекст не -client — отказ 64"                      world_route_bad_override "только контекст -client" "-" "ЛОКАЛЬНЫЙ ПУТЬ"
+    # (+) кластер доступен, номера задачи нет — отказ 64, а не docker.
+    assert 64 "(+) кластер доступен без номера задачи — отказ 64, не docker"  world_route_no_task "номера задачи нет" "-" "ЛОКАЛЬНЫЙ ПУТЬ"
+
+    echo "--- ось 10: внешнее пространство снимается своей задачей, чужое не трогается, перепись — числом"
+    assert 0  "(−) снос своего пространства — перепись 0"                   world_ext_down_own "пространство t841-kaname-own снято" "задачи 841 во внешнем кластере: 0" "НАХОДКА"
+    # (+) законный близнец переписи: оставшееся пространство она видит.
+    assert 1  "(+) пространство осталось — перепись 1, код 1"                world_ext_census_left "задачи 841 во внешнем кластере: 1" "-" "задачи 841 во внешнем кластере: 0"
+    assert 75 "(+) снос чужого пространства — отказ, не снято"               world_ext_down_foreign "заведено не этим стендом" "-" "снято"
+    assert 75 "(+) подъём в чужое пространство — отказ, не заведено"          world_ext_claim_foreign "заведено не этим стендом" "-" "НАХОДКА"
+
+    echo "--- ось 11: слушатели пода — по таблице сокетов ядра, а не по пробросу"
+    assert 0  "(−) оба порта в LISTEN — слушатели на месте"                 world_tcp_both "все слушатели пода на месте" "-" "НЕ слушает"
+    assert 1  "(+) второй порт не в LISTEN — назван недостающий"            world_tcp_one ":9091 НЕ слушает" ":9090 слушает" "все слушатели пода на месте"
+
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
     [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }
@@ -1408,27 +2230,28 @@ EOF
 fi
 
 case "${1:-}" in
-  up)
-    say "===== автономный стенд службы: подъём ====="
-    need_tool openssl
-    make_pki; start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
-    say "===== стенд поднят: своя база + свой УЦ, без платформы и без поставщика ====="
-    listeners_report
-    exit 0
-    ;;
+  up) stand_up; exit $? ;;
   env)
     # Печать посадки для соседнего шага: он читает её `eval`-ом, а не повторяет.
     stand_env
     env | grep -E '^KANAME_' | sort
     exit 0
     ;;
-  down) down; exit 0 ;;
-  db-fold) fold_db; exit 0 ;;
-  db-unfold) unfold_db; exit 0 ;;
+  down) stand_down; exit $? ;;
+  census)
+    # Перепись внешних пространств задачи: после `down` — 0 (kaname#841).
+    if ! route_load; then
+      route_decide || exit $?
+      if [ "$ROUTE" != external ]; then say "внешний кластер недоступен ($WHY) — переписывать нечего"; exit 0; fi
+      ext_name_ns || exit $?
+    fi
+    ext_census; exit $? ;;
+  db-fold) db_fold_routed; exit 0 ;;
+  db-unfold) db_unfold_routed; exit 0 ;;
   failclosed-prepare) failclosed_prepare "${2:-}"; exit 0 ;;
   failclosed-judge) failclosed_judge "${2:-}"; exit $? ;;
   *)
-    printf 'использование: %s {up|env|down|db-fold|db-unfold|failclosed-prepare|failclosed-judge|--self-test}\n' "$0" >&2
+    printf 'использование: %s {up|env|down|census|db-fold|db-unfold|failclosed-prepare|failclosed-judge|--self-test}\n' "$0" >&2
     exit 2
     ;;
 esac

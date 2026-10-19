@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 880
+Всего кейсов: 882
 
 ## Перепись по модулям
 
@@ -72,7 +72,7 @@
 | `cases/kaname-registration.py` | 2 |
 | `cases/kaname-address-verification.py` | 8 |
 | `cases/kaname-email-change.py` | 4 |
-| `cases/kaname-access-keys.py` | 51 |
+| `cases/kaname-access-keys.py` | 53 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 23 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1088,7 +1088,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 51 кейс
+## `cases/kaname-access-keys.py` — 53 кейса
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1146,7 +1146,9 @@
 - `IAM-AKLOGIN-OK-SECOND-FACTOR-AND-KEY-SESSIONS`
 - `IAM-AKLOGIN-OK-PASSWORDLESS-PERSON`
 - `IAM-AKLOGIN-SEC-RECOVERY-OF-PASSWORDLESS-PERSON-LEVEL-ONE`
+- `IAM-AKLOGIN-OK-KEY-LOGIN-OVER-LIVE-SESSION`
 - `IAM-AKLOGIN-SEC-REVOKE-ENDS-OTHER-SESSIONS`
+- `IAM-AKLOGIN-NEG-ONE-REFUSAL-EVERY-CAUSE`
 - `IAM-AKLOGIN-OK-CLEANUP-KEYS`
 - `IAM-ACCESSKEY-NEG-KN747-04-LEVEL-ONE-WITHOUT-CODE`
 - `IAM-ACCESSKEY-NEG-KN747-02-CODE-NOT-PRESENTED`

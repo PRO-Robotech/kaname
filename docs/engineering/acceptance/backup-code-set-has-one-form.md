@@ -42,6 +42,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 >   исключает только `*_test.go`; контроль @`db8bcb7e` перемерен; названы причина исключения и две
 >   опоры строгости исключённого (решение диспетчера, вариант (б)). В историю дописаны строка
 >   круга 5 и эта строка. Номера пунктов, сценарии, решения и §«Совместимость» не тронуты
+> - 2026-10-19 · круг 6 · APPROVED · редакция 6 `04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542` ·
+>   `docs/specs/reviews/backup-code-set-has-one-form/04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542.yaml`
+> - 2026-10-19 · правка ПОСЛЕ вердикта `04f85af1…` · редакция 7 — две правки DoD и сопутствующая
+>   строка посылки, и только они: (1) п. 4 признаёт необходимую правку
+>   `tests/authz-fixtures/seed_key_person.py`: её помощник снятия утверждал плоский
+>   `backupCodesRemaining` = `0` (ломаемая форма №3), и прежнее «зелёные без правки» противоречило
+>   п. 6 (`tests` → 0 строк) и BCS-11; строка «kaname, фикстуры прав» таблицы потребителей называет
+>   и это чтение; (2) п. 8 — опоры сведены слиянием ветки эпика `746` (`kaname#777`) с этой
+>   веткой: Ф12 редакция 20, SUA редакция 5, пункт называет их отпечатки. В историю дописаны строка
+>   круга 6 и эта строка. Сценарии (26) и их ID, решения, §«Совместимость» и прочие пункты DoD не
+>   тронуты. Вердикт `04f85af1…` относится к редакции 6 и на эту редакцию не переносится
 > **Дата:** 2026-10-19
 > **Эпик/issue:** PRO-Robotech/kaname#297 (Refs #296)
 > **Дом:** `docs/engineering/acceptance/` службы — предмет внутри одного сервиса (полоса входа
@@ -127,7 +138,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | консоль kacho, сквозные пробы | массив `backupCodes` подтверждения и перечеканки | `ui-future/e2e/specs/{ceremony-seed,access-key-seed,account-settings,account-access-keys}.ts`, `e2e/measurements/second-factor-classes.spec.ts` |
 | консоль kacho, сквозная проба полосы администратора | `backupCodesRemaining` = `0` у снятия (ломаемая форма №3) | `ui-future/e2e/specs/cloud-admin-lane.spec.ts:278-280` @main |
 | консоль kacho, модульная проба поля кода | объект `backupCodes` в теле `GET` (ломаемая форма №1) | `shared/src/components/molecules/auth/SecondFactorCodeField/SecondFactorCodeField.four-forms.test.tsx:29` @main |
-| kaname, фикстуры прав | массив `backupCodes` подтверждения | `tests/authz-fixtures/seed_ceremony.py`, `seed_key_person.py` |
+| kaname, фикстуры прав | массив `backupCodes` подтверждения; `backupCodesRemaining` = `0` у снятия (ломаемая форма №3; строка добавлена редакцией 7) | `tests/authz-fixtures/seed_ceremony.py`, `seed_key_person.py`; снятие — `seed_key_person.py` (`remove_second_factor`, двойник `_FakeLane`) |
 | kaname, пробы края | все пять форм | `tests/newman/cases/kaname-second-factor.py` (19 строк `backupCodes`, 3 — `backupCodesRemaining`), `kaname-access-keys.py:3541` |
 | kaname, срез отчёта | имя кода и близнецы сводки | `.github/scripts/redact-newman-report.py` (5 + 5 строк) |
 
@@ -584,8 +595,15 @@ integration в `internal/handler/loginlanehttp` на настоящей базе
 3. Срез отчёта проб: самопроверка `.github/scripts/redact-newman-report.py` утверждает — элементы
    `backupCodes` срезаны, `backupCodeSet` (числа и моменты) выжил; близнец «сводка под
    `backupCodes`» заменён близнецом «сводка под `backupCodeSet`».
-4. Фикстуры прав `tests/authz-fixtures/seed_ceremony.py`, `seed_key_person.py` зелёные без правки
-   (массив `backupCodes` не менялся).
+4. Фикстуры прав зелёные: `python3 tests/authz-fixtures/seed_ceremony.py --self-test` и
+   `python3 tests/authz-fixtures/seed_key_person.py --self-test` → код 0. `seed_ceremony.py` — без
+   правки (массив `backupCodes` подтверждения не менялся). `seed_key_person.py` правится
+   **необходимо** (редакция 7; прежние слова «обе без правки» противоречили п. 6): помощник снятия
+   `remove_second_factor` утверждал плоский `backupCodesRemaining` = `0` (2 строки @`db8bcb7e`, п. 6),
+   а BCS-11 эту форму снимает. Правка — правило ключей тела BCS-11: ответ снятия `200` с ключами
+   ровно `session`, `assurance`, иначе находка; двойник полосы `_FakeLane` отдаёт то же тело, а
+   близнец находки — лишнюю сводку `backupCodeSet` после снятия. Массив `backupCodes` подтверждения
+   в фикстурах не менялся.
 5. Документация: `auth-lane.mdx` описывает только форму Р1…Р5, прежних форм не называет; ответ
    повышения `lookup_secret` описан (закрывает Р-4); `git grep -c 'backupCodesRemaining' -- docs/content`
    → 0; абзаца о «двух нулях» нет; BCS-15 сверен чтением раздела.
@@ -619,9 +637,14 @@ integration в `internal/handler/loginlanehttp` на настоящей базе
    не правлены, дельта — запись о правке после вердикта в шапке и новый раздел отсылки):
    Ф12 редакция 19, §15, отпечаток
    `fb5c49ca5aa1e90a4b0543808f95334a92e7009ffc00b80df70fa4a1d635e4ff`; SUA редакция 4, §9, отпечаток
-   `b6d5f91182f28706ac703fa217df8af8096ef6335054dea157c324361b17c577`. Обе ссылаются на этот
-   документ одобренной редакцией 4 (`7e115ca9…`) — сценарии BCS-* в редакции 5 те же. Пункт
-   пройден, когда на каждый из двух отпечатков есть запись ревью `APPROVED` и внешнее событие.
+   `b6d5f91182f28706ac703fa217df8af8096ef6335054dea157c324361b17c577` (обе `APPROVED`). Ветка
+   эпика `746` тем временем получила независимые редакции тех же опор (`kaname#777`: Ф12
+   редакция 19 `b0d2209b…`, SUA редакция 4 `9178d6da…`); слияние сводит их (редакция 7 этого
+   документа): **Ф12 редакция 20**, §15, отпечаток
+   `e875e877f33b330bb9550adba0f1bf3bf15eefa6d5d31c8be89d0bc4c0529878`; **SUA редакция 5**, §9, отпечаток
+   `4a73a495751cd10971f67d5943433bd7c916bc995ba0726c1f6e116abdbaa6df`. Обе ссылаются на этот документ одобренной редакцией 4 (`7e115ca9…`) — сценарии BCS-* в
+   редакциях 5…7 те же. Пункт пройден, когда на каждый из двух сведённых отпечатков есть запись
+   ревью `APPROVED` и внешнее событие; одобрения редакций 19 и 4 на сведённые не переносятся.
 
 **Консоль (kacho), та же волна:**
 9. Перепин службы на ревизию с изменением `kaname#297` и правка консоли с её пробами — одним

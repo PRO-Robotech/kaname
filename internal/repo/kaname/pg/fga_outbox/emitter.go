@@ -129,7 +129,8 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 // ВЕРСИЕЙ ВЛАДЕЛЬЦА.
 //
 // Хранимый субъект публикации — системный класс `anonymous`, а не входное слово
-// соседа (`user:*`): перевод одного в другое живёт ОДНИМ написанием,
+// соседа (`user:*` либо `system_class:anonymous`, kaname#893): перевод живёт
+// ОДНИМ написанием,
 // `domain.PublicationSubject`, и его же называют снятие публикации, разбор
 // остаточных фактов и миграция переезда (kaname#829, SC-12, SC-13).
 //

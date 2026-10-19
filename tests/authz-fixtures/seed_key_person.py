@@ -500,16 +500,25 @@ def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None
 
 
 def seed_all(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
-             ceiling=None, sleep=time.sleep) -> dict:
-    """Обе личности, каждая под своей приставкой: свежая почта, свой ключ, своя рукоятка.
+             ceiling=None, sleep=time.sleep, prefixes=PREFIXES) -> dict:
+    """Личности названных приставок (умолчание — обе): свежая почта, свой ключ, своя рукоятка.
 
     Привязка разрешается ОДИН раз и уезжает в окружение рядом с личностями: набор
     ключей доступа собирает церемонии под ту же привязку, под которой посев
-    доказал регистрацию."""
+    доказал регистрацию.
+
+    ПОДМНОЖЕСТВО ПРИСТАВОК — ПЕРЕПОСЕВ ОДНОРАЗОВОЙ ЛИЧНОСТИ (kaname#860). Личность
+    без пароля прогон расходует: Ф13-25 заводит ей пароль восстановлением, а вход
+    ключом двигает счётчик подписи. Второй прогон на той же строке получает единый
+    отказ входа ключом. Поэтому прогонщик перед набором ключей доступа сеет одну
+    приставку `f13Person` заново, а прочие строки окружения не трогает."""
+    unknown = [p for p in prefixes if p not in PREFIXES]
+    if unknown or not prefixes:
+        raise Unmet(f"приставки {list(prefixes)} вне объявленных {list(PREFIXES)} — сеять некого")
     binding = binding or stand_binding(os.environ)
     ceiling = stand_ceiling(os.environ) if ceiling is None else ceiling
     patch: dict = {}
-    for prefix in PREFIXES:
+    for prefix in prefixes:
         patch.update(seed(lane, mailbox, doors, store, client, keys=keys, binding=binding,
                           sleep=sleep, prefix=prefix))
         say(f"  ok   личность «{prefix}» положена")
@@ -522,7 +531,7 @@ def run(args: argparse.Namespace) -> int:
     pki = pathlib.Path(args.pki)
     patch = seed_all(LaneHttp(args.base_url, pki), Mailbox(args.mailbox_url),
                  Doors(pki, args.issuance_url, args.own_url), PsqlStore(shlex.split(args.store_exec)),
-                 client_of(pathlib.Path(args.env_file)))
+                 client_of(pathlib.Path(args.env_file)), prefixes=tuple(args.prefix or PREFIXES))
     replaced = write_env(patch, pathlib.Path(args.env_file), pathlib.Path(args.env_template))
     say(f"посев личности с ключом: ключей записано {len(patch)} (заменено {replaced}) в {args.env_file}")
     return 0
@@ -754,6 +763,22 @@ def self_test() -> int:
         _c("личности разные: своя почта и своё удостоверение у каждой приставки",
            kind == "ok" and patch["keyPersonEmail"] != patch["f13PersonEmail"]
            and patch["keyPersonCredentialId"] != patch["f13PersonCredentialId"], f"{patch}")
+        # Перепосев одноразовой личности (kaname#860): одна приставка — одна личность,
+        # чужие ключи окружения не пишутся; близнец — умолчание выше (обе).
+        lane_one, doors_one = _FakeLane(), _FakeDoors(rp=rp)
+        kind_o, text_o = _outcome(lambda: seed_all(lane_one, None, doors_one, _FakeStore(), ("c", "s", "r"),
+                                                   binding=(rp, origin), sleep=lambda _: None,
+                                                   prefixes=("f13Person",)))
+        patch_o = json.loads(text_o.replace("'", '"')) if kind_o == "ok" else {}
+        _c("одна приставка — заведена одна личность, записаны только её ключи, привязка и потолок",
+           kind_o == "ok" and len(doors_one.finished) == 1 and len(lane_one.removed) == 1
+           and set(patch_o) == {"f13Person" + f for f in FIELDS} | set(BINDING_KEYS) | {CEILING_KEY},
+           f"{kind_o}: {text_o}")
+        kind_u, text_u = _outcome(lambda: seed_all(_FakeLane(), None, _FakeDoors(rp=rp), _FakeStore(),
+                                                   ("c", "s", "r"), binding=(rp, origin),
+                                                   sleep=lambda _: None, prefixes=("nobody",)))
+        _c("приставка вне объявленных — условие не создано, а не тихий пустой посев",
+           kind_u == "unmet" and "nobody" in text_u, f"{kind_u}: {text_u}")
         _c("привязка профиля уезжает в окружение рядом с личностями",
            kind == "ok" and (patch["accessKeysRpId"], patch["accessKeysOrigin"]) == (rp, origin), f"{patch}")
         _c("потолок уезжает в окружение тем же посевом",
@@ -856,6 +881,8 @@ def main() -> int:
     ap.add_argument("--env-template",
                     default=str(ROOT / "tests" / "newman" / "environments"
                                 / "local.postman_environment.template.json"))
+    ap.add_argument("--prefix", action="append", choices=PREFIXES,
+                    help="сеять только эту приставку (повторяемо); умолчание — все")
     ap.add_argument("--minted-keys", action="store_true")
     ap.add_argument("--minted-surface", action="store_true")
     ap.add_argument("--self-test", action="store_true")

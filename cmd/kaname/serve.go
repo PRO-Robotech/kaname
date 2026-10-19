@@ -1263,7 +1263,8 @@ func runServe(cfg config.Config) error {
 		// requireIssuingListenerAsksForACertificate выше.
 		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
 		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
-			ceremonyKeySource(signingKeystore), lane.secretChecker(), metricsReg.LoginLaneRecorder(), issuingSource, logger)
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), lane.secretCheckCost(),
+			metricsReg.LoginLaneRecorder(), issuingSource, logger)
 		if cerr != nil {
 			return fmt.Errorf("ceremony: %w", cerr)
 		}

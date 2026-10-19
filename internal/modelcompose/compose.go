@@ -16,15 +16,20 @@ package modelcompose
 //
 // # Что здесь НЕ делается
 //
-// Не судится ДОПУСК: он живёт в `authzmodel.Admit` и получает готовый текст.
-// Разделение несущее — допуск чистая функция от текста и о происхождении текста
-// не спрашивает; смешав их, мы получили бы судью, знающего, что он судит своё.
+// Не судится ДОПУСК: он живёт в `authzmodel.Admit` и получает готовый текст
+// вместе с перечнем термов, объявленных ключом публичного чтения
+// ([Report.KeyTerms], kaname#866, Р4). Перечень производит этот же вызов — тот же
+// проход рендера, что пишет блоки, — и выводится из СОДЕРЖАНИЯ доставленных
+// манифестов, а не из их происхождения. Разделение несущее — допуск о
+// происхождении текста не спрашивает; смешав их, мы получили бы судью, знающего,
+// что он судит своё.
 
 import (
 	"bytes"
 	"fmt"
 	"sort"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/modelrender"
@@ -48,6 +53,15 @@ type Report struct {
 	// редакции, принимаемой переходно (Р10, [modelrender.IsPriorEdition]).
 	// Действует при этом канон: прежняя редакция только допущена к сверке.
 	PriorEdition []string
+	// KeyTerms — термы, которые ключ публичного чтения вписал в блоки ДОБАВЛЕННЫХ
+	// типов (kaname#866, Р1, Р4), в порядке доставки. Это аргумент допуска
+	// (`authzmodel.Admit`), и производит его ТОТ ЖЕ вызов, что собрал текст:
+	// перечень, собранный отдельно, описывал бы другой текст.
+	//
+	// Только из ветки добавленных типов: блоки канона (подтверждённые и прежней
+	// редакции) в модель не идут, и терм, названный по ним, исключал бы то, чего
+	// допуск не судит (CE-02).
+	KeyTerms []authzmodel.KeyTerm
 }
 
 // Census — перепись одной строкой.
@@ -86,7 +100,11 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 	for _, m := range manifests {
 		for _, res := range m.Resources {
 			rep.ResourcesSeen++
-			blk, err := modelrender.Render(res)
+			// Перевод прозы примечаний применяется и к блокам вне канона, идущим в
+			// модель: таблица перевода ключуется строкой прозы registry и nlb
+			// целиком, и блок без такой строки она не меняет; форма одна у обоих судей.
+			// Термы ключа публичного чтения производит тот же проход рендера.
+			blk, keyTerms, err := modelrender.RenderForCanonWithKeyTerms(res)
 			if err != nil {
 				return "", rep, fmt.Errorf("modelcompose: модуль %q, ресурс %q: рендер блока: %w",
 					m.Module, res.Name, err)
@@ -131,6 +149,7 @@ func Compose(canon string, manifests []*manifest.Manifest) (string, Report, erro
 			out.WriteString("\n")
 			out.Write(blk)
 			rep.Composed = append(rep.Composed, res.ObjectType)
+			rep.KeyTerms = append(rep.KeyTerms, keyTerms...)
 			declared[res.ObjectType] = struct{}{}
 		}
 	}

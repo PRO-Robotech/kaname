@@ -151,7 +151,12 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 	default:
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}
-	res := uc.verifier.Verify(stored, in.CurrentPassword)
+	res, verr := uc.verifier.Verify(ctx, stored, in.CurrentPassword)
+	if verr != nil {
+		// Вызов кончился до места вычисления: проверка не состоялась, попыткой
+		// это не считается — как исчерпание ёмкости (kaname#892).
+		return ChangePasswordOutput{}, ErrAuthenticationFailed
+	}
 	switch res.Outcome {
 	case passwordverify.OutcomeMatched:
 	case passwordverify.OutcomeCapacityExhausted:

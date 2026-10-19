@@ -30,7 +30,7 @@
 // SUA-70, SUA-71 утверждают поведение, которое уже есть, и зелены до кода.
 //
 // Run: `go test ./internal/handler/loginlanehttp/ -run 'TestSUA' -count=1`
-// (Docker). Skipped under -short.
+// (нужен Docker); под -short пропускается.
 package loginlanehttp_test
 
 import (

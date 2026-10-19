@@ -1,0 +1,109 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: e875e877f33b330bb9550adba0f1bf3bf15eefa6d5d31c8be89d0bc4c0529878
+  static_status_note: >-
+    Слово статуса и история в шапке — статическая форма объявления (change-graph.md §2); рецензент
+    их не правил. Действующий вердикт о редакции 20 — эта запись и внешнее событие.
+  base_commit: 446edba4d60173a7b5aa89ecfda687e584d3d0cf (297, редакция 19 ветви kaname#297, fb5c49ca…)
+  merge_head: 4477a97902c1610adda0febea9eb645b53134bcb (746, редакция 19 ветви kaname#777, b0d2209b…)
+  merge_base: db8bcb7e87f11b267bb1470894bf033b3c033e78 (редакция 18, c6ea4897…)
+  content_commit: none
+  content_commit_note: >-
+    Редакция 20 рассмотрена незакоммиченной в копии слияния tmp/w-297-m746 (HEAD = origin/297,
+    MERGE_HEAD = origin/746, перемерено `git ls-remote origin refs/heads/297 refs/heads/746`).
+    Отпечаток перемерен sha256sum и равен заявленному.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 3055
+  scenarios: 46
+  round: 17
+  round_scope: >-
+    По дельте сведения к каждой из двух одобренных редакций 19 (fa-b1): к b0d2209b… — строки
+    истории (редакция 19 ветви kaname#297 и редакция 20) и §15 целиком; к fb5c49ca… — строки
+    истории (редакция 19 ветви kaname#777 и редакция 20), Р4 «Порядок проверок», Р8, «Дано» и
+    строки GET Ф12-01/02, §15 (заголовок, строки Ф12-01 и Ф12-02). Вне дельты не переоткрывалось.
+  predecessor_records:
+    - docs/specs/reviews/second-factor-totp-and-recovery-codes/b0d2209bbaf87df799983fd0def6d576bf3251f663e2b307e386df6f1789664c.yaml
+    - docs/specs/reviews/second-factor-totp-and-recovery-codes/fb5c49ca5aa1e90a4b0543808f95334a92e7009ffc00b80df70fa4a1d635e4ff.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T06:51:40Z'
+effective_approval:
+  issued: true
+  note: Одобрена редакция 20 (e875e877…); любая правка — новый круг по дельте.
+premise:
+  status: confirmed
+  predicate: >-
+    `timeout 45 git ls-remote origin refs/heads/297 refs/heads/746` → 446edba4d…, 4477a9790…;
+    `git rev-parse HEAD MERGE_HEAD` в копии — те же. `git show HEAD:<путь> | sha256sum` → fb5c49ca…,
+    `git show MERGE_HEAD:<путь> | sha256sum` → b0d2209b…, на базе слияния db8bcb7e → c6ea4897…;
+    обе записи-предшественницы APPROVED на эти отпечатки.
+delta_checks:
+  - id: D1
+    subject: сохранены обе стороны
+    result: пройдено
+    predicate: >-
+      `diff MERGE_HEAD-версия WT` → только добавления: строка истории редакции 19 kaname#297,
+      строка редакции 20, §15. `diff HEAD-версия WT` → строка истории редакции 19 kaname#777, Р4
+      (одно предложение), Р8 (заголовок, абзац уровня, «Наблюдаемое»), «Дано» и GET Ф12-01/02,
+      строка редакции 20, §15 — заголовок «редакция 4» и строки Ф12-01/02. Трёхсторонний
+      `git merge-file --diff3` (HEAD, база, MERGE_HEAD) против WT: конфликт только в истории;
+      вне истории отличие — ровно три правки §15, названные в строке редакции 20.
+  - id: D2
+    subject: сценарии и ID
+    result: пройдено
+    predicate: >-
+      `grep -oE '^\*\*Ф12-[0-9]+ ' | sort -u | md5sum` → одинаково (1f5780af) у базы, HEAD,
+      MERGE_HEAD и WT; 46 у каждой.
+  - id: D3
+    subject: противоположных «Тогда» нет
+    result: пройдено
+    predicate: >-
+      kaname#777 сузил GET Ф12-01/02 до ключей totp.* и backupCodes.* («прочие ключи не
+      утверждает»); §15 по оси формы читает backupCodes.* через BCS (Ф12-02 → backupCodeSet,
+      ключа backupCodes в GET нет). Новая строка Ф12-01 согласна с BCS-02 (ни backupCodeSet, ни
+      backupCodes; pending — не заведён, Р1). Оси разные: уровень заведения (Р8) и форма набора
+      (§15); Р8 формы набора не касается, §15 уровня не касается.
+  - id: D4
+    subject: заголовок §15
+    result: пройдено
+    predicate: >-
+      У BCS одобренная редакция 4 (7e115ca9…); сценарии и «Решения» BCS редакции 7 побайтово
+      равны редакции 4 (сравнение разделов «Решение», «Общее Given»…«DoD», «Решения» —
+      идентичны), поэтому отсылка на редакцию 4 верна.
+  - id: D5
+    subject: гейты приёмок
+    result: пройдено
+    predicate: >-
+      `go test -count=1 -run Acceptance ./internal/check/` в копии слияния → ok, код 0
+      (верхнего уровня PASS 12, FAIL 0). Гейт правки после вердикта судит историю git и
+      незакоммиченную правку не видит.
+new_blocking_from_delta: []
+non_blocking:
+  - id: N1
+    where: история, строка редакции 20
+    note: >-
+      «первая абзацем выше — kaname#777»: непосредственно выше стоит редакция 19 ветви kaname#297,
+      а kaname#777 — двумя пунктами выше. Отпечатки названы точно, ссылка однозначна; уточнить при
+      следующей правке.
+checks:
+  scope: дельта не вводит новых предметов сверх двух одобренных редакций 19
+  producer: 46 из 46, таблица §6 не тронута
+  twin: не тронуты
+  constructibility: новых Given сверх «ключей доступа нет» kaname#777 (одобрено b0d2209b…) нет
+  dod: без изменений
+event:
+  status: not_performed
+  note: публикует курьер на PRO-Robotech/kaname#297 после коммита слияния; тем же заходом блок приводится к факту
+event_body: acceptance-reviewer · APPROVED · e875e877f33b330bb9550adba0f1bf3bf15eefa6d5d31c8be89d0bc4c0529878
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true

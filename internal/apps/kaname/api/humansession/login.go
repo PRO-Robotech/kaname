@@ -83,7 +83,9 @@ type UserDirectory interface {
 
 // Verifier — проверяющий пароля Ф2 (порт по существующему типу).
 type Verifier interface {
-	Verify(stored domain.LoginVerifier, presented string) passwordverify.Result
+	// Verify — исход проверки; ошибка — только конец вызова до места
+	// вычисления (контекст вызывающего), исходом она не является.
+	Verify(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.Result, error)
 	MeetsDeclared(stored domain.LoginVerifier, declared passwordverify.Declared) (bool, error)
 }
 
@@ -293,7 +295,14 @@ func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey 
 	}
 
 	// (3) Проверка — всегда.
-	res := uc.verifier.Verify(stored, in.Password)
+	res, verr := uc.verifier.Verify(ctx, stored, in.Password)
+	if verr != nil {
+		// Вызов кончился раньше, чем проверке досталось место вычисления:
+		// проверка не состоялась — как при исчерпании ёмкости, попыткой это
+		// не считается (PWV-15.3), наружу — тот же отказ (kaname#892).
+		uc.observer.LoginObserved(LoginOutcomeCapacity)
+		return LoginOutput{}, ErrAuthenticationFailed
+	}
 	now := uc.now().UTC()
 	uc.admitClass(ctx, res)
 

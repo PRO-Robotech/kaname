@@ -1,0 +1,194 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/deletion-refusals-name-the-remainder-and-the-step.md
+  sha256: 3217711702358047275c3f7c588011e80d55704e9b1d589487733d42ae160faf
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка этой записью намеренно не правлена; вердикт о редакции 1 — эта запись.
+  base_commit: ede94db30592b0fe89d9964107468f7e3412b158
+  content_commit: 2bf6d6ae6a57fc1199160c31678726a984da7613
+  branch: 725-w9-kn-acc-proto-b
+  task: PRO-Robotech/kaname#725
+  lines: 401
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum <док> в копии kacho-workspace/tmp/w9/kn-acc-proto-b и
+    git show HEAD:<док> | sha256sum → 32177117…ae160faf; совпало с заданием; wc -l → 401.
+  measurement_revisions: >-
+    Код — та же копия; ede94db30..HEAD меняет только три документа приёмки (git diff --stat).
+    Фундамент — corelib v1.14.0 (go.mod:8). Край — PRO-Robotech/kacho a95248464.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T20:03:00Z'
+
+blocking:
+  - id: B1
+    kind: PRODUCER
+    scenarios: [§0.1 строка RemoveFromAccount, Р1 строка RemoveFromAccount, Р3, DRS-12, §0.4, DoD п. 3]
+    finding: >-
+      Перепись §0.1 и «Обзор» («ни один текст не называет, какой ресурс держит и что сделать»)
+      неверны для UserService.RemoveFromAccount: отказ СЕГОДНЯ уже называет держащие выдачи
+      (до 5), их полное число и шаг, и несёт свой признак. Производитель —
+      internal/apps/kaname/shared/membership_refusal.go:45 (reason MEMBERSHIP_CARRIES_RIGHTS),
+      :52–53 (metadata blocking_binding_ids, blocking_binding_count), :131 (хвост
+      ": <acb…>[, …] (N total); revoke them before removing the membership");
+      дочитывание — internal/apps/kaname/api/user/remove_from_account.go:213. Держатели —
+      tests/newman/cases/iam-user.py:2630–2636 (IAM-USR-EXCL-NEG-LIVE-GRANT, текст целиком
+      регекспом, reason) и internal/apps/kaname/api/user/remove_from_account_names_grants_test.go:190.
+      Р1/Р3/DRS-12 заменили бы этот контракт: reason MEMBERSHIP_CARRIES_RIGHTS → REFERENCE_IN_USE
+      (ломающее изменение для клиента, ветвящегося по reason, нигде не объявленное), перечень
+      из 5 → одна выдача, metadata blocking_* → resource_*. §0.4 этих потребителей не считает
+      (образцы не включают "cannot be removed from it").
+    predicate: >-
+      git grep -n 'revoke them before removing the membership\|MEMBERSHIP_CARRIES_RIGHTS' --
+      ':!docs/specs/reviews' ':!tests/newman/collections' @2bf6d6ae6
+    fix: >-
+      Снять RemoveFromAccount с предмета (сегодняшний отказ уже называет остаток и шаг) либо,
+      если форма меняется, объявить смену reason и metadata ломающим изменением с переписью
+      потребителей; DRS-12 тогда утверждает существующий контракт.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    scenarios: [DRS-12]
+    finding: >-
+      Г0 заводит выдачу B на U в чужом аккаунте F без членства U в F (так же, как KN664-36 в
+      iam-user.py:1680–1700). Исключение не-участника — успех без действия, а не отказ:
+      remove_from_account.go:145–151 («Членства не было: цель достигнута»). Триггер
+      membership_carrying_rights_is_kept (0001_initial.sql:1145, :5206) срабатывает только на
+      DELETE строки memberships. «Тогда» DRS-12 и его близнец («членство U в F снято») на Г0
+      не строятся.
+    predicate: sed -n 138,152p internal/apps/kaname/api/user/remove_from_account.go
+    fix: >-
+      «Дано» DRS-12 — U участник F с выдачей (приглашение с парой «проект + роль», фикстура
+      _invite_probe, как iam-user.py:2569).
+  - id: B3
+    kind: PRODUCER
+    scenarios: [DRS-05 последнее «Тогда», §0.3]
+    finding: >-
+      «GET /iam/v1/accessBindings?filter=subject="U" от U — страница содержит B» приписан
+      производителю, которого у этого глагола нет. Это `List` (access_binding_service.proto:119),
+      страница сужается построчно по v_get на iam_access_binding:<id> (:120–125; list.go
+      collectVisiblePage → judge). Цитата §0.3 «субъекту все его выдачи без сужения»
+      (proto:160–191) — контракт другого глагола, `ListBySubject` (:listBySubject, :193).
+      Что U держит v_get на выдаче, выданной администратором F, не измерено. На этом же доводе
+      стоит обоснование раскрытия §0.3 («вызывающий читает это сам»).
+    predicate: sed -n 110,125p proto/kaname/cloud/iam/v1/access_binding_service.proto; sed -n 160,195p там же
+    fix: >-
+      Утверждать видимость через GET /iam/v1/accessBindings:listBySubject?subjectId=U (её
+      контракт называет полосу субъекта), либо назвать производителя кортежа v_get субъекта на
+      его выдаче и поправить координату §0.3.
+  - id: B4
+    kind: DoD
+    scenarios: [DoD п. 4]
+    finding: >-
+      Предикат п. 4 `… and cannot be deleted"` (с кавычкой) находит только строки БЕЗ хвоста Р1,
+      поэтому «показывает только строки с хвостом Р1» невыполнимо по построению. Сегодня он
+      печатает 34 строки internal/repo, из них вне тестов 19 (прод-строки и комментарии); после правки останутся
+      group_repo.go:416, service_account_repo.go:320, :323 (не предмет), pgmaperr.go:618 — общая
+      ветвь User/Group/ServiceAccount по kindHint (:612–618), её Group/SA-половина не предмет, —
+      и тестовые файлы internal/repo. Пункт не даёт объективного «пройдено / не пройдено».
+    predicate: >-
+      git grep -n -E '(owns accounts|has active access bindings|one or more groups|contains [a-z ]+)
+      and cannot be deleted"' -- internal/repo | wc -l → 34 @2bf6d6ae6
+    fix: >-
+      Два предиката: (а) у производителей предмета (user_repo.go, account_repo.go, pgmaperr.go
+      ветви User/Account) прежнего текста без хвоста нет — счёт 0; (б) group_repo.go:416,
+      service_account_repo.go:320/:323 и Group/SA-ветвь pgmaperr.go:618 побайтово прежние.
+
+minor:
+  - kind: FORMAT
+    note: >-
+      DRS-04 помечен «· E», а DoD п. 1 ведёт его integration-пробой. В newman «id A2 больше id A»
+      не построить: id из crypto/rand (corelib v1.14.0 ids/ids.go:175), A — от самостоятельной
+      регистрации, указание id при Create не посажено (account-id-may-be-supplied-at-create.md —
+      DRAFT). Пометить «· I» либо сформулировать «наименьший из A, A2».
+  - kind: PRODUCER
+    note: >-
+      DRS-03 (второе «Тогда»): `var stepUpMethods` second_factor.go:193 — словарь способов
+      церемонии (всегда четыре), не поле ответа. Производитель поля —
+      humansession/sf_status.go:131 и loginlanehttp/handler.go:968.
+  - kind: FORMAT
+    note: >-
+      Р1: «область выдачи как её несёт ресурс AccessBinding (resourceType, resourceId)» — на
+      проводе у AccessBinding scopeType/scopeId со значением вида `iam.account` (proto поля 5, 6;
+      iam-user.py:1687). Текст использует написание колонки БД (`account`); объявить, что это
+      написание текста, а не поле ресурса.
+  - kind: FORMAT
+    note: >-
+      Ссылки «§2» (§0.4, DoD п. 4) ведут в несуществующий раздел — по смыслу «Что НЕ входит».
+      «Дано» DRS-08 «как DRS-06» и DRS-13 «после отзыва B (DRS-06)» — DRS-06 кончается снятием U;
+      нужно «состояние DRS-06 до его «Когда»».
+  - kind: TWIN
+    note: >-
+      DRS-04, DRS-07, DRS-11 утверждают форму отказа без собственного положительного близнеца;
+      держится тем, что текст утверждается целиком и снятие держащего проходит в DRS-06/DRS-10.
+      Не блокирует.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 3217711702358047275c3f7c588011e80d55704e9b1d589487733d42ae160faf
+    - ls docs/specs/reviews/deletion-refusals-name-the-remainder-and-the-step → нет каталога (круг 1)
+    - git grep -l <семь образцов §0.4> ede94db30 -- ':!docs/specs/reviews' → 26 (на HEAD 27 — плюс сам документ)
+    - git grep -n <образцы §0.1> → user_repo.go:834/837/840, pgmaperr.go:496/618/722/724, account_repo.go:404–410 — совпало
+    - sed -n 40,75p internal/apps/kaname/shared/reference_refusal.go → metadata у ErrorInfo нет — совпало
+    - git grep -n 'func installOneShotHold' → force_logout_concurrent_teardown_integration_test.go:273 — есть
+    - awk 'rpc BeginRegistration…' access_key_service.proto → required_acr_min "2"
+
+constructibility:
+  method: >-
+    Посев не ставился: стенда и разрешения на посев задание не называет. Нетривиальные «Дано»
+    сверены с названными фикстурами и с кодом.
+  seeded: 0
+  of: 14
+  named_fixture: 12
+  not_constructible: 1   # DRS-12 (B2)
+  not_executed: 1        # DRS-04 в форме E (minor)
+  fixtures:
+    - iam-user.py:1680–1700 — чужая выдача на человека (DRS-05…09)
+    - iam-user.py:2569 _invite_probe — участник с выдачей (нужен DRS-12)
+    - installOneShotHold — DRS-13
+    - kaname-second-factor.py — повышение кодом (DRS-02)
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: Вердикт CHANGES_REQUESTED, блокирующих четыре; санкции на код нет.
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 3217711702358047275c3f7c588011e80d55704e9b1d589487733d42ae160faf"
+
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  target: PRO-Robotech/kaname#725
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
