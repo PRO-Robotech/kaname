@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // TestCreate_DescriptionNamesEverySubject — описание операции создания
@@ -30,19 +30,19 @@ func TestCreate_DescriptionNamesEverySubject(t *testing.T) {
 
 	t.Run("двум субъектам", func(t *testing.T) {
 		uc, _ := newUC()
-		b := clusterScopeBinding(roleID, "usr_target")
-		b.Subjects = append(b.Subjects, domain.Subject{Type: domain.SubjectTypeUser, ID: "usr_second"})
+		b := clusterScopeBinding(roleID, "usr_desctarget000001")
+		b.Subjects = append(b.Subjects, domain.Subject{Type: domain.SubjectTypeUser, ID: "usr_descsecond000001"})
 		op, err := uc.Execute(clusterAdminCtx("usr_root------------"), b)
 		require.NoError(t, err)
 		require.NotNil(t, op)
-		require.True(t, strings.Contains(op.Description, "user/usr_target") && strings.Contains(op.Description, "user/usr_second"),
+		require.True(t, strings.Contains(op.Description, "user/usr_desctarget000001") && strings.Contains(op.Description, "user/usr_descsecond000001"),
 			"описание обязано называть обоих субъектов, получено %q", op.Description)
 	})
 	t.Run("одному субъекту — прежний текст", func(t *testing.T) {
 		uc, _ := newUC()
-		op, err := uc.Execute(clusterAdminCtx("usr_root------------"), clusterScopeBinding(roleID, "usr_target"))
+		op, err := uc.Execute(clusterAdminCtx("usr_root------------"), clusterScopeBinding(roleID, "usr_desctarget000001"))
 		require.NoError(t, err)
-		require.Equal(t, "Create access binding (user/usr_target → "+roleID+" on cluster/"+domain.ClusterSingletonID+")",
+		require.Equal(t, "Create access binding (user/usr_desctarget000001 → "+roleID+" on cluster/"+domain.ClusterSingletonID+")",
 			op.Description)
 	})
 }
