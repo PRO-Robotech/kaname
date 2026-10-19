@@ -138,7 +138,7 @@ func ndSeedRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id string
 	if err != nil {
 		t.Fatalf("роль %s: %v", id, err)
 	}
-	sels := inserted.Rules.MaterializingSelectors()
+	sels := catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())
 	if err := w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, sels); err != nil {
 		t.Fatalf("селекторы роли %s: %v", id, err)
 	}

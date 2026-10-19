@@ -336,31 +336,15 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 		return nil, shared.MapRepoErr(err)
 	}
 
-	// FGA tuple emission. The binding
-	// is thin (no per-binding target). buildBindingTuples is the SINGLE source of
-	// truth shared with the Role.Update reconcile fan-out. A RULES-role emits ONLY
-	// the binding-lifecycle hierarchy
-	// parent-pointer at Create — the per-object access tuples (ARM_ANCHOR/ARM_NAMES/
-	// ARM_LABELS) are materialized post-commit by the reconciler (no binding-time
-	// scope_grant emission). A legacy permissions-only role emits its role-relation
-	// tier tuples on the scope anchor.
-
-	// Emit an INDEPENDENT tuple-set
-	// PER SUBJECT. buildBindingTuples derives the subject from b.SubjectType/
-	// b.SubjectID, so call it once per subject with that pair set; the per-subject
-	// role-relation tuples differ by FGA `User` (user:… / group:…#member /
-	// service_account:…) while the scope→binding hierarchy parent-pointer is
-	// subject-independent (the ledger PK + ON CONFLICT DO NOTHING dedupe it).
-	// The emitted-tuple ledger keys by (binding_id, fga_user, relation, object) so
-	// each subject's lineage is distinguishable for per-subject revoke/audit.
-	var tuples []abrepo.RelationTuple
-	perSubject := created
-	for _, s := range b.Subjects {
-		perSubject.SubjectType = s.Type
-		perSubject.SubjectID = s.ID
-		tuples = append(tuples, buildBindingTuples(perSubject, role)...)
-	}
-	tuples = dedupeTuples(tuples)
+	// Кортежи уровня выдачи — НЕЗАВИСИМЫЙ набор на каждого субъекта
+	// (buildSubjectsBindingTuples): тот же построитель строит новую сторону
+	// сверки при смене роли, поэтому обе стороны сравнения совпадают по составу
+	// субъектов (kaname#880). Роль с правилами выпускает здесь только указатель
+	// выдачи на родителя — доступ к объектам разворачивает материализатор после
+	// коммита; роль «только разрешения» выпускает ярус на якоре области. Реестр
+	// выпущенного ключуется (выдача, субъект, отношение, объект), поэтому след
+	// каждого субъекта различим при снятии и в аудите.
+	tuples := buildSubjectsBindingTuples(created, b.Subjects, role)
 
 	// Atomic emit-in-tx. The fga_outbox INSERT commits iff the binding
 	// INSERT commits (запрет #10), and a trigger on that INSERT folds the row

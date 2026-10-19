@@ -682,6 +682,10 @@ var (
 // ли её основной запрос. Свойство держит проба на живой базе
 // (`selector_pruning_leaves_a_ledger_integration_test.go`), а не эта строка.
 //
+// Укороченная строка теряет и глаголы правила на вырезанных типах
+// (`verbs_by_type`, kaname#878): ключи карты — подмножество `object_types`, и
+// глагол на типе вне охвата правила был бы утверждением о несуществующем.
+//
 // Причина у вырезанного живого типа — причина снятия КОНТЕЙНЕРА (kaname#874):
 // живой элемент вырезается только вместе со строкой вложенного селектора, чей
 // контейнер снят, и своей причины у него нет.
@@ -720,7 +724,10 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		  RETURNING s.role_id, s.rule_fp
 		), stripped AS (
 		  UPDATE kaname.role_rule_selectors s
-		     SET object_types = c.alive
+		     SET object_types  = c.alive,
+		         verbs_by_type = (SELECT coalesce(jsonb_object_agg(g.k, g.v), '{}'::jsonb)
+		                            FROM jsonb_each(s.verbs_by_type) AS g(k, v)
+		                           WHERE g.k = ANY (c.alive))
 		    FROM changed c
 		   WHERE s.role_id = c.role_id AND s.rule_fp = c.rule_fp
 		     AND cardinality(c.alive) > 0

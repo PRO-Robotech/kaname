@@ -1,0 +1,189 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/public-read-container-of-a-module-type-is-admitted.md
+  sha256: 25a2af39b561a7004134967de0dc27e90f8894bbfe34aef69a09dfb5f14ad155
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 892853c45
+  content_commit: null
+  content_commit_note: документ не закоммичен (неотслеживаемый файл копии tmp/kn-866-acc, ветка 866)
+  branch: "866"
+  task: PRO-Robotech/kaname#866
+  related_tasks: [PRO-Robotech/kaname#856, PRO-Robotech/kaname#858]
+  lines: 337
+  round: 1
+  round_scope: >-
+    Первый круг. Решение диспетчера по вопросу автора принято как данность: вариант Р4
+    (допуск получает перечень типов, объявленных ключом); запрет класса в авторских
+    объявлениях на загрузке отвергнут (ломает registry_repository). Р4 не переоткрывается.
+  predecessor_record: null
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kn-866-acc @ 892853c45 → 25a2af39…ad155 (совпало с префиксом
+    задания).
+  measurement_revisions: >-
+    kaname — 892853c45 (HEAD копии); трекер — gh issue view 866 на 2026-10-18.
+  neighbours_pinned:
+    anonymous-and-authenticated-are-subject-classes.md: bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6
+    nested-rule-reaches-descendants-of-a-named-container.md: f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6
+    composed-model-admits-only-what-it-owns.md: 9f1b5a8546b6803a9895eff59383c7e51fa513685416d251a9efccc3ad77f50d
+  neighbours_note: >-
+    bd6325e3… и f12395ae… — APPROVED записями docs/specs/reviews/<имя>/<sha>.yaml. У
+    9f1b5a85… записи ревью нет (git grep -n 9f1b5a85 -- docs → только как сосед в записях
+    anonymous-…); его шапка сама говорит, что вердикт круга 4 на нынешнюю редакцию не
+    перенесён (§0.2, правки #2004, #2214). См. B2.
+
+verdict: CHANGES_REQUESTED
+verdict_note: >-
+  Блокирующих 2 (NEGATIVE, DoD). Объём, производители, близнецы существующих отрицаний и
+  конструируемость П1 годны; Р4 записан в согласии с решением диспетчера.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T22:10:00+03:00'
+
+blocking:
+  - id: B1
+    kind: NEGATIVE
+    where: "Р1 п. 3 (строки 102-103), сценарии PM-05…PM-08"
+    note: >-
+      Нет отрицательного сценария на границу исключения Р1 п. 3 со стороны ПРЯМОЙ записи:
+      ключ на boxes, у items действие get длинной формой с system_class. Р2 отвергает
+      второе объявление только у ресурса С КЛЮЧОМ (контейнера), у ребёнка ключа нет — вход
+      доходит до допуска. Р3 формулирует находку на уровне ОБЪЯВЛЕНИЯ-семени, а v_get
+      ребёнка — законное семя (п. 3); реализация, исключающая v_get ребёнка целиком,
+      проходит PM-01…PM-09 и молча допускает класс, названный модулем в блоке ребёнка
+      (SC-37 соседа). PM-05 этот вход не держит — он без ключа, где исключения нет вовсе.
+    predicate: >-
+      Посеяно пробой в изолированной копии (git archive 892853c45): П1 + у items
+      `{name: get, subjects: [system_class, user, service_account, 'group#member']}` →
+      manifest.Load проходит; блок probemod_item несёт
+      `define v_get: [system_class, user, service_account, group#member] or super_admin or
+      public_reader from box`; допуск сегодня — находок 4, четвёртая
+      `Д3: probemod_item.v_get: подстановочная запись субъекта system_class`.
+    fix: >-
+      Добавить сценарий (близнец PM-01, отличие — один факт: класс в составе get ребёнка):
+      Тогда ровно одна находка Д3 — тип probemod_item, отношение v_get, запись system_class
+      (либо отказ загрузки с координатой, если автор распространит Р2 на детей — выбрать и
+      записать). Р1/Р3 уточнить: исключение действует на ТЕРМ (запись system_class первой у
+      контейнера; терм `public_reader from <указатель>` у ребёнка), а не на объявление.
+      Строка в таблице производителей и в DoD п. 1 (красный/зелёный).
+  - id: B2
+    kind: DoD
+    where: "таблица «Опора» строка 54, DoD п. 4 (строки 323-325)"
+    note: >-
+      Изменение соседа названо (исключение Р1, третье ребро Р3), но согласовано не до
+      конца. (а) После изменения в соседе остаются утверждения, противоположные новому
+      правилу допуска, и DoD их правку не требует: §5 п. 6 «Третье ребро (Term.Computed)
+      не заводится» (строки 752-756 соседа), §3 строка Д3 «рёбер два» (строка 644), §2.9
+      «рёбер два, и это замер» (строка 493); тот же довод — в шапке reachableWildcardFindings
+      (admit.go:546-550), которую DoD п. 3 называет лишь разделами. «Строка таблицы правок»
+      у соседа места не имеет — такого раздела в нём нет (есть §0.x «что изменилось»). Два
+      места об одном правиле безопасности, из которых одно ложно. (б) Таблица «Опора: одобренные
+      соседи» перечисляет 9f1b5a85… наравне с одобренными, хотя у этой редакции вердикта нет
+      (fa-b7-pin-approved-neighbour) — это надо сказать прямо.
+    fix: >-
+      DoD п. 4: назвать места соседа — §3 (строка Д3), §5 п. 6, §2.9 — и форму правки
+      (пометка «заменено приёмкой public-read-container-…, Р1/Р3» со ссылкой; новая
+      подсекция §0.x с датой и задачей); строка его истории о непереносе вердикта. В таблице
+      «Опора» у 9f1b5a85… — статус «вердикт на редакцию не перенесён (§0.2 соседа);
+      клауза Д3 меняется ЭТОЙ приёмкой, санкция — её одобрение». DoD п. 3: и раздел «Рёбра»
+      шапки reachableWildcardFindings — с предикатом, что фраза «Третье ребро не заводится
+      для НОВОГО типа» после правки отсутствует.
+
+remarks_non_blocking:
+  - id: I1
+    kind: FORMAT
+    note: >-
+      Р3, строки 119-120: «объявление-семя, от которого класс достижим не через три
+      следствия Р1» читается так, что путь ЧЕРЕЗ законную точку законен — тогда v_update
+      (→ v_get) и peek (→ box.public_reader) находками не были бы, что противоречит Р1
+      («всякое иное объявление, из которого класс достижим») и PM-07/PM-08. Переписать:
+      находка — у каждого объявления нового типа, кроме законных термов Р1, из которого класс
+      достижим любым путём, включая путь через законные точки.
+  - id: I2
+    kind: FORMAT
+    note: >-
+      PM-03/PM-04, «Когда»: `POST /iam/v1/accessBindings` — путь края, а держатель (DoD п. 2)
+      — integration без края. Назвать вызов в форме держателя (AccessBindingService.Create
+      в процессе, как public_container_read_world_integration_test.go) и оставить ссылку
+      на «Вне объёма» п. 3.
+  - id: I3
+    kind: COVERAGE
+    note: >-
+      «ADM-A-07, 08, 20…22, 27 не меняются» — не измерено. На входе ADM-A-27
+      (`v_get: [user, service_account] or hidden`) третье ребро Р3 даёт вторую находку
+      (семя acme_widget.v_get → hidden → cluster.viewer); держатель
+      TestAdmitSeedingRuleWildcardReachableOnlyViaDeadRelation судит набор правил и
+      findingsOf(...)[0] — исход зависит от порядка находок. Сказать это в опоре и
+      условием к коду (порядок по семени).
+  - id: I4
+    kind: DoD
+    note: >-
+      DoD п. 2 без команды; назвать её (`heavy-slot.sh integration -- go test <пакет> -run
+      '^TestPM0[34]_' -count=1`) и пакет мира П2.
+
+summary:
+  scenarios_total: 9
+  scenarios_by_group: {positive: 3, negative: 5, invariance: 1}
+  producers_named: 9 of 9
+  twins_named: 5 of 5 negatives (PM-04↔03, PM-05↔02, PM-06/07/08↔01; «И» PM-08 — свои)
+  blocking: 2
+  roadmap_scope: >-
+    предикат kaname#866 (старт с ключом, чтение детей классом, близнец без ключа, красное
+    на d95fce875) покрыт PM-01, PM-03, PM-02, DoD п. 1; канон не меняется — в согласии с
+    «без правки канона» задачи.
+  constructibility: >-
+    посеяно 3 входа (П1 как есть; П1 без ключа; П1 + класс в get ребёнка — вход B1);
+    исходы совпали с замером автора (строки 1-2: находок 3 / 0, перепись «осмотрено 35,
+    новых 2»); строки «И» PM-01 побайтово совпали с блоками поставленной композиции. Блоки
+    ключевого П1 не несут ни одного Computed-терма на v_get/v_list/public_reader — PM-01
+    остаётся «находок 0» и после Р3. PM-05…PM-08, PM-09 — замер автора и названные держатели
+    (не перепосеяны). П2 (PM-03/04) — не выполнилось: мир с ключом по построению не ставится
+    до Р1 (это предмет); препятствие только Д3 — других находок (Д5′ глубины) на П1 нет,
+    образец мира — nesteddepth TestMain и public_container_read_world_integration_test.go.
+  constructibility_runs:
+    - command: GOWORK=off go test ./internal/modelcompose/ -run TestReviewProbe866 -count=1 -v
+      revision: 892853c45 (git archive в scratchpad + временная проба, в дерево не внесена)
+      result: код 0; base — находок 3; nokey — находок 0, admitted=true; key+itemsGetClass — находок 4
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: вердикт CHANGES_REQUESTED; одобрения нет
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 25a2af39b561a7004134967de0dc27e90f8894bbfe34aef69a09dfb5f14ad155 · ред. 1, круг 1: блокирующих 2 (NEGATIVE, DoD)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#866
+  status: not_performed
+  published: false
+  subject_sha256: "25a2af39b561a7004134967de0dc27e90f8894bbfe34aef69a09dfb5f14ad155"
+  verdict: "CHANGES_REQUESTED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

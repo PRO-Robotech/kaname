@@ -116,8 +116,12 @@ func (c RoleVerbReseedCensus) Structural() bool {
 	return c.Examined > 0 && c.Reseeded == 0
 }
 
-// ReseedSystemRoleVerbs пересчитывает проекцию глаголов КАЖДОЙ системной роли,
-// каждую роль — в собственной транзакции.
+// ReseedSystemRoleVerbs пересчитывает проекцию глаголов КАЖДОЙ живой системной
+// роли с правилами, каждую роль — в собственной транзакции, и в той же
+// транзакции — глаголы её правил на строках селекторов (kaname#878), снимая
+// роль из очереди пересчёта. Роли арендатора и снятые роли перечень не
+// содержит: очередь глаголов правил пересчитывает своя полоса
+// (DrainSelectorVerbsQueue), проекцию роли арендатора — правка роли.
 //
 // Отказ на одной роли не прерывает обход: остальные обязаны быть пересеяны, и
 // именно это отличает «база моргнула на одной строке» от «механизм не работает».
@@ -148,8 +152,8 @@ func ReseedSystemRoleVerbs(
 
 	var failures []error
 	for _, rr := range roles {
-		pairs := cat.RoleVerbsFromSelectors(rr.rules.MaterializingSelectors())
-		if rerr := replaceRoleVerbsInOwnTx(ctx, repo, rr.id, pairs); rerr != nil {
+		pairs, rerr := replaceRoleVerbsInOwnTx(ctx, repo, cat, rr.id)
+		if rerr != nil {
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
@@ -158,7 +162,7 @@ func ReseedSystemRoleVerbs(
 			continue
 		}
 		census.Reseeded++
-		census.Pairs += len(pairs)
+		census.Pairs += pairs
 		if obs != nil {
 			obs.IncRoleVerbReseed(RoleVerbReseedOutcomeReseeded)
 		}
@@ -184,19 +188,38 @@ func ReseedSystemRoleVerbs(
 // сервиса, поэтому в журнал приезжает не текст драйвера, а фиксированный. Полосу
 // это не размывает — транзиентную от структурной отличает ПЕРЕПИСЬ (сколько ролей
 // осмотрено против скольких закоммичено), а не текст отказа.
+//
+// Правила читаются ВНУТРИ транзакции под замком строки роли (`RulesForRegrain`),
+// а не из перечня: перечень прочитан до первой транзакции, и проекция, сосчитанная
+// по нему, могла бы переписать свежую правку роли устаревшей.
+//
+// В той же транзакции пересчитываются глаголы ПРАВИЛ на строках селекторов
+// (`RegrainSelectorVerbs`, kaname#878): строка, впервые положенная досевом
+// селекторов, несёт верхнюю границу и роль в очереди, и пересчёт снимает её.
 func replaceRoleVerbsInOwnTx(
 	ctx context.Context,
 	repo kanamerepo.Repository,
+	cat *catalog.Facts,
 	roleID string,
-	pairs []domain.RoleVerb,
-) error {
+) (int, error) {
+	pairs := 0
 	if err := shared.DoWithWriteTxVoid(ctx, repo,
 		func(ctx context.Context, w kanamerepo.Writer) error {
-			return w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), pairs)
+			rules, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(roleID))
+			if err != nil || !live {
+				return err
+			}
+			sels := cat.GrantSelectors(rules.MaterializingSelectors())
+			verbs := cat.RoleVerbsFromSelectors(sels)
+			if err := w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), verbs); err != nil {
+				return err
+			}
+			pairs = len(verbs)
+			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(roleID), sels)
 		}); err != nil {
-		return fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
+		return 0, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
 	}
-	return nil
+	return pairs, nil
 }
 
 // listMaterializingSystemRoles читает системные роли с непустыми правилами —

@@ -97,6 +97,27 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) []abrepo.Relat
 	return tuplesForBinding(b, relations)
 }
 
+// buildSubjectsBindingTuples — кортежи уровня выдачи на КАЖДОГО субъекта
+// перечня `subjects`: buildBindingTuples берёт субъекта из одиночной пары строки
+// выдачи, поэтому зовётся на каждого с этой парой, выставленной в него.
+// Указатель на родителя от субъекта не зависит и после объединения остаётся
+// один (dedupeTuples).
+//
+// Единственный построитель для обеих сторон сравнения: создание выпускает этот
+// набор и записывает его в реестр, сверка при смене роли строит из него новую
+// сторону. Сторона, построенная из одной пары, — проекции первого субъекта, —
+// снимала бы кортежи субъектов со второго по N-й (kaname#880).
+func buildSubjectsBindingTuples(b domain.AccessBinding, subjects []domain.Subject, role domain.Role) []abrepo.RelationTuple {
+	var tuples []abrepo.RelationTuple
+	perSubject := b
+	for _, s := range subjects {
+		perSubject.SubjectType = s.Type
+		perSubject.SubjectID = s.ID
+		tuples = append(tuples, buildBindingTuples(perSubject, role)...)
+	}
+	return dedupeTuples(tuples)
+}
+
 // capSynthesizedAccountAdmin keeps the legacy whole-role projection from
 // SYNTHESIZING the third tier of super-access.
 //

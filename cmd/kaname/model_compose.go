@@ -27,8 +27,16 @@ import (
 // читает.
 //
 // Провязка стоит здесь, а не в звеньях: композиция не знает о допуске, допуск не
-// знает о происхождении текста. Разделение несущее — допуск есть чистая функция
-// от текста, и, смешав их, мы получили бы судью, знающего, что он судит своё.
+// знает о происхождении текста. Разделение несущее — смешав их, мы получили бы
+// судью, знающего, что он судит своё.
+//
+// Допуск получает текст И перечень термов, объявленных ключом публичного чтения
+// (kaname#866, приёмка public-read-container-of-a-module-type-is-admitted.md,
+// Р4): три следствия ключа, написанные рукой, побайтово равны написанным ключом,
+// и по одному тексту их не различить. Перечень производит ТОТ ЖЕ вызов
+// композиции, что собрал текст (`rep.KeyTerms`), и передаётся аргументом: собранный
+// отдельно, он описывал бы другой текст. Допуск по-прежнему не знает, КТО написал
+// текст, — только какие типы объявлены ключом доставленных манифестов.
 //
 // # Почему отказ ФАТАЛЕН на каждом звене
 //
@@ -51,12 +59,13 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (
 		slog.Int("canon_types", rep.CanonTypes),
 		slog.Any("composed", rep.Composed),
 		slog.Any("reaffirmed", rep.Reaffirmed),
-		slog.Any("prior_edition", rep.PriorEdition))
+		slog.Any("prior_edition", rep.PriorEdition),
+		slog.Int("public_read_key_terms", len(rep.KeyTerms)))
 	if err != nil {
 		return rep, fmt.Errorf("композиция модели прав: %w", err)
 	}
 
-	admission, err := authzmodel.Admit(composed)
+	admission, err := authzmodel.Admit(composed, rep.KeyTerms...)
 	logger.Info("перепись допуска собранной модели",
 		slog.String("census", admission.Census()),
 		slog.Bool("admitted", admission.Admitted()))

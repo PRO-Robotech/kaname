@@ -1,0 +1,128 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: a01d921cadb9c2c078a2e23260200d8592822dbc1e20e6c0293da54b1be3c95b
+  revision: 8
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 55b27e57a
+  content_commit: 05b92d2e4
+  branch: 495-anon-registry-token
+  task: PRO-Robotech/kaname#495
+  related_tasks: [PRO-Robotech/kaname#829, PRO-Robotech/kacho#3238]
+  round: 1
+  round_scope: >-
+    Правка после одобренной редакции 7 (2b89df3e…): SC-39 разбит на случаи (а)–(г) — включение
+    анонимного потока выдачи токена реестра ручкой службы, пустое умолчание, страж формы;
+    строки таблицы производителей SC-39, DoD S1 и S3, строка истории review редакции 7, раздел
+    «Редакция 8: что исправлено». Судится дельта к редакции 7.
+  predecessor_record: docs/changes/kn-829/reviews/acceptance/2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kaname-495-anon → a01d921c…c95b; git show HEAD:<док> | sha256sum
+    @05b92d2e4 → тот же отпечаток (рабочее дерево = коммит).
+  measurement_revisions: >-
+    kaname @55b27e57a (код и пробы) и @05b92d2e4 (документ); kacho 2ec6e1e3d — как в строке (г),
+    не перемерялось (дельта kacho-сторону не меняет).
+
+verdict: APPROVED
+verdict_note: >-
+  Дельта годна: у каждого «Тогда» (а)–(г) назван производитель с координатой, совпавшей с деревом
+  @55b27e57a; у отрицаний (б), (в) есть близнецы в один факт; Given (а)–(в) построен посевом
+  рецензента через настройку службы, включая границу 63/64 знака.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-17T12:00:00+03:00'
+
+execution_check:
+  delta: >-
+    git diff 55b27e57a HEAD -- <док>: 1 файл, +121 −9 — история review (2 строки дописаны,
+    прежние не изменены), шапка (дата, редакция 8), SC-39 (а)–(г), таблица производителей (1
+    строка SC-39 → 3), DoD S1 (пункт SC-39 (а)–(в)), DoD S3 (SC-39 → SC-39 (г)), раздел
+    «Редакция 8: что исправлено».
+  checks:
+    - id: producer_a_b
+      result: pass
+      evidence: >-
+        defaults.go:70 SetDefault(anonymous-client-id, ""); serve.go:2363 registryTokenBuildConfig;
+        token.go:470 ExecuteAnonymous (Subject = Anonymous.ClientID, Scope AnonymousReadScope;
+        необъявленный поток → ErrUnauthenticated → 401). Пробы (а) sub/scope/iss/kid/aud и (б)
+        401 + непустой WWW-Authenticate — в serve_registry_token_anonymous_test.go:105, :128.
+    - id: producer_c
+      result: pass
+      evidence: >-
+        registry_token.go:108 AnonymousPrincipalForm, :110 предел 63, generatedIDShapeRe; текст
+        отказа называет ручку и переменную окружения; Validate → validate.go:85 → main.go:63–65
+        os.Exit(1).
+    - id: producer_d
+      result: pass
+      evidence: token.go:178 AnonymousSubject = domain.SpeakerAnonymous; kacho config.go — заказан (S3).
+    - id: twins
+      result: pass
+      evidence: >-
+        (а) ↔ вход по паролю служебной учётки (удостоверение предъявлено); (б) ↔ (а) (ручка
+        задана); (в) ↔ три имени и 63 знака (форма значения).
+    - id: ordered_producers
+      result: pass
+      evidence: >-
+        ручка в чарте — git grep -c 'anonymous-client-id' -- deploy → 0 совпадений (код 1)
+        @55b27e57a, заказана в DoD S1; пробы 63/64 — заказаны; newman (б) — коллекция
+        tests/newman/collections/docker-lane-credential-kind.postman_collection.json существует.
+    - id: counts
+      result: pass
+      evidence: grep -c '^#### SC-' → 49; grep -c '^##### SC-39' → 4; новых ID нет.
+    - id: disclosure
+      result: pass
+      evidence: grep -ic '<перечень раскрытия>' <док> → 0 (перечень — в правиле раскрытия, вне публичного дерева).
+
+summary:
+  blocking: 0
+  kinds: []
+minor:
+  - >-
+    Ветвь стража «форма порождённого идентификатора» в перечне (в) держит единственное значение,
+    проходящее основную форму, — `ak-0123456789abcdefg`; ближайшего положительного близнеца у
+    неё нет. Посев рецензента: `ak-0123456789abcdef` (16 знаков) принят. Добавить его в пробу
+    DeclaredFormIsAccepted — тогда ветвь отличается от принятого ровно длиной хвоста.
+  - >-
+    Следствие формы, а не дефект: имя вида `<2–4 буквы>-<17 знаков crockford>` (например
+    `pull-` + 17 знаков) отвергается, хотя двухсловно. Стоит назвать это в документации ручки.
+constructibility:
+  seeded: 4
+  of: 5
+  not_performed: 1
+  note: >-
+    Посеяно: go test -count=1 -run 'TestAnonymousPrincipal_|TestAnonymousRegistryToken_'
+    ./internal/apps/kaname/config/ ./cmd/kaname/ → ok, ok (unit (а), (б), (в)); проба рецензента
+    через go test -overlay (дерево не тронуто): 63 знака принят, 64 отвергнут,
+    ak-…abcdef принят, ak-…abcdefg отвергнут → PASS. Не выполнилось: integration-близнец (а)
+    (testcontainers, слот integration не брался) — фикстура названа,
+    TestAnonymousRegistryToken_OwnerCredentialStillGetsItsOwnToken. (г) — стадия S3, kacho.
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: >-
+    yes — ручка открывает выдачу токена без удостоверения; закрыта пустым умолчанием и стражем формы
+
+event_body: "acceptance-reviewer · APPROVED · sha256 a01d921cadb9c2c078a2e23260200d8592822dbc1e20e6c0293da54b1be3c95b · SC-39 (а)–(г), ред. 8 (kaname#495)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#495
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/changes/kn-829/reviews/acceptance/2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14.yaml
