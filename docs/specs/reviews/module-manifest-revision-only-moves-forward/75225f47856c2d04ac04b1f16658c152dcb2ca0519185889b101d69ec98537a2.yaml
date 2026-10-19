@@ -133,13 +133,23 @@ route_signs:
 event_body: "acceptance-reviewer · APPROVED · sha256 75225f47856c2d04ac04b1f16658c152dcb2ca0519185889b101d69ec98537a2"
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    Событие публикует курьер (git-operator) в PRO-Robotech/kaname#865 и тем же заходом приводит
-    этот блок к факту. Тело:
-    acceptance-reviewer · APPROVED · sha256 75225f47856c2d04ac04b1f16658c152dcb2ca0519185889b101d69ec98537a2
-
+  type: issue_comment
+  target: PRO-Robotech/kaname#865
+  status: performed
+  published: true
+  database_id: 6259781345
+  node_id: "IC_kwDOUO26pM8AAAABdRyu4Q"
+  url: "https://github.com/PRO-Robotech/kaname/issues/865#issuecomment-6259781345"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6259781345"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T04:38:29Z"
+  body_sha256: "1ef207ee26d5e1286eab0df5064e56c64419d3fcdb09b170b408728ab8cac7f1"
+  subject_sha256: "75225f47856c2d04ac04b1f16658c152dcb2ca0519185889b101d69ec98537a2"
+  subject_revision_commit: "b33319e1a3ba282dd523af19a330263702f17f10"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
