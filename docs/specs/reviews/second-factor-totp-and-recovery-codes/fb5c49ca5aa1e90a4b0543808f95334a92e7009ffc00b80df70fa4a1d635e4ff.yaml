@@ -33,17 +33,27 @@ verdict: APPROVED
 reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-19T04:49:38Z'
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-19T06:21:03Z"
   note: >-
     Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
     not_performed. Правка документа после этой записи вердикт не переносит.
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#297
-  status: not_performed
-  published: false
-  body: "acceptance-reviewer · APPROVED · fb5c49ca5aa1e90a4b0543808f95334a92e7009ffc00b80df70fa4a1d635e4ff"
+  status: performed
+  published: true
+  database_id: 6261027312
+  node_id: "IC_kwDOUO26pM8AAAABdS-x8A"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6261027312"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6261027312"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T06:21:03Z"
+  body_sha256: "526f55e6e6a106180161bce9b5eda7b8b5eb60edd0a9958e9311a0afb84f83a5"
   subject_sha256: "fb5c49ca5aa1e90a4b0543808f95334a92e7009ffc00b80df70fa4a1d635e4ff"
+  subject_revision_commit: "ad31941e63e2c6e282a973cba8ed969bf590a2d5"
   verdict: "APPROVED"
   publication_mode: scripts/rituals/approval-event.sh
 attribution:
