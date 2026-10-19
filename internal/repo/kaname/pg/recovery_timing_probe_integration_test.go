@@ -164,8 +164,14 @@ func runRecoveryLanes(t *testing.T, uc *humansession.RequestRecoveryUseCase, lan
 		if diff < 0 {
 			diff, faster, slower = -diff, p.coded, p.nobody
 		}
-		rows = append(rows, fmt.Sprintf("критерий Ф1-48 (%s, %q ↔ %q): |Δмедиан| %v ≤ max(IQR) %v",
-			p.scenario, p.coded.name, p.nobody.name, diff, pairIQR))
+		// Строка печатает исход сравнения, а не формулу: на инъекции «≤» стоял бы
+		// под нарушенным неравенством.
+		holds, rel := "выполнен", "≤"
+		if diff > pairIQR {
+			holds, rel = "НАРУШЕН", ">"
+		}
+		rows = append(rows, fmt.Sprintf("критерий Ф1-48 (%s, %q ↔ %q): |Δмедиан| %v %s max(IQR) %v — %s",
+			p.scenario, p.coded.name, p.nobody.name, diff, rel, pairIQR, holds))
 		verdict := ""
 		if diff > pairIQR {
 			verdict = fmt.Sprintf("%s: полоса %q быстрее полосы %q на %v при размахе %v",
