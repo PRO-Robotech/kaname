@@ -1,0 +1,133 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/backup-code-set-has-one-form.md
+  sha256: a334e4dacf5785042ac189402bd761be4c4fbaecca4628bfff9f8ae7d25b47a2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строки истории в шапке — статическая форма объявления; шапка не правлена
+    рецензентом намеренно (change-graph.md §2). Действующий вердикт о редакции a334e4da… — эта
+    запись и внешнее событие; прежние записи 7f950ca3… и c6e042f3… не тронуты.
+  base_commit: 5639f831b
+  content_commit: null
+  content_commit_note: >-
+    Редакция 3 не закоммичена: правка рабочего дерева поверх 5639f831b в копии tmp/w13-kn297
+    (ветка 297); судится содержимое по отпечатку.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 609
+  scenarios: 26
+  round: 3
+  round_scope: >-
+    delta_only к редакции 2 (c6e042f3…, APPROVED кругом 2): (1) предикаты консоли — древовидный
+    аргумент `HEAD:ui-future` вместо пути после `--`; (2) решение В-1 сменено на «один шаг»
+    (решение владельца 2026-10-19 «прода нет» — не переоткрывается), сняты этапы S1→S2→S3 и
+    BCS-20…22. Предел «≤ 2 кругов» (flow-acceleration fa-b8) — о споре по ⛔; здесь новая
+    редакция одобренного документа, круг заказан диспетчером.
+  round_note: >-
+    Круг 3 — новая редакция после APPROVED; прежний вердикт на неё не переносится.
+  predecessor_record: docs/specs/reviews/backup-code-set-has-one-form/c6e042f38106b49bedddc3abeef2af6dd0a647d8e555c1848d22e7a6774e21c6.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/backup-code-set-has-one-form.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T00:19:51Z'
+effective_approval:
+  issued: false
+  note: >-
+    Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
+    not_performed. Правка документа после этой записи вердикт не переносит.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: not_performed
+  published: false
+  publication_mode: courier_of_agent_verdict
+  body: acceptance-reviewer · APPROVED · kaname:docs/engineering/acceptance/backup-code-set-has-one-form.md · sha256 a334e4dacf5785042ac189402bd761be4c4fbaecca4628bfff9f8ae7d25b47a2
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/backup-code-set-has-one-form/7f950ca3f0709ac5b05558ae8deb441d7c9bd36df91fbe24253b7aa43347c81f.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/c6e042f38106b49bedddc3abeef2af6dd0a647d8e555c1848d22e7a6774e21c6.yaml
+premise:
+  status: confirmed
+  predicate: >-
+    sha256sum документа → a334e4da… (равен заявленному); `git show 5639f831b:<путь> | sha256sum`
+    → c6e042f3… (база дельты — одобренная редакция 2); `git diff` → 1 файл, +93/−101;
+    grep -c '^\*\*ID:\*\*' → 26 (было 29, сняты BCS-20, 21, 22)
+delta_checks:
+  - id: P1
+    subject: предикат консоли, древовидный аргумент
+    where: §«Совместимость» :217-222; DoD п.10 :580-582
+    result: пройдено
+    predicate: >-
+      project/kacho @a98dc1ebba (= origin/main): `git grep -c -E
+      'backupCodesRemaining|backupCodes\??: \{' a98dc1ebba:ui-future` → 4 файла, 6 строк, код 0
+      (cloud-admin-lane.spec.ts:2, login-lane.ts:2, SecondFactorCodeField.four-forms.test.tsx:1,
+      AccountSettingsPage.test.tsx:1) — контроль документа воспроизведён; отрицательный контроль
+      `git grep -c zzzNoSuchTokenqq a98dc1ebba:ui-future` → пусто, код 1 — «пусто» исполнимо.
+      Гейт службы: `go test -count=1 -run Acceptance ./internal/check/` в tmp/w13-kn297 → ok, код 0.
+  - id: P2
+    subject: переход в один шаг, порядок посадки
+    where: §«Совместимость» :205-216; §«Решения» В-1 :589-594; DoD пп. 1-10 :554-582
+    result: пройдено
+    predicate: >-
+      kacho держит службу пином, а не плавающей ревизией: go.mod:120
+      `github.com/PRO-Robotech/kaname v0.4.1-0.20261013180450-3d5b02ede3aa`;
+      deploy/helm/umbrella/values.a8f60d.yaml:624 и values.fe3455-prod.yaml:294 `tag: 296-3d5b02ed`
+      (@origin/main kacho) — утверждение «ревизии, где консоль читает форму, которой её служба не
+      отдаёт, нет» опирается на пин и перепин одним изменением. Иных потребителей полей в kacho,
+      кроме ui-future, нет: `git grep -nE backupCode origin/main -- gateway services tests deploy
+      ':!ui-future'` → пусто.
+  - id: P3
+    subject: остатки снятого
+    result: пройдено
+    predicate: >-
+      grep -nE '\bS[123]\b|BCS-2[0-9]|этап|Допущени' по файлу → только строки истории :18 и
+      §«Решения» :591-594 (описание снятого); в сценариях, таблице производителей и DoD отсылок
+      к этапам и BCS-20…22 нет. Отсылки у BCS-06 (:300) и BCS-10 (:338) к снятым BCS-21/22 убраны.
+new_blocking_from_delta: []
+dispatcher_decisions_conformance:
+  - decision: В-1 один шаг (решение владельца 2026-10-19 «прода нет»)
+    conforms: true
+    where: §«Совместимость» таблица :207-211, порядок посадки :213-216; §«Решения» :589
+  - decision: В-2 снятие выражает «набора нет» отсутствием ключа
+    conforms: true
+    where: Р4; «Что ломается» п.3; BCS-10/11; §«Решения» :595
+  - decision: В-3 имя backupCodeSet
+    conforms: true
+    where: Р2; §«Решения» :599
+  - decision: Д-4 (а) 200 без backupCodeSet
+    conforms: true
+    where: Р4; BCS-50/51; §«Решения» :602
+non_blocking:
+  - id: M1
+    kind: FORMAT
+    summary: >-
+      BCS-31 после снятия сосуществования повторяет «And ключа backupCodesRemaining нет» у BCS-06
+      (:300) и ключи тела у BCS-10 (:338) — избыточно, не ложно; держателем остаётся BCS-32.
+  - id: M2
+    kind: FORMAT
+    summary: >-
+      Раздел «Служба — прежних форм нет» (:489) стоит после раздела консоли (:462), хотя это та же
+      часть «служба» — косметика трассировки; ввод §«Решения» называет их «решениями диспетчера»,
+      а В-1 — решение владельца.
+checks:
+  scope: без изменений против круга 2, кроме снятого сосуществования — пройдено
+  producer: 26 из 26 «Тогда» с производителем; строки BCS-20…22 сняты из таблицы (строки «BCS-01, 30», «BCS-06, 08, 31», «BCS-10, 11»); заказанные — как в круге 2
+  twin: >-
+    пары отказов не тронуты: 02↔01, 09↔06, 12↔11, 14↔16, 17↔06, 18↔05, 50↔01, 51↔01, 30↔03;
+    снятые BCS-20…22 были положительными — отрицаний без близнеца не осталось
+  constructibility: >-
+    новых Given дельта не вводит (посеяно 0 из 0); «служба изменения kaname#297» — продукт самого
+    изменения, строится выкаткой; G0 и обвязка BCS-50/51 — как подтверждено в круге 2
+  format: GWT, ID, payload, пара статус/code у отказов — пройдено
+  conventions: camelCase, без чужих облаков, без proto — пройдено
+  dod: >-
+    пп. 1-8 (служба) и 9-10 (консоль) измеримы, ссылаются на BCS-01…18, 30…32, 40…42, 50, 51;
+    предикаты пп. 5, 6, 10 — команды с ожидаемым исходом
