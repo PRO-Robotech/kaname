@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 885
+Всего кейсов: 894
 
 ## Перепись по модулям
 
@@ -70,9 +70,9 @@
 | `cases/kaname-login-lane.py` | 24 |
 | `cases/kaname-recovery-lane.py` | 20 |
 | `cases/kaname-registration.py` | 2 |
-| `cases/kaname-address-verification.py` | 8 |
+| `cases/kaname-address-verification.py` | 13 |
 | `cases/kaname-email-change.py` | 4 |
-| `cases/kaname-access-keys.py` | 53 |
+| `cases/kaname-access-keys.py` | 57 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 23 |
 | `cases/kaname-own-rest-front.py` | 14 |
@@ -1091,7 +1091,7 @@
 - `IAM-REG-OK-FIRST-REGISTRATION-AND-SESSION`
 - `IAM-REG-NEG-OCCUPIED-ADDRESS-REFUSED`
 
-## `cases/kaname-access-keys.py` — 53 кейса
+## `cases/kaname-access-keys.py` — 57 кейсов
 
 > Ключи доступа (Ф7, kaname#268, приёмка `access-keys-are-ours.md` ред. 15):
 > шесть глаголов `AccessKeyService` на собственном фронте службы
@@ -1178,7 +1178,18 @@
 - `IAM-ACCESSKEY-BVA-SUA-70-SIXTH-PRESENTATION-REFUSED`
 - `IAM-ACCESSKEY-OK-SUA-CLEANUP-KEYS`
 
-## `cases/kaname-address-verification.py` — 8 кейсов
+> Сброс способов входа администратором облака (kaname#925): LMR-01, LMR-03…05
+> приёмки `cloud-administrator-resets-login-methods.md` ред. 5 и Ф12-30 приёмки
+> второго фактора — на собственном фронте службы; администратор облака — надзор
+> облака посева церемонии стенда чарта, распорядители и посторонний — свои люди
+> кейса с кодом по времени.
+
+- `IAM-ACCESSKEY-OK-LMR-01-ADMIN-RESET-REMOVES-EVERY-KEY`
+- `IAM-ACCESSKEY-NEG-LMR-04-NOTHING-TO-RESET`
+- `IAM-ACCESSKEY-OK-LMR-05-RECOVERY-AFTER-RESET`
+- `IAM-ACCESSKEY-AUTHZ-LMR-03-F12-30-ADMIN-RESET-RIGHTS`
+
+## `cases/kaname-address-verification.py` — 13 кейсов
 
 > Подтверждение адреса и положение подтверждения (kaname#456, приёмка
 > `access-beyond-login-needs-a-verified-address.md`, позиции уровня E): сессия
@@ -1204,6 +1215,16 @@
 - `IAM-ADDRVERIFY-NEG-WRONG-CODE`
 - `IAM-ADDRVERIFY-OK-INVITEE-SNAPSHOT-NAMES-TWO-ACCOUNTS`
 - `IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED`
+
+> Текст отказа, называющий снимающий его шаг (EV-14), и позиции регистрации Ф4,
+> наблюдаемые снимком «кто я» и чтениями фронта под токеном нашей церемонии
+> (Ф4-01, Ф4-11…13, Ф4-21…23, Ф4-26; kaname#925).
+
+- `IAM-ADDRVERIFY-OK-REFUSAL-NAMES-THE-STEP-THAT-LIFTS-IT`
+- `IAM-ADDRVERIFY-OK-REGISTRATION-HAS-FOUR-CONSEQUENCES`
+- `IAM-ADDRVERIFY-OK-FIRST-ACTION-IN-OWN-ACCOUNT`
+- `IAM-ADDRVERIFY-NEG-REGISTRATION-REFUSAL-HIDES-OCCUPANCY-AND-PACE`
+- `IAM-ADDRVERIFY-OK-INVITEE-REGISTERS-BY-THE-SAME-LANE`
 
 ## `cases/kaname-email-change.py` — 4 кейса
 
