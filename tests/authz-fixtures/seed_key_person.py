@@ -414,10 +414,12 @@ def remove_second_factor(lane, session: str, code: str) -> None:
     if status != 200:
         raise Finding(f"снятие второго фактора запасным кодом: ждали 200, получили {status} "
                       f"({message_of(text)!r})")
-    extra = sorted(set(_json(text)) - {"session", "assurance"})
-    if extra:
-        raise Finding(f"снятие второго фактора ответило 200, а тело несёт ещё {extra} — набор "
-                      "запасных кодов назван после снятия, фактор снят не целиком")
+    keys, want = set(_json(text)), {"session", "assurance"}
+    if keys != want:
+        extra, missing = sorted(keys - want), sorted(want - keys)
+        raise Finding(f"снятие второго фактора ответило 200, а ключи тела {sorted(keys)} не равны "
+                      f"{sorted(want)}: лишние {extra}, недостающие {missing} — лишний ключ называет "
+                      "набор после снятия, недостающий оставляет уровень после снятия неназванным")
 
 
 # ─────────────────────────── снятие строки пароля ────────────────────────────
@@ -604,10 +606,11 @@ class _FakeDoors:
 
 class _FakeLane:
     """Двойник полосы для снятия второго фактора: признак формы и сам глагол.
-    Отказ и лишняя сводка набора в ответе — изменяемые факты."""
+    Отказ, лишняя сводка набора в ответе и пропавший ключ тела (`without`) —
+    изменяемые факты; умолчание — тело ровно `session`, `assurance`."""
 
-    def __init__(self, remove_status=200, leftover=None):
-        self.remove_status, self.leftover = remove_status, leftover
+    def __init__(self, remove_status=200, leftover=None, without=()):
+        self.remove_status, self.leftover, self.without = remove_status, leftover, tuple(without)
         self.removed: list[dict] = []
 
     def ask(self, method, path, body=None, cookies=None):
@@ -624,6 +627,8 @@ class _FakeLane:
             body = {"session": {"assuranceLevel": "2"}, "assurance": {"level": "2"}}
             if self.leftover is not None:
                 body["backupCodeSet"] = self.leftover
+            for k in self.without:
+                body.pop(k, None)
             return 200, ["kaname_session=s3; Path=/"], json.dumps(body)
         return 404, [], "{}"
 
@@ -818,9 +823,23 @@ def self_test() -> int:
             ("снятие второго фактора назвало набор запасных кодов — находка",
              {"lane": _FakeLane(leftover={"remaining": 10, "total": 10, "issuedAt": "2026-10-19T00:00:00Z"})},
              "finding"),
+            ("снятие второго фактора ответило без assurance — находка",
+             {"lane": _FakeLane(without=("assurance",))}, "finding"),
+            ("снятие второго фактора ответило без session — находка",
+             {"lane": _FakeLane(without=("session",))}, "finding"),
         ]:
             (kind, text), _, _, _ = sow(**kw)
             _c(label, kind == want, f"{kind}: {text}")
+        # Множество ключей ответа снятия РАВНО {session, assurance} (BCS ред. 7, DoD п.4,
+        # BCS-11): законный близнец молчит, каждый отрицательный меняет ровно один
+        # факт против него — ключа нет либо ключ лишний.
+        for label, lane_x, want in [
+            ("ответ снятия ровно {session, assurance} — молчит", _FakeLane(), "ok"),
+            ("ответ снятия без assurance — находка", _FakeLane(without=("assurance",)), "finding"),
+            ("ответ снятия с лишним ключом — находка", _FakeLane(leftover={"remaining": 10}), "finding"),
+        ]:
+            got = _outcome(lambda lane_x=lane_x: remove_second_factor(lane_x, "s2", "backup-1"))
+            _c(label, got[0] == want and len(lane_x.removed) == 1, f"{got}")
         # Близнецы красного kaname#768, по одному изменённому факту. (а) Сессия не
         # поднята до «2» — посев называет причину сам, до глагола ключа. (б) Глагол
         # ключа под токеном «1» — двойник отказывает дословным текстом службы (пол
