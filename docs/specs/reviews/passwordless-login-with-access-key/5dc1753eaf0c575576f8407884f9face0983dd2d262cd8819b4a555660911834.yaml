@@ -1,0 +1,139 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/passwordless-login-with-access-key.md
+  sha256: 5dc1753eaf0c575576f8407884f9face0983dd2d262cd8819b4a555660911834
+  revision: 13
+  static_status_note: >-
+    Строка «редакция 13 — ВЕРДИКТА НА НЕЁ НЕТ» в шапке — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 3172ef7b18a3fd29f2a0569aafd9b5b0f29768b5
+  base_sha256: 147b8dea828e2e186f3799d4639d96a1299a0e8a752ee3aa374400cb13d7b771
+  content_commit: null
+  content_note: >-
+    редакция 13 не закоммичена: правка в рабочем дереве копии tmp/w-468-acc (detached @3172ef7b1 =
+    git ls-remote origin refs/heads/468); отпечаток снят с рабочего дерева; отпечаток базы
+    (git show 3172ef7b1:<путь> | sha256sum) → 147b8dea…, то есть редакция 12, одобренная кругом 11
+  branch: '468'
+  worktree: tmp/w-468-acc
+  measured_at: PRO-Robotech/kaname@3172ef7b1; PRO-Robotech/kacho@8daff6097d (ветка эпика 3172-identity-own-2), ствол @2af1fdf5d7
+  task: PRO-Robotech/kaname#468
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/passwordless-login-with-access-key.md
+  fingerprint_reproduced: true
+  lines: 2766
+  round: 12
+  round_note: >-
+    круг 1 редакции 13 (сквозной счёт документа — 12); прежний вердикт круга 11 на эту редакцию не
+    переносится
+  predecessor_record: docs/specs/reviews/passwordless-login-with-access-key/147b8dea828e2e186f3799d4639d96a1299a0e8a752ee3aa374400cb13d7b771.yaml (APPROVED, редакция 12)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 13 к редакции 12 (git diff 3172ef7b1 -- <файл>, 145 строк диффа): шапка (строка
+  редакции 13, дописки к строкам редакций 11 (N2) и 12), §5 (абзац обозначений «E у края» → «I у
+  края», заголовки Ф13-09 E → E + I и Ф13-28 E → I), §6.4 (перемер держателей на kacho@8daff6097d,
+  ветвь «л» Ф13-06), §9 п. 8. «Дано», «Когда», «Тогда», решения и инварианты не тронуты.
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: >-
+    пробы kacho#3273 влиты в ветку эпика платформы и закрывают оба пробела края §6.4; координаты
+    §6.4 существуют в названной ревизии; смена обозначения уровня не меняет утверждений
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    kacho: git rev-parse origin/3172-identity-own-2 → 8daff6097d; git merge-base --is-ancestor
+    631a292d61 8daff6097d → 0, … 2af1fdf5d7 → 1 («#3293 merge #3273»). git grep -c
+    'f13RefusalBodyF4d22' / 'none_no_carrier' 8daff6097d -- gateway/ → 6 и 1; на 2af1fdf5d7 —
+    пустой вывод, код 1. git grep -n '^func Test…' 8daff6097d -- gateway/: own_session_lane_test.go
+    :613 (F13_28), :403 (F3_51), :191 (F3_10); login_lane_relay_composition_test.go:101 (F12_38);
+    own_session_address_gate_test.go:326 (F6b_04); login_lane_paths_test.go:297 (F13_28 paths);
+    authz_util.go:248 isPublicHTTPPath. Литерал F4d-22 сверяется дословно на каждом глаголе ключа
+    (:672) после положительного контроля эталона телом входа паролем (:661); носитель
+    none_no_carrier — :118. Повтор пяти проб этим кругом (heavy-slot go-race, внешний кластер,
+    ns t3273-heavy-go-race-a32a снято) на чистой копии @8daff6097d: код 0, --- PASS 8, --- FAIL 0;
+    перепись отсечки «глаголов 2 · пар 4 · F4d-22 дословно 2», перепись состава по трём носителям
+    — 27/27/27/27, x-kacho- 0, Authorization 0 (журнал tmp/accrev-3273-b-3943799.log).
+    kaname @3172ef7b1: tests/newman/cases/kaname-access-keys.py:3137 IAM-AKLOGIN-OK-KEY-LOGIN-OVER-
+    LIVE-SESSION, :3138 заголовок с «Ф13-09»; access_key_timing_probe_test.go:142
+    TestAccessKeyLogin_F13_06_…; access_key_login_integration_test.go:256 TestF13_06_…; git log
+    85e1983c2..3172ef7b1 по модулю и пробе → 7bba91c53, baaba81d7 (правки после прогона названы
+    документом). Уровни §5: 32 сценария; E 23→21, E + I 1→2, I 3→4, прочие строки те же.
+    Перепись долга newman-suite-debt.py на этом тексте — код 1, одна находка «запись долга позиции
+    Ф13-28 пережила предмет»; та же перепись с изъятой записью SCENARIO_DEBT["Ф13-28"] (исполнена
+    exec изменённого текста, дерево не тронуто) — код 0, позиций 176, долг 31, строк ДОЛГ у Ф13 и
+    Ф5 — 0.
+
+blocking: []
+
+non_blocking:
+  - id: N13-1
+    kind: CONVENTION
+    summary: >-
+      Условие посадки, а не дефект контракта: правка оснастки (снять SCENARIO_DEBT["Ф13-28"] и
+      _HOLDER_F13_EDGE в .github/scripts/newman-suite-debt.py, переписать комментарии там и в
+      tests/newman/cases/kaname-access-keys.py:1983-1985) обязана войти тем же изменением, что эта
+      редакция; без неё перепись долга на дереве — код 1 (измерено). Документ это называет.
+  - id: N13-2
+    kind: FORMAT
+    summary: >-
+      §6.4: «git grep -c … по gateway/ дают на стволе 0 и 0» — git grep -c при нуле совпадений
+      ничего не печатает и возвращает код 1 (измерено на 2af1fdf5d7). Ожидаемое — «пустой вывод,
+      код 1». Тот же род, что N12-1 круга Ф5.
+  - id: N13-3
+    kind: DoD
+    summary: >-
+      Первая строка Ф13-09 и ветвь «л» Ф13-06 названы зелёными по прогону исполнителя на
+      85e1983c2; модуль и проба правлены после (7bba91c53, baaba81d7), повтора нет — документ это
+      пишет прямо. Повтор на голове посадки — дело DoD полосы, а не приёмки.
+
+accepted_parts: >-
+  Перевод Ф13-28 E → I и Ф13-09 E → E + I — смена обозначения к легенде §5 (I — изнутри процесса),
+  утверждения прежние: «Дано» — дублёр службы за краем, стенд его не ставит by construction
+  (testing-newman.md#edge-internal-consequence — следствие, краем стенда не видимое, держит проба с
+  причиной). Форма E + I у Ф13-09 — по образцу Ф13-06 (B1 (а) круга 9). Производитель назван у
+  каждой части «Тогда» Ф13-28 и Ф13-09; оба пробела края закрыты пробами kacho#3273, координаты
+  существуют в названной ревизии. Близнец: none_no_carrier против A_live_session — ровно один факт
+  (нет нашего печенья сессии); отсечка против «сессии нет» — один факт состояния сессии.
+  Вопрос автора (Ф13-09: E + I или E) — оставить E + I: позиция, часть которой уровня I, несёт I в
+  заголовке, как Ф13-06.
+
+constructibility:
+  seeded: 0
+  named_fixtures: 3
+  executed_probes: 5
+  not_performed: 0
+  detail: >-
+    «Дано» частей края — дублёр службы в процессе Go-пробы (fakeOwn с found/sess, носители
+    A_live_session, C_no_session, none_no_carrier); построен и исполнен повтором этого круга, код 0.
+    «Дано» первой половины Ф13-09 — набор kaname-access-keys на стенде own, исполнение — DoD.
+
+event_body: acceptance-reviewer · APPROVED · 5dc1753eaf0c575576f8407884f9face0983dd2d262cd8819b4a555660911834
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
+    после публикации ревизии содержимого. Условие публикации: правка оснастки (N13-1) входит тем же
+    коммитом, что редакция 13, иначе перепись долга на дереве красна (код 1).
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#468
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#468
+  status: not_performed
+  published: false

@@ -1,0 +1,130 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: cbd1885a865a751493cd280e8101e11ba70bd72fb76afed6cfb978f0ed2ae6b2
+  revision: 13
+  static_status: DRAFT
+  static_status_note: >-
+    Слово статуса в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка намеренно не правлена; эта запись её не трогает.
+  base_commit: 3172ef7b18a3fd29f2a0569aafd9b5b0f29768b5
+  base_sha256: 2a7ee61244542205ec00de09377da436f1f57a8dcde9ebbc2e84d6ceb3704599
+  content_commit: null
+  content_note: >-
+    редакция 13 не закоммичена: правка в рабочем дереве копии tmp/w-468-acc (detached @3172ef7b1 =
+    git ls-remote origin refs/heads/468); отпечаток снят с рабочего дерева; отпечаток базы
+    (git show 3172ef7b1:<путь> | sha256sum) → 2a7ee612…, то есть редакция 12, одобренная кругом 1
+  branch: '468'
+  worktree: tmp/w-468-acc
+  measured_at: PRO-Robotech/kaname@3172ef7b1
+  task: PRO-Robotech/kaname#468
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/recovery-of-access.md
+  fingerprint_reproduced: true
+  lines: 2786
+  round: 1
+  round_note: >-
+    круг 1 редакции 13 (после одобрения редакции 12 кругом 1); прежний вердикт на эту редакцию не
+    переносится
+  predecessor_record: docs/specs/reviews/recovery-of-access/2a7ee61244542205ec00de09377da436f1f57a8dcde9ebbc2e84d6ceb3704599.yaml (APPROVED, редакция 12)
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19'
+publication_mode: courier_of_agent_verdict
+scope_of_review: >-
+  дельта редакции 13 к редакции 12 (git diff 3172ef7b1 -- <файл>, 101 строка диффа): шапка (строка
+  редакции 13), §6 (последняя фраза абзаца уровня полосы), §22 (таблица держателей — строки Ф5-20
+  «И» (частота) и Ф5-29 последнее «И», координаты прочих строк, абзац «Пробелы-заказы», исходы DoD
+  пп. 3, 4), §23 (новый). «Дано», «Когда», «Тогда», Р1…Р10, уровни не тронуты.
+blocking_count: 0
+blocking_kinds_distinct: []
+
+premise_check:
+  premise: >-
+    строки «частично» и «нет» §22 неверны на пробе ветки 468 @3172ef7b1; оба пробела-заказа закрыты;
+    координаты таблицы — строки файла пробы этой ревизии
+  verdict: ПОДТВЕРЖДЕНА
+  detail: >-
+    git ls-remote origin refs/heads/468 → 3172ef7b1; git log --format=%h b800272d5..3172ef7b1 --
+    <проба> → 3172ef7b1, a673fc6cb. Каждая координата таблицы §22 и §23 сверена чтением
+    git show 3172ef7b1:<проба> | cat -n: :80-81 N/граница, :141-147 чередование, :154/:169-179
+    строки и вердикт пары, :191 функция, :192-194 пропуск без ручки, :198-202 посев, :217-220
+    сверка «Дано», :229-246 стоимость и потолок (SyncDispatcher :230, :281), :247-253 печать, :254,
+    :255/:271/:290 суд по исходам, :262-266 и :282-286 пары Ф5-20 и Ф5-29, :272/:291 и :366-374
+    постусловие, :273-276/:292-294 «НЕ ВЫПОЛНИЛОСЬ (Ф5-22…)», :295-299 инъекция, :302-309 суд,
+    :342-347/:356-361 отказ по частоте, :381 тест суда. Производитель исходов частоты в глаголе —
+    recovery_request.go:134 (source-paced), :179 (recipient-paced); RateLimitObserved там —
+    0 совпадений (git grep -c → код 1). DoD п.2 редакции 13: awk '/^## §22 /,/^## §23 /' <файл> |
+    grep -cE '^\| Ф5-.*\| \*\*(частично|нет)' → 0. Уровни §6: 14 E · 3 E · I · 9 I · 3 I · E · 4 P —
+    как у редакции 12. Повтор этим кругом (heavy-slot integration, внешний кластер, чистая копия
+    @3172ef7b1, ns t468-heavy-integration-05cf и -0151 сняты): ручной прогон
+    KACHO_RECOVERY_TIMING=1 … -run TestRecovery_F5_20 — код 0, --- PASS 1, «НЕ ВЫПОЛНИЛОСЬ» 0;
+    потолок 3,385 мс, наибольший размах 2,477 мс; пара Ф5-20 34,155 мкс ≤ 2,477 мс, пара Ф5-29
+    143,57 мкс ≤ 2,477 мс — выполнен; инъекция 2,285 мс > 0,682 мс и 2,244 мс > max(IQR) — красна на
+    обеих; TestRecoveryTimingObserver_… — код 0, --- PASS 1 (журнал tmp/accrev-f5-4083918.log).
+    Числа прогона исполнителя §23 п. 2 сверены с DoD-proof
+    https://github.com/PRO-Robotech/kaname/issues/468#issuecomment-6268294467 — совпадают.
+
+blocking: []
+
+non_blocking:
+  - id: N13-1
+    kind: DoD
+    summary: >-
+      §23 п. 2: «повтор на 3172ef7b1 редакцией 13 не стартовал» — верно для автора; повтор
+      исполнен этим кругом ревью (числа выше), исход тот же — зелёный, критерий выполнен, инъекция
+      красна. Документ править не требуется: прогон исполнителя назван исполнителю.
+  - id: N13-2
+    kind: FORMAT
+    summary: >-
+      §6 сохраняет фразу «(потолок — доля миллисекунды, …; §22)» и тут же её опровергает; §22
+      (:2659) — тоже, опровержение — §23 п. 3. Прогон этого круга подтверждает опровержение
+      (потолок 3,385 мс). Довод уровня держится первым доводом (различие вносится в продукт), так
+      что о корректности текст не вводит в заблуждение; при следующей правке §6 — снять оценку,
+      а не приписывать опровержение.
+
+accepted_parts: >-
+  Строки Ф5-20 «И» (частота) и Ф5-29 последнее «И» приведены к факту пробы: суд отказа по частоте
+  исполняется на всех трёх фазах и доказан инъекцией в обе стороны (:381); полоса «A» посеяна формой
+  §5.5 (6), «Дано» сверено чтением строки, и пара A ↔ Z судится тем же критерием с той же инъекцией.
+  Находка автора о мёртвой сверке RateLimitObserved измерена (0 совпадений). Близнецы: Ф5-21 против
+  Ф5-20 — один факт (синхронная постановка), законный близнец суда частоты молчит. Перепись долга на
+  тексте Ф5 находок не даёт: единственная находка дерева — Ф13-28 (запись Ф13).
+
+constructibility:
+  seeded: 2
+  named_fixtures: 2
+  not_performed: 0
+  detail: >-
+    «Дано» полос посеяно повтором этого круга: lmPeople + UPDATE email_verified_at (полоса «адрес
+    подтверждён») и личность ACTIVE без пароля с неподтверждённым адресом (полоса «A»), сверены
+    чтением строки (:217-220) — require прошли; полоса «Z» — адрес вне базы. Фикстуры —
+    SyncDispatcher, NewGoDispatcher.
+
+event_body: acceptance-reviewer · APPROVED · cbd1885a865a751493cd280e8101e11ba70bd72fb76afed6cfb978f0ed2ae6b2
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Агентский вердикт APPROVED; санкцию выдаёт внешнее событие допущенной учётки на этот отпечаток
+    после публикации ревизии содержимого. Публиковать тем же коммитом, что редакцию 13 Ф13 и правку
+    оснастки (Ф13-28): перепись долга судит обе приёмки одним деревом.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_target: PRO-Robotech/kaname#468
+
+authority:
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#468
+  status: not_performed
+  published: false
