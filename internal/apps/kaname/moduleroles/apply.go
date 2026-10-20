@@ -116,6 +116,12 @@ var (
 // RoleWriter — то, что применителю нужно от писателя. Порт объявлен ЗДЕСЬ, в
 // use-case: он описывает потребность, а не таблицу.
 type RoleWriter interface {
+	// LockOwnerModule берёт строку каталога модуля-владельца — ПЕРВЫМ строчным
+	// замком транзакции (kaname#913). Порядок «модуль → ресурсы» тот же, что у
+	// применителя каталога; без этого замка транзакция приведения правил брала
+	// бы строки ресурсов раньше строки модуля, и пара давала взаимную
+	// блокировку.
+	LockOwnerModule(ctx context.Context, module string) error
 	// UpsertSystemRole заводит либо приводит строку системной роли. `changed`
 	// ложно, когда объявленное состояние уже стоит в строке.
 	UpsertSystemRole(ctx context.Context, r domain.Role) (domain.Role, bool, error)
@@ -327,6 +333,14 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest, actor string)
 	// полоса и заводится.
 	var failed domain.RoleName
 	err := a.tx.RunInWriteTx(ctx, func(ctx context.Context, w RoleWriter) error {
+		// Строка модуля — ПЕРВЫМ строчным замком, до строки роли и проекций
+		// (kaname#913). Ключ роли на модуль берёт тот же замок, но лишь на
+		// вставке и оживлении; при приведении правил первыми шли бы строки
+		// ресурсов — в порядке правил, а не базы, — и встреча с применителем
+		// каталога, берущим «модуль → ресурсы», давала взаимную блокировку.
+		if lerr := w.LockOwnerModule(ctx, m.Module); lerr != nil {
+			return fmt.Errorf("%w: замок строки модуля %s: %w", ErrWriteFailed, m.Module, lerr)
+		}
 		for _, r := range declared {
 			// ОЖИВЛЕНИЕ идёт ПЕРВЫМ, до приведения полей, и это порядок, а не
 			// вкус: проекция сегментов ссылается на «эту роль И она жива», и
