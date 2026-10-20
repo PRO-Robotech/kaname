@@ -39,9 +39,8 @@ func collectLiveBindingPair(t *testing.T) check.BindingPairCensus {
 	t.Helper()
 	root := ceremonyModuleRoot(t)
 	census, err := check.CollectBindingSubjectPair(t.Context(), check.BindingPairSpec{
-		ModuleRoot:  root,
-		RootPackage: ceremonyModulePath(t, root) + "/" + ceremonyRootDir,
-		OnDisk:      bindingPairOnDisk(t, root),
+		ModuleRoot: root,
+		OnDisk:     bindingPairOnDisk(t, root),
 	})
 	if err != nil {
 		t.Fatalf("гейт НЕ ИСПОЛНИЛСЯ — это не зелёное и не находка: %v", err)

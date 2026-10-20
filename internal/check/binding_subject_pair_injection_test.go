@@ -95,6 +95,40 @@ func probeSQLForeignTable() string {
 // БЛИЗНЕЦ: ключ JSON — не SQL.
 func probeJSONKey() string { return "subject_id" }
 
+// ДЕФЕКТ: CTE над выдачей, колонка без квалификатора.
+func probeSQLCTEUnqualified() string {
+	return "WITH live AS (SELECT * FROM access_bindings WHERE revoked_at IS NULL) SELECT id FROM live WHERE subject_type = $1 AND subject_id = $2"
+}
+
+// ДЕФЕКТ: CTE над выдачей под псевдонимом.
+func probeSQLCTEAliased() string {
+	return "WITH live AS (SELECT * FROM access_bindings) SELECT l.id FROM live l WHERE l.subject_id = $1"
+}
+
+// ДЕФЕКТ: производная таблица над выдачей.
+func probeSQLDerived() string {
+	return "SELECT d.id FROM (SELECT * FROM access_bindings WHERE revoked_at IS NULL) d WHERE d.subject_id = $1"
+}
+
+// ДЕФЕКТ: колонка в верхнем регистре.
+func probeSQLUpper() string { return "SELECT ab.id FROM access_bindings ab WHERE ab.SUBJECT_ID = $1" }
+
+// БЛИЗНЕЦ: CTE над набором.
+func probeSQLCTESet() string {
+	return "WITH s2 AS (SELECT * FROM access_binding_subjects) SELECT binding_id FROM s2 WHERE subject_id = $1"
+}
+
+// БЛИЗНЕЦ: производная таблица над набором.
+func probeSQLDerivedSet() string {
+	return "SELECT d.binding_id FROM (SELECT * FROM access_binding_subjects) d WHERE d.subject_id = $1"
+}
+
+// БЛИЗНЕЦ: текст ошибки, называющий колонку, — не SQL.
+func probeErrorText() string { return "Illegal argument subject_id %q on a non-system access binding" }
+
+// Вызов геттера домена: чтение пары стоит в домене, находка — там.
+func probeCallsGetter(b domain.AccessBinding) domain.SubjectID { return b.ZzProbePrimary() }
+
 // БЛИЗНЕЦ: комментарий SQL не исполняется.
 func probeSQLComment() string {
 	return "SELECT 1 FROM access_binding_subjects s -- ab.subject_id\n WHERE s.binding_id = $1"
@@ -103,20 +137,66 @@ func probeSQLComment() string {
 
 // bindingPairProbeDefects — место дефекта → форма и что напечатано.
 var bindingPairProbeDefects = map[string][2]string{
-	"probeReadsPairValue":   {check.BindingPairFormSelector, ".SubjectID"},
-	"probeReadsPairPointer": {check.BindingPairFormSelector, ".SubjectType"},
-	"probeBuildsPair":       {check.BindingPairFormLiteral, "SubjectID:"},
-	"probeSQLQualified":     {check.BindingPairFormSQL, "ab.subject_id"},
-	"probeSQLFragment":      {check.BindingPairFormSQL, "subject_type"},
-	"probeSQLNestedForeign": {check.BindingPairFormSQL, "subject_id"},
-	"probeSQLFormat":        {check.BindingPairFormSQL, "<формат>.subject_id"},
-	"probeSQLColumnList":    {check.BindingPairFormSQL, "subject_id"},
+	"probeReadsPairValue":    {check.BindingPairFormSelector, ".SubjectID"},
+	"probeReadsPairPointer":  {check.BindingPairFormSelector, ".SubjectType"},
+	"probeBuildsPair":        {check.BindingPairFormLiteral, "SubjectID:"},
+	"probeSQLQualified":      {check.BindingPairFormSQL, "ab.subject_id"},
+	"probeSQLFragment":       {check.BindingPairFormSQL, "subject_type"},
+	"probeSQLNestedForeign":  {check.BindingPairFormSQL, "subject_id"},
+	"probeSQLFormat":         {check.BindingPairFormSQL, "<формат>.subject_id"},
+	"probeSQLColumnList":     {check.BindingPairFormSQL, "subject_id"},
+	"probeSQLCTEUnqualified": {check.BindingPairFormSQL, "subject_type"},
+	"probeSQLCTEAliased":     {check.BindingPairFormSQL, "l.subject_id"},
+	"probeSQLDerived":        {check.BindingPairFormSQL, "d.subject_id"},
+	"probeSQLUpper":          {check.BindingPairFormSQL, "ab.subject_id"},
+}
+
+// bindingPairOtherFiles — внесённое вне файла пробы: файл → исходник.
+// Ключ — путь относительно корня модуля; пакет берётся из каталога.
+var bindingPairOtherFiles = map[string]string{
+	// Геттер домена, читающий пару, — новое место в домене.
+	"internal/domain/zz_binding_pair_getter.go": `package domain
+
+func (b AccessBinding) ZzProbePrimary() SubjectID { return b.SubjectID }
+`,
+	// Файл под ограничением сборки, которое прод-сборка (CGO_ENABLED=0)
+	// выполняет, а сборка пробы — нет.
+	bindingPairProbePkg + "/zz_binding_pair_notcgo.go": `//go:build !cgo
+
+package access_binding
+
+import "github.com/PRO-Robotech/kaname/internal/domain"
+
+func probeNotCgo(b domain.AccessBinding) string { return string(b.SubjectID) }
+`,
+	// Файл, которого нет в прод-сборке: судится ведомостью файлов вне сборки.
+	bindingPairProbePkg + "/zz_binding_pair_cgo.go": `//go:build cgo
+
+package access_binding
+
+func probeCgoOnly() string { return "" }
+`,
+	// Новый пакет радиуса, не слинкованный в службу.
+	"internal/repo/kaname/pg/zzpairprobe/zzpairprobe.go": `package zzpairprobe
+
+import "github.com/PRO-Robotech/kaname/internal/domain"
+
+func Read(b domain.AccessBinding) string { return string(b.SubjectID) }
+`,
+}
+
+// bindingPairOtherDefects — места дефектов вне файла пробы.
+var bindingPairOtherDefects = map[string]string{
+	"internal/domain/zz_binding_pair_getter.go::AccessBinding.ZzProbePrimary": ".SubjectID",
+	bindingPairProbePkg + "/zz_binding_pair_notcgo.go::probeNotCgo":           ".SubjectID",
+	"internal/repo/kaname/pg/zzpairprobe/zzpairprobe.go::Read":                ".SubjectID",
 }
 
 // bindingPairProbeTwins — места, где доступа к паре нет.
 var bindingPairProbeTwins = []string{
 	"probeReadsSet", "probeReadsNamesake", "probeSQLSetQualified", "probeSQLSetUnqualified",
-	"probeSQLForeignTable", "probeJSONKey", "probeSQLComment",
+	"probeSQLForeignTable", "probeJSONKey", "probeSQLComment", "probeSQLCTESet", "probeSQLDerivedSet",
+	"probeErrorText", "probeCallsGetter",
 }
 
 // bindingPairPlace — ключ места внесённой функции.
@@ -144,8 +224,8 @@ var (
 )
 
 // bindingPairCopy — копия непроверочных файлов пакета в каталог dir.
-func bindingPairCopy(root, dir string) error {
-	src := filepath.Join(root, filepath.FromSlash(bindingPairProbePkg))
+func bindingPairCopy(root, rel, dir string) error {
+	src := filepath.Join(root, filepath.FromSlash(rel))
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return err
@@ -177,13 +257,6 @@ func bindingPairCensuses(t *testing.T) (control, injected check.BindingPairCensu
 	bindingPairOverlayOnce.Do(func() {
 		root := ceremonyModuleRoot(t)
 		modPath := ceremonyModulePath(t, root)
-		spec := func(dir string) check.BindingPairSpec {
-			return check.BindingPairSpec{
-				ModuleRoot:  root,
-				RootPackage: modPath + "/" + ceremonyRootDir,
-				Overlay:     map[string]string{modPath + "/" + bindingPairProbePkg: dir},
-			}
-		}
 		// Каталоги — свои на процесс, не t.TempDir(): перепись кэшируется для
 		// всех подпроб, а каталог подпробы снимается с её концом.
 		base, err := os.MkdirTemp("", "binding-pair-probe-")
@@ -192,26 +265,55 @@ func bindingPairCensuses(t *testing.T) (control, injected check.BindingPairCensu
 			return
 		}
 		defer func() { _ = os.RemoveAll(base) }()
-		ctrlDir, injDir := filepath.Join(base, "control"), filepath.Join(base, "injected")
-		for _, d := range []string{ctrlDir, injDir} {
-			if mkErr := os.MkdirAll(d, 0o750); mkErr != nil {
-				bindingPairOverlayErr = mkErr
-				return
+		// Копируются пакеты, в которые вносится инъекция: выдачи и домен.
+		copied := []string{bindingPairProbePkg, "internal/domain"}
+		build := func(name string, extra map[string]string) (map[string]string, error) {
+			overlay := map[string]string{}
+			for _, rel := range copied {
+				dir := filepath.Join(base, name, filepath.FromSlash(rel))
+				if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+					return nil, mkErr
+				}
+				if cpErr := bindingPairCopy(root, rel, dir); cpErr != nil {
+					return nil, cpErr
+				}
+				overlay[modPath+"/"+rel] = dir
 			}
-			if cpErr := bindingPairCopy(root, d); cpErr != nil {
-				bindingPairOverlayErr = cpErr
-				return
+			for rel, src := range extra {
+				dir := filepath.Join(base, name, filepath.FromSlash(filepath.Dir(rel)))
+				if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+					return nil, mkErr
+				}
+				if werr := os.WriteFile(filepath.Join(base, name, filepath.FromSlash(rel)), []byte(src), 0o600); werr != nil {
+					return nil, werr
+				}
+				overlay[modPath+"/"+filepath.ToSlash(filepath.Dir(rel))] = dir
 			}
+			return overlay, nil
 		}
-		if werr := os.WriteFile(filepath.Join(injDir, bindingPairProbeFile), []byte(bindingPairProbeSrc), 0o600); werr != nil {
-			bindingPairOverlayErr = werr
+		ctrl, err := build("control", nil)
+		if err != nil {
+			bindingPairOverlayErr = err
 			return
 		}
-		bindingPairControlCensus, bindingPairOverlayErr = check.CollectBindingSubjectPair(t.Context(), spec(ctrlDir))
+		extra := map[string]string{bindingPairProbePkg + "/" + bindingPairProbeFile: bindingPairProbeSrc}
+		var onDisk []string
+		for rel, src := range bindingPairOtherFiles {
+			extra[rel] = src
+			onDisk = append(onDisk, rel)
+		}
+		inj, err := build("injected", extra)
+		if err != nil {
+			bindingPairOverlayErr = err
+			return
+		}
+		bindingPairControlCensus, bindingPairOverlayErr = check.CollectBindingSubjectPair(t.Context(),
+			check.BindingPairSpec{ModuleRoot: root, Overlay: ctrl})
 		if bindingPairOverlayErr != nil {
 			return
 		}
-		bindingPairOverlayCensus, bindingPairOverlayErr = check.CollectBindingSubjectPair(t.Context(), spec(injDir))
+		bindingPairOverlayCensus, bindingPairOverlayErr = check.CollectBindingSubjectPair(t.Context(),
+			check.BindingPairSpec{ModuleRoot: root, Overlay: inj, OnDisk: onDisk})
 	})
 	if bindingPairOverlayErr != nil {
 		t.Fatalf("гейт НЕ ИСПОЛНИЛСЯ на фикстуре — условие не создано: %v", bindingPairOverlayErr)
@@ -267,6 +369,27 @@ func TestBindingSubjectPairInjectionEveryFormIsFound(t *testing.T) {
 			t.Errorf("находка по %s не называет строку доступа (объявление — строка %d):\n%s", fn, line, hit)
 		}
 	}
+	for place, what := range bindingPairOtherDefects {
+		found := false
+		for _, f := range findings {
+			if strings.HasPrefix(f, place+" ") && strings.Contains(f, what) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("ИНЪЕКЦИЯ НЕ ПОЙМАНА: %s (%s) — находки нет\nперепись: %s", place, what, injected.Summary())
+		}
+	}
+	cgo := bindingPairProbePkg + "/zz_binding_pair_cgo.go"
+	found := false
+	for _, f := range findings {
+		if strings.HasPrefix(f, cgo+" — непроверочный файл радиуса вне прод-сборки") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ИНЪЕКЦИЯ НЕ ПОЙМАНА: файл вне прод-сборки %s не назван находкой; вне сборки: %v", cgo, injected.OutsideBuild)
+	}
 }
 
 // TestBindingSubjectPairInjectionTwinsAreSilent — законные близнецы каждой
@@ -297,22 +420,29 @@ func TestBindingSubjectPairLedgerAxes(t *testing.T) {
 		for k, v := range extra {
 			ledger[k] = v
 		}
-		// Прочие дефекты пробы — в перечень, чтобы судилась одна ось.
-		for fn, want := range bindingPairProbeDefects {
-			p := bindingPairPlace(fn)
+		// Прочие места инъекции — в перечень точно, чтобы судилась одна ось.
+		for p, acc := range injected.Places() {
 			if _, ok := ledger[p]; ok {
 				continue
 			}
-			n := len(injected.Places()[p])
 			e := check.BindingPairEntry{Class: check.BindingPairProjection, Why: "проба"}
-			if want[0] == check.BindingPairFormSQL {
-				e.SQL = n
-			} else {
-				e.Go = n
+			for _, a := range acc {
+				if a.Form == check.BindingPairFormSQL {
+					e.SQL++
+				} else {
+					e.Go++
+				}
 			}
 			ledger[p] = e
 		}
-		return check.JudgeBindingSubjectPair(injected, ledger)
+		var out []string
+		for _, f := range check.JudgeBindingSubjectPair(injected, ledger) {
+			// Ось файлов вне сборки судится своей пробой выше.
+			if !strings.Contains(f, "вне прод-сборки") {
+				out = append(out, f)
+			}
+		}
+		return out
 	}
 	value := bindingPairPlace("probeReadsPairValue")
 	fallback := bindingPairPlace("probeFallbackWithSet")
@@ -377,24 +507,21 @@ func TestBindingSubjectPairLedgerAxes(t *testing.T) {
 // печатается неосмотренным.
 func TestBindingSubjectPairEmptyWalkIsNotAVerdict(t *testing.T) {
 	root := ceremonyModuleRoot(t)
-	modPath := ceremonyModulePath(t, root)
 	_, err := check.CollectBindingSubjectPair(t.Context(), check.BindingPairSpec{
-		ModuleRoot:  root,
-		RootPackage: modPath + "/" + ceremonyRootDir,
-		Dirs:        []string{"internal/no/such/dir"},
+		ModuleRoot: root,
+		Dirs:       []string{"internal/no/such/dir"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "обход пуст") {
 		t.Fatalf("пустой обход не назван «не выполнилось»: %v", err)
 	}
 	census, err := check.CollectBindingSubjectPair(t.Context(), check.BindingPairSpec{
-		ModuleRoot:  root,
-		RootPackage: modPath + "/" + ceremonyRootDir,
-		OnDisk:      []string{bindingPairProbePkg + "/zz_not_linked.go"},
+		ModuleRoot: root,
+		OnDisk:     []string{bindingPairProbePkg + "/zz_not_linked.go"},
 	})
 	if err != nil {
 		t.Fatalf("гейт НЕ ИСПОЛНИЛСЯ: %v", err)
 	}
-	if len(census.Unlinked) != 1 || census.Unlinked[0] != bindingPairProbePkg+"/zz_not_linked.go" {
-		t.Fatalf("файл вне бинаря не назван неосмотренным: %v", census.Unlinked)
+	if len(census.OutsideBuild) != 1 || census.OutsideBuild[0] != bindingPairProbePkg+"/zz_not_linked.go" {
+		t.Fatalf("файл вне прод-сборки не назван: %v", census.OutsideBuild)
 	}
 }

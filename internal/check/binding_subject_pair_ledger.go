@@ -57,6 +57,11 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 			"набор из одного субъекта пишется следом",
 	},
 	// ── откат к прежней форме: Go ──────────────────────────────────────────
+	"internal/domain/access_binding.go::AccessBinding.Validate": {
+		Go: 4, Class: BindingPairFallback,
+		Why: "проверка самой проекции (тип пары из словаря, пара непуста) и запрет подстановочного субъекта " +
+			"несистемной выдаче — по паре И по каждому члену набора (до kaname#917 — только по паре)",
+	},
 	"internal/apps/kaname/api/access_binding/helpers.go::callerIsSubjectOf": {
 		Go: 1, Class: BindingPairFallback, Why: bindingPairFallbackGo,
 	},
@@ -104,3 +109,7 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 		SQL: 4, Class: BindingPairFallback, Why: bindingPairFallbackSQL,
 	},
 }
+
+// BindingPairOutsideBuildLedger — непроверочные файлы радиуса, которых нет в
+// прод-сборке, с основанием. Пусто — каждый такой файл находка.
+var BindingPairOutsideBuildLedger = map[string]string{}

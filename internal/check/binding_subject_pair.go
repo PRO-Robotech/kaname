@@ -36,25 +36,38 @@ package check
 // Одноимённые поля фильтра страницы, события смены субъекта, гранта
 // администратора кластера — другие объекты и в счёт не идут.
 //
-// SQL — по строковым литералам Go: упоминание колонки `subject_type`/
-// `subject_id` считается обращением к ПАРЕ, когда его квалификатор связан с
-// `access_bindings` (псевдоним ищется в литерале, затем в литералах того же
-// места, затем в пакете — если там он однозначен); когда квалификатора нет, а
-// ближайшая по скобкам область, где названа таблица, называет `access_bindings`
-// либо таблиц в литерале нет вовсе (фрагмент условия чужого запроса); и когда
-// квалификатор не разрешён (глагол формата `%[1]s.`, неизвестный псевдоним).
-// Неразрешённое считается парой намеренно: ошибка в эту сторону стоит строки
-// ведомости, в обратную — пропущенного чтения.
+// SQL — по строковым литералам Go, без учёта регистра: упоминание колонки
+// `subject_type`/`subject_id` считается обращением к ПАРЕ, когда его
+// квалификатор связан с `access_bindings` (псевдоним ищется в литерале, затем
+// в литералах того же места, затем в пакете — если там он однозначен); когда
+// квалификатора нет, а ближайшая по скобкам область, где названа таблица,
+// называет `access_bindings` либо таблиц в литерале нет вовсе (фрагмент
+// условия чужого запроса); и когда квалификатор не разрешён (глагол формата
+// `%[1]s.`, неизвестный псевдоним). Имя CTE (`WITH live AS (…)`) и производной
+// таблицы (`FROM (…) d`) разрешается в таблицы верхнего уровня своего тела:
+// тело над `access_bindings` делает имя таблицей пары, тело без таблицы —
+// неразрешённым. Неразрешённое считается парой намеренно: ошибка в эту сторону
+// стоит строки ведомости, в обратную — пропущенного чтения.
+//
+// # Радиус
+//
+// Каждый пакет каталогов `BindingPairDirs` (домен выдачи, её use-case и слой
+// репозитория) независимо от того, какой бинарь его линкует, а файлы — по
+// ограничениям ПРОД-сборки (binding_subject_pair_load.go). Непроверочный файл
+// радиуса вне прод-сборки — находка, пока его нет в ведомости
+// `BindingPairOutsideBuildLedger`.
 //
 // # Граница названа, а не умолчана
 //
-// Радиус — пакеты каталогов `internal/apps/kaname/api/access_binding` и
-// `internal/repo/kaname/pg`, слинкованные в бинарь службы (`cmd/kaname`):
-// файлы, не попавшие в бинарь (обвязка замеров `scalegrid`, пакеты только
-// для проб), перечисляются переписью как неосмотренные. SQL-ось не видит
-// имени колонки, собранного из кусков, и второй таблицы списка `FROM a, b`;
-// литерал без признака SQL (ключ JSON, текст ошибки) не судится. Доступ через
-// рефлексию и копию структуры в другой тип типами не прослеживается.
+// Гейт НЕ видит: имени колонки, собранного из кусков (конкатенация, формат);
+// второй таблицы списка через запятую (`FROM a x, access_bindings y`);
+// таблицы в кавычках (`"access_bindings"`); выборки `SELECT *` и колонок,
+// названных не по имени (`RETURNING *`, `row_to_json`), — колонки пары в
+// литерале нет; доступа через рефлексию и через копию в другой тип; кода вне
+// каталогов радиуса. SQL-комментарий снимается от `--` до конца строки и
+// внутри строки SQL `'…--…'` тоже — колонка за ним в той строке не судится.
+// Замена одного доступа другим при том же числе внутри места из ведомости не
+// видна: ведомость судит число и наличие ветви набора, а не какую ветвь.
 
 import (
 	"context"
@@ -89,8 +102,11 @@ const BindingPairSubjectType = "Subject"
 // BindingPairColumns — колонки пары.
 var BindingPairColumns = []string{"subject_type", "subject_id"}
 
-// BindingPairDirs — каталоги радиуса относительно корня модуля.
+// BindingPairDirs — каталоги радиуса относительно корня модуля. Домен —
+// в радиусе: метод выдачи, читающий пару, иначе выносил бы чтение из-под гейта
+// одним вызовом.
 var BindingPairDirs = []string{
+	"internal/domain",
 	"internal/apps/kaname/api/access_binding",
 	"internal/repo/kaname/pg",
 }
@@ -154,9 +170,10 @@ type BindingPairCensus struct {
 	Literals int
 	// SetRefs — упоминаний колонок, разрешённых в набор либо чужую таблицу.
 	SetRefs int
-	// Unlinked — непроверочные файлы радиуса, не слинкованные в бинарь.
-	Unlinked []string
-	Accesses []BindingPairAccess
+	// OutsideBuild — непроверочные файлы радиуса по дереву, не попавшие в
+	// прод-сборку (ограничения сборки).
+	OutsideBuild []string
+	Accesses     []BindingPairAccess
 	// SetEvidence — места, где читается и набор: значение типа Subject либо
 	// []Subject (Go) или таблица набора в литерале места (SQL).
 	SetEvidence map[string]bool
@@ -173,8 +190,8 @@ func (c BindingPairCensus) Summary() string {
 		}
 	}
 	return fmt.Sprintf("пакетов %d · файлов %d · строк %d · литералов SQL %d · доступов к паре: Go %d, SQL %d · "+
-		"колонок набора и чужих таблиц %d · мест %d · файлов радиуса вне бинаря %d %v",
-		c.Packages, c.Files, c.Lines, c.Literals, goN, sqlN, c.SetRefs, len(c.Places()), len(c.Unlinked), c.Unlinked)
+		"колонок набора и чужих таблиц %d · мест %d · файлов радиуса вне прод-сборки %d %v",
+		c.Packages, c.Files, c.Lines, c.Literals, goN, sqlN, c.SetRefs, len(c.Places()), len(c.OutsideBuild), c.OutsideBuild)
 }
 
 // Places — доступы, сгруппированные по месту.
@@ -188,14 +205,13 @@ func (c BindingPairCensus) Places() map[string][]BindingPairAccess {
 
 // BindingPairSpec — что судится.
 type BindingPairSpec struct {
-	ModuleRoot  string
-	RootPackage string
+	ModuleRoot string
 	// Dirs — каталоги радиуса; пусто — BindingPairDirs.
 	Dirs []string
 	// Overlay — путь импорта → каталог копии пакета (инъекции).
 	Overlay map[string]string
 	// OnDisk — непроверочные файлы радиуса по дереву (относительно корня
-	// модуля): всё, что в бинарь не попало, печатается неосмотренным.
+	// модуля): всё, что в прод-сборку не попало, судится ведомостью.
 	OnDisk []string
 }
 
@@ -207,7 +223,7 @@ func CollectBindingSubjectPair(ctx context.Context, spec BindingPairSpec) (Bindi
 	if len(dirs) == 0 {
 		dirs = BindingPairDirs
 	}
-	l, err := listingFor(ctx, spec.ModuleRoot, spec.RootPackage)
+	l, err := bindingPairListingFor(ctx, spec.ModuleRoot, dirs)
 	if err != nil {
 		return BindingPairCensus{}, err
 	}
@@ -220,7 +236,7 @@ func CollectBindingSubjectPair(ctx context.Context, spec BindingPairSpec) (Bindi
 
 	domainPkg := prog.byPath[l.modulePath+BindingPairDomainPkg]
 	if domainPkg == nil || domainPkg.types == nil {
-		return BindingPairCensus{}, fmt.Errorf("предмет гейта снят: пакет %s не в радиусе %s", BindingPairDomainPkg, spec.RootPackage)
+		return BindingPairCensus{}, fmt.Errorf("предмет гейта снят: пакета %s нет в разборе радиуса %v", BindingPairDomainPkg, dirs)
 	}
 	fields, err := bindingPairFieldObjects(domainPkg.types)
 	if err != nil {
@@ -253,13 +269,13 @@ func CollectBindingSubjectPair(ctx context.Context, spec BindingPairSpec) (Bindi
 	}
 	for _, rel := range spec.OnDisk {
 		if inBindingPairRadius(pathDir(rel), dirs) && !seen[rel] {
-			census.Unlinked = append(census.Unlinked, rel)
+			census.OutsideBuild = append(census.OutsideBuild, rel)
 		}
 	}
-	sort.Strings(census.Unlinked)
+	sort.Strings(census.OutsideBuild)
 	if census.Files == 0 {
-		return census, fmt.Errorf("обход пуст: в радиусе %v ни одного файла бинаря %s — «ноль находок» здесь "+
-			"означало бы «ноль прочитанного»", dirs, spec.RootPackage)
+		return census, fmt.Errorf("обход пуст: в радиусе %v ни одного файла прод-сборки в %s — «ноль находок» здесь "+
+			"означало бы «ноль прочитанного»", dirs, spec.ModuleRoot)
 	}
 	return census, nil
 }
@@ -428,7 +444,7 @@ func (pp *bindingPairPkg) collectFile(f *ast.File, info *types.Info, fields map[
 		if err != nil {
 			continue
 		}
-		text = stripSQLComments(text)
+		text = asciiLower(stripSQLComments(text))
 		if !sqlMarker.MatchString(text) {
 			continue
 		}
@@ -444,11 +460,13 @@ func (pp *bindingPairPkg) resolve() {
 	c := pp.c
 	byPlace := map[string]map[string]string{}
 	byPkg := map[string]map[string]bool{}
-	for _, l := range pp.lits {
+	infos := make([]sqlInfo, len(pp.lits))
+	for i, l := range pp.lits {
+		infos[i] = sqlAnalyze(l.sql)
 		if byPlace[l.place] == nil {
 			byPlace[l.place] = map[string]string{}
 		}
-		for alias, table := range sqlAliases(l.sql) {
+		for alias, table := range infos[i].aliases {
 			byPlace[l.place][alias] = table
 			if byPkg[alias] == nil {
 				byPkg[alias] = map[string]bool{}
@@ -467,10 +485,9 @@ func (pp *bindingPairPkg) resolve() {
 			}
 		}
 	}
-	for _, l := range pp.lits {
-		local := sqlAliases(l.sql)
+	for i, l := range pp.lits {
 		for _, r := range bindingPairColRefs(l.sql) {
-			if bindingPairRefIsPair(r, l.sql, local, byPlace[l.place], pkgAliases) {
+			if bindingPairRefIsPair(r, infos[i], byPlace[l.place], pkgAliases) {
 				p := pp.fset.Position(l.pos)
 				c.Accesses = append(c.Accesses, BindingPairAccess{
 					Place: l.place,
@@ -507,9 +524,11 @@ func bindingPairRecv(expr ast.Expr) ast.Expr {
 	}
 }
 
-// sqlMarker — признак SQL в литерале: ключевое слово, сравнение либо перечень
-// через запятую (список колонок без единого ключевого слова — тоже SQL).
-var sqlMarker = regexp.MustCompile(`(?i)\b(select|insert|update|delete|where|from|join|values|returning|and|or|on|as|coalesce|order\s+by|group\s+by|exists|any)\b|[=<>,]`)
+// sqlMarker — признак SQL в литерале: ключевое слово оператора, сравнение
+// либо перечень через запятую (список колонок без ключевого слова — тоже SQL).
+// Союзы и предлоги (`and`, `or`, `on`, `as`) признаком не служат: ими полон
+// текст ошибки, называющий колонку («subject_id %q on a non-system …»).
+var sqlMarker = regexp.MustCompile(`(?i)\b(select|insert|update|delete|where|from|join|values|returning|coalesce|exists|any|between|order\s+by|group\s+by|is\s+(?:not\s+)?null|in\s*\()|[=<>,]`)
 
 // sqlTableRe — таблица после FROM/JOIN/INTO/UPDATE/USING и её псевдоним.
 var sqlTableRe = regexp.MustCompile(`(?i)\b(?:from|join|into|update|using)\s+(?:only\s+)?(?:kaname\.)?([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
@@ -524,17 +543,153 @@ var sqlNotAlias = map[string]bool{
 	"with": true, "into": true, "from": true, "fetch": true, "tablesample": true, "only": true,
 }
 
-// sqlAliases — псевдоним (и само имя таблицы) → таблица.
-func sqlAliases(s string) map[string]string {
-	out := map[string]string{}
-	for _, m := range sqlTableRe.FindAllStringSubmatch(s, -1) {
-		table := strings.ToLower(m[1])
+// sqlUnresolved — значение имени, таблицу которого разбор не установил (тело
+// CTE либо подзапроса без названной таблицы): обращение через него — пара.
+const sqlUnresolved = "<не разрешено>"
+
+// sqlInfo — разбор одного литерала: скобки, таблицы по скобкам, псевдонимы.
+type sqlInfo struct {
+	groups []int
+	// byGroup — начало скобки (-1 — верхний уровень) → таблицы, названные
+	// прямо в ней (CTE и производные — уже разрешёнными).
+	byGroup map[int][]string
+	// aliases — псевдоним, имя таблицы, имя CTE и производной → таблица.
+	aliases map[string]string
+}
+
+// sqlCTERe — имя CTE: `WITH [RECURSIVE] name AS [NOT] [MATERIALIZED] (` либо
+// следующее через запятую.
+var sqlCTERe = regexp.MustCompile(`(?:\bwith\s+(?:recursive\s+)?|,\s*)([a-z_][a-z0-9_]*)\s+as\s+(?:not\s+)?(?:materialized\s+)?\(`)
+
+// sqlDerivedRe — производная таблица: `FROM|JOIN [LATERAL] (`.
+var sqlDerivedRe = regexp.MustCompile(`\b(?:from|join)\s+(?:lateral\s+)?\(`)
+
+// sqlAfterParenAliasRe — псевдоним сразу за закрывающей скобкой подзапроса.
+var sqlAfterParenAliasRe = regexp.MustCompile(`^\s+(?:as\s+)?([a-z_][a-z0-9_]*)`)
+
+// sqlAnalyze разбирает литерал (уже в нижнем регистре, без комментариев).
+func sqlAnalyze(s string) sqlInfo {
+	info := sqlInfo{groups: sqlGroups(s), byGroup: map[int][]string{}, aliases: map[string]string{}}
+	closeOf := sqlCloseParens(s)
+
+	type named struct {
+		name  string
+		open  int // скобка тела
+		owner int // скобка, где имя видно колонкам без квалификатора
+	}
+	var derived []named
+	for _, m := range sqlCTERe.FindAllStringSubmatchIndex(s, -1) {
+		derived = append(derived, named{name: s[m[2]:m[3]], open: m[1] - 1, owner: -2})
+	}
+	for _, m := range sqlDerivedRe.FindAllStringIndex(s, -1) {
+		open := m[1] - 1
+		end, ok := closeOf[open]
+		if !ok {
+			continue
+		}
+		am := sqlAfterParenAliasRe.FindStringSubmatch(s[end+1:])
+		if am == nil || sqlNotAlias[am[1]] {
+			continue
+		}
+		derived = append(derived, named{name: am[1], open: open, owner: info.groups[open]})
+	}
+
+	// Таблицы, названные прямо в каждой скобке.
+	direct := map[int][]string{}
+	for _, m := range sqlTableRe.FindAllStringSubmatchIndex(s, -1) {
+		table := s[m[2]:m[3]]
 		if sqlNotAlias[table] {
 			continue
 		}
-		out[table] = table
-		if alias := strings.ToLower(m[2]); alias != "" && !sqlNotAlias[alias] {
-			out[alias] = table
+		g := info.groups[m[0]]
+		direct[g] = append(direct[g], table)
+		info.aliases[table] = table
+		if m[4] >= 0 {
+			if alias := s[m[4]:m[5]]; !sqlNotAlias[alias] {
+				info.aliases[alias] = table
+			}
+		}
+	}
+	// Имя CTE или производной разрешается в таблицы верхнего уровня тела;
+	// тело само бывает над производной — отсюда неподвижная точка.
+	resolved := map[string]string{}
+	resolve := func(t string) string {
+		if r, ok := resolved[t]; ok {
+			return r
+		}
+		return t
+	}
+	for round := 0; round <= len(derived); round++ {
+		changed := false
+		for _, d := range derived {
+			var cands []string
+			for _, t := range direct[d.open] {
+				cands = append(cands, resolve(t))
+			}
+			for _, inner := range derived {
+				if inner.owner == d.open {
+					cands = append(cands, resolve(inner.name))
+				}
+			}
+			r := sqlPickTable(cands)
+			if resolved[d.name] != r {
+				resolved[d.name] = r
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	for g, tables := range direct {
+		for _, t := range tables {
+			info.byGroup[g] = append(info.byGroup[g], resolve(t))
+		}
+	}
+	for _, d := range derived {
+		if d.owner != -2 {
+			info.byGroup[d.owner] = append(info.byGroup[d.owner], resolve(d.name))
+		}
+		info.aliases[d.name] = resolve(d.name)
+	}
+	for alias, t := range info.aliases {
+		info.aliases[alias] = resolve(t)
+	}
+	return info
+}
+
+// sqlPickTable — во что разрешается тело: таблица пары, если она среди
+// таблиц тела; неразрешённое, если тело без таблиц либо над неразрешённым;
+// иначе — первая таблица тела (набор либо чужая таблица).
+func sqlPickTable(cands []string) string {
+	if len(cands) == 0 {
+		return sqlUnresolved
+	}
+	for _, want := range []string{BindingPairTable, sqlUnresolved} {
+		for _, t := range cands {
+			if t == want {
+				return want
+			}
+		}
+	}
+	return cands[0]
+}
+
+// sqlCloseParens — открывающая скобка → закрывающая (вне '…').
+func sqlCloseParens(s string) map[int]int {
+	out := map[int]int{}
+	var stack []int
+	quoted := false
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\'':
+			quoted = !quoted
+		case quoted:
+		case s[i] == '(':
+			stack = append(stack, i)
+		case s[i] == ')' && len(stack) > 0:
+			out[stack[len(stack)-1]] = i
+			stack = stack[:len(stack)-1]
 		}
 	}
 	return out
@@ -566,30 +721,32 @@ func sqlGroups(s string) []int {
 	return groups
 }
 
-// sqlScopeTables — таблицы, видимые неквалифицированной колонке в позиции at:
+// scopeTables — таблицы, видимые неквалифицированной колонке в позиции at:
 // названные в той же скобке, что колонка; нет таких — во внешней, и так до
 // верхнего уровня (внутренний запрос затеняет внешний, как в самом SQL).
 // Пусто — таблицы колонки в литерале нет (фрагмент условия чужого запроса).
-func sqlScopeTables(s string, at int) []string {
-	groups := sqlGroups(s)
-	byGroup := map[int][]string{}
-	for _, m := range sqlTableRe.FindAllStringSubmatchIndex(s, -1) {
-		table := strings.ToLower(s[m[2]:m[3]])
-		if sqlNotAlias[table] {
-			continue
-		}
-		byGroup[groups[m[0]]] = append(byGroup[groups[m[0]]], table)
-	}
-	// Цепочка открытых скобок от колонки наружу.
-	for g := groups[at]; ; {
-		if t := byGroup[g]; len(t) > 0 {
+func (info sqlInfo) scopeTables(at int) []string {
+	for g := info.groups[at]; ; {
+		if t := info.byGroup[g]; len(t) > 0 {
 			return t
 		}
 		if g < 0 {
 			return nil
 		}
-		g = groups[g]
+		g = info.groups[g]
 	}
+}
+
+// asciiLower — нижний регистр латиницы без смены длины: позиции разбора
+// остаются позициями исходного текста.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
 }
 
 // bindingPairColRef — одно упоминание колонки пары.
@@ -635,7 +792,7 @@ func bindingPairColRefs(s string) []bindingPairColRef {
 				for q > 0 && isSQLIdent(s[q-1]) {
 					q--
 				}
-				ref.qualifier = strings.ToLower(s[q : at-1])
+				ref.qualifier = s[q : at-1]
 				if q > 0 && (s[q-1] == ']' || s[q-1] == '%') || q == at-1 {
 					ref.format = true
 				}
@@ -652,24 +809,24 @@ func isSQLIdent(b byte) bool {
 
 // bindingPairRefIsPair — упоминание обращается к паре `access_bindings`
 // (либо не разрешено и потому считается парой).
-func bindingPairRefIsPair(r bindingPairColRef, sql string, local, place, pkg map[string]string) bool {
+func bindingPairRefIsPair(r bindingPairColRef, info sqlInfo, place, pkg map[string]string) bool {
 	if r.format {
 		return true
 	}
 	if r.qualifier != "" {
-		for _, m := range []map[string]string{local, place, pkg} {
+		for _, m := range []map[string]string{info.aliases, place, pkg} {
 			if t, ok := m[r.qualifier]; ok {
-				return t == BindingPairTable
+				return t == BindingPairTable || t == sqlUnresolved
 			}
 		}
 		return true
 	}
-	scope := sqlScopeTables(sql, r.at)
+	scope := info.scopeTables(r.at)
 	if len(scope) == 0 {
 		return true
 	}
 	for _, t := range scope {
-		if t == BindingPairTable {
+		if t == BindingPairTable || t == sqlUnresolved {
 			return true
 		}
 	}
@@ -717,6 +874,7 @@ func JudgeBindingSubjectPair(census BindingPairCensus, ledger map[string]Binding
 				place, entry.Go, entry.SQL, goN, sqlN, strings.Join(where, "\n    ")))
 		}
 	}
+	findings = append(findings, judgeBindingPairOutsideBuild(census.OutsideBuild, BindingPairOutsideBuildLedger)...)
 	ledgerKeys := make([]string, 0, len(ledger))
 	for k := range ledger {
 		ledgerKeys = append(ledgerKeys, k)
@@ -745,4 +903,31 @@ func bindingPairKnownClass(c BindingPairClass) bool {
 		}
 	}
 	return false
+}
+
+// judgeBindingPairOutsideBuild — файл радиуса вне прод-сборки допустим лишь
+// записью ведомости; запись без такого файла истекает.
+func judgeBindingPairOutsideBuild(outside []string, ledger map[string]string) []string {
+	var findings []string
+	seen := map[string]bool{}
+	for _, rel := range outside {
+		seen[rel] = true
+		if strings.TrimSpace(ledger[rel]) == "" {
+			findings = append(findings, fmt.Sprintf("%s — непроверочный файл радиуса вне прод-сборки (%s): гейт его "+
+				"не разбирает, и доступ к паре в нём не виден. Снять ограничение сборки либо внести файл в "+
+				"BindingPairOutsideBuildLedger с основанием.", rel, strings.Join(BindingPairProdEnv, " ")))
+		}
+	}
+	keys := make([]string, 0, len(ledger))
+	for k := range ledger {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, rel := range keys {
+		if !seen[rel] {
+			findings = append(findings, fmt.Sprintf("%s — запись ведомости файлов вне прод-сборки без предмета: "+
+				"файл в сборке либо снят — снять запись", rel))
+		}
+	}
+	return findings
 }
