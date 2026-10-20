@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -818,22 +819,21 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 		if err := emitRevokedAuditOfExpiry(ctx, s, bs); err != nil {
 			return fmt.Errorf("expire: revoked audit %s: %w", bindingID, err)
 		}
+		// Снимается ВЕСЬ реестр выдачи, прочитанный после замков и CAS (порядок тот же,
+		// что у отзыва: advisory → FOR UPDATE → реестр), а не набор, выведенный из
+		// снимка каталога процесса: тип члена мог выпасть из снимка этой реплики, и
+		// ключ `<тип модели>:<id>` собрать было бы нечем (kaname#933). На истечении
+		// уходят ВСЕ члены выдачи, так что ни один из них реестр не держит. Факт, который
+		// держит другая действующая выдача того же субъекта, оставляет свёртка журнала
+		// (kaname#919): строки реестра этой выдачи забыты здесь же, и она уже REVOKED.
+		if err := r.revokeWholeLedger(ctx, s, bindingID, col); err != nil {
+			return fmt.Errorf("expire: %w", err)
+		}
 		members, err := s.CurrentMembers(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("expire: current members %s: %w", bindingID, err)
 		}
 		for _, m := range members {
-			if m.VerificationStatus == domain.VerificationActive {
-				// Read the saved ledger and DEFER the FGA delete to flushDeletes. On
-				// expiry EVERY member of THIS binding is revoked, so no member of this
-				// binding survives (within-binding survivingClaims empty). But ANOTHER
-				// active binding of the same subject may hold the identical tuple — the
-				// факт оставляет свёртка журнала (kaname#919): строки реестра этой
-				// выдачи забыты здесь же, и она уже REVOKED.
-				if err := r.revokeMemberTuples(ctx, s, bs, m, nil, col); err != nil {
-					return fmt.Errorf("expire: %w", err)
-				}
-			}
 			if err := s.DeleteMember(ctx, bindingID, m.RuleFP, m.ObjectType, m.ObjectID); err != nil {
 				return fmt.Errorf("expire: delete member %s/%s:%s: %w", m.RuleFP, m.ObjectType, m.ObjectID, err)
 			}
@@ -1468,8 +1468,11 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 // этого своя строка ведомости ОБЯЗАНА уйти до строки снятия, иначе выдача держит факт
 // сама: ForgetEmittedTuples стоит здесь, inline, раньше любого flushDeletes.
 func (r *Reconciler) revokeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember, survivingClaims map[domain.MembershipTuple]struct{}, col *syncFGACollector) error {
-	tuples, ok := r.revokeTuplesFor(ctx, s, bs, m)
-	if !ok || len(tuples) == 0 {
+	tuples, err := r.revokeTuplesFor(ctx, s, bs, m)
+	if err != nil {
+		return err
+	}
+	if len(tuples) == 0 {
 		return nil
 	}
 	// Subtract tuples still claimed by a surviving ACTIVE member of THIS binding.
@@ -1520,41 +1523,53 @@ func desiredActiveTupleSet(desired []DesiredMember) map[domain.MembershipTuple]s
 // transition (applyDiff.RecordEmittedTuples), so it is the uniform revoke source.
 // Empty ledger ⇒ nothing to revoke (the legacy-arm re-derivation fallback is gone;
 // all members are role.rules-driven).
-func (r *Reconciler) revokeTuplesFor(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember) ([]domain.MembershipTuple, bool) {
-	// Имя типа модели читается у ЖИВЫХ строк — тем же источником, каким его
-	// раскрывает желаемая сторона прохода. Промах здесь означает члена по типу,
-	// чья строка каталога снята в работающем процессе: снять его кортежи нечем,
-	// потому что ключ реестра эмитированного собирается из этого имени. Молча
-	// это остаться не вправе — иначе выданное по снятому типу переживает снятие,
-	// и об этом не говорит ни одна полоса.
+func (r *Reconciler) revokeTuplesFor(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember) ([]domain.MembershipTuple, error) {
+	// Имя типа модели читается у ЖИВЫХ строк. Промах означает члена по типу, чья строка
+	// снята либо не видна снимку этой реплики: ключ реестра по имени типа не собрать, а
+	// удалить члена, не сняв его кортежей, нельзя — факт пережил бы выдачу (kaname#933).
+	// Тогда набор берётся из реестра выдачи целиком по идентификатору объекта: реестр —
+	// единственный источник того, что выдано, и от каталога не зависит.
 	fgaType, ok := r.cat.Facts().FGAObjectType(m.ObjectType)
 	if !ok {
-		r.logger.WarnContext(ctx, "reconcile: member object_type has no live catalog row; its emitted tuples cannot be revoked this pass",
-			"binding_id", string(bs.BindingID),
-			"object_type", m.ObjectType,
-			"object_id", m.ObjectID,
-			"rule_fp", m.RuleFP)
-		return nil, false
+		all, err := s.LedgerTuples(ctx, bs.BindingID)
+		if err != nil {
+			return nil, fmt.Errorf("ledger of binding %s for member %s/%s:%s: %w", bs.BindingID, m.RuleFP, m.ObjectType, m.ObjectID, err)
+		}
+		suffix := ":" + m.ObjectID
+		var out []domain.MembershipTuple
+		for _, t := range all {
+			if strings.HasSuffix(t.Object, suffix) {
+				out = append(out, t)
+			}
+		}
+		return out, nil
 	}
 	object := fgaType + ":" + m.ObjectID
 	tuples, err := s.LedgerTuplesForObject(ctx, bs.BindingID, object)
 	if err != nil {
-		// Surface as "no tuples" — the DeleteMember still runs; the symmetric revoke
-		// (delete.go) / a later sweep re-converges. A hard error here would roll back
-		// the whole pass for a single member's ledger read. Log it (the revoke is
-		// retried by a later pass, but a silently-swallowed ledger read is otherwise
-		// invisible — observability).
-		r.logger.WarnContext(ctx, "reconcile: ledger read for member revoke failed; deferring tuple revoke to next pass",
-			"binding_id", string(bs.BindingID),
-			"object", object,
-			"rule_fp", m.RuleFP,
-			"error", err)
-		return nil, false
+		// Ошибка чтения реестра не гасится: член удаляется следом, и молча проглоченное
+		// чтение оставило бы его кортежи без владельца. Откат прохода повторит снятие.
+		return nil, fmt.Errorf("ledger read for member revoke %s (%s): %w", object, m.RuleFP, err)
 	}
-	if len(tuples) > 0 {
-		return tuples, true
+	return tuples, nil
+}
+
+// revokeWholeLedger снимает ВЕСЬ учтённый реестром набор выдачи: строки снятия — в
+// коллектор (уходят в конце прохода), записи реестра забываются здесь же, в той же
+// транзакции (ban #10). Набор берётся из реестра, а не из каталога процесса.
+func (r *Reconciler) revokeWholeLedger(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, col *syncFGACollector) error {
+	tuples, err := s.LedgerTuples(ctx, bindingID)
+	if err != nil {
+		return fmt.Errorf("read ledger of binding %s: %w", bindingID, err)
 	}
-	return nil, false
+	if len(tuples) == 0 {
+		return nil
+	}
+	col.deferDelete(bindingID, tuples)
+	if err := s.ForgetEmittedTuples(ctx, bindingID, tuples); err != nil {
+		return fmt.Errorf("forget ledger of binding %s: %w", bindingID, err)
+	}
+	return nil
 }
 
 // partitionByFeed splits selector types into the mirror-fed set (compute/vpc/
