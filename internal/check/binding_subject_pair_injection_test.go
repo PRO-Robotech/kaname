@@ -223,6 +223,51 @@ func probeSQLLateralFuncSet() string {
 	return "SELECT x.subject_id FROM users u, LATERAL f(u.id) fn, access_binding_subjects x"
 }
 
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaOnlySet() string {
+	return "SELECT x.subject_id FROM users u, ONLY access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLSampleFirstSet() string {
+	return "SELECT x.subject_id FROM users u TABLESAMPLE SYSTEM (10) REPEATABLE (1), access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaRowsOrdSet() string {
+	return "SELECT x.subject_id FROM users u, ROWS FROM (f(1,2)) WITH ORDINALITY r, access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaFuncOrdSet() string {
+	return "SELECT x.subject_id FROM users u, generate_series(1,3) WITH ORDINALITY g, access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLAliasColsSet() string {
+	return "SELECT x.subject_id FROM users AS u (a, b), access_binding_subjects x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLSampleFirst() string {
+	return "SELECT x.subject_id FROM users u TABLESAMPLE SYSTEM (10) REPEATABLE (1), access_bindings x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLCommaRowsOrd() string {
+	return "SELECT x.subject_id FROM users u, ROWS FROM (f(1,2)) WITH ORDINALITY r, access_bindings x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLCommaFuncOrd() string {
+	return "SELECT x.subject_id FROM users u, generate_series(1,3) WITH ORDINALITY g, access_bindings x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLAliasCols() string {
+	return "SELECT x.subject_id FROM users AS u (a, b), access_bindings x"
+}
+
 // БЛИЗНЕЦ: CTE над набором.
 func probeSQLCTESet() string {
 	return "WITH s2 AS (SELECT * FROM access_binding_subjects) SELECT binding_id FROM s2 WHERE subject_id = $1"
@@ -269,6 +314,10 @@ var bindingPairProbeDefects = map[string][2]string{
 	"probeSQLCommaFunc":        {check.BindingPairFormSQL, "x.subject_id"},
 	"probeSQLCommaOnly":        {check.BindingPairFormSQL, "x.subject_id"},
 	"probeSQLCommaSample":      {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLSampleFirst":      {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaRowsOrd":     {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaFuncOrd":     {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLAliasCols":        {check.BindingPairFormSQL, "x.subject_id"},
 }
 
 // bindingPairOtherFiles — внесённое вне файла пробы: файл → исходник.
@@ -318,6 +367,7 @@ var bindingPairProbeTwins = []string{
 	"probeSQLForeignTable", "probeJSONKey", "probeSQLComment", "probeSQLCTESet", "probeSQLDerivedSet",
 	"probeErrorText", "probeCallsGetter", "probeSQLCommaSet", "probeSQLCommaIn",
 	"probeSQLCommaPairThenSet", "probeSQLCommaGrant", "probeSQLCommaCTEGrant", "probeSQLCommaFuncSet", "probeSQLCommaRowsSet", "probeSQLCommaStarSet", "probeSQLCommaSampleSet", "probeSQLCommaDerivedSet", "probeSQLLateralSet", "probeSQLLateralFuncSet",
+	"probeSQLCommaOnlySet", "probeSQLSampleFirstSet", "probeSQLCommaRowsOrdSet", "probeSQLCommaFuncOrdSet", "probeSQLAliasColsSet",
 }
 
 // bindingPairPlace — ключ места внесённой функции.
