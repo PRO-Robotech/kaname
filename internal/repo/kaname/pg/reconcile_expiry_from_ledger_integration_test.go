@@ -20,11 +20,13 @@ package pg_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
@@ -32,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 const ledgerProbeType = "compute.instance"
@@ -87,6 +90,13 @@ func newLedgerProbe(t *testing.T, suffix string, retired bool) *ledgerProbe {
 	a, adapter := newReconciler(pool)
 	b := reconcile.New(adapter, nil, catalogWithout(t, ledgerProbeType, retired))
 	bid, subj := seedRaceBinding(t, ctx, pool, fx, suffix, projectRoleFixture)
+	// Цепь предков объекта — тем же входом, каким её пишет продукт: без указателя на
+	// проект вердикт области объекта не видит, и прямой факт отказывает ещё до снятия.
+	require.NoError(t, newRegisterUCWired(pool).Register(ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "project:" + string(fx.prj), Relation: "parent", Object: "compute_instance:iRace",
+		ParentProjectId: string(fx.prj), ParentAccountId: string(fx.accID),
+		SourceVersion: timestamppb.New(time.Now().Add(time.Minute)),
+	}))
 
 	require.NoError(t, a.ReconcileBinding(ctx, bid))
 	members, ledger, facts := bindingResidue(t, ctx, pool, bid, subj, "compute_instance", "iRace")
@@ -94,8 +104,23 @@ func newLedgerProbe(t *testing.T, suffix string, retired bool) *ledgerProbe {
 	require.Positive(t, ledger, "БЛИЗНЕЦ: запись реестра есть")
 	require.Positive(t, facts, "БЛИЗНЕЦ: прямой факт есть после свёртки")
 	assert.Equal(t, relverdict.Allow, ledgerVerdict(t, ctx, pool, subj),
-		"БЛИЗНЕЦ: до снятия вердикт — разрешение")
+		"БЛИЗНЕЦ: до снятия вердикт — разрешение; факты: %v", factsOf(t, ctx, pool, subj))
 	return &ledgerProbe{pool: pool, bid: bid, subj: subj, a: a, b: b}
+}
+
+func factsOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subj string) []string {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT object_type||':'||object_id||'#'||relation||'@'||subject||' cond='||coalesce(condition_name,'')
+	  FROM kaname.relation_fact WHERE subject = $1`, subj)
+	require.NoError(t, err)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		require.NoError(t, rows.Scan(&s))
+		out = append(out, s)
+	}
+	return out
 }
 
 func ledgerVerdict(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subj string) relverdict.Verdict {
@@ -104,7 +129,7 @@ func ledgerVerdict(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subj s
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	v, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
-		Subject: subj, ObjectType: "compute_instance", ObjectID: "iRace", Relation: "v_get",
+		Subject: subj, ObjectType: "compute_instance", ObjectID: "iRace", Relation: "editor",
 	})
 	require.NoError(t, err)
 	return v
@@ -113,7 +138,9 @@ func ledgerVerdict(t *testing.T, ctx context.Context, pool *pgxpool.Pool, subj s
 func (p *ledgerProbe) expireInPast(t *testing.T) {
 	t.Helper()
 	_, err := p.pool.Exec(context.Background(),
-		`UPDATE kaname.access_bindings SET expires_at = now() - interval '1 hour' WHERE id = $1`, string(p.bid))
+		`UPDATE kaname.access_bindings
+		    SET created_at = now() - interval '2 hours', expires_at = now() - interval '1 hour'
+		  WHERE id = $1`, string(p.bid))
 	require.NoError(t, err, "ПРЕДПОСЫЛКА: срок выдачи сдвинут в прошлое")
 }
 
