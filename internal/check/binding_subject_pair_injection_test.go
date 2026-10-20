@@ -133,6 +133,96 @@ func probeSQLCommaIn() string {
 	return "SELECT binding_id FROM access_binding_subjects WHERE subject_id IN ($1, $2)"
 }
 
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLLateral() string {
+	return "SELECT l.subject_id FROM users u, LATERAL (SELECT * FROM access_bindings ab WHERE ab.id = u.id) l"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLLateralAs() string {
+	return "SELECT l.subject_id FROM users u, LATERAL (SELECT * FROM access_bindings ab WHERE ab.id = u.id) AS l"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLLateralCTE() string {
+	return "WITH live AS (SELECT * FROM access_bindings) SELECT l.subject_id FROM users u, LATERAL (SELECT * FROM live) l"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLLateralThenComma() string {
+	return "SELECT l.subject_id FROM users u, LATERAL (SELECT * FROM access_bindings) l, projects p"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLCommaDerived() string {
+	return "SELECT d.subject_id FROM users u, (SELECT * FROM access_bindings) d"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLCommaFunc() string {
+	return "SELECT x.subject_id FROM users u, generate_series(1,3) g, access_bindings x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLCommaOnly() string {
+	return "SELECT x.subject_id FROM users u, ONLY access_bindings x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после запятой — выдача.
+func probeSQLCommaSample() string {
+	return "SELECT x.subject_id FROM users u, access_bindings x TABLESAMPLE SYSTEM (10) REPEATABLE (1), projects p"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaPairThenSet() string {
+	return "SELECT bs.subject_id FROM access_bindings ab, access_binding_subjects bs WHERE bs.binding_id = ab.id"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaGrant() string {
+	return "SELECT u.id FROM cluster_admin_grants g, users u WHERE g.subject_id = u.id"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaCTEGrant() string {
+	return "WITH cg AS (SELECT * FROM cluster_admin_grants) SELECT u.id FROM users u, cg WHERE cg.subject_id = u.id"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaFuncSet() string {
+	return "SELECT x.subject_id FROM users u, generate_series(1,3) g, access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaRowsSet() string {
+	return "SELECT x.subject_id FROM users u, ROWS FROM (f(1,2)) r, access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaStarSet() string {
+	return "SELECT x.subject_id FROM users u, access_binding_subjects * x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaSampleSet() string {
+	return "SELECT x.subject_id FROM users u, access_binding_subjects x TABLESAMPLE SYSTEM (10) REPEATABLE (1), projects p"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLCommaDerivedSet() string {
+	return "SELECT d.subject_id FROM users u, (SELECT * FROM access_binding_subjects) d"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLLateralSet() string {
+	return "SELECT l.subject_id FROM users u, LATERAL (SELECT * FROM access_binding_subjects ab WHERE ab.id = u.id) AS l"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи (набор либо чужая таблица).
+func probeSQLLateralFuncSet() string {
+	return "SELECT x.subject_id FROM users u, LATERAL f(u.id) fn, access_binding_subjects x"
+}
+
 // БЛИЗНЕЦ: CTE над набором.
 func probeSQLCTESet() string {
 	return "WITH s2 AS (SELECT * FROM access_binding_subjects) SELECT binding_id FROM s2 WHERE subject_id = $1"
@@ -157,20 +247,28 @@ func probeSQLComment() string {
 
 // bindingPairProbeDefects — место дефекта → форма и что напечатано.
 var bindingPairProbeDefects = map[string][2]string{
-	"probeReadsPairValue":    {check.BindingPairFormSelector, ".SubjectID"},
-	"probeReadsPairPointer":  {check.BindingPairFormSelector, ".SubjectType"},
-	"probeBuildsPair":        {check.BindingPairFormLiteral, "SubjectID:"},
-	"probeSQLQualified":      {check.BindingPairFormSQL, "ab.subject_id"},
-	"probeSQLFragment":       {check.BindingPairFormSQL, "subject_type"},
-	"probeSQLNestedForeign":  {check.BindingPairFormSQL, "subject_id"},
-	"probeSQLFormat":         {check.BindingPairFormSQL, "<формат>.subject_id"},
-	"probeSQLColumnList":     {check.BindingPairFormSQL, "subject_id"},
-	"probeSQLCTEUnqualified": {check.BindingPairFormSQL, "subject_type"},
-	"probeSQLCTEAliased":     {check.BindingPairFormSQL, "l.subject_id"},
-	"probeSQLDerived":        {check.BindingPairFormSQL, "d.subject_id"},
-	"probeSQLUpper":          {check.BindingPairFormSQL, "ab.subject_id"},
-	"probeSQLCommaAlias":     {check.BindingPairFormSQL, "x.subject_id"},
-	"probeSQLCommaBare":      {check.BindingPairFormSQL, "subject_id"},
+	"probeReadsPairValue":      {check.BindingPairFormSelector, ".SubjectID"},
+	"probeReadsPairPointer":    {check.BindingPairFormSelector, ".SubjectType"},
+	"probeBuildsPair":          {check.BindingPairFormLiteral, "SubjectID:"},
+	"probeSQLQualified":        {check.BindingPairFormSQL, "ab.subject_id"},
+	"probeSQLFragment":         {check.BindingPairFormSQL, "subject_type"},
+	"probeSQLNestedForeign":    {check.BindingPairFormSQL, "subject_id"},
+	"probeSQLFormat":           {check.BindingPairFormSQL, "<формат>.subject_id"},
+	"probeSQLColumnList":       {check.BindingPairFormSQL, "subject_id"},
+	"probeSQLCTEUnqualified":   {check.BindingPairFormSQL, "subject_type"},
+	"probeSQLCTEAliased":       {check.BindingPairFormSQL, "l.subject_id"},
+	"probeSQLDerived":          {check.BindingPairFormSQL, "d.subject_id"},
+	"probeSQLUpper":            {check.BindingPairFormSQL, "ab.subject_id"},
+	"probeSQLCommaAlias":       {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaBare":        {check.BindingPairFormSQL, "subject_id"},
+	"probeSQLLateral":          {check.BindingPairFormSQL, "l.subject_id"},
+	"probeSQLLateralAs":        {check.BindingPairFormSQL, "l.subject_id"},
+	"probeSQLLateralCTE":       {check.BindingPairFormSQL, "l.subject_id"},
+	"probeSQLLateralThenComma": {check.BindingPairFormSQL, "l.subject_id"},
+	"probeSQLCommaDerived":     {check.BindingPairFormSQL, "d.subject_id"},
+	"probeSQLCommaFunc":        {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaOnly":        {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaSample":      {check.BindingPairFormSQL, "x.subject_id"},
 }
 
 // bindingPairOtherFiles — внесённое вне файла пробы: файл → исходник.
@@ -219,6 +317,7 @@ var bindingPairProbeTwins = []string{
 	"probeReadsSet", "probeReadsNamesake", "probeSQLSetQualified", "probeSQLSetUnqualified",
 	"probeSQLForeignTable", "probeJSONKey", "probeSQLComment", "probeSQLCTESet", "probeSQLDerivedSet",
 	"probeErrorText", "probeCallsGetter", "probeSQLCommaSet", "probeSQLCommaIn",
+	"probeSQLCommaPairThenSet", "probeSQLCommaGrant", "probeSQLCommaCTEGrant", "probeSQLCommaFuncSet", "probeSQLCommaRowsSet", "probeSQLCommaStarSet", "probeSQLCommaSampleSet", "probeSQLCommaDerivedSet", "probeSQLLateralSet", "probeSQLLateralFuncSet",
 }
 
 // bindingPairPlace — ключ места внесённой функции.

@@ -43,8 +43,12 @@ package check
 // квалификатора нет, а ближайшая по скобкам область, где названа таблица,
 // называет `access_bindings` либо таблиц в литерале нет вовсе (фрагмент
 // условия чужого запроса); и когда квалификатор не разрешён (глагол формата
-// `%[1]s.`, неизвестный псевдоним). Перечень FROM через запятую
-// (`FROM a x, access_bindings y`) разбирается целиком. Имя CTE (`WITH live AS (…)`) и производной
+// `%[1]s.`, неизвестный псевдоним). Перечень FROM через запятую разбирается по
+// грамматике PostgreSQL: `[ONLY] таблица [*] [[AS] псевдоним (колонки)]
+// [TABLESAMPLE … [REPEATABLE …]]`, `[LATERAL] (подзапрос) [AS] псевдоним`,
+// `[LATERAL] функция(…) [WITH ORDINALITY] [[AS] псевдоним]`, `ROWS FROM (…)`,
+// имя CTE.
+// Имя CTE (`WITH live AS (…)`) и производной
 // таблицы (`FROM (…) d`) разрешается в таблицы верхнего уровня своего тела:
 // тело над `access_bindings` делает имя таблицей пары, тело без таблицы —
 // неразрешённым. Неразрешённое считается парой намеренно: ошибка в эту сторону
@@ -61,7 +65,9 @@ package check
 // # Граница названа, а не умолчана
 //
 // Гейт НЕ видит: имени колонки, собранного из кусков (конкатенация, формат);
-// таблицы в кавычках (`"access_bindings"`); выборки `SELECT *` и колонок,
+// таблицы в кавычках (`"access_bindings"`); элемента перечня FROM после
+// `JOIN … ON` (`FROM a JOIN b ON … , c`); строк выдачи, пришедших из функции
+// перечня (`FROM f()`); выборки `SELECT *` и колонок,
 // названных не по имени (`RETURNING *`, `row_to_json`), — колонки пары в
 // литерале нет; доступа через рефлексию и через копию в другой тип; кода вне
 // каталогов радиуса. SQL-комментарий снимается от `--` до конца строки и
@@ -533,9 +539,126 @@ var sqlMarker = regexp.MustCompile(`(?i)\b(select|insert|update|delete|where|fro
 // sqlTableRe — таблица после FROM/JOIN/INTO/UPDATE/USING и её псевдоним.
 var sqlTableRe = regexp.MustCompile(`(?i)\b(?:from|join|into|update|using)\s+(?:only\s+)?(?:kaname\.)?([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
 
-// sqlCommaTableRe — следующая таблица перечня FROM через запятую (в начале
-// остатка литерала) и её псевдоним.
-var sqlCommaTableRe = regexp.MustCompile(`^\s*,\s*(?:only\s+)?(?:kaname\.)?([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
+// sqlFromKwRe — ключевое слово FROM: за ним идёт перечень элементов.
+var sqlFromKwRe = regexp.MustCompile(`\bfrom\b`)
+
+// sqlFromItem — элемент перечня FROM: имя таблицы (пусто у подзапроса и
+// функции — подзапрос разрешает sqlDerivedRe) и псевдоним.
+type sqlFromItem struct{ table, alias string }
+
+var (
+	sqlItemLateralRe = regexp.MustCompile(`^\s*(?:lateral\b)?\s*`)
+	sqlItemRowsRe    = regexp.MustCompile(`^rows\s+from\s*\(`)
+	sqlItemNameRe    = regexp.MustCompile(`^(?:only\s+)?(?:kaname\.)?([a-z_][a-z0-9_]*)`)
+	sqlItemStarRe    = regexp.MustCompile(`^\s*\*`)
+	sqlItemOrdRe     = regexp.MustCompile(`^\s+with\s+ordinality\b`)
+	sqlItemAliasRe   = regexp.MustCompile(`^\s+(?:as\s+)?([a-z_][a-z0-9_]*)`)
+	sqlItemSampleRe  = regexp.MustCompile(`^\s+tablesample\s+[a-z_][a-z0-9_]*\s*\(`)
+	sqlItemRepeatRe  = regexp.MustCompile(`^\s+repeatable\s*\(`)
+	sqlItemSpaceRe   = regexp.MustCompile(`^\s*`)
+	sqlItemCommaRe   = regexp.MustCompile(`^\s*,`)
+)
+
+// sqlFromTail разбирает перечень элементов с позиции за словом FROM по
+// грамматике PostgreSQL и возвращает элементы после первого. Элемент:
+// `[ONLY] имя [*] [[AS] псевдоним] [TABLESAMPLE метод (…) [REPEATABLE (…)]]`,
+// `[LATERAL] (подзапрос) [AS] псевдоним`, `[LATERAL] функция(…) [WITH
+// ORDINALITY] [[AS] псевдоним]`, `ROWS FROM (…) …` либо имя CTE. Разбор
+// кончается на первом слове, которое не элемент (`WHERE`, `JOIN`, `GROUP`):
+// запятая после `JOIN … ON` в перечне не разбирается.
+func sqlFromTail(s string, from int, closeOf map[int]int) []sqlFromItem {
+	var items []sqlFromItem
+	end := from
+	first := true
+	skipParen := func(at int) (int, bool) {
+		at += len(sqlItemSpaceRe.FindString(s[at:]))
+		if at >= len(s) || s[at] != '(' {
+			return at, false
+		}
+		c, ok := closeOf[at]
+		if !ok {
+			return at, false
+		}
+		return c + 1, true
+	}
+	// alias — псевдоним (и перечень его колонок) за элементом.
+	alias := func(at int) (string, int) {
+		am := sqlItemAliasRe.FindStringSubmatchIndex(s[at:])
+		if am == nil {
+			return "", at
+		}
+		name := s[at+am[2] : at+am[3]]
+		if sqlNotAlias[name] {
+			return "", at
+		}
+		at += am[1]
+		if e, ok := skipParen(at); ok {
+			at = e
+		}
+		return name, at
+	}
+	for {
+		at := end
+		if !first {
+			cm := sqlItemCommaRe.FindStringIndex(s[end:])
+			if cm == nil {
+				return items
+			}
+			at = end + cm[1]
+		}
+		at += len(sqlItemLateralRe.FindString(s[at:]))
+		var it sqlFromItem
+		switch {
+		case at >= len(s):
+			return items
+		case s[at] == '(':
+			e, ok := skipParen(at)
+			if !ok {
+				return items
+			}
+			it.alias, at = alias(e)
+		case sqlItemRowsRe.MatchString(s[at:]):
+			e, ok := skipParen(at + len("rows from"))
+			if !ok {
+				return items
+			}
+			at = e
+			at += len(sqlItemOrdRe.FindString(s[at:]))
+			it.alias, at = alias(at)
+		default:
+			nm := sqlItemNameRe.FindStringSubmatchIndex(s[at:])
+			if nm == nil || sqlNotAlias[s[at+nm[2]:at+nm[3]]] {
+				return items
+			}
+			name := s[at+nm[2] : at+nm[3]]
+			at += nm[1]
+			if e, ok := skipParen(at); ok { // функция: имя таблицы не названо
+				at = e
+				at += len(sqlItemOrdRe.FindString(s[at:]))
+				it.alias, at = alias(at)
+				break
+			}
+			it.table = name
+			at += len(sqlItemStarRe.FindString(s[at:]))
+			it.alias, at = alias(at)
+			if sm := sqlItemSampleRe.FindStringIndex(s[at:]); sm != nil {
+				if e, ok := skipParen(at + sm[1] - 1); ok {
+					at = e
+				}
+				if rm := sqlItemRepeatRe.FindStringIndex(s[at:]); rm != nil {
+					if e, ok := skipParen(at + rm[1] - 1); ok {
+						at = e
+					}
+				}
+			}
+		}
+		if !first {
+			items = append(items, it)
+		}
+		first = false
+		end = at
+	}
+}
 
 // sqlNotAlias — слова, которые за таблицей стоят, но псевдонимом не являются.
 var sqlNotAlias = map[string]bool{
@@ -566,7 +689,7 @@ type sqlInfo struct {
 var sqlCTERe = regexp.MustCompile(`(?:\bwith\s+(?:recursive\s+)?|,\s*)([a-z_][a-z0-9_]*)\s+as\s+(?:not\s+)?(?:materialized\s+)?\(`)
 
 // sqlDerivedRe — производная таблица: `FROM|JOIN [LATERAL] (`.
-var sqlDerivedRe = regexp.MustCompile(`\b(?:from|join)\s+(?:lateral\s+)?\(`)
+var sqlDerivedRe = regexp.MustCompile(`(?:\b(?:from|join)|,)\s*(?:lateral\s+)?\(`)
 
 // sqlAfterParenAliasRe — псевдоним сразу за закрывающей скобкой подзапроса.
 var sqlAfterParenAliasRe = regexp.MustCompile(`^\s+(?:as\s+)?([a-z_][a-z0-9_]*)`)
@@ -608,36 +731,25 @@ func sqlAnalyze(s string) sqlInfo {
 		g := info.groups[m[0]]
 		direct[g] = append(direct[g], table)
 		info.aliases[table] = table
-		end := m[3]
 		if m[4] >= 0 {
 			if alias := s[m[4]:m[5]]; !sqlNotAlias[alias] {
 				info.aliases[alias] = table
-				end = m[5]
 			}
 		}
-		// Перечень таблиц через запятую — только после FROM: после INTO,
-		// UPDATE, USING запятая стоит в списке колонок и присваиваний.
-		if !strings.HasPrefix(strings.ToLower(s[m[0]:]), "from") {
-			continue
-		}
-		for {
-			cm := sqlCommaTableRe.FindStringSubmatchIndex(s[end:])
-			if cm == nil {
-				break
+	}
+	// Перечень элементов FROM через запятую: вторая и далее таблицы. Первая
+	// взята выше по ключевым словам FROM/JOIN; после INTO, UPDATE, USING
+	// запятая стоит в списке колонок и присваиваний — их перечнем не считаем.
+	for _, m := range sqlFromKwRe.FindAllStringIndex(s, -1) {
+		g := info.groups[m[0]]
+		for _, it := range sqlFromTail(s, m[1], closeOf) {
+			if it.table == "" {
+				continue
 			}
-			base := end
-			ctable := s[base+cm[2] : base+cm[3]]
-			if sqlNotAlias[ctable] {
-				break
-			}
-			direct[g] = append(direct[g], ctable)
-			info.aliases[ctable] = ctable
-			end = base + cm[3]
-			if cm[4] >= 0 {
-				if alias := s[base+cm[4] : base+cm[5]]; !sqlNotAlias[alias] {
-					info.aliases[alias] = ctable
-					end = base + cm[5]
-				}
+			direct[g] = append(direct[g], it.table)
+			info.aliases[it.table] = it.table
+			if it.alias != "" {
+				info.aliases[it.alias] = it.table
 			}
 		}
 	}
