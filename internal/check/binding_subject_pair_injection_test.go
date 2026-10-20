@@ -113,6 +113,26 @@ func probeSQLDerived() string {
 // ДЕФЕКТ: колонка в верхнем регистре.
 func probeSQLUpper() string { return "SELECT ab.id FROM access_bindings ab WHERE ab.SUBJECT_ID = $1" }
 
+// ДЕФЕКТ: выдача второй таблицей списка через запятую, свежий псевдоним.
+func probeSQLCommaAlias() string {
+	return "SELECT u.id FROM users u, access_bindings x WHERE x.subject_id = u.id"
+}
+
+// ДЕФЕКТ: то же без псевдонима, колонка без квалификатора.
+func probeSQLCommaBare() string {
+	return "SELECT u.id FROM users u, access_bindings WHERE subject_id = u.id"
+}
+
+// БЛИЗНЕЦ: набор второй таблицей списка через запятую.
+func probeSQLCommaSet() string {
+	return "SELECT u.id FROM users u, access_binding_subjects s WHERE s.subject_id = u.id"
+}
+
+// БЛИЗНЕЦ: перечень значений после IN — не таблица списка.
+func probeSQLCommaIn() string {
+	return "SELECT binding_id FROM access_binding_subjects WHERE subject_id IN ($1, $2)"
+}
+
 // БЛИЗНЕЦ: CTE над набором.
 func probeSQLCTESet() string {
 	return "WITH s2 AS (SELECT * FROM access_binding_subjects) SELECT binding_id FROM s2 WHERE subject_id = $1"
@@ -149,6 +169,8 @@ var bindingPairProbeDefects = map[string][2]string{
 	"probeSQLCTEAliased":     {check.BindingPairFormSQL, "l.subject_id"},
 	"probeSQLDerived":        {check.BindingPairFormSQL, "d.subject_id"},
 	"probeSQLUpper":          {check.BindingPairFormSQL, "ab.subject_id"},
+	"probeSQLCommaAlias":     {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaBare":      {check.BindingPairFormSQL, "subject_id"},
 }
 
 // bindingPairOtherFiles — внесённое вне файла пробы: файл → исходник.
@@ -196,7 +218,7 @@ var bindingPairOtherDefects = map[string]string{
 var bindingPairProbeTwins = []string{
 	"probeReadsSet", "probeReadsNamesake", "probeSQLSetQualified", "probeSQLSetUnqualified",
 	"probeSQLForeignTable", "probeJSONKey", "probeSQLComment", "probeSQLCTESet", "probeSQLDerivedSet",
-	"probeErrorText", "probeCallsGetter",
+	"probeErrorText", "probeCallsGetter", "probeSQLCommaSet", "probeSQLCommaIn",
 }
 
 // bindingPairPlace — ключ места внесённой функции.

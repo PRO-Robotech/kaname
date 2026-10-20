@@ -43,7 +43,8 @@ package check
 // квалификатора нет, а ближайшая по скобкам область, где названа таблица,
 // называет `access_bindings` либо таблиц в литерале нет вовсе (фрагмент
 // условия чужого запроса); и когда квалификатор не разрешён (глагол формата
-// `%[1]s.`, неизвестный псевдоним). Имя CTE (`WITH live AS (…)`) и производной
+// `%[1]s.`, неизвестный псевдоним). Перечень FROM через запятую
+// (`FROM a x, access_bindings y`) разбирается целиком. Имя CTE (`WITH live AS (…)`) и производной
 // таблицы (`FROM (…) d`) разрешается в таблицы верхнего уровня своего тела:
 // тело над `access_bindings` делает имя таблицей пары, тело без таблицы —
 // неразрешённым. Неразрешённое считается парой намеренно: ошибка в эту сторону
@@ -60,7 +61,6 @@ package check
 // # Граница названа, а не умолчана
 //
 // Гейт НЕ видит: имени колонки, собранного из кусков (конкатенация, формат);
-// второй таблицы списка через запятую (`FROM a x, access_bindings y`);
 // таблицы в кавычках (`"access_bindings"`); выборки `SELECT *` и колонок,
 // названных не по имени (`RETURNING *`, `row_to_json`), — колонки пары в
 // литерале нет; доступа через рефлексию и через копию в другой тип; кода вне
@@ -533,6 +533,10 @@ var sqlMarker = regexp.MustCompile(`(?i)\b(select|insert|update|delete|where|fro
 // sqlTableRe — таблица после FROM/JOIN/INTO/UPDATE/USING и её псевдоним.
 var sqlTableRe = regexp.MustCompile(`(?i)\b(?:from|join|into|update|using)\s+(?:only\s+)?(?:kaname\.)?([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
 
+// sqlCommaTableRe — следующая таблица перечня FROM через запятую (в начале
+// остатка литерала) и её псевдоним.
+var sqlCommaTableRe = regexp.MustCompile(`^\s*,\s*(?:only\s+)?(?:kaname\.)?([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
+
 // sqlNotAlias — слова, которые за таблицей стоят, но псевдонимом не являются.
 var sqlNotAlias = map[string]bool{
 	"where": true, "on": true, "set": true, "using": true, "join": true, "left": true, "right": true,
@@ -604,9 +608,36 @@ func sqlAnalyze(s string) sqlInfo {
 		g := info.groups[m[0]]
 		direct[g] = append(direct[g], table)
 		info.aliases[table] = table
+		end := m[3]
 		if m[4] >= 0 {
 			if alias := s[m[4]:m[5]]; !sqlNotAlias[alias] {
 				info.aliases[alias] = table
+				end = m[5]
+			}
+		}
+		// Перечень таблиц через запятую — только после FROM: после INTO,
+		// UPDATE, USING запятая стоит в списке колонок и присваиваний.
+		if !strings.HasPrefix(strings.ToLower(s[m[0]:]), "from") {
+			continue
+		}
+		for {
+			cm := sqlCommaTableRe.FindStringSubmatchIndex(s[end:])
+			if cm == nil {
+				break
+			}
+			base := end
+			ctable := s[base+cm[2] : base+cm[3]]
+			if sqlNotAlias[ctable] {
+				break
+			}
+			direct[g] = append(direct[g], ctable)
+			info.aliases[ctable] = ctable
+			end = base + cm[3]
+			if cm[4] >= 0 {
+				if alias := s[base+cm[4] : base+cm[5]]; !sqlNotAlias[alias] {
+					info.aliases[alias] = ctable
+					end = base + cm[5]
+				}
 			}
 		}
 	}
