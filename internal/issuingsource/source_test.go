@@ -165,3 +165,22 @@ func TestCensusIsSeededWithZeroes(t *testing.T) {
 		"token/forwarded-from-non-edge": true, "token/edge-without-address": true,
 	}, names)
 }
+
+// TestRegistryTokenPointFollowsTheRuleAndLeavesTheCensusClosed — источник
+// анонимного входа докерной полосы (kaname#928) выводится тем же правилом
+// (пп. 1–3): адрес от края только при проверенном сертификате края, иначе адрес
+// пира. Словарь переписи п. 4 закрыт двумя точками приёмки, и третья точка его
+// не двигает.
+func TestRegistryTokenPointFollowsTheRuleAndLeavesTheCensusClosed(t *testing.T) {
+	r := newRule(t)
+	require.Equal(t, "203.0.113.7", r.RegistryTokenPoint(request(t, edgeSAN, xff("203.0.113.7"))),
+		"край с одним адресом — источник из заголовка")
+	require.Equal(t, peer, r.RegistryTokenPoint(request(t, "", xff("203.0.113.7"))),
+		"заголовок пересылки без сертификата края не меняет ключа")
+	require.Equal(t, peer, r.RegistryTokenPoint(request(t, neighborSAN, xff("203.0.113.7"))),
+		"чужой проверенный сертификат краем не считается")
+	require.Equal(t, peer, r.RegistryTokenPoint(request(t, edgeSAN, xff("203.0.113.7, 198.51.100.1"))),
+		"край без годного адреса делит ключ своего пира")
+	requireCells(t, r, nil)
+	require.Len(t, issuingsource.Cells(), 4)
+}

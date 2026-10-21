@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/lanesigner"
 )
@@ -42,15 +43,23 @@ import (
 const (
 	anonLaneService   = "registry.probe.local"
 	anonLanePrincipal = "registry-anonymous"
+	// anonLanePace — темп анонимной выдачи, которого пробы пары не исчерпают.
+	anonLanePace = "50"
 )
 
 // anonymousLaneFromSettings собирает докерную полосу из НАСТРОЙКИ службы: env →
 // Load → страж старта → переложение корня → сборка. pool — nil для входа без
 // удостоверения (он не доходит до базы), живой — для близнеца с удостоверением.
-func anonymousLaneFromSettings(t *testing.T, principal string, pool *pgxpool.Pool) http.Handler {
+//
+// pace — темп анонимной выдачи на источник (kaname#928) строкой переменной;
+// пусто — переменная не задана.
+func anonymousLaneFromSettings(t *testing.T, principal, pace string, pool *pgxpool.Pool) http.Handler {
 	t.Helper()
 	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE", anonLaneService)
 	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID", principal)
+	if pace != "" {
+		t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC", pace)
+	}
 	cfg, err := config.Load("")
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -61,6 +70,7 @@ func anonymousLaneFromSettings(t *testing.T, principal string, pool *pgxpool.Poo
 	bc, err := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		signer:                 lanesigner.New(t),
 		basicCredentialTimeout: credentialLanePeerTimeout,
+		source:                 issuingsource.New(cfg.AuthN.TrustDomain()),
 	})
 	if err != nil {
 		t.Fatalf("переложение настройки: %v", err)
@@ -76,8 +86,15 @@ func anonymousLaneFromSettings(t *testing.T, principal string, pool *pgxpool.Poo
 // публичного репозитория без `docker login`.
 func anonymousPull(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
+	return anonymousPullFrom(t, h, "192.0.2.1:1234")
+}
+
+// anonymousPullFrom — тот же вход с адреса пира remote.
+func anonymousPullFrom(t *testing.T, h http.Handler, remote string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, registrytokenhttp.TokenPath+
 		"?service="+anonLaneService+"&scope=repository:pub/app:pull", nil)
+	req.RemoteAddr = remote
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -103,7 +120,7 @@ func mintedClaims(t *testing.T, rec *httptest.ResponseRecorder) (jwt.MapClaims, 
 }
 
 func TestAnonymousRegistryToken_DeclaredPrincipalGetsOurReadOnlyToken(t *testing.T) {
-	h := anonymousLaneFromSettings(t, anonLanePrincipal, nil)
+	h := anonymousLaneFromSettings(t, anonLanePrincipal, anonLanePace, nil)
 	rec := anonymousPull(t, h)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("вход без удостоверения при заданной ручке: статус %d, ждали 200; тело %q",
@@ -126,7 +143,7 @@ func TestAnonymousRegistryToken_DeclaredPrincipalGetsOurReadOnlyToken(t *testing
 }
 
 func TestAnonymousRegistryToken_UnsetKnobKeepsTheChallenge(t *testing.T) {
-	h := anonymousLaneFromSettings(t, "", nil)
+	h := anonymousLaneFromSettings(t, "", "", nil)
 	rec := anonymousPull(t, h)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("вход без удостоверения без ручки: статус %d, ждали 401-вызов; тело %q",
@@ -134,5 +151,29 @@ func TestAnonymousRegistryToken_UnsetKnobKeepsTheChallenge(t *testing.T) {
 	}
 	if rec.Header().Get("WWW-Authenticate") == "" {
 		t.Error("401 без вызова на аутентификацию — докер-клиенту некуда идти за входом")
+	}
+}
+
+// TestAnonymousRegistryToken_PaceFromSettingsRefusesBeyondTheLimit — темп
+// анонимной выдачи, объявленный НАСТРОЙКОЙ службы, доезжает до собранной полосы
+// (kaname#928): источник сверх темпа получает 429 со сроком ожидания, другой
+// источник в пределах темпа — токен.
+func TestAnonymousRegistryToken_PaceFromSettingsRefusesBeyondTheLimit(t *testing.T) {
+	h := anonymousLaneFromSettings(t, anonLanePrincipal, "2", nil)
+	for i := range 2 {
+		if rec := anonymousPullFrom(t, h, "192.0.2.10:1234"); rec.Code != http.StatusOK {
+			t.Fatalf("вход %d источника в пределах темпа: статус %d, тело %q", i+1, rec.Code, rec.Body.String())
+		}
+	}
+	rec := anonymousPullFrom(t, h, "192.0.2.10:1234")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("третий вход источника при темпе 2 в секунду из настройки: статус %d, ждали 429; тело %q",
+			rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("отказ по темпу без срока ожидания")
+	}
+	if twin := anonymousPullFrom(t, h, "192.0.2.20:1234"); twin.Code != http.StatusOK {
+		t.Fatalf("другой источник в пределах темпа: статус %d, тело %q", twin.Code, twin.Body.String())
 	}
 }
