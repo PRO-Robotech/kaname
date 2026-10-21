@@ -251,3 +251,44 @@ func TestLedgerWrite_RollsBackWithThePass(t *testing.T) {
 	assert.Zero(t, ledger, "откат прохода: строка реестра пережила транзакцию — запись вне транзакции прохода")
 	assert.Zero(t, facts, "откат прохода: факт остался")
 }
+
+// ── 4. Строка снятия — только кортежам своей координаты ────────────────────
+
+// deletesOn — строк снятия в журнале на объекте.
+func deletesOn(t *testing.T, ctx context.Context, pool *pgxpool.Pool, object string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.fga_outbox WHERE event_type = 'fga.tuple.delete' AND payload ->> 'object' = $1`,
+		object).Scan(&n))
+	return n
+}
+
+// Свёртка оставила бы факт сети по строке её реестра, но строка снятия в журнале —
+// это намерение «снять» для всякого потребителя журнала, а не только для свёртки:
+// снятие члена инстанса не вправе писать её кортежам сети с тем же id. Близнец —
+// строки снятия инстанса появились.
+func assertNoDeleteForTheOtherCoordinate(t *testing.T, pass func(p *suffixProbe) error, why string) {
+	t.Helper()
+	p := newSuffixProbe(t, "e933d"+why[:2], "iRace")
+	ctx := context.Background()
+	netBefore := deletesOn(t, ctx, p.pool, "vpc_network:iRace")
+	instBefore := deletesOn(t, ctx, p.pool, "compute_instance:iRace")
+	require.NoError(t, pass(p))
+	assert.Greater(t, deletesOn(t, ctx, p.pool, "compute_instance:iRace"), instBefore,
+		"%s: БЛИЗНЕЦ: строки снятия инстанса записаны", why)
+	assert.Equal(t, netBefore, deletesOn(t, ctx, p.pool, "vpc_network:iRace"),
+		"%s: снятие члена инстанса записало строку снятия кортежам ЧУЖОЙ координаты (сеть с тем же id)", why)
+}
+
+func TestLedgerCoordinate_ObjectPassWritesNoDeleteForTheOtherCoordinate(t *testing.T) {
+	assertNoDeleteForTheOtherCoordinate(t, func(p *suffixProbe) error {
+		return p.b.ReconcileObject(context.Background(), "compute.instance", "iRace")
+	}, "op проход по объекту")
+}
+
+func TestLedgerCoordinate_FullPassWritesNoDeleteForTheOtherCoordinate(t *testing.T) {
+	assertNoDeleteForTheOtherCoordinate(t, func(p *suffixProbe) error {
+		return p.b.ReconcileBinding(context.Background(), p.bid)
+	}, "fp полный проход")
+}
