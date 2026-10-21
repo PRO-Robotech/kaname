@@ -28,6 +28,8 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
 
 // registryProxyPeer — адрес пода прокси реестра: пир соединения у всех
@@ -93,6 +95,59 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerDoesNotChangeTheKey
 			}
 			if code := pullVia(t, h, peer.san, peer.verified, "203.0.113.2"); code != http.StatusTooManyRequests {
 				t.Fatalf("заголовок недоверенного пира сменил ключ темпа: статус %d, ждали 429", code)
+			}
+		})
+	}
+}
+
+// registryTokenFallbackRow — строка ряда переписи точки анонимной выдачи на
+// витрине реестра reg.
+func registryTokenFallbackRow(t *testing.T, reg *metrics.Registry) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	reg.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	prefix := metrics.RegistryTokenSourceFallbacksMetric + `{reason="forwarded-from-unrecognized-peer"} `
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	t.Fatalf("на витрине нет ряда %q", prefix)
+	return ""
+}
+
+// Пересылка от пира, который не доверенный пересыльщик, ВИДНА оператору: ряд
+// переписи точки на витрине растёт на каждый такой вход. Без него неверно
+// названный пересыльщик (все клиенты за прокси реестра делят один темп)
+// неотличим от залпа одного клиента: оба дают только рост
+// `anonymous_pace_exceeded`. Близнец — те же входы от доверенного
+// пересыльщика: ряд остаётся нулём. Полоса и витрина собраны переходниками
+// корня, теми же, что провязывает serve.go.
+func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerIsCountedOnTheShowcase(t *testing.T) {
+	for name, tc := range map[string]struct {
+		san      string
+		verified bool
+		want     string
+	}{
+		"сосед с заголовком":              {"spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc", true, "2"},
+		"другое пространство имён":        {"spiffe://kacho.cloud/ns/other/sa/kacho-registry", true, "2"},
+		"близнец: доверенный пересыльщик": {anonLaneForwarderSAN, true, "0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain))
+			reg := metrics.NewRegistry()
+			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
+			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)
+			if row := registryTokenFallbackRow(t, reg); !strings.HasSuffix(row, " 0") {
+				t.Fatalf("до первого входа ряд не ноль: %q", row)
+			}
+			for _, client := range []string{"203.0.113.1", "203.0.113.2"} {
+				if code := pullVia(t, h, tc.san, tc.verified, client); code != http.StatusOK {
+					t.Fatalf("вход клиента %s: статус %d", client, code)
+				}
+			}
+			if row := registryTokenFallbackRow(t, reg); !strings.HasSuffix(row, " "+tc.want) {
+				t.Fatalf("ряд после двух входов: %q, ждали значение %s", row, tc.want)
 			}
 		})
 	}

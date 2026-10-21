@@ -18,6 +18,9 @@
 //     `X-Forwarded-For`, `Forwarded` и `X-Real-IP` не читаются.
 //  4. Каждый случай п.3, где заголовок был и не прочитан или край адреса не
 //     дал, считается в закрытом словаре клеток ([Cells]), засеянном нулями.
+//     Точка анонимной выдачи считается в СВОЁМ закрытом словаре
+//     ([RegistryTokenReasons]): заголовок пересылки у пира, который ни край, ни
+//     объявленный пересыльщик (kaname#930).
 //
 // Край узнаётся тем же признаком, что у полосы входа и яруса gateway-only:
 // короткое имя службы из SAN проверенного сертификата
@@ -89,21 +92,48 @@ func Cells() []Cell {
 	return out
 }
 
+// RegistryTokenReason — почему на точке анонимной выдачи докерной полосы
+// источником стал адрес пира, хотя заголовок пересылки был (kaname#930).
+type RegistryTokenReason string
+
+// Причины точки анонимной выдачи. Словарь ЗАКРЫТ и отделён от словаря п. 4
+// точек приёмки ([Cells]).
+const (
+	// RegistryTokenReasonForwardedFromUnrecognizedPeer — заголовок пересылки у
+	// пира, который ни край, ни объявленный пересыльщик точки: сертификата нет,
+	// цепочка не проверена либо идентификатор не равен объявленному. На посадке
+	// с верно названным пересыльщиком такой пир к точке не ходит, и рост клетки
+	// — признак того, что пересыльщик назван не тем идентификатором и все
+	// клиенты за прокси реестра делят один ключ темпа.
+	RegistryTokenReasonForwardedFromUnrecognizedPeer RegistryTokenReason = "forwarded-from-unrecognized-peer"
+)
+
+// RegistryTokenReasons — закрытый словарь переписи точки анонимной выдачи,
+// КОПИЕЙ.
+func RegistryTokenReasons() []RegistryTokenReason {
+	return []RegistryTokenReason{RegistryTokenReasonForwardedFromUnrecognizedPeer}
+}
+
 // Rule — правило и его перепись.
 type Rule struct {
 	trust grpcsrv.TrustDomain
 
-	mu     sync.Mutex
-	counts map[Cell]uint64
+	mu       sync.Mutex
+	counts   map[Cell]uint64
+	registry map[RegistryTokenReason]uint64
 }
 
 // New собирает правило над доменом доверия процесса. Перепись засеяна нулём по
 // каждой клетке: клетка, появляющаяся при первом попадании, не отличает «ноль
 // случаев» от «счёта нет».
 func New(trust grpcsrv.TrustDomain) *Rule {
-	r := &Rule{trust: trust, counts: make(map[Cell]uint64, 4)}
+	r := &Rule{trust: trust, counts: make(map[Cell]uint64, 4),
+		registry: make(map[RegistryTokenReason]uint64, len(RegistryTokenReasons()))}
 	for _, c := range Cells() {
 		r.counts[c] = 0
+	}
+	for _, reason := range RegistryTokenReasons() {
+		r.registry[reason] = 0
 	}
 	return r
 }
@@ -188,6 +218,18 @@ func (r *Rule) Read() map[Cell]uint64 {
 	defer r.mu.Unlock()
 	out := make(map[Cell]uint64, len(r.counts))
 	for k, v := range r.counts {
+		out[k] = v
+	}
+	return out
+}
+
+// ReadRegistryTokenPoint — снимок переписи точки анонимной выдачи. Читается
+// сборщиком метрик.
+func (r *Rule) ReadRegistryTokenPoint() map[RegistryTokenReason]uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[RegistryTokenReason]uint64, len(r.registry))
+	for k, v := range r.registry {
 		out[k] = v
 	}
 	return out

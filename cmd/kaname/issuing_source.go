@@ -76,3 +76,28 @@ func issuingSourceFallbackReader(rule *issuingsource.Rule) func() map[metrics.Is
 		return out
 	}
 }
+
+// registryTokenSourceFallbackReasons — причины переписи точки анонимной
+// выдачи строками меток витрины, выведенные из закрытого словаря правила
+// (kaname#930).
+func registryTokenSourceFallbackReasons() []string {
+	reasons := issuingsource.RegistryTokenReasons()
+	out := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		out = append(out, string(reason))
+	}
+	return out
+}
+
+// registryTokenSourceFallbackReader — переходник от переписи точки анонимной
+// выдачи к читателю величин.
+func registryTokenSourceFallbackReader(rule *issuingsource.Rule) func() map[string]uint64 {
+	return func() map[string]uint64 {
+		read := rule.ReadRegistryTokenPoint()
+		out := make(map[string]uint64, len(read))
+		for reason, v := range read {
+			out[string(reason)] = v
+		}
+		return out
+	}
+}

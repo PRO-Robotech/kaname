@@ -1277,6 +1277,10 @@ func runServe(cfg config.Config) error {
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
+		// Перепись точки анонимной выдачи правила адреса источника — вплотную
+		// к сборке полосы (kaname#930): рост её клетки отличает неверно
+		// названного пересыльщика от залпа одного клиента.
+		metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))
 		// Токен-эндпоинт платформы (задача kacho#898) монтируется на ЭТУ ЖЕ
 		// поверхность, а не заводит свою. Вид выдачи «учётные данные клиента»
 		// задан формой запроса, а не нашим выбором порта; второй внешний

@@ -59,6 +59,13 @@ const (
 // пусто — переменная не задана.
 func anonymousLaneFromSettings(t *testing.T, principal, pace string, pool *pgxpool.Pool) http.Handler {
 	t.Helper()
+	return anonymousLaneWithSourceRule(t, principal, pace, pool, nil)
+}
+
+// anonymousLaneWithSourceRule — та же сборка с правилом адреса источника
+// rule; nil — правило над доменом доверия настройки.
+func anonymousLaneWithSourceRule(t *testing.T, principal, pace string, pool *pgxpool.Pool, rule *issuingsource.Rule) http.Handler {
+	t.Helper()
 	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE", anonLaneService)
 	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID", principal)
 	if pace != "" {
@@ -75,10 +82,13 @@ func anonymousLaneFromSettings(t *testing.T, principal, pace string, pool *pgxpo
 	if err := cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken, cfg.AuthN.TrustDomain()); err != nil {
 		t.Fatalf("страж старта отверг настройку пробы: %v", err)
 	}
+	if rule == nil {
+		rule = issuingsource.New(cfg.AuthN.TrustDomain())
+	}
 	bc, err := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		signer:                 lanesigner.New(t),
 		basicCredentialTimeout: credentialLanePeerTimeout,
-		source:                 issuingsource.New(cfg.AuthN.TrustDomain()),
+		source:                 rule,
 	})
 	if err != nil {
 		t.Fatalf("переложение настройки: %v", err)
