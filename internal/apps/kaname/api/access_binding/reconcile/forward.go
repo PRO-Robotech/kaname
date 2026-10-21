@@ -574,10 +574,10 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 	// in the pass collector, whose surviving consumer is the deletion subtraction. Per-pass
 	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
 	w.fresh = append(w.fresh, col.collectNew(dm.Tuples)...)
-	// Co-commit the emitted member-tuple into the ledger under the member's coordinate —
-	// the symmetric revoke + Role.Update reconcile both rest on it (ban #10). The INSERT
-	// is `ON CONFLICT (<полный ключ>) DO NOTHING` (idempotent — a re-emit /
-	// async-full-backstop overlap writes nothing twice).
+	// Кортежи члена ложатся в реестр под его координатой той же транзакцией: на реестре
+	// стоят симметричное снятие и сверка Role.Update (ban #10). Вставка — `ON CONFLICT
+	// (<полный ключ>) DO NOTHING`: повтор форварда и наложение асинхронного полного
+	// прохода ничего не пишут дважды.
 	for _, t := range dm.Tuples {
 		w.ledger = append(w.ledger, EmittedTupleRef{BindingID: bs.BindingID, Member: desiredCoord(dm), Tuple: t})
 	}
