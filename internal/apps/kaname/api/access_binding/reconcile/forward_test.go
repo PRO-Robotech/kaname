@@ -218,10 +218,10 @@ func TestReconcileObjectForward_IAMDirect_ReRegister_DelegatesToFull_DeleteStale
 		current: []domain.TargetMember{
 			{BindingID: "acb-1", RuleFP: fp, ObjectType: "iam.project", ObjectID: "p-flip", VerificationStatus: domain.VerificationActive},
 		},
-		ledger: []domain.MembershipTuple{
-			{User: "user:usr-1", Relation: "v_get", Object: "project:p-flip"},
-			{User: "user:usr-1", Relation: "viewer", Object: "project:p-flip"},
-		},
+		ledger: memberLedger("iam.project",
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "project:p-flip"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "project:p-flip"},
+		),
 		// BindingsForObject non-empty ⇒ the discriminator routes to the FULL path.
 		bindingsForObject: []domain.AccessBindingID{"acb-1"},
 	}
@@ -350,10 +350,10 @@ func TestReconcileObjectForward_ReRegister_DelegatesToFull_DeleteStale(t *testin
 		current: []domain.TargetMember{
 			{BindingID: "acb-1", RuleFP: fp, ObjectType: "compute.instance", ObjectID: "i-flip", VerificationStatus: domain.VerificationActive},
 		},
-		ledger: []domain.MembershipTuple{
-			{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-flip"},
-			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
-		},
+		ledger: memberLedger("compute.instance",
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-flip"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
+		),
 		// BindingsForObject non-empty ⇒ the discriminator routes to the FULL path.
 		bindingsForObject: []domain.AccessBindingID{"acb-1"},
 	}

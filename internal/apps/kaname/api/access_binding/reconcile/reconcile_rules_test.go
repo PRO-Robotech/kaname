@@ -18,6 +18,7 @@ package reconcile
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,13 +50,13 @@ type fakeStore struct {
 	deletes       []string // memberKey of deleted members
 	writes        [][]domain.MembershipTuple
 	tdeletes      [][]domain.MembershipTuple
-	recorded      [][]domain.MembershipTuple
-	forgotten     [][]domain.MembershipTuple
-	audits        []string                 // objectID audited
-	ledger        []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
-	locks         int                      // AcquireBindingLock (EXCLUSIVE) call count
-	keyShareLoads int                      // выдач, прочитанных без advisory-блокировки (форвард)
-	batchLoads    int                      // ОБРАЩЕНИЙ пакетного чтения (не выдач) — веер за фикс. число обращений
+	recorded      [][]LedgerRow
+	forgotten     [][]LedgerRow
+	audits        []string    // objectID audited
+	ledger        []LedgerRow // pre-seeded emitted-tuple ledger (revoke source)
+	locks         int         // AcquireBindingLock (EXCLUSIVE) call count
+	keyShareLoads int         // выдач, прочитанных без advisory-блокировки (форвард)
+	batchLoads    int         // ОБРАЩЕНИЙ пакетного чтения (не выдач) — веер за фикс. число обращений
 
 	// Producer-cost counters. An object-triggered pass must recompute ONLY the changed
 	// object, so the whole-scope candidate scan (MatchAllInScope*) and the whole-binding
@@ -332,33 +333,76 @@ func (f *fakeStore) DeleteMember(ctx context.Context, id domain.AccessBindingID,
 	f.deletes = append(f.deletes, memberKey(ot, oid))
 	return nil
 }
-func (f *fakeStore) LedgerTuplesForObject(ctx context.Context, id domain.AccessBindingID, object string) ([]domain.MembershipTuple, error) {
-	// The fake ledger = pre-seeded rows + anything recorded this pass.
+
+// LedgerTuplesForMember — строки реестра одной координаты: засеянное плюс записанное
+// проходом минус забытое им (тем же ключом, что у реестра базы).
+func (f *fakeStore) LedgerTuplesForMember(ctx context.Context, id domain.AccessBindingID, member MemberCoord) ([]domain.MembershipTuple, error) {
 	var out []domain.MembershipTuple
-	for _, t := range f.ledger {
-		if t.Object == object {
-			out = append(out, t)
-		}
-	}
-	for _, batch := range f.recorded {
-		for _, t := range batch {
-			if t.Object == object {
-				out = append(out, t)
-			}
+	for _, r := range f.ledgerNow() {
+		if r.Member == member {
+			out = append(out, r.Tuple)
 		}
 	}
 	return out, nil
 }
 
-// LedgerTuples — весь реестр выдачи: засеянное плюс записанное проходом (той же
-// формой, что LedgerTuplesForObject).
-func (f *fakeStore) LedgerTuples(ctx context.Context, id domain.AccessBindingID) ([]domain.MembershipTuple, error) {
+// LedgerTuples — весь реестр выдачи: засеянное плюс записанное проходом минус
+// забытое им.
+func (f *fakeStore) LedgerTuples(ctx context.Context, id domain.AccessBindingID) ([]LedgerRow, error) {
 	f.ledgerReads++
-	out := append([]domain.MembershipTuple(nil), f.ledger...)
-	for _, batch := range f.recorded {
-		out = append(out, batch...)
+	return f.ledgerNow(), nil
+}
+
+// ledgerNow — реестр двойника сейчас, по ключу (координата, кортеж) без дублей.
+func (f *fakeStore) ledgerNow() []LedgerRow {
+	gone := make(map[LedgerRow]struct{})
+	for _, b := range f.forgotten {
+		for _, r := range b {
+			gone[r] = struct{}{}
+		}
 	}
-	return out, nil
+	seen := make(map[LedgerRow]struct{})
+	var out []LedgerRow
+	add := func(rs []LedgerRow) {
+		for _, r := range rs {
+			if _, g := gone[r]; g {
+				continue
+			}
+			if _, dup := seen[r]; dup {
+				continue
+			}
+			seen[r] = struct{}{}
+			out = append(out, r)
+		}
+	}
+	add(f.ledger)
+	for _, b := range f.recorded {
+		add(b)
+	}
+	return out
+}
+
+// memberLedger — строки реестра члена типа `ot`: идентификатор члена — часть объекта
+// кортежа после первого `:`, как его держит проверка базы
+// `access_binding_emitted_tuples_member_coordinate`.
+func memberLedger(ot string, ts ...domain.MembershipTuple) []LedgerRow {
+	out := make([]LedgerRow, 0, len(ts))
+	for _, t := range ts {
+		_, id, _ := strings.Cut(t.Object, ":")
+		out = append(out, LedgerRow{Member: MemberCoord{ObjectType: ot, ObjectID: id}, Tuple: t})
+	}
+	return out
+}
+
+// ledgerTuples — кортежи строк реестра.
+func ledgerTuples(batches ...[]LedgerRow) []domain.MembershipTuple {
+	var out []domain.MembershipTuple
+	for _, b := range batches {
+		for _, r := range b {
+			out = append(out, r.Tuple)
+		}
+	}
+	return out
 }
 
 func (f *fakeStore) EmitTupleWrite(ctx context.Context, ts []domain.MembershipTuple) error {
@@ -371,9 +415,13 @@ func (f *fakeStore) EmitTupleDelete(ctx context.Context, ts []domain.MembershipT
 	f.tdeletes = append(f.tdeletes, ts)
 	return nil
 }
-func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {
+func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBindingID, member MemberCoord, ts []domain.MembershipTuple) error {
 	f.note()
-	f.recorded = append(f.recorded, ts)
+	rows := make([]LedgerRow, 0, len(ts))
+	for _, t := range ts {
+		rows = append(rows, LedgerRow{Member: member, Tuple: t})
+	}
+	f.recorded = append(f.recorded, rows)
 	return nil
 }
 
@@ -393,22 +441,22 @@ func (f *fakeStore) RecordEmittedTuplesBatch(ctx context.Context, refs []Emitted
 		return nil
 	}
 	f.note()
-	byBinding := make(map[domain.AccessBindingID][]domain.MembershipTuple, 1)
+	byBinding := make(map[domain.AccessBindingID][]LedgerRow, 1)
 	order := make([]domain.AccessBindingID, 0, 1)
 	for _, ref := range refs {
 		if _, ok := byBinding[ref.BindingID]; !ok {
 			order = append(order, ref.BindingID)
 		}
-		byBinding[ref.BindingID] = append(byBinding[ref.BindingID], ref.Tuple)
+		byBinding[ref.BindingID] = append(byBinding[ref.BindingID], LedgerRow{Member: ref.Member, Tuple: ref.Tuple})
 	}
 	for _, b := range order {
 		f.recorded = append(f.recorded, byBinding[b])
 	}
 	return nil
 }
-func (f *fakeStore) ForgetEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {
+func (f *fakeStore) ForgetEmittedTuples(ctx context.Context, id domain.AccessBindingID, rows []LedgerRow) error {
 	f.note()
-	f.forgotten = append(f.forgotten, ts)
+	f.forgotten = append(f.forgotten, rows)
 	return nil
 }
 func (f *fakeStore) EmitContainmentAudit(ctx context.Context, id domain.AccessBindingID, ot, oid string, s domain.ScopeAnchor) error {
@@ -565,12 +613,12 @@ func TestReconcileRules_RuleRemoved_EagerRevokeByRuleFP(t *testing.T) {
 		},
 		// The emitted-tuple ledger holds what was emitted for each member (the
 		// revoke source for a fell-out role.rules member whose rule verbs are gone).
-		ledger: []domain.MembershipTuple{
-			{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-a"},
-			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-a"},
-			{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-b"},
-			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-b"},
-		},
+		ledger: memberLedger("compute.instance",
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-a"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-a"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-b"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-b"},
+		),
 	}
 	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
@@ -615,10 +663,10 @@ func TestReconcileRules_ActiveToRejected_RevokesViaLedger(t *testing.T) {
 			{BindingID: "acb-1", RuleFP: fp, ObjectType: "compute.instance", ObjectID: "i-moved", VerificationStatus: domain.VerificationActive},
 		},
 		// ledger holds the previously-emitted tuple for i-moved (the revoke source).
-		ledger: []domain.MembershipTuple{
-			{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-moved"},
-			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-moved"},
-		},
+		ledger: memberLedger("compute.instance",
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-moved"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-moved"},
+		),
 	}
 	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))

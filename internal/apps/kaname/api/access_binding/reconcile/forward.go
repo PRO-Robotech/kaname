@@ -38,7 +38,7 @@ package reconcile
 //   - The forward path is ADDITIVE: it only WRITES the one new object's ACTIVE member +
 //     tuples and NEVER deletes anything. Two forward passes for DIFFERENT objects (R1,
 //     R2) of the SAME binding touch DISJOINT rows (member keyed by object, fga_outbox
-//     append-only, ledger keyed by (binding,user,relation,object)) → they do not
+//     append-only, ledger keyed by (binding,member,user,relation,object)) → they do not
 //     conflict → they need no mutual serialization. So forward does NOT take the
 //     EXCLUSIVE lock; N registrations proceed CONCURRENTLY (the fix).
 //   - Idempotency (forward re-run, or forward + the async full backstop both emitting
@@ -574,12 +574,12 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 	// in the pass collector, whose surviving consumer is the deletion subtraction. Per-pass
 	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
 	w.fresh = append(w.fresh, col.collectNew(dm.Tuples)...)
-	// Co-commit the emitted member-tuple into the ledger — the symmetric revoke +
-	// Role.Update reconcile both rest on it (ban #10). The INSERT is
-	// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'`
-	// (idempotent — a re-emit / async-full-backstop overlap re-tags at most, never dups).
+	// Co-commit the emitted member-tuple into the ledger under the member's coordinate —
+	// the symmetric revoke + Role.Update reconcile both rest on it (ban #10). The INSERT
+	// is `ON CONFLICT (<полный ключ>) DO NOTHING` (idempotent — a re-emit /
+	// async-full-backstop overlap writes nothing twice).
 	for _, t := range dm.Tuples {
-		w.ledger = append(w.ledger, EmittedTupleRef{BindingID: bs.BindingID, Tuple: t})
+		w.ledger = append(w.ledger, EmittedTupleRef{BindingID: bs.BindingID, Member: desiredCoord(dm), Tuple: t})
 	}
 	return nil
 }

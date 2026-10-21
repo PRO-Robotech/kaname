@@ -183,7 +183,7 @@ func TestExpireFromLedger_MultiSubject_ReplicaWithoutTheTypeRevokesEverySubject(
 var errLedgerProbe = errors.New("ledger read refused by probe")
 
 // failingLedgerTx — настоящий исполнитель транзакций, чьё хранилище отказывает в
-// чтении реестра: целиком (whole) либо по объекту (perObject).
+// чтении реестра: целиком (whole) либо по координате члена (perObject).
 type failingLedgerTx struct {
 	inner     *kanamepg.ReconcileAdapter
 	whole     bool
@@ -201,18 +201,18 @@ type failingLedgerStore struct {
 	f *failingLedgerTx
 }
 
-func (s *failingLedgerStore) LedgerTuples(ctx context.Context, bid domain.AccessBindingID) ([]domain.MembershipTuple, error) {
+func (s *failingLedgerStore) LedgerTuples(ctx context.Context, bid domain.AccessBindingID) ([]reconcile.LedgerRow, error) {
 	if s.f.whole {
 		return nil, errLedgerProbe
 	}
 	return s.ReconcileStore.LedgerTuples(ctx, bid)
 }
 
-func (s *failingLedgerStore) LedgerTuplesForObject(ctx context.Context, bid domain.AccessBindingID, object string) ([]domain.MembershipTuple, error) {
+func (s *failingLedgerStore) LedgerTuplesForMember(ctx context.Context, bid domain.AccessBindingID, member reconcile.MemberCoord) ([]domain.MembershipTuple, error) {
 	if s.f.perObject {
 		return nil, errLedgerProbe
 	}
-	return s.ReconcileStore.LedgerTuplesForObject(ctx, bid, object)
+	return s.ReconcileStore.LedgerTuplesForMember(ctx, bid, member)
 }
 
 // assertUntouched — проход откатился: выдача действующая, член ACTIVE, реестр и факт
@@ -244,7 +244,9 @@ func TestLedgerReadError_ExpiryRollsBack(t *testing.T) {
 func TestLedgerReadError_FellOutOnReplicaWithoutTheTypeRollsBack(t *testing.T) {
 	p := newLedgerProbe(t, "e933fe", false)
 	adapter := kanamepg.NewReconcileAdapter(p.pool, catalogfixture.Source())
-	r := reconcile.New(&failingLedgerTx{inner: adapter, whole: true}, nil, catalogWithout(t, ledgerProbeType, false))
+	// Отказывают ОБА чтения реестра: член снимается чтением своей координаты, и проба
+	// не вправе зависеть от того, каким из двух чтений путь берёт набор снятия.
+	r := reconcile.New(&failingLedgerTx{inner: adapter, whole: true, perObject: true}, nil, catalogWithout(t, ledgerProbeType, false))
 	err := r.ReconcileBinding(context.Background(), p.bid)
 	require.ErrorIs(t, err, errLedgerProbe, "выпадение члена обязано вернуть ошибку чтения реестра")
 	p.assertUntouched(t, "выпадение члена с отказом чтения реестра")

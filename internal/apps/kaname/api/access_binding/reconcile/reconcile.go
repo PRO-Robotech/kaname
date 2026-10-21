@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -99,12 +98,44 @@ type DesiredMember struct {
 	Tuples     []domain.MembershipTuple
 }
 
-// EmittedTupleRef — одна запись реестра выданных кортежей вместе с выдачей, которая её
-// породила. Нужна затем, чтобы весь веер прохода записывался ОДНИМ обращением: реестр
-// ключуется по (выдача, субъект, отношение, объект), поэтому идентификатор выдачи обязан
-// ехать вместе с кортежем, а не быть общим параметром вызова.
+// MemberCoord — координата члена выдачи, выпустившего строку реестра: точечное имя
+// типа и идентификатор объекта (`access_binding_target_members.object_type`,
+// `.object_id`). Строка реестра отвечает ровно за свою координату, и снятие члена
+// выбирает строки по ней, а не разбором объекта кортежа: суффикс `:<id>` у объектов
+// разных типов одной выдачи совпадает, а имя типа модели из снимка каталога процесса
+// у реплики бывает не тем, что было при выдаче (kaname#933). Нулевая координата —
+// строка уровня выдачи (`source='binding'`), у неё члена нет.
+type MemberCoord struct {
+	ObjectType string
+	ObjectID   string
+}
+
+// coordOf — координата материализованного члена.
+func coordOf(m domain.TargetMember) MemberCoord {
+	return MemberCoord{ObjectType: m.ObjectType, ObjectID: m.ObjectID}
+}
+
+// desiredCoord — координата желаемого члена.
+func desiredCoord(d DesiredMember) MemberCoord {
+	return MemberCoord{ObjectType: d.ObjectType, ObjectID: d.ObjectID}
+}
+
+// LedgerRow — строка реестра выпущенного: координата члена и кортеж. Ключ реестра —
+// (выдача, координата, кортеж): один кортеж от двух координат одной выдачи — две
+// строки, и уход одной координаты не забирает строку другой.
+type LedgerRow struct {
+	Member MemberCoord
+	Tuple  domain.MembershipTuple
+}
+
+// EmittedTupleRef — одна запись реестра выданных кортежей вместе с выдачей и членом,
+// которые её породили. Нужна затем, чтобы весь веер прохода записывался ОДНИМ
+// обращением: реестр ключуется по (выдача, координата члена, субъект, отношение,
+// объект), поэтому выдача и координата обязаны ехать вместе с кортежем, а не быть
+// общими параметрами вызова.
 type EmittedTupleRef struct {
 	BindingID domain.AccessBindingID
+	Member    MemberCoord
 	Tuple     domain.MembershipTuple
 }
 
@@ -300,18 +331,19 @@ type ReconcileStore interface {
 	UpsertMember(ctx context.Context, m domain.TargetMember) error
 	DeleteMember(ctx context.Context, bindingID domain.AccessBindingID, ruleFP, objectType, objectID string) error
 
-	// LedgerTuplesForObject reads the recorded emitted tuples for one object of a
-	// binding (access_binding_emitted_tuples WHERE binding_id=… AND object=…). Used
-	// to eager-revoke a role.rules member whose rule was removed: the rule's verbs
-	// are gone so the tuples cannot be re-derived — they are revoked from the SAVED
-	// ledger set (revoke the saved tuple-set, do not re-derive).
-	LedgerTuplesForObject(ctx context.Context, bindingID domain.AccessBindingID, object string) ([]domain.MembershipTuple, error)
+	// LedgerTuplesForMember — строки реестра, выпущенные ОДНИМ членом выдачи
+	// (access_binding_emitted_tuples WHERE binding_id=… AND координата=…), по префиксу
+	// первичного ключа. Источник снятия члена: глаголы снятого правила ушли, и кортежи
+	// не вывести заново — снимается СОХРАНЁННЫЙ набор. Каталог процесса не читается:
+	// координата — та же, что у строки члена (kaname#933).
+	LedgerTuplesForMember(ctx context.Context, bindingID domain.AccessBindingID, member MemberCoord) ([]domain.MembershipTuple, error)
 
-	// LedgerTuples — весь реестр выпущенного одной выдачей
-	// (access_binding_emitted_tuples WHERE binding_id=…), одним обращением. Читает
-	// его полный проход, чтобы довести неизменного члена выдачи нескольким
-	// субъектам до полного набора кортежей (emitted_completion.go, kaname#880).
-	LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.MembershipTuple, error)
+	// LedgerTuples — весь реестр выпущенного одной выдачей с координатами строк
+	// (access_binding_emitted_tuples WHERE binding_id=…), одним обращением. Читает его
+	// полный проход, чтобы довести неизменного члена выдачи нескольким субъектам до
+	// полного набора кортежей (emitted_completion.go, kaname#880), и истечение выдачи,
+	// снимающее весь учтённый набор.
+	LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]LedgerRow, error)
 
 	// EmitTupleWrite / EmitTupleDelete enqueue the per-object FGA tuples (+ the
 	// scope hierarchy parent-pointer is the binding-lifecycle concern handled at
@@ -328,10 +360,11 @@ type ReconcileStore interface {
 	// all_in_scope / resources[] arms' tuples already in the ledger. Without this the
 	// selector member-tuples were emitted to fga_outbox but never recorded, so the
 	// revoke orphaned them and a role tier change never reconciled them.
-	// RecordEmittedTuples is INSERT … ON CONFLICT DO UPDATE SET source='member' (idempotent re-emit);
-	// ForgetEmittedTuples removes exactly the supplied member rows (eager-revoke /
-	// fell-out). A deleted binding's rows are dropped by the FK ON DELETE CASCADE.
-	RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error
+	// RecordEmittedTuples пишет строки ОДНОГО члена — с его координатой, INSERT … ON
+	// CONFLICT DO NOTHING по полному ключу (повтор идемпотентен); ForgetEmittedTuples
+	// снимает ровно названные строки по полному ключу (eager-revoke / fell-out /
+	// expiry). A deleted binding's rows are dropped by the FK ON DELETE CASCADE.
+	RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, member MemberCoord, tuples []domain.MembershipTuple) error
 
 	// UpsertMembers / RecordEmittedTuplesBatch — те же записи, что UpsertMember и
 	// RecordEmittedTuples, но НАБОРОМ и за фиксированное число обращений к базе, каким
@@ -345,7 +378,7 @@ type ReconcileStore interface {
 	// выдача и отзыв одного ключа НЕ коммутативны). Пустой набор — no-op.
 	UpsertMembers(ctx context.Context, members []domain.TargetMember) error
 	RecordEmittedTuplesBatch(ctx context.Context, refs []EmittedTupleRef) error
-	ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error
+	ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, rows []LedgerRow) error
 
 	// EmitContainmentAudit writes the "rejected: not contained in scope" audit
 	// event (not silent) on the tx.
@@ -537,9 +570,10 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 // its own collector, and the revoke in between clears the member row and the ledger.
 //
 // The per-binding LEDGER write is deliberately NOT de-duplicated by this set: the ledger
-// PK is (binding_id, fga_user, relation, object), so two bindings claiming the identical
-// tuple must each keep their OWN row — по нему свёртка строки снятия и узнаёт, что
-// факт ещё держит другая действующая выдача (kaname#919).
+// PK is (binding_id, member coordinate, fga_user, relation, object), so two bindings (и
+// две координаты одной выдачи) claiming the identical tuple must each keep their OWN
+// row — по нему свёртка строки снятия и узнаёт, что факт ещё держит другой держатель
+// (kaname#919, kaname#933).
 //
 // A nil collector (sync-FGA unwired) de-duplicates nothing and returns the input as-is.
 func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.MembershipTuple {
@@ -644,11 +678,14 @@ func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.Acce
 //     change to object X cannot add, remove or re-status a member on object Y. The
 //     desired verdict for X is derived by desiredMemberForObject — the SAME per-object
 //     decision point the full recompute uses — so the two paths stay byte-identical.
-//   - The within-binding survivingClaims subtraction (applyDiff) only ever involves
-//     members that SHARE a ledger row, and the ledger PK is
-//     (binding_id, fga_user, relation, object): a shared row implies the SAME object.
-//     Restricting the desired set to one object therefore computes exactly the same
-//     subtraction the full set would have.
+//   - The within-binding survivingClaims subtraction (applyDiff) that decides which
+//     ledger rows are FORGOTTEN only ever involves members that SHARE a ledger row, and
+//     the ledger PK is (binding_id, member coordinate, fga_user, relation, object): a
+//     shared row implies the SAME coordinate, то есть тот же объект. Restricting the
+//     desired set to one object therefore forgets exactly what the full set would have.
+//     Строку снятия кортежа, который выдача ещё выпускает ДРУГОЙ координатой на том же
+//     объекте движка (тип переименован с сохранением типа модели), сужение не вычитает
+//     — её оставляет свёртка: строка той координаты держит факт (kaname#919).
 //   - Удержание факта, который держит ДРУГАЯ выдача, — дело свёртки журнала: она
 //     спрашивает реестр под замком строки факта (kaname#919) и желаемого набора не
 //     читает вовсе, поэтому сужение до объекта её не касается.
@@ -1009,7 +1046,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		return fmt.Errorf("current members for object %s %s:%s: %w", bindingID, objectType, objectID, err)
 	}
 
-	return r.applyDiff(ctx, s, bs, desired, current, r.objectEmitted(s, bindingID, objectType, objectID), col)
+	return r.applyDiff(ctx, s, bs, desired, current, objectEmitted(s, bindingID, objectType, objectID), col)
 }
 
 // desiredMembersForObject derives the members ONE binding wants ON ONE OBJECT. It is
@@ -1327,19 +1364,16 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	}
 	desiredByKey := make(map[string]struct{}, len(desired))
 
-	// survivingClaims — the set of FGA tuples STILL claimed by a desired ACTIVE member
-	// after this pass (dual-member-same-object). The ledger PK is
-	// (binding_id, fga_user, relation, object) WITHOUT rule_fp, so two desired members
-	// of the SAME binding that target the IDENTICAL object with IDENTICAL tuples (e.g.
-	// the owner scope-self member + the wildcard-expanded iam.account content member,
-	// or two ARM_LABELS rules matching the same object with the same verbs) share ONE
-	// ledger row. When ONE member falls out, the eager-revoke reads that shared row
-	// (LedgerTuplesForObject keys only by binding+object) and would strip the SURVIVING
-	// member's access. revokeMemberTuples subtracts this set so a shared tuple is
-	// revoked ONLY once the LAST owning member is gone. Built from the FULL desired set
-	// computed under the per-binding advisory lock (no concurrent pass of this binding),
-	// so it is race-free.
-	survivingClaims := desiredActiveTupleSet(desired)
+	// survivingClaims — кортежи, на которые после прохода ещё претендуют желаемые
+	// ACTIVE-члены этой выдачи: целиком и по координате члена. Ключ реестра —
+	// (выдача, координата члена, кортеж) без rule_fp, поэтому два члена ОДНОЙ
+	// координаты (тот же объект под двумя правилами, член `public_reader` со сменой
+	// ключа) делят одну строку: уходящий член забывает только строки, на которые не
+	// претендует выживший член его же координаты. Строку снятия в движок получает
+	// лишь кортеж, на который не претендует ни один выживший член выдачи. Набор
+	// вычислен под advisory-блокировкой выдачи (параллельного прохода этой выдачи
+	// нет), гонки в нём нет.
+	survivingClaims := desiredActiveClaims(desired)
 
 	for _, d := range desired {
 		key := memberRuleKey(d.RuleFP, d.ObjectType, d.ObjectID)
@@ -1386,9 +1420,10 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
 				}
 			}
-			// Co-commit the emitted member-tuple into the ledger — the
-			// symmetric revoke + Role.Update reconcile both rest on it (ban #10).
-			if err := s.RecordEmittedTuples(ctx, bs.BindingID, tuples); err != nil {
+			// Co-commit the emitted member-tuple into the ledger under the member's
+			// coordinate — the symmetric revoke + Role.Update reconcile both rest on it
+			// (ban #10).
+			if err := s.RecordEmittedTuples(ctx, bs.BindingID, desiredCoord(d), tuples); err != nil {
 				return fmt.Errorf("record emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
 			}
 		case domain.VerificationRejected:
@@ -1449,126 +1484,148 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 // revokeMemberTuples eager-revokes the live FGA tuples of a previously-ACTIVE
 // member (ACTIVE→REJECTED/PENDING transition OR a fell-out member) and forgets them
 // from the ledger, in lock-step (ban #10). The revoke set is the member's SAVED
-// tuple-set, read by revokeTuplesFor — NOT re-derived from a possibly-mutated role
-// (a removed rule's verbs are gone, so the only authority is the ledger).
+// tuple-set — строки реестра ЕГО координаты (revokeTuplesFor), NOT re-derived from a
+// possibly-mutated role (a removed rule's verbs are gone, so the only authority is the
+// ledger).
 //
-// survivingClaims is the set of tuples STILL claimed by a desired ACTIVE member after
-// this pass. Because the ledger PK has no rule_fp, two members of the same
-// binding on the SAME object with IDENTICAL tuples share ONE ledger row; revoking the
-// fell-out member must NOT strip a tuple another ACTIVE member of the SAME binding still
-// claims. We forget ONLY the set-difference (member's ledger MINUS survivingClaims) — a
-// shared tuple is revoked exactly when the LAST owning member is gone. survivingClaims is
-// nil/empty when every member is being revoked (e.g. expiry), giving the original
-// behaviour.
+// Множеств два (claims — набор выживших ACTIVE-членов этой выдачи после прохода):
+//   - ЗАБЫТЬ: строки своей координаты минус кортежи, на которые претендует выживший
+//     член ТОЙ ЖЕ координаты, — его строка та же, и забытая она оставила бы его без
+//     записи о выданном;
+//   - СНЯТЬ в движке: свои кортежи минус кортежи ВСЕХ выживших членов выдачи —
+//     кортеж, который выдача ещё выпускает другой координатой, не снимается.
 //
-// The within-binding survivingClaims handles same-binding shared tuples; the FGA
-// tuple-delete itself is DEFERRED into the collector (deferDelete) and emitted at the end
-// of the pass by flushDeletes. Факт, который держит другая действующая выдача того же
-// субъекта, оставляет свёртка строки снятия под замком строки факта (kaname#919) — для
-// этого своя строка ведомости ОБЯЗАНА уйти до строки снятия, иначе выдача держит факт
-// сама: ForgetEmittedTuples стоит здесь, inline, раньше любого flushDeletes.
-func (r *Reconciler) revokeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember, survivingClaims map[domain.MembershipTuple]struct{}, col *syncFGACollector) error {
+// Строка снятия ОТЛОЖЕНА в коллектор (deferDelete) и уходит в конце прохода
+// (flushDeletes). Факт, который держит другая действующая выдача того же субъекта либо
+// строка другой координаты, оставляет свёртка строки снятия под замком строки факта
+// (kaname#919) — для этого своя строка ведомости ОБЯЗАНА уйти до строки снятия, иначе
+// выдача держит факт сама: ForgetEmittedTuples стоит здесь, inline, раньше любого
+// flushDeletes.
+func (r *Reconciler) revokeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember, claims *memberClaims, col *syncFGACollector) error {
+	coord := coordOf(m)
 	tuples, err := r.revokeTuplesFor(ctx, s, bs, m)
 	if err != nil {
 		return err
 	}
-	if len(tuples) == 0 {
-		return nil
-	}
-	// Subtract tuples still claimed by a surviving ACTIVE member of THIS binding.
-	revoke := tuples[:0:0]
+	var forget []LedgerRow
+	var revoke []domain.MembershipTuple
 	for _, t := range tuples {
-		if _, claimed := survivingClaims[t]; claimed {
-			continue // another ACTIVE member of this binding keeps the shared tuple alive.
+		if claims.claimedAt(coord, t) {
+			continue // выживший член той же координаты держит ту же строку.
+		}
+		forget = append(forget, LedgerRow{Member: coord, Tuple: t})
+		if claims.claimed(t) {
+			continue // выдача ещё выпускает кортеж другой координатой.
 		}
 		revoke = append(revoke, t)
 	}
-	if len(revoke) == 0 {
-		return nil // every tuple is still claimed within this binding — nothing to revoke.
+	if len(forget) == 0 {
+		return nil
 	}
-	// Строка снятия — в конец прохода (вычитание записанного тем же проходом).
-	col.deferDelete(bs.BindingID, revoke)
-	// Forget this binding's ledger rows inline (binding-local — this binding no longer
-	// claims the tuple even if a sibling binding does; the sibling keeps its OWN row).
-	if err := s.ForgetEmittedTuples(ctx, bs.BindingID, revoke); err != nil {
+	// Своя строка реестра — раньше строки снятия (kaname#919).
+	if err := s.ForgetEmittedTuples(ctx, bs.BindingID, forget); err != nil {
 		return fmt.Errorf("forget emitted tuple %s/%s:%s: %w", m.RuleFP, m.ObjectType, m.ObjectID, err)
+	}
+	if len(revoke) > 0 {
+		// Строка снятия — в конец прохода (вычитание записанного тем же проходом).
+		col.deferDelete(bs.BindingID, revoke)
 	}
 	return nil
 }
 
-// desiredActiveTupleSet collects, into a set, every FGA tuple that a desired ACTIVE
-// member will (re)emit this pass. It is the "still-claimed" set the
-// eager-revoke subtracts so a tuple shared by two members on the same object is not
-// stripped while one of them is still ACTIVE. Only ACTIVE desired members carry
-// precomputed Tuples (REJECTED/PENDING members carry none), so they are the exact set
-// of live claims after the pass.
-func desiredActiveTupleSet(desired []DesiredMember) map[domain.MembershipTuple]struct{} {
-	out := make(map[domain.MembershipTuple]struct{})
+// memberClaims — кортежи, на которые после прохода претендуют желаемые ACTIVE-члены
+// выдачи: целиком (all) и по координате члена (byCoord). nil — не претендует никто
+// (истечение снимает выдачу целиком).
+type memberClaims struct {
+	all     map[domain.MembershipTuple]struct{}
+	byCoord map[MemberCoord]map[domain.MembershipTuple]struct{}
+}
+
+func (c *memberClaims) claimed(t domain.MembershipTuple) bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.all[t]
+	return ok
+}
+
+func (c *memberClaims) claimedAt(coord MemberCoord, t domain.MembershipTuple) bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.byCoord[coord][t]
+	return ok
+}
+
+// desiredActiveClaims collects every FGA tuple that a desired ACTIVE member will
+// (re)emit this pass — the "still-claimed" sets the eager-revoke subtracts. Only ACTIVE
+// desired members carry precomputed Tuples (REJECTED/PENDING members carry none), so
+// they are the exact set of live claims after the pass.
+func desiredActiveClaims(desired []DesiredMember) *memberClaims {
+	c := &memberClaims{
+		all:     make(map[domain.MembershipTuple]struct{}),
+		byCoord: make(map[MemberCoord]map[domain.MembershipTuple]struct{}),
+	}
 	for _, d := range desired {
 		if d.Status != domain.VerificationActive {
 			continue
 		}
+		coord := desiredCoord(d)
+		at := c.byCoord[coord]
+		if at == nil {
+			at = make(map[domain.MembershipTuple]struct{}, len(d.Tuples))
+			c.byCoord[coord] = at
+		}
 		for _, t := range d.Tuples {
-			out[t] = struct{}{}
+			c.all[t] = struct{}{}
+			at[t] = struct{}{}
 		}
 	}
-	return out
+	return c
 }
 
-// revokeTuplesFor returns the FGA tuples to revoke for a member. The authoritative
-// tuple-set is the SAVED ledger (access_binding_emitted_tuples) — "revoke what was
+// revokeTuplesFor returns the FGA tuples to revoke for a member: the SAVED ledger rows
+// of the member's coordinate (access_binding_emitted_tuples) — "revoke what was
 // actually emitted, do NOT re-derive from the role", because the role may have been
-// mutated out from under the member: a removed/downgraded role.rules rule whose
-// verbs are gone. The ledger is recorded for every member on the ACTIVE
-// transition (applyDiff.RecordEmittedTuples), so it is the uniform revoke source.
-// Empty ledger ⇒ nothing to revoke (the legacy-arm re-derivation fallback is gone;
-// all members are role.rules-driven).
+// mutated out from under the member. Координата — та же, что у строки члена, и снимку
+// каталога процесса здесь нечего решать: член по типу, выпавшему из снимка реплики,
+// снимается тем же чтением, а строки члена ДРУГОГО типа с тем же идентификатором
+// остаются нетронутыми (kaname#933). Empty ledger ⇒ nothing to revoke.
 func (r *Reconciler) revokeTuplesFor(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember) ([]domain.MembershipTuple, error) {
-	// Имя типа модели читается у ЖИВЫХ строк. Промах означает члена по типу, чья строка
-	// снята либо не видна снимку этой реплики: ключ реестра по имени типа не собрать, а
-	// удалить члена, не сняв его кортежей, нельзя — факт пережил бы выдачу (kaname#933).
-	// Тогда набор берётся из реестра выдачи целиком по идентификатору объекта: реестр —
-	// единственный источник того, что выдано, и от каталога не зависит.
-	fgaType, ok := r.cat.Facts().FGAObjectType(m.ObjectType)
-	if !ok {
-		all, err := s.LedgerTuples(ctx, bs.BindingID)
-		if err != nil {
-			return nil, fmt.Errorf("ledger of binding %s for member %s/%s:%s: %w", bs.BindingID, m.RuleFP, m.ObjectType, m.ObjectID, err)
-		}
-		suffix := ":" + m.ObjectID
-		var out []domain.MembershipTuple
-		for _, t := range all {
-			if strings.HasSuffix(t.Object, suffix) {
-				out = append(out, t)
-			}
-		}
-		return out, nil
-	}
-	object := fgaType + ":" + m.ObjectID
-	tuples, err := s.LedgerTuplesForObject(ctx, bs.BindingID, object)
+	tuples, err := s.LedgerTuplesForMember(ctx, bs.BindingID, coordOf(m))
 	if err != nil {
 		// Ошибка чтения реестра не гасится: член удаляется следом, и молча проглоченное
 		// чтение оставило бы его кортежи без владельца. Откат прохода повторит снятие.
-		return nil, fmt.Errorf("ledger read for member revoke %s (%s): %w", object, m.RuleFP, err)
+		return nil, fmt.Errorf("ledger read for member revoke %s/%s:%s: %w", m.RuleFP, m.ObjectType, m.ObjectID, err)
 	}
 	return tuples, nil
 }
 
-// revokeWholeLedger снимает ВЕСЬ учтённый реестром набор выдачи: строки снятия — в
-// коллектор (уходят в конце прохода), записи реестра забываются здесь же, в той же
-// транзакции (ban #10). Набор берётся из реестра, а не из каталога процесса.
+// revokeWholeLedger снимает ВЕСЬ учтённый реестром набор выдачи: строки реестра всех
+// координат забываются здесь же, в той же транзакции (ban #10), строки снятия — в
+// коллектор (уходят в конце прохода), по кортежу один раз. Набор берётся из реестра,
+// а не из каталога процесса.
 func (r *Reconciler) revokeWholeLedger(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, col *syncFGACollector) error {
-	tuples, err := s.LedgerTuples(ctx, bindingID)
+	rows, err := s.LedgerTuples(ctx, bindingID)
 	if err != nil {
 		return fmt.Errorf("read ledger of binding %s: %w", bindingID, err)
 	}
-	if len(tuples) == 0 {
+	if len(rows) == 0 {
 		return nil
 	}
-	col.deferDelete(bindingID, tuples)
-	if err := s.ForgetEmittedTuples(ctx, bindingID, tuples); err != nil {
+	if err := s.ForgetEmittedTuples(ctx, bindingID, rows); err != nil {
 		return fmt.Errorf("forget ledger of binding %s: %w", bindingID, err)
 	}
+	seen := make(map[domain.MembershipTuple]struct{}, len(rows))
+	tuples := make([]domain.MembershipTuple, 0, len(rows))
+	for _, row := range rows {
+		if _, dup := seen[row.Tuple]; dup {
+			continue
+		}
+		seen[row.Tuple] = struct{}{}
+		tuples = append(tuples, row.Tuple)
+	}
+	col.deferDelete(bindingID, tuples)
 	return nil
 }
 
