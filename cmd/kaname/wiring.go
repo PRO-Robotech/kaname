@@ -397,10 +397,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// converging in-process the way the cross-service RegisterResource path does.
 		WithObjectReconciler(rsabReconciler, logger)
 	userDelete := userapp.NewDeleteUserUseCase(kanameRepo, opsRepo)
-	userUpsert := userapp.NewUpsertFromIdentityUseCase(kanameRepo, opsRepo).
-		WithLogger(logger).
-		WithReconciler(rsabReconciler).
-		WithActivationObserver(metricsReg.InviteActivationRecorder())
 	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler).
@@ -431,7 +427,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		userBlock, userUnblock, userRemoveFromAccount).
 		WithResendInvite(userResendInvite).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
-	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet)
+	internalUserHandler := userapp.NewInternalHandler(userGet)
 
 	// ServiceAccountService.
 	saCreate := serviceaccountapp.NewCreateServiceAccountUseCase(kanameRepo, opsRepo).

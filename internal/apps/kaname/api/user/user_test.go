@@ -8,7 +8,7 @@ package user
 // Покрытие:
 //   - Get: invalid id format → InvalidArgument.
 //   - Delete: invalid id format → InvalidArgument.
-//   - UpsertFromIdentity: required external_id; invalid email format.
+//   - BootstrapPersonalResourcesTx: граф заведения со-коммитится в транзакции.
 
 import (
 	"context"
@@ -25,8 +25,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -62,97 +62,6 @@ func TestDeleteUser_Sync_InvalidID(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, st.Code())
 }
 
-func TestUpsertFromIdentity_Sync_RequireExternalID(t *testing.T) {
-	uc := NewUpsertFromIdentityUseCase(newFakeUserRepo(), newFakeOpsRepoUser())
-	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
-		Email: "u@example.com",
-	})
-	require.Error(t, err)
-	assert.Nil(t, op)
-	st, _ := status.FromError(err)
-	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Contains(t, err.Error(), "external_id")
-}
-
-func TestUpsertFromIdentity_Sync_InvalidEmail(t *testing.T) {
-	uc := NewUpsertFromIdentityUseCase(newFakeUserRepo(), newFakeOpsRepoUser())
-	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
-		ExternalID: "ext-1",
-		Email:      "not-an-email",
-	})
-	require.Error(t, err)
-	assert.Nil(t, op)
-	st, _ := status.FromError(err)
-	assert.Equal(t, codes.InvalidArgument, st.Code())
-}
-
-func TestUpsertFromIdentity_Sync_OK_OpReturned(t *testing.T) {
-	repo := newFakeUserRepo()
-	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser())
-	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
-		ExternalID:  "zit-ok",
-		Email:       "ok@example.com",
-		DisplayName: "OK",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, op)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	require.NoError(t, operations.Wait(ctx))
-	assert.Equal(t, 1, repo.upsertCalls(), "upsert called by worker")
-}
-
-// TestUpsertFromIdentity_Metadata_ExistingUserID.
-// Когда по external_id уже есть ACTIVE-row, Operation.metadata.user_id обязан
-// нести id СУЩЕСТВУЮЩЕГО row (а не throwaway ids.NewID()), и created=false.
-func TestUpsertFromIdentity_Metadata_ExistingUserID(t *testing.T) {
-	const existingID = "usr0000000000existng"
-	repo := newFakeUserRepo()
-	repo.existingActive = []domain.User{{
-		ID:           domain.UserID(existingID),
-		ExternalID:   "zit-existing",
-		Email:        "exist@example.com",
-		DisplayName:  "Existing",
-		InviteStatus: domain.InviteStatusActive,
-	}}
-	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser())
-
-	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
-		ExternalID:  "zit-existing",
-		Email:       "exist@example.com",
-		DisplayName: "Existing",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, op)
-
-	meta, err := operations.MetadataFor[*iamv1.UpsertFromIdentityMetadata](op)
-	require.NoError(t, err)
-	assert.Equal(t, existingID, meta.GetUserId(),
-		"metadata.user_id must be the existing row id, not a throwaway id")
-	assert.False(t, meta.GetCreated(), "created=false when user already exists")
-}
-
-// TestUpsertFromIdentity_Metadata_NewUserID (bootstrap-path).
-// Когда identity новая (нет ACTIVE/PENDING-row), metadata.user_id — новый id,
-// created=true, и тот же id используется bootstrap-row'ом.
-func TestUpsertFromIdentity_Metadata_NewUserID(t *testing.T) {
-	repo := newFakeUserRepo() // existingActive nil → bootstrap path
-	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser())
-
-	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
-		ExternalID:  "zit-fresh",
-		Email:       "fresh@example.com",
-		DisplayName: "Fresh",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, op)
-
-	meta, err := operations.MetadataFor[*iamv1.UpsertFromIdentityMetadata](op)
-	require.NoError(t, err)
-	assert.NotEmpty(t, meta.GetUserId())
-	assert.True(t, meta.GetCreated(), "created=true for fresh bootstrap identity")
-}
-
 // ── SEC-L: signup/bootstrap path writes the cluster parent-tuples ───────────
 
 // spyFGA records WriteTuples calls so the test can assert the SEC-L cluster
@@ -175,29 +84,30 @@ func TestUpsertFromIdentity_Metadata_NewUserID(t *testing.T) {
 // молча. Живая половина (намерение со-коммитится в той же транзакции) осталась
 // ниже и по-прежнему падает.
 
-// TestUpsertFromIdentity_SECL_BootstrapEmitsClusterParentTuplesInTx — 1.4-10b
-// (S2-iam): the signup/identity-bootstrap path that provisions a NEW account +
+// TestBootstrapPersonalResources_SECL_EmitsClusterParentTuplesInTx — 1.4-10b
+// (S2-iam): the bootstrap body (`BootstrapPersonalResourcesTx`, the one that
+// serves registration and invite activation) that provisions a NEW account +
 // default project must co-commit the WHOLE bootstrap-graph (owner self-grant +
 // admin self-grants + hierarchy + SEC-L cluster parent-pointer tuples) as
 // fga_outbox INTENTS in the SAME bootstrap-tx — NOT best-effort post-commit
 // through RelationStore.WriteTuples (which lost them on any FGA outage). The
 // owner self-grant is D-4 non-reconstructible, so the in-tx emit is the only
 // guarantee.
-func TestUpsertFromIdentity_SECL_BootstrapEmitsClusterParentTuplesInTx(t *testing.T) {
-	repo := newFakeUserRepo() // existingActive nil → bootstrap path
-	uc := NewUpsertFromIdentityUseCase(repo, newFakeOpsRepoUser())
+func TestBootstrapPersonalResources_SECL_EmitsClusterParentTuplesInTx(t *testing.T) {
+	repo := newFakeUserRepo()
+	ctx := context.Background()
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
 
-	op, err := uc.Execute(context.Background(), UpsertFromIdentityInput{
-		ExternalID:  "zit-bootstrap-secl",
-		Email:       "bootstrap-secl@example.com",
-		DisplayName: "Bootstrap SEC-L",
+	_, err = BootstrapPersonalResourcesTx(ctx, w, BootstrapInput{
+		CandidateUserID: ids.NewID(domain.PrefixUser),
+		ExternalID:      "zit-bootstrap-secl",
+		Email:           "bootstrap-secl@example.com",
+		DisplayName:     "Bootstrap SEC-L",
+		Actor:           "system",
+		NewIdentity:     true,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, op)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	require.NoError(t, operations.Wait(ctx))
 
 	var accountClusterSeen, projectClusterSeen, ownerSeen bool
 	for _, tup := range repo.fgaTuples() {
@@ -225,25 +135,12 @@ func TestUpsertFromIdentity_SECL_BootstrapEmitsClusterParentTuplesInTx(t *testin
 // ── fakes ────────────────────────────────────────────────────────────────
 
 type fakeUserRepo struct {
-	mu          sync.Mutex
-	upsertCount int
-	// existingActive — ACTIVE-row'ы, возвращаемые FindActiveByExternalID
-	// (для проверки resolveUserID).
-	existingActive []domain.User
-	fgaEmitted     []service.RelationTuple
-	fgaDeleted     []service.RelationTuple
-	// activateErr — отказ, который вернёт ActivateInvite. Дублёр обязан уметь
-	// отказывать так же, как настоящий: без этого путь отказа не наблюдаем ничем.
-	activateErr error
+	mu         sync.Mutex
+	fgaEmitted []service.RelationTuple
+	fgaDeleted []service.RelationTuple
 }
 
 func newFakeUserRepo() *fakeUserRepo { return &fakeUserRepo{} }
-
-func (f *fakeUserRepo) upsertCalls() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.upsertCount
-}
 
 // fgaTuples — snapshot of the bootstrap FGA owner-tuple intents emitted in-tx.
 func (f *fakeUserRepo) fgaTuples() []service.RelationTuple {
@@ -416,19 +313,7 @@ func (fakeABW) DeleteSubject(context.Context, domain.AccessBindingID, domain.Sub
 
 type fakeUserUR struct{ parent *fakeUserRepo }
 
-// Get отдаёт засеянную строку, если она есть: путь активации приглашения
-// продолжается в bootstrap уже СУЩЕСТВУЮЩЕЙ строки и загружает её именно так.
-// Дублёр, отказывающий там, где настоящий отвечает, делает целые ветки
-// недостижимыми для проб — оборотная сторона дублёра, принимающего больше
-// настоящего.
-func (r fakeUserUR) Get(_ context.Context, id domain.UserID) (domain.User, error) {
-	if r.parent != nil {
-		for _, u := range r.parent.existingActive {
-			if u.ID == id {
-				return u, nil
-			}
-		}
-	}
+func (fakeUserUR) Get(context.Context, domain.UserID) (domain.User, error) {
 	return domain.User{}, stderrors.New("not stubbed")
 }
 func (fakeUserUR) GetByEmail(context.Context, domain.Email) (domain.User, error) {
@@ -438,68 +323,14 @@ func (fakeUserUR) GetByAccountEmail(context.Context, domain.AccountID, domain.Em
 	return domain.User{}, stderrors.New("not stubbed")
 }
 
-// FindPendingByEmail models the real query: PENDING rows matched by email. A
-// pending invitee carries no external id (the DB CHECK forbids one), so email is
-// the only way it can be found — which is exactly why this branch has to be
-// reachable in tests that seed one.
-func (r fakeUserUR) FindPendingByEmail(_ context.Context, email domain.Email) ([]domain.User, error) {
-	if r.parent == nil {
-		return nil, nil
-	}
-	var out []domain.User
-	for _, u := range r.parent.existingActive {
-		if u.InviteStatus == domain.InviteStatusPending &&
-			strings.EqualFold(string(u.Email), string(email)) {
-			out = append(out, u)
-		}
-	}
-	return out, nil
+func (fakeUserUR) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
+	return nil, nil
 }
-
-// FindActiveByExternalID models the real query, whose WHERE clause is
-// `invite_status = 'ACTIVE'`. The status filter is applied HERE on purpose: a
-// double that returns rows of any state cannot fail on a caller who mistakes
-// "filtered out" for "does not exist", which is exactly the defect this reader
-// has to be able to express.
-func (r fakeUserUR) FindActiveByExternalID(_ context.Context, ext domain.ExternalSubject) ([]domain.User, error) {
-	if r.parent == nil {
-		return nil, nil
-	}
-	var out []domain.User
-	for _, u := range r.parent.existingActive {
-		if u.ExternalID == ext && u.InviteStatus == domain.InviteStatusActive {
-			out = append(out, u)
-		}
-	}
-	return out, nil
+func (fakeUserUR) FindByExternalIDInStatuses(context.Context, domain.ExternalSubject, []domain.InviteStatus) ([]domain.User, error) {
+	return nil, nil
 }
-func (r fakeUserUR) FindByExternalIDInStatuses(_ context.Context, ext domain.ExternalSubject, statuses []domain.InviteStatus) ([]domain.User, error) {
-	if r.parent == nil {
-		return nil, nil
-	}
-	want := map[domain.InviteStatus]bool{}
-	for _, st := range statuses {
-		want[st] = true
-	}
-	var out []domain.User
-	for _, u := range r.parent.existingActive {
-		if u.ExternalID == ext && (len(want) == 0 || want[u.InviteStatus]) {
-			out = append(out, u)
-		}
-	}
-	return out, nil
-}
-func (r fakeUserUR) FindActiveByEmail(_ context.Context, email domain.Email) ([]domain.User, error) {
-	if r.parent == nil {
-		return nil, nil
-	}
-	var out []domain.User
-	for _, u := range r.parent.existingActive {
-		if strings.EqualFold(string(u.Email), string(email)) {
-			out = append(out, u)
-		}
-	}
-	return out, nil
+func (fakeUserUR) FindActiveByEmail(context.Context, domain.Email) ([]domain.User, error) {
+	return nil, nil
 }
 func (fakeUserUR) ListAccountsForUser(context.Context, domain.UserID) ([]domain.AccountID, error) {
 	return nil, nil
@@ -518,19 +349,11 @@ func (w *fakeUserUW) InsertPending(_ context.Context, u domain.User, _ time.Time
 	return u, true, nil
 }
 func (w *fakeUserUW) ActivateInvite(_ context.Context, userID domain.UserID, ext domain.ExternalSubject, dn domain.DisplayName) (domain.User, error) {
-	if w.parent != nil && w.parent.activateErr != nil {
-		return domain.User{}, w.parent.activateErr
-	}
 	return domain.User{ID: userID, ExternalID: ext, DisplayName: dn, InviteStatus: domain.InviteStatusActive}, nil
 }
 
-// InsertActive — bootstrap-path; счётчик `upsertCount` считает строки,
-// заведённые воркером upsert-from-identity (его читает
-// `TestUpsertFromIdentity_Sync_OK_OpReturned`).
+// InsertActive — ветвь заведения новой личности.
 func (w *fakeUserUW) InsertActive(_ context.Context, u domain.User) (domain.User, error) {
-	w.parent.mu.Lock()
-	w.parent.upsertCount++
-	w.parent.mu.Unlock()
 	u.CreatedAt = time.Now().UTC()
 	return u, nil
 }

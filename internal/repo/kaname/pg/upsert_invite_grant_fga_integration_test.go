@@ -4,21 +4,25 @@
 package pg_test
 
 // upsert_invite_grant_fga_integration_test.go — RC-2 + RC-5 integration
-// (testcontainers Postgres), driving the real InternalUserService.UpsertFromIdentity
-// use-case (operations LRO) against a real DB and probing the transactional
-// outbox rows + DB state.
+// (testcontainers Postgres) on the live invite-activation lane: activation IN
+// THE OUTCOME OF ADDRESS VERIFICATION (`userapp.ActivateInviteOnVerificationTx`,
+// kaname#456) against a real DB, probing the transactional outbox rows + DB
+// state. Прежде пробы шли через глагол заведения личности по внешнему
+// удостоверению; он снят (kaname#929, AWI-09), а предмет проб — тело активации и
+// заведения личных ресурсов — живёт на полосе подтверждения адреса.
 //
 // Scenarios:
 //   T-I3 — invite-activation co-commits the member hierarchy tuple
-//          (account:<A>#account@iam_user:<id>) IN THE SAME Step-1 writer-tx as the
+//          (account:<A>#account@iam_user:<id>) IN THE SAME writer-tx as the
 //          iam.user.updated audit-event + the ActivateInvite UPDATE (ban #10 atomic
 //          co-commit through w.EmitFGARelationWrite, НЕ записью после коммита — она снята).
 //   T-I5 — an invitee that owns ZERO accounts gets a personal default Account +
 //          "default" Project bootstrapped (RC-5 gate), WITHOUT a 2nd InsertActive
 //          (the invitee user-row already exists → a re-INSERT would 23505 on
 //          UNIQUE(external_id)); the RC-2 inviter member-tuple co-exists.
-//   T-E4(int) — re-activation is idempotent: still exactly ONE owned personal
-//          account, no duplicate member-tuple intent shape mismatch.
+//   T-E4(int) — repeated bootstrap is idempotent: still exactly ONE owned
+//          personal account; a second activation of the already-ACTIVE row is
+//          refused (the row is no longer PENDING) and changes nothing.
 
 import (
 	"context"
@@ -32,12 +36,9 @@ import (
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
-	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -110,7 +111,39 @@ func activeRowCountByExternalID(t *testing.T, ctx context.Context, pool *pgxpool
 	return n
 }
 
-// ── T-I3 — RC-2 member-tuple co-committed with audit in Step-1 writer-tx ──────
+// activateOnVerification — активация приглашения в исходе подтверждения адреса
+// одним writer'ом, как у полосы входа (`ActivateInviteForLane`): строка
+// приглашения читается, активируется, личность чеканится полосой, личные ресурсы
+// заводятся той же транзакцией; затем фиксация.
+func activateOnVerification(t *testing.T, ctx context.Context, repo *kanamepg.Repository, inviteeID domain.UserID) (userapp.BootstrapResult, error) {
+	t.Helper()
+	rd, err := repo.Reader(ctx)
+	require.NoError(t, err)
+	pending, err := rd.Users().Get(ctx, inviteeID)
+	_ = rd.Rollback(ctx)
+	require.NoError(t, err)
+
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	res, err := userapp.ActivateInviteOnVerificationTx(ctx, w, pending, string(pending.ID))
+	if err != nil {
+		return userapp.BootstrapResult{}, err
+	}
+	require.NoError(t, w.Commit(ctx))
+	return res, nil
+}
+
+// externalIDOf — личность строки, отчеканенная полосой при активации.
+func externalIDOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID domain.UserID) string {
+	t.Helper()
+	var ext string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT external_id FROM kaname.users WHERE id = $1`, string(userID)).Scan(&ext))
+	return ext
+}
+
+// ── T-I3 — RC-2 member-tuple co-committed with audit in the activation writer-tx ──────
 func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -121,31 +154,24 @@ func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
-	opsRepo := operations.NewRepo(pool, "kaname")
 
-	const ext = "ext_INV_ti3"
 	const email = "invitee-ti3@example.com"
 	_, accID, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "ti3", email)
-	// Приглашённый подтвердил адрес — путь хука активирует только такую строку (kaname#456, Р11).
+	// Приглашённый подтвердил адрес — активация идёт только в этом исходе (kaname#456, Р11).
 	markAddressVerified(t, ctx, pool, inviteeID)
 
-	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo)
-	op, err := uc.Execute(ctx, userapp.UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject(ext),
-		Email:       domain.Email(email),
-		DisplayName: domain.DisplayName("Invitee Real"),
-	})
-	require.NoError(t, err)
-	done := awaitOp(t, ctx, opsRepo, op.ID)
-	require.Nil(t, done.Error, "UpsertFromIdentity must succeed: %v", done.Error)
+	res, err := activateOnVerification(t, ctx, repo, inviteeID)
+	require.NoError(t, err, "активация в исходе подтверждения адреса")
+	require.Equal(t, inviteeID, res.User.ID, "активирована та же строка (id сохранён)")
 
-	// PENDING → ACTIVE, id preserved.
+	// PENDING → ACTIVE, id preserved, identity minted by our lane.
 	var status, gotExt string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status, external_id FROM kaname.users WHERE id = $1`, string(inviteeID)).
 		Scan(&status, &gotExt))
 	assert.Equal(t, "ACTIVE", status, "invite activated")
-	assert.Equal(t, ext, gotExt, "external_id set on the SAME row (id preserved)")
+	assert.Equal(t, string(res.User.ExternalID), gotExt, "external_id set on the SAME row (id preserved)")
+	assert.NotEmpty(t, gotExt, "личность отчеканена полосой при активации")
 
 	// iam.user.updated audit-event present for the activated row.
 	assert.GreaterOrEqual(t, auditUpdatedCount(t, ctx, pool, string(inviteeID)), 1,
@@ -158,7 +184,7 @@ func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 		"exactly one RC-2 member hierarchy-tuple intent must be co-committed with activation")
 }
 
-// T-I3 atomicity — a rolled-back Step-1 tx leaves NEITHER the audit row NOR the
+// T-I3 atomicity — a rolled-back activation tx leaves NEITHER the audit row NOR the
 // fga member-tuple intent. We assert the co-commit invariant directly on the
 // writer-tx (the only way both rows can appear/disappear atomically is via the
 // SAME w.EmitFGARelationWrite + w.EmitAuditEvent on one pgx.Tx).
@@ -176,7 +202,7 @@ func TestUpsertInviteGrant_TI3_RC2_RollbackDiscardsBoth(t *testing.T) {
 	const email = "invitee-ti3rb@example.com"
 	_, accID, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "ti3rb", email)
 
-	// Replicate the Step-1 writer-tx shape, then ROLLBACK: activate + audit + fga
+	// Replicate the activation writer-tx shape, then ROLLBACK: activate + audit + fga
 	// member-tuple, all on one tx, abandoned.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
@@ -212,27 +238,19 @@ func TestUpsertInviteGrant_TI5_RC5_BootstrapFiresOwnsZero_NoSecondInsertActive(t
 	require.NoError(t, err)
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
-	opsRepo := operations.NewRepo(pool, "kaname")
 
-	const ext = "ext_INV_ti5"
 	const email = "invitee-ti5@example.com"
 	_, accA, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "ti5", email)
-	// Приглашённый подтвердил адрес — путь хука активирует только такую строку (kaname#456, Р11).
+	// Приглашённый подтвердил адрес — активация идёт только в этом исходе (kaname#456, Р11).
 	markAddressVerified(t, ctx, pool, inviteeID)
 
 	// Pre-condition: invitee owns ZERO accounts.
 	require.Equal(t, 0, ownedAccountCount(t, ctx, pool, string(inviteeID)),
 		"pre-state: invitee owns no account")
 
-	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo)
-	op, err := uc.Execute(ctx, userapp.UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject(ext),
-		Email:       domain.Email(email),
-		DisplayName: domain.DisplayName("Invitee Real"),
-	})
-	require.NoError(t, err)
-	done := awaitOp(t, ctx, opsRepo, op.ID)
-	require.Nil(t, done.Error, "UpsertFromIdentity must succeed (no 23505 from a 2nd InsertActive): %v", done.Error)
+	res, err := activateOnVerification(t, ctx, repo, inviteeID)
+	require.NoError(t, err, "активация с заведением личных ресурсов — без 23505 от второй вставки строки")
+	ext := externalIDOf(t, ctx, pool, inviteeID)
 
 	// ActivateInvite ran, id preserved, exactly one ACTIVE row (no 2nd InsertActive).
 	assert.Equal(t, 1, activeRowCountByExternalID(t, ctx, pool, ext),
@@ -280,11 +298,9 @@ func TestUpsertInviteGrant_TI5_RC5_BootstrapFiresOwnsZero_NoSecondInsertActive(t
 		"account:"+string(accA), "account", "iam_user:"+string(inviteeID)),
 		"RC-2: inviter member-tuple co-exists with RC-5 personal bootstrap")
 
-	// metadata.created stays false (existing activated id reused, not a new identity).
-	meta, err := operations.MetadataFor[*iamv1.UpsertFromIdentityMetadata](done)
-	require.NoError(t, err)
-	assert.Equal(t, string(inviteeID), meta.GetUserId(), "metadata.user_id = activated id")
-	assert.False(t, meta.GetCreated(), "metadata.created=false (user-row reused)")
+	// The bootstrap reused the activated row, not a new identity.
+	assert.Equal(t, inviteeID, res.User.ID, "заведение личных ресурсов — на активированной строке")
+	assert.Equal(t, domain.AccountID(personalAcc), res.AccountID, "личный аккаунт исхода — тот, что заведён")
 }
 
 // ── T-E4 (integration) — idempotent re-activation: still exactly one owned account ──
@@ -298,45 +314,43 @@ func TestUpsertInviteGrant_TE4_RC5_ReActivateIdempotent_SingleOwnedAccount(t *te
 	require.NoError(t, err)
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
-	opsRepo := operations.NewRepo(pool, "kaname")
 
-	const ext = "ext_INV_te4"
 	const email = "invitee-te4@example.com"
 	_, accA, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "te4", email)
-	// Приглашённый подтвердил адрес — путь хука активирует только такую строку (kaname#456, Р11).
+	// Приглашённый подтвердил адрес — активация идёт только в этом исходе (kaname#456, Р11).
 	markAddressVerified(t, ctx, pool, inviteeID)
 
-	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo)
-	in := userapp.UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject(ext),
-		Email:       domain.Email(email),
-		DisplayName: domain.DisplayName("Invitee Real"),
-	}
-
 	// First activation.
-	op1, err := uc.Execute(ctx, in)
+	first, err := activateOnVerification(t, ctx, repo, inviteeID)
 	require.NoError(t, err)
-	require.Nil(t, awaitOp(t, ctx, opsRepo, op1.ID).Error)
 	require.Equal(t, 1, ownedAccountCount(t, ctx, pool, string(inviteeID)),
 		"first activation → one owned account")
+	ext := externalIDOf(t, ctx, pool, inviteeID)
 
-	// Re-activation (re-login). Already-ACTIVE → owns-zero == false → no 2nd bootstrap.
-	op2, err := uc.Execute(ctx, in)
+	// Повторная активация уже ACTIVE строки: оператор активации её не находит
+	// (строка не PENDING), транзакция откатывается, ничего не меняется.
+	_, err = activateOnVerification(t, ctx, repo, inviteeID)
+	require.ErrorIs(t, err, iamerr.ErrNotFound, "повторная активация отвергнута: строка уже не PENDING")
+
+	// Повторное заведение личных ресурсов той же личностью: под транзакционной
+	// блокировкой число собственных аккаунтов уже ненулевое, и второго заведения
+	// нет — возвращается та же строка.
+	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	done2 := awaitOp(t, ctx, opsRepo, op2.ID)
-	require.Nil(t, done2.Error)
+	again, err := userapp.BootstrapPersonalResourcesTx(ctx, w, userapp.BootstrapInput{
+		CandidateUserID: string(inviteeID), ExternalID: domain.ExternalSubject(ext),
+		Email: domain.Email(email), Actor: "system", NewIdentity: false,
+	})
+	require.NoError(t, err)
+	require.NoError(t, w.Commit(ctx))
+	assert.Equal(t, first.User.ID, again.User.ID, "та же строка человека")
 
 	assert.Equal(t, 1, ownedAccountCount(t, ctx, pool, string(inviteeID)),
-		"RC-5 idempotent: still exactly one owned personal account after re-activation")
+		"RC-5 idempotent: still exactly one owned personal account after a repeated bootstrap")
 	assert.Equal(t, 1, activeRowCountByExternalID(t, ctx, pool, ext),
 		"still exactly one ACTIVE row")
 	// member tuple in inviter account still present.
 	assert.GreaterOrEqual(t, fgaOutboxCount(t, ctx, pool,
 		"account:"+string(accA), "account", "iam_user:"+string(inviteeID)), 1,
 		"inviter member-tuple intent present (at-least-once, idempotent drain)")
-
-	meta2, err := operations.MetadataFor[*iamv1.UpsertFromIdentityMetadata](done2)
-	require.NoError(t, err)
-	assert.Equal(t, string(inviteeID), meta2.GetUserId())
-	assert.False(t, meta2.GetCreated())
 }

@@ -5,9 +5,9 @@
 
 Covered RPCs:  Get, List, Invite, Delete + глаголы-действия :block / :unblock /
   :removeFromAccount (public UserService).
-Not covered here: InternalUserService.UpsertFromIdentity, InternalUserService.Get —
-  those are internal-port-only RPCs; their route census on the platform's listeners is
-  held by PRO-Robotech/kacho:gateway/tests/newman/cases/iam-internal-only-check.py.
+Not covered here: InternalUserService.Get — an internal-port-only RPC; its route
+  census on the platform's listeners is held by
+  PRO-Robotech/kacho:gateway/tests/newman/cases/iam-internal-only-check.py.
 
 CRUD fixture dependency:
   Reuses vars from crud-fixture/setup.sh (superset: authz-fixtures/setup.sh):
@@ -30,9 +30,8 @@ CRUD fixture dependency:
   ДАННЫМИ (`tests/authz-fixtures/principal_pairings.py`, `BINDING_TARGET_ONLY_IDS`)
   и сверяется гейтом `scripts/case_header_principal_claim_test.py`.
 
-  Users are seeded via InternalUserService.UpsertFromIdentity (internal flow)
-  during setup.sh or authz-fixtures/setup.sh. The public Invite flow is tested
-  here as the only public "write" path for users.
+  Users are seeded by the stand seed (authz-fixtures) through the sign-in lane.
+  The public Invite flow is tested here as the only public "write" path for users.
 
   crud-fixture extension:
     For IAM-USR-INV-CRUD-OK we Invite a NEW email (invitee-{{runId}}@kacho.local)

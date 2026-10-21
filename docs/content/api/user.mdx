@@ -25,8 +25,7 @@ import dedent from 'ts-dedent'
 **чужой** аккаунт он попадает **приглашением** (`Invite`) по email: backend
 создаёт строку личности (если её ещё нет) и членство в аккаунте, которое становится `ACTIVE`,
 когда приглашённый подтвердит этот адрес на полосе входа; у человека с уже активной личностью —
-сразу. Третий путь — внутренний `InternalUserService.UpsertFromIdentity`; публичного `Create`
-нет (раздел «Методы» ниже).
+сразу. Публичного `Create` нет (раздел «Методы» ниже).
 
 :::info Чем ключевать человека во внешнем справочнике
 Стабильный ключ человека — **`id`** (префикс `usr`). Он присваивается один раз и неизменен на
@@ -44,7 +43,7 @@ import dedent from 'ts-dedent'
   <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
   <tbody>
     <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Внутренний идентификатор (префикс <code>usr</code>)</td></tr>
-    <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Субъект входа человека. Чеканит его полоса входа: регистрация без приглашения либо подтверждение адреса живого приглашения; внутренний <code>InternalUserService.UpsertFromIdentity</code> пишет значение своего вызывающего. Пусто для <code>PENDING</code> (адрес приглашённого не подтверждён)</td></tr>
+    <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Субъект входа человека. Чеканит его полоса входа: регистрация без приглашения либо подтверждение адреса живого приглашения. Пусто для <code>PENDING</code> (адрес приглашённого не подтверждён)</td></tr>
     <tr><td><code>email</code></td><td>string</td><td>output-only</td><td>Email (case-insensitive lookup). <code>Update</code> его не меняет; меняет его сам человек на <a href="/api/auth-lane#email-change">полосе входа</a> кодом, пришедшим на новый адрес, — до предъявления кода здесь прежний адрес</td></tr>
     <tr><td><code>displayName</code></td><td>string</td><td>output-only</td><td>Отображаемое имя</td></tr>
     <tr><td><code>inviteStatus</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>BLOCKED</code></td></tr>
@@ -76,7 +75,7 @@ import dedent from 'ts-dedent'
   <thead><tr><th>Значение</th><th>Смысл</th></tr></thead>
   <tbody>
     <tr><td><code>PENDING</code></td><td>Приглашение не активировано: адрес приглашённого не подтверждён (<code>externalId</code> пуст). Зарегистрировавшийся адресом приглашения входит, но только в <a href="/api/auth-lane#verification-position">положение подтверждения</a></td></tr>
-    <tr><td><code>ACTIVE</code></td><td>Личность заведена, <code>externalId</code> заполнен: регистрацией без приглашения, подтверждением адреса живого приглашения либо внутренним <code>InternalUserService.UpsertFromIdentity</code>. Подтверждённого адреса <code>ACTIVE</code> не означает: зарегистрировавшийся без приглашения активен сразу и до подтверждения остаётся в положении подтверждения</td></tr>
+    <tr><td><code>ACTIVE</code></td><td>Личность заведена, <code>externalId</code> заполнен: регистрацией без приглашения либо подтверждением адреса живого приглашения. Подтверждённого адреса <code>ACTIVE</code> не означает: зарегистрировавшийся без приглашения активен сразу и до подтверждения остаётся в положении подтверждения</td></tr>
     <tr><td><code>BLOCKED</code></td><td>Вход на платформу запрещён администратором облака — во всех аккаунтах человека сразу</td></tr>
   </tbody>
 </table>
@@ -105,10 +104,9 @@ import dedent from 'ts-dedent'
 (`RemoveFromAccount`), обновление меток (`Update`), запрет и разрешение входа
 (`Block`/`Unblock`), сброс второго фактора (`ResetSecondFactor`), сброс ключей доступа
 (`ResetAccessKeys`), удаление личности
-(`Delete`) и журнал операций. Классического `Create` нет. Личность заводят три пути, и
+(`Delete`) и журнал операций. Классического `Create` нет. Личность заводят два пути, и
 перечень закрыт: регистрация без приглашения на [полосе входа](/api/auth-lane)
-(`POST /iam/v1/auth/register`), приглашение (`Invite`) и внутренний
-`InternalUserService.UpsertFromIdentity`.
+(`POST /iam/v1/auth/register`) и приглашение (`Invite`).
 
 :::info Что чьё
 
