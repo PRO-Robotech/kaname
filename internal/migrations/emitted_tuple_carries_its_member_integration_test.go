@@ -189,7 +189,10 @@ func TestEmittedTupleCoordinate_AmbiguousRowRefusesTheMigration(t *testing.T) {
 	got, verr := goose.GetDBVersion(db)
 	require.NoError(t, verr)
 	require.Equal(t, c.preceding(), got, "версия не сдвинулась")
-	assert.Len(t, etcRows(t, db, b.id, "compute_instance:iOrphan"), 1, "откат наката: сирота не снята")
+	var orphans int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.access_binding_emitted_tuples
+	   WHERE binding_id = $1 AND object = 'compute_instance:iOrphan'`, b.id).Scan(&orphans))
+	assert.Equal(t, 1, orphans, "откат наката: сирота не снята")
 
 	// Близнец: неоднозначная строка снята — накат проходит.
 	_, err = db.Exec(`DELETE FROM kaname.access_binding_emitted_tuples WHERE binding_id = $1 AND object = 'compute_instance:iAmb'`, b.id)
