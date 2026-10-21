@@ -8,7 +8,9 @@
 // объявленный доверенный пересыльщик: ключом темпа тогда стал адрес этого
 // пира. Без клетки неверно названный пересыльщик (все клиенты за прокси
 // реестра делят один предел) неотличим от залпа одного клиента: оба видны
-// только ростом отказов по темпу. Каждая клетка выходит на витрину НУЛЁМ в том
+// только ростом отказов по темпу. Рост клетки сам по себе значит одно из
+// двух: вызывающий пришёл мимо прокси реестра либо пересыльщик назван не тем
+// идентификатором. Каждая клетка выходит на витрину НУЛЁМ в том
 // числе: клетка, появляющаяся при первом попадании, не отличает «ноль случаев»
 // от «счёта нет».
 //
@@ -51,9 +53,10 @@ func (r *Registry) NewRegistryTokenSourceFallbackCollector(reasons []string, rea
 			"Anonymous requests of the docker lane /iam/token whose pace key became the peer address although "+
 				"a forwarding header was present: forwarded-from-unrecognized-peer (a forwarding header from a "+
 				"peer that is neither the edge nor the declared forwarder "+
-				"api-server.registry-token.anonymous-forwarder-san). Growth means the forwarder is declared by "+
-				"another identity and every client behind the registry proxy shares one pace limit. Every "+
-				"declared cell is printed, including the zero ones.",
+				"api-server.registry-token.anonymous-forwarder-san). Growth means either a caller reached the "+
+				"listener bypassing the registry proxy, or the forwarder is declared by another identity and "+
+				"every client behind the proxy shares one pace limit. Every declared cell is printed, "+
+				"including the zero ones.",
 			[]string{"reason"}, nil),
 	})
 }
