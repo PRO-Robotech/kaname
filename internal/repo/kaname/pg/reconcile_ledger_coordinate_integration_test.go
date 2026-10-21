@@ -14,9 +14,12 @@ package pg_test
 //  2. ДВЕ КООРДИНАТЫ, ОДИН КОРТЕЖ (тип переименован с сохранением типа модели): уход
 //     первой координаты оставляет факт, который держит строка второй; уход второй
 //     снимает факт, лишней строки не остаётся.
+//  3. ЗАПИСЬ РЕЕСТРА — в транзакции прохода: проход, отказавший после записи,
+//     не оставляет ни строки реестра, ни члена, ни факта.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -183,4 +186,68 @@ func TestLedgerCoordinate_TwoCoordinatesOneTupleEachHoldsTheFact(t *testing.T) {
 	forgetAndRevoke(reconcile.MemberCoord{ObjectType: "compute.instance", ObjectID: "iRace"})
 	assert.Zero(t, ledgerRowsOn(t, ctx, p.pool, p.bid, "compute_instance:iRace"), "уход обеих координат: строки реестра остались")
 	assert.Zero(t, factsOn(t, ctx, p.pool, p.subj, "compute_instance", "iRace"), "уход обеих координат: факт остался")
+}
+
+// ── 3. Запись реестра — в транзакции прохода ────────────────────────────────
+
+var errRecordProbe = errors.New("pass refused by probe after the ledger write")
+
+// failingRecordTx — настоящий исполнитель транзакций, чьё хранилище ПИШЕТ реестр и
+// затем отказывает: проход обязан откатиться вместе с записанной строкой.
+type failingRecordTx struct{ inner *kanamepg.ReconcileAdapter }
+
+func (f *failingRecordTx) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) error {
+	return f.inner.WithTx(ctx, func(ctx context.Context, s reconcile.ReconcileStore) error {
+		return fn(ctx, &failingRecordStore{ReconcileStore: s})
+	})
+}
+
+type failingRecordStore struct{ reconcile.ReconcileStore }
+
+func (s *failingRecordStore) RecordEmittedTuplesBatch(ctx context.Context, refs []reconcile.EmittedTupleRef) error {
+	if err := s.ReconcileStore.RecordEmittedTuplesBatch(ctx, refs); err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return errRecordProbe
+}
+
+// newForwardRecordProbe — выдача на инстанс iRace, объект зарегистрирован, член ещё не
+// материализован.
+func newForwardRecordProbe(t *testing.T, suffix string) (*pgxpool.Pool, domain.AccessBindingID, string) {
+	t.Helper()
+	skipShort(t)
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	fx := setupGamma(t, ctx, pool, suffix)
+	roleID := seedRulesRole(t, ctx, pool, fx.repo, fx.prj, suffix+"role", domain.Rules{forwardAnchorRule()})
+	bid := insertThinBinding(t, ctx, fx.repo, fx.member, roleID, fx.prj)
+	seedMirrorRow(t, ctx, pool, "compute.instance", "iRace", string(fx.prj), string(fx.accID), nil, time.Now())
+	registerUnderProject(t, ctx, pool, fx, "compute_instance:iRace")
+	return pool, bid, "user:" + string(fx.member)
+}
+
+func TestLedgerWrite_TwinForwardCommitsTheLedger(t *testing.T) {
+	pool, bid, subj := newForwardRecordProbe(t, "e933wt")
+	a, _ := newReconciler(pool)
+	require.NoError(t, a.ReconcileObjectForwardNoStale(context.Background(), "compute.instance", "iRace"))
+	members, ledger, facts := bindingResidue(t, context.Background(), pool, bid, subj, "compute_instance", "iRace")
+	assert.Positive(t, members, "БЛИЗНЕЦ: член записан")
+	assert.Positive(t, ledger, "БЛИЗНЕЦ: реестр записан")
+	assert.Positive(t, facts, "БЛИЗНЕЦ: факт сложен")
+}
+
+func TestLedgerWrite_RollsBackWithThePass(t *testing.T) {
+	pool, bid, subj := newForwardRecordProbe(t, "e933wr")
+	r := reconcile.New(&failingRecordTx{inner: kanamepg.NewReconcileAdapter(pool, catalogfixture.Source())}, nil, catalogfixture.Source())
+	err := r.ReconcileObjectForwardNoStale(context.Background(), "compute.instance", "iRace")
+	require.ErrorIs(t, err, errRecordProbe, "ПРЕДПОСЫЛКА: проход дошёл до записи реестра и отказал")
+	members, ledger, facts := bindingResidue(t, context.Background(), pool, bid, subj, "compute_instance", "iRace")
+	assert.Zero(t, members, "откат прохода: член остался")
+	assert.Zero(t, ledger, "откат прохода: строка реестра пережила транзакцию — запись вне транзакции прохода")
+	assert.Zero(t, facts, "откат прохода: факт остался")
 }
