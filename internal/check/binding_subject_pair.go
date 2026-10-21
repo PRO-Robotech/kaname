@@ -565,7 +565,10 @@ var (
 // `[LATERAL] (подзапрос) [AS] псевдоним`, `[LATERAL] функция(…) [WITH
 // ORDINALITY] [[AS] псевдоним]`, `ROWS FROM (…) …` либо имя CTE. Разбор
 // кончается на первом слове, которое не элемент (`WHERE`, `JOIN`, `GROUP`):
-// запятая после `JOIN … ON` в перечне не разбирается.
+// за элементом нет запятой, и запятая после `JOIN … ON` в перечне не
+// разбирается. Имя элемента со словарём ключевых слов не сверяется: по
+// грамматике PostgreSQL ключевое слово бывает именем элемента — `set` таблицей,
+// `left(…)` функцией, — и обрыв на нём пропустил бы выдачу дальше по перечню.
 func sqlFromTail(s string, from int, closeOf map[int]int) []sqlFromItem {
 	var items []sqlFromItem
 	end := from
@@ -627,7 +630,7 @@ func sqlFromTail(s string, from int, closeOf map[int]int) []sqlFromItem {
 			it.alias, at = alias(at)
 		default:
 			nm := sqlItemNameRe.FindStringSubmatchIndex(s[at:])
-			if nm == nil || sqlNotAlias[s[at+nm[2]:at+nm[3]]] {
+			if nm == nil {
 				return items
 			}
 			name := s[at+nm[2] : at+nm[3]]

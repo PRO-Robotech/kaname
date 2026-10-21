@@ -268,6 +268,26 @@ func probeSQLAliasCols() string {
 	return "SELECT x.subject_id FROM users AS u (a, b), access_bindings x"
 }
 
+// БЛИЗНЕЦ: перечень FROM без выдачи; функция с именем-ключевым словом.
+func probeSQLCommaKwFuncSet() string {
+	return "SELECT x.subject_id FROM users u, left(u.name, 1) l, access_binding_subjects x"
+}
+
+// БЛИЗНЕЦ: перечень FROM без выдачи; таблица с именем-ключевым словом.
+func probeSQLCommaKwTableSet() string {
+	return "SELECT x.subject_id FROM users u, set s, access_binding_subjects x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после функции с именем-ключевым словом — выдача.
+func probeSQLCommaKwFunc() string {
+	return "SELECT x.subject_id FROM users u, left(u.name, 1) l, access_bindings x"
+}
+
+// ДЕФЕКТ: перечень FROM, элемент после таблицы с именем-ключевым словом — выдача.
+func probeSQLCommaKwTable() string {
+	return "SELECT x.subject_id FROM users u, set s, access_bindings x"
+}
+
 // БЛИЗНЕЦ: CTE над набором.
 func probeSQLCTESet() string {
 	return "WITH s2 AS (SELECT * FROM access_binding_subjects) SELECT binding_id FROM s2 WHERE subject_id = $1"
@@ -318,6 +338,8 @@ var bindingPairProbeDefects = map[string][2]string{
 	"probeSQLCommaRowsOrd":     {check.BindingPairFormSQL, "x.subject_id"},
 	"probeSQLCommaFuncOrd":     {check.BindingPairFormSQL, "x.subject_id"},
 	"probeSQLAliasCols":        {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaKwFunc":      {check.BindingPairFormSQL, "x.subject_id"},
+	"probeSQLCommaKwTable":     {check.BindingPairFormSQL, "x.subject_id"},
 }
 
 // bindingPairOtherFiles — внесённое вне файла пробы: файл → исходник.
@@ -368,6 +390,7 @@ var bindingPairProbeTwins = []string{
 	"probeErrorText", "probeCallsGetter", "probeSQLCommaSet", "probeSQLCommaIn",
 	"probeSQLCommaPairThenSet", "probeSQLCommaGrant", "probeSQLCommaCTEGrant", "probeSQLCommaFuncSet", "probeSQLCommaRowsSet", "probeSQLCommaStarSet", "probeSQLCommaSampleSet", "probeSQLCommaDerivedSet", "probeSQLLateralSet", "probeSQLLateralFuncSet",
 	"probeSQLCommaOnlySet", "probeSQLSampleFirstSet", "probeSQLCommaRowsOrdSet", "probeSQLCommaFuncOrdSet", "probeSQLAliasColsSet",
+	"probeSQLCommaKwFuncSet", "probeSQLCommaKwTableSet",
 }
 
 // bindingPairPlace — ключ места внесённой функции.
