@@ -201,13 +201,20 @@ func (r *Rule) TokenPoint(req *http.Request) string { return r.Of(req, PointToke
 // Пустой forwarderSAN — доверен только край. Анонимный поток без пересыльщика
 // не стартует (страж `RegistryTokenConfig.Validate`).
 //
-// П. 4 к этой точке НЕ применяется: словарь переписи закрыт приёмкой
+// Словарь п. 4 к этой точке НЕ применяется: он закрыт приёмкой
 // (ceremony-pace-is-named-by-number.md, Р7 п. 4, KN-PACE-37) двумя точками, и
-// счёт третьей в клетку `token` смешал бы две разные точки, а новая клетка
-// разошлась бы с одобренным словарём.
+// счёт третьей в клетку `token` смешал бы две разные точки. Заголовок
+// пересылки от пира, который ни край, ни объявленный пересыльщик, считается в
+// своём словаре точки ([RegistryTokenReasons]): без счёта пересыльщик,
+// названный не тем идентификатором, неотличим от залпа одного клиента — оба
+// видны только отказами по темпу. Пересыльщик и край без годного адреса в
+// этом словаре не считаются.
 func (r *Rule) RegistryTokenPoint(forwarderSAN string) func(*http.Request) string {
 	return func(req *http.Request) string {
-		source, _, _ := r.resolve(req, forwarderSAN)
+		source, reason, counted := r.resolve(req, forwarderSAN)
+		if counted && reason == ReasonForwardedFromNonEdge {
+			r.countRegistryToken(RegistryTokenReasonForwardedFromUnrecognizedPeer)
+		}
 		return source
 	}
 }
@@ -238,6 +245,12 @@ func (r *Rule) ReadRegistryTokenPoint() map[RegistryTokenReason]uint64 {
 func (r *Rule) count(c Cell) {
 	r.mu.Lock()
 	r.counts[c]++
+	r.mu.Unlock()
+}
+
+func (r *Rule) countRegistryToken(reason RegistryTokenReason) {
+	r.mu.Lock()
+	r.registry[reason]++
 	r.mu.Unlock()
 }
 
