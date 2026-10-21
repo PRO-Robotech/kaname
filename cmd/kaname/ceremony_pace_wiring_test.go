@@ -114,6 +114,7 @@ func TestServeWiresTheIssuingSourceRuleAndItsGuard(t *testing.T) {
 		"requireIssuingListenerAsksForACertificate(cfg, mtlsCfg)",
 		"issuingsource.New(cfg.AuthN.TrustDomain())",
 		"metricsReg.NewIssuingSourceFallbackCollector(",
+		"metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("serve.go: нет %q", want)

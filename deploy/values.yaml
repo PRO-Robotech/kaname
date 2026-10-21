@@ -270,10 +270,24 @@ apiServer:
   #   иное, в том числе форма порождённого идентификатора, отвергает страж старта
   #   `RegistryTokenConfig.Validate`: субъект, совпавший с настоящим принципалом,
   #   отдал бы его права всякому без удостоверения.
+  #   `anonymousPerSourcePerSec` — ТЕМП анонимной выдачи (kaname#928): запросов
+  #   в секунду на источник, на реплику; сверх — 429. Умолчания нет: при
+  #   включённом потоке незаданный темп — отказ установки и старта.
+  #   `anonymousForwarderSan` — ДОВЕРЕННЫЙ ПЕРЕСЫЛЬЩИК (kaname#930): точный URI
+  #   SAN клиентского сертификата прокси реестра,
+  #   `spiffe://<домен доверия>/ns/<пространство>/sa/<учётная запись>`; только у
+  #   пира с этим проверенным сертификатом адрес клиента берётся из
+  #   X-Forwarded-For. Поток включён — слушатель выдачи обязан быть в режиме
+  #   KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE=optional-mutual с корнем
+  #   внутреннего УЦ в KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES (иначе —
+  #   отказ установки, `kaname-svc.requireAnonymousRegistryLane`). Обе ручки
+  #   рендерятся только при включённом потоке.
   registryToken:
     issuer: ""
     service: ""
     anonymousClientId: ""
+    anonymousPerSourcePerSec: 0
+    anonymousForwarderSan: ""
 repository:
   postgres:
     # Ширина пула на ОДНУ реплику. Число обязано совпадать с тем, что объявляет

@@ -1233,8 +1233,10 @@ func runServe(cfg config.Config) error {
 	// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края только
 	// при проверенном сертификате края, иначе адрес пира. Строится до сборки
 	// докерной полосы: её анонимная выдача — тоже точка этой поверхности
-	// (kaname#928). Режим слушателя, при котором край вообще узнаваем, требует
-	// страж requireIssuingListenerAsksForACertificate.
+	// (kaname#928), и на ней адрес берётся ещё и у объявленного доверенного
+	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
+	// край и пересыльщик вообще узнаваемы, требует страж
+	// requireIssuingListenerAsksForACertificate.
 	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
 	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		logger: logger,
@@ -1275,6 +1277,10 @@ func runServe(cfg config.Config) error {
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
+		// Перепись точки анонимной выдачи правила адреса источника — вплотную
+		// к сборке полосы (kaname#930): рост её клетки отличает неверно
+		// названного пересыльщика от залпа одного клиента.
+		metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))
 		// Токен-эндпоинт платформы (задача kacho#898) монтируется на ЭТУ ЖЕ
 		// поверхность, а не заводит свою. Вид выдачи «учётные данные клиента»
 		// задан формой запроса, а не нашим выбором порта; второй внешний
@@ -2444,7 +2450,9 @@ func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRu
 	}
 	var source func(*http.Request) string
 	if run.source != nil {
-		source = run.source.RegistryTokenPoint
+		// Доверенный пересыльщик точки (kaname#930) переносится как есть: его
+		// форму в домене доверия разобрал страж старта `RegistryTokenConfig.Validate`.
+		source = run.source.RegistryTokenPoint(rt.AnonymousForwarderSAN)
 	}
 	return registrytokenwire.BuildConfig{
 		AnonymousClientID:        anonymous,

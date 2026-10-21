@@ -33,9 +33,13 @@ func loadAnonLane(t *testing.T, principal, pace string) (config.Config, error) {
 	if pace != "" {
 		t.Setenv(anonPaceEnv, pace)
 	}
+	// Доверенный пересыльщик объявлен: предмет этих проб — темп, а поток без
+	// пересыльщика страж отвергает отдельно (kaname#930).
+	t.Setenv(trustDomainEnv, probeTrustDomain)
+	t.Setenv(anonForwarderEnv, registryForwarderSAN)
 	cfg, err := config.Load("")
 	require.NoError(t, err)
-	return cfg, cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken)
+	return cfg, cfg.APIServer.RegistryToken.Validate(cfg.AuthN.ClientToken, cfg.AuthN.TrustDomain())
 }
 
 func TestAnonymousPace_LoaderDoesNotSupplyIt(t *testing.T) {
