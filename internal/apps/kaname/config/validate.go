@@ -82,7 +82,7 @@ func (c Config) Validate() error {
 	// ключу служебной учётки две, и объявления обеих сверяются здесь — иначе
 	// одна выдаёт удостоверение туда, куда вторая его отвергает, и решал это
 	// не оператор, а порядок, в котором писались полосы.
-	errs = multierr.Append(errs, c.APIServer.RegistryToken.Validate(c.AuthN.ClientToken))
+	errs = multierr.Append(errs, c.APIServer.RegistryToken.Validate(c.AuthN.ClientToken, c.AuthN.TrustDomain()))
 
 	// Страж над половиной ВЫДАЧИ у контроля связанных с отправителем токенов
 	// (задача kacho#1137). Действует в любом режиме: величина, у которой нет

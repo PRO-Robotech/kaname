@@ -24,8 +24,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 //   приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
 //   пишет на строку приглашения способ входа и сессию, но приглашение не
 //   активирует.
-// - Create нет: личность заводят приглашение, регистрация без приглашения и
-//   внутренний `InternalUserService.UpsertFromIdentity`.
+// - Create нет: личность заводят приглашение и регистрация без приглашения.
 service UserService {
   // Returns the specified User resource.
   rpc Get (GetUserRequest) returns (User) {

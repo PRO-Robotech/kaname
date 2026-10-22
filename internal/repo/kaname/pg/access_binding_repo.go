@@ -1357,9 +1357,11 @@ func (w *abWriter) InsertEmittedTuples(ctx context.Context, bindingID domain.Acc
 			// source='binding': пишут Create и RoleTupleReconciler из Role.Update. Строки
 			// ARM_LABELS по членам (source='member') принадлежат реконсайлеру γ
 			// (RecordEmittedTuples), и путь уровня выдачи их НЕ трогает.
+			// Координата члена у строки уровня выдачи пуста (kaname#933): умолчание
+			// колонок, и ключ конфликта — полный ключ реестра.
 			`INSERT INTO access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
 			 VALUES ($1, $2, $3, $4, 'binding')
-			 ON CONFLICT (binding_id, fga_user, relation, object) DO NOTHING`,
+			 ON CONFLICT (binding_id, member_object_type, member_object_id, fga_user, relation, object) DO NOTHING`,
 			string(bindingID), t.User, t.Relation, t.Object,
 		); err != nil {
 			return mapErr(err, "", string(bindingID))
@@ -1546,7 +1548,7 @@ func deriveOpFromEventType(eventType string) string {
 // SelectEmittedTuples (весь реестр). Ноль строк ⇒ nil.
 func (r *abReader) SelectEmittedTuplesBySource(ctx context.Context, bindingID domain.AccessBindingID, source string) ([]access_binding.RelationTuple, error) {
 	rows, err := r.tx.Query(ctx,
-		`SELECT fga_user, relation, object
+		`SELECT DISTINCT fga_user, relation, object
 		   FROM access_binding_emitted_tuples
 		  WHERE binding_id = $1 AND source = $2
 		  ORDER BY relation, object, fga_user`, string(bindingID), source)
@@ -1572,10 +1574,11 @@ func (r *abReader) SelectEmittedTuplesBySource(ctx context.Context, bindingID do
 // (kaname.access_binding_emitted_tuples). Отзыв (delete.go) и веер реконсайла
 // Role.Update берут его источником правды о том, какие кортежи прав на деле
 // записаны, поэтому отзыв побайтно симметричен выдаче, каковы бы ни были текущие
-// права роли. Ноль строк ⇒ пустой срез (nil).
+// права роли. Кортеж, выпущенный двумя членами выдачи (две координаты), — одна
+// строка ответа (kaname#933). Ноль строк ⇒ пустой срез (nil).
 func (r *abReader) SelectEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]access_binding.RelationTuple, error) {
 	rows, err := r.tx.Query(ctx,
-		`SELECT fga_user, relation, object
+		`SELECT DISTINCT fga_user, relation, object
 		   FROM access_binding_emitted_tuples
 		  WHERE binding_id = $1
 		  ORDER BY relation, object, fga_user`, string(bindingID))

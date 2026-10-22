@@ -7,7 +7,21 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 )
+
+// ampleAnonPace — темп анонимного потока, которого проба не исчерпает:
+// анонимный поток без темпа не строится (kaname#928), а предмет этих проб — не
+// темп.
+func ampleAnonPace() AnonymousPacer {
+	at := time.Unix(1_700_000_000, 0)
+	p, err := exchangepace.New(1<<20, func() time.Time { return at })
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
 
 // anonConfig — a Config with anonymous pull ENABLED: a declared public identity
 // the registry data-plane resolves to the anonymous system class AnonymousSubject
@@ -17,7 +31,7 @@ func anonConfig() Config {
 	return Config{
 		AllowedAudiences: []string{"registry.kacho.local"},
 		DefaultService:   "registry.kacho.local",
-		Anonymous:        AnonymousIdentity{ClientID: "registry-anonymous"},
+		Anonymous:        AnonymousIdentity{ClientID: "registry-anonymous", Pace: ampleAnonPace()},
 	}
 }
 
@@ -39,7 +53,7 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 		t.Fatal("AnonymousEnabled() = false; want true when an anon identity is configured")
 	}
 
-	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
+	out, err := uc.ExecuteAnonymous(context.Background(), AnonymousInput{Service: "registry.kacho.local"})
 	if err != nil {
 		t.Fatalf("ExecuteAnonymous: %v", err)
 	}

@@ -158,10 +158,10 @@ func TestReconcileBindingForward_ExistingMembers_DelegatesToFull(t *testing.T) {
 		current: []domain.TargetMember{
 			{BindingID: "acb-1", RuleFP: fp, ObjectType: "compute.instance", ObjectID: "i-flip", VerificationStatus: domain.VerificationActive},
 		},
-		ledger: []domain.MembershipTuple{
-			{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-flip"},
-			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
-		},
+		ledger: memberLedger("compute.instance",
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-flip"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
+		),
 	}
 	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-1"))

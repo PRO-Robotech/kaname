@@ -1198,43 +1198,64 @@ func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.Tar
 }
 
 // RecordEmittedTuplesBatch — тот же реестр, что RecordEmittedTuples, но набором,
-// охватывающим НЕСКОЛЬКО выдач сразу: идентификатор выдачи едет вместе с кортежем,
-// потому что ключ реестра — (выдача, субъект, отношение, объект).
+// охватывающим НЕСКОЛЬКО выдач и членов сразу: выдача и координата члена едут вместе с
+// кортежем, потому что ключ реестра — (выдача, координата члена, субъект, отношение,
+// объект).
 func (s *reconcileStore) RecordEmittedTuplesBatch(ctx context.Context, refs []reconcile.EmittedTupleRef) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	binds := make([]string, 0, len(refs))
-	users := make([]string, 0, len(refs))
-	rels := make([]string, 0, len(refs))
-	objs := make([]string, 0, len(refs))
-	// Дедуп по ПОЛНОМУ ключу конфликта: `ON CONFLICT … DO UPDATE` не вправе задеть одну
-	// строку дважды в одном стейтменте (см. RecordEmittedTuples).
-	seen := make(map[[4]string]struct{}, len(refs))
+	cols := newLedgerColumns(len(refs))
 	for _, ref := range refs {
-		t := ref.Tuple
-		if t.User == "" || t.Relation == "" || t.Object == "" {
-			return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
-				t.User, t.Relation, t.Object)
+		if err := cols.add(ref.BindingID, ref.Member, ref.Tuple); err != nil {
+			return err
 		}
-		k := [4]string{string(ref.BindingID), t.User, t.Relation, t.Object}
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		seen[k] = struct{}{}
-		binds = append(binds, string(ref.BindingID))
-		users = append(users, t.User)
-		rels = append(rels, t.Relation)
-		objs = append(objs, t.Object)
 	}
 	if _, err := s.tx.Exec(ctx,
-		`INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-		 SELECT b, u, r, o, 'member' FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) AS t(b, u, r, o)
-		 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
-		binds, users, rels, objs,
+		`INSERT INTO kaname.access_binding_emitted_tuples
+		        (binding_id, member_object_type, member_object_id, fga_user, relation, object, source)
+		 SELECT b, mt, mi, u, r, o, 'member'
+		   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+		        AS t(b, mt, mi, u, r, o)
+		 ON CONFLICT (binding_id, member_object_type, member_object_id, fga_user, relation, object) DO NOTHING`,
+		cols.binds, cols.types, cols.ids, cols.users, cols.rels, cols.objs,
 	); err != nil {
 		return fmt.Errorf("reconcile: record emitted tuples batch: %w", err)
 	}
+	return nil
+}
+
+// ledgerColumns — столбцы набора строк реестра для unnest. Дубль по полному ключу
+// схлопывается здесь: повтор строки в одном наборе ничего не добавляет.
+type ledgerColumns struct {
+	seen                                 map[[6]string]struct{}
+	binds, types, ids, users, rels, objs []string
+}
+
+func newLedgerColumns(n int) *ledgerColumns {
+	return &ledgerColumns{
+		seen:  make(map[[6]string]struct{}, n),
+		binds: make([]string, 0, n), types: make([]string, 0, n), ids: make([]string, 0, n),
+		users: make([]string, 0, n), rels: make([]string, 0, n), objs: make([]string, 0, n),
+	}
+}
+
+func (c *ledgerColumns) add(bindingID domain.AccessBindingID, member reconcile.MemberCoord, t domain.MembershipTuple) error {
+	if t.User == "" || t.Relation == "" || t.Object == "" {
+		return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
+			t.User, t.Relation, t.Object)
+	}
+	k := [6]string{string(bindingID), member.ObjectType, member.ObjectID, t.User, t.Relation, t.Object}
+	if _, dup := c.seen[k]; dup {
+		return nil
+	}
+	c.seen[k] = struct{}{}
+	c.binds = append(c.binds, k[0])
+	c.types = append(c.types, k[1])
+	c.ids = append(c.ids, k[2])
+	c.users = append(c.users, k[3])
+	c.rels = append(c.rels, k[4])
+	c.objs = append(c.objs, k[5])
 	return nil
 }
 
@@ -1244,17 +1265,18 @@ func (s *reconcileStore) DeleteMember(ctx context.Context, bindingID domain.Acce
 	return target_members.DeleteTx(ctx, s.tx, string(bindingID), ruleFP, objectType, objectID)
 }
 
-// LedgerTuplesForObject reads the recorded emitted tuples for one object of a
-// binding from the access_binding_emitted_tuples ledger (the saved tuple-set the
-// role.rules eager-revoke replays when a rule's verbs are gone, C-20/C-21).
-func (s *reconcileStore) LedgerTuplesForObject(ctx context.Context, bindingID domain.AccessBindingID, object string) ([]domain.MembershipTuple, error) {
+// LedgerTuplesForMember читает строки реестра, выпущенные одним членом выдачи, — по
+// префиксу первичного ключа (выдача, координата члена). Источник снятия члена
+// (C-20/C-21): глаголы снятого правила ушли, и снимается сохранённый набор. Строки
+// члена ДРУГОГО типа с тем же идентификатором сюда не попадают (kaname#933).
+func (s *reconcileStore) LedgerTuplesForMember(ctx context.Context, bindingID domain.AccessBindingID, member reconcile.MemberCoord) ([]domain.MembershipTuple, error) {
 	rows, err := s.tx.Query(ctx,
 		`SELECT fga_user, relation, object
 		   FROM kaname.access_binding_emitted_tuples
-		  WHERE binding_id = $1 AND object = $2`,
-		string(bindingID), object)
+		  WHERE binding_id = $1 AND member_object_type = $2 AND member_object_id = $3`,
+		string(bindingID), member.ObjectType, member.ObjectID)
 	if err != nil {
-		return nil, fmt.Errorf("reconcile: ledger tuples for object %s: %w", object, err)
+		return nil, fmt.Errorf("reconcile: ledger tuples for member %s:%s: %w", member.ObjectType, member.ObjectID, err)
 	}
 	defer rows.Close()
 	var out []domain.MembershipTuple
@@ -1268,13 +1290,13 @@ func (s *reconcileStore) LedgerTuplesForObject(ctx context.Context, bindingID do
 	return out, rows.Err()
 }
 
-// LedgerTuples — весь реестр выпущенного одной выдачей, одним обращением по
-// префиксу первичного ключа (binding_id, fga_user, relation, object). Читает его
-// полный проход выдачи нескольким субъектам, чтобы дописать неизменному члену
-// кортежи, которых в реестре нет (reconcile/emitted_completion.go, kaname#880).
-func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.MembershipTuple, error) {
+// LedgerTuples — весь реестр выпущенного одной выдачей с координатами строк, одним
+// обращением по префиксу первичного ключа (binding_id). Читают его полный проход
+// выдачи нескольким субъектам, чтобы дописать неизменному члену кортежи, которых в
+// реестре нет (reconcile/emitted_completion.go, kaname#880), и истечение выдачи.
+func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]reconcile.LedgerRow, error) {
 	rows, err := s.tx.Query(ctx,
-		`SELECT fga_user, relation, object
+		`SELECT member_object_type, member_object_id, fga_user, relation, object
 		   FROM kaname.access_binding_emitted_tuples
 		  WHERE binding_id = $1`,
 		string(bindingID))
@@ -1282,13 +1304,13 @@ func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.Acce
 		return nil, fmt.Errorf("reconcile: ledger tuples of binding %s: %w", bindingID, err)
 	}
 	defer rows.Close()
-	var out []domain.MembershipTuple
+	var out []reconcile.LedgerRow
 	for rows.Next() {
-		var t domain.MembershipTuple
-		if err := rows.Scan(&t.User, &t.Relation, &t.Object); err != nil {
+		var r reconcile.LedgerRow
+		if err := rows.Scan(&r.Member.ObjectType, &r.Member.ObjectID, &r.Tuple.User, &r.Tuple.Relation, &r.Tuple.Object); err != nil {
 			return nil, fmt.Errorf("reconcile: scan binding ledger tuple: %w", err)
 		}
-		out = append(out, t)
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }
@@ -1304,70 +1326,49 @@ func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.Me
 
 // RecordEmittedTuples co-commits the per-member FGA tuples into the persisted
 // emitted-tuple ledger (kaname.access_binding_emitted_tuples — F3/#178) on the
-// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10). The INSERT is
-// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'` (the
-// DO UPDATE only re-tags a pre-0032 source='binding' row; the object-spaces are disjoint,
-// so no real binding↔member collision), so a repeated reconcile of the same ACTIVE member
-// — or a forward + async-full overlap — is an idempotent no-op. len==0 is a no-op.
-func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error {
-	users := make([]string, 0, len(tuples))
-	rels := make([]string, 0, len(tuples))
-	objs := make([]string, 0, len(tuples))
-	// Дедуп по ключу конфликта ОБЯЗАТЕЛЕН перед набором: `ON CONFLICT … DO UPDATE` не
-	// вправе задеть одну и ту же строку дважды В ОДНОМ стейтменте (Postgres отвергает
-	// такой набор целиком). Поштучная вставка этого не требовала, потому что каждая
-	// строка ехала своим стейтментом; при переходе на набор дубль внутри одного вызова
-	// обязан схлопываться здесь. Исход тот же: повтор был идемпотентен и раньше.
-	seen := make(map[[3]string]struct{}, len(tuples))
-	for _, t := range tuples {
-		if t.User == "" || t.Relation == "" || t.Object == "" {
-			return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
-				t.User, t.Relation, t.Object)
-		}
-		k := [3]string{t.User, t.Relation, t.Object}
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		seen[k] = struct{}{}
-		users = append(users, t.User)
-		rels = append(rels, t.Relation)
-		objs = append(objs, t.Object)
-	}
-	if len(users) == 0 {
+// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10), под координатой
+// члена, который их выпустил (kaname#933). The INSERT is `ON CONFLICT (<полный ключ>)
+// DO NOTHING`, so a repeated reconcile of the same ACTIVE member — or a forward +
+// async-full overlap — is an idempotent no-op. Строка уровня выдачи
+// (`source='binding'`) с тем же кортежем несёт пустую координату и остаётся отдельной
+// строкой: у неё свой владелец (Create, RoleTupleReconciler). len==0 is a no-op.
+func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, member reconcile.MemberCoord, tuples []domain.MembershipTuple) error {
+	if len(tuples) == 0 {
 		return nil
 	}
-	if _, err := s.tx.Exec(ctx,
-		// source='member': ARM_LABELS per-object tuples owned by the reconciler /
-		// RoleMembershipFanout — kept distinct from binding-level rows so a
-		// Role.Update binding-level reconcile (ReplaceEmittedTuples) never wipes them.
-		// DO UPDATE SET source='member' self-heals any pre-0032 row that defaulted to
-		// 'binding' (object-spaces are disjoint, so a real binding↔member collision
-		// cannot occur — this only re-tags an existing member row).
-		`INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-		 SELECT $1, u, r, o, 'member' FROM unnest($2::text[], $3::text[], $4::text[]) AS t(u, r, o)
-		 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
-		string(bindingID), users, rels, objs,
-	); err != nil {
-		return fmt.Errorf("reconcile: record emitted tuple: %w", err)
+	refs := make([]reconcile.EmittedTupleRef, 0, len(tuples))
+	for _, t := range tuples {
+		refs = append(refs, reconcile.EmittedTupleRef{BindingID: bindingID, Member: member, Tuple: t})
 	}
-	return nil
+	return s.RecordEmittedTuplesBatch(ctx, refs)
 }
 
-// ForgetEmittedTuples removes exactly the supplied member rows from the ledger on
-// the writer-tx (eager-revoke / fell-out / expiry), keeping the ledger lock-step
-// with the live FGA tuple set so a later symmetric revoke does not replay a tuple
-// that was already revoked. A deleted BINDING's rows are dropped by the FK ON
-// DELETE CASCADE (delete.go); this handles the member-level revocations that leave
-// the binding row alive. len==0 is a no-op.
-func (s *reconcileStore) ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error {
-	for _, t := range tuples {
-		if _, err := s.tx.Exec(ctx,
-			`DELETE FROM kaname.access_binding_emitted_tuples
-			  WHERE binding_id = $1 AND fga_user = $2 AND relation = $3 AND object = $4`,
-			string(bindingID), t.User, t.Relation, t.Object,
-		); err != nil {
-			return fmt.Errorf("reconcile: forget emitted tuple: %w", err)
+// ForgetEmittedTuples снимает ровно названные строки реестра — по ПОЛНОМУ ключу
+// (выдача, координата члена, кортеж) — на пишущей транзакции (eager-revoke /
+// fell-out / expiry), keeping the ledger lock-step with the live FGA tuple set so a
+// later symmetric revoke does not replay a tuple that was already revoked. Строка
+// другой координаты с тем же кортежем остаётся: она отвечает за своего члена
+// (kaname#933). A deleted BINDING's rows are dropped by the FK ON DELETE CASCADE
+// (delete.go). len==0 is a no-op.
+func (s *reconcileStore) ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, rows []reconcile.LedgerRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	cols := newLedgerColumns(len(rows))
+	for _, r := range rows {
+		if err := cols.add(bindingID, r.Member, r.Tuple); err != nil {
+			return err
 		}
+	}
+	if _, err := s.tx.Exec(ctx,
+		`DELETE FROM kaname.access_binding_emitted_tuples et
+		  USING unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) AS k(mt, mi, u, r, o)
+		  WHERE et.binding_id = $1
+		    AND et.member_object_type = k.mt AND et.member_object_id = k.mi
+		    AND et.fga_user = k.u AND et.relation = k.r AND et.object = k.o`,
+		string(bindingID), cols.types, cols.ids, cols.users, cols.rels, cols.objs,
+	); err != nil {
+		return fmt.Errorf("reconcile: forget emitted tuple: %w", err)
 	}
 	return nil
 }

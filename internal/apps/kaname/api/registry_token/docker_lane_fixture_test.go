@@ -16,10 +16,12 @@ package registry_token_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 )
 
 // liveBasicCredential — авторитет, знающий ровно одну живую строку.
@@ -59,4 +61,17 @@ func newBasicCredential(t *testing.T) (string, liveBasicCredential) {
 // который несёт сама строка.
 func dockerLogin(secret string) registrytokenuc.IssueInput {
 	return registrytokenuc.IssueInput{Username: dockerCredentialID, Password: secret}
+}
+
+// ampleAnonPace — темп анонимного потока, которого проба не исчерпает:
+// анонимный поток без темпа не строится (kaname#928), а предмет этих проб — не
+// темп.
+func ampleAnonPace(t *testing.T) registrytokenuc.AnonymousPacer {
+	t.Helper()
+	at := time.Unix(1_700_000_000, 0)
+	p, err := exchangepace.New(1<<20, func() time.Time { return at })
+	if err != nil {
+		t.Fatalf("темп пробы не построен: %v", err)
+	}
+	return p
 }

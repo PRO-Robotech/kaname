@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+
 	"github.com/PRO-Robotech/kaname/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kaname/pkg/generatedid"
 )
@@ -101,6 +103,96 @@ type RegistryTokenConfig struct {
 	// Форма значения закрыта (AnonymousPrincipalForm), и иная отвергается
 	// стражем старта — разбор формы и цена её нарушения в AnonymousPrincipal.
 	AnonymousClientID string `mapstructure:"anonymous-client-id"`
+
+	// AnonymousPerSourcePerSec — темп анонимной выдачи: входов без
+	// удостоверения в секунду на источник, НА ПРОЦЕСС (kaname#928). Источник —
+	// по правилу адреса поверхности выдачи (Р7); запас — одна секунда темпа;
+	// превышение — 429 со сроком ожидания. Несколько реплик дают источнику до
+	// «темп × число реплик».
+	//
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC
+	// Пример значения: 20
+	//
+	// Умолчания нет: при объявленном AnonymousClientID и поднятом слушателе
+	// нулевой темп отвергается стражем старта (Validate). Ноль означал бы
+	// «без ограничения» — выдачу, ни разу не отказавшую по частоте.
+	AnonymousPerSourcePerSec int `mapstructure:"anonymous-per-source-per-sec"`
+
+	// AnonymousForwarderSAN — ДОВЕРЕННЫЙ ПЕРЕСЫЛЬЩИК точки анонимной выдачи
+	// (kaname#930): ТОЧНЫЙ идентификатор (URI SAN) клиентского сертификата
+	// прокси реестра, через который к службе приходит анонимный вход.
+	//
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN
+	// Пример значения: spiffe://kacho.cloud/ns/kacho/sa/kacho-registry
+	//
+	// От пира с ПРОВЕРЕННЫМ сертификатом этого идентификатора ключ темпа на
+	// источник — адрес клиента из одного значения `X-Forwarded-For` (правило
+	// `internal/issuingsource`); от любого другого пира заголовок не читается.
+	// Форма — та же, что у кругов отправителей соседних ручек
+	// (`authn.trusted-forwarder-sans`): точный SPIFFE-идентификатор рабочей
+	// нагрузки нашего домена доверия, а не имя службы.
+	//
+	// Умолчания нет: при объявленном AnonymousClientID и поднятом слушателе
+	// незаданный пересыльщик отвергается стражем старта (Validate). Без него
+	// ключом темпа был бы адрес самого прокси, и предел стал бы общим на всех
+	// клиентов за ним. Слушатель при анонимном потоке обязан запрашивать
+	// клиентский сертификат — это судит страж корня
+	// requireIssuingListenerAsksForACertificate.
+	AnonymousForwarderSAN string `mapstructure:"anonymous-forwarder-san"`
+}
+
+// anonymousForwarderLabelRe — сегмент пространства имён и учётной записи в
+// идентификаторе пересыльщика: метка имени в кластере.
+var anonymousForwarderLabelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// AnonymousLaneDeclared — анонимный поток поднят: принципал объявлен и
+// слушатель полосы есть. Один предикат на стража настройки и стража корня.
+func (c RegistryTokenConfig) AnonymousLaneDeclared() bool {
+	return c.AnonymousClientID != "" && c.ListenAddress() != ""
+}
+
+// AnonymousForwarder — объявленный доверенный пересыльщик точки анонимной
+// выдачи в домене доверия trust.
+//
+// Пустое + nil — пересыльщик не объявлен. Ошибка — значение написано, но не
+// формы `spiffe://<домен>/ns/<пространство>/sa/<учётная запись>` нашего домена:
+// такое значение не совпало бы ни с одним предъявленным сертификатом
+// (сравнение точное), и поток поднялся бы с общим на всех темпом молча.
+// Обрезки пробелов нет по той же причине, что у принципала: обрезанное
+// значение было бы не тем, что объявил оператор.
+func (c RegistryTokenConfig) AnonymousForwarder(trust grpcsrv.TrustDomain) (string, error) {
+	v := c.AnonymousForwarderSAN
+	if v == "" {
+		return "", nil
+	}
+	if !trust.IsDeclared() {
+		return "", fmt.Errorf(
+			"api-server.registry-token.anonymous-forwarder-san %q is declared while authn.trust-domain is not — "+
+				"an undeclared trust domain recognises no certificate, so the forwarder would never be recognised "+
+				"and every anonymous client behind it would share one pace. Declare authn.trust-domain "+
+				"(env KANAME_AUTHN__TRUST_DOMAIN)", v)
+	}
+	if !forwarderSANWellFormed(trust, v) {
+		return "", fmt.Errorf(
+			"api-server.registry-token.anonymous-forwarder-san %q is not of the declared form "+
+				"%s<namespace>/sa/<service account> (lower-case labels, nothing after the account) — it is "+
+				"compared EXACTLY with the identity of the verified client certificate, and a value of another "+
+				"form would never match, leaving every anonymous client behind the registry proxy on one pace. "+
+				"Example: %skacho/sa/kacho-registry. Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN",
+			v, trust.NamespacePrefix(), trust.NamespacePrefix())
+	}
+	return v, nil
+}
+
+// forwarderSANWellFormed — v есть `<префикс пространств домена><ns>/sa/<sa>`, оба
+// сегмента — метки имени в кластере.
+func forwarderSANWellFormed(trust grpcsrv.TrustDomain, v string) bool {
+	rest, ok := strings.CutPrefix(v, trust.NamespacePrefix())
+	if !ok {
+		return false
+	}
+	ns, sa, ok := strings.Cut(rest, "/sa/")
+	return ok && anonymousForwarderLabelRe.MatchString(ns) && anonymousForwarderLabelRe.MatchString(sa)
 }
 
 // AnonymousPrincipalForm — объявленная форма публичного принципала анонимного
@@ -233,7 +325,7 @@ func (c RegistryTokenConfig) TokenTTL() time.Duration {
 // Принимает настройку токен-эндпоинта ПАРАМЕТРОМ, а не читает её из корня: две
 // величины связаны по существу, и связь обязана проверяться там, где она есть,
 // а не там, где о ней помнят.
-func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
+func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig, trust grpcsrv.TrustDomain) error {
 	// Окно перехода kacho#1143 разбирается СТРАЖЕМ СТАРТА, а не только на пути
 	// запроса. Разобранное лишь на пути запроса означает, что процесс поднялся
 	// с настройкой, которой нет, и узнает об этом первый вошедший клиент.
@@ -251,6 +343,12 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
 	if _, err := c.AnonymousPrincipal(); err != nil {
 		return err
 	}
+	// Доверенный пересыльщик (kaname#930) — тем же порядком: написанное
+	// значение не той формы не совпадёт ни с одним сертификатом при любом
+	// составе полос.
+	if _, err := c.AnonymousForwarder(trust); err != nil {
+		return err
+	}
 	if c.ListenAddress() == "" {
 		// Слушателя нет — полосы нет, и сверять нечего. Страж, требующий того,
 		// чем не пользуются, есть отказ в старте без предмета.
@@ -262,6 +360,28 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
 	// оно с именем, которое реестр называет докер-клиенту; совпадения не
 	// выбирал никто. Отказ называет ОБЕ величины: свою настройку и ту сторону,
 	// из которой она выводится, — иначе оператор ищет вслепую.
+	// ТЕМП АНОНИМНОЙ ВЫДАЧИ (kaname#928): поток объявлен — темп на источник
+	// объявлен числом. Без анонимного потока величина не требуется.
+	if c.AnonymousLaneDeclared() && c.AnonymousPerSourcePerSec <= 0 {
+		return fmt.Errorf(
+			"api-server.registry-token.anonymous-per-source-per-sec must be declared as a positive number "+
+				"of anonymous registry token requests per second per source, per replica, while "+
+				"api-server.registry-token.anonymous-client-id is set (got %d) — zero means «no pace». "+
+				"Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC",
+			c.AnonymousPerSourcePerSec)
+	}
+	// ДОВЕРЕННЫЙ ПЕРЕСЫЛЬЩИК (kaname#930): анонимный вход приходит через прокси
+	// реестра, и без пересыльщика ключом темпа на источник был бы адрес самого
+	// прокси — предел, общий на всех клиентов за ним.
+	if c.AnonymousLaneDeclared() && c.AnonymousForwarderSAN == "" {
+		return fmt.Errorf(
+			"api-server.registry-token.anonymous-forwarder-san must be declared while "+
+				"api-server.registry-token.anonymous-client-id is set — anonymous registry token requests reach "+
+				"this service through the registry proxy, and without a trusted forwarder the pace key is the "+
+				"proxy's own address, one pace shared by every client behind it. Declare the exact identity of "+
+				"the proxy's client certificate in the form %s<namespace>/sa/<service account>. "+
+				"Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN", trust.NamespacePrefix())
+	}
 	if c.TokenService() == "" {
 		return fmt.Errorf(
 			"api-server.registry-token.service is not declared while the docker lane listener is up (%s) — "+

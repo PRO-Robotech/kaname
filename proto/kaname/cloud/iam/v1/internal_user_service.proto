@@ -5,43 +5,24 @@ syntax = "proto3";
 
 package kaname.cloud.iam.v1;
 
-import "google/api/annotations.proto";
-import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/user.proto";
 import "kaname/cloud/iam/v1/user_service.proto";
-import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
-// InternalUserService — cluster-internal user-mutation API (port 9091).
+// InternalUserService — cluster-internal user API (port 9091).
 //
 // НЕ публикуется на external TLS listener.
 //
-// Transport:
-//   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
-//   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
-//     listener'а; вызывающий — admin-tooling.
+// Transport: `Get` — регистрируется в api-gateway internal mux (нужен
+// interceptor'у).
 service InternalUserService {
-  // Upsert User по субъекту личности (административный путь).
-  // Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
-  //
-  // REST exposed ONLY on the cluster-internal listener;
-  // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
-  // and authz-public-allowlist permits the <exempt> catalog entry.
-  rpc UpsertFromIdentity (UpsertFromIdentityRequest) returns (corelib.operation.Operation) {
-    option (google.api.http) = {
-      post: "/iam/v1/internal/users:upsertFromIdentity"
-      body: "*"
-    };
-    option (corelib.api.v1.operation) = {
-      metadata: "UpsertFromIdentityMetadata"
-      response: "User"
-    };
-    option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
-  }
+  // Глагола заведения личности по удостоверению внешнего поставщика здесь
+  // больше нет (kaname#929, приёмка `active-identity-has-a-way-in.md`, AWI-09):
+  // его обратный вызов из края снят, вызывающего не осталось, а сам глагол
+  // производил личность ACTIVE без способа входа. Людей заводят регистрация и
+  // приглашение.
 
   // Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
   rpc Get (GetUserRequest) returns (User) {
@@ -53,23 +34,4 @@ service InternalUserService {
   // нет (kaname#564): он снят вместе со снятым поставщиком (kaname#363),
   // вызывающего не осталось. Восстановление доступа ведёт собственная полоса
   // входа (`/iam/v1/auth/recovery/complete`).
-}
-
-message UpsertFromIdentityRequest {
-  // Субъект личности (`sub` claim) — UNIQUE-key.
-  string external_id = 1;
-
-  // Email (case-insensitive). Required.
-  string email = 2;
-
-  // Human-readable display name (необязателен).
-  string display_name = 3;
-}
-
-message UpsertFromIdentityMetadata {
-  // ID локального User row после upsert'а.
-  string user_id = 1;
-
-  // True если был создан новый User; false если обновился existing.
-  bool created = 2;
 }

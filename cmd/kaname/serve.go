@@ -1229,8 +1229,18 @@ func runServe(cfg config.Config) error {
 	// кодом 1. Отказ ниже поэтому недостижим на живой посадке и стоит здесь
 	// затем, чтобы значение не оказалось использовано неразобранным, если
 	// когда-нибудь эту функцию позовут в обход `main`.
+	// Адрес источника осей темпа — ОДНО правило на все точки поверхности выдачи
+	// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края только
+	// при проверенном сертификате края, иначе адрес пира. Строится до сборки
+	// докерной полосы: её анонимная выдача — тоже точка этой поверхности
+	// (kaname#928), и на ней адрес берётся ещё и у объявленного доверенного
+	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
+	// край и пересыльщик вообще узнаваемы, требует страж
+	// requireIssuingListenerAsksForACertificate.
+	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
 	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		logger: logger,
+		source: issuingSource,
 		// НАШ подписант — единственный издатель полосы. Выключенная своя
 		// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
 		// выхода (kaname#494): другого издателя у полосы нет.
@@ -1267,6 +1277,10 @@ func runServe(cfg config.Config) error {
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
+		// Перепись точки анонимной выдачи правила адреса источника — вплотную
+		// к сборке полосы (kaname#930): рост её клетки отличает неверно
+		// названного пересыльщика от залпа одного клиента.
+		metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))
 		// Токен-эндпоинт платформы (задача kacho#898) монтируется на ЭТУ ЖЕ
 		// поверхность, а не заводит свою. Вид выдачи «учётные данные клиента»
 		// задан формой запроса, а не нашим выбором порта; второй внешний
@@ -1284,12 +1298,8 @@ func runServe(cfg config.Config) error {
 		// выключенном эндпоинте (только вне боевого режима) — nil, и её пути
 		// здесь не резолвятся.
 		//
-		// Адрес источника осей темпа — ОДНО правило на обе точки поверхности
-		// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края
-		// только при проверенном сертификате края, иначе адрес пира. Режим
-		// слушателя, при котором край вообще узнаваем, требует страж
-		// requireIssuingListenerAsksForACertificate выше.
-		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
+		// Адрес источника осей темпа — то же правило issuingSource, что у
+		// докерной полосы выше: одно на все точки поверхности.
 		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
 			ceremonyKeySource(signingKeystore), lane.secretChecker(), lane.secretCheckCost(),
 			metricsReg.LoginLaneRecorder(), issuingSource, logger)
@@ -2408,6 +2418,9 @@ type registryTokenRuntime struct {
 	signer                 *tokensigner.Signer
 	credentialKindObserver registrytokenuc.CredentialKindObserver
 	basicCredentialTimeout time.Duration
+	// source — правило адреса источника поверхности выдачи (Р7): ключ темпа
+	// анонимной выдачи (kaname#928). Одно на все точки поверхности.
+	source *issuingsource.Rule
 }
 
 // registryTokenBuildConfig — ЕДИНСТВЕННОЕ переложение настройки докерной полосы
@@ -2435,15 +2448,23 @@ func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRu
 	if err != nil {
 		return registrytokenwire.BuildConfig{}, err
 	}
+	var source func(*http.Request) string
+	if run.source != nil {
+		// Доверенный пересыльщик точки (kaname#930) переносится как есть: его
+		// форму в домене доверия разобрал страж старта `RegistryTokenConfig.Validate`.
+		source = run.source.RegistryTokenPoint(rt.AnonymousForwarderSAN)
+	}
 	return registrytokenwire.BuildConfig{
-		AnonymousClientID:      anonymous,
-		Realm:                  rt.TokenIssuer(),
-		Service:                rt.TokenService(),
-		Logger:                 run.logger,
-		Signer:                 run.signer,
-		TokenTTL:               rt.TokenTTL(),
-		KeyMaterialWindowUntil: window,
-		CredentialKindObserver: run.credentialKindObserver,
-		BasicCredentialTimeout: run.basicCredentialTimeout,
+		AnonymousClientID:        anonymous,
+		AnonymousPerSourcePerSec: rt.AnonymousPerSourcePerSec,
+		Source:                   source,
+		Realm:                    rt.TokenIssuer(),
+		Service:                  rt.TokenService(),
+		Logger:                   run.logger,
+		Signer:                   run.signer,
+		TokenTTL:                 rt.TokenTTL(),
+		KeyMaterialWindowUntil:   window,
+		CredentialKindObserver:   run.credentialKindObserver,
+		BasicCredentialTimeout:   run.basicCredentialTimeout,
 	}, nil
 }

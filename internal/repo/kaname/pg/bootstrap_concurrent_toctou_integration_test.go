@@ -7,8 +7,8 @@ package pg_test
 // guard (ban #10: a within-service invariant must be DB-level/atomic, not a
 // software check-then-act).
 //
-// BUG (5th audit, DATA-medium): UpsertFromIdentityUseCase gated the personal-
-// resource bootstrap with a cross-transaction TOCTOU — countOwnedAccounts()
+// BUG (5th audit, DATA-medium): the personal-resource bootstrap was gated with a
+// cross-transaction TOCTOU — countOwnedAccounts()
 // opened its OWN reader-tx (SELECT count(*) FROM accounts WHERE owner_user_id=$1),
 // rolled it back, and THEN inserted a personal Account/Project/owner-binding in a
 // SEPARATE writer-tx when the count was 0. For the newIdentity=false path (an
@@ -28,7 +28,12 @@ package pg_test
 // creating a duplicate.
 //
 // RED before the fix (N concurrent bootstraps → N owned accounts), GREEN after
-// (exactly ONE owned account; every Operation still succeeds).
+// (exactly ONE owned account; every bootstrap still succeeds).
+//
+// Тело заведения — `userapp.BootstrapPersonalResourcesTx`, тот же оператор, что
+// служит активации в исходе подтверждения адреса и регистрации. Прежде проба
+// шла через глагол заведения личности по внешнему удостоверению; он снят
+// (kaname#929, AWI-09), а гонка — свойство тела, а не глагола.
 //
 // Run: `make test` (testcontainers + Docker). Skipped under -short.
 
@@ -41,7 +46,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
-	"github.com/PRO-Robotech/corelib/operations"
 
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -49,9 +53,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
-// TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount — N concurrent
-// UpsertFromIdentity calls for one already-ACTIVE, zero-account user must
-// bootstrap EXACTLY ONE personal account (not N).
+// TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount — N concurrent bootstraps
+// for one already-ACTIVE, zero-account user must create EXACTLY ONE personal
+// account (not N).
 func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -62,7 +66,6 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
-	opsRepo := operations.NewRepo(pool, "kaname")
 
 	const ext = "ext_BOOT_conc"
 	const email = "boot-conc@example.com"
@@ -83,34 +86,48 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	require.Equal(t, 0, ownedAccountCount(t, ctx, pool, string(inviteeID)),
 		"pre-state: activated invitee owns zero accounts")
 
-	// Fire N concurrent bootstraps, released together by a start barrier.
+	// Fire N concurrent bootstraps, released together by a start barrier; each
+	// in its OWN writer-tx, committed on success.
 	const n = 6
-	uc := userapp.NewUpsertFromIdentityUseCase(repo, opsRepo)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	opIDs := make([]string, n)
+	got := make([]domain.UserID, n)
+	errs := make([]error, n)
 	wg.Add(n)
 	for i := 0; i < n; i++ {
 		go func(idx int) {
 			defer wg.Done()
 			<-start
-			op, execErr := uc.Execute(ctx, userapp.UpsertFromIdentityInput{
-				ExternalID:  domain.ExternalSubject(ext),
-				Email:       domain.Email(email),
-				DisplayName: domain.DisplayName("Bootstrap Concurrent"),
+			w, werr := repo.Writer(ctx)
+			if werr != nil {
+				errs[idx] = werr
+				return
+			}
+			defer func() { _ = w.Rollback(ctx) }()
+			res, berr := userapp.BootstrapPersonalResourcesTx(ctx, w, userapp.BootstrapInput{
+				CandidateUserID: string(inviteeID),
+				ExternalID:      domain.ExternalSubject(ext),
+				Email:           domain.Email(email),
+				DisplayName:     domain.DisplayName("Bootstrap Concurrent"),
+				Actor:           "system",
+				NewIdentity:     false,
 			})
-			require.NoError(t, execErr)
-			opIDs[idx] = op.ID
+			if berr != nil {
+				errs[idx] = berr
+				return
+			}
+			errs[idx] = w.Commit(ctx)
+			got[idx] = res.User.ID
 		}(i)
 	}
 	close(start)
 	wg.Wait()
 
-	// Every Operation must terminate successfully (the loser returns the already-
-	// bootstrapped user, it does not error).
-	for _, id := range opIDs {
-		done := awaitOp(t, ctx, opsRepo, id)
-		require.Nil(t, done.Error, "concurrent UpsertFromIdentity must succeed: %v", done.Error)
+	// Every bootstrap must succeed (the loser returns the already-bootstrapped
+	// user, it does not error).
+	for i := range errs {
+		require.NoError(t, errs[i], "concurrent bootstrap #%d must succeed", i)
+		require.Equal(t, inviteeID, got[i], "concurrent bootstrap #%d returns the same user", i)
 	}
 
 	assert.Equal(t, 1, ownedAccountCount(t, ctx, pool, string(inviteeID)),

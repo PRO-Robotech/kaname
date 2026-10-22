@@ -75,13 +75,6 @@ type Registry struct {
 	registryTokenKindOnce sync.Once
 	registryTokenKind     *RegistryTokenCredentialKindRecorder
 
-	// inviteActivationOnce/inviteActivation — единственный экземпляр счётчика
-	// исходов активации приглашения. Потребителей два и собираются они в разных
-	// местах композиционного корня: gRPC-путь (buildServices) и ЖИВОЙ путь входа
-	// (buildHooksMux). Второй конструктор уронил бы старт на duplicate-register.
-	inviteActivationOnce sync.Once
-	inviteActivation     *InviteActivationRecorder
-
 	// inviteMailOnce/inviteMail — единственный экземпляр счётчика исходов
 	// ОТПРАВКИ письма приглашения. Он про другой предмет, чем сосед выше:
 	// активация отвечает на «выкупили ли приглашение», отправка — на «ушло ли

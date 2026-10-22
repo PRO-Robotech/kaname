@@ -176,8 +176,9 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 	_, err = fwd.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext($1))`, string(abID))
 	require.NoError(t, err)
 	_, err = fwd.Exec(ctx, `
-		INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-		VALUES ($1, $2, $3, $4, 'member')`,
+		INSERT INTO kaname.access_binding_emitted_tuples
+		       (binding_id, member_object_type, member_object_id, fga_user, relation, object, source)
+		VALUES ($1, 'vpc.network', 'net-race', $2, $3, $4, 'member')`,
 		string(abID), "user:"+string(member), "v_get", "vpc_network:net-race")
 	require.NoError(t, err)
 

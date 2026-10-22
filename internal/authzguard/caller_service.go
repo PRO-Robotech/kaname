@@ -41,13 +41,24 @@ func ServiceNameFromSAN(d grpcsrv.TrustDomain, san string) (string, bool) {
 // не проверил (нет проверенной цепочки), личности не доказывает. Необъявленный
 // домен доверия не узнаёт никого.
 func PeerIsGateway(d grpcsrv.TrustDomain, st *tls.ConnectionState) bool {
-	if st == nil || len(st.VerifiedChains) == 0 || len(st.VerifiedChains[0]) == 0 {
-		return false
-	}
-	san := d.CertIdentity(st.VerifiedChains[0][0])
+	san := VerifiedPeerIdentity(d, st)
 	if san == "" {
 		return false
 	}
 	svc, ok := ServiceNameFromSAN(d, san)
 	return ok && svc == GatewayServiceName()
+}
+
+// VerifiedPeerIdentity — идентификатор пира HTTP-слушателя: URI SAN нашего
+// домена доверия с ПРОВЕРЕННОГО слушателем листа. Пусто — сертификата нет,
+// цепочка не проверена либо лист не несёт идентификатора нашего домена.
+//
+// Одно место, где решается «чей это пир» по сертификату: признак края выше и
+// доверенный пересыльщик поверхности выдачи (`issuingsource`, kaname#930)
+// спрашивают его, а не разбирают состояние рукопожатия каждый сам.
+func VerifiedPeerIdentity(d grpcsrv.TrustDomain, st *tls.ConnectionState) string {
+	if st == nil || len(st.VerifiedChains) == 0 || len(st.VerifiedChains[0]) == 0 {
+		return ""
+	}
+	return d.CertIdentity(st.VerifiedChains[0][0])
 }

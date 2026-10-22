@@ -27,6 +27,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -292,8 +293,8 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	abID := ids.NewID(domain.PrefixAccessBinding)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
-		fmt.Sprintf("Create access binding (%s/%s → %s on %s/%s)",
-			b.SubjectType, b.SubjectID, b.RoleID, b.ResourceType, b.ResourceID),
+		fmt.Sprintf("Create access binding (%s → %s on %s/%s)",
+			subjectsLabel(b.Subjects), b.RoleID, b.ResourceType, b.ResourceID),
 		// account_id NARROW-SCOPE: stamped only for account-scoped bindings
 		// (ResourceType=="account" → ResourceID); project/cluster/cross-service
 		// bindings leave it empty (SQL NULL → not in the account-scoped list,
@@ -330,7 +331,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 				if u.logger != nil {
 					u.logger.Error("access_binding create operation panicked",
 						"op", op.ID, "panic", fmt.Sprint(r),
-						"subject", b.SubjectType, "subject_id", b.SubjectID,
+						"subjects", subjectsLabel(b.Subjects),
 						"role", b.RoleID, "resource", string(b.ResourceType)+":"+b.ResourceID)
 				}
 			}
@@ -339,7 +340,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 		if derr != nil && u.logger != nil {
 			u.logger.Error("access_binding create operation failed",
 				"op", op.ID, "err", derr,
-				"subject", b.SubjectType, "subject_id", b.SubjectID,
+				"subjects", subjectsLabel(b.Subjects),
 				"role", b.RoleID, "resource", string(b.ResourceType)+":"+b.ResourceID)
 		}
 		return res, derr
@@ -570,4 +571,15 @@ func newLiveTypeSet(live []string) liveTypeSet {
 func (s liveTypeSet) FGAObjectType(dotted string) (string, bool) {
 	_, ok := s[dotted]
 	return "", ok
+}
+
+// subjectsLabel — весь набор субъектов выдачи одной строкой «тип/id, тип/id»:
+// описание операции и журнал называют КАЖДОГО субъекта, а не проекцию первого
+// (kaname#917). У выдачи одному субъекту строка та же, что давала пара.
+func subjectsLabel(subjects []domain.Subject) string {
+	parts := make([]string, len(subjects))
+	for i, s := range subjects {
+		parts[i] = string(s.Type) + "/" + string(s.ID)
+	}
+	return strings.Join(parts, ", ")
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package user — UserService (public CRUD + Invite) + InternalUserService
-// (UpsertFromIdentity / Get).
+// (Get).
 package user
 
 import (
@@ -270,29 +270,15 @@ func (h *Handler) Invite(ctx context.Context, req *iamv1.InviteUserRequest) (*op
 // ожидает `Create` — добавь RPC в proto с `option deprecated = true` и
 // handler вернет FailedPrecondition с подсказкой использовать `Invite`.
 
-// InternalHandler — InternalUserService (UpsertFromIdentity / Get).
+// InternalHandler — InternalUserService (Get).
 type InternalHandler struct {
 	iamv1.UnimplementedInternalUserServiceServer
 
-	upsert *UpsertFromIdentityUseCase
-	get    *GetUserUseCase
+	get *GetUserUseCase
 }
 
-func NewInternalHandler(u *UpsertFromIdentityUseCase, g *GetUserUseCase) *InternalHandler {
-	return &InternalHandler{upsert: u, get: g}
-}
-
-func (h *InternalHandler) UpsertFromIdentity(ctx context.Context, req *iamv1.UpsertFromIdentityRequest) (*operationpb.Operation, error) {
-	in := UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject(req.GetExternalId()),
-		Email:       domain.Email(req.GetEmail()),
-		DisplayName: domain.DisplayName(req.GetDisplayName()),
-	}
-	op, err := h.upsert.Execute(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	return shared.OperationToProto(op), nil
+func NewInternalHandler(g *GetUserUseCase) *InternalHandler {
+	return &InternalHandler{get: g}
 }
 
 func (h *InternalHandler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*iamv1.User, error) {
