@@ -83,6 +83,11 @@ NOT_PERFORMED = re.compile(r"^\s*\S+\.go:\d+: НЕ ВЫПОЛНИЛОСЬ")
 _FRAMING = ("=== RUN", "=== PAUSE", "=== CONT", "=== NAME")
 
 
+# Сколько самых долгих пакетов печатает перепись: запас предела `-timeout`
+# решает самый долгий, следующие — видно ли, кто его догоняет.
+SLOWEST_PKGS = 3
+
+
 def _clip_line(line):
     line = line.rstrip("\n")
     if len(line) > FAILURE_LINE_CHARS:
@@ -124,6 +129,9 @@ def verdict(stream, out=sys.stdout):
     build_output = collections.defaultdict(list)
     failed_pkgs = []  # (пакет, FailedBuild) в порядке потока
     not_performed = []  # (пакет, проба, строка метки) — пропуски с меткой
+    # Время пакета — из его события исхода (Elapsed, с): доля пакета от предела
+    # `-timeout` шага видна в журнале CI, а не только в test.json (kaname#949).
+    pkg_elapsed = {}
 
     for line in stream:
         line = line.strip()
@@ -163,6 +171,8 @@ def verdict(stream, out=sys.stdout):
             elif action in ("pass", "fail", "skip"):
                 pkg[action] += 1
                 ended_pkgs.add(package)
+                if isinstance(event.get("Elapsed"), (int, float)):
+                    pkg_elapsed[package] = event["Elapsed"]
                 if action == "fail":
                     failed_pkgs.append((package, event.get("FailedBuild")))
             continue
@@ -202,6 +212,9 @@ def verdict(stream, out=sys.stdout):
     print("пакетов осмотрено : %d  (прошло %d · упало %d · без проб %d)"
           % (len(seen_pkgs), pkg["pass"], pkg["fail"], pkg["skip"]), file=out)
     print("проб исполнено    : %d" % executed, file=out)
+    slow = sorted(pkg_elapsed.items(), key=lambda kv: (-kv[1], kv[0]))[:SLOWEST_PKGS]
+    if slow:
+        print("самые долгие пакеты: %s" % " · ".join("%s %.1f с" % kv for kv in slow), file=out)
     print("отказов           : %d" % test["fail"], file=out)
     print("ПРОПУЩЕНО         : %d  (в зачёт прохода НЕ идёт)" % test["skip"], file=out)
     if interrupted:
@@ -534,6 +547,19 @@ def self_test():
     run(1, "(+) красное при пропуске с меткой — красное",
         ev("start") + ev("run", "TestB") + ev("fail", "TestB")
         + skipped(marked).replace(ev("pass"), ev("fail")))
+
+    # Время пакета: самый долгий — первым, пакет без Elapsed строки не даёт.
+    text = run(0, "(−) время пакетов — самый долгий первым",
+               ev("start") + ev("run", "TestA") + ev("pass", "TestA") + ev("pass", Elapsed=3.5)
+               + ev("start", pkg="q") + ev("run", "TestA", pkg="q") + ev("pass", "TestA", pkg="q")
+               + ev("pass", pkg="q", Elapsed=12.4))
+    if text and "самые долгие пакеты: q 12.4 с · p 3.5 с" not in text:
+        print("  ПРОВАЛ (−) время пакетов не напечатано по убыванию", file=sys.stderr)
+        failed += 1
+    text = run(0, "(−) пакет без Elapsed — строки времени нет", green)
+    if text and "самые долгие пакеты" in text:
+        print("  ПРОВАЛ (−) время напечатано без события с Elapsed", file=sys.stderr)
+        failed += 1
 
     print("")
     print("go-test-verdict --self-test: проб исполнено %d, провалов %d" % (probes, failed))
