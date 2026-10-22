@@ -1619,7 +1619,7 @@ ext_unfold() {
 #                 стенда, события. Форму судит runner_judge ДО записи в кластер; пространство
 #                 несёт посадку pod `baseline` — привилегированного пода учётка не заведёт;
 #   образ         golang версии `toolchain` из go.mod ревизии (ту же ставит конвейеру
-#                 setup-go); поверх — apt (python3, pyyaml, cryptography, venv, pip, jq,
+#                 setup-go; тот же образ — у Job тяжёлых прогонов); поверх — apt (python3, pyyaml, cryptography, venv, pip, jq,
 #                 openssl), node мажорной версии KANAME_STAND_RUNNER_NODE (умолчание 20 —
 #                 её несёт ранер конвейера, дерево версии node не объявляет) выпуском с
 #                 суммой из SHASUMS256 того же выпуска, kubectl — клиент машины потоком
@@ -1780,7 +1780,8 @@ runner_go() {
   printf '%s\n' "$v"
 }
 
-runner_image() { printf 'mirror.gcr.io/library/golang:%s-bookworm' "$1"; }
+# Тот же образ, что у Job тяжёлых прогонов внешнего кластера (golang версии toolchain).
+runner_image() { printf 'docker.io/library/golang:%s' "$1"; }
 
 # runner_exec ПРОСТРАНСТВО АРГУМЕНТЫ… — исполнить в pod раннера. Самопроверка подменяет её.
 runner_exec() { local ns="$1"; shift; ks -n "$ns" exec "$RUNNER_POD" -c run -- "$@"; }
@@ -2646,7 +2647,7 @@ EOF
     # runner_form_world [порча] — настоящий вывод runner_objects под судом runner_judge;
     # порча — jq-фильтр, меняющий ОДИН факт против законного близнеца.
     runner_form_world() {
-        ( objs="$(runner_objects t841-kaname-own mirror.gcr.io/library/golang:1.26.10-bookworm \
+        ( objs="$(runner_objects t841-kaname-own docker.io/library/golang:1.26.10 \
                     0123456789abcdef0123456789abcdef01234567 841 v1.31.2 1.26.10 'true ' PRO-Robotech/kaname)" || exit 9
           if [ -n "${1:-}" ]; then objs="$(jq "$1" <<< "$objs")" || exit 9; fi
           runner_judge t841-kaname-own <<< "$objs" )
@@ -2710,7 +2711,7 @@ EOF
           up_external() { ext_claim_ns && echo "ВНЕШНИЙ ПУТЬ: $EXT_NS"; }
           up_local()    { echo "ЛОКАЛЬНЫЙ ПУТЬ"; }
           rc=0; stand_up || rc=$?
-          ! grep -E 'create namespaces|get nodes|create -f' "$SELFTEST_KC/calls" | head -n 1 | sed 's/^/ВЫЗОВ ВНЕ СВОЕГО ПРОСТРАНСТВА: /' | grep .
+          grep -E 'create namespaces|get nodes|create -f' "$SELFTEST_KC/calls" | head -n 1 | sed 's/^/ВЫЗОВ ВНЕ СВОЕГО ПРОСТРАНСТВА: /'
           grep -q 'delete pod kaname-own' "$SELFTEST_KC/calls" && grep -q 'context=in-pod' "$SELFTEST_KC/calls" &&
             grep -q 'tokenFile' "$RUNDIR/in-pod.kubeconfig" && echo "остаток снят учёткой pod, токен — файлом"
           exit "$rc" )
@@ -2727,8 +2728,9 @@ EOF
           IN_POD=1; EXT_KCFG="$TMP/kc-u--prof.yaml"; EXT_CTX=in-pod; EXT_TASK=841; EXT_NS="t841-kaname-own"
           RUNDIR="$TMP/run-inpod-ext"; rm -rf "$RUNDIR"; mkdir -p "$RUNDIR"
           : > "$SELFTEST_KC/pod"
-          "$1"
-          ! grep 'delete namespace' "$SELFTEST_KC/calls" | head -n 1 | sed 's/^/СНЯТО ПРОСТРАНСТВО: /' | grep . )
+          rc=0; "$1" || rc=$?
+          grep 'delete namespace' "$SELFTEST_KC/calls" | head -n 1 | sed 's/^/СНЯТО ПРОСТРАНСТВО: /'
+          exit "$rc" )
     }
     inpod_down()        { ext_teardown_ns && ext_census; }
     inpod_census_left() { ext_census; }
