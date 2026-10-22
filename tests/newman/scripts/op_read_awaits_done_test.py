@@ -20,7 +20,8 @@ IAM-USR-DL-FLOW-TENANT-LEAVES (KN664-50) прочёл удаление прое�
 
 Судятся СГЕНЕРИРОВАННЫЕ коллекции дерева: правка мимо генератора пробу не обходит.
 Перепись печатается отдельно от находок, и ноль прочитанных читателей — красное.
-Исполняет `.github/scripts/run-python-probes.py` (обход по образцу `*_test.py`).
+Исполняет `.github/scripts/run-python-probes.py` (обход по образцу
+`tests/newman/scripts/*_test.py`).
 """
 import json
 import re
