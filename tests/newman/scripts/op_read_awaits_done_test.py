@@ -15,8 +15,9 @@ IAM-USR-DL-FLOW-TENANT-LEAVES (KN664-50) прочёл удаление прое�
     НЕ является: ответ 200 с `done:false` он пропускает к утверждению;
   * ближайший предыдущий шаг той же папки — самоопрос ТОЙ ЖЕ переменной X.
 Предыдущий опрос ДРУГОЙ переменной формой не является: `poll_operation_until_done`
-опрашивает общий `opId`, и стоящий перед чтением именованной `op_var` опрос ждёт
-чужую операцию — это ровно то место, где класс прятался.
+по умолчанию опрашивает общий `opId`, и стоящий перед чтением именованной `op_var`
+опрос ждёт чужую операцию — это ровно то место, где класс прятался. Опрос своей
+переменной записывается `poll_operation_until_done(op_var=…)`.
 
 Судятся СГЕНЕРИРОВАННЫЕ коллекции дерева: правка мимо генератора пробу не обходит.
 Перепись печатается отдельно от находок, и ноль прочитанных читателей — красное.
@@ -159,6 +160,17 @@ def test_assert_op_success_polls_its_own_operation_until_done():
         "между опросами нет настоящей паузы (busy-wait перед setNextRequest)"
     assert f"pc < {gen.POLL_CAP}" in js, "петля опроса без предела POLL_CAP"
     assert _polls_until_done(js), "самоповтор не под условием незавершённости операции"
+
+
+def test_poll_operation_until_done_polls_the_named_operation():
+    step = gen.poll_operation_until_done(op_var="kn948OpId")
+    pre, js = "\n".join(step.pre_script), "\n".join(step.test_script)
+    assert step.path == "/operations/{{kn948OpId}}", step.path
+    assert "kn948OpId" in pre, "страж пред-скрипта проверяет не ту переменную"
+    assert "'opId'" not in pre and "'opId'" not in js, "опрос именованной операции читает общий opId"
+    assert _polls_until_done(js), "опрос не под условием незавершённости операции"
+    default = gen.poll_operation_until_done()
+    assert default.path == "/operations/{{opId}}", default.path
 
 
 # ── Инъекция: дефект краснеет, законные близнецы молчат ───────────────────────

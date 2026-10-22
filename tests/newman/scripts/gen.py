@@ -2009,16 +2009,23 @@ def _iam_item_hook(step, item):
 #   * СТРАЖ ПУСТОГО ИДЕНТИФИКАТОРА ДВУХ ФОРМ (`required`): у кейса под проверкой
 #     отсутствие операции — ДЕФЕКТ и называется вслух, у уборки best-effort —
 #     законный случай, и запрос просто не отправляется.
-def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True) -> Step:
-    """Шаг опроса операции набора iam — общее тело плюс три его решения."""
+def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True,
+                              op_var: str = "opId") -> Step:
+    """Шаг опроса операции набора iam — общее тело плюс три его решения.
+
+    `op_var` — переменная ОПРАШИВАЕМОЙ операции (kaname#948). Прежде шаг опрашивал
+    только общий `opId`, и опрос операции, сохранённой под своим именем, записать
+    было нечем: следующее за ним чтение той же переменной стояло без опроса.
+    """
     return gen_shared.op_poll_step(
         Step,
         auth=auth,
+        op_var=op_var,
         budget=POLL_CAP,
         interval_ms=500,
         unique_name=False,
         pre_extra=[
-            *_op_id_guard("opId", required),
+            *_op_id_guard(op_var, required),
             "// poll-counter reset on first entry (request-name-scoped flag);",
             "// re-invocations via setNextRequest skip the reset.",
             "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
@@ -2026,7 +2033,7 @@ def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True
             "  pm.environment.set('_pollStarted', pm.info.requestName);",
             "}",
         ],
-        step_extra={"op_var": "opId"},
+        step_extra={"op_var": op_var},
     )
 
 
