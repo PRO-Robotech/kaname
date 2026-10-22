@@ -10,7 +10,9 @@ IAM-USR-DL-FLOW-TENANT-LEAVES (KN664-50) прочёл удаление прое�
 покраснел двумя утверждениями, хотя операция завершилась бы успешно.
 
 Законных форм у такого чтения ДВЕ, и проба знает обе:
-  * шаг опрашивает сам — самоповтор `setNextRequest(pm.info.requestName)`;
+  * шаг опрашивает сам — самоповтор `setNextRequest(pm.info.requestName)` под
+    условием `!<имя>.done`; самоповтор обёртки read-your-writes (на 403/404) опросом
+    НЕ является: ответ 200 с `done:false` он пропускает к утверждению;
   * ближайший предыдущий шаг той же папки — самоопрос ТОЙ ЖЕ переменной X.
 Предыдущий опрос ДРУГОЙ переменной формой не является: `poll_operation_until_done`
 опрашивает общий `opId`, и стоящий перед чтением именованной `op_var` опрос ждёт
@@ -32,8 +34,23 @@ import gen  # noqa: E402
 COLLECTIONS = Path(__file__).resolve().parents[1] / "collections"
 
 _OP_PATH = re.compile(r"/operations/\{\{([A-Za-z0-9_]+)\}\}")
-_DONE_ASSERT = re.compile(r"j\.done\b[^;]*\.to\.eql\(true\)")
+# Утверждение о завершении — любой `pm.expect(…)`, чей довод читает `<имя>.done`:
+# формы дерева — `j.done`, `j.done === true && …`, `j.done && j.response && …`.
+_DONE_ASSERT = re.compile(r"pm\.expect\([^;]*?\b[A-Za-z_$][\w$]*\.done\b")
 _SELF_POLL = "setNextRequest(pm.info.requestName)"
+# Опрос ДО ЗАВЕРШЕНИЯ — самоповтор под условием `!<имя>.done`. Голый самоповтор
+# опросом не является: обёртка read-your-writes повторяет шаг на 403/404 и
+# операцию с `done:false` пропускает к утверждению (так и прошёл KN664-50).
+_DONE_LOOP = re.compile(r"if\s*\([^\n{]*!\s*[A-Za-z_$][\w$]*\.done\b[^\n{]*\)\s*\{")
+
+
+def _polls_until_done(test: str) -> bool:
+    """Скрипт несёт самоповтор, условие которого — незавершённость операции."""
+    for m in _DONE_LOOP.finditer(test):
+        block = "\n".join(test[m.end():].splitlines()[:8])
+        if _SELF_POLL in block:
+            return True
+    return False
 
 
 def _url(item):
@@ -79,12 +96,12 @@ def audit(collections_dir: Path) -> dict:
                 if method != "GET" or not m or not _DONE_ASSERT.search(test):
                     continue
                 census["readers"] += 1
-                if _SELF_POLL in test:
+                if _polls_until_done(test):
                     census["self_polling"] += 1
                     continue
                 prev = items[i - 1] if i > 0 else None
                 pm_ = _OP_PATH.search(_url(prev)) if prev is not None else None
-                if pm_ and pm_.group(1) == m.group(1) and _SELF_POLL in _code(prev, "test"):
+                if pm_ and pm_.group(1) == m.group(1) and _polls_until_done(_code(prev, "test")):
                     census["after_same_var_poll"] += 1
                     continue
                 findings.append(f"{path.name} :: {it.get('name')} — читает {m.group(1)} одним GET "
@@ -140,6 +157,7 @@ def test_assert_op_success_polls_its_own_operation_until_done():
     assert any("while (Date.now() - " in ln for ln in head), \
         "между опросами нет настоящей паузы (busy-wait перед setNextRequest)"
     assert f"pc < {gen.POLL_CAP}" in js, "петля опроса без предела POLL_CAP"
+    assert _polls_until_done(js), "самоповтор не под условием незавершённости операции"
 
 
 # ── Инъекция: дефект краснеет, законные близнецы молчат ───────────────────────
@@ -154,6 +172,19 @@ def test_injected_single_read_after_a_poll_of_another_variable_is_found(tmp_path
 
 def test_injected_single_read_first_in_folder_is_found(tmp_path):
     res = audit(_write(tmp_path, [_single_read_item("CASE :: assert-op-success", "opId")]))
+    assert len(res["findings"]) == 1, res
+
+
+def test_injected_read_your_writes_retry_alone_is_not_a_poll(tmp_path):
+    """Форма шага на d34eab3f7: самоповтор есть, но лишь на 403/404 — done:false проходит."""
+    item = _single_read_item("CASE :: assert-op-success", "kn664LPrjOpId")
+    item["event"][0]["script"]["exec"][:0] = [
+        "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+        "  const _ard = Date.now(); while (Date.now() - _ard < 400) { }",
+        "  pm.execution.setNextRequest(pm.info.requestName);",
+        "  return;",
+        "}"]
+    res = audit(_write(tmp_path, [item]))
     assert len(res["findings"]) == 1, res
 
 
