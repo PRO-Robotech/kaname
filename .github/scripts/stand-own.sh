@@ -1669,6 +1669,14 @@ if [ "${1:-}" = api ] && [[ "${2:-}" =~ ^repos/[A-Za-z0-9_./-]+$ ]] && [[ "$2" !
   path="$2"; shift 2; expr=.
   if [ $# -eq 2 ] && [ "$1" = --jq ]; then expr="$2"; shift 2; fi
   if [ $# -eq 0 ]; then
+    # Ответ, прочитанный машиной (`gh api` её учёткой) и доставленный файлом `--ship
+    # gh-read.json` ({путь: тело}): удостоверение в pod не попадает, лимит анонимного
+    # REST на общий адрес кластера не тратится. Пути нет в файле — публичное чтение.
+    cache=/work/ship/gh-read.json
+    if [ -f "$cache" ] && jq -e --arg p "$path" 'has($p)' "$cache" > /dev/null 2>&1; then
+      jq -r --arg p "$path" ".[\$p] | $expr" "$cache"
+      exit
+    fi
     body="$(curl -fsS --retry 3 --max-time 60 -H 'Accept: application/vnd.github+json' "https://api.github.com/$path")" || exit 1
     jq -r "$expr" <<< "$body"
     exit
@@ -1751,7 +1759,10 @@ src="$1" work="$2"; shift 2
 cd "$src" || exit 1
 shopt -s globstar nullglob
 pats=("$@"); set --
-for g in "${pats[@]}"; do for p in $g; do set -- "$@" "$p"; done; done
+# Шаблон без подстановочных знаков nullglob не убирает: несуществующий путь (каталог
+# отчёта шага, который не дошёл до выкладывания) — не отчёт, и find на нём вышел бы
+# кодом 1, а забор — 125 при коде команды 0 (kaname#940).
+for g in "${pats[@]}"; do for p in $g; do [ -e "$p" ] || [ -L "$p" ] || continue; set -- "$@" "$p"; done; done
 { [ $# -eq 0 ] || find "$@" -type f -print0; } | sort -zu > "$work/.fetch.files0" || exit 1
 : > "$work/.manifest" || exit 1
 while IFS= read -r -d '' f; do
@@ -2669,8 +2680,10 @@ EOF
     world_rf_nolimit()     { runner_form_world "$RF_POD.spec.containers[0].resources.limits = {}"; }
     world_rf_foreign_ns()  { runner_form_world "$RF_POD.metadata.namespace = \"kacho\""; }
 
-    # fetch_world [cut] — забор из «pod»-каталога тем же текстом перечня и потока; cut
-    # обрывает поток tar на 1000 байтах в каждой попытке.
+    # fetch_world [cut|absent] — забор из «pod»-каталога тем же текстом перечня и потока; cut
+    # обрывает поток tar на 1000 байтах в каждой попытке; absent снимает каталоги отчётов,
+    # названные шаблоном без подстановочных знаков (шаги выкладывания не дошли до них).
+    # Каталога src/.stand/log-public нет ни в одном мире: несуществующий путь — не отчёт.
     fetch_world() {
         ( POD="$TMP/pod-root"; rm -rf "$POD"
           mkdir -p "$POD/work/out/artifacts/rep" "$POD/work/out/venv" "$POD/src/tests/newman/out-public" "$POD/src/.stand/run" "$POD/src/tests/newman/out"
@@ -2681,6 +2694,7 @@ EOF
           echo key > "$POD/src/.stand/run/wrapping.key"
           echo '{}' > "$POD/work/out/venv/x.json"
           echo '{"token": "x"}' > "$POD/src/tests/newman/out/raw.json"
+          if [ "${1:-}" = absent ]; then rm -rf "$POD/work/out/artifacts" "$POD/src/tests/newman/out-public"; fi
           RUNNER_ROOT="$POD"; RUNNER_WORK="$POD/work"; KANAME_STAND_RUNNER_FETCH_TRIES=2
           # Pod — тот же текст оболочкой здесь: runner_exec ПРОСТРАНСТВО bash -c ТЕКСТ ИМЯ ДОВОДЫ…
           runner_exec() { shift; "$@"; }
@@ -2696,6 +2710,7 @@ EOF
     }
     world_fetch_whole() { fetch_world; }
     world_fetch_cut()   { fetch_world cut; }
+    world_fetch_absent() { fetch_world absent; }
 
     # inpod_world [настройка] — подъём изнутри pod раннера до выбора пути; путь подменён
     # заведением пространства (оно в pod лишь чистит остаток) и строкой.
@@ -2760,6 +2775,19 @@ EOF
     rw_pod_gone()  { rm -f "$SELFTEST_KC/rc"; echo Failed > "$SELFTEST_KC/phase"; }
     rw_dirty()     { echo '// правка' >> "$R/go.mod"; }
     rw_unnamed()   { KANAME_STAND_KUBECONFIG=""; }
+    # Забор настоящим текстом перечня и потока над «pod»-каталогом: один отчёт, каталогов
+    # шаблонов без подстановочных знаков нет — код команды доходит (kaname#940); cut
+    # обрывает поток в каждой попытке — неполная доставка, 125.
+    rw_reports() {
+        local pod="$TMP/runner-pod-root"; rm -rf "$pod"; mkdir -p "$pod/work/out"
+        printf '{"job": "stand"}\n' > "$pod/work/out/result.json"
+        RUNNER_ROOT="$pod"; RUNNER_WORK="$pod/work"; KANAME_STAND_RUNNER_FETCH_TRIES=2
+        runner_exec() { shift; "$@"; }
+    }
+    rw_reports_cut() {
+        rw_reports
+        runner_exec() { shift; if [ "$4" = fetch ]; then "$@" | head -c 100; return 0; fi; "$@"; }
+    }
     rw_ns_exists() { echo own > "$SELFTEST_KC/ns/t841-kaname-own"; }
     world_runner_ok()        { runner_world; }
     world_runner_rc3()       { runner_world rw_rc3; }
@@ -2768,6 +2796,8 @@ EOF
     world_runner_unnamed()   { runner_world rw_unnamed; }
     world_runner_ns_exists() { runner_world rw_ns_exists; }
     world_runner_no_cmd()    { ( SELFTEST_RUNNER_ARGS=""; runner_world ); }
+    world_runner_reports()     { runner_world rw_reports; }
+    world_runner_reports_cut() { runner_world rw_reports_cut; }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -2945,6 +2975,7 @@ EOF
     echo "--- ось 13: раннер — отчёты сверены с перечнем pod, лишнее машине не уходит"
     assert 0  "(−) целый поток — доставлено 3 из 3, ни ключа, ни venv, ни сырого отчёта" world_fetch_whole "доставлено 3 из 3" "размер и сумма каждого сверены" "ЗАБРАНО ЛИШНЕЕ"
     assert 1  "(+) поток оборван в каждой попытке — неполно, с перечнем"     world_fetch_cut "ОТЧЁТЫ ДОСТАВЛЕНЫ НЕПОЛНО" "попытка 1 из 2" "доставлено 3 из 3"
+    assert 0  "(−) каталогов шаблонов нет — не отчёт, доставлено 1 из 1"     world_fetch_absent "доставлено 1 из 1" "размер и сумма каждого сверены" "перечень отчётов в pod не собран"
 
     echo "--- ось 14: стенд изнутри pod раннера — лишь своё пространство, пространств не заводит"
     assert 0  "(−) своё пространство — внешний путь, учётка pod"             world_inpod_own "ВНЕШНИЙ ПУТЬ: t841-kaname-own" "остаток снят учёткой pod, токен — файлом" "ВЫЗОВ ВНЕ СВОЕГО ПРОСТРАНСТВА"
@@ -2961,6 +2992,8 @@ EOF
     assert 125 "(+) кубконфиг не назван — 125, локального подъёма нет"      world_runner_unnamed "pod раннеру ставить негде" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 1  "(+) пространство уже есть — 1 до записи"                      world_runner_ns_exists "уже есть" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 64 "(+) команда не названа — 64 до записи"                        world_runner_no_cmd "команда не названа" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
+    assert 0  "(−) команда 0, отчёт забран перечнем pod — код 0"            world_runner_reports "доставлено 1 из 1" "раннер: команда в pod завершилась кодом 0" "УСЛОВИЕ НЕ СОЗДАНО"
+    assert 125 "(+) команда 0, забор неполон — 125, не зелёное"             world_runner_reports_cut "доставлены неполно" "задачи 841 во внешнем кластере: 0" "раннер: команда в pod завершилась кодом 0"
 
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"

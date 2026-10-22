@@ -260,6 +260,10 @@ func vertexLedger() map[string]vertexWaiver {
 		"scripts/hooks/prepush-rule.sh#cat-file": {Calls: 1,
 			Why: "резолв прежней вершины удалённой ветки (`remote_sha`), чтобы вычесть её из " +
 				"диапазона: предпосылка отрицания, а не вопрос о вхождении"},
+		".github/scripts/stand-own.sh#rev-parse": {Calls: 1,
+			Why: "резолв головы рабочей копии (`HEAD^{commit}`), которую раннер отдаёт в pod " +
+				"потоком `git archive`: pod исполняет ровно закоммиченное отправителем, и ствол " +
+				"здесь был бы другим деревом. Предпосылка доставки, а не вопрос о вхождении"},
 		".github/scripts/pr-rule-check.sh#rev-list": {Calls: 1,
 			Why: "предмет — САМ ЗАПРОС: свои первые родители головы (`HEAD_SHA --not BASE_SHA`). " +
 				"База запроса в ветку-номер — ветка линии, а не ствол, и диапазон строится от " +
