@@ -2121,6 +2121,12 @@ if [ "${1:-}" = "--self-test" ]; then
     fi
 
     TMP="$(mktemp -d)"
+    # Окружение pod раннера самопроверку не уводит: шаг задания `stand` в pod наследует
+    # KANAME_STAND_IN_POD, KANAME_STAND_EXT_NS, KANAME_STAND_TASK и адрес API кластера, и
+    # миры маршрута судили бы pod, а не свою настройку (11 провалов, kaname#940). Мир,
+    # которому они нужны, ставит их сам.
+    IN_POD=""; SA_DIR="$TMP/sa-none"
+    unset KANAME_STAND_IN_POD KANAME_STAND_EXT_NS KANAME_STAND_TASK KANAME_STAND_SA_DIR KUBERNETES_SERVICE_HOST KUBERNETES_SERVICE_PORT
     # Маршрут идущего стенда машины самопроверку не уводит: файла маршрута у неё нет.
     ROUTE_FILE="$TMP/route-none"
     stop_fakes() {
