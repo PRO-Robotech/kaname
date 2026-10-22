@@ -1972,6 +1972,10 @@ CASES.append(Case(
             "pm.test('labels', () => pm.expect(j.labels).to.eql({k: 'v1'}));"]),
         _aid_create("repeat", {"id": "{{aid13X}}", "name": "aid13-{{runId}}", "labels": {"k": "v1"}}, _a13),
         assert_op_error(6, "ALREADY_EXISTS", msg_text="Account {{aid13X}} already exists"),
+        # Первая операция читается ПОСЛЕ опроса её же переменной: шаг ниже — одиночный
+        # GET, и без опроса той же операции его `done` судил бы расписание воркера
+        # (kaname#948, проба op_read_awaits_done_test.py).
+        assert_op_success(auth=_a13, op_var="aid13FirstOp"),
         Step(name="first-op-still-succeeded", method="GET", path="/operations/{{aid13FirstOp}}", auth=_a13,
              test_script=[*assert_status(200), "const j = pm.response.json();",
                           "pm.test('first op done with response.id = X', () => pm.expect(j.done && j.response && "
