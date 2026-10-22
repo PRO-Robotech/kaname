@@ -141,8 +141,8 @@ func listingFor(ctx context.Context, moduleRoot, rootPkg string) (*surfaceListin
 // Без своего срока зависший `go list` (сеть модулей, блокировка кэша) съел
 // бы весь бюджет прогона, и пакет проб оборвался бы паникой без причины.
 // Замер: холодная сборка данных экспорта радиуса под -race (пустой GOCACHE,
-// 4 ядра, 605 пакетов) — 29 с. Срок в 10 раз выше замера и в 5 раз ниже
-// бюджета прогона конвейера (-timeout 25m).
+// 4 ядра, 605 пакетов) — 29 с. Срок в 10 раз выше замера и в 9 раз ниже
+// бюджета прогона конвейера (-timeout 45m).
 const surfaceListTimeout = 5 * time.Minute
 
 func newListing(ctx context.Context, moduleRoot, rootPkg string, timeout time.Duration) (*surfaceListing, error) {
