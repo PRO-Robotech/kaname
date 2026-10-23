@@ -56,9 +56,10 @@ func TestPublicReaderMember_KeyFollowsTheChildRule(t *testing.T) {
 	if childFP == "" {
 		t.Fatalf("у роли нет селектора вложенного правила — проба судила бы пустоту")
 	}
-	if pr[0].RuleFP != publicReaderRuleFPPrefix+childFP || len(pr[0].Tuples) != 1 {
-		t.Fatalf("член public_reader обязан нести ключ вложенного правила %q и один кортеж; получено %q, кортежей %d",
-			publicReaderRuleFPPrefix+childFP, pr[0].RuleFP, len(pr[0].Tuples))
+	wantKey := publicReaderRuleFPPrefix + childFP + publicReaderClassesSep + "system_class:anonymous"
+	if pr[0].RuleFP != wantKey || len(pr[0].Tuples) != 1 {
+		t.Fatalf("член public_reader обязан нести ключ вложенного правила и классов %q и один кортеж; получено %q, кортежей %d",
+			wantKey, pr[0].RuleFP, len(pr[0].Tuples))
 	}
 	for _, m := range members(twoRules) {
 		if m.RuleFP != pr[0].RuleFP && hasRelation(m, domain.PublicReaderRelation) {

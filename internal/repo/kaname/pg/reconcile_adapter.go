@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
@@ -113,23 +114,34 @@ type reconcileStore struct {
 // GetForNoKeyUpdate: он не конфликтует с `FOR KEY SHARE` дочерних вставок, поэтому
 // аддитивный форвард пути создания больше не стоит в очереди за фоновым проходом.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, true /* forUpdate — full path serializes the delete-stale diff */)
+	return s.loadBinding(ctx, bindingID, rowLockNoKeyUpdate)
 }
 
-// LoadBindingUnlocked loads the same BindingScope as LoadBinding but WITHOUT the
-// `FOR NO KEY UPDATE` row-lock — the read the ADDITIVE forward fast-path
-// (reconcile.ReconcileObjectForward) uses. Forward only WRITES the freshly-registered
-// object's tuples (never a delete-stale diff), so it needs no serialization against a
-// concurrent pass of the same binding; taking the row-lock here would re-serialize all
-// registrations sharing one editor/owner binding — the exact bottleneck the fast-path
-// removes. Correctness is preserved by the async FULL ReconcileObject backstop.
-func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, false /* no row-lock — additive forward path */)
+// LoadBindingForForward — те же факты выдачи, что LoadBinding, под замком строки
+// `FOR KEY SHARE`, — чтение аддитивного форварда (reconcile.ReconcileBindingForward).
+//
+// ЗАЧЕМ ЗАМОК (kaname#919). Форвард решает «выдача жива» этим чтением и пишет
+// члена, реестр и строку журнала позже, в той же транзакции. Снятие выдачи —
+// истечение срока — читает набор членов, чтобы снять их кортежи; члены форварда,
+// легшие после этого чтения, снимать было бы некому. Замок делает решение «жива»
+// верным до коммита: снятие берёт строку `FOR UPDATE`
+// (LockBindingForDeactivation), а это единственный режим, конфликтующий с
+// `FOR KEY SHARE`. Поэтому снятие ждёт коммита форварда и видит его членов, а
+// форвард, пришедший после снятия, дождётся его коммита и прочитает REVOKED.
+//
+// ПОЧЕМУ ИМЕННО `FOR KEY SHARE`. Полный проход держит строку `FOR NO KEY UPDATE`
+// (GetForNoKeyUpdate), и с `FOR KEY SHARE` этот режим совместим — форвард пути
+// создания по-прежнему не встаёт в очередь за фоновым полным проходом
+// (TestReconcileForward_07_DoesNotQueueBehindInFlightFullPass). Тот же режим
+// дочерние вставки форварда и так брали на этой строке проверкой внешнего ключа;
+// новым здесь стал только МОМЕНТ — до решения, а не после него.
+func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
+	return s.loadBinding(ctx, bindingID, rowLockKeyShare)
 }
 
-// LoadBindingsUnlocked loads the SAME BindingScope facts as LoadBindingUnlocked for a
-// WHOLE SET of bindings — in TWO round-trips total (one for the binding rows, one for
-// their DISTINCT roles), instead of two PER BINDING.
+// LoadBindingsForForward — те же факты BindingScope, что LoadBindingForForward, для
+// ЦЕЛОГО НАБОРА выдач — за ТРИ обращения к базе всего (строки выдач, их субъекты,
+// их РАЗЛИЧНЫЕ роли), а не по три на выдачу.
 //
 // ЗАЧЕМ. Веер материализации адресуется числом ВЫДАЧ, совпавших с одним объектом, а не
 // числом объектов: меняется ровно один объект, но кандидатов у него столько, сколько
@@ -141,13 +153,18 @@ func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID doma
 // Замер (testcontainers PG16, 15 проходов на размер): 9 выдач — p50 14.6 мс, 227 выдач —
 // p50 349.1 мс, то есть ~1.5 мс на выдачу.
 //
-// ЧТО НЕ МЕНЯЕТСЯ. Ни блокировок, ни порядка: путь аддитивен и advisory-блокировки не
-// берёт (см. reconcile/forward.go «LOCK CHOICE»), а строчной блокировки у этого чтения не
-// было и раньше. Проекция BindingScope собирается тем же bindingScopeFrom, что и у
-// поштучного чтения, поэтому пакетный и одиночный пути выводят ПОБАЙТОВО те же факты.
+// ЗАМОК. Строки выдач берутся `FOR KEY SHARE` одним оператором в порядке `id` — тот
+// же режим и то же основание, что у одиночного LoadBindingForForward (kaname#919):
+// снятие выдачи (истечение срока, LockBindingForDeactivation) не может прочитать
+// набор членов, пока форвард, решивший «выдача жива», не зафиксировал своих. С полным
+// проходом (`FOR NO KEY UPDATE`) режим совместим, advisory-замка путь не берёт (см.
+// reconcile/forward.go «LOCK CHOICE»). Порядок `id` — общий для всех выдач веера, и
+// подмножества одного порядка инверсии не дают. Проекция BindingScope собирается тем
+// же bindingScopeFrom, что и у поштучного чтения, поэтому пакетный и одиночный пути
+// выводят ПОБАЙТОВО те же факты.
 // Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
 // одиночного чтения; отсутствующая роль трактуется как «нет покрытия», а не как ошибка.
-func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
+func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
 	out := make(map[domain.AccessBindingID]reconcile.BindingScope, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -162,7 +179,7 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 		raw = append(raw, string(id))
 	}
 	rows, err := s.tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC`, abCols), raw)
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC FOR KEY SHARE`, abCols), raw)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
@@ -186,6 +203,20 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
 
+	// Субъекты — ОДНИМ обращением на весь набор: разворачивание судит каждого
+	// субъекта выдачи, а не проекцию первого (kaname#880).
+	bindingIDs := make([]domain.AccessBindingID, 0, len(bindings))
+	for _, b := range bindings {
+		bindingIDs = append(bindingIDs, b.ID)
+	}
+	subjects, err := (&abReader{tx: s.tx}).ListSubjectsForBindings(ctx, bindingIDs)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: load binding subjects batch: %w", err)
+	}
+	for i := range bindings {
+		bindings[i].Subjects = subjects[bindings[i].ID]
+	}
+
 	// Роли — ОДНИМ обращением по различным идентификаторам. Их у веера заметно меньше,
 	// чем выдач (на стенде при 227 кандидатах различных ролей 194, при медианных 9 —
 	// четыре), но главное здесь не сжатие, а то, что число обращений перестаёт зависеть
@@ -207,26 +238,44 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 	return out, nil
 }
 
-// loadBinding is the shared reader for LoadBinding (forUpdate=true) and
-// LoadBindingUnlocked (forUpdate=false). The BindingScope projection is IDENTICAL in
-// both modes — only the row-lock differs — so the full and forward paths derive the
-// same scope/selector/subject facts.
-func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, forUpdate bool) (reconcile.BindingScope, bool, error) {
+// bindingRowLock — режим замка строки выдачи, под которым читаются её факты.
+type bindingRowLock int
+
+const (
+	// rowLockNoKeyUpdate — полный проход: взаимное исключение проходов одной выдачи.
+	rowLockNoKeyUpdate bindingRowLock = iota
+	// rowLockKeyShare — аддитивный форвард: «выдача жива» верно до коммита.
+	rowLockKeyShare
+)
+
+// loadBinding — общий читатель LoadBinding (rowLockNoKeyUpdate) и
+// LoadBindingForForward (rowLockKeyShare). Проекция BindingScope ОДИНАКОВА в обоих
+// режимах — различается лишь замок строки, — поэтому полный проход и форвард
+// выводят одни и те же факты области, селекторов и субъектов.
+func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock bindingRowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
 	var (
 		b   domain.AccessBinding
 		err error
 	)
-	if forUpdate {
+	switch lock {
+	case rowLockNoKeyUpdate:
 		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
-	} else {
-		b, err = r.Get(ctx, bindingID)
+	case rowLockKeyShare:
+		b, err = r.GetForKeyShare(ctx, bindingID)
+	default:
+		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %d", lock)
 	}
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
 			return reconcile.BindingScope{}, false, nil
 		}
 		return reconcile.BindingScope{}, false, err
+	}
+	// Субъекты — весь перечень (kaname#880): строка выдачи несёт лишь проекцию
+	// первого. Чтение — в той же транзакции и после строчного замка полного пути.
+	if b.Subjects, err = r.ListSubjects(ctx, bindingID); err != nil {
+		return reconcile.BindingScope{}, false, fmt.Errorf("load binding subjects %s: %w", bindingID, err)
 	}
 
 	// Role permissions (verb-bundle) — read inside the tx so the tier derivation
@@ -317,7 +366,7 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 }
 
 // bindingScopeFrom — ЕДИНСТВЕННАЯ точка вывода BindingScope из строки выдачи и её роли.
-// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsUnlocked),
+// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsForForward),
 // поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
 func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
 	// СНЯТАЯ роль даёт ровно то же, что РОЛЬ, УДАЛЁННАЯ из-под выдачи, — «нет
@@ -348,21 +397,16 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 	}
 	selectors := role.Rules.MaterializingSelectorsInScope(b.Scope)
 	scopeSelf := role.Rules.ScopeSelfVerbs(string(b.ResourceType), scopeTypeVerbs(cat, string(b.ResourceType)))
-	// Выдача СИСТЕМНОМУ КЛАССУ материализует только чтение (Р4, SC-23), какими
-	// бы ни были правила роли СЕЙЧАС: роль может получить пишущий глагол путём,
-	// который правкой роли не является (поставка модулем), и страж правки его не
-	// видит. Сужение — здесь, в единственной точке вывода состава, поэтому
-	// пакетный и поштучный пути не расходятся; форма вердикта несёт то же
-	// правило на каждой ветви выдач (`relverdict.classVerbFilterSQL`).
-	if b.SubjectType == domain.SubjectTypeSystemClass {
-		selectors = classReadSelectors(selectors)
-		scopeSelf = classReadVerbs(scopeSelf)
-	}
+	// Сужение СИСТЕМНОМУ КЛАССУ до чтения (Р4, SC-23) делает разворачивание —
+	// по КАЖДОМУ субъекту выдачи (reconcile/subjects.go, kaname#880), той же
+	// границей, что форма вердикта на строке субъекта
+	// (`relverdict.classVerbFilterSQL`). Здесь сужать по выдаче целиком нельзя:
+	// человек той же выдачи потерял бы глаголы правила, а признак «выдача
+	// классу» по первому субъекту зависел бы от порядка перечня.
 	return reconcile.BindingScope{
-		BindingID:   b.ID,
-		Scope:       scopeAnchorFor(b),
-		SubjectType: string(b.SubjectType),
-		SubjectID:   string(b.SubjectID),
+		BindingID: b.ID,
+		Scope:     scopeAnchorFor(b),
+		Subjects:  bindingSubjects(b),
 		// RBAC explicit-model 2026 P4 (КФ-3): the dynamic membership source is the
 		// role's UNIFIED materializing selectors — ARM_ANCHOR(all) + ARM_NAMES +
 		// ARM_LABELS. Empty for a thin (legacy permissions-only) role → no
@@ -382,7 +426,7 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 		// Target — the per-object least-privilege selection (F8, IAM-1-21). When
 		// Target.Resources is non-empty the reconciler materializes ONLY the listed
 		// objects (never the whole scope). Read from the persisted access_bindings.target
-		// column by scanAB (unmarshalTarget). AllInScope/empty ⇒ whole-anchor grant.
+		// column by scanAB (relverdict.DecodeTarget). AllInScope/empty ⇒ whole-anchor grant.
 		Target: b.Target,
 		RoleID: string(b.RoleID),
 		Active: b.Status == domain.AccessBindingStatusActive,
@@ -1154,43 +1198,64 @@ func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.Tar
 }
 
 // RecordEmittedTuplesBatch — тот же реестр, что RecordEmittedTuples, но набором,
-// охватывающим НЕСКОЛЬКО выдач сразу: идентификатор выдачи едет вместе с кортежем,
-// потому что ключ реестра — (выдача, субъект, отношение, объект).
+// охватывающим НЕСКОЛЬКО выдач и членов сразу: выдача и координата члена едут вместе с
+// кортежем, потому что ключ реестра — (выдача, координата члена, субъект, отношение,
+// объект).
 func (s *reconcileStore) RecordEmittedTuplesBatch(ctx context.Context, refs []reconcile.EmittedTupleRef) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	binds := make([]string, 0, len(refs))
-	users := make([]string, 0, len(refs))
-	rels := make([]string, 0, len(refs))
-	objs := make([]string, 0, len(refs))
-	// Дедуп по ПОЛНОМУ ключу конфликта: `ON CONFLICT … DO UPDATE` не вправе задеть одну
-	// строку дважды в одном стейтменте (см. RecordEmittedTuples).
-	seen := make(map[[4]string]struct{}, len(refs))
+	cols := newLedgerColumns(len(refs))
 	for _, ref := range refs {
-		t := ref.Tuple
-		if t.User == "" || t.Relation == "" || t.Object == "" {
-			return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
-				t.User, t.Relation, t.Object)
+		if err := cols.add(ref.BindingID, ref.Member, ref.Tuple); err != nil {
+			return err
 		}
-		k := [4]string{string(ref.BindingID), t.User, t.Relation, t.Object}
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		seen[k] = struct{}{}
-		binds = append(binds, string(ref.BindingID))
-		users = append(users, t.User)
-		rels = append(rels, t.Relation)
-		objs = append(objs, t.Object)
 	}
 	if _, err := s.tx.Exec(ctx,
-		`INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-		 SELECT b, u, r, o, 'member' FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) AS t(b, u, r, o)
-		 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
-		binds, users, rels, objs,
+		`INSERT INTO kaname.access_binding_emitted_tuples
+		        (binding_id, member_object_type, member_object_id, fga_user, relation, object, source)
+		 SELECT b, mt, mi, u, r, o, 'member'
+		   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+		        AS t(b, mt, mi, u, r, o)
+		 ON CONFLICT (binding_id, member_object_type, member_object_id, fga_user, relation, object) DO NOTHING`,
+		cols.binds, cols.types, cols.ids, cols.users, cols.rels, cols.objs,
 	); err != nil {
 		return fmt.Errorf("reconcile: record emitted tuples batch: %w", err)
 	}
+	return nil
+}
+
+// ledgerColumns — столбцы набора строк реестра для unnest. Дубль по полному ключу
+// схлопывается здесь: повтор строки в одном наборе ничего не добавляет.
+type ledgerColumns struct {
+	seen                                 map[[6]string]struct{}
+	binds, types, ids, users, rels, objs []string
+}
+
+func newLedgerColumns(n int) *ledgerColumns {
+	return &ledgerColumns{
+		seen:  make(map[[6]string]struct{}, n),
+		binds: make([]string, 0, n), types: make([]string, 0, n), ids: make([]string, 0, n),
+		users: make([]string, 0, n), rels: make([]string, 0, n), objs: make([]string, 0, n),
+	}
+}
+
+func (c *ledgerColumns) add(bindingID domain.AccessBindingID, member reconcile.MemberCoord, t domain.MembershipTuple) error {
+	if t.User == "" || t.Relation == "" || t.Object == "" {
+		return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
+			t.User, t.Relation, t.Object)
+	}
+	k := [6]string{string(bindingID), member.ObjectType, member.ObjectID, t.User, t.Relation, t.Object}
+	if _, dup := c.seen[k]; dup {
+		return nil
+	}
+	c.seen[k] = struct{}{}
+	c.binds = append(c.binds, k[0])
+	c.types = append(c.types, k[1])
+	c.ids = append(c.ids, k[2])
+	c.users = append(c.users, k[3])
+	c.rels = append(c.rels, k[4])
+	c.objs = append(c.objs, k[5])
 	return nil
 }
 
@@ -1200,17 +1265,18 @@ func (s *reconcileStore) DeleteMember(ctx context.Context, bindingID domain.Acce
 	return target_members.DeleteTx(ctx, s.tx, string(bindingID), ruleFP, objectType, objectID)
 }
 
-// LedgerTuplesForObject reads the recorded emitted tuples for one object of a
-// binding from the access_binding_emitted_tuples ledger (the saved tuple-set the
-// role.rules eager-revoke replays when a rule's verbs are gone, C-20/C-21).
-func (s *reconcileStore) LedgerTuplesForObject(ctx context.Context, bindingID domain.AccessBindingID, object string) ([]domain.MembershipTuple, error) {
+// LedgerTuplesForMember читает строки реестра, выпущенные одним членом выдачи, — по
+// префиксу первичного ключа (выдача, координата члена). Источник снятия члена
+// (C-20/C-21): глаголы снятого правила ушли, и снимается сохранённый набор. Строки
+// члена ДРУГОГО типа с тем же идентификатором сюда не попадают (kaname#933).
+func (s *reconcileStore) LedgerTuplesForMember(ctx context.Context, bindingID domain.AccessBindingID, member reconcile.MemberCoord) ([]domain.MembershipTuple, error) {
 	rows, err := s.tx.Query(ctx,
 		`SELECT fga_user, relation, object
 		   FROM kaname.access_binding_emitted_tuples
-		  WHERE binding_id = $1 AND object = $2`,
-		string(bindingID), object)
+		  WHERE binding_id = $1 AND member_object_type = $2 AND member_object_id = $3`,
+		string(bindingID), member.ObjectType, member.ObjectID)
 	if err != nil {
-		return nil, fmt.Errorf("reconcile: ledger tuples for object %s: %w", object, err)
+		return nil, fmt.Errorf("reconcile: ledger tuples for member %s:%s: %w", member.ObjectType, member.ObjectID, err)
 	}
 	defer rows.Close()
 	var out []domain.MembershipTuple
@@ -1224,46 +1290,29 @@ func (s *reconcileStore) LedgerTuplesForObject(ctx context.Context, bindingID do
 	return out, rows.Err()
 }
 
-// TuplesStillClaimedByOtherBindings returns the subset of `tuples` still recorded in
-// the emitted-tuple ledger of an ACTIVE binding OTHER than excludeBinding. The ledger
-// PK is (binding_id, fga_user, relation, object) — per binding — so two bindings of the
-// SAME subject that materialized the IDENTICAL FGA tuple on the SAME object hold TWO
-// ledger rows for ONE non-refcounted tuple. Before deleting a tuple the
-// reconciler subtracts this set so a shared cross-binding tuple is dropped only when the
-// LAST owning binding releases it (label-revoke-vpc CHANGE-01). The join to
-// access_bindings requires the other binding be ACTIVE — a REVOKED/expired binding does
-// not keep a tuple alive. Empty `tuples` → empty result (no query).
-func (s *reconcileStore) TuplesStillClaimedByOtherBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []domain.MembershipTuple) (map[domain.MembershipTuple]struct{}, error) {
-	out := make(map[domain.MembershipTuple]struct{})
-	if len(tuples) == 0 {
-		return out, nil
+// LedgerTuples — весь реестр выпущенного одной выдачей с координатами строк, одним
+// обращением по префиксу первичного ключа (binding_id). Читают его полный проход
+// выдачи нескольким субъектам, чтобы дописать неизменному члену кортежи, которых в
+// реестре нет (reconcile/emitted_completion.go, kaname#880), и истечение выдачи.
+func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]reconcile.LedgerRow, error) {
+	rows, err := s.tx.Query(ctx,
+		`SELECT member_object_type, member_object_id, fga_user, relation, object
+		   FROM kaname.access_binding_emitted_tuples
+		  WHERE binding_id = $1`,
+		string(bindingID))
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: ledger tuples of binding %s: %w", bindingID, err)
 	}
-	// Probe each (fga_user, relation, object) triple against the ledger of every OTHER
-	// active binding. The set is small (one member's tuple-set), so a per-tuple EXISTS
-	// is cheap and keeps the query index-friendly (PK prefix on fga_user/relation/object
-	// is not available, but the access_binding_emitted_tuples object index covers it).
-	for _, t := range tuples {
-		var exists bool
-		err := s.tx.QueryRow(ctx,
-			`SELECT EXISTS (
-			   SELECT 1
-			     FROM kaname.access_binding_emitted_tuples et
-			     JOIN kaname.access_bindings ab ON ab.id = et.binding_id
-			    WHERE et.binding_id <> $1
-			      AND et.fga_user = $2
-			      AND et.relation = $3
-			      AND et.object   = $4
-			      AND ab.status = 'ACTIVE'
-			 )`,
-			string(excludeBinding), t.User, t.Relation, t.Object).Scan(&exists)
-		if err != nil {
-			return nil, fmt.Errorf("reconcile: still-claimed probe for %s#%s@%s: %w", t.Object, t.Relation, t.User, err)
+	defer rows.Close()
+	var out []reconcile.LedgerRow
+	for rows.Next() {
+		var r reconcile.LedgerRow
+		if err := rows.Scan(&r.Member.ObjectType, &r.Member.ObjectID, &r.Tuple.User, &r.Tuple.Relation, &r.Tuple.Object); err != nil {
+			return nil, fmt.Errorf("reconcile: scan binding ledger tuple: %w", err)
 		}
-		if exists {
-			out[t] = struct{}{}
-		}
+		out = append(out, r)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // EmitTupleWrite / EmitTupleDelete enqueue per-object FGA tuples on the tx.
@@ -1277,70 +1326,49 @@ func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.Me
 
 // RecordEmittedTuples co-commits the per-member FGA tuples into the persisted
 // emitted-tuple ledger (kaname.access_binding_emitted_tuples — F3/#178) on the
-// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10). The INSERT is
-// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'` (the
-// DO UPDATE only re-tags a pre-0032 source='binding' row; the object-spaces are disjoint,
-// so no real binding↔member collision), so a repeated reconcile of the same ACTIVE member
-// — or a forward + async-full overlap — is an idempotent no-op. len==0 is a no-op.
-func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error {
-	users := make([]string, 0, len(tuples))
-	rels := make([]string, 0, len(tuples))
-	objs := make([]string, 0, len(tuples))
-	// Дедуп по ключу конфликта ОБЯЗАТЕЛЕН перед набором: `ON CONFLICT … DO UPDATE` не
-	// вправе задеть одну и ту же строку дважды В ОДНОМ стейтменте (Postgres отвергает
-	// такой набор целиком). Поштучная вставка этого не требовала, потому что каждая
-	// строка ехала своим стейтментом; при переходе на набор дубль внутри одного вызова
-	// обязан схлопываться здесь. Исход тот же: повтор был идемпотентен и раньше.
-	seen := make(map[[3]string]struct{}, len(tuples))
-	for _, t := range tuples {
-		if t.User == "" || t.Relation == "" || t.Object == "" {
-			return fmt.Errorf("reconcile: record emitted tuple: incomplete (user=%q relation=%q object=%q)",
-				t.User, t.Relation, t.Object)
-		}
-		k := [3]string{t.User, t.Relation, t.Object}
-		if _, dup := seen[k]; dup {
-			continue
-		}
-		seen[k] = struct{}{}
-		users = append(users, t.User)
-		rels = append(rels, t.Relation)
-		objs = append(objs, t.Object)
-	}
-	if len(users) == 0 {
+// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10), под координатой
+// члена, который их выпустил (kaname#933). The INSERT is `ON CONFLICT (<полный ключ>)
+// DO NOTHING`, so a repeated reconcile of the same ACTIVE member — or a forward +
+// async-full overlap — is an idempotent no-op. Строка уровня выдачи
+// (`source='binding'`) с тем же кортежем несёт пустую координату и остаётся отдельной
+// строкой: у неё свой владелец (Create, RoleTupleReconciler). len==0 is a no-op.
+func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, member reconcile.MemberCoord, tuples []domain.MembershipTuple) error {
+	if len(tuples) == 0 {
 		return nil
 	}
-	if _, err := s.tx.Exec(ctx,
-		// source='member': ARM_LABELS per-object tuples owned by the reconciler /
-		// RoleMembershipFanout — kept distinct from binding-level rows so a
-		// Role.Update binding-level reconcile (ReplaceEmittedTuples) never wipes them.
-		// DO UPDATE SET source='member' self-heals any pre-0032 row that defaulted to
-		// 'binding' (object-spaces are disjoint, so a real binding↔member collision
-		// cannot occur — this only re-tags an existing member row).
-		`INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-		 SELECT $1, u, r, o, 'member' FROM unnest($2::text[], $3::text[], $4::text[]) AS t(u, r, o)
-		 ON CONFLICT (binding_id, fga_user, relation, object) DO UPDATE SET source = 'member'`,
-		string(bindingID), users, rels, objs,
-	); err != nil {
-		return fmt.Errorf("reconcile: record emitted tuple: %w", err)
+	refs := make([]reconcile.EmittedTupleRef, 0, len(tuples))
+	for _, t := range tuples {
+		refs = append(refs, reconcile.EmittedTupleRef{BindingID: bindingID, Member: member, Tuple: t})
 	}
-	return nil
+	return s.RecordEmittedTuplesBatch(ctx, refs)
 }
 
-// ForgetEmittedTuples removes exactly the supplied member rows from the ledger on
-// the writer-tx (eager-revoke / fell-out / expiry), keeping the ledger lock-step
-// with the live FGA tuple set so a later symmetric revoke does not replay a tuple
-// that was already revoked. A deleted BINDING's rows are dropped by the FK ON
-// DELETE CASCADE (delete.go); this handles the member-level revocations that leave
-// the binding row alive. len==0 is a no-op.
-func (s *reconcileStore) ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []domain.MembershipTuple) error {
-	for _, t := range tuples {
-		if _, err := s.tx.Exec(ctx,
-			`DELETE FROM kaname.access_binding_emitted_tuples
-			  WHERE binding_id = $1 AND fga_user = $2 AND relation = $3 AND object = $4`,
-			string(bindingID), t.User, t.Relation, t.Object,
-		); err != nil {
-			return fmt.Errorf("reconcile: forget emitted tuple: %w", err)
+// ForgetEmittedTuples снимает ровно названные строки реестра — по ПОЛНОМУ ключу
+// (выдача, координата члена, кортеж) — на пишущей транзакции (eager-revoke /
+// fell-out / expiry), keeping the ledger lock-step with the live FGA tuple set so a
+// later symmetric revoke does not replay a tuple that was already revoked. Строка
+// другой координаты с тем же кортежем остаётся: она отвечает за своего члена
+// (kaname#933). A deleted BINDING's rows are dropped by the FK ON DELETE CASCADE
+// (delete.go). len==0 is a no-op.
+func (s *reconcileStore) ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, rows []reconcile.LedgerRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	cols := newLedgerColumns(len(rows))
+	for _, r := range rows {
+		if err := cols.add(bindingID, r.Member, r.Tuple); err != nil {
+			return err
 		}
+	}
+	if _, err := s.tx.Exec(ctx,
+		`DELETE FROM kaname.access_binding_emitted_tuples et
+		  USING unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) AS k(mt, mi, u, r, o)
+		  WHERE et.binding_id = $1
+		    AND et.member_object_type = k.mt AND et.member_object_id = k.mi
+		    AND et.fga_user = k.u AND et.relation = k.r AND et.object = k.o`,
+		string(bindingID), cols.types, cols.ids, cols.users, cols.rels, cols.objs,
+	); err != nil {
+		return fmt.Errorf("reconcile: forget emitted tuple: %w", err)
 	}
 	return nil
 }
@@ -1411,6 +1439,46 @@ func (s *reconcileStore) scopeTenantAccountID(ctx context.Context, scope domain.
 		// cluster / cross-service / unknown — no single owning account.
 		return nil, nil
 	}
+}
+
+// LockBindingForDeactivation берёт строку выдачи `FOR UPDATE` — замок СНЯТИЯ.
+//
+// Это единственный режим строки, конфликтующий с `FOR KEY SHARE`, под которым
+// аддитивный форвард решает «выдача жива» (LoadBinding(s)ForForward, kaname#919).
+// Снятие, взявшее его, не прочитает набор членов, пока форвард не зафиксировал
+// своих, а форвард, пришедший после, дождётся коммита снятия и прочитает REVOKED.
+// Полному проходу этот режим не нужен: тот лишь пересчитывает членов живой выдачи,
+// и `FOR NO KEY UPDATE` держит его взаимное исключение без очереди форвардов.
+//
+// Строки нет (выдачу удалили) — не ошибка: следующее чтение вернёт ok=false.
+func (s *reconcileStore) LockBindingForDeactivation(ctx context.Context, bindingID domain.AccessBindingID) error {
+	if _, err := (&abReader{tx: s.tx}).getForUpdate(ctx, bindingID); err != nil && !errors.Is(err, iamerr.ErrNotFound) {
+		return fmt.Errorf("reconcile: lock binding for deactivation %s: %w", bindingID, err)
+	}
+	return nil
+}
+
+// EmitSubjectChangeEvent пишет строку журнала смены субъекта в транзакции прохода —
+// тем же писателем, что отзыв и удаление (abWriter.EmitSubjectChangeEvent). Вид
+// события и `op` выбирает use-case (reconcile.emitSubjectChangeOfExpiry), адаптер
+// только пишет.
+func (s *reconcileStore) EmitSubjectChangeEvent(ctx context.Context, evt access_binding.SubjectChangeEvent) error {
+	w := &abWriter{abReader{tx: s.tx}}
+	if err := w.EmitSubjectChangeEvent(ctx, evt); err != nil {
+		return fmt.Errorf("reconcile: subject change %s:%s: %w", evt.SubjectType, evt.SubjectID, err)
+	}
+	return nil
+}
+
+// EmitAuditEvent пишет строку журнала аудита в транзакции прохода — тем же
+// писателем, что отзыв и удаление (abWriter.EmitAuditEvent). Содержимое строки
+// выбирает use-case (reconcile.emitRevokedAuditOfExpiry).
+func (s *reconcileStore) EmitAuditEvent(ctx context.Context, ev access_binding.AuditEvent) error {
+	w := &abWriter{abReader{tx: s.tx}}
+	if err := w.EmitAuditEvent(ctx, ev); err != nil {
+		return fmt.Errorf("reconcile: audit %s binding %s: %w", ev.EventType, ev.BindingID, err)
+	}
+	return nil
 }
 
 // RevokeExpiredBinding CAS-transitions an ACTIVE binding to REVOKED on the tx
@@ -1587,28 +1655,12 @@ func scopeTypeVerbs(cat *catalog.Facts, scopeType string) []string {
 	return cat.AllVerbVocabulary()
 }
 
-// classReadVerbs — только глаголы чтения (Р4); `*` чтением не считается: он
-// раскрывается в набор типа, а набор растёт.
-func classReadVerbs(verbs []string) []string {
-	out := make([]string, 0, len(verbs))
-	for _, v := range verbs {
-		if domain.IsClassReadVerb(v) {
-			out = append(out, v)
-		}
+// bindingSubjects — весь перечень субъектов выдачи. Пустой перечень — выдача,
+// заведённая до дочерней таблицы субъектов: её субъект — одиночная пара строки
+// (та же замена, что у чтения и у веера отзыва, `revoke_subject_fanout.go`).
+func bindingSubjects(b domain.AccessBinding) []domain.Subject {
+	if len(b.Subjects) > 0 {
+		return b.Subjects
 	}
-	return out
-}
-
-// classReadSelectors — селекторы, сужённые до глаголов чтения; селектор, у
-// которого чтения не осталось, не материализует ничего и снимается целиком.
-func classReadSelectors(in []domain.RuleSelector) []domain.RuleSelector {
-	out := make([]domain.RuleSelector, 0, len(in))
-	for _, sel := range in {
-		sel.Verbs = classReadVerbs(sel.Verbs)
-		if len(sel.Verbs) == 0 {
-			continue
-		}
-		out = append(out, sel)
-	}
-	return out
+	return []domain.Subject{{Type: b.SubjectType, ID: b.SubjectID}}
 }

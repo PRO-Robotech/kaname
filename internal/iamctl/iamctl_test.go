@@ -671,3 +671,97 @@ func TestConnectRefusalNeverPrintsAnEmptyAddress(t *testing.T) {
 		mustContain(t, got.stderr, "iam-internal.kacho.svc:9091", "заданный адрес обязан быть назван")
 	})
 }
+
+// --- редакция манифеста (kaname#865) -------------------------------------------
+
+// Test865_37_RevisionVerdictsAreFindingsNotConvergence — клиент
+// администрирования не выдаёт вердикт редакции за схождение (kaname#865,
+// приёмка `module-manifest-revision-only-moves-forward.md`, Д11, сценарий
+// 865-37): схождение — ТОЛЬКО `WOULD_APPLY`; вердикты редакции и значение,
+// клиенту неизвестное, — находка с кодом `1`. Близнец — `WOULD_APPLY`.
+func Test865_37_RevisionVerdictsAreFindingsNotConvergence(t *testing.T) {
+	const module = "probemod"
+	dR5false := "sha256:" + strings.Repeat("a", 64)
+	dR5true := "sha256:" + strings.Repeat("b", 64)
+	i64 := func(n int64) *int64 { return &n }
+	str := func(s string) *string { return &s }
+	cases := []struct {
+		name string
+		resp *iamv1.PlanModuleResponse
+		// subject — что находка обязана назвать в потоке ошибок.
+		subject []string
+	}{
+		{"(а) младшая редакция", &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict:          iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION,
+			ManifestRevision: i64(3), AppliedRevision: i64(5),
+		}, []string{"3", "5"}},
+		{"(б) конфликт содержимого", &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict:          iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT,
+			ManifestRevision: i64(5), AppliedRevision: i64(5),
+			ManifestDigest: str(dR5false), AppliedDigest: str(dR5true),
+		}, []string{dR5false, dR5true}},
+		{"(в) неизвестное значение", &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict: iamv1.ModulePlanVerdict(99),
+		}, []string{"99"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := exercise(t, depsWith(t, &stubService{planResp: c.resp}), "plan", module)
+			if got.code != ExitFinding {
+				t.Fatalf("plan: код получено %d, ожидалось %d\n%s", got.code, ExitFinding, got.both())
+			}
+			mustContain(t, got.stderr, "НАХОДКА", "находка — в поток ошибок")
+			for _, n := range c.subject {
+				mustContain(t, got.stderr, n, "находка обязана назвать предмет")
+			}
+			for _, banned := range []string{"iamctl apply", "вердикт: применение сойдётся с якорем"} {
+				if strings.Contains(got.both(), banned) {
+					t.Fatalf("plan: на вердикте, отличном от WOULD_APPLY, вывод несёт %q:\n%s", banned, got.both())
+				}
+			}
+
+			doc := &stubService{
+				listResp: &iamv1.ListModulesResponse{Modules: []*iamv1.ModuleSummary{
+					{Module: module, LiveResourceCount: 2, LiveVerbCount: 4},
+				}},
+				planResp: c.resp,
+			}
+			dgot := exercise(t, depsWith(t, doc), "doctor")
+			if dgot.code != ExitFinding {
+				t.Fatalf("doctor: код получено %d, ожидалось %d\n%s", dgot.code, ExitFinding, dgot.both())
+			}
+			if strings.Contains(dgot.stdout, "каталог сходится с доставленным манифестом") {
+				t.Fatalf("doctor назвал вердикт, отличный от WOULD_APPLY, схождением:\n%s", dgot.both())
+			}
+		})
+	}
+
+	t.Run("близнец: WOULD_APPLY", func(t *testing.T) {
+		resp := &iamv1.PlanModuleResponse{
+			Module: module, ExpectedState: "sha256:dead",
+			Verdict:          iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_APPLY,
+			ManifestRevision: i64(5), AppliedRevision: i64(3),
+		}
+		got := exercise(t, depsWith(t, &stubService{planResp: resp}), "plan", module)
+		if got.code != ExitOK {
+			t.Fatalf("plan: код получено %d, ожидалось %d\n%s", got.code, ExitOK, got.both())
+		}
+		mustContain(t, got.stdout, "вердикт: применение сойдётся с якорем", "схождение названо")
+		mustContain(t, got.both(), "iamctl apply "+module+" -expected-state=", "подсказка применения")
+
+		doc := &stubService{
+			listResp: &iamv1.ListModulesResponse{Modules: []*iamv1.ModuleSummary{
+				{Module: module, LiveResourceCount: 2, LiveVerbCount: 4},
+			}},
+			planResp: resp,
+		}
+		dgot := exercise(t, depsWith(t, doc), "doctor")
+		if dgot.code != ExitOK {
+			t.Fatalf("doctor: код получено %d, ожидалось %d\n%s", dgot.code, ExitOK, dgot.both())
+		}
+		mustContain(t, dgot.stdout, "каталог сходится с доставленным манифестом", "doctor называет схождение")
+	})
+}

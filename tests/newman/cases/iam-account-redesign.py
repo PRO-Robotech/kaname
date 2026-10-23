@@ -350,7 +350,8 @@ CASES.append(Case(
 CASES.append(Case(
     id="IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG",
     title="IAM-1-06: Account.Delete на аккаунт с ≥1 Project (default из саги) → Operation{done} c "
-          "result.error FAILED_PRECONDITION 'Account <id> contains projects and cannot be deleted' "
+          "result.error FAILED_PRECONDITION 'Account <id> contains projects and cannot be deleted: "
+          "delete Project <default> first (projects: 1)' "
           "(within-service FK RESTRICT, ban #10 DB-backstop)",
     classes=["NEG", "SAGA"],
     priority="P1",
@@ -387,10 +388,15 @@ CASES.append(Case(
                 *save_from_response("j.id", "opId"),
             ],
         )),
-        # `msg_substr` приводит обе стороны к нижнему регистру и заглавную `A`
-        # владельца не различает; `msg_regex` сверяет текст как есть.
+        # Текст владельца ЦЕЛИКОМ и равенством: образец с `[^ ]+` на месте имени
+        # пропускал отказ о ЧУЖОМ аккаунте того же тона, а без якоря — любой хвост.
+        # Хвост — остаток и шаг (приёмка
+        # `deletion-refusals-name-the-remainder-and-the-step.md`, Р1, APPROVED на
+        # `b7a49bb0…`, kaname#725): в свежем аккаунте саги проект один — по
+        # умолчанию, `rstDefPrjId`.
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_regex="Account [^ ]+ contains projects and cannot be deleted"),
+                        msg_text="Account {{rstAccId}} contains projects and cannot be deleted: "
+                                 "delete Project {{rstDefPrjId}} first (projects: 1)"),
         # Уборка идёт ПОСЛЕ утверждения об отказе и ничего в нём не меняет: отказ
         # уже зафиксирован на непустом аккаунте. Сняв потомка, снимаем и родителя —
         # иначе аккаунт, чьё удаление кейс проверяет, переживает прогон и держит

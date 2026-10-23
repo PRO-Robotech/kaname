@@ -23,11 +23,12 @@ package pg_test
 // ends up DELETED → the subject loses v_list (DENY) though role-O legitimately
 // grants it.
 //
-// THE FIX: before emitting a tuple-delete for a fell-out / downgraded member, the
-// reconciler subtracts tuples STILL CLAIMED by an ACTIVE member of ANY OTHER
-// active binding of the same subject on the same object (StillClaimedByOtherBindings,
-// queried against the emitted-tuple ledger of OTHER active bindings). A shared
-// cross-binding tuple is revoked exactly when the LAST owning binding releases it.
+// ИСПРАВЛЕНИЕ: строка снятия выпавшего члена ОТКЛАДЫВАЕТСЯ до конца прохода
+// (flushDeletes), а там вычитается всё, что тот же проход записал заново, — здесь это
+// запись role-O, — и смена метки строки снятия общего кортежа не пишет вовсе. Факт,
+// который держит действующая выдача, сверенная ДРУГИМ проходом, оставляет свёртка
+// журнала: она спрашивает реестр под замком строки факта (kaname#919); снимка
+// реестров соседей реконсайлер больше не читает.
 //
 // Run: `make test` (testcontainers + Docker). Skipped under -short.
 

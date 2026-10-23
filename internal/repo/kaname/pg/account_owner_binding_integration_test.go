@@ -32,6 +32,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // TestAccountOwnerBinding_P6_CoCommit_Atomic — the owner-binding row co-commits
@@ -66,7 +67,7 @@ func TestAccountOwnerBinding_P6_CoCommit_Atomic(t *testing.T) {
 		Scope:              domain.ScopeAccount,
 		DeletionProtection: true,
 	}
-	createdBinding, err := w.AccessBindingsW().Insert(ctx, ownerBinding)
+	createdBinding, err := bindingset.Insert(ctx, w.AccessBindingsW(), ownerBinding)
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
@@ -107,7 +108,7 @@ func TestAccountOwnerBinding_P6_RollbackOnBindingFailure(t *testing.T) {
 	require.NoError(t, err)
 	insertedAcc, err := w.AccountsW().Insert(ctx, acc)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID:          domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol_does_not_exist01", ResourceType: "account", ResourceID: string(insertedAcc.ID),

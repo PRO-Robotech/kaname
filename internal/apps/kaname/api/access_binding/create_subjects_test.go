@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // TestCreate_E30_MultiSubject_IndependentTupleSets — a Create with two subjects
@@ -42,7 +43,7 @@ func TestCreate_E30_MultiSubject_IndependentTupleSets(t *testing.T) {
 	opsRepo := newFakeOpsRepo()
 	ctx := newOwnerContext(ownerID)
 
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(newRecordingFGA(), nil)
 	binding := domain.AccessBinding{
 		RoleID:       domain.RoleID(roleID),
 		ResourceType: "account",
@@ -94,7 +95,7 @@ func TestCreate_E34_LegacySingle_ProjectsToSubjects(t *testing.T) {
 	opsRepo := newFakeOpsRepo()
 	ctx := newOwnerContext(ownerID)
 
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(newRecordingFGA(), nil)
 	binding := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(userID),
@@ -144,7 +145,7 @@ func TestCreate_E32b_GroupSubject_NoGrantAuthority_Denied(t *testing.T) {
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{ID: "usr_e32b_attacker---", Type: "user"})
 
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(&denyingFGA{}, nil)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(&denyingFGA{}, nil)
 	binding := domain.AccessBinding{
 		RoleID:       domain.RoleID(roleID),
 		ResourceType: "account",
@@ -173,7 +174,7 @@ func TestCreate_E32_SubjectsConflict_Rejected(t *testing.T) {
 	opsRepo := newFakeOpsRepo()
 	ctx := newOwnerContext(ownerID)
 
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(newRecordingFGA(), nil)
 	binding := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser, // legacy single = usr_x---------------
 		SubjectID:    "usr_x---------------",

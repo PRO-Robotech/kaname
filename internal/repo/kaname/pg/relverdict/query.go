@@ -347,9 +347,9 @@ speaker_pair(s_type, s_id, via) AS (
     -- больше, и порядок соединения с субъектами выдач держит не оценка числа
     -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
     -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
-    SELECT 'system_class', $10::text, 'class'
+    SELECT 'system_class', $10::text, 'class' WHERE ` + speakerExistsSQL + `
   UNION ALL
-    SELECT 'system_class', $11::text, 'class'
+    SELECT 'system_class', $11::text, 'class' WHERE ` + speakerExistsSQL + `
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -366,9 +366,10 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'system_class:' || $10::text
-  UNION
-    SELECT 'system_class:' || $11::text
+    -- Классы — из пары колонок, где они уже прошли предикат существования
+    -- говорящего (speakerExistsSQL): второе написание параметров здесь вывело
+    -- бы класс учётке, которой нет.
+    SELECT 'system_class:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'class'
 ),
 fact_atom(parent_type, relation) AS (
     -- Источники-факты плана: где искать и что искать. Пустой тип предка означает
@@ -896,9 +897,9 @@ speaker_pair(s_type, s_id, via) AS (
     -- больше, и порядок соединения с субъектами выдач держит не оценка числа
     -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
     -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
-    SELECT 'system_class', $10::text, 'class'
+    SELECT 'system_class', $10::text, 'class' WHERE ` + speakerExistsSQL + `
   UNION ALL
-    SELECT 'system_class', $11::text, 'class'
+    SELECT 'system_class', $11::text, 'class' WHERE ` + speakerExistsSQL + `
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов. Обе формы имени группы: канонический
@@ -909,9 +910,10 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'system_class:' || $10::text
-  UNION
-    SELECT 'system_class:' || $11::text
+    -- Классы — из пары колонок, где они уже прошли предикат существования
+    -- говорящего (speakerExistsSQL): второе написание параметров здесь вывело
+    -- бы класс учётке, которой нет.
+    SELECT 'system_class:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'class'
 ),
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($4::text[], $5::text[])

@@ -188,6 +188,15 @@ type WriterIface interface {
 	// владение тем, чего манифест не несёт.
 	UpsertSystemRole(ctx context.Context, r domain.Role) (out domain.Role, changed bool, err error)
 
+	// LockOwnerModule берёт строку каталога модуля-владельца ключевым замком
+	// (`FOR KEY SHARE`) — первым строчным замком транзакции записи ролей модуля
+	// (kaname#913). Тот же замок берёт ключ роли на модуль при её вставке и
+	// оживлении; взятый первым, он ставит строку модуля раньше строк ресурсов при
+	// ЛЮБОМ ходе транзакции, в том числе при приведении правил, где ключ на
+	// модуль не проверяется. Ноль строк — законный исход: ссылку на модуль,
+	// которого нет, отвергнет ключ роли.
+	LockOwnerModule(ctx context.Context, module string) error
+
 	// ReplaceRuleSelectors syncs kaname.role_rule_selectors with the role's
 	// UNIFIED materializing rules: ARM_ANCHOR
 	// (all) + ARM_NAMES + ARM_LABELS. It DELETEs the role's current selector rows and
@@ -198,7 +207,21 @@ type WriterIface interface {
 	// mirror-change event affects (forward-materialization). A legacy
 	// permissions-only role clears its selectors (DELETE then no INSERT). Idempotent
 	// re-sync (same rules → same set).
+	//
+	// Каждый селектор обязан нести глаголы своего правила (`RuleSelector.Grants`,
+	// заполняет `catalog.Facts.GrantSelectors`); селектор без них отвергается
+	// (kaname#878). Роль снимается из очереди пересчёта глаголов правил.
 	ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
+
+	// RegrainSelectorVerbs пересчитывает глаголы правил у существующих строк
+	// селекторов роли (по отпечатку, в пересечении с типами строки) и снимает
+	// роль из очереди пересчёта (kaname#878). Охват правил не трогает. Правила
+	// вызывающий читает через RulesForRegrain В ТОЙ ЖЕ транзакции.
+	RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
+
+	// RulesForRegrain — правила роли под замком строки для пересчёта глаголов
+	// правил; live=false — роль снята либо её нет (kaname#878).
+	RulesForRegrain(ctx context.Context, roleID domain.RoleID) (rules domain.Rules, live bool, err error)
 
 	// ReplaceRoleVerbs syncs kaname.role_verb — проекцию «роль → тип объекта ×
 	// глагол», которой отвечает форма E.

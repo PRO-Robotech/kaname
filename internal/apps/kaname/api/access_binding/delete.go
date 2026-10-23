@@ -11,15 +11,14 @@ package access_binding
 //     `w.AccessBindingsW().EmitRelationDelete(ctx, stored)` inside the same
 //     writer-tx as the binding delete. Tx rollback ⇒ no orphan fga_outbox
 //     rows AND no orphan binding state.
-//   - The revoked tuple set is the PERSISTED emitted-set
-//     (access_binding_emitted_tuples — F3/#178), read via
-//     `w.AccessBindings().SelectEmittedTuples(id)`, MINUS the tuples another
-//     ACTIVE binding still claims (partitionRevokeSet — revoke_set.go). Reading
-//     the ledger instead of re-deriving keeps the revoke faithful to what was
-//     actually emitted at grant / last reconcile even if the binding's role
-//     permissions changed in between (a re-derive would orphan the originally-
-//     granted tuples); subtracting the surviving claims keeps it from deleting a
-//     non-refcounted relation fact that a sibling ACTIVE binding also grants.
+//   - Снимаемый набор — СОХРАНЁННЫЙ реестр выдачи (access_binding_emitted_tuples —
+//     F3/#178), прочитанный `w.AccessBindings().SelectEmittedTuples(id)`: снятие
+//     верно тому, что выпущено при выдаче либо последней сверке, даже если
+//     разрешения роли с тех пор менялись (набор, выведенный заново, осиротил бы
+//     выданное прежде). Общий кортеж, который
+//     держит другая действующая выдача, снимает не use-case: свёртка строки снятия
+//     спрашивает о держателях под замком строки факта (миграция 20261019180000,
+//     kaname#919).
 //
 // ОТЗЫВ ДЕЙСТВУЕТ С КОММИТА, и догоняющего пути для этого не нужно.
 //   - Строка снятия, положенная в журнал намерений ТОЙ ЖЕ writer-tx, снимает
@@ -27,8 +26,8 @@ package access_binding
 //     синхронный пост-коммитный вызов в чужое хранилище: он закрывал окно между
 //     коммитом и дренажом, пока право продолжало действовать. Хранилища нет
 //     (стадия S6, эпик kacho#747) — нет ни окна, ни того, кого догонять.
-//   - Снимается ровно тот же набор, что и прежде: emitted-set МИНУС всё, что ещё
-//     держит другая ACTIVE-привязка.
+//   - Строки снятия — на весь emitted-set; факт, который ещё держит другая
+//     ACTIVE-привязка, свёртка оставляет.
 
 import (
 	"context"
@@ -51,7 +50,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
 type DeleteAccessBindingUseCase struct {
@@ -232,28 +230,38 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 			_ = w.Rollback(ctx)
 		}
 	}()
-	// Take the binding's EXCLUSIVE xact advisory lock FIRST — the same
-	// pg_advisory_xact_lock(hashtext(binding_id)) key the reconciler's FULL pass uses
-	// (reconcile_adapter.go AcquireBindingLock). Взаимное исключение с полным проходом,
-	// истечением срока и параллельным отзывом этим держится.
+	// ПОРЯДОК ЗАМКОВ — тот же, что у отзыва (doRevoke) и истечения срока
+	// (reconcile.ExpireBinding): advisory-замок выдачи (против полного прохода,
+	// истечения, отзыва) → строка выдачи `FOR UPDATE` (GetForDeactivation, против
+	// аддитивного форварда) → чтение перечня субъектов и реестра → DELETE (замок
+	// строки уже взят) → строки журналов.
 	//
-	// ЧЕГО ЭТА БЛОКИРОВКА БОЛЬШЕ НЕ ДАЁТ — И ЭТО НАДО ЗНАТЬ, А НЕ ДОСТРАИВАТЬ.
-	// Здесь стояло утверждение, что EXCLUSIVE разводит отзыв с аддитивным форвардом,
-	// потому что тот держит SHARE-блокировку того же ключа. **Форвард не берёт
-	// advisory-блокировку вовсе** (снята 2026-08-05, см. reconcile/forward.go «LOCK
-	// CHOICE»), поэтому у EXCLUSIVE на этой стороне не осталось контрагента: два
-	// утверждения об одном предмете, из которых верным было одно, и верным — не это.
-	// Комментарий приведён к коду; сам разъезд отзыва с пост-коммитной записью форварда
-	// в хранилище прав — открытая задача (её предмет наблюдаем как кортежи, которых не
-	// держит ни одна выдача), и закрывается она упорядочиванием ПРИМЕНЕНИЯ, а не
-	// возвратом блокировки: применение к хранилищу прав у обеих сторон происходит ПОСЛЕ
-	// коммита, то есть заведомо вне любой xact-блокировки.
+	// Строчный замок стоит ДО чтения реестра (kaname#923). Форвард advisory не берёт
+	// (reconcile/forward.go «LOCK CHOICE»), решает «выдача жива» под `FOR KEY SHARE` и
+	// пишет члена, реестр и строку журнала позже, в своей транзакции; применение к
+	// прямому факту у обеих сторон идёт в той же транзакции — триггером журнала
+	// намерений. DELETE и так ждал форварда, но реестр был прочитан раньше, и прямой
+	// факт форварда переживал удаление. Строк каталога (порядок 2р→2а→4 применителей,
+	// kaname#913) транзакция не берёт, ребра ожидания с ними нет.
+	//
+	// Замка строки мало: исход снятия решает и ВЕРСИЯ строки журнала — свёртка в
+	// прямой факт снимает факт, лишь если его версия не новее версии строки снятия.
+	// Строка снятия несёт момент своей вставки, а не начало транзакции
+	// (fga_outbox, deleteStamp): иначе снятие, открывшее транзакцию раньше форварда и
+	// получившее строку после его коммита, писало бы строку старше факта, и факт её
+	// переживал. Оба порядка начала транзакций держит
+	// reconcile_deactivation_order_race_integration_test.go.
 	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
 		return err
 	}
-	// Read the binding's subject_id within the writer TX before deletion,
-	// so we can emit the outbox row atomically.
-	deletedBinding, err := w.AccessBindings().Get(ctx, id)
+	// Строка выдачи — под замком снятия; из неё же измерения событий, до удаления.
+	deletedBinding, err := w.AccessBindingsW().GetForDeactivation(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Перечень субъектов — ДО удаления: дочерние строки уходят каскадом той же
+	// транзакцией, и после удаления перечень вырождается в первого субъекта.
+	subjects, err := bindingSubjectsOf(ctx, w.AccessBindings().ListSubjects, deletedBinding)
 	if err != nil {
 		return err
 	}
@@ -262,29 +270,13 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	// (Role.Update) between grant and revoke; re-deriving would emit
 	// EmitRelationDelete on the NEW tuple set and orphan the originally-granted
 	// ones (standing privilege). access_binding_emitted_tuples records exactly
-	// what THIS binding emitted at grant / last reconcile — the candidate revoke-set,
-	// narrowed just below by whatever another ACTIVE binding still claims. Read on THIS
-	// writer-tx BEFORE the binding DELETE (the FK ON DELETE CASCADE drops the ledger
-	// rows on delete).
+	// what THIS binding emitted at grant / last reconcile. Реестр читается В ЭТОЙ
+	// пишущей транзакции ДО удаления выдачи: каскад внешнего ключа снимает его
+	// строки вместе с ней.
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
 		return err
 	}
-	// CROSS-BINDING SHARED TUPLES (access-loss fix). The ledger is keyed PER binding
-	// while a relation fact is not refcounted, so replaying `stored` verbatim would
-	// delete access ANOTHER ACTIVE binding of the same subject still grants — and
-	// nothing would ever re-write it (the ledger is read as the mirror of the store).
-	// Subtract the tuples another ACTIVE binding still claims; the rest is this
-	// binding's true revoke-set (see revoke_set.go).
-	revokeTuples, retained, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
-	if err != nil {
-		return err
-	}
-	if len(retained) > 0 && u.logger != nil {
-		u.logger.Info("access_binding delete: tuples retained — still granted by another ACTIVE binding",
-			"binding_id", string(id), "retained_count", len(retained), "revoked_count", len(revokeTuples))
-	}
-
 	// RBAC explicit-model 2026 P6 (C-04): atomic CAS backstop against TOCTOU —
 	// `DELETE … WHERE deletion_protection=false`. If a concurrent Update re-armed
 	// protection between the sync pre-check and here, DeleteGuarded returns
@@ -292,12 +284,11 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	if err := w.AccessBindingsW().DeleteGuarded(ctx, id); err != nil {
 		return err
 	}
-	// Atomic revoke emit-in-tx. Tx rollback ⇒ neither the binding row is
-	// gone NOR is the outbox row visible to drainer. The at-least-once async
-	// backstop carries the SAME cross-binding-filtered set as the sync removal
-	// below — otherwise the drainer would strip a still-claimed tuple seconds
-	// after the sync path correctly kept it.
-	if err := w.AccessBindingsW().EmitRelationDelete(ctx, revokeTuples); err != nil {
+	// Строки снятия — в той же транзакции: откат не оставляет ни удалённой выдачи,
+	// ни строк журнала. Строки снятия — после DELETE: реестр выдачи ушёл
+	// каскадом в этой же транзакции и её факт не держит; факт, который держит
+	// другая действующая выдача, свёртка оставляет (kaname#919).
+	if err := w.AccessBindingsW().EmitRelationDelete(ctx, stored); err != nil {
 		return err
 	}
 	// Симметрия созданию (kacho#2055): создание со-коммитит событие реконсайла,
@@ -315,9 +306,9 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	// Emit subject_change_outbox row in the same TX as the deletion: a rollback
 	// of this TX will not leave an orphan outbox row (atomicity guarantee).
 	// НА КАЖДОГО субъекта привязки, а не на легаси-одиночку: см.
-	// emitSubjectChangeForEverySubject.
-	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
-		deletedBinding, "binding_revoke", "binding_delete"); err != nil {
+	// emitSubjectChangeForEverySubject; перечень прочитан до удаления.
+	if err := emitSubjectChangeFor(ctx, w.AccessBindingsW().EmitSubjectChangeEvent, subjects,
+		"binding_revoke", "binding_delete"); err != nil {
 		return err
 	}
 
@@ -330,17 +321,7 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	if revokeActor == "" {
 		revokeActor = string(deletedBinding.GrantedByUserID)
 	}
-	if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
-		EventType:       abrepo.AuditEventTypeRevoked,
-		Actor:           revokeActor,
-		SubjectType:     string(deletedBinding.SubjectType),
-		SubjectID:       string(deletedBinding.SubjectID),
-		ResourceType:    string(deletedBinding.ResourceType),
-		ResourceID:      deletedBinding.ResourceID,
-		RoleID:          string(deletedBinding.RoleID),
-		BindingID:       string(deletedBinding.ID),
-		TenantAccountID: auditTenantAccountID(deletedBinding),
-	}); err != nil {
+	if err := revokedAuditFor(ctx, w.AccessBindingsW().EmitAuditEvent, subjects, revokeActor, deletedBinding); err != nil {
 		return err
 	}
 	if err := w.Commit(ctx); err != nil {

@@ -298,8 +298,11 @@ func r74SeedGrantRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID strin
 	// Именно область и является предметом.
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-1', 'anchor', $2::text[], '{}'::jsonb)`, roleID, catalog)
+		   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-1', 'anchor', $2::text[], '{}'::jsonb,
+		         (SELECT coalesce(jsonb_object_agg(g.object_type, g.verbs), '{}'::jsonb)
+		           FROM (SELECT object_type, jsonb_agg(verb ORDER BY verb) AS verbs
+		                   FROM kaname.role_verb WHERE role_id = $1 GROUP BY object_type) g))`, roleID, catalog)
 }
 
 // r74Ask — вопрос форме E. Ошибка запроса — ОШИБКА, а не отказ: вернуть её как
@@ -803,8 +806,9 @@ func TestR7_4_10_RevokedBindingKeepsItsParentAndReturnsNoGrant(t *testing.T) {
 			accountCatalog)
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ('rol-scope', 'fp-1', 'anchor', ARRAY[$1::text], '{}'::jsonb)`, accountCatalog)
+			   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ('rol-scope', 'fp-1', 'anchor', ARRAY[$1::text], '{}'::jsonb,
+			         jsonb_build_object($1::text, jsonb_build_array('get')))`, accountCatalog)
 
 		// Получатель выдачи и администратор аккаунта.
 		exec(t, ctx, tx,

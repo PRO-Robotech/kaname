@@ -25,8 +25,8 @@ import (
 func TestScopeSelfMember_Cluster_EmitsNothing(t *testing.T) {
 	// A full superuser verb-set on the cluster scope must STILL produce no
 	// scope-self member — cluster is owned by the D-9 short-circuit.
-	_, ok := scopeSelfMember(catalogfixture.Facts(), "user:usr_root", "cluster", "cluster_root",
-		[]string{"get", "list", "create", "update", "delete"})
+	_, ok := scopeSelfMember(catalogfixture.Facts(), []grantee{{subject: "user:usr_root",
+		verbs: []string{"get", "list", "create", "update", "delete"}}}, "cluster", "cluster_root")
 	if ok {
 		t.Fatalf("cluster scope-self must NOT materialize a per-object member (D-9 short-circuit owns cluster super-admin)")
 	}
@@ -36,10 +36,10 @@ func TestScopeSelfMember_AccountProject_StillEmit(t *testing.T) {
 	// Sanity: the live hierarchy scopes (account/project) DO still materialize a
 	// scope-self member — the guard above is specific to cluster, not a blanket
 	// disablement.
-	if _, ok := scopeSelfMember(catalogfixture.Facts(), "user:usr_a", "account", "acc_1", []string{"get"}); !ok {
+	if _, ok := scopeSelfMember(catalogfixture.Facts(), []grantee{{subject: "user:usr_a", verbs: []string{"get"}}}, "account", "acc_1"); !ok {
 		t.Fatalf("account scope-self must still materialize a member")
 	}
-	if _, ok := scopeSelfMember(catalogfixture.Facts(), "user:usr_a", "project", "prj_1", []string{"get"}); !ok {
+	if _, ok := scopeSelfMember(catalogfixture.Facts(), []grantee{{subject: "user:usr_a", verbs: []string{"get"}}}, "project", "prj_1"); !ok {
 		t.Fatalf("project scope-self must still materialize a member")
 	}
 }

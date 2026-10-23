@@ -442,7 +442,7 @@ func compareModule(treeRoot *os.Root, root, module, path string,
 
 	for i := range m.Resources {
 		r := m.Resources[i]
-		rendered, err := Render(r)
+		rendered, err := RenderForCanon(r)
 		if err != nil {
 			findings = append(findings, Finding{Module: module, Type: r.ObjectType,
 				Detail: "ресурс не отрендерен: " + err.Error()})

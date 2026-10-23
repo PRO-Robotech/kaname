@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // blockingReconciler holds every materialization pass until released, standing in
@@ -105,7 +106,7 @@ func TestCreateAccessBinding_OperationDoneNotGatedOnMaterialization(t *testing.T
 	rec := newBlockingReconciler()
 	ops := newFakeOpsRepo()
 
-	createUC := NewCreateAccessBindingUseCase(repo, ops).
+	createUC := NewCreateAccessBindingUseCase(repo, ops, catalogfixture.Source()).
 		WithRelationStore(newRecordingFGA(), nil).
 		WithReconciler(rec)
 

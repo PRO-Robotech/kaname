@@ -74,8 +74,9 @@ type StepUpOutput struct {
 	View      SessionView
 	Bearer    domain.SessionBearer
 	Assurance AssuranceView
-	// BackupCodesRemaining — только в ответе, потребившем запасной код (Р4).
-	BackupCodesRemaining *int
+	// BackupCodeSet — состояние набора ПОСЛЕ траты; есть только в ответе,
+	// потребившем запасной код (kaname#297 Р4): иной способ набора не меняет.
+	BackupCodeSet *BackupCodeSetView
 }
 
 // StepUpUseCase — церемония.
@@ -231,8 +232,8 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (_ StepUpO
 		Assurance: assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}
 	if st.consumed {
-		remaining := st.remaining
-		out.BackupCodesRemaining = &remaining
+		set := st.set
+		out.BackupCodeSet = &set
 	}
 	return out, nil
 }
@@ -385,7 +386,13 @@ func (uc *StepUpUseCase) verifyPassword(ctx context.Context, userID domain.UserI
 	default:
 		return "", err
 	}
-	res := uc.deps.Verifier.Verify(stored, password)
+	res, verr := uc.deps.Verifier.Verify(ctx, stored, password)
+	if verr != nil {
+		// Вызов кончился до места вычисления: проверка не состоялась — исход
+		// той же природы, что исчерпание ёмкости, попыткой не считается
+		// (kaname#892).
+		return passwordverify.OutcomeCapacityExhausted, nil
+	}
 	if res.Outcome.IsOurError() {
 		uc.deps.Logger.Error("step-up: stored password material could not be checked — our data, not the caller's input",
 			"outcome", string(res.Outcome))

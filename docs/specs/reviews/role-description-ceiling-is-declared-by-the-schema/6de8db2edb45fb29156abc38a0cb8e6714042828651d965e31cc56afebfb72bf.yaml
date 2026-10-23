@@ -1,0 +1,167 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/role-description-ceiling-is-declared-by-the-schema.md
+  sha256: 6de8db2edb45fb29156abc38a0cb8e6714042828651d965e31cc56afebfb72bf
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 892853c457efb6362f2eed315a4a6502d8b34293
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (git status: ?? <путь>); отпечаток снят с файла рабочей
+    копии. Коммит документа и этой записи — одним заходом, отпечаток перемерить при коммите.
+  branch: '866'
+  task: PRO-Robotech/kaname#884
+  related_tasks: [PRO-Robotech/kaname#867, PRO-Robotech/kaname#864]
+  lines: 161
+  round: 1
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/role-description-ceiling-is-declared-by-the-schema.md
+    в копии kacho-workspace/tmp/kn-866-acc @ 892853c45 → 6de8db2e…afebfb72bf
+  measurement_revisions: >-
+    Код — рабочая копия на 892853c45 (HEAD = origin/746 = 892853c45); #867 (3206bf295, влит
+    97853ea94) — предок HEAD; kaname#867 CLOSED.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T19:05:22Z'
+
+scope:
+  outcome: holds
+  note: >-
+    Предмет сужен до оставшегося после #867: схема объявляет maxLength 256 и называет единицу
+    (кодовая точка), проба согласия судит maxLength в обе стороны и равенство
+    domain.DescriptionMax. Загрузчик и доменный тип не меняются. Сужение «тем же текстом» →
+    «тот же предел и та же единица, сверенные пробой» обосновано: схема судьёй не является,
+    текст отказа редактора автора — не наш код. Одно число из одного источника: источник —
+    domain.DescriptionMax, литерал схемы держится пробой равенства (RD-01, близнец 255).
+
+coverage:
+  scenarios: 5
+  producer_named: 5/5
+  twin_named: 5/5
+  duplicates_867:
+    - RD-02, исход Load (256 принято, 257 отказ) — уже держит
+      TestRoleDescriptionCeilingIsJudgedByTheLoaderInCharacters; документ это называет
+      («уже производит»), новое в RD-02 — граница из схемы.
+    - RD-03 (в), 200 знаков «ж» — дословный повтор утверждения #867, нового факта не несёт.
+  new_relative_to_867:
+    - RD-01 (maxLength и единица в схеме), RD-05 (проба судит maxLength), RD-03 (а)/(б)
+      (кодовая точка против единицы UTF-16), RD-04 (перевод строки блочной записи).
+
+blocking: []
+
+minor:
+  - kind: FORMAT
+    scenarios: [RD-02, RD-03, RD-04]
+    note: >-
+      Текст RD-02 — подстрока err.Error(), а не весь текст: Load возвращает
+      «manifest: role description is longer than the domain bound: roles[0] (line 4): » +
+      процитированное. Писать «текст отказа СОДЕРЖИТ», иначе проба на равенство покраснеет
+      на верном загрузчике. Измерено временной пробой через -overlay @892853c45.
+  - kind: COVERAGE
+    scenarios: [RD-01]
+    note: >-
+      Р1 требует привести к правде фразу описания «…держит побайтовая сверка с живой строкой,
+      а не предел длины», но ни одно «Тогда» её не держит: схема с maxLength и этой фразой
+      прошла бы RD-01. Добавить в RD-01 «описание не утверждает отсутствие верхнего предела»
+      либо проверить на ревью диффа.
+  - kind: COVERAGE
+    scenarios: [RD-03]
+    note: >-
+      RD-03 (в) повторяет #867 (200 «ж» → принято); в пробу не дублировать — опора на
+      существующего держателя.
+  - kind: CONSTRUCTIBILITY
+    scenarios: [RD-01 близнец, RD-05]
+    note: >-
+      «Копия схемы» строится мутацией разобранного отображения: walkSchemaRequirements
+      принимает `node any` (requiredness_internal_test.go:85), но
+      TestSchemaAndLoaderAgreeOnRequiredness читает схему сам (readPublishedSchema, :340) —
+      перепись надо вынести в функцию от схемы, чтобы инъекция шла тем же путём, что прогон.
+      Конструируемо; шов назвать в реализации.
+
+premise:
+  outcome: partially_refuted_as_document_states
+  commands:
+    - sha256sum <док> → 6de8db2edb45fb29156abc38a0cb8e6714042828651d965e31cc56afebfb72bf
+    - git grep -c maxLength -- schema/ → пусто, код 1 (подтверждено)
+    - python3 json.load(schema)['properties']['roles']['items']['properties']['description'] → type string, minLength 1, без maxLength
+    - git log --oneline -1 3206bf295 → #867 загрузчик манифеста судит верхний предел…; 97853ea94 предок HEAD
+    - gh issue view 867 -R PRO-Robotech/kaname → CLOSED
+    - internal/manifest/roles.go:635-642 → domain.Description(role.Description).Validate() → ErrRoleDescriptionTooLong
+    - internal/domain/types.go:203 → const DescriptionMax = 256; Validate — utf8.RuneCountInString
+    - schemaagreement_internal_test.go:62-67 → maxLength в annotationKeywords; requiredness_internal_test.go:151 → аннотации не судятся
+    - sha256sum module-manifest-roles-and-seed-grants.md → fc75beed…a1a48fffb5 (опора совпала)
+
+constructibility:
+  method: >-
+    Временная проба manifest_test через `go test -overlay` (дерево не тронуто) @892853c45:
+    манифест П1 с description из сценария → Load.
+  seeded: 8
+  of: 8
+  results:
+    256a: 'nil'
+    257a: 'ErrRoleDescriptionTooLong, «roles[0].description: 257 знаков, допускается не более 256 — …»'
+    256_U+1F600: 'nil'
+    257_U+1F600: 'отказ, «257 знаков»'
+    200_zh: 'nil'
+    folded_256a: 'отказ, «257 знаков»'
+    folded_strip_256a: 'nil'
+    literal_256a: 'отказ, «257 знаков» (сверх документа)'
+  named_fixture: 2
+  named_fixture_note: >-
+    П2 — файл дерева; копия схемы (RD-01 близнец, RD-05) — мутация разобранного отображения,
+    шов — сигнатура walkSchemaRequirements(node any, …); фикстуры переписи несут
+    roles[].description (resources 4, seed 3, binding-resources 1 строк description:).
+  not_executed: 0
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+  note: schema — о схеме БД; опубликованная JSON-схема манифеста меняется (публичный контракт манифеста).
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Действующее одобрение возникает после публикации внешнего события в subject.task этой
+    учёткой; до него запись — объявление вердикта рецензента.
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_on: publication of event_body to PRO-Robotech/kaname#884 by pointpu
+
+event_body: "acceptance-reviewer · APPROVED · sha256 6de8db2edb45fb29156abc38a0cb8e6714042828651d965e31cc56afebfb72bf"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#884
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

@@ -308,6 +308,10 @@ func (w *fakeRoleWtr) ReplaceRuleSelectors(_ context.Context, _ domain.RoleID, _
 	return nil
 }
 
+func (w *fakeRoleWtr) RegrainSelectorVerbs(_ context.Context, _ domain.RoleID, _ []domain.RuleSelector) error {
+	return nil
+}
+
 // ReplaceRoleVerbs — дублёр умеет то же, что настоящий писатель: проекция
 // глаголов пишется рядом с селекторами. Дублёр, не умеющий метода, делает
 // невидимым ровно тот путь, ради которого его ставят.
@@ -322,6 +326,13 @@ func (w *fakeRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.
 // сделать дублёра снисходительнее продукта.
 func (w *fakeRoleWtr) UpsertSystemRole(context.Context, domain.Role) (domain.Role, bool, error) {
 	return domain.Role{}, false, errors.New("дублёр системную роль не пишет")
+}
+
+// LockOwnerModule — замок строки модуля транзакции ролей модуля (kaname#913).
+// Путь этих проб к ролям модуля не ведёт; отказ, а не «взято», по тому же
+// доводу, что у UpsertSystemRole.
+func (w *fakeRoleWtr) LockOwnerModule(context.Context, string) error {
+	return errors.New("дублёр строку модуля не берёт")
 }
 
 func (w *fakeRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
@@ -367,3 +378,7 @@ func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicR
 
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *fakeRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
+
+func (w *fakeRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, bool, error) {
+	return nil, false, nil
+}

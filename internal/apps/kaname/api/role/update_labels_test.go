@@ -265,6 +265,9 @@ func (w *rlRoleWtr) Delete(context.Context, domain.RoleID) error { return nil }
 func (w *rlRoleWtr) ReplaceRuleSelectors(context.Context, domain.RoleID, []domain.RuleSelector) error {
 	return nil
 }
+func (w *rlRoleWtr) RegrainSelectorVerbs(context.Context, domain.RoleID, []domain.RuleSelector) error {
+	return nil
+}
 
 // ReplaceRoleVerbs — дублёр умеет то же, что настоящий писатель: проекция
 // глаголов пишется рядом с селекторами. Дублёр, не умеющий метода, делает
@@ -280,6 +283,13 @@ func (w *rlRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.Ro
 // сделать дублёра снисходительнее продукта.
 func (w *rlRoleWtr) UpsertSystemRole(context.Context, domain.Role) (domain.Role, bool, error) {
 	return domain.Role{}, false, errors.New("дублёр системную роль не пишет")
+}
+
+// LockOwnerModule — замок строки модуля транзакции ролей модуля (kaname#913).
+// Путь этих проб к ролям модуля не ведёт; отказ, а не «взято», по тому же
+// доводу, что у UpsertSystemRole.
+func (w *rlRoleWtr) LockOwnerModule(context.Context, string) error {
+	return errors.New("дублёр строку модуля не берёт")
 }
 
 func (w *rlRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
@@ -389,3 +399,7 @@ func (_ *rlRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, er
 
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
+
+func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, bool, error) {
+	return nil, false, nil
+}

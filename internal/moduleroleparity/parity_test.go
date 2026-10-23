@@ -295,6 +295,10 @@ func (r *recordingTx) UpsertSystemRole(_ context.Context, role domain.Role) (dom
 	return role, true, nil
 }
 
+// LockOwnerModule — замок строки модуля (kaname#913): запоминающему писателю
+// держать нечего, вердикта замок не несёт.
+func (r *recordingTx) LockOwnerModule(context.Context, string) error { return nil }
+
 func (r *recordingTx) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
 	return nil
 }

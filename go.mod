@@ -2,10 +2,10 @@ module github.com/PRO-Robotech/kaname
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
-	github.com/PRO-Robotech/corelib v1.14.2
+	github.com/PRO-Robotech/corelib v1.15.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

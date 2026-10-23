@@ -92,6 +92,19 @@ func TestSystemClass_CE01_ThreeFormsAgreeOnSpeakerClasses(t *testing.T) {
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ('rol-sc', $1, 'update')`,
 			catalogFormOf(t, "vpc_network"))
+		// Пишущий глагол несёт и само правило роли (kaname#878): решение о
+		// доступе берёт глагол со строки селектора, и без него человек не
+		// получил бы `update` вовсе — контроль пробы потерял бы предмет.
+		exec(t, ctx, tx,
+			`UPDATE kaname.role_rule_selectors
+			    SET verbs_by_type = jsonb_build_object($1::text, jsonb_build_array('get', 'update'))
+			  WHERE role_id = 'rol-sc'`,
+			catalogFormOf(t, "vpc_network"))
+		// Служебная учётка — СТРОКОЙ: класс выводится лишь существующей учётке
+		// (kaname#909), и говорящий без строки ниже отвечал бы «нет» по другой
+		// причине, чем та, которую проба судит.
+		exec(t, ctx, tx,
+			`INSERT INTO kaname.service_accounts (id, account_id, name) VALUES ('sva-sc', 'acc-1', 'sc')`)
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.groups (id, account_id, name) VALUES ('grp-sc', 'acc-1', 'grp-sc')`)
 		exec(t, ctx, tx,
@@ -131,13 +144,15 @@ func TestSystemClass_CE01_ThreeFormsAgreeOnSpeakerClasses(t *testing.T) {
 			{"user:usr-1", false}, {"system_class:anonymous", false},
 		}, "выдача authenticated, пишущий глагол")
 
-		// Выдача анониму: читают и аноним, и вошедший (включение, Р2); переходная
-		// подстановка реестра — как аноним (разбор CE-03 (в)).
+		// Выдача анониму: читают и аноним, и вошедший (включение, Р2).
+		// Подстановка `user:*` классов не получает ни одной формой (SC-15, полоса
+		// L6 kaname#832): переходное отображение в аноним снято, и даже вопрос,
+		// миновавший отказ разбора двери, не читает выданного анониму.
 		exec(t, ctx, tx, `DELETE FROM kaname.access_binding_subjects WHERE binding_id = 'acb-sc-auth'`)
 		exec(t, ctx, tx, `DELETE FROM kaname.access_bindings WHERE id = 'acb-sc-auth'`)
 		scSeedClassGrant(t, ctx, tx, "acb-sc-anon", "anonymous")
 		scForms(t, ctx, tx, "v_get", []scSpeaker{
-			{"user:usr-1", true}, {"system_class:anonymous", true}, {"user:*", true},
+			{"user:usr-1", true}, {"system_class:anonymous", true}, {"user:*", false},
 			{"group:grp-sc#member", false},
 		}, "выдача anonymous")
 

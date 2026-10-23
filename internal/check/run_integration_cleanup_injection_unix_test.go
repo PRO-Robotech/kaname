@@ -69,6 +69,33 @@ func TestRunIntegrationCleanupProbeCanFail(t *testing.T) {
 		got, _ := auditRunIntegration(t, injectRunIntegration(t, raw, "trap 'exit 130' INT\n", ""))
 		require.Equal(t, []string{"прерывание SIGINT во время go test: код выхода 0, ожидался 130"}, got)
 	})
+
+	// Та же инъекция при родителе, игнорирующем HUP, INT и TERM
+	// (PRO-Robotech/kaname#898): сброс диспозиции в пробе не гасит находку о
+	// снятой ловушке. Ловушка SIGHUP так не судится: без неё bash умирает от
+	// сигнала, исполнив ловушку EXIT, и код 129 тот же — снимать её
+	// наблюдаемо нечем.
+	t.Run("ловушка SIGINT снята, игнор у родителя", func(t *testing.T) {
+		t.Parallel()
+		launch := runIntegrationDefaultLaunch
+		launch.inheritIgnored = true
+		got, _ := auditRunIntegrationLaunched(t, injectRunIntegration(t, raw, "trap 'exit 130' INT\n", ""), launch)
+		require.Equal(t, []string{"прерывание SIGINT во время go test: код выхода 0, ожидался 130"}, got)
+	})
+
+	// Диспозиция не сброшена — игнор родителя доходит до сценария, и ни одна
+	// его ловушка сигнала не ставится (PRO-Robotech/kaname#898). Это и есть
+	// ложное красное, от которого сброс ограждает несущую пробу; здесь оно
+	// доказывает, что родитель пробы игнор действительно передаёт.
+	t.Run("диспозиция не сброшена под игнором родителя", func(t *testing.T) {
+		t.Parallel()
+		got, _ := auditRunIntegrationLaunched(t, raw, runIntegrationLaunch{inheritIgnored: true})
+		require.Equal(t, []string{
+			"прерывание SIGINT во время go test: код выхода 0, ожидался 130",
+			"прерывание SIGTERM во время go test: код выхода 0, ожидался 143",
+			"прерывание SIGHUP во время go test: код выхода 0, ожидался 129",
+		}, got)
+	})
 }
 
 // TestRunIntegrationCleanupProbeCanStaySilent — ЗАКОННЫЕ БЛИЗНЕЦЫ тех же форм.

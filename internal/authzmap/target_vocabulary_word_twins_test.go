@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package authzmap
+package authzmap_test
 
 // target_vocabulary_word_twins_test.go — пообъектная цель не принимается по
 // написанию, отличающемуся СЛОВОМ, а не регистром.
@@ -10,9 +10,12 @@ package authzmap
 //
 // Утверждение — о `domain.ValidTargetType`, а производитель входа — о ПОРОЖДЁННОЙ
 // таблице `objectTypes` (словарь каталога → словарь модели, выводится из
-// манифестов модулей). Разные пакеты, и Go разрешает их встретиться только тут:
-// `authzmap` импортирует `domain`, обратное — цикл. Гейт ставится к
-// ПРОИЗВОДИТЕЛЮ, а не к потребителю.
+// манифестов модулей). Гейт ставится к ПРОИЗВОДИТЕЛЮ, а не к потребителю.
+//
+// Пакет проб внешний (`authzmap_test`, таблица — через `export_test.go`): с
+// kaname#904 предикат цели спрашивает ЖИВОЙ каталог (`catalogfixture`), а
+// фикстура каталога через посев импортирует `authzmap` — проба внутри пакета
+// замкнула бы кольцо импорта.
 //
 // # Что этот гейт ловит сверх соседнего
 //
@@ -41,10 +44,10 @@ package authzmap
 // # ПРЕДПОСЫЛКА ГЕЙТА, названная им самим
 //
 // Гейт — регрессионный замок против ВЫВОДА написания, а не против промаха
-// таблицы. Пока `ValidTargetType` есть прямой поиск в той же карте, из ключей
-// которой берётся лента, он упасть НЕ МОЖЕТ by construction: близнец в ленте
-// отсутствует, значит предикат на нём ложен всегда. Это сказано вслух, чтобы
-// зелёное не читалось шире сделанного.
+// таблицы. Пока `ValidTargetType` есть прямой поиск живой строки каталога, а
+// живые написания берутся из того же каталога, он упасть НЕ МОЖЕТ by
+// construction: близнеца среди живых нет, значит предикат на нём ложен всегда.
+// Это сказано вслух, чтобы зелёное не читалось шире сделанного.
 //
 // Предмет появляется в тот день, когда предикат снова начнёт ВЫВОДИТЬ имя из
 // имени, — а он это уже делал (разбор у `ValidTargetType`). Доказано инъекцией:
@@ -59,14 +62,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func TestTargetTypeRegistryRefusesModelSpellingsOfLiveTypes(t *testing.T) {
+	objectTypes := authzmap.ObjectTypes
 	require.NotEmpty(t, objectTypes, "objectTypes пуста — обход беспредметен")
 
-	feed := domain.AllMaterializableTypes()
-	require.NotEmpty(t, feed, "AllMaterializableTypes() пуста — гейт не утверждал бы ничего")
+	cat := catalogfixture.Facts()
+	var feed []string
+	for _, r := range cat.Resources() {
+		feed = append(feed, r.Module+"."+r.Resource)
+	}
+	require.NotEmpty(t, feed, "живой каталог фикстуры пуст — гейт не утверждал бы ничего")
 	live := make(map[string]bool, len(feed))
 	for _, dotted := range feed {
 		live[dotted] = true
@@ -86,7 +96,7 @@ func TestTargetTypeRegistryRefusesModelSpellingsOfLiveTypes(t *testing.T) {
 			continue // это и есть живое написание — им владеет положительная половина
 		}
 		twins = append(twins, twin)
-		if domain.ValidTargetType(twin) {
+		if domain.ValidTargetType(cat, twin) {
 			accepted = append(accepted, twin)
 		}
 	}
@@ -96,7 +106,7 @@ func TestTargetTypeRegistryRefusesModelSpellingsOfLiveTypes(t *testing.T) {
 	require.NotEmptyf(t, twins,
 		"из %d записей таблицы не выведено ни одного близнеца, отличного от живого написания — "+
 			"вокабуляр стал односложным, и у гейта не осталось предмета", len(objectTypes))
-	t.Logf("перепись: записей таблицы %d, типов ленты %d, выведено близнецов %d, принято %d",
+	t.Logf("перепись: записей таблицы %d, живых типов каталога %d, выведено близнецов %d, принято %d",
 		len(objectTypes), len(feed), len(twins), len(accepted))
 
 	require.Emptyf(t, accepted,
@@ -105,6 +115,6 @@ func TestTargetTypeRegistryRefusesModelSpellingsOfLiveTypes(t *testing.T) {
 		len(accepted), accepted)
 
 	// Контроль, что предикат не «ложь на всё»: живое написание обязано приниматься.
-	require.Truef(t, domain.ValidTargetType(feed[0]),
+	require.Truef(t, domain.ValidTargetType(cat, feed[0]),
 		"ValidTargetType(%q) ложно — отрицание выше ничего не доказывает", feed[0])
 }

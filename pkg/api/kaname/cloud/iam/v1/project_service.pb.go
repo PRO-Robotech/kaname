@@ -78,7 +78,9 @@ type ListProjectsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Account to list projects in.
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// The maximum number of results per page to return. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
@@ -413,7 +415,9 @@ type ListProjectOperationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Project resource to list operations for.
 	ProjectId string `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	// The maximum number of results per page that should be returned.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`

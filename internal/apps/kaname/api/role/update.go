@@ -308,14 +308,17 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			// selector here; the per-binding membership re-materialize (eager-revoke by
 			// rule_fp) runs post-commit.
 			if slices.Contains(changed, "rules") {
-				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID, upd.Rules.MaterializingSelectors()); serr != nil {
+				// Каталожный факт — один на обе стороны (довод — на создании).
+				facts := u.cat.Facts()
+				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
+					facts.GrantSelectors(upd.Rules.MaterializingSelectors())); serr != nil {
 					return domain.Role{}, serr
 				}
 				// Та же пара, что на создании: снятый из правил глагол обязан
 				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
 				// потому что добавление проходит успешно.
 				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					u.cat.Facts().RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
+					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
 					return domain.Role{}, verr
 				}
 				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и

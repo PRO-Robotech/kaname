@@ -93,6 +93,9 @@ type surfaceListing struct {
 	fset        *token.FileSet
 	gc          types.Importer
 	base        *surfaceProgram
+	// ctxt — ограничения сборки, которыми отбираются файлы наложения; nil —
+	// build.Default процесса пробы (так собран и перечень `go list`).
+	ctxt *build.Context
 }
 
 // surfaceProgram — разобранный радиус одного прогона.
@@ -369,7 +372,11 @@ func (l *surfaceListing) sourceFiles(path, overlayDir string) (names []string, d
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		ok, merr := build.Default.MatchFile(overlayDir, name)
+		ctxt := &build.Default
+		if l.ctxt != nil {
+			ctxt = l.ctxt
+		}
+		ok, merr := ctxt.MatchFile(overlayDir, name)
 		if merr != nil {
 			return nil, "", fmt.Errorf("радиус: наложение %s/%s: %w", path, name, merr)
 		}

@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func ndPgCode(err error) (string, string) {
@@ -118,14 +119,12 @@ func TestIntegration_ND05_ClassReadsOnlyGuardReadsNestedRules(t *testing.T) {
 	require.NoError(t, ndInsertRole(db, "rol-ndwr", `[{"module":"registry","resources":["registries"],"verbs":["get","list"],
 	                       "children":[{"resources":["repositories"],"verbs":["get","update"]}]}]`))
 	grant := func(id, role string) error {
-		if _, err := db.Exec(`INSERT INTO kaname.access_bindings
+		// Выдача и строка её набора — одним оператором (kaname#902): страж
+		// класса судит строку набора, и его отказ приходит тем же оператором.
+		_, err := db.Exec(bindingset.With(`INSERT INTO kaname.access_bindings
 		     (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
 		     VALUES ($1, 'system_class', 'anonymous', $2, 'project', 'prj-nd', 'ACTIVE',
-		             '{"resources":[{"type":"registry.registries","id":"reg-x"}]}'::jsonb)`, id, role); err != nil {
-			return err
-		}
-		_, err := db.Exec(`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-		                    VALUES ($1, 'system_class', 'anonymous')`, id)
+		             '{"resources":[{"type":"registry.registries","id":"reg-x"}]}'::jsonb)`), id, role)
 		return err
 	}
 	require.NoError(t, grant("acb-ndrd", "rol-ndrd"), "близнец: вложенное [get, list]")
@@ -147,9 +146,9 @@ func TestIntegration_ND02_SelectorContainerIsGuarded(t *testing.T) {
 	ins := func(fp, ctype, carm, cnames, clabels string) error {
 		_, err := db.Exec(`INSERT INTO kaname.role_rule_selectors
 		    (role_id, rule_fp, arm, object_types, match_labels,
-		     container_type, container_arm, container_resource_names, container_match_labels)
+		     container_type, container_arm, container_resource_names, container_match_labels, verbs_by_type)
 		    VALUES ('rol-ndsel', $1, 'anchor', ARRAY['registry.repositories'], '{}'::jsonb,
-		            NULLIF($2, ''), NULLIF($3, ''), $4::text[], $5::jsonb)`, fp, ctype, carm, cnames, clabels)
+		            NULLIF($2, ''), NULLIF($3, ''), $4::text[], $5::jsonb, '{}'::jsonb)`, fp, ctype, carm, cnames, clabels)
 		return err
 	}
 	require.NoError(t, ins("fp-ok", "registry.registries", "anchor", "{}", "{}"), "близнец: контейнер якорем")

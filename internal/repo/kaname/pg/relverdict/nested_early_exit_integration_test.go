@@ -54,9 +54,10 @@ func (f *gridFixture) setRNested(t *testing.T, ctx context.Context, from, target
 			roleID, probeCatalogType, probeVerb))
 		must(t, s.QueueRaw(ctx,
 			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, match_labels, container_type, container_arm)
-			 VALUES ($1, 'fp-n', 'anchor', ARRAY[$2::text], '{}'::jsonb, 'registry.registries', 'anchor')`,
-			roleID, probeCatalogType))
+			   (role_id, rule_fp, arm, object_types, match_labels, container_type, container_arm, verbs_by_type)
+			 VALUES ($1, 'fp-n', 'anchor', ARRAY[$2::text], '{}'::jsonb, 'registry.registries', 'anchor',
+			         jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+			roleID, probeCatalogType, probeVerb))
 		bid := fmt.Sprintf("acb-nr%05d", i)
 		must(t, s.QueueRaw(ctx,
 			`INSERT INTO kaname.access_bindings

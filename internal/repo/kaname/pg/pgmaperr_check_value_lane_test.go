@@ -145,6 +145,7 @@ var cvCallerValueSpec = map[string]struct{}{
 	"authorization_codes_challenge_form_ck":                {},
 	"authorization_codes_challenge_method_ck":              {},
 	"authorization_codes_redirect_uri_ck":                  {},
+	"catalog_module_applied_revision_positive":             {},
 	"catalog_module_nonempty":                              {},
 	"catalog_module_undotted":                              {},
 	"catalog_resource_module_undotted":                     {},
@@ -412,4 +413,22 @@ func TestCheckValueCensus_IssuanceTableLaneHasOneHome(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestWrapPgErr_EmittedTupleCoordinateCheckIsOurDefect — координату члена строки
+// реестра выводит служба из своего члена (kaname#933); отказ проверки
+// `access_binding_emitted_tuples_member_coordinate` — дефект писателя, и ответ на
+// него — фиксированный INTERNAL без имени ограничения и текста драйвера.
+func TestWrapPgErr_EmittedTupleCoordinateCheckIsOurDefect(t *testing.T) {
+	const constraint, table = "access_binding_emitted_tuples_member_coordinate", "access_binding_emitted_tuples"
+	logBuf := cvCaptureLog(t)
+
+	err := wrapPgErr(cvCheckPgErr(constraint, table), "AccessBinding", "acb-probe")
+
+	require.False(t, stderrors.Is(err, iamerr.ErrInvalidArg),
+		"%s: координату производит служба — вызывающий обвинён в чужом дефекте: %v", constraint, err)
+	require.True(t, stderrors.Is(err, iamerr.ErrInternal), "%s: want ErrInternal, got %v", constraint, err)
+	require.Equal(t, iamerr.ErrInternal.Error(), err.Error(),
+		"текст отказа фиксированный: ни имени ограничения, ни текста драйвера, ни строки")
+	require.Contains(t, logBuf.String(), "constraint="+constraint, "запись о рубеже называет ограничение")
 }

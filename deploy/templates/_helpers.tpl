@@ -555,3 +555,63 @@ kaname-svc.requireMailRelay — ОТКАЗ УСТАНОВКИ БОЕВОЙ ПО�
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+kaname-svc.requireAnonymousRegistryLane — АНОНИМНЫЙ ПОТОК ДОКЕРНОЙ ПОЛОСЫ
+СОБИРАЕТСЯ ТОЛЬКО ЦЕЛИКОМ (kaname#928, kaname#930).
+
+Поток поднят — `apiServer.registryToken.anonymousClientId` непуст, а адрес
+слушателя не объявлен пустым; это тот же предикат, что у процесса
+(`RegistryTokenConfig.AnonymousLaneDeclared`). Тогда процесс не стартует без
+темпа на источник, без доверенного пересыльщика и без слушателя выдачи,
+ЗАПРАШИВАЮЩЕГО клиентский сертификат (`optional-mutual`) по корню внутреннего
+удостоверяющего центра: адрес клиента из X-Forwarded-For берётся только у пира
+с проверенным сертификатом пересыльщика, иначе все клиенты за прокси реестра
+делят один предел. Отказ здесь приходит на установке, а не падающим подом.
+
+Форму значений (положительность темпа, форма SAN в домене доверия) судит страж
+старта, второго места о ней здесь не заводится. Три ручки потока не задаются
+окружением пода: переменная перекрыла бы файл настроек и обошла этот отказ.
+*/}}
+{{- define "kaname-svc.requireAnonymousRegistryLane" -}}
+{{- $canonical := dict
+      "KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID" "apiServer.registryToken.anonymousClientId"
+      "KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC" "apiServer.registryToken.anonymousPerSourcePerSec"
+      "KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN" "apiServer.registryToken.anonymousForwarderSan" -}}
+{{- $shadows := list -}}
+{{- range $source := list "env" "secrets" -}}
+{{- $carried := index $.Values $source | default dict -}}
+{{- range $name := keys $canonical | sortAlpha -}}
+{{- if hasKey $carried $name -}}
+{{- $shadows = append $shadows (printf "  %s.%s — её адрес в профиле: %s" $source $name (get $canonical $name)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $shadows -}}
+{{- fail (printf "чарт службы прав не ставится: окружение пода несёт ручки анонимного потока докерной полосы — %d.\n\nОкружение уходит процессу как есть и перекрывает файл настроек: объявленная переменной, ручка обошла бы отказ установки.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите переменную из карты env (secrets) и задайте ключ значений." (len $shadows) (join "\n" $shadows)) -}}
+{{- end -}}
+{{- $rt := (.Values.apiServer | default dict).registryToken | default dict -}}
+{{- $listenerOff := and (hasKey $rt "endpoint") (eq (toString $rt.endpoint) "") -}}
+{{- if and $rt.anonymousClientId (not $listenerOff) -}}
+{{- $env := .Values.env | default dict -}}
+{{- $missing := list -}}
+{{- if not $rt.anonymousPerSourcePerSec -}}
+{{- $missing = append $missing "  apiServer.registryToken.anonymousPerSourcePerSec — api-server.registry-token.anonymous-per-source-per-sec:\n      анонимных запросов токена в секунду на источник, на реплику; сверх — 429." -}}
+{{- end -}}
+{{- if not $rt.anonymousForwarderSan -}}
+{{- $missing = append $missing "  apiServer.registryToken.anonymousForwarderSan — api-server.registry-token.anonymous-forwarder-san:\n      точный URI SAN клиентского сертификата прокси реестра (spiffe://<домен доверия>/ns/<пространство>/sa/<учётная запись>)." -}}
+{{- end -}}
+{{- if ne (printf "%v" (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE" | default "")) "true" -}}
+{{- $missing = append $missing "  env.KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE=\"true\" — слушатель выдачи под TLS: без него сертификата пересыльщика не спрашивают." -}}
+{{- end -}}
+{{- if ne (printf "%v" (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE" | default "")) "optional-mutual" -}}
+{{- $missing = append $missing (printf "  env.KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE=optional-mutual — сейчас %q: слушатель выдачи обязан запрашивать\n      клиентский сертификат и проверять предъявленный; вызывающий без сертификата допускается." (printf "%v" (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE" | default ""))) -}}
+{{- end -}}
+{{- if not (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES") -}}
+{{- $missing = append $missing "  env.KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES — корень внутреннего удостоверяющего центра, которым выписан клиентский лист прокси реестра." -}}
+{{- end -}}
+{{- if $missing -}}
+{{- fail (printf "чарт службы прав не ставится: анонимный поток докерной полосы включён (apiServer.registryToken.anonymousClientId), а его условия не объявлены — %d.\n\nБез них страж старта процесса службу не поднимает: адрес клиента для темпа на источник берётся только у проверенного пересыльщика, иначе все клиенты за прокси реестра делят один предел.\n\n%s\n\nЧТО СДЕЛАТЬ: объявите их профилю — накладкой `-f` либо `--set`." (len $missing) (join "\n\n" $missing)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
