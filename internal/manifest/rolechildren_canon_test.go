@@ -11,8 +11,10 @@ package manifest_test
 // манифест registry, переставший копировать раздел канона. Законный близнец
 // «раздел есть» — `TestManifest_ND04_UnmodifiedFixtureLoadsWithTheNestedRule`.
 //
-// Пар здесь три, и в каждой отличие — один факт:
+// Канон вносится переходником образа (`manifestoracle.CanonTypes`) — тем же, что
+// вносит путь старта. Пар здесь четыре, и в каждой отличие — один факт:
 //
+//	без раздела, канон НЕ внесён                      → прежний отказ «не лежит под»;
 //	без раздела, children над потомком по канону      → загрузка успешна;
 //	без раздела, владелец и вложенный переставлены    → прежний отказ ND-04 (а):
 //	                                                    канон родство НАПРАВЛЯЕТ,
@@ -24,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifestoracle"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 )
 
@@ -71,10 +74,40 @@ func canonMutateReader(t *testing.T, old, new string) []byte {
 	return twin
 }
 
+// withImageCanon — родство типов КАНОНА ОБРАЗА тем же переходником, что вносит
+// его путь старта (`cmd/kaname`, `loadDelivery`): дублёр канона здесь судил бы
+// своей копией родства, а не родством модели.
+func withImageCanon(t *testing.T) manifest.LoadOption {
+	t.Helper()
+	canon, err := manifestoracle.CanonTypes()
+	if err != nil {
+		t.Fatalf("канон модели прав образа не разобран: %v", err)
+	}
+	return manifest.WithTypeCanon(canon)
+}
+
+func canonRequireFinding(t *testing.T, doc []byte, finding string) {
+	t.Helper()
+	_, err := manifest.Load(doc, withImageCanon(t))
+	if err == nil {
+		t.Fatalf("загрузка приняла документ; ждали находку %q", finding)
+	}
+	if !strings.Contains(err.Error(), finding) {
+		t.Fatalf("находка судьи формы\n ждали  %q\n получено %v", finding, err)
+	}
+}
+
+// Канон — ВНОСИМОЕ свойство: без внесения судья видит только раздел
+// `resources`, и тот же документ отвергается прежней находкой (как до
+// kaname#951). Отличие от пробы ниже — один факт: внесён ли канон.
+func TestManifest_951_WithoutTheCanonOnlyTheDocumentIsJudged(t *testing.T) {
+	ndRequireFinding(t, canonFixtureWithoutResources(t), `roles[1].rules[0].children[0].resources: тип "registry.repositories" не лежит под "registry.registries" ни по одному объявленному указателю parents; вложенное правило действует только на потомков типа правила-владельца`)
+}
+
 // Манифест без `resources`, чьи роли с `children` называют типы канона,
 // загружается и проходит суд ролей; вложенное правило доезжает до формы домена.
 func TestManifest_951_ManifestWithoutResourcesJudgesChildrenByTheCanon(t *testing.T) {
-	m, err := manifest.Load(canonFixtureWithoutResources(t))
+	m, err := manifest.Load(canonFixtureWithoutResources(t), withImageCanon(t))
 	if err != nil {
 		t.Fatalf("манифест без раздела resources отвергнут, хотя родство его типов объявляет канон: %v", err)
 	}
@@ -105,12 +138,12 @@ func TestManifest_951_CanonParentsKeepTheirDirection(t *testing.T) {
 	doc := canonMutateReader(t,
 		"        resources: [registries]\n        classes: [get, list]\n        children:\n          - resources: [repositories]",
 		"        resources: [repositories]\n        classes: [get, list]\n        children:\n          - resources: [registries]")
-	ndRequireFinding(t, doc, `roles[1].rules[0].children[0].resources: тип "registry.registries" не лежит под "registry.repositories" ни по одному объявленному указателю parents; вложенное правило действует только на потомков типа правила-владельца`)
+	canonRequireFinding(t, doc, `roles[1].rules[0].children[0].resources: тип "registry.registries" не лежит под "registry.repositories" ни по одному объявленному указателю parents; вложенное правило действует только на потомков типа правила-владельца`)
 }
 
 // Близнец: `children` над типом, которого нет ни в манифесте, ни в каноне, —
 // отказ, называющий именно эту причину.
 func TestManifest_951_ChildTypeOutsideManifestAndCanonIsRefused(t *testing.T) {
 	doc := canonMutateReader(t, "          - resources: [repositories]\n", "          - resources: [images]\n")
-	ndRequireFinding(t, doc, `roles[1].rules[0].children[0].resources: тип "registry.images" не объявлен ни разделом resources этого манифеста, ни каноном модели прав; указателей parents у него нет, и потомком типа правила-владельца он не бывает`)
+	canonRequireFinding(t, doc, `roles[1].rules[0].children[0].resources: тип "registry.images" не объявлен ни разделом resources этого манифеста, ни каноном модели прав; указателей parents у него нет, и потомком типа правила-владельца он не бывает`)
 }

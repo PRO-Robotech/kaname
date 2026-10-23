@@ -469,7 +469,7 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	// Разделы судятся В ПОРЯДКЕ ДОКУМЕНТА, и находки собираются ВСЕ: названная
 	// первая заставила бы автора чинить их по одной, по прогону на каждую.
 	faults := validateResources(&m, doc, referent)
-	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
+	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules), loadOpts.canon)...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
 
 	// Связность — последняя ступень той же загрузки; почему не отдельным
