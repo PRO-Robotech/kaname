@@ -47,6 +47,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/execstub"
 )
 
 // imageStepTimeout — срок одного шага. Шаги вычисляют имя и не ходят наружу;
@@ -229,8 +231,7 @@ type gateWorld struct {
 func gateEnv(t *testing.T, dir, fallbackNS string, w gateWorld) (map[string]string, string) {
 	t.Helper()
 	bin := filepath.Join(dir, "bin")
-	require.NoError(t, os.MkdirAll(bin, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "gh"), []byte(ghStub), 0o700)) // #nosec G306 -- двойник обязан исполняться
+	execstub.Write(t, filepath.Join(bin, "gh"), ghStub)
 	logPath := filepath.Join(dir, "gh.log")
 	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 	env := map[string]string{

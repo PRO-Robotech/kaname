@@ -115,13 +115,23 @@ const scopeSelfRuleFP = "scope_self"
 // object (account:<X>/project:<X>). ok=false when the role grants nothing on the
 // scope self OR the scope type has no live catalog row (cluster — D-9 short-circuit
 // owns cluster super-admin, not this per-object path).
-func scopeSelfMember(cat *catalog.Facts, subject string, scopeType, scopeID string, verbs []string) (DesiredMember, bool) {
+//
+// Кортежи — объединение по субъектам выдачи `gs`, каждому со своими глаголами
+// (subjects.go, kaname#880).
+func scopeSelfMember(cat *catalog.Facts, gs []grantee, scopeType, scopeID string) (DesiredMember, bool) {
 	dotted := "iam." + scopeType // iam.account / iam.project (cluster has no mapping)
 	if _, ok := cat.FGAObjectType(dotted); !ok {
 		return DesiredMember{}, false
 	}
-	tuples, ok := scopeSelfTuples(cat, subject, scopeType, scopeID, verbs)
-	if !ok {
+	var tuples []domain.MembershipTuple
+	for _, g := range gs {
+		t, ok := scopeSelfTuples(cat, g.subject, scopeType, scopeID, g.verbs)
+		if !ok {
+			return DesiredMember{}, false
+		}
+		tuples = append(tuples, t...)
+	}
+	if len(tuples) == 0 {
 		return DesiredMember{}, false
 	}
 	return DesiredMember{

@@ -5,13 +5,12 @@ package access_binding
 
 // role_tuple_reconciler.go — role-permission tuple reconciler.
 //
-// RoleTupleReconciler implements role.TupleReconciler: a ROLE-PERMISSION fan-out.
-// When a role's permissions/rules change (Role.Update), it reconciles the FGA
-// tuples of the role's ACTIVE bindings to the new tier via buildBindingTuples (the
-// thin-binding scope-anchor / per-rule scope_grant projection). The RBAC
-// rules-model clean-cut removed the per-binding target arms (resources[]/
-// selector), so the binding is thin and buildBindingTuples is the whole story for
-// the in-tx tier delta.
+// RoleTupleReconciler реализует role.TupleReconciler — веер по разрешениям роли.
+// Когда разрешения или правила роли меняются (Role.Update), он сверяет кортежи
+// действующих выдач роли с новым ярусом через buildSubjectsBindingTuples —
+// проекцию тонкой выдачи на якорь области, построенную на КАЖДОГО субъекта
+// выдачи. Целей у выдачи нет (модель правил их сняла), поэтому эта проекция и
+// есть весь сдвиг яруса внутри транзакции.
 //
 // The role.rules ARM_LABELS per-object MEMBERSHIP retiering is the complementary
 // half handled by RoleMembershipFanout (rules_membership_fanout.go): a rule's verb
@@ -46,8 +45,9 @@ func NewRoleTupleReconciler() *RoleTupleReconciler { return &RoleTupleReconciler
 // caller's writer-tx (the same tx as the role UPDATE — atomic, ban #10).
 //
 // Per binding:
-//  1. derive newTuples = buildBindingTuples(binding, newRole) — the thin-binding
-//     scope-anchor / per-rule scope_grant projection,
+//  1. newTuples = buildSubjectsBindingTuples(binding, subjects, newRole) —
+//     проекция на якорь области для КАЖДОГО субъекта выдачи, тем же
+//     построителем, что у создания (kaname#880),
 //  2. read oldTuples = SelectEmittedTuples(binding),
 //  3. diff: removed = old\new, added = new\old,
 //  4. EmitRelationDelete(removed) + EmitRelationWrite(added) +
@@ -62,14 +62,29 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 	if err != nil {
 		return fmt.Errorf("list active bindings of role %s: %w", roleID, err)
 	}
+	// Субъекты — ОДНИМ обращением на весь веер: строка выдачи несёт лишь
+	// проекцию первого субъекта, а создание выпустило кортежи каждому
+	// (kaname#880). Выдача без строк перечня — заведённая до него; её субъект —
+	// одиночная пара строки.
+	ids := make([]domain.AccessBindingID, len(bindings))
+	for i := range bindings {
+		ids[i] = bindings[i].ID
+	}
+	subjects, err := w.AccessBindings().ListSubjectsForBindings(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("list subjects of role %s bindings: %w", roleID, err)
+	}
 	for i := range bindings {
 		b := bindings[i]
-		// The binding is thin (rules-model clean-cut — no per-binding target);
-		// buildBindingTuples is the whole binding-level projection. The per-member
-		// (ARM_LABELS) tuple retiering is the complementary RoleMembershipFanout
-		// half (a rule verb change bumps rule_fp → γ eager-revokes + re-materializes
-		// at the new tier).
-		newTuples := buildBindingTuples(b, newRole)
+		bs := subjects[b.ID]
+		if len(bs) == 0 {
+			bs = []domain.Subject{{Type: b.SubjectType, ID: b.SubjectID}}
+		}
+		// Выдача тонкая (целей у выдачи нет): кортежи уровня выдачи — вся её
+		// проекция, и строятся они на каждого субъекта тем же построителем, что у
+		// создания. Перевод членов правил на новый ярус — вторая половина,
+		// RoleMembershipFanout (смена глаголов правила меняет его отпечаток).
+		newTuples := buildSubjectsBindingTuples(b, bs, newRole)
 		// Read ONLY the binding-level subset (source='binding'). The ARM_LABELS
 		// per-member tuples (source='member') are owned by RoleMembershipFanout — if
 		// the diff saw them it would classify every member tuple as `removed` and
