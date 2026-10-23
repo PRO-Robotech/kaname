@@ -882,6 +882,42 @@ def self_test() -> int:
     print(f"  [{'OK ' if good else 'ОТКАЗ'}] строка пробы о пакете вне дерева — находка: {stale}")
     ok &= good
 
+    # Ось 10 — ПЛАН СТРОИТ КАЖДЫЙ ШАРД: матрица объявлена процессом, а не выдана
+    # отдельным заданием плана. Копии плана обязаны совпасть, а пропавшая копия —
+    # не прочитаться зелёной.
+    copies: dict[str, dict | None] = {s["id"]: json.loads(json.dumps(small))
+                                      for s in small["shards"]}
+    agreed, f = agreed_plan(copies)
+    ok &= _case(f"копии плана {len(copies)} шардов совпали → зелено", False, f)
+    good = agreed == small
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] свод судит по согласованному плану: {good}")
+    ok &= good
+    first = sorted(copies)[0]
+    drift = json.loads(json.dumps(copies))
+    drift[first]["tree_packages"] = drift[first]["tree_packages"][1:]
+    ok &= _case("копия плана одного шарда разошлась → красно", True,
+                agreed_plan(drift)[1], "РАЗОШЛИСЬ")
+    lost_copy = dict(copies)
+    lost_copy[first] = None
+    ok &= _case("шард отчитался без копии плана → красно", True,
+                agreed_plan(lost_copy)[1], "без копии плана")
+    nothing, f = agreed_plan({})
+    good = nothing is None and not f
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] ни одной копии плана — плана нет "
+          f"(«не выполнилось»), а не пустой зелёный: {nothing is None}")
+    ok &= good
+    # Номер задания матрицы → шард плана: каждый номер 0..N-1 — ровно один шард,
+    # номер вне плана — не шард (вызывающий отказывает «не выполнилось»).
+    width = len(small["shards"])
+    ids = [shard_of_index(small, i) for i in range(width)]
+    good = ids == [s["id"] for s in small["shards"]] and len(set(ids)) == width
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] номера матрицы 0..{width - 1} → шарды плана "
+          f"без повторов: {ids}")
+    ok &= good
+    good = shard_of_index(small, width) is None and shard_of_index(small, -1) is None
+    print(f"  [{'OK ' if good else 'ОТКАЗ'}] номер вне плана ({width}, -1) шардом не назван")
+    ok &= good
+
     print("самопроба:", "ПРОЙДЕНА" if ok else "ПРОВАЛЕНА")
     return 0 if ok else 1
 
