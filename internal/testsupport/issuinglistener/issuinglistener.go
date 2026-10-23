@@ -43,6 +43,10 @@ const (
 	NeighborSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
 )
 
+// ServiceNameForm — форма имени службы, которой названы учётки проб
+// (kaname#308): край узнаётся по объявленной форме, а не по литералу у стража.
+const ServiceNameForm = "kacho-{service}"
+
 // Stand — поднятый слушатель и его УЦ.
 type Stand struct {
 	URL string

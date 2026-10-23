@@ -31,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Fixed client-facing messages for non-validation failures. Raw use-case or
@@ -95,6 +96,11 @@ type Handler struct {
 	// A knob may carry the exception; it may not carry the rule. Set via
 	// WithInsecureAnonymousPeer.
 	insecureAnonymousPeer bool
+	// moduleForm — форма имени службы, объявленная установкой: ею внутренний
+	// страж узнаёт пира-модуля по учётке его сертификата. Нулевая не узнаёт
+	// никого — анонимный пир тогда отвергается, как без сертификата вовсе.
+	// Задаётся WithServiceNameForm.
+	moduleForm servicesan.Form
 }
 
 // NewHandler — builder. Both svc and whoAmI are required (composition root
@@ -118,6 +124,15 @@ func (h *Handler) WithCallerAuthority(checker authzguard.RelationChecker) *Handl
 // Returns the receiver for chaining.
 func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
 	h.insecureAnonymousPeer = insecure
+	return h
+}
+
+// WithServiceNameForm задаёт форму имени службы, которой внутренний страж
+// узнаёт пира-модуля (cfg.AuthN.ServiceNameForm()). Не заданная, она не узнаёт
+// никого: отказ по умолчанию — то, что обязана дать ошибка сборки, а не
+// молчаливое «пускаем». Возвращает получателя для цепочки.
+func (h *Handler) WithServiceNameForm(form servicesan.Form) *Handler {
+	h.moduleForm = form
 	return h
 }
 

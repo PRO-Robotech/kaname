@@ -48,8 +48,8 @@ const hostListener = "0.0.0.0:9096"
 func clientTokenOn() config.ClientTokenConfig {
 	return config.ClientTokenConfig{
 		Enabled:          true,
-		AllowedAudiences: "registry.kacho.local, api.kacho.local",
-		DefaultAudience:  "api.kacho.local",
+		AllowedAudiences: "registry.kacho.local, api.example.test",
+		DefaultAudience:  "api.example.test",
 		TokenTTL:         15 * time.Minute,
 		BodyCeiling:      64 << 10,
 		// Темп (kaname#315): обменов в секунду на идентификатор клиента и
@@ -233,9 +233,9 @@ func TestAudienceListCountsElementsNotStringLength(t *testing.T) {
 		" ":                                 0,
 		",":                                 0,
 		" , , ":                             0,
-		"api.kacho.local":                   1,
-		" api.kacho.local , registry.local": 2,
-		"api.kacho.local,,registry.local":   2,
+		"api.example.test":                   1,
+		" api.example.test , registry.local": 2,
+		"api.example.test,,registry.local":   2,
 	} {
 		got := config.ClientTokenConfig{AllowedAudiences: raw}.AudienceList()
 		require.Len(t, got, want, "перечень %q", raw)

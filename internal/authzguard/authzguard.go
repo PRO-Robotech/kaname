@@ -42,7 +42,7 @@ import (
 // Message text is the Kachō canonical `"permission denied"` (no leak of
 // internal details).
 //
-// IMPORTANT: kacho-api-gateway injects an anonymous request as
+// IMPORTANT: the platform edge (api-gateway) injects an anonymous request as
 // Principal{Type:"system", ID:"anonymous"} (see auth.go:189 — injectAnonymous).
 // A principal with ID="anonymous" MUST NOT have privileges — despite
 // type=system. Both fields are checked.
@@ -139,7 +139,7 @@ func IsAnonymous(ctx context.Context) bool {
 		return true
 	}
 	// SystemPrincipal()-fallback: ctx didn't contain a Principal — typical
-	// "api-gateway did not forward x-kacho-principal-* headers", equivalent
+	// "api-gateway did not forward the principal metadata (`principalwire.MetaPrincipalPrefix`)", equivalent
 	// to an anonymous request.
 	if p.Type == "system" && p.ID == "bootstrap" {
 		return true

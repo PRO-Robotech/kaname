@@ -36,7 +36,8 @@
 // # Переданная личность НЕ читается
 //
 // На этой поверхности личность производит ОДИН механизм — носитель, судимый
-// службой по записи (Р16, KAN-SOLE-01). Заголовков `x-kacho-*` слушатель не
+// службой по записи (Р16, KAN-SOLE-01). Заголовков переданной личности
+// (`principalwire.Namespace`) слушатель не
 // читает вовсе — ни в голой, ни в мостовой форме: пары извлечения переданной
 // личности здесь нет, и субъект берётся из `kaname_session`.
 //
@@ -70,6 +71,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
@@ -283,6 +285,9 @@ type Config struct {
 	// Verification — клетки отказов положения на путях полосы (kaname#456,
 	// П13); nil — не считаются.
 	Verification humansession.AddressVerificationObserver
+	// ServiceNameForm — форма имени службы, объявленная установкой: ею учётка
+	// сертификата пира разбирается в имя службы, и допускается ровно край.
+	ServiceNameForm servicesan.Form
 }
 
 // Handler — слушатель полосы формы.
@@ -300,6 +305,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 		return nil, fmt.Errorf("login lane: session ttl must be positive")
 	case !cfg.TrustDomain.IsDeclared():
 		return nil, fmt.Errorf("login lane: trust domain must be declared — without it no caller is admitted")
+	case !cfg.ServiceNameForm.Valid():
+		return nil, fmt.Errorf("login lane: service name form must be declared — without it no caller is admitted")
 	case lane == nil:
 		return nil, fmt.Errorf("login lane: verbs required")
 	}
@@ -352,7 +359,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // callerIsGateway — ярус допуска (Р16, форма Ф-т на HTTP-слушателе).
 func (h *Handler) callerIsGateway(r *http.Request) bool {
-	return authzguard.PeerIsGateway(h.cfg.TrustDomain, r.TLS)
+	return authzguard.PeerIsGateway(h.cfg.TrustDomain, h.cfg.ServiceNameForm, r.TLS)
 }
 
 // method — отказ на неверный метод в форме, ОДНОЙ у обеих HTTP-поверхностей

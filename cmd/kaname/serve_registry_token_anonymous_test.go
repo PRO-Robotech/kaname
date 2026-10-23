@@ -83,7 +83,7 @@ func anonymousLaneWithSourceRule(t *testing.T, principal, pace string, pool *pgx
 		t.Fatalf("страж старта отверг настройку пробы: %v", err)
 	}
 	if rule == nil {
-		rule = issuingsource.New(cfg.AuthN.TrustDomain())
+		rule = issuingsource.New(cfg.AuthN.TrustDomain(), probeServiceNameForm)
 	}
 	bc, err := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		signer:                 lanesigner.New(t),

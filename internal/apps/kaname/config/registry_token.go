@@ -44,10 +44,16 @@ import (
 // же предмета, живущим в другом дереве, — и оно молча расходилось с тем, что
 // объявляет посадка реестра. Умолчания у величины, которую нельзя выбрать за
 // оператора, быть не может: незаданный адресат отвергается стражем старта.
-const (
-	defaultRegistryTokenIssuer = "https://api.kacho.local/iam/token" // #nosec G101 -- OIDC issuer URL default (iss claim), not a credential
-	defaultRegistryTokenTTL    = 5 * time.Minute
-)
+//
+// ИЗДАТЕЛЯ (`issuer`) СРЕДИ НИХ НЕТ ПО ТОЙ ЖЕ ПРИЧИНЕ (kaname#309). Издатель —
+// `iss` и область вызова на аутентификацию, то есть адрес НАШЕЙ полосы, а адрес
+// у каждой установки свой. Здесь стояло умолчание, называвшее координату
+// соседнего продукта: оно было непусто, поэтому страж старта по этой величине
+// не исполнялся ни разу, и самостоятельная установка поднималась зелёной,
+// чеканила удостоверения с чужим издателем и объявляла клиенту область по
+// адресу, которого у неё нет. Незаданный издатель при поднятом слушателе
+// отвергается стражем старта (Validate).
+const defaultRegistryTokenTTL = 5 * time.Minute
 
 // RegistryTokenConfig — api-server.registry-token section.
 //
@@ -278,13 +284,12 @@ func (c RegistryTokenConfig) KeyMaterialWindowUntil() (time.Time, error) {
 // the gRPC / hooks / metrics listeners.
 func (c RegistryTokenConfig) ListenAddress() string { return listenAddress(c.Endpoint) }
 
-// TokenIssuer — the `iss` claim + WWW-Authenticate realm. Falls back to the
-// built-in default when unset.
+// TokenIssuer — объявленный издатель полосы: `iss` выпускаемого токена и
+// область (`realm`) вызова на аутентификацию. ВСТРОЕННОЙ ПОДМЕНЫ НЕТ (kaname#309):
+// незаданное возвращается пустым, и полоса с пустым издателем до старта не
+// доживает (см. Validate) — так же, как с пустым адресатом рядом.
 func (c RegistryTokenConfig) TokenIssuer() string {
-	if s := strings.TrimSpace(c.Issuer); s != "" {
-		return s
-	}
-	return defaultRegistryTokenIssuer
+	return strings.TrimSpace(c.Issuer)
 }
 
 // TokenService — объявленное имя службы реестра (`aud` + `service=` в вызове на
@@ -390,6 +395,20 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig, trust grpcs
 				"(the registry ships it as KACHO_REGISTRY_SERVICE_AUD and advertises it to the docker client; "+
 				"we mint it into aud). Declare global.kacho.registry.serviceAud, or set this key directly "+
 				"when running iam on its own (env KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE)",
+			c.ListenAddress())
+	}
+	// ИЗДАТЕЛЬ (kaname#309) — та же несвязанность, что у адресата выше: полоса
+	// поднята, а адрес, который она называет клиенту и вписывает в каждое
+	// удостоверение, не объявлен ничем. Потребитель выбирает запись набора
+	// ключей по объявленному издателю, отката между записями нет — подставленный
+	// издатель отказал бы во входе каждому докерному клиенту, не назвав ручки.
+	if c.TokenIssuer() == "" {
+		return fmt.Errorf(
+			"api-server.registry-token.issuer is not declared while the docker lane listener is up (%s) — "+
+				"it is the iss claim of every minted token and the realm the docker client is sent to, that is, "+
+				"the address of THIS installation's token endpoint, and there is no address to default it to. "+
+				"Declare it as the public URL of the token endpoint (example https://iam.example.invalid/iam/token; "+
+				"env KANAME_API_SERVER__REGISTRY_TOKEN__ISSUER), the same value the registry advertises as its token realm",
 			c.ListenAddress())
 	}
 	if !clientToken.Enabled {

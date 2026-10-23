@@ -17,6 +17,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // authorityStub — configurable authzguard.RelationChecker for the inner
@@ -40,7 +41,8 @@ func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: stub,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth)
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth).
+		WithServiceNameForm(servicesan.NewForm("kacho-{service}"))
 }
 
 // newHandlerWithAuthorityProd builds the handler in the DEFAULT posture, which
@@ -225,6 +227,22 @@ func TestCallerAuthority_Anonymous_ProdMode_VerifiedModuleCert_Allowed(t *testin
 	if auth.calls != 0 {
 		t.Errorf("module-peer path must not hit the authority checker; calls=%d", auth.calls)
 	}
+}
+
+// TestCallerAuthority_Anonymous_ProdMode_ModuleOfAForeignForm_Denied — пир
+// узнаётся модулем ОБЪЯВЛЕННОЙ формой имени службы (kaname#308). Тот же
+// проверенный сертификат, что у близнеца выше, при объявленной форме, которой
+// его учётка не имеет, — отказ: страж не узнаёт модуль по приставке, вписанной в
+// код. Отличие от близнеца — ровно объявление формы.
+func TestCallerAuthority_Anonymous_ProdMode_ModuleOfAForeignForm_Denied(t *testing.T) {
+	auth := &authorityStub{allow: map[string]bool{}}
+	h := newHandlerWithAuthorityProd(true, auth).WithServiceNameForm(servicesan.NewForm("other-{service}"))
+	_, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
+		Subject:  "user:usr_bob",
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:   "iam.accounts.get",
+	})
+	requireDenied(t, err)
 }
 
 // TestCallerAuthority_ListSubjects_NoAuthority_Denied — enumerating who can act

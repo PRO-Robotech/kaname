@@ -214,6 +214,7 @@ var configBridge = []bridged{
 	{configKey: "invite-mail.from", valuePath: []string{"inviteMail", "from"}, omitEmpty: true},
 	{configKey: "authn.trusted-forwarder-sans", valuePath: []string{"authn", "trustedForwarderSANs"}, omitEmpty: true},
 	{configKey: "authn.trust-domain", valuePath: []string{"authn", "trustDomain"}, omitEmpty: true},
+	{configKey: "authn.service-name-form", valuePath: []string{"authn", "serviceNameForm"}, omitEmpty: true},
 	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Умолчания у адресов нет намеренно: адрес,
 	// приходящий умолчанием процесса, непуст всегда — профиль, о ребре
 	// умолчавший, поднимал бы его молча.

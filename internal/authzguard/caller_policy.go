@@ -6,16 +6,17 @@
 // platform's single authZ front door validates the JWT and runs per-user ReBAC
 // via iam.Check). iam's :9091 enforces only WHO MAY CALL each RPC:
 //
-//  1. Floor — every internal RPC requires a VERIFIED mTLS module cert (SPIRE SAN
-//     spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) in production. dev (no verified
-//     cert) → no-op (insecure back-compat, mirror RelationWriteGate).
+//  1. Пол — всякий внутренний RPC в боевой посадке требует ПРОВЕРЕННОГО
+//     сертификата модуля: SAN `spiffe://<домен>/ns/<пространство>/sa/<учётка>`,
+//     учётка — формы имени службы, объявленной установкой. В посадке
+//     разработки (проверенного сертификата нет) — проход, как у RelationWriteGate.
 //     Пол удовлетворяет ТАКЖЕ хоп собственного REST-фронта службы — лист того же
 //     внутреннего центра, чьё имя учётной записи приставки модулей не несёт. Он
 //     объявляется корнем (WithOwnFrontHop) и допускается РОВНО к тому, к чему
 //     допущен любой проверенный модуль: круга края ниже он не проходит никогда.
 //  2. Gateway-only — the gateway-fronted privileged admin RPCs
 //     (GatewayFrontedInternalRPCs) may ONLY be called by the api-gateway SA. A
-//     direct call from any other module (e.g. a compromised kacho-vpc) → DENY in
+//     direct call from any other module (e.g. a compromised vpc module) → DENY in
 //     prod (a data-plane module cannot escalate via :9091).
 //     dev → no-op.
 //  3. SAN-restricted — a small set of RPCs whose caller must appear on an
@@ -30,13 +31,14 @@
 //     caller's verified certificate identity; network position is NOT a
 //     credential ("internal = trusted" is a forbidden premise).
 //
-// WHY this replaces the former cert-bound ReBAC interceptor: the api-gateway
-// re-dials :9091 with ITS OWN client cert (SAN .../sa/kacho-api-gateway) and
-// forwards the end-user principal in x-kacho-principal-* metadata. A cert-bound
-// ReBAC Check on the gateway SA would DENY legitimate admin calls (system_admin@
-// cluster is held by the user, not the gateway SA); ReBAC-ing the forwarded user
-// would couple iam to the gateway's relation map. So iam does NO ReBAC and trusts
-// NO metadata here — it only verifies the caller IS the gateway for admin RPCs.
+// ПОЧЕМУ это заменило прежний перехватчик модели по сертификату: край заново
+// звонит на :9091 СВОИМ клиентским сертификатом (учётка края — имя службы
+// api-gateway в объявленной форме) и передаёт личность человека метаданными
+// (`principalwire.MetaPrincipalPrefix`). Вопрос модели по учётке края отверг бы
+// законные вызовы администрирования (system_admin@cluster держит человек, а не
+// учётка края); вопрос по переданному человеку связал бы iam с картой отношений
+// края. Поэтому здесь iam модель не спрашивает и метаданным не доверяет — он
+// лишь проверяет, что глаголы администрирования зовёт край.
 //
 // The fga-proxy write RPCs (RegisterResource / UnregisterResource) are NOT
 // gateway-only — their callers are vpc/compute/nlb MODULE SAs — and stay gated
@@ -53,11 +55,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
-// gatewayServiceName — the module service short-name of the api-gateway SA
-// (SPIRE SAN .../sa/kacho-api-gateway → "api-gateway"). The single legitimate
-// caller of the gateway-fronted privileged admin RPCs.
+// gatewayServiceName — короткое имя службы края: то, что объявленная форма
+// имени службы читает в учётке края. Единственный законный вызывающий глаголов
+// администрирования, которые фронтирует край.
 const gatewayServiceName = "api-gateway"
 
 // GatewayServiceName — короткое имя службы края, каким его называет SAN
@@ -216,16 +220,25 @@ type CallerPolicy struct {
 	// Величина СРАВНИВАЕТСЯ ЦЕЛИКОМ, как в третьем рукаве: пространство имён и
 	// учётная запись — части личности, и «похожее» здесь не годится.
 	ownFrontHop string
+	// form — форма имени службы, объявленная установкой: ею учётка сертификата
+	// разбирается в короткое имя службы (пол и круг края). Нулевая не узнаёт
+	// никого.
+	form servicesan.Form
 }
 
-// NewCallerPolicy builds the caller policy. gatewayOnlyRPCs is the set of
-// full-method names restricted to the api-gateway SA (see
-// GatewayFrontedInternalRPCs). prodMode comes from cfg.AuthN.Mode.IsProduction().
+// NewCallerPolicy строит политику вызывающего. gatewayOnlyRPCs — глаголы,
+// которые зовёт только край (GatewayFrontedInternalRPCs); prodMode — из
+// cfg.AuthN.Mode.IsProduction(); form — форма имени службы, объявленная
+// установкой (cfg.AuthN.ServiceNameForm()).
+//
+// Форма — параметр ОБЯЗАТЕЛЬНЫЙ и позиционный: сборка, забывшая её подставить,
+// не соберётся вовсе, тогда как умолчание сделало бы пол молча отвергающим
+// каждый модуль, край в том числе.
 //
 // The arm-3 METHOD set is static (SANRestrictedInternalRPCs); WithSANAllowlist
 // only supplies WHICH certificate identities may call them. A policy built
 // without WithSANAllowlist therefore denies every caller of those methods.
-func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string) *CallerPolicy {
+func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string, form servicesan.Form) *CallerPolicy {
 	m := make(map[string]struct{}, len(gatewayOnlyRPCs))
 	for _, rpc := range gatewayOnlyRPCs {
 		m[rpc] = struct{}{}
@@ -234,7 +247,7 @@ func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string) *CallerPolicy {
 	for _, rpc := range SANRestrictedInternalRPCs() {
 		restricted[rpc] = struct{}{}
 	}
-	return &CallerPolicy{prodMode: prodMode, gatewayOnly: m, sanRestricted: restricted}
+	return &CallerPolicy{prodMode: prodMode, gatewayOnly: m, sanRestricted: restricted, form: form}
 }
 
 // WithSANAllowlist supplies the arm-3 allow-list: fullMethod → the exact
@@ -359,7 +372,7 @@ func (p *CallerPolicy) allow(ctx context.Context, fullMethod string) error {
 
 	svc, ok := "", false
 	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), p.form, san)
 	}
 	// Хоп собственного REST-фронта удовлетворяет ПОЛ и на этом останавливается.
 	// Короткое имя службы у него остаётся ПУСТЫМ намеренно: круг края ниже

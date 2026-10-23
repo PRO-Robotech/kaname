@@ -75,6 +75,7 @@ func TestBootPosture_Production(t *testing.T) {
 	// Домен доверия — величина установки: без неё дескриптор не принимается,
 	// потому что процесс, не назвавший домена, своим не признаёт никого.
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
+	cfg.AuthN.ServiceNameFormRaw = probeServiceNameFormRaw
 	var mtls config.MTLSConfig
 	mtls.PublicServerMTLS.Enable = true
 	mtls.InternalServerMTLS.Enable = true
@@ -106,6 +107,7 @@ func TestBootPosture_SSLModeComesFromTheDSNThatReachesThePool(t *testing.T) {
 	// Домен доверия — величина установки: без неё дескриптор не принимается,
 	// потому что процесс, не назвавший домена, своим не признаёт никого.
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
+	cfg.AuthN.ServiceNameFormRaw = probeServiceNameFormRaw
 
 	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, config.MTLSConfig{}, true, restFrontUp(), restFrontUp())), map[string]any{
 		"auth_mode":  "production-strict",
@@ -127,6 +129,7 @@ func TestBootPosture_InsecureIsReportedHonestly(t *testing.T) {
 	// необъявленный домен, наоборот, не признаёт никого. Опт-ин «поднимусь без
 	// домена» означал бы согласие не работать, поэтому домен называется и здесь.
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
+	cfg.AuthN.ServiceNameFormRaw = probeServiceNameFormRaw
 
 	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, config.MTLSConfig{}, false, ownRESTFront{}, ownRESTFront{})), map[string]any{
 		"service":       "iam",

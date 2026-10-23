@@ -108,7 +108,7 @@ type TokenIssuer interface {
 // Config — handler config (the WWW-Authenticate realm + default service name).
 type Config struct {
 	// Realm — the token-endpoint URL advertised in WWW-Authenticate (must match
-	// the data-plane's Bearer realm, e.g. https://api.kacho.local/iam/token).
+	// the data-plane's Bearer realm, e.g. https://iam.example.invalid/iam/token).
 	Realm string
 	// DefaultService — the service name used in WWW-Authenticate when the request
 	// omits ?service= (e.g. registry.kacho.local).

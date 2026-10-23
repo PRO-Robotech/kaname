@@ -46,8 +46,8 @@
 //
 // Inputs are read ONLY under the trust invariant: grpcsrv.TrustedACRFromContext
 // for the acr and grpcsrv.TrustedPrincipalFromContext for the principal type. On
-// the mTLS-verified gateway→iam edge the gateway forwards x-kacho-token-acr and
-// x-kacho-principal-type; on an unverified/foreign-SAN peer the acr is dropped
+// the mTLS-verified gateway→iam edge the gateway forwards `principalwire.MetaTokenACR` and
+// `principalwire.MetaPrincipalType`; on an unverified/foreign-SAN peer the acr is dropped
 // upstream (corelib) and the principal is flagged untrusted — this floor then
 // passes an EMPTY principal type to the rule, so a forged
 // `service_account` header cannot buy the exemption (anti-spoof), and the absent
@@ -174,7 +174,7 @@ func (f *ACRFloor) allow(ctx context.Context, fullMethod string) error {
 	// The acr was already scrubbed upstream on an untrusted peer (rank 0 → deny).
 	// The principal is NOT scrubbed there (only flagged), so the trust flag is
 	// applied here: an untrusted peer yields an EMPTY principal type, which the
-	// rule never exempts. Forging `x-kacho-principal-type: service_account`
+	// rule never exempts. Forging `principalwire.MetaPrincipalType` = `service_account`
 	// therefore buys nothing (internalCallerPolicy already denied a non-gateway
 	// SAN before this floor — this is the second lock on the same door).
 	acr, _ := grpcsrv.TrustedACRFromContext(ctx)

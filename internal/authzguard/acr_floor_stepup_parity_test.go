@@ -141,7 +141,7 @@ func TestACRFloor_VerdictParity_MachineBranch_Pinned(t *testing.T) {
 // Unlike the acr (scrubbed upstream on an unverified peer), the forwarded
 // principal survives into the carrier with `trusted=false`. The floor must apply
 // the trust flag itself, otherwise anyone able to reach :9091 could forge
-// `x-kacho-principal-type: service_account` and skip the floor. (internalCallerPolicy
+// `principalwire.MetaPrincipalType` = `service_account` and skip the floor. (internalCallerPolicy
 // already denies a non-gateway SAN on these RPCs — this is the second lock.)
 func TestACRFloor_MachineExemption_RequiresTrustedPrincipal(t *testing.T) {
 	f := newACRFloor(true)

@@ -16,10 +16,10 @@ import (
 
 // SAN constants for the caller-policy table. The gateway SA is the single
 // legitimate caller of the gateway-fronted privileged admin RPCs; any other
-// module SAN (e.g. kacho-vpc) is a non-gateway module.
+// module SAN (e.g. the vpc module) is a non-gateway module.
 const (
-	gatewaySAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"
-	vpcSAN     = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
+	gatewaySAN = "spiffe://kacho.cloud/ns/kacho/sa/mod-api-gateway"
+	vpcSAN     = "spiffe://kacho.cloud/ns/kacho/sa/mod-vpc"
 
 	// gatewayOnlyMethod — a representative gateway-fronted privileged admin RPC.
 	gatewayOnlyMethod = "/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"
@@ -27,7 +27,7 @@ const (
 	floorOnlyMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
 
 	// authorizeBatchCheckMethod — RPC, которым пообъектный фильтр страницы
-	// (kacho-vpc / kacho-compute / kacho-nlb) судит идентификаторы СВОЕЙ страницы
+	// (модули vpc / compute / nlb) судит идентификаторы СВОЕЙ страницы
 	// service→service по ребру проверенного mTLS (:9091). НЕ gateway-fronted:
 	// звать вправе любая проверенная модульная SA — явный субъект в запросе есть
 	// авторизационный вид, а НЕ доступ вызывающего.
@@ -64,14 +64,14 @@ func newGatewayCtx() context.Context {
 	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, true)
 }
 
-// newVPCCtx returns a ctx carrying a verified kacho-vpc module cert SAN.
+// newVPCCtx returns a ctx carrying a verified vpc module cert SAN.
 func newVPCCtx() context.Context {
 	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), vpcSAN, true)
 }
 
 // testPolicy builds a CallerPolicy with the canonical gateway-only set.
 func testPolicy(prod bool) *CallerPolicy {
-	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs())
+	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm)
 }
 
 // ── allow(): gateway-only RPC ──────────────────────────────────────────────
@@ -88,7 +88,7 @@ func TestCallerPolicy_GatewayOnly_GatewayCert(t *testing.T) {
 }
 
 // TestCallerPolicy_GatewayOnly_NonGatewayCert_Prod — a verified non-gateway
-// module (kacho-vpc) calling a gateway-only RPC in prod → PermissionDenied
+// module (vpc) calling a gateway-only RPC in prod → PermissionDenied
 // (closes audit C1/C3: a compromised data-plane module cannot escalate).
 func TestCallerPolicy_GatewayOnly_NonGatewayCert_Prod(t *testing.T) {
 	p := testPolicy(true)
@@ -127,7 +127,7 @@ func TestCallerPolicy_GatewayOnly_NoCert_Dev(t *testing.T) {
 
 // ── allow(): non-gateway RPC (floor only) ──────────────────────────────────
 
-// TestCallerPolicy_FloorOnly_AnyModuleCert — any verified module (kacho-vpc) may
+// TestCallerPolicy_FloorOnly_AnyModuleCert — any verified module (vpc) may
 // call a non-gateway RPC, prod and dev.
 func TestCallerPolicy_FloorOnly_AnyModuleCert(t *testing.T) {
 	for _, prod := range []bool{true, false} {
@@ -167,7 +167,7 @@ func TestCallerPolicy_UnverifiedCert_Prod(t *testing.T) {
 }
 
 // TestCallerPolicy_NonModuleSAN_Prod — a verified but non-module SAN (not
-// kacho-<svc>) is treated as "no module cert" → PermissionDenied in prod.
+// of the declared service-name form) is treated as "no module cert" → PermissionDenied in prod.
 func TestCallerPolicy_NonModuleSAN_Prod(t *testing.T) {
 	p := testPolicy(true)
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/x/sa/not-a-module", true)
@@ -301,7 +301,7 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 // the consumer list-filter edge.
 
 // TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — a verified module SA
-// (kacho-vpc) may call AuthorizeService.{BatchCheck,Check,ListSubjects} on the
+// (vpc) may call AuthorizeService.{BatchCheck,Check,ListSubjects} on the
 // internal listener, prod AND dev (they are floor-only, not gateway-fronted).
 func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod, authorizeListSubjectsMethod}

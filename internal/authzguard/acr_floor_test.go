@@ -23,7 +23,7 @@ import (
 // (grpcsrv.TrustedACRFromContext).
 //
 // Drives the floor through a fake catalog (FQN→acr_min) + a fabricated trusted
-// acr ctx (grpcsrv.WithCertIdentity + x-kacho-token-acr metadata) — no Postgres,
+// acr ctx (grpcsrv.WithCertIdentity + `principalwire.MetaTokenACR` metadata) — no Postgres,
 // no FGA, no live handshake.
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ func TestACRFloor_0404_AcrMinZero_NotChecked(t *testing.T) {
 
 func TestACRFloor_0405_NonGatewayRPC_Exempt(t *testing.T) {
 	f := newACRFloor(true)
-	// kacho-vpc module SA, no user-acr, calling a non-gateway-fronted RPC.
+	// vpc module SA, no user-acr, calling a non-gateway-fronted RPC.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), vpcSAN, true)
 	ctx = grpcsrv.WithTrustedACR(ctx, "", true)
 	if err := f.allow(ctx, registerNonGateway); err != nil {

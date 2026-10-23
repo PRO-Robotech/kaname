@@ -13,7 +13,7 @@ package authzguard
 // exists yet — chicken-and-egg). The credential it DOES require is therefore the
 // caller's mTLS identity: only the SANs an operator explicitly allow-lists may
 // mint. "Any verified module cert" is NOT enough — a compromised data-plane
-// module (kacho-vpc, kacho-compute) must not be able to mint cluster-admin.
+// module (vpc, compute) must not be able to mint cluster-admin.
 //
 // Fail-closed everywhere: an EMPTY allow-list denies every caller (the mint has
 // no default caller), and the gate is enforced in dev as well as production —
@@ -35,12 +35,12 @@ const (
 	// bootstrapMintMethod — the RPC under test.
 	bootstrapMintMethod = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
 	// seedRunnerSAN — the allow-listed operator/CI identity.
-	seedRunnerSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-bootstrap-seeder"
+	seedRunnerSAN = "spiffe://kacho.cloud/ns/kacho/sa/mod-bootstrap-seeder"
 )
 
 // mintPolicy builds a CallerPolicy with the mint allow-list populated.
 func mintPolicy(prod bool, sans ...string) *CallerPolicy {
-	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).
+	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm).
 		WithSANAllowlist(map[string][]string{bootstrapMintMethod: sans})
 }
 
@@ -100,7 +100,7 @@ func TestCallerPolicy_BootstrapMint_EmptyAllowlist_DeniesEveryone(t *testing.T) 
 	for _, prod := range []bool{true, false} {
 		for _, p := range []*CallerPolicy{
 			mintPolicy(prod), // declared, empty
-			NewCallerPolicy(prod, GatewayFrontedInternalRPCs()), // never configured
+			NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm), // never configured
 			mintPolicy(prod).WithSANAllowlist(nil),              // explicitly cleared
 		} {
 			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), seedRunnerSAN, true)

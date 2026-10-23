@@ -49,7 +49,12 @@ func RegisterDefaults(v *viper.Viper) {
 	// the minted identity-JWT and must match the data-plane's advertised Bearer
 	// realm. Override via KANAME_API_SERVER__REGISTRY_TOKEN__{ENDPOINT,ISSUER,SERVICE,TTL}.
 	v.SetDefault("api-server.registry-token.endpoint", "tcp://0.0.0.0:9096")
-	v.SetDefault("api-server.registry-token.issuer", "https://api.kacho.local/iam/token")
+	// `api-server.registry-token.issuer` УМОЛЧАНИЯ НЕ ИМЕЕТ (kaname#309): издатель
+	// и есть адрес нашей полосы, а адрес у каждой установки свой. Прежнее
+	// умолчание называло координату соседнего продукта, и страж старта по этой
+	// величине не исполнялся ни разу. Ключ привязан к переменной в load.go;
+	// незаданный при поднятом слушателе отвергается стражем старта.
+	//
 	// `api-server.registry-token.service` УМОЛЧАНИЯ НЕ ИМЕЕТ намеренно — имя
 	// службы реестра объявляет посадка ОДИН раз на обе стороны полосы
 	// (`global.kacho.registry.serviceAud`), см. registry_token.go. Незаданное
