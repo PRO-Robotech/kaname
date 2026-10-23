@@ -84,6 +84,10 @@ func chainReader(t *testing.T) (*presentedcred.Reader, string) {
 // дописывается к утверждениям (уровень `acr`, вид принципала) — так близнецы
 // пробы отличаются ровно одним фактом и предъявляются одному читателю.
 func chainMint(t *testing.T) (*presentedcred.Reader, func(extra jwt.MapClaims) string) {
+	return chainMintWithRevocations(t, chainRevocations{})
+}
+
+func chainMintWithRevocations(t *testing.T, revocations presentedcred.RevocationReader) (*presentedcred.Reader, func(extra jwt.MapClaims) string) {
 	t.Helper()
 	mat, err := signingkeygen.Generate(domain.SigningAlgES256)
 	if err != nil {
@@ -123,7 +127,7 @@ func chainMint(t *testing.T) (*presentedcred.Reader, func(extra jwt.MapClaims) s
 		Keys: chainKeys{keys: []domain.PublishedKey{{
 			KID: domain.KeyID(chainKID), Algorithm: domain.SigningAlgES256, PublicKeyPEM: mat.PublicKeyPEM,
 		}}},
-		Revocations:        chainRevocations{},
+		Revocations:        revocations,
 		RevocationCacheTTL: 30 * time.Second,
 	})
 	if err != nil {
