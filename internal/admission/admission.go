@@ -49,6 +49,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
 
@@ -102,9 +103,17 @@ func ID(ctx context.Context, m Marks, id string) (bool, error) {
 // половина записи «тип:идентификатор». Набор («тип:идентификатор#отношение»),
 // подстановочный знак и запись без двоеточия идентификатора не называют —
 // ok=false: такой субъект не человек, и предикат его не судит.
+//
+// Системный класс (`system_class:<имя>`) человеком не является ПО ВИДУ, и
+// судится это видом, а не формой идентификатора (разбор CE-05): совпадение
+// «у людей идентификатор с префиксом, у класса — нет» давало бы тот же исход
+// случайно и стоило бы вопроса к хранилищу на каждый анонимный прогон.
 func SubjectID(subject string) (string, bool) {
 	i := strings.IndexByte(subject, ':')
 	if i <= 0 || i == len(subject)-1 {
+		return "", false
+	}
+	if subject[:i] == string(domain.SubjectTypeSystemClass) {
 		return "", false
 	}
 	id := subject[i+1:]

@@ -1,0 +1,230 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md
+  sha256: b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 892853c457efb6362f2eed315a4a6502d8b34293
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status --short` → `?? docs/engineering/acceptance/…`);
+    отпечаток снят с рабочего файла.
+  branch: '746'
+  task: PRO-Robotech/kaname#865
+  related_tasks: [PRO-Robotech/kaname#856]
+  lines: 805
+  round: 1
+  round_scope: >-
+    Первый круг ревью этого документа (прежних записей в каталоге нет). Решения диспетчера
+    2026-10-18 (источник порядка — `revision` + `applied_revision`; `applied_digest` с отказом
+    на равный номер и иной отпечаток; пропуск распространён на роли и посев; переход S1 → П2 →
+    S2) не переоткрываются; судится их выражение в сценариях и Д9 — выбор автора.
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md
+    в копии kacho-workspace/tmp/kn-865-acc @ 892853c45 → b5e3324d…f7f4f3 (совпадает с
+    названным автором)
+  measurement_revisions: >-
+    Код — рабочее дерево копии на 892853c45 (изменён только документ приёмки). Пробы
+    конструируемости — `go test -overlay` временными файлами из каталога scratchpad, дерево не
+    тронуто (`git status --short` до и после — одна строка документа).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T19:26:00Z'
+
+summary:
+  scenarios_total: 31
+  scenarios_s1: 27
+  scenarios_s2: 4
+  producer_rows: 31
+  scenarios_without_producer: 0
+  negatives_with_twin: all
+  blocking: 4
+  blocking_kinds: [CONSTRUCTIBILITY, NEGATIVE, COVERAGE, PRODUCER]
+
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    scenarios: [865-07, 865-08, 865-24, близнец 865-24]
+    claim: >-
+      «Дано» 865-07 вводит роль `probemod-viewer`; загрузчик такой документ отвергает, а общее
+      «Дано» §4 требует, чтобы каждый документ разобрался `manifest.Load` без ошибки.
+    predicate: >-
+      go test -overlay (zz_review865_test.go в internal/manifest) @892853c45: фикстура
+      probemod.public-read-fixture.yaml + roles[0].id=probemod-viewer → `manifest: role id is
+      not `<module>.<name>`` (ErrRoleIDMalformed, internal/manifest/roles.go:461–468);
+      то же с id=probemod.viewer → roles=1, err=nil.
+    fix: >-
+      Имя роли формы `<модуль>.<имя>` (напр. `probemod.viewer`) во всех четырёх местах; обозначить
+      документ с разделом `roles` отдельно от `R(n, open)` (напр. `R⁺(n, open)`), чтобы
+      «тот же документ» близнеца 865-24 читался однозначно.
+  - id: B2
+    kind: NEGATIVE
+    scenarios: [Д9, 865-26 п.2, Д2 строка «d = a, g ≠ h»]
+    claim: >-
+      Каноническая форма Д9 приводит скаляр по тегу разборщика без схемы (`!!int` → десятичная
+      запись, `!!float` → число JCS), а загрузчик читает тот же скаляр в строковое поле его
+      исходным текстом. Два документа с разным прочитанным содержимым получают РАВНЫЙ отпечаток —
+      ложное совпадение, которого Д9 по своему же доводу допускать не должна («ошибка в эту
+      сторону — лишь ложный конфликт … а не ложное совпадение»). Равный номер с иным содержимым
+      тогда проходит идемпотентным повтором, и строка Д2 «конфликт содержимого» не исполняется.
+      Пункт 2 сценария 865-26 (`b: [0x2, 1]` равен `b: [2, 1]`) закрепляет это правило.
+    predicate: >-
+      go test -overlay (zz_review865b_test.go) @892853c45, роль probemod.viewer с
+      `description: <x>`: Load принимает и читает Description "0x10" и "16", "016" и "14",
+      "1.0" и "1" — разные строки; модель данных yaml.v3 без схемы даёт int(16)/int(16),
+      int(14)/int(14), float64(1)/int(1) — по Д9 канонические формы попарно равны.
+    fix: >-
+      Добавить отрицательный сценарий с близнецом: при применённой редакции 5 доставка той же
+      редакции, отличающаяся ровно записью строкового скаляра (`description: 16` → `0x10`), —
+      конфликт; близнец — `Reformatted` без смены текста скаляра — повтор. Правило Д9 для
+      скаляра — по тексту узла (значение после снятия кавычек и экранирования) вместе с тегом,
+      без приведения числа; тогда `0x10`/`16` — ложный конфликт (допустимая по Д9 сторона), а
+      пункт 2 865-26 о записи целого переносится в пункт 3. Выбор механизма — за автором.
+  - id: B3
+    kind: COVERAGE
+    scenarios: [Д9, P15]
+    claim: >-
+      Отпечаток не определён для документа, который загрузчик принял: скаляр `.nan` / `.inf`
+      в строковом поле Load принимает, Д9 переводит `!!float` в число JCS, а RFC 8785 NaN и
+      бесконечность не представляет. Исход (отказ? какой текст? чей?) не назван — Д9 обещает
+      отпечаток для любого принятого документа.
+    predicate: >-
+      то же overlay-прогон: `description: .nan` → Load err=nil, Description ".nan";
+      модель yaml.v3 — float64(NaN).
+    fix: >-
+      Правило Д9 должно быть тотальным над принятыми документами (правка B2 снимает и это) и
+      сценарием утверждать отпечаток такого документа.
+  - id: B4
+    kind: PRODUCER
+    scenarios: [Д1, 865-17, §5 строка 865-17]
+    claim: >-
+      Д1 и §5 приписывают отказ на дробь существующему строгому разбору P1 («ErrShape (P1)»,
+      «P1 (ErrShape существует)»). Измерено: yaml.v3 приводит `!!float` к int64 молча.
+      Естественная реализация (поле int64 в оболочке) примет `revision: 1.5` как 1,
+      `5.0` как 5, `1e3` как 1000 — текст контракта называет производителем код, который этого
+      не производит.
+    predicate: >-
+      overlay-прогон: struct{Revision *int64 `yaml:"revision"`} + KnownFields(true):
+      "1.5" → 1 err=nil; "5.0" → 5 err=nil; "1e3" → 1000 err=nil; "\"5\"" → error;
+      "9223372036854775808" → error; "0x10" → 16 err=nil.
+    fix: >-
+      Производитель отказа на нецелое — проверка тега узла `!!int` до приведения (P13,
+      «заводит это изменение»); в 865-17 добавить `5.0` и `1e3` → ErrShape (иначе реализация,
+      отвергающая только дробную часть, проходит, а отпечаток по Д9 различает `5.0` и `5` при
+      равном номере).
+
+minor:
+  - id: m1
+    kind: PRODUCER
+    note: >-
+      Образец `module_catalog_boot_sequence_integration_test.go` назван без каталога; он лежит в
+      internal/repo/kaname/pg, а применители старта (`applyDeliveredManifests`,
+      `applyDeliveredModuleRoles`, `applyModuleSeed`) — package main в cmd/kaname. Держатель
+      865-07/08/24 — в cmd/kaname, образец — cmd/kaname/module_roles_apply_integration_test.go:129.
+  - id: m2
+    kind: FORMAT
+    note: >-
+      865-11…865-16, 865-27, 865-28 утверждают формы REST (HTTP 400, int64 строкой), а держатель
+      в §5 — интеграция use-case, которая HTTP не видит. Либо назвать держатель внутреннего
+      REST-моста, либо утверждать gRPC-код и присутствие поля.
+  - id: m3
+    kind: FORMAT
+    note: >-
+      Старшинство вердиктов `Plan` при одновременных BEYOND_ANCHOR и STALE/CONFLICT не названо;
+      комментарий перечисления (internal_module_service.proto:220–226 «verdict is the parity
+      accessor») станет неверным — правка тем же изменением.
+  - id: m4
+    kind: SCOPE
+    note: >-
+      Д3 «старт продолжается» верно для `applyDeliveredManifests`; опора паритета строится из
+      доставки, включая пропущенный документ (cmd/kaname/serve.go:300, AnchorOfDelivery), и
+      младшая редакция с иным набором ресурсов остановит пуск стражем — §2 п.4 это называет,
+      Д3 стоит сузить тем же словом.
+  - id: m5
+    kind: FORMAT
+    note: >-
+      Д9 «строка JCS со значением скаляра, как его прочёл разборщик» для `!!timestamp`
+      неоднозначна (yaml.v3 без схемы даёт time.Time, а не текст) — снимается правкой B2.
+
+premise:
+  outcome: confirmed
+  commands:
+    - "git grep -n applied_revision 892853c45 | wc -l → 0"
+    - "git grep -n applied_digest 892853c45 | wc -l → 0"
+    - "overlay: Load(фикстура + `revision: 5`) → ErrShape «field revision not found in type manifest.Manifest» (P1 сегодня)"
+    - "printf '%s' '{\"a\":\"x\",\"b\":[2,1]}' | sha256 → 1bb141b0…57148 (опорное значение Д9 совпало)"
+
+checked_and_passed:
+  - "Объём: §1/§2 совпадают с kaname#865 и решениями диспетчера 2026-10-18; «Что НЕ входит» есть"
+  - "Производитель у каждого «Тогда»: §5 — 31 строка на 31 ID (grep -c '^| 865-' → 31; grep -c '^**ID:**' → 31)"
+  - "Близнецы: у каждого отрицания назван; 865-06 — единственный итог при обоих порядках замка; 865-31 — близнец 865-06"
+  - "Миграция: три CHECK (положительность, форма отпечатка, связка), без обратного заполнения, ban #5 (DoD S1 п.3); строка 'vpc' для 865-18/30 посеяна 0001_initial.sql:3224"
+  - "Отказ Apply оставляет операцию с ошибкой — api/module/apply.go: MarkError до возврата applyRefusal"
+  - "Internal-vs-external: только InternalModuleService на :9091, новых методов и слушателей нет (ban #6); newman не нужен, обосновано"
+  - "Конвенции: optional для присутствия, тексты отказов Д7 дословно, имена латиницей"
+  - "DoD: измерим, ссылается на ID, S1/S2 раздельно, предикат S2 п.1 исполним"
+
+constructibility:
+  method: >-
+    go test -overlay с временными файлами вне дерева, пакет internal/manifest, @892853c45.
+  seeded: 6
+  of: 9
+  red: 1
+  red_items: ["роль probemod-viewer → ErrRoleIDMalformed (B1)"]
+  green_items:
+    - "фикстура probemod.public-read-fixture.yaml → Load без ошибки"
+    - "роль probemod.viewer, cluster-ярус, rules probemod/boxes/get → Load без ошибки"
+    - "`roles: []` → Load без ошибки"
+    - "опорное значение Д9"
+    - "модель данных: псевдоним развёрнут, 0x2 → int 2 (утверждения 865-26 п.2а)"
+  not_executed: 3
+  not_executed_items:
+    - "catalogPool + применитель с probemod (865-01…06, 10, 25, 29, 31) — testcontainers требует тяжёлого слота, шаг ограничен 60 с; производители прочитаны: catalog_referent_integration_test.go:57, module_catalog_applier_integration_test.go:101, :223, :352"
+    - "применители ролей и посева на старте (865-07/08/24) — то же; образец cmd/kaname/module_roles_apply_integration_test.go:129"
+    - "use-case Plan/Apply/Get (865-11…16, 19, 27, 28) — то же"
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#865
+  status: performed
+  published: true
+  database_id: 6255185671
+  node_id: "IC_kwDOUO26pM8AAAABdNaPBw"
+  url: "https://github.com/PRO-Robotech/kaname/issues/865#issuecomment-6255185671"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6255185671"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-18T21:10:23Z"
+  subject_sha256: "b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3"
+  verdict: "CHANGES_REQUESTED"
+  issued: false
+  reason: >-
+    вердикт — CHANGES_REQUESTED, одобрения нет; тело события содержит event_body записи дословно.
+    Ритуал approval-event.sh неприменим: редакция 2 документа в истории не закоммичена, отпечаток
+    сверяется с event_body.
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

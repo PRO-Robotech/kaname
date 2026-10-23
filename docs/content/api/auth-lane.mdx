@@ -15,7 +15,7 @@ import dedent from 'ts-dedent'
 Это **единственный** вход человека в продукт: посадка личности у службы одна, внешнего
 поставщика удостоверений нет (устройство — [Идентичность и токены](/architecture/identity)).
 
-Путей у полосы **двадцать три**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
+Путей у полосы **двадцать четыре**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
 (`internal/handler/loginlanehttp/handler.go`); перечень ниже сверяется с ним пробой, а не
 выписан.
 
@@ -27,7 +27,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/login</code></td><td>вход паролем, необязательно — с кодом второго фактора</td><td><code>login</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/logout</code></td><td>выход: запись сессии гасится на стороне сервера</td><td><code>logout</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/password</code></td><td>смена пароля с подтверждением текущим; все прочие сессии человека завершаются</td><td><code>password</code></td><td>да</td></tr>
-    <tr><td><code>POST /iam/v1/auth/password/enroll</code></td><td>заведение первого пароля из свежей сессии человеком, у которого пароля нет; сессии не трогаются</td><td><code>password-enroll</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/password/enroll</code></td><td>заведение первого пароля из свежей сессии человеком, у которого пароля нет; сессии не трогаются</td><td><code>password-enroll</code></td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/auth/recovery</code></td><td>запрос кода восстановления письмом</td><td><code>recovery</code></td><td>нет</td></tr>
     <tr><td><code>POST /iam/v1/auth/recovery/complete</code></td><td>предъявление кода с новым паролем; отвечает как вход</td><td><code>recovery-complete</code></td><td>нет</td></tr>
     <tr><td><code>GET /iam/v1/auth/second-factor</code></td><td>состояние второго фактора</td><td>—</td><td>да</td></tr>
@@ -36,6 +36,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/second-factor/remove</code></td><td>снятие фактора, подтверждённое кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/backup-codes</code></td><td>перечеканка запасных кодов, подтверждённая кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/step-up/access-key/begin</code></td><td>испытание повышения ключом доступа этой сессии; перечень ключей человека</td><td><code>step-up-access-key-begin</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/verify-email</code></td><td>запрос письма с кодом подтверждения адреса</td><td><code>verify-email</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/verify-email/confirm</code></td><td>предъявление кода подтверждения; новый носитель той же сессии</td><td><code>verify-email-confirm</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/access-key/begin</code></td><td>испытание входа ключом доступа; человека запрос не называет</td><td><code>access-key-begin</code></td><td>нет</td></tr>
@@ -87,7 +88,10 @@ gRPC-слушателей службы, права человека не дей�
 
 Адрес меняет только **второе** обращение, и только кодом, пришедшим на **новый** адрес. Оба
 пути — правка своих данных: в положении подтверждения они отвечают отказом положения, без
-сессии — `401` `authentication failed`.
+сессии — `401` `authentication failed`. Незаполненное обязательное поле (`newEmail` у запроса,
+`code` у предъявления) называется **раньше** суждения о сессии — как у заведения пароля,
+повышения и завершения сессий: без сессии и без поля ответ — `Illegal argument newEmail: required`
+либо `Illegal argument code: required`, а не `401`.
 
 У человека, заведшего код по времени либо ключ доступа, **оба** пути требуют сессии уровня не
 ниже `2` — того, что гарантирует заведённое им. Сессия ниже получает указание повысить уровень:
@@ -125,7 +129,10 @@ a credential of another kind`, `WWW-Authenticate` с `error="insufficient_user_a
 годен), все **прочие** сессии человека сняты вместе с выданным в них, живые коды восстановления сняты, на
 **прежний** адрес уходит уведомление без нового адреса. Ответ — `{"session": {…, "emailVerified":
 true}}`. Неподошедший код — неверный, истёкший, вытесненный, применённый, истраченный пределом
-попыток, выданный другому человеку — один отказ `401` `authentication failed`; пустой `code` —
+попыток, выданный другому человеку — один отказ `401` `authentication failed`. Шага текст отказа
+не называет, и он один на все эти причины: запросить новый код повторным
+`POST /iam/v1/auth/email-change` — с тем же требованием свежести и не раньше `Retry-After`;
+новый код вытесняет прежний. Пустой `code` —
 `Illegal argument code: required`. Адрес, занятый между запросом и предъявлением, — `409`,
 код `6`, `email address is already in use`, `EMAIL_IN_USE`: исход откатывается целиком, код
 остаётся неприменённым. Исход для выданного в снятых сессиях — тот же, что у
@@ -163,8 +170,8 @@ SAN проверенного клиентского сертификата по�
   место края занимает прогонщик набора: клиентский лист на имя края ему выписывает
   внутренний удостоверяющий центр стенда (`.github/scripts/stand-chart.sh`).
 
-:::note Что из двадцати трёх путей ретранслирует край — свойство версии края
-Служба обслуживает все двадцать три (`loginlanehttp.Paths()`). Край платформы ретранслирует
+:::note Что из двадцати четырёх путей ретранслирует край — свойство версии края
+Служба обслуживает все двадцать четыре (`loginlanehttp.Paths()`). Край платформы ретранслирует
 перечень, объявленный у него (`gateway/internal/middleware/login_lane_paths.go` в
 `PRO-Robotech/kacho`), и перечень этот — свойство ревизии края, которую вы ставите. Путь,
 которого край не ретранслирует, отвечает с адреса консоли отказом края, а не службы.
@@ -190,8 +197,8 @@ SAN проверенного клиентского сертификата по�
 печеньем `kaname_form`. Признак — свёртка HMAC-SHA256 над видом формы с ключом-контекстом:
 признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
 случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
-`recovery`, `recovery-complete`, `second-factor`, `step-up`, `verify-email`,
-`verify-email-confirm`, `access-key-begin`, `access-key-login`, `password-enroll`,
+`recovery`, `recovery-complete`, `second-factor`, `step-up`, `step-up-access-key-begin`,
+`verify-email`, `verify-email-confirm`, `access-key-begin`, `access-key-login`, `password-enroll`,
 `email-change`, `email-change-confirm`, `session-end`.
 
 <CodeBlock language="bash">
@@ -202,7 +209,7 @@ SAN проверенного клиентского сертификата по�
 </CodeBlock>
 
 Неизвестный вид — `400` с кодом `3`:
-`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up verify-email verify-email-confirm access-key-begin access-key-login password-enroll email-change email-change-confirm session-end]`.
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up step-up-access-key-begin verify-email verify-email-confirm access-key-begin access-key-login password-enroll email-change email-change-confirm session-end]`.
 
 ## Форма запроса и ответа — по глаголу
 
@@ -223,8 +230,11 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
 `secondFactor` необязателен: без него сессия получает уровень `1`, даже если фактор заведён;
 с ним (`method` — `totp` либо `lookup_secret`, `code` — шесть цифр либо десять знаков
 запасного кода) — уровень `2`. Выше `2` вход паролем не поднимает; уровень `2` без второго
-фактора и уровень `3` даёт только [вход ключом доступа](#access-key-login). Форма кода судится **до** пароля: негодный код — отказ формы с
-именем поля (`Illegal argument secondFactor.code: must be 6 digits`), не попытка. Всё
+фактора и уровень `3` даёт только [вход ключом доступа](#access-key-login). Форма кода судится **до** пароля: негодный код — отказ формы
+`400` с именем поля, не попытка: `Illegal argument secondFactor.code: must be 6 digits` у кода
+по времени и `Illegal argument secondFactor.code: must be 10 characters of the backup-code alphabet`
+у запасного кода. Ответ входа сводки набора запасных кодов не несёт — остаток после входа
+запасным кодом читается [`GET …/second-factor`](#second-factor). Всё
 остальное о коде — не сошёлся, повторён, потреблён, **фактор не заведён** — отвечает тем же
 `401`, что неверный пароль **с тем же полем**, и считается попыткой: по ответу на вход нельзя
 узнать ни состояние фактора, ни то, совпал ли пароль.
@@ -234,7 +244,9 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
 `authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled`. Вход **без** поля отвечает прежним `authentication failed`. Это не оракул:
 форму запроса знает сам вызывающий, и текст различает присланное, а не найденное. Если фактор
 не заведён, войдите без `secondFactor` и прочитайте его состояние
-[`GET /iam/v1/auth/second-factor`](#second-factor). Попытка с кодом при незаведённом факторе
+[`GET /iam/v1/auth/second-factor`](#second-factor). Шаг после отказа входа без поля тот же для
+каждой причины: проверить адрес и пароль; забытый пароль возвращает восстановление по адресу —
+`POST /iam/v1/auth/recovery`, затем `POST /iam/v1/auth/recovery/complete` с новым паролем. Попытка с кодом при незаведённом факторе
 окно частоты тратит так же, как неверный пароль: иначе темп окна выдавал бы, совпал ли пароль.
 
 Успех — `200`, печенья `kaname_session` и **новое** `kaname_form`:
@@ -307,7 +319,9 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 сессии: `{ "newPassword", "csrfToken" }`, признак вида `password-enroll`. Текущего пароля здесь
 нет by construction — его и нет. Сессия должна быть свежей (момент последнего предъявления не
 старше окна правки своих данных; ровно окно — свежая), иначе `403` `SESSION_NOT_FRESH` —
-предъявите способ входа ещё раз. Без подтверждённого адреса — отказ положения подтверждения
+предъявите способ входа ещё раз: у человека без пароля это
+[повышение ключом доступа](#step-up-access-key), нового входа не требуется
+([как освежить сессию](#refresh)). Без подтверждённого адреса — отказ положения подтверждения
 (`403` `EMAIL_NOT_VERIFIED`). Новый пароль судится тем же правилом, что при смене.
 
 Успех — `200` с `{"session": {...}}` той же формы, что у входа, **без** `Set-Cookie`: прочие
@@ -332,7 +346,11 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 `kaname_recovery_request_outcomes_total`. Текст `a letter with a recovery code is sent if this address can recover access; if no letter arrives, request again later, sign in and confirm the address, or ask an administrator to reset your sign-in methods`
 называет шаг условием, которое знает сам человек: письмо пришло — завершение; не пришло —
 повторить позже, войти и подтвердить адрес либо обратиться к администратору. Что письмо
-**отправлено**, он не утверждает. Поле `nextStep` стоит всегда; клиент на его значение не
+**отправлено**, он не утверждает. Приглашённому, который ещё не зарегистрировался, письмо не
+придёт: у приглашения без пароля на неподтверждённый адрес кода нет. Его шаг — регистрация тем же
+адресом (`POST /iam/v1/auth/register`): способ входа и сессия ложатся на строку приглашения; если
+приглашение истекло, регистрация ответит `REGISTRATION_REFUSED`, и шаг — повторное приглашение
+администратором аккаунта. Поле `nextStep` стоит всегда; клиент на его значение не
 ключуется — оно для человека. Заблокированная личность код получает и встречает отказ на
 предъявлении. Срок кода — `authn.login.recovery-code-ttl`; новый запрос вытесняет прежние коды.
 
@@ -385,16 +403,57 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 ### Второй фактор {#second-factor}
 
-`GET /iam/v1/auth/second-factor` (без признака, с сессией) — три формы тела:
+`GET /iam/v1/auth/second-factor` (без признака, с сессией) — три формы `totp`, и у каждой —
+доступность ключей и способы повышения:
 
 <CodeBlock language="json">
   {dedent`
-    { "totp": { "enrolled": false } }
-    { "totp": { "enrolled": false, "pendingUntil": "2026-09-17T10:15:00Z" } }
-    { "totp": { "enrolled": true, "confirmedAt": "2026-09-17T10:00:00Z" },
-      "backupCodes": { "remaining": 8, "total": 10 } }
+    { "totp": { "enrolled": false },
+      "accessKeys": { "available": true }, "stepUpMethods": ["webauthn"] }
+    { "totp": { "enrolled": false, "pendingUntil": "2026-09-17T10:15:00Z" },
+      "accessKeys": { "available": true }, "stepUpMethods": [] }
+    { "totp": { "enrolled": true, "confirmedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T08:00:00Z" },
+      "backupCodeSet": { "remaining": 8, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" },
+      "accessKeys": { "available": true }, "stepUpMethods": ["lookup_secret", "totp", "webauthn"] }
   `}
 </CodeBlock>
+
+Моменты — UTC, до секунды. `totp.lastUsedAt` — последний принятый код (вход с кодом, повышение,
+перечеканка), `backupCodeSet.lastUsedAt` — последний потраченный запасной код, `issuedAt` — выпуск
+набора; момента, которого не было, в теле **нет ключом** — сразу после подтверждения обоих
+`lastUsedAt` нет. `accessKeys.available` — включены ли ключи на установке. `stepUpMethods` —
+набор способов, которыми человек повысит **эту** сессию, по алфавиту: `totp` — у заведённого
+фактора, `lookup_secret` — пока в наборе есть коды, `webauthn` — при включённых ключах и хотя бы
+одном ключе; пароль способом повышения не считается, пусто — `[]`.
+
+#### Набор запасных кодов — два ключа, у каждого один тип {#backup-code-set}
+
+- `backupCodes` — **массив** ровно из десяти кодов только что выпущенного набора, показанных один
+  раз. Он есть только в ответах подтверждения заведения и перечеканки.
+- `backupCodeSet` — **объект** состояния набора с ключами `remaining` (остаток неиспользованных
+  кодов, число), `total` (`10`), `issuedAt` (выпуск набора) и `lastUsedAt` (последняя трата кода
+  этого набора; ключа нет, если из набора не тратили). Кодов в нём нет никогда. Остаток читается
+  одним путём — `backupCodeSet.remaining` — во всех ответах.
+
+`backupCodeSet` в ответе — состояние набора **после** глагола, и его значения совпадают со
+значениями `backupCodeSet` следующего `GET` той же сессии:
+
+| ответ `200` | `backupCodeSet` |
+|---|---|
+| `GET …/second-factor`, фактор заведён | есть — текущее состояние |
+| `GET …/second-factor`, фактора нет либо заведение не подтверждено | нет ключа |
+| `GET …/second-factor`, фактор заведён, а набор не читается | нет ключа; `totp.enrolled: true`, `stepUpMethods` без `lookup_secret` |
+| `POST …/confirm` | есть — `{ "remaining": 10, "total": 10, "issuedAt" }` |
+| `POST …/backup-codes` (перечеканка) | есть — новый набор, `{ "remaining": 10, "total": 10, "issuedAt" }` |
+| `POST /iam/v1/auth/step-up` способом `lookup_secret` | есть — остаток после траты, `lastUsedAt` — момент этой траты |
+| `POST /iam/v1/auth/step-up` способами `password`, `totp`, `webauthn` | нет ключа — набор глаголом не менялся |
+| `POST …/remove` | нет ключа — набора после снятия нет |
+| любой отказ | нет ключа |
+
+`remaining: 0` означает ровно одно — «фактор заведён, коды исчерпаны». «Сводки набора нет»
+выражается **отсутствием** ключа, а не нулём; что именно отсутствует, различает `totp.enrolled`:
+`false` — фактора нет, `true` — набор не читается (дефект хранения на стороне службы; путь
+починки — перечеканка кодом по времени).
 
 `POST …/enroll` (`{ "csrfToken" }`) отвечает `{ "secret", "otpauthUri", "expiresAt" }` — секрет
 в Base32 показывается **один раз**; печений нет. Требует **свежего** предъявления: последнее
@@ -415,7 +474,7 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 не «ключа нет». У человека без ключа условие не действует: свежая сессия `1` заводит код.
 
 `POST …/confirm` (`{ "code", "csrfToken" }`) — первым кодом с приложения; ответ
-`{ "backupCodes": [десять кодов], "session", "assurance" }` и **новый** `kaname_session`:
+`{ "backupCodes": [десять кодов], "backupCodeSet", "session", "assurance" }` и **новый** `kaname_session`:
 подтверждение — предъявление, сессия получает уровень `2`. Запасные коды показываются один раз.
 Требует **свежего** предъявления, как и заведение: иначе `403` `SESSION_NOT_FRESH`, и при
 истёкших обоих окнах — свежести и заведения — первой отвечает свежесть. Условие уровня у
@@ -424,16 +483,13 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 `POST …/remove` и `POST …/backup-codes` подтверждаются кодом — `{ "method", "code",
 "csrfToken" }` (`method`: `totp` либо `lookup_secret`), как смена пароля подтверждается текущим.
-Ответ — `200 { "session", "assurance" }` и новый носитель. У перечеканки к нему добавлен
-`backupCodes` (новый набор). Снятие несёт ещё `backupCodesRemaining: 0` — **всегда** и любым годным
-кодом, а не только потребившим запасной. Поле означает «второй фактор снят, резервных кодов не
-осталось»: снятие убирает фактор, набора запасных кодов после него нет. Успешность снятия
-подтверждают через `GET …/second-factor` по `totp.enrolled: false`, **а не** по счётчику остатка.
-Поле `backupCodesRemaining` в ответе снятия (плоское, всегда `0`) — это **не** то же, что
-`backupCodes.remaining` из `GET` заведённого фактора (вложенное, «сколько кодов ещё у живого
-фактора»): два разных нуля — у снятия `0` значит «фактора больше нет», у живого фактора
-`backupCodes.remaining: 0` значит «фактор жив, но коды исчерпаны». Без заведённого фактора —
-`400` `SECOND_FACTOR_NOT_ENROLLED`.
+Ответ снятия — `200 { "session", "assurance" }` и новый носитель, ровно эти два ключа при любом
+годном коде: набора после снятия нет, и сводки нет. Успешность снятия подтверждают через
+`GET …/second-factor` по `totp.enrolled: false`. Ответ перечеканки — тот же с ключами
+`backupCodes` (новый набор) и `backupCodeSet` (его состояние). Негодная форма кода — отказ формы
+`400`, `code` `3`, не попытка: `Illegal argument code: must be 6 digits` у кода по времени и
+`Illegal argument code: must be 10 characters of the backup-code alphabet` у запасного кода.
+Без заведённого фактора — `400` `SECOND_FACTOR_NOT_ENROLLED`.
 
 Утративший и приложение, и запасные коды сам фактор не снимет: за него это делает надзор облака
 глаголом [`UserService.ResetSecondFactor`](/api/user#reset-second-factor).
@@ -444,13 +500,20 @@ with the current password`: пароль меняют через `POST /iam/v1/a
   {dedent`
     { "method": "totp", "code": "123456", "csrfToken": "…" }
     { "method": "password", "password": "…", "csrfToken": "…" }
+    { "method": "webauthn", "credential": { "id": "…", "type": "public-key",
+      "response": { "clientDataJSON": "…", "authenticatorData": "…", "signature": "…", "userHandle": "…" } },
+      "csrfToken": "…" }
   `}
 </CodeBlock>
 
-Способ называет клиент: `password`, `totp`, `lookup_secret`; поле, не относящееся к способу,
-отвергается по имени. Успешное предъявление кладёт способ в множество предъявленных, уровень
+Способ называет клиент: `password`, `totp`, `lookup_secret`, `webauthn`; иной —
+`Illegal argument method: must be one of password|totp|lookup_secret|webauthn`. Поле другого
+способа отвергается по имени: `Illegal argument <поле>: not accepted with method <способ>`. Успешное предъявление кладёт способ в множество предъявленных, уровень
 пересчитывается правилом (монотонно — понижения нет), носитель перевыпускается. Неудачное
-предъявление сессию не гасит и не понижает. Ответ — `{ "session", "assurance" }`:
+предъявление сессию не гасит и не понижает. Форма кода у `totp` и `lookup_secret` судится до
+сверки, как у снятия: `Illegal argument code: must be 6 digits` либо
+`Illegal argument code: must be 10 characters of the backup-code alphabet`. Ответ —
+`{ "session", "assurance" }`:
 
 <CodeBlock language="json">
   {dedent`
@@ -459,10 +522,57 @@ with the current password`: пароль меняют через `POST /iam/v1/a
   `}
 </CodeBlock>
 
+У способа `lookup_secret` к нему добавлено состояние набора после траты — `backupCodeSet`
+([набор запасных кодов](#backup-code-set)):
+
+<CodeBlock language="json">
+  {dedent`
+    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
+      "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] },
+      "backupCodeSet": { "remaining": 9, "total": 10, "issuedAt": "2026-09-17T10:00:00Z", "lastUsedAt": "2026-09-18T07:00:00Z" } }
+  `}
+</CodeBlock>
+
 `level2Reachable` — есть ли среди заведённых у человека способов такой, что даст `2`;
-`missingForLevel2` — какие способы (`totp`, `lookup_secret`) его предъявление в этой сессии
-выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
-запасным кодом — `2`; один пароль либо код восстановления — `1`.
+`missingForLevel2` — какие способы (`totp`, `lookup_secret`, `webauthn`) его предъявление в этой
+сессии выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
+запасным кодом — `2`; ключ доступа — `2`, а ключ с проверкой пользователя, не допускающий
+резервного копирования, — `3`; один пароль либо код восстановления — `1`.
+
+#### Как освежить сессию {#refresh}
+
+Успешное предъявление церемонией повышения двигает момент
+последнего предъявления сессии — тот, от которого считается окно свежести
+(`authn.self-service-freshness`) и на который отвечает `SESSION_NOT_FRESH` — одна из причин
+`403` ([таблица причин](/api/rest-surface#forbidden-reasons)). Освежает любой
+заведённый способ: пароль, код по времени, запасной код либо ключ доступа. Человек только с
+ключом освежает сессию [повышением ключом доступа](#step-up-access-key) — два обращения в той же
+сессии, без нового входа и без новой строки в [перечне своих сессий](#own-sessions). Момента
+аутентификации сессии повышение не двигает: его читает условие `mfa_fresh` модели прав, и отказ
+по этому условию снимает только новый вход ключом доступа, дающий `3`
+([что снимает отказ по `mfa_fresh`](/architecture/authz#условия-на-кортежах)).
+
+#### Повышение ключом доступа — `POST /iam/v1/auth/step-up/access-key/begin` {#step-up-access-key}
+
+Сначала испытание **этой** сессии: `{ "csrfToken" }` признаком вида `step-up-access-key-begin`.
+Ответ — параметры предъявления, `allowCredentials` — ключи человека в порядке заведения:
+
+<CodeBlock language="json">
+  {dedent`
+    { "publicKey": { "challenge": "…", "rpId": "console.example", "timeout": 300000,
+      "userVerification": "preferred",
+      "allowCredentials": [ { "type": "public-key", "id": "…" } ] } }
+  `}
+</CodeBlock>
+
+Живое испытание у сессии одно: новая выдача сменяет прежнее, и прежнее предъявить нельзя.
+Выдача попыткой не считается. Ключей нет — `400` `ACCESS_KEY_NOT_REGISTERED`; ключи на установке
+выключены — `400` `ACCESS_KEYS_DISABLED` (тем же отказом отвечают выдача регистрации ключа и
+выдача входа ключом). Затем — церемония `POST /iam/v1/auth/step-up` способом `webauthn`.
+Испытание сгорает при предъявлении, каким бы ни был исход сверки. Испытание другой сессии либо
+сменённое — `400` `CHALLENGE_NOT_ISSUED`, повтор — `400` `CHALLENGE_ALREADY_PRESENTED`, истёкшее —
+`400` `CHALLENGE_EXPIRED`; эти отказы попыткой не считаются. Прочие отказы ключа — тот же
+`401` `authentication failed`, что у неверного кода, и та же попытка в том же счёте.
 
 ### Вход ключом доступа — `POST /iam/v1/auth/access-key/{begin,login}` {#access-key-login}
 
@@ -539,8 +649,18 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 ### Ключи доступа (WebAuthn) — `AccessKeyService`
 
 Ключ доступа — **свой ресурс** человека (не строка способа входа): своя таблица, свой `id`
-формы `ak-…`, свои шесть глаголов. Ходят они **не полосой форм**, а обычным REST-фронтом
-службы (тем же, что `UserService`), и поднимаются вместе с полосой входа на каждом старте. Церемонию ведёт браузер (`navigator.credentials.create` /
+формы `ak-…`, свои шесть глаголов. Ходят они **не полосой форм**, а публичным API службы (тем
+же, что `UserService`), и поднимаются вместе с полосой входа на каждом старте. Входы принимают
+их по-разному — так же, как прочие глаголы ([таблица форм](/api/overview#аутентификация)):
+
+- **через край платформы** — печеньем сессии человека: край принимает печенье и передаёт службе
+  личность вызывающего и номер его текущей сессии; так ходит консоль;
+- **на собственном REST-фронте службы (`:9098`)** — только JWT доступа: печенья этот фронт не
+  принимает, и вызов с одним печеньем получает `UNAUTHENTICATED`, как вызов без удостоверения.
+
+Столбец «Сессия» ниже — о живой сессии самого человека, а не о том, чем предъявлен вызов:
+свежесть судится по последнему предъявлению в его действующих сессиях, на обоих входах одинаково.
+Церемонию ведёт браузер (`navigator.credentials.create` /
 `get`); служба выдаёт испытание, судит результат и хранит открытый ключ. Аттестация ключа не
 требуется, не проверяется и не хранится; модель устройства продукт не судит.
 
@@ -589,7 +709,8 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 `credProps.rk`, если браузер его сообщил (сообщённое `false` отвергается: ключ обязан быть
 обнаруживаемым). Форма имени и описания судится **до** результата церемонии и испытание не
 гасит. Утверждение — `{ "credential": { "id", "clientDataJson", "authenticatorData",
-"signature", "userHandle" } }`; ответ — `{ "userId", "accessKeyId", "flags": { "userPresent",
+"signature", "userHandle" } }` (чем оно отличается от утверждения полосы входа —
+[таблица ниже](#assertion-surfaces)); ответ — `{ "userId", "accessKeyId", "flags": { "userPresent",
 "userVerified", "backupEligible", "backupState" } }`, и `userId` всегда равен вызывающему.
 
 Число ключей человека ограничено потолком `own-ceilings.access-keys-per-user` (ноль — «ключей
@@ -597,15 +718,67 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 перечень происхождений консоли, перечень алгоритмов (`-7` ES256, `-8` EdDSA, `-257` RS256) —
 объявляет посадка ручками `authn.access-keys.*`; их смена делает существующие ключи негодными.
 
-Отказы полосы регистрации и снятия различимы по `reason`: `SESSION_NOT_FRESH` (403),
-`CHALLENGE_NOT_ISSUED` · `CHALLENGE_ALREADY_PRESENTED` · `CHALLENGE_EXPIRED` ·
-`ORIGIN_NOT_ALLOWED` · `RP_ID_MISMATCH` · `USER_NOT_PRESENT` · `ALGORITHM_NOT_ALLOWED` ·
-`CREDENTIAL_NOT_DISCOVERABLE` (400 на приёме результата), `LAST_SIGN_IN_METHOD` (400 на
-снятии), `AlreadyExists` на удостоверении, уже принятом, отказ потолка с действующей величиной
-и следующим шагом. Отказ **утверждения** — один на все причины и без подробностей:
-`400` `access key assertion is not accepted`; какая именно — видно только оператору по
-счётчикам. Малформный `accessKeyId` — `400` `invalid access key id '…'` первым стейтментом;
-чужой и несуществующий ключ на снятии — одинаковое `404`.
+Отказы регистрации и снятия различимы по `reason`, и каждый называет следующий шаг после
+двоеточия: начать регистрацию заново — и с чем именно — либо повторить позже. Шаг верен при любом
+состоянии прежнего испытания: новое `beginRegistration` выдаёт новое.
+
+<table>
+  <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
+  <tbody>
+    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>выдача испытания, приём результата, снятие ключа — при предъявлении старше окна свежести; освежает <a href="#refresh">повышение</a>; одна из <a href="/api/rest-surface#forbidden-reasons">причин <code>403</code></a></td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration challenge was not issued: begin registration again</code></td><td><code>CHALLENGE_NOT_ISSUED</code></td><td>приём результата над испытанием, которого этому вызывающему не выдавали</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration challenge was already presented: begin registration again</code></td><td><code>CHALLENGE_ALREADY_PRESENTED</code></td><td>повтор результата над уже предъявленным испытанием</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration challenge expired: begin registration again</code></td><td><code>CHALLENGE_EXPIRED</code></td><td>срок испытания (5 минут) вышел</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential origin is not in the declared list: begin registration again from a declared origin, or ask the operator to declare this origin</code></td><td><code>ORIGIN_NOT_ALLOWED</code></td><td>происхождение церемонии вне перечня <code>authn.access-keys.*</code> посадки</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential was created for another relying party: begin registration again and create the credential for the relying party named in the challenge</code></td><td><code>RP_ID_MISMATCH</code></td><td>удостоверение создано для другого имени доверяющей стороны</td></tr>
+    <tr><td>400</td><td>3</td><td><code>authenticator did not report user presence: begin registration again and confirm presence on the authenticator</code></td><td><code>USER_NOT_PRESENT</code></td><td>аутентификатор не сообщил присутствия человека</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential public key algorithm is not in the declared list: begin registration again with an algorithm named in the challenge</code></td><td><code>ALGORITHM_NOT_ALLOWED</code></td><td>алгоритм открытого ключа вне перечня испытания</td></tr>
+    <tr><td>400</td><td>3</td><td><code>credential is not discoverable: begin registration again with a discoverable credential</code></td><td><code>CREDENTIAL_NOT_DISCOVERABLE</code></td><td>браузер сообщил <code>credProps.rk</code> = <code>false</code></td></tr>
+    <tr><td>400</td><td>3</td><td><code>Illegal argument credential.client_data_json: credential result is malformed: begin registration again</code></td><td>—</td><td>результат церемонии не разбирается либо его байты расходятся с испытанием</td></tr>
+    <tr><td>400</td><td>9</td><td><code>last sign-in method cannot be revoked: enrol another sign-in method first</code></td><td><code>LAST_SIGN_IN_METHOD</code></td><td>снятие последнего способа входа человека</td></tr>
+    <tr><td>400</td><td>9</td><td><code>access keys are turned off on this installation</code></td><td><code>ACCESS_KEYS_DISABLED</code></td><td>перечень происхождений посадки пуст</td></tr>
+    <tr><td>503</td><td>14</td><td><code>access key service temporarily unavailable: retry later</code></td><td>—</td><td>хранилище либо окно свежести не ответили; ни форма, ни испытание вызывающего не виноваты, состояние не изменено</td></tr>
+  </tbody>
+</table>
+
+Удостоверение, уже принятое, — `AlreadyExists`; отказ потолка называет действующую величину и
+следующий шаг. Отказ **утверждения** — один на все четырнадцать причин и без подробностей:
+`400` `access key assertion is not accepted: begin the assertion again`; какая именно — видно
+только оператору по счётчикам. Шаг верен на каждой причине: новое
+`POST /iam/v1/accessKeys:beginAssertion` выдаёт новое испытание при любом состоянии прежнего.
+Малформный `accessKeyId` — `400` `invalid access key id '…'` первым стейтментом; чужой и
+несуществующий ключ на снятии — одинаковое `404`.
+
+#### Утверждение на двух поверхностях {#assertion-surfaces}
+
+Одно и то же утверждение ключа служба принимает на двух поверхностях, и они различаются: на
+[полосе входа](#access-key-login) утверждение **есть** удостоверение ещё никем не названного
+вызывающего, на REST-фронте — полезная нагрузка вызова живой сессии. Различие объявлено здесь,
+и других его описаний нет.
+
+<table>
+  <thead><tr><th>свойство</th><th>полоса входа <code>POST /iam/v1/auth/access-key/login</code></th><th>REST <code>POST /iam/v1/accessKeys:finishAssertion</code></th></tr></thead>
+  <tbody>
+    <tr><td>форма</td><td><code>credential.response.&#123;clientDataJSON, authenticatorData, signature, userHandle&#125;</code> — сериализация браузера без <code>clientExtensionResults</code> и <code>authenticatorAttachment</code>; лишнее поле — <code>400</code> с его именем</td><td><code>credential.&#123;id, clientDataJson, authenticatorData, signature, userHandle&#125;</code> — сообщение <code>AssertionCredential</code>, плоское; сериализация браузера — отказ формы <code>Illegal argument credential.client_data_json: required</code> до сверки, испытание не тратится</td></tr>
+    <tr><td>кодировка байтов</td><td>base64url без дополнения</td><td>base64 и base64url, с дополнением и без</td></tr>
+    <tr><td><code>userHandle</code></td><td>обязателен: испытание не называет человека</td><td>необязателен: испытание выдано вызывающему; пустой — «не прислан», присланный сверяется</td></tr>
+    <tr><td>отказ по существу</td><td><code>401</code>, код <code>16</code>, <code>authentication failed</code></td><td><code>400</code>, код <code>3</code>, <code>access key assertion is not accepted: begin the assertion again</code>, <code>details</code> пуст</td></tr>
+    <tr><td>испытание после отказа</td><td>погашено при любом исходе предъявления</td><td>гасится только принятым утверждением; после отказа живо до своего срока</td></tr>
+  </tbody>
+</table>
+
+Поля браузера переходят в поля сообщения одним переименованием:
+
+<table>
+  <thead><tr><th>полоса входа</th><th>REST</th></tr></thead>
+  <tbody>
+    <tr><td><code>response.clientDataJSON</code></td><td><code>clientDataJson</code></td></tr>
+    <tr><td><code>response.authenticatorData</code></td><td><code>authenticatorData</code></td></tr>
+    <tr><td><code>response.signature</code></td><td><code>signature</code></td></tr>
+    <tr><td><code>response.userHandle</code></td><td><code>userHandle</code></td></tr>
+    <tr><td><code>rawId / id</code></td><td><code>id</code></td></tr>
+  </tbody>
+</table>
 
 ### Свои сессии — `GET /iam/v1/auth/sessions`, `POST …/sessions/{end,end-others}` {#own-sessions}
 
@@ -675,7 +848,9 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 Оба выхода требуют **свежей** сессии: момент последнего предъявления не старше
 `authn.self-service-freshness` (ровно окно — свежая), иначе `403` `SESSION_NOT_FRESH` —
-повышение `POST /iam/v1/auth/step-up` освежает сессию, после него выход проходит.
+повышение `POST /iam/v1/auth/step-up` освежает сессию, после него выход проходит; человек только
+с ключом освежает её [повышением ключом доступа](#step-up-access-key)
+([как освежить сессию](#refresh)).
 Довод: носитель, оказавшийся у постороннего, без свежести давал бы ему выгнать владельца со всех
 прочих устройств. Перечень свежести не требует. Отсечки эти глаголы не пишут, и в счёт неверных
 предъявлений не идут. Каждое снятие пишет событие аудита `iam.session.ended_by_person`
@@ -685,15 +860,24 @@ with the current password`: пароль меняют через `POST /iam/v1/a
 
 Форма — та же, что у края через grpc-gateway: `{code, message, details}`, `details` — всегда
 массив, пустой либо с одним `google.rpc.ErrorInfo` (`reason`, `domain`). Тексты — контракт:
-они не несут причины, и клиент ключуется на `reason`, а не на прозу.
+они не несут причины, и клиент ключуется на `reason`, а не на прозу. Где `reason` в таблице — «—»,
+`details` пуст, и отказ различается парой HTTP-статус и `code` на своём глаголе. Так отвечает и
+«сессии нет» у глаголов полосы под сессией (`GET /iam/v1/auth/sessions`,
+`GET /iam/v1/auth/second-factor` и прочие): `401`, код `16`, `authentication failed`, `details`
+пуст. Маршрут края `GET /iam/v1/me` то же состояние отвечает тем же статусом, кодом и текстом, но
+с `ErrorInfo` (`reason` `AUTHN_REQUIRED`) в `details`: клиент, который читает оба, узнаёт «сессии
+нет» по `401` и коду `16`, а не по `reason`.
 
 <table>
   <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
   <tbody>
     <tr><td>400</td><td>3</td><td><code>Illegal argument &lt;поле&gt;: required</code> · <code>… unknown field</code> · <code>Illegal argument body: malformed JSON</code> · <code>… trailing content</code> · правило пароля · форма кода</td><td>—</td><td>форма негодна; состояние не изменено, в счёт частоты не идёт</td></tr>
     <tr><td>400</td><td>9</td><td><code>registration refused; if this address is already yours, sign in or recover access; if you were invited, ask an account administrator to invite again; otherwise try again later</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · способ входа на строку приглашения уже записан · приглашение истекло · потолок темпа заведения исчерпан · окно регистраций источника полно — <strong>один</strong> отказ на все, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса. Текст называет шаг условием, которое знает сам вызывающий, и ни одной причины, числа или срока</td></tr>
-    <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>церемония повышения, снятие или перечеканка без заведённого фактора — глаголы под живой сессией; <strong>на входе не производится</strong>: код при незаведённом факторе — тот же <code>401</code>, что неверный пароль с тем же полем <code>secondFactor</code></td></tr>
+    <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>церемония повышения, снятие или перечеканка без заведённого фактора — глаголы под живой сессией; следующий шаг — завести фактор: <code>POST /iam/v1/auth/second-factor/enroll</code>, затем <code>POST /iam/v1/auth/second-factor/confirm</code>, либо повыситься другим заведённым способом (<code>missingForLevel2</code> ответа повышения называет, каким); <strong>на входе не производится</strong>: код при незаведённом факторе — тот же <code>401</code>, что неверный пароль с тем же полем <code>secondFactor</code></td></tr>
     <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
+    <tr><td>400</td><td>9</td><td><code>no access key is registered: register an access key first</code></td><td><code>ACCESS_KEY_NOT_REGISTERED</code></td><td>выдача испытания повышения ключом у человека без ключей; попыткой не считается</td></tr>
+    <tr><td>400</td><td>9</td><td><code>access keys are turned off on this installation</code></td><td><code>ACCESS_KEYS_DISABLED</code></td><td>выдача испытания повышения ключом и выдача входа ключом на установке с пустым перечнем происхождений; попыткой не считается</td></tr>
+    <tr><td>400</td><td>9</td><td><code>step-up challenge was not issued: begin step-up again</code> · <code>step-up challenge was already presented: begin step-up again</code> · <code>step-up challenge expired: begin step-up again</code></td><td><code>CHALLENGE_NOT_ISSUED</code> · <code>CHALLENGE_ALREADY_PRESENTED</code> · <code>CHALLENGE_EXPIRED</code></td><td>церемония повышения ключом: испытания этой сессии нет (другой сессии либо сменено) · уже предъявлено · истекло; попыткой не считается</td></tr>
     <tr><td>400</td><td>9</td><td><code>email address is already verified</code></td><td><code>EMAIL_ALREADY_VERIFIED</code></td><td>запрос письма либо предъявление кода подтверждённым: письмо не ставится, отметка не переписывается</td></tr>
     <tr><td>400</td><td>9</td><td><code>the current session ends by logout</code></td><td><code>SESSION_IS_CURRENT</code></td><td>выход из выбранной сессии назвал текущую: из неё выходят выходом, ничего не снято</td></tr>
     <tr><td>400</td><td>9</td><td><code>invite is no longer valid; ask an account administrator to invite again</code></td><td><code>INVITE_NOT_VALID</code></td><td>код подошёл — подтверждения адреса либо завершения восстановления, переводящего запись к владельцу ящика, — а приглашение приглашённого истекло либо снято: отметки нет, попытка кода не истрачена, у завершения восстановления ничего не меняется и код остаётся годным; выход — повторное приглашение</td></tr>
@@ -702,7 +886,7 @@ with the current password`: пароль меняют через `POST /iam/v1/a
     <tr><td>401</td><td>16</td><td><code>authentication level is insufficient: step up with a second factor, or present a credential of another kind</code></td><td>—</td><td>указание повысить уровень: заведение либо подтверждение кода у человека с ключом доступа, запрос смены адреса либо предъявление его кода у человека с кодом по времени либо ключом доступа — из сессии ниже <code>2</code>; <code>WWW-Authenticate</code> несёт <code>error="insufficient_user_authentication"</code> и <code>acr_values="2"</code>; состояние не изменено</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled</code></td><td>—</td><td>вход <strong>с полем</strong> <code>secondFactor</code>: <strong>один</strong> отказ на все причины этой формы — адреса нет · пароль не тот · личность заблокирована · код не тот, повторён или потреблён · фактор не заведён; называет шаг, не называя причины</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
-    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора, заведение пароля, запрос смены адреса, регистрация (выдача испытания и приём результата), снятие ключа доступа, выход из выбранной сессии либо из всех, кроме текущей, — при предъявлении старше окна свежести; ответ у всех одинаков</td></tr>
+    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора, заведение пароля, запрос смены адреса, регистрация (выдача испытания и приём результата), снятие ключа доступа, выход из выбранной сессии либо из всех, кроме текущей, — при предъявлении старше окна свежести; ответ у всех одинаков; освежает сессию <a href="#refresh">повышение</a> любым заведённым способом, в том числе ключом доступа</td></tr>
     <tr><td>403</td><td>7</td><td><code>email address is not verified: confirm it with the code from the letter (POST /iam/v1/auth/verify-email/confirm)</code></td><td><code>EMAIL_NOT_VERIFIED</code></td><td>отказ положения подтверждения: путь объявлен отказом, адрес владельца сессии не подтверждён</td></tr>
     <tr><td>403</td><td>7</td><td><code>permission denied</code></td><td>—</td><td>вызывающий — не край: тело не читалось</td></tr>
     <tr><td>404</td><td>5</td><td><code>session not found</code></td><td><code>SESSION_NOT_FOUND</code></td><td>выход из выбранной сессии назвал не живую сессию самого человека — чужую, неизвестную, снятую либо истёкшую, неразличимо</td></tr>

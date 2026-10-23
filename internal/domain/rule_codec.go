@@ -25,6 +25,19 @@ type ruleJSON struct {
 	Verbs         []string          `json:"verbs"`
 	ResourceNames []string          `json:"resource_names,omitempty"`
 	MatchLabels   map[string]string `json:"match_labels,omitempty"`
+	// Children — вложенные правила (kaname#874). Ключа нет у правила без
+	// вложенных: хранимая форма прежних ролей не меняется ни на байт.
+	Children []childRuleJSON `json:"children,omitempty"`
+}
+
+// childRuleJSON — хранимая форма ВЛОЖЕННОГО правила. Модуля и своих вложенных у
+// неё нет by construction: модуль берётся у владельца, глубину выражает тип
+// (страж базы `kaname.iam_rules_valid` отвергает оба ключа у вложенного).
+type childRuleJSON struct {
+	Resources     []string          `json:"resources"`
+	Verbs         []string          `json:"verbs"`
+	ResourceNames []string          `json:"resource_names,omitempty"`
+	MatchLabels   map[string]string `json:"match_labels,omitempty"`
 }
 
 // DecodeRules decodes the roles.rules JSONB payload into domain Rules. An empty/nil
@@ -39,13 +52,25 @@ func DecodeRules(raw []byte) (Rules, error) {
 	}
 	out := make(Rules, 0, len(in))
 	for _, r := range in {
-		out = append(out, Rule{
+		rule := Rule{
 			Module:        r.Module,
 			Resources:     r.Resources,
 			Verbs:         r.Verbs,
 			ResourceNames: r.ResourceNames,
 			MatchLabels:   r.MatchLabels,
-		})
+		}
+		if len(r.Children) > 0 {
+			rule.Children = make([]Rule, 0, len(r.Children))
+			for _, c := range r.Children {
+				rule.Children = append(rule.Children, Rule{
+					Resources:     c.Resources,
+					Verbs:         c.Verbs,
+					ResourceNames: c.ResourceNames,
+					MatchLabels:   c.MatchLabels,
+				})
+			}
+		}
+		out = append(out, rule)
 	}
 	return out, nil
 }
@@ -54,13 +79,22 @@ func DecodeRules(raw []byte) (Rules, error) {
 func EncodeRules(rs Rules) ([]byte, error) {
 	out := make([]ruleJSON, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, ruleJSON{
+		rj := ruleJSON{
 			Module:        r.Module,
 			Resources:     r.Resources,
 			Verbs:         r.Verbs,
 			ResourceNames: r.ResourceNames,
 			MatchLabels:   r.MatchLabels,
-		})
+		}
+		for _, c := range r.Children {
+			rj.Children = append(rj.Children, childRuleJSON{
+				Resources:     c.Resources,
+				Verbs:         c.Verbs,
+				ResourceNames: c.ResourceNames,
+				MatchLabels:   c.MatchLabels,
+			})
+		}
+		out = append(out, rj)
 	}
 	return json.Marshal(out)
 }

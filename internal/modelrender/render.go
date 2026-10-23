@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -72,12 +74,36 @@ var (
 // включительно, БЕЗ завершающей пустой строки — разделитель принадлежит файлу, а
 // не блоку.
 func Render(r manifest.Resource) ([]byte, error) {
+	blk, _, err := RenderWithKeyTerms(r)
+	return blk, err
+}
+
+// RenderWithKeyTerms — тот же блок и вместе с ним ТЕРМЫ, которые в него вписал
+// ключ публичного чтения (kaname#866, приёмка
+// public-read-container-of-a-module-type-is-admitted.md, Р1, Р4).
+//
+// Перечень производит ТОТ ЖЕ проход, что пишет строки: ветка ключа отмечает
+// терм там, где его пишет, и второго правила «что пишет ключ» в дереве нет. По
+// тексту блока перечень не восстановим — три следствия, написанные рукой, дают
+// побайтово тот же блок (замер приёмки, строки 5 и 6), — поэтому допуск получает
+// его рядом с текстом, а не выводит из текста.
+//
+// Термы трёх видов, и только эти:
+//
+//   - контейнер: голая запись класса в `public_reader`;
+//   - контейнер: голая запись класса в отношении действия чтения — только того
+//     отношения, которое порождает СОБСТВЕННОЕ действие ресурса (авторское
+//     отношение с тем же именем терма не получает: его пишет не ключ);
+//   - ребёнок: `public_reader from <указатель>` в отношении действия чтения, по
+//     каждому указателю из [manifest.Resource.PublicReadPointers].
+func RenderWithKeyTerms(r manifest.Resource) ([]byte, []authzmodel.KeyTerm, error) {
 	if r.ObjectType == "" {
-		return nil, ErrObjectTypeEmpty
+		return nil, nil, ErrObjectTypeEmpty
 	}
 	if len(r.Parents) == 0 {
-		return nil, ErrParentEmpty
+		return nil, nil, ErrParentEmpty
 	}
+	var terms []authzmodel.KeyTerm
 
 	var b strings.Builder
 	b.WriteString("type " + r.ObjectType + "\n")
@@ -125,10 +151,20 @@ func Render(r manifest.Resource) ([]byte, error) {
 		if len(sources) == 0 {
 			sources = []string{previous}
 		}
-		define(tier.Name, "["+strings.Join(subjects, ", ")+"] or "+strings.Join(sources, " or "))
+		define(tier.Name, "["+strings.Join(subjectWords(subjects), ", ")+"] or "+strings.Join(sources, " or "))
 		previous = tier.Name
 	}
 	writeAuthoredRelations(r, "beforeVerbs", define)
+
+	// Публичное чтение детям (Р9 «Способ», kaname#856): ключ контейнера даёт ему
+	// отношение `public_reader` — последним перед действиями, — а действиям
+	// чтения контейнера и детей — по одному следствию ниже. Пишущие глаголы,
+	// ярусы и каскад ключ не трогает.
+	if r.PassesPublicRead() {
+		define(domain.PublicReaderRelation, "["+string(domain.SubjectTypeSystemClass)+"]")
+		terms = append(terms, authzmodel.KeyTerm{Type: r.ObjectType, Relation: domain.PublicReaderRelation})
+	}
+	inherits := r.PublicReadPointers()
 
 	// Порядок глаголов задаёт КАНОН, а не манифест: перестановка ресурсов и
 	// глаголов в YAML рендер не меняет (B-04). Субъекты здесь умолчательные —
@@ -151,12 +187,74 @@ func Render(r manifest.Resource) ([]byte, error) {
 		if len(verb.From) > 0 {
 			sources = verb.From
 		}
-		define(manifest.VerbRelationName(verb.Name),
-			"["+strings.Join(subjects, ", ")+"] or "+strings.Join(sources, " or "))
+		words := subjectWords(subjects)
+		relation := manifest.VerbRelationName(verb.Name)
+		// Судится ИМЯ действия, а не класс: следствие ключа касается ровно
+		// отношений `v_get` и `v_list` (Р9 «Способ»), а их порождают действия с
+		// этими именами; собственное действие с классом чтения пишет своё
+		// отношение, и публичное чтение его не открывает. Набор имён объявлен
+		// один раз — в `domain` (kaname#866, CE-03).
+		if domain.IsPublicReadVerb(verb.Name) {
+			if r.PassesPublicRead() {
+				words = withClassFirst(words)
+				terms = append(terms, authzmodel.KeyTerm{Type: r.ObjectType, Relation: relation})
+			}
+			for _, ptr := range inherits {
+				sources = append(append([]string(nil), sources...),
+					domain.PublicReaderRelation+" from "+ptr)
+				terms = append(terms, authzmodel.KeyTerm{Type: r.ObjectType, Relation: relation, Pointer: ptr})
+			}
+		}
+		define(relation, "["+strings.Join(words, ", ")+"] or "+strings.Join(sources, " or "))
 	}
 	writeAuthoredRelations(r, "afterVerbs", define)
 
-	return []byte(b.String()), nil
+	return []byte(b.String()), terms, nil
+}
+
+// withClassFirst — состав субъектов с классом `system_class` первым, без повтора:
+// так его пишет канон (`[system_class, user, …]`), и состав, где класс уже есть
+// (перевод слова `user:*`), не получает второй записи.
+func withClassFirst(words []string) []string {
+	class := string(domain.SubjectTypeSystemClass)
+	out := make([]string, 0, len(words)+1)
+	out = append(out, class)
+	for _, w := range words {
+		if w != class {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// subjectWords — состав субъектов отношения в словах модели.
+//
+// Перевод ВРЕМЕННЫЙ, и его основание — внешний факт, а не выбор этого пакета:
+// манифест registry ствола kacho объявляет публичное чтение репозитория словом
+// `user:*`, а канон после классов субъектов (kaname#829) несёт на том же месте
+// `system_class`. Блок типа канона обязан совпадать с манифестом побайтово, а
+// kacho закрепляет kaname в go.mod и сверяет свои манифесты ЭТИМ сборщиком —
+// поэтому переход манифеста раньше пина ломает kacho, а пин раньше перевода
+// ломает сверку здесь. Перевод снимает эту взаимную блокировку.
+//
+// Переводится ТОЛЬКО запись субъекта, равная слову целиком, и только в
+// позиции субъекта порождаемого отношения: проза примечаний и текст авторских
+// отношений воспроизводятся дословно, как и прежде. Допуск переводом не
+// ослабляется: класс в новом типе модуля по-прежнему находка Д3, как и само
+// слово `user:*`.
+//
+// Предикат снятия: манифест registry kacho переведён на `system_class` и kacho
+// поднял пин kaname (PRO-Robotech/kacho#3251); снятие — kaname#836 снятие
+// перевода.
+func subjectWords(subjects []string) []string {
+	out := make([]string, len(subjects))
+	for i, s := range subjects {
+		if s == domain.LegacyPublicWildcardWord {
+			s = string(domain.SubjectTypeSystemClass)
+		}
+		out[i] = s
+	}
+	return out
 }
 
 // writeAuthoredRelations — авторские отношения ОДНОГО места, в порядке манифеста.

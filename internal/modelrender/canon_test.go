@@ -23,7 +23,7 @@ import (
 // с баннером следующего домена.
 //
 // Проба утверждает ЧИСЛО внутриблочных комментариев, а не только число блоков:
-// разборщик, взявший единицу B, дал бы то же число блоков (32) и другое число
+// разборщик, взявший единицу B, дал бы то же число блоков (33) и другое число
 // комментариев, то есть ошибка была бы невидима по первой величине.
 //
 // ЕДИНИЦА здесь — из §0.7 приёмки (строка-комментарий с отступом внутри тела
@@ -44,8 +44,8 @@ func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 		t.Fatalf("канон не резолвится: %v", err)
 	}
 	blocks := modelrender.SplitCanon(dsl)
-	if len(blocks) != 32 {
-		t.Fatalf("блоков %d, ожидалось 32 (канон %s)", len(blocks), path)
+	if len(blocks) != 33 {
+		t.Fatalf("блоков %d, ожидалось 33 (канон %s)", len(blocks), path)
 	}
 
 	inner := 0
@@ -79,7 +79,7 @@ func TestB06TypesOutsideModulesAreDerivedNotWritten(t *testing.T) {
 		t.Fatalf("канон не резолвится: %v", err)
 	}
 	got := modelrender.TypesOutsideModules(seed.LiteralRows().Resources, dsl)
-	want := []string{"cluster", "group", "iam_fgaproxy", "service_account", "user"}
+	want := []string{"cluster", "group", "iam_fgaproxy", "service_account", "system_class", "user"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("типы вне модулей = %v, ожидалось %v", got, want)
 	}

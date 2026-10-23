@@ -184,7 +184,7 @@ func (s Scope) ValidateAgainst(resourceType, resourceID string) error {
 // IsScopeAnchorKind reports whether a bare within-service kind may anchor an
 // AccessBinding. Only the three hierarchy tiers can; a per-object type names an
 // object UNDER the anchor and belongs to the `target` axis (F8), whose vocabulary
-// is the materialization feed (`ValidTargetType`).
+// is the live platform catalog (`ValidTargetType`, kaname#904).
 func IsScopeAnchorKind(bare string) bool {
 	return scopeVocabulary[bare].dotted != ""
 }

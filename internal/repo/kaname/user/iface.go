@@ -23,20 +23,14 @@ type ReaderIface interface {
 	GetByAccountEmail(ctx context.Context, accountID domain.AccountID, email domain.Email) (domain.User, error)
 
 	// FindPendingByEmail — все PENDING-row'ы по email через все Account'ы
-	// (cross-Account). Используется в `InternalUserService.UpsertFromIdentity`
-	// для активации pending-invites при first-login.
+	// (cross-Account). Используется зеркалом регистрации: адрес живого
+	// приглашения ложится на строку приглашения, а не заводит вторую.
 	FindPendingByEmail(ctx context.Context, email domain.Email) ([]domain.User, error)
-
-	// FindActiveByExternalID — все ACTIVE-row'ы по identity (субъект `sub`) через
-	// все Account'ы. Используется в UpsertFromIdentity чтобы определить,
-	// нужен ли bootstrap новый Account.
-	FindActiveByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error)
 
 	// FindByExternalIDInStatuses — все row'ы по identity (субъект `sub`) через все
 	// Account'ы, ограниченные множеством invite_status'ов, ORDER BY created_at
-	// ASC. В отличие от FindActiveByExternalID (ACTIVE-only), этот reader видит
-	// и BLOCKED-row'ы: читатели (поиск субъекта, административное заведение
-	// личности) обязаны отличать заблокированную личность от отсутствующей.
+	// ASC. Видит и BLOCKED-row'ы: читатель (поиск субъекта) обязан отличать
+	// заблокированную личность от отсутствующей.
 	// Пустой externalID либо пустой
 	// statuses → nil-срез. Возвращает nil-срез если
 	// нет ни одной row.

@@ -143,7 +143,7 @@ func (h *sfHarness) verbsUnder(t *testing.T, totp *totpverify.Verifier) keyedVer
 	now := func() time.Time { return h.clock }
 	deps := humansession.SecondFactorDeps{
 		Store: h.store, Methods: fakeMethods{h.store}, TOTP: totp, Sets: h.verifier, SetHasher: h.hasher,
-		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain,
+		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain, Keys: sfKeys(),
 		Observer: h.obs, Now: now, Logger: logger,
 	}
 	stepUp, err := humansession.NewStepUpUseCase(deps)

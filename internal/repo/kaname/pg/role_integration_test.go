@@ -32,6 +32,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func seedCustomRole(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.Role {
@@ -173,9 +174,9 @@ func TestRole_30b_DeleteCustom_WithBindings(t *testing.T) {
 	r := seedCustomRole(t, ctx, repo, acc.ID, "bound_role")
 
 	abID := ids.NewID(domain.PrefixAccessBinding)
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id)
-		VALUES ($1, 'user', $2, $3, 'account', $4)`,
+		VALUES ($1, 'user', $2, $3, 'account', $4)`),
 		abID, string(uid), string(r.ID), string(acc.ID),
 	)
 	require.NoError(t, err)

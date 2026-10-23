@@ -626,10 +626,13 @@ func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID
 //	git grep -nE '\.(UpsertPendingTOTP|ActivateTOTP|ReplaceLookupSet|ConsumeLookupElement|RemoveSecondFactor)\(ctx' -- '*.go' ':!*_test.go'
 //
 //	строки смены адреса        — только глаголы смены (эта дверь)
-//	коды восстановления        — запрос кода: `PersonWriter` (kaname#770;
-//	                             брал коды раньше личности — 3 блокировки из 3
-//	                             с исходом смены и с удалением личности,
-//	                             `recovery_request_lock_order_integration_test.go`);
+//	коды восстановления        — запрос кода: `SessionSetWriter` (kaname#770
+//	                             поставил личность первой — брал коды раньше
+//	                             неё, 3 блокировки из 3 с исходом смены и с
+//	                             удалением личности,
+//	                             `recovery_request_lock_order_integration_test.go`;
+//	                             kaname#776 поднял силу: ключевой замок не
+//	                             упорядочивал запросы одной личности);
 //	                             завершение: `RecoveryCompletionWriter`
 //	записи сессии              — выдача входа: `LockPersonForLogin` первым;
 //	                             выход, повышение, перечеканка: `PersonWriter`;
@@ -1286,12 +1289,19 @@ func (w *humanSessionWriter) LockLookupSet(ctx context.Context, userID domain.Us
 	return lockLookupSetTx(ctx, w.tx, userID)
 }
 
-func (w *humanSessionWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (bool, error) {
-	return consumeLookupElementTx(ctx, w.tx, userID, element)
+func (w *humanSessionWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string, at time.Time) (bool, error) {
+	return consumeLookupElementTx(ctx, w.tx, userID, element, at)
 }
 
-func (w *humanSessionWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (bool, error) {
-	return recordAcceptedStepTx(ctx, w.tx, userID, step)
+func (w *humanSessionWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64, at time.Time) (bool, error) {
+	return recordAcceptedStepTx(ctx, w.tx, userID, step, at)
+}
+
+// AdvanceSignCount — сдвиг счётчика ключа ЭТОЙ транзакцией (kaname#827,
+// замысел §2.3): оператор — общий с хранилищем ключей, таблицу ключей
+// называет только его файл.
+func (w *humanSessionWriter) AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (bool, error) {
+	return advanceSignCountTx(ctx, w.tx, id, expected, reported, usedAt)
 }
 
 func (w *humanSessionWriter) RemoveSecondFactor(ctx context.Context, userID domain.UserID) (bool, error) {

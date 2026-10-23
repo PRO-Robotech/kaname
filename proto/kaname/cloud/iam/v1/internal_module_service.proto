@@ -57,8 +57,9 @@ syntax = "proto3";
 // singleton `cluster` object (`scope_extractor.object_type = "cluster"`,
 // `from_request_field = "*"`), the same gate `InternalClusterService` carries. No
 // new relation and no new model type is introduced. `viewer` on `cluster` would
-// NOT do: that relation is satisfiable by a wildcard tuple written for the global
-// catalogs, so it answers "yes" to every authenticated caller and would mean
+// NOT do: that relation is satisfiable by the class tuple
+// (`system_class:authenticated`) written for the global catalogs, so it answers
+// "yes" to every authenticated caller and would mean
 // "authenticated", not "authorized" (security.md §«Отношение, выполнимое
 // подстановочным знаком, не сужает НИЧЕГО»). The `<exempt>` band would be worse
 // still: access granted by it is not visible in an enumeration of grants and is
@@ -215,23 +216,43 @@ service InternalModuleService {
   }
 }
 
-// ModulePlanVerdict — what `Apply` would do with this plan, as far as the parity
-// anchor is concerned.
+// ModulePlanVerdict — what `Apply` would do with this plan.
 //
-// The verdict is NOT a second expression of the lists below it: it is the
-// existing accessor of the parity census (`MissingRows` or `ExtraRows` non-empty),
-// so there is nothing for it to diverge from. Note in particular that
-// `withdrawn_rows` does NOT enter it — a withdrawal that leaves evidence is
-// lawful by construction.
+// Two judgements enter it, and their PRECEDENCE repeats the order in which
+// `Apply` refuses: the manifest revision is compared with the applied one by the
+// FIRST writing statement of the transaction, the parity anchor is checked just
+// before the commit. So a stale revision or a revision conflict yields its own
+// verdict whatever the anchor says (`WOULD_BE_REFUSED_BEYOND_ANCHOR` included);
+// the anchor verdict is given only when the revision passes — the module has no
+// applied revision, the manifest revision is newer, or it is equal with an equal
+// content digest.
+//
+// The anchor part is NOT a second expression of the lists of the response: it is
+// the existing accessor of the parity census (`MissingRows` or `ExtraRows`
+// non-empty), so there is nothing for it to diverge from. `withdrawn_rows` does
+// NOT enter it — a withdrawal that leaves evidence is lawful by construction. The
+// lists and counts of the plan are computed under every verdict.
 enum ModulePlanVerdict {
   MODULE_PLAN_VERDICT_UNSPECIFIED = 0;
 
-  // Applying converges with the anchor: the next boot proceeds.
+  // Applying converges with the anchor and the revision passes: the next boot
+  // proceeds.
   MODULE_PLAN_VERDICT_WOULD_APPLY = 1;
 
   // Applying would step outside the anchor and is refused inside the transaction,
   // before the commit. Repaired by editing the source, not by retrying.
   MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR = 2;
+
+  // The manifest revision is OLDER than the applied one (or, while the
+  // `revision` key is optional, the manifest declares none over an applied
+  // revision): `Apply` refuses and writes nothing. A rollback is expressed by a
+  // new, greater revision carrying the old content.
+  MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION = 3;
+
+  // The manifest revision EQUALS the applied one, but its content digest
+  // differs: `Apply` refuses and writes nothing. A content change is expressed
+  // by a new, greater revision.
+  MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT = 4;
 }
 
 // PlanModuleRequest — payload for `Plan`.
@@ -362,8 +383,28 @@ message PlanModuleResponse {
   // Sorted lexicographically; not capped, same reasoning as the two above.
   repeated string withdrawn_rows = 17;
 
-  // Verdict of the parity anchor over the hypothetical post-application state.
+  // Verdict of the plan: the revision comparison first, then the parity anchor
+  // over the hypothetical post-application state (see `ModulePlanVerdict`).
   ModulePlanVerdict verdict = 18;
+
+  // Revision declared by the delivered manifest (its `revision` key). ABSENT
+  // when the manifest declares none — absence is not zero, and zero is never a
+  // revision.
+  optional int64 manifest_revision = 19;
+
+  // Revision last applied to this module's catalog. ABSENT when the module was
+  // never applied with a declared revision.
+  optional int64 applied_revision = 20;
+
+  // Content digest of the delivered manifest: `sha256:` and 64 lowercase hex
+  // digits over the canonical form of the document (JCS over the YAML node
+  // tree). Present exactly when `manifest_revision` is: a digest without a
+  // revision compares nothing.
+  optional string manifest_digest = 21;
+
+  // Content digest of the applied revision. Present exactly when
+  // `applied_revision` is.
+  optional string applied_digest = 22;
 }
 
 // ApplyModuleRequest — payload for `Apply`.
@@ -469,6 +510,19 @@ message ApplyModuleResponse {
   int32 pruned_selector_rows = 12;
   int32 pruned_selector_rows_dropped = 13;
   int32 pruned_selector_types = 14;
+
+  // Revision applied to the module's catalog AFTER this application. ABSENT
+  // when the module has none — the manifest declares no revision and none was
+  // applied before. Moving the revision alone is NOT a catalog change:
+  // `changed` keeps speaking of the module, resource and verb rows.
+  optional int64 applied_revision = 15;
+
+  // Revision that was applied BEFORE this application. ABSENT when there was
+  // none.
+  optional int64 previous_applied_revision = 16;
+
+  // Content digest of `applied_revision`. Present exactly when it is.
+  optional string applied_digest = 17;
 }
 
 // GetModuleRequest — payload for `Get`.
@@ -525,6 +579,13 @@ message ModuleCatalog {
 
   // Live verbs of the module. A SET, on the same terms as `resources`.
   repeated ModuleVerbRow verbs = 3;
+
+  // Revision last applied to the module's catalog. ABSENT when the module was
+  // never applied with a declared revision.
+  optional int64 applied_revision = 4;
+
+  // Content digest of `applied_revision`. Present exactly when it is.
+  optional string applied_digest = 5;
 }
 
 // ListModulesRequest — no fields.

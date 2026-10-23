@@ -74,7 +74,12 @@ func (r *Registry) NewRegistryTokenCredentialKindRecorder() *RegistryTokenCreden
 				"basic_refused_<причина> — отказ базового секрета по причине, названной " +
 				"авторитетом (тот же словарь причин, что у внутренних глаголов базового " +
 				"секрета); basic_refused_reason_unnamed — авторитет причины не назвал; " +
-				"basic_principal_kind_refused — секрет не машинного принципала.",
+				"basic_principal_kind_refused — секрет не машинного принципала. " +
+				"anonymous_* — исходы входа без удостоверения (kaname#928): anonymous_issued — " +
+				"анонимный токен выдан (знаменатель анонимного потока); anonymous_pace_exceeded — " +
+				"источник исчерпал темп api-server.registry-token.anonymous-per-source-per-sec, ответ 429; " +
+				"anonymous_audience_refused — адресат вне объявления посадки; " +
+				"anonymous_issuer_unavailable — наш подписант не выпустил токен.",
 		}, []string{"outcome"}),
 	}
 	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей

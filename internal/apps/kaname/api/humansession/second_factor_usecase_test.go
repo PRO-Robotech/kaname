@@ -65,7 +65,7 @@ func newSFHarness(t *testing.T) *sfHarness {
 	logger := slog.New(slog.DiscardHandler)
 	deps := humansession.SecondFactorDeps{
 		Store: h.store, Methods: fakeMethods{h.store}, TOTP: totp, Sets: h.verifier, SetHasher: h.hasher,
-		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain,
+		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain, Keys: sfKeys(),
 		Observer: h.obs, Now: now, Logger: logger,
 	}
 	h.enroll, err = humansession.NewEnrollSecondFactorUseCase(deps)
@@ -172,7 +172,7 @@ func TestF12_01_EnrollMintsAPendingRowAndShowsTheSecretOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, st.TOTPEnrolled)
 	require.True(t, st.PendingUntil.Equal(en.ExpiresAt))
-	require.Nil(t, st.BackupCodes, "ключа backupCodes нет: заведён — только active")
+	require.Nil(t, st.BackupCodeSet, "ключа backupCodes нет: заведён — только active")
 	require.Equal(t, 1, h.obs.sfEvents[humansession.SecondFactorEnrollmentStarted])
 
 	// Вход с кодом от pending — строка `pending` не способ: тот же отказ
@@ -232,9 +232,9 @@ func TestF12_02_ConfirmActivatesMintsCodesAndIsAPresentation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, st.TOTPEnrolled)
 	require.True(t, st.ConfirmedAt.Equal(h.clock))
-	require.NotNil(t, st.BackupCodes)
-	require.Equal(t, 10, st.BackupCodes.Remaining)
-	require.Equal(t, 10, st.BackupCodes.Total)
+	require.NotNil(t, st.BackupCodeSet)
+	require.Equal(t, 10, st.BackupCodeSet.Remaining)
+	require.Equal(t, 10, st.BackupCodeSet.Total)
 
 	// Событие аудита и журнал повышения — одной транзакцией, без личных данных.
 	var enrolledEvents, stepUps int
@@ -422,7 +422,7 @@ func TestF12_11_14_LoginWithACodeIssuesLevelTwoOnTheFirstBearer(t *testing.T) {
 	require.ElementsMatch(t, []string{"password", "lookup_secret"}, out2.View.Session.PresentedMethods)
 	st, err := h.status.Execute(context.Background(), humansession.StatusInput{Bearer: out2.Bearer})
 	require.NoError(t, err)
-	require.Equal(t, 9, st.BackupCodes.Remaining)
+	require.Equal(t, 9, st.BackupCodeSet.Remaining)
 	_, err = h.login.Execute(context.Background(), humansession.LoginInput{
 		Email: "l1@example.invalid", Password: "correct horse battery", Source: "203.0.113.7",
 		SecondFactor: &humansession.SecondFactorPresentation{Method: assurance.MethodLookupSecret, Code: codes[0]},
@@ -569,7 +569,7 @@ func TestF12_15_18_StepUpWithACodeRaisesTheSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "2", out.View.Session.AssuranceLevel)
 	require.Equal(t, humansession.AssuranceView{Level: "2", Level2Reachable: true, MissingForLevel2: []string{}}, out.Assurance)
-	require.Nil(t, out.BackupCodesRemaining, "поле только у ответа, потребившего код")
+	require.Nil(t, out.BackupCodeSet, "сводка набора только у ответа, потребившего код (kaname#297 BCS-07)")
 	require.True(t, out.View.Session.AuthenticatedAt.Equal(authAt))
 	_, reason, err = h.store.Resolve(context.Background(), login.Bearer.Digest(), h.clock)
 	require.NoError(t, err)
@@ -582,8 +582,8 @@ func TestF12_15_18_StepUpWithACodeRaisesTheSession(t *testing.T) {
 	out, err = h.stepUp.Execute(context.Background(), humansession.StepUpInput{Bearer: other.Bearer, Method: assurance.MethodLookupSecret, Code: codes[3], Source: "203.0.113.7"})
 	require.NoError(t, err)
 	require.Equal(t, "2", out.Assurance.Level)
-	require.NotNil(t, out.BackupCodesRemaining)
-	require.Equal(t, 9, *out.BackupCodesRemaining)
+	require.NotNil(t, out.BackupCodeSet)
+	require.Equal(t, 9, out.BackupCodeSet.Remaining)
 	_, err = h.stepUp.Execute(context.Background(), humansession.StepUpInput{Bearer: out.Bearer, Method: assurance.MethodLookupSecret, Code: codes[3], Source: "203.0.113.7"})
 	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "тот же код второй раз")
 	require.Equal(t, 1, h.obs.sfEvents[humansession.SecondFactorBackupCodeConsumed])
@@ -680,24 +680,24 @@ func TestF12_23_26_BackupCodesOnceEachDownToZero(t *testing.T) {
 	}
 	out, err := present(codes[2])
 	require.NoError(t, err)
-	require.Equal(t, 9, *out.BackupCodesRemaining)
+	require.Equal(t, 9, out.BackupCodeSet.Remaining)
 	_, err = present(codes[2])
 	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
 	out, err = present(codes[6])
 	require.NoError(t, err)
-	require.Equal(t, 8, *out.BackupCodesRemaining)
+	require.Equal(t, 8, out.BackupCodeSet.Remaining)
 	for _, i := range []int{0, 1, 3, 4, 5, 7, 8} {
 		out, err = present(codes[i])
 		require.NoError(t, err, "код №%d годен", i)
 	}
-	require.Equal(t, 1, *out.BackupCodesRemaining)
+	require.Equal(t, 1, out.BackupCodeSet.Remaining)
 	out, err = present(codes[9])
 	require.NoError(t, err)
-	require.Equal(t, 0, *out.BackupCodesRemaining, "остаток ноль назван числом")
+	require.Equal(t, 0, out.BackupCodeSet.Remaining, "остаток ноль назван числом")
 	st, err := h.status.Execute(context.Background(), humansession.StatusInput{Bearer: bearer})
 	require.NoError(t, err)
-	require.Equal(t, 0, st.BackupCodes.Remaining)
-	require.Equal(t, 10, st.BackupCodes.Total)
+	require.Equal(t, 0, st.BackupCodeSet.Remaining)
+	require.Equal(t, 10, st.BackupCodeSet.Total)
 	_, err = present(codes[4])
 	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "одиннадцатый — 401")
 	// Код по времени по-прежнему работает.
@@ -773,8 +773,6 @@ func TestF12_28_29_RemoveEndsOtherSessionsAndKeepsTheCurrentAtTwo(t *testing.T) 
 	// Ф12-28: снятие кодом.
 	out, err := h.remove.Execute(context.Background(), humansession.RemoveSecondFactorInput{Bearer: s1.Bearer, Factor: humansession.SecondFactorPresentation{Method: assurance.MethodLookupSecret, Code: codes[0]}, Source: "203.0.113.7"})
 	require.NoError(t, err)
-	require.NotNil(t, out.BackupCodesRemaining, "ответ remove несёт backupCodesRemaining всегда (Р4)")
-	require.Equal(t, 0, *out.BackupCodesRemaining, "снятие убрало фактор — набора нет, остаток 0 (Р4 ред. 10, kaname#275)")
 	require.Equal(t, "2", out.View.Session.AssuranceLevel, "сверка кода — предъявление")
 	require.NotEqual(t, s1.Bearer.Digest(), out.Bearer.Digest())
 	_, ok = h.sfRow(u, domain.LoginMethodTOTP)
@@ -802,7 +800,7 @@ func TestF12_28_29_RemoveEndsOtherSessionsAndKeepsTheCurrentAtTwo(t *testing.T) 
 	st, err := h.status.Execute(context.Background(), humansession.StatusInput{Bearer: out.Bearer})
 	require.NoError(t, err)
 	require.False(t, st.TOTPEnrolled)
-	require.Nil(t, st.BackupCodes)
+	require.Nil(t, st.BackupCodeSet)
 	require.Equal(t, 1, h.obs.sfEvents[humansession.SecondFactorRemoved])
 
 	// (г) без фактора — не заведён, не попытка; новое заведение проходит.

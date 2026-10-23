@@ -33,6 +33,7 @@
 #   ссылка на версию   — `v<МАЖОР>.<МИНОР>.<ПАТЧ>` (образ тегуется самой версией)
 #   ствол              — `main-<8 знаков ревизии>`
 #   ветка линии        — `<номер>-<8 знаков ревизии>` (эпик, волна: `357-…`, `366-…`)
+#   ветка задачи       — `task-<ветка>-<8 знаков ревизии>` (полоса: `task-916-…`)
 #   запрос на слияние   — НЕ публикуется вовсе, только собирается
 #
 # ВЕТКА ЛИНИИ ПУБЛИКУЕТСЯ ПО ТОМУ ЖЕ ПРАВИЛУ, ЧТО СТВОЛ, и по той же причине:
@@ -43,11 +44,16 @@
 # он собирает и не публикует.
 #
 # ЛИНИЮ ОТ ЗАДАЧИ ОТЛИЧАЕТ ШАГ `gate`, А НЕ ФИЛЬТР. Ветки задач названы номером
-# так же, как ветки волн и эпиков, и фильтр `push` пропускает обе; ветка задачи
-# в реестр не идёт — её состояние никуда не влито и не принято, — а собирается
-# по `push`, только пока её голову не собирает открытый готовый запрос (шаг
-# `duplicate` задания `changes`, kaname#847).
-# Признак линии — перепись запросов с этой базой у провайдера (довод у шага).
+# так же, как ветки волн и эпиков, и фильтр `push` пропускает обе. Признак
+# линии — перепись запросов с этой базой у провайдера (довод у шага).
+#
+# ВЕТКА ЗАДАЧИ ПУБЛИКУЕТСЯ — ПОД ИМЕНЕМ ЗАДАЧИ, А НЕ ЛИНИИ (kaname#916). Стенд
+# проб платформы поднимает службу из реестра, а не из узла: пока образ ветки
+# полосы не публиковался, её прогон на внешнем кластере был невыполним и шёл
+# локальным kind. Её состояние никуда не влито и не принято, поэтому тег несёт
+# приставку `task-`: форма `<номер>-<ревизия>` по-прежнему значит «посажено», и
+# пин головы линии с пином полосы не путается. Публикуют только ветки самого
+# репозитория (`push` и ручной запуск — право записи), запрос не публикует.
 #
 # ФОРМА ТЕГА СТВОЛА ВЗЯТА У МОНОРЕПО НАМЕРЕННО: профили посадки пинят службу
 # именно ею. Что изменилось после выноса и о чём надо знать: `main-<ревизия>`
@@ -89,8 +95,6 @@ on:
   # здесь отправка в линию не повторяет вердикт её запроса — запрос образа не
   # публикует. Равенство множеств держит проба `internal/check`
   # TestReviewIntoALineRunsTheTrunkPipeline (перечень публикующих — там же).
-  # Отправка в ветку задачи, чью голову собирает её запрос, сборку пропускает —
-  # шаг `duplicate` задания `changes` (kaname#847); фильтр от этого не сужается.
   push:
     branches: [main, '[0-9]+']
     tags:
@@ -154,51 +158,7 @@ jobs:
     outputs:
       full: ${{ steps.pick.outputs.full }}
       jobs: ${{ steps.pick.outputs.jobs }}
-      duplicate: ${{ steps.duplicate.outputs.duplicate }}
     steps:
-      # ДВОЙНИК СБОРКИ ЗАПРОСА (kaname#847). Ветка задачи названа номером, как
-      # линия, и фильтр `push` её пропускает; публикации у неё нет (шаг `gate`),
-      # а ту же голову собирает прогон её запроса. Сборка по `push` здесь — без
-      # потребителя: дублей «push + запрос» на одном коммите за 2026-10-02…16 —
-      # 233, из них на ветках задач 204. Снять `push` с веток-номеров нельзя:
-      # тег головы линии пинит зонт монорепо (`values.yaml` — `296-…`).
-      #
-      # Пропуск — ровно когда (1) ветка — задача: база ни одного запроса, тот же
-      # признак, что у `gate`; (2) у неё открытый НЕ-черновой запрос в базу из
-      # фильтра `pull_request` ниже. Черновой не в счёт: там образ выбирает карта
-      # путей и может не выбрать. Отказ провайдера и неразобранный ответ —
-      # «собирать», вслух: потеря сборки молча дороже лишней. Пробы —
-      # `internal/check` TestImagePushOnATaskBranchIsNotRebuiltWhenItsReviewBuildsIt.
-      - name: отправка в ветку задачи — двойник сборки её запроса?
-        id: duplicate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          REPO: ${{ github.repository }}
-        run: |
-          decide() { echo "duplicate=$1" >> "$GITHUB_OUTPUT"; echo "$2"; }
-          unknown() {
-            echo "::warning title=СБОРКА НЕ СНЯТА::ветка $REF_NAME: $1 — двойник ли сборка, не установлено; собираем"
-            decide false "не установлено: собираем"
-          }
-          if [ "$EVENT" != push ] || [ "$REF_TYPE" != branch ] || ! [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then
-            decide false "$EVENT на $REF_NAME: не отправка в ветку-номер — собираем"; exit 0
-          fi
-          bases=$(gh api "repos/$REPO/pulls?base=$REF_NAME&state=all&per_page=1" --jq length) ||
-            { unknown "перепись запросов с этой базой отказала"; exit 0; }
-          [[ "$bases" =~ ^[0-9]+$ ]] || { unknown "ответ переписи баз «$bases» не разобран"; exit 0; }
-          [ "$bases" = 0 ] || { decide false "ветка $REF_NAME — линия: база запроса, сборка публикуемая"; exit 0; }
-          pulls=$(gh api "repos/$REPO/pulls?head=${REPO%%/*}:$REF_NAME&state=open&per_page=100") ||
-            { unknown "перепись запросов с этой головой отказала"; exit 0; }
-          n=$(jq '[.[] | select(.draft == false and (.base.ref == "main" or (.base.ref | test("^[0-9]+$"))))] | length' <<<"$pulls") ||
-            { unknown "ответ переписи голов не разобран"; exit 0; }
-          case "$n" in
-            0) decide false "ветка $REF_NAME — задача без открытого готового запроса в ствол или линию: сборка по push единственная" ;;
-            [1-9]*) decide true "ветка $REF_NAME — задача, её голову собирает прогон запроса (их $n): сборка по push снята" ;;
-            *) unknown "число запросов «$n» не разобрано" ;;
-          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           sparse-checkout: |
@@ -216,7 +176,7 @@ jobs:
         run: python3 .github/scripts/affected.py --github-output docker-build.yml
 
   image:
-    if: ${{ needs.changes.outputs.duplicate != 'true' && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'image')) }}
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'image') }}
     needs: [changes]
     name: образ службы (сборка · публикация по пину)
     runs-on: ubuntu-latest
@@ -270,12 +230,16 @@ jobs:
       # ноль, а голова посажена. Замер 2026-09-27: базы `main`, `357`, `366` —
       # по запросу и больше; `398`, `405`, `415`, `315` — ноль.
       #
-      # Отказ провайдера — НЕ «задача»: решить «не публикуем» значило бы вернуть
-      # голову линии без образа (#429) без единого красного. Шаг отказывает и
-      # называет, что не установлено.
+      # Отказ провайдера — НЕ «задача»: решить «под именем задачи» значило бы
+      # вернуть голову линии без образа линии (#429) без единого красного. Шаг
+      # отказывает и называет, что не установлено.
       #
       # Ствол и ссылка на версию трекер не спрашивают: их посаженность — имя.
-      # Любая другая ветка (ручной запуск на ветке полосы) не публикуется.
+      #
+      # ИМЯ ОБРАЗА РЕШАЕТ ЭТОТ ШАГ, а `subject` даёт ему имя по правилу ствола:
+      # посаженное публикуется под ним, ветка задачи и любая другая ветка
+      # (ручной запуск на ветке полосы) — под `task-<имя>` (kaname#916). Выход
+      # `tag` — единственное имя, которое собирают и сверяют шаги ниже.
       - name: гейт учётных данных реестра и посаженности
         id: gate
         env:
@@ -286,34 +250,43 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          SUBJECT_TAG: ${{ steps.subject.outputs.tag }}
         run: |
+          if [ -z "$SUBJECT_TAG" ]; then
+            echo "::error title=НЕ ИСПОЛНЯЛАСЬ::имени образа от шага subject нет — решать публикацию не о чем"
+            exit 1
+          fi
           if [ -z "$DH_USER" ] || [ -z "$DH_TOKEN" ]; then
+            # Не публикуется — имя остаётся локальным, линия или задача не спрашивается.
             echo "push=false" >> "$GITHUB_OUTPUT"
             echo "ns=$FALLBACK_NS" >> "$GITHUB_OUTPUT"
+            echo "tag=$SUBJECT_TAG" >> "$GITHUB_OUTPUT"
             echo "::warning::учётные данные реестра не объявлены — ТОЛЬКО СБОРКА, публикации нет"
             exit 0
           fi
+          publish=true; tag="$SUBJECT_TAG"
           if [ "$EVENT" = "pull_request" ]; then
-            landed=false; why="запрос на слияние: собираем, не публикуем"
+            publish=false; why="запрос на слияние: собираем, не публикуем"
           elif [ "$REF_TYPE" = "tag" ] || [ "$REF_NAME" = "main" ]; then
-            landed=true; why="ствол или ссылка на версию: публикуем"
+            publish=true; why="ствол или ссылка на версию: публикуем"
           elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then
             if ! bases=$(gh api "repos/$REPO/pulls?base=$REF_NAME&state=all&per_page=1" --jq length); then
               echo "::error title=НЕ ИСПОЛНЯЛАСЬ::ветка $REF_NAME: линия или задача — не установлено, перепись запросов у провайдера отказала. Публикации нет, и это не вердикт о дереве"
               exit 1
             fi
             case "$bases" in
-              0) landed=false; why="ветка $REF_NAME — задача: база ни одного запроса, её состояние не посажено; собираем, не публикуем" ;;
-              1) landed=true; why="ветка $REF_NAME — линия: база запроса, голова посажена вливанием; публикуем" ;;
+              0) tag="task-$SUBJECT_TAG"; why="ветка $REF_NAME — задача: база ни одного запроса, её состояние не посажено; публикуем под именем задачи" ;;
+              1) why="ветка $REF_NAME — линия: база запроса, голова посажена вливанием; публикуем" ;;
               *) echo "::error title=НЕ ИСПОЛНЯЛАСЬ::ветка $REF_NAME: линия или задача — не установлено, ответ переписи запросов «$bases» не разобран"
                  exit 1 ;;
             esac
           else
-            landed=false; why="ветка $REF_NAME вне ствола и линии: собираем, не публикуем"
+            tag="task-$SUBJECT_TAG"; why="ветка $REF_NAME вне ствола и линии: публикуем под именем задачи"
           fi
-          echo "push=$landed" >> "$GITHUB_OUTPUT"
+          echo "push=$publish" >> "$GITHUB_OUTPUT"
           echo "ns=$DH_USER" >> "$GITHUB_OUTPUT"
-          echo "$why"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "$why; тег=$tag"
 
       # САМОПРОВЕРКА СВЕРКИ ОПУБЛИКОВАННОГО — БЕЗУСЛОВНО И ДО СБОРКИ. Сверка,
       # потерявшая способность упасть, молчит так же, как исправная на верном
@@ -360,7 +333,7 @@ jobs:
       # него кэшируется только последняя, то есть кэш есть, а толку с него мало.
       - name: сборка образа
         env:
-          IMAGE_REF: ${{ steps.gate.outputs.ns }}/${{ env.IMAGE_NAME }}:${{ steps.subject.outputs.tag }}
+          IMAGE_REF: ${{ steps.gate.outputs.ns }}/${{ env.IMAGE_NAME }}:${{ steps.gate.outputs.tag }}
           PLATFORMS: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           PUSH_FLAG: ${{ steps.gate.outputs.push == 'true' && '--push' || '' }}
           REVISION: ${{ steps.subject.outputs.revision }}
@@ -394,7 +367,7 @@ jobs:
         id: published
         if: steps.gate.outputs.push == 'true'
         env:
-          IMAGE_REF: ${{ steps.gate.outputs.ns }}/${{ env.IMAGE_NAME }}:${{ steps.subject.outputs.tag }}
+          IMAGE_REF: ${{ steps.gate.outputs.ns }}/${{ env.IMAGE_NAME }}:${{ steps.gate.outputs.tag }}
           REVISION: ${{ steps.subject.outputs.revision }}
           PLATFORMS: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
         run: .github/scripts/image-published-revision.sh "$IMAGE_REF" "$REVISION" "$PLATFORMS"

@@ -93,11 +93,13 @@ func caller(why string) sideVerdict { return sideVerdict{why: why} }
 // secondFactorSideLedger — запись на КАЖДОЕ значение перечней.
 func secondFactorSideLedger() map[string]sideVerdict {
 	return map[string]sideVerdict{
-		"refusal/not-enrolled":           caller("фактора у человека нет — состояние предъявителя"),
-		"refusal/already-enrolled":       caller("фактор уже заведён — повтор заведения предъявителем"),
-		"refusal/enrollment-not-pending": caller("подтверждать нечего — порядок шагов предъявителя"),
-		"refusal/session-not-fresh":      caller("сессия не свежа — предъявитель повышает уровень"),
-		"refusal/step-up-required":       caller("у личности с ключом сессия ниже «2» — предъявитель повышает уровень (kaname#747)"),
+		"refusal/not-enrolled":              caller("фактора у человека нет — состояние предъявителя"),
+		"refusal/already-enrolled":          caller("фактор уже заведён — повтор заведения предъявителем"),
+		"refusal/enrollment-not-pending":    caller("подтверждать нечего — порядок шагов предъявителя"),
+		"refusal/session-not-fresh":         caller("сессия не свежа — предъявитель повышает уровень"),
+		"refusal/step-up-required":          caller("у личности с ключом сессия ниже «2» — предъявитель повышает уровень (kaname#747)"),
+		"refusal/access-key-not-registered": caller("ключей у человека нет — предъявитель просит испытание способа, которого не заводил (kaname#827)"),
+		"refusal/access-keys-disabled":      caller("ключи выключены решением посадки — клиент читает accessKeys.available и способ не предлагает (kaname#827)"),
 		"refusal/unavailable": {rule: ruleLaneFailing,
 			why: "материал не открывается ни одним ключом перечня — 503 человеку с верным кодом"},
 
@@ -111,6 +113,8 @@ func secondFactorSideLedger() map[string]sideVerdict {
 		"presentation/lookup_secret/mismatched": caller("неверный запасной код предъявителя"),
 		"presentation/lookup_secret/material-unreadable": {rule: ruleLaneFailing, reads: &pairedUnavailable,
 			why: "наш дефект хранения набора; считается парной клеткой refusal/unavailable"},
+		"presentation/webauthn/matched":    caller("успех, не отказ (kaname#827)"),
+		"presentation/webauthn/mismatched": caller("утверждение ключа не принято — предъявитель; причина — в клетках ветви ключа (kaname#827)"),
 		"presentation/lookup_secret/capacity-exhausted": {rule: ruleCapacity,
 			why: "ёмкость проверяющего, общая с паролем, исчерпана — отказ по нагрузке"},
 	}

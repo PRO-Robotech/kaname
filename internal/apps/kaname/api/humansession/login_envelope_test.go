@@ -278,10 +278,10 @@ type computedSignal struct {
 	computed chan struct{}
 }
 
-func (c *computedSignal) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
-	res := c.inner.Verify(stored, presented)
+func (c *computedSignal) Verify(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.Result, error) {
+	res, err := c.inner.Verify(ctx, stored, presented)
 	c.computed <- struct{}{}
-	return res
+	return res, err
 }
 
 func (c *computedSignal) MeetsDeclared(stored domain.LoginVerifier, declared passwordverify.Declared) (bool, error) {
@@ -302,18 +302,18 @@ type slotHeldThroughTheWait struct {
 	computed chan struct{}
 }
 
-func (d *slotHeldThroughTheWait) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
+func (d *slotHeldThroughTheWait) Verify(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.Result, error) {
 	select {
 	case d.slot <- struct{}{}:
 	default:
 		d.computed <- struct{}{}
-		return passwordverify.Result{Outcome: passwordverify.OutcomeCapacityExhausted}
+		return passwordverify.Result{Outcome: passwordverify.OutcomeCapacityExhausted}, nil
 	}
 	defer func() { <-d.slot }()
-	res := d.inner.Verify(stored, presented)
+	res, err := d.inner.Verify(ctx, stored, presented)
 	d.computed <- struct{}{}
 	time.Sleep(d.hold) // дефект: место занято и на ожидании
-	return res
+	return res, err
 }
 
 func (d *slotHeldThroughTheWait) MeetsDeclared(stored domain.LoginVerifier, declared passwordverify.Declared) (bool, error) {

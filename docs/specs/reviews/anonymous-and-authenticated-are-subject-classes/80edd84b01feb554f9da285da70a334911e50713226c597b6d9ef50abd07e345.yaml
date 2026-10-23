@@ -1,0 +1,229 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 80edd84b01feb554f9da285da70a334911e50713226c597b6d9ef50abd07e345
+  revision: 13
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписано туда при правке. Вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: e0f69f3ef
+  content_commit: null
+  content_commit_note: >-
+    Правка не закоммичена: изменённый отслеживаемый файл копии tmp/kn-893-acc, ветка 893-acc.
+    Ляжет только поверх кода kaname e36fd21a6 (ветка 893).
+  branch: 893-acc
+  task: PRO-Robotech/kaname#893
+  related_tasks: [PRO-Robotech/corelib#116, PRO-Robotech/kacho#3287, PRO-Robotech/kaname#836, PRO-Robotech/kaname#858]
+  lines: 1974
+  round: 1
+  round_scope: >-
+    Круг 1 дельты редакции 13 к одобренной редакции 12 (bd6325e3…). Предмет — git diff
+    HEAD по документу (+192/−15): «Что НЕ входит» п. 2, строка опоры о соседе, вводные
+    SC-12, SC-67, условие старта SC-15, стадия S6 (SC-74…77), строки производителя S6,
+    инвариант 8, DoD S6, раздел «Редакция 13», две строки истории. Вне дельты ничего не
+    переоткрыто.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> → 80edd84b…5e345, совпало с заданием. git show HEAD:<док> | sha256sum
+    → bd6325e3…79b67fd6: база дельты — одобренная редакция 12.
+  measurement_revisions: >-
+    corelib 7ffb6873c (ветка 116-public-read-anonymous); kaname e36fd21a6 (ветка 893, пин
+    corelib v1.14.3-0.20261018111057-7ffb6873c497 в go.mod:8); kacho a952484649 (origin/main);
+    трекер — gh issue view 836/858/893 (kaname), 3287 (kacho), 116 (corelib) на 2026-10-18.
+  neighbours_pinned:
+    register-resource-checks-the-module-vocabulary.md: 3236ea00c5d3be71b23792beec7b04178a4537b56dfad0a8f78ac03f73d8f6b8
+  neighbours_note: >-
+    Опора сменилась вместе с соседом (fa-b7) и перепроверена этим же заходом. Соседа
+    одобряет запись docs/specs/reviews/register-resource-checks-the-module-vocabulary/3236ea00….yaml.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T15:40:00+03:00'
+
+delta_check:
+  - item: SC-74 — приём слова класса, тот же вызов порта, ответы Check
+    result: >-
+      Подтверждено. Corelib policy.go@7ffb6873c: publicReadSubjects = [user:*,
+      system_class:anonymous]; IsPublicReadGrant — один предикат для приёма, применения и
+      снятия (IsProxyWritable). Kaname handler.go@e36fd21a6: validateProxyTuple:176,
+      вызовы :199 и :224. governance_ports.go:98 — ApplyTx(objectType, objectID, published,
+      version), субъекта в сигнатуре нет. «И» по Check держится составом: unit
+      AnonymousWordIsAPublication показывает тот же вызов порта, integration SC12_SC13
+      показывает путь порт → Check словом user:*. Довод верен (см. R1).
+  - item: SC-75 — снятие крест-накрест; кэш вердиктов
+    result: >-
+      Подтверждено. PublicationWordsShareOneStoredForm проверяет оба направления на одном
+      объекте порта. Отсутствие кэша у решения службы перемерено: git grep -n -i cache
+      @e36fd21a6 по relverdict, api/authorize и authorize_service.go без проб → 1 строка,
+      grantarm.go:199, комментарий о плане запроса. Осмотрено 16 файлов (15 в двух каталогах
+      плюс authorize_service.go). Кэш края — kacho gateway/internal/middleware/authz_cache.go:48
+      newDecisionCache, хранит только allowed=true. Срок его жизни держит SC-34.
+  - item: SC-76 — отказы с близнецами
+    result: >-
+      Строки (а)–(ж) и «домен неизвестен» держатся corelib@7ffb6873c и kaname. Строка (з)
+      меняет против SC-74 два факта — B1.
+  - item: SC-77 — переходный срок user:* и предикат его снятия
+    result: >-
+      Часть «сейчас» держит TestPublicReadSubjects_ClosedList. У конца перехода нет
+      носителя (B2), а его предикат недостижим (B3).
+  - item: «Что НЕ входит» п. 2, опора о соседе, SC-12, SC-67, SC-15, инвариант 8, DoD S6, история
+    result: Исполнено. Строка истории об одобрении редакции 12 соответствует существующей записи bd6325e3….yaml.
+
+blocking:
+  - id: B1
+    kind: TWIN
+    title: >-
+      SC-76 (з) «объект чужого домена» меняет два факта; отказ по домену вызывающего
+      для пары публикации не держит ни одна проба
+    finding: >-
+      Строка 1517: вызывающий registry, объект vpc_network:net1. Против SC-74 изменились и
+      домен, и тип: vpc_network не входит в publicReadObjectTypes. Отказ даёт уже
+      publicReadAllowed (policy.go:444), до привязки к домену (:452). Инъекцией это
+      проверено на копии corelib@7ffb6873c: в policy.go:452 условие заменено на `if
+      callerDomain != "" && hierarchical`, то есть привязка к домену снята для публикаций.
+      После этого весь пакет authz/proxytuple зелёный, кроме посева рецензента: красных 0
+      среди собственных проб. Посев рецензента — ValidateTuple("vpc", "system_class:anonymous",
+      "v_get", "registry_repository:r1"); до инъекции → refused, после → accepted. Без
+      инъекции принимается только вызывающий registry, а vpc и nlb, со словом класса и с
+      user:*, получают отказ. Значит, продукт верен, но пункт 3 задания («чужой домен →
+      PermissionDenied») в этой приёмке не держит ни одна проба. В kaname таких троек тоже
+      нет: git grep по *_test.go @e36fd21a6, где вызывающий vpc/compute/nlb/storage, а
+      объект registry_repository, → 0.
+    fix: >-
+      В SC-76 добавить строку, которая меняет ровно один факт — домен вызывающего: учётка
+      службы vpc (домен vpc), system_class:anonymous, v_get, registry_repository:r1 →
+      PERMISSION_DENIED `permission denied`. Близнец — SC-74. Строку (з) переименовать в
+      «тип чужого домена (не публикуемый)». В строке производителя SC-76 назвать держателя:
+      строку пробы в corelib TestValidateTuple_PublicReadAcceptsTheAnonymousClass (и
+      user:* — в TestValidateTuple_PublicReadIsWildcardOnly) либо в kaname
+      TestRegisterResource_PublicationAcceptsTheAnonymousClass. Держателя заказать задачами
+      #116/#893, это добавка только в пробы.
+  - id: B2
+    kind: PRODUCER
+    title: шаг снятия user:* из перечня отнесён к kaname#836, а DoD #836 его не содержит
+    finding: >-
+      Строки 1538-1542 и 1594. «Снятие слова — заказано (kaname#836)». Предмет #836 —
+      снять перевод user:* → system_class и прозу примечаний в сборщике модели
+      (internal/modelcompose, internal/modelrender). Её DoD не упоминает ни
+      proxytuple.publicReadSubjects, ни пин corelib, ни отказ RegisterResource(user:*).
+      Документ сам называет отнесение допущением. В итоге у «после снятия → PERMISSION_DENIED»
+      и у перечня из одного слова нет носителя, который этот шаг несёт. Переходный приём
+      остаётся без ответственного (ban11-three-outcomes).
+    fix: >-
+      Выбор за диспетчером, вопрос автора. Рекомендация совпадает с авторской (б): завести
+      задачу в PRO-Robotech/corelib — исключить user:* из publicReadSubjects, Blocked by
+      kacho#3287. Связанная с ней задача kaname — поднять пин, проба отказа user:* с
+      близнецом словом класса. Номер вписать в SC-77, в строку производителя SC-77 и в DoD
+      S6 вместо #836. Вариант (а) годен только тогда, когда этот шаг дописан в DoD #836.
+  - id: B3
+    kind: CONSTRUCTIBILITY
+    title: условие конца перехода в SC-77 недостижимо
+    finding: >-
+      Строка 1537: снятие ждёт, пока `git grep -n 'user:\*' -- . ':!docs/archive'` в kacho
+      даст 0 «по написанию и по предмету». Замер на kacho a952484649: 135 строк в 54 файлах.
+      Большинство относится не к слову публикации, а к подстановке cluster:<root>#viewer@user:*
+      бутстрапа кластера и к гейтам, которые её читают: gateway/internal/middleware/authz.go:80,
+      :960, :1138; internal/repohygiene/membershipreadrelation.go:69 mrrWildcard;
+      services/storage/cmd/storage/permission_map_test.go:323-505; порождённые
+      *_grpc.pb.go; proto/corelib/authz/v1/authz_options.proto:168. Слово публикации
+      реестра — 7 строк FGASubjectPublicWildcard в services/registry. kacho#3287 эти строки
+      не трогает, и ноль по написанию недостижим. Условие не наступит, и переход не
+      закончится; либо его «закончат» удалением чужих гейтов. Предикат взят из DoD
+      kacho#3287, но здесь он утверждается этим документом.
+    fix: >-
+      Условие снятия задать предикатом по предмету — слову публикации. Пример:
+      `git grep -n 'FGASubjectPublicWildcard' -- services/registry` в kacho → 0 (сегодня 7)
+      плюс кортеж публикации службы реестра несёт system_class:anonymous (проба #3287).
+      Отдельно — kacho#3287 влита и выкачена. Предикат DoD kacho#3287 по всему дереву
+      поправить в самой #3287, это не предмет приёмки (см. R3).
+
+important:
+  - id: R1
+    kind: DoD
+    note: >-
+      «И» SC-74 и SC-75 по Check для слова класса держится составом unit + integration.
+      Довод верен: субъекта в сигнатуре порта нет. Прямую пробу дала бы одна строка
+      integration — ветвь SC12_SC13 со словом system_class:anonymous на открытии или
+      снятии. Дёшево; рекомендую в #893.
+  - id: R2
+    kind: PRODUCER
+    note: >-
+      Утверждение SC-76 «тот же отказ даёт UnregisterResource с той же тройкой» держится
+      чтением handler.go:224 (вызов той же функции). Пробы S6 зовут validateProxyTuple
+      напрямую, а не через RPC.
+  - id: R3
+    kind: FORMAT
+    note: >-
+      Сосед по трекеру: DoD kacho#3287 несёт тот же недостижимый предикат по всему дереву.
+      Это находка для задачи kacho, а не для приёмки; диспетчеру — поправить #3287 тем же
+      заходом, что B3.
+
+summary:
+  scenarios_total: 67
+  scenarios_in_delta: 4 новых (SC-74…77) и 3 правленых вводных (SC-12, SC-15, SC-67)
+  blocking: 3
+  blocking_kinds: [TWIN, PRODUCER, CONSTRUCTIBILITY]
+  producer_named: 67 из 67. Конец перехода SC-77 заказан носителю, который шаг не несёт (B2)
+  twins: 3 из 4 сценариев S6 с верным близнецом. SC-76 (з) отличается двумя фактами (B1)
+  constructibility: >-
+    Посеяно на копии corelib@7ffb6873c (git worktree, GOWORK=off, unit без слота): прогон
+    ^Test(ValidateTuple_PublicRead|PublicReadGrant_|PublicReadSubjects_) — 5 функций, 32
+    подслучая, все PASS. Посев рецензента — 4 случая: registry принят; vpc со словом
+    класса, vpc с user:*, nlb со словом класса — отказ; PASS. Инъекция (привязка к домену
+    снята для публикаций): пробы пакета зелёные, посев рецензента красный в 3 из 3
+    отказных случаев. Integration kaname (Docker) не посеяна — «не выполнилось»; путь
+    порт → Check рецензент прочитал, а не прогнал. Копия снята.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: >-
+    Вердикт — возврат. Одобрение bd6325e3… относится к редакции 12 и на редакцию 13 не
+    переносится.
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 80edd84b01feb554f9da285da70a334911e50713226c597b6d9ef50abd07e345 · ред. 13, дельта S6 к bd6325e3…: блокирующих 3 (TWIN — SC-76 (з); PRODUCER — носитель снятия user:*; CONSTRUCTIBILITY — предикат конца перехода SC-77)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#893
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации блок честно not_performed
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+    - 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - 447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml
+    - 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d.yaml
+    - 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9.yaml
+    - c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc.yaml
+    - bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6.yaml

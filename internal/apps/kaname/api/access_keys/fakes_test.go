@@ -98,6 +98,11 @@ func (s *fakeStore) endedOf(id domain.HumanSessionID) string {
 // revokeStoreFault — сырой текст подставного отказа записи снятия.
 const revokeStoreFault = "pg: revoke write refused at db-internal-7"
 
+// RegistrationWriter — у двойника замков нет: та же транзакция, что Writer.
+func (s *fakeStore) RegistrationWriter(ctx context.Context, _ domain.UserID) (access_keys.Writer, error) {
+	return s.Writer(ctx)
+}
+
 func (s *fakeStore) RevokeWriter(ctx context.Context, _ domain.UserID) (access_keys.RevokeWriter, error) {
 	w, err := s.Writer(ctx)
 	if err != nil {

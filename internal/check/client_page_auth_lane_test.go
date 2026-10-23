@@ -14,10 +14,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 // Клиентская страница полосы входа обязана СХОДИТЬСЯ со слушателем: перечень
@@ -132,6 +134,31 @@ func liveAuthLaneContract() authLaneContract {
 			humansession.TextSessionIsCurrent,
 			humansession.ReasonSessionNotFound,
 			humansession.ReasonSessionIsCurrent,
+			// Повышение ключом доступа (kaname#827).
+			humansession.TextStepUpChallengeNotIssued,
+			humansession.TextStepUpChallengePresented,
+			humansession.TextStepUpChallengeExpired,
+			humansession.TextAccessKeyNotRegistered,
+			humansession.ReasonStepUpChallengeNotIssued,
+			humansession.ReasonStepUpChallengePresented,
+			humansession.ReasonStepUpChallengeExpired,
+			humansession.ReasonAccessKeyNotRegistered,
+			webauthnverify.TextKeysDisabled,
+			webauthnverify.ReasonKeysDisabled,
+			// Ключи доступа REST-фронта (kaname#802, kaname#757): каждый отказ
+			// регистрации и утверждения называет шаг, и страница несёт его дословно.
+			access_keys.TextAssertionNotAccepted,
+			access_keys.TextChallengeUnknown,
+			access_keys.TextChallengeConsumed,
+			access_keys.TextChallengeExpired,
+			access_keys.TextOriginNotAllowed,
+			access_keys.TextRPIDMismatch,
+			access_keys.TextUserNotPresent,
+			access_keys.TextAlgorithmNotAllowed,
+			access_keys.TextNotDiscoverable,
+			access_keys.TextMalformedCredential,
+			access_keys.TextLastSignInMethod,
+			access_keys.TextStoreUnavailable,
 		},
 		Cookies:  []string{loginlanehttp.CookieSession, loginlanehttp.CookieForm},
 		BodyKeys: loginlanehttp.ResponseObjectKeys(),

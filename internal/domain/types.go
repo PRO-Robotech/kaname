@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"unicode/utf8"
 
 	"github.com/PRO-Robotech/corelib/validate/nameform"
 )
@@ -63,7 +64,7 @@ type (
 	Permission  string
 	Permissions []Permission
 
-	// SubjectType — enum: user|service_account|group.
+	// SubjectType — enum: user|service_account|group|system_class.
 	SubjectType string
 	// ResourceType — ЯКОРЬ ОБЛАСТИ привязки: один из трёх ярусов иерархии
 	// (`cluster`/`account`/`project`). Вокабуляр объявлен ОДИН раз —
@@ -191,8 +192,18 @@ func (s ExternalSubject) Validate() error {
 	return nil
 }
 
+// DescriptionMax — предел описания в ЗНАКАХ, а не в байтах.
+//
+// Единица — та же, что у ограничений базы (`*_description_check`:
+// `length(description) <= 256`, Postgres считает знаки) и у загрузчика
+// манифеста (`minRoleDescriptionRunes`). Счёт в байтах отвергал кириллическое
+// описание в 129 знаков, которое база принимает: описание роли модуля,
+// доставленное манифестом, проходило загрузку и роняло применение ролей на
+// старте (kaname#856, роль `registry.public.read`).
+const DescriptionMax = 256
+
 func (d Description) Validate() error {
-	if len(d) > 256 {
+	if utf8.RuneCountInString(string(d)) > DescriptionMax {
 		return fmt.Errorf("Illegal argument description: length must be <=256")
 	}
 	return nil
@@ -278,10 +289,10 @@ func (p Permissions) validateGrammarAndCap() error {
 // Validate — SubjectType — enum check.
 func (s SubjectType) Validate() error {
 	switch s {
-	case SubjectTypeUser, SubjectTypeServiceAccount, SubjectTypeGroup:
+	case SubjectTypeUser, SubjectTypeServiceAccount, SubjectTypeGroup, SubjectTypeSystemClass:
 		return nil
 	default:
-		return fmt.Errorf("Illegal argument subject_type %q (allowed: user|service_account|group)", string(s))
+		return fmt.Errorf("Illegal argument subject_type %q (allowed: user|service_account|group|system_class)", string(s))
 	}
 }
 

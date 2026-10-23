@@ -69,6 +69,7 @@ import (
 	user_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // ─── Symmetric FGA grant/revoke ────────────────────────────────────────────
@@ -98,7 +99,7 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	ctx := newOwnerContext(ownerID)
 
 	// ── Create ────────────────────────────────────────────────────────────────
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(fga, nil)
 
 	binding := domain.AccessBinding{
@@ -191,7 +192,7 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 	fga := newRecordingFGA()
 	ctx := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	binding := domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
@@ -373,13 +374,6 @@ type abFakeRepo struct {
 	// round-trip is order-stable without an unordered Go-map shuffle. A plain
 	// `map[tuple]struct{}` iterates in random order ⇒ require.Equal flakes/fails.
 	emittedTuples map[domain.AccessBindingID]*orderedTupleSet
-	// claimedByOthers — the tuples some OTHER *ACTIVE* binding also recorded in its
-	// own ledger row (the emitted-tuple ledger is keyed per binding, while the
-	// materialized fact is one row per (object, relation, subject) and is NOT
-	// refcounted). Backs the fake
-	// SelectTuplesClaimedByOtherActiveBindings probe; seeded per test via
-	// seedTuplesClaimedByOtherActiveBindings. Empty ⇒ nothing else claims anything.
-	claimedByOthers []ab_repo.RelationTuple
 	// txOps — ordered trace of the writer-tx port calls that carry a DB-level
 	// serialization contract (advisory-lock / ledger-read / status-CAS). Lets a
 	// unit test pin the ORDER those statements are issued in, which is what makes
@@ -844,9 +838,6 @@ func (u *fakeUserRdr) GetByAccountEmail(_ context.Context, _ domain.AccountID, _
 func (u *fakeUserRdr) FindPendingByEmail(_ context.Context, _ domain.Email) ([]domain.User, error) {
 	return nil, nil
 }
-func (u *fakeUserRdr) FindActiveByExternalID(_ context.Context, _ domain.ExternalSubject) ([]domain.User, error) {
-	return nil, nil
-}
 func (u *fakeUserRdr) FindByExternalIDInStatuses(_ context.Context, _ domain.ExternalSubject, _ []domain.InviteStatus) ([]domain.User, error) {
 	return nil, nil
 }
@@ -944,6 +935,18 @@ func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, membe
 
 // fakeABWtr — access_binding Writer; stores Insert result, clears on Delete.
 type fakeABWtr struct{ repo *abFakeRepo }
+
+// GetForDeactivation — то же чтение, что у фейка читателя: замка строки у фейка нет,
+// предмет пробы здесь — набор снимаемых кортежей, а не порядок замков.
+func (w *fakeABWtr) GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return (&fakeABRdr{repo: w.repo}).Get(ctx, id)
+}
+
+// LockLiveTargetTypes — дублёр выполняет контракт настоящего тем же источником,
+// что синхронная половина проверки: живые строки каталога фикстуры.
+func (w *fakeABWtr) LockLiveTargetTypes(_ context.Context, types []string) ([]string, error) {
+	return fixtureLiveTargetTypes(types), nil
+}
 
 func (w *fakeABWtr) Insert(_ context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	w.repo.mu.Lock()
@@ -1272,4 +1275,9 @@ func (r *fakeRoleRdr) UnresolvedSegments(context.Context, []domain.RoleSegment) 
 func (*fakeRoleRdr) Lifecycles(_ context.Context, _ []domain.RoleID) (
 	map[domain.RoleID]domain.RoleLifecycle, error) {
 	return nil, nil
+}
+
+// BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *fakeRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
+	return false, nil
 }

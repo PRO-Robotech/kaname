@@ -3,7 +3,10 @@
 
 // image_line_tag_test.go — ОБРАЗ ГОЛОВЫ ЛИНИИ ТЕГУЕТСЯ ТЕМ ЖЕ ПРАВИЛОМ, ЧТО
 // СТВОЛ: `<ветка>-<8 знаков ревизии>`, публикуется по `push`, движущегося тега
-// нет (задача PRO-Robotech/kaname#429).
+// нет (задача PRO-Robotech/kaname#429). ОБРАЗ ВЕТКИ ЗАДАЧИ публикуется тоже, но
+// под ДРУГИМ именем — `task-<ветка>-<8 знаков ревизии>`: стенд проб платформы
+// ставит образ ветки полосы до вливания (задача PRO-Robotech/kaname#916), а
+// форма `<номер>-<ревизия>` по-прежнему значит «посажено».
 //
 // Проба ИСПОЛНЯЕТ тела шагов `subject` и `gate` задания `image` из объявления в
 // дереве той оболочкой, какой их исполняет провайдер при `defaults.run.shell:
@@ -14,12 +17,12 @@
 // `subject`.
 //
 // ЛИНИЯ ИЛИ ЗАДАЧА — ПРЕДМЕТ ЭТОЙ ПРОБЫ, а не фильтра. Ветки задач названы
-// номером так же, как линии, и фильтр `push` пропускает обе; публикацию решает
-// шаг `gate` переписью запросов с базой этой ветки. Провайдер подменён
-// двойником CLI (ghStub), отвечающим так, как отвечает API: ветка задачи —
-// голова запроса в волну и база ни одного, линия — база, в том числе когда все
-// запросы в неё уже влиты. Законный близнец линии — push в задачу 429 с тем же
-// видом имени: сборка есть, публикации нет.
+// номером так же, как линии, и фильтр `push` пропускает обе; ИМЯ публикуемого
+// образа решает шаг `gate` переписью запросов с базой этой ветки. Провайдер
+// подменён двойником CLI (ghStub), отвечающим так, как отвечает API: ветка
+// задачи — голова запроса в волну и база ни одного, линия — база, в том числе
+// когда все запросы в неё уже влиты. Законный близнец линии — push в задачу 429
+// с тем же видом имени ветки: образ публикуется, но тег его — не формы линии.
 //
 // ЧЕГО ПРОБА НЕ СУДИТ — сказано прямо. Выражения `${{ … }}` в `env:` шага
 // провайдер вычисляет ДО оболочки, и здесь значения подаются такими, какие он
@@ -41,12 +44,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/execstub"
 )
 
 // imageStepTimeout — срок одного шага. Шаги вычисляют имя и не ходят наружу;
@@ -62,6 +68,21 @@ const (
 	lineHeadSHA  = "fc9f5aff1d0e6b6a3a4c0e0b6f1a2b3c4d5e6f70"
 	trunkHeadSHA = "cbbac984b1a2c3d4e5f60718293a4b5c6d7e8f90"
 )
+
+// lineTagForm — форма тега ПОСАЖЕННОГО состояния ветки, названной номером:
+// `<номер>-<8 знаков ревизии>`. Её не вправе носить образ ветки задачи — иначе
+// пин такого тега не отличить от пина головы линии (дефект ревью #429).
+var lineTagForm = regexp.MustCompile(`^[0-9]+-[0-9a-f]{8}$`)
+
+// subjectTagOf — тег, который шаг `subject` выдаёт на ветке `ref` при ревизии
+// lineHeadSHA (ссылка на версию тегуется самой версией): вход шага `gate`.
+func subjectTagOf(refType, ref string) string {
+	slug := strings.ReplaceAll(ref, "/", "-")
+	if refType == "tag" {
+		return slug
+	}
+	return slug + "-" + lineHeadSHA[:8]
+}
 
 type imageStep struct {
 	ID   string            `yaml:"id"`
@@ -229,8 +250,7 @@ type gateWorld struct {
 func gateEnv(t *testing.T, dir, fallbackNS string, w gateWorld) (map[string]string, string) {
 	t.Helper()
 	bin := filepath.Join(dir, "bin")
-	require.NoError(t, os.MkdirAll(bin, 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "gh"), []byte(ghStub), 0o700)) // #nosec G306 -- двойник обязан исполняться
+	execstub.Write(t, filepath.Join(bin, "gh"), ghStub)
 	logPath := filepath.Join(dir, "gh.log")
 	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 	env := map[string]string{
@@ -243,6 +263,7 @@ func gateEnv(t *testing.T, dir, fallbackNS string, w gateWorld) (map[string]stri
 		"FALLBACK_NS":   fallbackNS,
 		"GH_STUB_LOG":   logPath,
 		"GH_STUB_PULLS": w.pulls,
+		"SUBJECT_TAG":   subjectTagOf(w.refType, w.refName),
 	}
 	if w.creds {
 		env["DH_USER"] = "owner"
@@ -278,14 +299,18 @@ var (
 		pulls: "366:closed 366:open 357:closed"}
 )
 
-// gateFinding — что не так с решением о публикации; пусто — решение то, что ждали.
-func gateFinding(outputs map[string]string, push, ns string) string {
+// gateFinding — что не так с решением о публикации и об имени образа; пусто —
+// решение то, что ждали.
+func gateFinding(outputs map[string]string, push, ns, tag string) string {
 	var why []string
 	if outputs["push"] != push {
 		why = append(why, fmt.Sprintf("публикация %q, а ждали %q", outputs["push"], push))
 	}
 	if outputs["ns"] != ns {
 		why = append(why, fmt.Sprintf("пространство имён %q, а ждали %q", outputs["ns"], ns))
+	}
+	if outputs["tag"] != tag {
+		why = append(why, fmt.Sprintf("тег %q, а ждали %q", outputs["tag"], tag))
 	}
 	return strings.Join(why, "; ")
 }
@@ -317,30 +342,36 @@ func TestImageProducerTagsALineHeadLikeTheTrunk(t *testing.T) {
 	ns := wf.Env["FALLBACK_NS"]
 	require.NotEmpty(t, ns, "предпосылка ложна: `env.FALLBACK_NS` не объявлен")
 	for _, tc := range []struct {
-		what     string
-		w        gateWorld
-		push, ns string
+		what          string
+		w             gateWorld
+		push, ns, tag string
 		// asks — о какой базе шаг обязан спросить трекер; пусто — не спрашивает вовсе.
 		asks string
 	}{
-		{"push в ствол публикует, трекер не спрашивается", trunkPush, "true", "owner", ""},
-		{"push в ветку линии публикует — она база запроса", linePush, "true", "owner", "366"},
-		{"линия, все запросы в которую влиты, публикует", landedLinePush, "true", "owner", "357"},
-		// ЗАКОННЫЙ БЛИЗНЕЦ ЛИНИИ той же формы имени: фильтр `push` его пропускает,
-		// а посаженного состояния у него нет.
-		{"push в ветку задачи НЕ публикует — имя той же формы, состояние не посажено", taskPush, "false", "owner", "429"},
-		{"ссылка на версию публикует", gateWorld{event: "push", refType: "tag", refName: "v1.2.3", creds: true}, "true", "owner", ""},
-		{"ручной запуск на ветке полосы не публикует",
-			gateWorld{event: "workflow_dispatch", refType: "branch", refName: "lane/kn-api", creds: true}, "false", "owner", ""},
+		{"push в ствол публикует, трекер не спрашивается", trunkPush, "true", "owner", "main-fc9f5aff", ""},
+		{"push в ветку линии публикует — она база запроса", linePush, "true", "owner", "366-fc9f5aff", "366"},
+		{"линия, все запросы в которую влиты, публикует", landedLinePush, "true", "owner", "357-fc9f5aff", "357"},
+		// ЗАКОННЫЙ БЛИЗНЕЦ ЛИНИИ той же формы имени ветки: фильтр `push` его
+		// пропускает, посаженного состояния у него нет — образ публикуется для
+		// стенда проб, но под именем задачи, а не линии (kaname#916).
+		{"push в ветку задачи публикует под именем задачи — не формы линии", taskPush, "true", "owner", "task-429-fc9f5aff", "429"},
+		{"ссылка на версию публикует", gateWorld{event: "push", refType: "tag", refName: "v1.2.3", creds: true}, "true", "owner", "v1.2.3", ""},
+		{"ручной запуск на ветке полосы публикует под именем задачи",
+			gateWorld{event: "workflow_dispatch", refType: "branch", refName: "lane/kn-api", creds: true}, "true", "owner", "task-lane-kn-api-fc9f5aff", ""},
 		{"запрос не публикует и с учётными данными",
-			gateWorld{event: "pull_request", refType: "branch", refName: "437/merge", creds: true, pulls: "366:open"}, "false", "owner", ""},
-		{"push без учётных данных только собирает", gateWorld{event: "push", refType: "branch", refName: "366", pulls: "366:open"}, "false", ns, ""},
+			gateWorld{event: "pull_request", refType: "branch", refName: "437/merge", creds: true, pulls: "366:open"}, "false", "owner", "437-merge-fc9f5aff", ""},
+		{"push без учётных данных только собирает", gateWorld{event: "push", refType: "branch", refName: "366", pulls: "366:open"}, "false", ns, "366-fc9f5aff", ""},
 	} {
 		t.Run("публикация: "+tc.what, func(t *testing.T) {
 			t.Parallel()
 			out, calls, err := runGate(t, steps["gate"].Run, ns, tc.w)
 			require.NoError(t, err)
-			require.Emptyf(t, gateFinding(out, tc.push, tc.ns), "шаг `gate` дал %v", out)
+			require.Emptyf(t, gateFinding(out, tc.push, tc.ns, tc.tag), "шаг `gate` дал %v", out)
+			// Форма линии — ТОЛЬКО у посаженного: опубликованный образ ветки,
+			// которая не ствол, не версия и не линия, её не носит.
+			if strings.HasPrefix(tc.tag, "task-") {
+				require.Falsef(t, lineTagForm.MatchString(out["tag"]), "образ задачи носит форму линии: %q", out["tag"])
+			}
 			if tc.asks == "" {
 				require.Emptyf(t, calls, "решение не зависит от трекера, а шаг его спросил: %s", calls)
 				return
@@ -362,14 +393,16 @@ func TestImageProducerTagsALineHeadLikeTheTrunk(t *testing.T) {
 		require.Contains(t, err.Error(), "не установлено")
 	})
 
-	// Тег у сборки ОДИН, и это вычисленный `subject`: второго `-t` — например,
-	// движущегося — нет.
-	t.Run("сборка несёт один тег, и он из `subject`", func(t *testing.T) {
+	// Тег у сборки ОДИН, и это решение `gate` над именем `subject`: второго `-t`
+	// — например, движущегося — нет, и второго написания имени тоже.
+	t.Run("сборка несёт один тег, и он из `gate` над `subject`", func(t *testing.T) {
 		t.Parallel()
 		require.Equal(t, 1, strings.Count(steps["build"].Run, " -t "), "тегов у сборки не один")
 		require.Contains(t, steps["build"].Run, `-t "$IMAGE_REF"`)
-		require.True(t, strings.HasSuffix(steps["build"].Env["IMAGE_REF"], ":${{ steps.subject.outputs.tag }}"),
-			"тег образа взят не у шага `subject`: %q", steps["build"].Env["IMAGE_REF"])
+		require.True(t, strings.HasSuffix(steps["build"].Env["IMAGE_REF"], ":${{ steps.gate.outputs.tag }}"),
+			"тег образа взят не у шага `gate`: %q", steps["build"].Env["IMAGE_REF"])
+		require.Equal(t, "${{ steps.subject.outputs.tag }}", strings.TrimSpace(steps["gate"].Env["SUBJECT_TAG"]),
+			"шаг `gate` решает не над именем шага `subject`")
 	})
 }
 
@@ -391,29 +424,39 @@ func TestImageProducerTagProbeCanFail(t *testing.T) {
 
 	t.Run("push в ствол перестал публиковать", func(t *testing.T) {
 		t.Parallel()
-		script := injectOnce(t, steps["gate"].Run, `landed=true; why="ствол`, `landed=false; why="ствол`)
+		script := injectOnce(t, steps["gate"].Run, `publish=true; why="ствол`, `publish=false; why="ствол`)
 		out, _, err := runGate(t, script, "local", trunkPush)
 		require.NoError(t, err)
-		require.Contains(t, gateFinding(out, "true", "owner"), `публикация "false", а ждали "true"`)
+		require.Contains(t, gateFinding(out, "true", "owner", "main-fc9f5aff"), `публикация "false", а ждали "true"`)
 	})
 
 	// ДЕФЕКТ РЕВЬЮ #429: линию «распознаёт» фильтр — ветка из цифр публикуется
 	// без переписи, и ветка задачи идёт в реестр под именем линии.
-	t.Run("линию распознаёт форма имени, а не перепись — задача публикуется", func(t *testing.T) {
+	t.Run("линию распознаёт форма имени, а не перепись — задача под именем линии", func(t *testing.T) {
 		t.Parallel()
 		script := injectOnce(t, steps["gate"].Run, `elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then`,
-			`elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then landed=true; why="ветка из цифр"; elif false; then`)
+			`elif [[ "$REF_NAME" =~ ^[0-9]+$ ]]; then why="ветка из цифр"; elif false; then`)
 		out, _, err := runGate(t, script, "local", taskPush)
 		require.NoError(t, err)
-		require.Contains(t, gateFinding(out, "false", "owner"), `публикация "true", а ждали "false"`)
+		require.Contains(t, gateFinding(out, "true", "owner", "task-429-fc9f5aff"), `тег "429-fc9f5aff", а ждали "task-429-fc9f5aff"`)
 	})
 
-	t.Run("перепись только открытых запросов — влитая линия без образа", func(t *testing.T) {
+	// Дефект kaname#916: ветка задачи снова только собирается — стенду проб
+	// платформы ставить нечего.
+	t.Run("ветка задачи снова не публикуется", func(t *testing.T) {
+		t.Parallel()
+		script := injectOnce(t, steps["gate"].Run, `0) tag="task-$SUBJECT_TAG";`, `0) publish=false; tag="task-$SUBJECT_TAG";`)
+		out, _, err := runGate(t, script, "local", taskPush)
+		require.NoError(t, err)
+		require.Contains(t, gateFinding(out, "true", "owner", "task-429-fc9f5aff"), `публикация "false", а ждали "true"`)
+	})
+
+	t.Run("перепись только открытых запросов — влитая линия под именем задачи", func(t *testing.T) {
 		t.Parallel()
 		script := injectOnce(t, steps["gate"].Run, "&state=all&", "&state=open&")
 		out, _, err := runGate(t, script, "local", landedLinePush)
 		require.NoError(t, err)
-		require.Contains(t, gateFinding(out, "true", "owner"), `публикация "false", а ждали "true"`)
+		require.Contains(t, gateFinding(out, "true", "owner", "357-fc9f5aff"), `тег "task-357-fc9f5aff", а ждали "357-fc9f5aff"`)
 	})
 
 	t.Run("шаг, упавший в оболочке, — отказ, а не пустой выход", func(t *testing.T) {

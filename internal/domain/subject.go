@@ -13,6 +13,7 @@ import (
 //	user            → user:<id>
 //	service_account → service_account:<id>
 //	group           → group:<id>#member  (computed relation expands group members)
+//	system_class    → system_class:<anonymous|authenticated>
 //
 // Empty / unknown subject_type defaults to user (defensive). SINGLE source of
 // truth shared by the AccessBinding grant-tuple builder (tuples.go /
@@ -25,6 +26,10 @@ func FGASubjectRef(subjectType, subjectID string) string {
 		return "service_account:" + subjectID
 	case "group":
 		return "group:" + subjectID + "#member"
+	case string(SubjectTypeSystemClass):
+		// Класс — свой вид субъекта модели. Ветвь по умолчанию сделала бы из
+		// выдачи классу выдачу ЧЕЛОВЕКУ с идентификатором «authenticated».
+		return string(SubjectTypeSystemClass) + ":" + subjectID
 	default:
 		return "user:" + subjectID
 	}
@@ -41,13 +46,17 @@ type Subject struct {
 	ID   SubjectID
 }
 
-// Validate — self-validating subject: closed type + non-empty id.
+// Validate — субъект судит себя сам: закрытый вид и непустой идентификатор;
+// системный класс называет имя закрытого словаря (`anonymous` | `authenticated`).
 func (s Subject) Validate() error {
 	if err := s.Type.Validate(); err != nil {
 		return err
 	}
 	if s.ID == "" {
 		return fmt.Errorf("Illegal argument subject id (must be non-empty)")
+	}
+	if s.IsSystemClass() {
+		return validateSystemClassName(s.ID)
 	}
 	if len(s.ID) > 64 {
 		return fmt.Errorf("Illegal argument subject id: length must be <=64")

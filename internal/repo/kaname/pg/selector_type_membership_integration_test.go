@@ -129,11 +129,11 @@ func TestSelectorTypeMembership_GinServesContainmentNotScalarAny(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO kaname.role_rule_selectors
-		       (role_id, rule_fp, arm, object_types, resource_names, match_labels)
+		       (role_id, rule_fp, arm, object_types, resource_names, match_labels, verbs_by_type)
 		SELECT r.id, md5(r.id), 'anchor',
 		       CASE WHEN (row_number() OVER (ORDER BY r.id)) % 500 = 0
 		            THEN ARRAY[$1::text] ELSE ARRAY[$2::text] END,
-		       '{}'::text[], '{}'::jsonb
+		       '{}'::text[], '{}'::jsonb, '{}'::jsonb
 		  FROM kaname.roles r
 		 WHERE r.id LIKE 'rol0%'
 		ON CONFLICT DO NOTHING`, probedType, bulkType)

@@ -387,30 +387,38 @@ func (w *accountWriter) Delete(ctx context.Context, id domain.AccountID) error {
 		deleted                                                 int
 		accountExists, hasProjects, hasSAs, hasGroups, hasRoles bool
 	)
-	err := w.tx.QueryRow(ctx, q, string(id)).
-		Scan(&deleted, &accountExists, &hasProjects, &hasSAs, &hasGroups, &hasRoles)
-	if err != nil {
-		return mapErr(err, "Account.Delete", string(id))
-	}
-	if deleted == 1 {
-		return nil
-	}
-	// Не удалили: либо нет, либо есть дети. Probe-результаты выше.
-	if !accountExists {
+	// Оператор — под точкой сохранения: отказ ключа `*_account_fk` (держащий
+	// зафиксирован после снимка охраны) отменяется до точки, и остаток
+	// дочитывается той же формой, что у охраны (kaname#725, Р2).
+	return deleteUnderSavepoint(ctx, w.tx, "Account.Delete", string(id), func(sp pgx.Tx) error {
+		err := sp.QueryRow(ctx, q, string(id)).
+			Scan(&deleted, &accountExists, &hasProjects, &hasSAs, &hasGroups, &hasRoles)
+		if err != nil {
+			return mapErr(err, "Account.Delete", string(id))
+		}
+		if deleted == 1 {
+			return nil
+		}
+		// Не удалили: либо нет, либо есть дети. Probe-результаты выше.
+		if !accountExists {
+			return iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
+		}
+		// Полоса — «ещё ссылаются» с видом держащего, как у ветвей ключей в
+		// `fkText`: признак `REFERENCE_IN_USE` у отказа охраны и у отказа гонки
+		// один (kaname#725, Р3). Порядок видов — прежний.
+		switch {
+		case hasProjects:
+			return heldRefusal(iamerr.HoldProjects, string(id))
+		case hasSAs:
+			return heldRefusal(iamerr.HoldServiceAccounts, string(id))
+		case hasGroups:
+			return heldRefusal(iamerr.HoldGroups, string(id))
+		case hasRoles:
+			return heldRefusal(iamerr.HoldCustomRoles, string(id))
+		}
+		// Race: row исчез между DELETE-step и probe-SELECT (другой коммит). NotFound.
 		return iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
-	}
-	switch {
-	case hasProjects:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Account %s contains projects and cannot be deleted", id)
-	case hasSAs:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Account %s contains service accounts and cannot be deleted", id)
-	case hasGroups:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Account %s contains groups and cannot be deleted", id)
-	case hasRoles:
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Account %s contains custom roles and cannot be deleted", id)
-	}
-	// Race: row исчез между DELETE-step и probe-SELECT (другой коммит). NotFound.
-	return iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
+	})
 }
 
 // LockForRemoval — см. порт. Замок строки аккаунта — ПЕРВЫМ оператором

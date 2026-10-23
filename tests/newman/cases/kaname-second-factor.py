@@ -133,7 +133,8 @@ Coverage (техники: классы эквивалентности состо
                                             неверный и повторённый — 401; строки не
                                             сняты, носитель не перевыпущен
   IAM-2FA-OK-REMOVE-BY-CODE               — Ф12-28: снятие кодом по времени — сессия
-                                            «2», остаток 0; состояние — не заведён;
+                                            «2», сводки набора нет (BCS-10);
+                                            состояние — не заведён;
                                             вход с кодом после снятия — тот же 401,
                                             что на неверный пароль (Ф12-13 е); без
                                             кода — «1»
@@ -166,6 +167,41 @@ Coverage (техники: классы эквивалентности состо
                                             и отказ признака счёта не растят; у
                                             личности без фактора — отказы «не
                                             заведён» и «нет ожидающего заведения»
+  IAM-2FA-CONF-BACKUP-CODE-SET-READ-AND-CONFIRM
+                                          — kaname#297 (приёмка
+                                            `backup-code-set-has-one-form.md`):
+                                            BCS-02 — без фактора ни `backupCodeSet`,
+                                            ни `backupCodes`; BCS-03 — подтверждение:
+                                            массив из 10 различных кодов и сводка
+                                            {10, 10, issuedAt} без `lastUsedAt`;
+                                            BCS-01, BCS-30 — чтение: та же сводка,
+                                            кодов в ней нет, ключа `backupCodes` нет
+  IAM-2FA-CONF-BACKUP-CODE-SET-STEP-UP    — BCS-17: отказ формы 400/3 текстом Р5 без
+                                            сводки; BCS-07: код по времени — ключа
+                                            сводки нет; BCS-06, BCS-31: запасной код —
+                                            {9, 10, прежний issuedAt, lastUsedAt},
+                                            плоского остатка нет, чтение равно
+                                            ответу; BCS-09: потраченный — 401 без
+                                            сводки; BCS-08: десятый — remaining 0
+                                            числом, `lookup_secret` ушёл из
+                                            `stepUpMethods`
+  IAM-2FA-CONF-BACKUP-CODE-SET-REGENERATE — BCS-18: отказ формы 400/3, ни кодов, ни
+                                            сводки, набор цел; BCS-04: кодом по
+                                            времени — десять новых, сводка {10, 10},
+                                            issuedAt не раньше прежнего; BCS-05:
+                                            запасным кодом — остаток нового набора 10
+  IAM-2FA-CONF-BACKUP-CODE-SET-REMOVE     — BCS-12: отказ формы 400/3, фактор цел;
+                                            BCS-13: годный по форме неверный — 401
+                                            сверки; BCS-11: живой код — тело ровно
+                                            `session`, `assurance`, фактора нет
+  IAM-2FA-CONF-BACKUP-CODE-SET-ONE-TYPE-SWEEP
+                                          — BCS-32: обход одиннадцати ответов 200 —
+                                            `backupCodes` массивом только у
+                                            `confirm` и перечеканки, `backupCodeSet`
+                                            по таблице Р4, иных ключей семейства
+                                            набора нигде; BCS-10, BCS-31: снятие кодом по
+                                            времени — ключи ровно `session`,
+                                            `assurance`
   IAM-2FA-BVA-PROFILE-WINDOW-ELAPSED      — окно профиля прошло, ожидание одно на
                                             четыре ветви: Ф12-31 (г) — по истечении
                                             Retry-After верный код 200, «2»; Ф12-09 —
@@ -326,8 +362,10 @@ def _backup_summary(label, remaining):
     """Сводка набора состояния: члены и числа — без значений кодов."""
     return [
         f"pm.test({js_str(label)}, () => {{",
-        "  const bc = (j.backupCodes && typeof j.backupCodes === 'object' && !Array.isArray(j.backupCodes)) ? j.backupCodes : {};",
-        "  pm.expect(Object.keys(bc).sort(), 'члены сводки набора').to.eql(['remaining', 'total']);",
+        "  const bc = (j.backupCodeSet && typeof j.backupCodeSet === 'object' && !Array.isArray(j.backupCodeSet)) ? j.backupCodeSet : {};",
+        # Моменты набора (kaname#827, SUA Р6): `issuedAt` есть всегда, `lastUsedAt` —
+        # только после траты; значения кодов сводка не несёт.
+        "  pm.expect(Object.keys(bc).filter((k) => k !== 'lastUsedAt').sort(), 'члены сводки набора').to.eql(['issuedAt', 'remaining', 'total']);",
         f"  pm.expect([bc.remaining, bc.total], 'остаток и размер набора').to.eql([{remaining}, 10]);",
         "});",
     ]
@@ -562,7 +600,7 @@ def _status_step(name, tests, session_var="sfSessionCookie", form_var="sfFormCoo
 def _keep_remaining(var):
     return [
         "{",
-        "  const bc = (j.backupCodes && typeof j.backupCodes === 'object') ? j.backupCodes : {};",
+        "  const bc = (j.backupCodeSet && typeof j.backupCodeSet === 'object') ? j.backupCodeSet : {};",
         f"  pm.environment.set({js_str(var)}, String(bc.remaining));",
         "}",
     ]
@@ -572,7 +610,7 @@ def _remaining_is(var, delta, label):
     """Остаток набора в состоянии равен захваченному ранее минус `delta`."""
     return [
         f"pm.test({js_str(label)}, () => {{",
-        "  const bc = (j.backupCodes && typeof j.backupCodes === 'object') ? j.backupCodes : {};",
+        "  const bc = (j.backupCodeSet && typeof j.backupCodeSet === 'object') ? j.backupCodeSet : {};",
         f"  pm.expect(bc.remaining, 'остаток набора').to.eql(parseInt(pm.environment.get({js_str(var)}), 10) - {delta});",
         "});",
     ]
@@ -614,7 +652,7 @@ def _backup_step_up_ok(name, index, label, remaining=None, set_var="sfBackupCode
     if remaining is not None:
         tests.append(
             f"pm.test({js_str(label + ': остаток ' + str(remaining) + ' назван в ответе')}, () => "
-            f"pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql({remaining}));")
+            f"pm.expect(j.backupCodeSet && j.backupCodeSet.remaining, 'остаток запасных кодов').to.eql({remaining}));")
     return _step_up(
         name,
         {"method": "lookup_secret", "code": "{{sfBackupCode}}", "csrfToken": "{{sfCsrfStepUp}}"},
@@ -706,7 +744,7 @@ CASES.append(Case(
             "pm.test('STATUS-NONE: фактора нет — ни заведённого, ни ожидающего, набора нет', () => {",
             "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
             "  pm.expect(Object.prototype.hasOwnProperty.call(j.totp || {}, 'pendingUntil'), 'срок ожидания').to.eql(false);",
-            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
+            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodeSet'), 'сводка набора в ответе').to.eql(false);",
             "});",
         ]),
         _csrf_step("ne-csrf-step-up", "step-up", "sfCsrfStepUp", "CSRF-STEP-UP"),
@@ -770,7 +808,7 @@ CASES.append(Case(
             "pm.test('PE-STATUS: не заведён; срок ожидания — тот, что назвал ответ заведения; набора нет', () => {",
             "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
             "  pm.expect(j.totp && j.totp.pendingUntil, 'срок ожидания').to.eql(pm.environment.get('sfPendingUntil'));",
-            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
+            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodeSet'), 'сводка набора в ответе').to.eql(false);",
             "});",
         ]),
         _csrf_step("pe-csrf-login", "login", "sfCsrfLogin", "CSRF-LOGIN"),
@@ -822,7 +860,7 @@ CASES.append(Case(
         _status_step("status-before-enroll", [
             "pm.test('STATUS-0: фактор не заведён, набора нет', () => {",
             "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
-            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
+            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodeSet'), 'сводка набора в ответе').to.eql(false);",
             "});",
         ]),
         _csrf_step("csrf-second-factor", "second-factor", "sfCsrfSecondFactor", "CSRF-2FA"),
@@ -853,7 +891,7 @@ CASES.append(Case(
             "pm.test('STATUS-PENDING: не заведён, срок ожидания назван, набора нет', () => {",
             "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
             "  pm.expect(j.totp && j.totp.pendingUntil, 'срок ожидания').to.be.a('string').and.not.empty;",
-            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
+            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodeSet'), 'сводка набора в ответе').to.eql(false);",
             "});",
         ]),
         _post("confirm-with-replaced-secret", _CONFIRM, {"code": "{{sfCode}}", "csrfToken": "{{sfCsrfSecondFactor}}"},
@@ -942,7 +980,7 @@ CASES.append(Case(
                      "pm.test('STEP-UP: «2», остаток 9 назван только здесь', () => {",
                      "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
                      "  pm.expect(j.assurance && j.assurance.level, 'уровень assurance').to.eql('2');",
-                     "  pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql(9);",
+                     "  pm.expect(j.backupCodeSet && j.backupCodeSet.remaining, 'остаток запасных кодов').to.eql(9);",
                      "});",
                      *_capture_cookie("kaname_session", "sfSessionCookie", "STEP-UP"),
                  ]),
@@ -1232,9 +1270,9 @@ CASES.append(Case(
                   *_OK,
                   *_ACCEPTED_STEP,
                   "const j = pm.response.json();",
-                  "pm.test('REMOVE: сессия «2», остаток 0 всегда (фактор снят, набора нет — Р4 ред. 10), путь к «2» закрыт', () => {",
+                  "pm.test('REMOVE: сессия «2», сводки набора нет — набора после снятия нет (BCS-10), путь к «2» закрыт', () => {",
                   "  pm.expect(j.session && j.session.assuranceLevel, 'уровень сессии').to.eql('2');",
-                  "  pm.expect(j.backupCodesRemaining, 'остаток запасных кодов').to.eql(0);",
+                  "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodeSet'), 'сводка набора в ответе').to.eql(false);",
                   "  pm.expect(j.assurance, 'assurance').to.eql({level: '2', level2Reachable: false, missingForLevel2: []});",
                   "});",
                   *_capture_cookie("kaname_session", "sfSessionCookie", "REMOVE"),
@@ -1242,7 +1280,7 @@ CASES.append(Case(
         _status_step("status-after-remove", [
             "pm.test('STATUS: не заведён, набора нет', () => {",
             "  pm.expect(j.totp && j.totp.enrolled, 'фактор заведён').to.eql(false);",
-            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodes'), 'сводка набора в ответе').to.eql(false);",
+            "  pm.expect(Object.prototype.hasOwnProperty.call(j, 'backupCodeSet'), 'сводка набора в ответе').to.eql(false);",
             "});",
         ]),
         *_logout_steps("after-remove"),
@@ -1273,7 +1311,7 @@ CASES.append(Case(
         _post("confirm-without-code", _CONFIRM, {"csrfToken": "{{sfCsrfSecondFactor}}"}, [],
               _refusal(400, 3, "Illegal argument code: required", "NO-CODE")),
         _step_up("step-up-method-outside-vocabulary", {"method": "sms", "code": "123456", "csrfToken": "{{sfCsrfStepUp}}"}, [],
-                 _refusal(400, 3, "Illegal argument method: must be one of password|totp|lookup_secret", "BAD-METHOD")),
+                 _refusal(400, 3, "Illegal argument method: must be one of password|totp|lookup_secret|webauthn", "BAD-METHOD")),
         _post("confirm-without-pending-enrollment", _CONFIRM, {"code": "123456", "csrfToken": "{{sfCsrfSecondFactor}}"}, [],
               _refusal(400, 9, "no pending enrollment: begin with enroll", "NOT-PENDING", reason="ENROLLMENT_NOT_PENDING")),
         *_logout_steps("after-negatives"),
@@ -2071,6 +2109,537 @@ def _fp_step_up_password(p, name, session_var, tests):
                     {"method": "password", "password": f"{{{{{_fp(p, 'Password')}}}}}",
                      "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
                     with_session=session_var, tests=tests)
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# НАБОР ЗАПАСНЫХ КОДОВ — ОДНА ФОРМА ВО ВСЕХ ОТВЕТАХ РАЗДЕЛА (kaname#297, приёмка
+# `docs/engineering/acceptance/backup-code-set-has-one-form.md`, BCS-01…13, 17,
+# 18, 30…32; BCS-14 и BCS-16 — набор `kaname-login-lane`).
+#
+# Форма (Р1…Р4 приёмки): `backupCodes` — массив ровно из десяти строк, только в
+# ответах подтверждения и перечеканки; `backupCodeSet` — сводка набора ключами
+# `remaining`, `total`, `issuedAt` и `lastUsedAt` (последнего нет, пока из набора
+# не тратили), только о прочитанном наборе и по таблице Р4; плоского
+# остатка нет ни в одном ответе; отказ формы запасного кода — `400`,
+# `code` `3` и текст Р5 дословно.
+#
+# ЛЮДИ СВОИ У КАЖДОГО КЕЙСА (регистрация → код письма → заведение фактора, та же
+# фикстура `_fp_person`, что у кейсов частоты): каждый кейс тратит, перечеканивает
+# либо снимает набор, и на человеке посева порядок соседних кейсов это сломало
+# бы. Неверных предъявлений у человека не больше одного (BCS-09, BCS-13) — ниже
+# величины профиля; отказ формы попыткой не считается (Ф12 Р4).
+#
+# ЗНАЧЕНИЙ КОДОВ УТВЕРЖДЕНИЯ НЕ ПОЛУЧАЮТ (kaname#417, шапка набора): форма и
+# различие кодов — булевым предметом, состав — числом, равенство сводок — булевым
+# сравнением канонической записи.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_BCS_FORM_TEXT = "Illegal argument code: must be 10 characters of the backup-code alphabet"
+_BCS_J = "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }"
+_BCS_UTC_SECOND = "/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/"
+# Каноническая запись сводки: ключи по алфавиту — равенство не зависит от
+# порядка членов в теле.
+_BCS_CANON = ("const __bcsCanon = (o) => JSON.stringify(Object.keys(o || {}).sort()"
+              ".reduce((a, k) => { a[k] = o[k]; return a; }, {}));")
+_BCS_SET_OF = ("const __bcsSetOf = (b) => (b && b.backupCodeSet && typeof b.backupCodeSet === 'object' "
+               "&& !Array.isArray(b.backupCodeSet)) ? b.backupCodeSet : null;")
+
+
+def _bcs_absent(label, *keys, body="__j"):
+    """Ключей тела нет — по утверждению на ключ (одна мысль на проверку)."""
+    return [
+        f"pm.test({js_str(label + ': ключа ' + k + ' в теле нет')}, () => "
+        f"pm.expect(Object.prototype.hasOwnProperty.call({body}, {js_str(k)}), {js_str('ключ ' + k)}).to.eql(false));"
+        for k in keys
+    ]
+
+
+def _bcs_family_closed(label, body="__j"):
+    """Семейство ключей набора закрыто: в теле нет ключа с приставкой
+    `backupCode`, кроме `backupCodes` и `backupCodeSet` (Р1, Р3; §«Совместимость» —
+    снятые имена в разделе не появляются вовсе). Предикат — по приставке, а не по
+    снятому имени: он ловит и плоский остаток, и любое иное имя того же предмета."""
+    return [
+        f"pm.test({js_str(label + ': ключей набора, кроме backupCodes и backupCodeSet, в теле нет')}, () => "
+        f"pm.expect(Object.keys({body}).filter(k => /^backupCode/.test(k) && k !== 'backupCodes' "
+        "&& k !== 'backupCodeSet').length, 'иных ключей набора').to.eql(0));",
+    ]
+
+
+def _bcs_set(label, remaining, last_used):
+    """Сводка `backupCodeSet` ответа: объект, ключи ровно по Р2, числа, моменты UTC до секунды."""
+    keys = sorted(["remaining", "total", "issuedAt"] + (["lastUsedAt"] if last_used else []))
+    out = [
+        "{",
+        f"  {_BCS_SET_OF}",
+        "  const __set = __bcsSetOf(__j) || {};",
+        f"  pm.test({js_str(label + ': backupCodeSet — объект')}, () => "
+        "pm.expect(__bcsSetOf(__j) !== null, 'сводка набора объектом').to.eql(true));",
+        f"  pm.test({js_str(label + ': ключи сводки ровно ' + ', '.join(keys))}, () => "
+        f"pm.expect(Object.keys(__set).sort(), 'ключи сводки').to.eql({js_str(','.join(keys))}.split(',')));",
+        f"  pm.test({js_str(label + ': remaining ' + str(remaining) + ' и total 10 — числа')}, () => "
+        f"pm.expect([__set.remaining, __set.total], 'остаток и размер набора').to.eql([{remaining}, 10]));",
+        f"  pm.test({js_str(label + ': issuedAt — момент UTC до секунды')}, () => "
+        f"pm.expect({_BCS_UTC_SECOND}.test(String(__set.issuedAt)), 'issuedAt').to.eql(true));",
+    ]
+    if last_used:
+        out.append(
+            f"  pm.test({js_str(label + ': lastUsedAt — момент UTC до секунды')}, () => "
+            f"pm.expect({_BCS_UTC_SECOND}.test(String(__set.lastUsedAt)), 'lastUsedAt').to.eql(true));")
+    out.append("}")
+    return out
+
+
+def _bcs_remaining_is(label, remaining):
+    return [
+        f"pm.test({js_str(label + ': backupCodeSet.remaining = ' + str(remaining))}, () => "
+        "pm.expect(__j.backupCodeSet && __j.backupCodeSet.remaining, 'остаток набора')"
+        f".to.eql({remaining}));",
+    ]
+
+
+def _bcs_keep_set(p, var):
+    """Каноническая запись сводки ответа — в `<p><var>` (кодов в ней нет, Р2)."""
+    return [
+        "{",
+        f"  {_BCS_CANON}",
+        f"  {_BCS_SET_OF}",
+        f"  pm.environment.set({js_str(_fp(p, var))}, __bcsSetOf(__j) ? __bcsCanon(__bcsSetOf(__j)) : '');",
+        "}",
+    ]
+
+
+def _bcs_set_equals(p, var, label):
+    """Сводка этого ответа равна сохранённой — те же ключи, те же значения."""
+    return [
+        "{",
+        f"  {_BCS_CANON}",
+        f"  {_BCS_SET_OF}",
+        f"  const __kept = pm.environment.get({js_str(_fp(p, var))}) || '';",
+        f"  pm.test({js_str(label + ': сводка глагола сохранена (контроль непустоты)')}, () => "
+        "pm.expect(__kept.length > 2, 'сводка сохранена').to.eql(true));",
+        f"  pm.test({js_str(label + ': backupCodeSet равен сводке ответа глагола')}, () => "
+        "pm.expect(__bcsSetOf(__j) !== null && __bcsCanon(__bcsSetOf(__j)) === __kept, 'сводки равны').to.eql(true));",
+        "}",
+    ]
+
+
+def _bcs_set_holds_no_code(p, label, codes_var="BackupCodes"):
+    """Ни одно значение `backupCodeSet` не равно ни одному коду набора."""
+    return [
+        "{",
+        f"  {_BCS_SET_OF}",
+        "  let __codes = [];",
+        f"  try {{ __codes = JSON.parse(pm.environment.get({js_str(_fp(p, codes_var))}) || '[]'); }} catch (e) {{ __codes = []; }}",
+        f"  pm.test({js_str(label + ': набор кодов захвачен (контроль непустоты)')}, () => "
+        "pm.expect(Array.isArray(__codes) && __codes.length === 10, 'набор захвачен').to.eql(true));",
+        f"  pm.test({js_str(label + ': ни одно значение сводки не равно коду набора')}, () => "
+        "pm.expect(Object.values(__bcsSetOf(__j) || {}).filter(v => __codes.includes(v)).length, "
+        "'значений сводки, равных коду').to.eql(0));",
+        "}",
+    ]
+
+
+def _bcs_codes(label):
+    """`backupCodes` ответа: массив ровно из десяти различных строк алфавита запасного кода."""
+    return [
+        "{",
+        "  const __c = Array.isArray(__j.backupCodes) ? __j.backupCodes : [];",
+        f"  pm.test({js_str(label + ': backupCodes — массив ровно из 10 строк')}, () => "
+        "pm.expect(Array.isArray(__j.backupCodes) ? __j.backupCodes.length : -1, 'запасных кодов').to.eql(10));",
+        f"  pm.test({js_str(label + ': каждый код — десять знаков алфавита запасного кода')}, () => "
+        "pm.expect(__c.filter(c => !/^[0-9A-HJKMNP-TV-Z]{10}$/.test(String(c))).length, 'кодов вне формы').to.eql(0));",
+        f"  pm.test({js_str(label + ': коды попарно различны')}, () => "
+        "pm.expect(new Set(__c).size, 'различных кодов').to.eql(10));",
+        "}",
+    ]
+
+
+def _bcs_store_codes(p):
+    return [f"if (Array.isArray(__j.backupCodes) && __j.backupCodes.length === 10) "
+            f"{{ pm.environment.set({js_str(_fp(p, 'BackupCodes'))}, JSON.stringify(__j.backupCodes)); }}"]
+
+
+def _bcs_keep_issued(p, var="IssuedAt"):
+    return [f"pm.environment.set({js_str(_fp(p, var))}, String(__j.backupCodeSet && __j.backupCodeSet.issuedAt));"]
+
+
+def _bcs_issued_is_kept(p, label, var="IssuedAt"):
+    return [
+        f"pm.test({js_str(label + ': issuedAt равен запомненному — набор тот же')}, () => "
+        f"pm.expect(String(__j.backupCodeSet && __j.backupCodeSet.issuedAt) === pm.environment.get({js_str(_fp(p, var))}), "
+        "'момент выпуска прежний').to.eql(true));",
+    ]
+
+
+def _bcs_refused_form(label):
+    """Отказ формы запасного кода (Р5): `400`, `code` `3`, текст дословно."""
+    return _fp_refused(400, 3, _BCS_FORM_TEXT, label)
+
+
+def _bcs_step_up_backup(p, name, index, session_var, tests):
+    up = name.upper()
+    return _fp_post(p, name, _STEP_UP,
+                    {"method": "lookup_secret", "code": f"{{{{{_fp(p, 'BackupCode')}}}}}",
+                     "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                    with_session=session_var, pre=_fp_backup(p, index, up), tests=tests)
+
+
+def _bcs_step_up_abc(p, name, session_var, label):
+    return _fp_post(p, name, _STEP_UP,
+                    {"method": "lookup_secret", "code": "ABC", "csrfToken": f"{{{{{_fp(p, 'Csrf')}}}}}"},
+                    with_session=session_var,
+                    tests=[*_bcs_refused_form(label), *_bcs_absent(label, "backupCodeSet", body="__r"),
+                           *_bcs_family_closed(label, body="__r")])
+
+
+def _bcs_spent(p, name, index, session_var, remaining):
+    """Трата кода №`index` повышением: `200`, остаток назван сводкой, носитель захвачен."""
+    up = name.upper()
+    return _bcs_step_up_backup(p, name, index, session_var, [
+        *_fp_status(200, up), _BCS_J, *_bcs_remaining_is(up, remaining),
+        *_fp_capture(p, "kaname_session", session_var, up),
+    ])
+
+
+def _bcs_state(p, name, session_var, tests):
+    return _fp_state(p, name, session_var, list(tests))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# BCS-02 → BCS-03 → BCS-01 / BCS-30: чтение без фактора, подтверждение заведения,
+# чтение заведённого. Различие BCS-02 и BCS-01 одно — фактор заведён.
+# ───────────────────────────────────────────────────────────────────────────
+_PBA = "sfBa"
+CASES.append(Case(
+    id="IAM-2FA-CONF-BACKUP-CODE-SET-READ-AND-CONFIRM",
+    title="Набор одной формы: чтение без фактора — ни backupCodeSet, ни backupCodes (BCS-02); подтверждение — массив backupCodes и сводка {10, 10, issuedAt} (BCS-03); чтение — та же сводка без lastUsedAt, ключа backupCodes нет (BCS-01, BCS-30)",
+    classes=["CONF", "CRUD"],
+    priority="P0",
+    steps=[
+        *_fp_person(_PBA, "bcsa", factor=False),
+        _bcs_state(_PBA, "bcs02-state-without-factor", "SessionCookie", [
+            "pm.test('BCS-02: totp.enrolled = false', () => "
+            "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(false));",
+            *_bcs_absent("BCS-02", "backupCodeSet", "backupCodes"),
+        ]),
+        _fp_csrf(_PBA, "bcs03-csrf-second-factor", "second-factor"),
+        _fp_enroll(_PBA, "bcs03-enroll", "SessionCookie"),
+        _fp_post(_PBA, "bcs03-confirm", _CONFIRM,
+                 {"code": f"{{{{{_fp(_PBA, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PBA, 'Csrf')}}}}}"},
+                 with_session="SessionCookie", pre=_fp_present(_PBA, "BCS03-CONFIRM"),
+                 tests=[
+                     *_fp_status(200, "BCS-03"), *_fp_accepted(_PBA), _BCS_J,
+                     *_bcs_codes("BCS-03"),
+                     *_bcs_store_codes(_PBA),
+                     *_bcs_set("BCS-03", 10, False),
+                     *_bcs_set_holds_no_code(_PBA, "BCS-03"),
+                     *_bcs_keep_set(_PBA, "SetJson"),
+                     *_fp_capture(_PBA, "kaname_session", "SessionCookie", "BCS-03"),
+                 ]),
+        _bcs_state(_PBA, "bcs01-state-enrolled", "SessionCookie", [
+            "pm.test('BCS-01: totp.enrolled = true', () => "
+            "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(true));",
+            *_bcs_set("BCS-01", 10, False),
+            *_bcs_set_holds_no_code(_PBA, "BCS-01"),
+            *_bcs_absent("BCS-30", "backupCodes"),
+            *_bcs_set_equals(_PBA, "SetJson", "BCS-03"),
+        ]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Повышение: отказ формы (BCS-17), код по времени (BCS-07), запасной код (BCS-06,
+# BCS-31), потраченный код (BCS-09), исчерпание (BCS-08). Порядок несущий: BCS-17
+# и BCS-07 стоят на нетронутом наборе (остаток 10), BCS-06 тратит первый код,
+# BCS-09 предъявляет его снова, BCS-08 тратит остальные девять.
+# ───────────────────────────────────────────────────────────────────────────
+_PBB = "sfBb"
+CASES.append(Case(
+    id="IAM-2FA-CONF-BACKUP-CODE-SET-STEP-UP",
+    title="Повышение: отказ формы — 400/3 текстом Р5 без сводки (BCS-17); код по времени — ключа backupCodeSet нет (BCS-07); запасной код — сводка {9, 10, issuedAt, lastUsedAt}, плоского остатка нет (BCS-06, BCS-31); тот же код — 401 без сводки (BCS-09); десятый — remaining 0 числом, lookup_secret ушёл из stepUpMethods (BCS-08)",
+    classes=["CONF", "NEG", "VAL", "BVA"],
+    priority="P0",
+    steps=[
+        *_fp_person(_PBB, "bcsb"),
+        *_fp_login(_PBB, "bcsb-login"),
+        _bcs_state(_PBB, "bcsb-state-before", "LoginSessionCookie", [
+            *_bcs_remaining_is("BCSB-BEFORE", 10), *_bcs_keep_issued(_PBB),
+        ]),
+        _fp_csrf(_PBB, "bcsb-csrf-step-up", "step-up", with_session="LoginSessionCookie"),
+        _bcs_step_up_abc(_PBB, "bcs17-step-up-malformed", "LoginSessionCookie", "BCS-17"),
+        _bcs_state(_PBB, "bcs17-state-after", "LoginSessionCookie", [*_bcs_remaining_is("BCS-17", 10)]),
+        _fp_step_up_right(_PBB, "bcs07-step-up-totp", "LoginSessionCookie", [
+            *_fp_status(200, "BCS-07"), _BCS_J,
+            *_bcs_absent("BCS-07", "backupCodeSet"), *_bcs_family_closed("BCS-07"),
+            *_fp_capture(_PBB, "kaname_session", "LoginSessionCookie", "BCS-07"),
+        ]),
+        _bcs_state(_PBB, "bcs07-state-after", "LoginSessionCookie", [*_bcs_remaining_is("BCS-07", 10)]),
+        _bcs_step_up_backup(_PBB, "bcs06-step-up-backup-code", 0, "LoginSessionCookie", [
+            *_fp_status(200, "BCS-06"), _BCS_J,
+            *_bcs_set("BCS-06", 9, True),
+            *_bcs_issued_is_kept(_PBB, "BCS-06"),
+            *_bcs_family_closed("BCS-31"),
+            *_bcs_keep_set(_PBB, "SetJson"),
+            *_fp_capture(_PBB, "kaname_session", "LoginSessionCookie", "BCS-06"),
+        ]),
+        _bcs_state(_PBB, "bcs06-state-after", "LoginSessionCookie", [*_bcs_set_equals(_PBB, "SetJson", "BCS-06")]),
+        _bcs_step_up_backup(_PBB, "bcs09-step-up-spent-code", 0, "LoginSessionCookie", [
+            *_fp_refused(401, 16, _AUTH_FAILED, "BCS-09"),
+            *_bcs_absent("BCS-09", "backupCodeSet", body="__r"), *_bcs_family_closed("BCS-09", body="__r"),
+        ]),
+        _bcs_state(_PBB, "bcs09-state-after", "LoginSessionCookie", [*_bcs_remaining_is("BCS-09", 9)]),
+        *[_bcs_spent(_PBB, f"bcs08-spend-{i}", i, "LoginSessionCookie", 9 - i) for i in range(1, 9)],
+        _bcs_step_up_backup(_PBB, "bcs08-step-up-tenth", 9, "LoginSessionCookie", [
+            *_fp_status(200, "BCS-08"), _BCS_J,
+            "pm.test('BCS-08: ключ backupCodeSet на месте', () => "
+            "pm.expect(Object.prototype.hasOwnProperty.call(__j, 'backupCodeSet'), 'ключ backupCodeSet').to.eql(true));",
+            *_bcs_set("BCS-08", 0, True),
+            *_fp_capture(_PBB, "kaname_session", "LoginSessionCookie", "BCS-08"),
+        ]),
+        _bcs_state(_PBB, "bcs08-state-exhausted", "LoginSessionCookie", [
+            "pm.test('BCS-08: totp.enrolled = true', () => "
+            "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(true));",
+            *_bcs_remaining_is("BCS-08-STATE", 0),
+            "pm.test('BCS-08: stepUpMethods без lookup_secret', () => "
+            "pm.expect(Array.isArray(__j.stepUpMethods) && !__j.stepUpMethods.includes('lookup_secret'), "
+            "'lookup_secret среди способов повышения').to.eql(true));",
+        ]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Перечеканка: отказ формы (BCS-18), кодом по времени после траты одного кода
+# (BCS-04), запасным кодом нового набора после траты одного его кода (BCS-05 —
+# остаток НОВОГО набора 10, а не 8 прежнего).
+# ───────────────────────────────────────────────────────────────────────────
+_PBC = "sfBc"
+CASES.append(Case(
+    id="IAM-2FA-CONF-BACKUP-CODE-SET-REGENERATE",
+    title="Перечеканка: отказ формы — 400/3 текстом Р5, ни кодов, ни сводки, набор не тронут (BCS-18); кодом по времени — десять новых и сводка {10, 10, issuedAt} без lastUsedAt (BCS-04); запасным кодом — остаток нового набора 10 (BCS-05); следующее чтение равно сводке ответа",
+    classes=["CONF", "NEG", "VAL", "STATE"],
+    priority="P0",
+    steps=[
+        *_fp_person(_PBC, "bcsc"),
+        *_fp_login(_PBC, "bcsc-login"),
+        _bcs_state(_PBC, "bcsc-state-before", "LoginSessionCookie", [
+            *_bcs_remaining_is("BCSC-BEFORE", 10), *_bcs_keep_issued(_PBC),
+        ]),
+        _fp_csrf(_PBC, "bcs18-csrf-second-factor", "second-factor", with_session="LoginSessionCookie"),
+        _fp_post(_PBC, "bcs18-regenerate-malformed", _BACKUP_CODES,
+                 {"method": "lookup_secret", "code": "ABC", "csrfToken": f"{{{{{_fp(_PBC, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie",
+                 tests=[*_bcs_refused_form("BCS-18"), *_bcs_absent("BCS-18", "backupCodes", "backupCodeSet", body="__r")]),
+        _bcs_state(_PBC, "bcs18-state-after", "LoginSessionCookie", [
+            *_bcs_remaining_is("BCS-18", 10), *_bcs_issued_is_kept(_PBC, "BCS-18"),
+        ]),
+        _fp_csrf(_PBC, "bcs04-csrf-step-up", "step-up", with_session="LoginSessionCookie"),
+        _bcs_spent(_PBC, "bcs04-spend-one", 0, "LoginSessionCookie", 9),
+        _bcs_state(_PBC, "bcs04-state-before", "LoginSessionCookie", [
+            *_bcs_remaining_is("BCS-04-GIVEN", 9), *_bcs_keep_issued(_PBC),
+        ]),
+        _fp_await_step(_PBC, "bcs04-await-step", "second-factor", "LoginSessionCookie", "BCS04-AWAIT"),
+        _fp_post(_PBC, "bcs04-regenerate-totp", _BACKUP_CODES,
+                 {"method": "totp", "code": f"{{{{{_fp(_PBC, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PBC, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie", pre=_fp_present(_PBC, "BCS04-REGEN"),
+                 tests=[
+                     *_fp_status(200, "BCS-04"), *_fp_accepted(_PBC), _BCS_J,
+                     *_bcs_codes("BCS-04"),
+                     "{",
+                     "  let __old = [];",
+                     f"  try {{ __old = JSON.parse(pm.environment.get({js_str(_fp(_PBC, 'BackupCodes'))}) || '[]'); }} catch (e) {{ __old = []; }}",
+                     "  pm.test('BCS-04: прежний набор захвачен (контроль непустоты)', () => "
+                     "pm.expect(Array.isArray(__old) && __old.length === 10, 'прежний набор').to.eql(true));",
+                     "  pm.test('BCS-04: ни один новый код не входит в прежний набор', () => "
+                     "pm.expect((Array.isArray(__j.backupCodes) ? __j.backupCodes : []).filter(c => __old.includes(c)).length, "
+                     "'совпавших с прежними').to.eql(0));",
+                     "}",
+                     *_bcs_set("BCS-04", 10, False),
+                     f"pm.test('BCS-04: issuedAt не раньше прежнего', () => "
+                     f"pm.expect(Date.parse(String(__j.backupCodeSet && __j.backupCodeSet.issuedAt)) >= "
+                     f"Date.parse(pm.environment.get({js_str(_fp(_PBC, 'IssuedAt'))})), 'момент выпуска').to.eql(true));",
+                     *_bcs_store_codes(_PBC),
+                     *_bcs_keep_set(_PBC, "SetJson"),
+                     *_fp_capture(_PBC, "kaname_session", "LoginSessionCookie", "BCS-04"),
+                 ]),
+        _bcs_state(_PBC, "bcs04-state-after", "LoginSessionCookie", [*_bcs_set_equals(_PBC, "SetJson", "BCS-04")]),
+        _fp_csrf(_PBC, "bcs05-csrf-step-up", "step-up", with_session="LoginSessionCookie"),
+        _bcs_spent(_PBC, "bcs05-spend-one", 0, "LoginSessionCookie", 9),
+        _fp_csrf(_PBC, "bcs05-csrf-second-factor", "second-factor", with_session="LoginSessionCookie"),
+        _fp_post(_PBC, "bcs05-regenerate-backup-code", _BACKUP_CODES,
+                 {"method": "lookup_secret", "code": f"{{{{{_fp(_PBC, 'BackupCode')}}}}}",
+                  "csrfToken": f"{{{{{_fp(_PBC, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie", pre=_fp_backup(_PBC, 1, "BCS-05"),
+                 tests=[
+                     *_fp_status(200, "BCS-05"), _BCS_J,
+                     *_bcs_codes("BCS-05"),
+                     *_bcs_set("BCS-05", 10, False),
+                     *_bcs_store_codes(_PBC),
+                     *_bcs_keep_set(_PBC, "SetJson"),
+                     *_fp_capture(_PBC, "kaname_session", "LoginSessionCookie", "BCS-05"),
+                 ]),
+        _bcs_state(_PBC, "bcs05-state-after", "LoginSessionCookie", [*_bcs_set_equals(_PBC, "SetJson", "BCS-05")]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Снятие запасным кодом: отказ формы (BCS-12), годный по форме неверный код —
+# отказ сверки (BCS-13), живой код — снято, тело ровно `session`, `assurance`
+# (BCS-11). Положительный близнец BCS-12 и BCS-13 — BCS-11.
+# ───────────────────────────────────────────────────────────────────────────
+_PBE = "sfBe"
+_BCS_WRONG_BACKUP = [
+    "let __set = [];",
+    f"try {{ __set = JSON.parse(pm.environment.get({js_str(_fp(_PBE, 'BackupCodes'))}) || '[]'); }} catch (e) {{ __set = []; }}",
+    # Десять знаков алфавита, которых в наборе нет наверняка: перебор по кругу.
+    "const __alpha = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';",
+    "let __wrong = '';",
+    "for (let i = 0; i < __alpha.length && __wrong === ''; i++) { const c = __alpha[i].repeat(10); if (!__set.includes(c)) { __wrong = c; } }",
+    f"pm.environment.set({js_str(_fp(_PBE, 'Code'))}, __wrong);",
+]
+CASES.append(Case(
+    id="IAM-2FA-CONF-BACKUP-CODE-SET-REMOVE",
+    title="Снятие запасным кодом: отказ формы — 400/3 текстом Р5, фактор цел (BCS-12); годный по форме неверный — 401 сверки (BCS-13); живой — 200, ключи тела ровно session и assurance, остатка снятого набора нет; чтение — фактора и сводки нет (BCS-11)",
+    classes=["CONF", "NEG", "VAL"],
+    priority="P0",
+    steps=[
+        *_fp_person(_PBE, "bcse"),
+        *_fp_login(_PBE, "bcse-login"),
+        _fp_csrf(_PBE, "bcs12-csrf-second-factor", "second-factor", with_session="LoginSessionCookie"),
+        _fp_post(_PBE, "bcs12-remove-malformed", _REMOVE,
+                 {"method": "lookup_secret", "code": "ABC", "csrfToken": f"{{{{{_fp(_PBE, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie", tests=_bcs_refused_form("BCS-12")),
+        _bcs_state(_PBE, "bcs12-state-after", "LoginSessionCookie", [
+            "pm.test('BCS-12: фактор не снят — totp.enrolled = true', () => "
+            "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(true));",
+            *_bcs_remaining_is("BCS-12", 10),
+        ]),
+        _fp_post(_PBE, "bcs13-remove-wrong-code", _REMOVE,
+                 {"method": "lookup_secret", "code": f"{{{{{_fp(_PBE, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PBE, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie", pre=_BCS_WRONG_BACKUP,
+                 tests=_fp_refused(401, 16, _AUTH_FAILED, "BCS-13")),
+        _fp_post(_PBE, "bcs11-remove-backup-code", _REMOVE,
+                 {"method": "lookup_secret", "code": f"{{{{{_fp(_PBE, 'BackupCode')}}}}}",
+                  "csrfToken": f"{{{{{_fp(_PBE, 'Csrf')}}}}}"},
+                 with_session="LoginSessionCookie", pre=_fp_backup(_PBE, 0, "BCS-11"),
+                 tests=[
+                     *_fp_status(200, "BCS-11"), _BCS_J,
+                     "pm.test('BCS-11: ключи тела ровно assurance, session', () => "
+                     "pm.expect(Object.keys(__j).sort(), 'ключи тела').to.eql(['assurance', 'session']));",
+                     "pm.test('BCS-11: остатка снятого набора нет ни под каким ключом', () => "
+                     "pm.expect(/backupCode/i.test(pm.response.text()), 'ключ набора в теле').to.eql(false));",
+                     *_fp_capture(_PBE, "kaname_session", "LoginSessionCookie", "BCS-11"),
+                 ]),
+        _bcs_state(_PBE, "bcs11-state-after", "LoginSessionCookie", [
+            "pm.test('BCS-11: totp.enrolled = false', () => "
+            "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(false));",
+            *_bcs_absent("BCS-11-STATE", "backupCodeSet"),
+        ]),
+    ],
+))
+# ───────────────────────────────────────────────────────────────────────────
+# BCS-32: один тип ключа во всех ответах раздела — обход одиннадцати ответов
+# `200` в порядке приёмки; заодно снятие кодом по времени — ключи тела ровно
+# `session`, `assurance` (BCS-10) и плоского остатка нет (BCS-31).
+# Таблица Р4: (backupCodes массивом из 10, backupCodeSet объектом) у каждого ответа.
+# ───────────────────────────────────────────────────────────────────────────
+_PBF = "sfBf"
+_BCS32_SEEN = _fp(_PBF, "Seen")
+
+
+def _bcs32(label, codes, set_, declare=True):
+    """Форма ответа обхода по Р4: присутствие и тип каждого ключа, счёт ответов.
+
+    `declare=False` — шаг уже объявил `__j` (чтение состояния, заведение)."""
+    out = [_BCS_J] if declare else []
+    if codes:
+        out.append(f"pm.test({js_str(label + ': backupCodes — массив ровно из 10 строк')}, () => "
+                   "pm.expect(Array.isArray(__j.backupCodes) ? __j.backupCodes.filter(c => typeof c === 'string').length : -1, "
+                   "'запасных кодов строками').to.eql(10));")
+    else:
+        out += _bcs_absent(label, "backupCodes")
+    if set_:
+        out += [
+            f"pm.test({js_str(label + ': backupCodeSet — объект с ключами из {remaining, total, issuedAt, lastUsedAt}, первые три обязательны')}, () => {{",
+            "  const s = __j.backupCodeSet;",
+            "  const ok = !!s && typeof s === 'object' && !Array.isArray(s)",
+            "    && Object.keys(s).every(k => ['remaining', 'total', 'issuedAt', 'lastUsedAt'].includes(k))",
+            "    && ['remaining', 'total', 'issuedAt'].every(k => Object.prototype.hasOwnProperty.call(s, k));",
+            "  pm.expect(ok, 'форма сводки').to.eql(true);",
+            "});",
+        ]
+    else:
+        out += _bcs_absent(label, "backupCodeSet")
+    out += _bcs_family_closed(label)
+    out.append(f"if (pm.response.code === 200) {{ pm.environment.set({js_str(_BCS32_SEEN)}, "
+               f"String(parseInt(pm.environment.get({js_str(_BCS32_SEEN)}) || '0', 10) + 1)); }}")
+    return out
+
+
+_BCS32_STEPS = [
+    *_fp_person(_PBF, "bcsf"),
+    *_fp_login(_PBF, "bcsf-login"),
+    _bcs_state(_PBF, "bcs32-1-state", "LoginSessionCookie", _bcs32("BCS32-1-GET", False, True, declare=False)),
+    _fp_csrf(_PBF, "bcs32-csrf-step-up", "step-up", with_session="LoginSessionCookie"),
+    _fp_step_up_password(_PBF, "bcs32-2-step-up-password", "LoginSessionCookie", [
+        *_fp_status(200, "BCS32-2"), *_bcs32("BCS32-2-STEP-UP-PASSWORD", False, False),
+        *_fp_capture(_PBF, "kaname_session", "LoginSessionCookie", "BCS32-2", required=False),
+    ]),
+    _fp_step_up_right(_PBF, "bcs32-3-step-up-totp", "LoginSessionCookie", [
+        *_fp_status(200, "BCS32-3"), *_bcs32("BCS32-3-STEP-UP-TOTP", False, False),
+        *_fp_capture(_PBF, "kaname_session", "LoginSessionCookie", "BCS32-3"),
+    ]),
+    _bcs_step_up_backup(_PBF, "bcs32-4-step-up-backup-code", 0, "LoginSessionCookie", [
+        *_fp_status(200, "BCS32-4"), *_bcs32("BCS32-4-STEP-UP-LOOKUP", False, True),
+        "pm.test('BCS-31: остаток повышения — backupCodeSet.remaining = 9', () => "
+        "pm.expect(__j.backupCodeSet && __j.backupCodeSet.remaining, 'остаток набора').to.eql(9));",
+        *_fp_capture(_PBF, "kaname_session", "LoginSessionCookie", "BCS32-4"),
+    ]),
+    _fp_await_step(_PBF, "bcs32-await-regenerate", "second-factor", "LoginSessionCookie", "BCS32-AWAIT-5"),
+    _fp_post(_PBF, "bcs32-5-regenerate-totp", _BACKUP_CODES,
+             {"method": "totp", "code": f"{{{{{_fp(_PBF, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PBF, 'Csrf')}}}}}"},
+             with_session="LoginSessionCookie", pre=_fp_present(_PBF, "BCS32-5"),
+             tests=[*_fp_status(200, "BCS32-5"), *_fp_accepted(_PBF), *_bcs32("BCS32-5-REGENERATE", True, True),
+                    *_bcs_store_codes(_PBF),
+                    *_fp_capture(_PBF, "kaname_session", "LoginSessionCookie", "BCS32-5")]),
+    _bcs_state(_PBF, "bcs32-6-state", "LoginSessionCookie", _bcs32("BCS32-6-GET", False, True, declare=False)),
+    _fp_await_step(_PBF, "bcs32-await-remove", "second-factor", "LoginSessionCookie", "BCS32-AWAIT-7"),
+    _fp_post(_PBF, "bcs32-7-remove-totp", _REMOVE,
+             {"method": "totp", "code": f"{{{{{_fp(_PBF, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PBF, 'Csrf')}}}}}"},
+             with_session="LoginSessionCookie", pre=_fp_present(_PBF, "BCS32-7"),
+             tests=[*_fp_status(200, "BCS32-7"), *_fp_accepted(_PBF), *_bcs32("BCS32-7-REMOVE", False, False),
+                    "pm.test('BCS-10: ключи тела ровно assurance, session', () => "
+                    "pm.expect(Object.keys(__j).sort(), 'ключи тела').to.eql(['assurance', 'session']));",
+                    *_fp_capture(_PBF, "kaname_session", "LoginSessionCookie", "BCS32-7")]),
+    _bcs_state(_PBF, "bcs32-8-state", "LoginSessionCookie", [
+        *_bcs32("BCS32-8-GET", False, False, declare=False),
+        "pm.test('BCS-10: totp.enrolled = false', () => "
+        "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(false));",
+    ]),
+    _fp_csrf(_PBF, "bcs32-csrf-enroll", "second-factor", with_session="LoginSessionCookie"),
+    _fp_enroll(_PBF, "bcs32-9-enroll", "LoginSessionCookie", tests=_bcs32("BCS32-9-ENROLL", False, False, declare=False)),
+    _fp_post(_PBF, "bcs32-10-confirm", _CONFIRM,
+             {"code": f"{{{{{_fp(_PBF, 'Code')}}}}}", "csrfToken": f"{{{{{_fp(_PBF, 'Csrf')}}}}}"},
+             with_session="LoginSessionCookie", pre=_fp_present(_PBF, "BCS32-10"),
+             tests=[*_fp_status(200, "BCS32-10"), *_fp_accepted(_PBF), *_bcs32("BCS32-10-CONFIRM", True, True),
+                    *_fp_capture(_PBF, "kaname_session", "LoginSessionCookie", "BCS32-10")]),
+    _bcs_state(_PBF, "bcs32-11-state", "LoginSessionCookie", [
+        *_bcs32("BCS32-11-GET", False, True, declare=False),
+        f"pm.test('BCS-32: обход прочёл ровно 11 ответов 200', () => "
+        f"pm.expect(pm.environment.get({js_str(_BCS32_SEEN)}), 'ответов обхода').to.eql('11'));",
+    ]),
+]
+# Счёт ответов обхода — свой на прогон: обнуляется первым шагом кейса.
+_BCS32_STEPS[0].pre_script = [f"pm.environment.unset({js_str(_BCS32_SEEN)});", *_BCS32_STEPS[0].pre_script]
+
+CASES.append(Case(
+    id="IAM-2FA-CONF-BACKUP-CODE-SET-ONE-TYPE-SWEEP",
+    title="Один тип ключа во всех ответах раздела: обход GET · повышение password, totp, lookup_secret · перечеканка · GET · снятие · GET · enroll · confirm · GET — backupCodes массивом из 10 только у confirm и перечеканки, backupCodeSet объектом ровно по таблице Р4, иных ключей набора нигде (BCS-32); снятие — ключи тела ровно session, assurance (BCS-10, BCS-31)",
+    classes=["CONF", "STATE"],
+    priority="P0",
+    steps=_BCS32_STEPS,
+))
 
 
 _PWG, _PWF, _PWP, _PWE = "sfWg", "sfWf", "sfWp", "sfWe"

@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // resources.go — раздел `resources` (приёмка
@@ -27,7 +28,8 @@ import (
 // человек, и перегенерация обязана сохранить вторые.
 //
 //	порождается    name · objectType · parents[] · verbs[]
-//	объявляется    notes[] · relations[] · subjects[] · tiers[] · cascade[]
+//	объявляется    notes[] · relations[] · subjects[] · tiers[] · cascade[] ·
+//	               publicReadToChildren
 //
 // Вид ключей записи называет сама запись — ключом `producer` из закрытого набора
 // `derived | authored`. Он не порождается и ресурс не описывает: он говорит, чем
@@ -169,6 +171,20 @@ var (
 	// ErrSourceListEmpty — перечень источников объявлен пустым. Пустой перечень
 	// неотличим от опущенного ключа, а формы «без источников вовсе» канон не несёт.
 	ErrSourceListEmpty = errors.New("manifest: an empty source list is not a form of the model")
+	// ErrPublicReadFalse — `publicReadToChildren: false`: второй способ сказать
+	// «не объявлено» рядом с отсутствием ключа (SC-71 (в)).
+	ErrPublicReadFalse = errors.New("manifest: publicReadToChildren is either absent or true")
+	// ErrPublicReadWithoutChild — ключ на типе, на который не указывает ни один
+	// ресурс того же документа: объявление без следствия (SC-71 (б)).
+	ErrPublicReadWithoutChild = errors.New("manifest: publicReadToChildren is declared on a type no resource of the module points to")
+	// ErrPublicReaderShadowed — авторское отношение занимает имя, которое
+	// порождает ключ публичного чтения: два объявления одного отношения.
+	ErrPublicReaderShadowed = errors.New("manifest: authored relation shadows the generated public reader relation")
+	// ErrPublicReadClassInReadVerb — действие чтения ресурса с ключом публичного
+	// чтения называет класс в составе субъектов: класс туда вписывает сам ключ, и
+	// блок с такой записью побайтово равен блоку из одного ключа (kaname#866, Р2) —
+	// два объявления одного следствия, которые допуск различить не может.
+	ErrPublicReadClassInReadVerb = errors.New("manifest: a read verb of a public read container names a subject class the key already brings")
 )
 
 // canonicalVerbClasses — ЕДИНСТВЕННОЕ в дереве объявление правила «класс из
@@ -442,6 +458,39 @@ type Resource struct {
 	//
 	// Отсутствие признака означает «ярусов нет».
 	BaseRoles bool `yaml:"baseRoles"`
+	// PublicReadToChildren — тип есть КОНТЕЙНЕР публичного чтения: выдача
+	// системному классу на его объект открывает чтение детей этого объекта,
+	// включая созданных позже (приёмка anonymous-and-authenticated-are-subject-classes.md,
+	// Р9 «Способ», kaname#856).
+	//
+	// Указатель, а не значение: значение выражается ОДНИМ способом — ключ
+	// отсутствует (не объявлено) либо равен true. `false` — второй способ
+	// сказать «нет», и отличить его от отсутствия можно только по указателю;
+	// загрузка его отвергает (SC-71 (в)). Читатели спрашивают [Resource.PassesPublicRead].
+	PublicReadToChildren *bool `yaml:"publicReadToChildren"`
+
+	// publicReadVia — имена указателей ЭТОГО ресурса на контейнеры ТОГО ЖЕ
+	// документа, объявившие публичное чтение детям, в порядке указателей.
+	//
+	// Не ключ документа, а ВЫВОД загрузчика ([linkPublicRead]): рендер блока
+	// ребёнка получает один ресурс и о соседях по документу не знает, а
+	// третье следствие ключа (`or public_reader from <указатель>`) принадлежит
+	// именно ребёнку. Неэкспортировано, чтобы его нельзя было объявить рукой
+	// в обход ключа контейнера.
+	publicReadVia []string
+}
+
+// PassesPublicRead — тип объявлен контейнером публичного чтения
+// (`publicReadToChildren: true`).
+func (r Resource) PassesPublicRead() bool {
+	return r.PublicReadToChildren != nil && *r.PublicReadToChildren
+}
+
+// PublicReadPointers — указатели ресурса на контейнеры того же документа,
+// объявившие публичное чтение детям; пусто у ресурса, не прошедшего загрузку,
+// и у ресурса без такого контейнера. Возвращается копия.
+func (r Resource) PublicReadPointers() []string {
+	return append([]string(nil), r.publicReadVia...)
 }
 
 // BaseRoleTiers — ярусы, которые ресурс ПОРОЖДАЕТ базовыми ролями.
@@ -698,8 +747,8 @@ type Relation struct {
 //
 // Умолчание — `[user, service_account, group#member] or super_admin`, и его
 // несут 24 модульных блока канона из 27. Остальные три несут иное:
-// `registry_repository` — `[user:*, user, service_account, group#member] or owner
-// or super_admin` (анонимное чтение публичного репозитория), `registry_registry`
+// `registry_repository` — `[system_class, user, service_account, group#member] or
+// owner or super_admin` (анонимное чтение публичного репозитория), `registry_registry`
 // — вывод от `owner`, `nlb_target_group` — вывод от другого ДЕЙСТВИЯ (`v_update`).
 // Ни одно из трёх не порождалось умолчательной формой, а объявить `v_*`
 // авторским отношением загрузчик не позволяет (имя порождается глаголом того же
@@ -814,6 +863,7 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 		faults = append(faults, validateResourceCascade(r, doc, i)...)
 		faults = append(faults, validateResourceTiers(r, doc, i)...)
 		faults = append(faults, validateResourceBaseRoles(r, doc, i)...)
+		faults = append(faults, validateResourcePublicRead(m, r, doc, i)...)
 		faults = append(faults, validateResourceVerbs(r, doc, i)...)
 		faults = append(faults, validateResourceRelations(r, doc, i)...)
 		faults = append(faults, validateResourceNotes(r, doc, i)...)
@@ -1164,6 +1214,132 @@ func validateResourceBaseRoles(r *Resource, doc *yaml.Node, i int) []error {
 			"признак либо назовите действие, доступное арендатору",
 			i, r.Name, strings.Join(r.BaseRoleTiers(), ", "), len(r.Verbs)),
 	}}
+}
+
+// validateResourcePublicRead — ключ публичного чтения детям (SC-71 (б), (в)).
+//
+// Значение выражается одним способом: ключ отсутствует либо равен true.
+// Объявление обязано иметь следствие: на тип указывает хотя бы один ресурс ТОГО
+// ЖЕ документа. Ребёнок из чужого манифеста наследования не получает — модуль не
+// правит блоки чужого типа, — поэтому и следствием объявления он не считается.
+func validateResourcePublicRead(m *Manifest, r *Resource, doc *yaml.Node, i int) []error {
+	if r.PublicReadToChildren == nil {
+		return nil
+	}
+	coord := locate(doc, "resources", i, "publicReadToChildren")
+	if !*r.PublicReadToChildren {
+		return []error{linkFault{
+			kind:  ErrPublicReadFalse,
+			coord: coord,
+			detail: fmt.Sprintf("resources[%d].publicReadToChildren: значение false не принимается — "+
+				"ключ либо отсутствует, либо равен true", i),
+		}}
+	}
+	var faults []error
+	if r.ObjectType != "" && len(childrenOf(m, r.ObjectType)) == 0 {
+		faults = append(faults, linkFault{
+			kind:  ErrPublicReadWithoutChild,
+			coord: coord,
+			detail: fmt.Sprintf("resources[%d].publicReadToChildren: на тип %s не указывает ни один "+
+				"ресурс модуля %s — объявление без следствия", i, r.ObjectType, m.Module),
+		})
+	}
+	for k, rel := range r.Relations {
+		if rel.Name != domain.PublicReaderRelation {
+			continue
+		}
+		faults = append(faults, linkFault{
+			kind:  ErrPublicReaderShadowed,
+			coord: locate(doc, "resources", i, "relations", k),
+			detail: fmt.Sprintf("resources[%d].relations[%d].name: имя %q порождает ключ "+
+				"publicReadToChildren того же ресурса — два объявления одного отношения, "+
+				"из которых верно одно", i, k, rel.Name),
+		})
+	}
+	return append(faults, readVerbClassFaults(r, doc, i)...)
+}
+
+// readVerbClassFaults — класс субъекта в составе действия чтения ресурса С ключом
+// (kaname#866, приёмка public-read-container-of-a-module-type-is-admitted.md, Р2,
+// PM-06).
+//
+// Ключ сам ставит класс первым в отношения действий чтения контейнера. Класс,
+// названный ещё и в составе действия, даёт ТОТ ЖЕ блок побайтово, поэтому допуск
+// собранной модели второе объявление отличить не может — и судит его загрузка.
+// Ловятся все написания класса ([domain.IsClassSubjectWord], `user:*` в том
+// числе), находка — одна на действие, и копятся все действия.
+//
+// На ребёнка правило не распространяется: ключ ребёнку класса не пишет, его блок
+// с такой записью отличается от блока из ключа по тексту, и отказ у него — один,
+// от допуска (Р2, PM-10).
+func readVerbClassFaults(r *Resource, doc *yaml.Node, i int) []error {
+	var faults []error
+	for j, v := range r.Verbs {
+		if !domain.IsPublicReadVerb(v.Name) {
+			continue
+		}
+		for _, word := range v.Subjects {
+			if !domain.IsClassSubjectWord(word) {
+				continue
+			}
+			faults = append(faults, linkFault{
+				kind:  ErrPublicReadClassInReadVerb,
+				coord: locate(doc, "resources", i, "verbs", j, "subjects"),
+				detail: fmt.Sprintf("resources[%d].verbs[%d].subjects: класс субъекта в действии %s "+
+					"ресурса с ключом publicReadToChildren вносит сам ключ — два объявления одного "+
+					"следствия, из которых верно одно", i, j, v.Name),
+			})
+			break
+		}
+	}
+	return faults
+}
+
+// childrenOf — ресурсы документа, чей указатель называет тип typ, в порядке
+// документа, с именем указателя.
+func childrenOf(m *Manifest, typ string) []childPointer {
+	var out []childPointer
+	for j := range m.Resources {
+		c := &m.Resources[j]
+		if c.ObjectType == typ {
+			continue
+		}
+		for _, p := range c.Parents {
+			if p.Type == typ {
+				out = append(out, childPointer{resource: j, pointer: p.Name})
+			}
+		}
+	}
+	return out
+}
+
+// childPointer — ребёнок контейнера: индекс ресурса и имя его указателя.
+type childPointer struct {
+	resource int
+	pointer  string
+}
+
+// linkPublicRead — вывод третьего следствия ключа: каждому ребёнку объявленного
+// контейнера того же документа — имена его указателей на контейнер.
+//
+// Зовётся ПОСЛЕ того, как загрузка нашла документ годным: на документе с
+// находками вывод не нужен никому, а на годном он полон.
+func linkPublicRead(m *Manifest) {
+	for i := range m.Resources {
+		m.Resources[i].publicReadVia = nil
+	}
+	for i := range m.Resources {
+		c := &m.Resources[i]
+		if !c.PassesPublicRead() {
+			continue
+		}
+		for _, ch := range childrenOf(m, c.ObjectType) {
+			child := &m.Resources[ch.resource]
+			if !contains(child.publicReadVia, ch.pointer) {
+				child.publicReadVia = append(child.publicReadVia, ch.pointer)
+			}
+		}
+	}
 }
 
 // validateResourceVerbs — имя и класс каждого действия; класс короткой формы

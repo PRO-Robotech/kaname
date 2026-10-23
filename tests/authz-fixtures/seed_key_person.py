@@ -404,8 +404,9 @@ LOOKUP_SECRET = "lookup_secret"
 
 def remove_second_factor(lane, session: str, code: str) -> None:
     """Снятие второго фактора глаголом полосы (Ф12-28) под сессией «2»,
-    подтверждённое запасным кодом. Утверждается ответ: `200` и остаток
-    запасных кодов `0` (фактор снят целиком, Р4 ред. 10)."""
+    подтверждённое запасным кодом. Утверждается ответ: `200` и тело ровно
+    `session`, `assurance` — набора после снятия нет, и сводки набора в ответе
+    нет (kaname#297 BCS-11)."""
     token, ctx = form_token(lane, SECOND_FACTOR_FORM, {"kaname_session": session})
     status, _, text = lane.ask("POST", SECOND_FACTOR_REMOVE,
                                body={"method": LOOKUP_SECRET, "code": code, "csrfToken": token},
@@ -413,9 +414,12 @@ def remove_second_factor(lane, session: str, code: str) -> None:
     if status != 200:
         raise Finding(f"снятие второго фактора запасным кодом: ждали 200, получили {status} "
                       f"({message_of(text)!r})")
-    if _json(text).get("backupCodesRemaining") != 0:
-        raise Finding("снятие второго фактора ответило 200, а запасные коды остались — фактор снят "
-                      "не целиком")
+    keys, want = set(_json(text)), {"session", "assurance"}
+    if keys != want:
+        extra, missing = sorted(keys - want), sorted(want - keys)
+        raise Finding(f"снятие второго фактора ответило 200, а ключи тела {sorted(keys)} не равны "
+                      f"{sorted(want)}: лишние {extra}, недостающие {missing} — лишний ключ называет "
+                      "набор после снятия, недостающий оставляет уровень после снятия неназванным")
 
 
 # ─────────────────────────── снятие строки пароля ────────────────────────────
@@ -498,16 +502,25 @@ def seed(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None
 
 
 def seed_all(lane, mailbox, doors, store, client: tuple[str, str, str], *, keys=None, binding=None,
-             ceiling=None, sleep=time.sleep) -> dict:
-    """Обе личности, каждая под своей приставкой: свежая почта, свой ключ, своя рукоятка.
+             ceiling=None, sleep=time.sleep, prefixes=PREFIXES) -> dict:
+    """Личности названных приставок (умолчание — обе): свежая почта, свой ключ, своя рукоятка.
 
     Привязка разрешается ОДИН раз и уезжает в окружение рядом с личностями: набор
     ключей доступа собирает церемонии под ту же привязку, под которой посев
-    доказал регистрацию."""
+    доказал регистрацию.
+
+    ПОДМНОЖЕСТВО ПРИСТАВОК — ПЕРЕПОСЕВ ОДНОРАЗОВОЙ ЛИЧНОСТИ (kaname#860). Личность
+    без пароля прогон расходует: Ф13-25 заводит ей пароль восстановлением, а вход
+    ключом двигает счётчик подписи. Второй прогон на той же строке получает единый
+    отказ входа ключом. Поэтому прогонщик перед набором ключей доступа сеет одну
+    приставку `f13Person` заново, а прочие строки окружения не трогает."""
+    unknown = [p for p in prefixes if p not in PREFIXES]
+    if unknown or not prefixes:
+        raise Unmet(f"приставки {list(prefixes)} вне объявленных {list(PREFIXES)} — сеять некого")
     binding = binding or stand_binding(os.environ)
     ceiling = stand_ceiling(os.environ) if ceiling is None else ceiling
     patch: dict = {}
-    for prefix in PREFIXES:
+    for prefix in prefixes:
         patch.update(seed(lane, mailbox, doors, store, client, keys=keys, binding=binding,
                           sleep=sleep, prefix=prefix))
         say(f"  ok   личность «{prefix}» положена")
@@ -520,7 +533,7 @@ def run(args: argparse.Namespace) -> int:
     pki = pathlib.Path(args.pki)
     patch = seed_all(LaneHttp(args.base_url, pki), Mailbox(args.mailbox_url),
                  Doors(pki, args.issuance_url, args.own_url), PsqlStore(shlex.split(args.store_exec)),
-                 client_of(pathlib.Path(args.env_file)))
+                 client_of(pathlib.Path(args.env_file)), prefixes=tuple(args.prefix or PREFIXES))
     replaced = write_env(patch, pathlib.Path(args.env_file), pathlib.Path(args.env_template))
     say(f"посев личности с ключом: ключей записано {len(patch)} (заменено {replaced}) в {args.env_file}")
     return 0
@@ -593,10 +606,11 @@ class _FakeDoors:
 
 class _FakeLane:
     """Двойник полосы для снятия второго фактора: признак формы и сам глагол.
-    Отказ и остаток кодов — изменяемые факты."""
+    Отказ, лишняя сводка набора в ответе и пропавший ключ тела (`without`) —
+    изменяемые факты; умолчание — тело ровно `session`, `assurance`."""
 
-    def __init__(self, remove_status=200, remaining=0):
-        self.remove_status, self.remaining = remove_status, remaining
+    def __init__(self, remove_status=200, leftover=None, without=()):
+        self.remove_status, self.leftover, self.without = remove_status, leftover, tuple(without)
         self.removed: list[dict] = []
 
     def ask(self, method, path, body=None, cookies=None):
@@ -610,7 +624,12 @@ class _FakeLane:
             self.removed.append(body)
             if self.remove_status != 200:
                 return self.remove_status, [], json.dumps({"message": "refused"})
-            return 200, ["kaname_session=s3; Path=/"], json.dumps({"backupCodesRemaining": self.remaining})
+            body = {"session": {"assuranceLevel": "2"}, "assurance": {"level": "2"}}
+            if self.leftover is not None:
+                body["backupCodeSet"] = self.leftover
+            for k in self.without:
+                body.pop(k, None)
+            return 200, ["kaname_session=s3; Path=/"], json.dumps(body)
         return 404, [], "{}"
 
 
@@ -749,6 +768,22 @@ def self_test() -> int:
         _c("личности разные: своя почта и своё удостоверение у каждой приставки",
            kind == "ok" and patch["keyPersonEmail"] != patch["f13PersonEmail"]
            and patch["keyPersonCredentialId"] != patch["f13PersonCredentialId"], f"{patch}")
+        # Перепосев одноразовой личности (kaname#860): одна приставка — одна личность,
+        # чужие ключи окружения не пишутся; близнец — умолчание выше (обе).
+        lane_one, doors_one = _FakeLane(), _FakeDoors(rp=rp)
+        kind_o, text_o = _outcome(lambda: seed_all(lane_one, None, doors_one, _FakeStore(), ("c", "s", "r"),
+                                                   binding=(rp, origin), sleep=lambda _: None,
+                                                   prefixes=("f13Person",)))
+        patch_o = json.loads(text_o.replace("'", '"')) if kind_o == "ok" else {}
+        _c("одна приставка — заведена одна личность, записаны только её ключи, привязка и потолок",
+           kind_o == "ok" and len(doors_one.finished) == 1 and len(lane_one.removed) == 1
+           and set(patch_o) == {"f13Person" + f for f in FIELDS} | set(BINDING_KEYS) | {CEILING_KEY},
+           f"{kind_o}: {text_o}")
+        kind_u, text_u = _outcome(lambda: seed_all(_FakeLane(), None, _FakeDoors(rp=rp), _FakeStore(),
+                                                   ("c", "s", "r"), binding=(rp, origin),
+                                                   sleep=lambda _: None, prefixes=("nobody",)))
+        _c("приставка вне объявленных — условие не создано, а не тихий пустой посев",
+           kind_u == "unmet" and "nobody" in text_u, f"{kind_u}: {text_u}")
         _c("привязка профиля уезжает в окружение рядом с личностями",
            kind == "ok" and (patch["accessKeysRpId"], patch["accessKeysOrigin"]) == (rp, origin), f"{patch}")
         _c("потолок уезжает в окружение тем же посевом",
@@ -785,11 +820,26 @@ def self_test() -> int:
              {"after_login": {"bearer": "b", "verified": True}}, "finding"),
             ("подтверждение второго фактора без запасных кодов — находка", {"codes": ()}, "finding"),
             ("снятие второго фактора отвергнуто — находка", {"lane": _FakeLane(remove_status=409)}, "finding"),
-            ("снятие второго фактора оставило запасные коды — находка", {"lane": _FakeLane(remaining=10)},
+            ("снятие второго фактора назвало набор запасных кодов — находка",
+             {"lane": _FakeLane(leftover={"remaining": 10, "total": 10, "issuedAt": "2026-10-19T00:00:00Z"})},
              "finding"),
+            ("снятие второго фактора ответило без assurance — находка",
+             {"lane": _FakeLane(without=("assurance",))}, "finding"),
+            ("снятие второго фактора ответило без session — находка",
+             {"lane": _FakeLane(without=("session",))}, "finding"),
         ]:
             (kind, text), _, _, _ = sow(**kw)
             _c(label, kind == want, f"{kind}: {text}")
+        # Множество ключей ответа снятия РАВНО {session, assurance} (BCS ред. 7, DoD п.4,
+        # BCS-11): законный близнец молчит, каждый отрицательный меняет ровно один
+        # факт против него — ключа нет либо ключ лишний.
+        for label, lane_x, want in [
+            ("ответ снятия ровно {session, assurance} — молчит", _FakeLane(), "ok"),
+            ("ответ снятия без assurance — находка", _FakeLane(without=("assurance",)), "finding"),
+            ("ответ снятия с лишним ключом — находка", _FakeLane(leftover={"remaining": 10}), "finding"),
+        ]:
+            got = _outcome(lambda lane_x=lane_x: remove_second_factor(lane_x, "s2", "backup-1"))
+            _c(label, got[0] == want and len(lane_x.removed) == 1, f"{got}")
         # Близнецы красного kaname#768, по одному изменённому факту. (а) Сессия не
         # поднята до «2» — посев называет причину сам, до глагола ключа. (б) Глагол
         # ключа под токеном «1» — двойник отказывает дословным текстом службы (пол
@@ -850,6 +900,8 @@ def main() -> int:
     ap.add_argument("--env-template",
                     default=str(ROOT / "tests" / "newman" / "environments"
                                 / "local.postman_environment.template.json"))
+    ap.add_argument("--prefix", action="append", choices=PREFIXES,
+                    help="сеять только эту приставку (повторяемо); умолчание — все")
     ap.add_argument("--minted-keys", action="store_true")
     ap.add_argument("--minted-surface", action="store_true")
     ap.add_argument("--self-test", action="store_true")

@@ -130,26 +130,36 @@ func TestPublicReadObjectTypesAreInTheCatalog(t *testing.T) {
 	// законной во всём, кроме типа: субъект и отношение берутся из объявлений
 	// самого правила, иначе отказ пришёл бы от соседней оговорки и «разрешённых»
 	// насчиталось бы меньше, чем есть.
-	var admitted []string
-	for typ := range model.types {
-		if err := proxytuple.ValidateTuple(callerDomainOf(typ), proxytuple.PublicReadSubject,
-			string(proxytuple.PublicReadRelation), typ+":x"); err == nil {
-			admitted = append(admitted, typ)
-		}
-	}
-	sort.Strings(admitted)
+	//
+	// Входных слов публикации два (kaname#893), и зонд спрашивает КАЖДОЕ: тип,
+	// разрешённый одному слову и не разрешённый другому, был бы виден лишь
+	// половине проверки.
+	words := proxytuple.PublicReadSubjects()
+	require.NotEmpty(t, words, "перечень входных слов публикации пуст — зонду нечего подать")
 	sort.Strings(declared)
+	var admitted []string
+	for _, word := range words {
+		var byWord []string
+		for typ := range model.types {
+			if err := proxytuple.ValidateTuple(callerDomainOf(typ), word,
+				string(proxytuple.PublicReadRelation), typ+":x"); err == nil {
+				byWord = append(byWord, typ)
+			}
+		}
+		sort.Strings(byWord)
 
-	t.Logf("типов в модели %d · объявлено публикуемыми %d · путь записи разрешает %d",
-		len(model.types), len(declared), len(admitted))
+		t.Logf("слово %q · типов в модели %d · объявлено публикуемыми %d · путь записи разрешает %d",
+			word, len(model.types), len(declared), len(byWord))
 
-	require.Equalf(t, declared, admitted,
-		"объявленный перечень публикуемых типов разошёлся с тем, что путь записи "+
-			"РАЗРЕШАЕТ.\n\n"+
-			"Объявление — рукописная копия карты, а копия множества не компилируется "+
-			"против оригинала. Расхождение тихое в обе стороны: лишний разрешённый тип "+
-			"не виден ни одной проверке этого дерева, лишний объявленный — сверяется с "+
-			"каталогом, хотя опубликовать его уже нельзя.")
+		require.Equalf(t, declared, byWord,
+			"объявленный перечень публикуемых типов разошёлся с тем, что путь записи "+
+				"РАЗРЕШАЕТ слову %q.\n\n"+
+				"Объявление — рукописная копия карты, а копия множества не компилируется "+
+				"против оригинала. Расхождение тихое в обе стороны: лишний разрешённый тип "+
+				"не виден ни одной проверке этого дерева, лишний объявленный — сверяется с "+
+				"каталогом, хотя опубликовать его уже нельзя.", word)
+		admitted = byWord
+	}
 
 	var findings []string
 	for _, typ := range admitted {

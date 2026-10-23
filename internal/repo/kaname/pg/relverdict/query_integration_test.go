@@ -137,9 +137,10 @@ func seedRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID, objType, ver
 	// пробел фикстуры.
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-1', $2, ARRAY[$3::text], $4::jsonb)`,
-		roleID, arm, grantType, labels)
+		   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-1', $2, ARRAY[$3::text], $4::jsonb,
+		         jsonb_build_object($3::text, jsonb_build_array($5::text)))`,
+		roleID, arm, grantType, labels, verb)
 }
 
 // Источник 1 — прямой факт.

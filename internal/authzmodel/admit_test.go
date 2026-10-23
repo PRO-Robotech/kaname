@@ -104,10 +104,10 @@ func TestAdmitLegalTwinFromCanonIsAdmitted(t *testing.T) {
 	if !rep.Admitted() {
 		t.Fatalf("законный близнец из канона обязан быть допущен; находки: %v; перепись: %s", rep.Findings, rep.Census())
 	}
-	if rep.TypesSeen != 33 || rep.TypesNew != 1 {
-		t.Fatalf("перепись: типов осмотрено %d (ждали 33), новых %d (ждали 1)", rep.TypesSeen, rep.TypesNew)
+	if rep.TypesSeen != 34 || rep.TypesNew != 1 {
+		t.Fatalf("перепись: типов осмотрено %d (ждали 34), новых %d (ждали 1)", rep.TypesSeen, rep.TypesNew)
 	}
-	if !strings.Contains(rep.Census(), "типов осмотрено 33, новых 1, находок 0") {
+	if !strings.Contains(rep.Census(), "типов осмотрено 34, новых 1, находок 0") {
 		t.Fatalf("перепись обязана печататься в форме нормы §5 п. 3, получено: %s", rep.Census())
 	}
 }
@@ -128,7 +128,7 @@ func TestAdmitTypeNameAlreadyCarriedByCanon(t *testing.T) {
 		t.Fatalf("находка обязана называть ЧИСЛО вхождений, получено %q", got[0].Text)
 	}
 	// Переопределение канонического имени новым типом НЕ считается новым типом:
-	// формулировка через множество здесь молчит (различных имён по-прежнему 32).
+	// формулировка через множество здесь молчит (различных имён по-прежнему 33).
 	if rep.TypesNew != 0 {
 		t.Fatalf("новых типов обязано быть 0, получено %d", rep.TypesNew)
 	}
@@ -323,8 +323,10 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 	if n := len(findingsOf(rep, RuleD5)); n != 0 {
 		t.Fatalf("законная форма вывода обязана проходить, находок Д5′: %d", n)
 	}
-	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 270.
-	// Число перемерено после снятия `cluster#console` (kacho#1820): было 273.
+	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 271.
+	// Число перемерено после заведения `registry_registry#public_reader`
+	// (kaname#856): было 270; до того — после снятия `cluster#console`
+	// (kacho#1820), было 273. План `public_reader from parent` выразим.
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -339,8 +341,8 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 270 || bad != 0 {
-		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 270)", bad, pairs)
+	if pairs != 271 || bad != 0 {
+		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 271)", bad, pairs)
 	}
 }
 
@@ -454,7 +456,7 @@ func TestAdmitTypeNameOutsideIdentifierForm(t *testing.T) {
 	if !strings.Contains(got[0].Text, "acme widget") {
 		t.Fatalf("находка обязана называть ПРЕДЪЯВЛЕННОЕ имя, получено %q", got[0].Text)
 	}
-	// Положительный близнец: все 32 имени типов канона форме удовлетворяют.
+	// Положительный близнец: все 33 имени типов канона форме удовлетворяют.
 	re := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
@@ -466,8 +468,8 @@ func TestAdmitTypeNameOutsideIdentifierForm(t *testing.T) {
 			bad++
 		}
 	}
-	if len(m.Types) != 32 || bad != 0 {
-		t.Fatalf("канон: имён вне формы %d из %d (ждали 0 из 32)", bad, len(m.Types))
+	if len(m.Types) != 33 || bad != 0 {
+		t.Fatalf("канон: имён вне формы %d из %d (ждали 0 из 33)", bad, len(m.Types))
 	}
 }
 
@@ -491,8 +493,9 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 	if !strings.Contains(got[0].Text, "2") {
 		t.Fatalf("находка обязана называть число объявлений, получено %q", got[0].Text)
 	}
-	// Положительный близнец: в каноне 270 объявлений и 0 имён, объявленных дважды
-	// (было 273 — перемерено после снятия `cluster#console`, kacho#1820).
+	// Положительный близнец: в каноне 271 объявление и 0 имён, объявленных дважды
+	// (было 270 — перемерено после заведения `registry_registry#public_reader`,
+	// kaname#856; до того 273 — после снятия `cluster#console`, kacho#1820).
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -510,8 +513,8 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 			}
 		}
 	}
-	if decls != 270 || dups != 0 {
-		t.Fatalf("канон: объявлений %d (ждали 270), дублей имени %d (ждали 0)", decls, dups)
+	if decls != 271 || dups != 0 {
+		t.Fatalf("канон: объявлений %d (ждали 271), дублей имени %d (ждали 0)", decls, dups)
 	}
 }
 
@@ -570,7 +573,7 @@ func TestAdmitWildcardReachedTransitivelyViaPointer(t *testing.T) {
 	var witnessed bool
 	for _, a := range p.Atoms {
 		if a.ParentType == "cluster" && a.Relation == "viewer" &&
-			a.Origin == "cluster.viewer → [user, user:*, service_account]" {
+			a.Origin == "cluster.viewer → [user, service_account, system_class]" {
 			witnessed = true
 		}
 	}
@@ -612,7 +615,7 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 	}
 }
 
-// ── §2.1 · запретное множество канона: 2 из 270, транзитивных сверх прямых 0 ──
+// ── §2.1 · запретное множество канона: 5 из 271, транзитивных сверх прямых 0 ──
 //
 // Это ПРОИЗВОДИТЕЛЬ премиссы, которой ревизия круга 4 (§17.5) не нашла ни одного:
 // «два ребра и три дают на каноне один ответ» названо там числом-ориентиром, а
@@ -622,9 +625,12 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 //
 // ЧИСЛО СТОИТ В ИМЕНИ, и потому имя движется вместе с каноном: всякое снятие
 // или заведение объявления переименовывает эту пробу. Последний раз её двигало
-// снятие `v_get` с типа `iam_role` (kacho#1922) — 271 → 270. Так и задумано: имя,
-// называющее величину, не вправе пережить её молча.
-func TestCanonWildcardSetIsTwoOfTwoHundredSeventy(t *testing.T) {
+// публичное чтение контейнера (kaname#856) — 2 из 270 → 5 из 271: отношение
+// `registry_registry#public_reader` и `system_class` в составе `v_get`, `v_list`
+// реестра (Р9 «Способ» приёмки anonymous-and-authenticated-are-subject-classes.md);
+// до того — снятие `v_get` с типа `iam_role` (kacho#1922), 271 → 270. Так и
+// задумано: имя, называющее величину, не вправе пережить её молча.
+func TestCanonWildcardSetIsFiveOfTwoHundredSeventyOne(t *testing.T) {
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -636,18 +642,27 @@ func TestCanonWildcardSetIsTwoOfTwoHundredSeventy(t *testing.T) {
 			pairs++
 			for _, term := range r.Terms {
 				for _, d := range term.Direct {
-					if d.Wildcard {
+					// Подстановка и системный класс — одно по смыслу: отношение
+					// выполнимо «каждым вошедшим» либо «каждым без входа»
+					// (kaname#829). После переезда канон выражает их классом.
+					if d.Wildcard || d.Type == "system_class" {
 						direct[ty.Name+"."+r.Name] = true
 					}
 				}
 			}
 		}
 	}
-	if pairs != 270 {
-		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 270 — числа приёмки перемеряются, а не помнятся", pairs)
+	if pairs != 271 {
+		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 271 — числа приёмки перемеряются, а не помнятся", pairs)
 	}
-	if len(direct) != 2 || !direct["cluster.viewer"] || !direct["registry_repository.v_get"] {
-		t.Fatalf("прямых подстановок канона %d, ждали 2 (cluster.viewer, registry_repository.v_get): %v", len(direct), direct)
+	wantDirect := []string{"cluster.viewer", "registry_repository.v_get",
+		"registry_registry.public_reader", "registry_registry.v_get", "registry_registry.v_list"}
+	missing := false
+	for _, w := range wantDirect {
+		missing = missing || !direct[w]
+	}
+	if len(direct) != len(wantDirect) || missing {
+		t.Fatalf("прямых подстановок канона %d, ждали %d %v: %v", len(direct), len(wantDirect), wantDirect, direct)
 	}
 	for _, useComputed := range []bool{false, true} {
 		reached := map[string]bool{}
@@ -658,9 +673,9 @@ func TestCanonWildcardSetIsTwoOfTwoHundredSeventy(t *testing.T) {
 				}
 			}
 		}
-		if len(reached) != 2 {
-			t.Fatalf("замыкание канона (Computed=%v): достигаемых подстановкой пар %d, ждали 2 — "+
-				"транзитивных СВЕРХ прямых обязано быть 0: %v", useComputed, len(reached), reached)
+		if len(reached) != len(direct) {
+			t.Fatalf("замыкание канона (Computed=%v): достигаемых подстановкой пар %d, ждали %d — "+
+				"транзитивных СВЕРХ прямых обязано быть 0: %v", useComputed, len(reached), len(direct), reached)
 		}
 	}
 
@@ -906,13 +921,31 @@ func TestAdmitSeedingRuleWildcardReachableOnlyViaDeadRelation(t *testing.T) {
 		t.Fatalf("план обязан быть выразим: err=%v expressible=%v", err, p.Expressible())
 	}
 
+	// Утверждается МНОЖЕСТВО находок по паре (семя, путь), а не элемент по
+	// индексу: с третьим ребром внутри нового типа и находкой на семени
+	// (kaname#866, приёмка public-read-container-of-a-module-type-is-admitted.md,
+	// PM-11) находок две, и порядок их — свойство обхода, а не предмета.
 	rep := mustAdmit(t, composed)
-	if r := rules(rep); len(r) != 1 || r[0] != string(RuleD3) {
-		t.Fatalf("вход правила посева обязан поднимать РОВНО Д3, получено %v", r)
+	for _, r := range rules(rep) {
+		if r != string(RuleD3) {
+			t.Fatalf("вход правила посева обязан поднимать только Д3, получено %v", rules(rep))
+		}
 	}
-	got := findingsOf(rep, RuleD3)[0]
-	if !strings.Contains(got.Text, "acme_widget.hidden → cluster.viewer") {
-		t.Fatalf("находка обязана называть путь через МЁРТВОЕ отношение, получено %q", got.Text)
+	want := map[string]string{
+		"acme_widget.hidden": "acme_widget.hidden → cluster.viewer",
+		"acme_widget.v_get":  "acme_widget.v_get → acme_widget.hidden → cluster.viewer",
+	}
+	got := map[string]string{}
+	for _, f := range findingsOf(rep, RuleD3) {
+		got[f.Type+"."+f.Relation] = f.Text
+	}
+	if len(got) != len(want) || len(findingsOf(rep, RuleD3)) != len(want) {
+		t.Fatalf("находок Д3 обязано быть %d (по одной на семя), получено %v", len(want), rep.Findings)
+	}
+	for seed, path := range want {
+		if !strings.Contains(got[seed], path) {
+			t.Fatalf("находка на семени %s обязана называть путь %q, получено %q", seed, path, got[seed])
+		}
 	}
 }
 
@@ -969,7 +1002,7 @@ func probeReachesWildcardFrom(t *testing.T, m *authzplan.Model, typeName, relati
 		}
 		for _, term := range r.Terms {
 			for _, d := range term.Direct {
-				if d.Wildcard {
+				if d.Wildcard || d.Type == "system_class" {
 					out[key] = true
 				}
 			}
@@ -1024,7 +1057,7 @@ func probeReachesWildcard(t *testing.T, m *authzplan.Model, newType string, seed
 		}
 		for _, term := range r.Terms {
 			for _, d := range term.Direct {
-				if d.Wildcard {
+				if d.Wildcard || d.Type == "system_class" {
 					hit = true
 				}
 			}

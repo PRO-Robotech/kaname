@@ -151,6 +151,7 @@ named(subject) AS (
       JOIN kaname.role_verb rv
         ON rv.role_id = b.role_id AND rv.object_type = $9::text
        AND rv.verb = ANY ($8::text[])
+       AND ` + classVerbFilterSQL + `
       JOIN kaname.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
       JOIN scope_distinct sc ON sc.s_type = b.resource_type AND sc.s_id = b.resource_id
@@ -160,11 +161,9 @@ named(subject) AS (
      WHERE b.status = 'ACTIVE'
        AND (b.expires_at IS NULL OR b.expires_at > now())
        AND b.revoked_at IS NULL
-       AND (
-             rs.arm = 'anchor'
-          OR (rs.arm = 'names'  AND $2::text = ANY (rs.resource_names))
-          OR (rs.arm = 'labels' AND m.labels IS NOT NULL AND m.labels @> rs.match_labels)
-       )
+       -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
+       -- вопроса (grantArmPredicate, grantarm.go).
+       AND ({{arm_predicate}})
 ),
 granted(subject) AS (
     SELECT n.subject FROM named n
@@ -182,10 +181,15 @@ SELECT g.subject
 
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
-func subjectsQuerySQL(labelTable string) string {
-	sql := strings.Replace(subjectsSQL, labelsJoinMark,
+func subjectsQuerySQL(labelTable string, nesting bool) (string, error) {
+	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", nesting))
+	if err != nil {
+		return "", err
+	}
+	sql = strings.Replace(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$9", "$2"), 1)
-	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("n.subject"), 1)
+	return strings.Replace(sql, membersJoinMark, membersOfNamedGroups("n.subject"), 1), nil
 }
 
 // Subjects отдаёт страницу субъектов, имеющих отношение на объекте.
@@ -206,7 +210,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	// порождённой сборкой (kacho#1986, catalogtype.go). Читается ПЕРЕД выбором
 	// оси: ось выбирается по этому же имени (kacho#2036), и второго чтения
 	// каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
@@ -216,7 +220,11 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := q.Query(ctx, subjectsQuerySQL(labelTable),
+	sql, err := subjectsQuerySQL(labelTable, nesting)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := q.Query(ctx, sql,
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
 		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {

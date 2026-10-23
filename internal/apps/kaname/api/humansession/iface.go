@@ -142,7 +142,10 @@ type Store interface {
 	// взята строка личности userID замком писателя нескольких сессий этого
 	// человека (kaname#340). Так открывает свою транзакцию каждый вариант
 	// использования, снимающий прочие записи сессии (`EndOtherSessions`): смена
-	// пароля, снятие второго фактора, завершение восстановления.
+	// пароля, снятие второго фактора, завершение восстановления. Ею же
+	// открывается запрос кода восстановления (kaname#776): сила этого замка
+	// конфликтует сама с собой и упорядочивает одновременные запросы одной
+	// личности — живой код у неё один.
 	//
 	// Первым — потому что каждый из них до строк сессии берёт и свои строки
 	// (способа входа, фактора, кода восстановления), а удаление личности берёт
@@ -157,9 +160,9 @@ type Store interface {
 	// строки-ребёнка личности (kaname#382). Так открывает свою транзакцию
 	// каждый вариант использования, пишущий строки сессии одной личности и не
 	// снимающий прочих её записей: выход, повышение, перечеканка запасных
-	// кодов. Ею же открывается запрос кода восстановления (kaname#770): он
-	// снимает и пишет коды личности, которые снимают и держатели её строки
-	// `FOR UPDATE` (исход смены адреса, удаление). Выдача входа — не этой
+	// кодов. Запрос кода восстановления открывался ею до kaname#776 и ушёл к
+	// `SessionSetWriter`: ключевой замок совместим сам с собой и одновременных
+	// запросов одной личности не упорядочивает. Выдача входа — не этой
 	// дверью (ниже); заведение и подтверждение второго фактора — дверью
 	// `EnrollmentWriter`.
 	//
@@ -330,7 +333,9 @@ type Writer interface {
 	// EmitRecoveryMail — намерение отправить письмо восстановления той же
 	// транзакцией, что строка кода (Ф5-09, Р3), ПОСЛЕ списания окна писем
 	// адресата тем же оператором (kaname#456); окно полно —
-	// ErrLetterWindowFull.
+	// ErrLetterWindowFull. Адрес письма судится ЭТОЙ транзакцией, до списания
+	// окна: адрес, который личности на момент записи уже не принадлежит, —
+	// ErrRecoveryAddressMoved, письма и кода нет (kaname#776, Р4).
 	EmitRecoveryMail(ctx context.Context, in RecoveryMailIntent) error
 	// InsertRecoveryCompletion — журнал завершений по ключу потока (Р4, форма
 	// Ф-а): inserted=false — ключ уже стоит, побочных записей делать нельзя.
@@ -359,16 +364,26 @@ type Writer interface {
 	// потребление идут под ним. found=false — набора нет.
 	LockLookupSet(ctx context.Context, userID domain.UserID) (domain.LoginMethod, bool, error)
 	// ConsumeLookupElement — снятие ОДНОГО элемента набора по его значению
-	// (Ф12-23): consumed=false — такого элемента в наборе нет.
-	ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (consumed bool, err error)
-	// RecordAcceptedStep — условная запись принятого шага (Ф12 Р5, Ф12-22):
+	// (Ф12-23) и момент траты at тем же оператором (kaname#827, SUA Р6):
+	// consumed=false — такого элемента в наборе нет, и момент не тронут.
+	ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string, at time.Time) (consumed bool, err error)
+	// RecordAcceptedStep — условная запись принятого шага (Ф12 Р5, Ф12-22) и
+	// момента предъявления at тем же условным оператором (kaname#827, SUA Р6):
 	// проходит, когда строка `active` и шаг старше последнего принятого;
 	// recorded=false — повтор либо младший шаг либо строка не `active`.
-	RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (recorded bool, err error)
+	RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64, at time.Time) (recorded bool, err error)
 	// RemoveSecondFactor — строки `totp` (`active`) и `lookup_secret` сняты
 	// одним оператором (Ф12-28, Ф12-30); removed=false — заведённого фактора
 	// нет, и строка `pending` при этом НЕ тронута (матрица Р4).
 	RemoveSecondFactor(ctx context.Context, userID domain.UserID) (removed bool, err error)
+
+	// AdvanceSignCount — сдвиг счётчика подписи и момента предъявления ключа
+	// доступа ЭТОЙ транзакцией (kaname#827, замысел §2.3): тот же оператор, что
+	// у хранилища ключей (Ф7 Р6), — с условием на прежнее значение, а при
+	// «0 → 0» двигается только момент. advanced=false — сдвиг проигран
+	// другому утверждению того же ключа либо строки ключа больше нет; откат
+	// транзакции снимает и сдвиг, и предъявление.
+	AdvanceSignCount(ctx context.Context, id domain.AccessKeyID, expected, reported uint32, usedAt time.Time) (advanced bool, err error)
 
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
@@ -451,6 +466,32 @@ type AccessKeyLoginStore interface {
 	// UserOf — человек, которому принадлежит найденная строка ключа: ему и
 	// выдаётся сессия (Р3). Нет человека — NOT_FOUND.
 	UserOf(ctx context.Context, id domain.UserID) (domain.User, error)
+}
+
+// StepUpChallengeStore — хранилище ветви ключа ЦЕРЕМОНИИ ПОВЫШЕНИЯ
+// (kaname#827, приёмка SUA Р2, Р3; замысел §2.1): свои испытания, привязанные к
+// записи сессии, плюс чтения строк ключа ТЕМИ ЖЕ операторами, что у хранилища
+// ключей — второй реализации чтения строки ключа в дереве не заводится.
+// Моменты приходят параметром — часами службы, как у испытаний Ф7.
+type StepUpChallengeStore interface {
+	// IssueStepUpChallenge кладёт выданное испытание, ЗАМЕЩАЯ живое испытание
+	// той же записи сессии одним оператором: живым остаётся позднее, прежнее
+	// значение в хранилище не остаётся ни в каком виде.
+	IssueStepUpChallenge(ctx context.Context, c domain.StepUpChallenge) error
+	// ConsumeStepUpChallenge — ОДИН условный оператор однократности по паре
+	// (сессия, испытание): строка, не предъявленная и не истёкшая на now,
+	// получает отметку. consumed=false — ничего не отмечено.
+	ConsumeStepUpChallenge(ctx context.Context, session domain.HumanSessionID, challenge []byte, now time.Time) (consumed bool, err error)
+	// StepUpChallengeState — классифицирующее чтение той же пары после
+	// несгоревшего испытания: оно лишь называет причину, решение о годности
+	// принял оператор однократности.
+	StepUpChallengeState(ctx context.Context, session domain.HumanSessionID, challenge []byte, now time.Time) (domain.StepUpChallengeState, error)
+	// KeyByCredentialID — строка ключа по идентификатору удостоверения;
+	// found=false — строки нет (снятый ключ и «удостоверения не было» — одно).
+	KeyByCredentialID(ctx context.Context, credentialID []byte) (domain.AccessKey, bool, error)
+	// CredentialIDsOf — удостоверения человека для `allowCredentials`, в
+	// порядке `(created_at, id)`.
+	CredentialIDsOf(ctx context.Context, userID domain.UserID) ([][]byte, error)
 }
 
 // EnrollmentSweeper — порт уборки неподтверждённых заведений второго фактора

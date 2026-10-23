@@ -149,10 +149,12 @@ var renderedSecretStandIns = func() map[string]string {
 // берётся накладкой оператора (`operatorOverlay`), а не выписывается второй раз.
 // Почтовый узел вошёл сюда тем же путём (kaname#475): в боевом режиме шаблон
 // отвергает пустые `inviteMail.relay` и `inviteMail.from`, а базовые значения
-// их не объявляют. Величины — те же нерезолвимые заглушки, что у профиля.
+// их не объявляют. Величины — узел и отправитель УСТАНОВКИ, а не заглушки
+// профиля: заглушку в зоне `.invalid` шаблон отвергает (kaname#733), и её отказ
+// судит `mail_lane_undeliverable_test.go`.
 var minimalOperatorCoordinates = append([]string{
-	"inviteMail.relay=relay.example.invalid:587",
-	"inviteMail.from=kaname@access.example.invalid",
+	"inviteMail.relay=" + installMailRelayForRender,
+	"inviteMail.from=" + installMailFromForRender,
 	"image=registry.example.invalid/pro-robotech/kaname:0.1.0",
 	"db.host=postgres.example.invalid",
 	"db.passwordSecretName=kaname-db",
@@ -168,12 +170,25 @@ var minimalOperatorCoordinates = append([]string{
 // сам отказ судит `domain_placeholder_refused_test.go`.
 const installDomainForRender = "kaname.local"
 
+// installMailRelayForRender и installMailFromForRender — ПОЧТОВЫЙ УЗЕЛ И
+// ОТПРАВИТЕЛЬ УСТАНОВКИ, которыми рендер боевой цепочки заменяет заглушки
+// профиля (kaname#733) — тем же правилом, что домен выше: заглушку отвергает
+// шаблон, а пробы рендера судят прочие свойства профиля.
+const (
+	installMailRelayForRender = "mail.kaname.local:587"
+	installMailFromForRender  = "kaname@kaname.local"
+)
+
 // installCoordinateSets — `--set` координат установки для цепочки, в которой
 // стоит боевой профиль; ставятся ПЕРВЫМИ, и `--set` вызывающего их перекрывает.
 func installCoordinateSets(valueFiles []string) []string {
 	for _, f := range valueFiles {
 		if filepath.Base(f) == "values.prod.yaml" {
-			return []string{"authn.domain=" + installDomainForRender}
+			return []string{
+				"authn.domain=" + installDomainForRender,
+				"inviteMail.relay=" + installMailRelayForRender,
+				"inviteMail.from=" + installMailFromForRender,
+			}
 		}
 	}
 	return nil

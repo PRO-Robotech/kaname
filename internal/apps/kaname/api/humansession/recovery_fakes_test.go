@@ -108,9 +108,15 @@ func (w *fakeWriter) EmitRecoveryMail(_ context.Context, in humansession.Recover
 	if in.Code.IsZero() {
 		return errFakeArg("Illegal argument recovery_mail.code: required")
 	}
-	if strings.TrimSpace(in.To) == "" || strings.TrimSpace(string(in.UserID)) == "" {
-		// Адаптер: отказ очереди писем — без класса словаря, до базы.
-		return errors.New("recovery mail intent: recipient and user required")
+	// Адрес судится транзакцией первым оператором, до списания окна, — как у
+	// адаптера (kaname#776, Р4): адрес, личности не принадлежащий (и пустой), —
+	// отказ без класса, без письма.
+	w.store.trip()
+	w.store.mu.Lock()
+	u, ok := w.store.users[in.UserID]
+	w.store.mu.Unlock()
+	if !ok || string(u.Email) != in.To {
+		return humansession.ErrRecoveryAddressMoved
 	}
 	// Окно писем адресата (kaname#456) — как у адаптера: предел не объявлен —
 	// отказ до базы; списание — свой оператор; окно полно — ErrLetterWindowFull.

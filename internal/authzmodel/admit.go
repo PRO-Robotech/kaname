@@ -4,6 +4,7 @@
 package authzmodel
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -15,6 +16,15 @@ import (
 // admit.go — ДОПУСК собранной модели прав: чистая функция, отвечающая на один
 // вопрос — вправе ли текст, собранный из доставленных манифестов, стать моделью
 // процесса.
+//
+// Вход — ТЕКСТ и перечень термов, объявленных ключом публичного чтения
+// (`publicReadToChildren`) в доставленных манифестах ([KeyTerm], kaname#866,
+// приёмка public-read-container-of-a-module-type-is-admitted.md, Р4). Допуск
+// по-прежнему не знает, КТО написал текст, но знает, какие типы объявлены
+// ключом: три следствия ключа, написанные рукой, побайтово равны написанным
+// ключом, и по одному тексту их не различить. Перечень выводится из СОДЕРЖАНИЯ
+// доставленных манифестов (поле ключа), а не из их происхождения. Пустой перечень
+// — строгий режим: класс в блоке нового типа есть находка всюду.
 //
 // Решение — docs/engineering/architecture/composed-model-is-admitted-by-content.md.
 // Приёмка — docs/engineering/acceptance/composed-model-admits-only-what-it-owns.md,
@@ -88,7 +98,8 @@ const (
 	// — ровно один раз в перечне объявлений своего типа.
 	RuleD1 Rule = "Д1"
 	// RuleD3 — ни одна пара (тип, отношение), достижимая из объявлений нового
-	// типа, не разрешается подстановкой.
+	// типа, не разрешается подстановкой, кроме термов, объявленных ключом
+	// публичного чтения, — и тех только в своём объявлении ([KeyTerm]).
 	RuleD3 Rule = "Д3"
 	// RuleD4Userset — всякий усерсет нового типа есть отношение, которое
 	// тип-носитель действительно объявляет.
@@ -180,13 +191,12 @@ type AdmissionReport struct {
 	TerminatedAtD7 bool
 	// ComputedOnlyWildcards — величина СОБСТВЕННОЙ ПРЕМИССЫ допуска: сколько пар
 	// достигают подстановки ТОЛЬКО шагом `Term.Computed` внутри канонического
-	// типа. Замыкание сокращено до двух рёбер потому, что третье ведёт в
-	// отношение ТОГО ЖЕ типа, а посев уже включает каждое объявление нового типа;
-	// довод верен для шага внутри НОВОГО типа и не покрывает шаг внутри типа
-	// КАНОНИЧЕСКОГО. Поэтому замыкание, войдя в канонический тип, идёт по
-	// `Computed` внутри него, а эта величина печатается ВСЕГДА: иначе премисса
-	// осталась бы утверждением без производителя — той же формой без содержания,
-	// только этажом выше клаузы.
+	// типа. Ребро `Computed` внутри НОВОГО типа проходится всегда (редакция
+	// kaname#866: законные термы ключа — точки с классом в новом типе, и
+	// объявление, выведенное из них, судится само), а внутри канонического —
+	// переключается; эта величина и есть разница двух счётов. Печатается ВСЕГДА:
+	// иначе премисса осталась бы утверждением без производителя — той же формой
+	// без содержания, только этажом выше клаузы.
 	ComputedOnlyWildcards int
 }
 
@@ -239,9 +249,45 @@ func (r AdmissionReport) Census() string {
 // ответ её не вправе зависеть от того, наполнил ли кто-то запомненные планы
 // раньше. Цена — один разбор канона на вызов; допуск зовётся на пути ПУСКА, а не
 // на пути запроса.
-func Admit(composed string) (AdmissionReport, error) {
-	return admit(DSL, composed)
+//
+// keyTerms — термы, которые ключ публичного чтения вписал в блоки НОВЫХ типов
+// этого текста (их производит тот же вызов композиции, что собрал текст). Пусто —
+// строгий режим. Запись, которой текст не несёт, — отказ ([ErrKeyTermNotInText]):
+// перечень, описывающий другой текст, исключал бы то, чего ключ здесь не писал.
+func Admit(composed string, keyTerms ...KeyTerm) (AdmissionReport, error) {
+	return admit(DSL, composed, keyTerms...)
 }
+
+// KeyTerm — один терм, который ключ публичного чтения вписал в объявление
+// НОВОГО типа (kaname#866, Р1). Термов три вида, и только эти:
+//
+//   - контейнер, `public_reader`: голая запись класса (Pointer пуст);
+//   - контейнер, отношение действия чтения: голая запись класса (Pointer пуст);
+//   - ребёнок, отношение действия чтения: `public_reader from <Pointer>`.
+//
+// Исключение снимает с суждения Д3 ровно этот терм и ровно в этом объявлении:
+// прочие записи того же объявления судятся как без перечня.
+type KeyTerm struct {
+	// Type — новый тип, в блоке которого стоит терм.
+	Type string
+	// Relation — объявление, в котором стоит терм.
+	Relation string
+	// Pointer — пусто у голой записи класса; иначе указатель терма
+	// `public_reader from <Pointer>`.
+	Pointer string
+}
+
+func (k KeyTerm) String() string {
+	if k.Pointer == "" {
+		return k.Type + "." + k.Relation + " [" + string(domain.SubjectTypeSystemClass) + "]"
+	}
+	return k.Type + "." + k.Relation + " [" + domain.PublicReaderRelation + " from " + k.Pointer + "]"
+}
+
+// ErrKeyTermNotInText — перечень термов ключа называет терм, которого собранный
+// текст не несёт, либо тип, которого нет среди новых типов текста. Суждение не
+// состоялось: перечень описывает не этот текст.
+var ErrKeyTermNotInText = errors.New("authzmodel: допуск: перечень термов ключа не описывает собранный текст")
 
 // admit — параметризованная форма. НЕ экспортирована: см. шапку файла про
 // самоудовлетворимость.
@@ -252,8 +298,8 @@ func Admit(composed string) (AdmissionReport, error) {
 // завтра, получит строгое умолчание сам, ничего для этого не делая. Перечень
 // мест, которые автор обязан не забыть, разошёлся бы с кодом на первом же
 // новом отказе — и разошёлся бы молча, в сторону «допущено».
-func admit(canon, composed string) (AdmissionReport, error) {
-	rep, err := judge(canon, composed)
+func admit(canon, composed string, keyTerms ...KeyTerm) (AdmissionReport, error) {
+	rep, err := judge(canon, composed, keyTerms)
 	if err != nil {
 		// Отчёт по пути ошибки отдаётся КАК ЕСТЬ, без признака суждения: он
 		// несёт то, что успели осмотреть, и не выдаёт этого за вердикт.
@@ -265,7 +311,7 @@ func admit(canon, composed string) (AdmissionReport, error) {
 
 // judge — сами правила. Всякий её `nil`-возврат есть ВЕРДИКТ (в том числе
 // остановка на Д7); всякая ошибка — «судить не о чем».
-func judge(canon, composed string) (AdmissionReport, error) {
+func judge(canon, composed string, keyTerms []KeyTerm) (AdmissionReport, error) {
 	var rep AdmissionReport
 
 	// Канон разбирается ПЕРВЫМ: из него выводятся закрытые наборы (имена типов,
@@ -327,7 +373,11 @@ func judge(canon, composed string) (AdmissionReport, error) {
 	dupTypeName, d1 := occurrenceFindings(m)
 	rep.Findings = append(rep.Findings, d1...)
 
-	d3, premise := reachableWildcardFindings(m, newNames)
+	lawful, err := lawfulKeyTerms(m, newNames, keyTerms)
+	if err != nil {
+		return rep, err
+	}
+	d3, premise := reachableWildcardFindings(m, newNames, lawful)
 	rep.Findings = append(rep.Findings, d3...)
 	rep.ComputedOnlyWildcards = premise
 
@@ -487,10 +537,28 @@ func declarationsNamed(t *authzplan.ModelType, name string) []*authzplan.Relatio
 	return out
 }
 
-// wildcardRecords — записи субъектов пары, делающие её разрешаемой подстановкой.
+// isWildcardLike — запись субъекта делает пару разрешаемой подстановкой.
 // Признак — ПОЛЕ разбора (`DirectSubject.Wildcard`), а не написание `:*` в
 // тексте: написание живёт в `Term.Raw`, и сверка по нему разошлась бы с разбором
 // на первой же правке грамматики.
+//
+// Системный класс — та же подстановка по смыслу: отношение, принимающее класс
+// прямо (`system_class`, `system_class:<имя>`), выполнимо «каждым вошедшим» или
+// «каждым без входа». Словарь классов объявлен ядром, и модуль его не вносит
+// (SC-37) — по тому же доводу, по которому не вносит `user:*`. Узнаётся по типу
+// записи разбора, а не по написанию; правило «слово — класс» объявлено одно на
+// дерево ([domain.IsClassSubjectWord]), его же читает загрузчик манифеста.
+func isWildcardLike(d authzplan.DirectSubject) bool {
+	return d.Wildcard || domain.IsClassSubjectWord(d.Type)
+}
+
+// bareClassRecord — голая запись класса, как её пишет ключ публичного чтения.
+// Только она исключается термом ключа (CE-06): `system_class:<класс>` и `user:*`
+// ключ не пишет никогда, и у них исключения нет ни в какой позиции.
+var bareClassRecord = authzplan.DirectSubject{Type: string(domain.SubjectTypeSystemClass)}.String()
+
+// wildcardRecords — записи субъектов пары, делающие её разрешаемой подстановкой
+// (признак — [isWildcardLike]).
 func wildcardRecords(m *authzplan.Model, typeName, relation string) []string {
 	t := m.Type(typeName)
 	if t == nil {
@@ -500,7 +568,7 @@ func wildcardRecords(m *authzplan.Model, typeName, relation string) []string {
 	for _, r := range declarationsNamed(t, relation) {
 		for _, term := range r.Terms {
 			for _, d := range term.Direct {
-				if d.Wildcard {
+				if isWildcardLike(d) {
 					out = append(out, d.String())
 				}
 			}
@@ -515,6 +583,96 @@ type pair struct{ typeName, relation string }
 
 func (p pair) String() string { return p.typeName + "." + p.relation }
 
+// keyTermSet — термы ключа, ставшие законными: исключение по [KeyTerm].
+type keyTermSet struct {
+	// class — объявления, где голая запись класса законна.
+	class map[pair]bool
+	// via — объявления и указатели, где терм `public_reader from <указатель>`
+	// законен.
+	via map[pair]map[string]bool
+}
+
+// lawfulKeyTerms — перечень ключа, сверенный с ТЕКСТОМ.
+//
+// Отказ ([ErrKeyTermNotInText]) — на всякой записи, которой текст не несёт: тип
+// не из новых, объявления нет, голой записи класса либо терма с этим указателем
+// в объявлении нет. Перечень, разошедшийся с текстом, описывает другую сборку, и
+// исключать по нему — значит исключать вслепую. Называются ВСЕ такие записи.
+//
+// Терм ребёнка становится законным, только когда его указатель ведёт в НОВЫЙ тип,
+// объявленный контейнером этим же перечнем (CE-07): резать ребро «ребёнок →
+// контейнер» безопасно лишь потому, что `public_reader` такого контейнера сам
+// стоит в посеве и судится как своё семя. Указатель в канонический тип либо в
+// новый тип без `public_reader` в перечне — терм в тексте есть, но законным он не
+// становится, и путь через него остаётся находкой.
+func lawfulKeyTerms(m *authzplan.Model, newNames map[string]bool, keyTerms []KeyTerm) (keyTermSet, error) {
+	set := keyTermSet{class: map[pair]bool{}, via: map[pair]map[string]bool{}}
+	var absent []string
+	type viaTerm struct {
+		at  pair
+		ptr string
+	}
+	var pending []viaTerm
+	for _, kt := range keyTerms {
+		t := m.Type(kt.Type)
+		if !newNames[kt.Type] || t == nil {
+			absent = append(absent, kt.String()+": тип не из новых типов текста")
+			continue
+		}
+		at := pair{kt.Type, kt.Relation}
+		found := false
+		for _, r := range declarationsNamed(t, kt.Relation) {
+			for _, term := range r.Terms {
+				switch {
+				case kt.Pointer == "" && term.Kind == authzplan.TermDirect:
+					for _, d := range term.Direct {
+						if d.String() == bareClassRecord {
+							found = true
+						}
+					}
+				case kt.Pointer != "" && term.Kind == authzplan.TermTTU &&
+					term.TTUPointer == kt.Pointer && term.TTURelation == domain.PublicReaderRelation:
+					found = true
+				}
+			}
+		}
+		if !found {
+			absent = append(absent, kt.String()+": объявление такого терма не несёт")
+			continue
+		}
+		if kt.Pointer == "" {
+			set.class[at] = true
+			continue
+		}
+		pending = append(pending, viaTerm{at: at, ptr: kt.Pointer})
+	}
+	if len(absent) > 0 {
+		return keyTermSet{}, fmt.Errorf("%w: %s", ErrKeyTermNotInText, strings.Join(absent, "; "))
+	}
+	for _, v := range pending {
+		// Судятся ВСЕ объявления указателя: задвоенное имя ловит и Д1, но двух
+		// молчаний не складывают.
+		var targets []string
+		for _, decl := range declarationsNamed(m.Type(v.at.typeName), v.ptr) {
+			targets = append(targets, m.PointerTargets(decl)...)
+		}
+		lawful := len(targets) > 0
+		for _, target := range targets {
+			if !newNames[target] || !set.class[pair{target, domain.PublicReaderRelation}] {
+				lawful = false
+			}
+		}
+		if !lawful {
+			continue
+		}
+		if set.via[v.at] == nil {
+			set.via[v.at] = map[string]bool{}
+		}
+		set.via[v.at][v.ptr] = true
+	}
+	return set, nil
+}
+
 // reachableWildcardFindings — Д3 и величина собственной премиссы допуска.
 //
 // # Правило ПОСЕВА
@@ -525,96 +683,138 @@ func (p pair) String() string { return p.typeName + "." + p.relation }
 // широкого посева названа честно: мёртвое отношение, достигающее подстановки,
 // будет отвергнуто, хотя ни одного вердикта не меняет.
 //
+// # Обход — от КАЖДОГО семени отдельно, находка — на семени
+//
+// Редакция kaname#866 (приёмка public-read-container-of-a-module-type-is-admitted.md,
+// Р1/Р3). У каждого семени свой обход в ширину и своё множество посещённых, и
+// находка ставится на ОБЪЯВЛЕНИЕ-СЕМЯ, из которого класс либо подстановка
+// достижимы: одна на семя, а не одна на достигнутую пару с записью. Иначе
+// исключение законных термов, наложенное на пару, снимало бы вместе с ними
+// единственный сигнал об объявлении, которое до этих термов достаёт
+// (`v_update` от `v_get`, авторское отношение от `public_reader`).
+//
+// Исключение термов ключа ([KeyTerm], перечень Р4 — типы, объявленные ключом)
+// действует ТОЛЬКО на узле, равном семени: голая запись класса и терм
+// `public_reader from <указатель>` законны в своём объявлении и больше нигде.
+// Путь через законную точку ДРУГОГО объявления законным не становится.
+//
+// Поля находки: `Type`/`Relation` — семя; `Term` — отсортированные уникальные
+// записи подстановки, достигнутые от семени; `Text` — путь до ПЕРВОГО попадания
+// обхода в ширину и записи там. Порядок находок — по семени: тип, затем
+// отношение в порядке объявления. Обход идёт по срезам, а не по картам, поэтому
+// текст и порядок от прогона к прогону одни.
+//
 // # Рёбра
 //
-// Их два — `Term.TTU` и `DirectSubject.Userset`, — плюс `Term.Computed` ВНУТРИ
-// канонического типа. Третье ребро не заводится для НОВОГО типа: оно ведёт в
-// отношение того же типа, а посев уже включает каждое его объявление, поэтому
-// входа, отличающего его наличие от отсутствия, нет. Для типа КАНОНИЧЕСКОГО такого
-// довода нет — объявления канона в семя не кладутся, — и ребро там остаётся.
-// Разница между двумя счётами возвращается вызывающему величиной премиссы.
+// Их три: `Term.TTU`, `DirectSubject.Userset` и `Term.Computed`. Ребро
+// `Computed` проходится внутри нового типа (законная точка с классом в новом
+// типе есть, и объявление, выведенное из неё — `or v_get`, — обязано стать
+// находкой само) и внутри канонического (объявления канона в семя не кладутся).
+// Величина премиссы — разница счётов с ребром `Computed` внутри канона и без
+// него; внутри нового типа ребро включено в обоих плечах.
 //
 // # Судятся только НОВЫЕ типы
 //
 // Блоки канона судит Д7 — байтами, и ничем иным. Допуск, судящий Д3 по всей
 // модели, покраснел бы на самом каноне: тот несёт подстановку в двух местах.
-func reachableWildcardFindings(m *authzplan.Model, newNames map[string]bool) ([]Finding, int) {
+func reachableWildcardFindings(m *authzplan.Model, newNames map[string]bool, lawful keyTermSet) ([]Finding, int) {
 	var seeds []pair
+	seeded := map[pair]bool{}
 	for _, t := range m.Types {
 		if !newNames[t.Name] {
 			continue
 		}
 		for _, r := range t.Relations {
-			seeds = append(seeds, pair{t.Name, r.Name})
+			s := pair{t.Name, r.Name}
+			if seeded[s] {
+				continue
+			}
+			seeded[s] = true
+			seeds = append(seeds, s)
 		}
 	}
 	if len(seeds) == 0 {
 		return nil, 0
 	}
 
-	full, from := reach(m, newNames, seeds, true)
-	twoEdges, _ := reach(m, newNames, seeds, false)
+	full := map[pair]bool{}
+	canonEdgeless := map[pair]bool{}
+	var out []Finding
+	for _, seed := range seeds {
+		order, from := reach(m, newNames, seed, lawful, true)
+		without, _ := reach(m, newNames, seed, lawful, false)
+		for _, p := range order {
+			full[p] = true
+		}
+		for _, p := range without {
+			canonEdgeless[p] = true
+		}
 
-	var keys []string
-	byKey := map[string]pair{}
-	for k, p := range full {
-		if len(wildcardRecords(m, p.typeName, p.relation)) == 0 {
+		var records []string
+		var first pair
+		var firstRecords []string
+		for _, p := range order {
+			recs := wildcardRecords(m, p.typeName, p.relation)
+			if p == seed && lawful.class[seed] {
+				recs = slices.DeleteFunc(slices.Clone(recs), func(r string) bool { return r == bareClassRecord })
+			}
+			if len(recs) == 0 {
+				continue
+			}
+			if firstRecords == nil {
+				first, firstRecords = p, recs
+			}
+			records = append(records, recs...)
+		}
+		if firstRecords == nil {
 			continue
 		}
-		keys = append(keys, k)
-		byKey[k] = p
-	}
-	slices.Sort(keys)
+		slices.Sort(records)
+		records = slices.Compact(records)
 
-	premise := 0
-	var out []Finding
-	for _, k := range keys {
-		p := byKey[k]
-		if _, ok := twoEdges[k]; !ok {
-			premise++
-		}
-		records := strings.Join(wildcardRecords(m, p.typeName, p.relation), ", ")
-		// Путь непуст by construction: ключ взят из достигнутого, а у всякой
-		// достигнутой пары в карте предшественников есть запись.
-		path := pathTo(from, k)
-		seed := path[0]
-		text := fmt.Sprintf("%s: подстановочная запись субъекта %s", p, records)
-		if len(path) > 1 {
+		at := strings.Join(firstRecords, ", ")
+		text := fmt.Sprintf("%s: подстановочная запись субъекта %s", first, at)
+		if path := pathTo(from, first.String()); len(path) > 1 {
 			names := make([]string, 0, len(path))
 			for _, q := range path {
 				names = append(names, q.String())
 			}
-			text = fmt.Sprintf("подстановка достижима: %s; запись %s",
-				strings.Join(names, " → "), records)
+			text = fmt.Sprintf("подстановка достижима: %s; запись %s", strings.Join(names, " → "), at)
 		}
 		out = append(out, Finding{
 			Rule:     RuleD3,
 			Type:     seed.typeName,
 			Relation: seed.relation,
-			Term:     records,
+			Term:     strings.Join(records, ", "),
 			Text:     text,
 		})
+	}
+
+	// Премисса — как прежде: пары с записью подстановки, достижимые ТОЛЬКО
+	// шагом `Computed` внутри канонического типа (по объединению обходов всех
+	// семян; записи — без исключения термов, оно о семени, а не о паре).
+	premise := 0
+	for p := range full {
+		if canonEdgeless[p] || len(wildcardRecords(m, p.typeName, p.relation)) == 0 {
+			continue
+		}
+		premise++
 	}
 	return out, premise
 }
 
-// reach — обход в ширину от посева. Возвращает достигнутое и карту
-// предшественников, по которой восстанавливается путь для отказа.
-func reach(m *authzplan.Model, newNames map[string]bool, seeds []pair, computedInsideCanon bool) (map[string]pair, map[string]string) {
-	seen := map[string]pair{}
-	from := map[string]string{}
-	queue := make([]pair, 0, len(seeds))
-	for _, s := range seeds {
-		if _, ok := seen[s.String()]; ok {
-			continue
-		}
-		seen[s.String()] = s
-		from[s.String()] = ""
-		queue = append(queue, s)
-	}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
+// reach — обход в ширину от ОДНОГО семени. Возвращает достигнутое в порядке
+// обхода (начиная с семени) и карту предшественников, по которой
+// восстанавливается путь для отказа.
+//
+// На узле, равном семени, ребро законного терма `public_reader from <указатель>`
+// не проходится ([lawfulKeyTerms]); на всяком другом узле — проходится.
+func reach(m *authzplan.Model, newNames map[string]bool, seed pair, lawful keyTermSet, computedInsideCanon bool) ([]pair, map[string]string) {
+	seen := map[pair]bool{seed: true}
+	from := map[string]string{seed.String(): ""}
+	order := []pair{seed}
+	for i := 0; i < len(order); i++ {
+		cur := order[i]
 		t := m.Type(cur.typeName)
 		if t == nil {
 			continue
@@ -624,10 +824,13 @@ func reach(m *authzplan.Model, newNames map[string]bool, seeds []pair, computedI
 			for _, term := range r.Terms {
 				switch term.Kind {
 				case authzplan.TermComputed:
-					if computedInsideCanon && !newNames[cur.typeName] {
+					if newNames[cur.typeName] || computedInsideCanon {
 						next = append(next, pair{cur.typeName, term.Computed})
 					}
 				case authzplan.TermTTU:
+					if cur == seed && term.TTURelation == domain.PublicReaderRelation && lawful.via[seed][term.TTUPointer] {
+						continue
+					}
 					for _, ptr := range declarationsNamed(t, term.TTUPointer) {
 						for _, target := range m.PointerTargets(ptr) {
 							next = append(next, pair{target, term.TTURelation})
@@ -643,15 +846,15 @@ func reach(m *authzplan.Model, newNames map[string]bool, seeds []pair, computedI
 			}
 		}
 		for _, n := range next {
-			if _, ok := seen[n.String()]; ok {
+			if seen[n] {
 				continue
 			}
-			seen[n.String()] = n
+			seen[n] = true
 			from[n.String()] = cur.String()
-			queue = append(queue, n)
+			order = append(order, n)
 		}
 	}
-	return seen, from
+	return order, from
 }
 
 // pathTo восстанавливает путь от посева до пары.

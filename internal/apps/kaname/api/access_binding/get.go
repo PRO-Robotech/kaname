@@ -86,11 +86,11 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 	// RBAC rules-model 2026: AccessBinding no longer carries
 	// a resource-scoped target dimension (the "what object" decision lives on
 	// role.rules now), so there is no per-binding target/selector to project here.
-	// Load the multi-subject set on the
-	// SAME reader-tx (before the scope-filter may release it) so the response fills
-	// BOTH subjects[] (full set) AND the legacy single (= subjects[0]). Zero child
-	// rows ⇒ a legacy binding; the projection falls back to the one-element legacy
-	// single (toPb domainSubjectsToProto).
+	// Набор субъектов читается на ТОЙ ЖЕ читающей транзакции (до того, как
+	// фильтр области может её отпустить), чтобы ответ заполнил и subjects[]
+	// (весь набор), и унаследованную одиночную пару (= subjects[0]). У
+	// сохранённой выдачи набор непуст — это держит база
+	// (`access_bindings_carry_a_subject`, kaname#902).
 	subs, serr := rd.AccessBindings().ListSubjects(ctx, id)
 	if serr != nil {
 		return domain.AccessBinding{}, shared.MapRepoErr(serr)

@@ -67,7 +67,8 @@ type AccessKeyLoginDeps struct {
 	// Keys — испытания полосы, строки ключей и люди по ним.
 	Keys AccessKeyLoginStore
 	// Methods — подтверждённость адреса для состава ответа (поле то же, что у
-	// входа паролем — Ф3-01) и ось «заведено» для обнуления счёта по адресу.
+	// входа паролем — Ф3-01). Ось «заведено» для обнуления счёта по адресу
+	// отсюда НЕ читается: её даёт удержанный ключ (`keyLoginEnrollment`, Р6).
 	Methods loginmethod.Store
 	// Binding — три ручки посадки Ф7: имя доверяющей стороны, происхождения,
 	// алгоритмы. Своих ручек Ф13 не заводит (Р9).
@@ -203,6 +204,12 @@ func (uc *BeginAccessKeyLoginUseCase) Execute(ctx context.Context, in BeginAcces
 	if len(in.FormContext) > domain.AccessKeyLoginChallengeContextMax {
 		return BeginAccessKeyLoginOutput{}, ErrFormTokenRejected
 	}
+	// Ключи на установке выключены (kaname#827, приёмка SUA Р7): отказ
+	// состояния ДО счёта по источнику и до выдачи — испытание, которое нечем
+	// принять, не выдаётся, и попытки не было (SUA-24).
+	if uc.deps.Binding.Disabled() {
+		return BeginAccessKeyLoginOutput{}, webauthnverify.ErrKeysDisabled
+	}
 	if hit, err := uc.gate.check(ctx, "", in.Source); err != nil {
 		uc.deps.Observer.AccessKeyLoginObserved(AccessKeyLoginStoreFailed)
 		return BeginAccessKeyLoginOutput{}, ErrStoreUnavailable
@@ -230,6 +237,41 @@ func (uc *BeginAccessKeyLoginUseCase) Execute(ctx context.Context, in BeginAcces
 	}, nil
 }
 
+// AssertionPresentation — утверждение ключа доступа в байтах браузера: одна
+// форма у входа ключом (Ф13) и у ветви ключа церемонии повышения (kaname#827,
+// приёмка SUA Р1). Разбор `credential` у транспорта один на обе формы, и
+// обязательность полей — одна функция ([JudgeAssertionForm]).
+type AssertionPresentation struct {
+	CredentialID      []byte
+	ClientDataJSON    []byte
+	AuthenticatorData []byte
+	Signature         []byte
+	// UserHandle — рукоятка, ОБЯЗАТЕЛЬНАЯ у этой формы (Р3): сравнение с
+	// рукояткой строки безусловно, и отсутствующее значение — отказ ФОРМЫ.
+	UserHandle []byte
+}
+
+// JudgeAssertionForm — обязательные поля утверждения, называемые полным
+// именем ДО всякой сверки (Ф13-07): отсутствующее поле — отказ формы, не
+// попытка. «Поля нет» и «ключ не тот» — разные факты.
+func JudgeAssertionForm(a AssertionPresentation) error {
+	for _, f := range []struct {
+		name  string
+		value []byte
+	}{
+		{"credential.id", a.CredentialID},
+		{"credential.response.clientDataJSON", a.ClientDataJSON},
+		{"credential.response.authenticatorData", a.AuthenticatorData},
+		{"credential.response.signature", a.Signature},
+		{"credential.response.userHandle", a.UserHandle},
+	} {
+		if len(f.value) == 0 {
+			return FieldRequired(f.name)
+		}
+	}
+	return nil
+}
+
 // AccessKeyLoginInput — утверждение в байтах браузера и контекст запроса.
 // Форму (поля, лишние поля, base64url) судит транспорт; сюда приходят байты.
 type AccessKeyLoginInput struct {
@@ -238,13 +280,28 @@ type AccessKeyLoginInput struct {
 	ClientDataJSON    []byte
 	AuthenticatorData []byte
 	Signature         []byte
-	// UserHandle — рукоятка, ОБЯЗАТЕЛЬНАЯ у этой формы (Р3): сравнение с
-	// рукояткой строки безусловно, и отсутствующее значение — отказ ФОРМЫ.
+	// UserHandle — рукоятка, ОБЯЗАТЕЛЬНАЯ у этой формы (Р3).
 	UserHandle []byte
 	Source     string
 	// Client — описание клиента выдающего запроса (kaname#634, Р3): идёт в
 	// запись выдаваемой сессии и больше никуда.
 	Client domain.ClientDescription
+}
+
+// Assertion — утверждение входа в общей форме полос.
+func (in AccessKeyLoginInput) Assertion() AssertionPresentation {
+	return AssertionPresentation{
+		CredentialID: in.CredentialID, ClientDataJSON: in.ClientDataJSON,
+		AuthenticatorData: in.AuthenticatorData, Signature: in.Signature, UserHandle: in.UserHandle,
+	}
+}
+
+// WithAssertion — вход с утверждением a: транспорт разбирает `credential`
+// общим разборщиком и кладёт байты сюда.
+func (in AccessKeyLoginInput) WithAssertion(a AssertionPresentation) AccessKeyLoginInput {
+	in.CredentialID, in.ClientDataJSON, in.AuthenticatorData = a.CredentialID, a.ClientDataJSON, a.AuthenticatorData
+	in.Signature, in.UserHandle = a.Signature, a.UserHandle
+	return in
 }
 
 // AccessKeyLoginUseCase — вход ключом.
@@ -273,21 +330,11 @@ func NewAccessKeyLoginUseCase(d AccessKeyLoginDeps) (*AccessKeyLoginUseCase, err
 
 // Execute — вход.
 func (uc *AccessKeyLoginUseCase) Execute(ctx context.Context, in AccessKeyLoginInput) (LoginOutput, error) {
-	switch {
-	case in.FormContext == "":
+	if in.FormContext == "" {
 		return LoginOutput{}, FieldRequired("csrfToken")
-	case len(in.CredentialID) == 0:
-		return LoginOutput{}, FieldRequired("credential.id")
-	case len(in.ClientDataJSON) == 0:
-		return LoginOutput{}, FieldRequired("credential.response.clientDataJSON")
-	case len(in.AuthenticatorData) == 0:
-		return LoginOutput{}, FieldRequired("credential.response.authenticatorData")
-	case len(in.Signature) == 0:
-		return LoginOutput{}, FieldRequired("credential.response.signature")
-	case len(in.UserHandle) == 0:
-		// Отказ ФОРМЫ, а не входа: «поля нет» и «ключ не тот» — разные факты
-		// (Ф13-07 против Ф13-06 «з»).
-		return LoginOutput{}, FieldRequired("credential.response.userHandle")
+	}
+	if err := JudgeAssertionForm(in.Assertion()); err != nil {
+		return LoginOutput{}, err
 	}
 
 	// (1) Частота — до всего: отказ по частоте не жжёт испытания и попыткой
@@ -459,8 +506,6 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 	if err != nil {
 		return LoginOutput{}, issueFailed
 	}
-	// Ось «заведено» — ДО транзакции записи (шапка `completed_login.go`).
-	enrolled, enrolledKnown := enrollmentBeforeWrite(ctx, uc.deps.Methods, uc.deps.Logger, user.ID)
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return LoginOutput{}, issueFailed
@@ -499,9 +544,11 @@ func (uc *AccessKeyLoginUseCase) issue(ctx context.Context, user domain.User, ke
 		return LoginOutput{}, issueFailed
 	}
 	// Успешный вход обнуляет счёт по адресу человека — как всякий успешный
-	// вход (Р9, Ф3 Р10); решает единственный писатель обнуления.
+	// вход (Р9, Ф3 Р10); решает единственный писатель обнуления. Ось
+	// «заведено» — ключ, удержанный этой транзакцией выше (`keyLoginEnrollment`):
+	// строк способов входа, и пароля среди них, полоса не читает (Р6).
 	if err := resetFailuresOnCompletedLogin(ctx, w, completedLogin{
-		Enrolled: enrolled, EnrolledKnown: enrolledKnown,
+		Enrolled: keyLoginEnrollment(), EnrolledKnown: true,
 		AddressKey: AddressKey(string(user.Email)), Level: s.AssuranceLevel,
 	}); err != nil {
 		return LoginOutput{}, issueFailed

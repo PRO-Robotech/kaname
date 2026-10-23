@@ -203,8 +203,10 @@ func TestABSubjects_Batch_ListForBindings(t *testing.T) {
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
 	})
+	// Пара второй выдачи — её единственный субъект: набор пишется вместе с
+	// выдачей и начинается с пары, как у каждого пути записи продукта (kaname#902).
 	ab2 := insertAB(t, ctx, repo, domain.AccessBinding{
-		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
+		SubjectType: domain.SubjectTypeServiceAccount, SubjectID: domain.SubjectID(said),
 		RoleID: "rol000000000sysadmin", ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	insertSubjects(t, ctx, repo, ab1.ID, []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}, {Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)}})

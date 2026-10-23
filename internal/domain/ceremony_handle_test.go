@@ -109,7 +109,7 @@ func TestAccessKey_HandleCarryingThePlatformIdIsRefused(t *testing.T) {
 	key := domain.AccessKey{
 		ID: "ak-00000000000000001", UserID: "usr00000000000000a01", CredentialID: []byte("cred"),
 		PublicKey: []byte{0xa5}, Algorithm: -7, UserHandle: minted.Bytes(), Name: "key-1",
-		CreatedAt: time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC),
+		CreatedAt: time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC), Discoverability: domain.DiscoverabilityConfirmed,
 	}
 	require.NoError(t, key.Validate(), "близнец: рукоятка носителя")
 	key.UserHandle = []byte("usr00000000000000a01")

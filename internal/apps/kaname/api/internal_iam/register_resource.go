@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -213,7 +214,7 @@ func (t tupleIntent) splitObject() (fgaType, id string) {
 }
 
 // isPureGrant reports whether the intent only opens the object for anonymous
-// read (`user:* #v_get`) instead of describing the object's own state.
+// read (`user:*` or `system_class:anonymous` `#v_get`) instead of describing the object's own state.
 //
 // Such an intent carries no parent scope and no labels — nothing about the
 // resource changed — yet it addresses the SAME object key as the resource's own
@@ -226,7 +227,7 @@ func (t tupleIntent) isPureGrant() bool {
 }
 
 // publicReadPublisher — narrow write port for the ONE pure grant the proxy admits:
-// publication of an object for anonymous read (`user:* #v_get`). Implemented by
+// publication of an object for anonymous read (`user:*` or `system_class:anonymous` `#v_get`). Implemented by
 // *repo/kaname/pg.PublicReadPublisher.
 //
 // ApplyTx applies the owner's intent inside the caller-owned tx IN THE ORDER OF THE
@@ -628,6 +629,14 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 		if have.Relation == t.relation && have.User == t.subject {
 			continue // the request already carries this one
 		}
+		// ХРАНИМАЯ публикация узнаётся по хранимой паре, а не по входному слову
+		// соседа: после переезда на системные классы (kaname#829, разбор CE-08)
+		// факт несёт `system_class:anonymous`, и предикаты входного слова ниже его
+		// не узнали бы, отнеся к «не нашим» по совпадению. Снимается она своим
+		// путём, в порядке версий владельца.
+		if domain.IsStoredPublication(have.User, have.Relation) {
+			continue
+		}
 		if !proxytuple.IsProxyWritable(have.User, have.Relation) {
 			continue // not ours to remove — see the doc above
 		}
@@ -734,7 +743,7 @@ func validateRelationString(field, v string) error {
 }
 
 // publish applies the owner's intent about anonymous read of ONE object — the pure
-// grant `user:* #v_get` — in its own writer-tx, through the publication port.
+// grant (`user:*` or `system_class:anonymous` `#v_get`) — in its own writer-tx, through the publication port.
 //
 // WHAT IT DOES. The publication store compares the intent's version with the last
 // one applied to the object and applies it only when strictly newer; an applied

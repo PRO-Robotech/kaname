@@ -4,12 +4,12 @@
 package audit_test
 
 // user_audit_integration_test.go — User audit slice.
-// UpsertFromIdentity insert-branch → отказ базы (kaname#608), следа нет;
-// activate-invite update-branch → iam.user.updated; Delete → iam.user.deleted.
+// Активация приглашения в исходе подтверждения адреса → iam.user.updated;
+// Delete → iam.user.deleted.
 //
-// UpsertFromIdentity is the InternalUserService bootstrap/provision path
-// (admin-tooling). When no caller principal is present (provision without a
-// JWT) the actor is the system/bootstrap identity — recorded, never fabricated.
+// Событие заведения (`iam.user.created`) производит регистрация; глагол
+// заведения личности по внешнему удостоверению, чья ветвь вставки тоже его
+// писала, снят (kaname#929, AWI-09), и его проба ушла вместе с ним.
 // Delete runs through the public UserService.Delete (self-delete).
 
 import (
@@ -18,59 +18,20 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/corelib/operations"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// TestUserAudit_5_2_14_UpsertInsertIsRefusedAndLeavesNoTrace — ветвь заведения
-// новой личности внутренним глаголом заведения по внешнему удостоверению
-// производит `ACTIVE` без способа входа, и с инвариантом kaname#608
-// (`users_active_has_a_way_in_fk`, приёмка `active-identity-has-a-way-in.md`
-// AWI-01, C2) база отвергает её фиксацию: операция завершается отказом, строки
-// личности нет, события заведения нет — событие ложится той же транзакцией и
-// откатывается вместе с ней. Прежде проба утверждала здесь событие заведения;
-// производитель этого события на живом пути — регистрация.
-func TestUserAudit_5_2_14_UpsertInsertIsRefusedAndLeavesNoTrace(t *testing.T) {
+// TestUserAudit_5_2_14_InviteActivationEmitsUpdated — активация приглашения на
+// полосе входа (`ActivateInviteOnVerificationTx`, тот же оператор, что у
+// `ActivateInviteForLane`) пишет `iam.user.updated` той же транзакцией;
+// актор — сам человек строки.
+func TestUserAudit_5_2_14_InviteActivationEmitsUpdated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	bootstrapCtx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "system", ID: "bootstrap", DisplayName: "kaname-bootstrap"})
-
-	uc := user.NewUpsertFromIdentityUseCase(env.repo, env.opsRepo)
-	op, err := uc.Execute(bootstrapCtx, user.UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject("ext-sub-5214-insert"),
-		Email:       domain.Email("u-5214-insert@example.com"),
-		DisplayName: domain.DisplayName("Upsert Insert"),
-	})
-	require.NoError(t, err, "приём операции синхронный; отказ — исход операции")
-	awaitWorkers(t)
-
-	done, err := env.opsRepo.Get(ctx, op.ID)
-	require.NoError(t, err)
-	require.True(t, done.Done, "операция завершена")
-	require.NotNil(t, done.Error, "AWI-01: заведение ACTIVE без способа входа обязано получить отказ базы")
-
-	var n int
-	require.NoError(t, env.pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.users WHERE external_id = $1`, "ext-sub-5214-insert").Scan(&n))
-	require.Zero(t, n, "строки личности после отказа нет")
-	require.NoError(t, env.pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.audit_outbox WHERE event_type = 'iam.user.created'
-		   AND event_payload->>'actor' = 'system'`).Scan(&n))
-	require.Zero(t, n, "события заведения после отказа нет: оно откатилось той же транзакцией")
-}
-
-func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
-	env := newTestEnv(t)
-	ctx := context.Background()
-
-	// Seed a PENDING invite row by email (no external_id yet). Приглашение путь
-	// хука активирует только при отметке подтверждения нашей полосы
-	// (kaname#456, Р11 п. 5): строка её несёт — предмет пробы событие, а не
-	// отметка.
+	// Seed a PENDING invite row with the verification mark of our lane:
+	// активация идёт только в исходе подтверждения адреса (kaname#456, Р11).
 	owner, accID := seedUserAccount(t, ctx, env.pool, "usr14upd")
 	_ = owner
 	pendingID := domain.UserID("usr0000000000005214pp")
@@ -85,21 +46,22 @@ func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
 		VALUES ($1, 'password', 'fixture-password-row-without-a-known-password')`, string(pendingID))
 	require.NoError(t, err)
 
-	bootstrapCtx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "system", ID: "bootstrap", DisplayName: "kaname-bootstrap"})
-
-	uc := user.NewUpsertFromIdentityUseCase(env.repo, env.opsRepo)
-	_, err = uc.Execute(bootstrapCtx, user.UpsertFromIdentityInput{
-		ExternalID:  domain.ExternalSubject("ext-sub-5214-activate"),
-		Email:       domain.Email("u-5214-activate@example.com"),
-		DisplayName: domain.DisplayName("Now Active"),
-	})
+	rd, err := env.repo.Reader(ctx)
 	require.NoError(t, err)
-	awaitWorkers(t)
+	pending, err := rd.Users().Get(ctx, pendingID)
+	_ = rd.Rollback(ctx)
+	require.NoError(t, err)
+
+	w, err := env.repo.Writer(ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	_, err = user.ActivateInviteOnVerificationTx(ctx, w, pending, string(pending.ID))
+	require.NoError(t, err)
+	require.NoError(t, w.Commit(ctx))
 
 	r := requireOneAuditRow(ctx, t, env.pool, "iam.user.updated", string(pendingID))
 	require.Equal(t, string(pendingID), r.payload["resource_id"])
-	require.Equal(t, "system", r.payload["actor"])
+	require.Equal(t, string(pendingID), r.payload["actor"], "актор активации — сам человек строки")
 	require.Regexp(t, evtIDFormat, r.id)
 }
 

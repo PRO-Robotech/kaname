@@ -47,7 +47,7 @@ func replaceSelectorsThrough(t *testing.T, repo *kanamepg.Repository,
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	if rerr := w.RolesW().ReplaceRuleSelectors(ctx, role, []domain.RuleSelector{{
-		RuleFP: fp, Arm: domain.ArmAnchor, ObjectTypes: types,
+		RuleFP: fp, Arm: domain.ArmAnchor, ObjectTypes: types, Grants: map[string][]string{},
 	}}); rerr != nil {
 		_ = w.Rollback(ctx)
 		return rerr

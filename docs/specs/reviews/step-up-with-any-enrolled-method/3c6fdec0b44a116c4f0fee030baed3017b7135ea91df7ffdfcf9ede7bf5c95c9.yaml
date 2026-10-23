@@ -1,0 +1,104 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+  sha256: 3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строка «редакция 1; кругов ревью не было» в шапке — статическая форма объявления;
+    шапка не правлена намеренно (change-graph.md §2). Действующий вердикт о редакции 3c6fdec0… — эта запись.
+  base_commit: ab5a82cead0bde41dad2c19017a56a4de075d361
+  content_commit: ab5a82cead0bde41dad2c19017a56a4de075d361
+  branch: '827'
+  task: PRO-Robotech/kaname#827
+  lines: 576
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-14T19:06:30Z'
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+effective_approval:
+  issued: false
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#827
+  status: not_performed
+  published: false
+  publication_mode: courier_of_agent_verdict
+  body: acceptance-reviewer · CHANGES_REQUESTED · kaname:docs/engineering/acceptance/step-up-with-any-enrolled-method.md · sha256 3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    note: Записей ревью этого документа до этой нет — документ новый.
+blocking:
+  - kind: CONSTRUCTIBILITY
+    where: "SUA-15; Р3 строка «ключ снят»; посев П-ккл"
+    finding: >-
+      П-ккл несёт ОДИН ключ (§3, таблица посевов). После его Revoke годных ключей ноль, и выдача
+      испытания повышения отвечает ACCESS_KEY_NOT_REGISTERED (Р5, SUA-21) — «allowCredentials снятого
+      удостоверения не содержит» и «утверждение снятым ключом» недостижимы. Строка Р3 «ключ снят → 401»
+      не имеет ни одного конструируемого сценария.
+    predicate: >-
+      sed -n 278p docs/engineering/acceptance/step-up-with-any-enrolled-method.md («П-ккл | пароль + код + ключ»);
+      sed -n 189,192p (Р5: годных ключей ноль → ACCESS_KEY_NOT_REGISTERED) @ab5a82cea
+    required: >-
+      Посев с двумя ключами (снимается один, второй держит выдачу) либо испытание, выданное ДО снятия;
+      разнести «allowCredentials без снятого» и «утверждение снятым → 401» так, чтобы оба строились.
+  - kind: CONSTRUCTIBILITY
+    where: "Р7 третий пункт; SUA-22 строка And"
+    finding: >-
+      «Revoke его — операция done без ошибки» из сессии «1» противоречит полу «2» у Revoke
+      (level-two-is-enrolled-at-level-two.md Р3, Р5). П-кл при выключенных ключах «2» получить не может:
+      кода нет (SUA-20), выдача испытания ключом отвечает ACCESS_KEYS_DISABLED (Р7), вход ключом — тоже (SUA-24).
+      Обещание Р7 «человек видит и убирает свои ключи» для этой популяции ложно.
+    predicate: >-
+      git show bbbe33524:docs/engineering/acceptance/level-two-is-enrolled-at-level-two.md | sed -n 205,212p
+      (Revoke — «2»); sed -n 395,401p step-up-with-any-enrolled-method.md @ab5a82cea
+    required: >-
+      Р7 сказать точно: снятие — на полу «2» без изменения; человек без кода на установке с выключенными
+      ключами «2» не достигает, путь — ResetAccessKeys администратором (level-two Р5). SUA-22 And: Revoke из «1»
+      — форма Ф11 Р11 дословно; положительный близнец — П-ккл на «выкл», повышение кодом → Revoke done.
+non_blocking:
+  - SUA-05 «Тогда» «уровень прежний («2» либо «3» по флагам)» — назвать флаги посева П-л и одно значение.
+  - SUA-01 «прежний носитель следующим запросом — отказ «сессии нет»» — без кода и текста; дописать пару статус+code.
+  - Р7 не называет следствие для человека только с ключом на установке с выключенными ключами (входа нет вовсе) —
+    поведение прежнее (ORIGIN_NOT_ALLOWED сегодня на приёме), но называть его стоит рядом с Р7.
+  - SUA-16 не говорит, что стало с испытанием S1 после предъявления его в S2 (сгорело ли); дописать одно And.
+checks:
+  scope: >-
+    Строк линии в 04-roadmap-and-phasing.md нет (предикат дока → 0, подтверждено); объём — решение владельца
+    2026-10-14 и эпик kaname#746; §6 перечисляет вынесенное с носителями.
+  neighbours: >-
+    Пять отпечатков §0.1 пересчитаны `git show bbbe33524:docs/engineering/acceptance/<f>.md | sha256sum` — все 5 совпали.
+  premise: >-
+    `git grep -c 'must be one of password|totp|lookup_secret"' bbbe33524 -- internal ':!*_test.go'` → second_factor.go:2;
+    `git grep -c 'step-up/access-key' bbbe33524` → 0 — посылка подтверждена.
+  rate: >-
+    rate.go:91 `if n < attempts` — пятый неверный разрешён, шестой отвергнут; SUA-70/71 сходятся с кодом;
+    values.prod.yaml:256-259 → 5/15m/50/15m.
+  texts: >-
+    TextStepUpRequired (internal/errors/step_up.go:29), TextSessionNotFresh (humansession/second_factor.go:206) —
+    тексты SUA-50 и SUA-05 совпадают дословно; end-others → {"ended": N} (own-sessions…md:398).
+  empty_origins_boot: >-
+    config/access_keys.go:141-154 `originsAreNone` — пустой перечень и слово none загружаются как «никого»; посев «выкл» строим.
+  producer: "§5 покрывает все 35 ID; «заказ» — kaname#827."
+  twins: "Отрицания §3.2–§3.8 несут близнеца; SUA-17, SUA-19 — внутри сценария."
+  constructibility: >-
+    Фикстуры названы и существуют @bbbe33524: seed_login_lane.py (seed), seed_key_person.py, _KEYS/_UP/_UV/_BE
+    в kaname-access-keys.py:362-368. Посев не выполнялся — стенд заданием не назван: посеяно 0, не выполнилось 7 посевов.

@@ -1,0 +1,50 @@
+# Пост-дифф ревью Go-кода продукта — роль go-style-reviewer, kaname#495.
+# Запись не правится: вердикт привязан к отпечатку (change-graph §2).
+schema_version: 1
+change_id: kn-495
+holder: post-diff/go-style-reviewer
+owner: go-style-reviewer
+subject: >-
+  kaname#495 — ручка api-server.registry-token.anonymous-client-id, страж формы
+  RegistryTokenConfig.AnonymousPrincipal в Validate, переложение настройки в
+  registrytokenwire.BuildConfig одной функцией registryTokenBuildConfig (cmd/kaname/serve.go).
+
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: 495-anon-registry-token
+  base: a7a726802188957bc3c062953ea2a5bee6108455     # merge-base с origin/main, перемерено
+  head: 55b27e57a17e627d2ff82f40b0dbe50988f8cc6e     # закоммичено локально, на origin ветки нет
+content_digest: sha256:58744d1306a7b76aa13c1b64aab1ab2bb3704c44fc636b8a1eb85721ce36fbc5
+digest_definition: >-
+  git diff --full-index origin/main...HEAD | sha256sum в tmp/kaname-495-anon
+
+verdict: accepted
+blocks_landing: false
+review_scope: >-
+  полный дифф, 7 файлов (+511 -34): прод 3 (serve.go, config/defaults.go,
+  config/registry_token.go), пробы 4. Прочитано построчно. Радиус: потребители
+  AnonymousClientID/ExecuteAnonymous по не-тестовому дереву — build.go:41,130,
+  token.go:470, registrytokenhttp/handler.go:183, serve.go:2381; иных путей нет.
+  Формы порождённых id сверены с domain/ids_extended.go (`_`), corelib ids.NewID
+  (без разделителя), ids.NewHyphenID (префикс 2..3 + `-` + 17) — все отсекаются
+  формой либо generatedIDShapeRe.
+
+critical: []
+important: []
+foundation_candidates: []
+style:
+  - coord: internal/apps/kaname/config/registry_token.go:118
+    note: >-
+      generatedIDShapeRe держит длину тела 17 литералом; источник числа — idBodyLen
+      фундамента. Расхождение безопасно (форма с дефисом и так шире), не блокирует.
+approved:
+  - ошибки — fmt.Errorf с %w на переложении; текст отказа называет ключ и переменную
+  - ctx не затронут; внешних вызовов дифф не добавляет
+  - паники в рабочем пути нет; regexp.MustCompile — пакетный уровень на литерале
+  - журнал не тронут; персональных данных нет
+  - корень — единственное место переложения; рефакторинг Build без смены входа
+  - fail-closed: пустое умолчание зарегистрировано, без ручки 401-вызов (проба)
+  - пробы в том же PR: да (unit, integration, переписанный текстовый гейт)
+deferral_markers_added: 0
+tests_in_same_pr: true
+security_comments_contradicting_code: []

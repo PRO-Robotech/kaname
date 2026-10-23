@@ -223,9 +223,13 @@ class PrAggregate(unittest.TestCase):
         return out
 
     def test_draft_with_green_selection_is_red_and_says_n_of_m(self):
-        rc, out = self._call(self._needs(lambda j: "success" if j == "unit" else "skipped"), "true")
+        needs = self._needs(lambda j: "success" if j == "unit" else "skipped")
+        rc, out = self._call(needs, "true")
         self.assertEqual(rc, affected.RED)
-        self.assertIn("целевой прогон: 1 заданий из 11", out)
+        # знаменатель — задания процесса из карты, а не выписанное число
+        total = len(needs) - 1
+        self.assertGreater(total, 1)
+        self.assertIn(f"целевой прогон: 1 заданий из {total}", out)
         self.assertIn("целевой зелёный", out)
 
     def test_full_run_all_green_is_green(self):

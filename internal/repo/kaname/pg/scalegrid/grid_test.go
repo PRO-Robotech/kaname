@@ -90,7 +90,7 @@ func TestFullGridCarriesTheMillionAndTheZeroOfAxisF(t *testing.T) {
 	// Способы набора: ось R набирается двумя, ось F — тремя.
 	for _, want := range []scalegrid.Recruit{
 		scalegrid.RecruitViaGroup, scalegrid.RecruitFactSelf,
-		scalegrid.RecruitFactGroup, scalegrid.RecruitFactWildcard,
+		scalegrid.RecruitFactGroup, scalegrid.RecruitFactClass,
 	} {
 		if recruits[want] == 0 {
 			t.Errorf("способ набора %q не встречается в сетке ни разу: ветви speaker разные, "+

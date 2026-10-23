@@ -67,6 +67,9 @@ func overlayWithout(t *testing.T, path []string) string {
 	// Накладка лежит под своим именем, и подставить домен за неё по имени файла
 	// рендер не может.
 	setAt(overlay, []string{"authn", "domain"}, installDomainForRender)
+	// Узел и отправитель установки — тем же правилом (kaname#733).
+	setAt(overlay, []string{"inviteMail", "relay"}, installMailRelayForRender)
+	setAt(overlay, []string{"inviteMail", "from"}, installMailFromForRender)
 	if len(path) > 0 {
 		require.NotNilf(t, at(overlay, path...),
 			"фикстура беспредметна: боевая накладка не объявляет %s — снимать нечего",

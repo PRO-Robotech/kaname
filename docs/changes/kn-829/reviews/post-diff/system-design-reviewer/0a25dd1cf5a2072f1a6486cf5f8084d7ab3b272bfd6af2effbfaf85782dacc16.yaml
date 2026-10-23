@@ -1,0 +1,95 @@
+# Пост-дифф ревью распределённых свойств — роль system-design-reviewer.
+# kaname#829. Проверка исполнения своего возврата SD-829-1 (запись c72887b4…).
+# Запись новая, добавлением (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/system-design-reviewer
+owner: system-design-reviewer
+round: 2   # проверка исполнения своего ⛔ (gi-asm-one-round): новое блокирует только критическое
+
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: 829-impl (локальная; копия tmp/829/wt-impl)
+  base: origin/746 @ c032a0274449435513963ff705259bc41740844d
+  merge_base: bbbe33524c4ae501d4ea14d2d9747f300d057a99
+  head: ea31742e8c22e44ceb56ee67e8ad09547f299160
+  previous_head: 993b99f013ea0e6254b3879e25364489deace0c8
+  delta_commits: [b5c59acc4 (проба SD-829-1), ea31742e8 (фикс свёртки)]
+  delta_files:
+    - internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
+    - internal/migrations/system_class_old_writer_unpublish_integration_test.go
+  commits: 42
+  files: 113
+content_digest: sha256:0a25dd1cf5a2072f1a6486cf5f8084d7ab3b272bfd6af2effbfaf85782dacc16
+digest_definition: 'git -C tmp/829/wt-impl diff --full-index origin/746...ea31742e8 | sha256sum'
+committed: 'да; git status --short → только неотслеживаемый docs/changes/kn-829/ (записи ревью)'
+
+verdict: ✅ принято
+blocks_landing: false
+return_to: —
+distributed_surface: true
+schema_overlap: true   # переобъявление функции свёртки журнала
+
+executed:
+  - id: SD-829-1
+    status: исполнено
+    evidence: >-
+      kaname.relation_fact_fold_row переобъявлена в 20261015120000 (раздел 4 Up):
+      ветка fga.tuple.delete при v_user = 'user:*' снимает хранимого субъекта
+      по переводу переписи п.3 (v_get → system_class:anonymous, прочее →
+      system_class:authenticated), с той же сверкой source_version <= v_version.
+      Ветка записи не тронута — подстановку на записи по-прежнему отвергает
+      relation_fact_subject_not_wildcard (23514). Тело Up отличается от
+      20261011120000 только веткой снятия; Down возвращает тело 20261011120000
+      дословно (сравнение текстов функций скриптом: равны). Позже 20261015120000
+      функцию никто не переобъявляет (grep CREATE OR REPLACE FUNCTION
+      kaname.relation_fact_fold_row по internal/migrations: 20261011120000 и
+      20261015120000).
+    predicate_run: >-
+      heavy-slot integration go test ./internal/migrations/ -run
+      '^(TestSystemClass_SD8291_OldWriterUnpublishAfterMove|TestSystemClass.*Wildcard.*)$'
+      -count=1 -v @ea31742e8 → ok, код 0 (замер этой роли 2026-10-15 08:10).
+      Красный контроль @b5c59acc4 (expected 0, actual 1) — со слов исполнителя;
+      собственный повтор не выполнился: слот integration не выдан за 281 с (код 75).
+      По коду красный неизбежен: прежняя свёртка снимает subject = 'user:*', а
+      после переписи такой строки нет.
+    probe_shape: >-
+      близнец меняет ровно один факт — субъект строки журнала
+      (system_class:anonymous против user:*); исход «отвергнуто» засчитывается
+      только ошибкой базы (pgErrorOf), фикстура проверена до предмета.
+
+directions_of_old_writer_journal:
+  write: >-
+    fga.tuple.write с user:* (публикация, перевыпуск фактов выдачи) — 23514
+    ограничений relation_fact_subject_not_wildcard и
+    access_binding_emitted_tuples_user_not_wildcard; транзакция прежнего пода
+    откатывается целиком вместе с надгробием — закрыто, не порча. Пробы — три
+    CHECK-пробы (RelationFact, JournalProjection, EmittedTuples) и DownLifts.
+  delete: >-
+    fga.tuple.delete с user:* — перевод на хранимый класс; только сужает
+    (снимает то, что переписал п.3), старый (не новее) повтор не снимает
+    благодаря source_version. Снятие строк access_binding_emitted_tuples по
+    user:* прежним подом касается только системной выдачи, которая защищена от
+    удаления, — предмета нет.
+  lock_order: >-
+    Проекция упорядочивает строки по написанию субъекта в журнале, а замок
+    берётся по хранимому. Инверсии нет: 'user:*' — наименьшее написание среди
+    user:…, и между system_class:authenticated и user:* в порядке C нет ни
+    одного вида субъекта (user, service_account, group, system_class); строка
+    снятия публикации — оператор из одной строки (EmitPublicationTx). Вывод
+    чтением, без пробы.
+
+rollout_order:
+  - id: SD-829-2
+    status: не исполнено, не блокирует (было «важное»; в задачу не выносится — gi-find-own-issue)
+    note: >-
+      Окно чтения у прежних подов (поиск 'user:*' литералом в relverdict ствола —
+      отказ анонимному чтению и чтению справочника до замены последнего пода)
+      по-прежнему не описано ни в шапке миграции, ни в операторском документе.
+      Закрыто, не порча; пункт о снятии публикации снят фиксом SD-829-1.
+  - id: SD-829-3
+    status: не исполнено, не блокирует (гонка DO-переписи с ADD CONSTRAINT — громкая, сходится повтором init-контейнера)
+
+new_critical: []
+
+orders: []

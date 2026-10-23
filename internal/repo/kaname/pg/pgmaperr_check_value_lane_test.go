@@ -145,11 +145,13 @@ var cvCallerValueSpec = map[string]struct{}{
 	"authorization_codes_challenge_form_ck":                {},
 	"authorization_codes_challenge_method_ck":              {},
 	"authorization_codes_redirect_uri_ck":                  {},
+	"catalog_module_applied_revision_positive":             {},
 	"catalog_module_nonempty":                              {},
 	"catalog_module_undotted":                              {},
 	"catalog_resource_module_undotted":                     {},
 	"catalog_resource_nonempty":                            {},
 	"catalog_resource_object_type_form":                    {},
+	"catalog_resource_parent_types_form":                   {},
 	"catalog_resource_resource_undotted":                   {},
 	"catalog_verb_nonempty":                                {},
 	"catalog_verb_undotted":                                {},
@@ -186,6 +188,9 @@ var cvCallerValueSpec = map[string]struct{}{
 	"role_rule_ref_verb_nonempty":                          {},
 	"role_rule_ref_verb_undotted":                          {},
 	"role_rule_selectors_arm_shape":                        {},
+	"role_rule_selectors_container_labels_valid":           {},
+	"role_rule_selectors_container_not_own_type":           {},
+	"role_rule_selectors_container_shape":                  {},
 	"role_rule_selectors_labels_valid":                     {},
 	"role_rule_selectors_types_nonempty":                   {},
 	"role_verb_type_nonempty":                              {},
@@ -408,4 +413,22 @@ func TestCheckValueCensus_IssuanceTableLaneHasOneHome(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestWrapPgErr_EmittedTupleCoordinateCheckIsOurDefect — координату члена строки
+// реестра выводит служба из своего члена (kaname#933); отказ проверки
+// `access_binding_emitted_tuples_member_coordinate` — дефект писателя, и ответ на
+// него — фиксированный INTERNAL без имени ограничения и текста драйвера.
+func TestWrapPgErr_EmittedTupleCoordinateCheckIsOurDefect(t *testing.T) {
+	const constraint, table = "access_binding_emitted_tuples_member_coordinate", "access_binding_emitted_tuples"
+	logBuf := cvCaptureLog(t)
+
+	err := wrapPgErr(cvCheckPgErr(constraint, table), "AccessBinding", "acb-probe")
+
+	require.False(t, stderrors.Is(err, iamerr.ErrInvalidArg),
+		"%s: координату производит служба — вызывающий обвинён в чужом дефекте: %v", constraint, err)
+	require.True(t, stderrors.Is(err, iamerr.ErrInternal), "%s: want ErrInternal, got %v", constraint, err)
+	require.Equal(t, iamerr.ErrInternal.Error(), err.Error(),
+		"текст отказа фиксированный: ни имени ограничения, ни текста драйвера, ни строки")
+	require.Contains(t, logBuf.String(), "constraint="+constraint, "запись о рубеже называет ограничение")
 }

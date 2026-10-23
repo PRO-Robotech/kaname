@@ -2289,7 +2289,7 @@
       ]
     },
     {
-      "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG — IAM-1-06: Account.Delete на аккаунт с ≥1 Project (default из саги) → Operation{done} c result.error FAILED_PRECONDITION 'Account <id> contains projects and cannot be deleted' (within-service FK RESTRICT, ban #10 DB-backstop)",
+      "name": "IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG — IAM-1-06: Account.Delete на аккаунт с ≥1 Project (default из саги) → Operation{done} c result.error FAILED_PRECONDITION 'Account <id> contains projects and cannot be deleted: delete Project <default> first (projects: 1)' (within-service FK RESTRICT, ban #10 DB-backstop)",
       "description": "class:NEG | class:SAGA | priority:P1",
       "item": [
         {
@@ -2887,7 +2887,11 @@
                   "pm.environment.unset('_opErrStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('error text matches /Account [^ ]+ contains projects and cannot be deleted/', () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/Account [^ ]+ contains projects and cannot be deleted/));"
+                  "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  const opMsg = (j.error && j.error.message) || '';",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Account ' + pm.environment.get('rstAccId') + ' contains projects and cannot be deleted: delete Project ' + pm.environment.get('rstDefPrjId') + ' first (projects: 1)');",
+                  "});"
                 ]
               }
             }

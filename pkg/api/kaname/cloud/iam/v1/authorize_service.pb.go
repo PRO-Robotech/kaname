@@ -91,7 +91,9 @@ func (x *ResourceRef) GetId() string {
 type AuthorizeCheckRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
-	// / "group:<grp…>#member"). Required.
+	// / "group:<grp…>#member" / "system_class:anonymous"). Required.
+	// "system_class:authenticated" and the wildcard "user:*" are not speakers →
+	// INVALID_ARGUMENT.
 	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
 	// Resource the action is being checked against.
 	Resource *ResourceRef `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
@@ -385,7 +387,8 @@ type ListSubjectsRequest struct {
 	Resource *ResourceRef `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
 	// Action string. 1-128 chars.
 	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
-	// Page size; default 100, max 1000.
+	// Page size; default 500 — a page of relation holders, larger than the 50
+	// rows every other List of the service returns on 0; max 1000.
 	PageSize int64 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`

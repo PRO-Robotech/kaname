@@ -11,7 +11,6 @@ package iamv1
 
 import (
 	context "context"
-	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -23,31 +22,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InternalUserService_UpsertFromIdentity_FullMethodName = "/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity"
-	InternalUserService_Get_FullMethodName                = "/kaname.cloud.iam.v1.InternalUserService/Get"
+	InternalUserService_Get_FullMethodName = "/kaname.cloud.iam.v1.InternalUserService/Get"
 )
 
 // InternalUserServiceClient is the client API for InternalUserService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// InternalUserService — cluster-internal user-mutation API (port 9091).
+// InternalUserService — cluster-internal user API (port 9091).
 //
 // НЕ публикуется на external TLS listener.
 //
-// Transport:
-//   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
-//   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
-//     listener'а; вызывающий — admin-tooling.
+// Transport: `Get` — регистрируется в api-gateway internal mux (нужен
+// interceptor'у).
 type InternalUserServiceClient interface {
-	// Upsert User по субъекту личности (административный путь).
-	// Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
-	//
-	// REST exposed ONLY on the cluster-internal listener;
-	// api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
-	// and authz-public-allowlist permits the <exempt> catalog entry.
-	UpsertFromIdentity(ctx context.Context, in *UpsertFromIdentityRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
 	Get(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*User, error)
 }
@@ -58,16 +46,6 @@ type internalUserServiceClient struct {
 
 func NewInternalUserServiceClient(cc grpc.ClientConnInterface) InternalUserServiceClient {
 	return &internalUserServiceClient{cc}
-}
-
-func (c *internalUserServiceClient) UpsertFromIdentity(ctx context.Context, in *UpsertFromIdentityRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(operation.Operation)
-	err := c.cc.Invoke(ctx, InternalUserService_UpsertFromIdentity_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *internalUserServiceClient) Get(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*User, error) {
@@ -84,23 +62,13 @@ func (c *internalUserServiceClient) Get(ctx context.Context, in *GetUserRequest,
 // All implementations must embed UnimplementedInternalUserServiceServer
 // for forward compatibility.
 //
-// InternalUserService — cluster-internal user-mutation API (port 9091).
+// InternalUserService — cluster-internal user API (port 9091).
 //
 // НЕ публикуется на external TLS listener.
 //
-// Transport:
-//   - `Get` — регистрируется в api-gateway internal mux (нужен interceptor'у);
-//   - `UpsertFromIdentity` — доступен через gRPC direct
-//     (`grpcurl -plaintext kaname-internal:9091 ...`) и REST внутреннего
-//     listener'а; вызывающий — admin-tooling.
+// Transport: `Get` — регистрируется в api-gateway internal mux (нужен
+// interceptor'у).
 type InternalUserServiceServer interface {
-	// Upsert User по субъекту личности (административный путь).
-	// Вызывается admin через grpcurl; внешнего вызывающего у метода нет.
-	//
-	// REST exposed ONLY on the cluster-internal listener;
-	// api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
-	// and authz-public-allowlist permits the <exempt> catalog entry.
-	UpsertFromIdentity(context.Context, *UpsertFromIdentityRequest) (*operation.Operation, error)
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
 	Get(context.Context, *GetUserRequest) (*User, error)
 	mustEmbedUnimplementedInternalUserServiceServer()
@@ -113,9 +81,6 @@ type InternalUserServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedInternalUserServiceServer struct{}
 
-func (UnimplementedInternalUserServiceServer) UpsertFromIdentity(context.Context, *UpsertFromIdentityRequest) (*operation.Operation, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpsertFromIdentity not implemented")
-}
 func (UnimplementedInternalUserServiceServer) Get(context.Context, *GetUserRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
 }
@@ -138,24 +103,6 @@ func RegisterInternalUserServiceServer(s grpc.ServiceRegistrar, srv InternalUser
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&InternalUserService_ServiceDesc, srv)
-}
-
-func _InternalUserService_UpsertFromIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpsertFromIdentityRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(InternalUserServiceServer).UpsertFromIdentity(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: InternalUserService_UpsertFromIdentity_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(InternalUserServiceServer).UpsertFromIdentity(ctx, req.(*UpsertFromIdentityRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _InternalUserService_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -183,10 +130,6 @@ var InternalUserService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "kaname.cloud.iam.v1.InternalUserService",
 	HandlerType: (*InternalUserServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "UpsertFromIdentity",
-			Handler:    _InternalUserService_UpsertFromIdentity_Handler,
-		},
 		{
 			MethodName: "Get",
 			Handler:    _InternalUserService_Get_Handler,

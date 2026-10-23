@@ -512,6 +512,14 @@ kaname-svc.requireMailRelay — ОТКАЗ УСТАНОВКИ БОЕВОЙ ПО�
 адреса узла, домен отправителя, половина удостоверения) судит страж старта
 (`InviteMailConfig.Validate`), а не этот шаблон. Вне боевого режима пустой узел
 законен: секция не рендерится, и это видно счётчиком исходов отправки.
+
+ЗАГЛУШКА — ТОЖЕ НЕ УЗЕЛ (kaname#733). Боевой профиль несёт на месте узла и
+отправителя имена в зарезервированной зоне `.invalid` (RFC 2606) — той же формы,
+что `authn.domain` (`kaname-svc.requireInstallDomain`). Такое имя не разрешается
+ни у одной установки: служба поднялась бы, а первое же письмо подтверждения не
+ушло бы. Признак — ЗОНА, а не строка образца: регистр, завершающая точка, схема,
+удостоверение и порт в адресе узла его не меняют; имя, лишь содержащее
+`invalid`, признаком не является.
 */}}
 {{- define "kaname-svc.requireMailRelay" -}}
 {{- $mode := default "production" (include "kaname-svc.authMode" .) -}}
@@ -524,8 +532,86 @@ kaname-svc.requireMailRelay — ОТКАЗ УСТАНОВКИ БОЕВОЙ ПО�
 {{- if not (trim (toString (default "" $im.from))) -}}
 {{- $missing = append $missing "  inviteMail.from  — invite-mail.from: адрес отправителя, один на установку, формы имя@домен." -}}
 {{- end -}}
+{{- $relay := trim (toString (default "" $im.relay)) -}}
+{{- if $relay -}}
+{{- $host := regexReplaceAll "^[A-Za-z][A-Za-z0-9+.-]*://" $relay "" -}}
+{{- $host = regexReplaceAll "^[^@/]*@" $host "" -}}
+{{- $host = regexReplaceAll "[/?#].*$" $host "" -}}
+{{- $host = regexReplaceAll ":[0-9]*$" $host "" -}}
+{{- $host = trimSuffix "." (lower $host) -}}
+{{- if or (eq $host "invalid") (hasSuffix ".invalid" $host) -}}
+{{- fail (printf "inviteMail.relay=%q — заглушка почтового узла в зарезервированной зоне .invalid (RFC 2606): такое имя не разрешается ни у одной установки, и ни одно письмо — подтверждения адреса, восстановления доступа, смены адреса — не ушло бы. Назовите узел этой установки: inviteMail.relay в профиле чарта (invite-mail.relay, INSTALL.md §3 «Почтовая полоса»)" $relay) -}}
+{{- end -}}
+{{- end -}}
+{{- $from := trim (toString (default "" $im.from)) -}}
+{{- if $from -}}
+{{- $fromDomain := trimSuffix "." (lower (regexReplaceAll "^.*@" $from "")) -}}
+{{- if or (eq $fromDomain "invalid") (hasSuffix ".invalid" $fromDomain) -}}
+{{- fail (printf "inviteMail.from=%q — адрес отправителя в зарезервированной зоне .invalid (RFC 2606): узел установки такого отправителя не примет. Назовите отправителя этой установки: inviteMail.from в профиле чарта (invite-mail.from, INSTALL.md §3 «Почтовая полоса»)" $from) -}}
+{{- end -}}
+{{- end -}}
 {{- if $missing -}}
 {{- fail (printf "чарт службы прав не ставится: почтовый узел не объявлен в боевом режиме (authMode=%q) — %d.\n\nКоды подтверждения адреса и восстановления доступа уходят только письмом, а дальше входа пускается только человек с подтверждённым адресом: без узла служба поднялась бы, а ни один человек, первый администратор кластера тоже, дальше входа не прошёл бы. Страж старта процесса такую службу не поднимает (invite-mail.relay, invite-mail.from); отказ здесь приходит на установке, а не в кластере.\n\n%s\n\nЧТО СДЕЛАТЬ: назовите узел и отправителя профилю — накладкой `-f` либо `--set`, вместе с удостоверением к узлу и якорем доверия, если они нужны вашему узлу (INSTALL.md §3 «Почтовая полоса»). Без почты служба ставится только в режиме разработчика (authMode=dev)." $mode (len $missing) (join "\n" $missing)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kaname-svc.requireAnonymousRegistryLane — АНОНИМНЫЙ ПОТОК ДОКЕРНОЙ ПОЛОСЫ
+СОБИРАЕТСЯ ТОЛЬКО ЦЕЛИКОМ (kaname#928, kaname#930).
+
+Поток поднят — `apiServer.registryToken.anonymousClientId` непуст, а адрес
+слушателя не объявлен пустым; это тот же предикат, что у процесса
+(`RegistryTokenConfig.AnonymousLaneDeclared`). Тогда процесс не стартует без
+темпа на источник, без доверенного пересыльщика и без слушателя выдачи,
+ЗАПРАШИВАЮЩЕГО клиентский сертификат (`optional-mutual`) по корню внутреннего
+удостоверяющего центра: адрес клиента из X-Forwarded-For берётся только у пира
+с проверенным сертификатом пересыльщика, иначе все клиенты за прокси реестра
+делят один предел. Отказ здесь приходит на установке, а не падающим подом.
+
+Форму значений (положительность темпа, форма SAN в домене доверия) судит страж
+старта, второго места о ней здесь не заводится. Три ручки потока не задаются
+окружением пода: переменная перекрыла бы файл настроек и обошла этот отказ.
+*/}}
+{{- define "kaname-svc.requireAnonymousRegistryLane" -}}
+{{- $canonical := dict
+      "KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID" "apiServer.registryToken.anonymousClientId"
+      "KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC" "apiServer.registryToken.anonymousPerSourcePerSec"
+      "KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN" "apiServer.registryToken.anonymousForwarderSan" -}}
+{{- $shadows := list -}}
+{{- range $source := list "env" "secrets" -}}
+{{- $carried := index $.Values $source | default dict -}}
+{{- range $name := keys $canonical | sortAlpha -}}
+{{- if hasKey $carried $name -}}
+{{- $shadows = append $shadows (printf "  %s.%s — её адрес в профиле: %s" $source $name (get $canonical $name)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $shadows -}}
+{{- fail (printf "чарт службы прав не ставится: окружение пода несёт ручки анонимного потока докерной полосы — %d.\n\nОкружение уходит процессу как есть и перекрывает файл настроек: объявленная переменной, ручка обошла бы отказ установки.\n\n%s\n\nЧТО СДЕЛАТЬ: уберите переменную из карты env (secrets) и задайте ключ значений." (len $shadows) (join "\n" $shadows)) -}}
+{{- end -}}
+{{- $rt := (.Values.apiServer | default dict).registryToken | default dict -}}
+{{- $listenerOff := and (hasKey $rt "endpoint") (eq (toString $rt.endpoint) "") -}}
+{{- if and $rt.anonymousClientId (not $listenerOff) -}}
+{{- $env := .Values.env | default dict -}}
+{{- $missing := list -}}
+{{- if not $rt.anonymousPerSourcePerSec -}}
+{{- $missing = append $missing "  apiServer.registryToken.anonymousPerSourcePerSec — api-server.registry-token.anonymous-per-source-per-sec:\n      анонимных запросов токена в секунду на источник, на реплику; сверх — 429." -}}
+{{- end -}}
+{{- if not $rt.anonymousForwarderSan -}}
+{{- $missing = append $missing "  apiServer.registryToken.anonymousForwarderSan — api-server.registry-token.anonymous-forwarder-san:\n      точный URI SAN клиентского сертификата прокси реестра (spiffe://<домен доверия>/ns/<пространство>/sa/<учётная запись>)." -}}
+{{- end -}}
+{{- if ne (printf "%v" (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE" | default "")) "true" -}}
+{{- $missing = append $missing "  env.KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE=\"true\" — слушатель выдачи под TLS: без него сертификата пересыльщика не спрашивают." -}}
+{{- end -}}
+{{- if ne (printf "%v" (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE" | default "")) "optional-mutual" -}}
+{{- $missing = append $missing (printf "  env.KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE=optional-mutual — сейчас %q: слушатель выдачи обязан запрашивать\n      клиентский сертификат и проверять предъявленный; вызывающий без сертификата допускается." (printf "%v" (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE" | default ""))) -}}
+{{- end -}}
+{{- if not (index $env "KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES") -}}
+{{- $missing = append $missing "  env.KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES — корень внутреннего удостоверяющего центра, которым выписан клиентский лист прокси реестра." -}}
+{{- end -}}
+{{- if $missing -}}
+{{- fail (printf "чарт службы прав не ставится: анонимный поток докерной полосы включён (apiServer.registryToken.anonymousClientId), а его условия не объявлены — %d.\n\nБез них страж старта процесса службу не поднимает: адрес клиента для темпа на источник берётся только у проверенного пересыльщика, иначе все клиенты за прокси реестра делят один предел.\n\n%s\n\nЧТО СДЕЛАТЬ: объявите их профилю — накладкой `-f` либо `--set`." (len $missing) (join "\n\n" $missing)) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

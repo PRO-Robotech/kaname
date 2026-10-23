@@ -76,27 +76,6 @@ type ReaderIface interface {
 	// caller's tx. Zero rows ⇒ empty slice (nil).
 	SelectEmittedTuplesBySource(ctx context.Context, bindingID domain.AccessBindingID, source string) ([]RelationTuple, error)
 
-	// SelectTuplesClaimedByOtherActiveBindings returns the SUBSET of `tuples` that is
-	// ALSO recorded in the emitted-tuple ledger of an ACTIVE binding OTHER than
-	// excludeBinding — i.e. the tuples a revoke of excludeBinding MUST leave alone.
-	//
-	// WHY IT EXISTS. The ledger PK is per binding (binding_id, fga_user, relation,
-	// object), while the tuple itself is NOT refcounted: two bindings of the SAME
-	// subject on the SAME scope hold TWO ledger rows for ONE live tuple. Replaying a
-	// binding's own ledger set verbatim as deletions therefore removes access another
-	// ACTIVE binding still grants (silent access-loss, and self-sustaining — the
-	// ledger is read as the mirror of the rights state, so no reconcile pass
-	// re-writes it).
-	// Delete/Revoke subtract this set so a shared tuple is removed only when the LAST
-	// ACTIVE claimant releases it — the same rule the reconciler already applies
-	// internally (reconcile.ReconcileStore.TuplesStillClaimedByOtherBindings).
-	//
-	// The join requires the other binding to be ACTIVE: a REVOKED/expired binding
-	// does not keep a tuple alive. Read on the caller's tx (the revoke runs it inside
-	// its own writer-tx, so the answer is consistent with the delete it guards).
-	// Empty `tuples` ⇒ empty result, no query.
-	SelectTuplesClaimedByOtherActiveBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []RelationTuple) ([]RelationTuple, error)
-
 	// ListActiveByRole returns every NON-revoked (PENDING/ACTIVE) binding that
 	// references roleID. Used by the Role.Update reconcile fan-out: when
 	// a role's permissions change, every active binding of that role must have its
@@ -143,18 +122,29 @@ type ReaderIface interface {
 	// отменяет — он лишь остаётся неперечисленным.
 	ListActiveHoldingMembership(ctx context.Context, userID domain.UserID, accountID domain.AccountID, limit int) (ids []string, total int, err error)
 
-	// ListSubjects returns the multi-subject set of ONE binding ordered by
-	// (ordinal, subject_type, subject_id) (the read-projection).
-	// Zero rows ⇒ a legacy binding written before the backfill — the read-side
-	// then projects the legacy single subject as a one-element subjects[]
-	// (the use-case applies that fallback; the repo returns verbatim rows).
+	// ListSubjects отдаёт набор субъектов ОДНОЙ выдачи в порядке (ordinal,
+	// subject_type, subject_id) — проекция чтения. У сохранённой выдачи набор
+	// непуст: это держит база (`access_bindings_carry_a_subject`, kaname#902), и
+	// ноль строк значит лишь, что выдачи с таким идентификатором нет.
 	ListSubjects(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.Subject, error)
 
-	// ListSubjectsForBindings batch-loads the subjects of MANY bindings in one
-	// query (avoids per-row N+1 on List / ListByRole). Result maps binding id →
-	// ordered subjects; a binding with no rows is absent from the map (caller
-	// applies the legacy single-subject fallback).
+	// ListSubjectsForBindings пачкой читает субъектов МНОГИХ выдач одним
+	// запросом (без N+1 на List / ListByRole). Карта: идентификатор выдачи →
+	// упорядоченные субъекты. У сохранённой выдачи набор непуст (kaname#902),
+	// поэтому в карте нет только идентификаторов, которых нет в таблице.
 	ListSubjectsForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error)
+
+	// GrantorLastPresentedAt — самое свежее предъявление среди ЖИВЫХ сессий
+	// человека-выдающего (окно свежести выдачи системному классу, Р5, SC-25).
+	// found=false — живых сессий нет. Граница «живая» — та же, что у окна
+	// свежести ключа доступа: сессия не завершена и не истекла.
+	GrantorLastPresentedAt(ctx context.Context, userID domain.UserID) (at time.Time, found bool, err error)
+
+	// PublicReadContainer — что ЖИВОЙ каталог говорит о точечном типе цели выдачи
+	// системному классу: объявлен ли он контейнером публичного чтения и какие
+	// живые типы указывают на него (ворота SC-65, kaname#856). Тип, которого в
+	// каталоге нет, — нулевое значение: не объявлен, детей нет.
+	PublicReadContainer(ctx context.Context, dottedType string) (domain.PublicReadContainer, error)
 
 	// ListMaterializedAtForBindings batch-loads, for MANY bindings in one query,
 	// the instant each one's per-object access last became live: MAX(updated_at)
@@ -182,11 +172,30 @@ type WriterIface interface {
 	Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error)
 	Delete(ctx context.Context, id domain.AccessBindingID) error
 
+	// LockLiveTargetTypes — какие из типов пообъектной цели `types` имеют ЖИВУЮ
+	// строку каталога платформы, прочитанные в ЭТОЙ транзакции под замком
+	// `FOR KEY SHARE` в порядке `dotted` (kaname#904, Р2). Замок согласован с
+	// применением манифеста: применитель держит `FOR UPDATE` на строках ресурсов
+	// модуля в том же порядке, поэтому незафиксированное снятие запись дожидается
+	// и судит по его исходу, а зафиксированное до записи строку из ответа
+	// убирает. Возвращает подмножество `types` (порядок не гарантирован); пустой
+	// вход — пустой ответ без обращения к базе.
+	LockLiveTargetTypes(ctx context.Context, types []string) ([]string, error)
+
 	// DeleteGuarded — atomic CAS-delete honoring deletion_protection (RBAC
 	// explicit-model). Single-statement
 	// `DELETE … WHERE id=$1 AND deletion_protection=false`; 0 rows → re-read:
 	// protected → ErrFailedPrecondition, absent → ErrNotFound. No software TOCTOU.
 	DeleteGuarded(ctx context.Context, id domain.AccessBindingID) error
+
+	// GetForDeactivation — строка выдачи под замком `FOR UPDATE`: первое чтение
+	// снятия выдачи (отзыв, удаление) после advisory-замка, ДО чтения реестра и
+	// перечня субъектов. Это единственный режим строки, конфликтующий с
+	// `FOR KEY SHARE`, под которым аддитивный форвард решает «выдача жива»
+	// (reconcile LoadBinding(s)ForForward): снятие ждёт коммита такого форварда и
+	// читает реестр уже с его записями, а форвард, пришедший позже, читает выдачу
+	// снятой (kaname#919, kaname#923). Строки нет ⇒ ErrNotFound.
+	GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error)
 
 	// RevokeGuarded — atomic CAS soft-revoke (redesign-2026 F10 IAM-1-28). Unlike
 	// DeleteGuarded (physical row-removal) this RETAINS the row and transitions

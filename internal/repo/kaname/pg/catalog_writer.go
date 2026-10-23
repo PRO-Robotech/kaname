@@ -72,7 +72,8 @@ const CatalogLockKey = "kaname.module_catalog"
 // # Состав ВЫВЕДЕН из `WHERE` писателя, а не выбран
 //
 //	`catalog_module`    `live` — оживление модуля есть изменение
-//	`catalog_resource`  `resource`, `object_type`, `live` — ровно то, что читает
+//	`catalog_resource`  `resource`, `object_type`, `parent_types`,
+//	                    `public_read_to_children`, `live` — ровно то, что читает
 //	                    условие изменения `UpsertResource`, плюс ключ снятия
 //	`catalog_verb`      `resource`, `verb`, `per_object`, `live` — ровно условие
 //	                    изменения `UpsertVerb`, плюс ключ снятия
@@ -106,7 +107,8 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 	    SELECT 'm:' || module || ':' || live::text
 	      FROM kaname.catalog_module WHERE module = $1
 	    UNION ALL
-	    SELECT 'r:' || resource || ':' || object_type || ':' || live::text
+	    SELECT 'r:' || resource || ':' || object_type || ':' || array_to_string(parent_types, ',')
+	           || ':' || public_read_to_children::text || ':' || live::text
 	      FROM kaname.catalog_resource WHERE module = $1
 	    UNION ALL
 	    SELECT 'v:' || resource || '.' || verb || ':' || live::text || ':' || per_object::text
@@ -139,6 +141,45 @@ type catalogWriter struct{ tx pgx.Tx }
 // И откатом, поэтому оборванный применитель не оставляет каталог запертым.
 func (w catalogWriter) LockCatalog(ctx context.Context) error {
 	_, err := w.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, CatalogLockKey)
+	return err
+}
+
+// LockModuleRow берёт строку `catalog_module` модуля `FOR UPDATE` — первый
+// замок шага 2а, ДО строк ресурсов (kaname#913).
+//
+// # Почему строка модуля раньше строк ресурсов
+//
+// Применитель ролей модуля берёт строку модуля РАНЬШЕ строк ресурсов: ключ
+// роли на модуль (`roles_owner_module_live_fk`) проверяется на вставке и
+// оживлении роли, а сама его транзакция открывается ключевым замком строки
+// модуля (`roleWriter.LockOwnerModule`); строки ресурсов он берёт потом,
+// записью проекции правил. Применитель брал их в обратном порядке: строки
+// ресурсов на шаге 2а, строку модуля — лишь на шаге 4 (`UpsertModule`
+// присваивает `live`, входящий в ключ, то есть берёт `FOR UPDATE`). Пара
+// давала взаимную блокировку, и Postgres отвергал одну из сторон (40P01) —
+// опыт полосы kaname#865, проба
+// `catalog_applier_module_role_lock_order_integration_test.go`.
+//
+// Здесь порядок «модуль → ресурсы» становится общим: применитель встаёт за
+// транзакцией ролей на строке модуля, НИЧЕГО ещё не держа из строк ресурсов, и
+// продолжает после её коммита.
+//
+// # Почему `FOR UPDATE`, а не `FOR NO KEY UPDATE`
+//
+// Шаг 4 присваивает `live` (ключ `catalog_module_live_uk`) и берёт строку
+// `FOR UPDATE`. Возьми мы здесь замок слабее, шаг 4 повышал бы его — и это
+// повышение снова стояло бы ПОСЛЕ строк ресурсов, то есть в том самом
+// неупорядоченном месте. Замок шага 2р (`FOR NO KEY UPDATE`, при объявленной
+// редакции) этот оператор повышает до строк ресурсов, а не после.
+//
+// Ноль строк — законный исход (модуль устанавливается впервые): строки, которой
+// ещё нет, ключом не держит никто, а второго применителя не пускает
+// консультативный замок каталога.
+func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
+	_, err := w.tx.Exec(ctx, `
+		SELECT 1 FROM kaname.catalog_module
+		 WHERE module = $1
+		   FOR UPDATE`, module)
 	return err
 }
 
@@ -212,7 +253,8 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 
 	resRows, err := w.tx.Query(ctx,
-		`SELECT module, resource, object_type FROM kaname.catalog_resource
+		`SELECT module, resource, object_type, parent_types, public_read_to_children
+		   FROM kaname.catalog_resource
 		  WHERE module = $1 AND live
 		  ORDER BY resource`, module)
 	if err != nil {
@@ -220,7 +262,7 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 	out.Resources, err = pgx.CollectRows(resRows, func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
 		var r catalog.ResourceRow
-		return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType)
+		return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.PublicReadToChildren)
 	})
 	if err != nil {
 		return out, fmt.Errorf("прочитать ресурсы модуля %s: %w", module, err)
@@ -279,6 +321,79 @@ func (w catalogWriter) ReadCatalog(ctx context.Context) (modulecatalog.CatalogSt
 	return modulecatalog.NewCatalogState(live, retired), nil
 }
 
+// advanceRevisionSQL — сравнение-и-запись пары редакции ОДНИМ оператором
+// (kaname#865, приёмка `module-manifest-revision-only-moves-forward.md`, Д2).
+//
+// `$1` — модуль, `$2` — объявленный номер, `$3` — объявленный отпечаток; оба
+// `NULL`, если документ ключа `revision` не несёт. Строки таблицы Д2 и обе
+// строки переходной ветки S1 записаны предикатами явно:
+//
+//	строки нет,  d объявлена   вставка: первая редакция
+//	строки нет,  d не объявлена вставки нет (`WHERE $2 IS NOT NULL`)
+//	a пусто,     d объявлена   запись: первая редакция
+//	a есть,      d > a         запись: старшая редакция
+//	a есть,      d ≤ a         записи нет: повтор, младшая либо конфликт
+//	d не объявлена             записи нет ни при каком a
+//
+// Различать повтор, младшую и конфликт — дело решателя
+// (`modulecatalog.JudgeRevision`): оператор отдаёт прежнюю пару и признак
+// записи, а применитель сверяет, что решатель назвал тот же исход.
+//
+// `prev` читает строку ДО записи: подзапросы `WITH` видят один снимок, и
+// изменение `written` в нём не видно. Второго писателя между ними нет — его не
+// пускает консультативный замок каталога, взятый первым оператором транзакции.
+// Обновляются только `applied_*`, ключ строки не меняется, поэтому оператор
+// берёт `FOR NO KEY UPDATE`, а не `FOR UPDATE`: соседний ключ живости
+// (`catalog_resource_module_live_fk`) он не блокирует.
+const advanceRevisionSQL = `
+	WITH prev AS (
+	  SELECT applied_revision, applied_digest
+	    FROM kaname.catalog_module
+	   WHERE module = $1
+	), written AS (
+	  INSERT INTO kaname.catalog_module (module, applied_revision, applied_digest)
+	  SELECT $1, $2::bigint, $3::text
+	   WHERE $2::bigint IS NOT NULL AND $3::text IS NOT NULL
+	  ON CONFLICT (module) DO UPDATE
+	     SET applied_revision = EXCLUDED.applied_revision,
+	         applied_digest = EXCLUDED.applied_digest
+	   WHERE catalog_module.applied_revision IS NULL
+	      OR (catalog_module.applied_revision IS NOT NULL
+	          AND EXCLUDED.applied_revision > catalog_module.applied_revision)
+	  RETURNING 1
+	)
+	SELECT EXISTS (SELECT 1 FROM prev),
+	       (SELECT applied_revision FROM prev),
+	       (SELECT applied_digest FROM prev),
+	       EXISTS (SELECT 1 FROM written)`
+
+// AdvanceRevision — сравнение-и-запись пары редакции (см. `advanceRevisionSQL`).
+func (w catalogWriter) AdvanceRevision(
+	ctx context.Context, module string, declared *modulecatalog.Edition,
+) (modulecatalog.RevisionWrite, error) {
+	var (
+		revision *int64
+		digest   *string
+	)
+	if declared != nil {
+		revision, digest = &declared.Revision, &declared.Digest
+	}
+	var (
+		existed, written bool
+		prevRev          *int64
+		prevDigest       *string
+	)
+	if err := w.tx.QueryRow(ctx, advanceRevisionSQL, module, revision, digest).
+		Scan(&existed, &prevRev, &prevDigest, &written); err != nil {
+		return modulecatalog.RevisionWrite{}, err
+	}
+	prev, err := editionOf(prevRev, prevDigest)
+	if err != nil {
+		return modulecatalog.RevisionWrite{}, fmt.Errorf("строка модуля %s: %w", module, err)
+	}
+	return modulecatalog.RevisionWrite{Previous: prev, RowCreated: !existed && written, Written: written}, nil
+}
+
 // UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля.
 //
 // Оживление, а не вставка новой строки: снятая строка занимает первичный ключ, и
@@ -305,16 +420,30 @@ func (w catalogWriter) UpsertModule(ctx context.Context, module string) (bool, e
 // (какое отношение `v_*` адресует ресурс). Правка манифеста, меняющая
 // `objectType`, обязана доезжать до строки; иначе она была бы принята и
 // проигнорирована.
+//
+// Указатели и признак контейнера публичного чтения (kaname#856) входят в
+// условие по той же причине: снятый с манифеста ключ, не доехавший до строки,
+// оставил бы контейнер открытым для новых выдач классу.
 func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow) (bool, error) {
+	parents := r.ParentTypes
+	if parents == nil {
+		// Пустой перечень, а не NULL: колонка NOT NULL, и «указателей нет»
+		// выражается в ней одним способом.
+		parents = []string{}
+	}
 	return w.changed(ctx, `
-		INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type)
-		VALUES ($1, $2, $1 || '.' || $2, $3)
+		INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types, public_read_to_children)
+		VALUES ($1, $2, $1 || '.' || $2, $3, $4, $5)
 		ON CONFLICT (module, resource) DO UPDATE
 		   SET retired_at = NULL, live = true, retired_reason = NULL, superseded_by = NULL,
-		       object_type = EXCLUDED.object_type
+		       object_type = EXCLUDED.object_type,
+		       parent_types = EXCLUDED.parent_types,
+		       public_read_to_children = EXCLUDED.public_read_to_children
 		 WHERE catalog_resource.live IS DISTINCT FROM true
 		    OR catalog_resource.object_type IS DISTINCT FROM EXCLUDED.object_type
-		RETURNING 1`, r.Module, r.Resource, r.ObjectType)
+		    OR catalog_resource.parent_types IS DISTINCT FROM EXCLUDED.parent_types
+		    OR catalog_resource.public_read_to_children IS DISTINCT FROM EXCLUDED.public_read_to_children
+		RETURNING 1`, r.Module, r.Resource, r.ObjectType, parents, r.PublicReadToChildren)
 }
 
 // UpsertVerb заводит, оживляет либо приводит признак словаря.
@@ -592,6 +721,14 @@ var (
 // ли её основной запрос. Свойство держит проба на живой базе
 // (`selector_pruning_leaves_a_ledger_integration_test.go`), а не эта строка.
 //
+// Укороченная строка теряет и глаголы правила на вырезанных типах
+// (`verbs_by_type`, kaname#878): ключи карты — подмножество `object_types`, и
+// глагол на типе вне охвата правила был бы утверждением о несуществующем.
+//
+// Причина у вырезанного живого типа — причина снятия КОНТЕЙНЕРА (kaname#874):
+// живой элемент вырезается только вместе со строкой вложенного селектора, чей
+// контейнер снят, и своей причины у него нет.
+//
 // Четвёртой величины наружу оператор не отдаёт НАМЕРЕННО: перепись применения
 // уже несёт число вырезанных элементов, а число записанных строк от него
 // отличается лишь на повторы, которых у необратимого вырезания не бывает.
@@ -626,7 +763,10 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		  RETURNING s.role_id, s.rule_fp
 		), stripped AS (
 		  UPDATE kaname.role_rule_selectors s
-		     SET object_types = c.alive
+		     SET object_types  = c.alive,
+		         verbs_by_type = (SELECT coalesce(jsonb_object_agg(g.k, g.v), '{}'::jsonb)
+		                            FROM jsonb_each(s.verbs_by_type) AS g(k, v)
+		                           WHERE g.k = ANY (c.alive))
 		    FROM changed c
 		   WHERE s.role_id = c.role_id AND s.rule_fp = c.rule_fp
 		     AND cardinality(c.alive) > 0
@@ -638,11 +778,13 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		), recorded AS (
 		  INSERT INTO kaname.role_selector_prune
 		         (role_id, rule_fp, object_type, outcome, retired_reason, applied_by)
-		  SELECT k.role_id, k.rule_fp, t, k.outcome, cr.retired_reason, $6
+		  SELECT k.role_id, k.rule_fp, t, k.outcome,
+		         CASE WHEN coalesce(cr.live, false) THEN cc.retired_reason ELSE cr.retired_reason END, $6
 		    FROM cut k
 		    JOIN changed c ON c.role_id = k.role_id AND c.rule_fp = k.rule_fp
 		    CROSS JOIN LATERAL unnest(c.was) AS t
 		    LEFT JOIN kaname.catalog_resource cr ON cr.dotted = t
+		    LEFT JOIN kaname.catalog_resource cc ON cc.dotted = c.container
 		   WHERE NOT (t = ANY (c.alive))
 		  ON CONFLICT (role_id, rule_fp, object_type) DO NOTHING
 		  RETURNING 1

@@ -51,6 +51,7 @@ package loginlanehttp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,6 +70,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 // Пути семейства — точное совпадение (Р2). «Кто я» — маршрут КРАЯ, здесь его
@@ -93,6 +95,9 @@ const (
 	PathSecondFactorRemove      = "/iam/v1/auth/second-factor/remove"
 	PathSecondFactorBackupCodes = "/iam/v1/auth/second-factor/backup-codes"
 	PathStepUp                  = "/iam/v1/auth/step-up"
+	// PathStepUpAccessKeyBegin — выдача испытания повышения ключом доступа под
+	// живой сессией (kaname#827, приёмка SUA Р2): подпуть церемонии.
+	PathStepUpAccessKeyBegin = "/iam/v1/auth/step-up/access-key/begin"
 	// Подтверждение адреса (kaname#456, Р6; имена ратифицированы — Ф6 Р15):
 	// запрос письма и предъявление кода — два глагола под сессией человека.
 	PathVerifyEmail        = "/iam/v1/auth/verify-email"
@@ -116,7 +121,7 @@ const (
 	PathSessionsEndOthers = "/iam/v1/auth/sessions/end-others"
 )
 
-// Paths — двадцать три глагола полосы. Регистрации в New объявляют то же
+// Paths — двадцать четыре глагола полосы. Регистрации в New объявляют то же
 // множество второй раз; равенство двух объявлений держит проба
 // TestLaneServesExactlyItsDeclaredPaths (kaname#280): путь только здесь — 404
 // слушателя, путь только в New — обслуживается мимо перечня. Край платформы
@@ -126,7 +131,7 @@ func Paths() []string {
 	return []string{
 		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
 		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
-		PathSecondFactorBackupCodes, PathStepUp, PathVerifyEmail, PathVerifyEmailConfirm,
+		PathSecondFactorBackupCodes, PathStepUp, PathStepUpAccessKeyBegin, PathVerifyEmail, PathVerifyEmailConfirm,
 		PathAccessKeyBegin, PathAccessKeyLogin, PathPasswordEnroll, PathEmailChange, PathEmailChangeConfirm,
 		PathSessions, PathSessionsEnd, PathSessionsEndOthers,
 	}
@@ -166,6 +171,9 @@ var pathPositions = map[string]PathPosition{
 	PathSecondFactorRemove:      PathRefusedInVerification,
 	PathSecondFactorBackupCodes: PathRefusedInVerification,
 	PathStepUp:                  PathRefusedInVerification,
+	// Выдача испытания повышения ключом — в один голос с церемонией (SUA Р2):
+	// без отметки подтверждения адреса повышать нечего.
+	PathStepUpAccessKeyBegin: PathRefusedInVerification,
 	// Заведение пароля — правка своих данных: в положении подтверждения адреса
 	// отказ (A7 Р2, F6b Р2).
 	PathPasswordEnroll: PathRefusedInVerification,
@@ -236,6 +244,9 @@ type Lane interface {
 	RemoveSecondFactor(ctx context.Context, in humansession.RemoveSecondFactorInput) (humansession.RemoveSecondFactorOutput, error)
 	RegenerateBackupCodes(ctx context.Context, in humansession.RegenerateBackupCodesInput) (humansession.RegenerateBackupCodesOutput, error)
 	StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error)
+	// BeginStepUpAccessKey — выдача испытания повышения ключом под сессией
+	// носителя (kaname#827, Р2).
+	BeginStepUpAccessKey(ctx context.Context, in humansession.StepUpAccessKeyBeginInput) (humansession.StepUpAccessKeyBeginOutput, error)
 	// Подтверждение адреса (kaname#456, Р6): запрос письма и предъявление кода.
 	RequestEmailVerification(ctx context.Context, bearer domain.SessionBearer) (humansession.RequestVerificationOutput, error)
 	ConfirmEmailVerification(ctx context.Context, in humansession.ConfirmVerificationInput) (humansession.ConfirmVerificationOutput, error)
@@ -315,6 +326,7 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathSecondFactorRemove, h.method(http.MethodPost, h.removeSecondFactor))
 	h.mux.HandleFunc(PathSecondFactorBackupCodes, h.method(http.MethodPost, h.regenerateBackupCodes))
 	h.mux.HandleFunc(PathStepUp, h.method(http.MethodPost, h.stepUp))
+	h.mux.HandleFunc(PathStepUpAccessKeyBegin, h.method(http.MethodPost, h.stepUpAccessKeyBegin))
 	h.mux.HandleFunc(PathVerifyEmail, h.method(http.MethodPost, h.requestEmailVerification))
 	h.mux.HandleFunc(PathVerifyEmailConfirm, h.method(http.MethodPost, h.confirmEmailVerification))
 	h.mux.HandleFunc(PathAccessKeyBegin, h.method(http.MethodPost, h.accessKeyBegin))
@@ -403,10 +415,13 @@ type confirmedForm struct {
 // stepUpForm — церемония: один способ; `password` — у ветви пароля, `code` — у
 // кода; поле, не относящееся к названному способу, отвергается глаголом.
 type stepUpForm struct {
-	Method    string `json:"method"`
-	Password  string `json:"password"`
-	Code      string `json:"code"`
-	CSRFToken string `json:"csrfToken"`
+	Method   string `json:"method"`
+	Password string `json:"password"`
+	Code     string `json:"code"`
+	// Credential — утверждение ключа у способа `webauthn` (kaname#827, Р1):
+	// та же форма, что у входа ключом, тем же разборщиком.
+	Credential json.RawMessage `json:"credential"`
+	CSRFToken  string          `json:"csrfToken"`
 }
 
 type logoutForm struct {
@@ -914,14 +929,28 @@ func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"backupCodes": out.BackupCodes,
-		"session":     sessionJSON(out.View),
-		"assurance":   assuranceJSON(out.Assurance),
+		"backupCodes":   out.BackupCodes,
+		"backupCodeSet": backupCodeSetJSON(out.BackupCodeSet),
+		"session":       sessionJSON(out.View),
+		"assurance":     assuranceJSON(out.Assurance),
 	})
 }
 
+// backupCodeSetJSON — состояние набора запасных кодов наружу (kaname#297 Р2):
+// ЕДИНСТВЕННЫЙ писатель ключа `backupCodeSet` во всех ответах раздела. Ключи
+// закрыты — `remaining`, `total`, `issuedAt` и `lastUsedAt` (нет ключа — из
+// набора не тратили); кодов и материала нет.
+func backupCodeSetJSON(v humansession.BackupCodeSetView) map[string]any {
+	set := map[string]any{"remaining": v.Remaining, "total": v.Total, "issuedAt": moment(v.IssuedAt)}
+	if v.LastUsed {
+		set["lastUsedAt"] = moment(v.LastUsedAt)
+	}
+	return set
+}
+
 // secondFactorStatus — чтение состояния (Р4): без признака; две формы тела —
-// `pending` и `active`; ключ `backupCodes` — только у заведённого.
+// `pending` и `active`; ключ `backupCodeSet` — только у заведённого фактора с
+// прочитанным набором (kaname#297 Р4: «сводки нет» — отсутствие ключа).
 func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 	if !h.admitted(w, r, PathSecondFactor, humansession.TextRequestNotPerformed) {
 		return
@@ -934,13 +963,26 @@ func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 	totp := map[string]any{"enrolled": out.TOTPEnrolled}
 	switch {
 	case out.TOTPEnrolled:
-		totp["confirmedAt"] = out.ConfirmedAt.UTC().Truncate(time.Second).Format(time.RFC3339)
+		totp["confirmedAt"] = moment(out.ConfirmedAt)
+		if out.TOTPLastUsed {
+			totp["lastUsedAt"] = moment(out.TOTPLastUsedAt)
+		}
 	case !out.PendingUntil.IsZero():
-		totp["pendingUntil"] = out.PendingUntil.UTC().Truncate(time.Second).Format(time.RFC3339)
+		totp["pendingUntil"] = moment(out.PendingUntil)
 	}
-	body := map[string]any{"totp": totp}
-	if out.BackupCodes != nil {
-		body["backupCodes"] = map[string]any{"remaining": out.BackupCodes.Remaining, "total": out.BackupCodes.Total}
+	// Отсутствие момента — отсутствие ключа (SUA Р6), а не нулевое время;
+	// `stepUpMethods` — набор словом, пусто — `[]`.
+	methods := out.StepUpMethods
+	if methods == nil {
+		methods = []string{}
+	}
+	body := map[string]any{
+		"totp":          totp,
+		"accessKeys":    map[string]any{"available": out.AccessKeysAvailable},
+		"stepUpMethods": methods,
+	}
+	if out.BackupCodeSet != nil {
+		body["backupCodeSet"] = backupCodeSetJSON(*out.BackupCodeSet)
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -971,11 +1013,8 @@ func (h *Handler) removeSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
-	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
-	if out.BackupCodesRemaining != nil {
-		body["backupCodesRemaining"] = *out.BackupCodesRemaining
-	}
-	writeJSON(w, http.StatusOK, body)
+	// Набора после снятия нет — ключа `backupCodeSet` нет (kaname#297 Р4).
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)})
 }
 
 // regenerateBackupCodes — Ф12-25: новый набор один раз, ответ как у церемонии.
@@ -1005,9 +1044,10 @@ func (h *Handler) regenerateBackupCodes(w http.ResponseWriter, r *http.Request) 
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"backupCodes": out.BackupCodes,
-		"session":     sessionJSON(out.View),
-		"assurance":   assuranceJSON(out.Assurance),
+		"backupCodes":   out.BackupCodes,
+		"backupCodeSet": backupCodeSetJSON(out.BackupCodeSet),
+		"session":       sessionJSON(out.View),
+		"assurance":     assuranceJSON(out.Assurance),
 	})
 }
 
@@ -1031,6 +1071,14 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := humansession.StepUpInput{Bearer: h.bearer(r), Method: method, Password: form.Password, Code: form.Code, Source: h.source(r)}
+	if credentialPresent(form.Credential) {
+		a, err := parseCredential(form.Credential)
+		if err != nil {
+			h.writeError(w, err, humansession.TextRequestNotPerformed)
+			return
+		}
+		in.Assertion = &a
+	}
 	if err := humansession.JudgeStepUpForm(in); err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
@@ -1042,10 +1090,45 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
-	if out.BackupCodesRemaining != nil {
-		body["backupCodesRemaining"] = *out.BackupCodesRemaining
+	if out.BackupCodeSet != nil {
+		body["backupCodeSet"] = backupCodeSetJSON(*out.BackupCodeSet)
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// stepUpAccessKeyBegin — выдача испытания повышения ключом (kaname#827, Р2):
+// признак своего вида, положение, затем глагол. `allowCredentials` — массив
+// удостоверений человека в порядке заведения.
+func (h *Handler) stepUpAccessKeyBegin(w http.ResponseWriter, r *http.Request) {
+	var form accessKeyBeginForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormStepUpAccessKeyBegin, form.CSRFToken) {
+		return
+	}
+	if !h.admitted(w, r, PathStepUpAccessKeyBegin, humansession.TextRequestNotPerformed) {
+		return
+	}
+	out, err := h.lane.BeginStepUpAccessKey(r.Context(), humansession.StepUpAccessKeyBeginInput{Bearer: h.bearer(r)})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	allow := make([]map[string]any, 0, len(out.AllowCredentials))
+	for _, id := range out.AllowCredentials {
+		allow = append(allow, map[string]any{"type": credentialTypePublicKey, "id": base64.RawURLEncoding.EncodeToString(id)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"publicKey": map[string]any{
+			"challenge":        base64.RawURLEncoding.EncodeToString(out.Challenge),
+			"rpId":             out.RPID,
+			"timeout":          out.Timeout.Milliseconds(),
+			"userVerification": out.UserVerification,
+			"allowCredentials": allow,
+		},
+	})
 }
 
 // --- подтверждение адреса (kaname#456, Р6) ---
@@ -1433,6 +1516,23 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	case errors.Is(err, humansession.ErrSessionIsCurrent):
 		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextSessionIsCurrent,
 			&errorInfo{Reason: humansession.ReasonSessionIsCurrent, Domain: h.cfg.RefusalDomain})
+	// Ветвь ключа повышения (kaname#827, Р3, Р5, Р7): состояние — 400 с
+	// признаком, не попытка.
+	case errors.Is(err, humansession.ErrStepUpChallengeNotIssued):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextStepUpChallengeNotIssued,
+			&errorInfo{Reason: humansession.ReasonStepUpChallengeNotIssued, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrStepUpChallengePresented):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextStepUpChallengePresented,
+			&errorInfo{Reason: humansession.ReasonStepUpChallengePresented, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrStepUpChallengeExpired):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextStepUpChallengeExpired,
+			&errorInfo{Reason: humansession.ReasonStepUpChallengeExpired, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrAccessKeyNotRegistered):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextAccessKeyNotRegistered,
+			&errorInfo{Reason: humansession.ReasonAccessKeyNotRegistered, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, webauthnverify.ErrKeysDisabled):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, webauthnverify.TextKeysDisabled,
+			&errorInfo{Reason: webauthnverify.ReasonKeysDisabled, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrSecondFactorUnavailable):
 		// Запись журнала уровня ошибки (Ф12-35 «в», «г») — дело глагола, где
 		// известны личность и способ: у общей сверки (вход, step-up, снятие,
@@ -1448,6 +1548,9 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
 	}
 }
+
+// moment — момент наружу: UTC, усечён до секунды, RFC 3339 (api-timestamp-truncate).
+func moment(t time.Time) string { return t.UTC().Truncate(time.Second).Format(time.RFC3339) }
 
 func retryAfterSeconds(d time.Duration) int64 {
 	s := int64(d / time.Second)

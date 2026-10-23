@@ -54,29 +54,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// selectorsNamingDeadTypes — перепись: сколько строк селекторов называют тип, у
-// которого в каталоге нет ЖИВОЙ строки.
+// selectorsNamingDeadTypes — перепись: сколько ссылок строк селекторов называют
+// тип, у которого в каталоге нет ЖИВОЙ строки.
 //
-// Возвращает и число строк, и их перечень: одно число не говорит, ЧТО именно
+// Ссылок у строки два вида: элементы `object_types` и тип контейнера
+// вложенного правила (`container_type`, kaname#874). Страж живости судит оба —
+// значит и перепись читает оба: читай она один `object_types`, селектор с
+// повисшим контейнером был бы для неё чистым.
+//
+// Возвращает и число ссылок, и их перечень: одно число не говорит, ЧТО именно
 // повисло, а перечень без числа не отличает «ничего не нашли» от «ничего не
 // прочли».
 func selectorsNamingDeadTypes(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (int, []string) {
 	t.Helper()
 	rows, err := pool.Query(ctx, `
-		SELECT s.role_id, s.rule_fp, t AS dotted
+		SELECT s.role_id, s.rule_fp, u.col, u.dotted
 		  FROM kaname.role_rule_selectors s
-		  CROSS JOIN LATERAL unnest(s.object_types) AS t
+		  CROSS JOIN LATERAL (
+		        SELECT 'object_types' AS col, e AS dotted FROM unnest(s.object_types) AS e
+		        UNION ALL
+		        SELECT 'container_type', s.container_type WHERE s.container_type IS NOT NULL) AS u
 		 WHERE NOT EXISTS (
 		         SELECT 1 FROM kaname.catalog_resource cr
-		          WHERE cr.dotted = t AND cr.live)
-		 ORDER BY s.role_id, s.rule_fp, t`)
+		          WHERE cr.dotted = u.dotted AND cr.live)
+		 ORDER BY s.role_id, s.rule_fp, u.col, u.dotted`)
 	require.NoError(t, err)
 	defer rows.Close()
 	var out []string
 	for rows.Next() {
-		var role, fp, dotted string
-		require.NoError(t, rows.Scan(&role, &fp, &dotted))
-		out = append(out, role+"/"+fp+" → "+dotted)
+		var role, fp, col, dotted string
+		require.NoError(t, rows.Scan(&role, &fp, &col, &dotted))
+		out = append(out, role+"/"+fp+" "+col+" → "+dotted)
 	}
 	require.NoError(t, rows.Err())
 	return len(out), out

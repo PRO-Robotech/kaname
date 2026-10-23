@@ -66,6 +66,9 @@ func storeFailureSideLedger() map[string]sideVerdict {
 		"store-failure/backup-codes-regenerate": ours("хранилище не ответило на перечеканке запасных кодов"),
 		"store-failure/password-change":         ours("хранилище не ответило на смене пароля"),
 		"store-failure/password-enroll":         ours("хранилище не ответило на заведении пароля"),
+		"store-failure/own-sessions-list":       ours("хранилище не ответило на перечне своих сессий (kaname#735)"),
+		"store-failure/own-session-end":         ours("хранилище не ответило на выходе из выбранной сессии (kaname#735)"),
+		"store-failure/own-sessions-end-others": ours("хранилище не ответило на выходе из прочих сессий (kaname#735)"),
 	}
 }
 
