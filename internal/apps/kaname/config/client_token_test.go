@@ -229,10 +229,10 @@ func TestClientTokenRefusalNamesNoSecretValue(t *testing.T) {
 // свелась бы к «принимаем любой».
 func TestAudienceListCountsElementsNotStringLength(t *testing.T) {
 	for raw, want := range map[string]int{
-		"":                                  0,
-		" ":                                 0,
-		",":                                 0,
-		" , , ":                             0,
+		"":                                   0,
+		" ":                                  0,
+		",":                                  0,
+		" , , ":                              0,
 		"api.example.test":                   1,
 		" api.example.test , registry.local": 2,
 		"api.example.test,,registry.local":   2,

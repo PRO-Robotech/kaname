@@ -121,10 +121,10 @@ func TestRelationWriteGate_C03_MalformedOrForeignSANDenied(t *testing.T) {
 	gate := authzguard.NewRelationWriteGate(chk, probeServiceNameForm).WithProductionMode(true)
 
 	for _, san := range []string{
-		"spiffe://other-trust-domain/x",      // foreign trust domain — never extracted
-		"spiffe://kacho.cloud/garbage",       // wrong path shape
+		"spiffe://other-trust-domain/x",    // foreign trust domain — never extracted
+		"spiffe://kacho.cloud/garbage",     // wrong path shape
 		"spiffe://kacho.cloud/ns//sa/mod-", // empty segments
-		"",                                   // no identity
+		"",                                 // no identity
 	} {
 		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
 		_, err := gate.Authorize(ctx)

@@ -99,9 +99,12 @@ func TestCallerPolicy_BootstrapMint_NoVerifiedCert_Denied(t *testing.T) {
 func TestCallerPolicy_BootstrapMint_EmptyAllowlist_DeniesEveryone(t *testing.T) {
 	for _, prod := range []bool{true, false} {
 		for _, p := range []*CallerPolicy{
-			mintPolicy(prod), // declared, empty
-			NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm), // never configured
-			mintPolicy(prod).WithSANAllowlist(nil),              // explicitly cleared
+			// перечень объявлен пустым
+			mintPolicy(prod),
+			// перечень не настраивался вовсе
+			NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm),
+			// перечень очищен явно
+			mintPolicy(prod).WithSANAllowlist(nil),
 		} {
 			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), seedRunnerSAN, true)
 			if status.Code(p.allow(ctx, bootstrapMintMethod)) != codes.PermissionDenied {
