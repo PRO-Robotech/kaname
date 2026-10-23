@@ -1256,10 +1256,9 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 	if metricsReg != nil {
 		edgeAuthz = metrics.NewInstrumentedSubjectAuthorizer(authSvc, metricsReg)
 	}
-	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC).
+	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC, moduleForm).
 		WithCallerAuthority(ownGates).
-		WithInsecureAnonymousPeer(!prodMode).
-		WithServiceNameForm(moduleForm)
+		WithInsecureAnonymousPeer(!prodMode)
 
 	return authzServiceBundle{
 		authorize:    authzH,

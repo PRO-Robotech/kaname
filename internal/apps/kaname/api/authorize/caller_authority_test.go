@@ -36,13 +36,21 @@ func (a *authorityStub) Check(_ context.Context, subject, relation, object strin
 	return a.allow[relation+"|"+object], nil
 }
 
+// probeModuleForm — форма имени службы, которой названы учётки проб пакета
+// (`moduleCertCtx`): объявление установки, под которым собирается обработчик.
+var probeModuleForm = servicesan.NewForm("kacho-{service}")
+
 func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
+	return newHandlerOfForm(svcCheck, auth, probeModuleForm)
+}
+
+// newHandlerOfForm — тот же обработчик, собранный с объявленной формой form.
+func newHandlerOfForm(svcCheck bool, auth *authorityStub, form servicesan.Form) *Handler {
 	stub := &stubVerdict{check: svcCheck}
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: stub,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth).
-		WithServiceNameForm(servicesan.NewForm("kacho-{service}"))
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), form).WithCallerAuthority(auth)
 }
 
 // newHandlerWithAuthorityProd builds the handler in the DEFAULT posture, which
@@ -236,7 +244,7 @@ func TestCallerAuthority_Anonymous_ProdMode_VerifiedModuleCert_Allowed(t *testin
 // код. Отличие от близнеца — ровно объявление формы.
 func TestCallerAuthority_Anonymous_ProdMode_ModuleOfAForeignForm_Denied(t *testing.T) {
 	auth := &authorityStub{allow: map[string]bool{}}
-	h := newHandlerWithAuthorityProd(true, auth).WithServiceNameForm(servicesan.NewForm("other-{service}"))
+	h := newHandlerOfForm(true, auth, servicesan.NewForm("other-{service}")).WithInsecureAnonymousPeer(false)
 	_, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
 		Subject:  "user:usr_bob",
 		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},

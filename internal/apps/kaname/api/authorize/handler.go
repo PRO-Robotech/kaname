@@ -99,14 +99,19 @@ type Handler struct {
 	// moduleForm — форма имени службы, объявленная установкой: ею внутренний
 	// страж узнаёт пира-модуля по учётке его сертификата. Нулевая не узнаёт
 	// никого — анонимный пир тогда отвергается, как без сертификата вовсе.
-	// Задаётся WithServiceNameForm.
+	// Задаётся конструктором (NewHandler) и обязательна.
 	moduleForm servicesan.Form
 }
 
-// NewHandler — builder. Both svc and whoAmI are required (composition root
-// wires both unconditionally; nil at construction time means a wiring bug).
-func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase) *Handler {
-	return &Handler{svc: svc, whoAmI: whoAmI}
+// NewHandler — builder. svc, whoAmI and form are required (composition root
+// wires them unconditionally; nil at construction time means a wiring bug).
+//
+// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm()):
+// ею внутренний страж узнаёт пира-модуля. Параметр позиционный намеренно —
+// сборка, забывшая форму, не соберётся, тогда как умолчание отвергало бы
+// каждого пира-модуля молча.
+func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase, form servicesan.Form) *Handler {
+	return &Handler{svc: svc, whoAmI: whoAmI, moduleForm: form}
 }
 
 // WithCallerAuthority injects the FGA relation checker used by the inner
@@ -124,15 +129,6 @@ func (h *Handler) WithCallerAuthority(checker authzguard.RelationChecker) *Handl
 // Returns the receiver for chaining.
 func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
 	h.insecureAnonymousPeer = insecure
-	return h
-}
-
-// WithServiceNameForm задаёт форму имени службы, которой внутренний страж
-// узнаёт пира-модуля (cfg.AuthN.ServiceNameForm()). Не заданная, она не узнаёт
-// никого: отказ по умолчанию — то, что обязана дать ошибка сборки, а не
-// молчаливое «пускаем». Возвращает получателя для цепочки.
-func (h *Handler) WithServiceNameForm(form servicesan.Form) *Handler {
-	h.moduleForm = form
 	return h
 }
 
