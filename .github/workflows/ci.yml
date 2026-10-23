@@ -287,7 +287,11 @@ jobs:
     needs: [changes]
     name: юниты · шард ${{ matrix.shard }} из ${{ strategy.job-total }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Предел задания — предел `go test` раздатчика (`-timeout 45m`, kaname#949; число и
+    # довод — у `RUN_FLAGS` в `.github/scripts/unit-shards.py`) плюс подготовка, план и
+    # прогонщик вердикта: иначе зависший пакет снял бы шард раньше паники `-timeout`,
+    # и вердикта о нём не было бы.
+    timeout-minutes: 55
     strategy:
       # Красный шард не снимает соседей: вердикт нужен о КАЖДОМ пакете, а снятые
       # пришли бы в свод третьей категорией по причине вне своего предмета.
