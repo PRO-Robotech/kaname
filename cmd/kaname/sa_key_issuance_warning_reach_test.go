@@ -109,6 +109,7 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
 		Endpoint: "tcp://0.0.0.0:9096",
 		Service:  "registry.kacho.local",
+		Issuer:   "https://access.example.test/iam/token",
 	}
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:                  false,

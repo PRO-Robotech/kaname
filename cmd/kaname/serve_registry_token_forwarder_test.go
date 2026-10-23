@@ -158,7 +158,7 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerIsCountedOnTheShowc
 func anonymousLaneConfig() config.Config {
 	var cfg config.Config
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: anonLaneService,
+		Endpoint: "tcp://0.0.0.0:9096", Service: anonLaneService, Issuer: anonLaneIssuer,
 		AnonymousClientID: anonLanePrincipal, AnonymousPerSourcePerSec: 5,
 		AnonymousForwarderSAN: anonLaneForwarderSAN,
 	}

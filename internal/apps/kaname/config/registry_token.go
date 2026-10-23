@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"go.uber.org/multierr"
 
 	"github.com/PRO-Robotech/kaname/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kaname/pkg/generatedid"
@@ -387,15 +388,19 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig, trust grpcs
 				"the proxy's client certificate in the form %s<namespace>/sa/<service account>. "+
 				"Env KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN", trust.NamespacePrefix())
 	}
+	// Адресат и издатель — две несвязанности ОДНОГО рода, и судятся они вместе:
+	// отказ, называющий одну из двух, отправил бы оператора на второй
+	// перезапуск ради второй ручки.
+	var undeclared error
 	if c.TokenService() == "" {
-		return fmt.Errorf(
+		undeclared = multierr.Append(undeclared, fmt.Errorf(
 			"api-server.registry-token.service is not declared while the docker lane listener is up (%s) — "+
 				"this addressee is not ours to default: it is the registry's own service name, declared once "+
 				"by the deployment as global.kacho.registry.serviceAud and read by BOTH sides of the lane "+
 				"(the registry ships it as KACHO_REGISTRY_SERVICE_AUD and advertises it to the docker client; "+
 				"we mint it into aud). Declare global.kacho.registry.serviceAud, or set this key directly "+
 				"when running iam on its own (env KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE)",
-			c.ListenAddress())
+			c.ListenAddress()))
 	}
 	// ИЗДАТЕЛЬ (kaname#309) — та же несвязанность, что у адресата выше: полоса
 	// поднята, а адрес, который она называет клиенту и вписывает в каждое
@@ -403,13 +408,16 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig, trust grpcs
 	// ключей по объявленному издателю, отката между записями нет — подставленный
 	// издатель отказал бы во входе каждому докерному клиенту, не назвав ручки.
 	if c.TokenIssuer() == "" {
-		return fmt.Errorf(
+		undeclared = multierr.Append(undeclared, fmt.Errorf(
 			"api-server.registry-token.issuer is not declared while the docker lane listener is up (%s) — "+
 				"it is the iss claim of every minted token and the realm the docker client is sent to, that is, "+
 				"the address of THIS installation's token endpoint, and there is no address to default it to. "+
 				"Declare it as the public URL of the token endpoint (example https://iam.example.invalid/iam/token; "+
 				"env KANAME_API_SERVER__REGISTRY_TOKEN__ISSUER), the same value the registry advertises as its token realm",
-			c.ListenAddress())
+			c.ListenAddress()))
+	}
+	if undeclared != nil {
+		return undeclared
 	}
 	if !clientToken.Enabled {
 		// Перечень платформы не объявлен вовсе. Внешняя граница этой полосы при

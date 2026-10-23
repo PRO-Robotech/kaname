@@ -29,6 +29,7 @@ const (
 func loadAnonLane(t *testing.T, principal, pace string) (config.Config, error) {
 	t.Helper()
 	t.Setenv(anonServiceEnv, "registry.probe.local")
+	t.Setenv(registryIssuerEnv, probeIssuer)
 	t.Setenv(anonPrincipalEnv, principal)
 	if pace != "" {
 		t.Setenv(anonPaceEnv, pace)

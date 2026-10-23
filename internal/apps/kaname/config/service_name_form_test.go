@@ -64,11 +64,11 @@ func TestServiceNameForm_UndeclaredRefusesToStartNamingTheKnob(t *testing.T) {
 // выйдет ни одного имени, и значение ничего не объявляет.
 func TestServiceNameForm_WithoutThePlaceholderRefusesToStart(t *testing.T) {
 	for name, v := range map[string]string{
-		"одна приставка":       "acme-",
-		"два заполнителя":      "{service}-{service}",
-		"косая черта в форме":  "acme/{service}",
-		"верхний регистр":      "Acme-{service}",
-		"пробел внутри формы":  "acme {service}",
+		"одна приставка":        "acme-",
+		"два заполнителя":       "{service}-{service}",
+		"косая черта в форме":   "acme/{service}",
+		"верхний регистр":       "Acme-{service}",
+		"пробел внутри формы":   "acme {service}",
 		"заполнитель с опиской": "acme-{svc}",
 	} {
 		t.Run(name, func(t *testing.T) {
