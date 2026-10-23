@@ -48,7 +48,7 @@ func TestBasicRefusal_OneRecordOfTheDeclaredLevelNamingTheReason(t *testing.T) {
 	// Тело эталона — отказ аутентификации без причины.
 	plainBody := func() string {
 		h := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
-			Realm: "https://api.kacho.local/iam/token", DefaultService: "registry.kacho.local",
+			Realm: "https://api.example.test/iam/token", DefaultService: "registry.kacho.local",
 		}, issuerStub{err: registrytokenuc.ErrUnauthenticated})
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/iam/token?service=registry.kacho.local", nil)
@@ -61,7 +61,7 @@ func TestBasicRefusal_OneRecordOfTheDeclaredLevelNamingTheReason(t *testing.T) {
 		t.Run(b.name, func(t *testing.T) {
 			var log bytes.Buffer
 			h := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
-				Realm: "https://api.kacho.local/iam/token", DefaultService: "registry.kacho.local",
+				Realm: "https://api.example.test/iam/token", DefaultService: "registry.kacho.local",
 			}, issuerStub{err: b.err}).WithLogger(slog.New(slog.NewJSONHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/iam/token?service=registry.kacho.local", nil)

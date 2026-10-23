@@ -49,28 +49,30 @@ import (
 )
 
 // Литералы посева: идентификатор выведен ОДНАЖДЫ и записан руками, как в
-// применённой миграции. `sva` + первые 17 знаков md5 полного имени.
+// применённой миграции. `sva` + первые 17 знаков md5 полного имени учётки.
+//
+// Имена нейтральны намеренно: форму имени службы объявляет установка, и
+// синтетика, названная приставкой одного продукта, читалась бы как его форма.
 const (
-	seededAlphaID = "sva4eb45766cc857b506" // kacho-alpha
-	seededBetaID  = "svaf5f1f9a8dbc6ccc20" // kacho-beta
-	seededGammaID = "svaf98367462082075e8" // kacho-gamma
-	seededOtherID = "sva9316a9e2698fa762e" // other-thing — НЕ модульная
+	seededAlphaID = "svaf577868bd6793ec5e" // mod-alpha
+	seededBetaID  = "svaf84f5bd1ea7d7d0cc" // mod-beta
+	seededGammaID = "sva7122706bbe1b75a54" // mod-gamma
+	seededOtherID = "sva9316a9e2698fa762e" // other-thing — учётка иной формы
 )
 
-// injectedSeed — посев синтетического дерева: две модульные учётки и одна
-// чужая, чтобы полоса «прочих служебных» была не пуста.
+// injectedSeed — посев синтетического дерева: две учётки одной формы и одна
+// иной, чтобы второй круг судил учётку независимо от её формы.
 func injectedSeed() []seedRow {
 	return []seedRow{
-		{id: seededAlphaID, name: "kacho-alpha"},
-		{id: seededBetaID, name: "kacho-beta"},
+		{id: seededAlphaID, name: "mod-alpha"},
+		{id: seededBetaID, name: "mod-beta"},
 		{id: seededOtherID, name: "other-thing"},
 	}
 }
 
-// reconcileInjected — круг с настоящими приставками и настоящим производителем.
+// reconcileInjected — круг с настоящей приставкой и настоящим производителем.
 func reconcileInjected(rows []seedRow) ([]string, seedCensus) {
-	return reconcileSeedWithFormula(
-		rows, saPrefix, svcNamePrefix, domain.DerivedIDSuffix, ServiceAccountIDForService)
+	return reconcileSeedWithFormula(rows, saPrefix, domain.DerivedIDSuffix, ServiceAccountIDForAccount)
 }
 
 // TestControlIntactSeedIsSilent — КОНТРОЛЬ: посев сходится с формулой, находок нет.
@@ -83,13 +85,12 @@ func TestControlIntactSeedIsSilent(t *testing.T) {
 		t.Fatalf("контроль обязан молчать на целом посеве, а находок %d: %s",
 			len(findings), strings.Join(findings, "; "))
 	}
-	if census.modules != 2 || census.others != 1 {
-		t.Fatalf("контроль прочитал не тот посев: модульных %d (ждали 2), прочих %d "+
-			"(ждали 1) — синтетика разошлась с замыслом, и вердикты ниже недействительны",
-			census.modules, census.others)
+	if census.rows != 3 || census.produced != 3 {
+		t.Fatalf("контроль прочитал не тот посев: строк %d (ждали 3), спрошено у производителя %d "+
+			"(ждали 3) — синтетика разошлась с замыслом, и вердикты ниже недействительны",
+			census.rows, census.produced)
 	}
-	t.Logf("перепись контроля: строк %d · модульных %d · прочих %d",
-		census.rows, census.modules, census.others)
+	t.Logf("перепись контроля: строк %d · спрошено у производителя %d", census.rows, census.produced)
 }
 
 // TestFormulaIdPrefixDivergenceIsAFinding — приставка ИДЕНТИФИКАТОРА сменена в
@@ -97,8 +98,8 @@ func TestControlIntactSeedIsSilent(t *testing.T) {
 func TestFormulaIdPrefixDivergenceIsAFinding(t *testing.T) {
 	injected := saPrefix + "X"
 	findings, _ := reconcileSeedWithFormula(
-		injectedSeed(), injected, svcNamePrefix, domain.DerivedIDSuffix,
-		func(svc string) string { return injected + domain.DerivedIDSuffix(svcNamePrefix+svc) })
+		injectedSeed(), injected, domain.DerivedIDSuffix,
+		func(account string) string { return injected + domain.DerivedIDSuffix(account) })
 
 	if len(findings) == 0 {
 		t.Fatal("смена приставки идентификатора в ФОРМУЛЕ при нетронутом посеве прошла " +
@@ -113,25 +114,22 @@ func TestFormulaIdPrefixDivergenceIsAFinding(t *testing.T) {
 	t.Logf("находок %d, первая: %s", len(findings), first)
 }
 
-// TestFormulaNamePrefixDivergenceIsAFinding — приставка ИМЕНИ СЛУЖБЫ сменена в
-// формуле: модульных учёток не опознаётся ни одной, второй круг не исполняется.
-//
-// Это отдельный случай, а не повтор предыдущего: здесь сверка обязана сообщить
-// не о расхождении величин, а о том, что она НЕ РАБОТАЛА, — иначе «ноль
-// расхождений» означало бы «ноль сверенного».
-func TestFormulaNamePrefixDivergenceIsAFinding(t *testing.T) {
-	_, census := reconcileSeedWithFormula(
-		injectedSeed(), saPrefix, "kaname-", domain.DerivedIDSuffix, ServiceAccountIDForService)
+// TestProducerThatRewritesTheAccountIsAFinding — ПРОИЗВОДИТЕЛЬ стража выводит
+// идентификатор не из учётки целиком, а из переписанного имени: ровно то, что
+// делал прежний производитель, дописывая к имени службы приставку-литерал
+// (kaname#308). Формула и посев при этом не тронуты — один факт.
+func TestProducerThatRewritesTheAccountIsAFinding(t *testing.T) {
+	rewritten := func(account string) string { return saPrefix + domain.DerivedIDSuffix("x-"+account) }
+	findings, census := reconcileSeedWithFormula(injectedSeed(), saPrefix, domain.DerivedIDSuffix, rewritten)
 
-	if census.modules != 0 {
-		t.Fatalf("приставка имени службы разведена с посевом, а модульных опознано %d — "+
-			"признак модульности перестал зависеть от приставки", census.modules)
+	if len(findings) != census.rows {
+		t.Fatalf("производитель, переписывающий учётку, разошёлся с посевом на %d строках из %d — "+
+			"второй круг пропускает строки", len(findings), census.rows)
 	}
-	if census.rows == 0 {
-		t.Fatal("перепись пуста: случай не отличим от непрочитанного посева")
+	if !strings.Contains(findings[0], "производитель личности") {
+		t.Errorf("находка называет не тот круг: %s", findings[0])
 	}
-	t.Logf("второй круг не исполнялся: строк прочитано %d, модульных опознано %d — "+
-		"настоящая проба обязана на этом упасть", census.rows, census.modules)
+	t.Logf("находок %d, первая: %s", len(findings), findings[0])
 }
 
 // TestSeedDivergenceIsAFinding — сменён ПОСЕВ при нетронутой формуле: один факт,
@@ -169,18 +167,18 @@ func TestCoordinatedRenameOfBothSidesIsSilent(t *testing.T) {
 	}
 
 	findings, census := reconcileSeedWithFormula(
-		rows, renamed, svcNamePrefix, domain.DerivedIDSuffix,
-		func(svc string) string { return renamed + domain.DerivedIDSuffix(svcNamePrefix+svc) })
+		rows, renamed, domain.DerivedIDSuffix,
+		func(account string) string { return renamed + domain.DerivedIDSuffix(account) })
 
 	if len(findings) != 0 {
 		t.Fatalf("согласованная смена ОБЕИХ сторон обязана проходить, а находок %d: %s — "+
 			"сверка судит переименование, а не расхождение", len(findings),
 			strings.Join(findings, "; "))
 	}
-	if census.modules != 2 {
-		t.Fatalf("близнец прошёл вхолостую: модульных сверено %d (ждали 2)", census.modules)
+	if census.produced != 3 {
+		t.Fatalf("близнец прошёл вхолостую: спрошено у производителя %d (ждали 3)", census.produced)
 	}
-	t.Logf("законное переименование прошло: модульных сверено %d", census.modules)
+	t.Logf("законное переименование прошло: спрошено у производителя %d", census.produced)
 }
 
 // TestLegitimateNewServiceIsSilent — БЛИЗНЕЦ Б: новая служба, выведенная верно.
@@ -191,20 +189,20 @@ func TestLegitimateNewServiceIsSilent(t *testing.T) {
 	before := injectedSeed()
 	_, censusBefore := reconcileInjected(before)
 
-	after := append(before, seedRow{id: seededGammaID, name: "kacho-gamma"})
+	after := append(before, seedRow{id: seededGammaID, name: "mod-gamma"})
 	findings, censusAfter := reconcileInjected(after)
 
 	if len(findings) != 0 {
 		t.Fatalf("законно выведенная новая служба обязана проходить, а находок %d: %s",
 			len(findings), strings.Join(findings, "; "))
 	}
-	if censusAfter.modules != censusBefore.modules+1 {
-		t.Fatalf("перепись не выросла: модульных было %d, стало %d — новая строка не "+
-			"прочитана, и молчание здесь ничего не доказывает",
-			censusBefore.modules, censusAfter.modules)
+	if censusAfter.produced != censusBefore.produced+1 {
+		t.Fatalf("перепись не выросла: спрошено у производителя было %d, стало %d — новая строка "+
+			"не прочитана, и молчание здесь ничего не доказывает",
+			censusBefore.produced, censusAfter.produced)
 	}
-	t.Logf("законная новая служба принята: модульных %d → %d",
-		censusBefore.modules, censusAfter.modules)
+	t.Logf("законная новая служба принята: спрошено у производителя %d → %d",
+		censusBefore.produced, censusAfter.produced)
 }
 
 // TestRecognizerSeesTheSeedForm — ПРЕДПОСЫЛКА распознавателя.
@@ -215,10 +213,10 @@ func TestLegitimateNewServiceIsSilent(t *testing.T) {
 func TestRecognizerSeesTheSeedForm(t *testing.T) {
 	const oneRow = `INSERT INTO kaname.service_accounts (id, account_id, name, ` +
 		`description, created_at, enabled, labels) VALUES ('` + seededAlphaID +
-		`', 'acc0000000000000000', 'kacho-alpha', 'Module SA', now(), true, '{}');`
+		`', 'acc0000000000000000', 'mod-alpha', 'Module SA', now(), true, '{}');`
 
 	if rows := parseSeededServiceAccounts(oneRow); len(rows) != 1 ||
-		rows[0].id != seededAlphaID || rows[0].name != "kacho-alpha" {
+		rows[0].id != seededAlphaID || rows[0].name != "mod-alpha" {
 		t.Fatalf("распознаватель не прочитал форму посева: %#v", rows)
 	}
 	if rows := parseSeededServiceAccounts("-- ни одной строки посева"); len(rows) != 0 {

@@ -31,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Fixed client-facing messages for non-validation failures. Raw use-case or
@@ -95,12 +96,22 @@ type Handler struct {
 	// A knob may carry the exception; it may not carry the rule. Set via
 	// WithInsecureAnonymousPeer.
 	insecureAnonymousPeer bool
+	// moduleForm — форма имени службы, объявленная установкой: ею внутренний
+	// страж узнаёт пира-модуля по учётке его сертификата. Нулевая не узнаёт
+	// никого — анонимный пир тогда отвергается, как без сертификата вовсе.
+	// Задаётся конструктором (NewHandler) и обязательна.
+	moduleForm servicesan.Form
 }
 
-// NewHandler — builder. Both svc and whoAmI are required (composition root
-// wires both unconditionally; nil at construction time means a wiring bug).
-func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase) *Handler {
-	return &Handler{svc: svc, whoAmI: whoAmI}
+// NewHandler — builder. svc, whoAmI and form are required (composition root
+// wires them unconditionally; nil at construction time means a wiring bug).
+//
+// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm()):
+// ею внутренний страж узнаёт пира-модуля. Параметр позиционный намеренно —
+// сборка, забывшая форму, не соберётся, тогда как умолчание отвергало бы
+// каждого пира-модуля молча.
+func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase, form servicesan.Form) *Handler {
+	return &Handler{svc: svc, whoAmI: whoAmI, moduleForm: form}
 }
 
 // WithCallerAuthority injects the FGA relation checker used by the inner

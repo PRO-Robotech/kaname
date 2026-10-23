@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Config — root configuration struct for kaname.
@@ -440,7 +442,42 @@ type AuthNConfig struct {
 	//
 	// ENV `KANAME_AUTHN__TRUST_DOMAIN`, ключ YAML `authn.trust-domain`.
 	TrustDomainName string `mapstructure:"trust-domain"`
+
+	// ServiceNameFormRaw — ФОРМА ИМЕНИ СЛУЖБЫ в учётке SPIFFE-идентификатора
+	// модуля (kaname#308): как установка складывает имя учётки из короткого
+	// имени службы, с заполнителем `{service}` на месте имени
+	// (`acme-{service}`, `{service}`).
+	//
+	// Домен выше отвечает, чьи предъявители наши; форма — кто из них какой
+	// модуль. По ней узнаются край на полосе входа, модули на обоих слушателях
+	// и пишущий модуль у посредника модели. Пока форма стояла литералом в
+	// страже прав, это была приставка имени другого продукта: установка,
+	// называвшая учётки иначе, поднималась зелёной, а полоса входа отказывала
+	// каждому запросу, не называя ни ручки, ни причины.
+	//
+	// Умолчания нет по той же причине, что у домена: непустое умолчание сделало
+	// бы контроль на вид включённым и увело бы установку, забывшую назвать
+	// форму, в чужую. Пустая и незаконная запись — отказ старта (Validate) на
+	// ЛЮБОМ старте. Каждая запись круга отправителей обязана разбираться этой
+	// формой (страж корня `requireForwardersRecognised`), иначе отказ старта называет запись.
+	//
+	// ENV `KANAME_AUTHN__SERVICE_NAME_FORM`, ключ YAML `authn.service-name-form`.
+	ServiceNameFormRaw string `mapstructure:"service-name-form"`
 }
+
+// ServiceNameForm — форма имени службы, которая РЕАЛЬНО уезжает к пяти
+// читателям разбора и к стражу круга отправителей.
+//
+// Единственный источник этой величины на процесс: проводка, стража старта и
+// сверка круга читают ОДИН объект и спрашивают его ОДИН разбор
+// (`servicesan.Form.Parse`). Приведение написанного оператором живёт в
+// конструкторе типа и здесь не повторяется.
+func (a AuthNConfig) ServiceNameForm() servicesan.Form {
+	return servicesan.NewForm(a.ServiceNameFormRaw)
+}
+
+// ServiceNameFormKnob — имя ручки формы для текстов отказа: ключ и переменная.
+const ServiceNameFormKnob = "authn.service-name-form (env KANAME_AUTHN__SERVICE_NAME_FORM)"
 
 // TrustDomain — домен доверия, который РЕАЛЬНО уезжает в пару звеньев извлечения
 // личности на обоих слушателях.

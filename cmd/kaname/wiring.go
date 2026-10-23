@@ -55,6 +55,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
@@ -654,7 +655,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
-		metricsReg, cfg.AuthN.Mode.IsProduction())
+		metricsReg, cfg.AuthN.Mode.IsProduction(), cfg.AuthN.ServiceNameForm())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -731,7 +732,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	if metricsReg != nil {
 		registerResourceUC = registerResourceUC.WithMetrics(metricsReg.NewRegisterPostCommitRecorder())
 	}
-	regGate := authzguard.NewRelationWriteGate(relationStore).
+	regGate := authzguard.NewRelationWriteGate(relationStore, cfg.AuthN.ServiceNameForm()).
 		WithProductionMode(cfg.AuthN.Mode.IsProduction())
 	// Session-revocation writer. Pool-scoped adapter over
 	// session_revocations — the InternalSessionRevocationsService Revoke path
@@ -1220,7 +1221,8 @@ type authzServiceBundle struct {
 // sessions — записи сессий человека: из записи сессии вопроса служба выводит
 // доводы способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
 func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	sessions service.SessionRecords, metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
+	sessions service.SessionRecords, metricsReg *metrics.Registry, prodMode bool,
+	moduleForm servicesan.Form) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
@@ -1254,7 +1256,7 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 	if metricsReg != nil {
 		edgeAuthz = metrics.NewInstrumentedSubjectAuthorizer(authSvc, metricsReg)
 	}
-	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC).
+	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC, moduleForm).
 		WithCallerAuthority(ownGates).
 		WithInsecureAnonymousPeer(!prodMode)
 

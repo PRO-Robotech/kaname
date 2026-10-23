@@ -624,7 +624,7 @@ func (w *ceremonyWorld) buildSurface() {
 	// ключей — публикуемый набор подписанта пробы, проверяющий секрета клиента —
 	// проверяющий паролей с приманкой того же класса, что пишет хешер секрета
 	// (seedClient), как проверяющий полосы входа у корня.
-	source := issuingsource.New(cfg.AuthN.TrustDomain())
+	source := issuingsource.New(cfg.AuthN.TrustDomain(), probeServiceNameForm)
 	// Проверяющий и стоимость проверки церемония берёт у полосы входа тем же
 	// путём, что корень (`serve.go`): стоимость — `loginLane.secretCheckCost`.
 	checker := ceremonySecretChecker(w)
