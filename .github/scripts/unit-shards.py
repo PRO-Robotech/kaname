@@ -29,16 +29,28 @@
 
 Значит снять `-race` с гейтов нельзя: стена опускается распилом пакета ПО ПРОБАМ.
 
-КРИТЕРИЙ СТЕНЫ — ОТ СОЗДАНИЯ ЗАДАНИЯ ПЛАНА ДО КОНЦА СВОДА
---------------------------------------------------------
-Мерится `created_at` задания `unitplan` → `completed_at` задания `unit` одного
+КРИТЕРИЙ СТЕНЫ — ОТ СОЗДАНИЯ ПЕРВОГО ЗАДАНИЯ ЮНИТОВ ДО КОНЦА СВОДА
+-----------------------------------------------------------------
+Мерится `created_at` первого задания юнитов → `completed_at` задания `unit` одного
 прогона (`gh api …/actions/runs/<id>/jobs`), и сравнивается с прежним
-`created_at` → `completed_at` задания `unit` на ревизии-основании. Исполнение
-шарда без ожидания исполнителя — НЕ стена: на первом круге (PR kaname#875, прогон
-39039147809) двенадцать шардов исполнялись 2:32…8:02, а ждали исполнителя
-7:15…23:30, и стена вышла 33:44 против 28:05 одного задания при «исполнении»
-19:47. Вторая мера — минуты исполнителей (сумма длительностей заданий): шардов
-не больше, чем окупает их ожидание.
+`created_at` → `completed_at` задания `unit` на ревизии-основании (28:05, прогон
+39026914830). Исполнение шарда без ожидания исполнителя — НЕ стена: на первом
+круге (PR kaname#875, прогон 39039147809) двенадцать шардов исполнялись
+2:32…8:02, а ждали исполнителя 7:15…23:30, и стена вышла 33:44 против 28:05 при
+«исполнении» 19:47. Вторая мера — минуты исполнителей (сумма длительностей
+заданий): шардов не больше, чем окупает их ожидание.
+
+ПЛАН СТРОИТ КАЖДЫЙ ШАРД, ОТДЕЛЬНОГО ЗАДАНИЯ ПЛАНА НЕТ
+----------------------------------------------------
+Второй круг (прогон 39082092467 @1c66d470d) шёл цепочкой «выбор затронутого →
+задание плана → шарды → свод»: план исполнялся 17 с, а ЖДАЛ исполнителя 34:58, и
+стена от его создания вышла 61:41 — каждое звено цепочки ждёт исполнителя заново,
+а прежнее одно задание ждало один раз. План — чистая функция дерева и ведомости
+весов, поэтому его строит каждый шард сам, и цепочка равна прежней: «выбор
+затронутого → шарды → свод». Число шардов объявляет ОДНО место — матрица
+процесса: шард строит план на её ширину (`strategy.job-total`) и берёт долю по
+своему номеру (`strategy.job-index`), как контейнерные шарды. Свод сверяет, что
+копии плана всех шардов СОВПАЛИ и что каждый шард плана отчитался.
 
 Нижняя граница стены шарда — самая долгая НЕДЕЛИМАЯ проба: на первом круге
 `internal/supplyhygiene` TestPlatformMintingClaimIsNotDeniedByThe… — 363 с из
@@ -71,12 +83,14 @@
 
 ПОЛНОТА — ЧИСЛАМИ, В ТРЁХ МЕСТАХ
 --------------------------------
-  1. план (`--plan`): множество розданных пакетов СОВПАДАЕТ с `go list ./...`,
-     ни одного дважды, части каждого распиленного пакета — 0..N-1 ровно по разу;
+  1. план (в каждом шарде до прогона; `--plan` — только он): множество розданных
+     пакетов СОВПАДАЕТ с `go list ./...`, ни одного дважды, части каждого
+     распиленного пакета — 0..N-1 ровно по разу;
   2. шард (`--run`): у каждой части — перечень проб пакета и её выборка; выборка
      сверяется с функцией разреза тут же, до прогона;
-  3. свод (`--aggregate`): все шарды плана отчитались; пакеты, ВИДЕННЫЕ в потоках
-     `go test -json`, совпадают с деревом плана; у распиленного пакета перечни
+  3. свод (`--aggregate`): копии плана шардов совпали; все шарды плана
+     отчитались; пакеты, ВИДЕННЫЕ в потоках `go test -json`, совпадают с
+     деревом плана; у распиленного пакета перечни
      всех частей равны, выборки не пересекаются и в объединении дают перечень;
      исполненные пробы части лежат в её выборке, а невыполненные — только
      замеры (`Benchmark*`, без `-bench` их не исполняет и прежний прогон).
@@ -87,10 +101,9 @@
 
 Запуск:
   python3 .github/scripts/unit-shards.py --self-test
-  python3 .github/scripts/unit-shards.py --plan --out unit-plan.json [--github-output "$GITHUB_OUTPUT"]
-  python3 .github/scripts/unit-shards.py --run u01 --plan unit-plan.json --out-dir unit-out --attempt 1
-  python3 .github/scripts/unit-shards.py --aggregate --plan unit-plan.json --dir unit-in \
-      --plan-result success --shard-result success
+  python3 .github/scripts/unit-shards.py --plan --job-total 5 [--out unit-plan.json]
+  python3 .github/scripts/unit-shards.py --run --job-index 0 --job-total 5 --out-dir unit-out --attempt 1
+  python3 .github/scripts/unit-shards.py --aggregate --dir unit-in --shard-result success
 """
 from __future__ import annotations
 
@@ -107,14 +120,11 @@ ROOT = Path(__file__).resolve().parents[2]
 WEIGHTS = ROOT / ".github" / "unit-shard-weights.txt"
 VERDICT = ROOT / ".github" / "scripts" / "go-test-verdict.py"
 
-# ЧИСЛО ШАРДОВ — ЗАМЕР ПЕРВОГО КРУГА (PR kaname#875, прогон 39039147809 @113dbddee).
-# Двенадцать шардов исполнялись 2:32…8:02 каждый, но ЖДАЛИ ИСПОЛНИТЕЛЯ 7:15…23:30,
-# и свод — ещё 6:08: стена от создания плана до конца свода 33:44 против 28:05
-# одного задания, минуты исполнителей ≈52 против ≈25. Предел здесь — число
-# исполнителей, а не процессор шарда, поэтому шардов столько, сколько их можно
-# получить разом рядом с остальными заданиями процесса. Сумма замеренных весов
-# 2575 с на пять шардов — около 540 с каждому до параллелизма внутри шарда.
-SHARDS = 5
+# ЧИСЛА ШАРДОВ ЗДЕСЬ НЕТ: его объявляет ОДНО место — матрица задания `unitshard`
+# в ci.yml (там же замер, которым выбрано пять), и шард строит план на ширину
+# матрицы (`--job-total` = `strategy.job-total`), как контейнерные шарды
+# (`run-integration.sh`). Второе объявление разошлось бы с первым молча.
+#
 # Доля среднего шарда, больше которой пакет режется на части. Мелкие части
 # усредняют неровность хэша: на первом круге две части `supplyhygiene` по
 # хэшу имён дали 385 и 68 с — делёж по числу проб не делит время.
@@ -235,7 +245,7 @@ def read_weights(path: Path) -> tuple[dict[str, int], list[str]]:
     return weights, bad
 
 
-def build_plan(tree: list[str], weights: dict[str, int], shards_n: int = SHARDS,
+def build_plan(tree: list[str], weights: dict[str, int], shards_n: int,
                fraction: float = PIECE_FRACTION) -> dict:
     """Раскладка ровно на `shards_n` шардов: пакет тяжелее доли среднего шарда
     режется на части, затем LPT — самая тяжёлая единица в наименее загруженный
@@ -344,6 +354,53 @@ def short(pkg: str) -> str:
     return pkg.split("/kaname/", 1)[-1] if "/kaname/" in pkg else pkg
 
 
+def make_plan(shards_n: int) -> tuple[dict, list[str], str]:
+    """План из дерева и ведомости — ОДНА функция у `--plan` и у каждого шарда:
+    шарды строят его независимо, и сойтись копии могут, только если путь один.
+    Не измерено (ведомость не прочитана, `go list` не отработал) — Unmeasured."""
+    weights, bad = read_weights(WEIGHTS)
+    tree = tree_packages()
+    plan = build_plan(tree, weights, shards_n)
+    findings = plan_findings(plan) + bad + [
+        f"{WEIGHTS.name}: строка о пакете, которого нет в дереве: {p} — запись пережила "
+        f"предмет; снять её" for p in stale_weights(weights, tree)]
+    return plan, findings, plan_census_text(plan, weights)
+
+
+def shard_of_index(plan: dict, index: int) -> str | None:
+    """Номер задания матрицы (`strategy.job-index`, с нуля) → шард плана. План
+    построен на ширину матрицы, поэтому номера и шарды взаимно однозначны; номер
+    вне плана — не шард, и шард тогда не исполняет ничего."""
+    shards = plan.get("shards", [])
+    return shards[index]["id"] if 0 <= index < len(shards) else None
+
+
+def agreed_plan(copies: dict[str, dict | None]) -> tuple[dict | None, list[str]]:
+    """Копии плана, построенные шардами независимо, обязаны СОВПАСТЬ: свод судит
+    по одному плану, и разошедшаяся копия значит, что шарды раздавали разное.
+    `None` у шарда — опись есть, копии плана нет. Копий ноль — плана нет вовсе
+    (`None`, без находок): это «не выполнилось», и решает его вызывающий."""
+    out: list[str] = []
+    missing = sorted(sid for sid, p in copies.items() if p is None)
+    if missing:
+        out.append(f"ШАРДЫ ОТЧИТАЛИСЬ без копии плана ({len(missing)}): {', '.join(missing)} "
+                   f"— по какому плану они раздавали, не сверить")
+    groups: dict[str, list[str]] = {}
+    for sid, p in sorted(copies.items()):
+        if p is not None:
+            groups.setdefault(json.dumps(p, sort_keys=True, ensure_ascii=False), []).append(sid)
+    if not groups:
+        return None, out
+    if len(groups) > 1:
+        out.append(f"КОПИИ ПЛАНА ШАРДОВ РАЗОШЛИСЬ ({len(groups)} варианта): "
+                   + " · ".join(", ".join(v) for v in groups.values())
+                   + " — шарды раздавали разные деревья, свод судил бы одно из них")
+    # Судит свод по копии большинства (при равенстве — по копии первого шарда):
+    # при расхождении вердикт красный и без того, а перепись должна прочитаться.
+    best = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[1][0]))[0]
+    return json.loads(best[0]), out
+
+
 # ─── шард ───────────────────────────────────────────────────────────────────
 
 def list_tests(pkg: str) -> list[str]:
@@ -371,6 +428,9 @@ def run_shard(plan: dict, shard_id: str, out_dir: Path, attempt: str) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     stream_path = out_dir / f"{shard_id}.a{attempt}.json"
     census_path = out_dir / f"{shard_id}.a{attempt}.census.json"
+    # Копия плана, по которому шард раздавал: свод сверяет копии всех шардов.
+    (out_dir / f"{shard_id}.a{attempt}.plan.json").write_text(
+        json.dumps(plan, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     census: dict = {"shard": shard_id, "attempt": attempt, "whole": [], "parts": [],
                     "go_test_rc": []}
     findings: list[str] = []
@@ -442,19 +502,21 @@ def run_shard(plan: dict, shard_id: str, out_dir: Path, attempt: str) -> int:
 
 # ─── сводный вердикт ────────────────────────────────────────────────────────
 
-def latest_reports(dirpath: Path) -> dict[str, tuple[Path, Path]]:
+def latest_reports(dirpath: Path) -> dict[str, tuple[Path, Path, Path]]:
     """По каждому шарду — САМАЯ СВЕЖАЯ попытка: перезапущенный шард заливает
-    опись с новым номером, а неперезапущенный оставляет законную прежнюю."""
-    best: dict[str, tuple[int, Path, Path]] = {}
+    опись с новым номером, а неперезапущенный оставляет законную прежнюю.
+    Тройка путей — опись, поток `go test -json` и копия плана той же попытки."""
+    best: dict[str, tuple[int, Path, Path, Path]] = {}
     for c in dirpath.rglob("*.census.json"):
         m = re.match(r"^(?P<id>[^.]+)\.a(?P<a>\d+)\.census\.json$", c.name)
         if not m:
             continue
         s = c.with_name(f"{m['id']}.a{m['a']}.json")
+        p = c.with_name(f"{m['id']}.a{m['a']}.plan.json")
         a = int(m["a"])
         if m["id"] not in best or a > best[m["id"]][0]:
-            best[m["id"]] = (a, c, s)
-    return {k: (c, s) for k, (_, c, s) in best.items()}
+            best[m["id"]] = (a, c, s, p)
+    return {k: (c, s, p) for k, (_, c, s, p) in best.items()}
 
 
 def read_events(path: Path) -> list[dict]:
@@ -584,21 +646,36 @@ def combined_events(reports: dict[str, tuple[dict, list[dict]]]) -> list[dict]:
     return out
 
 
-def aggregate(plan_path: Path, dirpath: Path, plan_result: str, shard_result: str) -> int:
-    print(f"исход задания плана: {plan_result} · исход шардов: {shard_result}")
-    try:
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        print(f"НЕ ВЫПОЛНИЛОСЬ: план не прочитан ({e}) — сводить не с чем")
-        return 2
+def aggregate(dirpath: Path, shard_result: str) -> int:
+    print(f"исход шардов: {shard_result}")
     reports: dict[str, tuple[dict, list[dict]]] = {}
-    for sid, (c, s) in latest_reports(dirpath).items():
+    copies: dict[str, dict | None] = {}
+    for sid, (c, s, p) in latest_reports(dirpath).items():
         try:
             reports[sid] = (json.loads(c.read_text(encoding="utf-8")), read_events(s))
         except (OSError, ValueError) as e:
             print(f"опись шарда {sid} не прочитана: {e}")
+            continue
+        try:
+            copies[sid] = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print(f"копия плана шарда {sid} не прочитана: {e}")
+            copies[sid] = None
+    plan, plan_bad = agreed_plan(copies)
+    if plan is None:
+        for f in plan_bad:
+            print("  · " + f)
+        if plan_bad:
+            print("КРАСНЫЙ: свод юнитов — шарды отчитались без плана.")
+            return 1
+        print(f"НЕ ВЫПОЛНИЛОСЬ: в {dirpath} ни одной описи шарда с копией плана — сводить "
+              f"не с чем (исход шардов: {shard_result})")
+        return 2
     findings, num = aggregate_findings(plan, reports)
+    findings = plan_bad + findings
     print("ПЕРЕПИСЬ СВОДА")
+    print(f"  копий плана: {sum(1 for v in copies.values() if v is not None)} · "
+          f"разошлось: {'да' if plan_bad else 'нет'}")
     print(f"  шардов в плане: {num['planned']} · отчиталось: {num['reported']}")
     print(f"  пакетов в дереве плана: {num['tree']} · осмотрено шардами: {num['seen']} · "
           f"распилено по пробам: {num['split']}")
@@ -623,7 +700,6 @@ def aggregate(plan_path: Path, dirpath: Path, plan_result: str, shard_result: st
         tops = head[1].split("=== текст отказа", 1)[0]
         print("=== упавшие пробы" + tops.rstrip())
         print("(текст отказа — в журнале своего шарда)")
-    bad_jobs = [r for r in (plan_result, shard_result) if r != "success"]
     if findings:
         print(f"НАХОДОК СВОДА: {len(findings)}")
         for f in findings:
@@ -631,8 +707,8 @@ def aggregate(plan_path: Path, dirpath: Path, plan_result: str, shard_result: st
     if vrc.returncode == 1 or findings:
         print("КРАСНЫЙ: свод юнитов.")
         return 1
-    if bad_jobs or vrc.returncode == 2:
-        print(f"НЕ ВЫПОЛНИЛОСЬ: задания плана/шардов дали {bad_jobs or '—'}, прогонщик — "
+    if shard_result != "success" or vrc.returncode == 2:
+        print(f"НЕ ВЫПОЛНИЛОСЬ: задания шардов дали {shard_result}, прогонщик — "
               f"код {vrc.returncode}. Это не зелёный вердикт.")
         return 2
     print("ЗЕЛЁНЫЙ: все шарды плана отчитались, роздано = дерево, отказов нет.")
@@ -936,64 +1012,73 @@ def stale_weights(weights: dict[str, int], tree: list[str]) -> list[str]:
 
 # ─── точка входа ────────────────────────────────────────────────────────────
 
+def _count(raw: str | None, what: str, low: int) -> int | None:
+    """Число из матрицы процесса либо None: не число — сверять не с чем."""
+    s = (raw or "").strip()
+    if not s.isdigit() or int(s) < low:
+        print(f"НЕ ВЫПОЛНИЛОСЬ: {what} не названа числом ≥ {low} («{s}»)")
+        return None
+    return int(s)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="юниты -race матрицей шардов")
     ap.add_argument("--self-test", action="store_true")
-    ap.add_argument("--plan", nargs="?", const="", default=None, metavar="PLAN",
-                    help="без значения — построить план; со значением — путь к плану")
+    ap.add_argument("--plan", action="store_true", help="построить план и перепись — только их")
     ap.add_argument("--out", help="куда записать построенный план")
-    ap.add_argument("--github-output", help="куда дописать `matrix=<json>`")
-    ap.add_argument("--run", metavar="SHARD")
+    ap.add_argument("--run", action="store_true", help="план, перепись и доля шарда")
+    ap.add_argument("--job-total", help="ширина матрицы процесса (`strategy.job-total`)")
+    ap.add_argument("--job-index", help="номер задания матрицы с нуля (`strategy.job-index`)")
     ap.add_argument("--out-dir", default="unit-out")
     ap.add_argument("--attempt", default="1")
     ap.add_argument("--aggregate", action="store_true")
     ap.add_argument("--dir", default="unit-in")
-    ap.add_argument("--plan-result", default="success")
     ap.add_argument("--shard-result", default="success")
     a = ap.parse_args()
 
     if a.self_test:
         return self_test()
 
-    if a.run:
-        plan = json.loads(Path(a.plan).read_text(encoding="utf-8"))
-        return run_shard(plan, a.run, Path(a.out_dir), a.attempt)
-
     if a.aggregate:
-        return aggregate(Path(a.plan), Path(a.dir), a.plan_result, a.shard_result)
+        return aggregate(Path(a.dir), a.shard_result)
 
-    if a.plan == "":
-        try:
-            weights, bad = read_weights(WEIGHTS)
-            tree = tree_packages()
-        except Unmeasured as e:
-            print(f"НЕ ВЫПОЛНИЛОСЬ: {e}")
-            return 2
-        stale = stale_weights(weights, tree)
-        plan = build_plan(tree, weights)
-        findings = plan_findings(plan) + bad + [
-            f"{WEIGHTS.name}: строка о пакете, которого нет в дереве: {p} — запись пережила "
-            f"предмет; снять её" for p in stale]
-        print(plan_census_text(plan, weights))
-        if a.out:
-            Path(a.out).write_text(json.dumps(plan, ensure_ascii=False, indent=1) + "\n",
-                                   encoding="utf-8")
-            print(f"  план записан: {a.out}")
-        if findings:
-            print(f"НАХОДОК: {len(findings)}")
-            for f in findings:
-                print("  · " + f)
-            return 1
-        matrix = {"shard": [s["id"] for s in plan["shards"]]}
-        if a.github_output:
-            with open(a.github_output, "a", encoding="utf-8") as fh:
-                fh.write("matrix=" + json.dumps(matrix) + "\n")
-        print("роздано = дерево: ни одного пакета вне шардов, ни одного дважды, "
-              "части распиленных — 0..N-1 ровно по разу")
+    if not (a.plan or a.run):
+        ap.print_usage(sys.stderr)
+        return 2
+    total = _count(a.job_total, "ширина матрицы (--job-total)", 1)
+    if total is None:
+        return 2
+    index = _count(a.job_index, "номер задания матрицы (--job-index)", 0) if a.run else 0
+    if index is None:
+        return 2
+
+    # ПЕРЕПИСЬ ПОЛНОТЫ — ДО ПРОГОНА: шард, раздающий не дерево, не исполняет ничего.
+    try:
+        plan, findings, census = make_plan(total)
+    except Unmeasured as e:
+        print(f"НЕ ВЫПОЛНИЛОСЬ: {e}")
+        return 2
+    print(census)
+    if a.out:
+        Path(a.out).write_text(json.dumps(plan, ensure_ascii=False, indent=1) + "\n",
+                               encoding="utf-8")
+        print(f"  план записан: {a.out}")
+    if findings:
+        print(f"НАХОДОК ПЛАНА: {len(findings)}")
+        for f in findings:
+            print("  · " + f)
+        return 1
+    print("роздано = дерево: ни одного пакета вне шардов, ни одного дважды, "
+          "части распиленных — 0..N-1 ровно по разу")
+    if not a.run:
         return 0
-
-    ap.print_usage(sys.stderr)
-    return 2
+    shard_id = shard_of_index(plan, index)
+    if shard_id is None:
+        print(f"НЕ ВЫПОЛНИЛОСЬ: задание матрицы №{index} из {total} — шарда с таким номером "
+              f"в плане нет (шардов {len(plan['shards'])})")
+        return 2
+    print(f"задание матрицы №{index} из {total} → шард {shard_id}")
+    return run_shard(plan, shard_id, Path(a.out_dir), a.attempt)
 
 
 if __name__ == "__main__":

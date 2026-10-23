@@ -64,7 +64,6 @@
    "why": "пробы -race -short: пакеты и пробы, обходящие дерево (deploy/, tests/newman, миграции) — любой путь",
    "jobs": [
     "ci.yml:unit",
-    "ci.yml:unitplan",
     "ci.yml:unitshard"
    ],
    "paths": [
@@ -81,7 +80,6 @@
    "why": "Go-пробы, читающие tests/newman",
    "jobs": [
     "ci.yml:unit",
-    "ci.yml:unitplan",
     "ci.yml:unitshard"
    ],
    "paths": [
