@@ -204,6 +204,8 @@ build_module() {
     # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
     cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
     cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
+    # Второй страж хука — новых blob'ов (kaname#894): без него хук отказывает.
+    cp "$ROOT/scripts/hooks/prepush-added-files.sh" "$d/scripts/hooks/prepush-added-files.sh" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/budget\n\ngo 1.21\n' > "$d/go.mod"
     cat > "$d/budget_test.go" <<GO

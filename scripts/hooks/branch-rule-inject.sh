@@ -49,7 +49,7 @@ unset KANAME_SKIP_PREPUSH GITHUB_REPOSITORY
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-for f in "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/pre-push" \
+for f in "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/prepush-added-files.sh" "$HERE/pre-push" \
     "$HERE/prepush-classify.sh" "$HERE/install.sh" "$ROOT/.github/scripts/pr-rule-check.sh"; do
     [ -f "$f" ] || { echo "branch-rule-inject: нет $f — предпосылки нет" >&2; exit 2; }
 done
@@ -122,7 +122,8 @@ REAL_TRAILER="Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.co
 # ── Набор оснастки под судом: настоящий либо с воссозданным дефектом ─────────
 kit_from_tree() { # $1 — каталог набора
     mkdir -p "$1/scripts/hooks" "$1/.github/scripts"
-    cp "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/pre-push" \
+    # prepush-added-files.sh — второй страж хука (kaname#894): без него хук отказывает.
+    cp "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/prepush-added-files.sh" "$HERE/pre-push" \
         "$HERE/prepush-classify.sh" "$HERE/install.sh" "$1/scripts/hooks/"
     cp "$ROOT/.github/scripts/pr-rule-check.sh" "$1/.github/scripts/"
     chmod +x "$1/scripts/hooks/"* "$1/.github/scripts/"*
