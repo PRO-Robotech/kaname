@@ -27,8 +27,10 @@ import (
 // ClassGrantsKey — ключ оболочки манифеста стадии S7 (Р11 п. 1).
 const ClassGrantsKey = "classGrantsOnlyOnContainers"
 
-// envelopeModuleLine — строка оболочки, за которой П7 ставит ключ.
-const envelopeModuleLine = "module: registry\n"
+// envelopeModuleLine — строка оболочки, за которой П7 ставит ключ. Перевод
+// строки ПЕРЕД ней обязателен: `module: registry` стоит и в каждом правиле роли
+// (`      - module: registry`), и без начала строки вхождений было бы шесть.
+const envelopeModuleLine = "\nmodule: registry\n"
 
 // Роли И и И2 (SC-81): имена и id по формуле 'rol' || substr(md5(имя), 1, 17).
 // Id выписаны, а не вычислены, — их называет приёмка; согласие с формулой
