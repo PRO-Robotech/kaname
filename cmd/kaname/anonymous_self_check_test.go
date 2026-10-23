@@ -102,7 +102,7 @@ func (d *anonymousDecision) Check(_ context.Context, req service.CheckRequest) (
 func anonymousRequest() *iamv1.AuthorizeCheckRequest {
 	return &iamv1.AuthorizeCheckRequest{
 		Resource: &iamv1.ResourceRef{Type: "service", Id: "123456789/registry"},
-		Action:   "registry.repositories.read",
+		Action:   "registry.repositories.get",
 	}
 }
 
