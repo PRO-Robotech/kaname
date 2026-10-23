@@ -25,9 +25,10 @@
 //
 // Строки без версии владельца (выведенные выдачей) упорядочены меткой журнала,
 // и их порядок решён иначе: выдача, начавшая транзакцию раньше снятия и
-// свёрнутая после него, ложится заново (kaname#919, kaname#923; держит это
-// `TestEmitDeleteTx_GrantFoldedAfterTheRevokeSurvives` пакета `fga_outbox`).
-// Надгробие их не судит — это законный близнец по другую сторону предмета.
+// свёрнутая после него, ложится заново (kaname#919, kaname#923). Надгробие их
+// не судит; законный близнец по другую сторону предмета —
+// `TestEmitDeleteTx_GrantBegunBeforeTheRemovalOfAStandingFactSurvives` пакета
+// `fga_outbox` (снятие СТОЯЩЕГО факта, а затем выдача, начатая раньше него).
 //
 // # Как построено
 //
@@ -86,6 +87,17 @@ func grantFact(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objectID s
 	return v, true
 }
 
+// removalRows — число строк надгробия кортежа.
+func removalRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objectID string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM kaname.relation_fact_removal
+		 WHERE object_type = $1 AND object_id = $2 AND relation = $3 AND subject = $4`,
+		lateGrantType, objectID, lateGrantRelation, lateGrantSubject).Scan(&n))
+	return n
+}
+
 // TestRelationFact_NTF3_184_LateGrantNotNewerThanItsRemovalDoesNotRevive —
 // запись `t1`, снятие `t2 > t1`, повторная запись с прежней версией `t1`:
 // строки факта нет. Близнец по одному факту — повторная запись с версией
@@ -133,6 +145,10 @@ func TestRelationFact_NTF3_184_LateGrantNotNewerThanItsRemovalDoesNotRevive(t *t
 		v, ok := afterRemoval(t, "vol-41fresh", t3)
 		require.True(t, ok, "запись t3 новее снятия t2 строки не дала")
 		require.True(t, v.Equal(t3), "версия факта: %s, ожидается %s", v, t3)
+		// Рост надгробий ограничен кортежами, снятыми и не выданными заново:
+		// применённая запись снимает след своего кортежа.
+		require.Zero(t, removalRows(t, ctx, pool, "vol-41fresh"),
+			"применённая запись t3 не сняла надгробие своего кортежа")
 	})
 	t.Run("близнец: запись с версией снятия t2", func(t *testing.T) {
 		v, ok := afterRemoval(t, "vol-41equal", t2)
