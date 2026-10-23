@@ -902,6 +902,10 @@ func runServe(cfg config.Config) error {
 	// молчаливым nil здесь.
 	var presentedReader *presentedcred.Reader
 	if cfg.AuthN.PresentedCredential.Enabled {
+		basicAuthority, err := newBasicCredentialAuthority(pool)
+		if err != nil {
+			return fmt.Errorf("basic credential authority: %w", err)
+		}
 		if signingKeystore == nil {
 			// Настройка это уже отвергла (страж связывает приём с чеканкой), и
 			// отказ здесь — не второй страж, а отказ ПОСТРОЕНИЯ: собранный
@@ -911,6 +915,7 @@ func runServe(cfg config.Config) error {
 				"реестра ключей нет — проверять подпись нечем")
 		}
 		presentedReader, err = presentedcred.New(presentedcred.Config{
+			BasicCredentials:   basicAuthority,
 			Issuer:             cfg.AuthN.TokenSigning.Issuer,
 			Audience:           cfg.AuthN.PresentedCredential.Audience,
 			AllowedAlgorithms:  cfg.AuthN.TokenSigning.AllowedAlgorithmList(),
