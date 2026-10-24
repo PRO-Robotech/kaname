@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 894
+Всего кейсов: 896
 
 ## Перепись по модулям
 
@@ -39,6 +39,7 @@
 | `cases/docker-lane-credential-kind.py` | 2 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
+| `cases/iam-access-binding-revocation-reason.py` | 2 |
 | `cases/iam-access-binding-redesign.py` | 19 |
 | `cases/iam-account-redesign.py` | 9 |
 | `cases/iam-account.py` | 58 |
@@ -422,6 +423,13 @@
 
 - `IAM-AB-REV-01-BY-ACCOUNT-INCLUDE-REVOKED-OK`
 - `IAM-AB-REV-02-BY-ROLE-INCLUDE-REVOKED-OK`
+
+## `cases/iam-access-binding-revocation-reason.py` — 2 кейсов
+
+> Case-set: причина отзыва выдачи на крае (`AccessBinding.revocationReason`).
+
+- `IAM-AB-URG-E1-REVOCATION-REASON-VISIBLE-OK`
+- `IAM-AB-URG-E2-ACTIVE-HAS-NO-REASON-OK`
 
 ## `cases/iam-access-binding-redesign.py` — 19 кейсов
 

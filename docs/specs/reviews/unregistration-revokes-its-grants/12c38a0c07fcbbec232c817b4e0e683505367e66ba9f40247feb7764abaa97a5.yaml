@@ -1,0 +1,256 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/unregistration-revokes-its-grants.md
+  sha256: 12c38a0c07fcbbec232c817b4e0e683505367e66ba9f40247feb7764abaa97a5
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: 1e09286f1
+  content_commit: none
+  branch: '963'
+  task: PRO-Robotech/kaname#963
+  lines: 910
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/unregistration-revokes-its-grants.md в копии
+    kacho-workspace/tmp/963-kaname-unreg-grants → 12c38a0c…abaa97a5. Совпал с заданием.
+  measurement_revisions: >-
+    Замеры дерева — `git grep` и чтение файлов на голове 318f793bb (ветка 963, основание
+    origin/955 @1e09286f1). Документ в ветке не закоммичен (`git status` → `??`). Соседи
+    прочитаны из `git show origin/636:…` и `git show origin/746:…`.
+  premise: >-
+    Красная проба `TestUnregister_GrantOnFormerObjectDoesNotReachReRegisteredKey` в ветке
+    есть, утверждение имеет ту форму, что назвал документ: `git show 318f793bb --stat`,
+    файл internal/apps/kaname/api/access_binding/unregister_reregister_world_integration_test.go:151-168.
+    Что она красная, прогоном не проверено: прогона не было. Пины соседей сверены:
+    relation-fact-remembers-its-removal.md @origin/636 → f5b97963…;
+    access-target-names-live-catalog-types.md @origin/746 → 18360285…;
+    nested-rule-reaches-descendants-of-a-named-container.md @HEAD → f12395ae…
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих пять: CONSTRUCTIBILITY ×2, COVERAGE, SCOPE ×2. Санкции на контракт и
+    миграцию по этой редакции нет.
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · CHANGES_REQUESTED · 12c38a0c07fcbbec232c817b4e0e683505367e66ba9f40247feb7764abaa97a5"
+
+blocking:
+  - kind: CONSTRUCTIBILITY
+    scenario: Д5 (строки 266-272); URG-18 (581-591), URG-20 (606-617), URG-23 (640-648)
+    claim: >-
+      Д5 требует состояния «роль с `rules = []`, не дающая ничего». Схема его запрещает.
+      У такой роли компиляция правил даёт пустой `permissions`, а ограничение
+      `roles_permissions_valid` при пустом `rules` требует непустых и годных `permissions`.
+      Значит снятие, которое пишет такую роль в своей транзакции, падает на ограничении.
+      Если же `permissions` оставить прежним, роль без правил читается веткой
+      «роль только с перечнем прав» (permissions-only), а не как «роль ничего не даёт».
+      Довод Д5 «пустой `rules` на чтении уже законен у наследных ролей» верен лишь для
+      роли с непустым `permissions`: это другое состояние. В DoD п.2 изменение
+      ограничения не названо.
+    measured: >-
+      internal/migrations/0001_initial.sql:2510 — `CHECK ((jsonb_array_length(permissions) = 0
+      AND jsonb_array_length(rules) > 0) OR kaname.iam_permissions_valid(permissions))`;
+      :379 — `iam_permissions_valid`: пустой массив → false; :453 — `iam_rules_valid`:
+      пустой массив → true. `git grep -l roles_permissions_valid -- internal/migrations` →
+      только 0001_initial.sql (позднее не менялось).
+      internal/domain/rule.go:402-438 — `CompileRules`: ветвь names даёт права только по
+      названным id. Ветка роли без правил:
+      internal/apps/kaname/api/access_binding/structural_gates.go:107-121,
+      internal/apps/kaname/api/access_binding/tuples.go:73-93.
+    fix: >-
+      В Д5 назвать форму, в которой роль с потерянными адресатами МОЖЕТ существовать, и её
+      отличие от роли только с перечнем прав. В DoD п.2 назвать правку ограничения
+      миграцией #963. В §6 п.5 добавить инъекцию: прежний `permissions` оставлен при
+      `rules = []` → краснеет URG-20 по утверждению о Y и Z, близнец URG-22 зелен. Другой
+      путь — поменять Д5 так, чтобы состояние было законным уже сегодня. Решение за
+      автором, но конструируемость показать посевом: роль записана в базу, `Check` отвечает.
+
+  - kind: CONSTRUCTIBILITY
+    scenario: Д8 (строки 295-299); §0.7 (124-140); мир проб, фикстура манифеста (354-360); URG-13 (524-534), URG-14 (536-545)
+    claim: >-
+      Выдачу S из «Дано» URG-13 применитель посева не строит. Он не переносит в строку
+      выдачи ни `target`, ни `resources` манифеста. Идентификатор выдачи он выводит из
+      субъекта, формы и области, без цели. Второго утверждения Д8 тоже нет в дереве:
+      «следующее применение заводит выдачу заново». Повторное применение даёт тот же
+      идентификатор, что у отозванной S, и вставка `ON CONFLICT (id) DO NOTHING` строки не
+      кладёт. Значит URG-14 («новая выдача, id ≠ S») не станет зелёным при применителе,
+      который Д8 объявляет неизменным. Третье: `applyDelivered` мира П6 зовёт применитель
+      каталога и ролей, но не применитель посева. Фраза «применяется `applyDelivered`»
+      выдачу S не заводит.
+    measured: >-
+      internal/apps/kaname/moduleseed/apply.go:96-99 — `GrantRelation`/`GrantRole` без
+      параметра цели; :336-355 — `applyBinding` передаёт только субъект, форму, вид
+      области и её id. internal/repo/kaname/pg/module_seed_writer.go:316-322 — id =
+      `'acb' || md5('system-grant:' || субъект || форма || вид || id области)`; :337-349 —
+      столбцы вставки без цели, `ON CONFLICT (id) DO NOTHING`.
+      internal/apps/kaname/api/access_binding/public_container_read_world_integration_test.go:269-311
+      — `applyDelivered`: modulecatalog, moduleroles, самолечение селекторов, без moduleseed.
+    fix: >-
+      Переписать группу D и Д8 по дереву. Системной выдачи с перечнем объектов сегодня не
+      пишет ни один производитель: канон — 0 объявлений (§0.7), применитель цель не несёт.
+      Либо «Дано» URG-13 строится названной фикстурой строки, и сказано, что
+      производителя у такой выдачи нет; либо группа D снимается. URG-14 и вторую
+      половину Д8 привести к тому, что применитель делает на самом деле, с
+      производителем в §5.
+      Поведение применителя посева в части цели — предмет отдельной задачи, и рецензент
+      передал его диспетчеру. Здесь оно не разбирается.
+
+  - kind: COVERAGE
+    scenario: Р1 (д) (строки 202-205); группа E (547-591)
+    claim: >-
+      §1 обещает снять «все ссылки правил ролей, называющие X», а Р1 (д) говорит о
+      `rules[i].resourceNames` и о контейнере правила-владельца. Но у вложенного правила
+      есть свой `resourceNames`: имена объектов вложенного типа. Документ не говорит, что
+      с ним делает снятие ключа такого объекта, и сценария на это нет. Не задан и случай,
+      когда у вложенного правила убрано последнее имя. В дереве возможны оба неверных
+      исхода: имя остаётся (тот же дефект, что предмет #963), либо перечень хранится
+      пустым и читается шире названного. Сегодня в каноне таких объявлений 0 (§0.7),
+      но контракт обязан сказать, что верно.
+    measured: >-
+      schema/module-manifest.schema.json:385-389 — `children[].resourceNames`: «Сужение по
+      идентификаторам объектов вложенного типа»; proto/kaname/cloud/iam/v1/role.proto:743 —
+      `repeated Rule children = 7`. `grep -n -i 'children' <документ>` — только правило-владелец
+      (строки 357, 360, 552, 590).
+    fix: >-
+      Дописать Р1 (д): имя объекта, названное во вложенном правиле, убирается. Вложенное
+      правило без имён снимается и не хранится пустым. Добавить сценарий: роль
+      манифеста с вложенным правилом `resourceNames: [<X/app>]`, снята регистрация
+      `X/app` → `Check(…, X/app)` deny, `Check(…, X/late)` deny. Близнец — вложенное
+      правило с другим именем не тронуто. В §5 назвать производителя, в §6 п.5 —
+      инъекцию.
+
+  - kind: SCOPE
+    scenario: §1 (строки 163-166); §2 (171-182)
+    claim: >-
+      §1 говорит без оговорки: «повторная регистрация … не наследует ни одной выдачи,
+      сделанной до снятия». Но есть выдачи на ключи, снятые ДО наката #963. Отзыв по
+      снятию к ним не применялся, а сценария и строки §2 о них нет. По Д6 и ATC-03 такая
+      выдача неотличима от законной выдачи на свободный ключ. Значит после наката они
+      по-прежнему достают до объекта, заново занявшего ключ. Утверждение §1 о безопасности
+      шире того, что приёмка обеспечивает.
+    measured: >-
+      Чтение §1, §2, Д1, Д6, Д7 редакции 12c38a0c. `grep -n -i -E 'наката|до посадки|уже снят'
+      <документ>` → совпадения только о `revocation_reason` (строки 180, 291, 783).
+    fix: >-
+      Назвать судьбу таких выдач. Либо строка §2 с причиной (неотличимы от выдач по
+      ATC-03, вывода из истории нет, как в Д7) и с местом, где предмет живёт, а §1
+      сужен до «снятие после наката»; либо сценарий и шаг миграции, если признак
+      найдётся.
+
+  - kind: SCOPE
+    scenario: Д8 (строки 295-299); §2 (171-182)
+    claim: >-
+      Задание закрепило: запрет ссылок на объекты в манифестах — отдельная задача P2,
+      она вне объёма, и в §2 стоит ссылка «будет заведена». В §2 такой строки нет. Д8
+      заканчивается словами «эта приёмка его не меняет» без адреса, где предмет живёт.
+      Решение диспетчера в документ не вписано.
+    measured: >-
+      `grep -n -E 'P2|будет заведен' <документ>` → 0 строк.
+    fix: >-
+      Добавить в §2 строку: «ссылки на объекты в объявлениях манифеста (роли и посев)» ·
+      почему вне объёма · «задача P2, будет заведена». В Д8 сослаться на эту строку.
+
+important:
+  - kind: DoD
+    scenario: §6 п.10 (строки 894-898)
+    claim: >-
+      `assert-shard-coverage.py` и «запись ведомости производителя набора» — оснастка
+      kacho, в дереве kaname её нет. В kaname набор регистрируется строкой `run_one` в
+      tests/newman/scripts/run.sh и строкой `--service` в .github/workflows/e2e-newman.yml.
+    measured: >-
+      `git ls-tree -r --name-only HEAD | grep -i shard` → только .github/integration-shard-weights.txt;
+      образец соседнего кейса — run.sh:497 и e2e-newman.yml:992 (`iam-access-binding-include-revoked`).
+  - kind: FORMAT
+    scenario: URG-24 (строки 652-667)
+    claim: >-
+      Окно «после возврата Operation и до фиксации записи» существует: запись выдачи
+      делает воркер операции (create.go:242-293). Но сценарий не требует, чтобы окно было
+      задето хотя бы раз. Если воркер всякий раз успевает раньше снятия, все 50 итераций
+      проходят путём URG-01. Инъекция I6 из §6 п.5 это поймает, и всё же лучше назвать
+      точку, которая держит воркер до снятия, и потребовать исход (i) или (ii)
+      «записано после снятия» ≥ 1.
+  - kind: CONVENTION
+    scenario: DoD п.1 (строки 857-861)
+    claim: >-
+      Комментарий `AccessTargetResources` переписывает и одобренный сосед (ветка 746, Р6
+      соседа). Две правки одного комментария в двух ветках — свести при посадке, чтобы
+      ни одна не стёрла другую.
+  - kind: FORMAT
+    scenario: шапка (строки 8-21)
+    claim: >-
+      Документ в ветке 963 не закоммичен. Санкцией полосы приёмка станет только из ветки,
+      и отпечаток закоммиченной редакции должен совпасть с рассмотренным.
+
+decisions_check:
+  inscribed: >-
+    Р1 (а) — URG-01; Р1 (б) — URG-06, -07, -08; Р1 (в) — URG-11, близнец URG-12;
+    Р1 (г) — URG-13 (форма есть, «Дано» не строится, см. blocking); Р1 (д) — URG-15…23
+    (вложенные имена не покрыты, см. blocking); Р2 — URG-02, -16, -19; Р3 — URG-04, -09,
+    близнец URG-10; Р4 — URG-02, -06, -16, -19; Д6/ATC-03 — URG-25; гонка — URG-24, -26;
+    Д8 «как есть» — вписано, строки §2 о задаче P2 нет (см. blocking).
+  red_without_decision: >-
+    Утверждение, которое краснеет без решения, есть у каждого вписанного решения, кроме
+    Р1 (г): у него утверждение есть, а «Дано» не строится.
+  note: >-
+    В задании гонка записана словами «ключ, снятый до её приёма». Документ читает её
+    как «выдача принята до снятия, записана после» (Д6, URG-24), иначе выдача по Д6 и
+    ATC-03 законна. Расхождение формулировок рецензент передал диспетчеру. Форма
+    документа согласована с одобренным соседом.
+
+constructibility:
+  seeded: 0
+  refuted_by_schema_or_code: 2
+  not_performed: >-
+    Посева не было: ни стенда, ни слота внешнего кластера рецензенту не выдали. Прочие
+    «Дано» по чтению дерева строятся существующими глаголами мира У/П6
+    (`registerRegistry`, `registerRepository`, `seedRole`, `deliverNewEdition`,
+    `createDone`). Для URG-34 есть поступенчатый накат миграций
+    (internal/migrations/family_revocation_vocabulary_narrows_integration_test.go).
+    Чтение посевом не считается: это «не выполнилось».
+
+neighbours:
+  - path: docs/engineering/acceptance/access-target-names-live-catalog-types.md
+    sha256: 18360285461ee74e59c92a0445fcff9d313e8c2e3ed99bb56b4efce209ff9bd9
+    verdict: >-
+      Не расходится. «Graceful-dangling» (§2 п.2 соседа) и ATC-03 Д6 читает дословно;
+      Р5 соседа касается снятия ТИПА, документ это оговаривает.
+  - path: docs/engineering/acceptance/relation-fact-remembers-its-removal.md
+    sha256: f5b979630f087295e8b8038a0ac4dbe43936c9522a920cfe1d9b96a3600b9304
+    verdict: >-
+      Не расходится. Р4 соседа (строки без версии владельца след не судит) и KN-RFR-09/10
+      касаются кортежа выдачи, а не снятия объекта. Исход (ii) URG-24 — отзыв строкой
+      выдачи, след соседа его не трогает.
+  - path: docs/engineering/acceptance/nested-rule-reaches-descendants-of-a-named-container.md
+    sha256: f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6
+    verdict: >-
+      Не расходится по правилу-владельцу. Об именах вложенного правила сосед говорит, а
+      этот документ молчит — см. blocking COVERAGE.
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: false
+  public_contract_field: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu

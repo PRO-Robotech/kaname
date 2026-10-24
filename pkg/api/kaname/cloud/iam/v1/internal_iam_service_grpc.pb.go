@@ -147,6 +147,14 @@ type InternalIAMServiceClient interface {
 	// ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
 	// НЕ NotFound — drainer ретраит безопасно.
 	//
+	// Снятие, которое удалило регистрацию объекта (надгробие не старше хранимой
+	// регистрации, снимается не публикация), в той же транзакции отзывает выдачи,
+	// цель которых — только этот объект (`revocation_reason =
+	// REVOCATION_REASON_RESOURCE_UNREGISTERED`, защита от удаления не мешает),
+	// сужает выдачи с несколькими объектами цели и убирает его id из
+	// `resource_names` правил ролей (правило без имён снимается). Повторная
+	// регистрация того же ключа начинается с пустого набора выдач.
+	//
 	// Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
 	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
 	// нет google.api.http.
@@ -421,6 +429,14 @@ type InternalIAMServiceServer interface {
 	//
 	// ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
 	// НЕ NotFound — drainer ретраит безопасно.
+	//
+	// Снятие, которое удалило регистрацию объекта (надгробие не старше хранимой
+	// регистрации, снимается не публикация), в той же транзакции отзывает выдачи,
+	// цель которых — только этот объект (`revocation_reason =
+	// REVOCATION_REASON_RESOURCE_UNREGISTERED`, защита от удаления не мешает),
+	// сужает выдачи с несколькими объектами цели и убирает его id из
+	// `resource_names` правил ролей (правило без имён снимается). Повторная
+	// регистрация того же ключа начинается с пустого набора выдач.
 	//
 	// Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
 	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,

@@ -45,7 +45,7 @@ func (e *ResourceMirrorEmitter) UpsertTx(ctx context.Context, tx service.Tx, row
 }
 
 // DeleteTx — implements service.ResourceMirrorEmitter.
-func (e *ResourceMirrorEmitter) DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) error {
+func (e *ResourceMirrorEmitter) DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) (bool, error) {
 	return resource_mirror.DeleteTx(ctx, txAsPgx(tx), objectType, objectID, tombstone)
 }
 

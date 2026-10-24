@@ -509,7 +509,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// RoleService.
 	roleCreate := roleapp.NewCreateRoleUseCase(kanameRepo, opsRepo, catalogSource).
 		WithRelationStore(relationStore, logger).
-		WithObjectReconciler(rsabReconciler)
+		WithObjectReconciler(rsabReconciler).
+		// Роль, принятая до снятия регистрации названного ключа и записанная после,
+		// снятого ключа не называет (kaname#963, Р8).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool))
 	// Role.Update of an active role's permissions reconciles the FGA
 	// tuples of every active binding of that role in the SAME writer-tx (atomic,
 	// ban #10) via the access_binding RoleTupleReconciler (it owns the FGA
@@ -524,6 +527,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// NOTE: rsabReconciler is created once near the top of buildServices (shared
 	// with the Account.Create owner auto-binding materialization).
 	roleUpdate := roleapp.NewUpdateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kanameRepo, rsabReconciler)).
 		// Same revoke-latency fix as accountUpdate above, for the role AS AN OBJECT
@@ -552,7 +556,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Role.Update membership fan-out; the same instance drives Create + worker.)
 	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kanameRepo, opsRepo, catalogSource).
 		WithRelationStore(relationStore, logger).
-		WithReconciler(rsabReconciler)
+		WithReconciler(rsabReconciler).
+		// Выдача, принятая до снятия регистрации объекта цели и записанная после,
+		// живой не остаётся (kaname#963, Р8).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool))
 	// abDelete — relationStore drives the grant-authority gate, and ONLY that. The
 	// post-commit tuple-removal it also used to drive is gone with the external store:
 	// the in-tx EmitRelationDelete is now the whole mechanism, because a trigger folds
@@ -689,6 +696,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// опция: без порта у публикации нет порядка, и запоздавшая доставка открытия
 		// после закрытия вернула бы анонимное чтение приватному объекту.
 		kanamepg.NewPublicReadPublisher(),
+		// Снятие регистрации объекта снимает его выдачи и названия правил ролей в той
+		// же транзакции (kaname#963). Параметр, а не опция: без него освободившийся
+		// ключ наследовал бы выдачи прежнего объекта.
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogSource),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
