@@ -214,7 +214,11 @@ message ResourceRef {
 
 message AuthorizeCheckRequest {
   // FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
-  // / "group:<grp…>#member" / "system_class:anonymous"). Required.
+  // / "group:<grp…>#member" / "system_class:anonymous"). Required except
+  // for a credential-free public Check: omit subject, context and
+  // required_relation to ask only as server-inferred system_class:anonymous.
+  // A supplied invalid credential never falls back to anonymous. Other RPCs
+  // and authenticated/module subject-binding rules are unchanged.
   // "system_class:authenticated" and the wildcard "user:*" are not speakers →
   // INVALID_ARGUMENT.
   string subject = 1;

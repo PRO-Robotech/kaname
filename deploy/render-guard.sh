@@ -60,6 +60,6 @@ echo "render-guard: helm $("$HELM_BIN" version --short 2>/dev/null || echo '?') 
 # `go test` не знает, и кеш вернул бы вердикт о чужом дереве.
 cd "$MODULE_DIR"
 HELM_RENDER_GUARD_LANE=1 go test ./deploy/ -count=1 -v \
-	-run 'TestProdProfile_Rendered|TestConfigBridge_CoversEveryKeyTheChartRenders|TestBridgeCoverageCensusCanFail|TestRenderedInputRefusesAnEmptyRender|TestRenderedFilesAreMountableCanFail|TestRenderedSecretStandInsCanFail|TestRenderedVerdictNamesEveryRefusal'
+	-run 'TestProdProfile_Rendered|TestConfigBridge_CoversEveryKeyTheChartRenders|TestBridgeCoverageCensusCanFail|TestRenderedInputRefusesAnEmptyRender|TestRenderedFilesAreMountableCanFail|TestRenderedSecretStandInsCanFail|TestRenderedVerdictNamesEveryRefusal|TestModuleManifests_'
 
 echo "render-guard: вход рендера принят стражем старта"
