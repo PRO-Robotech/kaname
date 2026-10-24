@@ -20,11 +20,10 @@ package access_binding_test
 // контейнере, который модель объявляет: `registry.registries` с вложенным
 // правилом над `repositories`. Имя вложенного правила — непрозрачный id
 // репозитория, и ярлыки приёмки `t1`, `t3`, `t4` здесь — id репозиториев под X
-// (форма имени `^[a-zA-Z0-9_-]+$` им годна). Роли — та же новая редакция
-// манифеста registry, к которой добавлены три роли таблицы П3-У.
+// (форма имени `^[a-zA-Z0-9_-]+$` им годна). Роли — роли арендатора, заведённые
+// в домене: манифест модуля на объекты не ссылается (kaname#965).
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,59 +35,18 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
-// urNamedRoles — роли П3-У: правило над реестрами и вложенное правило над
-// репозиториями с собственными именами.
-const urNamedRoles = `
-  - id: registry.reader_t13
-    description: >
-      Пробная роль П3-У: чтение реестра и репозиториев t1, t3 под ним.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: registry
-        resources: [registries]
-        classes: [get, list]
-        children:
-          - resources: [repositories]
-            classes: [get, list]
-            resourceNames: [t1, t3]
-
-  - id: registry.reader_t1
-    description: >
-      Пробная роль П3-У: чтение реестра и репозитория t1 под ним.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: registry
-        resources: [registries]
-        classes: [get, list]
-        children:
-          - resources: [repositories]
-            classes: [get, list]
-            resourceNames: [t1]
-
-  - id: registry.reader_t3
-    description: >
-      Пробная роль П3-У: чтение реестра и репозитория t3 под ним.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: registry
-        resources: [registries]
-        classes: [get, list]
-        children:
-          - resources: [repositories]
-            classes: [get, list]
-            resourceNames: [t3]
-`
-
-// newP3UWorld поднимает П3-У: доставка новой редакции с ролями П3-У.
+// newP3UWorld поднимает П3-У: доставка новой редакции registry. Роли с именами
+// объектов мир заводит в домене (grantNamedRole), а не манифестом: манифест
+// модуля на объекты не ссылается (kaname#965, `manifest/object_refs.go`), роль с
+// `resourceNames` — роль арендатора.
 func newP3UWorld(t *testing.T) *urxWorld {
 	t.Helper()
 	w := newURXWorld(t)
 	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
 	require.NoError(t, err, "фикстура П3-У")
-	text := strings.TrimRight(string(doc), "\n") + "\n" + urNamedRoles
-	m, err := manifest.Load([]byte(text))
+	m, err := manifest.Load(doc)
 	require.NoError(t, err, "фикстура П3-У обязана загружаться")
-	w.applyDelivered("П3-У: доставка registry с ролями П3-У", m)
+	w.applyDelivered("П3-У: доставка новой редакции registry", m)
 	w.rewire()
 	return w
 }
@@ -119,10 +77,14 @@ func (w *urxWorld) unregisterTag(id string) {
 
 func (w *urxWorld) tag(id string) bool { return w.ask(w.usr(w.usrD), "v_get", pcrRepoType, id) }
 
-// grantNamedRole — выдача роли манифеста человеку usr-D на prj-A, вся область.
-func (w *urxWorld) grantNamedRole(name string) domain.RoleID {
+// grantNamedRole — роль арендатора П3-У (правило над реестрами и вложенное правило
+// над репозиториями с именами `names`) и её выдача человеку usr-D на prj-A, вся
+// область.
+func (w *urxWorld) grantNamedRole(name string, names ...string) domain.RoleID {
 	w.t.Helper()
-	role := domain.SystemRoleID(domain.RoleName(name))
+	child := pcrRepositoriesRule()
+	child.ResourceNames = names
+	role := w.seedRole(name, pcrWithChild(child))
 	w.grantTo(w.usrD, role, ndAllInScope(), false, "П3-У: выдача "+name)
 	return role
 }
@@ -132,7 +94,7 @@ func TestURG35_NestedNameRemovedOthersRemain(t *testing.T) {
 	w := newP3UWorld(t)
 	w.registerTag("t1")
 	w.registerTag("t3")
-	role := w.grantNamedRole("registry.reader_t13")
+	role := w.grantNamedRole("reader_t13", "t1", "t3")
 	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, "t1", true, "URG-35 контроль фикстуры: t1")
 	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, "t3", true, "URG-35 контроль фикстуры: t3")
 	ownerBefore := w.roleRules(role)[0]
@@ -159,7 +121,7 @@ func TestURG36_LastNestedNameDropsChild(t *testing.T) {
 	w := newP3UWorld(t)
 	w.registerTag("t1")
 	w.registerTag("t3")
-	role := w.grantNamedRole("registry.reader_t1")
+	role := w.grantNamedRole("reader_t1", "t1")
 	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, "t1", true, "URG-36 контроль фикстуры: t1")
 	require.False(t, w.tag("t3"), "URG-36 контроль фикстуры: имена сужают — t3 доступен")
 
@@ -180,7 +142,7 @@ func TestURG37_NestedRuleWithoutKeyUntouched(t *testing.T) {
 	w := newP3UWorld(t)
 	w.registerTag("t1")
 	w.registerTag("t3")
-	role := w.grantNamedRole("registry.reader_t3")
+	role := w.grantNamedRole("reader_t3", "t3")
 	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, "t3", true, "URG-37 контроль фикстуры: t3")
 	before := w.roleRules(role)
 
