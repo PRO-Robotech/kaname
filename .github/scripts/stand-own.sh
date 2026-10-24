@@ -2669,6 +2669,10 @@ case "$line" in
   *"get pod kaname-own"*"--ignore-not-found"*) [ -f "$S/pod" ] && echo pod/kaname-own; exit 0 ;;
   *"delete pod kaname-own"*) rm -f "$S/pod" ;;
   *"get pod kaname-runner"*) cat "$S/phase" 2>/dev/null || echo Running ;;
+  # Поток в pod (`exec -i`) настоящий клиент читает до конца. Подложный, вышедший не
+  # прочитав, ронял SIGPIPE-ом gzip потока исходников, и pipefail давал «не доставлены»
+  # (125) по жребию планировщика: один прогон из пяти (kaname#944).
+  *" exec -i "*) cat > /dev/null ;;
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
   *"logs "*) echo "журнал службы из пода" ;;
   *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
