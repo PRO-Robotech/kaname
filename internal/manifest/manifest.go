@@ -471,6 +471,7 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	faults := validateResources(&m, doc, referent)
 	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
+	faults = append(faults, refuseObjectRefs(&m, doc)...) // ссылки на объекты, kaname#965
 
 	// Связность — последняя ступень той же загрузки; почему не отдельным
 	// вызовом, сказано в шапке Load. Перечень ролей приезжает ИЗ РАЗОБРАННОГО

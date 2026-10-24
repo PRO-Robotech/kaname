@@ -36,7 +36,8 @@
 // Он не читает каталог доставки (это `loadDeliveredManifests`) и не судит форму
 // манифеста (это валидатор связности `internal/manifest`). Ему приезжают уже
 // разобранные и уже проверенные манифесты, и он приводит базу к тому, что в них
-// написано.
+// написано. Исключение одно и названо: цель выдачи применитель судит сам до
+// транзакции (target.go, kaname#965) — посев исполняет только ярус целиком.
 //
 // Он не СНИМАЕТ строк. Снятие модуля из доставки — отдельный предмет с
 // отдельной ценой: снятая личность уносит с собой права, а её отсутствие
@@ -278,6 +279,9 @@ func (a *Applier) applyOne(ctx context.Context, m *manifest.Manifest) (Report, e
 		DeclaredGroups:   len(seed.Groups),
 		DeclaredJoins:    len(seed.Joins),
 		DeclaredGrants:   len(seed.AccessBindings),
+	}
+	if err := refuseNarrowedTargets(seed); err != nil {
+		return report, err
 	}
 
 	err := a.tx.RunInWriteTx(ctx, func(ctx context.Context, w Writer) error {
