@@ -90,10 +90,12 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 // адресуется числом выдач, а роли у них повторяются, поэтому без памятки полный проход
 // перечитывал одну и ту же строку роли по разу на выдачу. Внутри одной транзакции ответ
 // измениться не может; роль, изменённая в середине прохода, доводится своим собственным
-// веером Role.Update — как и до памятки.
+// веером Role.Update — так у ПОЛНОГО прохода; аддитивный форвард этот довод не
+// покрывает и читает роль под замком (roleRowLock). Ключ памятки несёт режим замка:
+// ответ, прочитанный без замка, не годится вопросу, которому замок нужен.
 type reconcileStore struct {
 	tx        pgx.Tx
-	roleCache map[domain.RoleID]domain.Role
+	roleCache map[roleCacheKey]domain.Role
 	// cat — каталожный факт, взятый ОДИН раз на весь проход. Брать его заново
 	// на каждой выдаче значило бы допустить проход, собранный из разных
 	// моментов времени.
@@ -224,9 +226,11 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 	// чем выдач (на стенде при 227 кандидатах различных ролей 194, при медианных 9 —
 	// четыре), но главное здесь не сжатие, а то, что число обращений перестаёт зависеть
 	// от размера веера.
+	// Роли форвард читает под `FOR SHARE` (roleRowLock) — после строк выдач, до
+	// первой записи прохода; почему — у roleLockShare.
 	roles := make(map[domain.RoleID]domain.Role, len(roleIDs))
 	if len(roleIDs) > 0 {
-		loaded, rerr := loadRolesWithLifecycle(ctx, s.tx, roleIDs)
+		loaded, rerr := loadRolesWithLifecycle(ctx, s.tx, roleIDs, roleLockShare)
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -251,10 +255,57 @@ const (
 	rowLockKeyShare
 )
 
+// roleRowLock — режим замка строки роли, под которым читаются её правила.
+type roleRowLock int
+
+const (
+	// roleLockNone — полный проход. Правки роли он не ждёт и ждать не должен: веер
+	// правки (RoleMembershipFanout) берёт строку выдачи `FOR NO KEY UPDATE` тем же
+	// режимом, что полный проход, — встаёт за проходом, прочитавшим старые правила,
+	// и пересчитывает выдачу по новым после его коммита.
+	roleLockNone roleRowLock = iota
+	// roleLockShare — аддитивный форвард (kaname#926). Форвард решает по правилам
+	// роли, КАКОЙ ярус выдать, и пишет члена позже, в той же транзакции; с вееером
+	// правки роли он не упорядочен ничем другим: advisory-замка форвард не берёт, а
+	// его `FOR KEY SHARE` на строке выдачи совместим с `FOR NO KEY UPDATE` веера.
+	// Без замка роли правка, суживающая роль, коммитилась бы между чтением и
+	// записью форварда, веер не видел бы его незакоммиченного члена, и ярус,
+	// отобранный правкой, держался бы до следующего полного прохода.
+	//
+	// `FOR SHARE` конфликтует с замком, который правка роли берёт ПЕРВЫМ
+	// (GuardSystemClassReads, `FOR NO KEY UPDATE`), и с самой записью строки, но
+	// не с `FOR SHARE` и `FOR KEY SHARE`: форварды одной роли друг друга не ждут, а
+	// пересчёт глаголов (RulesForRegrain) берёт тот же `FOR SHARE`. Исходов два, и
+	// оба верны: правка ждёт коммита форварда, и её веер видит его члена; либо
+	// форвард ждёт коммита правки и читает уже новые правила. Снятие роли
+	// (RetireRole, `FOR NO KEY UPDATE`) упорядочено с форвардом так же.
+	//
+	// Новых строк замок не трогает: член, которого форвард пишет, берёт на той же
+	// строке роли `FOR KEY SHARE` проверкой внешнего ключа
+	// (`access_binding_target_members` → `roles (id, live)`). Новыми стали режим и
+	// момент — до решения о ярусе, а не после него.
+	roleLockShare
+)
+
+// roleLockFor — режим замка роли, отвечающий режиму замка строки выдачи: форвард
+// (`FOR KEY SHARE` на выдаче) читает роль под замком, полный проход — без.
+func roleLockFor(lock bindingRowLock) roleRowLock {
+	if lock == rowLockKeyShare {
+		return roleLockShare
+	}
+	return roleLockNone
+}
+
+// roleCacheKey — ключ памятки ролей прохода.
+type roleCacheKey struct {
+	id   domain.RoleID
+	lock roleRowLock
+}
+
 // loadBinding — общий читатель LoadBinding (rowLockNoKeyUpdate) и
 // LoadBindingForForward (rowLockKeyShare). Проекция BindingScope ОДИНАКОВА в обоих
-// режимах — различается лишь замок строки, — поэтому полный проход и форвард
-// выводят одни и те же факты области, селекторов и субъектов.
+// режимах — различаются лишь замки строк выдачи и роли, — поэтому полный проход и
+// форвард выводят одни и те же факты области, селекторов и субъектов.
 func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock bindingRowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
 	var (
@@ -281,12 +332,11 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		return reconcile.BindingScope{}, false, fmt.Errorf("load binding subjects %s: %w", bindingID, err)
 	}
 
-	// Role permissions (verb-bundle) — read inside the tx so the tier derivation
-	// is consistent with the binding row read. Memoized per-tx (roleCache): a fan-out
-	// pass reads the SAME role once per pass instead of once per binding, and within one
-	// tx the answer cannot differ. A role changed mid-pass is re-materialized by its own
-	// Role.Update fan-out, exactly as before.
-	role, err := s.role(ctx, b.RoleID)
+	// Правила роли читаются в той же транзакции, что строка выдачи, и запоминаются
+	// на проход (roleCache): веер читает одну роль один раз, а не по разу на выдачу.
+	// Роль, изменённую в середине ПОЛНОГО прохода, доводит веер её правки; форвард
+	// читает роль под замком (roleLockShare), потому что этот довод его не покрывает.
+	role, err := s.role(ctx, b.RoleID, roleLockFor(lock))
 	if err != nil {
 		// A dangling role (deleted out from under the binding) leaves no perms —
 		// the reconciler then emits no tuples (membership stays non-ACTIVE). Treat
@@ -300,31 +350,32 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 	return bindingScopeFrom(s.cat, b, role), true, nil
 }
 
-// role reads a role inside the tx, memoized for the lifetime of THIS pass. The per-binding
-// full path (reconcileBindingForObject) fans out over the same candidate set as the
-// forward path and re-read the SAME role row once per binding; the memo makes that read
-// O(distinct roles) instead of O(bindings). A not-found role is memoized too (as "no
-// coverage"), so a dangling role does not turn into a per-binding round-trip either.
-func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Role, error) {
+// role читает роль в транзакции прохода под замком lock и запоминает её на жизнь
+// ЭТОГО прохода. Поштучный полный путь (reconcileBindingForObject) обходит тот же
+// набор кандидатов, что форвард, и перечитывал бы одну строку роли по разу на выдачу;
+// памятка делает чтение O(различных ролей), а не O(выдач). Отсутствующая роль
+// запоминается тоже («нет покрытия»), чтобы и она не стала обращением на выдачу.
+func (s *reconcileStore) role(ctx context.Context, id domain.RoleID, lock roleRowLock) (domain.Role, error) {
 	if s.roleCache == nil {
-		s.roleCache = make(map[domain.RoleID]domain.Role)
+		s.roleCache = make(map[roleCacheKey]domain.Role)
 	}
-	if ro, ok := s.roleCache[id]; ok {
+	key := roleCacheKey{id: id, lock: lock}
+	if ro, ok := s.roleCache[key]; ok {
 		return ro, nil
 	}
 	// Читается ТЕМ ЖЕ загрузчиком, что пакетный путь: жизненное состояние роли
 	// решает, даёт ли она покрытие (kacho#1913), и два оператора об одном предмете
 	// разошлись бы молча — на живой роли они отвечают одинаково.
-	loaded, err := loadRolesWithLifecycle(ctx, s.tx, []string{string(id)})
+	loaded, err := loadRolesWithLifecycle(ctx, s.tx, []string{string(id)}, lock)
 	if err != nil {
 		return domain.Role{}, err
 	}
 	ro, ok := loaded[id]
 	if !ok {
-		s.roleCache[id] = domain.Role{}
+		s.roleCache[key] = domain.Role{}
 		return domain.Role{}, iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id)
 	}
-	s.roleCache[id] = ro
+	s.roleCache[key] = ro
 	return ro, nil
 }
 
@@ -337,15 +388,26 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 // `roleCols` состояния не несёт НАМЕРЕННО: тот же перечень читают пути ответа
 // операции, а ответ операции жизненного состояния не вычисляет (§2.6 приёмки).
 // Поэтому живость дочитывается ОТДЕЛЬНОЙ колонкой здесь, а не добавляется туда.
-func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
+//
+// lock — режим замка строк роли (roleRowLock). Под замком строки берутся одним
+// оператором в порядке `id`: подмножества одного порядка инверсии между собой не дают.
+func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string, lock roleRowLock) (
 	map[domain.RoleID]domain.Role, error,
 ) {
 	out := make(map[domain.RoleID]domain.Role, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1)`, roleCols), ids)
+	var q string
+	switch lock {
+	case roleLockNone:
+		q = fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1)`, roleCols)
+	case roleLockShare:
+		q = fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id FOR SHARE`, roleCols)
+	default:
+		return nil, fmt.Errorf("reconcile: unknown role row-lock mode %d", lock)
+	}
+	rows, err := tx.Query(ctx, q, ids)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load roles: %w", err)
 	}
