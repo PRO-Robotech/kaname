@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Фикстура П3-У приёмки
+# docs/engineering/acceptance/unregistration-revokes-its-grants.md (kaname#963):
+# тот же модуль трёх уровней родства, что `probemod.children-fixture.yaml`
+#   boxes (`probemod_box`, указатель на проект)
+#     └ items (`probemod_item`, указатель `box`)
+#         └ tags (`probemod_tag`, указатель `item`),
+# но у вложенного правила над ярлыками — СВОИ имена (Р7). Через API вложенное
+# правило на вход не принимается, поэтому имена вложенного правила кладёт только
+# применитель ролей манифеста — им и строится «Дано» URG-35…URG-37.
+#
+# Роли (id — 'rol' || substr(md5(имя), 1, 17), `domain.SystemRoleID`):
+#   - `probemod.reader_t13` — вложенное правило с `resourceNames: [t1, t3]` (URG-35);
+#   - `probemod.reader_t1`  — `[t1]` (URG-36);
+#   - `probemod.reader_t3`  — `[t3]` (URG-37, близнец).
+#
+# Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
+# базовым именем, и фикстура, названная так, судилась бы как манифест модуля.
+
+apiVersion: iam/v1
+module: probemod
+
+resources:
+
+  - name: boxes
+    objectType: probemod_box
+    parents: [project]
+    producer: derived
+    verbs: [get, list, create, update, delete]
+
+  - name: items
+    objectType: probemod_item
+    parents:
+      - {name: box, type: probemod_box}
+    producer: derived
+    verbs: [get, list, update, delete]
+
+  - name: tags
+    objectType: probemod_tag
+    parents:
+      - {name: item, type: probemod_item}
+    producer: derived
+    verbs: [get, list, update, delete]
+
+roles:
+
+  - id: probemod.reader_t13
+    description: >
+      Пробная роль: чтение ящика и ярлыков t1, t3 под ним на любой глубине.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: probemod
+        resources: [boxes]
+        classes: [get, list]
+        children:
+          - resources: [tags]
+            classes: [get, list]
+            resourceNames: [t1, t3]
+
+  - id: probemod.reader_t1
+    description: >
+      Пробная роль: чтение ящика и ярлыка t1 под ним на любой глубине.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: probemod
+        resources: [boxes]
+        classes: [get, list]
+        children:
+          - resources: [tags]
+            classes: [get, list]
+            resourceNames: [t1]
+
+  - id: probemod.reader_t3
+    description: >
+      Пробная роль: чтение ящика и ярлыка t3 под ним на любой глубине.
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: probemod
+        resources: [boxes]
+        classes: [get, list]
+        children:
+          - resources: [tags]
+            classes: [get, list]
+            resourceNames: [t3]
