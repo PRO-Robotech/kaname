@@ -877,6 +877,24 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 	}
 	// Операторы хранилища — те самые, что исполняет снятие, а не их копия: копия
 	// разошлась бы с продуктом молча (ревью db-architect @5c0f8f13d).
+	//
+	// Объём выдач — 5000 действующих выдач на другие ключи, с собранной статистикой.
+	// Продуктовый оператор упорядочивает по id, и на семи строках мира планировщик
+	// законно идёт первичным ключом с фильтром: «берёт ли индекс» на таком объёме
+	// спрашивать не о чем. На объёме, где просмотр всех выдач дорог, — есть.
+	_, err := w.pool.Exec(w.ctx,
+		`INSERT INTO kaname.access_bindings
+		 SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
+		           'id', 'acbvol' || lpad(g::text, 14, '0'),
+		           'target_digest', 'vol' || g,
+		           'target', jsonb_build_object('resources', jsonb_build_array(
+		               jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
+		   FROM kaname.access_bindings b, generate_series(1, 5000) g
+		  WHERE b.id = (SELECT id FROM kaname.access_bindings WHERE revoked_at IS NULL ORDER BY id LIMIT 1)`,
+		pcrRegTgt)
+	require.NoError(t, err, "п.10: объём выдач")
+	_, err = w.pool.Exec(w.ctx, `ANALYZE kaname.access_bindings`)
+	require.NoError(t, err, "п.10: статистика выдач")
 	explain("выдачи по ключу", "access_bindings_target_resources_live_idx", kanamepg.BindingsNamingKeySQL, pcrRegTgt, pcrX)
 	explain("правила по ключу", "role_rule_selectors_resource_names_idx", kanamepg.RolesNamingKeySQL, pcrRegTgt, pcrX)
 }
