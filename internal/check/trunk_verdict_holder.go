@@ -274,13 +274,29 @@ func PushesToTrunk(raw string) (bool, string, error) {
 		return false, doc.Name, nil
 	}
 	var push struct {
-		Branches []string `yaml:"branches"`
+		Branches       []string `yaml:"branches"`
+		BranchesIgnore []string `yaml:"branches-ignore"`
+		Tags           []string `yaml:"tags"`
+		TagsIgnore     []string `yaml:"tags-ignore"`
 	}
 	if err := node.Decode(&push); err != nil {
 		// `push:` без тела означает «все ветки», ствол в том числе.
 		return true, doc.Name, nil
 	}
 	if len(push.Branches) == 0 {
+		// ФИЛЬТР ОДНИХ МЕТОК ВЕТВЕЙ НЕ ПРОПУСКАЕТ ВОВСЕ (kaname#964). У
+		// провайдера `push`, назвавший только `tags`/`tags-ignore` и не
+		// назвавший `branches`/`branches-ignore`, на отправку в ветку не идёт:
+		// «если задан фильтр лишь одного вида ссылок, процесс не идёт на
+		// события ссылок неназванного вида» (документация провайдера,
+		// «Workflow syntax», on.push.<branches|tags>). Прежде отсутствие
+		// `branches` читалось здесь как «все ветки», и процесс публикации по
+		// метке версии объявлялся процессом ствола без держателя. Фильтр
+		// `branches-ignore` по-прежнему читается как «ствол возможен» — он
+		// сужает ветки, а не снимает их.
+		if len(push.BranchesIgnore) == 0 && (len(push.Tags) > 0 || len(push.TagsIgnore) > 0) {
+			return false, doc.Name, nil
+		}
 		return true, doc.Name, nil
 	}
 	for _, b := range push.Branches {
