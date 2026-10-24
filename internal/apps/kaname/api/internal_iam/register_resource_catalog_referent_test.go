@@ -65,8 +65,8 @@ func (m refusingMirror) UpsertTx(_ context.Context, _ service.Tx, row service.Re
 	return true, false, nil
 }
 
-func (refusingMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) error {
-	return nil
+func (refusingMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) (bool, error) {
+	return false, nil
 }
 
 // TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument — отказ
@@ -82,6 +82,7 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		&smTxBeginner{},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		&recordingWithdrawal{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -130,6 +131,7 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		&smTxBeginner{},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		&recordingWithdrawal{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

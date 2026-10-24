@@ -206,7 +206,8 @@ type ReconcileStore interface {
 	// Держит замок другое: решение форварда «выдача жива» верно до его коммита. Снятие
 	// выдачи (LockBindingForDeactivation, `FOR UPDATE`) с ним конфликтует и не прочитает
 	// набор членов и реестр, пока форвард, увидевший выдачу ACTIVE, ещё пишет
-	// (kaname#919, kaname#923). ok=false — выдачи больше нет.
+	// (kaname#919, kaname#923). Тот же `FOR UPDATE` берёт отзыв по снятию регистрации
+	// объекта (kaname#963, F1). ok=false — выдачи больше нет.
 	LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
 	// LoadBindingsForForward — то же чтение, что LoadBindingForForward, но для ЦЕЛОГО НАБОРА

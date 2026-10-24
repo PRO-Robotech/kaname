@@ -94,7 +94,7 @@ func sameStringMap(a, b map[string]string) bool {
 	return true
 }
 
-func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
@@ -103,8 +103,9 @@ func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid stri
 		delete(m.stored, key)
 		delete(m.labelsOf, key)
 		m.mutated++
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 // countingEmitter counts the owner-tuple rows enqueued into fga_outbox.
@@ -178,7 +179,7 @@ func newRedeliveryRig() *redeliveryRig {
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	rec := &smObjectReconciler{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
 		WithReconcile(ev).
 		WithObjectReconciler(rec, nil)
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}

@@ -61,7 +61,9 @@ const (
 	// silently DROPPED the needed re-grant (the PK collided with the tombstone) → the
 	// account was left with NO active owner-binding. Keying off a fresh id makes the
 	// re-grant a genuine new ACTIVE row; idempotency rests on the active-grant
-	// partial-UNIQUE access_bindings_active_grant_uniq (WHERE revoked_at IS NULL) via
+	// partial-UNIQUE access_bindings_active_grant_uniq (WHERE revoked_at IS NULL AND
+	// narrowed_at IS NULL — условие сужения, kaname#963; предикат ON CONFLICT обязан
+	// совпадать с условием индекса, иначе вывод индекса отказывает 42P10) via
 	// ON CONFLICT on that partial index — a revoked tombstone is NOT in it, so it never
 	// suppresses a re-grant, while a concurrent double-insert of an ACTIVE grant is a
 	// clean no-op (not a 23505 error). The id stays acb-prefixed (20 chars) so type
@@ -92,7 +94,7 @@ WHERE NOT EXISTS (
      AND b.revoked_at IS NULL
 )
 ON CONFLICT (subject_id, subject_type, role_id, resource_type, resource_id, target_digest)
-  WHERE revoked_at IS NULL
+  WHERE revoked_at IS NULL AND narrowed_at IS NULL
   DO NOTHING`
 
 	// backfillOwnerSubjectsSQL projects the single-subject row for every active
