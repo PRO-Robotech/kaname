@@ -41,7 +41,7 @@ func TestRuleChildren_TierIsJudgedByTheScopeAnchorVocabulary(t *testing.T) {
 
 	tierFindings := func() []string {
 		var out []string
-		for _, err := range validateRuleChildren(m, rule, nil, 0, 0) {
+		for _, err := range validateRuleChildren(m, rule, nil, 0, 0, nil) {
 			if errors.Is(err, ErrRoleRuleNestingMalformed) && strings.Contains(err.Error(), finding) {
 				out = append(out, err.Error())
 			}

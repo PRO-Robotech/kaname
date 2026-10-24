@@ -31,6 +31,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
@@ -104,7 +105,8 @@ func disclosureRootAsk(t *testing.T, reg *metrics.Registry, strangerVerified, st
 	// Дверь — та же, что корень выдаёт стражам и решателю края (`wiring.go`).
 	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	require.True(t, door.FormReachable(), "НЕ-ВЫПОЛНИЛОСЬ(предпосылка): дверь собрана без формы")
-	bundle := buildAuthZServices(kanamepg.New(pool, pool), door, kanamepg.NewHumanSessionRepo(pool), reg, true)
+	bundle := buildAuthZServices(kanamepg.New(pool, pool), door, kanamepg.NewHumanSessionRepo(pool), reg, true,
+		servicesan.NewForm("kacho-{service}"))
 
 	req := &iamv1.AuthorizeCheckRequest{Subject: "user:" + stranger, Resource: &iamv1.ResourceRef{Type: "account", Id: acc},
 		Action: "iam.account.edit", RequiredRelation: "editor"}

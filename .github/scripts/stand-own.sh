@@ -269,7 +269,14 @@ stand_env() {
   # подтверждения глагола читает принципал как непроверенный и отвечает
   # `authz.step_up` (замер на стенде: 403, PreconditionFailure).
   export KANAME_AUTHN__TRUSTED_FORWARDER_SANS="spiffe://kaname.local/ns/kaname/sa/kaname,spiffe://kaname.local/ns/kaname/sa/$EDGE_SA"
+  # ФОРМА ИМЕНИ СЛУЖБЫ (kaname#308): учётка края стенда названа ею
+  # (`$EDGE_SA`); запись `…/sa/kaname` — собственный фронт службы, её корень
+  # узнаёт по сертификату фронта. Запись иной формы страж старта отвергает.
+  export KANAME_AUTHN__SERVICE_NAME_FORM="kacho-{service}"
   export KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE=registry.kaname.local
+  # ИЗДАТЕЛЬ ДОКЕРНОЙ ПОЛОСЫ (kaname#309): умолчания у процесса нет — адрес
+  # полосы стенда объявляется явно, как адресат строкой выше.
+  export KANAME_API_SERVER__REGISTRY_TOKEN__ISSUER=https://kaname.local/iam/token
   export KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY=3
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_SERVICE_ACCOUNT=5

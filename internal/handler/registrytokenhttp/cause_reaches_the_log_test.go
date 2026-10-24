@@ -61,7 +61,7 @@ func TestUnavailabilityCauseReachesTheLogButNotTheBody(t *testing.T) {
 
 	var log bytes.Buffer
 	h := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 	}, issuerStub{err: wrapped}).WithLogger(slog.New(slog.NewTextHandler(&log, nil)))
 
@@ -95,7 +95,7 @@ func TestUnavailabilityCauseReachesTheLogButNotTheBody(t *testing.T) {
 // условие работы обработчика (в пробах его нет).
 func TestHandlerWithoutALoggerStillAnswers(t *testing.T) {
 	h := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 	}, issuerStub{err: registrytokenuc.ErrIssuerUnavailable})
 
@@ -133,7 +133,7 @@ func TestRemovedCredentialKindReachesTheLogButNotTheBody(t *testing.T) {
 		t.Helper()
 		var log bytes.Buffer
 		h := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
-			Realm:          "https://api.kacho.local/iam/token",
+			Realm:          "https://api.example.test/iam/token",
 			DefaultService: "registry.kacho.local",
 		}, issuerStub{err: err}).WithLogger(slog.New(slog.NewTextHandler(&log, nil)))
 

@@ -98,7 +98,7 @@ func newAuthorizeServicesForRegistration() *services {
 	// ровно то состояние, которое послабление описывает. Без него страж полномочий
 	// вызывающего (справедливо) откажет ДО того, как маршрут будет исполнен, а
 	// предмет этой пробы — МАРШРУТ.
-	h := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).
+	h := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil), probeServiceNameForm).
 		WithInsecureAnonymousPeer(true)
 	return &services{authorizeHandler: h}
 }

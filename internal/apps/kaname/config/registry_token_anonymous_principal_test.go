@@ -34,6 +34,7 @@ const (
 func loadRegistryLane(t *testing.T, principal string) (config.Config, error) {
 	t.Helper()
 	t.Setenv(anonServiceEnv, "registry.probe.local")
+	t.Setenv(registryIssuerEnv, probeIssuer)
 	t.Setenv(anonPrincipalEnv, principal)
 	// Темп анонимной выдачи объявлен: предмет этих проб — форма принципала, а
 	// поток без темпа страж отвергает отдельно (kaname#928).
