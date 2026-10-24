@@ -243,7 +243,7 @@ func TestURG26_RoleAcceptedBeforeUnregisterWrittenAfterDoesNotNameKey(t *testing
 			reached, release = hold.arm()
 		}
 		cop, err := h.Create(asUser(w.ctx, w.usrA), &iamv1.CreateRoleRequest{
-			AccountId: string(w.accA), Name: fmt.Sprintf("urg26-create-%d", i), Description: "URG-26",
+			AccountId: string(w.accA), Name: fmt.Sprintf("urg26_create_%d", i), Description: "URG-26",
 			Rules: []*iamv1.Rule{protoNamesRule(ckey, pcrY)},
 		})
 		require.NoErrorf(t, err, "URG-26 create #%d: приём создания", i)

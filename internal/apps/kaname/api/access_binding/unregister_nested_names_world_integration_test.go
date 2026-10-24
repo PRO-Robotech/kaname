@@ -117,8 +117,48 @@ func (w *urxWorld) grantProbeRole(name string) domain.RoleID {
 // pollTag — опрос `Check` по ярлыку до want (окно материализации).
 func (w *urxWorld) pollTag(id string, want bool, why string) {
 	w.t.Helper()
-	require.Eventuallyf(w.t, func() bool { return w.tag(id) == want }, waitWindow, pollStep,
-		"%s: Check(usr-D, v_get, probemod_tag:%s) не дошёл до %v", why, id, want)
+	deadline := time.Now().Add(waitWindow)
+	for {
+		if w.tag(id) == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(pollStep)
+	}
+	// Разбор контроля фикстуры: из чего решение могло бы вывести ответ. Печать —
+	// чтобы красный контроль называл недостающую строку, а не только исход.
+	w.dumpProbeFacts(id)
+	w.t.Fatalf("%s: Check(usr-D, v_get, probemod_tag:%s) за %s не дошёл до %v", why, id, waitWindow, want)
+}
+
+// dumpProbeFacts печатает строки, из которых решение выводит доступ к ярлыку.
+func (w *urxWorld) dumpProbeFacts(id string) {
+	w.t.Helper()
+	for _, q := range []struct{ what, sql string }{
+		{"каталог probemod", `SELECT dotted || ' ' || object_type || ' live=' || live FROM kaname.catalog_resource WHERE dotted LIKE 'probemod.%' ORDER BY 1`},
+		{"зеркало probemod", `SELECT object_type || ':' || object_id FROM kaname.resource_mirror WHERE object_type LIKE 'probemod.%' ORDER BY 1`},
+		{"рёбра ярлыка", `SELECT object_type || ':' || object_id || ' <- ' || parent_type || ':' || parent_id FROM kaname.resource_parent_edge WHERE object_id = '` + id + `' ORDER BY 1`},
+		{"селекторы ролей probemod", `SELECT r.name || ' ' || s.arm || ' ' || array_to_string(s.object_types, ',') || ' names=' || array_to_string(s.resource_names, ',') || ' ctype=' || COALESCE(s.container_type, '-') || ' cotype=' || COALESCE(s.container_object_type, '-') || ' carm=' || COALESCE(s.container_arm, '-') || ' verbs=' || COALESCE(s.verbs_by_type::text, '-') FROM kaname.role_rule_selectors s JOIN kaname.roles r ON r.id = s.role_id WHERE r.name LIKE 'probemod.%' ORDER BY 1`},
+		{"проекция глаголов", `SELECT r.name || ' ' || v.object_type || ' ' || v.verb FROM kaname.role_verb v JOIN kaname.roles r ON r.id = v.role_id WHERE r.name LIKE 'probemod.%' ORDER BY 1`},
+		{"выдачи usr-D", `SELECT id || ' ' || COALESCE(role_id, '') || ' ' || status || ' ' || target::text FROM kaname.access_bindings WHERE subject_id = '` + string(w.usrD) + `'`},
+	} {
+		rows, err := w.pool.Query(w.ctx, q.sql)
+		if err != nil {
+			w.t.Logf("разбор П3-У: %s — запрос не прошёл: %v", q.what, err)
+			continue
+		}
+		var lines []string
+		for rows.Next() {
+			var s string
+			if rows.Scan(&s) == nil {
+				lines = append(lines, s)
+			}
+		}
+		rows.Close()
+		w.t.Logf("разбор П3-У: %s (%d): %v", q.what, len(lines), lines)
+	}
 }
 
 // URG-35 · имя убирается из вложенного правила, остальные действуют.

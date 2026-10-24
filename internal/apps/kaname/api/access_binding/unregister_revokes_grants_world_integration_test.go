@@ -52,6 +52,11 @@ type urxWorld struct {
 	*urWorld
 	abx   *accessbindingapp.Handler
 	verMu sync.Mutex // версия владельца из параллельных горутин снятия
+	// admin — администратор облака: вправе спрашивать ExpandAccess о любом
+	// объекте. Владелец аккаунта в мире П6 структурных фактов владения не
+	// несёт (аккаунт посеян строкой), и права администрировать объект реестра
+	// ему вывести не из чего — ответ «отказано» был бы о фикстуре.
+	admin domain.UserID
 }
 
 // newURXWorld поднимает мир У, регистрирует Z и провязывает чтения.
@@ -59,6 +64,9 @@ func newURXWorld(t *testing.T) *urxWorld {
 	t.Helper()
 	w := &urxWorld{urWorld: newURWorld(t)}
 	w.registerRegistry(urZ)
+	w.admin = mustSeedUser(t, w.ctx, w.pool, "urxadm")
+	seedClusterAdmin(t, w.ctx, w.pool, w.admin)
+	verifyAddresses(t, w.ctx, w.pool)
 	w.rewire()
 	return w
 }
@@ -172,10 +180,10 @@ func (w *urxWorld) privilegeBindings(who domain.UserID) []string {
 	return out
 }
 
-// expandUsers — люди в `ExpandAccess(X, v_get)` от имени usr-A.
+// expandUsers — люди в `ExpandAccess(X, v_get)` от имени администратора облака.
 func (w *urxWorld) expandUsers(id string) []string {
 	w.t.Helper()
-	resp, err := w.abx.ExpandAccess(asUser(w.ctx, w.usrA), &iamv1.ExpandAccessRequest{
+	resp, err := w.abx.ExpandAccess(asUser(w.ctx, w.admin), &iamv1.ExpandAccessRequest{
 		ObjectType: pcrRegType, ObjectId: id, Relation: "v_get",
 	})
 	require.NoErrorf(w.t, err, "ExpandAccess(%s)", id)
@@ -388,6 +396,9 @@ func TestURG09_NarrowedGrantDoesNotHoldTheSlot(t *testing.T) {
 	w := newURXWorld(t)
 	b2 := w.grantTo(w.usrD, w.rolRegGet, urTarget(pcrX, pcrY), false, "URG-09: B2 на X, Y")
 	w.withdrawX()
+	// «Дано URG-06 исполнен»: без сужения B2 вопрос о слоте суженной выдачи не
+	// задан вовсе — совпадения ключа нет, и зелёное ниже было бы ни о чём.
+	require.Equal(t, regRefs(pcrY), targetIDs(w.get(b2)), "URG-09 предусловие: B2 не сужена до [Y]")
 
 	op, err := w.abx.Create(asUser(w.ctx, w.usrA), w.grantRequest(userSubject(w.usrD), w.rolRegGet, urTarget(pcrY)))
 	require.NoError(t, err)
