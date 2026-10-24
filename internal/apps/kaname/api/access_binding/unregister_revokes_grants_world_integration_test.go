@@ -12,7 +12,7 @@ package access_binding_test
 // `unregister_nested_names_world_integration_test.go`, строка, отозванная до
 // миграции (URG-34, R0), — проба наката в `internal/migrations`.
 //
-// Мир — У приёмки (`newURWorld` пробы #963 поверх П6) с дополнениями раздела «Мир
+// Мир — У приёмки (`newURWorld` пробы kaname#963 поверх П6) с дополнениями раздела «Мир
 // проб»: реестр Z, никогда не регистрируемый ключ Q, роли с названиями. Чтения —
 // теми частями, что корень службы: `AccessBindingService.Get/List/ListSubjectPrivileges/
 // ExpandAccess/Revoke`, `AuthorizeService.Check`. Роль читается строкой хранилища

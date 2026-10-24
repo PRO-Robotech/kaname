@@ -30,7 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
-// unregistrationMigration — файл изменения #963.
+// unregistrationMigration — файл изменения kaname#963.
 const unregistrationMigration = "20261024050000_unregistration_revokes_its_grants.sql"
 
 // urgSeed — аккаунт, человек, проект, роль с перечнем прав и выдача R0, отозванная
@@ -81,7 +81,7 @@ func TestURG34_R0_RowRevokedBeforeMigrationKeepsUnspecifiedReason(t *testing.T) 
 	                          '[{"module":"registry","resources":["registries"],"verbs":["get"],"resourceNames":["r1"]}]'::jsonb)`)
 	require.NoError(t, err, "Р6 близнец: роль с правилом принимается и до наката")
 
-	require.NoError(t, goose.UpTo(db, ".", own), "накат #963")
+	require.NoError(t, goose.UpTo(db, ".", own), "накат kaname#963")
 
 	var status string
 	var reason sql.NullString
@@ -128,7 +128,7 @@ func TestUnregistrationMigration_DownRestoresPriorDefinitions(t *testing.T) {
 	require.NotEqual(t, wantCheck, gotCheck, "Дано: накат меняет ограничение роли")
 	require.NotEqual(t, wantUniq, gotUniq, "Дано: накат меняет предикат индекса уникальности")
 
-	require.NoError(t, goose.DownTo(db, ".", previous), "откат #963")
+	require.NoError(t, goose.DownTo(db, ".", previous), "откат kaname#963")
 	gotCheck, gotUniq = defs(db)
 	require.Equal(t, wantCheck, gotCheck, "откат: ограничение роли не прежнее")
 	require.Equal(t, wantUniq, gotUniq, "откат: индекс уникальности не прежний")
