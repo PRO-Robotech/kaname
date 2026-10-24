@@ -87,6 +87,29 @@ func TestObjectRefs_SeedBindingToAnObjectListIsRefused(t *testing.T) {
 	// Тот же охват без перечня — тоже отказ по охвату, а не только «перечня нет».
 	bare := orReplaceOnce(t, doc, orObjectListTarget, "      target: resources\n")
 	orRequireRefusal(t, bare, "seed.accessBindings[0].target")
+
+	// Тот же охват с ПУСТЫМ перечнем — отказ по охвату, а не только «перечень
+	// назван и пуст» (ось Г MOD-RL-23).
+	empty := orReplaceOnce(t, doc, orObjectListTarget, "      target: resources\n      resources: []\n")
+	orRequireRefusal(t, empty, "seed.accessBindings[0].target")
+}
+
+// Выдача посева без цели: находка называет единственное годное в манифесте
+// значение — allInScope, а не «ярус либо перечень» (ось В MOD-RL-23).
+func TestObjectRefs_SeedBindingWithoutTargetNamesAllInScope(t *testing.T) {
+	doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, "")
+	_, err := manifest.Load(doc)
+	if err == nil {
+		t.Fatal("выдача посева без цели принята")
+	}
+	if !errors.Is(err, manifest.ErrBindingIncomplete) {
+		t.Fatalf("отказ не отнесён к неполной выдаче (ErrBindingIncomplete): %v", err)
+	}
+	const want = "seed.accessBindings[0].target: ключ не назван — выдача посева в манифесте модуля " +
+		"действует только на ярус целиком: напишите `target: allInScope`"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("находка не называет единственное годное значение\n ждали  %q\n получено %v", want, err)
+	}
 }
 
 // Близнец: та же выдача на ярус целиком загружается.
@@ -143,18 +166,27 @@ func orPublicReadFixture(t *testing.T) string {
 	return string(doc)
 }
 
+// Перечень судится НАЛИЧИЕМ ключа: пустой отвергается так же, как непустой.
 func TestObjectRefs_NestedRuleResourceNamesIsRefused(t *testing.T) {
-	doc := orPublicReadFixture(t)
-	nested := orReplaceOnce(t, doc, orReaderOwner, orReaderOwner+"            resourceNames: [app]\n")
-	orRequireRefusal(t, nested, "roles[1].rules[0].children[0].resourceNames")
+	for name, names := range map[string]string{"непустой перечень": "[app]", "пустой перечень": "[]"} {
+		t.Run(name, func(t *testing.T) {
+			doc := orPublicReadFixture(t)
+			nested := orReplaceOnce(t, doc, orReaderOwner, orReaderOwner+"            resourceNames: "+names+"\n")
+			orRequireRefusal(t, nested, "roles[1].rules[0].children[0].resourceNames")
+		})
+	}
 }
 
 func TestObjectRefs_OwnerRuleWithChildrenResourceNamesIsRefused(t *testing.T) {
-	doc := orPublicReadFixture(t)
-	owner := orReplaceOnce(t, doc, orReaderOwner, strings.Replace(orReaderOwner,
-		"        resources: [registries]\n",
-		"        resources: [registries]\n        resourceNames: [reg00000000000000001]\n", 1))
-	orRequireRefusal(t, owner, "roles[1].rules[0].resourceNames")
+	for name, names := range map[string]string{"непустой перечень": "[reg00000000000000001]", "пустой перечень": "[]"} {
+		t.Run(name, func(t *testing.T) {
+			doc := orPublicReadFixture(t)
+			owner := orReplaceOnce(t, doc, orReaderOwner, strings.Replace(orReaderOwner,
+				"        resources: [registries]\n",
+				"        resources: [registries]\n        resourceNames: "+names+"\n", 1))
+			orRequireRefusal(t, owner, "roles[1].rules[0].resourceNames")
+		})
+	}
 }
 
 // Близнец: та же фикстура без ссылок на объекты загружается, и роль
