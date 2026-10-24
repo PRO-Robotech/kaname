@@ -261,8 +261,9 @@ func TestResourceMirror_DeleteTx_DoesNotAskTheCatalog(t *testing.T) {
 		 VALUES ('compute.disk', 'dsk-withdraw', 'prj-P', $1)`, stamp)
 	require.NoError(t, err)
 
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, "compute.disk", "dsk-withdraw", time.Now().UTC()),
-		"снятие обязано работать и на типе, снятом с платформы")
+	deleted, err := resource_mirror.DeleteTx(ctx, tx, "compute.disk", "dsk-withdraw", time.Now().UTC())
+	require.NoError(t, err, "снятие обязано работать и на типе, снятом с платформы")
+	require.True(t, deleted, "снятие лежащей строки на типе, снятом с платформы, обязано сказать «снята»")
 
 	var n int
 	require.NoError(t, tx.QueryRow(ctx,

@@ -60,8 +60,8 @@ type mirrorAdapter struct{}
 func (mirrorAdapter) UpsertTx(context.Context, service.Tx, service.ResourceMirrorRow) (bool, bool, error) {
 	return true, false, nil
 }
-func (mirrorAdapter) DeleteTx(context.Context, service.Tx, string, string, time.Time) error {
-	return nil
+func (mirrorAdapter) DeleteTx(context.Context, service.Tx, string, string, time.Time) (bool, error) {
+	return false, nil
 }
 
 // regReq satisfies the registerInput interface (tupleInput + versionedInput +
@@ -119,7 +119,7 @@ func (r *smObjectReconciler) snapshot() [][2]string {
 func newRegUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
 	t.Helper()
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{})
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{})
 	if rec != nil {
 		uc = uc.WithObjectReconciler(rec, nil)
 	}

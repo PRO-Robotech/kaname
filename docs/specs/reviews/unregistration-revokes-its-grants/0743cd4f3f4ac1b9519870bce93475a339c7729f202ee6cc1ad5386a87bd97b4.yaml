@@ -1,0 +1,121 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/unregistration-revokes-its-grants.md
+  sha256: 0743cd4f3f4ac1b9519870bce93475a339c7729f202ee6cc1ad5386a87bd97b4
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: 1e09286f1
+  content_commit: none
+  branch: '963'
+  task: PRO-Robotech/kaname#963
+  related_tasks: [PRO-Robotech/kaname#965]
+  lines: 1099
+  round: 2
+  review_form: delta_carry_over
+  predecessor_record: >-
+    docs/specs/reviews/unregistration-revokes-its-grants/4351c531af8de816049712329171d0afc667c0c90b7c4c0af4f5a58d9cfdd174.yaml
+    (круг 2, APPROVED, редакция 2 до правки неблокирующих)
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/unregistration-revokes-its-grants.md в копии
+    kacho-workspace/tmp/963-kaname-unreg-grants → 0743cd4f…87bd97b4. Совпал с заданием.
+  measurement_revisions: >-
+    Чтение файла копии на голове ветки 318f793bb. Документ не закоммичен (`??`), поэтому
+    прежней редакции 4351c531 нет ни в git, ни копией на диске. Дельта восстановлена
+    сверкой со своим полным чтением 4351c531 в этом же сеансе, а не `diff`: четыре места
+    прочитаны целиком, остальное сверено по позициям строк (ниже).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  scope: >-
+    Только редакция с отпечатком 0743cd4f…87bd97b4. Одобрение 4351c531 перенесено проверкой
+    дельты, а не новым кругом. Санкцией полосы приёмка станет, когда закоммиченная
+    редакция даст этот отпечаток.
+  why: >-
+    Дельта — ровно четыре заявленных места. Смысл, сценарии и DoD не изменились. Связки
+    «координата + условие + следствие» в публичном тексте больше нет.
+
+delta:
+  - place: §0.7 «Посев» (строки 146-147)
+    was: >-
+      Координаты применителя посева (файл и строки), перечень незаписываемых столбцов и
+      фраза о том, что таких выдач не пишет ни один производитель.
+    now: >-
+      «Посев цель манифеста не переносит, поэтому выдачи посева на перечень объектов вне
+      объёма — kaname#965 (§2)».
+    judged: Условие без координаты и без следствия. Смысл для объёма тот же.
+  - place: §2, строка о манифестах (208)
+    now: >-
+      «загрузчик будет отвергать такие ссылки (kaname#965). Имена ВЛОЖЕННОГО правила
+      остаются в объёме (Р7)».
+    judged: >-
+      Следствие убрано. Хвост о Р7 оставлен, как решил диспетчер, — объём Р7 не сузился.
+  - place: §5, строка 38/40 (989)
+    judged: >-
+      Держатель 38 приведён к «Тогда» URG-38: реестр выпущенных кортежей (только указатель
+      на родителя) и deny по Y и Z. Сказано, что правку `tuples.go` держит I7 через URG-20.
+      Держатель 40 не изменился.
+  - place: §6 п.3 (1023-1028)
+    judged: >-
+      Добавлен `domain.Role.Validate` (`internal/domain/role.go:151-157`) — он правится тем же
+      изменением. Координату сверил: ветвь «Legacy permissions-only role: must carry ≥1
+      permission». Держатели и близнецы п.3 прежние.
+
+unchanged_evidence:
+  line_count: 1099 у 4351c531, 1099 у 0743cd4f
+  offset_reconciliation: >-
+    §0.7 сократился на 3 строки, §6 п.3 вырос на 3 строки. Между ними каждый заголовок
+    сдвинут ровно на −3 против 4351c531: URG-01 447→444, URG-13 601→598, URG-20 663→660,
+    Р8 294→291, строка 38 в §5 992→989, §6 п.3 1026→1023. После п.3 позиции совпадают:
+    «Редакция 2: что закрыто» 1075, «Опора» 1093.
+  scenario_counts: >-
+    `grep -c '^#### URG-'` → 43 (URG-01…41, E1, E2); `grep -c '^\*\*Тогда\*\*'` → 39 (37
+    действующих и E1, E2) — как у 4351c531. Снятые 13, 14, 18, 23 по-прежнему сняты.
+  limit: >-
+    Побайтной сверки строк вне четырёх мест нет: прежней редакции на диске не было.
+    Перечисленные позиции и счётчики сходятся.
+
+disclosure_check:
+  predicate: >-
+    grep -n -E 'module_seed_writer|moduleseed|GrantRole|GrantRelation|молча' <документ> →
+    0 совпадений. Посев упомянут в трёх местах: §0.7 (146), URG-13 (600), таблица «Редакция 2:
+    что закрыто» (1078). Везде только условие («цель не переносит» / «не строит
+    применитель»), без координаты и без следствия.
+  verdict: Сборки нет.
+
+important:
+  - kind: DoD
+    scenario: §6 п.4
+    claim: >-
+      Не изменилось с прошлой записи и не блокирует. До миграции URG-38 краснеет на «Дано»
+      (роль не строится), а не по тексту утверждения. Строка §5 честно так и пишет.
+      Формулировку п.4 полоса может уточнить без повтора ревью, если смысл не поменяется.
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · APPROVED · 0743cd4f3f4ac1b9519870bce93475a339c7729f202ee6cc1ad5386a87bd97b4"
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: false
+  public_contract_field: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu

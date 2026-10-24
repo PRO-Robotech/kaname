@@ -70,6 +70,16 @@ type CreateRoleUseCase struct {
 	relations  clients.RelationStore
 	reconciler ObjectReconciler // rbac-contract-a-fix — optional, nil-safe
 	logger     *slog.Logger
+	// keys — какие ключи, названные правилами, зарегистрированы на приёме (kaname#963).
+	keys shared.RegisteredKeys
+}
+
+// WithRegisteredKeys — чтение регистрации ключей, названных в resourceNames, на
+// приёме (kaname#963, Р8): роль, принятая до снятия и записанная после, снятого
+// ключа не называет. Провязывает корень службы.
+func (u *CreateRoleUseCase) WithRegisteredKeys(k shared.RegisteredKeys) *CreateRoleUseCase {
+	u.keys = k
+	return u
 }
 
 func NewCreateRoleUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *CreateRoleUseCase {
@@ -162,6 +172,11 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if err := r.Validate(facts); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
+	held, err := heldNamesOf(ctx, u.keys, r.Rules)
+	if err != nil {
+		return nil, err
+	}
+	r.HeldNames = held
 
 	roleID := ids.NewID(domain.PrefixRole)
 	op, err := operations.NewFromContext(ctx,

@@ -58,3 +58,43 @@ func TestAccessBindingToPb_UnsetStatusAndNullables(t *testing.T) {
 	assert.Nil(t, pb.GetExpiresAt())
 	assert.Equal(t, "", pb.GetRevokedByUserId())
 }
+
+// TestAccessBindingToPb_RevocationReasonHasPresence — причина отзыва — поле с
+// присутствием (kaname#963, URG-E2): у действующей выдачи и у выдачи, отозванной до
+// заведения поля (R0, Д7), поле не задано вовсе; у выдачи, отозванной с причиной,
+// задано словом словаря. Нулевое значение перечня вместо «не задано» вернуло бы ключ
+// в тело края.
+func TestAccessBindingToPb_RevocationReasonHasPresence(t *testing.T) {
+	rat := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name   string
+		status domain.AccessBindingStatus
+		reason domain.RevocationReason
+		want   *iamv1.AccessBinding_RevocationReason
+	}{
+		{"действующая", domain.AccessBindingStatusActive, domain.RevocationReasonNone, nil},
+		{"отозвана до заведения поля", domain.AccessBindingStatusRevoked, domain.RevocationReasonNone, nil},
+		{"глагол Revoke", domain.AccessBindingStatusRevoked, domain.RevocationReasonRevoke,
+			iamv1.AccessBinding_REVOCATION_REASON_REVOKE.Enum()},
+		{"истёк срок", domain.AccessBindingStatusRevoked, domain.RevocationReasonExpired,
+			iamv1.AccessBinding_REVOCATION_REASON_EXPIRED.Enum()},
+		{"снята регистрация", domain.AccessBindingStatusRevoked, domain.RevocationReasonResourceUnregistered,
+			iamv1.AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED.Enum()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := domain.AccessBinding{ID: "acb00000000000000rsn", Status: tc.status, RevocationReason: tc.reason}
+			if tc.status == domain.AccessBindingStatusRevoked {
+				b.RevokedAt = &rat
+			}
+			pb, err := abObj{}.toPb(b)
+			require.NoError(t, err)
+			if tc.want == nil {
+				assert.Nil(t, pb.RevocationReason, "причина задана у выдачи без причины")
+				return
+			}
+			require.NotNil(t, pb.RevocationReason, "причина не задана у отозванной с причиной")
+			assert.Equal(t, *tc.want, pb.GetRevocationReason())
+		})
+	}
+}

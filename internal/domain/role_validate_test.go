@@ -10,7 +10,6 @@ package domain
 // applies to LEGACY permissions-only roles (no Rules).
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -76,22 +75,35 @@ func TestRole_A10_MixedArmRoleValidates(t *testing.T) {
 	}
 }
 
-// A LEGACY permissions-only role (no Rules) with an EMPTY permission set is still
-// invalid — the ≥1 lower bound is retained for the back-compat path so a degenerate
-// legacy role cannot exist.
-func TestRole_LegacyEmptyPermissionsRejected(t *testing.T) {
+// Роль без правил И без прав — законная форма (kaname#963, приёмка
+// `unregistration-revokes-its-grants.md`, Р6, §6 п.3): роль, все правила которой
+// потеряли адресатов снятием регистрации, остаётся и не даёт ничего. Прежнее
+// утверждение «пустой набор прав без правил отвергается» эта приёмка снимает
+// намеренно: держать его значило бы отвергать роль, которую строит само снятие.
+func TestRole_NoRulesNoPermissionsIsTheEmptyRole(t *testing.T) {
 	r := Role{
 		ID:        RoleID("rol0000000000000leg0"),
 		AccountID: AccountID("acc00000000000000000A"),
 		Name:      RoleName("legacy_empty"),
 		// No Rules; empty Permissions.
 	}
+	if err := r.Validate(fixtureModules()); err != nil {
+		t.Fatalf("Role.Validate() = %v, want nil (роль без правил и без прав — «ничего», Р6)", err)
+	}
+}
+
+// Близнец: роль только с перечнем прав по-прежнему судится нижней формой перечня —
+// негодное право отвергается, и пустые правила этого не отменяют.
+func TestRole_LegacyPermissionsOnlyStillJudgesItsSet(t *testing.T) {
+	r := Role{
+		ID:          RoleID("rol0000000000000leg1"),
+		AccountID:   AccountID("acc00000000000000000A"),
+		Name:        RoleName("legacy_bad"),
+		Permissions: Permissions{Permission("not-a-permission")},
+	}
 	err := r.Validate(fixtureModules())
 	if err == nil {
-		t.Fatalf("Role.Validate() = nil, want error (legacy permissions-only role with empty set)")
-	}
-	if !strings.Contains(err.Error(), "at least 1") {
-		t.Fatalf("Role.Validate() = %v, want the legacy ≥1 lower-bound error", err)
+		t.Fatalf("Role.Validate() = nil, want error (legacy permissions-only role with a malformed permission)")
 	}
 }
 

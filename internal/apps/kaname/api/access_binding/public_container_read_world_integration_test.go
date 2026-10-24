@@ -109,6 +109,9 @@ func newPCRWorld(t *testing.T) *pcrWorld {
 		kanamepg.NewPoolTxBeginner(w.pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
+		// каталожным фактом, что у мира после последней доставки.
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 	)
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           w.door,
@@ -379,3 +382,10 @@ func sixPairs() []pcrPair {
 	}
 	return out
 }
+
+// pcrFacts — каталожный факт мира П6 после ПОСЛЕДНЕЙ доставки: доставка
+// (`applyDelivered`) пересобирает факт, и отзыв по снятию регистрации обязан
+// видеть тот же, что разворачивание выдачи.
+type pcrFacts struct{ p *pcrWorld }
+
+func (s pcrFacts) Facts() *catalog.Facts { return s.p.facts }

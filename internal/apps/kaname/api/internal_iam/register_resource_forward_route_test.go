@@ -89,14 +89,15 @@ func (m *projectionMirror) UpsertTx(_ context.Context, _ service.Tx, row service
 	return true, unchanged, nil
 }
 
-func (m *projectionMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *projectionMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := ot + ":" + oid
 	if prev, ok := m.stored[key]; ok && !prev.version.After(tombstone) {
 		delete(m.stored, key)
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 // ── реконсайлер, воспроизводящий страж устаревших членов ────────────────────
@@ -145,7 +146,7 @@ func (r *guardedReconciler) snapshotPasses() []string {
 
 func newRouteRig() (*RegisterResourceUseCase, *guardedReconciler) {
 	rec := newGuardedReconciler()
-	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
 		WithReconcile(&countingReconcileEvents{}).
 		WithObjectReconciler(rec, nil)
 	return uc, rec
@@ -325,7 +326,7 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 	t.Run("успешные запуски посчитаны, и метка называет выбранный путь", func(t *testing.T) {
 		rec := newGuardedReconciler()
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(rec, nil).
 			WithMetrics(met)
@@ -347,7 +348,7 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 
 	t.Run("отказ ускорителя посчитан, а не только залогирован", func(t *testing.T) {
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(&failingReconciler{err: assertAnError}, nil).
 			WithMetrics(met)
