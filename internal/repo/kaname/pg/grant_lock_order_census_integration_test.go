@@ -237,7 +237,9 @@ type errOpRefused struct {
 	msg  string
 }
 
-func (e errOpRefused) Error() string { return fmt.Sprintf("операция отказала: %s: %s", e.code, e.msg) }
+func (e errOpRefused) Error() string {
+	return fmt.Sprintf("операция отказала: %s: %s", e.code, e.msg)
+}
 
 // awaitOpDone — терминальный исход операции use-case.
 func awaitOpDone(ctx context.Context, ops operations.Repo, op *operations.Operation, err error) error {

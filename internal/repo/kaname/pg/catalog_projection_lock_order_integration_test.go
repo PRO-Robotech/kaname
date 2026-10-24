@@ -246,4 +246,3 @@ func platformProbeRole(t *testing.T, ctx context.Context, repo *kanamepg.Reposit
 	require.NoError(t, w.Commit(ctx))
 	return out.ID
 }
-
