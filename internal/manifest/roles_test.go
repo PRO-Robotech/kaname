@@ -163,14 +163,12 @@ func TestMODMR13ResourceNamesAndMatchLabelsAreMutuallyExclusive(t *testing.T) {
 		t.Errorf("отказ не несёт дословного текста домена: %v", err)
 	}
 
-	// Парные положительные: ровно одно из двух.
-	for _, only := range []string{
-		"        resourceNames: [net-abc]\n",
-		"        matchLabels: {env: prod}\n",
-	} {
-		if _, err := manifest.Load([]byte(strings.Replace(base, "%s", only, 1))); err != nil {
-			t.Fatalf("ровно один селектор отвергнут (%q): %v", strings.TrimSpace(only), err)
-		}
+	// Парный положительный: один селектор — метки. Второй одиночный, имена, в
+	// манифесте модуля отвергается сам по себе (kaname#965,
+	// `object_refs_test.go`): ссылка на объект манифесту не дана.
+	only := "        matchLabels: {env: prod}\n"
+	if _, err := manifest.Load([]byte(strings.Replace(base, "%s", only, 1))); err != nil {
+		t.Fatalf("ровно один селектор отвергнут (%q): %v", strings.TrimSpace(only), err)
 	}
 }
 
