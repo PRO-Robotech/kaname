@@ -46,7 +46,7 @@ func urgSeed(t *testing.T, db *sql.DB) {
 		`INSERT INTO kaname.users (id, external_id, email, account_id) VALUES ('usr-urg', 'ext-urg', 'usr-urg@kacho.local', 'acc-urg')`,
 		`INSERT INTO kaname.projects (id, account_id, name) VALUES ('prj-urg', 'acc-urg', 'prj')`,
 		`INSERT INTO kaname.roles (id, account_id, name, description, permissions)
-		 VALUES ('rol-urg', 'acc-urg', 'urg-role', 'urg', '["iam.users.*.read"]'::jsonb)`,
+		 VALUES ('rol-urg', 'acc-urg', 'urg_role', 'urg', '["iam.users.*.read"]'::jsonb)`,
 		`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status, revoked_at, revoked_by_user_id)
 		 VALUES ('acb-urg-r0', 'user', 'usr-urg', 'rol-urg', 'project', 'prj-urg', 'REVOKED', now(), 'usr-urg')`,
@@ -72,12 +72,12 @@ func TestURG34_R0_RowRevokedBeforeMigrationKeepsUnspecifiedReason(t *testing.T) 
 
 	// Р6 до наката: роль без правил и без прав отвергается, близнец с правилом — нет.
 	_, err := db.Exec(`INSERT INTO kaname.roles (id, account_id, name, description, permissions, rules)
-	                   VALUES ('rol-urg-empty', 'acc-urg', 'urg-empty', 'urg', '[]'::jsonb, '[]'::jsonb)`)
+	                   VALUES ('rol-urg-empty', 'acc-urg', 'urg_empty', 'urg', '[]'::jsonb, '[]'::jsonb)`)
 	code, constraint := ndPgCode(err)
 	require.Equal(t, "23514", code, "Р6 до наката: роль rules=[] permissions=[] обязана отвергаться")
 	require.Equal(t, "roles_permissions_valid", constraint, "Р6 до наката: отказ не тем ограничением")
 	_, err = db.Exec(`INSERT INTO kaname.roles (id, account_id, name, description, permissions, rules)
-	                  VALUES ('rol-urg-rule', 'acc-urg', 'urg-rule', 'urg', '[]'::jsonb,
+	                  VALUES ('rol-urg-rule', 'acc-urg', 'urg_rule', 'urg', '[]'::jsonb,
 	                          '[{"module":"registry","resources":["registries"],"verbs":["get"],"resourceNames":["r1"]}]'::jsonb)`)
 	require.NoError(t, err, "Р6 близнец: роль с правилом принимается и до наката")
 
@@ -92,7 +92,7 @@ func TestURG34_R0_RowRevokedBeforeMigrationKeepsUnspecifiedReason(t *testing.T) 
 
 	// Р6 после наката.
 	_, err = db.Exec(`INSERT INTO kaname.roles (id, account_id, name, description, permissions, rules)
-	                  VALUES ('rol-urg-empty', 'acc-urg', 'urg-empty', 'urg', '[]'::jsonb, '[]'::jsonb)`)
+	                  VALUES ('rol-urg-empty', 'acc-urg', 'urg_empty', 'urg', '[]'::jsonb, '[]'::jsonb)`)
 	require.NoError(t, err, "Р6 после наката: роль rules=[] permissions=[] обязана приниматься")
 
 	// Д2: закрытый словарь и согласие с отзывом.

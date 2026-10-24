@@ -57,11 +57,6 @@ type urxWorld struct {
 	*urWorld
 	abx   *accessbindingapp.Handler
 	verMu sync.Mutex // версия владельца из параллельных горутин снятия
-	// admin — администратор облака: вправе спрашивать ExpandAccess о любом
-	// объекте. Владелец аккаунта в мире П6 структурных фактов владения не
-	// несёт (аккаунт посеян строкой), и права администрировать объект реестра
-	// ему вывести не из чего — ответ «отказано» был бы о фикстуре.
-	admin domain.UserID
 }
 
 // newURXWorld поднимает мир У, регистрирует Z и провязывает чтения.
@@ -69,9 +64,18 @@ func newURXWorld(t *testing.T) *urxWorld {
 	t.Helper()
 	w := &urxWorld{urWorld: newURWorld(t)}
 	w.registerRegistry(urZ)
-	w.admin = mustSeedUser(t, w.ctx, w.pool, "urxadm")
-	seedClusterAdmin(t, w.ctx, w.pool, w.admin)
-	verifyAddresses(t, w.ctx, w.pool)
+	// Структурные факты, которые создание аккаунта и проекта кладёт в боевой
+	// посадке: владелец аккаунта и указатель проекта на аккаунт. Мир П6 сеет
+	// аккаунт и проект строками, без них у usr-A нет права администрировать
+	// объекты аккаунта (`project.super_admin: admin from account`, `account.admin:
+	// … or owner`), и ExpandAccess/List отвечали бы отказом о фикстуре, а не о
+	// предмете.
+	_, err := w.pool.Exec(w.ctx,
+		`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
+		 VALUES ('account', $1, 'owner', 'user:' || $2),
+		        ('project', $3, 'account', 'account:' || $1)
+		 ON CONFLICT DO NOTHING`, string(w.accA), string(w.usrA), string(w.prjA))
+	require.NoError(t, err, "мир У: структурные факты аккаунта и проекта")
 	w.rewire()
 	return w
 }
@@ -186,10 +190,10 @@ func (w *urxWorld) privilegeBindings(who domain.UserID) []string {
 	return out
 }
 
-// expandUsers — люди в `ExpandAccess(X, v_get)` от имени администратора облака.
+// expandUsers — люди в `ExpandAccess(X, v_get)` от имени usr-A (владелец acc-A).
 func (w *urxWorld) expandUsers(id string) []string {
 	w.t.Helper()
-	resp, err := w.abx.ExpandAccess(asUser(w.ctx, w.admin), &iamv1.ExpandAccessRequest{
+	resp, err := w.abx.ExpandAccess(asUser(w.ctx, w.usrA), &iamv1.ExpandAccessRequest{
 		ObjectType: pcrRegType, ObjectId: id, Relation: "v_get",
 	})
 	require.NoErrorf(w.t, err, "ExpandAccess(%s)", id)
