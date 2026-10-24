@@ -1481,6 +1481,27 @@ func (s *reconcileStore) EmitAuditEvent(ctx context.Context, ev access_binding.A
 	return nil
 }
 
+// LiveCatalogTypes реализует reconcile.ReconcileStore (kaname#937): какие из типов
+// имеют живую строку каталога по базе. Вызывается только о типах, которых не знает
+// снимок процесса. Замка строк нет НАМЕРЕННО: чтение решает судьбу члена на один
+// проход, а `FOR KEY SHARE` завёл бы ребро ожидания сверки с применителем каталога
+// (строки ресурсов `FOR UPDATE`, шаг 2а, kaname#913), которого сейчас нет.
+func (s *reconcileStore) LiveCatalogTypes(ctx context.Context, types []string) ([]string, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	rows, err := s.tx.Query(ctx,
+		`SELECT dotted FROM kaname.catalog_resource WHERE dotted = ANY($1) AND live ORDER BY dotted`, types)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: live catalog types: %w", err)
+	}
+	live, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: live catalog types: %w", err)
+	}
+	return live, nil
+}
+
 // RevokeExpiredBinding CAS-transitions an ACTIVE binding to REVOKED on the tx
 // (ban #10 — single-statement UPDATE WHERE status='ACTIVE'). ok=false ⇒ 0 rows
 // (already revoked / concurrent Delete won). revoked_at is stamped to satisfy the
