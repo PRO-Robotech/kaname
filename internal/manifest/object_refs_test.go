@@ -142,7 +142,7 @@ func orRequireTargetFinding(t *testing.T, doc []byte, kind error, n int) {
 // Цель судится по РАЗОБРАННОМУ значению: псевдоним YAML, раскрывающийся в
 // `resources`, — та же ссылка на объекты, что и литерал.
 func TestObjectRefs_SeedBindingTargetThroughAnAliasIsRefused(t *testing.T) {
-	doc := orReplaceOnce(t, orBindingFixture(t), "      target: resources\n", "      target: &t resources\n")
+	doc := string(orReplaceOnce(t, orBindingFixture(t), "      target: resources\n", "      target: &t resources\n"))
 	for name, tail := range map[string]string{
 		"с перечнем":  "      target: *t\n" + orObjectList,
 		"без перечня": "      target: *t\n",
@@ -155,7 +155,7 @@ func TestObjectRefs_SeedBindingTargetThroughAnAliasIsRefused(t *testing.T) {
 
 // Близнец псевдонима: якорь на allInScope — обе выдачи загружаются.
 func TestObjectRefs_SeedBindingTargetAliasToAllInScopeLoads(t *testing.T) {
-	doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, "      target: &t allInScope\n")
+	doc := string(orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, "      target: &t allInScope\n"))
 	orRequireLoads(t, []byte(doc+orSecondBinding+"      target: *t\n"), "псевдоним на allInScope")
 }
 
@@ -172,7 +172,7 @@ func TestObjectRefs_SeedBindingUnknownTargetIsRefused(t *testing.T) {
 // Судится КАЖДАЯ выдача, а не первая: вторая отвергается по своей координате,
 // первая (на ярус целиком) находки не получает.
 func TestObjectRefs_SecondSeedBindingIsJudged(t *testing.T) {
-	doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, orWholeScopeTarget)
+	doc := string(orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, orWholeScopeTarget))
 	bad := []byte(doc + orSecondBinding + "      target: resources\n" + orObjectList)
 	orRequireTargetFinding(t, bad, manifest.ErrObjectRefInManifest, 1)
 	if _, err := manifest.Load(bad); strings.Contains(err.Error(), "seed.accessBindings[0].target") {
