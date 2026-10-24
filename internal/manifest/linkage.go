@@ -514,8 +514,11 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 	return census, faults
 }
 
-// Виды выдачи по охвату. Перечень закрыт схемой (`target.enum`); здесь названы
-// оба, потому что правило о перечне объектов зависит от того, КОТОРЫЙ выбран.
+// Виды выдачи по охвату. Контракт создания знает оба; манифесту модуля дан
+// только `allInScope` (`target.enum` схемы): охват `resources` отвергается
+// находкой о ссылке на объект (object_refs.go, kaname#965). Здесь названы оба,
+// потому что правило о перечне объектов зависит от того, КОТОРЫЙ выбран, и
+// отказ по охвату не заменяет находок о самом перечне.
 const (
 	bindingTargetAllInScope = "allInScope"
 	bindingTargetResources  = "resources"
