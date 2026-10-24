@@ -37,12 +37,16 @@ func (s *UnregisteredKeyStore) WriterOn(tx service.Tx) kanamerepo.Writer {
 	return &writeTx{readTx: readTx{tx: txAsPgx(tx)}}
 }
 
-// liveBinding — ОДНО условие «выдача действует» для отбора и для CAS отзыва и
+// liveBinding — ОДНО условие «выдача не отозвана» для отбора и для CAS отзыва и
 // сужения. Отбор и CAS на разных условиях пропускали бы молча строку, которая
-// проходит одно и не проходит другое (`revoked_at` пуст, а статус не ACTIVE).
-// `revoked_at IS NULL` в нём ещё и затем, что из него следует условие частичного
-// индекса `access_bindings_target_resources_live_idx`.
-const liveBinding = `status = 'ACTIVE' AND revoked_at IS NULL`
+// проходит одно и не проходит другое. Условие — `revoked_at IS NULL`: схема держит
+// его равносильным «статус PENDING или ACTIVE» (`access_bindings_revoked_consistency_ck`),
+// поэтому ожидающая выдача на снятый ключ отзывается так же, как действующая, — она
+// называет объект, которого нет. Второго сравнения со статусом нет намеренно: оно
+// дало бы планировщику индекс по статусу, и поиск ушёл бы с частичного индекса
+// `access_bindings_target_resources_live_idx`, чьё условие — ровно это (замер —
+// `TestUnregistrationLookupUsesIndexes` на операторе хранилища).
+const liveBinding = `revoked_at IS NULL`
 
 // BindingsNamingKeySQL — оператор поиска выдач по снятому ключу ($1 — тип, $2 — id).
 // Экспортирован ради пробы плана (`TestUnregistrationLookupUsesIndexes`): она судит
