@@ -3,13 +3,13 @@
 
 // fgaproxy_test.go — the FGA-proxy authz ReBAC gate + cert-SAN→SA mapping.
 //
-// Unit-level: the FGA-proxy gate resolves the verified mTLS client-cert SAN
-// (spiffe://kacho.cloud/ns/<ns>/sa/<учётка>, учётка — формы, объявленной пробой:
-// mod-<svc>) to a deterministic
-// ServiceAccount id, then ReBAC-checks `service_account:<sva>#fga_writer@
-// cluster:cluster_root` via the injected RelationChecker. No DB / no live TLS:
-//   - cert-identity injected via grpcsrv.WithCertIdentity;
-//   - ReBAC decision injected via a fake RelationChecker.
+// Уровень модуля: ворота посредника модели переводят SAN проверенного
+// клиентского сертификата (spiffe://kacho.cloud/ns/<ns>/sa/<учётка>, учётка —
+// формы, объявленной пробой: mod-<svc>) в детерминированный идентификатор
+// ServiceAccount и спрашивают `service_account:<sva>#fga_writer@cluster:cluster_root`
+// через подставленный RelationChecker. Без базы и без живого TLS:
+//   - личность сертификата подставляется через grpcsrv.WithCertIdentity;
+//   - решение модели прав — поддельным RelationChecker.
 //
 // Со снятия внешнего движка прав вопрос уходит не чужому хранилищу, а двери
 // решения над реляционной формой собственной базы (`authzcascade.Client` поверх

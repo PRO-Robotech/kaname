@@ -103,8 +103,8 @@ type Handler struct {
 	moduleForm servicesan.Form
 }
 
-// NewHandler — builder. svc, whoAmI and form are required (composition root
-// wires them unconditionally; nil at construction time means a wiring bug).
+// NewHandler — построитель. svc, whoAmI и form обязательны: композиционный
+// корень провязывает их безусловно, и nil при сборке означает ошибку провязки.
 //
 // form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm()):
 // ею внутренний страж узнаёт пира-модуля. Параметр позиционный намеренно —

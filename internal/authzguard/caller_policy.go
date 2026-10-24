@@ -14,11 +14,11 @@
 //     внутреннего центра, чьё имя учётной записи формы модулей не имеет. Он
 //     объявляется корнем (WithOwnFrontHop) и допускается РОВНО к тому, к чему
 //     допущен любой проверенный модуль: круга края ниже он не проходит никогда.
-//  2. Gateway-only — the gateway-fronted privileged admin RPCs
-//     (GatewayFrontedInternalRPCs) may ONLY be called by the api-gateway SA. A
-//     direct call from any other module (e.g. a compromised vpc module) → DENY in
-//     prod (a data-plane module cannot escalate via :9091).
-//     dev → no-op.
+//  2. Только край — привилегированные админские RPC за краем
+//     (GatewayFrontedInternalRPCs) вправе звать ТОЛЬКО учётка api-gateway.
+//     Прямой вызов любого другого модуля (например, скомпрометированного модуля
+//     vpc) в боевой посадке — ОТКАЗ: модуль плоскости данных не поднимает себе
+//     права через :9091. В посадке разработки — проход.
 //  3. SAN-restricted — a small set of RPCs whose caller must appear on an
 //     EXPLICIT, operator-supplied allow-list of client-certificate SPIFFE SANs
 //     (WithSANAllowlist). Unlike arms 1-2 this arm is enforced in EVERY mode and
@@ -286,9 +286,9 @@ func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolic
 // # Предмет: сертификат на этом хопе называет НЕ ЗВОНЯЩЕГО
 //
 // Фронт — обычный клиент своего же слушателя, и представляется он листом самой
-// службы. Учётная запись у службы своя и объявленной формы имени модулей не
-// имеет (при форме с приставкой — по построению), поэтому [ServiceNameFromSAN]
-// на такой строке не срабатывает — и пол
+// службы. Учётная запись у службы своя и названа, как правило, не приставкой
+// модулей (форма без приставки отвергается стражем старта, [servicesan.Form]),
+// поэтому [ServiceNameFromSAN] на такой строке не срабатывает — и пол
 // (рукав 1) отвергал КАЖДЫЙ запрос, пришедший через фронт, в боевой посадке. На
 // стенде рукав вырождается целиком, поэтому расхождение было невидимо ровно
 // там, где его ищут.

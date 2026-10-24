@@ -12,8 +12,9 @@ package authzguard
 // ReBAC relation gate (it exists to obtain the FIRST token, where no token
 // exists yet — chicken-and-egg). The credential it DOES require is therefore the
 // caller's mTLS identity: only the SANs an operator explicitly allow-lists may
-// mint. "Any verified module cert" is NOT enough — a compromised data-plane
-// module (vpc, compute) must not be able to mint cluster-admin.
+// mint. «Любого проверенного сертификата модуля» НЕ достаточно:
+// скомпрометированный модуль плоскости данных (vpc, compute) не должен уметь
+// выпустить себе администратора кластера.
 //
 // Fail-closed everywhere: an EMPTY allow-list denies every caller (the mint has
 // no default caller), and the gate is enforced in dev as well as production —
