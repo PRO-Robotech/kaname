@@ -250,7 +250,18 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 // те же факты области, селекторов и субъектов.
 func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock rowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
-	b, err := r.getLocked(ctx, bindingID, lock)
+	var (
+		b   domain.AccessBinding
+		err error
+	)
+	switch lock {
+	case lockNoKeyUpdate:
+		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
+	case lockKeyShare:
+		b, err = r.GetForKeyShare(ctx, bindingID)
+	default:
+		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %q", lock)
+	}
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
 			return reconcile.BindingScope{}, false, nil
