@@ -191,17 +191,17 @@ func readPodDelivery(t *testing.T, rendered string) podDelivery {
 var deliveryEnvKeys = []string{"KANAME_MANIFESTS__DIR", "KANAME_MANIFESTS__REQUIRED"}
 
 func TestModuleManifests_TwoListedConfigMapsLandAsFilesInTheDeliveryDir(t *testing.T) {
-	sets := append(moduleManifestsEntry(0, "registry-platform-kaname-module", "registry.manifest.yaml"),
+	sets := append(moduleManifestsEntry(0, "registry-module-manifest", "registry.manifest.yaml"),
 		moduleManifestsEntry(1, "compute-kaname-module", "compute.manifest.yaml")...)
 	out := renderStandaloneChart(t, chartProfiles, sets...)
 	pd := readPodDelivery(t, out)
 
 	require.Equal(t, map[string]string{
-		moduleManifestsDefaultDir + "/registry.manifest.yaml": "registry-platform-kaname-module/registry.manifest.yaml",
+		moduleManifestsDefaultDir + "/registry.manifest.yaml": "registry-module-manifest/registry.manifest.yaml",
 		moduleManifestsDefaultDir + "/compute.manifest.yaml":  "compute-kaname-module/compute.manifest.yaml",
 	}, pd.Files, "файлы каталога доставки в поде не те, что перечислены в значениях")
 	require.Empty(t, pd.WholeMaps, "ConfigMap смонтирован целиком — ключ, которого перечень не называл, лёг бы в каталог доставки")
-	require.Equal(t, []string{"compute-kaname-module", ownConfigMapName, "registry-platform-kaname-module"}, pd.Referenced,
+	require.Equal(t, []string{"compute-kaname-module", ownConfigMapName, "registry-module-manifest"}, pd.Referenced,
 		"под ссылается на ConfigMap вне перечня")
 	require.Empty(t, pd.Optional, "ссылка тома с optional: true — отсутствие манифеста под пропустил бы молча, "+
 		"а отсутствие снятием модуля не является")
@@ -218,14 +218,14 @@ func TestModuleManifests_TwoListedConfigMapsLandAsFilesInTheDeliveryDir(t *testi
 func TestModuleManifests_UnlistedConfigMapIsNotMounted(t *testing.T) {
 	// Близнец пробы выше ровно без второго элемента.
 	out := renderStandaloneChart(t, chartProfiles,
-		moduleManifestsEntry(0, "registry-platform-kaname-module", "registry.manifest.yaml")...)
+		moduleManifestsEntry(0, "registry-module-manifest", "registry.manifest.yaml")...)
 	pd := readPodDelivery(t, out)
 
 	require.Equal(t, map[string]string{
-		moduleManifestsDefaultDir + "/registry.manifest.yaml": "registry-platform-kaname-module/registry.manifest.yaml",
+		moduleManifestsDefaultDir + "/registry.manifest.yaml": "registry-module-manifest/registry.manifest.yaml",
 	}, pd.Files, "в каталоге доставки файл ConfigMap, которого перечень не называет")
 	require.NotContains(t, pd.Referenced, "compute-kaname-module", "ConfigMap вне перечня смонтирован")
-	require.Equal(t, []string{ownConfigMapName, "registry-platform-kaname-module"}, pd.Referenced)
+	require.Equal(t, []string{ownConfigMapName, "registry-module-manifest"}, pd.Referenced)
 }
 
 func TestModuleManifests_EmptyListRendersNoVolumeNoMountNoKnob(t *testing.T) {
