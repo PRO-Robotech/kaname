@@ -63,7 +63,8 @@
    "id": "go-unit",
    "why": "пробы -race -short: пакеты и пробы, обходящие дерево (deploy/, tests/newman, миграции) — любой путь",
    "jobs": [
-    "ci.yml:unit"
+    "ci.yml:unit",
+    "ci.yml:unitshard"
    ],
    "paths": [
     "**"
@@ -78,7 +79,8 @@
    "id": "tree-gates-newman",
    "why": "Go-пробы, читающие tests/newman",
    "jobs": [
-    "ci.yml:unit"
+    "ci.yml:unit",
+    "ci.yml:unitshard"
    ],
    "paths": [
     "tests/**"
