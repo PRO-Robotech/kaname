@@ -1,0 +1,107 @@
+# Пост-дифф ревью распределённых свойств — роль system-design-reviewer.
+# kaname#829. Проверка по дельте: перевод слова `user:*` → `system_class` в сборщике
+# модели (вариант В3), асимметричное закрепление kacho↔kaname.
+# Запись новая, добавлением (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/system-design-reviewer
+owner: system-design-reviewer
+round: delta   # судится дельта от прошлой записи 0a25dd1c… (голова ea31742e8)
+
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: 829-impl (локальная; копия tmp/829/wt-impl)
+  base: origin/746 @ cd796be94c69866c9487dc86d3d6dee885e07778
+  merge_base: bbbe33524c4ae501d4ea14d2d9747f300d057a99
+  head: dcc1160cfe5a0a6794582940229c931ae1d9c6de
+  previous_head: ea31742e8c22e44ceb56ee67e8ad09547f299160
+  delta_subject_commits: [fda31d7a2 (перевод в render.go), af8b0d2fc (проза канона = манифест), dcc1160cf]
+  commits: 53
+  files: 123
+content_digest: sha256:ba67e7efecb9c698e694c1cf9a4d652f2634d4bab32c4be495052154deea43f9
+digest_definition: 'git -C tmp/829/wt-impl diff --full-index origin/746...HEAD | sha256sum  (HEAD = dcc1160cf)'
+committed: 'да; git status --short → только неотслеживаемый upstream-kacho/ (второй операнд сверки)'
+
+verdict: ✅ принято
+blocks_landing: false
+return_to: —
+distributed_surface: true
+schema_overlap: false   # CAS/xmin/advisory-lock дельта не трогает
+
+measurements:
+  # Сверка модели (make model-canon-check, код обёртки), второй операнд — ОДНО дерево
+  # kacho под корнем за прогон. Вариант «class» — копия upstream-kacho@a95248464, где
+  # в services/registry/manifest.yaml:157 заменено ТОЛЬКО слово субъекта 'user:*' →
+  # system_class, проза примечаний прежняя.
+  - {kaname: '829 HEAD dcc1160cf', manifest: 'user:*', rc: 0, census: '27 из 27, находок 0'}
+  - {kaname: '829 HEAD dcc1160cf', manifest: class,    rc: 0, census: '27 из 27, находок 0'}
+  - {kaname: 'origin/main bbbe33524', manifest: 'user:*', rc: 0, census: '27 из 27, находок 0'}
+  - {kaname: 'origin/main bbbe33524', manifest: class,    rc: 2, census: '26 из 27, НАХОДКА registry_repository строка 19'}
+  - {kaname: 'origin/746 cd796be94', manifest: 'user:*', rc: 0, census: '27 из 27, находок 0'}
+  - {kaname: 'origin/746 cd796be94', manifest: class,    rc: 2, census: '26 из 27, НАХОДКА registry_repository строка 19'}
+  - {probe: 'module-manifest-check (сборка HEAD) -root=<kacho>', manifest: 'user:* | class', rc: '0 | 0'}
+  - {probe: 'go test ./internal/modelcompose ./internal/modelrender -run TestSC829|TestMODMR33A|Canon', rc: 0}
+  - {fact: 'kaname CI берёт дерево платформы с ДЕФОЛТНОЙ ветки kacho', where: '.github/actions/platform-tree/action.yml:81 (repository без ref)'}
+  - {fact: 'kacho сверяет пином: двоичное и канон из go.mod', where: 'upstream-kacho/internal/repohygiene/modelcanonpin.go; go.mod:120 kaname 3d5b02ede3aa'}
+  - {fact: 'образ kaname в чарте kacho согласован с пином модуля', where: 'upstream-kacho/deploy/outsourced_image_pin_agrees_with_module_pin_test.go'}
+  - {fact: 'расхождение блока канона на старте — фатальный отказ kaname', where: 'internal/modelcompose/compose.go:108-116; cmd/kaname/serve.go:326'}
+
+convergence_matrix:
+  # K — сверка kacho (пин), N — сверка kaname (голова kacho main), B — старт kaname
+  # с доставленными манифестами kacho.
+  S0 (до 829):                        {K: green, N_main: green, N_746: green}
+  S1 (829 в kaname 746):              {K: 'green (старый пин)', N_829: 'green (перевод)', N_main: green}
+  S2 (kacho поднял пин на 829):       {K: 'green (перевод в пине)', N: 'не меняется — манифест kacho main прежний', B: 'kaname≥829 + user:* → перевод → reaffirmed'}
+  S3 (kacho перевёл слово манифеста): {K: green, N_829: green, N_main_без_829: RED, N_746_без_829: RED, B_kaname_до_829: 'FATAL на старте'}
+  S4 (kaname#836 снял перевод):       {K: 'green до следующего подъёма пина', N: 'green только если kacho MAIN несёт class'}
+  verdict: 'обе сверки сходятся на каждой ревизии ТОЛЬКО при двух условиях порядка ниже; без них S3 краснит kaname main и любую ветку kaname без 829'
+
+runtime_rollout:
+  # Что пишет registry kacho во время выкатки — без изменений в дельте, держится
+  # прежними путями (SD-829-1 исполнен, запись 0a25dd1c…).
+  publication_input: '`user:* #v_get` через RegisterResource → хранится system_class:anonymous (domain.PublicationSubject, fga_outbox/emitter.go EmitPublicationTx)'
+  speaker_input: 'Check с говорящим `user:*` → SpeakerClasses → [anonymous] (domain/system_class.go:101)'
+  old_writer_unpublish: 'system_class_old_writer_unpublish_integration_test.go'
+  model_fit: 'v_get registry_repository = [system_class, …]; кортеж `user:*` в модель не пишется ни одним путём kaname≥829'
+
+critical: []
+
+important:
+  - id: SD-829-2
+    where: internal/modelrender/render.go:183-185 (предикат снятия)
+    what: >-
+      Предикат снятия перевода называет «манифест registry kacho переведён и kacho поднял
+      пин», но не называет ВЕТКУ: kaname CI читает дефолтную ветку kacho
+      (platform-tree/action.yml:81). Снятие (kaname#836) при переводе лишь в ветке эпика kacho
+      краснит сверку kaname. В строке предиката — «на origin/main kacho».
+    predicate: 'git -C <kacho> show origin/main:services/registry/manifest.yaml | grep -c "subjects: \[system_class" → 1 ДО посадки kaname#836'
+  - id: SD-829-3
+    where: порядок kacho#3251 (шаг 3)
+    what: >-
+      Шаг 3 (перевод слова в манифесте kacho main) законен только когда 829 уже в
+      origin/main kaname (иначе S3: rc=2 на kaname main и на каждой ветке без 829),
+      и в отдельной выкатке ПОСЛЕ подъёма пина и образа (иначе старый под kaname
+      при перезапуске получит новую доставку и откажет в старте).
+    predicate: 'git -C <kaname> merge-base --is-ancestor fda31d7a2 origin/main && echo ok — до вливания kacho#3251 в kacho main'
+  - id: SD-829-4
+    where: services/registry/manifest.yaml:144-151 (kacho), канон registry_repository (af8b0d2fc)
+    what: >-
+      Проза примечаний канона теперь побайтово равна прозе манифеста kacho и несёт
+      `user:*`. Её правка одной стороной — та же взаимная блокировка, перевода для
+      прозы нет. kacho#3251 меняет ТОЛЬКО слово субъекта; правка прозы — отдельным
+      парным шагом после kaname#836.
+
+orders:
+  - 'tooling/диспетчер: в задания kacho#3251 и kaname#836 — условия SD-829-2/3/4'
+  - 'git-operator: слияние в origin/746 — конфликты содержимого вне предмета роли: .github/scripts/newman-suite-debt.py, tests/newman/docs/CASES-INDEX.md (git merge-tree --write-tree origin/746 HEAD → rc 1)'
+
+checklist:
+  atomicity: 'n/a в дельте'
+  idempotency: 'перевод чист и детерминирован (subjectWords, render.go:186-195)'
+  cas_occ: 'n/a в дельте'
+  delivery_polling: 'n/a'
+  workers: 'n/a'
+  cross_service: 'новых рёбер нет; build-ребро kacho→kaname пином, обратного нет'
+  replica_isolation: 'n/a'
+  edge: 'n/a'
+  clean_arch: 'modelrender → domain (константа класса) — внутрь, допустимо'

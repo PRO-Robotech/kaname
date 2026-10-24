@@ -66,6 +66,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -354,16 +355,16 @@ func TestR7_4_02_LegitimatelyParentlessIsCountedApartFromLost(t *testing.T) {
 		        $2, now())`,
 			"rol-census-acc", "acc-census-1")
 		// Привязка с областью ВНЕ закрытого набора — тоже законно без предка.
-		mustExec(t, ctx, tx, `
+		mustExec(t, ctx, tx, bindingset.With(`
 		INSERT INTO kaname.access_bindings (id, resource_type, resource_id, role_id,
 		                                       subject_type, subject_id, scope, created_at)
-		VALUES ($1, 'vpc_network', 'net-census-1', $2, 'user', 'usr-census-owner', 3, now())`,
+		VALUES ($1, 'vpc_network', 'net-census-1', $2, 'user', 'usr-census-owner', 3, now())`),
 			"abn-census-res", "rol-census-acc")
 		// Привязка с областью В наборе — положительный близнец.
-		mustExec(t, ctx, tx, `
+		mustExec(t, ctx, tx, bindingset.With(`
 		INSERT INTO kaname.access_bindings (id, resource_type, resource_id, role_id,
 		                                       subject_type, subject_id, scope, created_at)
-		VALUES ($1, 'account', $2, $3, 'user', 'usr-census-owner', 2, now())`,
+		VALUES ($1, 'account', $2, $3, 'user', 'usr-census-owner', 2, now())`),
 			"abn-census-acc", "acc-census-1", "rol-census-acc")
 	})
 
@@ -482,10 +483,10 @@ func TestR7_4_11_CensusIsZeroInBothDirections(t *testing.T) {
 		VALUES ($1, 'census_role', '["storage.volumes.*.get"]'::jsonb,
 		        '[{"verbs": ["get"], "module": "storage", "resources": ["volumes"]}]'::jsonb,
 		        $2, now())`, "rol-census-1", "acc-census-1")
-		mustExec(t, ctx, tx, `
+		mustExec(t, ctx, tx, bindingset.With(`
 		INSERT INTO kaname.access_bindings (id, resource_type, resource_id, role_id,
 		                                       subject_type, subject_id, scope, created_at)
-		VALUES ($1, 'account', $2, $3, 'user', $4, 2, now())`,
+		VALUES ($1, 'account', $2, $3, 'user', $4, 2, now())`),
 			"abn-census-1", "acc-census-1", "rol-census-1", "usr-census-1")
 	})
 

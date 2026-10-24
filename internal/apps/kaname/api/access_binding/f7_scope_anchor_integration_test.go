@@ -30,13 +30,15 @@ import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // deltaHandler wires the minimal Handler needed for Create + Get round-trips
 // (other use-cases are nil — not exercised here).
 func deltaHandler(t *testing.T, repo *kanamepg.Repository, opsRepo operations.Repo) *accessbindingapp.Handler {
 	t.Helper()
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 	get := accessbindingapp.NewGetAccessBindingUseCase(repo).
 		WithRelationStore(allowRelationStore{}, nil)
@@ -166,10 +168,10 @@ func TestAB_IAM_1_18_DbRowProjectsDotted(t *testing.T) {
 	bid := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	// `scope` (SMALLINT) omitted — the migration-0005 BEFORE INSERT trigger derives
 	// it from resource_type (account ⇒ ACCOUNT).
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, granted_by_user_id)
-		VALUES ($1,'user',$2,$3,'account',$4,'ACTIVE',$5)`,
+		VALUES ($1,'user',$2,$3,'account',$4,'ACTIVE',$5)`),
 		string(bid), string(member), string(role), string(acc), string(owner))
 	require.NoError(t, err)
 

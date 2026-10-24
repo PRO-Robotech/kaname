@@ -310,7 +310,8 @@ message ListSubjectsRequest {
   // Action string. 1-128 chars.
   string action = 2;
 
-  // Page size; default 100, max 1000.
+  // Page size; default 500 — a page of relation holders, larger than the 50
+  // rows every other List of the service returns on 0; max 1000.
   int64 page_size = 3;
 
   // Page token.

@@ -30,7 +30,7 @@
 // SUA-70, SUA-71 утверждают поведение, которое уже есть, и зелены до кода.
 //
 // Run: `go test ./internal/handler/loginlanehttp/ -run 'TestSUA' -count=1`
-// (Docker). Skipped under -short.
+// (нужен Docker); под -short пропускается.
 package loginlanehttp_test
 
 import (
@@ -233,7 +233,7 @@ func TestSUA31_ExhaustedSetLeavesOnlyTheCode(t *testing.T) {
 		s = rotated(t, id, r, s)
 	}
 	st := h.status(t, s)
-	require.EqualValues(t, 0, requireDeclared(t, id, st, "backupCodes.remaining"), "%s: остаток — ноль числом", id)
+	require.EqualValues(t, 0, requireDeclared(t, id, st, "backupCodeSet.remaining"), "%s: остаток — ноль числом", id)
 	require.Equal(t, []string{"totp"}, methodsOf(t, id, st), "%s: stepUpMethods", id)
 }
 
@@ -291,12 +291,12 @@ func TestSUA40_NoMomentsRightAfterConfirmation(t *testing.T) {
 	confirmed := momentOf(t, id, st, "totp.confirmedAt")
 	_, has := field(st, "totp.lastUsedAt")
 	require.False(t, has, "%s: ключа totp.lastUsedAt нет", id)
-	require.EqualValues(t, 10, requireDeclared(t, id, st, "backupCodes.remaining"), "%s: backupCodes.remaining", id)
-	require.EqualValues(t, 10, requireDeclared(t, id, st, "backupCodes.total"), "%s: backupCodes.total", id)
-	issuedAt := momentOf(t, id, st, "backupCodes.issuedAt")
+	require.EqualValues(t, 10, requireDeclared(t, id, st, "backupCodeSet.remaining"), "%s: backupCodeSet.remaining", id)
+	require.EqualValues(t, 10, requireDeclared(t, id, st, "backupCodeSet.total"), "%s: backupCodeSet.total", id)
+	issuedAt := momentOf(t, id, st, "backupCodeSet.issuedAt")
 	require.False(t, issuedAt.After(confirmed), "%s: issuedAt ≤ confirmedAt до секунды", id)
-	_, has = field(st, "backupCodes.lastUsedAt")
-	require.False(t, has, "%s: ключа backupCodes.lastUsedAt нет", id)
+	_, has = field(st, "backupCodeSet.lastUsedAt")
+	require.False(t, has, "%s: ключа backupCodeSet.lastUsedAt нет", id)
 
 	r := h.stepUpCode(t, s, "totp", h.totpNow(t, p))
 	require.Equalf(t, http.StatusOK, r.status, "%s близнец SUA-01: — 200: %s", id, r.body)
@@ -305,7 +305,7 @@ func TestSUA40_NoMomentsRightAfterConfirmation(t *testing.T) {
 	require.Equalf(t, http.StatusOK, r.status, "%s близнец SUA-02: — 200: %s", id, r.body)
 	after := h.status(t, rotated(t, id, r, s))
 	momentOf(t, id, after, "totp.lastUsedAt")
-	momentOf(t, id, after, "backupCodes.lastUsedAt")
+	momentOf(t, id, after, "backupCodeSet.lastUsedAt")
 }
 
 // TestSUA41_LoginWithTheSecondFactorStampsTheCode — SUA-41.
@@ -422,11 +422,11 @@ func TestSUA60_BackupCodesAreShownOnce(t *testing.T) {
 	h.withCode(t, p)
 	require.Len(t, p.codes, 10, "%s: тело confirm несёт 10 кодов", id)
 	st := h.status(t, h.login(t, p))
-	momentOf(t, id, st, "backupCodes.issuedAt")
-	raw, ok := field(st, "backupCodes")
-	require.True(t, ok, "%s: объект backupCodes", id)
+	momentOf(t, id, st, "backupCodeSet.issuedAt")
+	raw, ok := field(st, "backupCodeSet")
+	require.True(t, ok, "%s: объект backupCodeSet", id)
 	obj, ok := raw.(map[string]any)
-	require.True(t, ok, "%s: backupCodes — объект", id)
+	require.True(t, ok, "%s: backupCodeSet — объект", id)
 	keys := []string{}
 	for k := range obj {
 		keys = append(keys, k)
@@ -442,7 +442,7 @@ func TestSUA61_RegenerationRetiresThePreviousSet(t *testing.T) {
 	h.withCode(t, p)
 	old := p.codes[0]
 	s := h.raiseByCode(t, p, h.login(t, p))
-	before := momentOf(t, id, h.status(t, s), "backupCodes.issuedAt")
+	before := momentOf(t, id, h.status(t, s), "backupCodeSet.issuedAt")
 	h.clock.Advance(2 * time.Second)
 
 	r := h.lane.do(t, h.c, http.MethodPost, loginlanehttp.PathSecondFactorBackupCodes,
@@ -455,9 +455,9 @@ func TestSUA61_RegenerationRetiresThePreviousSet(t *testing.T) {
 	require.Len(t, out.BackupCodes, 10, "%s: 10 новых кодов", id)
 	s = rotated(t, id, r, s)
 	st := h.status(t, s)
-	require.True(t, momentOf(t, id, st, "backupCodes.issuedAt").After(before), "%s: issuedAt сдвинут", id)
-	_, has := field(st, "backupCodes.lastUsedAt")
-	require.False(t, has, "%s: ключа backupCodes.lastUsedAt нет", id)
+	require.True(t, momentOf(t, id, st, "backupCodeSet.issuedAt").After(before), "%s: issuedAt сдвинут", id)
+	_, has := field(st, "backupCodeSet.lastUsedAt")
+	require.False(t, has, "%s: ключа backupCodeSet.lastUsedAt нет", id)
 
 	requireAuthFailed(t, id, h.stepUpCode(t, h.login(t, p), "lookup_secret", old))
 	twin := h.stepUpCode(t, h.login(t, p), "lookup_secret", out.BackupCodes[0])

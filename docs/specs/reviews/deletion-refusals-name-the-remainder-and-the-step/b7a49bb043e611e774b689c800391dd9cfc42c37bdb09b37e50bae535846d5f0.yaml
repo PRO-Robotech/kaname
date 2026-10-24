@@ -1,0 +1,159 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/deletion-refusals-name-the-remainder-and-the-step.md
+  sha256: b7a49bb043e611e774b689c800391dd9cfc42c37bdb09b37e50bae535846d5f0
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — статическая форма объявления, а не вердикт (change-graph.md §2).
+    Шапка этой записью намеренно не правлена; вердикт о редакции 2 — эта запись.
+  base_commit: ede94db30592b0fe89d9964107468f7e3412b158
+  content_commit: null   # редакция 2 в рабочей копии, не закоммичена; голова ветки f8021ad84
+  branch: 725-w9-kn-acc-proto-b
+  task: PRO-Robotech/kaname#725
+  lines: 491
+  round: 2
+  predecessor_record: docs/specs/reviews/deletion-refusals-name-the-remainder-and-the-step/3217711702358047275c3f7c588011e80d55704e9b1d589487733d42ae160faf.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии kacho-workspace/tmp/w9/kn-acc-proto-b → b7a49bb0…846d5f0;
+    совпало с заданием; wc -l → 491.
+  measurement_revisions: >-
+    Код — та же копия @f8021ad84; git diff --stat ede94db30 HEAD -- internal proto tests пуст.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T21:00:00Z'
+review_scope: >-
+  Круг 2 — по дельте к редакции 1 (раздел документа «Дельта к редакции 1»), плюс сверка
+  новых координат §0.1, §0.3, §0.4, DoD п. 4 и п. 10 командами.
+
+round1_closure:
+  - id: B1
+    kind: PRODUCER
+    closed: true
+    evidence: >-
+      RemoveFromAccount снят с предмета (шапка, §0.1 строка «не предмет», «Что НЕ входит», DRS-12
+      снят, DoD п. 10). Перепись потребителей §0.4 перемерена:
+      git grep -n 'revoke them before removing the membership\|MEMBERSHIP_CARRIES_RIGHTS' --
+      ':!docs/specs/reviews' ':!tests/newman/collections' ':!docs/engineering/acceptance' →
+      membership_refusal.go:45, :131; remove_from_account_names_grants_test.go:190;
+      errors.go:142; iam-user.py:2632, :2636, :2668 — совпало с документом.
+      Место дописывания хвоста: git grep -n -E 'Message\(\) *\+|st\.Message\(\)|WithDetails\('
+      -- 'internal/apps/kaname/**/*.go' ':!*_test.go' — `Message()+` только membership_refusal.go:120.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    closed: true
+    evidence: снят вместе с DRS-12; ID повторно не выдаётся.
+  - id: B3
+    kind: PRODUCER
+    closed: true
+    evidence: >-
+      Видимость — через ListSubjectPrivileges (access_binding_service.proto:255, required_acr_min "1";
+      комментарий :234–241 «несужёнными проходят … собственное чтение … и надзор облака»).
+      subject_read_authority.go:105 narrowsPage() == subjectReadAccountAdmin; :136 предикат;
+      :181 полоса своего; :194 надзор облака; list_subject_privileges.go:213 `if
+      !dec.lane.narrowsPage()`. SubjectPrivilege.scope_type = 12 (точечная форма iam.account),
+      scope_id = 13 — совпало с DRS-05 и Р1.
+  - id: B4
+    kind: DoD
+    closed: true
+    evidence: >-
+      Предикат (а) на HEAD → 13 строк: account_repo.go:404/406/408/410, pgmaperr.go:51 (комментарий),
+      :496, :505, :510, :515, :520, user_repo.go:834/837/840 — совпало с документом.
+      Предикат (б): group_repo.go, service_account_repo.go по 1 каждой строке;
+      pgmaperr_test.go:203–204 — Group/ServiceAccount-строки общей ветви.
+
+blocking: []
+
+minor:
+  - kind: FORMAT
+    note: >-
+      DoD п. 4(б) `git grep -c -F` без pathspec находит и сам документ приёмки (по 2 файла, а не
+      по 1). Файл назван в скобках — исполнять с pathspec `-- internal/repo/kaname/pg/group_repo.go`
+      / `service_account_repo.go`. Не блокирует: однозначно по названному файлу.
+  - kind: DISCLOSURE
+    note: >-
+      §0.3 «называть … группу человека вызывающему не открывает ничего, чего он не читает сам» —
+      для группы не измерено: у человека нет глагола «мои группы» (rpc в user_service.proto и
+      group_service.proto: ListMembers — по группе). Называемое — id группы, членом которой
+      является сам вызывающий (свой факт; существование членства уже в прежнем тексте). Вне дельты
+      круга 2, угрозы не несёт; полоса реализации формулирует довод точнее либо оставляет так.
+  - kind: TWIN
+    note: >-
+      DRS-04, DRS-07, DRS-11 — без собственного близнеца (принято в круге 1 как не блокирующее,
+      не изменилось).
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → b7a49bb043e611e774b689c800391dd9cfc42c37bdb09b37e50bae535846d5f0
+    - git diff --stat ede94db30 HEAD -- internal proto tests → пусто
+    - предикат DoD п. 4(а) → 13
+    - sed -n 95,210p subject_read_authority.go; grep -n narrowsPage list_subject_privileges.go → :213
+    - git grep -n StepUpMethods → sf_status.go:94, loginlanehttp/handler.go:961
+
+constructibility:
+  method: >-
+    Посев не ставился: стенда и разрешения на посев задание не называет. Нетривиальные «Дано»
+    сверены с названными фикстурами и кодом. DRS-08: AddMember не требует членства в аккаунте
+    группы — триггер group_members_member_exists (0001_initial.sql:335–362) проверяет только
+    существование пользователя.
+  seeded: 0
+  of: 13
+  named_fixture: 13
+  not_constructible: 0
+  not_executed: 0
+  fixtures:
+    - iam-user.py:1680–1700 — чужая выдача на человека (Г0, DRS-05…09)
+    - integration-посев явными id в internal/repo/kaname/pg — DRS-04, DRS-07, DRS-11
+    - installOneShotHold — DRS-13
+    - mock-порт use-case — DRS-14
+    - kaname-second-factor.py — повышение кодом (DRS-02)
+
+scenarios:
+  total: 13
+  positive: 3      # DRS-06, DRS-08 близнец, DRS-10 близнец (опора)
+  negative: 9
+  edge: 1          # DRS-14
+  producer_named: 13
+  twin_named_for_negatives: 6 of 9
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: Вердикт APPROVED записан; действующим становится после публикации внешнего события курьером.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 b7a49bb043e611e774b689c800391dd9cfc42c37bdb09b37e50bae535846d5f0"
+
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  target: PRO-Robotech/kaname#725
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true

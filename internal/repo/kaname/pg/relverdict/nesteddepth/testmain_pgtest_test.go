@@ -51,9 +51,13 @@ func TestMain(m *testing.M) {
 //     обхода 4 (`relverdict.MaxAncestorDepth`), и планы `probemod_tag.v_*`
 //     невыразимы (находки Д5′). Три уровня под проектом сегодня не доставляются
 //     вовсе; под аккаунтом цепь ярлыка — ровно 4;
-//   - без ключа `publicReadToChildren`: допуск отвергает подстановочную запись
-//     субъекта `system_class` в блоке модуля вне канона (находки Д3). Публичное
-//     чтение здесь не предмет — его держат пробы материализатора и мира П1.
+//   - без ключа `publicReadToChildren`: публичное чтение здесь не предмет — его
+//     держат пробы материализатора
+//     (`access_binding/reconcile/public_reader_sc65_test.go`), сборки модели с
+//     ключом у типа вне канона (`internal/modelcompose/public_read_module_type_test.go`),
+//     цепочки старта (`cmd/kaname/public_read_module_type_test.go`) и мира П2
+//     приёмки kaname#866 (`access_binding/publicreadmodule`, PM-03/04). Ключ
+//     убран, чтобы модель этого пакета несла ровно тот предмет, о котором его пробы.
 //
 // Предмет ND-08 — глубина вложенного правила — от обеих правок не зависит:
 // контейнер остаётся предком внука на глубине 2.
@@ -79,11 +83,11 @@ func installProbemodModel() error {
 	if err != nil {
 		return fmt.Errorf("фикстура П3: %w", err)
 	}
-	composed, _, err := modelcompose.Compose(authzmodel.DSL, []*manifest.Manifest{m})
+	composed, crep, err := modelcompose.Compose(authzmodel.DSL, []*manifest.Manifest{m})
 	if err != nil {
 		return fmt.Errorf("композиция модели: %w", err)
 	}
-	adm, err := authzmodel.Admit(composed)
+	adm, err := authzmodel.Admit(composed, crep.KeyTerms...)
 	if err != nil {
 		return fmt.Errorf("допуск модели: %w", err)
 	}

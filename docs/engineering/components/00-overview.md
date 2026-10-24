@@ -231,7 +231,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |
 | `:9091`   | `AuthorizeService`              | тот же обработчик для peer-проверок по mTLS-ребру      |
 | `:9091`   | `InternalClusterService`        | cluster-admin grants (time-bombed / permanent)         |
-| `:9091`   | `InternalUserService`           | `UpsertFromIdentity` (mirror identity)                 |
+| `:9091`   | `InternalUserService`           | `Get` (чтение личности для края)                       |
 | `:9091`   | `InternalOperationsService`     | cluster-wide admin operations feed                     |
 | `:9091`   | `InternalSessionRevocationsService` | logout / force-logout + hot-path IsRevoked         |
 | `:9091`   | `InternalInteractiveClientService` | CRUD InteractiveClient (OAuth2-клиенты консоли) |

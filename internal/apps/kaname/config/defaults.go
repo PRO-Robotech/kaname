@@ -68,6 +68,18 @@ func RegisterDefaults(v *viper.Viper) {
 	// у окна выше: без него переменная окружения до поля не доехала бы.
 	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID
 	v.SetDefault("api-server.registry-token.anonymous-client-id", "")
+	// ТЕМП АНОНИМНОЙ ВЫДАЧИ НА ИСТОЧНИК (kaname#928) — НОЛЬ, ТО ЕСТЬ НЕ ОБЪЯВЛЕН.
+	// Число за оператора не выбирается, как у темпа соседних точек поверхности
+	// выдачи: при включённом анонимном потоке нулевой отвергается стражем
+	// старта. Умолчание объявлено ради привязки переменной окружения.
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC
+	v.SetDefault("api-server.registry-token.anonymous-per-source-per-sec", 0)
+	// ДОВЕРЕННЫЙ ПЕРЕСЫЛЬЩИК ТОЧКИ АНОНИМНОЙ ВЫДАЧИ (kaname#930) — ПУСТО, ТО ЕСТЬ
+	// НЕ ОБЪЯВЛЕН. Доверие к пересылке за оператора не выбирается: при
+	// включённом анонимном потоке пустое отвергается стражем старта. Умолчание
+	// объявлено ради привязки переменной окружения.
+	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_FORWARDER_SAN
+	v.SetDefault("api-server.registry-token.anonymous-forwarder-san", "")
 	// Cluster-INTERNAL listener of the verification KEY SET — a SEPARATE port
 	// (default `tcp://0.0.0.0:9097`), served ONLY on the kaname-internal Service
 	// (never external, ban #6) over one-way server-TLS. It publishes ONE record

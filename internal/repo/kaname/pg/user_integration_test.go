@@ -33,6 +33,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // upsertUser-compatible helper: создает **дополнительного** user-row
@@ -238,9 +239,9 @@ func TestUser_41c_Delete_WithAccessBinding(t *testing.T) {
 	u, _ := upsertUser(t, ctx, repo, "ext-41c", "u41c@example.com", "U41c")
 	// Bind на system-role (есть в seed)
 	abID := ids.NewID(domain.PrefixAccessBinding)
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id)
-		VALUES ($1, 'user', $2, $3, 'account', 'acc0000000000000ghst')`,
+		VALUES ($1, 'user', $2, $3, 'account', 'acc0000000000000ghst')`),
 		abID, string(u.ID), seedSystemRoleIDIAMView,
 	)
 	require.NoError(t, err)

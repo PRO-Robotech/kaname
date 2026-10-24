@@ -1,0 +1,155 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/backup-code-set-has-one-form.md
+  sha256: 04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строки истории в шапке — статическая форма объявления; шапку рецензент не
+    правил намеренно (change-graph.md §2). Действующий вердикт о редакции 04f85af1… — эта запись
+    и внешнее событие. Прежние записи 7f950ca3…, c6e042f3…, a334e4da…, 7e115ca9…, 9d9ac6c8… не
+    тронуты.
+  base_commit: 02f8bf0f12d5114e71d4a81a8ffa825a90c1d59d
+  content_commit: none
+  content_commit_note: >-
+    Редакция 6 рассмотрена незакоммиченной в рабочей копии tmp/w13-kn297-acc5. HEAD копии равен
+    origin/297 = 02f8bf0f12d5… (перемерено `git ls-remote origin refs/heads/297`). Отпечаток
+    перемерен рецензентом через sha256sum и равен заявленному.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 657
+  scenarios: 26
+  round: 6
+  round_scope: >-
+    Проверка исполнения дельты редакция 5 → редакция 6 (9d9ac6c8… → 04f85af1…): DoD п. 6 и две
+    строки истории. Пункты вне дельты не переоткрываются (flow-acceleration fa-b1). Ф12 не правлен
+    (отпечаток fb5c49ca… перемерен), поэтому записи на новый отпечаток Ф12 нет.
+  round_note: >-
+    Вердикт 9d9ac6c8… (RETURNED) относится к редакции 5. Эта запись — вердикт о редакции 6.
+  predecessor_record: docs/specs/reviews/backup-code-set-has-one-form/9d9ac6c8951ca7264cd744e225fe418822a880d027d6cdd6640c4f484408db9a.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/backup-code-set-has-one-form.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T05:59:10Z'
+effective_approval:
+  issued: true
+  note: >-
+    Одобрена редакция 6 (04f85af1…). Одобрение действует, пока отпечаток не изменится; при любой
+    правке нужен новый круг по дельте.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: performed
+  published: true
+  database_id: 6261024854
+  node_id: "IC_kwDOUO26pM8AAAABdS-oVg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6261024854"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6261024854"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T06:20:53Z"
+  body_sha256: "dfb24391453197e4b1559350c9f87d2ad41de4b2c28c3341202d2e404c3618f1"
+  subject_sha256: "04f85af12ed3c71d20e6386674c80cc5c05d4848be1efaf71044aa9bf7b58542"
+  subject_revision_commit: "ad31941e63e2c6e282a973cba8ed969bf590a2d5"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/backup-code-set-has-one-form/7f950ca3f0709ac5b05558ae8deb441d7c9bd36df91fbe24253b7aa43347c81f.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/c6e042f38106b49bedddc3abeef2af6dd0a647d8e555c1848d22e7a6774e21c6.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/a334e4dacf5785042ac189402bd761be4c4fbaecca4628bfff9f8ae7d25b47a2.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/7e115ca9278b26f1b699b9a597f0640fb21e9e4b3515ba0e7465515ac5905957.yaml
+    - docs/specs/reviews/backup-code-set-has-one-form/9d9ac6c8951ca7264cd744e225fe418822a880d027d6cdd6640c4f484408db9a.yaml
+premise:
+  status: confirmed
+  predicate: >-
+    `timeout 45 git ls-remote origin refs/heads/297` → 02f8bf0f12d5114e71d4a81a8ffa825a90c1d59d,
+    `git rev-parse HEAD` в копии — та же голова. sha256sum документа → 04f85af1… (равен
+    заявленному). Строк 657 против 640 у редакции 5 (+17). `git diff --numstat` против HEAD:
+    45 строк добавлено, 3 удалено (у редакции 5 было 28/3). Прирост — история +7 (строка круга 5
+    и строка редакции 6), DoD п. 6 +10. Текст п. 8 тот же, что проверен в D4 круга 5. Сценариев
+    26 (`grep -c '^### Сценарий BCS-'`), нумерация пунктов DoD 1…10 прежняя.
+delta_checks:
+  - id: D1
+    subject: B1 круга 5 закрыт — `.github` снова в предикате п. 6
+    result: пройдено
+    predicate: >-
+      Предикат п. 6 читает internal, cmd, docs/content, tests, .github и исключает только
+      `*_test.go`. Он строже исправления, которое просил B1: `tests` тоже возвращён.
+      @02f8bf0f `git grep -n 'backupCodesRemaining' 02f8bf0f… -- internal cmd docs/content tests .github ':(exclude)*_test.go' | wc -l` → 0.
+  - id: D2
+    subject: контроль п. 6 читает и совпадает с документом
+    result: пройдено
+    predicate: >-
+      @db8bcb7e `git grep -c` тем же предикатом → 8 файлов, 25 строк: redact-newman-report.py 5,
+      auth-lane.mdx 2, sf_remove.go 1, handler.go 2, seed_key_person.py 2, kaname-second-factor.py
+      3, kaname-second-factor.postman_collection.json 9, second_factor_assertion_values_test.py 1.
+      Разбивка совпадает с п. 6 по каждому файлу. `*_test.py` предикат не исключает: файл учтён.
+  - id: D3
+    subject: исключение `*_test.go` названо и ограничено правдиво
+    result: пройдено
+    predicate: >-
+      @02f8bf0f `git grep -c 'backupCodesRemaining' 02f8bf0f… -- '*_test.go'` → 4 файла, 8 строк
+      (backup_code_set_integration_test.go 3, second_factor_remove_integration_test.go 1,
+      second_factor_test.go 3, step_up_any_method_ceremony_integration_test.go 1) — как в п. 6.
+      Перепись строгости: `git grep -h -E 'backupCodesRemaining|bcsKeyFlatRemains' <rev> -- '*_test.go' | grep -v -E '^\s*//|NotContains' | grep -v -E '^\s*bcsKeyFlatRemains\s*=\s*"backupCodesRemaining"$' | wc -l`
+      → 0 @02f8bf0f, 0 в рабочей копии, 10 @db8bcb7e — как в п. 6. Предикат ловит и чтение
+      константы вне NotContains, поэтому константа обходным путём не служит.
+  - id: D4
+    subject: N1 круга 5 учтён
+    result: пройдено
+    predicate: >-
+      П. 6 называет заглушки в `tests` и самопроверку чистильщика в `.github`. Они отвечают сами и
+      службу не спрашивают, поэтому их прежнюю форму ловит только написание; оба пути в
+      предикате. На голове пробы newman утверждают отсутствие ключа равенством множества членов
+      (`Object.keys(bc)…to.eql(['issuedAt','remaining','total'])`, kaname-second-factor.py:368
+      @02f8bf0f), а не написанием имени. Ноль по `tests` получен не обходом предиката.
+  - id: D5
+    subject: строка истории круга 5 и строка редакции 6 правдивы
+    result: пройдено
+    predicate: >-
+      Запись 9d9ac6c8….yaml существует: verdict RETURNED, subject.sha256 9d9ac6c8…, round 5. Строка
+      редакции 6 называет ровно сделанное — п. 6 и две строки истории.
+  - id: D6
+    subject: отсылка Ф12 к BCS DoD п. 6
+    result: пройдено
+    predicate: >-
+      Ф12 не правлен: sha256sum → fb5c49ca…, запись fb5c49ca….yaml на месте. Отсылка
+      second-factor-totp-and-recovery-codes.md:2986 «§9, предикат … в наборе newman → BCS DoD п. 6»
+      теперь верна: п. 6 читает `tests`. В редакции 5 он `tests` не читал, и отсылка была неточна.
+  - id: D7
+    subject: гейты приёмок
+    result: пройдено
+    predicate: >-
+      `go test -count=1 -run Acceptance ./internal/check/` в рабочей копии → ok, код 0. Гейт правки
+      после вердикта судит историю git, незакоммиченную правку он ещё не видит.
+new_blocking_from_delta: []
+non_blocking:
+  - id: N1
+    where: DoD п. 6, абзац о строгости
+    note: >-
+      Слова «По предмету:» стоят в пункте дважды: опора строгости (BCS-06/31/32 краснеют) и
+      последняя фраза (BCS-32 зелёный). Смысл однозначен, править не обязательно.
+checks:
+  scope: без изменений против круга 4, дельта сценариев не трогает
+  producer: 26 из 26, таблица не тронута
+  twin: как в круге 4, отрицания не тронуты
+  constructibility: новых Given дельта не вводит (посеяно 0 из 0)
+  format: без изменений
+  conventions: без изменений
+  dod: п. 6 — пройдено (B1 закрыт); п. 8 — без изменений против круга 5
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: false

@@ -89,3 +89,25 @@ func TestRegistryTokenCredentialKindRecorder_IsASingleInstance(t *testing.T) {
 		reg.RegistryTokenCredentialKindRecorder(),
 		"экземпляр обязан быть один: повторная регистрация коллектора роняет старт")
 }
+
+// TestRegistryTokenCredentialKindRecorder_AnonymousCellsAreSeeded — исходы
+// анонимного потока (kaname#928) — клетки той же переписи, заведённые нулём при
+// регистрации: «поток не обслужил ни одного входа» отличимо от «счёта нет».
+func TestRegistryTokenCredentialKindRecorder_AnonymousCellsAreSeeded(t *testing.T) {
+	reg := NewRegistry()
+	rec := reg.NewRegistryTokenCredentialKindRecorder()
+	cells := []string{
+		registrytokenuc.OutcomeAnonymousIssued, registrytokenuc.OutcomeAnonymousPaceExceeded,
+		registrytokenuc.OutcomeAnonymousAudienceRefused, registrytokenuc.OutcomeAnonymousIssuerUnavailable,
+	}
+	for _, o := range cells {
+		got, present := labelledCounter(t, reg,
+			"kaname_registry_token_credential_kind_total", map[string]string{"outcome": o})
+		require.True(t, present, "клетка %q обязана быть заведена нулём при регистрации", o)
+		require.Zero(t, got, "клетка %q заведена не нулём", o)
+	}
+	rec.ObserveCredentialKind(registrytokenuc.OutcomeAnonymousPaceExceeded)
+	got, _ := labelledCounter(t, reg,
+		"kaname_registry_token_credential_kind_total", map[string]string{"outcome": registrytokenuc.OutcomeAnonymousPaceExceeded})
+	require.Equal(t, float64(1), got)
+}

@@ -165,3 +165,190 @@ func TestCensusIsSeededWithZeroes(t *testing.T) {
 		"token/forwarded-from-non-edge": true, "token/edge-without-address": true,
 	}, names)
 }
+
+// TestRegistryTokenPointFollowsTheRuleAndLeavesTheCensusClosed — источник
+// анонимного входа докерной полосы (kaname#928) выводится тем же правилом
+// (пп. 1–3): адрес от края только при проверенном сертификате края, иначе адрес
+// пира. Словарь переписи п. 4 закрыт двумя точками приёмки, и третья точка его
+// не двигает.
+func TestRegistryTokenPointFollowsTheRuleAndLeavesTheCensusClosed(t *testing.T) {
+	r := newRule(t)
+	require.Equal(t, "203.0.113.7", r.RegistryTokenPoint("")(request(t, edgeSAN, xff("203.0.113.7"))),
+		"край с одним адресом — источник из заголовка")
+	require.Equal(t, peer, r.RegistryTokenPoint("")(request(t, "", xff("203.0.113.7"))),
+		"заголовок пересылки без сертификата края не меняет ключа")
+	require.Equal(t, peer, r.RegistryTokenPoint("")(request(t, neighborSAN, xff("203.0.113.7"))),
+		"чужой проверенный сертификат краем не считается")
+	require.Equal(t, peer, r.RegistryTokenPoint("")(request(t, edgeSAN, xff("203.0.113.7, 198.51.100.1"))),
+		"край без годного адреса делит ключ своего пира")
+	requireCells(t, r, nil)
+	require.Len(t, issuingsource.Cells(), 4)
+}
+
+// registryForwarderSAN — прокси реестра, объявленный доверенным пересыльщиком
+// точки анонимной выдачи (kaname#930).
+const registryForwarderSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-registry"
+
+// TestRegistryTokenPointTwoClientsBehindTheTrustedForwarderKeyApart — два
+// клиента за одним доверенным пересыльщиком получают РАЗНЫЕ ключи темпа: адрес
+// клиента из одного значения X-Forwarded-For, а не адрес пересыльщика
+// (kaname#930). Пир у обоих один — под прокси реестра.
+func TestRegistryTokenPointTwoClientsBehindTheTrustedForwarderKeyApart(t *testing.T) {
+	r := newRule(t)
+	source := r.RegistryTokenPoint(registryForwarderSAN)
+	require.Equal(t, "203.0.113.1", source(request(t, registryForwarderSAN, xff("203.0.113.1"))))
+	require.Equal(t, "203.0.113.2", source(request(t, registryForwarderSAN, xff("203.0.113.2"))))
+	require.Equal(t, "2001:db8::7", source(request(t, registryForwarderSAN, xff("2001:db8::7"))),
+		"IPv6 одним значением — тоже адрес")
+	requireCells(t, r, nil)
+}
+
+// Близнец: пересылка от пира, который НЕ объявленный пересыльщик, ключа не
+// меняет — ключ остаётся адресом пира. Строки различаются от положительной
+// пробы выше ровно личностью пира.
+func TestRegistryTokenPointIgnoresForwardingFromAnUntrustedPeer(t *testing.T) {
+	r := newRule(t)
+	source := r.RegistryTokenPoint(registryForwarderSAN)
+	unverified := request(t, registryForwarderSAN, xff("203.0.113.1"))
+	unverified.TLS.VerifiedChains = nil
+	for name, req := range map[string]*http.Request{
+		"без сертификата":          request(t, "", xff("203.0.113.1")),
+		"сертификат соседа":        request(t, neighborSAN, xff("203.0.113.1")),
+		"цепочка не проверена":     unverified,
+		"чужой домен доверия":      request(t, "spiffe://other.example/ns/kacho/sa/kacho-registry", xff("203.0.113.1")),
+		"другое пространство имён": request(t, "spiffe://kacho.cloud/ns/other/sa/kacho-registry", xff("203.0.113.1")),
+	} {
+		require.Equalf(t, peer, source(req), "строка %q", name)
+	}
+	requireCells(t, r, nil)
+}
+
+// Близнец: тот же сертификат прокси реестра при НЕобъявленном пересыльщике
+// личности пересыльщика не даёт — доверие задаёт ручка, а не сертификат.
+func TestRegistryTokenPointWithoutDeclaredForwarderKeysByThePeer(t *testing.T) {
+	r := newRule(t)
+	require.Equal(t, peer, r.RegistryTokenPoint("")(request(t, registryForwarderSAN, xff("203.0.113.1"))))
+}
+
+// Пересыльщик без годного адреса делит ключ своего пира — как край (п. 3):
+// нового ключа он не получает.
+func TestRegistryTokenPointForwarderWithoutUsableAddressSharesItsPeerKey(t *testing.T) {
+	r := newRule(t)
+	source := r.RegistryTokenPoint(registryForwarderSAN)
+	for name, h := range map[string]http.Header{
+		"заголовка нет":  nil,
+		"два значения":   xff("203.0.113.7", "198.51.100.2"),
+		"список":         xff("203.0.113.7, 198.51.100.2"),
+		"не адрес":       xff("not-an-address"),
+		"адрес с портом": xff("203.0.113.7:443"),
+	} {
+		require.Equalf(t, peer, source(request(t, registryForwarderSAN, h)), "строка %q", name)
+	}
+}
+
+// Доверие пересыльщику ограничено ТОЧКОЙ анонимной выдачи: на точках приёмки
+// (авторизация, токен-эндпоинт) его заголовок не читается и считается.
+func TestForwarderIsNotTrustedOnTheAcceptancePoints(t *testing.T) {
+	r := newRule(t)
+	_ = r.RegistryTokenPoint(registryForwarderSAN)
+	require.Equal(t, peer, r.Of(request(t, registryForwarderSAN, xff("203.0.113.1")), issuingsource.PointAuthorize))
+	require.Equal(t, peer, r.TokenPoint(request(t, registryForwarderSAN, xff("203.0.113.1"))))
+	requireCells(t, r, map[issuingsource.Cell]uint64{
+		{Point: issuingsource.PointAuthorize, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
+		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}:     1,
+	})
+}
+
+// requireRegistryTokenCensus — перепись точки анонимной выдачи равна
+// ожидаемой; не названные причины — нулю.
+func requireRegistryTokenCensus(t *testing.T, r *issuingsource.Rule, want map[issuingsource.RegistryTokenReason]uint64) {
+	t.Helper()
+	got := r.ReadRegistryTokenPoint()
+	require.Len(t, got, len(issuingsource.RegistryTokenReasons()),
+		"перепись точки несёт ровно клетки своего словаря")
+	for _, reason := range issuingsource.RegistryTokenReasons() {
+		require.Equalf(t, want[reason], got[reason], "причина %s", reason)
+	}
+}
+
+// Перепись точки анонимной выдачи засеяна нулём до первого запроса: клетка,
+// появляющаяся при первом попадании, не отличает «ноль случаев» от «счёта
+// нет». Словарь закрыт и отделён от словаря п. 4 приёмки.
+func TestRegistryTokenPointCensusIsSeededWithZeros(t *testing.T) {
+	r := newRule(t)
+	require.Equal(t, []issuingsource.RegistryTokenReason{
+		issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer,
+	}, issuingsource.RegistryTokenReasons())
+	require.Equal(t, "forwarded-from-unrecognized-peer",
+		string(issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer))
+	requireRegistryTokenCensus(t, r, nil)
+	requireCells(t, r, nil)
+}
+
+// Заголовок пересылки от проверенного или непроверенного пира, который ни
+// край, ни объявленный пересыльщик точки, на точке анонимной выдачи СЧИТАЕТСЯ:
+// при неверно названном пересыльщике все клиенты за прокси реестра делят один
+// ключ темпа, и без этого счёта такая посадка неотличима от залпа одного
+// клиента (kaname#930). Каждая строка — один запрос и ровно +1; словарь п. 4
+// приёмки при этом не двигается.
+func TestRegistryTokenPointCountsForwardingFromAnUnrecognizedPeer(t *testing.T) {
+	unverified := func(t *testing.T) *http.Request {
+		req := request(t, registryForwarderSAN, xff("203.0.113.1"))
+		req.TLS.VerifiedChains = nil
+		return req
+	}
+	for name, build := range map[string]func(*testing.T) *http.Request{
+		"без сертификата":      func(t *testing.T) *http.Request { return request(t, "", xff("203.0.113.1")) },
+		"сертификат соседа":    func(t *testing.T) *http.Request { return request(t, neighborSAN, xff("203.0.113.1")) },
+		"цепочка не проверена": unverified,
+		"чужой домен доверия": func(t *testing.T) *http.Request {
+			return request(t, "spiffe://other.example/ns/kacho/sa/kacho-registry", xff("203.0.113.1"))
+		},
+		"другое пространство имён": func(t *testing.T) *http.Request {
+			return request(t, "spiffe://kacho.cloud/ns/other/sa/kacho-registry", xff("203.0.113.1"))
+		},
+		"заголовок Forwarded": func(t *testing.T) *http.Request {
+			return request(t, neighborSAN, http.Header{"Forwarded": []string{"for=203.0.113.1"}})
+		},
+		"заголовок X-Real-Ip": func(t *testing.T) *http.Request {
+			return request(t, neighborSAN, http.Header{"X-Real-Ip": []string{"203.0.113.1"}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRule(t)
+			source := r.RegistryTokenPoint(registryForwarderSAN)
+			require.Equal(t, peer, source(build(t)))
+			requireRegistryTokenCensus(t, r, map[issuingsource.RegistryTokenReason]uint64{
+				issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer: 1,
+			})
+			requireCells(t, r, nil)
+		})
+	}
+}
+
+// Близнец: тот же запрос от ОБЪЯВЛЕННОГО пересыльщика и от края счёта не
+// двигает — строки отличаются от отрицательных выше ровно личностью пира.
+// Запрос без заголовка пересылки не считается тоже: заголовка не было.
+func TestRegistryTokenPointLeavesTheCensusForRecognizedPeers(t *testing.T) {
+	r := newRule(t)
+	source := r.RegistryTokenPoint(registryForwarderSAN)
+	require.Equal(t, "203.0.113.1", source(request(t, registryForwarderSAN, xff("203.0.113.1"))))
+	require.Equal(t, "203.0.113.2", source(request(t, edgeSAN, xff("203.0.113.2"))))
+	require.Equal(t, peer, source(request(t, neighborSAN, nil)))
+	requireRegistryTokenCensus(t, r, nil)
+	requireCells(t, r, nil)
+}
+
+// Перепись точки анонимной выдачи не смешивается с переписью точек приёмки:
+// тот же пир-сосед с заголовком двигает клетку своей точки, и только её.
+func TestRegistryTokenPointCensusIsSeparateFromTheAcceptancePoints(t *testing.T) {
+	r := newRule(t)
+	_ = r.RegistryTokenPoint(registryForwarderSAN)(request(t, neighborSAN, xff("203.0.113.1")))
+	_ = r.TokenPoint(request(t, neighborSAN, xff("203.0.113.1")))
+	requireRegistryTokenCensus(t, r, map[issuingsource.RegistryTokenReason]uint64{
+		issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer: 1,
+	})
+	requireCells(t, r, map[issuingsource.Cell]uint64{
+		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
+	})
+}

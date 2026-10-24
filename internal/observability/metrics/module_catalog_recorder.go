@@ -19,6 +19,8 @@ var (
 	ModuleCatalogApplyOutcomes = []string{
 		modulecatalog.ApplyOutcomeApplied,
 		modulecatalog.ApplyOutcomeFailed,
+		modulecatalog.ApplyOutcomeStaleRevision,
+		modulecatalog.ApplyOutcomeRevisionConflict,
 	}
 	// ModuleCatalogRetiredKinds — виды снятой строки каталога.
 	ModuleCatalogRetiredKinds = []string{

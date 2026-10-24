@@ -86,6 +86,9 @@ type seedWiringCensus struct {
 	ownBound map[string]string
 	// deliveredBound — идентификаторы, связанные `loadDeliveredManifests`.
 	deliveredBound map[string]string
+	// appliedBound — идентификаторы, связанные `applyDeliveredManifests`:
+	// ПРИМЕНЁННАЯ часть доставки (kaname#865, Д3).
+	appliedBound map[string]string
 }
 
 // rootProdFiles — не-тестовые файлы Go композиционного корня.
@@ -111,6 +114,7 @@ func seedApplierWiring(t *testing.T) seedWiringCensus {
 	census := seedWiringCensus{
 		bound: map[string]string{}, called: map[string]string{},
 		ownBound: map[string]string{}, deliveredBound: map[string]string{},
+		appliedBound: map[string]string{},
 	}
 	fset := token.NewFileSet()
 
@@ -148,6 +152,8 @@ func seedApplierWiring(t *testing.T) seedWiringCensus {
 							census.ownBound[lhs.Name] = at
 						case "loadDeliveredManifests":
 							census.deliveredBound[lhs.Name] = at
+						case "applyDeliveredManifests":
+							census.appliedBound[lhs.Name] = at
 						}
 					}
 				}
@@ -243,8 +249,17 @@ func TestMRW1_OwnManifestReachesTheSeedApplierAsItsOwnArgument(t *testing.T) {
 	if _, ok := c.deliveredBound[own]; ok {
 		t.Errorf("довод своего манифеста %q связан loadDeliveredManifests — доставка подана вместо своего", own)
 	}
-	if _, ok := c.deliveredBound[delivered]; !ok {
-		t.Errorf("довод доставки %q не связан loadDeliveredManifests (связаны: %v)", delivered, keysOf(c.deliveredBound))
+	if _, ok := c.appliedBound[own]; ok {
+		t.Errorf("довод своего манифеста %q связан applyDeliveredManifests — доставка подана вместо своего", own)
+	}
+	// Доставка едет ПРИМЕНЁННОЙ частью (kaname#865, Д3): модуль, пропущенный
+	// применителем каталога как младшая редакция либо отвергнутый конфликтом,
+	// посева не получает. Перечень, связанный загрузчиком доставки напрямую,
+	// нёс бы и пропущенный модуль.
+	if _, ok := c.appliedBound[delivered]; !ok {
+		t.Errorf("довод доставки %q не связан applyDeliveredManifests — посев получил бы модуль, "+
+			"пропущенный применителем каталога (связаны применённой частью: %v; загрузчиком доставки: %v)",
+			delivered, keysOf(c.appliedBound), keysOf(c.deliveredBound))
 	}
 }
 

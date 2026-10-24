@@ -54,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 const ciClusterObject = "cluster:cluster_root"
@@ -177,9 +178,9 @@ func (w *ciWorld) seedRole(t *testing.T, id, accountID string) {
 
 func (w *ciWorld) seedBinding(t *testing.T, id, subjectID, roleID, resourceType, resourceID string) {
 	t.Helper()
-	w.exec(t, `INSERT INTO kaname.access_bindings
+	w.exec(t, bindingset.With(`INSERT INTO kaname.access_bindings
 	             (id, subject_type, subject_id, role_id, resource_type, resource_id)
-	           VALUES ($1, 'user', $2, $3, $4, $5)`, id, subjectID, roleID, resourceType, resourceID)
+	           VALUES ($1, 'user', $2, $3, $4, $5)`), id, subjectID, roleID, resourceType, resourceID)
 }
 
 func (w *ciWorld) seedProject(t *testing.T, id, accountID string) {

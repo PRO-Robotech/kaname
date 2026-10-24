@@ -32,6 +32,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	repogroup "github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func seedGroup(t *testing.T, ctx context.Context, repo *kanamepg.Repository, accID domain.AccountID, name string) domain.Group {
@@ -230,9 +231,9 @@ func TestGroup_42b_Delete_WithAccessBinding(t *testing.T) {
 	g := seedGroup(t, ctx, repo, acc.ID, "g-42b")
 
 	abID := ids.NewID(domain.PrefixAccessBinding)
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id)
-		VALUES ($1, 'group', $2, $3, 'account', 'acc0000000000000xxxx')`,
+		VALUES ($1, 'group', $2, $3, 'account', 'acc0000000000000xxxx')`),
 		abID, string(g.ID), seedSystemRoleIDIAMView,
 	)
 	require.NoError(t, err)

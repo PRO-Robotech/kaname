@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -265,11 +266,6 @@ func (delABReader) SelectEmittedTuplesBySource(context.Context, domain.AccessBin
 	return nil, nil
 }
 
-// The account teardown fixture holds no sibling binding, so nothing survives a
-// per-binding revoke here.
-func (delABReader) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
-	return nil, nil
-}
 func (delABReader) ListActiveByRole(context.Context, domain.RoleID) ([]domain.AccessBinding, error) {
 	return nil, nil
 }
@@ -355,6 +351,17 @@ func (w delABWriter) Delete(_ context.Context, id domain.AccessBindingID) error 
 	}
 	w.repo.deleted[id] = true
 	return nil
+}
+
+// GetForDeactivation — замок снятия строки выдачи, который дренаж берёт до чтения
+// ведомости; снятой строки нет — NotFound, как у настоящего репозитория.
+func (w delABWriter) GetForDeactivation(_ context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	for _, b := range w.repo.liveBindings() {
+		if b.ID == id {
+			return b, nil
+		}
+	}
+	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 func (w delABWriter) EmitRelationDelete(context.Context, []access_binding.RelationTuple) error {
 	return nil

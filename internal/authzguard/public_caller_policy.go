@@ -42,8 +42,9 @@
 //     сертификата нет) — проход, как у CallerPolicy и RelationWriteGate.
 //  2. Край — служебная учётка края зовёт всё: это парадная дверь, и
 //     пообъектное решение модели доступа, на котором стоит весь замысел,
-//     принимается там. Исключение — глаголы [PublicGatewayFlooredRPCs]: их пол
-//     уровня служба судит и на этой ветви (второй замок, kaname#747).
+//     принимается там. Пол уровня из своего каталога служба судит и на этой
+//     ветви — у каждого глагола с полом, кроме [PublicGatewayFloorExemptRPCs]
+//     (второй замок, kaname#747, kaname#767).
 //  3. Вызываемые соседями — малая статичная таблица БЕЗ МУТАЦИЙ, называющая для
 //     каждого глагола, какие служебные учётки модулей вправе его звать. Всё, чего
 //     в ней нет, — только для края: prod — PermissionDenied, dev — проход.
@@ -101,36 +102,45 @@ const (
 	publicBatchCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 )
 
-// Три глагола ключа доступа, у которых пол уровня держит ВТОРОЙ ЗАМОК службы
-// на ветви края (задача kaname#747, Р1, Р3).
-const (
-	publicKeyBeginRegistrationMethod  = "/kaname.cloud.iam.v1.AccessKeyService/BeginRegistration"
-	publicKeyFinishRegistrationMethod = "/kaname.cloud.iam.v1.AccessKeyService/FinishRegistration"
-	publicKeyRevokeMethod             = "/kaname.cloud.iam.v1.AccessKeyService/Revoke"
-)
+// publicAuthorizeCheckMethod — вопрос модели доступа, которым край решает о
+// КАЖДОМ запросе арендатора (единственное изъятие второго замка, ниже).
+const publicAuthorizeCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/Check"
 
-// PublicGatewayFlooredRPCs — публичные глаголы, на которых пол уровня из
-// каталога службы судит САМА служба и тогда, когда вызывающий — край.
+// PublicGatewayFloorExemptRPCs — публичные глаголы с полом уровня, на которых
+// второй замок службы на ветви края НЕ стоит, с основанием каждого.
 //
-// # Зачем второй замок там, где пол уже судит край
+// # Что держит второй замок
 //
-// Край судит пол по СВОЕЙ копии каталога, и копия отстаёт от контракта службы
-// на время между вливанием контракта и пересборкой края: так было с этими
-// тремя глаголами, у которых копия края несла «1» при «2» в контракте. Пока
-// ветвь края пропускала всё, пол таких глаголов держал только край — и держал
-// не тот. Здесь пол читается у встроенного каталога службы, то есть у того же
-// производителя, что объявляет его в контракте.
+// На ветви края служба судит пол уровня из СВОЕГО встроенного каталога у
+// КАЖДОГО глагола, чья запись объявляет пол выше «0» (kaname#767), а не у
+// выписанного перечня. Перечень расходился бы с каталогом молча: новый глагол с
+// полом в него сам не попадает, и его пол держал бы только край — по своей
+// копии каталога, которая отстаёт от контракта службы на время между вливанием
+// контракта и пересборкой края (так было с тремя глаголами ключа доступа:
+// «1» в копии края при «2» в контракте, kaname#747). Выведенное из каталога
+// множество закрыто по умолчанию: глагол, получивший пол в контракте, получает
+// и второй замок тем же изменением.
 //
-// # Почему эти три
+// # Почему изъятие — перечень с основанием, а не настройка
 //
-// Они заводят и снимают способ, чьё предъявление ОДНО даёт уровень «2»
-// (приёмка `level-two-is-enrolled-at-level-two.md`, Р1): заведённый сессией
-// «1», такой способ поднимает её держателя до «2», не предъявившего второго
-// фактора. Ошибка пола здесь — повышение уровня, а не лишний доступ к записи.
-// Перечень статичен и живёт в коде, как таблица соседей выше: расширяет его
-// изменение с ревью, а не настройка посадки.
-func PublicGatewayFlooredRPCs() []string {
-	return []string{publicKeyBeginRegistrationMethod, publicKeyFinishRegistrationMethod, publicKeyRevokeMethod}
+// Изъятие ослабляет замок, и потому живёт в коде под ревью, как таблица
+// соседей выше: расширяет его изменение, называющее основание, а не настройка
+// посадки. Запись, чьего глагола нет среди публичных с полом, — находка
+// (TestKN767_ExemptionExpiresWithItsSubject): изъятие истекает вместе с
+// предметом.
+func PublicGatewayFloorExemptRPCs() map[string]string {
+	return map[string]string{
+		// Край задаёт этот вопрос САМ, о каждом запросе арендатора, до
+		// пересылки (звено авторизации края, вопрос о субъекте из ТЕЛА
+		// запроса). Пол уровня, который при этом судится, — пол глагола
+		// арендатора, а не этого вопроса: замок по уровню, переданному
+		// метаданными, отказывал бы самому решению о доступе — всякий раз,
+		// когда край задаёт вопрос без переданного уровня, и за глаголом
+		// арендатора без пола у сессии ниже «1». Пол самого вопроса для
+		// арендатора, зовущего его через край, держит край.
+		publicAuthorizeCheckMethod: "вопрос модели доступа, которым край решает о каждом запросе; " +
+			"судится пол глагола арендатора, а не этого вопроса",
+	}
 }
 
 // UnnamedCallerMessage — ЕДИНСТВЕННЫЙ текст отказа тому, кто не назвался ничем.
@@ -212,9 +222,10 @@ type PublicCallerPolicy struct {
 	// peerCallable — полное имя глагола → множество коротких имён служб-модулей
 	// (не края), которым его разрешено звать.
 	peerCallable map[string]map[string]struct{}
-	// gatewayFloored — глаголы, чей пол служба судит и на ветви края
-	// ([PublicGatewayFlooredRPCs]).
-	gatewayFloored map[string]struct{}
+	// gatewayFloorExempt — глаголы с полом, на которых второй замок на ветви
+	// края не стоит ([PublicGatewayFloorExemptRPCs]); у прочих он стоит везде,
+	// где каталог объявил пол.
+	gatewayFloorExempt map[string]struct{}
 	// presented — ПОРТ: приложил ли вызывающий удостоверение к этому запросу.
 	//
 	// Порт, а не прямой вызов читателя, и это НЕ оформление. Носитель
@@ -254,12 +265,12 @@ func NewPublicCallerPolicy(
 		}
 		m[method] = set
 	}
-	floored := make(map[string]struct{})
-	for _, method := range PublicGatewayFlooredRPCs() {
-		floored[method] = struct{}{}
+	exempt := make(map[string]struct{})
+	for method := range PublicGatewayFloorExemptRPCs() {
+		exempt[method] = struct{}{}
 	}
 	return &PublicCallerPolicy{
-		prodMode: prodMode, peerCallable: m, gatewayFloored: floored,
+		prodMode: prodMode, peerCallable: m, gatewayFloorExempt: exempt,
 		acrCatalog: acrCatalog, presented: presented,
 	}
 }
@@ -282,9 +293,10 @@ func NewPublicCallerPolicy(
 //     `PermissionDenied`. Разница — про следующий шаг вызывающего, а не про
 //     строгость: просить прав некому там, где края нет (kacho#2103).
 //   - край (api-gateway) → nil: это парадная дверь, где идёт пообъектный
-//     вопрос к модели доступа от имени человека, — кроме глаголов
-//     [PublicGatewayFlooredRPCs]: там пол уровня из каталога службы судит
-//     второй замок ([PublicCallerPolicy.gatewayFloor]).
+//     вопрос к модели доступа от имени человека, — если только каталог службы
+//     не объявил глаголу пол уровня, до которого переданный уровень не
+//     дотягивает: его судит второй замок ([PublicCallerPolicy.gatewayFloor]),
+//     кроме глаголов [PublicGatewayFloorExemptRPCs].
 //   - другой модуль на глаголе, который называет его в таблице вызываемых
 //     соседями, → nil.
 //   - любой иной модуль: prod → PermissionDenied; dev → nil.
@@ -433,7 +445,8 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
-// gatewayFloor — ВТОРОЙ ЗАМОК пола уровня на ветви края (kaname#747, Р3).
+// gatewayFloor — ВТОРОЙ ЗАМОК пола уровня на ветви края (kaname#747, Р3;
+// у каждого глагола с полом — kaname#767).
 //
 // Решает ОБЩЕЕ правило платформы (`grpcsrv.EvaluateStepUp`) — то же, что у края
 // и у пола внутреннего слушателя; ранжирование и освобождение машинного
@@ -449,7 +462,7 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 // dev-посадка — проход, как у прочих ветвей политики: без mTLS ветви края на
 // стенде нет вовсе.
 func (p *PublicCallerPolicy) gatewayFloor(ctx context.Context, fullMethod string) error {
-	if _, floored := p.gatewayFloored[fullMethod]; !floored || !p.prodMode {
+	if _, exempt := p.gatewayFloorExempt[fullMethod]; exempt || !p.prodMode {
 		return nil
 	}
 	required := p.requiredACRMin(fullMethod)

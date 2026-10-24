@@ -106,14 +106,16 @@ func TestLane_F12_01_EnrollShowsTheSecretOnce(t *testing.T) {
 	require.Len(t, keys, 3, "ровно три поля: secret, otpauthUri, expiresAt")
 }
 
-// TestLane_F12_02_ConfirmShowsTheCodesAndRotatesTheBearer — `confirm`: коды,
-// сессия «2», объект `assurance`, новый носитель печеньем; код и адрес
-// источника уходят глаголу.
+// TestLane_F12_02_ConfirmShowsTheCodesAndRotatesTheBearer — `confirm`: коды
+// массивом `backupCodes`, сводка нового набора `backupCodeSet` (kaname#297
+// BCS-03), сессия «2», объект `assurance`, новый носитель печеньем; код и
+// адрес источника уходят глаголу.
 func TestLane_F12_02_ConfirmShowsTheCodesAndRotatesTheBearer(t *testing.T) {
 	fresh, _ := domain.NewSessionBearer()
 	stub := &stubLane{confirmOut: humansession.ConfirmOutput{
 		View: levelTwoView(), Bearer: fresh, Assurance: assuranceTwo(),
-		BackupCodes: []string{"0123456789", "ABCDEFGHJK", "MNPQRSTVWX", "YZ01234567", "89ABCDEFGH", "JKMNPQRSTV", "WXYZ012345", "6789ABCDEF", "GHJKMNPQRS", "TVWXYZ0123"},
+		BackupCodes:   []string{"0123456789", "ABCDEFGHJK", "MNPQRSTVWX", "YZ01234567", "89ABCDEFGH", "JKMNPQRSTV", "WXYZ012345", "6789ABCDEF", "GHJKMNPQRS", "TVWXYZ0123"},
+		BackupCodeSet: humansession.BackupCodeSetView{Remaining: 10, Total: 10, IssuedAt: base.Add(time.Second / 2)},
 	}}
 	l := newLane(t, stub, "")
 	c := l.client(t, gatewaySAN)
@@ -140,12 +142,15 @@ func TestLane_F12_02_ConfirmShowsTheCodesAndRotatesTheBearer(t *testing.T) {
 	require.Equal(t, "bearer-1", stub.confirmIn[0].Bearer.CookieValue())
 	var keys map[string]any
 	require.NoError(t, json.Unmarshal([]byte(r.body), &keys))
-	require.NotContains(t, keys, "backupCodesRemaining", "поле остатка — только у предъявления запасного кода")
+	require.NotContains(t, keys, "backupCodesRemaining", "плоского остатка нет ни в одном ответе (kaname#297 Р3)")
+	require.Equal(t, map[string]any{"remaining": float64(10), "total": float64(10), "issuedAt": "2026-09-16T12:00:00Z"}, keys["backupCodeSet"],
+		"BCS-03: сводка нового набора, без lastUsedAt")
 }
 
 // TestLane_F12_StatusHasTwoShapes — `GET` состояния: без признака; `pending` —
-// `enrolled: false` с `pendingUntil` и БЕЗ `backupCodes`; `active` — `enrolled:
-// true`, `confirmedAt`, остаток числом (ноль — тоже число, Ф12-26).
+// `enrolled: false` с `pendingUntil` и БЕЗ `backupCodeSet`; `active` — `enrolled:
+// true`, `confirmedAt`, сводка `backupCodeSet` (kaname#297 Р2), остаток числом
+// (ноль — тоже число, Ф12-26); набора не прочитано — ключа нет (BCS-50).
 func TestLane_F12_StatusHasTwoShapes(t *testing.T) {
 	stub := &stubLane{statusOut: humansession.StatusOutput{PendingUntil: base.Add(15 * time.Minute)}}
 	l := newLane(t, stub, "")
@@ -164,14 +169,19 @@ func TestLane_F12_StatusHasTwoShapes(t *testing.T) {
 	// `active`: моменты — до секунды; момента, которого не было, нет ключом
 	// (kaname#827, SUA Р6).
 	stub.statusOut = humansession.StatusOutput{TOTPEnrolled: true, ConfirmedAt: base,
-		BackupCodes:         &humansession.BackupCodesView{Remaining: 0, Total: 10, IssuedAt: base.Add(time.Second / 2)},
+		BackupCodeSet:       &humansession.BackupCodeSetView{Remaining: 0, Total: 10, IssuedAt: base.Add(time.Second / 2)},
 		AccessKeysAvailable: true, StepUpMethods: []string{"totp"}}
 	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
-	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z"},"backupCodes":{"remaining":0,"total":10,"issuedAt":"2026-09-16T12:00:00Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
+	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z"},"backupCodeSet":{"remaining":0,"total":10,"issuedAt":"2026-09-16T12:00:00Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
 	stub.statusOut.TOTPLastUsed, stub.statusOut.TOTPLastUsedAt = true, base.Add(90*time.Second+time.Millisecond)
-	stub.statusOut.BackupCodes.LastUsed, stub.statusOut.BackupCodes.LastUsedAt = true, base.Add(time.Minute)
+	stub.statusOut.BackupCodeSet.LastUsed, stub.statusOut.BackupCodeSet.LastUsedAt = true, base.Add(time.Minute)
 	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
-	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:30Z"},"backupCodes":{"remaining":0,"total":10,"issuedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:00Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
+	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:30Z"},"backupCodeSet":{"remaining":0,"total":10,"issuedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:00Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
+
+	// Фактор заведён, сводки набора нет (BCS-50, BCS-51): ключа нет, а не нули.
+	stub.statusOut.BackupCodeSet = nil
+	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/second-factor", nil, nil, sess)
+	require.JSONEq(t, `{"totp":{"enrolled":true,"confirmedAt":"2026-09-16T12:00:00Z","lastUsedAt":"2026-09-16T12:01:30Z"},"accessKeys":{"available":true},"stepUpMethods":["totp"]}`, r.body)
 
 	post := l.do(t, c, http.MethodPost, "/iam/v1/auth/second-factor", map[string]string{}, nil, sess)
 	require.Equal(t, http.StatusMethodNotAllowed, post.status)
@@ -184,8 +194,9 @@ func TestLane_F12_StatusHasTwoShapes(t *testing.T) {
 }
 
 // TestLane_F12_15_18_StepUpNamesTheMethodAndTheRemainder — церемония: способ
-// называет клиент; ответ — сессия и `assurance`; `backupCodesRemaining` только
-// там, где потреблён запасной код; ветвь пароля несёт `password`, а не `code`.
+// называет клиент; ответ — сессия и `assurance`; сводка `backupCodeSet` только
+// там, где потреблён запасной код (kaname#297 BCS-06, BCS-07), плоского
+// `backupCodesRemaining` нет; ветвь пароля несёт `password`, а не `code`.
 func TestLane_F12_15_18_StepUpNamesTheMethodAndTheRemainder(t *testing.T) {
 	fresh, _ := domain.NewSessionBearer()
 	stub := &stubLane{stepUpOut: humansession.StepUpOutput{View: levelTwoView(), Bearer: fresh, Assurance: assuranceTwo()}}
@@ -206,17 +217,18 @@ func TestLane_F12_15_18_StepUpNamesTheMethodAndTheRemainder(t *testing.T) {
 	require.Equal(t, "123456", stub.stepUpIn[0].Code)
 	require.Equal(t, "203.0.113.7", stub.stepUpIn[0].Source)
 
-	nine := 9
-	stub.stepUpOut.BackupCodesRemaining = &nine
+	stub.stepUpOut.BackupCodeSet = &humansession.BackupCodeSetView{Remaining: 9, Total: 10, IssuedAt: base, LastUsedAt: base.Add(time.Minute + time.Millisecond), LastUsed: true}
 	r = l.do(t, c, http.MethodPost, "/iam/v1/auth/step-up", map[string]string{"method": "lookup_secret", "code": "ABCDEFGH12", "csrfToken": tok}, fwd(), ctxCk, sess)
 	require.Equal(t, http.StatusOK, r.status, r.body)
 	keys = nil
 	require.NoError(t, json.Unmarshal([]byte(r.body), &keys))
 	require.Len(t, keys, 3)
-	require.EqualValues(t, 9, keys["backupCodesRemaining"])
+	require.NotContains(t, keys, "backupCodesRemaining", "BCS-31: плоского остатка нет")
+	require.Equal(t, map[string]any{"remaining": float64(9), "total": float64(10), "issuedAt": "2026-09-16T12:00:00Z", "lastUsedAt": "2026-09-16T12:01:00Z"}, keys["backupCodeSet"],
+		"BCS-06: сводка набора после траты")
 	require.Equal(t, assurance.MethodLookupSecret, stub.stepUpIn[1].Method)
 
-	stub.stepUpOut.BackupCodesRemaining = nil
+	stub.stepUpOut.BackupCodeSet = nil
 	r = l.do(t, c, http.MethodPost, "/iam/v1/auth/step-up", map[string]string{"method": "password", "password": "correct horse battery", "csrfToken": tok}, fwd(), ctxCk, sess)
 	require.Equal(t, http.StatusOK, r.status, r.body)
 	require.Equal(t, assurance.MethodPassword, stub.stepUpIn[2].Method)
@@ -225,15 +237,16 @@ func TestLane_F12_15_18_StepUpNamesTheMethodAndTheRemainder(t *testing.T) {
 }
 
 // TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode — снятие и
-// перечеканка: `{"method","code"}` в теле; снятие отвечает сессией и
-// `assurance`, и `backupCodesRemaining: 0` ВСЕГДА (Р4 ред. 10, kaname#275:
-// фактор снят, набора нет); перечеканка — новым набором.
+// перечеканка: `{"method","code"}` в теле; снятие отвечает ровно сессией и
+// `assurance` — набора после снятия нет, и это отсутствие ключа (kaname#297
+// BCS-10, BCS-11; инвариант kaname#275 сохранён); перечеканка — новым набором
+// массивом и его сводкой (BCS-04).
 func TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode(t *testing.T) {
 	fresh, _ := domain.NewSessionBearer()
-	zero := 0
 	stub := &stubLane{
-		removeOut: humansession.RemoveSecondFactorOutput{View: levelTwoView(), Bearer: fresh, Assurance: humansession.AssuranceView{Level: "2", MissingForLevel2: []string{}}, BackupCodesRemaining: &zero},
-		regenOut:  humansession.RegenerateBackupCodesOutput{View: levelTwoView(), Bearer: fresh, Assurance: assuranceTwo(), BackupCodes: []string{"0123456789"}},
+		removeOut: humansession.RemoveSecondFactorOutput{View: levelTwoView(), Bearer: fresh, Assurance: humansession.AssuranceView{Level: "2", MissingForLevel2: []string{}}},
+		regenOut: humansession.RegenerateBackupCodesOutput{View: levelTwoView(), Bearer: fresh, Assurance: assuranceTwo(), BackupCodes: []string{"0123456789"},
+			BackupCodeSet: humansession.BackupCodeSetView{Remaining: 10, Total: 10, IssuedAt: base}},
 	}
 	l := newLane(t, stub, "")
 	c := l.client(t, gatewaySAN)
@@ -244,8 +257,8 @@ func TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode(t *testing.T) {
 	require.Equal(t, http.StatusOK, r.status, r.body)
 	var keys map[string]any
 	require.NoError(t, json.Unmarshal([]byte(r.body), &keys))
-	require.Len(t, keys, 3)
-	require.EqualValues(t, 0, keys["backupCodesRemaining"])
+	require.Len(t, keys, 2, "BCS-10, BCS-11: ключи тела ровно session и assurance")
+	require.Contains(t, keys, "session")
 	require.Equal(t, map[string]any{"level": "2", "level2Reachable": false, "missingForLevel2": []any{}}, keys["assurance"])
 	require.Equal(t, fresh.CookieValue(), cookieNamed(r.cookies, "kaname_session").Value)
 	require.Equal(t, assurance.MethodLookupSecret, stub.removeIn[0].Factor.Method)
@@ -256,8 +269,10 @@ func TestLane_F12_25_28_RemoveAndBackupCodesConfirmWithACode(t *testing.T) {
 	require.Equal(t, http.StatusOK, r.status, r.body)
 	keys = nil // разбор в непустую карту дописывает, а не заменяет
 	require.NoError(t, json.Unmarshal([]byte(r.body), &keys))
-	require.Len(t, keys, 3)
+	require.Len(t, keys, 4)
 	require.Equal(t, []any{"0123456789"}, keys["backupCodes"])
+	require.Equal(t, map[string]any{"remaining": float64(10), "total": float64(10), "issuedAt": "2026-09-16T12:00:00Z"}, keys["backupCodeSet"],
+		"BCS-04: сводка нового набора, без lastUsedAt")
 	require.Contains(t, keys, "session")
 	require.Contains(t, keys, "assurance")
 	require.Equal(t, assurance.MethodTOTP, stub.regenIn[0].Factor.Method)
