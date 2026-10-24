@@ -12,8 +12,9 @@ package moduleseed
 // затем, что манифест применителю вправе подать и не загрузчик: цель, которую
 // посев не исполняет, останавливает запись, а не пропускается.
 //
-// Суждение стоит ДО транзакции и по всем выдачам сразу: отказ не оставляет ни
-// одной строки посева этого манифеста — ни выдачи, ни личности, ни группы.
+// Суждение стоит ДО транзакции: все выдачи судятся до первой записи, и отказ
+// не оставляет ни одной строки посева этого манифеста — ни выдачи, ни
+// личности, ни группы.
 
 import (
 	"errors"
@@ -25,18 +26,15 @@ import (
 // ErrBindingTargetNotWholeScope — выдача посева действует не на ярус целиком.
 var ErrBindingTargetNotWholeScope = errors.New("moduleseed: seed access binding target is not allInScope")
 
-// seedTargetWholeScope — единственная цель, которую исполняет посев.
-const seedTargetWholeScope = "allInScope"
-
 // refuseNarrowedTargets — первая выдача, чья цель не `allInScope`.
 func refuseNarrowedTargets(seed *manifest.Seed) error {
 	for i, b := range seed.AccessBindings {
-		if b.Target == seedTargetWholeScope {
+		if b.Target == manifest.TargetAllInScope {
 			continue
 		}
 		return fmt.Errorf("выдача seed.accessBindings[%d]: %w: цель %q — посев исполняет только %q; "+
 			"ни одна строка этого манифеста не записана",
-			i, ErrBindingTargetNotWholeScope, b.Target, seedTargetWholeScope)
+			i, ErrBindingTargetNotWholeScope, b.Target, manifest.TargetAllInScope)
 	}
 	return nil
 }

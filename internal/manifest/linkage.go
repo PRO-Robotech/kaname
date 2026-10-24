@@ -520,8 +520,10 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 // потому что правило о перечне объектов зависит от того, КОТОРЫЙ выбран, и
 // отказ по охвату не заменяет находок о самом перечне.
 const (
-	bindingTargetAllInScope = "allInScope"
-	bindingTargetResources  = "resources"
+	// TargetAllInScope — единственная цель выдачи посева, годная манифесту модуля;
+	// её же исполняет применитель посева (moduleseed).
+	TargetAllInScope       = "allInScope"
+	bindingTargetResources = "resources"
 )
 
 // bindingResourcesDeclared — назван ли ключ `resources` у выдачи В ДОКУМЕНТЕ.
@@ -564,13 +566,13 @@ func validateBindingTarget(doc *yaml.Node, i int, b AccessBinding, declared bool
 			detail: fmt.Sprintf("seed.accessBindings[%d]: охват назван %q, а перечня объектов нет — "+
 				"выдаче не на что распространяться", i, bindingTargetResources),
 		})
-	case b.Target == bindingTargetAllInScope && declared:
+	case b.Target == TargetAllInScope && declared:
 		faults = append(faults, linkFault{
 			kind:  ErrBindingIncomplete,
 			coord: locate(doc, "seed", "accessBindings", i, "resources"),
 			detail: fmt.Sprintf("seed.accessBindings[%d]: охват назван %q — выдача покрывает весь "+
 				"ярус и БУДУЩИЕ объекты тоже, поэтому перечень при нём не читает никто; "+
-				"написанный, он утверждает сужение, которого не будет", i, bindingTargetAllInScope),
+				"написанный, он утверждает сужение, которого не будет", i, TargetAllInScope),
 		})
 	}
 

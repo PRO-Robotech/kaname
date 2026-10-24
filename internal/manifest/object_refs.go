@@ -10,13 +10,19 @@ package manifest
 // применяется на каждом старте и вернул бы ссылку снова. Поэтому манифест
 // называет только ТИПЫ и ОБЛАСТИ.
 //
-// Отказов два, и оба судятся по сырому узлу документа — по НАЛИЧИЮ, а не по
-// длине разобранного значения:
+// Отказов два, и судятся они разным материалом — каждый тем, где предмет виден
+// целиком:
 //
-//  1. выдача посева с охватом `resources` (перечень объектов);
-//  2. ключ `resourceNames` в правиле роли и во вложенном правиле (`children`).
-//     Пустой перечень — тоже отказ: схема объявляет ключ недопустимым, а не
-//     «допустимым пустым», и два ответа об одном ключе разошлись бы молча.
+//  1. цель выдачи посева — по РАЗОБРАННОМУ значению: псевдоним YAML в сыром
+//     узле несёт имя якоря, а не значение. Годна одна цель, [TargetAllInScope];
+//     `resources` (перечень объектов) — ссылка на объекты, всякое иное значение —
+//     неизвестная цель. Пустая цель — находка неполной выдачи (linkage.go);
+//  2. ключ `resourceNames` в правиле роли и во вложенном правиле (`children`) —
+//     по НАЛИЧИЮ в узле документа: разобранный перечень не отличает пустой
+//     ключ от отсутствующего. Пустой перечень — тоже отказ: схема объявляет
+//     ключ недопустимым, а не «допустимым пустым».
+//
+// Координата находки берётся из узла документа в обоих случаях.
 //
 // Сужение метками (`matchLabels`) объекта не называет и остаётся законным.
 // Роли с `resourceNames`, создаваемые арендатором через API, этот отказ не
@@ -41,23 +47,31 @@ const objectRefWhy = "идентификатор объекта присваив
 	"регистрацией объекта, а манифест применяется на каждом старте и вернул бы ссылку снова"
 
 // refuseObjectRefs — оба отказа шапки файла; находки собираются все.
-func refuseObjectRefs(doc *yaml.Node) []error {
+func refuseObjectRefs(m *Manifest, doc *yaml.Node) []error {
 	var faults []error
-	bindings := mapValue(mapValue(doc, "seed"), "accessBindings")
-	if bindings != nil && bindings.Kind == yaml.SequenceNode {
-		for i, b := range bindings.Content {
-			target := mapValue(b, "target")
-			if target == nil || target.Value != bindingTargetResources {
+	if m.Seed != nil {
+		for i, b := range m.Seed.AccessBindings {
+			coord := locate(doc, "seed", "accessBindings", i, "target")
+			switch b.Target {
+			case TargetAllInScope, "":
 				continue
+			case bindingTargetResources:
+				faults = append(faults, linkFault{
+					kind:  ErrObjectRefInManifest,
+					coord: coord,
+					detail: fmt.Sprintf("seed.accessBindings[%d].target: охват %q (перечень объектов) "+
+						"в манифесте модуля не допускается — выдача посева действует на ярус целиком "+
+						"(%s); %s",
+						i, bindingTargetResources, TargetAllInScope, objectRefWhy),
+				})
+			default:
+				faults = append(faults, linkFault{
+					kind:  ErrBindingTargetUnknown,
+					coord: coord,
+					detail: fmt.Sprintf("seed.accessBindings[%d].target: охват %q манифесту модуля "+
+						"не известен — годное значение одно (%s)", i, b.Target, TargetAllInScope),
+				})
 			}
-			faults = append(faults, linkFault{
-				kind:  ErrObjectRefInManifest,
-				coord: locate(doc, "seed", "accessBindings", i, "target"),
-				detail: fmt.Sprintf("seed.accessBindings[%d].target: охват %q (перечень объектов) "+
-					"в манифесте модуля не допускается — выдача посева действует на ярус целиком "+
-					"(%s); %s",
-					i, bindingTargetResources, bindingTargetAllInScope, objectRefWhy),
-			})
 		}
 	}
 
