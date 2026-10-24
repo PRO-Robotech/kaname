@@ -504,9 +504,12 @@ type AccessBinding struct {
 	// она отвергается, у платформенной заменена системным классом.
 	System bool `protobuf:"varint,25,opt,name=system,proto3" json:"system,omitempty"`
 	// OUTPUT-ONLY. Причина отзыва. Задана ровно тогда, когда `status = REVOKED` и
-	// отзыв случился после заведения поля; у действующей выдачи не задана (proto3
-	// JSON поле по умолчанию опускает).
-	RevocationReason AccessBinding_RevocationReason `protobuf:"varint,26,opt,name=revocation_reason,json=revocationReason,proto3,enum=kaname.cloud.iam.v1.AccessBinding_RevocationReason" json:"revocation_reason,omitempty"`
+	// отзыв случился после заведения поля; у действующей выдачи и у выдачи,
+	// отозванной до заведения поля, не задана. Поле с присутствием (`optional`):
+	// незаданное не выходит ключом и в JSON, печатающем незаданные поля, — у
+	// действующей выдачи ключа `revocationReason` в теле нет (приёмка
+	// unregistration-revokes-its-grants.md, URG-E2).
+	RevocationReason *AccessBinding_RevocationReason `protobuf:"varint,26,opt,name=revocation_reason,json=revocationReason,proto3,enum=kaname.cloud.iam.v1.AccessBinding_RevocationReason,oneof" json:"revocation_reason,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -675,8 +678,8 @@ func (x *AccessBinding) GetSystem() bool {
 }
 
 func (x *AccessBinding) GetRevocationReason() AccessBinding_RevocationReason {
-	if x != nil {
-		return x.RevocationReason
+	if x != nil && x.RevocationReason != nil {
+		return *x.RevocationReason
 	}
 	return AccessBinding_REVOCATION_REASON_UNSPECIFIED
 }
@@ -1422,7 +1425,7 @@ var File_kaname_cloud_iam_v1_access_binding_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\n" +
-	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\xb3\v\n" +
+	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\xce\v\n" +
 	"\rAccessBinding\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fsubject_type\x18\x02 \x01(\tR\vsubjectType\x12\x1d\n" +
@@ -1448,8 +1451,8 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x06target\x18\x16 \x01(\v2!.kaname.cloud.iam.v1.AccessTargetR\x06target\x12C\n" +
 	"\x0fmaterialized_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x0ematerializedAt\x12)\n" +
 	"\x10granted_relation\x18\x18 \x01(\tR\x0fgrantedRelation\x12\x16\n" +
-	"\x06system\x18\x19 \x01(\bR\x06system\x12`\n" +
-	"\x11revocation_reason\x18\x1a \x01(\x0e23.kaname.cloud.iam.v1.AccessBinding.RevocationReasonR\x10revocationReason\x1a9\n" +
+	"\x06system\x18\x19 \x01(\bR\x06system\x12e\n" +
+	"\x11revocation_reason\x18\x1a \x01(\x0e23.kaname.cloud.iam.v1.AccessBinding.RevocationReasonH\x00R\x10revocationReason\x88\x01\x01\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +
@@ -1468,7 +1471,8 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x1dREVOCATION_REASON_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18REVOCATION_REASON_REVOKE\x10\x01\x12\x1d\n" +
 	"\x19REVOCATION_REASON_EXPIRED\x10\x02\x12+\n" +
-	"'REVOCATION_REASON_RESOURCE_UNREGISTERED\x10\x03J\x04\b\t\x10\n" +
+	"'REVOCATION_REASON_RESOURCE_UNREGISTERED\x10\x03B\x14\n" +
+	"\x12_revocation_reasonJ\x04\b\t\x10\n" +
 	"J\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13R\fcondition_idR\x11builtin_conditionR\x05scopeR\tscope_refR\n" +
 	"target_refR\bselector\"\xb5\x01\n" +
 	"\fAccessTarget\x12J\n" +
@@ -1598,6 +1602,7 @@ func file_kaname_cloud_iam_v1_access_binding_proto_init() {
 		return
 	}
 	file_kaname_cloud_iam_v1_authorize_service_proto_init()
+	file_kaname_cloud_iam_v1_access_binding_proto_msgTypes[0].OneofWrappers = []any{}
 	file_kaname_cloud_iam_v1_access_binding_proto_msgTypes[1].OneofWrappers = []any{
 		(*AccessTarget_Resources)(nil),
 		(*AccessTarget_AllInScope)(nil),

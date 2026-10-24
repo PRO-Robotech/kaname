@@ -80,21 +80,24 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 }
 
 // revocationReasonToProto — слово хранения причины отзыва → значение контракта.
-// Пустое слово — «не отозвана либо отозвана до заведения поля» (Д7). Слово вне
-// словаря проецируется тем же UNSPECIFIED, а не выдумывается: словарь колонки
-// закрыт ограничением `access_bindings_revocation_reason_ck`, и такое слово
-// возникнуть не может.
-func revocationReasonToProto(r domain.RevocationReason) iamv1.AccessBinding_RevocationReason {
+// Поле контракта с присутствием: nil — «не отозвана либо отозвана до заведения
+// поля» (Д7), и в теле края такого ключа нет (URG-E2). Слово вне словаря
+// проецируется тем же nil, а не выдумывается: словарь колонки закрыт
+// ограничением `access_bindings_revocation_reason_ck`, и такое слово возникнуть
+// не может.
+func revocationReasonToProto(r domain.RevocationReason) *iamv1.AccessBinding_RevocationReason {
+	var v iamv1.AccessBinding_RevocationReason
 	switch r {
 	case domain.RevocationReasonRevoke:
-		return iamv1.AccessBinding_REVOCATION_REASON_REVOKE
+		v = iamv1.AccessBinding_REVOCATION_REASON_REVOKE
 	case domain.RevocationReasonExpired:
-		return iamv1.AccessBinding_REVOCATION_REASON_EXPIRED
+		v = iamv1.AccessBinding_REVOCATION_REASON_EXPIRED
 	case domain.RevocationReasonResourceUnregistered:
-		return iamv1.AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED
+		v = iamv1.AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED
 	default:
-		return iamv1.AccessBinding_REVOCATION_REASON_UNSPECIFIED
+		return nil
 	}
+	return &v
 }
 
 // materializedAtProto projects the materialization instant, truncated to seconds
