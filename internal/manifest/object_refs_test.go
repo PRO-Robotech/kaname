@@ -131,7 +131,15 @@ func orRequireTargetFinding(t *testing.T, doc []byte, kind error, n int, v strin
 	if !errors.Is(err, kind) {
 		t.Fatalf("отказ не отнесён к %v: %v", kind, err)
 	}
+	// Вид находки привязан к ЕЁ координате: errors.Is удовлетворила бы и
+	// находка соседней выдачи.
 	coord := "seed.accessBindings[" + itoa(n) + "].target: охват \"" + v + "\""
+	switch kind {
+	case manifest.ErrObjectRefInManifest:
+		coord += " (перечень объектов) в манифесте модуля не допускается"
+	case manifest.ErrBindingTargetUnknown:
+		coord += " манифесту модуля не известен"
+	}
 	for _, want := range []string{coord, "(allInScope)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("находка не называет %q:\n%v", want, err)
