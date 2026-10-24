@@ -882,15 +882,25 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 	// Продуктовый оператор упорядочивает по id, и на семи строках мира планировщик
 	// законно идёт первичным ключом с фильтром: «берёт ли индекс» на таком объёме
 	// спрашивать не о чем. На объёме, где просмотр всех выдач дорог, — есть.
+	//
+	// Набор субъектов каждой выдачи — копия набора шаблона в ТОЙ ЖЕ инструкции:
+	// выдача без строки набора к фиксации не допускается (миграция 20261018214804),
+	// пара выдачи обязана быть в её наборе (миграция 20261019194800).
 	_, err := w.pool.Exec(w.ctx,
-		`INSERT INTO kaname.access_bindings
-		 SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
-		           'id', 'acbvol' || lpad(g::text, 14, '0'),
-		           'target_digest', 'vol' || g,
-		           'target', jsonb_build_object('resources', jsonb_build_array(
-		               jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
-		   FROM kaname.access_bindings b, generate_series(1, 5000) g
-		  WHERE b.id = $2`,
+		`WITH vol AS (
+		   INSERT INTO kaname.access_bindings
+		   SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
+		             'id', 'acbvol' || lpad(g::text, 14, '0'),
+		             'target_digest', 'vol' || g,
+		             'target', jsonb_build_object('resources', jsonb_build_array(
+		                 jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
+		     FROM kaname.access_bindings b, generate_series(1, 5000) g
+		    WHERE b.id = $2
+		   RETURNING id)
+		 INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
+		 SELECT vol.id, s.subject_type, s.subject_id, s.ordinal
+		   FROM vol, kaname.access_binding_subjects s
+		  WHERE s.binding_id = $2`,
 		pcrRegTgt, tmpl)
 	require.NoError(t, err, "п.10: объём выдач")
 	_, err = w.pool.Exec(w.ctx, `ANALYZE kaname.access_bindings`)
