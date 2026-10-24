@@ -80,6 +80,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // Публичные глаголы, которые законно зовёт модуль, не являющийся краем.
@@ -542,6 +543,14 @@ func stepUpTrailer(err error) (metadata.MD, bool) {
 // подсказку — ответ беднее, но не ложен и не шире.
 func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		// The anonymous exception is unary and request-shaped. It must never
+		// open the method-only policy used by streams or other RPCs.
+		if info.FullMethod == iamv1.AuthorizeService_Check_FullMethodName {
+			check, ok := req.(*iamv1.AuthorizeCheckRequest)
+			if ok && IsAnonymousSelfCheck(ctx, check) {
+				return handler(ctx, req)
+			}
+		}
 		if err := p.allow(ctx, info.FullMethod); err != nil {
 			if md, ok := stepUpTrailer(err); ok {
 				_ = grpc.SetTrailer(ctx, md) // исход отказа от хвоста не зависит — см. выше
