@@ -851,7 +851,7 @@ func TestURG01_RevokeCommitsOnlyWithUnregistration(t *testing.T) {
 // законно выбрал бы его), и печать плана с числами исполнения.
 func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 	w := newURXWorld(t)
-	w.grantTo(w.usrD, w.rolRegGet, urTarget(pcrX, pcrY), false, "п.10: выдача на X, Y")
+	tmpl := w.grantTo(w.usrD, w.rolRegGet, urTarget(pcrX, pcrY), false, "п.10: выдача на X, Y")
 	w.seedRole("rol_reg_names_xy", domain.Rules{namesRule(pcrX, pcrY)})
 
 	explain := func(what, index, sql string, args ...any) {
@@ -890,8 +890,8 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 		           'target', jsonb_build_object('resources', jsonb_build_array(
 		               jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
 		   FROM kaname.access_bindings b, generate_series(1, 5000) g
-		  WHERE b.id = (SELECT id FROM kaname.access_bindings WHERE revoked_at IS NULL ORDER BY id LIMIT 1)`,
-		pcrRegTgt)
+		  WHERE b.id = $2`,
+		pcrRegTgt, tmpl)
 	require.NoError(t, err, "п.10: объём выдач")
 	_, err = w.pool.Exec(w.ctx, `ANALYZE kaname.access_bindings`)
 	require.NoError(t, err, "п.10: статистика выдач")
