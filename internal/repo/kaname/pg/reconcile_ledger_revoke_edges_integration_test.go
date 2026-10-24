@@ -12,8 +12,8 @@ package pg_test
 //  2. ОШИБКА ЧТЕНИЯ реестра откатывает проход целиком: выдача остаётся действующей,
 //     члены, реестр и прямые факты — на месте; проход повторим.
 //  3. СОВПАДЕНИЕ СУФФИКСА `:<id>` у объектов разных типов одной выдачи: снятие члена
-//     типа, которого нет в снимке реплики, не снимает кортежей объекта ДРУГОГО типа
-//     с тем же идентификатором.
+//     типа, которого нет в снимке реплики (объект ушёл из зеркала — kaname#937), не
+//     снимает кортежей объекта ДРУГОГО типа с тем же идентификатором.
 //
 // У каждой пробы — законный близнец, отличный ровно одним фактом.
 
@@ -243,6 +243,9 @@ func TestLedgerReadError_ExpiryRollsBack(t *testing.T) {
 
 func TestLedgerReadError_FellOutOnReplicaWithoutTheTypeRollsBack(t *testing.T) {
 	p := newLedgerProbe(t, "e933fe", false)
+	// Член выпадает по-настоящему — объект ушёл из зеркала; одно незнание типа
+	// репликой его не снимает (kaname#937).
+	removeLedgerProbeObject(t, p.pool)
 	adapter := kanamepg.NewReconcileAdapter(p.pool, catalogfixture.Source())
 	// Отказывают ОБА чтения реестра: член снимается чтением своей координаты, и проба
 	// не вправе зависеть от того, каким из двух чтений путь берёт набор снятия.
@@ -315,6 +318,9 @@ func newSuffixProbe(t *testing.T, suffix, netID string) *suffixProbe {
 	require.Positive(t, ledgerRowsOn(t, ctx, pool, bid, "vpc_network:"+netID), "БЛИЗНЕЦ: реестр сети есть")
 	require.Positive(t, factsOn(t, ctx, pool, subj, "compute_instance", "iRace"), "БЛИЗНЕЦ: факт инстанса есть")
 	require.Positive(t, factsOn(t, ctx, pool, subj, "vpc_network", netID), "БЛИЗНЕЦ: факт сети есть")
+	// Инстанс уходит из зеркала: его член выпадает по-настоящему. Реплика B его типа
+	// не знает, но одно это члена не снимает (kaname#937) — снимает выпадение.
+	removeLedgerProbeObject(t, pool)
 	return &suffixProbe{pool: pool, bid: bid, subj: subj, netID: netID, b: b}
 }
 

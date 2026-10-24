@@ -51,12 +51,14 @@ func (r *Registry) NewRegistryTokenSourceFallbackCollector(reasons []string, rea
 		read:    read,
 		desc: prometheus.NewDesc(RegistryTokenSourceFallbacksMetric,
 			"Anonymous requests of the docker lane /iam/token whose pace key became the peer address although "+
-				"a forwarding header was present: forwarded-from-unrecognized-peer (a forwarding header from a "+
-				"peer that is neither the edge nor the declared forwarder "+
-				"api-server.registry-token.anonymous-forwarder-san). Growth means either a caller reached the "+
-				"listener bypassing the registry proxy, or the forwarder is declared by another identity and "+
-				"every client behind the proxy shares one pace limit. Every declared cell is printed, "+
-				"including the zero ones.",
+				"a forwarding header was present or expected: forwarded-from-unrecognized-peer (a forwarding "+
+				"header from a peer that is neither the edge nor the declared forwarder "+
+				"api-server.registry-token.anonymous-forwarder-san) and edge-without-address (the edge or the "+
+				"declared forwarder gave no usable address: no header, two values, a comma list or not an "+
+				"address). Growth of the first means either a caller reached the listener bypassing the "+
+				"registry proxy, or the forwarder is declared by another identity; growth of the second means "+
+				"the registry proxy does not pass the client address as one value. Either way every client "+
+				"behind the proxy shares one pace limit. Every declared cell is printed, including the zero ones.",
 			[]string{"reason"}, nil),
 	})
 }
