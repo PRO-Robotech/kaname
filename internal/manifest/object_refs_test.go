@@ -112,6 +112,75 @@ func TestObjectRefs_SeedBindingWithoutTargetNamesAllInScope(t *testing.T) {
 	}
 }
 
+// orSecondBinding — вторая выдача посева той же группе другой ролью; цель
+// дописывает вызывающий.
+const orSecondBinding = "    - subjects:\n        - {type: group, name: vpc-pool-operators}\n" +
+	"      roleId: vpc.addressPoolViewer\n      scopeType: iam.cluster\n      scopeId: cluster_root\n"
+
+// orObjectList — перечень объектов выдачи.
+const orObjectList = "      resources:\n        - {type: vpc.addressPool, id: apl000000000000001}\n"
+
+// orRequireTargetFinding — находка по цели выдачи N названа своим видом и
+// координатой, текст называет годное значение.
+func orRequireTargetFinding(t *testing.T, doc []byte, kind error, n int) {
+	t.Helper()
+	_, err := manifest.Load(doc)
+	if err == nil {
+		t.Fatalf("загрузка приняла выдачу посева с целью не allInScope (seed.accessBindings[%d])", n)
+	}
+	if !errors.Is(err, kind) {
+		t.Fatalf("отказ не отнесён к %v: %v", kind, err)
+	}
+	coord := "seed.accessBindings[" + itoa(n) + "].target: охват"
+	for _, want := range []string{coord, "(allInScope)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("находка не называет %q:\n%v", want, err)
+		}
+	}
+}
+
+// Цель судится по РАЗОБРАННОМУ значению: псевдоним YAML, раскрывающийся в
+// `resources`, — та же ссылка на объекты, что и литерал.
+func TestObjectRefs_SeedBindingTargetThroughAnAliasIsRefused(t *testing.T) {
+	doc := orReplaceOnce(t, orBindingFixture(t), "      target: resources\n", "      target: &t resources\n")
+	for name, tail := range map[string]string{
+		"с перечнем":  "      target: *t\n" + orObjectList,
+		"без перечня": "      target: *t\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			orRequireTargetFinding(t, []byte(doc+orSecondBinding+tail), manifest.ErrObjectRefInManifest, 1)
+		})
+	}
+}
+
+// Близнец псевдонима: якорь на allInScope — обе выдачи загружаются.
+func TestObjectRefs_SeedBindingTargetAliasToAllInScopeLoads(t *testing.T) {
+	doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, "      target: &t allInScope\n")
+	orRequireLoads(t, []byte(doc+orSecondBinding+"      target: *t\n"), "псевдоним на allInScope")
+}
+
+// Годное значение одно: всякое иное — находка с координатой и годным значением.
+func TestObjectRefs_SeedBindingUnknownTargetIsRefused(t *testing.T) {
+	for _, v := range []string{"Resources", "allinscope", "bogus"} {
+		t.Run(v, func(t *testing.T) {
+			doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, "      target: "+v+"\n")
+			orRequireTargetFinding(t, doc, manifest.ErrBindingTargetUnknown, 0)
+		})
+	}
+}
+
+// Судится КАЖДАЯ выдача, а не первая: вторая отвергается по своей координате,
+// первая (на ярус целиком) находки не получает.
+func TestObjectRefs_SecondSeedBindingIsJudged(t *testing.T) {
+	doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, orWholeScopeTarget)
+	bad := []byte(doc + orSecondBinding + "      target: resources\n" + orObjectList)
+	orRequireTargetFinding(t, bad, manifest.ErrObjectRefInManifest, 1)
+	if _, err := manifest.Load(bad); strings.Contains(err.Error(), "seed.accessBindings[0].target") {
+		t.Fatalf("находка легла на законную первую выдачу:\n%v", err)
+	}
+	orRequireLoads(t, []byte(doc+orSecondBinding+orWholeScopeTarget), "две выдачи на ярус целиком")
+}
+
 // Близнец: та же выдача на ярус целиком загружается.
 func TestObjectRefs_SeedBindingToTheWholeScopeLoads(t *testing.T) {
 	orRequireLoads(t, orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, orWholeScopeTarget),
@@ -187,6 +256,29 @@ func TestObjectRefs_NestedRuleResourceNamesIsRefused(t *testing.T) {
 				t.Fatalf("находка ND-04 (з) не дословна\n ждали  %q\n получено %v", orNestedFinding, err)
 			}
 		})
+	}
+}
+
+// orProbemodChildren — вложенные правила роли probemod.reader фикстуры П3.
+const orProbemodChildren = "        children:\n          - resources: [tags]\n            classes: [get, list]\n"
+
+// Судится КАЖДОЕ вложенное правило, а не первое: ссылка во втором
+// (children[1]) отвергается по своей координате.
+func TestObjectRefs_SecondNestedRuleIsJudged(t *testing.T) {
+	raw, err := publicreadfixture.Read(publicreadfixture.ChildrenProbemodFile)
+	if err != nil {
+		t.Fatalf("фикстура П3: %v", err)
+	}
+	two := func(tagsExtra string) []byte {
+		return orReplaceOnce(t, string(raw), orProbemodChildren,
+			"        children:\n          - resources: [items]\n            classes: [get, list]\n"+
+				"          - resources: [tags]\n            classes: [get, list]\n"+tagsExtra)
+	}
+	orRequireLoads(t, two(""), "два вложенных правила над типами")
+	bad := two("            resourceNames: [t1]\n")
+	orRequireRefusal(t, bad, "roles[0].rules[0].children[1].resourceNames")
+	if _, err := manifest.Load(bad); strings.Contains(err.Error(), "children[0].resourceNames") {
+		t.Fatalf("находка легла на законное первое вложенное правило:\n%v", err)
 	}
 }
 

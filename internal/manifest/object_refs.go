@@ -32,6 +32,10 @@ import (
 // ErrObjectRefInManifest — манифест модуля называет КОНКРЕТНЫЙ объект.
 var ErrObjectRefInManifest = errors.New("manifest: a module manifest names a concrete object")
 
+// ErrBindingTargetUnknown — цель выдачи посева названа значением, которого
+// манифест модуля не знает.
+var ErrBindingTargetUnknown = errors.New("manifest: seed access binding target is unknown")
+
 // objectRefWhy — общая часть причины: почему манифесту объект не назвать.
 const objectRefWhy = "идентификатор объекта присваивает запись, и снимается он вместе с " +
 	"регистрацией объекта, а манифест применяется на каждом старте и вернул бы ссылку снова"
