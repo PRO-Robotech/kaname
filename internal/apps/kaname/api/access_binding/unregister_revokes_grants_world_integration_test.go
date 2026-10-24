@@ -23,7 +23,9 @@ package access_binding_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,8 +39,10 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -792,4 +796,87 @@ func TestURG34_ReasonOnRevokeAndExpiryPaths(t *testing.T) {
 	assert.Equal(t, iamv1.AccessBinding_REVOKED, b2.GetStatus(), "URG-34: R2 не отозвана сроком")
 	assert.Equal(t, iamv1.AccessBinding_REVOCATION_REASON_EXPIRED, b2.GetRevocationReason(), "URG-34: причина R2")
 	assert.Empty(t, b2.GetRevokedByUserId(), "URG-34: revokedByUserId R2")
+}
+
+// ── DoD §6 п.7, п.10 — атомарность и цена поиска ─────────────────────────────
+
+// failingWithdrawal — настоящий отзыв, после которого транзакция снятия
+// получает отказ: всё, что отзыв записал, обязано откатиться вместе со снятием.
+type failingWithdrawal struct {
+	inner *accessbindingapp.UnregisteredKeyWithdrawal
+}
+
+func (f failingWithdrawal) WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error {
+	if err := f.inner.WithdrawTx(ctx, tx, key, actor); err != nil {
+		return err
+	}
+	return errors.New("инъекция kaname#963: отказ после отзыва и до фиксации")
+}
+
+// DoD п.7 · отзыв в транзакции снятия: отказ после отзыва и до фиксации не
+// оставляет ни снятия, ни отзыва, ни строки аудита.
+func TestURG01_RevokeCommitsOnlyWithUnregistration(t *testing.T) {
+	w := newURXWorld(t)
+	uc := internaliam.NewRegisterResourceUseCase(
+		kanamepg.NewFGAOutboxEmitter(),
+		kanamepg.NewResourceMirrorEmitter(),
+		kanamepg.NewPoolTxBeginner(w.pool),
+		kanamepg.NewCatalogTypeReader(),
+		kanamepg.NewPublicReadPublisher(),
+		failingWithdrawal{inner: accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld})},
+	)
+	err := uc.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
+		SubjectId: "project:" + string(w.prjA), Relation: "project", Object: pcrRegType + ":" + pcrX,
+		SourceVersion: w.nextVersion(),
+	})
+	require.Error(t, err, "п.7: инъецированный отказ не дошёл до вызывающего")
+
+	var mirror int
+	require.NoError(t, w.pool.QueryRow(w.ctx,
+		`SELECT count(*) FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`, pcrRegTgt, pcrX).Scan(&mirror))
+	assert.Equal(t, 1, mirror, "п.7: строка регистрации снята без отзыва")
+	assert.Equal(t, iamv1.AccessBinding_ACTIVE, w.get(w.grantB).GetStatus(), "п.7: отзыв зафиксирован без снятия")
+	assert.Zero(t, w.auditCount("iam.access_binding.resource_unregistered_revoked", "binding_id", w.grantB),
+		"п.7: строка аудита отзыва пережила откат")
+}
+
+// DoD п.10 · поиск выдач и правил по ключу идёт индексом. Цена на базе стенда
+// пишется в DoD-proof задачи; здесь — что план вообще способен взять индекс
+// (последовательный просмотр выключен, иначе на крошечной таблице планировщик
+// законно выбрал бы его), и печать плана с числами исполнения.
+func TestUnregistrationLookupUsesIndexes(t *testing.T) {
+	w := newURXWorld(t)
+	w.grantTo(w.usrD, w.rolRegGet, urTarget(pcrX, pcrY), false, "п.10: выдача на X, Y")
+	w.seedRole("rol_reg_names_xy", domain.Rules{namesRule(pcrX, pcrY)})
+
+	explain := func(what, index, sql string, args ...any) {
+		t.Helper()
+		tx, err := w.pool.Begin(w.ctx)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(w.ctx) }()
+		_, err = tx.Exec(w.ctx, `SET LOCAL enable_seqscan = off`)
+		require.NoError(t, err)
+		rows, err := tx.Query(w.ctx, `EXPLAIN (ANALYZE, BUFFERS) `+sql, args...)
+		require.NoError(t, err)
+		var plan []string
+		for rows.Next() {
+			var line string
+			require.NoError(t, rows.Scan(&line))
+			plan = append(plan, line)
+		}
+		rows.Close()
+		require.NoError(t, rows.Err())
+		text := strings.Join(plan, "\n")
+		t.Logf("п.10 %s:\n%s", what, text)
+		assert.Containsf(t, text, index, "п.10 %s: план не берёт индекс %s", what, index)
+	}
+	explain("выдачи по ключу", "access_bindings_target_resources_live_idx",
+		`SELECT id FROM kaname.access_bindings
+		  WHERE revoked_at IS NULL
+		    AND target -> 'resources' @> jsonb_build_array(jsonb_build_object('type', $1::text, 'id', $2::text))`,
+		pcrRegTgt, pcrX)
+	explain("правила по ключу", "role_rule_selectors_resource_names_idx",
+		`SELECT role_id FROM kaname.role_rule_selectors
+		  WHERE resource_names @> ARRAY[$2::text] AND $1::text = ANY (object_types)`,
+		pcrRegTgt, pcrX)
 }
