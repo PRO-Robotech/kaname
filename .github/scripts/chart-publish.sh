@@ -200,7 +200,7 @@ FAKE
             64:no) got=refuse64 ;;
             0:no) got="код 0 без отправки" ;;
             *:no) got=refuse ;;
-            *:yes) got=pushed-refused ;;
+            *:yes) got="pushed-refused" ;;
         esac
         if [ "$got" != "$want" ]; then
             echo "  ПРОВАЛ сценарий $name — ждали $want, получили $got (код $rc, отправлен: $pushed)" >&2
@@ -210,6 +210,11 @@ FAKE
         fi
         echo "  ok   сценарий $name ($got)"
     }
+
+    # Дословный вывод помощника учётных данных: `$PATH` в нём — текст, а не
+    # подстановка.
+    # shellcheck disable=SC2016 # литерал вывода, раскрытие не нужно
+    local cred_helper_out='Error: error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH, out: ``'
 
     echo "=== chart-publish: метка версии ==="
     # Положительные близнецы: без них отказы ниже зеленели бы на разборе,
@@ -233,7 +238,7 @@ version: 0.1.0" "(+) версия есть — отказ, неизменяем�
     show 2 1 "Error: unexpected status code 401: unauthorized" "(+) отказ доступа — не распознан, а не «нет»"
     show 2 1 "" "(+) пустой ответ — не распознан"
     show 2 1 "Error: ghcr.io/pro-robotech/charts/kaname:1.0.0: not found" "(+) «not found» о ДРУГОЙ версии — не распознан"
-    show 2 1 'Error: error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH, out: ``' "(+) S12 помощник учётных данных — не распознан"
+    show 2 1 "$cred_helper_out" "(+) S12 помощник учётных данных — не распознан"
     show 2 1 "Error: failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://ghcr.io/token?scope=repository%3Apro-robotech%2Fcharts%2Fkaname%3Apull&service=ghcr.io: 404 Not Found" "(+) S13 служба токена 404 — не распознан"
     show 2 1 'Error: plugin "oci-helper" not found' "(+) S14 плагин не найден — не распознан"
 
@@ -254,7 +259,7 @@ version: 9.9.9" "S01 версия есть"
     scenario refuse 1 "Error: Get \"https://ghcr.io/v2/\": context deadline exceeded" "S08 таймаут"
     scenario refuse 1 "" "S09 пустой ответ"
     scenario refuse 1 "Error: Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io on 127.0.0.53:53: no such host" "S11 DNS"
-    scenario refuse 1 'Error: error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH, out: ``' "S12 помощник учётных данных"
+    scenario refuse 1 "$cred_helper_out" "S12 помощник учётных данных"
     scenario refuse 1 "Error: failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://ghcr.io/token?scope=repository%3Apro-robotech%2Fcharts%2Fkaname%3Apull&service=ghcr.io: 404 Not Found" "S13 служба токена 404"
     scenario refuse 1 'Error: plugin "oci-helper" not found' "S14 плагин не найден"
     scenario refuse64 1 "Error: ghcr.io/pro-robotech/charts/kaname:9.9.9: not found" "S15 метка не версия" "v1.2"
