@@ -125,7 +125,6 @@ func TestGrantLockOrderCensusPairsDoNotDeadlock(t *testing.T) {
 				continue
 			}
 			pairs++
-			a, b := a, b
 			t.Run(string(a)+"×"+string(b), func(t *testing.T) { raceGrantPair(t, a, b) })
 		}
 	}
