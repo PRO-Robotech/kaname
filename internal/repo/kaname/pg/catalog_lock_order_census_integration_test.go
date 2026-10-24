@@ -121,7 +121,7 @@ func TestCatalogLockOrderCensus_ApplierAgainstTenantRoleCreate(t *testing.T) {
 				AccountID: domain.AccountID(env.tenant.accountID), Name: domain.RoleName(fmt.Sprintf("p922c%02d", i)),
 				Description: "проба kaname#922", Rules: twinRules("get"),
 			})
-			return opOutcome(ctx, env.ops, op, err)
+			return awaitOpDone(ctx, env.ops, op, err)
 		}
 	})
 }
@@ -140,7 +140,7 @@ func TestCatalogLockOrderCensus_ApplierAgainstTenantRoleUpdate(t *testing.T) {
 			Description: "проба kaname#922",
 			Rules:       domain.Rules{{Module: applierProbeModule, Resources: []string{crossLateName}, Verbs: []string{"get"}}},
 		})
-		require.NoErrorf(t, opOutcome(ctx, env.ops, op, err), "ПРЕДПОСЫЛКА хода %d: роль заведена", i)
+		require.NoErrorf(t, awaitOpDone(ctx, env.ops, op, err), "ПРЕДПОСЫЛКА хода %d: роль заведена", i)
 		got, gerr := env.ops.Get(ctx, op.ID)
 		require.NoError(t, gerr)
 		roleID := roleIDOf(t, got)
@@ -148,7 +148,7 @@ func TestCatalogLockOrderCensus_ApplierAgainstTenantRoleUpdate(t *testing.T) {
 			uop, uerr := update.Execute(declarerCtx(ctx, env.tenant.userID), roleapp.UpdateRoleInput{
 				ID: roleID, Rules: twinRules("get"), UpdateMask: []string{"rules"},
 			})
-			return opOutcome(ctx, env.ops, uop, uerr)
+			return awaitOpDone(ctx, env.ops, uop, uerr)
 		}
 	})
 }

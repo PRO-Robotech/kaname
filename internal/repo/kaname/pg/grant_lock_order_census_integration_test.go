@@ -199,16 +199,16 @@ func (e *grantEnv) run(ctx context.Context, w grantWriter, g grantTarget) <-chan
 		case gwRevoke:
 			op, err := accessbindingapp.NewRevokeAccessBindingUseCase(e.fx.repo, e.ops).
 				WithRelationStore(ownerPathOnlyRelations{}, nil).Execute(asOwner, g.bid)
-			out <- opOutcome(ctx, e.ops, op, err)
+			out <- awaitOpDone(ctx, e.ops, op, err)
 		case gwDelete:
 			op, err := accessbindingapp.NewDeleteAccessBindingUseCase(e.fx.repo, e.ops).
 				WithRelationStore(ownerPathOnlyRelations{}, nil).Execute(asOwner, g.bid)
-			out <- opOutcome(ctx, e.ops, op, err)
+			out <- awaitOpDone(ctx, e.ops, op, err)
 		case gwUpdate:
 			op, err := accessbindingapp.NewUpdateAccessBindingUseCase(e.fx.repo, e.ops).
 				WithRelationStore(ownerPathOnlyRelations{}, nil).
 				Execute(asOwner, g.bid, []string{"labels"}, false, domain.Labels{"census": "922"})
-			out <- opOutcome(ctx, e.ops, op, err)
+			out <- awaitOpDone(ctx, e.ops, op, err)
 		case gwExpiry:
 			out <- e.rec.ExpireBinding(ctx, g.bid)
 		case gwScope:
@@ -239,8 +239,8 @@ type errOpRefused struct {
 
 func (e errOpRefused) Error() string { return fmt.Sprintf("операция отказала: %s: %s", e.code, e.msg) }
 
-// opOutcome — терминальный исход операции use-case.
-func opOutcome(ctx context.Context, ops operations.Repo, op *operations.Operation, err error) error {
+// awaitOpDone — терминальный исход операции use-case.
+func awaitOpDone(ctx context.Context, ops operations.Repo, op *operations.Operation, err error) error {
 	if err != nil {
 		return err
 	}
