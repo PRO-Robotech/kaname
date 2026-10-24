@@ -187,7 +187,8 @@ func awaitBlockedOrDone(t *testing.T, ctx context.Context, pool *pgxpool.Pool, d
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM pg_stat_activity
-			  WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0`).Scan(&n))
+			  WHERE datname = current_database() AND wait_event_type = 'Lock'
+			    AND cardinality(pg_blocking_pids(pid)) > 0`).Scan(&n))
 		if n > 0 {
 			return true
 		}
@@ -247,6 +248,7 @@ func TestUnregisterVsCreateForward_HeldForwardLeavesNoFactOnKey(t *testing.T) {
 	}
 	<-finished
 	t.Logf("F1: снятие ждало прохода материализации: %v", blocked)
+	assert.True(t, blocked, "F1: снятие прошло мимо незафиксированного прохода материализации, читавшего выдачу")
 
 	w.reRegisterX(w.usrC)
 
@@ -351,4 +353,141 @@ func TestURG26b_UnregisterWaitsForRoleWriterHoldingKey(t *testing.T) {
 	names, ok := w.roleNames(domain.RoleID(md.GetRoleId()))
 	require.True(t, ok, "URG-26b: роли нет")
 	assert.NotContains(t, names, key, fmt.Sprintf("URG-26b: роль называет снятый ключ %s", key))
+}
+
+// ── F4: имя ключа в правиле роли против снятия ──────────────────────────────
+
+// membersOn — члены выдачи по объекту (то, что материализатор записал на ключ).
+func (w *urxWorld) membersOn(bindingID, objectID string) int {
+	w.t.Helper()
+	var n int
+	require.NoError(w.t, w.pool.QueryRow(w.ctx,
+		`SELECT count(*) FROM kaname.access_binding_target_members WHERE binding_id = $1 AND object_id = $2`,
+		bindingID, objectID).Scan(&n))
+	return n
+}
+
+// unmaterializedGrant — выдача роли человеку usr-D на prj-A, созданная БЕЗ прохода
+// материализации: членов у неё нет, поэтому проход по объекту идёт аддитивным путём, а
+// не делегирует полному.
+func (w *urxWorld) unmaterializedGrant(role domain.RoleID, target *iamv1.AccessTarget, why string) string {
+	w.t.Helper()
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
+		WithRelationStore(w.door, nil).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
+	h := accessbindingapp.NewHandler(create, nil, nil, nil, nil, nil, nil)
+	op, err := h.Create(asUser(w.ctx, w.usrA), w.grantRequest(userSubject(w.usrD), role, target))
+	require.NoError(w.t, err, why)
+	var md iamv1.CreateAccessBindingMetadata
+	require.NoError(w.t, op.GetMetadata().UnmarshalTo(&md))
+	require.Nil(w.t, awaitOp(w.t, w.ctx, w.ops, op.GetId()).Error, why)
+	return md.GetAccessBindingId()
+}
+
+// heldWithdraw — снятие ключа, пока проход держится на первой записи; затем отпуск.
+// Возвращает, ждало ли снятие прохода на замке.
+func (w *urxWorld) heldWithdraw(key string, reached, finished <-chan struct{}, release func(), why string) bool {
+	w.t.Helper()
+	select {
+	case <-reached:
+	case <-time.After(30 * time.Second):
+		w.t.Fatalf("%s: проход материализации не дошёл до записи", why)
+	}
+	done := make(chan error, 1)
+	go func() { done <- w.withdrawErr(w.ctx, key) }()
+	blocked := awaitBlockedOrDone(w.t, w.ctx, w.pool, done)
+	release()
+	if blocked {
+		require.NoErrorf(w.t, <-done, "%s: снятие после отпускания прохода", why)
+	}
+	<-finished
+	return blocked
+}
+
+// F4 · проход создания выдачи, прочитавший правило роли с именем ключа до снятия, не
+// пишет член и факт по снятому ключу после него.
+func TestUnregisterVsCreateForward_RoleNameHeldForwardLeavesNoMember(t *testing.T) {
+	w := newURXWorld(t)
+	role := w.seedRole("f4_names_x", domain.Rules{namesRule(pcrX)})
+	hold := &forwardHold{TxRunner: kanamepg.NewReconcileAdapter(w.pool, catalog.Fixed{F: w.facts})}
+	h := w.forwardCreate(hold)
+	reached, finished, release := hold.arm()
+
+	op, err := h.Create(asUser(w.ctx, w.usrA), w.grantRequest(userSubject(w.usrD), role, ndAllInScope()))
+	require.NoError(t, err, "F4: приём выдачи роли с именем X")
+	var md iamv1.CreateAccessBindingMetadata
+	require.NoError(t, op.GetMetadata().UnmarshalTo(&md))
+	require.Nil(t, awaitOp(t, w.ctx, w.ops, op.GetId()).Error, "F4: создание выдачи")
+	id := md.GetAccessBindingId()
+
+	blocked := w.heldWithdraw(pcrX, reached, finished, release, "F4")
+	t.Logf("F4 (проход создания): снятие ждало прохода: %v", blocked)
+
+	assert.True(t, blocked, "F4: снятие прошло мимо незафиксированного прохода, читавшего роль")
+	assert.Zero(t, w.membersOn(id, pcrX), "F4: член выдачи по снятому X записан")
+	assert.Zero(t, w.factsOf(w.usr(w.usrD), pcrRegType, pcrX), "F4: прямой факт usr-D на снятом X")
+	assert.False(t, w.ask(w.usr(w.usrD), "v_get", pcrRegType, pcrX), "F4: usr-D читает снятый X")
+}
+
+// F4 · проход по объекту, прочитавший правило роли с именем ключа до снятия, не пишет
+// член и факт по снятому ключу после него.
+func TestUnregisterVsObjectForward_RoleNameHeldForwardLeavesNoMember(t *testing.T) {
+	w := newURXWorld(t)
+	key := raceKey(8000, 0)
+	w.registerRegistry(key)
+	role := w.seedRole("f4_names_key", domain.Rules{namesRule(key)})
+	id := w.unmaterializedGrant(role, ndAllInScope(), "F4 объект: выдача роли с именем ключа")
+	require.Zero(t, w.membersOn(id, key), "F4 объект: фикстура — у выдачи уже есть член")
+	hold := &forwardHold{TxRunner: kanamepg.NewReconcileAdapter(w.pool, catalog.Fixed{F: w.facts})}
+	rec := reconcile.New(hold, nil, catalog.Fixed{F: w.facts})
+	reached, finished, release := hold.arm()
+	fwd := make(chan error, 1)
+	go func() { fwd <- rec.ReconcileObjectForward(w.ctx, pcrRegTgt, key) }()
+
+	blocked := w.heldWithdraw(key, reached, finished, release, "F4 объект")
+	require.NoError(t, <-fwd, "F4 объект: проход по объекту")
+	t.Logf("F4 (проход по объекту): снятие ждало прохода: %v", blocked)
+
+	assert.True(t, blocked, "F4 объект: снятие прошло мимо незафиксированного прохода, читавшего роль")
+	assert.Zero(t, w.membersOn(id, key), "F4 объект: член выдачи по снятому ключу записан")
+	assert.Zero(t, w.factsOf(w.usr(w.usrD), pcrRegType, key), "F4 объект: прямой факт usr-D на снятом ключе")
+}
+
+// F4 · близнец: проход по объекту закончился до снятия — член снимается снятием.
+func TestUnregisterVsObjectForward_RoleNameNoRaceLeavesNoMember(t *testing.T) {
+	w := newURXWorld(t)
+	key := raceKey(8100, 0)
+	w.registerRegistry(key)
+	role := w.seedRole("f4_names_key_twin", domain.Rules{namesRule(key)})
+	id := w.unmaterializedGrant(role, ndAllInScope(), "F4 близнец: выдача роли с именем ключа")
+	require.NoError(t, w.rec.ReconcileObjectForward(w.ctx, pcrRegTgt, key), "F4 близнец: проход по объекту")
+	require.NotZero(t, w.membersOn(id, key), "F4 близнец контроль: проход записал член")
+
+	w.withdraw(w.ctx, key)
+
+	assert.Zero(t, w.membersOn(id, key), "F4 близнец: член по снятому ключу пережил снятие")
+	assert.Zero(t, w.factsOf(w.usr(w.usrD), pcrRegType, key), "F4 близнец: прямой факт на снятом ключе")
+}
+
+// Заказ db r2 · проход по объекту (пакетное чтение выдач) против отзыва по цели: выдача,
+// цель которой называет ключ, прочитанная проходом до снятия, не оставляет факта.
+func TestUnregisterVsObjectForward_TargetHeldForwardLeavesNoFact(t *testing.T) {
+	w := newURXWorld(t)
+	key := raceKey(8200, 0)
+	w.registerRegistry(key)
+	id := w.unmaterializedGrant(w.rolRegGet, urTarget(key), "объект/цель: выдача на ключ")
+	hold := &forwardHold{TxRunner: kanamepg.NewReconcileAdapter(w.pool, catalog.Fixed{F: w.facts})}
+	rec := reconcile.New(hold, nil, catalog.Fixed{F: w.facts})
+	reached, finished, release := hold.arm()
+	fwd := make(chan error, 1)
+	go func() { fwd <- rec.ReconcileObjectForward(w.ctx, pcrRegTgt, key) }()
+
+	blocked := w.heldWithdraw(key, reached, finished, release, "объект/цель")
+	require.NoError(t, <-fwd, "объект/цель: проход по объекту")
+	t.Logf("объект/цель: снятие ждало прохода: %v", blocked)
+
+	assert.True(t, blocked, "объект/цель: снятие прошло мимо незафиксированного прохода, читавшего выдачу")
+	b := w.get(id)
+	assert.Equal(t, iamv1.AccessBinding_REVOKED, b.GetStatus(), "объект/цель: выдача на снятый ключ жива")
+	assert.Zero(t, w.factsOf(w.usr(w.usrD), pcrRegType, key), "объект/цель: прямой факт usr-D на снятом ключе")
 }
