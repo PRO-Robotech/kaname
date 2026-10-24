@@ -78,8 +78,8 @@ func orBindingFixture(t *testing.T) string {
 	return string(raw)
 }
 
-// Выдача посева с целью «перечень объектов» отвергается: применитель посева
-// цель не пишет, и выдача молча легла бы на весь ярус.
+// Выдача посева с целью «перечень объектов» отвергается (MOD-RL-23b, ось Г
+// MOD-RL-23).
 func TestObjectRefs_SeedBindingToAnObjectListIsRefused(t *testing.T) {
 	doc := orBindingFixture(t)
 	orRequireRefusal(t, []byte(doc), "seed.accessBindings[0].target")
@@ -166,6 +166,16 @@ func orPublicReadFixture(t *testing.T) string {
 	return string(doc)
 }
 
+// orObjectRefWhy — причина отказа дословно, как её называют MOD-RL-23b,
+// MOD-MR-13а и ND-04 (з).
+const orObjectRefWhy = "идентификатор объекта присваивает запись, и снимается он вместе с " +
+	"регистрацией объекта, а манифест применяется на каждом старте и вернул бы ссылку снова"
+
+// orNestedFinding — текст находки ND-04 (з) дословно.
+const orNestedFinding = "roles[1].rules[0].children[0].resourceNames: сужение по идентификаторам объектов " +
+	"в роли манифеста модуля не допускается — правило называет типы (resources) и вправе сузиться " +
+	"метками (matchLabels); " + orObjectRefWhy
+
 // Перечень судится НАЛИЧИЕМ ключа: пустой отвергается так же, как непустой.
 func TestObjectRefs_NestedRuleResourceNamesIsRefused(t *testing.T) {
 	for name, names := range map[string]string{"непустой перечень": "[app]", "пустой перечень": "[]"} {
@@ -173,7 +183,23 @@ func TestObjectRefs_NestedRuleResourceNamesIsRefused(t *testing.T) {
 			doc := orPublicReadFixture(t)
 			nested := orReplaceOnce(t, doc, orReaderOwner, orReaderOwner+"            resourceNames: "+names+"\n")
 			orRequireRefusal(t, nested, "roles[1].rules[0].children[0].resourceNames")
+			if _, err := manifest.Load(nested); !strings.Contains(err.Error(), orNestedFinding) {
+				t.Fatalf("находка ND-04 (з) не дословна\n ждали  %q\n получено %v", orNestedFinding, err)
+			}
 		})
+	}
+}
+
+// MOD-RL-23b: находка называет годный охват и причину.
+func TestObjectRefs_SeedBindingFindingNamesAllInScopeAndTheReason(t *testing.T) {
+	_, err := manifest.Load([]byte(orBindingFixture(t)))
+	if err == nil {
+		t.Fatal("выдача посева на перечень объектов принята")
+	}
+	for _, want := range []string{"(allInScope)", orObjectRefWhy} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("находка MOD-RL-23b не называет %q:\n%v", want, err)
+		}
 	}
 }
 

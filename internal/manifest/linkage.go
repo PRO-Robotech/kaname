@@ -395,7 +395,7 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 		for _, need := range []struct{ key, value, why string }{
 			{"scopeType", b.ScopeType, "выдача не сказала, на каком ярусе она действует"},
 			{"scopeId", b.ScopeID, "выдача не сказала, на каком объекте яруса она действует"},
-			{"target", b.Target, "выдача не сказала, распространяется ли она на весь ярус либо на перечень объектов"},
+			{"target", b.Target, "выдача посева в манифесте модуля действует только на ярус целиком: напишите `target: allInScope`"},
 		} {
 			if strings.TrimSpace(need.value) != "" {
 				continue

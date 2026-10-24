@@ -27,8 +27,7 @@ func TestApply_SeedBindingNotOnTheWholeScopeIsRefused(t *testing.T) {
 			b.Target = "resources"
 			b.Resources = []manifest.TargetResource{{Type: "iam.cluster", ID: "cluster_root"}}
 		},
-		// Цель не названа вовсе: записать её применитель не может, а молча
-		// положенная строка получила бы умолчание колонки — весь ярус.
+		// Цель не названа вовсе: это тоже не ярус целиком.
 		"цель не названа": func(b *manifest.AccessBinding) { b.Target = "" },
 	} {
 		t.Run(name, func(t *testing.T) {
