@@ -104,7 +104,7 @@ func raceCatalogTwin(t *testing.T, env *catalogTwinEnv, name string, prepare fun
 		require.NoErrorf(t, aerr, "ход %d: применитель не дошёл до конца", i)
 		require.NoErrorf(t, serr, "ход %d: %s не дошёл до конца", i, name)
 	}
-	time.Sleep(1500 * time.Millisecond)
+	flushStats(env.pool)
 	delta := deadlocksOf(t, ctx, env.pool) - before
 	t.Logf("применитель × %s: ходов %d · взаимных блокировок по счётчику базы %d", name, grantCensusRepeats, delta)
 	require.Zerof(t, delta, "применитель × %s: база отметила взаимных блокировок %d", name, delta)

@@ -329,11 +329,57 @@ func raceGrantPair(t *testing.T, a, b grantWriter) {
 			refused++
 		}
 	}
-	// Счётчик базы обновляется по сбросу статистики стороной-жертвой; пауза больше
-	// интервала сброса.
-	time.Sleep(1500 * time.Millisecond)
+	flushStats(env.pool)
 	delta := deadlocksOf(t, ctx, env.pool) - before
 	t.Logf("%s×%s: ходов %d · взаимных блокировок по счётчику базы %d · законных проигрышей %d",
 		a, b, grantCensusRepeats, delta, refused)
 	require.Zerof(t, delta, "%s×%s: база отметила взаимных блокировок %d за %d ходов", a, b, delta, grantCensusRepeats)
+}
+
+// flushStats — сброс статистики соединений пула. Счётчик взаимных блокировок база
+// пополняет из статистики стороны-жертвы, а соединение в простое сбрасывает её с
+// задержкой до десяти секунд; закрытое соединение сбрасывает её при выходе.
+func flushStats(pool *pgxpool.Pool) {
+	pool.Reset()
+	time.Sleep(500 * time.Millisecond)
+}
+
+// TestDeadlockCounterSeesADeadlock — положительный контроль ПРИБОРА: счётчик базы,
+// по которому судятся пары, видит взаимную блокировку. Две транзакции берут две
+// строки каталога в обратном порядке (ABBA); без этого контроля «ноль по
+// счётчику» был бы неотличим от счётчика, который не пополняется.
+func TestDeadlockCounterSeesADeadlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: требует Postgres")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	before := deadlocksOf(t, ctx, pool)
+
+	lock := `SELECT 1 FROM kaname.catalog_module WHERE module = $1 FOR UPDATE`
+	a, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = a.Rollback(ctx) }()
+	b, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = b.Rollback(ctx) }()
+	_, err = a.Exec(ctx, lock, "compute")
+	require.NoError(t, err)
+	_, err = b.Exec(ctx, lock, "vpc")
+	require.NoError(t, err)
+	ares := make(chan error, 1)
+	go func() { _, e := a.Exec(ctx, lock, "vpc"); ares <- e }()
+	require.True(t, lockWaiters(ctx, pool, 1, grantCensusBudget), "ПРЕДПОСЫЛКА: первая сторона встала")
+	_, berr := b.Exec(ctx, lock, "compute")
+	aerr := <-ares
+	require.True(t, isDeadlock(aerr) || isDeadlock(berr), "ПРЕДПОСЫЛКА: одна сторона снята взаимной блокировкой (%v · %v)", aerr, berr)
+	_ = a.Rollback(ctx)
+	_ = b.Rollback(ctx)
+
+	flushStats(pool)
+	delta := deadlocksOf(t, ctx, pool) - before
+	t.Logf("контроль счётчика: взаимных блокировок по счётчику базы %d", delta)
+	require.Equal(t, int64(1), delta, "счётчик базы не увидел взаимной блокировки — судить пары по нему нельзя")
 }
