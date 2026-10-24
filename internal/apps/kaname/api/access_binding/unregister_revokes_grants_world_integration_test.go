@@ -84,7 +84,7 @@ func newURXWorld(t *testing.T) *urxWorld {
 // мира. Доставка манифеста (`applyDelivered`) пересобирает `ab`, поэтому после неё
 // зовётся снова.
 func (w *urxWorld) rewire() {
-	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops, pcrFacts{w.pcrWorld}).
 		WithRelationStore(w.door, nil).
 		WithReconciler(w.rec).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))

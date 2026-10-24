@@ -212,7 +212,7 @@ func (w *urxWorld) factsOf(subject, objectType, objectID string) int {
 
 // forwardCreate — обработчик выдач, чей проход материализации держит `hold`.
 func (w *urxWorld) forwardCreate(hold *forwardHold) *accessbindingapp.Handler {
-	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops, pcrFacts{w.pcrWorld}).
 		WithRelationStore(w.door, nil).
 		WithReconciler(reconcile.New(hold, nil, catalog.Fixed{F: w.facts})).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
@@ -281,7 +281,7 @@ func TestUnregisterVsCreateForward_NoRaceLeavesNoFactOnKey(t *testing.T) {
 func TestURG24b_UnregisterWaitsForBindingWriterHoldingKey(t *testing.T) {
 	w := newURXWorld(t)
 	hold := &lockHoldRepo{Repository: w.repo}
-	create := accessbindingapp.NewCreateAccessBindingUseCase(hold, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(hold, w.ops, pcrFacts{w.pcrWorld}).
 		WithRelationStore(w.door, nil).
 		WithReconciler(w.rec).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
@@ -372,7 +372,7 @@ func (w *urxWorld) membersOn(bindingID, objectID string) int {
 // не делегирует полному.
 func (w *urxWorld) unmaterializedGrant(role domain.RoleID, target *iamv1.AccessTarget, why string) string {
 	w.t.Helper()
-	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops, pcrFacts{w.pcrWorld}).
 		WithRelationStore(w.door, nil).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
 	h := accessbindingapp.NewHandler(create, nil, nil, nil, nil, nil, nil)

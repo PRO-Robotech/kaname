@@ -77,7 +77,7 @@ func raceKey(base, i int) string { return fmt.Sprintf("reg%017d", base+i) }
 
 // holdingCreate — обработчик выдач, чей use-case создания держит воркер на `hold`.
 func (w *urxWorld) holdingCreate(hold *holdingRepo) *accessbindingapp.Handler {
-	create := accessbindingapp.NewCreateAccessBindingUseCase(hold, w.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(hold, w.ops, pcrFacts{w.pcrWorld}).
 		WithRelationStore(w.door, nil).
 		WithReconciler(w.rec).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
