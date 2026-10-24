@@ -459,3 +459,7 @@ func (_ delABReader) GrantorLastPresentedAt(context.Context, domain.UserID) (tim
 func (_ delABReader) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
 	return domain.PublicReadContainer{}, nil
 }
+
+func (_ delABReader) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}

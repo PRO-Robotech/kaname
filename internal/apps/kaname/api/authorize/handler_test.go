@@ -82,7 +82,7 @@ func newHandlerWithStub(check bool) (*Handler, *stubVerdict) {
 	// whoAmI is required by the handler; tests that don't exercise WhoAmI pass
 	// a use-case with nil deps — its Execute() returns Unavailable via the
 	// documented defensive guards rather than panicking.
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)), stub
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), probeModuleForm), stub
 }
 
 func TestHandler_Check_AllowedHappyPath(t *testing.T) {
@@ -223,7 +223,7 @@ func newHandlerWithAuthorizer(a service.Authorizer) *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: a,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil))
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), probeModuleForm)
 }
 
 // TestHandler_Authorize_RedactsBackendError — отказавший вызов к источнику

@@ -10,7 +10,7 @@
 // (api-gateway) — единственная парадная дверь авторизации платформы. Он
 // проверяет токен, задаёт пообъектный вопрос через iam.Check по каталогу прав и
 // только после этого передаёт установленную личность метаданными
-// x-kacho-principal-*. Всё, что стоит после этого решения, действует от имени
+// (`principalwire.MetaPrincipalPrefix`). Всё, что стоит после этого решения, действует от имени
 // ЛЮБОЙ личности, приехавшей в этих заголовках.
 //
 // Но :9090 — не только для края. Пять служб-потребителей зовут его на пути
@@ -37,8 +37,9 @@
 //
 // Ветви (по порядку):
 //  1. Пол — всякий публичный глагол в боевой посадке требует ПРОВЕРЕННОГО
-//     модульного сертификата mTLS (SAN SPIFFE
-//     spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>). dev (проверенного
+//     модульного сертификата mTLS (SAN
+//     `spiffe://<домен>/ns/<пространство>/sa/<учётка>`, учётка — объявленной
+//     установкой формы имени службы). dev (проверенного
 //     сертификата нет) — проход, как у CallerPolicy и RelationWriteGate.
 //  2. Край — служебная учётка края зовёт всё: это парадная дверь, и
 //     пообъектное решение модели доступа, на котором стоит весь замысел,
@@ -81,6 +82,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Публичные глаголы, которые законно зовёт модуль, не являющийся краем.
@@ -234,6 +236,9 @@ type PublicCallerPolicy struct {
 	// реализацией проверки удостоверения, то есть два предмета, которые меняются
 	// порознь. Реализацию подставляет композиционный корень.
 	presented CredentialPresence
+	// form — форма имени службы, объявленная установкой: ею учётка
+	// сертификата разбирается в короткое имя службы. Нулевая не узнаёт никого.
+	form servicesan.Form
 }
 
 // CredentialPresence — приложил ли вызывающий удостоверение к ЭТОМУ запросу.
@@ -250,11 +255,17 @@ type CredentialPresence func(ctx context.Context) bool
 // presented — реализация порта [CredentialPresence]. Параметр ОБЯЗАТЕЛЕН и
 // позиционен: сборка, забывшая его подставить, не соберётся вовсе — тогда как
 // умолчание сделало бы её молча отвечающей «назовись» тому, кто назвался.
+//
+// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm()):
+// ею учётка сертификата разбирается в короткое имя службы. Обязательна и
+// позиционна по той же причине: нулевая не узнаёт никого, и забытая сборкой
+// она сделала бы пол молча отвергающим каждый модуль, край в том числе.
 func NewPublicCallerPolicy(
 	prodMode bool,
 	peerCallable map[string][]string,
 	acrCatalog ACRRequirementLookup,
 	presented CredentialPresence,
+	form servicesan.Form,
 ) *PublicCallerPolicy {
 	m := make(map[string]map[string]struct{}, len(peerCallable))
 	for method, svcs := range peerCallable {
@@ -270,7 +281,7 @@ func NewPublicCallerPolicy(
 	}
 	return &PublicCallerPolicy{
 		prodMode: prodMode, peerCallable: m, gatewayFloorExempt: exempt,
-		acrCatalog: acrCatalog, presented: presented,
+		acrCatalog: acrCatalog, presented: presented, form: form,
 	}
 }
 
@@ -381,7 +392,7 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 
 	svc, ok := "", false
 	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), p.form, san)
 	}
 	if !ok {
 		// Проверенного модульного сертификата нет: dev — проход, prod — отказ

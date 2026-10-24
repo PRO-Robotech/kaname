@@ -25,7 +25,7 @@ import (
 
 func boundedRequest(ttl time.Duration, notAfter time.Time) tokensigner.Request {
 	return tokensigner.Request{
-		Subject: "usr-alice", Audience: []string{"api.kacho.local"},
+		Subject: "usr-alice", Audience: []string{"api.example.test"},
 		TokenType: "at+jwt", TTL: ttl, NotAfter: notAfter,
 	}
 }

@@ -19,7 +19,7 @@
 //
 // Scope of the gate — only TENANT-facing principals (user / service_account)
 // are gated. Anonymous / system principals are the cluster-internal
-// verified-mTLS module PDP peer calls (kacho-vpc / kacho-compute / kacho-nlb
+// verified-mTLS module PDP peer calls (модули vpc / compute / nlb
 // on :9091): their authz contract is "a verified module MAY query authz
 // decisions" (NOT "the module has access to the objects"), gated by the
 // internal listener's CallerPolicy verified-cert floor — see
@@ -145,7 +145,8 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 // (PrincipalSubject !ok) reaching the inner gate. The only legitimate
 // no-tenant-principal caller of AuthorizeService is a cluster-internal module
 // PDP peer, which is identified by a VERIFIED mTLS module SAN
-// (spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>) on the :9091 internal listener —
+// (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`, учётка — объявленной установкой
+// формы имени службы, NewHandler) on the :9091 internal listener —
 // NOT by the mere absence of a principal. It returns nil (allow) only when:
 //
 //   - a verified module SAN is present (genuine internal PDP peer — the internal
@@ -161,7 +162,7 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 // what a wiring mistake must produce.
 func (h *Handler) authorizeAnonymousPeer(ctx context.Context) error {
 	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
-		if _, ok := authzguard.SANToServiceDomain(grpcsrv.CertIdentityDomainFromContext(ctx), san); ok {
+		if _, ok := authzguard.SANToServiceDomain(grpcsrv.CertIdentityDomainFromContext(ctx), h.moduleForm, san); ok {
 			return nil
 		}
 	}

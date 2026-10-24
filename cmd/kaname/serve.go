@@ -717,6 +717,14 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
+	// Круг отправителей — тем же предикатом, которым его записи разберёт
+	// транспорт (kaname#308): форма имени службы в объявленном домене либо имя
+	// собственного фронта, только что выведенное из его сертификата. Запись,
+	// которую пол не узнает, прошла бы взаимный TLS и получала бы отказ на
+	// каждом вызове при зелёных стражах старта (см. forwarderform.go).
+	if err := requireForwardersRecognised(cfg.AuthN, ownFrontSAN); err != nil {
+		return err
+	}
 	// Различимость адресов поверхностей судится НЕ ЗДЕСЬ, а там, где собран срез
 	// подъёма: сверять надо ВСЕ поверхности, а адреса не-gRPC приходят профилем
 	// поверхности, которого на этом шаге ещё нет. Прежде страж стоял здесь и
@@ -770,7 +778,8 @@ func runServe(cfg config.Config) error {
 	// круг края он не проходит никогда, потому что краем не является и о том,
 	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
 	// который фронт предъявляет, — разойтись с проводом ей нечем.
-	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
+	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs(),
+		cfg.AuthN.ServiceNameForm()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
 		}).
@@ -798,7 +807,8 @@ func runServe(cfg config.Config) error {
 	// движку мимо второго шанса и мимо сравнения форм. Страж при этом
 	// присутствовал, был провязан и исполнялся — снаружи неотличимо от
 	// исправного.
-	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs()).
+	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs(),
+		cfg.AuthN.ServiceNameForm()).
 		WithProductionMode(productionMode)
 
 	// Per-RPC `required_acr_min` (step-up) FLOOR on the internal
@@ -844,7 +854,8 @@ func runServe(cfg config.Config) error {
 		// Реализация порта присутствия удостоверения: КЛЮЧ метаданных и
 		// объявленная схема предъявления живут у читателя, и второй их разбор
 		// разошёлся бы с первым молча — на входе, который оба считают годным.
-		presentedcred.Presented)
+		presentedcred.Presented,
+		cfg.AuthN.ServiceNameForm())
 
 	// РУБЕЖ ПОЛОЖЕНИЯ ПОДТВЕРЖДЕНИЯ (kaname#456, Р4б, Р4в) — ОДНО значение на
 	// оба слушателя и обе полосы, сразу после политики вызывающего: человек с
@@ -1237,7 +1248,7 @@ func runServe(cfg config.Config) error {
 	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
 	// край и пересыльщик вообще узнаваемы, требует страж
 	// requireIssuingListenerAsksForACertificate.
-	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
+	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain(), cfg.AuthN.ServiceNameForm())
 	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		logger: logger,
 		source: issuingSource,

@@ -24,7 +24,7 @@ import (
 // отказывает и называет его; с пределом та же сборка проходит.
 func TestBuild_RefusesAnUndeclaredBasicCredentialLimit(t *testing.T) {
 	cfg := registrytokenwire.BuildConfig{
-		Realm:   "https://api.kacho.local/iam/token",
+		Realm:   "https://api.example.test/iam/token",
 		Service: "registry.probe.local",
 		// Наш подписант подан: без него сборка отказывает раньше предела, и
 		// отказ ниже был бы не о пределе (kaname#494).

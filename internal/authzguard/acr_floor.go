@@ -44,14 +44,14 @@
 // (acr_floor_stepup_parity_test.go drives this entrypoint against the shared
 // rule, machine principal included).
 //
-// Inputs are read ONLY under the trust invariant: grpcsrv.TrustedACRFromContext
-// for the acr and grpcsrv.TrustedPrincipalFromContext for the principal type. On
-// the mTLS-verified gateway→iam edge the gateway forwards x-kacho-token-acr and
-// x-kacho-principal-type; on an unverified/foreign-SAN peer the acr is dropped
-// upstream (corelib) and the principal is flagged untrusted — this floor then
-// passes an EMPTY principal type to the rule, so a forged
-// `service_account` header cannot buy the exemption (anti-spoof), and the absent
-// acr ranks 0 → denied.
+// Входы читаются ТОЛЬКО под инвариантом доверия: уровень —
+// grpcsrv.TrustedACRFromContext, вид принципала —
+// grpcsrv.TrustedPrincipalFromContext. На ребре край→iam, проверенном взаимным TLS, край передаёт
+// `principalwire.MetaTokenACR` и `principalwire.MetaPrincipalType`; у пира без
+// проверки либо с чужим SAN уровень снимается выше по цепочке (corelib), а
+// принципал помечается недоверенным — и тогда этот пол передаёт правилу ПУСТОЙ
+// вид принципала: подделанный заголовок `service_account` освобождения не
+// покупает (защита от подмены), а отсутствующий уровень имеет ранг 0 → отказ.
 //
 // EXEMPT (deliberately not enforced here):
 //   - Non-gateway-fronted internal RPCs (InternalIAMService/Check,
@@ -172,11 +172,12 @@ func (f *ACRFloor) allow(ctx context.Context, fullMethod string) error {
 	// 4. Production + acr_min > 0 — hand the inputs to THE shared rule.
 	//
 	// The acr was already scrubbed upstream on an untrusted peer (rank 0 → deny).
-	// The principal is NOT scrubbed there (only flagged), so the trust flag is
-	// applied here: an untrusted peer yields an EMPTY principal type, which the
-	// rule never exempts. Forging `x-kacho-principal-type: service_account`
-	// therefore buys nothing (internalCallerPolicy already denied a non-gateway
-	// SAN before this floor — this is the second lock on the same door).
+	// Принципал там НЕ снимается (только помечается), поэтому признак доверия
+	// применяется здесь: недоверенный пир даёт ПУСТОЙ вид принципала, который
+	// правило не освобождает никогда. Подделка
+	// `principalwire.MetaPrincipalType` = `service_account` поэтому не покупает
+	// ничего (internalCallerPolicy отверг SAN не-края ещё до этого пола — здесь
+	// второй замок на той же двери).
 	acr, _ := grpcsrv.TrustedACRFromContext(ctx)
 	principalType := ""
 	if p, trusted := grpcsrv.TrustedPrincipalFromContext(ctx); trusted {
