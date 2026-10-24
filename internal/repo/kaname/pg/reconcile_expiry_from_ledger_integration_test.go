@@ -178,10 +178,23 @@ func TestExpireFromLedger_RetiredTypeRevokesTheWholeLedger(t *testing.T) {
 	p.assertNothingLeft(t, "истечение после снятия типа из каталога")
 }
 
-// Выпадение члена из желаемого: полный проход реплики без типа в снимке видит члена как
-// выпавшего — и обязан снять его кортежи по реестру.
+// Выпадение члена из желаемого на реплике без типа в снимке: объект ушёл из зеркала,
+// член выпал по-настоящему — и его кортежи снимаются по реестру, хотя ключа
+// `<тип модели>:<id>` реплике собрать нечем. Тип при этом жив в строках каталога:
+// одно отставание снимка члена не снимает (kaname#937,
+// reconcile_catalog_lag_integration_test.go), снимает выпадение.
 func TestFellOutMemberFromLedger_ReplicaWithoutTheType(t *testing.T) {
 	p := newLedgerProbe(t, "e933fo", false)
+	removeLedgerProbeObject(t, p.pool)
 	require.NoError(t, p.b.ReconcileBinding(context.Background(), p.bid))
 	p.assertNothingLeft(t, "член выпал из желаемого на реплике без типа")
+}
+
+// removeLedgerProbeObject — объект пробы ушёл из зеркала: член выдачи выпадает из
+// желаемого по-настоящему, а не потому, что реплика не знает его типа.
+func removeLedgerProbeObject(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`DELETE FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = 'iRace'`, ledgerProbeType)
+	require.NoError(t, err, "ПРЕДПОСЫЛКА: объект пробы снят с зеркала")
 }
