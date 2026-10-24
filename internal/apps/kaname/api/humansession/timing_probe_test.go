@@ -51,8 +51,14 @@
 // так, чтобы доля ложного красного была не выше бюджета, — это держит
 // детерминированная TestTimingCriterion_PositiveTwinHoldsAtTheDeclaredN. Красный — не выполнен хотя бы на
 // одной: полоса названа. «Не выполнилось» — размах любой полосы выше потолка
-// годности (`timingIQRCeiling`): стенд шумит сильнее, чем различимость, которую
-// меряют, и вердикта нет ни в одну сторону (Ф1-50).
+// годности (timingFitnessCeiling — половина различия, которое вносит Ф1-49):
+// стенд шумит сильнее, чем различимость, которую меряют, и вердикта нет ни в
+// одну сторону (Ф1-50). Этот исход подаётся `t.Skip` с меткой
+// timingNotPerformed, а не `t.Fatalf`: код выхода красного у него был бы тем
+// же, что у отказа продукта. Вердикт ручного прогона читает прогонщик
+// `.github/scripts/go-test-verdict.py` — 0 зелёный, 1 красный, 2 «не
+// выполнилось» (kaname#861). Потолок, не лежащий строго ниже различия, —
+// красное: это дефект пробы, а не шум стенда.
 //
 // # Инъекция Ф1-49 — способность критерия упасть (kaname#223)
 //
@@ -66,7 +72,7 @@
 // упасть на синтетических выборках держится без машины и без ручки —
 // `timing_probe_verdict_test.go`, на каждой отправке.
 //
-//	KACHO_LOGIN_TIMING=1 KACHO_LOGIN_TIMING_INJECT='адреса нет' go test ./internal/apps/kaname/api/humansession/ -run TestLogin_F3_31_RefusalTime -count=1 -v -timeout 60m
+//	KACHO_LOGIN_TIMING=1 KACHO_LOGIN_TIMING_INJECT='адреса нет' go test ./internal/apps/kaname/api/humansession/ -run TestLogin_F3_31_RefusalTime -count=1 -json -timeout 60m > timing.json; python3 .github/scripts/go-test-verdict.py < timing.json
 //
 // # Почему ручной прогон
 //
@@ -74,7 +80,10 @@
 // машине прогона); при N=40 на семь полос — 5–6 минут, и на общем ранере
 // размах превышает потолок годности by construction. Прогон — ручкой, как у соседних измерительных приборов:
 //
-//	KACHO_LOGIN_TIMING=1 go test ./internal/apps/kaname/api/humansession/ -run TestLogin_F3_31 -count=1 -v -timeout 60m
+//	KACHO_LOGIN_TIMING=1 go test ./internal/apps/kaname/api/humansession/ -run TestLogin_F3_31 -count=1 -json -timeout 60m > timing.json; python3 .github/scripts/go-test-verdict.py < timing.json
+//
+// Печать замера (калибровка, медианы, пары) лежит в `timing.json` событиями
+// вывода; вердикт — код прогонщика, а не `ok` голого `go test`.
 package humansession_test
 
 import (
@@ -109,16 +118,14 @@ const (
 	// положительный контроль.
 	timingInjectEnv  = "KACHO_LOGIN_TIMING_INJECT"
 	timingRunCommand = "KACHO_LOGIN_TIMING=1 go test ./internal/apps/kaname/api/humansession/ " +
-		"-run TestLogin_F3_31 -count=1 -v -timeout 60m"
+		"-run TestLogin_F3_31 -count=1 -json -timeout 60m > timing.json; " +
+		"python3 .github/scripts/go-test-verdict.py < timing.json"
 	// timingLaneN — обращений на полосу; нижняя граница Ф1-48 — 10. Объявлено
 	// выше границы — наименьшее из 12/24/30/36/40, при котором ложный красный
 	// положительного близнеца на шуме разрешения ожидания не выше бюджета
 	// (TestTimingCriterion_PositiveTwinHoldsAtTheDeclaredN): при 12 — 0,174,
 	// при 36 — 0,00085 (у края бюджета), при 40 — 0,00035 (kaname#223).
 	timingLaneN = 40
-	// timingIQRCeiling — потолок годности замера: размах выше него означает,
-	// что стенд шумит сильнее измеряемого, и вердикта нет (Ф1-50).
-	timingIQRCeiling = 250 * time.Millisecond
 	// timingWaitResolution — разрешение ожидания огибающей на машине прогона:
 	// простаивающий процесс Go ждёт таймер в epoll с таймаутом в целых
 	// миллисекундах (runtime/netpoll_epoll.go), и выход из ожидания несёт
@@ -182,6 +189,50 @@ func timingPairFailures(rows []timingRow) (failures, lines []string) {
 		}
 	}
 	return failures, lines
+}
+
+// timingNotPerformed — метка третьего исхода измерительной пробы. Исход подаётся
+// `t.Skip` с этой меткой в начале текста, а не `t.Fatalf`: код выхода 1 у
+// «стенд шумит» и у «продукт различим» одинаков, и читающий их не различил бы.
+// Прогонщик вердикта (`.github/scripts/go-test-verdict.py`) читает метку и
+// отдаёт код 2 — «не выполнилось», не зелёный (kaname#861).
+const timingNotPerformed = "НЕ ВЫПОЛНИЛОСЬ"
+
+// timingFitnessCeiling — потолок годности замера, ПРОИЗВОДНЫЙ от различия,
+// которое вносит инъекция Ф1-49 на машине прогона: половина. Приёмка Ф1-50:
+// «годен тот потолок, при котором Ф1-49 краснеет» — полоса с размахом у
+// потолка поглощает различие не больше потолка, значит годный потолок строго
+// ниже различия; половина оставляет медиане запас на собственный шум.
+// Выписанного числа у потолка нет намеренно: стоимость класса — свойство
+// машины, и число, верное на одной, на другой делало бы пробу слепой.
+func timingFitnessCeiling(injected time.Duration) time.Duration { return injected / 2 }
+
+// timingCeilingFault — судья потолка годности: потолок обязан быть конечным и
+// строго ниже внесённого различия. Потолок не ниже различия — дефект ПРОБЫ, а
+// не шум стенда: проверка размаха выродилась, и проба зелена при любом
+// различии; поэтому вызывающий подаёт это красным.
+func timingCeilingFault(ceiling, injected time.Duration) error {
+	if injected <= 0 {
+		return fmt.Errorf("потолок годности не из чего вывести: внесённое различие %v не откалибровано", injected)
+	}
+	if ceiling <= 0 || ceiling >= injected {
+		return fmt.Errorf("потолок годности %v не ниже внесённого различия %v: полоса с размахом у потолка "+
+			"поглотит различие, и проба зелена при любом (Ф1-50: годен тот потолок, при котором Ф1-49 краснеет)",
+			ceiling, injected)
+	}
+	return nil
+}
+
+// timingUnfitLane — третий исход Ф1-50: первая полоса, чей размах выше
+// потолка годности, с текстом, который начинается меткой timingNotPerformed.
+func timingUnfitLane(rows []timingRow, ceiling time.Duration) (string, bool) {
+	for _, r := range rows {
+		if r.iqr > ceiling {
+			return fmt.Sprintf("%s (Ф1-50): размах полосы %q %v выше потолка годности %v — стенд шумит "+
+				"сильнее измеряемого, вердикта нет", timingNotPerformed, r.lane.name, r.iqr, ceiling), true
+		}
+	}
+	return "", false
 }
 
 // timingInjectedLane — полоса, названная ручкой инъекции Ф1-49. Имя, которого
@@ -285,6 +336,13 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	require.True(t, ok)
 	t.Logf("огибающая: потолок %v · класс-потолок %s (стоимость %v) · классов %d",
 		envelope.Floor(), ceiling.Class.Key(), ceiling.Cost, len(envelope.Classes()))
+	// Потолок годности — производный от различия инъекции Ф1-49 (стоимость
+	// класса ручки), и он судится ДО замера: потолок не ниже различия делал бы
+	// пробу зелёной при любом различии.
+	fitness := timingFitnessCeiling(knobCost)
+	if err := timingCeilingFault(fitness, knobCost); err != nil {
+		t.Fatalf("Ф1-50: %v", err)
+	}
 	h.envelopePort = envelope
 	require.NoError(t, rebuildLoginWithLimits(h, limitN, limitT))
 	// Материала нет — личность без строки способа входа.
@@ -301,7 +359,7 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	if injectName != "" {
 		l, err := timingInjectedLane(lanes, injectName)
 		if err != nil {
-			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ: %v", err)
+			t.Skipf("%s: %v", timingNotPerformed, err)
 		}
 		require.Positive(t, knobCost, "стоимость класса ручки не откалибрована — величине инъекции не из чего взяться")
 		l.inject = knobCost
@@ -328,7 +386,7 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	require.Zero(t, h.obs.login[humansession.LoginOutcomeRateLimited], "Ф3-30: отказов по частоте ноль")
 
 	t.Logf("предел частоты: N=%d за T=%v · обращений на полосу %d · потолок годности IQR %v · нижняя граница N — 10",
-		limitN, limitT, timingLaneN, timingIQRCeiling)
+		limitN, limitT, timingLaneN, fitness)
 	var rows []timingRow
 	floor := envelope.Floor()
 	var belowFloor []string
@@ -336,13 +394,12 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		m, q := l.stats()
 		rows = append(rows, timingRow{l, m, q})
 		t.Logf("полоса %-36s медиана %10v · IQR %10v · n=%d · потолок %v", l.name, m, q, len(l.samples), floor)
-		if q > timingIQRCeiling {
-			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ (Ф1-50): размах полосы %q %v выше потолка годности %v — стенд шумит сильнее измеряемого, вердикта нет",
-				l.name, q, timingIQRCeiling)
-		}
 		if m < floor {
 			belowFloor = append(belowFloor, fmt.Sprintf("%s: медиана %v раньше потолка %v", l.name, m, floor))
 		}
+	}
+	if text, unfit := timingUnfitLane(rows, fitness); unfit {
+		t.Skip(text)
 	}
 	require.Empty(t, belowFloor, "Ф3-31: медиана раньше потолка огибающей — исход ушёл до потолка (ожидание не настоящее либо числа калибровки выбраны неверно, Р17)")
 	failures, lines := timingPairFailures(rows)
@@ -351,7 +408,7 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	}
 	if injectName != "" {
 		t.Logf("инъекция Ф1-49 при потолке годности IQR %v и N=%d: нарушивших пар %d — ждём красное С ИМЕНЕМ полосы %q",
-			timingIQRCeiling, timingLaneN, len(failures), injectName)
+			fitness, timingLaneN, len(failures), injectName)
 	}
 	require.Empty(t, failures, "Ф1-48 нарушен на парах полос: время отказа различает класс стоимости либо наличие материала")
 }

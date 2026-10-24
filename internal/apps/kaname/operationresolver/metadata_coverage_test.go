@@ -111,7 +111,6 @@ var unresolvedMetadata = []string{
 	"RevokeMetadata",
 	"RevokeSAKeyMetadata",
 	"RevokeUserTokenMetadata",
-	"UpsertFromIdentityMetadata",
 	// Здесь стояла `WriteTuplesMetadata`. Запись снята вместе со своим предметом
 	// (kacho#788): RPC `InternalAuthorizeService.WriteTuples` удалён с контракта, тип
 	// метаданных перестал существовать — и перепись назвала запись истёкшей сама,

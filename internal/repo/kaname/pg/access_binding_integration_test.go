@@ -36,6 +36,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // insertAB — helper для seed-вставки AccessBinding.
@@ -56,7 +57,7 @@ func insertAB(t *testing.T, ctx context.Context, repo *kanamepg.Repository, b do
 	if !assert.NoError(t, err) {
 		t.FailNow()
 	}
-	out, err := w.AccessBindingsW().Insert(ctx, b)
+	out, err := bindingset.Insert(ctx, w.AccessBindingsW(), b)
 	if err != nil {
 		_ = w.Rollback(ctx) // освобождаем connection до FailNow
 		assert.NoError(t, err)
@@ -131,7 +132,7 @@ func TestAB_31b_Insert_DuplicateActiveIsAlreadyExists(t *testing.T) {
 	b2.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, insErr := w.AccessBindingsW().Insert(ctx, b2)
+	_, insErr := bindingset.Insert(ctx, w.AccessBindingsW(), b2)
 	_ = w.Rollback(ctx) // release connection even on error path
 
 	require.Error(t, insErr, "duplicate active grant must surface")
@@ -212,7 +213,7 @@ func TestAB_32_Insert_MissingRole(t *testing.T) {
 	}
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, b)
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), b)
 	_ = w.Rollback(ctx)
 	require.Error(t, err)
 	assert.True(t, stderrors.Is(err, iamerr.ErrFailedPrecondition))
@@ -241,7 +242,7 @@ func TestAB_33_Insert_InvalidSubjectType(t *testing.T) {
 	}
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, b)
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), b)
 	_ = w.Rollback(ctx)
 	require.Error(t, err)
 	assert.True(t, stderrors.Is(err, iamerr.ErrInvalidArg))
@@ -405,7 +406,7 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 				otherErrs <- ierr
 				return
 			}
-			out, ierr := w.AccessBindingsW().Insert(ctx, b)
+			out, ierr := bindingset.Insert(ctx, w.AccessBindingsW(), b)
 			if ierr != nil {
 				_ = w.Rollback(ctx) // release connection on the loser path
 				if stderrors.Is(ierr, iamerr.ErrAlreadyExists) {

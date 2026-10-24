@@ -10,10 +10,10 @@
 #
 # Предметы у них РАЗНЫЕ, и различие несущее.
 #
-#   stand-own.sh   поднимает ПРОЦЕСС: свой бинарь, свой Postgres в docker, свой
-#                  УЦ. Он доказывает, что служба живёт без платформы, и ничего
-#                  не утверждает о ЧАРТЕ — helm, kubectl и kind в нём не
-#                  встречаются ни разу.
+#   stand-own.sh   поднимает ПРОЦЕСС: свой бинарь, свой Postgres (в docker либо
+#                  голым подом внешнего кластера, kaname#841), свой УЦ. Он доказывает,
+#                  что служба живёт без платформы, и ничего не утверждает о ЧАРТЕ —
+#                  helm и kind в нём не встречаются ни разу.
 #   render-guard.sh судит РЕНДЕР: вход, который чарт отдаёт процессу, страж
 #                  старта принимает. Его собственная шапка говорит прямо: «пода
 #                  не поднимает и об установке в кластере не утверждает ничего».
@@ -1313,8 +1313,9 @@ seed_ceremony() {
 # by construction. Запись — одним оператором через `psql` пода базы стенда;
 # оператор уходит вводом, а не аргументами. Разбор шагов и границ — шапка
 # `tests/authz-fixtures/seed_stored_value.py`. Исходы — те же три.
-seed_stored_value() {
-	need_tool python3; need_tool go
+# lane_and_store — общее «Дано» посевов, пишущих строку мимо продукта: лист края,
+# живая полоса входа (LANE_URL) и исполнитель записи (STORE_EXEC — psql пода базы).
+lane_and_store() {
 	local f
 	for f in edge.crt edge.key ca.crt; do
 		[ -s "$EDGE_DIR/$f" ] || { unmet "листа края нет в $EDGE_DIR — сначала seed-login-lane"; exit "$RC_UNMET"; }
@@ -1334,11 +1335,42 @@ seed_stored_value() {
 	else
 		start_lane_forward
 	fi
-	local rc=0 store_exec="kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname"
+	STORE_EXEC="kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname"
+}
+
+seed_stored_value() {
+	need_tool python3; need_tool go
+	lane_and_store
+	local rc=0
 	python3 "$ROOT/tests/authz-fixtures/seed_stored_value.py" \
-		--base-url "$LANE_URL" --pki "$EDGE_DIR" --store-exec "$store_exec" || rc=$?
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --store-exec "$STORE_EXEC" || rc=$?
 	[ "$rc" -eq 0 ] || return "$rc"
-	seed_store_companions "$store_exec"
+	seed_store_companions "$STORE_EXEC"
+}
+
+# seed_key_person_once — ПЕРЕПОСЕВ одноразовой личности без пароля (kaname#860).
+# Набор ключей доступа расходует её за прогон: Ф13-25 заводит ей пароль
+# восстановлением, вход ключом двигает счётчик подписи. Второй прогон на прежней
+# строке получал единый отказ входа ключом (48 упавших в Ф13-19…25). Прогонщик
+# набора (tests/newman/scripts/run.sh) зовёт эту подкоманду перед набором: личность
+# `f13Person` заводится заново, прочие строки окружения не трогаются.
+seed_key_person_once() {
+	need_tool python3
+	lane_and_store
+	seed_key_person_with "$STORE_EXEC" --prefix f13Person
+}
+
+# seed_key_person_with STORE_EXEC [--prefix P…] — посев личностей с ключом; место
+# вызова одно на оба пути (соседи посева хранимых значений и перепосев).
+seed_key_person_with() {
+	local store_exec="$1" mailbox issuance own
+	shift
+	ensure_forward mailbox "$MAIL_SVC" http; mailbox="http://127.0.0.1:$FORWARD_PORT"
+	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
+	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
+	python3 "$ROOT/tests/authz-fixtures/seed_key_person.py" "$@" \
+		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" \
+		--issuance-url "$issuance" --own-url "$own" --store-exec "$store_exec"
 }
 
 # ─── СОСЕДИ ПОСЕВА ХРАНИЛИЩЕМ: ТЕ ЖЕ ДВЕРИ, ТОТ ЖЕ ИСПОЛНИТЕЛЬ ЗАПИСИ ───────────
@@ -1362,7 +1394,7 @@ seed_stored_value() {
 #     Заводятся регистрацией полосы, строка пароля снимается той же записью, что
 #     у личности с ключом.
 seed_store_companions() {
-	local store_exec="$1" rc=0 mailbox metrics issuance own cfg="$WORK/process-config.yaml"
+	local store_exec="$1" rc=0 mailbox metrics cfg="$WORK/process-config.yaml"
 	ensure_forward mailbox "$MAIL_SVC" http; mailbox="http://127.0.0.1:$FORWARD_PORT"
 	ensure_deploy_forward metrics metrics; metrics="https://127.0.0.1:$FORWARD_PORT"
 	"${KCTL[@]}" -n "$NS" get configmap "$RELEASE-config" -o 'jsonpath={.data.config\.yaml}' \
@@ -1371,11 +1403,7 @@ seed_store_companions() {
 		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" --metrics-url "$metrics" \
 		--config-file "$cfg" --store-exec "$store_exec" || rc=$?
 	[ "$rc" -eq 0 ] || return "$rc"
-	ensure_forward registry-token "$RELEASE" registry-token; issuance="https://127.0.0.1:$FORWARD_PORT"
-	ensure_forward http-rest "$RELEASE" http-rest; own="https://127.0.0.1:$FORWARD_PORT"
-	python3 "$ROOT/tests/authz-fixtures/seed_key_person.py" \
-		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" \
-		--issuance-url "$issuance" --own-url "$own" --store-exec "$store_exec" || rc=$?
+	seed_key_person_with "$store_exec" || rc=$?
 	[ "$rc" -eq 0 ] || return "$rc"
 	python3 "$ROOT/tests/authz-fixtures/seed_wayless_person.py" \
 		--base-url "$LANE_URL" --pki "$EDGE_DIR" --mailbox-url "$mailbox" --store-exec "$store_exec" || rc=$?
@@ -1437,12 +1465,16 @@ case "${1:-}" in
 		need_tool kubectl
 		seed_stored_value
 		;;
+	seed-key-person)
+		need_tool kubectl
+		seed_key_person_once
+		;;
 	down)
 		need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|seed-stored-value|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|seed-stored-value|seed-key-person|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac

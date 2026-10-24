@@ -61,7 +61,7 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 	// Условие пробы: человек и принадлежащий ему аккаунт существуют. Заводится
 	// каноническим посевом пакета — он и есть тот путь, которым эта пара строк
 	// появляется у арендатора.
-	ownerID, _ := bootstrapAdmin(t, ctx, repo, "ownsacc")
+	ownerID, ownedAcc := bootstrapAdmin(t, ctx, repo, "ownsacc")
 
 	// Предмет: снятие ВЛАДЕЮЩЕГО человека.
 	//
@@ -85,7 +85,8 @@ func TestUserDelete_OwnsAccount_SaysSoInsteadOfNotFound(t *testing.T) {
 		"полоса «ссылки нет» на существующем человеке — то самое утверждение об отсутствии")
 
 	got := iamerr.StripSentinel(cerr)
-	assert.Equal(t, "User "+string(ownerID)+" owns accounts and cannot be deleted", got)
+	assert.Equal(t, "User "+string(ownerID)+" owns accounts and cannot be deleted: delete Account "+
+		string(ownedAcc)+" first (accounts owned: 1)", got)
 	assert.NotContains(t, got, "not found",
 		"отказ не вправе утверждать отсутствие человека, которого возвращает ListUsers")
 	for _, frag := range []string{"accounts_owner_fk", "constraint", "kaname", "SQLSTATE"} {

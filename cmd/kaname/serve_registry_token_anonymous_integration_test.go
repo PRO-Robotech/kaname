@@ -81,7 +81,7 @@ func TestAnonymousRegistryToken_OwnerCredentialStillGetsItsOwnToken(t *testing.T
 	pgtest.ClosePoolAtEnd(t, pool)
 	secret := seedOwnerCredential(t, pool)
 
-	h := anonymousLaneFromSettings(t, anonLanePrincipal, pool)
+	h := anonymousLaneFromSettings(t, anonLanePrincipal, anonLanePace, pool)
 
 	req := httptest.NewRequest(http.MethodGet, registrytokenhttp.TokenPath+
 		"?service="+anonLaneService+"&scope=repository:pub/app:pull", nil)

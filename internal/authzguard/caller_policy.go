@@ -166,9 +166,6 @@ func GatewayFrontedInternalRPCs() []string {
 		// (chicken-and-egg) → floor-only, deliberately NOT in this set.
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
-		// InternalUserService — identity provisioning (admin tooling through the
-		// gateway's internal mux).
-		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 		// NOT here: InternalBootstrapTokenService/MintBootstrapToken. It has no
 		// REST route on the gateway at all (the mint would be credential-free
 		// there — see the proto / restmux comments), so the api-gateway SA is not

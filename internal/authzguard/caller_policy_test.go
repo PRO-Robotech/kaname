@@ -259,7 +259,6 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 		// the api-gateway logout handler; ListByUser is admin-UI fronted.
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
-		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 	}
 	for _, m := range mustHave {
 		if _, ok := set[m]; !ok {

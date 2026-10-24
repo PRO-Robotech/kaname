@@ -325,7 +325,12 @@ func runServe(cfg config.Config) error {
 	// Отказ ФАТАЛЕН на каждом звене: собранная модель, не прошедшая допуск, —
 	// это данные оператора, расширяющие модель прав установки, и мягкий проход
 	// здесь означал бы контроль, который не откажет ни разу.
-	if cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
+	//
+	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
+	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
+	// (kaname#865, Д10) — второй композиции для этого не заводится.
+	composedReport, cErr := installComposedModel(logger, deliveredManifests)
+	if cErr != nil {
 		return cErr
 	}
 
@@ -349,8 +354,24 @@ func runServe(cfg config.Config) error {
 	// вызову конструктора в правой части, и цепочка увела бы применителя
 	// из-под его наблюдения — молча.
 	catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
-	if aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests); aErr != nil {
+	// Применённые ПОЛНОСТЬЮ — ровно они едут применителям ролей и посева ниже
+	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
+	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
+	// и страж ниже судят доставку целиком, как прежде.
+	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+	if aErr != nil {
 		return aErr
+	}
+
+	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
+	// паритета, ролей и посева (kaname#865, Д10). Модель процесса выше собрана
+	// из всей доставки; модуль, документ которого каталог пропустил либо
+	// отверг и который принёс в модель тип вне канона, останавливает пуск:
+	// модель доступа не собирается из документа, который каталог отверг. Довод
+	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
+	// `model_catalog_agreement_wiring_test.go`.
+	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
+		return mcErr
 	}
 
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
@@ -431,7 +452,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("роли модуля: %w", rrErr)
 	}
 	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
-	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, deliveredManifests); raErr != nil {
+	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
 		return raErr
 	}
 
@@ -447,17 +468,24 @@ func runServe(cfg config.Config) error {
 	// службы; своё доставкой не связано.
 	//
 	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
-	// доводом — в перечень `deliveredManifests` он не подмешивается: тот
-	// читают пятеро, а получатель у своего манифеста ровно один (Р3 приёмки
-	// MRW-1). Довод о месте, порядке и о том, почему отказ фатален, — шапка
-	// `module_seed_apply.go`; порядок и раздельность доводов держит гейт
+	// доводом — в перечень доставки он не подмешивается: доставку читают
+	// несколько потребителей старта, а получатель у своего манифеста ровно один
+	// (Р3 приёмки MRW-1). Довод о месте, порядке и о том, почему отказ фатален,
+	// — шапка `module_seed_apply.go`; порядок и раздельность доводов держит гейт
 	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+	//
+	// Доставленные едут сюда ПРИМЕНЁННЫМИ (kaname#865, Д3): модуль доставки,
+	// пропущенный как младшая редакция либо отвергнутый конфликтом, посева не
+	// получает. Свой манифест службы этим отбором НЕ сужается и подаётся всегда:
+	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
+	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
+	// разных входа.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
 		return omErr
 	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, deliveredManifests); seErr != nil {
+	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
 		return seErr
 	}
 
@@ -1206,8 +1234,18 @@ func runServe(cfg config.Config) error {
 	// кодом 1. Отказ ниже поэтому недостижим на живой посадке и стоит здесь
 	// затем, чтобы значение не оказалось использовано неразобранным, если
 	// когда-нибудь эту функцию позовут в обход `main`.
+	// Адрес источника осей темпа — ОДНО правило на все точки поверхности выдачи
+	// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края только
+	// при проверенном сертификате края, иначе адрес пира. Строится до сборки
+	// докерной полосы: её анонимная выдача — тоже точка этой поверхности
+	// (kaname#928), и на ней адрес берётся ещё и у объявленного доверенного
+	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
+	// край и пересыльщик вообще узнаваемы, требует страж
+	// requireIssuingListenerAsksForACertificate.
+	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
 	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		logger: logger,
+		source: issuingSource,
 		// НАШ подписант — единственный издатель полосы. Выключенная своя
 		// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
 		// выхода (kaname#494): другого издателя у полосы нет.
@@ -1244,6 +1282,10 @@ func runServe(cfg config.Config) error {
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
+		// Перепись точки анонимной выдачи правила адреса источника — вплотную
+		// к сборке полосы (kaname#930): рост её клетки отличает неверно
+		// названного пересыльщика от залпа одного клиента.
+		metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))
 		// Токен-эндпоинт платформы (задача kacho#898) монтируется на ЭТУ ЖЕ
 		// поверхность, а не заводит свою. Вид выдачи «учётные данные клиента»
 		// задан формой запроса, а не нашим выбором порта; второй внешний
@@ -1261,14 +1303,11 @@ func runServe(cfg config.Config) error {
 		// выключенном эндпоинте (только вне боевого режима) — nil, и её пути
 		// здесь не резолвятся.
 		//
-		// Адрес источника осей темпа — ОДНО правило на обе точки поверхности
-		// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края
-		// только при проверенном сертификате края, иначе адрес пира. Режим
-		// слушателя, при котором край вообще узнаваем, требует страж
-		// requireIssuingListenerAsksForACertificate выше.
-		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
+		// Адрес источника осей темпа — то же правило issuingSource, что у
+		// докерной полосы выше: одно на все точки поверхности.
 		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
-			ceremonyKeySource(signingKeystore), lane.secretChecker(), metricsReg.LoginLaneRecorder(), issuingSource, logger)
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), lane.secretCheckCost(),
+			metricsReg.LoginLaneRecorder(), issuingSource, logger)
 		if cerr != nil {
 			return fmt.Errorf("ceremony: %w", cerr)
 		}
@@ -2384,6 +2423,9 @@ type registryTokenRuntime struct {
 	signer                 *tokensigner.Signer
 	credentialKindObserver registrytokenuc.CredentialKindObserver
 	basicCredentialTimeout time.Duration
+	// source — правило адреса источника поверхности выдачи (Р7): ключ темпа
+	// анонимной выдачи (kaname#928). Одно на все точки поверхности.
+	source *issuingsource.Rule
 }
 
 // registryTokenBuildConfig — ЕДИНСТВЕННОЕ переложение настройки докерной полосы
@@ -2411,15 +2453,23 @@ func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRu
 	if err != nil {
 		return registrytokenwire.BuildConfig{}, err
 	}
+	var source func(*http.Request) string
+	if run.source != nil {
+		// Доверенный пересыльщик точки (kaname#930) переносится как есть: его
+		// форму в домене доверия разобрал страж старта `RegistryTokenConfig.Validate`.
+		source = run.source.RegistryTokenPoint(rt.AnonymousForwarderSAN)
+	}
 	return registrytokenwire.BuildConfig{
-		AnonymousClientID:      anonymous,
-		Realm:                  rt.TokenIssuer(),
-		Service:                rt.TokenService(),
-		Logger:                 run.logger,
-		Signer:                 run.signer,
-		TokenTTL:               rt.TokenTTL(),
-		KeyMaterialWindowUntil: window,
-		CredentialKindObserver: run.credentialKindObserver,
-		BasicCredentialTimeout: run.basicCredentialTimeout,
+		AnonymousClientID:        anonymous,
+		AnonymousPerSourcePerSec: rt.AnonymousPerSourcePerSec,
+		Source:                   source,
+		Realm:                    rt.TokenIssuer(),
+		Service:                  rt.TokenService(),
+		Logger:                   run.logger,
+		Signer:                   run.signer,
+		TokenTTL:                 rt.TokenTTL(),
+		KeyMaterialWindowUntil:   window,
+		CredentialKindObserver:   run.credentialKindObserver,
+		BasicCredentialTimeout:   run.basicCredentialTimeout,
 	}, nil
 }

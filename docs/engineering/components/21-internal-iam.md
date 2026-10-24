@@ -8,8 +8,6 @@ kacho-loadbalancer) общаются с kaname:
 
 - `LookupSubject(by external_id | id | email)` — api-gateway auth-interceptor
   ищет User/SA по subject из JWT.
-- `UpsertFromIdentity(external_id, email, ...)` — OIDC-callback создает /
-  обновляет User row.
 - `Check(subject, action, resource)` — per-RPC authorization gate (как и
   AuthorizeService.Check, но с Cascade fast-path и principal-prop).
 - `ListPermissions` — catalog-mode listing (все permissions из IAM-domain).
@@ -35,7 +33,6 @@ kacho-loadbalancer) общаются с kaname:
 | RPC                     | Sync/Async       | Описание                                        |
 |-------------------------|------------------|-------------------------------------------------|
 | `LookupSubject`         | sync             | Find User/SA by external_id | id | email.        |
-| `UpsertFromIdentity`    | async (sync-LRO) | Create/update User (+ bootstrap Account/Project)|
 | `Get`                   | sync             | Admin Get User.                                 |
 | `Check`                 | sync             | per-RPC authz gate (Cascade + FGA + OPA).       |
 | `ListPermissions`       | sync             | Catalog all permissions (debug).                |
@@ -142,11 +139,6 @@ grpcurl -plaintext -d '{"external_id":"sub-xyz"}' localhost:9091 \
 grpcurl -plaintext -d '{
   "subject_id":"user:usr_alice","relation":"editor","object":"project:prj_yyy"
 }' localhost:9091 kaname.cloud.iam.v1.InternalIAMService/Check
-
-# UpsertFromIdentity (административный путь; внешнего вызывающего нет).
-grpcurl -plaintext -d '{
-  "external_id":"sub-xyz","email":"alice@example.com","display_name":"Alice"
-}' localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 
 # PollSubjectChanges (api-gateway cache invalidation poll).
 grpcurl -plaintext -d '{"since_id":0,"limit":100}' localhost:9091 \

@@ -1,0 +1,40 @@
+# Пост-дифф ревью Go — роль go-style-reviewer. kaname#829, дельта проб SC-15/28/44.
+# Запись новая, добавлением (change-graph §2).
+schema_version: 1
+change_id: kn-829
+holder: post-diff/go-style-reviewer
+owner: go-style-reviewer
+fingerprint:
+  repo: PRO-Robotech/kaname
+  branch: 829-impl (локальная; копия tmp/829/wt-impl)
+  base: dc3ee2066
+  head: 7b1ae9ac6037cf74756568633a9c339ba7f28c0b
+  delta_commits: [a8da4504a, 7b1ae9ac6]
+  delta_files:
+    - internal/apps/kaname/api/access_binding/system_class_s1_integration_test.go
+    - internal/apps/kaname/api/access_binding/system_class_s2_integration_test.go
+    - internal/migrations/system_class_rename_integration_test.go
+content_digest: sha256:869b36ab6a123b9f11cd2e9d7dea949494820c417544094b1ee275146e43b2d5
+digest_definition: 'git -C tmp/829/wt-impl diff --full-index dc3ee2066...7b1ae9ac6 | sha256sum'
+verdict: ✅ принято
+blocks_landing: false
+return_to: —
+prod_code_in_delta: false
+fresh_deferral_markers_non_test: 0
+tests_in_same_pr: да (дельта — только пробы)
+critical: []
+important: []
+notes_non_blocking:
+  - at: internal/migrations/system_class_rename_integration_test.go:265
+    note: >-
+      повтор goose.UpTo(move) после снятия версии верен, пока шаг переезда — новейшая
+      миграция дерева; появится миграция новее 20261015120000 — снятая версия станет
+      «пропущенной» и goose без allow-missing откажет громко (красное, не ложное зелёное).
+  - at: internal/apps/kaname/api/access_binding/system_class_s2_integration_test.go:410
+    note: >-
+      строка 1 SC-28 сверяет текст PermissionDenied только NotContains (роль не названа),
+      без дословного текста; утечки не утверждает, но и формы отказа не держит.
+  - at: internal/apps/kaname/api/access_binding/system_class_s1_integration_test.go:199
+    note: >-
+      Tests-followup kaname#832 — в пробе, задача открыта, приёмка ред. 5/6 называет её;
+      запрет #11 (не-тестовое дерево) не задет.

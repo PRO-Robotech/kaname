@@ -41,7 +41,7 @@ func buildServices() *services {
 	return &services{moduleHandler: moduleapp.NewHandler(
 		moduleapp.NewPlanUseCase(delivery, rows, nil),
 		moduleapp.NewApplyUseCase(delivery, moduleApplier, opsRepo, logger),
-		moduleapp.NewGetUseCase(rows),
+		moduleapp.NewGetUseCase(rows, nil),
 		moduleapp.NewListUseCase(rows),
 	)}
 }

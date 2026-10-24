@@ -98,7 +98,7 @@ func TestSetMatch_EachCodeOnceOthersRemainAndElementIsConsumable(t *testing.T) {
 	set, err := hasher.HashSet(codes)
 	require.NoError(t, err)
 
-	cand := verifier.SetCandidate(set, codes[2])
+	cand := setCandidate(t, verifier, set, codes[2])
 	require.True(t, cand.Ready())
 	require.NotEmpty(t, cand.Element())
 	require.NotContains(t, cand.Element(), ",", "элемент — без разделителя набора")
@@ -114,21 +114,21 @@ func TestSetMatch_EachCodeOnceOthersRemainAndElementIsConsumable(t *testing.T) {
 	size, ok := verifier.SetSize(consumed)
 	require.True(t, ok)
 	require.Equal(t, 9, size)
-	again := verifier.MatchSet(consumed, verifier.SetCandidate(consumed, codes[2]))
+	again := verifier.MatchSet(consumed, setCandidate(t, verifier, consumed, codes[2]))
 	require.Equal(t, passwordverify.OutcomeMismatched, again.Outcome, "второй раз тот же — не совпал")
 	require.Equal(t, 9, again.Remaining)
-	other := verifier.MatchSet(consumed, verifier.SetCandidate(consumed, codes[7]))
+	other := verifier.MatchSet(consumed, setCandidate(t, verifier, consumed, codes[7]))
 	require.Equal(t, passwordverify.OutcomeMatched, other.Outcome, "прочие годны")
 
 	// Строчные буквы предъявленного — тот же код.
-	lower := verifier.MatchSet(consumed, verifier.SetCandidate(consumed, strings.ToLower(codes[5])))
+	lower := verifier.MatchSet(consumed, setCandidate(t, verifier, consumed, strings.ToLower(codes[5])))
 	require.Equal(t, passwordverify.OutcomeMatched, lower.Outcome)
 
 	// Чужой код — не совпал; кандидат от ДРУГОГО набора (другая соль) — не совпал.
-	require.Equal(t, passwordverify.OutcomeMismatched, verifier.MatchSet(set, verifier.SetCandidate(set, "ZZZZZZZZZZ")).Outcome)
+	require.Equal(t, passwordverify.OutcomeMismatched, verifier.MatchSet(set, setCandidate(t, verifier, set, "ZZZZZZZZZZ")).Outcome)
 	foreign, err := hasher.HashSet(codes)
 	require.NoError(t, err)
-	require.Equal(t, passwordverify.OutcomeMismatched, verifier.MatchSet(foreign, verifier.SetCandidate(set, codes[0])).Outcome)
+	require.Equal(t, passwordverify.OutcomeMismatched, verifier.MatchSet(foreign, setCandidate(t, verifier, set, codes[0])).Outcome)
 
 	// Исчерпанный набор: остаток ноль, ни один код не совпадает.
 	empty, err := domain.NewLoginVerifier(set.Reveal()[:strings.LastIndex(set.Reveal(), "$")+2])
@@ -136,7 +136,7 @@ func TestSetMatch_EachCodeOnceOthersRemainAndElementIsConsumable(t *testing.T) {
 	size, ok = verifier.SetSize(empty)
 	require.True(t, ok)
 	require.Zero(t, size)
-	require.Equal(t, passwordverify.OutcomeMismatched, verifier.MatchSet(empty, verifier.SetCandidate(empty, codes[0])).Outcome)
+	require.Equal(t, passwordverify.OutcomeMismatched, verifier.MatchSet(empty, setCandidate(t, verifier, empty, codes[0])).Outcome)
 
 	// Исходы набора в клетки ПРОВЕРЯЮЩЕГО ПАРОЛЯ не идут — их считает полоса по
 	// способу (Ф12-43).
@@ -149,7 +149,7 @@ func TestSetMatch_EachCodeOnceOthersRemainAndElementIsConsumable(t *testing.T) {
 // исчерпанная ёмкость — преходящий исход, не попытка.
 func TestSetCandidate_MissingMaterialAndCapacity(t *testing.T) {
 	hasher, verifier, _ := setHarness(t)
-	cand := verifier.SetCandidate(domain.LoginVerifier{}, "ABCDEFGH12")
+	cand := setCandidate(t, verifier, domain.LoginVerifier{}, "ABCDEFGH12")
 	require.False(t, cand.Ready())
 	require.Equal(t, passwordverify.OutcomeMaterialMissing, cand.Refusal())
 	require.Empty(t, cand.Element())
@@ -166,7 +166,7 @@ func TestSetCandidate_MissingMaterialAndCapacity(t *testing.T) {
 	}
 	<-started
 	<-started
-	cand = verifier.SetCandidate(set, codes[0])
+	cand = setCandidate(t, verifier, set, codes[0])
 	require.False(t, cand.Ready())
 	require.Equal(t, passwordverify.OutcomeCapacityExhausted, cand.Refusal())
 	close(release)
@@ -175,14 +175,14 @@ func TestSetCandidate_MissingMaterialAndCapacity(t *testing.T) {
 	// не совпадение и не паника.
 	single, err := hasher.Hash("a-password")
 	require.NoError(t, err)
-	cand = verifier.SetCandidate(single, codes[0])
+	cand = setCandidate(t, verifier, single, codes[0])
 	require.False(t, cand.Ready())
 	require.Equal(t, passwordverify.OutcomeBodyNotParsable, cand.Refusal())
 	_, ok := verifier.SetSize(single)
 	require.False(t, ok)
 	junk, err := domain.NewLoginVerifier("not-a-set")
 	require.NoError(t, err)
-	cand = verifier.SetCandidate(junk, codes[0])
+	cand = setCandidate(t, verifier, junk, codes[0])
 	require.False(t, cand.Ready())
 	require.Equal(t, passwordverify.OutcomeFormatNotInRegistry, cand.Refusal())
 }

@@ -35,6 +35,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 type p3 struct {
@@ -158,9 +159,10 @@ func (w *p3) role(id string, rules domain.Rules) {
 
 func (w *p3) bind(id, role, target string) {
 	w.t.Helper()
-	w.exec(`INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
-	        VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`, id, role, target)
-	w.exec(`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id) VALUES ($1, 'user', 'usr-1')`, id)
+	// Выдача и строка её набора — одним оператором: отдельные операторы вне
+	// транзакции фиксировали бы выдачу без набора, и база её отвергает (kaname#902).
+	w.exec(bindingset.With(`INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
+	        VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`), id, role, target)
 }
 
 func (w *p3) allowed(typ, id string) bool {

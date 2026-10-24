@@ -10,7 +10,7 @@ package pg_test
 // - InsertPending concurrent race.
 // - ActivateInvite happy + not-found.
 // - FindPendingByEmail: одна строка человека, членства в N аккаунтах.
-// - FindActiveByExternalID.
+// - FindByExternalIDInStatuses (ACTIVE).
 // - GetByAccountEmail (idempotent invite).
 // - InsertActive bootstrap-flow DEFERRABLE FK.
 // - Глобальная уникальность почты: приглашение известной почты во второй
@@ -310,7 +310,8 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
-	rows, err := rd.Users().FindActiveByExternalID(ctx, "external-sub-s05")
+	rows, err := rd.Users().FindByExternalIDInStatuses(ctx, "external-sub-s05",
+		[]domain.InviteStatus{domain.InviteStatusActive})
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
 	assert.Equal(t, pending.ID, rows[0].ID)

@@ -58,8 +58,9 @@ const (
 
 type ListIamOperationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maximum number of results per page that should be returned. Default
-	// value: 100. Clamped to a max of 1000 (no single-shot cluster-wide dump).
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. To get the next page of results, set [page_token] to the
 	// [ListIamOperationsResponse.next_page_token] returned by a previous list request.

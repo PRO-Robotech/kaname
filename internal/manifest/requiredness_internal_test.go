@@ -20,7 +20,10 @@
 //
 // # Перепись идёт ПРОД-ПУТЁМ, а не чтением кода загрузчика
 //
-// Вход портится в фикстуре РОВНО ДО ОБЪЯВЛЕННОЙ ГРАНИЦЫ — строка в `minLength`\n// минус один знак, список в `minItems` минус один элемент, — и приговор выносит\n// `Load`, тот самый исполнитель,
+// Вход портится в фикстуре РОВНО ДО ОБЪЯВЛЕННОЙ ГРАНИЦЫ — строка в `minLength`
+// минус один знак, список в `minItems` минус один элемент, строка в `maxLength`
+// плюс один знак (и её законный близнец — ровно `maxLength` знаков, который
+// обязан грузиться), — и приговор выносит `Load`, тот самый исполнитель,
 // которым судит `make module-manifest-check`. Проба, читающая
 // исходник загрузчика на предмет «есть ли там проверка», утверждала бы о ТЕКСТЕ,
 // а не об исходе: проверка, стоящая в недостижимой ветке, прошла бы её молча.
@@ -68,6 +71,10 @@ const (
 	kindNonEmptyList = "minItems"
 	// kindNonEmptyText — строка обязана нести не менее `minLength` знаков.
 	kindNonEmptyText = "minLength"
+	// kindCeilingText — строка обязана нести не более `maxLength` знаков.
+	// Судится в ОБЕ стороны: значение ровно в пределе загрузчик обязан принять,
+	// на знак выше — отвергнуть (kaname#884).
+	kindCeilingText = "maxLength"
 )
 
 // walkSchemaRequirements — сторона схемы, ВЫВЕДЕННАЯ обходом.
@@ -134,6 +141,13 @@ func walkSchemaRequirements(node any, prefix, at string, negated, conditional bo
 			if n, ok := value.(float64); ok && n >= 1 {
 				emit(requirement{Path: prefix, Kind: kindNonEmptyText, Bound: int(n), At: at})
 			}
+		case keyword == "maxLength":
+			// Верхний предел судится, а не пропускается как аннотация: предел,
+			// который схема объявила, а загрузчик держит иначе, — то же «два
+			// правила об одном поле», только с другой стороны границы (kaname#884).
+			if n, ok := value.(float64); ok && n >= 0 {
+				emit(requirement{Path: prefix, Kind: kindCeilingText, Bound: int(n), At: at})
+			}
 		case keyword == "additionalProperties":
 			if _, isSchema := value.(map[string]any); !isSchema {
 				continue
@@ -178,7 +192,7 @@ type pathStep struct {
 // boundText — объявленный предел в тексте находки. Без него «minLength» не
 // говорит, ГДЕ проходит граница, и починка целится наугад.
 func boundText(r requirement) string {
-	if r.Bound == 0 {
+	if r.Bound == 0 && r.Kind != kindCeilingText {
 		return ""
 	}
 	return " " + itoaLocal(r.Bound)
@@ -253,6 +267,47 @@ func containersFor(doc *yaml.Node, steps []pathStep) []*yaml.Node {
 	return nodes
 }
 
+// ceilingScalar — первый строковый узел по пути r: то место, где предел
+// верхней границы проверяется. Nil — места нет, вход не произведён.
+func ceilingScalar(doc *yaml.Node, r requirement) *yaml.Node {
+	steps := parsePath(r.Path)
+	if len(steps) == 0 {
+		return nil
+	}
+	last := steps[len(steps)-1]
+	if last.anyValue {
+		return nil
+	}
+	for _, holder := range containersFor(doc, steps[:len(steps)-1]) {
+		idx := mapEntry(holder, last.name)
+		if idx < 0 || holder.Content[idx+1].Kind != yaml.ScalarNode {
+			continue
+		}
+		return holder.Content[idx+1]
+	}
+	return nil
+}
+
+// setRunes кладёт в узел строку из n знаков `я`. Знак двухбайтовый намеренно:
+// судья в байтах отверг бы такую строку вдвое раньше предела, и расхождение в
+// единице счёта стало бы видно на той же оси.
+func setRunes(n *yaml.Node, count int) {
+	n.Value = strings.Repeat("я", count)
+	n.Tag = "!!str"
+	n.Style = yaml.DoubleQuotedStyle
+}
+
+// reachCeiling кладёт значение РОВНО в пределе — законный близнец порчи:
+// загрузчик обязан его принять. False — места нет.
+func reachCeiling(doc *yaml.Node, r requirement) bool {
+	n := ceilingScalar(doc, r)
+	if n == nil {
+		return false
+	}
+	setRunes(n, r.Bound)
+	return true
+}
+
 // violate портит РОВНО ОДНО место документа по требованию r.
 //
 // Возвращает false, если места нет: тогда вход не произведён, и вердикта по этой
@@ -265,6 +320,14 @@ func violate(doc *yaml.Node, r requirement) bool {
 	last := steps[len(steps)-1]
 	if last.anyValue {
 		return false
+	}
+	if r.Kind == kindCeilingText {
+		n := ceilingScalar(doc, r)
+		if n == nil {
+			return false
+		}
+		setRunes(n, r.Bound+1)
+		return true
 	}
 	for _, holder := range containersFor(doc, steps[:len(steps)-1]) {
 		idx := mapEntry(holder, last.name)
@@ -289,9 +352,7 @@ func violate(doc *yaml.Node, r requirement) bool {
 			if value.Kind != yaml.ScalarNode {
 				continue
 			}
-			value.Value = strings.Repeat("я", r.Bound-1)
-			value.Tag = "!!str"
-			value.Style = yaml.DoubleQuotedStyle
+			setRunes(value, r.Bound-1)
 			return true
 		}
 	}
@@ -334,16 +395,42 @@ func readFixtureDoc(t *testing.T, path string) (*yaml.Node, []byte) {
 	return root.Content[0], raw
 }
 
-// TestSchemaAndLoaderAgreeOnRequiredness — по каждой оси, объявленной схемой
-// обязательной, загрузчик обязан отвергнуть вход, где её нет либо она пуста.
-func TestSchemaAndLoaderAgreeOnRequiredness(t *testing.T) {
+// requirednessCensus — исход переписи требовательности по ОДНОЙ схеме.
+//
+// Перепись вынесена в функцию от схемы, а не читает схему сама: копия схемы с
+// подменённым пределом (инъекция) обязана идти ТЕМ ЖЕ путём, что прогон по
+// опубликованной, — иначе проба инъекции доказывала бы свойство своей копии
+// обхода, а не того, которым судится дерево (kaname#884).
+type requirednessCensus struct {
+	// axes — различные оси схемы (путь, вид, предел).
+	axes int
+	// conditional — условные объявления: не судятся, печатаются числом.
+	conditional int
+	// produced — оси, для которых вход произведён хотя бы в одной фикстуре.
+	produced int
+	// divergences — расхождения схемы и загрузчика, поимённо.
+	divergences []string
+	// notProduced — оси без места в фикстурах: третья категория.
+	notProduced []string
+	// unknown — формы схемы, распознавателю неизвестные.
+	unknown []string
+	// ceilings — судимые оси верхнего предела (`maxLength`) с произведённым
+	// входом. Ноль — не «пределы согласны», а «пределов не судили».
+	ceilings int
+}
+
+// judgeRequiredness — перепись требовательности схемы schema против `Load`.
+//
+// Отказ фикстуры (не прочитана, не разбирается, отвергнута нетронутой) роняет
+// прогон сразу: это не исход сверки, а поломка её подпорки.
+func judgeRequiredness(t *testing.T, schema map[string]any) requirednessCensus {
+	t.Helper()
 	var required, conditional []requirement
-	var unknown []string
-	walkSchemaRequirements(readPublishedSchema(t), "", "$", false, false,
-		&required, &conditional, &unknown)
-	if len(unknown) > 0 {
-		t.Fatalf("распознаватель схемы не знает %d форм — его вердикт был бы свойством "+
-			"обхода, а не документа:\n  %s", len(unknown), strings.Join(unknown, "\n  "))
+	var c requirednessCensus
+	walkSchemaRequirements(schema, "", "$", false, false, &required, &conditional, &c.unknown)
+	c.conditional = len(conditional)
+	if len(c.unknown) > 0 {
+		return c
 	}
 
 	// Различные оси: один и тот же ключ схема законно называет дважды (в
@@ -369,10 +456,7 @@ func TestSchemaAndLoaderAgreeOnRequiredness(t *testing.T) {
 		}
 		return axes[i].Bound < axes[j].Bound
 	})
-
-	if len(axes) == 0 {
-		t.Fatal("схема не объявила НИ ОДНОЙ обязательной оси — обход пуст, вердикт беспредметен")
-	}
+	c.axes = len(axes)
 
 	// Положительный контроль: нетронутая фикстура обязана грузиться. Без него
 	// отрицание зеленело бы на загрузчике, отвергающем всё.
@@ -384,8 +468,6 @@ func TestSchemaAndLoaderAgreeOnRequiredness(t *testing.T) {
 		}
 	}
 
-	var divergences, notProduced []string
-	produced := 0
 	for _, r := range axes {
 		madeInput := false
 		// Отказ требуется в КАЖДОЙ фикстуре, где вход произведён, а не в одной.
@@ -395,12 +477,27 @@ func TestSchemaAndLoaderAgreeOnRequiredness(t *testing.T) {
 		// бы как проверенная, а в другом разделе проходила бы молча.
 		refused := true
 		accepted := ""
+		var rejectedAtBound []string
 		for _, path := range requirednessFixtures {
 			doc, _ := readFixtureDoc(t, path)
 			if !violate(doc, r) {
 				continue
 			}
 			madeInput = true
+			if r.Kind == kindCeilingText {
+				// Законный близнец порчи: ровно в пределе вход обязан грузиться.
+				// Без него предел, который загрузчик держит НИЖЕ схемы, читался бы
+				// согласием: на знак выше отвергают обе стороны.
+				twin, _ := readFixtureDoc(t, path)
+				reachCeiling(twin, r)
+				atBound, err := yaml.Marshal(twin)
+				if err != nil {
+					t.Fatalf("документ в пределе не сериализуется (%s %s): %v", r.Path, r.Kind, err)
+				}
+				if _, err := Load(atBound); err != nil {
+					rejectedAtBound = append(rejectedAtBound, fmt.Sprintf("%s: %v", path, err))
+				}
+			}
 			broken, err := yaml.Marshal(doc)
 			if err != nil {
 				t.Fatalf("испорченный документ не сериализуется (%s %s): %v", r.Path, r.Kind, err)
@@ -410,31 +507,52 @@ func TestSchemaAndLoaderAgreeOnRequiredness(t *testing.T) {
 				accepted = path
 			}
 		}
-		switch {
-		case !madeInput:
-			notProduced = append(notProduced, fmt.Sprintf("%s (%s%s) — места в фикстурах нет; объявлено %s",
+		if !madeInput {
+			c.notProduced = append(c.notProduced, fmt.Sprintf("%s (%s%s) — места в фикстурах нет; объявлено %s",
 				r.Path, r.Kind, boundText(r), r.At))
-		case refused:
-			produced++
-		default:
-			produced++
-			divergences = append(divergences, fmt.Sprintf(
+			continue
+		}
+		if r.Kind == kindCeilingText {
+			c.ceilings++
+		}
+		c.produced++
+		if !refused {
+			c.divergences = append(c.divergences, fmt.Sprintf(
 				"%s (%s%s): схема требует, загрузчик ПРИНИМАЕТ (%s) — объявлено %s",
 				r.Path, r.Kind, boundText(r), accepted, r.At))
 		}
+		for _, rej := range rejectedAtBound {
+			c.divergences = append(c.divergences, fmt.Sprintf(
+				"%s (%s%s): схема допускает %d знаков, загрузчик ОТВЕРГАЕТ (%s) — объявлено %s",
+				r.Path, r.Kind, boundText(r), r.Bound, rej, r.At))
+		}
+	}
+	sort.Strings(c.divergences)
+	return c
+}
+
+// TestSchemaAndLoaderAgreeOnRequiredness — по каждой оси, объявленной схемой
+// обязательной, загрузчик обязан отвергнуть вход, где её нет либо она пуста.
+func TestSchemaAndLoaderAgreeOnRequiredness(t *testing.T) {
+	c := judgeRequiredness(t, readPublishedSchema(t))
+	if len(c.unknown) > 0 {
+		t.Fatalf("распознаватель схемы не знает %d форм — его вердикт был бы свойством "+
+			"обхода, а не документа:\n  %s", len(c.unknown), strings.Join(c.unknown, "\n  "))
+	}
+	if c.axes == 0 {
+		t.Fatal("схема не объявила НИ ОДНОЙ обязательной оси — обход пуст, вердикт беспредметен")
 	}
 
-	t.Logf("перепись требовательности: осей схемы %d · вход произведён %d · расхождений %d · "+
-		"вход не произведён %d · условных осей (не судятся) %d",
-		len(axes), produced, len(divergences), len(notProduced), len(conditional))
-	for _, s := range notProduced {
+	t.Logf("перепись требовательности: осей схемы %d · вход произведён %d · из них верхних пределов %d · "+
+		"расхождений %d · вход не произведён %d · условных осей (не судятся) %d",
+		c.axes, c.produced, c.ceilings, len(c.divergences), len(c.notProduced), c.conditional)
+	for _, s := range c.notProduced {
 		t.Logf("вход не произведён: %s", s)
 	}
 
-	if len(divergences) > 0 {
-		sort.Strings(divergences)
+	if len(c.divergences) > 0 {
 		t.Fatalf("схема и загрузчик расходятся по требовательности на %d осях из %d осмотренных — "+
 			"автор получает «манифест годен» от инструмента и отказ от продукта:\n  %s",
-			len(divergences), produced, strings.Join(divergences, "\n  "))
+			len(c.divergences), c.produced, strings.Join(c.divergences, "\n  "))
 	}
 }

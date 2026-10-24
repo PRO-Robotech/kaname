@@ -1,0 +1,162 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md
+  sha256: 75225f47856c2d04ac04b1f16658c152dcb2ca0519185889b101d69ec98537a2
+  revision: 4
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 63d8938a20ad29d62dda137a547718a9ee090fe8
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status --short` → ` M docs/engineering/acceptance/…`);
+    отпечаток снят с рабочего файла. Копия kacho-workspace/tmp/kn-865-acc4 — отсоединённая
+    голова 63d8938a2 (голова ветки `865`).
+  branch: '865'
+  task: PRO-Robotech/kaname#865
+  related_tasks: [PRO-Robotech/kaname#856]
+  round: 3
+  round_scope: >-
+    Ревью ТОЛЬКО дельты ред. 3 → ред. 4 (пункты В1 и В2 разбора классов, §10 документа) по
+    решению диспетчера (вариант (а) вопроса автора). Это не третий круг спора по ⛔
+    (`flow-acceleration.md#fa-b8-acceptance-two-rounds`): ред. 3 одобрена кругом 2, ред. 4 —
+    новая редакция с новым отпечатком. Решение диспетчера по В1 (вариант (б)) не переоткрыто.
+  predecessor_record: >-
+    docs/specs/reviews/module-manifest-revision-only-moves-forward/6339dc63581b67fe2ba326199328faba5cd7df31f1703c33a7e781c635c9d63d.yaml
+    (круг 2, APPROVED ред. 3; не тронута)
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md в копии
+    kn-865-acc4 @63d8938a2 → 75225f47…98537a2 (совпадает с названным автором);
+    git show 63d8938a2:<документ> | sha256sum → 6339dc63…c9d63d (база дельты = одобренная ред. 3)
+  measurement_revisions: >-
+    Код — 63d8938a2. Проба — `go test -overlay` временным файлом из scratchpad
+    (r865v4/zz_rev865v4_test.go) в пакете internal/modelcompose; `git status --short` до и после —
+    только строка документа приёмки.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T21:20:49Z'
+
+summary:
+  diff: "1 файл, +209/−42 (git diff --stat)"
+  scenarios_total: 37
+  scenarios_new: [865-34, 865-35, 865-36, 865-37]
+  scenarios_rewritten: [865-07, 865-08, 865-24]
+  scenarios_extended: [865-01, 865-09]
+  producer_rows: 37
+  scenarios_without_producer: 0
+  negatives_with_twin: all
+  blocking: 0
+  blocking_kinds: []
+
+delta_scope:
+  outcome: confined
+  predicate: >-
+    git diff -- <документ>: правлены шапка (статус, дата, тип изменения, сервис), §0 (место проб
+    overlay ред. 4), §0.1 (5 строк о потребителях доставки, композиции, iamctl), §0.2 (P4, P14,
+    новые P16–P18), §2 пп. 4–5, Д3 (последний абзац), Д7 (строка отказа Д10), Д8, новые Д10 и
+    Д11, общее «Дано» §4 (`I~`, типы вне канона), 865-01/07/08/09/24, новые 865-34…37, §5
+    (вступление и строки), DoD S1 п.2, S2 п.2, §8 пп. 8–9, §10. Каждая правка выводится из В1
+    или В2; правок вне них нет.
+
+checked_and_passed:
+  - "Производитель: строк `| 865-` в §5 — 37, ID 865-01…865-37; у 865-34…37 названы P16, P17, P18, P14 `WithRoleDescription`; заводимое отмечено"
+  - "Близнецы ровно одним фактом: 865-34 ↔ R(6,false) (строка revision); 865-35 ↔ I(3) (строка description роли); 865-37 ↔ WOULD_APPLY (один вердикт); 865-09 ↔ модуль без применённой редакции; 865-24 ↔ Q(5,true)"
+  - "Текст отказа Д10 — шаблон Д7, утверждается равенством строки (865-09, 865-24, 865-34), форма «не объявлена» для документа без ключа и её снятие на S2 (DoD S2 п.2)"
+  - "865-07/08 больше не опираются на пропуск probemod (он бы остановил пуск Д10) — пропущенным стал iam без типов вне канона; Given 865-08 от 865-07 отличается только строкой revision iam"
+  - "Поверхность: новый отказ пуска назван (тип изменения, Д8, §8 п.8), новых методов и слушателей нет"
+  - "Д11: iamctl @63d8938a2 уже несёт перебор (iamctl.go:335–352 — схождение только WOULD_APPLY; :395, :404 — вердикты редакции; :778 — doctor); образцы близнеца существуют (iamctl_test.go:207, :528)"
+  - "Гейт провязки корня, на который ссылается §5 — cmd/kaname/module_revision_filter_wiring_test.go, существует @63d8938a2"
+  - "Порядок шагов P4 сверен: serve.go @63d8938a2 — AnchorOfDelivery → installComposedModel → applyDeliveredManifests → AssertCatalogParity → роли → посев; место шага Д10 между применителем и стражем свободно"
+
+constructibility:
+  method: >-
+    go test -overlay, пакет internal/modelcompose, @63d8938a2, TestRev865v4 — PASS; документы
+    собраны фикстурами P11/P14 (`Read`, `WithoutKey`, `WithRevision`, `WithRoles`,
+    `WithEmptyRoles`) и `servicemanifest.Raw()`, разобраны `manifest.Load`.
+  seeded: 6
+  of: 8
+  red: 0
+  green_items:
+    - "Compose(authzmodel.DSL): I(1) → [], I~(3) → [], R(3,false) → [probemod_box probemod_item], R без ключа → те же два"
+    - "доставки сценариев: I(1)+E(6,false), I(4)+E(6,false), I~(3)+Q(5,true) → Composed [probemod_box probemod_item] — отнесение 865-36 различимо (iam ничего не вносит)"
+    - "AnchorOfDelivery на всех семи наборах — без отказа: опора паритета не останавливает 865-07, 08, 35 раньше шага Д10 (роли в строки опоры не входят, anchor.go:41)"
+    - "D(I(3)) = sha256:94b6c091… ≠ D(I~(3)) = sha256:90ec9136…; строка `description: \"Admin AccessBinding\"` в встроенном манифесте — 1, принадлежит роли iam.access_binding.admin (manifest.embedded.yaml:866–867)"
+    - "перепись применителя ролей: `modules` — модули, по которым применитель отработал (module_roles_apply.go:87, :243) — `modules = [probemod]` в 865-35 и 865-07 исполнимо"
+    - "go test ./internal/iamctl -run 'TestPlanRevisionVerdictsAreFindingsNotConvergence|TestPlanPrintsTheCensusAndTheFingerprint|TestDoctorOnAConvergedCatalogPrintsTheCensus' → 3 PASS"
+  not_executed: 2
+  not_executed_items:
+    - "последовательность старта над живой базой (865-07, 08, 09, 24, 34, 35) — testcontainers, тяжёлый слот; шаг Д10 ещё не заведён (P17). Входы шага прочитаны: SkippedStale/RefusedConflict с Declared/Previous — cmd/kaname/module_catalog_apply.go:122–123, :148–160"
+    - "AssertCatalogParity на I~(3) против строк I(3) — не исполнялось; строки опоры от описания роли не зависят (anchor.go, RowsOf — модули, ресурсы, глаголы)"
+
+minor:
+  - id: n1
+    kind: PRODUCER
+    note: >-
+      865-01 получил «Тогда» об остановке пуска шагом Д10, а строка §5 865-01 P17 не называет.
+      Держатель утверждения есть — 865-34 с ТЕМИ ЖЕ Дано и When (R(5,true) → R(3,false)), и
+      строка прямо отсылает к нему; рекомендую при переносе дописать P17 в строку 865-01 либо
+      оформить строку как ссылку, а не утверждение.
+  - id: n2
+    kind: COVERAGE
+    note: >-
+      Д10 останавливает пуск и тогда, когда пропущенный документ несёт типы вне канона с
+      блоками, равными применённым (например R(3,true) после R(5,true)): исход — следствие
+      решения (б), не переоткрывается. Стоит назвать это в шапке шага P17, чтобы оператор,
+      откативший доставку к прежней редакции того же содержимого, читал отказ как ожидаемый.
+  - id: n3
+    kind: DISCLOSURE
+    note: >-
+      §0.1 и Д10 называют координату расхождения модели и каталога, существующего @63d8938a2,
+      и его следствие. Условие — запись доставки (данные оператора), посторонним недостижимо,
+      поэтому не блокирует; документ садится в ветку `865` вместе с P17, а не отдельной
+      посадкой впереди него.
+
+premise:
+  outcome: confirmed
+  commands:
+    - "sha256sum <документ> → 75225f47…98537a2; git show 63d8938a2:<документ> | sha256sum → 6339dc63…c9d63d"
+    - "git show 63d8938a2:cmd/kaname/serve.go — порядок опора → композиция → каталог → страж → роли → посев (строки 300–471 вывода)"
+    - "overlay TestRev865v4 @63d8938a2 → ok"
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+
+event_body: "acceptance-reviewer · APPROVED · sha256 75225f47856c2d04ac04b1f16658c152dcb2ca0519185889b101d69ec98537a2"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#865
+  status: performed
+  published: true
+  database_id: 6259781345
+  node_id: "IC_kwDOUO26pM8AAAABdRyu4Q"
+  url: "https://github.com/PRO-Robotech/kaname/issues/865#issuecomment-6259781345"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6259781345"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T04:38:29Z"
+  body_sha256: "1ef207ee26d5e1286eab0df5064e56c64419d3fcdb09b170b408728ab8cac7f1"
+  subject_sha256: "75225f47856c2d04ac04b1f16658c152dcb2ca0519185889b101d69ec98537a2"
+  subject_revision_commit: "b33319e1a3ba282dd523af19a330263702f17f10"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3.yaml
+    - 6339dc63581b67fe2ba326199328faba5cd7df31f1703c33a7e781c635c9d63d.yaml

@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
@@ -207,9 +208,9 @@ func TestRole_A16_DeleteRestrictByFK(t *testing.T) {
 	r := seedCustomRole(t, ctx, repo, acc.ID, "in_use_role")
 
 	abID := ids.NewID(domain.PrefixAccessBinding)
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id)
-		VALUES ($1, 'user', $2, $3, 'account', $4)`,
+		VALUES ($1, 'user', $2, $3, 'account', $4)`),
 		abID, string(uid), string(r.ID), string(acc.ID),
 	)
 	require.NoError(t, err)
@@ -389,7 +390,7 @@ func TestRole_A16_ConcurrentDeleteVsGrant(t *testing.T) {
 				grantErr = werr
 				return
 			}
-			_, gerr := w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+			_, gerr := bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 				ID:           domain.AccessBindingID(abID),
 				SubjectType:  domain.SubjectTypeUser,
 				SubjectID:    domain.SubjectID(uid),

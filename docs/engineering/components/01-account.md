@@ -310,17 +310,16 @@ make -C deploy logs-svc SVC=iam
 - **Delete cascade** — НЕТ. Все child-ресурсы (Project, SA, Group, ...) надо
   удалить вручную, иначе RESTRICT-блок. Каскадное удаление через границу
   сервиса не выполняется (только same-DB FK cascade).
-- **Bootstrap path** — регистрация человека (и административный
-  `InternalUserService.UpsertFromIdentity`) создает User + Account + Project +
-  default-AccessBindings в одной транзакции; обходит per-resource Create
-  use-case (см. [`03-user.md`](03-user.md), [`21-internal-iam.md`](21-internal-iam.md)).
+- **Bootstrap path** — регистрация человека и активация приглашения в исходе
+  подтверждения адреса создают User + Account + Project + default-AccessBindings
+  в одной транзакции; обходят per-resource Create use-case (см.
+  [`03-user.md`](03-user.md)).
 
 ## Связанные компоненты
 
 - [`02-project.md`](02-project.md) — Project (child Account-а).
 - [`03-user.md`](03-user.md) — User (`owner_user_id`).
 - [`07-role.md`](07-role.md) — Role (custom-роли account-scoped).
-- [`21-internal-iam.md`](21-internal-iam.md) — `UpsertFromIdentity` bootstrap path.
 - [`29-relational-verdict.md`](29-relational-verdict.md) — owner-tuple propagation.
 
 ## Ссылки на код

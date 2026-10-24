@@ -163,6 +163,18 @@ Coverage:
                                           и входит этим паролем (`200`); иной пароль — `401`;
                                           повтор заведения из новой сессии — `409` код 6
                                           `PASSWORD_ALREADY_SET` (отказ FP-02)
+
+Позиции BCS-14 и BCS-16 приёмки `backup-code-set-has-one-form.md` (kaname#297);
+прочие её сценарии несёт набор `kaname-second-factor`. «Дано» — человек стенда с
+фактором: кейс заводит фактор сам и снимает его последним шагом.
+
+  IAM-LOGINLANE-CONF-BACKUP-CODE-LOGIN  — BCS-14: вход с запасным кодом вне формы —
+                                          400, code 3, текст «Illegal argument
+                                          secondFactor.code: must be 10 characters of
+                                          the backup-code alphabet», носителя нет;
+                                          BCS-16: живой код — 200, «2», ключи тела
+                                          ровно `session`, `user`; следующее чтение
+                                          новой сессии — остаток 9
 """
 
 import pathlib as _pathlib
@@ -1439,3 +1451,167 @@ CASES.append(Case(
     ],
 ))
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ВХОД С ЗАПАСНЫМ КОДОМ — ОТКАЗ ФОРМЫ И ТЕЛО БЕЗ СВОДКИ НАБОРА (kaname#297,
+# приёмка `docs/engineering/acceptance/backup-code-set-has-one-form.md`, BCS-14 и
+# BCS-16; прочие сценарии этой приёмки несёт набор `kaname-second-factor`).
+#
+# «Дано» G0 — человек стенда (`loginLaneEmail`) с заведённым фактором: кейс
+# заводит его сам (вход паролем → `enroll` → `confirm` кодом по времени) и
+# возвращает в исходное снятием запасным кодом; последний шаг утверждает «фактора
+# нет» — набор второго фактора, который идёт следующим, ждёт человека без
+# фактора. Отказ формы (BCS-14) попыткой не считается (Ф12 Р4), неверных
+# предъявлений кейс не делает.
+#
+# Код по времени вычисляется тем же ядром, что в наборе второго фактора: ядро
+# `_TOTP_JS` читается разбором `kaname-second-factor.py` — второй копии нет.
+#
+# Утверждения значений кодов и секрета не получают (kaname#417): сообщение —
+# литерал, форма кодов — булевым предметом. Переменные с удостоверением названы
+# так, как их знает срез отчёта: секрет — словом `Secret`, коды — `Code`/`Codes`,
+# печенья — `Cookie`.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_BC_ENROLL = "/iam/v1/auth/second-factor/enroll"
+_BC_CONFIRM = "/iam/v1/auth/second-factor/confirm"
+_BC_REMOVE = "/iam/v1/auth/second-factor/remove"
+_BC_FORM_TEXT = "Illegal argument secondFactor.code: must be 10 characters of the backup-code alphabet"
+
+
+def _bc_totp_core():
+    """Ядро кода по времени набора второго фактора — до определения ступени."""
+    path = _pathlib.Path(__file__).resolve().parent / "kaname-second-factor.py"
+    tree = _ast.parse(path.read_text(encoding="utf-8"))
+    nodes = {t.id: n.value for n in tree.body if isinstance(n, _ast.Assign)
+             for t in n.targets if isinstance(t, _ast.Name)}
+    if "_TOTP_JS" not in nodes:
+        raise SystemExit("kaname-login-lane: в kaname-second-factor.py нет _TOTP_JS — ядра кода по времени для BCS-14/16 нет")
+    core = _ast.literal_eval(nodes["_TOTP_JS"])
+    stop = "const __stepNow = () => Math.floor(Date.now() / 1000 / 30);"
+    if stop not in core:
+        raise SystemExit("kaname-login-lane: _TOTP_JS сменил форму ступени — сверить разбор")
+    return core[:core.index(stop) + 1]
+
+
+_BC_TOTP = _bc_totp_core()
+_BC_J = "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }"
+
+
+def _bc_status(code, label):
+    return [f"pm.test({js_str(label + ': ответ ' + str(code))}, () => pm.expect(pm.response.code, 'код ответа').to.eql({code}));"]
+
+
+def _bc_capture(cookie, var, label, required=True):
+    """Захват печенья без значения в сообщении (тела этой полосы несут коды)."""
+    out = ["{", "  const __sc = pm.response.headers.all()"
+                f".filter(h => h.key.toLowerCase() === 'set-cookie' && h.value.startsWith({js_str(cookie + '=')}));"]
+    if required:
+        out.append(f"  pm.test({js_str(label + ': ответ ставит печенье ' + cookie)}, () => "
+                   f"pm.expect(__sc.length, {js_str('печений ' + cookie)}).to.eql(1));")
+    out += [f"  if (__sc.length === 1) {{ pm.environment.set({js_str(var)}, __sc[0].value.split(';')[0].slice({len(cookie) + 1})); }}",
+            "}"]
+    return out
+
+
+def _bc_csrf(name, form, session_var=None):
+    step = _csrf(name, form, "llBcTok", "llBcForm", "llBcSrc")
+    cookies = [("kaname_form", "llBcForm")] + ([("kaname_session", session_var)] if session_var else [])
+    step.pre_script = [*_lane_via(_CSRF + "?form=" + form, "llBcSrc"), *_with_cookies(*cookies)]
+    return step
+
+
+def _bc_backup_code(index, label):
+    return [
+        "let __set = [];",
+        "try { __set = JSON.parse(pm.environment.get('llBcBackupCodes') || '[]'); } catch (e) { __set = []; }",
+        f"pm.test({js_str(label + ': набор запасных кодов захвачен подтверждением')}, () => "
+        f"pm.expect(Array.isArray(__set) && typeof __set[{index}] === 'string', 'набор на месте').to.eql(true));",
+        f"pm.environment.set('llBcBackupCode', Array.isArray(__set) && typeof __set[{index}] === 'string' ? __set[{index}] : '');",
+    ]
+
+
+def _bc_session_cookies(session_var):
+    return [("kaname_session", session_var), ("kaname_form", "llBcForm")]
+
+
+def _bc_first_csrf():
+    return _csrf("bcs-csrf-login", "login", "llBcTok", "llBcForm", "llBcSrc", fresh_context=True, first=True)
+
+
+CASES.append(Case(
+    id="IAM-LOGINLANE-CONF-BACKUP-CODE-LOGIN",
+    title="Вход с запасным кодом: код вне формы — 400/3 текстом «secondFactor.code: must be 10 characters of the backup-code alphabet» без носителя (BCS-14); живой код — 200, «2», ключи тела ровно session и user, следующее чтение — остаток 9 (BCS-16)",
+    classes=["CONF", "NEG", "VAL"],
+    priority="P0",
+    steps=[
+        _bc_first_csrf(),
+        _login("bcs-login-password", "{{loginLaneEmail}}", "{{loginLanePassword}}", "llBcTok", "llBcForm", "llBcSrc", [
+            *_bc_status(200, "BCS-GIVEN-LOGIN"), _BC_J,
+            "pm.test('BCS-GIVEN-LOGIN: сессия уровня «1» — фактора у человека стенда нет', () => "
+            "pm.expect(__j.session && __j.session.assuranceLevel, 'уровень сессии').to.eql('1'));",
+            *_bc_capture("kaname_session", "llBcSessionCookie", "BCS-GIVEN-LOGIN"),
+            *_bc_capture("kaname_form", "llBcForm", "BCS-GIVEN-LOGIN", required=False),
+        ]),
+        _bc_csrf("bcs-csrf-enroll", "second-factor", "llBcSessionCookie"),
+        _post("bcs-enroll", _BC_ENROLL, {"csrfToken": "{{llBcTok}}"}, "llBcSrc", _bc_session_cookies("llBcSessionCookie"), [
+            *_bc_status(200, "BCS-GIVEN-ENROLL"), _BC_J,
+            "pm.test('BCS-GIVEN-ENROLL: секрет base32 выдан', () => "
+            "pm.expect(/^[A-Z2-7]{32}$/.test(String(__j.secret)), 'форма секрета').to.eql(true));",
+            "pm.environment.set('llBcSecret', __j.secret || '');",
+        ]),
+        _post("bcs-confirm", _BC_CONFIRM, {"code": "{{llBcCode}}", "csrfToken": "{{llBcTok}}"}, "llBcSrc",
+              _bc_session_cookies("llBcSessionCookie"), [
+                  *_bc_status(200, "BCS-GIVEN-CONFIRM"), _BC_J,
+                  "pm.test('BCS-GIVEN-CONFIRM: десять запасных кодов выданы', () => "
+                  "pm.expect(Array.isArray(__j.backupCodes) ? __j.backupCodes.length : -1, 'запасных кодов').to.eql(10));",
+                  "if (Array.isArray(__j.backupCodes)) { pm.environment.set('llBcBackupCodes', JSON.stringify(__j.backupCodes)); }",
+                  *_bc_capture("kaname_session", "llBcSessionCookie", "BCS-GIVEN-CONFIRM"),
+              ],
+              extra_pre=[*_BC_TOTP, "pm.environment.set('llBcCode', __totp(pm.environment.get('llBcSecret'), __stepNow()));"]),
+        _bc_csrf("bcs-csrf-login-again", "login"),
+        _post("bcs14-login-malformed-backup-code", _LOGIN,
+              {"email": "{{loginLaneEmail}}", "password": "{{loginLanePassword}}", "csrfToken": "{{llBcTok}}",
+               "secondFactor": {"method": "lookup_secret", "code": "ABC"}},
+              "llBcSrc", [("kaname_form", "llBcForm")], _invalid_400(_BC_FORM_TEXT, "BCS-14")),
+        _post("bcs16-login-backup-code", _LOGIN,
+              {"email": "{{loginLaneEmail}}", "password": "{{loginLanePassword}}", "csrfToken": "{{llBcTok}}",
+               "secondFactor": {"method": "lookup_secret", "code": "{{llBcBackupCode}}"}},
+              "llBcSrc", [("kaname_form", "llBcForm")], [
+                  *_bc_status(200, "BCS-16"), _BC_J,
+                  "pm.test('BCS-16: session.assuranceLevel = \"2\"', () => "
+                  "pm.expect(__j.session && __j.session.assuranceLevel, 'уровень сессии').to.eql('2'));",
+                  "pm.test('BCS-16: ключи тела ровно session, user — сводки набора и кодов нет', () => "
+                  "pm.expect(Object.keys(__j).sort(), 'ключи тела').to.eql(['session', 'user']));",
+                  *_bc_capture("kaname_session", "llBcLoginSessionCookie", "BCS-16"),
+                  *_bc_capture("kaname_form", "llBcForm", "BCS-16", required=False),
+              ],
+              extra_pre=_bc_backup_code(0, "BCS-16")),
+        Step(name="bcs16-state-after", method="GET", path=_STATUS,
+             pre_script=[*_lane_via(_STATUS, "llBcSrc"), *_with_cookies(*_bc_session_cookies("llBcLoginSessionCookie"))],
+             insecure_tls=True, auth="anonymous", cookie_jar=False,
+             test_script=[
+                 *_bc_status(200, "BCS-16-STATE"), _BC_J,
+                 "pm.test('BCS-16: следующее чтение новой сессии — backupCodeSet.remaining = 9', () => "
+                 "pm.expect(__j.backupCodeSet && __j.backupCodeSet.remaining, 'остаток набора').to.eql(9));",
+             ]),
+        # Возврат человека стенда в исходное — снятие живым запасным кодом; исход
+        # утверждается чтением, а не предполагается.
+        _bc_csrf("bcs-csrf-remove", "second-factor", "llBcLoginSessionCookie"),
+        _post("bcs-cleanup-remove", _BC_REMOVE, {"method": "lookup_secret", "code": "{{llBcBackupCode}}", "csrfToken": "{{llBcTok}}"},
+              "llBcSrc", _bc_session_cookies("llBcLoginSessionCookie"), [
+                  *_bc_status(200, "BCS-CLEANUP-REMOVE"),
+                  *_bc_capture("kaname_session", "llBcLoginSessionCookie", "BCS-CLEANUP-REMOVE", required=False),
+              ],
+              extra_pre=_bc_backup_code(1, "BCS-CLEANUP-REMOVE")),
+        Step(name="bcs-cleanup-state", method="GET", path=_STATUS,
+             pre_script=[*_lane_via(_STATUS, "llBcSrc"), *_with_cookies(*_bc_session_cookies("llBcLoginSessionCookie"))],
+             insecure_tls=True, auth="anonymous", cookie_jar=False,
+             test_script=[
+                 *_bc_status(200, "BCS-CLEANUP-STATE"), _BC_J,
+                 "pm.test('BCS-CLEANUP-STATE: человек стенда возвращён в исходное — фактора нет', () => "
+                 "pm.expect(__j.totp && __j.totp.enrolled, 'фактор заведён').to.eql(false));",
+             ]),
+    ],
+))

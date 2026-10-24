@@ -1,0 +1,116 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+  sha256: b6d5f91182f28706ac703fa217df8af8096ef6335054dea157c324361b17c577
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строки истории в шапке — статическая форма объявления; шапка не правлена
+    рецензентом намеренно (change-graph.md §2). Действующий вердикт о редакции b6d5f911… — эта
+    запись и внешнее событие; прежние записи 3c6fdec0…, c9224c8b…, 35224856… не тронуты.
+  base_commit: 225428b30
+  content_commit: none
+  content_commit_note: >-
+    Редакция 4 рассмотрена незакоммиченной в рабочей копии tmp/w13-kn297-acc5 (отсоединена на
+    origin/297 @225428b30); отпечаток перемерен рецензентом sha256sum и равен заявленному.
+  branch: '297'
+  task: PRO-Robotech/kaname#297
+  lines: 662
+  scenarios: 36
+  round: 4
+  round_scope: >-
+    проверка исполнения дельты к редакции 3 (35224856…, APPROVED кругом 3): две строки истории
+    (пропущенная строка круга 3 и запись о правке после вердикта) и новый §9 (отсылка по оси формы
+    к backup-code-set-has-one-form.md, редакция 4). Пункты вне дельты не переоткрываются (fa-b1).
+    Круг заказан диспетчером по DoD п. 8 приёмки BCS.
+  round_note: >-
+    Вердикт 35224856… относится к редакции 3 и на редакцию 4 не переносится; эта запись — вердикт
+    о редакции 4.
+  predecessor_record: docs/specs/reviews/step-up-with-any-enrolled-method/35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683.yaml
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/step-up-with-any-enrolled-method.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-19T04:49:38Z'
+effective_approval:
+  issued: true
+  issued_at: "2026-10-19T06:21:12Z"
+  note: >-
+    Одобрение действует с публикацией внешнего события (тело ниже); до неё блок event честно
+    not_performed. Правка документа после этой записи вердикт не переносит.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#297
+  status: performed
+  published: true
+  database_id: 6261029281
+  node_id: "IC_kwDOUO26pM8AAAABdS-5oQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/297#issuecomment-6261029281"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6261029281"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T06:21:12Z"
+  body_sha256: "1a9ad79e9b505c23883170db3dc964b9d1b0a6dc77794ef05bc658667c5f025f"
+  subject_sha256: "b6d5f91182f28706ac703fa217df8af8096ef6335054dea157c324361b17c577"
+  subject_revision_commit: "ad31941e63e2c6e282a973cba8ed969bf590a2d5"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/step-up-with-any-enrolled-method/3c6fdec0b44a116c4f0fee030baed3017b7135ea91df7ffdfcf9ede7bf5c95c9.yaml
+    - docs/specs/reviews/step-up-with-any-enrolled-method/c9224c8b5d06e38eff5a8272e889b7aa6f2cefbac4afaf38274f1c13b106ef58.yaml
+    - docs/specs/reviews/step-up-with-any-enrolled-method/35224856e3e2aec098ac0398deaeceb22dbb8cd4702232d921af62ea8168d683.yaml
+premise:
+  status: confirmed
+  predicate: >-
+    sha256sum документа → b6d5f911… (равен заявленному); `git diff --numstat` @225428b30 → 34
+    добавлено, 0 удалено; ханки — история :15-16 и §9 в конце файла.
+delta_checks:
+  - id: D1
+    subject: сценарии не тронуты
+    result: пройдено
+    predicate: >-
+      удалённых строк 0; `grep -c '^\*\*ID: SUA-'` → 36, как в записи круга 3 (scenarios: 36).
+  - id: D2
+    subject: строка круга 3 правдива
+    result: пройдено
+    predicate: >-
+      запись docs/specs/reviews/step-up-with-any-enrolled-method/35224856….yaml существует, verdict
+      APPROVED, round 3.
+  - id: D3
+    subject: §9 правдив о прежней и целевой форме
+    result: пройдено
+    predicate: >-
+      чтение: SUA-02 :331-335 (`backupCodes.remaining/total/lastUsedAt`), SUA-12 :372, SUA-31 :469,
+      SUA-40 :487-491, SUA-60 :522, SUA-61 :528-531; Р6 :221-222; §4 строка «Ф12 · Р4, ответ чтения
+      состояния» — совпадает со столбцом «прежняя форма». Целевая форма сверена с BCS-01, 03, 04,
+      06, 08, 09, 30, 31, 32. Ось смысла (моменты набора, stepUpMethods) оставлена здесь.
+  - id: D4
+    subject: гейты приёмок
+    result: пройдено
+    predicate: >-
+      `go test -count=1 -run Acceptance ./internal/check/` → ok, код 0.
+new_blocking_from_delta: []
+non_blocking: []
+checks:
+  scope: без изменений против круга 3
+  producer: без изменений — §«сценарий → производитель» не тронут
+  twin: без изменений
+  constructibility: новых Given дельта не вводит (посеяно 0 из 0)
+  format: без изменений
+  conventions: без изменений
+  dod: без изменений
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: false

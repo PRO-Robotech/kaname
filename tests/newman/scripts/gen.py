@@ -1332,12 +1332,36 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
 
 
 def assert_op_success(auth: str = AUTH_INHERIT_OP, op_var: str = "opId") -> Step:
-    """The auth parameter ensures the step carries a valid Bearer token; by default
-    it inherits the principal that minted `op_var` (AUTH_INHERIT_OP)."""
+    """Опрашивает /operations/{op_var} до done и утверждает успех: response есть, error нет.
+
+    The auth parameter ensures the step carries a valid Bearer token; by default
+    it inherits the principal that minted `op_var` (AUTH_INHERIT_OP).
+
+    ОПРОС — ВНУТРИ ШАГА, а не обязанность вызывающего (kaname#948). Мутация
+    отвечает конвертом Operation сразу, работа — асинхронно, и одиночный GET сразу
+    после неё читает `done:false`: исход утверждения становился функцией
+    расписания воркера. Так упал KN664-50 (IAM-USR-DL-FLOW-TENANT-LEAVES, удаление
+    проекта) на CI kaname#881. Перед помощником стоял опрос не везде, а
+    `poll_operation_until_done` опрашивает только общий `opId`, поэтому для
+    именованной `op_var` предшествующего опроса той же операции не бывает вовсе.
+    Форма та же, что у `assert_op_error`: самоповтор шага (setNextRequest на себя,
+    предел POLL_CAP) с настоящей паузой между опросами и счётчиком, сбрасываемым по
+    имени шага. Перед шагом стоит опрос — первый же ответ уже done, повтора нет.
+    """
     return Step(name="assert-op-success", method="GET", path="/operations/{{" + op_var + "}}",
                 auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True),
                 test_script=[
                     "const j = pm.response.json();",
+                    "if (pm.environment.get('_opOkStarted') !== pm.info.requestName) { pm.environment.set('_opOkCount', '0'); pm.environment.set('_opOkStarted', pm.info.requestName); }",
+                    "const pc = parseInt(pm.environment.get('_opOkCount') || '0', 10);",
+                    f"if (!j.done && pc < {POLL_CAP}) {{",
+                    "  pm.environment.set('_opOkCount', String(pc + 1));",
+                    "  const _ipd2 = Date.now(); while (Date.now() - _ipd2 < 500) void 0; /* real inter-poll delay: cap 50 x 500ms ~= 25s budget (testing.md) */",
+                    "  pm.execution.setNextRequest(pm.info.requestName);",
+                    "  return;",
+                    "}",
+                    "pm.environment.unset('_opOkCount');",
+                    "pm.environment.unset('_opOkStarted');",
                     "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                     "pm.test('operation succeeded (response, no error)', () => pm.expect(Boolean(j.response) && !j.error, JSON.stringify(j)).to.eql(true));",
                 ])
@@ -1985,16 +2009,23 @@ def _iam_item_hook(step, item):
 #   * СТРАЖ ПУСТОГО ИДЕНТИФИКАТОРА ДВУХ ФОРМ (`required`): у кейса под проверкой
 #     отсутствие операции — ДЕФЕКТ и называется вслух, у уборки best-effort —
 #     законный случай, и запрос просто не отправляется.
-def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True) -> Step:
-    """Шаг опроса операции набора iam — общее тело плюс три его решения."""
+def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True,
+                              op_var: str = "opId") -> Step:
+    """Шаг опроса операции набора iam — общее тело плюс три его решения.
+
+    `op_var` — переменная ОПРАШИВАЕМОЙ операции (kaname#948). Прежде шаг опрашивал
+    только общий `opId`, и опрос операции, сохранённой под своим именем, записать
+    было нечем: следующее за ним чтение той же переменной стояло без опроса.
+    """
     return gen_shared.op_poll_step(
         Step,
         auth=auth,
+        op_var=op_var,
         budget=POLL_CAP,
         interval_ms=500,
         unique_name=False,
         pre_extra=[
-            *_op_id_guard("opId", required),
+            *_op_id_guard(op_var, required),
             "// poll-counter reset on first entry (request-name-scoped flag);",
             "// re-invocations via setNextRequest skip the reset.",
             "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
@@ -2002,7 +2033,7 @@ def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True
             "  pm.environment.set('_pollStarted', pm.info.requestName);",
             "}",
         ],
-        step_extra={"op_var": "opId"},
+        step_extra={"op_var": op_var},
     )
 
 

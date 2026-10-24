@@ -156,9 +156,6 @@ func (r *fakeUserRdr) GetByAccountEmail(context.Context, domain.AccountID, domai
 func (r *fakeUserRdr) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
 	return nil, nil
 }
-func (r *fakeUserRdr) FindActiveByExternalID(context.Context, domain.ExternalSubject) ([]domain.User, error) {
-	return nil, nil
-}
 func (r *fakeUserRdr) FindByExternalIDInStatuses(context.Context, domain.ExternalSubject, []domain.InviteStatus) ([]domain.User, error) {
 	return nil, nil
 }
@@ -207,9 +204,6 @@ func (r *fakeABRdr) ListActiveByRole(context.Context, domain.RoleID) ([]domain.A
 }
 func (r *fakeABRdr) CountActiveByRole(context.Context, domain.RoleID) (int, error) { return 0, nil }
 func (r *fakeABRdr) SelectEmittedTuplesBySource(context.Context, domain.AccessBindingID, string) ([]access_binding.RelationTuple, error) {
-	return nil, nil
-}
-func (r *fakeABRdr) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
 	return nil, nil
 }
 func (r *fakeABRdr) ListByRole(context.Context, domain.RoleID, access_binding.ListByRoleFilter) ([]domain.AccessBinding, string, error) {

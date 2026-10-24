@@ -65,15 +65,18 @@ func basicRefusalOutcome(err error) string {
 	return OutcomeBasicRefusedReasonUnnamed
 }
 
-// CredentialKindOutcomes — ЗАКРЫТЫЙ набор исходов полосы предъявленного
-// удостоверения целиком, в объявленном порядке. Набор клеток счётчика
-// выводится отсюда, а не выписывается у адаптера метрик.
+// CredentialKindOutcomes — ЗАКРЫТЫЙ набор исходов полосы целиком — входов с
+// предъявленным удостоверением и анонимных (kaname#928), — в объявленном
+// порядке. Набор клеток счётчика выводится отсюда, а не выписывается у
+// адаптера метрик.
 func CredentialKindOutcomes() []string {
 	reasons := domain.BasicCredentialRefusalReasons()
-	out := make([]string, 0, len(reasons)+5)
+	out := make([]string, 0, len(reasons)+9)
 	out = append(out, OutcomeBasicAccepted, OutcomeKeyMaterialAcceptedInWindow, OutcomeKeyMaterialRefused)
 	for _, r := range reasons {
 		out = append(out, BasicRefusedOutcome(r))
 	}
-	return append(out, OutcomeBasicRefusedReasonUnnamed, OutcomeBasicPrincipalKindRefused)
+	out = append(out, OutcomeBasicRefusedReasonUnnamed, OutcomeBasicPrincipalKindRefused)
+	return append(out, OutcomeAnonymousIssued, OutcomeAnonymousPaceExceeded,
+		OutcomeAnonymousAudienceRefused, OutcomeAnonymousIssuerUnavailable)
 }

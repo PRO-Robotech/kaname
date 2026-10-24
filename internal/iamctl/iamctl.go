@@ -332,8 +332,18 @@ func planWithService(ctx context.Context, stdout, stderr io.Writer, svc ModuleSe
 	}
 	printPlan(stdout, resp)
 
-	if resp.GetVerdict() == iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR {
+	// Схождение — ТОЛЬКО `WOULD_APPLY`. Всякий иной вердикт, в том числе
+	// клиенту неизвестный, — находка: код 0 и подсказка `apply` на плане,
+	// который служба отвергнет, были бы ложью (kaname#865).
+	switch resp.GetVerdict() {
+	case iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_APPLY:
+	case iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR:
 		printBeyondAnchor(stderr, resp)
+		return ExitFinding
+	default:
+		f := verdictFinding(deps.Endpoint, resp)
+		_, _ = fmt.Fprintf(stderr, "НАХОДКА: %s\n", f.Wrong)
+		_, _ = fmt.Fprintf(stderr, "что сделать: %s\n", f.Fix)
 		return ExitFinding
 	}
 	_, _ = fmt.Fprintf(stdout, "вердикт: применение сойдётся с якорем\n")
@@ -373,6 +383,51 @@ func printBeyondAnchor(stderr io.Writer, resp *iamv1.PlanModuleResponse) {
 	printNamed(stderr, "  недостающая строка (якорь объявляет, каталог не несёт)", resp.GetBeyondAnchorMissing())
 	_, _ = fmt.Fprintln(stderr, "что сделать: править ИСТОЧНИК манифеста — повтор применения не поможет "+
 		"ни при каком числе попыток")
+}
+
+// verdictFinding — находка по вердикту плана, отличному от схождения и от
+// выхода за якорь: младшая редакция, конфликт содержимого либо вердикт, этому
+// клиенту неизвестный (kaname#865).
+func verdictFinding(endpoint string, resp *iamv1.PlanModuleResponse) finding {
+	checked := fmt.Sprintf("вызов iam InternalModuleService/Plan по адресу %s вернул вердикт %s",
+		endpoint, resp.GetVerdict())
+	switch resp.GetVerdict() {
+	case iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION:
+		return finding{
+			Wrong: fmt.Sprintf("модуль %s: редакция доставленного манифеста %s старше применённой %s — "+
+				"применение будет отвергнуто", resp.GetModule(),
+				optionalRevision(resp.ManifestRevision), optionalRevision(resp.AppliedRevision)),
+			Checked: checked,
+			Fix: "откат выражается НОВОЙ редакцией больше применённой — повтор применения не поможет " +
+				"ни при каком числе попыток",
+		}
+	case iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT:
+		return finding{
+			Wrong: fmt.Sprintf("модуль %s: редакция %s уже применена с другим содержимым "+
+				"(отпечаток манифеста %s, применённый %s) — применение будет отвергнуто",
+				resp.GetModule(), optionalRevision(resp.ManifestRevision),
+				resp.GetManifestDigest(), resp.GetAppliedDigest()),
+			Checked: checked,
+			Fix: "изменение содержимого выражается НОВОЙ редакцией больше применённой — повтор " +
+				"применения не поможет",
+		}
+	default:
+		return finding{
+			Wrong: fmt.Sprintf("модуль %s: вердикт плана %d этому клиенту неизвестен — схождением "+
+				"он не считается", resp.GetModule(), int32(resp.GetVerdict())),
+			Checked: checked,
+			Fix:     "обновите iamctl до версии, знающей этот вердикт, и повторите план",
+		}
+	}
+}
+
+// optionalRevision — номер редакции для текста; отсутствие называется словом,
+// а не нулём: ноль редакцией не бывает.
+func optionalRevision(n *int64) string {
+	if n == nil {
+		return "не объявлена"
+	}
+	return fmt.Sprintf("%d", *n)
 }
 
 func printNamed(w io.Writer, label string, items []string) {
@@ -717,6 +772,12 @@ func doctorWithService(ctx context.Context, stdout, stderr io.Writer, svc Module
 				Fix: "править ИСТОЧНИК манифеста: следующий подъём службы будет отвергнут этой же " +
 					"сверкой, и повтор применения не поможет",
 			}.print(stderr)
+			code = worse(code, ExitFinding)
+			continue
+		}
+		if resp.GetVerdict() != iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_APPLY {
+			findings++
+			verdictFinding(deps.Endpoint, resp).print(stderr)
 			code = worse(code, ExitFinding)
 			continue
 		}

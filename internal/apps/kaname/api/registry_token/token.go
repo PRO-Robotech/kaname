@@ -165,6 +165,10 @@ type AnonymousIdentity struct {
 	// ClientID — субъект анонимного токена; приёмная сторона резолвит его в
 	// AnonymousSubject.
 	ClientID string
+	// Pace — темп анонимных входов на источник (kaname#928). При объявленном
+	// ClientID обязателен: построитель без него отказывает
+	// ([ErrAnonymousPaceRequired]). Разбор — anonymous_pace.go.
+	Pace AnonymousPacer
 }
 
 const (
@@ -246,6 +250,11 @@ type IssueRegistryTokenUseCase struct {
 func NewIssueRegistryTokenUseCase(cfg Config, m LocalMinter) (*IssueRegistryTokenUseCase, error) {
 	if m == nil {
 		return nil, ErrOwnMinterRequired
+	}
+	// Анонимный поток без темпа — выдача без предела чеканок на источник;
+	// такое состояние не строится (kaname#928).
+	if cfg.Anonymous.ClientID != "" && cfg.Anonymous.Pace == nil {
+		return nil, ErrAnonymousPaceRequired
 	}
 	return &IssueRegistryTokenUseCase{
 		cfg:    cfg,
@@ -465,19 +474,36 @@ func (u *IssueRegistryTokenUseCase) AnonymousEnabled() bool {
 // вызывающий — подстановочный принципал, а не конкретный субъект. Срок —
 // срок токенов полосы, объявленный её настройкой.
 //
-// Необъявленный анонимный поток — ErrUnauthenticated (→ 401-вызов); отказ нашей
-// чеканки — ErrIssuerUnavailable (→ 503, токена нет).
-func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, service string) (IssueOutput, error) {
+// Необъявленный анонимный поток — ErrUnauthenticated (→ 401-вызов); источник
+// сверх темпа — [AnonymousPaceExceededError] (→ 429); отказ нашей чеканки —
+// ErrIssuerUnavailable (→ 503, токена нет).
+//
+// Исход каждого входа объявленного потока — ровно одна клетка переписи полосы
+// (anonymous_pace.go).
+func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, in AnonymousInput) (IssueOutput, error) {
 	if !u.AnonymousEnabled() {
 		// Anonymous pull not configured → fail-closed (handler issues 401).
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
+	// Темп — до адресата и до чеканки: бережётся именно обращение к
+	// подписанту. Построитель не пускает поток без темпа; nil здесь означает
+	// обход построителя, и исход тот же — выдачи нет.
+	if u.cfg.Anonymous.Pace == nil {
+		u.observeKind(OutcomeAnonymousIssuerUnavailable)
+		return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, ErrAnonymousPaceRequired)
+	}
+	if _, after, ok := u.cfg.Anonymous.Pace.Reserve(in.Source); !ok {
+		u.observeKind(OutcomeAnonymousPaceExceeded)
+		return IssueOutput{}, &AnonymousPaceExceededError{RetryAfter: after}
+	}
+
 	// Сужения ключа здесь нет ПО ПОСТРОЕНИЮ — учётных данных не предъявляли, —
 	// поэтому остаётся внешняя граница. Она действует и тут: анонимный поток
 	// той же полосы адресата себе не назначает.
-	service, err := u.resolveAudience(u.cfg.Anonymous.ClientID, service)
+	service, err := u.resolveAudience(u.cfg.Anonymous.ClientID, in.Service)
 	if err != nil {
+		u.observeKind(OutcomeAnonymousAudienceRefused)
 		return IssueOutput{}, err
 	}
 	now := u.now()
@@ -490,8 +516,10 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 		Scope: AnonymousReadScope,
 	})
 	if merr != nil {
+		u.observeKind(OutcomeAnonymousIssuerUnavailable)
 		return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
 	}
+	u.observeKind(OutcomeAnonymousIssued)
 	return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
 }
 

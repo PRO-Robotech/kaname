@@ -173,7 +173,8 @@ type LookupSubjectRequest_ExternalId struct {
 }
 
 type LookupSubjectRequest_Id struct {
-	// kaname internal id (`usr-...` или `sva-...`).
+	// kaname internal id: префикс и 17 знаков без разделителя (`usr<17>` или
+	// `sva<17>`, 20 знаков в сумме).
 	Id string `protobuf:"bytes,2,opt,name=id,proto3,oneof"`
 }
 

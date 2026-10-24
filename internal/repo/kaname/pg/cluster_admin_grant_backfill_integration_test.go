@@ -31,6 +31,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // backfillSQL — exact backfill statements from migration 0004. Extracted
@@ -97,7 +98,10 @@ $migration$;
 // runBackfill executes the inline backfill statements.
 func runBackfill(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(ctx, backfillSQL)
+	// Набор субъектов выдач, которые завело заполнение, пишется той же неявной
+	// транзакцией многооператорного запроса: на голове цепи выдачу без набора
+	// база на фиксации отвергает (kaname#902).
+	_, err := pool.Exec(ctx, backfillSQL+";\n"+bindingset.SeedSQL)
 	require.NoError(t, err, "backfill SQL must succeed")
 }
 

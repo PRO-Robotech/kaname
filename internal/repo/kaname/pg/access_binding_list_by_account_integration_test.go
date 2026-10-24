@@ -36,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 func TestAB_LBA01_DirectAndProjectScopedBindings(t *testing.T) {
@@ -159,10 +160,10 @@ func TestAB_LBA03_IncludeRevokedFlag(t *testing.T) {
 	// Insert a REVOKED binding directly (cannot use the partial-UNIQUE active
 	// path twice for the same 5-tuple).
 	other := mustSeedUser(t, ctx, pool, "lba03x")
-	_, err = pool.Exec(ctx, `INSERT INTO kaname.access_bindings
+	_, err = pool.Exec(ctx, bindingset.With(`INSERT INTO kaname.access_bindings
 		(id, subject_type, subject_id, role_id, resource_type, resource_id, status,
 		 granted_by_user_id, revoked_at, revoked_by_user_id, created_at)
-		VALUES ($1, 'user', $2, $3, 'account', $4, 'REVOKED', '', now(), $5, now())`,
+		VALUES ($1, 'user', $2, $3, 'account', $4, 'REVOKED', '', now(), $5, now())`),
 		ids.NewID(domain.PrefixAccessBinding), string(other),
 		seedSystemRoleIDIAMView, string(acc.ID), string(owner))
 	require.NoError(t, err)
