@@ -81,7 +81,7 @@ type abReader struct {
 // выдачи различает пара (role_id, granted_relation), и ровно одна из них непуста.
 const abCols = "id, subject_type, subject_id, COALESCE(role_id, '') AS role_id, resource_type, resource_id, " +
 	"status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
-	"deletion_protection, labels, target, granted_relation, is_system"
+	"deletion_protection, labels, target, granted_relation, is_system, COALESCE(revocation_reason, '') AS revocation_reason"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
@@ -692,6 +692,12 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())
 	}
 	targetDigest := b.Target.Digest()
+	if err := holdRegisteredKeys(ctx, w.tx, b.HeldTargets, func(ref domain.ResourceRef) error {
+		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"target resource %s %s was unregistered before the access binding was written", ref.Type, ref.ID)
+	}); err != nil {
+		return domain.AccessBinding{}, err
+	}
 	q := fmt.Sprintf(`
 		INSERT INTO access_bindings (
 			id, subject_type, subject_id, role_id, resource_type, resource_id,
@@ -856,7 +862,8 @@ func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID,
 		UPDATE access_bindings
 		   SET status             = 'REVOKED',
 		       revoked_at         = $2,
-		       revoked_by_user_id = $3
+		       revoked_by_user_id = $3,
+		       revocation_reason  = 'REVOKE'
 		 WHERE id = $1
 		   AND status = 'ACTIVE'
 		   AND deletion_protection = false
@@ -1045,6 +1052,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		&targetJSON,
 		&ab.GrantedRelation,
 		&ab.System,
+		(*string)(&ab.RevocationReason),
 	)
 	err := row.Scan(dest...)
 	if err != nil {

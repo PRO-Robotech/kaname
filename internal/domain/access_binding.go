@@ -107,7 +107,33 @@ type AccessBinding struct {
 	// closed per-object set. The zero value is treated as AllInScope (legacy /
 	// internal rows); the public Create RPC rejects a missing target (least-priv).
 	Target AccessTarget
+
+	// RevocationReason — почему выдача отозвана (kaname#963, Д2). Пусто у
+	// действующей выдачи и у отозванной до заведения поля (Д7).
+	RevocationReason RevocationReason
+
+	// HeldTargets — НЕ ХРАНИТСЯ. Объекты цели, которые на приёме выдачи были
+	// зарегистрированы (Р8 приёмки `unregistration-revokes-its-grants.md`). Запись
+	// выдачи берёт на каждом замок строки регистрации и отказывает, если строки
+	// уже нет: выдача, принятая до снятия и записанная после, живой не остаётся
+	// (URG-24). Пусто — судить нечего (ключи свободны либо цель — вся область).
+	HeldTargets []ResourceRef
 }
+
+// RevocationReason — закрытый словарь причин отзыва выдачи (kaname#963, Д2).
+// Написание — слово хранения (`access_bindings.revocation_reason`).
+type RevocationReason string
+
+const (
+	// RevocationReasonNone — выдача не отозвана либо отозвана до заведения поля.
+	RevocationReasonNone RevocationReason = ""
+	// RevocationReasonRevoke — глагол `Revoke`.
+	RevocationReasonRevoke RevocationReason = "REVOKE"
+	// RevocationReasonExpired — истёк срок, отозвал проход срока.
+	RevocationReasonExpired RevocationReason = "EXPIRED"
+	// RevocationReasonResourceUnregistered — снята регистрация объекта цели.
+	RevocationReasonResourceUnregistered RevocationReason = "RESOURCE_UNREGISTERED"
+)
 
 func (b AccessBinding) Validate() error {
 	var errs error

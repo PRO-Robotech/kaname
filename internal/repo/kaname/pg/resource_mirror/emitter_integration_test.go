@@ -315,7 +315,9 @@ func TestResourceMirror_DeleteTx_RemovesRow(t *testing.T) {
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-del", time.Time{}))
+	deleted, err := resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-del", time.Time{})
+	require.NoError(t, err)
+	require.True(t, deleted, "снятие лежащей строки обязано сказать «снята» (kaname#963, Д1)")
 	require.NoError(t, tx.Commit(ctx))
 
 	require.Equal(t, 0, countMirror(t, ctx, pool, "compute.instance", "inst-del"))
@@ -333,8 +335,9 @@ func TestResourceMirror_DeleteTx_AbsentIsNoop(t *testing.T) {
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback(ctx) })
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-absent", time.Time{}),
-		"delete of absent row must be OK (idempotent, β-07/D-β5)")
+	deleted, err := resource_mirror.DeleteTx(ctx, tx, "compute.instance", "inst-absent", time.Time{})
+	require.NoError(t, err, "delete of absent row must be OK (idempotent, β-07/D-β5)")
+	require.False(t, deleted, "снятие отсутствующей строки не вправе сказать «снята» (kaname#963, Д1)")
 	require.NoError(t, tx.Commit(ctx))
 }
 
@@ -352,7 +355,8 @@ func deleteCommitted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objT
 	t.Helper()
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, resource_mirror.DeleteTx(ctx, tx, objType, objID, tombstone))
+	_, err = resource_mirror.DeleteTx(ctx, tx, objType, objID, tombstone)
+	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
 }
 

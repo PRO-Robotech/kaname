@@ -1459,7 +1459,7 @@ func (s *reconcileStore) scopeTenantAccountID(ctx context.Context, scope domain.
 func (s *reconcileStore) RevokeExpiredBinding(ctx context.Context, bindingID domain.AccessBindingID) (bool, error) {
 	tag, err := s.tx.Exec(ctx,
 		`UPDATE kaname.access_bindings
-		    SET status = 'REVOKED', revoked_at = now()
+		    SET status = 'REVOKED', revoked_at = now(), revocation_reason = 'EXPIRED'
 		  WHERE id = $1 AND status = 'ACTIVE'`,
 		string(bindingID),
 	)

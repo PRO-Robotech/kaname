@@ -73,7 +73,27 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		// «ничего не выдано» и «выдано в обход» снова становятся неотличимы.
 		GrantedRelation: b.GrantedRelation,
 		System:          b.System,
+		// Причина отзыва (kaname#963, Д2) — на каждом чтении, как статус.
+		RevocationReason: revocationReasonToProto(b.RevocationReason),
 	}, nil
+}
+
+// revocationReasonToProto — слово хранения причины отзыва → значение контракта.
+// Пустое слово — «не отозвана либо отозвана до заведения поля» (Д7). Слово вне
+// словаря проецируется тем же UNSPECIFIED, а не выдумывается: словарь колонки
+// закрыт ограничением `access_bindings_revocation_reason_ck`, и такое слово
+// возникнуть не может.
+func revocationReasonToProto(r domain.RevocationReason) iamv1.AccessBinding_RevocationReason {
+	switch r {
+	case domain.RevocationReasonRevoke:
+		return iamv1.AccessBinding_REVOCATION_REASON_REVOKE
+	case domain.RevocationReasonExpired:
+		return iamv1.AccessBinding_REVOCATION_REASON_EXPIRED
+	case domain.RevocationReasonResourceUnregistered:
+		return iamv1.AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED
+	default:
+		return iamv1.AccessBinding_REVOCATION_REASON_UNSPECIFIED
+	}
 }
 
 // materializedAtProto projects the materialization instant, truncated to seconds

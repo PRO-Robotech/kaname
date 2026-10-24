@@ -495,6 +495,10 @@ else
   # вердикта выводится из дерева, а не из перечня вызовов), но подхват — сигнал
   # автору, а не норма: место в порядке у коллекции есть, и оно здесь.
   run_one "iam-access-binding-include-revoked"
+  # iam-access-binding-revocation-reason — причина отзыва выдачи на крае
+  # (`revocationReason`, kaname#963, приёмка unregistration-revokes-its-grants.md,
+  # URG-E1/E2). Зависимости окружения — те же, что у соседней коллекции.
+  run_one "iam-access-binding-revocation-reason"
   # iam-permission-catalog — PermissionCatalogService.ListPermissionCatalog
   # (sub-phase G): backend-driven grantable role-rule catalog on the PUBLIC mux
   # (GET /iam/v1/permissionCatalog). Authenticated read + anonymous-deny. The CI

@@ -110,11 +110,21 @@ type CreateAccessBindingUseCase struct {
 	// `system_admin` on the scope object) through this client. Do not drop it.
 	relations  clients.RelationStore
 	reconciler SelectorReconciler // γ — optional, nil-safe
-	logger     *slog.Logger
+	// keys — какие объекты цели зарегистрированы на приёме (kaname#963, Р8).
+	keys   shared.RegisteredKeys
+	logger *slog.Logger
 }
 
 func NewCreateAccessBindingUseCase(r Repo, opsRepo operations.Repo) *CreateAccessBindingUseCase {
 	return &CreateAccessBindingUseCase{repo: r, opsRepo: opsRepo}
+}
+
+// WithRegisteredKeys — чтение регистрации объектов цели на приёме (kaname#963,
+// Р8): выдача, принятая до снятия регистрации и записанная после, живой не
+// остаётся. Провязывает корень службы.
+func (u *CreateAccessBindingUseCase) WithRegisteredKeys(k shared.RegisteredKeys) *CreateAccessBindingUseCase {
+	u.keys = k
+	return u
 }
 
 // WithReconciler wires the γ selector reconciler (post-commit membership
@@ -231,6 +241,18 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// rejection observable on the request path, not buried in Operation.error).
 	if err := u.validateGlobalAllSelector(ctx, b); err != nil {
 		return nil, err
+	}
+
+	// ПРИЁМ ВЫДАЧИ ЧИТАЕТСЯ ОТ МОМЕНТА ПРИЁМА (kaname#963, Р8, Д6). Объекты цели,
+	// зарегистрированные сейчас, запись выдачи держит замком строки регистрации
+	// и отказывает (Т1), если снятие успело раньше записи; свободный ключ — ключ
+	// по ATC-03, выдача на него действует с ближайшей регистрации.
+	if u.keys != nil && len(b.Target.Resources) > 0 {
+		held, err := u.keys.RegisteredOf(ctx, b.Target.Resources)
+		if err != nil {
+			return nil, shared.MapRepoErr(err)
+		}
+		b.HeldTargets = held
 	}
 
 	// Strict create — generate a candidate id; on a duplicate active grant

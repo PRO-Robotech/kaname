@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -63,7 +64,18 @@ type relationOutboxEmitter interface {
 // second tells it that what it must do cannot involve removing anything.
 type resourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
-	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) error
+	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) (deleted bool, err error)
+}
+
+// keyWithdrawal — узкий порт: снятие регистрации объекта снимает его выдачи
+// (kaname#963, приёмка `unregistration-revokes-its-grants.md`). В ТОЙ ЖЕ
+// транзакции, что удалила строку регистрации, отзывает выдачи, цель которых —
+// только этот ключ, сужает выдачи с несколькими объектами и убирает ключ из
+// `resourceNames` правил ролей. `key.Type` — точечный тип каталога, `actor` —
+// проверенная личность вызывающего. Реализация —
+// *access_binding.UnregisteredKeyWithdrawal.
+type keyWithdrawal interface {
+	WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error
 }
 
 // reconcileEventEmitter — narrow write port: enqueue a reconcile
@@ -266,6 +278,7 @@ type RegisterResourceUseCase struct {
 	txb          service.TxBeginner
 	catalogTypes catalogTypeReader     // ОБЯЗАТЕЛЕН, см. конструктор
 	publications publicReadPublisher   // ОБЯЗАТЕЛЕН, см. конструктор
+	withdrawal   keyWithdrawal         // ОБЯЗАТЕЛЕН, см. конструктор
 	reconcile    reconcileEventEmitter // optional, nil-safe
 	accounts     accountResolver       // optional, nil-safe
 	objRecon     objectReconciler      // sync post-commit — optional, nil-safe
@@ -290,14 +303,21 @@ type RegisterResourceUseCase struct {
 // состояние, в котором запоздавшая доставка открытия после закрытия возвращала бы
 // анонимное чтение (kaname#107). Опция с «нет — значит голый кортеж» делала бы
 // этот дефект молчаливым умолчанием.
+//
+// `withdrawal` — ТОЖЕ ПАРАМЕТР (kaname#963). Без него снятие регистрации
+// оставляло бы выдачи и названия правил на освободившийся ключ, и повторная
+// регистрация того же ключа другим владельцем наследовала бы их: опция с «нет —
+// значит не отзываем» и была тем дефектом.
 func NewRegisterResourceUseCase(
 	emitter relationOutboxEmitter,
 	mirror resourceMirrorEmitter,
 	txb service.TxBeginner,
 	catalogTypes catalogTypeReader,
 	publications publicReadPublisher,
+	withdrawal keyWithdrawal,
 ) *RegisterResourceUseCase {
-	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb, catalogTypes: catalogTypes, publications: publications}
+	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb, catalogTypes: catalogTypes,
+		publications: publications, withdrawal: withdrawal}
 }
 
 // WithReconcile wires the reconcile-event emitter: a mirror change
@@ -869,8 +889,21 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
 			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
-		if err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion); err != nil {
-			return "", false, false, fmt.Errorf("delete resource mirror: %w", err)
+		deleted, derr := uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion)
+		if derr != nil {
+			return "", false, false, fmt.Errorf("delete resource mirror: %w", derr)
+		}
+		// СНЯТИЕ РЕГИСТРАЦИИ СНИМАЕТ ВЫДАЧИ ОБЪЕКТА (kaname#963, Д1). Только снятие,
+		// удалившее строку регистрации, есть снятие регистрации: устаревшее
+		// надгробие, повтор применённого снятия и снятие незарегистрированного
+		// ключа строки не удаляют и выдач не трогают. В той же транзакции —
+		// отзыв не фиксируется без снятия, и снятие без отзыва.
+		if deleted {
+			if err = uc.withdrawal.WithdrawTx(ctx, tx,
+				domain.ResourceRef{Type: row.ObjectType, ID: row.ObjectID},
+				authzguard.PrincipalUserID(ctx)); err != nil {
+				return "", false, false, fmt.Errorf("withdraw grants of unregistered resource: %w", err)
+			}
 		}
 		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE SAME VERSION.
 		//

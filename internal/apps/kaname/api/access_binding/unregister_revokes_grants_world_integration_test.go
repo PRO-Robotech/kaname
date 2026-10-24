@@ -38,6 +38,7 @@ import (
 
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -77,7 +78,8 @@ func newURXWorld(t *testing.T) *urxWorld {
 func (w *urxWorld) rewire() {
 	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops).
 		WithRelationStore(w.door, nil).
-		WithReconciler(w.rec)
+		WithReconciler(w.rec).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
 	get := accessbindingapp.NewGetAccessBindingUseCase(w.repo).WithRelationStore(w.door, nil).WithRelationQueries(w.door)
 	del := accessbindingapp.NewDeleteAccessBindingUseCase(w.repo, w.ops).WithRelationStore(w.door, nil)
 	lsp := accessbindingapp.NewListSubjectPrivilegesUseCase(w.repo).WithRelationStore(w.door, nil).WithRelationQueries(w.door)

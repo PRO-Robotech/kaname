@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
@@ -78,7 +79,8 @@ func raceKey(base, i int) string { return fmt.Sprintf("reg%017d", base+i) }
 func (w *urxWorld) holdingCreate(hold *holdingRepo) *accessbindingapp.Handler {
 	create := accessbindingapp.NewCreateAccessBindingUseCase(hold, w.ops).
 		WithRelationStore(w.door, nil).
-		WithReconciler(w.rec)
+		WithReconciler(w.rec).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
 	get := accessbindingapp.NewGetAccessBindingUseCase(w.repo).WithRelationStore(w.door, nil).WithRelationQueries(w.door)
 	return accessbindingapp.NewHandler(create, nil, get, nil, nil, nil, nil)
 }
@@ -153,8 +155,10 @@ func TestURG25_GrantAcceptedAfterUnregisterIsOnFreeKey(t *testing.T) {
 // roleHandler — обработчик ролей, чьи use-case'ы создания и правки держат воркер на `hold`.
 func (w *urxWorld) roleHandler(hold *holdingRepo) *roleapp.Handler {
 	src := catalog.Fixed{F: w.facts}
-	create := roleapp.NewCreateRoleUseCase(hold, w.ops, src).WithRelationStore(w.door, nil).WithObjectReconciler(w.rec)
+	create := roleapp.NewCreateRoleUseCase(hold, w.ops, src).WithRelationStore(w.door, nil).WithObjectReconciler(w.rec).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool))
 	update := roleapp.NewUpdateRoleUseCase(hold, w.ops, src).
+		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec))
 	return roleapp.NewHandler(create, update, nil, nil, nil)
