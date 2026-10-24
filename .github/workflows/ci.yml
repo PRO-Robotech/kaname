@@ -201,6 +201,13 @@ jobs:
       - name: стражи правила git — проба с воссозданными дефектами
         run: bash scripts/hooks/branch-rule-inject.sh
 
+      # ПЯТАЯ — СТРАЖ НОВЫХ BLOB'ОВ ОТПРАВКИ (kaname#894). Бинарь и файл больше 1 МБ
+      # среди blob'ов, которые отправка вносит в публичную историю, — отказ до
+      # обхода KANAME_SKIP_PREPUSH; песочница с голым удалённым, настоящий хук.
+      # Исход — кодом: 0 · 1 · 2 (предпосылки нет).
+      - name: страж новых blob'ов отправки — проба
+        run: bash scripts/hooks/prepush-added-files-inject.sh
+
       - name: сборка
         run: go build ./...
 
