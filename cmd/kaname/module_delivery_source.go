@@ -16,7 +16,8 @@ package main
 //
 // # Второго разбора не заводится
 //
-// Обход и разбор — те же (`manifest.LoadDelivered`), что у пути старта; этот тип
+// Обход и разбор — те же (`loadDelivery` над `manifest.LoadDelivered`, с тем же
+// родством типов канона), что у пути старта; этот тип
 // только переводит его перепись в форму, которую объявил use-case, и различает
 // ТРИ состояния доставки, потому что чинятся они в трёх разных местах.
 
@@ -25,7 +26,6 @@ import (
 
 	moduleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/module"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
-	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // manifestDeliverySource — `moduleapp.DeliverySource` над каталогом доставки,
@@ -50,7 +50,7 @@ func (s *manifestDeliverySource) Read(context.Context) (moduleapp.Delivery, erro
 		// доставка: чинится оно посадкой, и отказ обязан назвать именно её.
 		return moduleapp.Delivery{Declared: false}, nil
 	}
-	report, err := manifest.LoadDelivered(s.cfg.Dir)
+	report, err := loadDelivery(s.cfg.Dir)
 	return moduleapp.Delivery{
 		Declared:      true,
 		ManifestsRead: report.ManifestsRead,

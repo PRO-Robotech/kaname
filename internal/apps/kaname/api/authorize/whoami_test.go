@@ -620,3 +620,7 @@ func (_ *fakeABRdr) GrantorLastPresentedAt(context.Context, domain.UserID) (time
 func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
 	return domain.PublicReadContainer{}, nil
 }
+
+func (_ *fakeABRdr) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}
