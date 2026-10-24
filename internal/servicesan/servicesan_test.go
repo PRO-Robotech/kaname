@@ -42,21 +42,34 @@ func TestParse_AccountOfAForeignFormIsNotAModule(t *testing.T) {
 	require.Equal(t, servicesan.Identity{Service: "api-gateway", Account: "acme-api-gateway"}, id)
 }
 
-// Форма без приставки законна: учётка и есть имя службы.
-func TestParse_FormWithoutAPrefixReadsTheAccountAsTheService(t *testing.T) {
-	id, ok := servicesan.NewForm("{service}").Parse(domain, san("platform", "api-gateway"))
-	require.True(t, ok)
-	require.Equal(t, "api-gateway", id.Service)
+// Инъекция F1 ревью сборки k1: форма без приставки модуль не сужает ничем,
+// кроме совпадения имени учётки с коротким именем службы, — и потому не форма.
+// По ней не узнаётся никто, в том числе учётка, равная имени службы, и учётка
+// с окончанием формы. Близнец — та же учётка под формой с приставкой: отличие
+// ровно одно, приставка.
+func TestParse_FormWithoutAPrefixRecognizesNobody(t *testing.T) {
+	for raw, account := range map[string]string{
+		"{service}":    "api-gateway",
+		"{service}-sa": "api-gateway-sa",
+	} {
+		_, ok := servicesan.NewForm(raw).Parse(domain, san("platform", account))
+		require.Falsef(t, ok, "форма %q без приставки узнала модулем учётку %q: модульность решает "+
+			"одно совпадение имени учётки с именем службы", raw, account)
+
+		id, ok := servicesan.NewForm("acme-"+raw).Parse(domain, san("platform", "acme-"+account))
+		require.Truef(t, ok, "та же учётка под формой с приставкой не узнана — близнец отрицания")
+		require.Equal(t, "api-gateway", id.Service)
+	}
 }
 
 // Окончание формы снимается так же, как приставка.
 func TestParse_SuffixIsCut(t *testing.T) {
-	form := servicesan.NewForm("{service}-sa")
-	id, ok := form.Parse(domain, san("platform", "vpc-sa"))
+	form := servicesan.NewForm("acme-{service}-sa")
+	id, ok := form.Parse(domain, san("platform", "acme-vpc-sa"))
 	require.True(t, ok)
 	require.Equal(t, "vpc", id.Service)
 
-	_, ok = form.Parse(domain, san("platform", "vpc"))
+	_, ok = form.Parse(domain, san("platform", "acme-vpc"))
 	require.False(t, ok, "учётка без объявленного окончания признана модулем")
 }
 
@@ -67,7 +80,7 @@ func TestParse_ZeroValuesRecognizeNobody(t *testing.T) {
 	require.False(t, ok, "необъявленная форма узнала модуль")
 
 	var zeroDomain grpcsrv.TrustDomain
-	_, ok = servicesan.NewForm("{service}").Parse(zeroDomain, san("platform", "vpc"))
+	_, ok = servicesan.NewForm("acme-{service}").Parse(zeroDomain, san("platform", "acme-vpc"))
 	require.False(t, ok, "необъявленный домен узнал модуль")
 }
 
@@ -102,7 +115,7 @@ func TestParse_MalformedIdentifiersAreRefused(t *testing.T) {
 // Учётка, которую форма называет службой, разбирается обратно в ту же службу —
 // одна форма, а не две.
 func TestAccountAndServiceAreInverse(t *testing.T) {
-	for _, raw := range []string{"acme-{service}", "{service}", "{service}-sa", "a.b-{service}-c"} {
+	for _, raw := range []string{"acme-{service}", "acme-{service}-sa", "a{service}", "a.b-{service}-c"} {
 		form := servicesan.NewForm(raw)
 		account := form.Account("api-gateway")
 		svc, ok := form.Service(account)
@@ -110,6 +123,7 @@ func TestAccountAndServiceAreInverse(t *testing.T) {
 		require.Equal(t, "api-gateway", svc)
 	}
 	require.Empty(t, servicesan.NewForm("acme-").Account("vpc"), "незаконная форма собрала учётку")
+	require.Empty(t, servicesan.NewForm("{service}").Account("vpc"), "форма без приставки собрала учётку")
 	require.Empty(t, servicesan.NewForm("acme-{service}").Account(""), "собрана учётка без имени службы")
 }
 
@@ -131,8 +145,38 @@ func TestRequire(t *testing.T) {
 		require.Contains(t, err.Error(), bad)
 	}
 
-	for _, good := range []string{"acme-{service}", "  {service}  ", "{service}-sa", servicesan.Sample} {
+	for _, good := range []string{"acme-{service}", "  acme-{service}  ", "acme-{service}-sa", "a{service}",
+		"0.{service}", servicesan.Sample} {
 		require.NoErrorf(t, servicesan.NewForm(good).Require(gate), "законная форма %q отвергнута", good)
+	}
+}
+
+// Инъекция F1 ревью сборки k1 у стража: форма без приставки — отказ старта, и
+// отказ называет причину (приставку), а не только ручку. Близнецы — те же формы
+// с приставкой в TestRequire: отличие ровно одно.
+func TestRequire_FormWithoutAPrefixRefusesNamingThePrefix(t *testing.T) {
+	gate := servicesan.Gate{Knob: "probe.knob (env PROBE_KNOB)"}
+	for _, bad := range []string{"{service}", "  {service}  ", "{service}-sa"} {
+		form := servicesan.NewForm(bad)
+		require.Falsef(t, form.Valid(), "форма %q без приставки названа законной", bad)
+		err := form.Require(gate)
+		require.Errorf(t, err, "форма %q без приставки прошла стража старта", bad)
+		for _, want := range []string{gate.Knob, strings.TrimSpace(bad), "prefix", servicesan.Sample} {
+			require.Containsf(t, err.Error(), want, "отказ о форме %q обязан называть %q: %v", bad, want, err)
+		}
+	}
+}
+
+// Приставка и окончание стоят на краях имени учётки кластера, а имя учётки
+// начинается и кончается буквой или цифрой. Приставка из одного разделителя
+// либо окончание, им кончающееся, не называют ни одной возможной учётки: по
+// такой форме не узнаётся никто, а установка выглядела бы настроенной.
+func TestRequire_FormWhoseAccountsCannotExistRefuses(t *testing.T) {
+	gate := servicesan.Gate{Knob: "probe.knob (env PROBE_KNOB)"}
+	for _, bad := range []string{"-{service}", ".acme-{service}", "acme-{service}-", "acme-{service}."} {
+		err := servicesan.NewForm(bad).Require(gate)
+		require.Errorf(t, err, "форма %q, по которой не складывается ни одна учётка, прошла стража", bad)
+		require.Contains(t, err.Error(), bad)
 	}
 }
 

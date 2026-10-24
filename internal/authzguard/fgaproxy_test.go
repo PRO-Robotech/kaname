@@ -300,13 +300,13 @@ func TestSANToServiceAccountID(t *testing.T) {
 	// Форма имени службы приезжает величиной так же (kaname#308): под ДРУГОЙ
 	// объявленной формой та же учётка перестаёт быть модулем, а учётка той
 	// формы — становится, и идентификатор выводится из учётки целиком.
-	otherForm := servicesan.NewForm("{service}-sa")
+	otherForm := servicesan.NewForm("acme-{service}-sa")
 	if _, ok := authzguard.SANToServiceAccountID(d, otherForm, "spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc"); ok {
 		t.Fatalf("учётка чужой формы признана модулем — разбор читает не объявленную форму")
 	}
-	got, ok = authzguard.SANToServiceAccountID(d, otherForm, "spiffe://kacho.cloud/ns/platform-system/sa/vpc-sa")
+	got, ok = authzguard.SANToServiceAccountID(d, otherForm, "spiffe://kacho.cloud/ns/platform-system/sa/acme-vpc-sa")
 	require.True(t, ok, "учётка ОБЪЯВЛЕННОЙ формы обязана разбираться")
-	sum := md5.Sum([]byte("vpc-sa"))
+	sum := md5.Sum([]byte("acme-vpc-sa"))
 	require.Equal(t, "sva"+hex.EncodeToString(sum[:])[:17], got,
 		"идентификатор выведен не из учётки целиком")
 
