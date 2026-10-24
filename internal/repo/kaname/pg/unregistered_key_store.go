@@ -20,6 +20,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -111,7 +112,7 @@ func (s *UnregisteredKeyStore) NarrowTarget(ctx context.Context, tx service.Tx, 
 	if len(target.Resources) == 0 {
 		return false, iamerr.Wrapf(iamerr.ErrInternal, "narrowing access binding %s to an empty target", id)
 	}
-	targetJSON, err := marshalTarget(target)
+	targetJSON, err := relverdict.EncodeTarget(target)
 	if err != nil {
 		return false, fmt.Errorf("narrow target %s: %w", id, err)
 	}
