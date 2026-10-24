@@ -116,7 +116,8 @@ func TestLoginMethodRepo_CostClassPrefixRoundTripsThroughTheParser(t *testing.T)
 	require.NoError(t, err)
 	want := map[string]int64{}
 	for _, v := range []domain.LoginVerifier{fresh, legacy} {
-		res := verifier.Verify(v, "not the password")
+		res, err := verifier.Verify(ctx, v, "not the password")
+		require.NoError(t, err)
 		require.Equal(t, passwordverify.OutcomeMismatched, res.Outcome)
 		want[domain.PasswordCostClass{Format: res.Format, Params: res.Params}.Key()]++
 	}

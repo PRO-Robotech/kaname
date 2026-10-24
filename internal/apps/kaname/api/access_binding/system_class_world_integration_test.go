@@ -97,7 +97,7 @@ func newSCWorld(t *testing.T) *scWorld {
 	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
 	rec := reconcile.New(kanamepg.NewReconcileAdapter(pool, catalogfixture.Source()), nil, catalogfixture.Source())
 
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, ops, catalogfixture.Source()).
 		WithRelationStore(door, nil).
 		WithReconciler(rec)
 	get := accessbindingapp.NewGetAccessBindingUseCase(repo).WithRelationStore(door, nil)

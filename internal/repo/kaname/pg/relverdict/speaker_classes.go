@@ -45,3 +45,25 @@ func classSlot(speaker string, i int) string {
 	}
 	return strings.TrimPrefix(classes[i], string(domain.SubjectTypeSystemClass)+":")
 }
+
+// speakerExistsSQL — говорящий `$1` называет СУЩЕСТВУЮЩУЮ учётку (kaname#909).
+//
+// Классы положены говорящему С ЛИЧНОСТЬЮ (приёмка, Р2), а вид записи
+// (`domain.SpeakerClasses`) — ещё не личность: личность — строка учётки. Поэтому
+// обе строки класса в паре колонок стоят под этим предикатом, а текстовая форма
+// берёт классы из пары, а не вторым написанием параметров.
+//
+// Видов здесь ровно столько, скольким производитель отдаёт классы: человек и
+// служебная учётка; паритет держит проба пакета. Предикат — часть ТОГО ЖЕ
+// оператора, а не вопрос перед ним: снимок базы у класса и у выдач общий, и
+// кругов к базе не прибавляется. Системный класс сам по себе
+// (`system_class:anonymous`) классов сверх себя не выводит и предикатом не
+// судится.
+const speakerExistsSQL = `(
+           (split_part($1::text, ':', 1) = 'user'
+            AND EXISTS (SELECT 1 FROM kaname.users u
+                         WHERE u.id = substr($1::text, length(split_part($1::text, ':', 1)) + 2)))
+        OR (split_part($1::text, ':', 1) = 'service_account'
+            AND EXISTS (SELECT 1 FROM kaname.service_accounts s
+                         WHERE s.id = substr($1::text, length(split_part($1::text, ':', 1)) + 2)))
+       )`

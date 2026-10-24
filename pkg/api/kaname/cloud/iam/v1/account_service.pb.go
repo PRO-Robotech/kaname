@@ -76,7 +76,9 @@ func (x *GetAccountRequest) GetAccountId() string {
 
 type ListAccountsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maximum number of results per page to return. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. To get the next page of results, set [page_token] to the
 	// [ListAccountsResponse.next_page_token] returned by a previous list request.
@@ -431,7 +433,9 @@ type ListAccountOperationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Account resource to list operations for.
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// The maximum number of results per page that should be returned. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. To get the next page of results, set [page_token] to the
 	// [ListAccountOperationsResponse.next_page_token] returned by a previous list request.
@@ -550,7 +554,9 @@ type ListAllAccountOperationsRequest struct {
 	// ID of the Account whose IAM operations are aggregated. Filters by the
 	// denormalized `account_id` column on the operations rows.
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// The maximum number of results per page that should be returned. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. To get the next page of results, set [page_token] to the
 	// [ListAllAccountOperationsResponse.next_page_token] returned by a previous list request.

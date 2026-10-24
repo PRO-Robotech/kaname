@@ -33,8 +33,7 @@
 **Ограничения:**
 - `external_id` immutable (изменение → identity-mismatch).
 - `account_id` immutable.
-- Создавать User напрямую нельзя — только регистрацией, через Invite либо
-  административным `InternalUserService.UpsertFromIdentity` на `:9091`.
+- Создавать User напрямую нельзя — только регистрацией либо через Invite.
 
 ## Доменная модель
 
@@ -147,8 +146,11 @@ sequenceDiagram
 
 | RPC                    | Описание                                                    |
 |------------------------|-------------------------------------------------------------|
-| `UpsertFromIdentity`   | Административное заведение/обновление User по субъекту (+ bootstrap Account/Project). Внешнего вызывающего у метода нет. |
 | `Get`                  | Admin Get.                                                  |
+
+Глагола заведения личности по внешнему удостоверению на internal-полосе больше
+нет (kaname#929, приёмка `active-identity-has-a-way-in.md`, AWI-09): вызывающего
+у него не осталось, а сам он производил личность `ACTIVE` без способа входа.
 
 ### REST mapping
 
@@ -245,21 +247,6 @@ curl http://localhost:18080/iam/v1/users/usr_xxx -H "Authorization: Bearer $TOKE
 curl "http://localhost:18080/iam/v1/users?account_id=acc_xxx" -H "Authorization: Bearer $TOKEN"
 ```
 
-### gRPC InternalUpsertFromIdentity (admin only)
-
-```bash
-grpcurl -plaintext -d '{
-  "external_id":"sub-xyz",
-  "email":"alice@example.com",
-  "display_name":"Alice"
-}' localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
-```
-
-### Идемпотентность
-
-`UpsertFromIdentity` идемпотентен по `(account_id, external_id)`: повторный
-вызов с тем же `external_id` возвращает уже созданный User row без `ALREADY_EXISTS`.
-
 ### Типичные ошибки
 
 | Сценарий                                  | gRPC code             | HTTP | Текст                                          |
@@ -287,28 +274,29 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 make -C deploy psql SVC=iam
 # > SELECT id, account_id, email, invite_status, external_id FROM kaname.users LIMIT 10;
 
-# Integration: invite-flow + UpsertFromIdentity.
+# Integration: invite-flow + активация приглашения.
 go test -short -count=1 -timeout 120s \
-  -run "TestUser|TestUpsertFromIdentity|TestInvite" \
+  -run "TestUser|TestUpsertInviteGrant|TestInvite" \
   ./services/iam/internal/repo/kaname/pg/...
 ```
 
 ## Подробности реализации
 
 - **Use-cases:** `internal/apps/kaname/api/user/` (`get.go`, `list.go`, `delete.go`,
-  `invite.go`, `internal_upsert.go`, `set_blocked.go`, `update.go`, `audit.go`).
+  `invite.go`, `mirror_tx.go`, `set_blocked.go`, `update.go`, `audit.go`).
 - **Handler:** `internal/apps/kaname/api/user/handler.go` (public и internal —
-  `InternalHandler` в том же файле); вариант использования internal-полосы —
-  `internal_upsert.go`. Глагола приёма исхода восстановления от прежнего поставщика
-  у internal-полосы больше нет (kaname#564): восстановление доступа ведёт полоса
-  входа, `internal/apps/kaname/api/humansession/recovery_complete.go`.
+  `InternalHandler` в том же файле, только `Get`). Глагола приёма исхода
+  восстановления от прежнего поставщика у internal-полосы больше нет (kaname#564):
+  восстановление доступа ведёт полоса входа,
+  `internal/apps/kaname/api/humansession/recovery_complete.go`.
 - **Repo:** `internal/repo/kaname/pg/user_repo.go` + `user_pool_repo.go`.
-- **Bootstrap path:** `UpsertFromIdentity` создает User + Account + Project +
-  AccessBindings в одной transaction, минуя per-resource `CreateUseCase`.
+- **Bootstrap path:** `BootstrapPersonalResourcesTx` (`mirror_tx.go`) создает
+  User + Account + Project + AccessBindings в транзакции вызывающего —
+  регистрации либо активации приглашения, — минуя per-resource `CreateUseCase`.
   FGA tuples — все в одном `fga_outbox` batch.
-- **Invite-flow:** `users.invited_by` хранит admin'а; на match'е (`account_id,
-  email, status=PENDING`) Upsert обновляет PENDING-row → ACTIVE с
-  `external_id := <new sub>`.
+- **Invite-flow:** `users.invited_by` хранит admin'а; подтверждение адреса
+  приглашённым (`ActivateInviteOnVerificationTx`) переводит PENDING-row → ACTIVE
+  с `external_id`, отчеканенным полосой входа.
 - **DB:** таблица `users` со столбцами `id, account_id, external_id, email,
   display_name, invite_status, invited_by, created_at`.
 - **Indexes:** PK `users_pkey(id)`; partial UNIQUE `users_account_external_id_unique`
@@ -335,7 +323,6 @@ go test -short -count=1 -timeout 120s \
 
 - [`01-account.md`](01-account.md) — Account создается вместе с первым User'ом.
 - [`08-access-binding.md`](08-access-binding.md) — bindings на `subject_type=user`.
-- [`21-internal-iam.md`](21-internal-iam.md) — `UpsertFromIdentity` детали.
 
 ## Ссылки на код
 

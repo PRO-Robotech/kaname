@@ -36,6 +36,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // seedSAID inserts a live service_accounts row in the given account and returns
@@ -68,10 +69,10 @@ func seedGroupID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID, s
 // arbitrary (subject_type, subject_id), bypassing the domain layer so the raw DB
 // trigger is what is under test. Returns the pg error (nil on success).
 func insertBindingRaw(ctx context.Context, pool *pgxpool.Pool, id, subjectType, subjectID, roleID, resType, resID string) error {
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 			(id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')`,
+		VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')`),
 		id, subjectType, subjectID, roleID, resType, resID)
 	return err
 }
@@ -260,10 +261,10 @@ func TestABSubjectExists_ConcurrentDeleteVsCreate_NoDangling(t *testing.T) {
 			_ = txInsert.Rollback(ctx)
 		}
 	}()
-	_, err = txInsert.Exec(ctx, `
+	_, err = txInsert.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 			(id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		padOrTrim20("acb00000abse7"), member, roleID, prjID)
 	require.NoError(t, err)
 

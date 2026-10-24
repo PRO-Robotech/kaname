@@ -46,7 +46,7 @@ func (s issuerStub) Execute(context.Context, registrytokenuc.IssueInput) (regist
 	return registrytokenuc.IssueOutput{}, s.err
 }
 
-func (s issuerStub) ExecuteAnonymous(context.Context, string) (registrytokenuc.IssueOutput, error) {
+func (s issuerStub) ExecuteAnonymous(context.Context, registrytokenuc.AnonymousInput) (registrytokenuc.IssueOutput, error) {
 	return registrytokenuc.IssueOutput{}, s.err
 }
 

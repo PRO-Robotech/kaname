@@ -41,8 +41,8 @@ func (f *fakeIssuer) Execute(_ context.Context, in registrytokenuc.IssueInput) (
 
 func (f *fakeIssuer) AnonymousEnabled() bool { return f.anonEnabled }
 
-func (f *fakeIssuer) ExecuteAnonymous(_ context.Context, service string) (registrytokenuc.IssueOutput, error) {
-	f.gotAnonSvc = service
+func (f *fakeIssuer) ExecuteAnonymous(_ context.Context, in registrytokenuc.AnonymousInput) (registrytokenuc.IssueOutput, error) {
+	f.gotAnonSvc = in.Service
 	return f.anonOut, f.anonErr
 }
 

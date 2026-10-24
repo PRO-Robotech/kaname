@@ -84,8 +84,7 @@ func (User_InviteStatus) EnumDescriptor() ([]byte, []int) {
 // аккаунтов у человека может быть несколько.
 //
 // Личность заводят регистрация и активация приглашения в исходе подтверждения
-// адреса — обе на полосе входа самой службы — и внутренний
-// `InternalUserService.UpsertFromIdentity` (см. `external_id`, `invite_status`).
+// адреса — обе на полосе входа самой службы (см. `external_id`, `invite_status`).
 //
 // Resource id prefix: `usr` (concatenated form, `ids.NewID`).
 type User struct {
@@ -94,18 +93,16 @@ type User struct {
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Идентичность субъекта входа. Регистрация и активация приглашения в исходе
 	// подтверждения адреса (kaname#456) пишут значение, отчеканенное полосой
-	// входа службы, — `own:sub-<…>`; внутренний
-	// `InternalUserService.UpsertFromIdentity` пишет значение, которое приносит
-	// его вызывающий. Уникально на всю установку, после записи не меняется.
+	// входа службы, — `own:sub-<…>`. Уникально на всю установку, после записи
+	// не меняется.
 	// Пусто у PENDING.
 	ExternalId string `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	// Email (case-insensitive lookup). При Invite адрес указывает пригласивший;
 	// регистрация адресом живого приглашения ложится на строку этого
 	// приглашения, а не заводит вторую.
 	Email string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
-	// Human-readable display name. Задаёт пригласивший при Invite либо
-	// вызывающий `InternalUserService.UpsertFromIdentity`; не задано — берётся
-	// локальная часть адреса (до `@`).
+	// Human-readable display name. Задаёт пригласивший при Invite; не задано —
+	// берётся локальная часть адреса (до `@`).
 	DisplayName string `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Creation timestamp.
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
@@ -118,8 +115,7 @@ type User struct {
 	//
 	// ACTIVE  — личность заведена, external_id заполнен: регистрацией без
 	//
-	//	приглашения, подтверждением адреса живого приглашения либо внутренним
-	//	`InternalUserService.UpsertFromIdentity`.
+	//	приглашения либо подтверждением адреса живого приглашения.
 	//
 	// BLOCKED — вход на платформу запрещён (`UserService.Block`; снимается
 	//

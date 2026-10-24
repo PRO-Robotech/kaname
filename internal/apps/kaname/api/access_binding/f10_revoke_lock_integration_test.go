@@ -21,10 +21,13 @@ package access_binding_test
 //
 // РАСХОЖДЕНИЕ ДУБЛЁРА С ПРОДУКТОМ — названо, а не подразумевается. Сегодня форвард
 // advisory-блокировки НЕ БЕРЁТ ВОВСЕ (см. «LOCK CHOICE» в reconcile/forward.go), поэтому
-// дублёр здесь СТРОЖЕ продукта: он держит SHARE, а настоящий форвард не держит ничего.
+// дублёр здесь СТРОЖЕ продукта: он держит SHARE, а настоящий форвард advisory не держит
+// (строку выдачи он берёт `FOR KEY SHARE`, kaname#919).
 // Утверждение теста от этого остаётся верным — оно про отзыв: тот и правда берёт
-// EXCLUSIVE на том же ключе, и это доказывается ожиданием. Чего этот тест НЕ утверждает:
-// что настоящий форвард встал бы в очередь за отзывом — он не встанет.
+// EXCLUSIVE на том же ключе, и это доказывается ожиданием. Встречу отзыва с НАСТОЯЩИМ
+// форвардом держит другая проба — на строчном замке: отзыв берёт строку выдачи
+// `FOR UPDATE` до чтения реестра (reconcile_forward_deactivation_race_integration_test.go
+// в internal/repo/kaname/pg, kaname#923).
 
 import (
 	"context"
@@ -43,6 +46,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // denyingRelations — RelationStore that denies every question.
@@ -148,7 +152,7 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 	abID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: abID, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member),
 		RoleID: role, ResourceType: "account", ResourceID: string(acc),
 	})
@@ -172,8 +176,9 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 	_, err = fwd.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext($1))`, string(abID))
 	require.NoError(t, err)
 	_, err = fwd.Exec(ctx, `
-		INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
-		VALUES ($1, $2, $3, $4, 'member')`,
+		INSERT INTO kaname.access_binding_emitted_tuples
+		       (binding_id, member_object_type, member_object_id, fga_user, relation, object, source)
+		VALUES ($1, 'vpc.network', 'net-race', $2, $3, $4, 'member')`,
 		string(abID), "user:"+string(member), "v_get", "vpc_network:net-race")
 	require.NoError(t, err)
 

@@ -62,11 +62,28 @@ func msFacts(pre []domain.MembershipTuple, f *fakeStore) msTupleSet {
 	return out
 }
 
-// msLedger — реестр выпущенного после прохода.
-func msLedger(f *fakeStore) msTupleSet {
-	out := msSetOf(f.ledger, msFlatten(f.recorded))
-	for t := range msSetOf(msFlatten(f.forgotten)) {
-		delete(out, t)
+// msLedger — реестр выпущенного после прохода, строками (координата члена, кортеж).
+func msLedger(f *fakeStore) map[LedgerRow]struct{} {
+	out := make(map[LedgerRow]struct{})
+	for _, r := range f.ledgerNow() {
+		out[r] = struct{}{}
+	}
+	return out
+}
+
+func msSortedRows(s map[LedgerRow]struct{}) []string {
+	out := make([]string, 0, len(s))
+	for r := range s {
+		out = append(out, r.Member.ObjectType+":"+r.Member.ObjectID+" "+r.Tuple.User+" "+r.Tuple.Relation+" "+r.Tuple.Object)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func msFlattenRows(batches [][]LedgerRow) []LedgerRow {
+	var out []LedgerRow
+	for _, b := range batches {
+		out = append(out, b...)
 	}
 	return out
 }
@@ -82,7 +99,7 @@ func msSorted(s msTupleSet) []string {
 
 // msPreFix — состав и реестр, которые оставил прежний код: разворачивание одному
 // первому субъекту, ключ `public_reader` без классов.
-func msPreFix(t *testing.T, rules domain.Rules, first string) ([]domain.TargetMember, []domain.MembershipTuple) {
+func msPreFix(t *testing.T, rules domain.Rules, first string) ([]domain.TargetMember, []LedgerRow) {
 	t.Helper()
 	f := msStore(rules, first)
 	ndReconcile(t, f)
@@ -93,7 +110,7 @@ func msPreFix(t *testing.T, rules domain.Rules, first string) ([]domain.TargetMe
 		}
 		members = append(members, m)
 	}
-	return members, msFlatten(f.recorded)
+	return members, msFlattenRows(f.recorded)
 }
 
 // msFresh — свежая материализация выдачи полным составом.
@@ -125,10 +142,10 @@ func TestReconcileMultiSubject_PreFixBindingConvergesOnTheFullPass(t *testing.T)
 			f.current, f.ledger = members, ledger
 			ndReconcile(t, f)
 
-			if got, want := msSorted(msFacts(ledger, f)), msSorted(msSetOf(allWrites(fresh))); !slices.Equal(got, want) {
+			if got, want := msSorted(msFacts(ledgerTuples(ledger), f)), msSorted(msSetOf(allWrites(fresh))); !slices.Equal(got, want) {
 				t.Errorf("кортежи после прохода:\n  %v\nсвежая материализация:\n  %v", got, want)
 			}
-			if got, want := msSorted(msLedger(f)), msSorted(msLedger(fresh)); !slices.Equal(got, want) {
+			if got, want := msSortedRows(msLedger(f)), msSortedRows(msLedger(fresh)); !slices.Equal(got, want) {
 				t.Errorf("реестр выпущенного после прохода:\n  %v\nсвежая материализация:\n  %v", got, want)
 			}
 		})
@@ -145,7 +162,7 @@ func TestReconcileMultiSubject_ConvergedBindingIsNotRewritten(t *testing.T) {
 			fresh := msFresh(t, rules, refs...)
 
 			f := msStore(rules, refs...)
-			f.current, f.ledger = fresh.upserts, msFlatten(fresh.recorded)
+			f.current, f.ledger = fresh.upserts, msFlattenRows(fresh.recorded)
 			ndReconcile(t, f)
 
 			if len(f.writes) != 0 || len(f.recorded) != 0 || len(f.tdeletes) != 0 || len(f.forgotten) != 0 {
@@ -184,7 +201,7 @@ func TestReconcileMultiSubject_PreFixBindingConvergesOnTheObjectPass(t *testing.
 		maps.DeleteFunc(out, func(t domain.MembershipTuple, _ struct{}) bool { return t.Object != object })
 		return out
 	}
-	if got, want := msSorted(onObject(msFacts(ledger, f))), msSorted(onObject(msSetOf(allWrites(fresh)))); !slices.Equal(got, want) {
+	if got, want := msSorted(onObject(msFacts(ledgerTuples(ledger), f))), msSorted(onObject(msSetOf(allWrites(fresh)))); !slices.Equal(got, want) {
 		t.Errorf("кортежи на %s после прохода:\n  %v\nсвежая материализация:\n  %v", object, got, want)
 	}
 	for _, tu := range allWrites(f) {

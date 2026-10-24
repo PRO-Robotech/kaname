@@ -278,7 +278,7 @@ func (a *BackfillAdapter) RemoveSmokeMirrorObject(ctx context.Context, objectTyp
 // read OUTSIDE any reconcile tx.
 func (a *BackfillAdapter) ListActiveBindingRelationChecks(ctx context.Context) ([]seed.BindingRelationCheck, error) {
 	rows, err := a.pool.Query(ctx,
-		`SELECT t.binding_id, t.fga_user, t.relation, t.object
+		`SELECT DISTINCT t.binding_id, t.fga_user, t.relation, t.object
 		   FROM kaname.access_binding_emitted_tuples t
 		   JOIN kaname.access_bindings b ON b.id = t.binding_id
 		  WHERE b.status = 'ACTIVE'

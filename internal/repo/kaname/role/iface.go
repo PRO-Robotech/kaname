@@ -188,6 +188,15 @@ type WriterIface interface {
 	// владение тем, чего манифест не несёт.
 	UpsertSystemRole(ctx context.Context, r domain.Role) (out domain.Role, changed bool, err error)
 
+	// LockOwnerModule берёт строку каталога модуля-владельца ключевым замком
+	// (`FOR KEY SHARE`) — первым строчным замком транзакции записи ролей модуля
+	// (kaname#913). Тот же замок берёт ключ роли на модуль при её вставке и
+	// оживлении; взятый первым, он ставит строку модуля раньше строк ресурсов при
+	// ЛЮБОМ ходе транзакции, в том числе при приведении правил, где ключ на
+	// модуль не проверяется. Ноль строк — законный исход: ссылку на модуль,
+	// которого нет, отвергнет ключ роли.
+	LockOwnerModule(ctx context.Context, module string) error
+
 	// ReplaceRuleSelectors syncs kaname.role_rule_selectors with the role's
 	// UNIFIED materializing rules: ARM_ANCHOR
 	// (all) + ARM_NAMES + ARM_LABELS. It DELETEs the role's current selector rows and

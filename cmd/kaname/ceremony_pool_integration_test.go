@@ -40,6 +40,7 @@ func (w *ceremonyWorld) racePublic(forms []url.Values) []*httptest.ResponseRecor
 	}
 	close(start)
 	wg.Wait()
+	w.logOperationRefusals(out)
 	return out
 }
 

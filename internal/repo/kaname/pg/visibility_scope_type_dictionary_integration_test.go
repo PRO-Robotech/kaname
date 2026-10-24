@@ -82,6 +82,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // dictionaryCase — один тип каталога и то, ЧЕМ его спрашивает вызывающий.
@@ -127,19 +129,13 @@ func TestIntegration_Issue2003_ScopeKeysComeFromTranslationNotTruncation(t *test
 	// словарём МОДЕЛИ (иначе CHECK не пропустит) и намеренно указывает на другой
 	// аккаунт: так вклад самой выдачи отличим от вклада её членов.
 	bindingID := padOrTrim20("abn_d2003bind")
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		  (id, subject_type, subject_id, role_id, resource_type, resource_id,
 		   status, granted_by_user_id)
-		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $2)`,
+		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $2)`),
 		bindingID, subject, roleID, subjectAccount)
 	require.NoError(t, err, "seed binding")
-
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-		VALUES ($1, 'user', $2)`,
-		bindingID, subject)
-	require.NoError(t, err, "seed binding subject")
 
 	// Семь членов — по одному на каждый точечный тип iam. object_id — непрозрачная
 	// мягкая ссылка без внешнего ключа (миграция 0020), поэтому значения выбраны

@@ -251,7 +251,6 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 		"/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin",
 		"/kaname.cloud.iam.v1.InternalClusterService/RevokeAdmin",
 		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
-		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 	}
 	for _, m := range mustNotHave {
 		if _, ok := set[m]; ok {

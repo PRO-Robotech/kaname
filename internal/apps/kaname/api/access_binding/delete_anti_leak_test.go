@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // Project-admin (owner) can revoke a binding for ANY subject on a
@@ -38,7 +39,7 @@ func TestAccessBinding_Delete_OwnerCanRevokeAnyBindingOnOwnResource(t *testing.T
 	fga := newRecordingFGA()
 	ctxOwner := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	binding := domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
@@ -81,7 +82,7 @@ func TestAccessBinding_Delete_StrangerDenied(t *testing.T) {
 	fga := newRecordingFGA()
 	ctxOwner := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	binding := domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
@@ -132,7 +133,7 @@ func TestAccessBinding_Delete_SubjectIsOwner_Allowed(t *testing.T) {
 	fga := newRecordingFGA()
 	ctxOwner := newOwnerContext(ownerID)
 
-	createUC := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(fga, nil)
+	createUC := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(fga, nil)
 	binding := domain.AccessBinding{
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(ownerID),

@@ -58,7 +58,7 @@ taxonomy), `SAKeyService` (ключи служебных учёток; токе�
 запрет #6): `InternalIAMService` (`Check` + `RegisterResource`/`UnregisterResource`
 владение чужими ресурсами), `InternalClusterService`
 (cluster-admin gранты — time-bombed/permanent), `InternalUserService`
-(`UpsertFromIdentity`), `InternalOperationsService`,
+(`Get`), `InternalOperationsService`,
 `InternalSessionRevocationsService`. `AuthorizeService` дополнительно
 регистрируется и здесь — чтобы сервисы платформы (vpc/compute/nlb) спрашивали
 вердикт по уже доверенному mTLS-ребру `:9091`, не открывая отдельный публичный
@@ -651,11 +651,6 @@ kubectl -n kacho exec deploy/kaname -- wget -qO- --no-check-certificate https://
 # 3. gRPC reflection публичного API (через api-gateway).
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 grpcurl -plaintext localhost:18080 list | grep kaname.cloud.iam.v1
-
-# 4. Bootstrap-юзер через UpsertFromIdentity (internal-порт).
-kubectl -n kacho port-forward svc/iam 9091:9091 &
-grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.cloud","display_name":"bootstrap"}' \
-  localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 ```
 
 ## Связанные компоненты

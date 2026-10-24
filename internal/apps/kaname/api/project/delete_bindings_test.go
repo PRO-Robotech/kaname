@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
@@ -200,6 +201,24 @@ func (r *fakeProjABRdr) SelectEmittedTuples(_ context.Context,
 type fakeProjABWtr struct {
 	abrepo.WriterIface
 	parent *fakeProjRepo
+}
+
+// GetForDeactivation — замок снятия строки выдачи, который дренаж берёт до чтения
+// ведомости; строки нет — NotFound, как у настоящего репозитория.
+func (w *fakeProjABWtr) GetForDeactivation(_ context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	if w.parent.bindingsInexhaustible {
+		return domain.AccessBinding{ID: id, Status: domain.AccessBindingStatus("ACTIVE")}, nil
+	}
+	for _, list := range w.parent.bindingsByScope {
+		for _, b := range list {
+			if b.ID == id {
+				return b, nil
+			}
+		}
+	}
+	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 
 func (w *fakeProjABWtr) Delete(_ context.Context, id domain.AccessBindingID) error {

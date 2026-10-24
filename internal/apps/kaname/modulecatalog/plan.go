@@ -88,6 +88,14 @@ const (
 	// которой опора не знает, либо строка, которой опора требует, а её нет ни
 	// живой, ни снятой.
 	VerdictWouldBeRefusedBeyondAnchor Verdict = "WOULD_BE_REFUSED_BEYOND_ANCHOR"
+	// VerdictWouldBeRefusedStaleRevision — объявленная редакция младше
+	// применённой (либо не объявлена при применённой, стадия S1): `Apply`
+	// откажет раньше опоры (kaname#865, Д4). Производит [PlanVerdict], а не
+	// сверка опоры.
+	VerdictWouldBeRefusedStaleRevision Verdict = "WOULD_BE_REFUSED_STALE_REVISION"
+	// VerdictWouldBeRefusedRevisionConflict — номер равен применённому,
+	// содержимое иное: `Apply` откажет раньше опоры (kaname#865, Д4).
+	VerdictWouldBeRefusedRevisionConflict Verdict = "WOULD_BE_REFUSED_REVISION_CONFLICT"
 )
 
 var (

@@ -117,16 +117,16 @@ func TestAnonymousLaneIsBoundByTheSameLandingDeclaration(t *testing.T) {
 	uc := mustLane(t, registrytokenuc.Config{
 		AllowedAudiences: []string{audRegistry},
 		DefaultService:   audRegistry,
-		Anonymous:        registrytokenuc.AnonymousIdentity{ClientID: "anon-cid"},
+		Anonymous:        registrytokenuc.AnonymousIdentity{ClientID: "anon-cid", Pace: ampleAnonPace(t)},
 	}, m)
 
 	// ОТРИЦАНИЕ.
-	_, err := uc.ExecuteAnonymous(context.Background(), audForeign)
+	_, err := uc.ExecuteAnonymous(context.Background(), registrytokenuc.AnonymousInput{Service: audForeign})
 	require.Error(t, err)
 	require.Empty(t, m.in.Audience)
 
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ.
-	_, err = uc.ExecuteAnonymous(context.Background(), audRegistry)
+	_, err = uc.ExecuteAnonymous(context.Background(), registrytokenuc.AnonymousInput{Service: audRegistry})
 	require.NoError(t, err)
 	require.Equal(t, audRegistry, m.in.Audience)
 }

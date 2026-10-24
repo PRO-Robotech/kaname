@@ -22,7 +22,7 @@
 // отнять, и зелены до кода.
 //
 // Run: `go test ./internal/handler/loginlanehttp/ -run 'TestSUA' -count=1`
-// (Docker). Skipped under -short.
+// (нужен Docker); под -short пропускается.
 package loginlanehttp_test
 
 import (
@@ -115,16 +115,15 @@ func TestSUA02_BackupCodeRaisesTheSessionAndStampsItsMoment(t *testing.T) {
 	require.Equalf(t, http.StatusOK, r.status, "%s: повышение запасным кодом — 200: %s", id, r.body)
 	assuranceLevel, _ := ceremonyLevels(t, r.body)
 	require.Equal(t, "2", assuranceLevel, "%s: assurance.level", id)
-	var rem struct {
-		BackupCodesRemaining int `json:"backupCodesRemaining"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(r.body), &rem))
-	require.Equal(t, 9, rem.BackupCodesRemaining, "%s: backupCodesRemaining", id)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal([]byte(r.body), &body))
+	require.EqualValues(t, 9, requireDeclared(t, id, body, "backupCodeSet.remaining"), "%s: backupCodeSet.remaining ответа (kaname#297 Р3)", id)
+	require.NotContains(t, body, "backupCodesRemaining", "%s: плоского остатка нет (kaname#297 BCS-31)", id)
 
 	st := h.status(t, rotated(t, id, r, s))
-	require.EqualValues(t, 9, requireDeclared(t, id, st, "backupCodes.remaining"), "%s: backupCodes.remaining", id)
-	require.EqualValues(t, 10, requireDeclared(t, id, st, "backupCodes.total"), "%s: backupCodes.total", id)
-	momentOf(t, id, st, "backupCodes.lastUsedAt")
+	require.EqualValues(t, 9, requireDeclared(t, id, st, "backupCodeSet.remaining"), "%s: backupCodeSet.remaining", id)
+	require.EqualValues(t, 10, requireDeclared(t, id, st, "backupCodeSet.total"), "%s: backupCodeSet.total", id)
+	momentOf(t, id, st, "backupCodeSet.lastUsedAt")
 }
 
 // TestSUA03_KeyRaisesTheSessionToLevelTwo — SUA-03.
@@ -279,7 +278,7 @@ func TestSUA12_SpentBackupCodeIsRefused(t *testing.T) {
 	s := h.login(t, p)
 	r := h.stepUpCode(t, s, "lookup_secret", p.codes[0])
 	requireAuthFailed(t, id, r)
-	require.EqualValues(t, 9, requireDeclared(t, id, h.status(t, s), "backupCodes.remaining"), "%s: остаток не изменился", id)
+	require.EqualValues(t, 9, requireDeclared(t, id, h.status(t, s), "backupCodeSet.remaining"), "%s: остаток не изменился", id)
 }
 
 // TestSUA13_KeyFromAForeignOriginIsRefused — SUA-13; близнец SUA-03, отличие —

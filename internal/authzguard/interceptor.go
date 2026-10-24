@@ -59,15 +59,14 @@ var readonlySuffixes = []string{
 // whitelistFullMethod — RPCs that do NOT require an authenticated principal
 // (bootstrap-flow, internal-listener-only RPCs).
 //
-// Minimal set: register-myself, federation login/callback, OIDC discovery,
-// JWKS, health, internal bootstrap. Anything else — even legitimate
-// self-registration — must come through an explicit allow.
+// Minimal set: internal lookups and preflight authz-queries of peers. Anything
+// else — even legitimate self-registration — must come through an explicit
+// allow.
+//
+// Записи глагола заведения личности по внешнему удостоверению здесь больше нет:
+// он снят с контракта (kaname#929, AWI-09). Послабление, пережившее свой метод,
+// не истекает само — оно досталось бы следующему RPC под этим именем.
 var whitelistFullMethod = map[string]struct{}{
-	// UpsertFromIdentity is invoked by api-gateway middleware on first login —
-	// at that moment the Principal is still anonymous. This is a legitimate
-	// "register-myself" operation. (In production-strict deployments it is
-	// additionally protected by mTLS / NetworkPolicy.)
-	"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity": {},
 	// LookupSubject — internal helper, invoked by api-gateway without an
 	// auth-context.
 	"/kaname.cloud.iam.v1.InternalIAMService/LookupSubject": {},

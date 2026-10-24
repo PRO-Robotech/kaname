@@ -23,6 +23,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // rtrMultiSubjectGrant заводит выдачу роли «только разрешения» `perms` на
@@ -35,7 +36,7 @@ func rtrMultiSubjectGrant(t *testing.T, roleID string, perms domain.Permissions,
 	)
 	repo := newABFakeRepo(ownerID, accountID, accountID, roleID, "viewer", perms)
 	opsRepo := newFakeOpsRepo()
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(newRecordingFGA(), nil)
 	op, err := uc.Execute(newOwnerContext(ownerID), domain.AccessBinding{
 		RoleID: domain.RoleID(roleID), ResourceType: "account", ResourceID: accountID, Subjects: subjects,
 	})

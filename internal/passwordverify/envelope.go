@@ -405,12 +405,18 @@ func (e *Envelope) calibrationRun(ctx context.Context, class domain.PasswordCost
 		return 0, fmt.Errorf("password_envelope: ёмкость для калибровки класса %s не получена: %w", class.Key(), err)
 	}
 	defer release()
-	var res Result
+	var (
+		res        Result
+		computeErr error
+	)
 	runs := 0
 	elapsed := e.meter(class, func() {
 		runs++
-		res = e.verifier.compute(value, wrong)
+		res, computeErr = e.verifier.compute(ctx, value, wrong)
 	})
+	if computeErr != nil {
+		return 0, fmt.Errorf("password_envelope: место вычисления для калибровки класса %s не получено: %w", class.Key(), computeErr)
+	}
 	if runs != 1 {
 		// Мера без прогона назначала бы стоимость мимо ёмкости и мимо
 		// исхода; мера двух прогонов отдала бы их сумму за один.

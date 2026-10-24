@@ -93,7 +93,13 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Выдача: субъект, роль, область, цель, срок и метки прислал вызывающий.
 	// Выдавшего и отозвавшего называет служба по проверенному принципалу;
 	// состояние, отзыв, ярус и форму отношения системной выдачи ставит служба —
-	// на пути вызывающего отношение пусто, и его проверки молчат.
+	// на пути вызывающего отношение пусто, и его проверки молчат. Форму цели
+	// (`access_bindings_target_form_ck`, kaname#863) сериализует служба
+	// (`relverdict.EncodeTarget`) из уже разобранного запроса: вызывающий шлёт
+	// поля контракта, а не JSON колонки, и формы вне контракта ему прислать
+	// нечем — её отказ есть дефект писателя. Число элементов перечня
+	// (`access_bindings_target_resources_card_ck`) — длина присланного списка,
+	// и оно остаётся полосой ввода.
 	"access_bindings": {
 		caller: []string{
 			"access_bindings_expires_future_ck",
@@ -113,6 +119,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_revoked_consistency_ck",
 			"access_bindings_scope_ck",
 			"access_bindings_status_ck",
+			"access_bindings_target_form_ck",
 		},
 	},
 	// Вызов ключа доступа — вызов, назначение и срок чеканит служба.
@@ -176,9 +183,21 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 	},
 	// Каталог модуля: имя модуля — из манифеста; живость и снятие — служба.
+	// Номер применённой редакции — из манифеста как есть (ключ `revision`,
+	// kaname#865); отпечаток содержимого считает служба над деревом узлов
+	// документа, и пару из номера и отпечатка пишет оператор
+	// сравнения-и-записи службы.
 	"catalog_module": {
-		caller:  []string{"catalog_module_nonempty", "catalog_module_undotted"},
-		service: []string{"catalog_module_live_matches_retired"},
+		caller: []string{
+			"catalog_module_applied_revision_positive",
+			"catalog_module_nonempty",
+			"catalog_module_undotted",
+		},
+		service: []string{
+			"catalog_module_applied_digest_form",
+			"catalog_module_applied_pair",
+			"catalog_module_live_matches_retired",
+		},
 	},
 	// Каталог ресурса: модуль, ресурс, тип модели и типы указателей — из
 	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
