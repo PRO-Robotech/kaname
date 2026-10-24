@@ -120,9 +120,9 @@ const orSecondBinding = "    - subjects:\n        - {type: group, name: vpc-pool
 // orObjectList — перечень объектов выдачи.
 const orObjectList = "      resources:\n        - {type: vpc.addressPool, id: apl000000000000001}\n"
 
-// orRequireTargetFinding — находка по цели выдачи N названа своим видом и
-// координатой, текст называет годное значение.
-func orRequireTargetFinding(t *testing.T, doc []byte, kind error, n int) {
+// orRequireTargetFinding — находка по цели выдачи N названа своим видом, координатой и
+// РАЗОБРАННЫМ значением цели (v); текст называет годное значение.
+func orRequireTargetFinding(t *testing.T, doc []byte, kind error, n int, v string) {
 	t.Helper()
 	_, err := manifest.Load(doc)
 	if err == nil {
@@ -131,7 +131,7 @@ func orRequireTargetFinding(t *testing.T, doc []byte, kind error, n int) {
 	if !errors.Is(err, kind) {
 		t.Fatalf("отказ не отнесён к %v: %v", kind, err)
 	}
-	coord := "seed.accessBindings[" + itoa(n) + "].target: охват"
+	coord := "seed.accessBindings[" + itoa(n) + "].target: охват \"" + v + "\""
 	for _, want := range []string{coord, "(allInScope)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("находка не называет %q:\n%v", want, err)
@@ -148,7 +148,7 @@ func TestObjectRefs_SeedBindingTargetThroughAnAliasIsRefused(t *testing.T) {
 		"без перечня": "      target: *t\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			orRequireTargetFinding(t, []byte(doc+orSecondBinding+tail), manifest.ErrObjectRefInManifest, 1)
+			orRequireTargetFinding(t, []byte(doc+orSecondBinding+tail), manifest.ErrObjectRefInManifest, 1, "resources")
 		})
 	}
 }
@@ -164,7 +164,7 @@ func TestObjectRefs_SeedBindingUnknownTargetIsRefused(t *testing.T) {
 	for _, v := range []string{"Resources", "allinscope", "bogus"} {
 		t.Run(v, func(t *testing.T) {
 			doc := orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, "      target: "+v+"\n")
-			orRequireTargetFinding(t, doc, manifest.ErrBindingTargetUnknown, 0)
+			orRequireTargetFinding(t, doc, manifest.ErrBindingTargetUnknown, 0, v)
 		})
 	}
 }
@@ -174,7 +174,7 @@ func TestObjectRefs_SeedBindingUnknownTargetIsRefused(t *testing.T) {
 func TestObjectRefs_SecondSeedBindingIsJudged(t *testing.T) {
 	doc := string(orReplaceOnce(t, orBindingFixture(t), orObjectListTarget, orWholeScopeTarget))
 	bad := []byte(doc + orSecondBinding + "      target: resources\n" + orObjectList)
-	orRequireTargetFinding(t, bad, manifest.ErrObjectRefInManifest, 1)
+	orRequireTargetFinding(t, bad, manifest.ErrObjectRefInManifest, 1, "resources")
 	if _, err := manifest.Load(bad); strings.Contains(err.Error(), "seed.accessBindings[0].target") {
 		t.Fatalf("находка легла на законную первую выдачу:\n%v", err)
 	}
