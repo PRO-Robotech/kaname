@@ -2545,7 +2545,11 @@ EOF
     #
     # Подложный kubectl отвечает из каталога состояния `SELFTEST_KC`: контексты,
     # ответ права, узлы, пространства (файл на пространство, содержимое — метка
-    # стенда), вывод `/proc/net/tcp` пода. Ни одна проба не говорит с кластером.
+    # стенда; метки целиком — строками «ключ=значение» в labels/), вывод
+    # `/proc/net/tcp` пода. Перепись выбирает пространства по селектору меток так же,
+    # как сервер (`=` и `!=`; иная форма — отказ, а не тихое совпадение), а снос
+    # пространства, названного в stuck, «проходит», оставляя его на месте — так
+    # перепись судится отдельно от сноса. Ни одна проба не говорит с кластером.
     mkdir -p "$TMP/kc" "$TMP/xdg-empty"
     cat > "$TMP/kc/kubectl" <<'EOF'
 #!/usr/bin/env bash
@@ -2571,15 +2575,45 @@ case "$line" in
     [ -f "$S/ns/$ns" ] || { echo "Error from server (NotFound): namespaces \"$ns\" not found" >&2; exit 1; }
     cat "$S/ns/$ns" ;;
   *"get namespaces"*)
-    for f in "$S"/ns/*; do [ -f "$f" ] && [ "$(cat "$f")" = own ] && echo "namespace/${f##*/}"; done; exit 0 ;;
+    sel=""; case "$line" in *" -l="*) sel="${line#* -l=}"; sel="${sel%% *}" ;; esac
+    IFS=, read -ra terms <<< "$sel"
+    for f in "$S"/ns/*; do
+      [ -f "$f" ] || continue
+      ns="${f##*/}"; ok=1
+      for t in "${terms[@]}"; do
+        case "$t" in
+          *"!="*) grep -qxF -- "${t%%!=*}=${t#*!=}" "$S/labels/$ns" 2>/dev/null && ok=0 ;;
+          *=*)    grep -qxF -- "$t" "$S/labels/$ns" 2>/dev/null || ok=0 ;;
+          *) echo "подложный kubectl: форма селектора «$t» не поддержана" >&2; exit 2 ;;
+        esac
+      done
+      [ "$ok" = 1 ] && echo "namespace/$ns"
+    done; exit 0 ;;
   *"delete namespace "*)
-    ns="${line#*delete namespace }"; ns="${ns%% *}"; rm -f "$S/ns/$ns" ;;
+    ns="${line#*delete namespace }"; ns="${ns%% *}"
+    grep -qxF -- "$ns" "$S/stuck" 2>/dev/null || rm -f "$S/ns/$ns" "$S/labels/$ns" ;;
+  *" label namespace "*)
+    ns="${line#* label namespace }"; ns="${ns%% *}"
+    [ -f "$S/ns/$ns" ] || { echo "Error from server (NotFound): namespaces \"$ns\" not found" >&2; exit 1; }
+    rest="${line#* label namespace "$ns" }"
+    for t in $rest; do
+      case "$t" in
+        --*) ;;
+        *=*) { grep -vF -- "${t%%=*}=" "$S/labels/$ns" 2>/dev/null; echo "$t"; } > "$S/labels/$ns.new"
+             mv -f "$S/labels/$ns.new" "$S/labels/$ns" ;;
+      esac
+    done ;;
   *"create -f -"*)
-    # Заведение пространства запоминается его меткой стенда — перепись и снос видят его.
+    # Заведение пространства запоминается его меткой стенда и всеми метками — перепись
+    # и снос видят его.
     body="$(cat)"
     if grep -q '^kind: Namespace' <<< "$body"; then
       ns="$(sed -n 's/^  name: //p' <<< "$body" | head -n 1)"
       sed -n 's/^    kaname.io\/stand: //p' <<< "$body" > "$S/ns/$ns"
+      awk '/^  labels:/ {on = 1; next}
+           on && /^    #/ {next}
+           on && /^    [^ ]/ {k = $1; sub(/:$/, "", k); v = $2; gsub(/"/, "", v); print k "=" v; next}
+           on {on = 0}' <<< "$body" > "$S/labels/$ns"
     fi ;;
   *"version -o=json"*) echo '{"serverVersion": {"gitVersion": "v1.31.2"}}' ;;
   *"get pod kaname-own"*"--ignore-not-found"*) [ -f "$S/pod" ] && echo pod/kaname-own; exit 0 ;;
@@ -2597,7 +2631,7 @@ EOF
     # право есть, два узла профиля. Настройка мира меняет ОДИН факт.
     kc_reset() {
         export SELFTEST_KC="$TMP/kc-state"
-        rm -rf "$SELFTEST_KC"; mkdir -p "$SELFTEST_KC/ns"
+        rm -rf "$SELFTEST_KC"; mkdir -p "$SELFTEST_KC/ns" "$SELFTEST_KC/labels"
         printf 'u--prof-infra\nu--prof-client\n' > "$SELFTEST_KC/contexts"
         printf 'node/prof-client-aaa-1\nnode/prof-client-aaa-2\n' > "$SELFTEST_KC/nodes"
         : > "$SELFTEST_KC/calls"
@@ -2629,22 +2663,69 @@ EOF
     world_route_bad_override(){ ( SELFTEST_CTX="u--prof-infra"; route_world ); }
     world_route_no_task()     { ( SELFTEST_TASK=""; ROOT="$TMP/empty"; route_world ); }
 
+    # kc_ns <пространство> <метка стенда> [ключ запуска] — пространство задачи 841 в
+    # подложном кластере с метками, как их ставит ext_claim_ns; без ключа — пространство,
+    # заведённое до kaname#944 (метки запуска нет).
+    kc_ns() {
+        echo "$2" > "$SELFTEST_KC/ns/$1"
+        { echo kacho.io/task=841; echo kacho.io/stand=test; echo kacho.io/repo=kaname
+          echo kacho.io/kind=stand-own; echo "kaname.io/stand=$2"
+          [ -z "${3:-}" ] || echo "kaname.io/run=$3"; } > "$SELFTEST_KC/labels/$1"
+    }
+    # kc_stuck <пространство> — снос «проходит», пространство остаётся: перепись судится
+    # отдельно от сноса.
+    kc_stuck() { echo "$1" >> "$SELFTEST_KC/stuck"; }
+    # Второй раннер той же задачи: своё имя пространства, свой ключ запуска, жив.
+    kc_other_runner() { kc_ns t841-kaname-own-b own r-selftest-other; }
+
     # ext_world <действие> — снос и перепись пространства внешнего пути.
     ext_world() {
         ( PATH="$TMP/kc:$PATH"; kc_reset
           EXT_KCFG="$TMP/kc-u--prof.yaml"; EXT_CTX="u--prof-client"; EXT_TASK=841; EXT_NS="t841-kaname-own"
+          EXT_RUN=r-selftest-own
           RUNDIR="$TMP/run-ext"; rm -rf "$RUNDIR"; mkdir -p "$RUNDIR"
           ROUTE_FILE="$RUNDIR/route"; FORWARD_PID="$RUNDIR/forward.pid"; FORWARD_ON="$RUNDIR/forward.on"
           "$1" )
     }
-    ext_down_own()      { echo own > "$SELFTEST_KC/ns/$EXT_NS"; ext_down && ext_census; }
-    ext_down_foreign()  { echo other > "$SELFTEST_KC/ns/$EXT_NS"; ext_down; }
-    ext_claim_foreign() { echo other > "$SELFTEST_KC/ns/$EXT_NS"; ext_claim_ns; }
-    ext_census_left()   { echo own > "$SELFTEST_KC/ns/$EXT_NS"; ext_census; }
+    ext_down_own()      { kc_ns "$EXT_NS" own "$EXT_RUN"; ext_down && ext_census; }
+    ext_down_foreign()  { kc_ns "$EXT_NS" other; ext_down; }
+    ext_claim_foreign() { kc_ns "$EXT_NS" other; ext_claim_ns; }
+    ext_census_left()   { kc_ns "$EXT_NS" own "$EXT_RUN"; ext_census; }
+    # kaname#944: своё снято, второй раннер задачи жив — его пространство числом, исход 0.
+    ext_down_other_alive() { kc_ns "$EXT_NS" own "$EXT_RUN"; kc_other_runner; ext_down && ext_census; }
+    # …и близнец: своё после сноса осталось при том же живом соседе — 1.
+    ext_left_other_alive() { kc_ns "$EXT_NS" own "$EXT_RUN"; kc_stuck "$EXT_NS"; kc_other_runner; ext_down && ext_census; }
+    # Ключа запуска нет (файл маршрута старой формы, `census` без подъёма): судится вся
+    # задача, как до kaname#944, — чужой засчитан, ложного зелёного нет.
+    ext_census_no_key() { EXT_RUN=""; kc_other_runner; ext_census; }
     world_ext_down_own()      { ext_world ext_down_own; }
     world_ext_down_foreign()  { ext_world ext_down_foreign; }
     world_ext_claim_foreign() { ext_world ext_claim_foreign; }
     world_ext_census_left()   { ext_world ext_census_left; }
+    world_ext_down_other_alive() { ext_world ext_down_other_alive; }
+    world_ext_left_other_alive() { ext_world ext_left_other_alive; }
+    world_ext_census_no_key()    { ext_world ext_census_no_key; }
+
+    # down_world <настройка> — `up` и `down` РАЗНЫМИ процессами: ключ запуска доезжает
+    # до переписи сноса только файлом маршрута подъёма. Подъём подменён заведением
+    # пространства, второй раннер задачи жив всё время.
+    down_world() {
+        ( PATH="$TMP/kc:$PATH"; kc_reset
+          export XDG_CONFIG_HOME="$TMP/xdg-empty"
+          unset KACHO_REMOTE_KUBECONFIG KANAME_STAND_CONTEXT KANAME_STAND_PROFILE
+          export KANAME_STAND_KUBECONFIG="$TMP/kc-u--prof.yaml" KANAME_STAND_TASK=841
+          RUNDIR="$TMP/run-down"; rm -rf "$RUNDIR"
+          ROUTE_FILE="$RUNDIR/route"; ROUTE_LOG="$RUNDIR/route.log"
+          FORWARD_PID="$RUNDIR/forward.pid"; FORWARD_ON="$RUNDIR/forward.on"
+          up_external() { ext_claim_ns; }
+          ( stand_up ) || exit 9
+          kc_other_runner
+          "${1:-:}"
+          ( EXT_NS=""; EXT_TASK=""; EXT_RUN=""; stand_down ) )
+    }
+    dw_stuck() { kc_stuck t841-kaname-own; }
+    world_down_other_alive() { down_world; }
+    world_down_left_other_alive() { down_world dw_stuck; }
 
     # Слушатели пода — по таблице сокетов ядра, а не по пробросу: проброс
     # принимает соединение и тогда, когда в поде порт никто не слушает.
@@ -2794,7 +2875,12 @@ EOF
         rw_reports
         runner_exec() { shift; if [ "$4" = fetch ]; then "$@" | head -c 100; return 0; fi; "$@"; }
     }
-    rw_ns_exists() { echo own > "$SELFTEST_KC/ns/t841-kaname-own"; }
+    rw_ns_exists() { kc_ns t841-kaname-own own r-selftest-before; }
+    # kaname#944: второй раннер задачи жив (его пространство — другое имя, другой ключ).
+    rw_other_alive() { kc_other_runner; }
+    rw_left_other_alive() { kc_other_runner; kc_stuck t841-kaname-own; }
+    world_runner_other_alive()      { runner_world rw_other_alive; }
+    world_runner_left_other_alive() { runner_world rw_left_other_alive; }
     world_runner_ok()        { runner_world; }
     world_runner_rc3()       { runner_world rw_rc3; }
     world_runner_pod_gone()  { runner_world rw_pod_gone; }
@@ -2957,6 +3043,18 @@ EOF
     assert 75 "(+) снос чужого пространства — отказ, не снято"               world_ext_down_foreign "заведено не этим стендом" "-" "снято"
     assert 75 "(+) подъём в чужое пространство — отказ, не заведено"          world_ext_claim_foreign "заведено не этим стендом" "-" "НАХОДКА"
 
+    echo "--- ось 10а: перепись после сноса судит СВОЁ пространство ключом запуска, чужие стенды задачи — числом (kaname#944)"
+    # (+) снос своего при живом пространстве второго раннера той же задачи: прежняя
+    # перепись по задаче краснела здесь ложно (журнал полосы kaname#940).
+    assert 0  "(+) своё снято, второй раннер жив — 0, чужой числом"          world_ext_down_other_alive "чужих стендов задачи: 1" "задачи 841 во внешнем кластере: 0" "задачи 841 во внешнем кластере: 1"
+    # (−) законный близнец, один факт: своё после сноса осталось — 1 при том же соседе.
+    assert 1  "(−) своё осталось, второй раннер жив — 1"                      world_ext_left_other_alive "задачи 841 во внешнем кластере: 1" "чужих стендов задачи: 1" "задачи 841 во внешнем кластере: 0"
+    # Ключ — из файла маршрута подъёма: `down` — другой процесс.
+    assert 0  "(+) up и down разными процессами, второй раннер жив — 0"      world_down_other_alive "чужих стендов задачи: 1" "задачи 841 во внешнем кластере: 0" "УСЛОВИЕ НЕ СОЗДАНО"
+    assert 1  "(−) up и down разными процессами, своё осталось — 1"          world_down_left_other_alive "задачи 841 во внешнем кластере: 1" "-" "задачи 841 во внешнем кластере: 0"
+    # Ключа нет — судится вся задача: ложный красный допустим, ложный зелёный — нет.
+    assert 1  "(+) ключа запуска нет — перепись всей задачи, чужой засчитан"  world_ext_census_no_key "ключа запуска нет" "задачи 841 во внешнем кластере: 1" "чужих стендов задачи"
+
     echo "--- ось 11: слушатели пода — по таблице сокетов ядра, а не по пробросу"
     assert 0  "(−) оба порта в LISTEN — слушатели на месте"                 world_tcp_both "все слушатели пода на месте" "-" "НЕ слушает"
     assert 1  "(+) второй порт не в LISTEN — назван недостающий"            world_tcp_one ":9091 НЕ слушает" ":9090 слушает" "все слушатели пода на месте"
@@ -3000,6 +3098,9 @@ EOF
     assert 64 "(+) команда не названа — 64 до записи"                        world_runner_no_cmd "команда не названа" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 0  "(−) команда 0, отчёт забран перечнем pod — код 0"            world_runner_reports "доставлено 1 из 1" "раннер: команда в pod завершилась кодом 0" "УСЛОВИЕ НЕ СОЗДАНО"
     assert 125 "(+) команда 0, забор неполон — 125, не зелёное"             world_runner_reports_cut "доставлены неполно" "задачи 841 во внешнем кластере: 0" "раннер: команда в pod завершилась кодом 0"
+    # kaname#944: два раннера одной задачи — снятие одного не краснит его соседом.
+    assert 0  "(+) раннер: второй раннер задачи жив — код команды 0, чужой числом" world_runner_other_alive "чужих стендов задачи: 1" "раннер: код 0" "остаток"
+    assert 1  "(−) раннер: своё пространство осталось при живом соседе — 1"      world_runner_left_other_alive "задачи 841 во внешнем кластере: 1" "остаток своего пространства не ноль" "раннер: код 0"
 
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
