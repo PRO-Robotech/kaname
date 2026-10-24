@@ -165,6 +165,9 @@ func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID do
 // Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
 // одиночного чтения; отсутствующая роль трактуется как «нет покрытия», а не как ошибка.
 func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки выдач веера — FOR KEY SHARE, одним
+	// оператором, ORDER BY id: тот же порядок id, что у advisory-замков прохода по
+	// объекту и у сноса области. Перепись — docs/changes/kn-922/lock-order-census.md.
 	out := make(map[domain.AccessBindingID]reconcile.BindingScope, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -438,6 +441,8 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 // pool-scoped). Concurrent reconcile passes of the same binding block here until the
 // holder commits, then see the already-materialized member (idempotent skip).
 func (s *reconcileStore) AcquireBindingLock(ctx context.Context, bindingID domain.AccessBindingID) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): ПЕРВЫМ замком выдачи у полного прохода и
+	// истечения — до её строки (FOR NO KEY UPDATE либо FOR UPDATE).
 	if _, err := s.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, string(bindingID)); err != nil {
 		return fmt.Errorf("reconcile: advisory-lock binding %s: %w", bindingID, err)
 	}
@@ -457,6 +462,9 @@ func (s *reconcileStore) AcquireBindingLock(ctx context.Context, bindingID domai
 // поштучный захват стоил бы столько же последовательных обращений внутри одной
 // транзакции. Прежний путь платил ровно это.
 func (s *reconcileStore) AcquireBindingLocks(ctx context.Context, bindingIDs []domain.AccessBindingID) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): advisory-замки ВСЕГО веера по возрастанию id —
+	// до первой строки выдачи и до первой записи; строки выдач затем берутся
+	// (LoadBinding, FOR NO KEY UPDATE) в том же порядке. Перепись — docs/changes/kn-922/lock-order-census.md.
 	if len(bindingIDs) == 0 {
 		return nil
 	}
@@ -1452,6 +1460,8 @@ func (s *reconcileStore) scopeTenantAccountID(ctx context.Context, scope domain.
 //
 // Строки нет (выдачу удалили) — не ошибка: следующее чтение вернёт ok=false.
 func (s *reconcileStore) LockBindingForDeactivation(ctx context.Context, bindingID domain.AccessBindingID) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): вторым замком истечения — после advisory-замка
+	// этой выдачи (AcquireBindingLock), до чтения членов и реестра.
 	if _, err := (&abReader{tx: s.tx}).getForUpdate(ctx, bindingID); err != nil && !errors.Is(err, iamerr.ErrNotFound) {
 		return fmt.Errorf("reconcile: lock binding for deactivation %s: %w", bindingID, err)
 	}
@@ -1507,6 +1517,8 @@ func (s *reconcileStore) LiveCatalogTypes(ctx context.Context, types []string) (
 // (already revoked / concurrent Delete won). revoked_at is stamped to satisfy the
 // access_bindings_revoked_consistency_ck CHECK.
 func (s *reconcileStore) RevokeExpiredBinding(ctx context.Context, bindingID domain.AccessBindingID) (bool, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка уже взята FOR UPDATE
+	// (LockBindingForDeactivation) после advisory-замка этой выдачи.
 	tag, err := s.tx.Exec(ctx,
 		`UPDATE kaname.access_bindings
 		    SET status = 'REVOKED', revoked_at = now()
