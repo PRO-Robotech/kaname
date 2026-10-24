@@ -126,18 +126,24 @@ func (s *UnregisteredKeyStore) NarrowTarget(ctx context.Context, tx service.Tx, 
 }
 
 // RolesNamingKeySQL — оператор поиска ролей по снятому ключу ($1 — тип, $2 — id);
-// экспортирован ради пробы плана, как BindingsNamingKeySQL. `FOR NO KEY UPDATE`:
-// строка роли не удаляется и ключ её не меняется, поэтому вставки, берущие на ней
-// `FOR KEY SHARE` (члены и выдачи роли), на время снятия не встают.
+// экспортирован ради пробы плана, как BindingsNamingKeySQL.
+//
+// `FOR UPDATE`, а не `FOR NO KEY UPDATE` — намеренно (kaname#963, F4): проходы
+// материализации читают роль под `FOR KEY SHARE` (`loadRolesWithLifecycle`), и только
+// этот режим с ним конфликтует. Слабее — и проход, прочитавший правило с именем до
+// фиксации снятия, писал бы член и факт по снятому ключу после неё, а пост-фиксационный
+// проход снятия незафиксированной записи не видит. Цена — на время снятия встают
+// вставки, берущие на этих строках ролей `FOR KEY SHARE` (члены и выдачи); ролей —
+// только называющие снятый ключ.
 const RolesNamingKeySQL = `SELECT r.id FROM kaname.roles r
 		  WHERE r.id IN (SELECT s.role_id FROM kaname.role_rule_selectors s
 		                  WHERE s.resource_names @> ARRAY[$2::text]
 		                    AND $1::text = ANY (s.object_types))
 		  ORDER BY r.id
-		    FOR NO KEY UPDATE`
+		    FOR UPDATE`
 
 // RolesNamingKey — роли, правило (или вложенное правило) которых называет ключ в
-// `resourceNames`, под `FOR NO KEY UPDATE`, в порядке id. Поиск — по строкам отбора
+// `resourceNames`, под `FOR UPDATE`, в порядке id. Поиск — по строкам отбора
 // (`role_rule_selectors_resource_names_idx`): у вложенного правила строка несёт
 // его собственные имена и его типы.
 func (s *UnregisteredKeyStore) RolesNamingKey(ctx context.Context, tx service.Tx, key domain.ResourceRef) ([]domain.RoleID, error) {

@@ -298,6 +298,17 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 // `roleCols` состояния не несёт НАМЕРЕННО: тот же перечень читают пути ответа
 // операции, а ответ операции жизненного состояния не вычисляет (§2.6 приёмки).
 // Поэтому живость дочитывается ОТДЕЛЬНОЙ колонкой здесь, а не добавляется туда.
+//
+// ЗАМОК. Строки ролей читаются под `FOR KEY SHARE` в порядке id до конца транзакции
+// прохода (kaname#963, F4). Имя объекта в `resourceNames` правила — второй путь, по
+// которому выдача получает ключ (первый — цель, его держит замок строки выдачи).
+// Снятие регистрации вычёркивает имя под `FOR UPDATE` строки роли
+// (`RolesNamingKeySQL`) — единственным режимом, с которым `FOR KEY SHARE` конфликтует.
+// Поэтому одно ждёт другого: либо снятие ждёт фиксации прохода, и его пост-фиксационный
+// проход по объекту снимает записанное; либо проход ждёт фиксации снятия и читает роль
+// уже без имени (запирающее чтение отдаёт последнюю зафиксированную версию строки).
+// С `FOR NO KEY UPDATE` правки роли и с `FOR KEY SHARE` вставок членов режим не
+// конфликтует, так что проходы по-прежнему не встают в очередь за правкой роли.
 func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 	map[domain.RoleID]domain.Role, error,
 ) {
@@ -306,7 +317,7 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 		return out, nil
 	}
 	rows, err := tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1)`, roleCols), ids)
+		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lockKeyShare), ids)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load roles: %w", err)
 	}
