@@ -477,10 +477,13 @@ type Role struct {
 	// ID of the Project that owns this Role. Non-empty only for project-scoped
 	// custom roles.
 	ProjectId string `protobuf:"bytes,10,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	// Authored-политика роли: 1..64 правил. Источник истины И публичная
-	// API-поверхность (UI/клиенты рендерят роль из `rules`). Каждое Rule —
-	// однородный грант `{verbs}` над `{module} × resources` (ровно один модуль
-	// на правило), опц. суженный `resource_names` XOR `match_labels`.
+	// Authored-политика роли: на входе 1..64 правил; на чтении 0..64, ноль — роль
+	// только с перечнем прав (`permissions` непуст) либо роль, все правила которой
+	// потеряли адресатов снятием регистрации (`permissions` пуст: такая роль не
+	// даёт ничего). Источник истины И публичная API-поверхность (UI/клиенты
+	// рендерят роль из `rules`). Каждое Rule — однородный грант `{verbs}` над
+	// `{module} × resources` (ровно один модуль на правило), опц. суженный
+	// `resource_names` XOR `match_labels`.
 	// Роль, покрывающая несколько модулей = несколько правил (по одному на модуль).
 	Rules []*Rule `protobuf:"bytes,11,rep,name=rules,proto3" json:"rules,omitempty"`
 	// Optimistic-concurrency token (xmin-backed) для Role.Update под
@@ -1463,6 +1466,10 @@ type Rule struct {
 	Verbs []string `protobuf:"bytes,3,rep,name=verbs,proto3" json:"verbs,omitempty"`
 	// Pin-by-id селекция инстансов (K8s-native). ≤256; opaque-id; literal `"*"`
 	// запрещен как элемент. Взаимоисключающе с `match_labels`.
+	//
+	// Снятие регистрации объекта убирает его id из перечня. Правило, у которого
+	// имён не осталось, снимается целиком, а не хранится пустым перечнем: пустой
+	// перечень означал бы все объекты типа.
 	ResourceNames []string `protobuf:"bytes,4,rep,name=resource_names,json=resourceNames,proto3" json:"resource_names,omitempty"`
 	// Label-equality селекция инстансов (наше расширение; AND-equality). ≤16
 	// ключей; если задано — непусто. Взаимоисключающе с `resource_names`.
@@ -1495,6 +1502,10 @@ type Rule struct {
 	// которых среди предков есть контейнер, выбранный правилом-владельцем и целью
 	// выдачи, — включая созданные позже. Правило верхнего уровня сравнивает
 	// точно, как прежде.
+	//
+	// Снятие регистрации объекта убирает его id из `resource_names` вложенного
+	// правила; вложенное правило, у которого имён не осталось, снимается целиком.
+	// Правило-владелец и остальные вложенные правила при этом не меняются.
 	Children      []*Rule `protobuf:"bytes,7,rep,name=children,proto3" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
