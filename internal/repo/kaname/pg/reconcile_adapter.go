@@ -113,21 +113,20 @@ type reconcileStore struct {
 // GetForNoKeyUpdate: он не конфликтует с `FOR KEY SHARE` дочерних вставок, поэтому
 // аддитивный форвард пути создания больше не стоит в очереди за фоновым проходом.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, true /* forUpdate — full path serializes the delete-stale diff */)
+	return s.loadBinding(ctx, bindingID, lockNoKeyUpdate /* full path serializes the delete-stale diff */)
 }
 
-// LoadBindingUnlocked loads the same BindingScope as LoadBinding but WITHOUT the
-// `FOR NO KEY UPDATE` row-lock — the read the ADDITIVE forward fast-path
-// (reconcile.ReconcileObjectForward) uses. Forward only WRITES the freshly-registered
-// object's tuples (never a delete-stale diff), so it needs no serialization against a
-// concurrent pass of the same binding; taking the row-lock here would re-serialize all
-// registrations sharing one editor/owner binding — the exact bottleneck the fast-path
-// removes. Correctness is preserved by the async FULL ReconcileObject backstop.
-func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, false /* no row-lock — additive forward path */)
+// LoadBindingKeyShared — то же чтение, что LoadBinding, но под `FOR KEY SHARE`
+// (GetForKeyShare): им читает выдачу аддитивный проход материализации после
+// создания (reconcile.ReconcileBindingForward). Замок не конфликтует с
+// `FOR NO KEY UPDATE` полного прохода — проход создания не встаёт за фоновой работой, —
+// но конфликтует с `FOR UPDATE` отзыва по снятию регистрации: член, реестр выпущенного и
+// факт не пишутся для выдачи, отзыв которой уже прочитал реестр (kaname#963, F1).
+func (s *reconcileStore) LoadBindingKeyShared(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
+	return s.loadBinding(ctx, bindingID, lockKeyShare)
 }
 
-// LoadBindingsUnlocked loads the SAME BindingScope facts as LoadBindingUnlocked for a
+// LoadBindingsKeyShared loads the SAME BindingScope facts as LoadBinding (without a row-lock) for a
 // WHOLE SET of bindings — in THREE round-trips total (one for the binding rows, one for
 // their subjects, one for their DISTINCT roles), instead of three PER BINDING.
 //
@@ -141,13 +140,16 @@ func (s *reconcileStore) LoadBindingUnlocked(ctx context.Context, bindingID doma
 // Замер (testcontainers PG16, 15 проходов на размер): 9 выдач — p50 14.6 мс, 227 выдач —
 // p50 349.1 мс, то есть ~1.5 мс на выдачу.
 //
-// ЧТО НЕ МЕНЯЕТСЯ. Ни блокировок, ни порядка: путь аддитивен и advisory-блокировки не
-// берёт (см. reconcile/forward.go «LOCK CHOICE»), а строчной блокировки у этого чтения не
-// было и раньше. Проекция BindingScope собирается тем же bindingScopeFrom, что и у
+// ЗАМОК. Advisory-блокировки путь не берёт (reconcile/forward.go «LOCK CHOICE»), а строки
+// выдач читает под `FOR KEY SHARE` в порядке id (kaname#963, F1): с `FOR NO KEY UPDATE`
+// полного прохода режим не конфликтует, а с `FOR UPDATE` отзыва по снятию регистрации —
+// конфликтует, поэтому проход по объекту не пишет член, реестр выпущенного и факт для
+// выдачи, отзыв которой уже прочитал реестр. Порядок id тот же, что у отзыва, — кольца
+// ожидания между ними нет. Проекция BindingScope собирается тем же bindingScopeFrom, что и у
 // поштучного чтения, поэтому пакетный и одиночный пути выводят ПОБАЙТОВО те же факты.
 // Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
 // одиночного чтения; отсутствующая роль трактуется как «нет покрытия», а не как ошибка.
-func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
+func (s *reconcileStore) LoadBindingsKeyShared(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
 	out := make(map[domain.AccessBindingID]reconcile.BindingScope, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -162,7 +164,7 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 		raw = append(raw, string(id))
 	}
 	rows, err := s.tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC`, abCols), raw)
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC %s`, abCols, lockKeyShare), raw)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
@@ -221,21 +223,13 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 	return out, nil
 }
 
-// loadBinding is the shared reader for LoadBinding (forUpdate=true) and
-// LoadBindingUnlocked (forUpdate=false). The BindingScope projection is IDENTICAL in
+// loadBinding is the shared reader for LoadBinding (`FOR NO KEY UPDATE`) and
+// LoadBindingKeyShared (`FOR KEY SHARE`). The BindingScope projection is IDENTICAL in
 // both modes — only the row-lock differs — so the full and forward paths derive the
 // same scope/selector/subject facts.
-func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, forUpdate bool) (reconcile.BindingScope, bool, error) {
+func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock rowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
-	var (
-		b   domain.AccessBinding
-		err error
-	)
-	if forUpdate {
-		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
-	} else {
-		b, err = r.Get(ctx, bindingID)
-	}
+	b, err := r.getLocked(ctx, bindingID, lock)
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
 			return reconcile.BindingScope{}, false, nil
@@ -336,7 +330,7 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 }
 
 // bindingScopeFrom — ЕДИНСТВЕННАЯ точка вывода BindingScope из строки выдачи и её роли.
-// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsUnlocked),
+// Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsKeyShared),
 // поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
 func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
 	// СНЯТАЯ роль даёт ровно то же, что РОЛЬ, УДАЛЁННАЯ из-под выдачи, — «нет

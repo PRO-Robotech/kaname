@@ -81,7 +81,7 @@ func NewUnregisteredKeyWithdrawal(store UnregisteredKeyStore, cat catalog.Source
 func (u *UnregisteredKeyWithdrawal) WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error {
 	w := u.store.WriterOn(tx)
 	if err := u.withdrawBindings(ctx, tx, w, key, actor); err != nil {
-		return err
+		return fmt.Errorf("withdraw access bindings naming %s %s: %w", key.Type, key.ID, err)
 	}
 	return u.withdrawRoleNames(ctx, tx, w, key, actor)
 }
@@ -105,17 +105,17 @@ func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx ser
 		if len(remaining) == 0 {
 			ok, err := u.store.RevokeForUnregistered(ctx, tx, id)
 			if err != nil {
-				return err
+				return fmt.Errorf("revoke access binding %s: %w", id, err)
 			}
 			if !ok {
 				continue // строку уже отозвал параллельный отзыв (URG-27)
 			}
 			if err := revokeEmittedOf(ctx, w, id); err != nil {
-				return err
+				return fmt.Errorf("revoke emitted tuples of access binding %s: %w", id, err)
 			}
 			if err := emitSubjectChangeFor(ctx, w.AccessBindingsW().EmitSubjectChangeEvent, subjects,
 				"binding_revoke", "binding_delete"); err != nil {
-				return err
+				return fmt.Errorf("subject change of revoked access binding %s: %w", id, err)
 			}
 			for _, s := range subjects {
 				if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
@@ -128,14 +128,14 @@ func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx ser
 						"unregistered_resource": unregistered,
 					},
 				}); err != nil {
-					return err
+					return fmt.Errorf("audit revoke of access binding %s: %w", id, err)
 				}
 			}
 			continue
 		}
 		ok, err := u.store.NarrowTarget(ctx, tx, id, domain.AccessTarget{Resources: remaining})
 		if err != nil {
-			return err
+			return fmt.Errorf("narrow target of access binding %s: %w", id, err)
 		}
 		if !ok {
 			continue
@@ -151,7 +151,7 @@ func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx ser
 					"remaining_resource_count": len(remaining),
 				},
 			}); err != nil {
-				return err
+				return fmt.Errorf("audit narrowing of access binding %s: %w", id, err)
 			}
 		}
 	}
@@ -164,11 +164,11 @@ func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx ser
 func revokeEmittedOf(ctx context.Context, w Writer, id domain.AccessBindingID) error {
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("select emitted tuples: %w", err)
 	}
 	remove, _, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
 	if err != nil {
-		return err
+		return fmt.Errorf("partition revoke set: %w", err)
 	}
 	return w.AccessBindingsW().EmitRelationDelete(ctx, remove)
 }
@@ -208,17 +208,17 @@ func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx se
 			return fmt.Errorf("compile narrowed rules of role %s: %w", id, err)
 		}
 		if err := u.store.RewriteRoleRules(ctx, tx, id, rules, perms); err != nil {
-			return err
+			return fmt.Errorf("rewrite rules of role %s: %w", id, err)
 		}
 		sels := rules.MaterializingSelectors()
 		if err := w.RolesW().ReplaceRuleSelectors(ctx, id, facts.GrantSelectors(sels)); err != nil {
-			return err
+			return fmt.Errorf("replace rule selectors of role %s: %w", id, err)
 		}
 		if err := w.RolesW().ReplaceRoleVerbs(ctx, id, facts.RoleVerbsFromSelectors(sels)); err != nil {
-			return err
+			return fmt.Errorf("replace verbs of role %s: %w", id, err)
 		}
 		if err := w.RolesW().ReplaceRuleRefs(ctx, id, domain.RuleRefsOf(rules)); err != nil {
-			return err
+			return fmt.Errorf("replace rule refs of role %s: %w", id, err)
 		}
 		if err := w.EmitAuditEvent(ctx, outboxtypes.AuditEvent{
 			EventType:       AuditEventRoleResourceUnregistered,
@@ -233,7 +233,7 @@ func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx se
 				"remaining_rule_count":  len(rules),
 			},
 		}); err != nil {
-			return err
+			return fmt.Errorf("audit narrowing of role %s: %w", id, err)
 		}
 	}
 	return nil

@@ -875,13 +875,8 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 		t.Logf("п.10 %s:\n%s", what, text)
 		assert.Containsf(t, text, index, "п.10 %s: план не берёт индекс %s", what, index)
 	}
-	explain("выдачи по ключу", "access_bindings_target_resources_live_idx",
-		`SELECT id FROM kaname.access_bindings
-		  WHERE revoked_at IS NULL
-		    AND target -> 'resources' @> jsonb_build_array(jsonb_build_object('type', $1::text, 'id', $2::text))`,
-		pcrRegTgt, pcrX)
-	explain("правила по ключу", "role_rule_selectors_resource_names_idx",
-		`SELECT role_id FROM kaname.role_rule_selectors
-		  WHERE resource_names @> ARRAY[$2::text] AND $1::text = ANY (object_types)`,
-		pcrRegTgt, pcrX)
+	// Операторы хранилища — те самые, что исполняет снятие, а не их копия: копия
+	// разошлась бы с продуктом молча (ревью db-architect @5c0f8f13d).
+	explain("выдачи по ключу", "access_bindings_target_resources_live_idx", kanamepg.BindingsNamingKeySQL, pcrRegTgt, pcrX)
+	explain("правила по ключу", "role_rule_selectors_resource_names_idx", kanamepg.RolesNamingKeySQL, pcrRegTgt, pcrX)
 }

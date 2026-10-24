@@ -162,21 +162,20 @@ type ReconcileStore interface {
 	//
 	// The implementation takes a `SELECT … FOR UPDATE` row-lock on the binding row so
 	// two concurrent FULL reconcile passes of the same binding serialize (the delete-
-	// stale diff must not race). The forward fast-path does NOT use this — see
-	// LoadBindingUnlocked.
+	// stale diff must not race). Аддитивный проход создания читает иначе — см.
+	// LoadBindingKeyShared.
 	LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
-	// LoadBindingUnlocked loads the SAME BindingScope facts as LoadBinding but WITHOUT
-	// the `FOR UPDATE` row-lock (and the forward fast-path additionally skips the
-	// advisory lock). It is the read the ADDITIVE forward path (ReconcileObjectForward)
-	// uses: because that path only ADDS the freshly-registered object's tuples (never a
-	// delete-stale diff), it needs no serialization against a concurrent pass of the
-	// same binding, so it must not take the binding row-lock that would re-serialize all
-	// registrations sharing one editor/owner binding (the throughput bottleneck this
-	// fast-path removes). ok=false when the binding no longer exists.
-	LoadBindingUnlocked(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
+	// LoadBindingKeyShared — те же факты, что LoadBinding, но под строчным замком
+	// `FOR KEY SHARE` до конца транзакции. Им читает выдачу аддитивный проход создания
+	// (ReconcileBindingForward). С `FOR NO KEY UPDATE` полного прохода режим не
+	// конфликтует — создание не встаёт в очередь за фоновой работой; с `FOR UPDATE`, которым
+	// отзыв по снятию регистрации запирает выдачу, конфликтует — проход не пишет член, реестр
+	// выпущенного и факт для выдачи, отзыв которой уже прочитал реестр (kaname#963, F1).
+	// ok=false — выдачи больше нет.
+	LoadBindingKeyShared(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
-	// LoadBindingsUnlocked — то же чтение, что LoadBindingUnlocked, но для ЦЕЛОГО НАБОРА
+	// LoadBindingsKeyShared — то же чтение, что LoadBindingKeyShared, но для ЦЕЛОГО НАБОРА
 	// выдач за фиксированное число обращений к базе (не по два на выдачу).
 	//
 	// Веер материализации адресуется числом ВЫДАЧ, покрывающих область объекта, а не
@@ -187,8 +186,10 @@ type ReconcileStore interface {
 	//
 	// Контракт: выдача, которой в базе нет (удалена), в карте ОТСУТСТВУЕТ — ровно как
 	// ok=false у одиночного чтения; роль, удалённая из-под выдачи, даёт «нет покрытия»
-	// (пустые селекторы), а не ошибку. Блокировок не берёт — путь аддитивен.
-	LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error)
+	// (пустые селекторы), а не ошибку. Advisory-блокировок не берёт — путь аддитивен; строки
+	// выдач — под `FOR KEY SHARE` в порядке id, тем же замком, что LoadBindingKeyShared
+	// (kaname#963, F1).
+	LoadBindingsKeyShared(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error)
 
 	// MatchSelector returns the MIRROR objects matching a selector's
 	// types+matchLabels (labels @> matchLabels) — the consumer-owned feed

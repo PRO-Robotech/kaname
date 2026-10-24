@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,6 +34,12 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
+
+// registeredKeysCallTimeout — свой срок одного чтения регистраций на приёме
+// (`arch-per-call-deadline`): чтение — один оператор по первичному ключу зеркала на
+// ключи одного запроса и идёт на пути ответа клиенту, поэтому ждать его дольше секунд
+// значит держать запрос на занятом пуле, а не читать.
+const registeredKeysCallTimeout = 5 * time.Second
 
 // RegisteredKeys — чтение «какие ключи сейчас зарегистрированы» на приёме.
 type RegisteredKeys struct {
@@ -55,6 +62,8 @@ func (r *RegisteredKeys) RegisteredOf(ctx context.Context, keys []domain.Resourc
 	for i, k := range keys {
 		types[i], ids[i] = k.Type, k.ID
 	}
+	ctx, cancel := context.WithTimeout(ctx, registeredKeysCallTimeout)
+	defer cancel()
 	rows, err := r.pool.Query(ctx,
 		`SELECT m.object_type, m.object_id
 		   FROM unnest($1::text[], $2::text[]) AS k(object_type, object_id)

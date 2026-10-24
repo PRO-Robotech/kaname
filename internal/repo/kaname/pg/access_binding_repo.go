@@ -135,8 +135,34 @@ func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.A
 // парным положительным контролем, что тот же форвард без держателя материализует
 // объект (иначе «не ждёт» зеленело бы на проходе, который ничего не делает).
 func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return r.getLocked(ctx, id, lockNoKeyUpdate)
+}
+
+// GetForKeyShare — строка выдачи под `FOR KEY SHARE` до конца транзакции
+// (kaname#963, F1). Им читает выдачу аддитивный проход материализации после
+// создания: режим конфликтует ТОЛЬКО с `FOR UPDATE`, которым отзыв по снятию
+// регистрации запирает выдачу (`UnregisteredKeyStore.ActiveBindingsNamingKey`),
+// и не конфликтует ни с `FOR NO KEY UPDATE` полного прохода, ни с `FOR KEY SHARE`
+// дочерних вставок. Проход поэтому не встаёт в очередь за фоновой работой, но и
+// не пишет член, реестр выпущенного и факт для выдачи, отзыв которой уже
+// прочитал реестр: либо отзыв ждёт фиксации прохода и снимает записанное, либо
+// проход ждёт фиксации отзыва и читает строку уже отозванной.
+func (r *abReader) GetForKeyShare(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return r.getLocked(ctx, id, lockKeyShare)
+}
+
+// rowLock — режим строчного замка чтения выдачи. Закрытый набор постоянных: текст
+// вставляется в оператор, поэтому значения извне сюда не попадают.
+type rowLock string
+
+const (
+	lockNoKeyUpdate rowLock = "FOR NO KEY UPDATE"
+	lockKeyShare    rowLock = "FOR KEY SHARE"
+)
+
+func (r *abReader) getLocked(ctx context.Context, id domain.AccessBindingID, lock rowLock) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR NO KEY UPDATE`, abCols), string(id))
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 %s`, abCols, lock), string(id))
 	out, err := scanAB(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

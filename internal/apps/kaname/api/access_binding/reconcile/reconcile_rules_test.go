@@ -36,25 +36,26 @@ func memberKey(objectType, objectID string) string { return objectType + "\x00" 
 
 // fakeStore — an in-memory ReconcileStore for the role.rules reconcile slices.
 type fakeStore struct {
-	scope         domain.ScopeAnchor
-	subjectType   string
-	subjectID     string
-	active        bool
-	selectors     []domain.RuleSelector
-	mirror        map[string][]domain.MirrorObject // dotted type → objects (MatchSelector source)
-	iamDirect     map[string][]domain.MirrorObject // dotted iam.* type → own-table objects (iam-direct feed)
-	current       []domain.TargetMember
-	upserts       []domain.TargetMember
-	deletes       []string // memberKey of deleted members
-	writes        [][]domain.MembershipTuple
-	tdeletes      [][]domain.MembershipTuple
-	recorded      [][]domain.MembershipTuple
-	forgotten     [][]domain.MembershipTuple
-	audits        []string                 // objectID audited
-	ledger        []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
-	locks         int                      // AcquireBindingLock (EXCLUSIVE) call count
-	unlockedLoads int                      // выдач, прочитанных без advisory-блокировки (форвард)
-	batchLoads    int                      // ОБРАЩЕНИЙ пакетного чтения (не выдач) — веер за фикс. число обращений
+	scope          domain.ScopeAnchor
+	subjectType    string
+	subjectID      string
+	active         bool
+	selectors      []domain.RuleSelector
+	mirror         map[string][]domain.MirrorObject // dotted type → objects (MatchSelector source)
+	iamDirect      map[string][]domain.MirrorObject // dotted iam.* type → own-table objects (iam-direct feed)
+	current        []domain.TargetMember
+	upserts        []domain.TargetMember
+	deletes        []string // memberKey of deleted members
+	writes         [][]domain.MembershipTuple
+	tdeletes       [][]domain.MembershipTuple
+	recorded       [][]domain.MembershipTuple
+	forgotten      [][]domain.MembershipTuple
+	audits         []string                 // objectID audited
+	ledger         []domain.MembershipTuple // pre-seeded emitted-tuple ledger (revoke source)
+	locks          int                      // AcquireBindingLock (EXCLUSIVE) call count
+	unlockedLoads  int                      // выдач, прочитанных без advisory-блокировки (форвард)
+	keySharedLoads int                      // выдач, прочитанных проходом создания под FOR KEY SHARE
+	batchLoads     int                      // ОБРАЩЕНИЙ пакетного чтения (не выдач) — веер за фикс. число обращений
 
 	// Producer-cost counters. An object-triggered pass must recompute ONLY the changed
 	// object, so the whole-scope candidate scan (MatchAllInScope*) and the whole-binding
@@ -148,12 +149,11 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 	}, true, nil
 }
 
-// LoadBindingUnlocked mirrors LoadBinding but records that the forward path took NO
-// advisory lock: the test asserts f.locks stays 0 across a forward pass (the throughput-
-// critical property). unlockedLoads counts the no-lock loads so a forward unit test can
-// prove it read the binding without AcquireBindingLock.
-func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
-	f.unlockedLoads++
+// LoadBindingKeyShared — чтение выдачи проходом создания (строчный замок FOR KEY SHARE
+// в продукте, без advisory-блокировки): проба утверждает, что f.locks остаётся 0, а
+// keySharedLoads доказывает, что аддитивный проход действительно прочитал выдачу.
+func (f *fakeStore) LoadBindingKeyShared(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
+	f.keySharedLoads++
 	return BindingScope{
 		BindingID:      id,
 		Scope:          f.scope,
@@ -165,11 +165,11 @@ func (f *fakeStore) LoadBindingUnlocked(ctx context.Context, id domain.AccessBin
 	}, true, nil
 }
 
-// LoadBindingsUnlocked — пакетное чтение фактов выдач (то же, что LoadBindingUnlocked,
+// LoadBindingsKeyShared — пакетное чтение фактов выдач (то же, что LoadBindingKeyShared,
 // но для набора). batchLoads считает ОБРАЩЕНИЯ (не выдачи), поэтому проба может утверждать,
 // что число обращений не растёт с размером веера; unlockedLoads по-прежнему растёт на
 // каждую прочитанную выдачу, чтобы «прочитал ли вообще» осталось наблюдаемым.
-func (f *fakeStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error) {
+func (f *fakeStore) LoadBindingsKeyShared(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error) {
 	f.batchLoads++
 	out := make(map[domain.AccessBindingID]BindingScope, len(ids))
 	for _, id := range ids {

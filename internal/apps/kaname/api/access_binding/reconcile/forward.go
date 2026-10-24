@@ -185,7 +185,17 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 		// файла): аддитивный проход не удаляет ничего, а перекрёстного ожидания с полным
 		// проходом больше нет by construction — тот держит строку в режиме
 		// `FOR NO KEY UPDATE`, который с `FOR KEY SHARE` дочерних вставок не конфликтует.
-		bs, ok, err := s.LoadBindingUnlocked(ctx, bindingID)
+		//
+		// Строка выдачи читается под `FOR KEY SHARE` до фиксации (kaname#963, F1). Без
+		// замка проход, прочитавший выдачу ACTIVE, писал член, реестр выпущенного и факт
+		// после зафиксированного отзыва по снятию регистрации: отзыв снимает выпущенное по
+		// реестру и записанного позже не видел, а отозванную выдачу ни объектный, ни
+		// периодический проход не дочищают — факт на ключе пережил бы снятие. С замком
+		// одно из двух ждёт другого: отзыв (`FOR UPDATE`) — фиксации прохода и затем
+		// снимает записанное; проход — фиксации отзыва и читает выдачу уже отозванной.
+		// С `FOR NO KEY UPDATE` полного прохода этот режим не конфликтует, поэтому «LOCK
+		// CHOICE» выше остаётся верным.
+		bs, ok, err := s.LoadBindingKeyShared(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("forward binding: load %s: %w", bindingID, err)
 		}
@@ -428,10 +438,11 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 		// выдачу. Стоимость прохода задаётся размером веера (p50 = 9 кандидатов, хвост
 		// 227 по дереву выдач), и поштучное чтение делало её линейной по числу выдач
 		// СОСЕДЕЙ, хотя изменился ровно один объект. Проекция та же (bindingScopeFrom у
-		// адаптера — единственная точка вывода), блокировок пакетное чтение не берёт, как
-		// не брало и поштучное.
+		// адаптера — единственная точка вывода). Advisory-блокировок пакетное чтение не
+		// берёт; строки выдач оно читает под `FOR KEY SHARE` в порядке id — тем же замком,
+		// что проход создания, против отзыва по снятию регистрации (kaname#963, F1).
 		ids := dedupSortBindingIDs(matching)
-		scopes, err := s.LoadBindingsUnlocked(ctx, ids)
+		scopes, err := s.LoadBindingsKeyShared(ctx, ids)
 		if err != nil {
 			return fmt.Errorf("forward: load bindings %s:%s: %w", objectType, objectID, err)
 		}

@@ -8,7 +8,7 @@ package pg_test
 // IAM-FMB) driven through the pg ReconcileAdapter + testcontainers Postgres 16.
 //
 // The create-forward materializes the binding's desired ACTIVE per-object members
-// ADDITIVELY (NO advisory lock at all, LoadBindingUnlocked / no FOR UPDATE, write-missing-only,
+// ADDITIVELY (NO advisory lock at all, LoadBindingKeyShared / no FOR UPDATE, write-missing-only,
 // NO delete-stale diff) — the throughput fix for a mass-binding-create burst. The FULL
 // EXCLUSIVE ReconcileBinding REMAINS the Role.Update fan-out + sweep backstop (delete-stale
 // needs EXCLUSIVE there).

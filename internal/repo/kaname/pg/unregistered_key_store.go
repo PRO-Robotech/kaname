@@ -37,16 +37,34 @@ func (s *UnregisteredKeyStore) WriterOn(tx service.Tx) kanamerepo.Writer {
 	return &writeTx{readTx: readTx{tx: txAsPgx(tx)}}
 }
 
+// liveBinding — ОДНО условие «выдача действует» для отбора и для CAS отзыва и
+// сужения. Отбор и CAS на разных условиях пропускали бы молча строку, которая
+// проходит одно и не проходит другое (`revoked_at` пуст, а статус не ACTIVE).
+// `revoked_at IS NULL` в нём ещё и затем, что из него следует условие частичного
+// индекса `access_bindings_target_resources_live_idx`.
+const liveBinding = `status = 'ACTIVE' AND revoked_at IS NULL`
+
+// BindingsNamingKeySQL — оператор поиска выдач по снятому ключу ($1 — тип, $2 — id).
+// Экспортирован ради пробы плана (`TestUnregistrationLookupUsesIndexes`): она судит
+// этот самый текст, а не свою копию.
+//
+// `FOR UPDATE`, а не `FOR NO KEY UPDATE` — намеренно (kaname#963, F1): только этот
+// режим конфликтует с `FOR KEY SHARE`, под которым проход материализации после
+// создания читает выдачу (`abReader.GetForKeyShare`). Слабее — и проход, прочитавший
+// выдачу ACTIVE, писал бы член, реестр выпущенного и факт после этого отзыва. Цена —
+// на время снятия встают вставки, берущие на этих строках `FOR KEY SHARE`; строк —
+// только выдачи, называющие снятый ключ.
+const BindingsNamingKeySQL = `SELECT id FROM kaname.access_bindings
+		  WHERE ` + liveBinding + `
+		    AND target -> 'resources' @> jsonb_build_array(jsonb_build_object('type', $1::text, 'id', $2::text))
+		  ORDER BY id
+		    FOR UPDATE`
+
 // ActiveBindingsNamingKey — действующие выдачи, цель которых называет ключ, под
 // `FOR UPDATE`, в порядке id (два снятия одного набора выдач берут замки в одном
 // порядке, URG-28). Поиск — индексом `access_bindings_target_resources_live_idx`.
 func (s *UnregisteredKeyStore) ActiveBindingsNamingKey(ctx context.Context, tx service.Tx, key domain.ResourceRef) ([]domain.AccessBindingID, error) {
-	rows, err := txAsPgx(tx).Query(ctx,
-		`SELECT id FROM kaname.access_bindings
-		  WHERE revoked_at IS NULL
-		    AND target -> 'resources' @> jsonb_build_array(jsonb_build_object('type', $1::text, 'id', $2::text))
-		  ORDER BY id
-		    FOR UPDATE`, key.Type, key.ID)
+	rows, err := txAsPgx(tx).Query(ctx, BindingsNamingKeySQL, key.Type, key.ID)
 	if err != nil {
 		return nil, mapErr(err, "", key.ID)
 	}
@@ -68,14 +86,14 @@ func (s *UnregisteredKeyStore) ActiveBindingsNamingKey(ctx context.Context, tx s
 // RevokeForUnregistered — отзыв по снятию регистрации: `REVOKED`, `revoked_at`,
 // причина `RESOURCE_UNREGISTERED`, `revoked_by_user_id` пуст (отозвал не
 // человек). Защита от удаления не условие (Р1 (в)): она — от удаления и отзыва
-// пользователем, а не от жизненного цикла объекта. CAS по `status = 'ACTIVE'`:
-// параллельный отзыв глаголом, выигравший строку, делает этот оператор
-// пустым (ok=false, URG-27).
+// пользователем, а не от жизненного цикла объекта. CAS по `liveBinding` — том же
+// условии, что у отбора: параллельный отзыв глаголом, выигравший строку, делает
+// этот оператор пустым (ok=false, URG-27).
 func (s *UnregisteredKeyStore) RevokeForUnregistered(ctx context.Context, tx service.Tx, id domain.AccessBindingID) (bool, error) {
 	tag, err := txAsPgx(tx).Exec(ctx,
 		`UPDATE kaname.access_bindings
 		    SET status = 'REVOKED', revoked_at = now(), revocation_reason = 'RESOURCE_UNREGISTERED'
-		  WHERE id = $1 AND status = 'ACTIVE'`, string(id))
+		  WHERE id = $1 AND `+liveBinding, string(id))
 	if err != nil {
 		return false, mapErr(err, "AccessBinding.RevokeForUnregistered", string(id))
 	}
@@ -96,25 +114,30 @@ func (s *UnregisteredKeyStore) NarrowTarget(ctx context.Context, tx service.Tx, 
 	tag, err := txAsPgx(tx).Exec(ctx,
 		`UPDATE kaname.access_bindings
 		    SET target = $2::jsonb, target_digest = $3, narrowed_at = now()
-		  WHERE id = $1 AND status = 'ACTIVE'`, string(id), targetJSON, target.Digest())
+		  WHERE id = $1 AND `+liveBinding, string(id), targetJSON, target.Digest())
 	if err != nil {
 		return false, mapErr(err, "AccessBinding.NarrowTarget", string(id))
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
-// RolesNamingKey — роли, правило (или вложенное правило) которых называет ключ в
-// `resourceNames`, под `FOR UPDATE`, в порядке id. Поиск — по строкам отбора
-// (`role_rule_selectors_resource_names_idx`): у вложенного правила строка несёт
-// его собственные имена и его типы.
-func (s *UnregisteredKeyStore) RolesNamingKey(ctx context.Context, tx service.Tx, key domain.ResourceRef) ([]domain.RoleID, error) {
-	rows, err := txAsPgx(tx).Query(ctx,
-		`SELECT r.id FROM kaname.roles r
+// RolesNamingKeySQL — оператор поиска ролей по снятому ключу ($1 — тип, $2 — id);
+// экспортирован ради пробы плана, как BindingsNamingKeySQL. `FOR NO KEY UPDATE`:
+// строка роли не удаляется и ключ её не меняется, поэтому вставки, берущие на ней
+// `FOR KEY SHARE` (члены и выдачи роли), на время снятия не встают.
+const RolesNamingKeySQL = `SELECT r.id FROM kaname.roles r
 		  WHERE r.id IN (SELECT s.role_id FROM kaname.role_rule_selectors s
 		                  WHERE s.resource_names @> ARRAY[$2::text]
 		                    AND $1::text = ANY (s.object_types))
 		  ORDER BY r.id
-		    FOR UPDATE`, key.Type, key.ID)
+		    FOR NO KEY UPDATE`
+
+// RolesNamingKey — роли, правило (или вложенное правило) которых называет ключ в
+// `resourceNames`, под `FOR NO KEY UPDATE`, в порядке id. Поиск — по строкам отбора
+// (`role_rule_selectors_resource_names_idx`): у вложенного правила строка несёт
+// его собственные имена и его типы.
+func (s *UnregisteredKeyStore) RolesNamingKey(ctx context.Context, tx service.Tx, key domain.ResourceRef) ([]domain.RoleID, error) {
+	rows, err := txAsPgx(tx).Query(ctx, RolesNamingKeySQL, key.Type, key.ID)
 	if err != nil {
 		return nil, mapErr(err, "", key.ID)
 	}
