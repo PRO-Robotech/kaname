@@ -298,6 +298,11 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	if kerr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", kerr)
 	}
+	// Срок переводится в длительность ОДИН раз и без заворота: срок сверх
+	// представимого заворачивался в ноль («срок не назван»), в отрицательное
+	// или в доли секунды, и каждый потолок ниже судил завёрнутое число
+	// (kaname#993).
+	requestedTTL, representable := shared.TTLFromSeconds(in.TTLSeconds)
 	var secretTTL time.Duration
 	if kind == domain.CredentialKindSecret {
 		// Поля, осмысленные не для этого вида, отвергаются ЯВНО и с именем
@@ -308,8 +313,9 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 				"audience: not meaningful for credential_kind %s — its holder presents the secret itself and asks for no audience",
 				domain.CredentialKindSecret)
 		}
-		ttl, ok := tokenpolicy.ResolveSecretCredentialTTL(time.Duration(in.TTLSeconds) * time.Second)
-		if !ok {
+		// Непредставимый срок заведомо выше потолка вида — отказ тем же текстом.
+		ttl, ok := tokenpolicy.ResolveSecretCredentialTTL(requestedTTL)
+		if !representable || !ok {
 			return nil, status.Errorf(codes.InvalidArgument,
 				"ttl_seconds: exceeds the %s ceiling of %d seconds for credential_kind SECRET",
 				domain.CredentialKindSecret, int64(tokenpolicy.SecretCredentialTTLCeiling.Seconds()))
@@ -320,9 +326,15 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	// (a machine has no second factor), which is only defensible while the
 	// credential is bounded in time — so the bound is enforced here, not left to
 	// the caller's discretion. Inclusive: exactly MaxTTL is allowed.
-	if u.MaxTTL > 0 && time.Duration(in.TTLSeconds)*time.Second > u.MaxTTL {
+	if u.MaxTTL > 0 && (!representable || requestedTTL > u.MaxTTL) {
 		return nil, status.Errorf(codes.InvalidArgument,
 			"ttl_seconds must be <= %d (%s)", int64(u.MaxTTL.Seconds()), u.MaxTTL)
+	}
+	// Без потолка установки предел — представимость: иначе ключ получил бы
+	// умолчание, истёк бы в миг выдачи или жил бы доли секунды.
+	if !representable {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"ttl_seconds must be <= %d", shared.MaxTTLSeconds)
 	}
 	// Предел описания судит ДОМЕННЫЙ тип — в знаках, как ограничение схемы;
 	// `len()` здесь мерил бы байты и отвергал кириллицу вдвое раньше (kaname#864).
@@ -801,7 +813,9 @@ func (u *IssueSAKeyUseCase) resolveExpiry(in IssueInput) *time.Time {
 	var d time.Duration
 	switch {
 	case in.TTLSeconds > 0:
-		d = time.Duration(in.TTLSeconds) * time.Second
+		// Область срока проверил Execute до всякой записи: сюда доходит лишь
+		// представимый срок, и признак представимости здесь не нужен.
+		d, _ = shared.TTLFromSeconds(in.TTLSeconds)
 	case u.DefaultTTL > 0:
 		d = u.DefaultTTL
 	default:
