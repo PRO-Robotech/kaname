@@ -96,17 +96,21 @@ func (w *urWorld) withdrawX() {
 
 // reRegisterX — тот же ключ X зарегистрирован заново в той же области, владелец
 // объекта — `owner`.
+//
+// Версия — СВОЯ у каждого намерения. Два намерения с одной версией use-case
+// читает как повторную доставку одного: второе не меняет строку зеркала, и его
+// кортеж не ставится (ворота повторной доставки в `Register`). Тогда владелец
+// объекта не получил бы `owner`, и контроль живости ниже краснел бы по фикстуре.
 func (w *urWorld) reRegisterX(owner domain.UserID) {
 	w.t.Helper()
 	obj := pcrRegType + ":" + pcrX
-	ver := w.nextVersion()
 	for _, r := range []*iamv1.RegisterResourceRequest{
 		{SubjectId: "project:" + string(w.prjA), Relation: "project", Object: obj},
 		{SubjectId: "user:" + string(owner), Relation: "owner", Object: obj},
 	} {
 		r.ParentProjectId, r.ParentAccountId = string(w.prjA), string(w.accA)
 		r.ParentChain = []string{"project:" + string(w.prjA), "account:" + string(w.accA)}
-		r.SourceVersion = ver
+		r.SourceVersion = w.nextVersion()
 		require.NoErrorf(w.t, w.reg.Register(w.ctx, r), "повторная регистрация реестра X (%s)", r.GetRelation())
 	}
 }
