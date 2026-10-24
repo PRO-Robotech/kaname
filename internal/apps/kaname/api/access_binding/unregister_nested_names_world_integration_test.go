@@ -191,3 +191,52 @@ func TestURG37_NestedRuleWithoutKeyUntouched(t *testing.T) {
 	assert.Zero(t, w.auditCount("iam.role.resource_unregistered_narrowed", "role_id", string(role)),
 		"URG-37: строка сужения роли без снятого имени")
 }
+
+// F2 (security-auditor, ревью @5c0f8f13d) · правило над двумя типами с общим
+// перечнем имён: снятие ключа (repositories, X) вычёркивает X только для
+// repositories — объект (registries, X), тот же id другого типа, ключом не
+// является (Д1, URG-05) и доступ к нему сохраняется.
+func TestUnregisterNameOfOneTypeKeepsItForTheOtherType(t *testing.T) {
+	w := newP3UWorld(t)
+	w.registerTag(pcrX) // репозиторий с id X под реестром X
+	role := w.seedRole("f2_both_types", domain.Rules{{
+		Module: "registry", Resources: []string{"registries", "repositories"},
+		Verbs: []string{"get"}, ResourceNames: []string{pcrX},
+	}})
+	w.grantTo(w.usrD, role, ndAllInScope(), false, "F2: выдача правила над двумя типами")
+	w.pollAsk(w.usr(w.usrD), "v_get", pcrRegType, pcrX, true, "F2 контроль фикстуры: (registries, X)")
+	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, pcrX, true, "F2 контроль фикстуры: (repositories, X)")
+
+	w.unregisterTag(pcrX)
+
+	assert.True(t, w.ask(w.usr(w.usrD), "v_get", pcrRegType, pcrX),
+		"F2: снятие (repositories, X) отобрало доступ к зарегистрированному (registries, X)")
+	assert.False(t, w.tag(pcrX), "F2: usr-D читает снятый (repositories, X)")
+	w.registerTag(pcrX)
+	w.recompute()
+	assert.False(t, w.tag(pcrX), "F2: после повторной регистрации (repositories, X) usr-D его читает")
+	for _, r := range w.roleRules(role) {
+		for _, res := range r.Resources {
+			if res == "repositories" {
+				assert.NotContainsf(t, r.ResourceNames, pcrX, "F2: правило над repositories называет снятый X: %+v", r)
+			}
+		}
+	}
+}
+
+// F2 · близнец: правило над одним типом теряет снятое имя целиком (URG-19..21).
+func TestUnregisterNameOfSingleTypeRuleDropsRule(t *testing.T) {
+	w := newP3UWorld(t)
+	w.registerTag(pcrX)
+	role := w.seedRole("f2_one_type", domain.Rules{{
+		Module: "registry", Resources: []string{"repositories"},
+		Verbs: []string{"get"}, ResourceNames: []string{pcrX},
+	}})
+	w.grantTo(w.usrD, role, ndAllInScope(), false, "F2 близнец: выдача правила над repositories")
+	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, pcrX, true, "F2 близнец контроль: (repositories, X)")
+
+	w.unregisterTag(pcrX)
+
+	assert.Empty(t, w.roleRules(role), "F2 близнец: правило без имён хранится")
+	assert.False(t, w.tag(pcrX), "F2 близнец: usr-D читает снятый (repositories, X)")
+}

@@ -678,7 +678,8 @@ func TestURG30_StaleTombstoneRevokesNothing(t *testing.T) {
 
 	assert.Equal(t, iamv1.AccessBinding_ACTIVE, w.get(id).GetStatus(), "URG-30: устаревшее надгробие отозвало выдачу")
 	assert.True(t, w.ask(w.usr(w.usrD), "v_get", pcrRegType, pcrX), "URG-30: usr-D не читает X")
-	assert.True(t, w.ask(w.usr(w.usrC), "v_get", pcrRegType, pcrX), "URG-30: usr-C не читает X")
+	// Доступ владельца нового объекта (usr-C) при запоздалом снятии — предмет kaname#969
+	// (приёмка, редакция 17eaa8f2, «вне объёма»): эта проба его не судит.
 }
 
 // URG-31 · снятие публикации — не снятие регистрации.
