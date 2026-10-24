@@ -19,9 +19,9 @@
 // This is a COARSE "is this a legitimate internal reader" gate (defense-in-depth
 // against a compromised module holding a valid cert but not authorized to read
 // IAM) — NOT a per-resource viewer-check. Per-user authz is the api-gateway's
-// job, run BEFORE it forwards to :9091. The floor never ReBACs the forwarded
-// end-user principal (`principalwire.MetaPrincipalPrefix`) — the subject of the Check is the
-// caller MODULE-SA, not the end user.
+// job, run BEFORE it forwards to :9091. Переданного принципала конечного
+// пользователя (`principalwire.MetaPrincipalPrefix`) пол моделью прав не судит
+// никогда: субъект проверки — учётка вызывающего МОДУЛЯ, а не пользователь.
 //
 // Default-OFF / production-mode-only: in dev/newman (no mTLS, FGA-on-internal
 // disabled) the floor is a NO-OP pass-through, byte-identical to today — the

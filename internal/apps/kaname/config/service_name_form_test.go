@@ -79,10 +79,26 @@ func TestServiceNameForm_WithoutThePlaceholderRefusesToStart(t *testing.T) {
 	}
 }
 
+// Инъекция F1 ревью сборки k1: форма без приставки — отказ старта тем же путём
+// подачи, которым её задаёт оператор. Без приставки модульность учётки решает
+// одно совпадение её имени с коротким именем службы, и пол «проверенный модуль»
+// сужает не больше, чем имя учётки. Близнец — те же записи с приставкой в
+// TestServiceNameForm_DeclaredFormIsAccepted.
+func TestServiceNameForm_WithoutAPrefixRefusesToStart(t *testing.T) {
+	for _, v := range []string{"{service}", "{service}-sa", "-{service}"} {
+		t.Run(v, func(t *testing.T) {
+			err := loadValidated(t, v, true)
+			require.Truef(t, refusesForm(err),
+				"форма %q без приставки принята стражем старта: модулем назовётся всякая учётка, "+
+					"чьё имя совпало с именем службы: %v", v, err)
+		})
+	}
+}
+
 // Положительный близнец: объявленная законная форма отказа о себе не даёт —
-// ни с приставкой, ни без неё, ни с окончанием.
+// с приставкой, с приставкой и окончанием, с приставкой без разделителя.
 func TestServiceNameForm_DeclaredFormIsAccepted(t *testing.T) {
-	for _, v := range []string{"acme-{service}", "{service}", "{service}-sa", "team.a-{service}"} {
+	for _, v := range []string{"acme-{service}", "acme-{service}-sa", "team.a-{service}", "a{service}"} {
 		t.Run(v, func(t *testing.T) {
 			err := loadValidated(t, v, true)
 			require.Falsef(t, refusesForm(err),

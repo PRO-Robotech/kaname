@@ -3,13 +3,13 @@
 
 // fgaproxy_test.go — the FGA-proxy authz ReBAC gate + cert-SAN→SA mapping.
 //
-// Unit-level: the FGA-proxy gate resolves the verified mTLS client-cert SAN
-// (spiffe://kacho.cloud/ns/<ns>/sa/<учётка>, учётка — формы, объявленной пробой:
-// mod-<svc>) to a deterministic
-// ServiceAccount id, then ReBAC-checks `service_account:<sva>#fga_writer@
-// cluster:cluster_root` via the injected RelationChecker. No DB / no live TLS:
-//   - cert-identity injected via grpcsrv.WithCertIdentity;
-//   - ReBAC decision injected via a fake RelationChecker.
+// Уровень модуля: ворота посредника модели переводят SAN проверенного
+// клиентского сертификата (spiffe://kacho.cloud/ns/<ns>/sa/<учётка>, учётка —
+// формы, объявленной пробой: mod-<svc>) в детерминированный идентификатор
+// ServiceAccount и спрашивают `service_account:<sva>#fga_writer@cluster:cluster_root`
+// через подставленный RelationChecker. Без базы и без живого TLS:
+//   - личность сертификата подставляется через grpcsrv.WithCertIdentity;
+//   - решение модели прав — поддельным RelationChecker.
 //
 // Со снятия внешнего движка прав вопрос уходит не чужому хранилищу, а двери
 // решения над реляционной формой собственной базы (`authzcascade.Client` поверх
@@ -300,13 +300,13 @@ func TestSANToServiceAccountID(t *testing.T) {
 	// Форма имени службы приезжает величиной так же (kaname#308): под ДРУГОЙ
 	// объявленной формой та же учётка перестаёт быть модулем, а учётка той
 	// формы — становится, и идентификатор выводится из учётки целиком.
-	otherForm := servicesan.NewForm("{service}-sa")
+	otherForm := servicesan.NewForm("acme-{service}-sa")
 	if _, ok := authzguard.SANToServiceAccountID(d, otherForm, "spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc"); ok {
 		t.Fatalf("учётка чужой формы признана модулем — разбор читает не объявленную форму")
 	}
-	got, ok = authzguard.SANToServiceAccountID(d, otherForm, "spiffe://kacho.cloud/ns/platform-system/sa/vpc-sa")
+	got, ok = authzguard.SANToServiceAccountID(d, otherForm, "spiffe://kacho.cloud/ns/platform-system/sa/acme-vpc-sa")
 	require.True(t, ok, "учётка ОБЪЯВЛЕННОЙ формы обязана разбираться")
-	sum := md5.Sum([]byte("vpc-sa"))
+	sum := md5.Sum([]byte("acme-vpc-sa"))
 	require.Equal(t, "sva"+hex.EncodeToString(sum[:])[:17], got,
 		"идентификатор выведен не из учётки целиком")
 
