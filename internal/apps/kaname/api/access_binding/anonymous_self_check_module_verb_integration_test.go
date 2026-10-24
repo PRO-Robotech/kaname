@@ -32,6 +32,7 @@ import (
 
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -46,6 +47,7 @@ func (p *pcrWorld) anonSelfCheckHandler() *authorizeapp.Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           p.door,
 		ClusterAdminChecker: p.door,
+		Catalog:             catalog.Fixed{F: p.facts},
 	})
 	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
 }

@@ -654,7 +654,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
-		metricsReg, cfg.AuthN.Mode.IsProduction())
+		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -1219,8 +1219,11 @@ type authzServiceBundle struct {
 //
 // sessions — записи сессий человека: из записи сессии вопроса служба выводит
 // доводы способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
+//
+// catalogSource — каталог модулей из живых строк, тот же экземпляр, что у ролей и
+// выдач: из него вопрос анонимной самопроверки берёт глагол типа (kaname#994).
 func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	sessions service.SessionRecords, metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
+	sessions service.SessionRecords, catalogSource catalog.Source, metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
@@ -1230,6 +1233,7 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 		Relations:           ownGates,
 		ClusterAdminChecker: ownGates,
 		SessionRecords:      sessions,
+		Catalog:             catalogSource,
 	})
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kanameRepo, ownGates)
 	// WithCallerAuthority wires the caller-authority gate (a tenant principal may
