@@ -20,25 +20,24 @@ package pg_test
 //
 // и Postgres снимает одну сторону взаимной блокировкой (40P01).
 //
-// Писателей с таким порядком перепись нашла три:
+// Писателей с таким порядком перепись нашла два:
 //
 //	I1  ReplaceRuleRefs  — досев проекции сегментов системных ролей на старте
 //	                       (seed.ReseedSystemRoleRuleRefs), транзакция на роль;
-//	I2  ReplaceRoleVerbs — досев проекции глаголов (seed.ReseedSystemRoleVerbs);
-//	I3  применитель ролей модуля — проекции нескольких ролей одной транзакцией,
-//	    правила которых называют ресурсы ЧУЖОГО модуля: замок строки своего
-//	    модуля (kaname#913) чужой модуль не запирает.
+//	I2  ReplaceRoleVerbs — досев проекции глаголов (seed.ReseedSystemRoleVerbs).
+//
+// Третий кандидат переписи — применитель ролей модуля, если бы правило роли
+// называло ресурсы ЧУЖОГО модуля, — опровергнут: такое правило отвергают загрузчик
+// (manifest.ErrRoleRuleForeignModule) и домен (`ModuleSetOf(<свой модуль>)`), а
+// строку своего модуля транзакция берёт первой (kaname#913).
 //
 // # Ход — заданный ожиданием, а не временем
 //
-// I1, I2: ДЕРЖАТЕЛЬ вставляет в проекцию строку второго ресурса и не фиксирует её —
-// с отложенным ключом на каталог, поэтому строки каталога он не держит. Писатель
+// ДЕРЖАТЕЛЬ вставляет в проекцию строку второго ресурса и не фиксирует её — с
+// отложенным ключом на каталог, поэтому строки каталога он не держит. Писатель
 // вставляет первую строку (ключ берёт `zzz`) и встаёт на вставке второй — за
 // незафиксированным дубликатом держателя. Применитель встаёт на `zzz`. Держатель
 // откатывается — писатель идёт к ключу на `aaa`, которую держит применитель.
-//
-// I3: настоящий применитель ролей модуля останавливается перед записью второй
-// роли (rolePause, kaname#913); первая роль уже взяла ключом ресурс чужого модуля.
 //
 // В каждом повторе утверждается: применитель ВСТАЛ за писателем (иначе стороны не
 // встретились); ни одна сторона не отвергнута взаимной блокировкой; обе дошли до
@@ -54,9 +53,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/ids"
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -66,9 +63,6 @@ const projectionLockRepeats = 20
 
 // projectionLockBudget — предел ожидания любого шага хода.
 const projectionLockBudget = 30 * time.Second
-
-// projectionFarModule — ЧУЖОЙ модуль для I3: его ресурсы называют роли модуля пробы.
-const projectionFarModule = "probefar"
 
 // projectionWriter — писатель проекции под гонкой (I1/I2).
 type projectionWriter struct {
@@ -253,101 +247,3 @@ func platformProbeRole(t *testing.T, ctx context.Context, repo *kanamepg.Reposit
 	return out.ID
 }
 
-// TestModuleRolesApplierTakesForeignCatalogRowsInTheApplierOrder — I3: роли
-// модуля пробы называют ресурсы ЧУЖОГО модуля, первая — поздний, вторая — ранний.
-func TestModuleRolesApplierTakesForeignCatalogRowsInTheApplierOrder(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: требует Postgres")
-	}
-	ctx, pool := catalogPool(t)
-	catalogApplier := applierOver(t, pool)
-	repo := kanamepg.New(pool, nil)
-
-	_, err := catalogApplier.Apply(ctx, probeManifest(probeResource(crossEarlyName, "get")))
-	require.NoError(t, err, "Дано: модуль-владелец %s", applierProbeModule)
-	far := &manifest.Manifest{APIVersion: "iam/v1", Module: projectionFarModule,
-		Resources: []manifest.Resource{farResource(crossEarlyName), farResource(crossLateName)}}
-	_, err = catalogApplier.Apply(ctx, far)
-	require.NoError(t, err, "Дано: чужой модуль %s с ресурсами %s и %s", projectionFarModule, crossEarlyName, crossLateName)
-
-	deadlocks := 0
-	var first error
-	for i := 0; i < projectionLockRepeats; i++ {
-		late := fmt.Sprintf("%s.p922f%02da.viewer", applierProbeModule, i)
-		early := fmt.Sprintf("%s.p922f%02db.viewer", applierProbeModule, i)
-		pause := newRolePause(domain.SystemRoleID(domain.RoleName(early)))
-		paused := moduleroles.NewApplier(pause.over(moduleroles.NewRepoTxRunner(repo)), literalRights{})
-		rres := make(chan error, 1)
-		go func() {
-			_, rerr := paused.Apply(ctx, farRolesManifest(
-				farRoleDecl{late, crossLateName}, farRoleDecl{early, crossEarlyName}), moduleroles.BootActorID)
-			rres <- rerr
-		}()
-		select {
-		case <-pause.reached:
-		case rerr := <-rres:
-			t.Fatalf("повтор %d: применитель ролей завершился (%v), не дойдя до второй роли", i, rerr)
-		case <-time.After(projectionLockBudget):
-			t.Fatalf("повтор %d: применитель ролей не дошёл до второй роли за %s", i, projectionLockBudget)
-		}
-		ares := make(chan error, 1)
-		go func() {
-			_, aerr := catalogApplier.Apply(ctx, far)
-			ares <- aerr
-		}()
-		deadline := time.Now().Add(projectionLockBudget)
-		for !lockWaiters(ctx, pool, 1, 100*time.Millisecond) {
-			select {
-			case aerr := <-ares:
-				close(pause.release)
-				t.Fatalf("повтор %d: применитель каталога НЕ встал за транзакцией ролей (%v)", i, aerr)
-			default:
-			}
-			if !time.Now().Before(deadline) {
-				close(pause.release)
-				t.Fatalf("повтор %d: применитель каталога не встал за %s", i, projectionLockBudget)
-			}
-		}
-		close(pause.release)
-		roleErr, applyErr := awaitBoth(t, rres, ares, i)
-		if isDeadlockOrAborted(roleErr) || isDeadlockOrAborted(applyErr) {
-			deadlocks++
-			if first == nil {
-				first = fmt.Errorf("повтор %d: роли модуля=%v · применитель=%v", i, roleErr, applyErr)
-			}
-			continue
-		}
-		require.NoErrorf(t, roleErr, "повтор %d: применитель ролей не дошёл до конца", i)
-		require.NoErrorf(t, applyErr, "повтор %d: применитель каталога не дошёл до конца", i)
-	}
-	t.Logf("роли модуля по чужому модулю: повторов %d · взаимных блокировок %d", projectionLockRepeats, deadlocks)
-	require.Zerof(t, deadlocks,
-		"взаимная блокировка в %d из %d повторов (первая: %v): применитель ролей модуля берёт строки "+
-			"ресурсов ЧУЖОГО модуля по ролям, в порядке их записи, а не базы", deadlocks, projectionLockRepeats, first)
-}
-
-// farResource — ресурс чужого модуля.
-func farResource(name string) manifest.Resource {
-	return manifest.Resource{Name: name, ObjectType: projectionFarModule + "_" + name,
-		Verbs: []manifest.Verb{{Name: "get"}}}
-}
-
-// farRoleDecl — роль модуля пробы с единственным правилом по ресурсу чужого модуля.
-type farRoleDecl struct {
-	name     string
-	resource string
-}
-
-// farRolesManifest — манифест модуля пробы, чьи роли называют ресурсы чужого модуля.
-func farRolesManifest(roles ...farRoleDecl) *manifest.Manifest {
-	m := &manifest.Manifest{APIVersion: "iam/v1", Module: applierProbeModule}
-	for _, r := range roles {
-		m.Roles = append(m.Roles, manifest.Role{
-			ID:          r.name,
-			Description: "Роль модуля пробы kaname#922.",
-			Tier:        &manifest.Tier{TierType: domain.ScopeTypeClusterDotted, TierID: domain.ClusterSingletonID},
-			Rules:       []manifest.Rule{{Module: projectionFarModule, Resources: []string{r.resource}, Verbs: []string{"get"}}},
-		})
-	}
-	return m
-}
