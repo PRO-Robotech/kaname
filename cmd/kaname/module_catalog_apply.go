@@ -59,6 +59,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
@@ -70,25 +71,57 @@ import (
 // Перепись обязательна: «применено шесть манифестов, изменений ноль» и
 // «применено ноль манифестов» — разные утверждения о платформе, а молчание у них
 // одно и то же.
+//
+// # Что возвращается и почему ЗНАЧЕНИЕМ (kaname#865, Д3)
+//
+// Возвращается перечень манифестов, применённых ПОЛНОСТЬЮ: модуль, пропущенный
+// как младшая редакция либо отвергнутый конфликтом содержимого, следующие
+// применители старта — ролей и посева — не получают. Младшая редакция устарела
+// целиком, а не только в разделе ресурсов, и документ, который каталог
+// отказался применить, не применяется и по частям. Перечень приходит из итога
+// применителя, а не вторым сравнением редакций у корня: второй решатель
+// разошёлся бы с первым молча.
+//
+// Обещание «пропуск — не отказ» — ровно о применителях каталога, ролей и
+// посева: опора паритета и страж паритета судят доставку целиком, как прежде
+// (§2 п.4 приёмки).
+//
+// Перепись складывается: `delivered = applied + skipped_stale +
+// refused_conflict`. Каждый пропуск и каждый отказ называется ещё и своей
+// записью — с номерами, а у конфликта и с отпечатками: число без имени не
+// говорит оператору, ЧТО именно не доехало.
 func applyDeliveredManifests(
 	ctx context.Context,
 	logger *slog.Logger,
 	applier *modulecatalog.Applier,
 	manifests []*manifest.Manifest,
-) error {
+) ([]*manifest.Manifest, []modulecatalog.RevisionSkip, error) {
 	if len(manifests) == 0 {
 		// Законное состояние ровно одно: доставка посадкой не объявлена.
 		// «Объявлена и сорвана» сюда не доходит — её отверг читатель доставки.
 		// Молчать нельзя по той же причине, по какой не молчит читатель: снаружи
 		// «применять нечего» неотличимо от «применили и ничего не изменилось».
 		logger.Info("применение каталога модуля: доставленных манифестов нет, применять нечего")
-		return nil
+		return nil, nil, nil
 	}
 
+	started := time.Now()
 	census, err := applier.ApplyAll(ctx, manifests)
+	elapsed := time.Since(started)
+	for _, s := range census.SkippedStale {
+		logger.Warn("применение каталога модуля: редакция старше применённой — модуль пропущен",
+			revisionAttrs(s, false)...)
+	}
+	for _, s := range census.RefusedConflict {
+		logger.Error("применение каталога модуля: редакция совпадает с применённой, содержимое другое — модуль не применён",
+			revisionAttrs(s, true)...)
+	}
 	logger.Info("перепись применения каталога модуля",
 		slog.Int("delivered", len(manifests)),
 		slog.Int("applied", census.Applied),
+		slog.Int("skipped_stale", len(census.SkippedStale)),
+		slog.Int("refused_conflict", len(census.RefusedConflict)),
+		slog.Duration("elapsed", elapsed),
 		slog.Any("modules", census.Modules),
 		slog.Int("changed_modules", census.ChangedModules),
 		slog.Int("written_resources", census.WrittenResources),
@@ -102,7 +135,28 @@ func applyDeliveredManifests(
 		slog.Int("pruned_selector_types", census.PrunedSelectorTypes),
 		slog.Bool("changed", census.Changed()))
 	if err != nil {
-		return fmt.Errorf("каталог модуля: применение доставленных манифестов: %w", err)
+		return nil, nil, fmt.Errorf("каталог модуля: применение доставленных манифестов: %w", err)
 	}
-	return nil
+	return census.AppliedManifests, census.NotApplied, nil
+}
+
+// revisionAttrs — поля записи пропуска либо отказа по редакции. Номер, которого
+// нет, ОПУСКАЕТСЯ, а не пишется нулём (условие CE-12): ноль редакцией не
+// бывает, и «манифест редакцию не объявил» обязано быть отличимо от любого
+// номера.
+func revisionAttrs(s modulecatalog.RevisionSkip, withDigests bool) []any {
+	attrs := []any{slog.String("module", s.Module)}
+	if s.Declared != nil {
+		attrs = append(attrs, slog.Int64("delivered_revision", s.Declared.Revision))
+		if withDigests {
+			attrs = append(attrs, slog.String("delivered_digest", s.Declared.Digest))
+		}
+	}
+	if s.Previous != nil {
+		attrs = append(attrs, slog.Int64("applied_revision", s.Previous.Revision))
+		if withDigests {
+			attrs = append(attrs, slog.String("applied_digest", s.Previous.Digest))
+		}
+	}
+	return attrs
 }

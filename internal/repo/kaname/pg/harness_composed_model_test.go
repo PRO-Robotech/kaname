@@ -75,7 +75,10 @@ func installHarnessComposedModel() (modelcompose.Report, authzmodel.AdmissionRep
 		return rep, authzmodel.AdmissionReport{}, fmt.Errorf("композиция модели прав: %w", err)
 	}
 
-	admission, err := authzmodel.Admit(composed)
+	// Перечень термов ключа — из ТОЙ ЖЕ композиции, как у корня (kaname#866):
+	// гейт сверяет имена шагов, а не их аргументы, и допуск без перечня здесь
+	// судил бы иначе, чем на старте.
+	admission, err := authzmodel.Admit(composed, rep.KeyTerms...)
 	if err != nil {
 		return rep, admission, fmt.Errorf("допуск собранной модели прав: %w", err)
 	}

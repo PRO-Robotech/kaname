@@ -196,11 +196,11 @@ func TestReconcileObject_Narrow_StillRevokesOnLabelRemoval(t *testing.T) {
 			VerificationStatus: domain.VerificationActive,
 		}},
 		// The standing grant's ledger lineage — the revoke source.
-		ledger: []domain.MembershipTuple{
-			{User: sub, Relation: "v_get", Object: "compute_instance:i-1"},
-			{User: sub, Relation: "v_update", Object: "compute_instance:i-1"},
-			{User: sub, Relation: "editor", Object: "compute_instance:i-1"},
-		},
+		ledger: memberLedger("compute.instance",
+			domain.MembershipTuple{User: sub, Relation: "v_get", Object: "compute_instance:i-1"},
+			domain.MembershipTuple{User: sub, Relation: "v_update", Object: "compute_instance:i-1"},
+			domain.MembershipTuple{User: sub, Relation: "editor", Object: "compute_instance:i-1"},
+		),
 		bindingsForObject: []domain.AccessBindingID{"acb-1"},
 	}
 
@@ -227,7 +227,7 @@ func TestReconcileObject_Narrow_StillRevokesOnLabelRemoval(t *testing.T) {
 func TestReconcileObject_Narrow_ReGrantAfterRevokeIsEmitted(t *testing.T) {
 	fp := domain.Rule{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get", "update"}}.Fingerprint()
 
-	newStore := func(labels map[string]string, current []domain.TargetMember, ledger []domain.MembershipTuple) *fakeStore {
+	newStore := func(labels map[string]string, current []domain.TargetMember, ledger []LedgerRow) *fakeStore {
 		return &fakeStore{
 			scope:       domain.ScopeAnchor{Type: "project", ID: "prj-1"},
 			subjectType: "user", subjectID: "usr-1", active: true,
@@ -252,11 +252,11 @@ func TestReconcileObject_Narrow_ReGrantAfterRevokeIsEmitted(t *testing.T) {
 		ObjectType: "compute.instance", ObjectID: "i-1",
 		VerificationStatus: domain.VerificationActive,
 	}}
-	standingLedger := []domain.MembershipTuple{
-		{User: sub, Relation: "v_get", Object: "compute_instance:i-1"},
-		{User: sub, Relation: "v_update", Object: "compute_instance:i-1"},
-		{User: sub, Relation: "editor", Object: "compute_instance:i-1"},
-	}
+	standingLedger := memberLedger("compute.instance",
+		domain.MembershipTuple{User: sub, Relation: "v_get", Object: "compute_instance:i-1"},
+		domain.MembershipTuple{User: sub, Relation: "v_update", Object: "compute_instance:i-1"},
+		domain.MembershipTuple{User: sub, Relation: "editor", Object: "compute_instance:i-1"},
+	)
 	ctx := context.Background()
 
 	// (1) GRANT — label matches, nothing materialized yet.

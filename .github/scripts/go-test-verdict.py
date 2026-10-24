@@ -44,6 +44,13 @@
 усечение называется числом: неполный текст обязан быть отличим от полного.
 Усечённая середина остаётся только в самом потоке `go test -json`.
 
+ПРОПУСК С МЕТКОЙ «НЕ ВЫПОЛНИЛОСЬ» — тоже код 2. Измерительная проба подаёт
+«стенд шумит сильнее измеряемого» пропуском, чей текст НАЧИНАЕТСЯ этой меткой
+(`t.Skip("НЕ ВЫПОЛНИЛОСЬ …")`): красным это не является — продукт не отказал, —
+а проходом тем более (kaname#861). Метка читается только у ПРОПУСКА и только
+в начале его строки после координаты `файл.go:строка:`; красное она не
+маскирует — отказ проверяется раньше.
+
 НЕ ВЫПОЛНИЛОСЬ — ОТДЕЛЬНЫЙ ИСХОД, а не зелёный. Пакет, начатый и не
 завершённый ни проходом, ни отказом, означает оборванный поток (например, убит
 сам `go test`): «отказов 0» на нём значит «досмотреть не успели». Такой прогон
@@ -53,6 +60,7 @@
 
 import collections
 import json
+import re
 import subprocess
 import sys
 
@@ -66,9 +74,18 @@ FAILURE_TEXT_TAIL = 20
 FAILURE_TEXT_TOTAL = 1000
 FAILURE_LINE_CHARS = 400
 
+# NOT_PERFORMED — метка третьего исхода в тексте пропуска: строка вывода пробы
+# вида `    файл.go:строка: НЕ ВЫПОЛНИЛОСЬ …`, как её печатает `t.Skip`.
+NOT_PERFORMED = re.compile(r"^\s*\S+\.go:\d+: НЕ ВЫПОЛНИЛОСЬ")
+
 # Строки разметки, которые `go test -json` добавляет сам (`-test.v=test2json`):
 # они называют пробу, а не её отказ, и имя уже стоит в заголовке блока.
 _FRAMING = ("=== RUN", "=== PAUSE", "=== CONT", "=== NAME")
+
+
+# Сколько самых долгих пакетов печатает перепись: запас предела `-timeout`
+# решает самый долгий, следующие — видно ли, кто его догоняет.
+SLOWEST_PKGS = 3
 
 
 def _clip_line(line):
@@ -111,6 +128,10 @@ def verdict(stream, out=sys.stdout):
     pkg_output = collections.defaultdict(list)
     build_output = collections.defaultdict(list)
     failed_pkgs = []  # (пакет, FailedBuild) в порядке потока
+    not_performed = []  # (пакет, проба, строка метки) — пропуски с меткой
+    # Время пакета — из его события исхода (Elapsed, с): доля пакета от предела
+    # `-timeout` шага видна в журнале CI, а не только в test.json (kaname#949).
+    pkg_elapsed = {}
 
     for line in stream:
         line = line.strip()
@@ -150,6 +171,8 @@ def verdict(stream, out=sys.stdout):
             elif action in ("pass", "fail", "skip"):
                 pkg[action] += 1
                 ended_pkgs.add(package)
+                if isinstance(event.get("Elapsed"), (int, float)):
+                    pkg_elapsed[package] = event["Elapsed"]
                 if action == "fail":
                     failed_pkgs.append((package, event.get("FailedBuild")))
             continue
@@ -172,6 +195,10 @@ def verdict(stream, out=sys.stdout):
                 failed_runs.append((package, name, lines))
                 if "/" not in name:
                     failed_top.append("%s :: %s" % (package, name))
+            elif action == "skip":
+                marks = [l.strip() for l in lines if NOT_PERFORMED.match(l)]
+                if marks:
+                    not_performed.append((package, name, marks[0]))
 
     silent_pkgs = sorted(p for p in seen_pkgs if p not in saw_test_event)
     executed = test["pass"] + test["fail"]
@@ -185,6 +212,9 @@ def verdict(stream, out=sys.stdout):
     print("пакетов осмотрено : %d  (прошло %d · упало %d · без проб %d)"
           % (len(seen_pkgs), pkg["pass"], pkg["fail"], pkg["skip"]), file=out)
     print("проб исполнено    : %d" % executed, file=out)
+    slow = sorted(pkg_elapsed.items(), key=lambda kv: (-kv[1], kv[0]))[:SLOWEST_PKGS]
+    if slow:
+        print("самые долгие пакеты: %s" % " · ".join("%s %.1f с" % kv for kv in slow), file=out)
     print("отказов           : %d" % test["fail"], file=out)
     print("ПРОПУЩЕНО         : %d  (в зачёт прохода НЕ идёт)" % test["skip"], file=out)
     if interrupted:
@@ -216,6 +246,17 @@ def verdict(stream, out=sys.stdout):
         print("", file=out)
         print("КРАСНЫЙ: отказов %d." % (test["fail"] or pkg["fail"]), file=out)
         return 1
+
+    if not_performed:
+        print("", file=out)
+        print("=== не выполнилось: пропуски с меткой (%d) ===" % len(not_performed), file=out)
+        for package, name, mark in not_performed:
+            print("   %s :: %s" % (package, name), file=out)
+            print("      %s" % _clip_line(mark), file=out)
+        print("", file=out)
+        print("НЕ ВЫПОЛНИЛОСЬ: проба сама заявила, что вердикта нет. Это не зелёный", file=out)
+        print("вердикт и не красный: перепрогон на тихом стенде.", file=out)
+        return 2
 
     if unterminated:
         print("", file=out)
@@ -474,6 +515,51 @@ def self_test():
         ev("start") + ev("run", "TestA") + ev("pass", "TestA"))
     run(0, "(−) тот же пакет завершён — зелёный",
         ev("start") + ev("run", "TestA") + ev("pass", "TestA") + ev("pass"))
+
+    # --- третий исход измерительной пробы (kaname#861) ----------------------
+    #
+    # Пропуск, чей текст начинается меткой НЕ ВЫПОЛНИЛОСЬ, — «не выполнилось»,
+    # а не зелёный: так измерительная проба подаёт «стенд шумит сильнее
+    # измеряемого», и код выхода у неё не совпадает ни с красным, ни с проходом.
+    # Близнецы отличаются ОДНИМ фактом — меткой в тексте пропуска.
+    def skipped(text):
+        return (ev("start") + ev("run", "TestProbe")
+                + ev("output", "TestProbe", "    probe_test.go:9: %s\n" % text)
+                + ev("output", "TestProbe", "--- SKIP: TestProbe (0.00s)\n")
+                + ev("skip", "TestProbe") + ev("pass"))
+
+    marked = "НЕ ВЫПОЛНИЛОСЬ (Ф1-50): размах полосы \"A\" 9ms выше потолка годности 4ms"
+    text = run(2, "(+) пропуск с меткой — не выполнилось, не зелёный", skipped(marked))
+    if text and not ("TestProbe" in text and "потолка годности" in text):
+        print("  ПРОВАЛ (+) не выполнилось не назвало пробу и её текст", file=sys.stderr)
+        failed += 1
+    run(0, "(−) пропуск без метки — по-прежнему не красное и не «не выполнилось»",
+        skipped("измерительная проба идёт РУЧНЫМ прогоном"))
+    # Метка — только В НАЧАЛЕ текста пропуска: слово внутри фразы меткой не
+    # является, иначе любой пропуск, упомянувший исход, менял бы вердикт.
+    run(0, "(−) слово метки внутри фразы пропуска — не метка",
+        skipped("ручной прогон: исход НЕ ВЫПОЛНИЛОСЬ печатается словами"))
+    # Метка в выводе ПРОШЕДШЕЙ пробы вердикта не меняет: исход — пропуск.
+    run(0, "(−) метка у прошедшей пробы — не пропуск, вердикт зелёный",
+        ev("start") + ev("run", "TestA") + ev("output", "TestA", "    a_test.go:3: %s\n" % marked)
+        + ev("pass", "TestA") + ev("pass"))
+    # Красное не маскируется меткой: отказ соседки старше третьего исхода.
+    run(1, "(+) красное при пропуске с меткой — красное",
+        ev("start") + ev("run", "TestB") + ev("fail", "TestB")
+        + skipped(marked).replace(ev("pass"), ev("fail")))
+
+    # Время пакета: самый долгий — первым, пакет без Elapsed строки не даёт.
+    text = run(0, "(−) время пакетов — самый долгий первым",
+               ev("start") + ev("run", "TestA") + ev("pass", "TestA") + ev("pass", Elapsed=3.5)
+               + ev("start", pkg="q") + ev("run", "TestA", pkg="q") + ev("pass", "TestA", pkg="q")
+               + ev("pass", pkg="q", Elapsed=12.4))
+    if text and "самые долгие пакеты: q 12.4 с · p 3.5 с" not in text:
+        print("  ПРОВАЛ (−) время пакетов не напечатано по убыванию", file=sys.stderr)
+        failed += 1
+    text = run(0, "(−) пакет без Elapsed — строки времени нет", green)
+    if text and "самые долгие пакеты" in text:
+        print("  ПРОВАЛ (−) время напечатано без события с Elapsed", file=sys.stderr)
+        failed += 1
 
     print("")
     print("go-test-verdict --self-test: проб исполнено %d, провалов %d" % (probes, failed))

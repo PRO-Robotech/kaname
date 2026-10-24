@@ -769,8 +769,9 @@ func (*AccessTarget_Resources) isAccessTarget_Target() {}
 func (*AccessTarget_AllInScope) isAccessTarget_Target() {}
 
 // AccessTargetResources is the per-object arm of AccessTarget: a closed set of
-// polymorphic ResourceRef{type,id} (graceful-dangling; `type` is dotted from the
-// closed type-registry, e.g. `compute.instance`).
+// polymorphic ResourceRef{type,id} (graceful-dangling; `type` is the dotted name
+// of a type live in the platform resource catalog, e.g. `compute.instance`; the
+// grantable types are published by `GET /iam/v1/permissionCatalog`).
 //
 // Снятие регистрации объекта, выполненное после того, как выдача сделана, убирает
 // объект из перечня в той же транзакции; опустевший перечень — отзыв выдачи

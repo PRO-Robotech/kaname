@@ -289,7 +289,8 @@ message LookupSubjectRequest {
   oneof key {
     // Субъект личности (`sub` claim).
     string external_id = 1;
-    // kaname internal id (`usr-...` или `sva-...`).
+    // kaname internal id: префикс и 17 знаков без разделителя (`usr<17>` или
+    // `sva<17>`, 20 знаков в сумме).
     string id = 2;
     // Case-insensitive email lookup.
     string email = 3;

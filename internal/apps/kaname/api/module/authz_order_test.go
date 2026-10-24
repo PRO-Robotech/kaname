@@ -85,7 +85,7 @@ func verbs(chk *fakeRelationChecker) map[string]func(ctx context.Context) error 
 			return err
 		},
 		"Get": func(ctx context.Context) error {
-			_, err := moduleapp.NewGetUseCase(nil).WithAdminChecker(chk).Execute(ctx, "")
+			_, err := moduleapp.NewGetUseCase(nil, nil).WithAdminChecker(chk).Execute(ctx, "")
 			return err
 		},
 		"List": func(ctx context.Context) error {
@@ -158,7 +158,7 @@ func TestModuleVerbs_MA138_UnwiredCheckerFailsClosed(t *testing.T) {
 			return err
 		},
 		"Get": func(ctx context.Context) error {
-			_, err := moduleapp.NewGetUseCase(nil).Execute(ctx, "vpc")
+			_, err := moduleapp.NewGetUseCase(nil, nil).Execute(ctx, "vpc")
 			return err
 		},
 		"List": func(ctx context.Context) error {

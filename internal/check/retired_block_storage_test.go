@@ -17,6 +17,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -168,8 +169,8 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 	// successor of the retired resources could not be named as a per-object target
 	// at all, so the only expressible grant on a volume was the whole anchor. That
 	// was recorded here as a separate defect, and it has since been fixed — the
-	// predicate now resolves against the materialization feed, the one vocabulary
-	// the reconciler actually compares a target against
+	// predicate now resolves against the LIVE platform catalog (kaname#904), the
+	// set of types the mirror admits and the reconciler compares a target against
 	// (domain/access_binding_target_vocabulary_test.go holds it for every type).
 	//
 	// So the control is now the present OWNER of these resources, which is what
@@ -185,17 +186,18 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 	// positive that WAS the defect. The whitelist is removed (kacho#1092) and the
 	// control is an actual anchor, which is what "the predicate is not false for
 	// everything" needs.
+	liveCatalog := catalogfixture.Facts()
 	for _, r := range retiredBlockStorage {
-		require.Falsef(t, domain.ValidTargetType(r.dotted),
+		require.Falsef(t, domain.ValidTargetType(liveCatalog, r.dotted),
 			"domain.ValidTargetType(%q) is still true — an AccessBinding may still target the retired resource", r.dotted)
 		require.Errorf(t, domain.ResourceType(r.fga).Validate(),
 			"domain.ResourceType(%q).Validate() still accepts the retired type", r.fga)
 	}
 	for _, l := range liveBlockStorage {
-		require.Truef(t, domain.ValidTargetType(l.dotted),
+		require.Truef(t, domain.ValidTargetType(liveCatalog, l.dotted),
 			"domain.ValidTargetType(%q) is false — block storage lost its per-object grant instead of moving it to its present owner, and the negative half above proves nothing", l.dotted)
 	}
-	require.True(t, domain.ValidTargetType("compute.instance"),
+	require.True(t, domain.ValidTargetType(liveCatalog, "compute.instance"),
 		"domain.ValidTargetType(\"compute.instance\") is false — the live sibling must be targetable, or the negative half above proves nothing")
 	require.NoError(t, domain.ResourceType("project").Validate(),
 		"domain.ResourceType(\"project\").Validate() rejects a hierarchy tier — the anchor vocabulary is damaged and the negative half above proves nothing")

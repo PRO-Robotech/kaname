@@ -6,7 +6,10 @@
 //
 // Инъекция подаёт НАСТОЯЩИЙ вход — сборщик хуков в том виде, в каком он лежал на
 // `kaname@5303cebd`: со своим построением реконсайлера и без параметра
-// (kaname#116). Законные близнецы — те же формы записи там, где они законны.
+// (kaname#116). Судимые узлы (построение `reconcileapp.New`, параметр
+// `*reconcileapp.Reconciler`) дословны; вариант использования, которому сборщик
+// передавал экземпляр, заменён живым — прежний (глагол заведения личности по
+// внешнему удостоверению) снят kaname#929, а гейт его не судит. Законные близнецы — те же формы записи там, где они законны.
 // Разбор принимает имя сборщика параметром, поэтому дефект подаётся дословно, с
 // прежним именем, хотя живой гейт стережёт уже сборщик полосы своего входа.
 package main
@@ -25,9 +28,9 @@ import (
 
 func buildHooksMux(pool *pgxpool.Pool, catalogSource catalog.Source, logger *slog.Logger) http.Handler {
 	provisionReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
-	userUpsert := userapp.NewUpsertFromIdentityUseCase(kanameRepo, opsRepo).
-		WithReconciler(provisionReconciler)
-	return mux(userUpsert)
+	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
+		WithObjectReconciler(provisionReconciler)
+	return mux(userInvite)
 }
 `
 
@@ -39,9 +42,9 @@ import (
 )
 
 func buildHooksMux(pool *pgxpool.Pool, bindingReconciler *reconcileapp.Reconciler, logger *slog.Logger) http.Handler {
-	userUpsert := userapp.NewUpsertFromIdentityUseCase(kanameRepo, opsRepo).
-		WithReconciler(bindingReconciler)
-	return mux(userUpsert)
+	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
+		WithObjectReconciler(bindingReconciler)
+	return mux(userInvite)
 }
 `
 

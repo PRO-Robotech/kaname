@@ -36,6 +36,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // accountScopeBinding builds an account-scoped, allInScope grant of roleID on acc.
@@ -81,7 +82,7 @@ func TestCreate_AuthzBeforeStructuralGates_NoRoleOracle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newCustomRoleRepo(ownerID, homeAcct, roleID)
 			opsRepo := newFakeOpsRepo()
-			uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(deny(), nil)
+			uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(deny(), nil)
 
 			// Probing a FOREIGN scope (acc_other) with a foreign / absent role id.
 			_, err := uc.Execute(newOwnerContext("usr_stranger--------"),
@@ -114,7 +115,7 @@ func TestCreate_ForeignRoleHiddenFromAuthorizedCaller(t *testing.T) {
 	// The fake account reader reports ownerID as the owner of ANY account, so the
 	// caller holds grant-authority on the probed scope (Path 1).
 	newUC := func(repo *abFakeRepo) *CreateAccessBindingUseCase {
-		return NewCreateAccessBindingUseCase(repo, newFakeOpsRepo()).
+		return NewCreateAccessBindingUseCase(repo, newFakeOpsRepo(), catalogfixture.Source()).
 			WithRelationStore(&scopedFGA{allow: map[string]bool{}}, nil)
 	}
 

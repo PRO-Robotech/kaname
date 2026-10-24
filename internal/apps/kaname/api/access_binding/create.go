@@ -27,6 +27,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -40,6 +41,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -102,6 +104,13 @@ type SelectorReconciler interface {
 type CreateAccessBindingUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
+	// cat — источник КАТАЛОЖНОГО ФАКТА: тип пообъектной цели годен тогда и
+	// только тогда, когда у него есть живая строка каталога (kaname#904, Р1).
+	// Тот же снимок судит правило роли (`CreateRoleUseCase`), поэтому выдача и
+	// роль судятся одним множеством. Обязателен: без источника годного типа нет
+	// ни одного (`domain.ValidTargetType` на nil — false), то есть отказ, а не
+	// всеразрешение.
+	cat catalog.Source
 	// relations — the door to the rights decision. The grant TUPLES are NOT written
 	// through it (they go via the atomic fga_outbox emit-in-tx flow, and a trigger
 	// folds them into direct facts). It IS a live dependency on the READ side:
@@ -115,8 +124,43 @@ type CreateAccessBindingUseCase struct {
 	logger *slog.Logger
 }
 
-func NewCreateAccessBindingUseCase(r Repo, opsRepo operations.Repo) *CreateAccessBindingUseCase {
-	return &CreateAccessBindingUseCase{repo: r, opsRepo: opsRepo}
+func NewCreateAccessBindingUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *CreateAccessBindingUseCase {
+	return &CreateAccessBindingUseCase{repo: r, opsRepo: opsRepo, cat: cat}
+}
+
+// targetTypeNotLiveSyncMsg — текст Т1 приёмки (Р3), синхронный отказ
+// INVALID_ARGUMENT. Префикс до скобки — прежний текст побайтово (на нём стоят
+// утверждения вхождением у клиентов); продление называет, где брать перечень
+// годных типов, тем же адресом, что отказ правила роли (`domain.CatalogEndpoint`).
+// Снятый тип отвергается ЭТИМ ЖЕ текстом (Р4): отдельного «снят» у цели нет.
+func targetTypeNotLiveSyncMsg(typ string) string {
+	return fmt.Sprintf("Illegal argument target.resources[].type %q (not a live entry of the platform resource catalog; grantable types are published by %s)",
+		typ, domain.CatalogEndpoint)
+}
+
+// targetTypeNotLiveTxMsg — текст Т2 приёмки (Р3): `Operation.error`
+// FAILED_PRECONDITION, когда тип снят между синхронной проверкой и записью.
+func targetTypeNotLiveTxMsg(typ string) string {
+	return fmt.Sprintf("target type %s is not a live entry of the platform resource catalog; grantable types are published by %s",
+		typ, domain.CatalogEndpoint)
+}
+
+// refuseNonLiveTargetType — синхронная половина проверки цели (Р2): первый в
+// порядке перечня тип без живой строки в СНИМКЕ каталога → INVALID_ARGUMENT,
+// текст Т1. Снимок отстаёт от базы на окно обновления (П5), поэтому эта
+// половина не последняя: транзакция записи спрашивает строку каталога ещё раз
+// (`doCreate`).
+func (u *CreateAccessBindingUseCase) refuseNonLiveTargetType(t domain.AccessTarget) error {
+	var facts domain.TargetTypeCatalog
+	if u.cat != nil {
+		if f := u.cat.Facts(); f != nil {
+			facts = f
+		}
+	}
+	if typ, bad := t.FirstNonLiveType(facts); bad {
+		return status.Error(codes.InvalidArgument, targetTypeNotLiveSyncMsg(typ))
+	}
+	return nil
 }
 
 // WithRegisteredKeys — чтение регистрации объектов цели на приёме (kaname#963,
@@ -146,6 +190,14 @@ func (u *CreateAccessBindingUseCase) WithRelationStore(relations clients.Relatio
 }
 
 func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.AccessBinding) (*operations.Operation, error) {
+	// Тип пообъектной цели — ПЕРВЫМ оператором, как он судился на входе ручки до
+	// kaname#904: порядок относительно права выдавать и аутентификации не
+	// меняется (Р2). Перечень живых типов публичен (`GET /iam/v1/permissionCatalog`),
+	// поэтому отказ до права выдавать не сообщает ничего, чего вызывающий не мог
+	// бы прочесть.
+	if err := u.refuseNonLiveTargetType(b.Target); err != nil {
+		return nil, err
+	}
 	// AccessBinding.Create grant-authority model.
 	//
 	// Grant authority follows from the GRANT SCOPE, not identity equality:
@@ -263,8 +315,8 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	abID := ids.NewID(domain.PrefixAccessBinding)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
-		fmt.Sprintf("Create access binding (%s/%s → %s on %s/%s)",
-			b.SubjectType, b.SubjectID, b.RoleID, b.ResourceType, b.ResourceID),
+		fmt.Sprintf("Create access binding (%s → %s on %s/%s)",
+			subjectsLabel(b.Subjects), b.RoleID, b.ResourceType, b.ResourceID),
 		// account_id NARROW-SCOPE: stamped only for account-scoped bindings
 		// (ResourceType=="account" → ResourceID); project/cluster/cross-service
 		// bindings leave it empty (SQL NULL → not in the account-scoped list,
@@ -301,7 +353,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 				if u.logger != nil {
 					u.logger.Error("access_binding create operation panicked",
 						"op", op.ID, "panic", fmt.Sprint(r),
-						"subject", b.SubjectType, "subject_id", b.SubjectID,
+						"subjects", subjectsLabel(b.Subjects),
 						"role", b.RoleID, "resource", string(b.ResourceType)+":"+b.ResourceID)
 				}
 			}
@@ -310,7 +362,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 		if derr != nil && u.logger != nil {
 			u.logger.Error("access_binding create operation failed",
 				"op", op.ID, "err", derr,
-				"subject", b.SubjectType, "subject_id", b.SubjectID,
+				"subjects", subjectsLabel(b.Subjects),
 				"role", b.RoleID, "resource", string(b.ResourceType)+":"+b.ResourceID)
 		}
 		return res, derr
@@ -329,6 +381,22 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 			_ = w.Rollback(ctx)
 		}
 	}()
+	// Вторая половина проверки цели (Р2) — В ЭТОЙ транзакции и ПЕРВЫМ её
+	// оператором: строки каталога типов цели читаются под замком, согласованным с
+	// применением манифеста (применитель держит `FOR UPDATE` на строках ресурсов
+	// модуля, `catalogWriter.LockModuleResources`). Снятие, зафиксированное до
+	// записи, даёт FAILED_PRECONDITION (Т2) и строки выдачи нет; снятие, начатое
+	// и не зафиксированное, запись дожидается и судит по его исходу. Первым —
+	// чтобы транзакция ждала применителя, ничего не держа сама.
+	if types := b.Target.DistinctTypes(); len(types) > 0 {
+		live, lerr := w.AccessBindingsW().LockLiveTargetTypes(ctx, types)
+		if lerr != nil {
+			return nil, shared.MapRepoErr(lerr)
+		}
+		if typ, bad := b.Target.FirstNonLiveType(newLiveTypeSet(live)); bad {
+			return nil, status.Error(codes.FailedPrecondition, targetTypeNotLiveTxMsg(typ))
+		}
+	}
 	// Read the role inside the writer-tx (the writer also satisfies the Reader
 	// interface) BEFORE the binding INSERT for the permission-based FGA mapping
 	// below. The structural gates (role-scope IsRoleAssignable, RoleCoversType) are
@@ -505,4 +573,35 @@ func (u *CreateAccessBindingUseCase) reconcileNewBindingObject(ctx context.Conte
 		u.logger.Error("access_binding create: object forward reconcile failed (event/sweep will retry)",
 			"binding_id", string(bindingID), "err", rerr)
 	}
+}
+
+// liveTypeSet — множество типов, чьи живые строки транзакция записи прочла под
+// замком; реализует `domain.TargetTypeCatalog` для того же вопроса
+// «первый неживой тип», что задаёт синхронная половина.
+type liveTypeSet map[string]struct{}
+
+func newLiveTypeSet(live []string) liveTypeSet {
+	out := make(liveTypeSet, len(live))
+	for _, ty := range live {
+		out[ty] = struct{}{}
+	}
+	return out
+}
+
+// FGAObjectType реализует domain.TargetTypeCatalog: ok — тип среди прочитанных
+// живых. Имя типа модели этой половине не нужно и не отдаётся.
+func (s liveTypeSet) FGAObjectType(dotted string) (string, bool) {
+	_, ok := s[dotted]
+	return "", ok
+}
+
+// subjectsLabel — весь набор субъектов выдачи одной строкой «тип/id, тип/id»:
+// описание операции и журнал называют КАЖДОГО субъекта, а не проекцию первого
+// (kaname#917). У выдачи одному субъекту строка та же, что давала пара.
+func subjectsLabel(subjects []domain.Subject) string {
+	parts := make([]string, len(subjects))
+	for i, s := range subjects {
+		parts[i] = string(s.Type) + "/" + string(s.ID)
+	}
+	return strings.Join(parts, ", ")
 }

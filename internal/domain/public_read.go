@@ -63,9 +63,30 @@ func (c PublicReadContainer) CoveredChild(rules Rules) (string, bool) {
 	return "", false
 }
 
-// publicReadVerbsOfChild — глаголы, которые публичное чтение открывает на детях
-// контейнера: `public_reader from <указатель>` стоит и в `v_get`, и в `v_list`.
+// publicReadVerbsOfChild — действия, которых касается публичное чтение: метаданные
+// объекта и перечень (Р9 п. 2). Ключ контейнера ставит класс в их отношения у
+// контейнера и `public_reader from <указатель>` — у детей; пишущие действия ключ
+// не трогает (Р9 п. 3).
+//
+// Объявлено ОДИН раз (kaname#866, CE-03): набор читают рендер блока (какие
+// отношения несут следствия ключа), загрузчик манифеста (Р2: класс в составе
+// этих действий у ресурса с ключом) и ворота выдачи ([readsWhole]). Прежде у
+// рендера была своя копия, и два написания расходились бы молча. Имя осталось
+// прежним («детей»), потому что на него ссылается запись замера приёмки
+// nested-rule-reaches-descendants-of-a-named-container.md.
 var publicReadVerbsOfChild = []string{"get", "list"}
+
+// IsPublicReadVerb — действие с этим именем касается публичное чтение
+// ([publicReadVerbsOfChild]). Имя сравнивается в нормальной форме ([NormalizeVerb]).
+func IsPublicReadVerb(verb string) bool {
+	v := NormalizeVerb(verb)
+	for _, c := range publicReadVerbsOfChild {
+		if v == c {
+			return true
+		}
+	}
+	return false
+}
 
 // readsWhole — ЕДИНСТВЕННЫЙ предикат «правило открывает чтение типа целиком»:
 // правило не сужено (вид — якорь, без имён и меток) и даёт ВСЕ глаголы, которые

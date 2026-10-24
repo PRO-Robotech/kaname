@@ -1,0 +1,194 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md
+  sha256: 6339dc63581b67fe2ba326199328faba5cd7df31f1703c33a7e781c635c9d63d
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 892853c457efb6362f2eed315a4a6502d8b34293
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status --short` → `?? docs/engineering/acceptance/…`,
+    `?? docs/specs/reviews/…`); отпечаток снят с рабочего файла. Копия — отсоединённая голова
+    892853c45 (голова ветки службы 746).
+  branch: '746'
+  task: PRO-Robotech/kaname#865
+  related_tasks: [PRO-Robotech/kaname#856]
+  lines: 959
+  round: 2
+  round_scope: >-
+    Второй и последний круг (`flow-acceleration.md#fa-b8-acceptance-two-rounds`). Судится снятие
+    блокирующих B1–B4 и важных m1–m5 круга 1 предикатом, плюс новое, внесённое правкой (Д1
+    «только десятичная запись», Д4 старшинство, Д9 скаляр «тег текст», сценарии 865-32, 865-33,
+    обозначения `Q`, `E`). Решения диспетчера 2026-10-18 и по вопросу редакции 2 не переоткрыты.
+  predecessor_record: >-
+    docs/specs/reviews/module-manifest-revision-only-moves-forward/b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3.yaml
+    (круг 1, CHANGES_REQUESTED; не тронута)
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md
+    в копии kacho-workspace/tmp/kn-865-acc @ 892853c45 → 6339dc63…c9d63d (совпадает с
+    названным автором)
+  measurement_revisions: >-
+    Код — рабочее дерево копии на 892853c45 (изменены только файлы приёмки и записей ревью).
+    Пробы — `go test -overlay` временными файлами из scratchpad (r865/zz_review865c_test.go,
+    zz_review865d_test.go), пакет internal/manifest; `git status --short | wc -l` до и после → 2.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-18T19:42:12Z'
+
+summary:
+  scenarios_total: 33
+  scenarios_s1: 29
+  scenarios_s2: 4
+  producer_rows: 33
+  scenarios_without_producer: 0
+  negatives_with_twin: all
+  blocking: 0
+  blocking_kinds: []
+
+prior_blocking_closed:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    outcome: closed
+    predicate: >-
+      overlay @892853c45: `Q(·, ·, t)` (фикстура + раздел roles, id probemod.viewer) — Load без
+      ошибки на всех 11 значениях t; `E` (фикстура + `roles: []`) — Load без ошибки.
+      `grep -n probemod-viewer <документ>` → пусто. Снятие роли пустым объявленным разделом —
+      прочитано internal/apps/kaname/moduleroles/retire.go:94 (`!m.RolesDeclared()` → не снимать;
+      объявлен — сверка Reconcile).
+  - id: B2
+    kind: NEGATIVE
+    outcome: closed
+    predicate: >-
+      overlay: каноническая форма по Д9 (тег ShortTag, пробел, Node.Value; ключи по UTF-16;
+      псевдоним раскрыт) — D(Q(5,true,16)) ≠ D(Q(5,true,0x10)), а Load читает описания "16" и
+      "0x10"; сценарий 865-32 с близнецом `Reformatted` есть.
+  - id: B3
+    kind: COVERAGE
+    outcome: closed
+    predicate: >-
+      overlay: для t = .nan, .inf, -.inf, 1.0, 2001-12-14, true, !!binary aGk=, !foo bar Load
+      принимает, форма содержит `"description":"!!float .nan"` … `"!!binary aGk="`, `"!foo bar"`
+      — ровно подстроки 865-26 п.6; чисел в форме нет.
+  - id: B4
+    kind: PRODUCER
+    outcome: closed
+    predicate: >-
+      overlay: ShortTag значения revision: 1.5, 5.0, 1e3 → !!float; 5, 010, 0o10, 0x10, +5,
+      1_000, 0b10, -0, 9223372036854775808 → !!int; ~ и пусто → !!null; !!str 5 → !!str.
+      Производитель отказа на нецелое — проверка тега P13 (Д1, §5 строка 865-17) — тег различает
+      все отрицания 865-17.
+  - {id: m1, outcome: closed, predicate: "cmd/kaname/module_roles_apply_integration_test.go:129 — TestIAM2010_BootPathWritesARoleDeclaredOnlyByTheDeliveredManifest (§5, вступление)"}
+  - {id: m2, outcome: closed, predicate: "865-11…16, 19, 27…29, 32 утверждают gRPC-код и присутствие; §2 п.8 выводит REST-форму из предмета"}
+  - {id: m3, outcome: closed, predicate: "Д4 старшинство; 865-33 с близнецом; planStates содержит IAM-MA-1-02 и IAM-MA-1-36 (plan_verdict_test.go:335, :340); поля beyond_anchor_extra/missing, withdrawn_rows — internal_module_service.proto:344, :349, :364; DoD S1 п.4 правит комментарий :219–226"}
+  - {id: m4, outcome: closed, predicate: "Д3 последний абзац и §2 п.4 называют serve.go:300 и страж паритета"}
+  - {id: m5, outcome: closed, predicate: "снято правкой B2: `!!timestamp 2001-12-14` в форме — overlay"}
+
+new_blocking_from_edit: none
+
+minor:
+  - id: n1
+    kind: COVERAGE
+    note: >-
+      Д1 определяет исход и для записей, которых нет в списке 865-17: `0o10`, `0b10`, `1_000`,
+      `-0` (тег !!int, запись не десятичная → текст положительности) и `revision: ~` / пустое
+      значение (тег !!null → ErrShape). Измерено overlay. Правило их определяет однозначно;
+      рекомендую вписать в unit-пробу 865-17 строками таблицы, чтобы реализация, сверяющая
+      запись регулярным выражением «без 0x», не прошла молча.
+  - id: n2
+    kind: FORMAT
+    note: >-
+      Тег КОЛЛЕКЦИИ в каноническую форму не входит (отображение → объект, последовательность →
+      массив) — это следует из правил Д9, но не названо словами. Ложного совпадения нет:
+      overlay — `!!null`/`!foo` на последовательности roles, resources, verbs, `!!null`/`!!str`/
+      `!foo` на элементе-отображении и `--- !!null` на документе: Load принимает и читает то же,
+      отпечаток равен; `!!null` на отображении в указатель (`tier`) Load отвергает. Стоит одной
+      фразой назвать это в Д9 тем же изменением, что и реализацию P15.
+  - id: n3
+    kind: FORMAT
+    note: >-
+      Близнец 865-24 (`Q(5, true)` против отрицания `E(5, false)`) различается фактом «доставлен
+      ровно применённый документ», а не одной строкой: раздел roles и признак меняются вместе.
+      Выбор оправдан — пустой раздел roles служит наблюдателем «модуль не применён по частям»;
+      держателю стоит назвать это в шапке пробы.
+
+premise:
+  outcome: confirmed
+  commands:
+    - "sha256sum <документ> → 6339dc63…c9d63d"
+    - "printf '%s' '{\"a\":\"!!str x\",\"b\":[\"!!int 2\",\"!!int 1\"]}' | sha256sum → 0d437a49…f1767 (опорное значение Д9); тот же отпечаток — обходом дерева yaml.v3 в overlay"
+    - "git show 892853c45:docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md | sha256sum → 32a0bc40…1825d (опора 865-33 совпала)"
+    - "grep -c ') Has[A-Z]' pkg/api/kaname/cloud/iam/v1/internal_module_service.pb.go → 0"
+
+checked_and_passed:
+  - "Производитель у «Тогда»: grep -c '^**ID:**' → 33; grep -c '^| 865-' → 33; множества ID совпадают (diff пуст)"
+  - "Близнецы: у каждого отрицания назван (865-17 — по одному на запись; 865-32 — Reformatted; 865-33 — состояние IAM-MA-1-02)"
+  - "865-26 п.1–3, 2а: равенства (3 из 3), псевдоним (1), различия (4 из 4), `a: 5` против `a: \"5\"` — различны — overlay"
+  - "DoD S1 п.2 включает 865-24…865-33; S2 п.2 — снятие 865-09/19 и сохранность 865-24…33"
+  - "Новое правило Д1 (только десятичная запись) — выбор автора внутри предмета, сужает вход, отказ назван текстом Д7; производитель — P13"
+  - "Поверхность: только InternalModuleService на :9091, новых методов нет (ban #6); newman не нужен (DoD S1 п.7)"
+
+constructibility:
+  method: >-
+    go test -overlay с временными файлами вне дерева, пакет internal/manifest, @892853c45,
+    TestReview865c и TestReview865d — PASS.
+  seeded: 7
+  of: 11
+  red: 0
+  green_items:
+    - "Q(·,·,t) для 11 t: Load без ошибки, описания и формы — как §0.1 и 865-26 п.6"
+    - "E: Load без ошибки"
+    - "опорное значение Д9 обходом дерева"
+    - "865-26 п.2, 2а, 3"
+    - "865-32: D(Q16) ≠ D(Q0x10)"
+    - "теги значений revision для 865-17"
+    - "теги коллекций — ложного совпадения нет"
+  not_executed: 4
+  not_executed_items:
+    - "catalogPool + применитель (865-01…06, 09, 10, 25, 29, 31) — testcontainers, нужен тяжёлый слот; шаг ограничен 60 с; производители прочитаны в круге 1"
+    - "последовательность старта cmd/kaname (865-07, 08, 24) — то же; образец прочитан (:129)"
+    - "use-case Plan/Apply/Get (865-11…16, 19, 27, 28, 32) — то же"
+    - "миграционные CHECK (865-18, 30) и unit 865-33 над planStates — миграции ещё нет; состояния planStates прочитаны (:279, :335, :340)"
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+
+event_body: "acceptance-reviewer · APPROVED · sha256 6339dc63581b67fe2ba326199328faba5cd7df31f1703c33a7e781c635c9d63d"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#865
+  status: performed
+  published: true
+  database_id: 6259785911
+  node_id: "IC_kwDOUO26pM8AAAABdRzAtw"
+  url: "https://github.com/PRO-Robotech/kaname/issues/865#issuecomment-6259785911"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6259785911"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-19T04:38:52Z"
+  body_sha256: "839f411b7755a1acd30ad920a34644386acee562a796b94e5c523d6edddb1dec"
+  subject_sha256: "6339dc63581b67fe2ba326199328faba5cd7df31f1703c33a7e781c635c9d63d"
+  subject_revision_commit: "e121f192082b6fce70682bbe268f8157dd642866"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3.yaml

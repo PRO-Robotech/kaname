@@ -253,8 +253,6 @@ go test -short -count=1 -timeout 60s \
   существует (`grep -rni retention` — ноль), строки живут, пока их кто-нибудь не
   удалит. Это открытый долг, а не поведение; audit-trail при этом живёт отдельно
   в `audit_outbox`.
-- **Anonymous bootstrap path** — при первом `UpsertFromIdentity` у Account
-  еще нет owner'а, principal = `('system','bootstrap','kaname-bootstrap')`.
 
 ## Связанные компоненты
 

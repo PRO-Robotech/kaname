@@ -159,18 +159,17 @@ func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx ser
 }
 
 // revokeEmittedOf снимает выпущенное выдачей так же, как отзыв глаголом
-// (revoke.go): по реестру выпущенного, за вычетом кортежей, которые держит
-// другая действующая выдача, — в той же транзакции.
+// (revoke.go): строки снятия — на ВЕСЬ реестр выпущенного, в той же транзакции.
+// Выдача к этому моменту уже REVOKED (RevokeForUnregistered), поэтому свой реестр её
+// факт не держит; общий кортеж, который держит другая действующая выдача, свёртка
+// строки снятия оставляет — вопрос о держателях она задаёт под замком строки факта
+// (kaname#919).
 func revokeEmittedOf(ctx context.Context, w Writer, id domain.AccessBindingID) error {
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
 		return fmt.Errorf("select emitted tuples: %w", err)
 	}
-	remove, _, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
-	if err != nil {
-		return fmt.Errorf("partition revoke set: %w", err)
-	}
-	return w.AccessBindingsW().EmitRelationDelete(ctx, remove)
+	return w.AccessBindingsW().EmitRelationDelete(ctx, stored)
 }
 
 // withoutTargetKey — объекты цели без ключа, в прежнем порядке (Р1 (б)).

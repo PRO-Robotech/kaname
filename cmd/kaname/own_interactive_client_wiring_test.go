@@ -163,7 +163,10 @@ func TestCompositionRoot_OwnClientSecretIsHashedInTheSignInLaneClass(t *testing.
 	if err != nil || !meets {
 		t.Fatalf("проверочное значение не отвечает объявленному классу полосы входа: отвечает=%t, %v", meets, err)
 	}
-	got := checker.Verify(pc.SecretVerifier, "x")
+	got, err := checker.Verify(t.Context(), pc.SecretVerifier, "x")
+	if err != nil {
+		t.Fatalf("сверка проверочного значения не состоялась: %v", err)
+	}
 	for param, want := range declared.Params {
 		if got.Params[param] != want {
 			t.Errorf("параметр %s проверочного значения = %d, у объявленного класса приманки — %d",

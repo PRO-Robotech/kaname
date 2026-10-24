@@ -285,6 +285,13 @@ func (w *rlRoleWtr) UpsertSystemRole(context.Context, domain.Role) (domain.Role,
 	return domain.Role{}, false, errors.New("дублёр системную роль не пишет")
 }
 
+// LockOwnerModule — замок строки модуля транзакции ролей модуля (kaname#913).
+// Путь этих проб к ролям модуля не ведёт; отказ, а не «взято», по тому же
+// доводу, что у UpsertSystemRole.
+func (w *rlRoleWtr) LockOwnerModule(context.Context, string) error {
+	return errors.New("дублёр строку модуля не берёт")
+}
+
 func (w *rlRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
 	return nil
 }

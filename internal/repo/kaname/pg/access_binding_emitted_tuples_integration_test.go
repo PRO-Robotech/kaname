@@ -292,7 +292,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 	}
 	adapter := kanamepg.NewReconcileAdapter(pool, catalogfixture.Source())
 	require.NoError(t, adapter.WithTx(ctx, func(ctx context.Context, s reconcileapp.ReconcileStore) error {
-		return s.RecordEmittedTuples(ctx, ab.ID, memberTuples)
+		return s.RecordEmittedTuples(ctx, ab.ID, reconcileapp.MemberCoord{ObjectType: "vpc.subnet", ObjectID: "sub-emsrc"}, memberTuples)
 	}))
 	require.Equal(t, len(bindingLevel)+len(memberTuples), emittedTuplesCount(t, ctx, pool, ab.ID),
 		"precondition: ledger holds both binding-level and member tuples")

@@ -180,6 +180,11 @@ var (
 	// ErrPublicReaderShadowed — авторское отношение занимает имя, которое
 	// порождает ключ публичного чтения: два объявления одного отношения.
 	ErrPublicReaderShadowed = errors.New("manifest: authored relation shadows the generated public reader relation")
+	// ErrPublicReadClassInReadVerb — действие чтения ресурса с ключом публичного
+	// чтения называет класс в составе субъектов: класс туда вписывает сам ключ, и
+	// блок с такой записью побайтово равен блоку из одного ключа (kaname#866, Р2) —
+	// два объявления одного следствия, которые допуск различить не может.
+	ErrPublicReadClassInReadVerb = errors.New("manifest: a read verb of a public read container names a subject class the key already brings")
 )
 
 // canonicalVerbClasses — ЕДИНСТВЕННОЕ в дереве объявление правила «класс из
@@ -1250,6 +1255,42 @@ func validateResourcePublicRead(m *Manifest, r *Resource, doc *yaml.Node, i int)
 				"publicReadToChildren того же ресурса — два объявления одного отношения, "+
 				"из которых верно одно", i, k, rel.Name),
 		})
+	}
+	return append(faults, readVerbClassFaults(r, doc, i)...)
+}
+
+// readVerbClassFaults — класс субъекта в составе действия чтения ресурса С ключом
+// (kaname#866, приёмка public-read-container-of-a-module-type-is-admitted.md, Р2,
+// PM-06).
+//
+// Ключ сам ставит класс первым в отношения действий чтения контейнера. Класс,
+// названный ещё и в составе действия, даёт ТОТ ЖЕ блок побайтово, поэтому допуск
+// собранной модели второе объявление отличить не может — и судит его загрузка.
+// Ловятся все написания класса ([domain.IsClassSubjectWord], `user:*` в том
+// числе), находка — одна на действие, и копятся все действия.
+//
+// На ребёнка правило не распространяется: ключ ребёнку класса не пишет, его блок
+// с такой записью отличается от блока из ключа по тексту, и отказ у него — один,
+// от допуска (Р2, PM-10).
+func readVerbClassFaults(r *Resource, doc *yaml.Node, i int) []error {
+	var faults []error
+	for j, v := range r.Verbs {
+		if !domain.IsPublicReadVerb(v.Name) {
+			continue
+		}
+		for _, word := range v.Subjects {
+			if !domain.IsClassSubjectWord(word) {
+				continue
+			}
+			faults = append(faults, linkFault{
+				kind:  ErrPublicReadClassInReadVerb,
+				coord: locate(doc, "resources", i, "verbs", j, "subjects"),
+				detail: fmt.Sprintf("resources[%d].verbs[%d].subjects: класс субъекта в действии %s "+
+					"ресурса с ключом publicReadToChildren вносит сам ключ — два объявления одного "+
+					"следствия, из которых верно одно", i, j, v.Name),
+			})
+			break
+		}
 	}
 	return faults
 }

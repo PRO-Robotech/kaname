@@ -32,6 +32,11 @@ type fakeStore struct {
 	calls int // вызовов писателя строки
 	// retired — идентификаторы снятых ролей в порядке снятия (kacho#1913).
 	retired []domain.RoleID
+	// locked — модули, чья строка взята замком, в порядке взятия;
+	// writesBeforeLock — сколько записей строки роли предшествовало каждому
+	// взятию (kaname#913).
+	locked           []string
+	writesBeforeLock []int
 }
 
 func newStore() *fakeStore {
@@ -84,6 +89,14 @@ func mustEncode(rs domain.Rules) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// LockOwnerModule — замок строки модуля: дублёр записывает, какой модуль и
+// сколько записей писателя ему предшествовало.
+func (s *fakeStore) LockOwnerModule(_ context.Context, module string) error {
+	s.locked = append(s.locked, module)
+	s.writesBeforeLock = append(s.writesBeforeLock, s.calls)
+	return nil
 }
 
 func (s *fakeStore) ReplaceRuleRefs(_ context.Context, id domain.RoleID, refs []domain.RoleRuleRef) error {
@@ -320,4 +333,28 @@ func (s *fakeStore) ReviveRole(_ context.Context, id domain.RoleID) (bool, error
 	r.Lifecycle = domain.RoleLifecycle{State: domain.RoleLifecycleDeclared}
 	s.rows[id] = r
 	return true, nil
+}
+
+// TestApplierLocksTheOwnerModuleRowBeforeAnyRoleWrite — kaname#913: транзакция
+// ролей модуля берёт строку модуля ПЕРВОЙ — до первой записи строки роли, и
+// ровно один раз. Порядок «модуль → ресурсы» против применителя каталога
+// исполнением утверждает
+// `catalog_applier_module_role_lock_order_integration_test.go`; здесь — что
+// применитель вообще просит замок и просит его раньше записи.
+func TestApplierLocksTheOwnerModuleRowBeforeAnyRoleWrite(t *testing.T) {
+	store := newStore()
+	if _, err := applierUnderTest(t, store).Apply(context.Background(),
+		vpcManifest(t, "vpc.network.admin", "get"), moduleroles.BootActorID); err != nil {
+		t.Fatalf("применение отвергнуто: %v", err)
+	}
+	if len(store.locked) != 1 || store.locked[0] != "vpc" {
+		t.Fatalf("строка модуля взята %v, а не один раз строка модуля vpc", store.locked)
+	}
+	if store.writesBeforeLock[0] != 0 {
+		t.Fatalf("замку строки модуля предшествовало записей строки роли: %d — строки ресурсов "+
+			"транзакция ролей могла взять раньше строки модуля", store.writesBeforeLock[0])
+	}
+	if store.calls == 0 {
+		t.Fatal("ПРЕДПОСЫЛКА: применитель не записал ни одной роли — порядок судить не о чем")
+	}
 }

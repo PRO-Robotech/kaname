@@ -921,13 +921,31 @@ func TestAdmitSeedingRuleWildcardReachableOnlyViaDeadRelation(t *testing.T) {
 		t.Fatalf("план обязан быть выразим: err=%v expressible=%v", err, p.Expressible())
 	}
 
+	// Утверждается МНОЖЕСТВО находок по паре (семя, путь), а не элемент по
+	// индексу: с третьим ребром внутри нового типа и находкой на семени
+	// (kaname#866, приёмка public-read-container-of-a-module-type-is-admitted.md,
+	// PM-11) находок две, и порядок их — свойство обхода, а не предмета.
 	rep := mustAdmit(t, composed)
-	if r := rules(rep); len(r) != 1 || r[0] != string(RuleD3) {
-		t.Fatalf("вход правила посева обязан поднимать РОВНО Д3, получено %v", r)
+	for _, r := range rules(rep) {
+		if r != string(RuleD3) {
+			t.Fatalf("вход правила посева обязан поднимать только Д3, получено %v", rules(rep))
+		}
 	}
-	got := findingsOf(rep, RuleD3)[0]
-	if !strings.Contains(got.Text, "acme_widget.hidden → cluster.viewer") {
-		t.Fatalf("находка обязана называть путь через МЁРТВОЕ отношение, получено %q", got.Text)
+	want := map[string]string{
+		"acme_widget.hidden": "acme_widget.hidden → cluster.viewer",
+		"acme_widget.v_get":  "acme_widget.v_get → acme_widget.hidden → cluster.viewer",
+	}
+	got := map[string]string{}
+	for _, f := range findingsOf(rep, RuleD3) {
+		got[f.Type+"."+f.Relation] = f.Text
+	}
+	if len(got) != len(want) || len(findingsOf(rep, RuleD3)) != len(want) {
+		t.Fatalf("находок Д3 обязано быть %d (по одной на семя), получено %v", len(want), rep.Findings)
+	}
+	for seed, path := range want {
+		if !strings.Contains(got[seed], path) {
+			t.Fatalf("находка на семени %s обязана называть путь %q, получено %q", seed, path, got[seed])
+		}
 	}
 }
 

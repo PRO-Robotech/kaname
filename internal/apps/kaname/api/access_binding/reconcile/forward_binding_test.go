@@ -36,7 +36,7 @@ import (
 // create-forward materializes the binding's desired ACTIVE members + per-object tuples and
 // takes NO EXCLUSIVE advisory lock (f.locks stays 0), only the SHARE lock
 // (f.locks==0) — и НИКАКОЙ другой: с 2026-08-05 форвард не берёт advisory вовсе, поэтому
-// проверяется отсутствие блокировки плюс факт прохода (f.keySharedLoads>=1). This is
+// проверяется отсутствие блокировки плюс факт прохода (f.keyShareLoads>=1). This is
 // the throughput-critical property: SHARE ∥ SHARE do not conflict, so a burst of
 // concurrent binding-creates never serializes on the full path's EXCLUSIVE lock.
 //
@@ -69,7 +69,8 @@ func TestReconcileBindingForward_MaterializesDesired_NoExclusiveLock(t *testing.
 	// NO EXCLUSIVE advisory lock — the additive create-forward removes the serialization
 	// point; it takes only the SHARE lock (coexists with sibling create-forwards).
 	assert.Equal(t, 0, f.locks, "create-forward must NOT take the EXCLUSIVE advisory lock (throughput)")
-	assert.GreaterOrEqual(t, f.keySharedLoads, 1, "create-forward прошёл аддитивным путём: выдача прочитана под FOR KEY SHARE, не FOR UPDATE")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "create-forward прошёл аддитивным путём (чтение форварда)")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "форвард создания читает выдачу чтением форварда (FOR KEY SHARE, без advisory-замка)")
 
 	// The desired ACTIVE member is materialized additively.
 	require.Len(t, f.upserts, 1, "the in-scope object is materialized")
@@ -122,7 +123,7 @@ func TestReconcileBindingForward_ForeignScope_SkipsNoTuple(t *testing.T) {
 	assert.Empty(t, allWrites(f), "foreign-scope object gets NO tuple")
 	assert.Empty(t, f.audits, "create-forward defers the containment audit to the async FULL backstop")
 	assert.Equal(t, 0, f.locks, "still no EXCLUSIVE advisory lock")
-	assert.GreaterOrEqual(t, f.keySharedLoads, 1, "свежий биндинг материализуется аддитивным путём (чтение под FOR KEY SHARE)")
+	assert.GreaterOrEqual(t, f.keyShareLoads, 1, "свежий биндинг материализуется аддитивным путём (чтение форварда)")
 }
 
 // TestReconcileBindingForward_ExistingMembers_DelegatesToFull (IAM-FMB-10 unit) — the
@@ -157,20 +158,20 @@ func TestReconcileBindingForward_ExistingMembers_DelegatesToFull(t *testing.T) {
 		current: []domain.TargetMember{
 			{BindingID: "acb-1", RuleFP: fp, ObjectType: "compute.instance", ObjectID: "i-flip", VerificationStatus: domain.VerificationActive},
 		},
-		ledger: []domain.MembershipTuple{
-			{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-flip"},
-			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
-		},
+		ledger: memberLedger("compute.instance",
+			domain.MembershipTuple{User: "user:usr-1", Relation: "v_get", Object: "compute_instance:i-flip"},
+			domain.MembershipTuple{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
+		),
 	}
 	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-1"))
 
 	// Routed to the FULL path: EXCLUSIVE advisory lock taken (delete-stale serialization);
-	// аддитивный путь НЕ исполнялся — его собственное чтение биндинга (под FOR KEY SHARE) не
+	// аддитивный путь НЕ исполнялся — его собственное чтение биндинга (чтение форварда) не
 	// случилось. Прежде это утверждалось счётчиком SHARE-блокировки, которой у форварда
 	// больше нет: счётчик стал тождественно нулевым, то есть проверкой, не способной упасть.
 	assert.Greater(t, f.locks, 0, "existing-members binding must route to the FULL ReconcileBinding (EXCLUSIVE lock, delete-stale)")
-	assert.Equal(t, 0, f.keySharedLoads, "аддитивный форвард не исполняется для биндинга с уже материализованными членами")
+	assert.Equal(t, 0, f.keyShareLoads, "аддитивный форвард не исполняется для биндинга с уже материализованными членами")
 
 	// The now-unmatched grant is REVOKED (the revoke additive-forward could never do).
 	var revoked []domain.MembershipTuple

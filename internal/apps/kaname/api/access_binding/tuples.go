@@ -8,13 +8,13 @@ package access_binding
 // Permission-based mapping collapses the previous name-based mappers
 // (`roleNameToRelation`, `resolveBindingRelation`, `resolveRelationFromRepo`)
 // into a single permission-based mapper `authzmap.PermissionsToRelations` and
-// a single tuple-builder `tuplesForBinding(b, []Relation)`.
+// a single tuple-builder `tuplesForBinding(b, subject, []Relation)`.
 //
 // Emit path:
 //
 //  1. Read role (via Writer-tx reader-side or pre-loaded role).
 //  2. relations := authzmap.PermissionsToRelations(role.Permissions)
-//  3. tuples := tuplesForBinding(binding, relations)
+//  3. tuples := tuplesForBinding(binding, subject, relations) — per subject of the set
 //  4. w.AccessBindingsW().EmitRelationWrite(ctx, tuples)         // grant
 //     -- OR --
 //     w.AccessBindingsW().EmitRelationDelete(ctx, tuples)        // revoke (symmetric)
@@ -70,7 +70,7 @@ func dedupeTuples(tuples []abrepo.RelationTuple) []abrepo.RelationTuple {
 	return out
 }
 
-func buildBindingTuples(b domain.AccessBinding, role domain.Role) []abrepo.RelationTuple {
+func buildBindingTuples(b domain.AccessBinding, subject domain.Subject, role domain.Role) []abrepo.RelationTuple {
 	// RBAC explicit-model 2026 P4 (D-4 / КФ-3): the binding-time scope_grant emission
 	// path is REMOVED WHOLESALE. A RULES-role no longer emits per-rule scope_grant
 	// tuples at Create — the UNIFIED reconciler is the SINGLE materialization path
@@ -98,12 +98,13 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) []abrepo.Relat
 		permissions[i] = string(p)
 	}
 	relations := capSynthesizedAccountAdmin(b, permissions, authzmap.PermissionsToRelations(permissions))
-	return tuplesForBinding(b, relations)
+	return tuplesForBinding(b, subject, relations)
 }
 
 // buildSubjectsBindingTuples — кортежи уровня выдачи на КАЖДОГО субъекта
-// перечня `subjects`: buildBindingTuples берёт субъекта из одиночной пары строки
-// выдачи, поэтому зовётся на каждого с этой парой, выставленной в него.
+// перечня `subjects`: buildBindingTuples получает субъекта аргументом и
+// одиночной пары строки выдачи не читает (kaname#917 — построитель, читавший
+// пару, был тем местом, где выдача разворачивалась первому субъекту).
 // Указатель на родителя от субъекта не зависит и после объединения остаётся
 // один (dedupeTuples).
 //
@@ -113,11 +114,8 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) []abrepo.Relat
 // снимала бы кортежи субъектов со второго по N-й (kaname#880).
 func buildSubjectsBindingTuples(b domain.AccessBinding, subjects []domain.Subject, role domain.Role) []abrepo.RelationTuple {
 	var tuples []abrepo.RelationTuple
-	perSubject := b
 	for _, s := range subjects {
-		perSubject.SubjectType = s.Type
-		perSubject.SubjectID = s.ID
-		tuples = append(tuples, buildBindingTuples(perSubject, role)...)
+		tuples = append(tuples, buildBindingTuples(b, s, role)...)
 	}
 	return dedupeTuples(tuples)
 }
@@ -201,13 +199,13 @@ func capSynthesizedAccountAdmin(
 // iam.accessBinding, triggered by the create.go reconcile-event emit).
 //
 // Returns nil when the binding cannot be represented (empty resource_type).
-func tuplesForBinding(b domain.AccessBinding, relations []authzmap.Relation) []abrepo.RelationTuple {
+func tuplesForBinding(b domain.AccessBinding, subject domain.Subject, relations []authzmap.Relation) []abrepo.RelationTuple {
 	resType := strings.ToLower(string(b.ResourceType))
 	if resType == "" || len(relations) == 0 {
 		return nil
 	}
 
-	subject := domain.FGASubjectRef(string(b.SubjectType), string(b.SubjectID))
+	user := domain.FGASubjectRef(string(subject.Type), string(subject.ID))
 	object := fmt.Sprintf("%s:%s", resType, b.ResourceID)
 
 	// Cluster is the only scope where the *direct* relations on the FGA
@@ -226,7 +224,7 @@ func tuplesForBinding(b domain.AccessBinding, relations []authzmap.Relation) []a
 	out := make([]abrepo.RelationTuple, 0, len(relations)+1)
 	for _, rel := range relations {
 		out = append(out, abrepo.RelationTuple{
-			User:     subject,
+			User:     user,
 			Relation: string(rel),
 			Object:   object,
 		})

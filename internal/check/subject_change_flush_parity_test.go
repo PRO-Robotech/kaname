@@ -53,6 +53,11 @@ var subjectChangeProducerRoster = map[string]int{
 	"internal/apps/kaname/api/access_binding/create.go": 1,
 	"internal/apps/kaname/api/access_binding/delete.go": 1,
 	"internal/apps/kaname/api/access_binding/revoke.go": 1,
+	// Снятие выдачи сроком (kaname#920): строка той же формы, что у отзыва и
+	// удаления, на каждого субъекта. Самосброса у края здесь нет и не нужно:
+	// истечение — фоновый проход сведения, а не RPC, и реплики, обслужившей
+	// мутацию, у него нет; край узнаёт о снятии чтением очереди.
+	"internal/apps/kaname/api/access_binding/reconcile/reconcile.go": 1,
 	// Отзыв выдачи снятием регистрации объекта (kaname#963, приёмка
 	// unregistration-revokes-its-grants.md, Р1 (а)): строка на каждого субъекта
 	// отозванной выдачи, `op` = `binding_delete`. Мутацию обслуживает внутренний

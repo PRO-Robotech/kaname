@@ -3,41 +3,41 @@
 
 package pg
 
-// access_binding_repo.go — pgxpool-impl для access_binding.ReaderIface / WriterIface;
-// lifecycle state machine on access_bindings.status (PENDING → ACTIVE → REVOKED).
+// access_binding_repo.go — pgxpool-реализация access_binding.ReaderIface / WriterIface;
+// автомат жизненного цикла по access_bindings.status (PENDING → ACTIVE → REVOKED).
 //
-// Strict Insert:
+// Строгая вставка:
 //
-//   INSERT INTO kaname.access_bindings (...)
-//   VALUES ($newID, $st, $sid, $rid, $rt, $rid2, $status, $cond, $exp, $grb, $rva, $rvb, now())
-//   RETURNING id, ..., created_at;
+//   `INSERT INTO kaname.access_bindings (...)`
+//   `VALUES ($newID, $st, $sid, $rid, $rt, $rid2, $status, $cond, $exp, $grb, $rva, $rvb, now())`
+//   `RETURNING id, ..., created_at;`
 //
 // На дубле (subject_id, subject_type, role_id, resource_type, resource_id)
 // с revoked_at IS NULL — partial UNIQUE access_bindings_active_grant_uniq
 // (migration 0003) поднимает 23505 → mapErr → ErrAlreadyExists с verbatim
-// «these permissions are already granted to <subject_id> on <res_type>:<res_id>».
+// «`these permissions are already granted to <subject_id> on <res_type>:<res_id>`».
 // Прежний `ON CONFLICT DO UPDATE SET id = access_bindings.id` (silent
 // idempotent-upsert) удален — он маскировал реальный duplicate-grant и
 // засорял audit-чейн.
 //
-// Full column coverage (12 cols):
+// Полное покрытие столбцов (12):
 //   id, subject_type, subject_id, role_id, resource_type, resource_id,
-//   status (PENDING|ACTIVE|REVOKED — DEFAULT 'ACTIVE'),
-//   expires_at (nullable TTL), granted_by_user_id (audit),
-//   revoked_at (nullable), revoked_by_user_id (nullable), created_at.
+//   status (PENDING|ACTIVE|REVOKED — по умолчанию 'ACTIVE'),
+//   expires_at (срок, может отсутствовать), granted_by_user_id (аудит),
+//   revoked_at (может отсутствовать), revoked_by_user_id (может отсутствовать), created_at.
 //
-// State machine: PENDING → ACTIVE → REVOKED (terminal).
-// TransitionStatus(...) — single-statement CAS UPDATE WHERE status IN (expected);
-// 0 rows из RETURNING → ErrFailedPrecondition (no TOCTOU; within-service refs
-// must be enforced at the DB level).
+// Автомат: PENDING → ACTIVE → REVOKED (конечное).
+// TransitionStatus(...) — одним оператором CAS UPDATE WHERE status IN (ожидаемые);
+// 0 строк из RETURNING → ErrFailedPrecondition (без TOCTOU: ссылки внутри службы
+// держит база).
 //
-// Within-service refs — DB-level invariants:
-//   - UNIQUE access_bindings_active_grant_uniq (5-tuple WHERE revoked_at IS NULL)
-//     → 23505 → ErrAlreadyExists (verbatim text per idHint encoding).
+// Ссылки внутри службы — инварианты уровня базы:
+//   - UNIQUE access_bindings_active_grant_uniq (пятёрка при revoked_at IS NULL)
+//     → 23505 → ErrAlreadyExists (дословный текст по кодировке idHint).
 //   - FK access_bindings_role_fk → SQLSTATE 23503 → ErrFailedPrecondition.
 //   - CHECK access_bindings_status_ck — SQLSTATE 23514 → ErrInvalidArg.
-//   - CHECK access_bindings_revoked_consistency_ck — same.
-//   - subject_id/resource_id — soft-ref (нет FK; polymorphic + cross-DB).
+//   - CHECK access_bindings_revoked_consistency_ck — то же.
+//   - subject_id/resource_id — мягкая ссылка (нет FK; полиморфная и между базами).
 
 import (
 	"context"
@@ -57,17 +57,18 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 type abReader struct {
 	tx pgx.Tx
 }
 
-// abCols — access_bindings columns (RBAC v2 + scope + deletion_protection + F8
-// target). Порядок SELECT и RETURNING совпадает ПОСТРОЕНИЕМ: оба места
-// интерполируют эту константу, и разойтись им нечем. `target_digest` is
-// write-only (index key, computed on Insert) — NOT scanned, so it is
-// deliberately absent here.
+// abCols — столбцы access_bindings (RBAC v2 + область + deletion_protection + цель
+// F8). Порядок SELECT и RETURNING совпадает ПОСТРОЕНИЕМ: оба места
+// интерполируют эту константу, и разойтись им нечем. `target_digest` только
+// пишется (ключ индекса, вычисляется во Insert) и НЕ читается, поэтому его здесь
+// нет намеренно.
 //
 // Здесь стоял поимённый перечень глаголов, несущих RETURNING. Он разошёлся с
 // деревом в ОБЕ стороны: называл `DeleteGuarded`, который эту проекцию не
@@ -96,14 +97,14 @@ func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.A
 	return out, nil
 }
 
-// GetForNoKeyUpdate is Get with a `FOR NO KEY UPDATE` row-lock on the binding row.
-// The γ reconciler calls it as the FIRST statement of its FULL writer-tx
-// (LoadBinding) so two concurrent full passes of the SAME binding are serialized on
-// the row-lock: the second pass blocks until the first commits its membership diff,
-// then re-reads CurrentMembers seeing the already-ACTIVE member (no status change ⇒
-// idempotent skip) and emits ZERO duplicate fga_outbox tuples. This is a parent-row-
-// lock critical-section pattern. A missing row ⇒ ErrNotFound (the binding was deleted
-// — the reconciler then does nothing).
+// GetForNoKeyUpdate — Get с замком строки выдачи `FOR NO KEY UPDATE`.
+// Реконсайлер γ зовёт его ПЕРВЫМ оператором своей ПОЛНОЙ пишущей транзакции
+// (LoadBinding), и два одновременных полных прохода ОДНОЙ выдачи выстраиваются на
+// замке строки: второй ждёт, пока первый зафиксирует разницу членства, затем
+// перечитывает CurrentMembers, видит уже ACTIVE-члена (статус не меняется ⇒
+// идемпотентный пропуск) и не выпускает НИ ОДНОГО повторного кортежа fga_outbox.
+// Это критическая секция на замке родительской строки. Строки нет ⇒ ErrNotFound
+// (выдачу удалили — реконсайлер тогда ничего не делает).
 //
 // ПОЧЕМУ `FOR NO KEY UPDATE`, А НЕ `FOR UPDATE` — И ЧТО ЭТО НЕ ОСЛАБЛЯЕТ.
 //
@@ -138,15 +139,16 @@ func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindin
 	return r.getLocked(ctx, id, lockNoKeyUpdate)
 }
 
-// GetForKeyShare — строка выдачи под `FOR KEY SHARE` до конца транзакции
-// (kaname#963, F1). Им читает выдачу аддитивный проход материализации после
-// создания: режим конфликтует ТОЛЬКО с `FOR UPDATE`, которым отзыв по снятию
-// регистрации запирает выдачу (`UnregisteredKeyStore.ActiveBindingsNamingKey`),
-// и не конфликтует ни с `FOR NO KEY UPDATE` полного прохода, ни с `FOR KEY SHARE`
-// дочерних вставок. Проход поэтому не встаёт в очередь за фоновой работой, но и
-// не пишет член, реестр выпущенного и факт для выдачи, отзыв которой уже
-// прочитал реестр: либо отзыв ждёт фиксации прохода и снимает записанное, либо
-// проход ждёт фиксации отзыва и читает строку уже отозванной.
+// GetForKeyShare — строка выдачи под `FOR KEY SHARE` до конца транзакции: чтение
+// аддитивного форварда (reconcile LoadBindingForForward, kaname#919). Режим совместим
+// с `FOR NO KEY UPDATE` полного прохода и с `FOR KEY SHARE` дочерних вставок, а
+// конфликтует ТОЛЬКО с `FOR UPDATE` — замком снятия выдачи: истечения срока, отзыва и
+// удаления (getForUpdate, kaname#923) и отзыва по снятию регистрации
+// (`UnregisteredKeyStore.ActiveBindingsNamingKey`, kaname#963, F1). Форвард поэтому
+// не встаёт в очередь за фоновой работой, а решение «выдача жива» верно до его
+// коммита: либо снятие ждёт фиксации форварда и снимает записанное по реестру, либо
+// форвард ждёт фиксации снятия и читает строку уже отозванной. Строки нет ⇒
+// ErrNotFound.
 func (r *abReader) GetForKeyShare(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	return r.getLocked(ctx, id, lockKeyShare)
 }
@@ -173,6 +175,30 @@ func (r *abReader) getLocked(ctx context.Context, id domain.AccessBindingID, loc
 	return out, nil
 }
 
+// getForUpdate — Get с замком строки выдачи `FOR UPDATE`: замок СНЯТИЯ выдачи.
+// Единственный дом этого чтения — его берут и отзыв с удалением
+// (abWriter.GetForDeactivation), и истечение срока
+// (reconcileStore.LockBindingForDeactivation). Строки нет ⇒ ErrNotFound.
+func (r *abReader) getForUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	row := r.tx.QueryRow(ctx,
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR UPDATE`, abCols), string(id))
+	out, err := scanAB(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
+		}
+		return domain.AccessBinding{}, mapErr(err, "", string(id))
+	}
+	return out, nil
+}
+
+// GetForDeactivation — строка выдачи под замком снятия `FOR UPDATE` (контракт —
+// у порта WriterIface): отзыв и удаление ждут коммита аддитивного форварда,
+// решившего «выдача жива», и читают реестр уже с его записями (kaname#923).
+func (w *abWriter) GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return w.getForUpdate(ctx, id)
+}
+
 // accountScopePredicate — «привязка лежит в области ЭТОГО аккаунта»: либо
 // привязана к самому аккаунту, либо к любому его проекту. Один placeholder,
 // названный дважды: аккаунт и его проекты сверяются с одним и тем же значением.
@@ -180,7 +206,11 @@ func (r *abReader) getLocked(ctx context.Context, id domain.AccessBindingID, loc
 // ОДНО написание на двух вызывающих — `List` (поле AccountID, kacho#1737) и
 // `ListByAccount`. Прежде их было два, и приёмка требует от них ОДИНАКОВОГО
 // охвата; держать это требование на двух написаниях значило бы завести два
-// ответа на вопрос «чья это привязка», которые разойдутся молча.
+// ответа на вопрос «чья это привязка», которые разойдутся молча. Третье место
+// того же написания — подзапрос набора в bindingHasSubjectTypeInAccount
+// (kaname#888): там неквалифицированные resource_type/resource_id разрешаются в
+// столбцы области строки access_binding_subjects, и вопрос «в области ли этого
+// аккаунта» задаётся набору тем же текстом, что и выдаче.
 //
 // Третье написание в этом файле — `membershipHoldingBindingsPredicate` (kacho#1686) —
 // сюда НЕ сводится: копия там объявлена копией НАМЕРЕННО, чтобы правка одной
@@ -196,24 +226,129 @@ func accountScopePredicate(argPos int) string {
 		argPos)
 }
 
-// List — the unified read (redesign-2026 F11). Builds the WHERE from whatever
-// optional predicates the filter carries (subject/role/scope-type/scope-id),
-// then keyset-paginates by (created_at, id) ASC. Read VISIBILITY is NOT a
-// predicate here — the use-case applies it per-object to the returned page
-// (internal/authzfilter); the former FGA visible-id push-down was capped at
-// 1000 objects by the external engine and silently hid a tenant's own bindings.
-// The page_token decode is the authoritative format backstop (garbage →
-// InvalidArgument), independent of the handler pre-check.
+// bindingNamesSubject — предикат «выдача `ab` называет субъекта ($typePos,
+// $idPos)», где бы он в выдаче ни стоял (kaname#888, остаток класса
+// kaname#880).
 //
-// IncludeRevoked defaults to FALSE: F10 soft-revoke RETAINS the row with
-// status='REVOKED', so without the predicate a revoked grant would be listed next to
-// live ones — and because the active-grant partial UNIQUE keys on revoked_at, an
-// identical re-grant produces a SECOND row, i.e. one grant shown twice. Parity with
-// ListByAccount / ListByRole, whose default already hides them.
+// У выдачи ДВЕ проекции субъектов: одиночная пара строки `access_bindings`
+// (subject_type, subject_id) — это её ПЕРВЫЙ субъект — и набор
+// `access_binding_subjects`, где назван КАЖДЫЙ. Чтение по одной паре видит
+// только первого: второму выдача не показана, хотя права по ней у него есть.
+// Пара — одна из строк набора у КАЖДОЙ выдачи, и держит это база:
+// отложенная до коммита проверка `access_bindings_carry_a_subject` судит
+// вставку выдачи, смену пары, снятие и смену строки набора (kaname#902,
+// kaname#907), а лежащих выдач с парой вне набора нет — накат миграции
+// kaname#907 их пересчитывает и отказывает на ненулевом числе. Ветвь пары
+// поэтому по смыслу избыточна: всякую выдачу, которую она находит, находит и
+// ветвь набора. Снять её — правка формы чтения, которую судит план запроса,
+// а не этот инвариант; здесь она не делается.
+//
+// Форма — `id = ANY (ARRAY(подзапрос))`, а не `EXISTS` и не `IN`: подзапрос
+// без ссылок наружу исполняется ОДИН раз (InitPlan) по индексу
+// `access_binding_subjects_subject_scope_idx`, и обе ветви дизъюнкции остаются
+// индексными — `access_bindings_subject_idx` для пары и первичный ключ для
+// набора, — поэтому чтение, которое субъект и ведёт, не сползает в обход
+// таблицы выдач. `EXISTS` под `OR` не поднимается в полусоединение и
+// исполнялся бы на каждой строке-кандидате.
+func bindingNamesSubject(ab string, typePos, idPos int) string {
+	return fmt.Sprintf(
+		`((%[1]s.subject_type = $%[2]d AND %[1]s.subject_id = $%[3]d)
+		   OR %[1]s.id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                             WHERE s.subject_type = $%[2]d AND s.subject_id = $%[3]d)))`,
+		ab, typePos, idPos)
+}
+
+// bindingNamesSubjectID — тот же вопрос, что у bindingNamesSubject, но по одному
+// идентификатору субъекта без вида (фильтр `subject` у List): выдача называет
+// субъекта $pos в паре или в наборе.
+//
+// Вид вопросу не известен, а оба индекса субъекта ведутся видом
+// (`access_bindings_subject_idx` и `access_binding_subjects_subject_scope_idx`
+// — subject_type, subject_id). Голое `subject_id = $pos` ведущего столбца не
+// называет, и подзапрос набора читал access_binding_subjects целиком —
+// субъектов всех арендаторов на каждый запрос (kaname#888: 40010 строк, 5 мс
+// из 6 на 20000 выдачах). Поэтому вид назван закрытым словарём
+// bindingSubjectKindsSQL: `subject_type = ANY (словарь) AND subject_id = $pos`
+// — индексное условие по обоим столбцам, по одному спуску на вид. Словарь
+// сверен со схемой пробой (TestSubjectFilterPlan): новый вид в ограничении
+// без него в словаре — красное, а не молча выпавшие выдачи.
+//
+// Форма набора — та же `id = ANY (ARRAY(подзапрос))`: с `EXISTS` планировщик
+// исполнял набор хэшированным подпланом и обходил всю таблицу выдач по курсору.
+func bindingNamesSubjectID(pos int) string {
+	return fmt.Sprintf(
+		`((subject_type = ANY (%[2]s) AND subject_id = $%[1]d)
+		   OR id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                       WHERE s.subject_type = ANY (%[2]s) AND s.subject_id = $%[1]d)))`,
+		pos, bindingSubjectKindsSQL())
+}
+
+// bindingSubjectKinds — закрытый словарь вида субъекта выдачи: тот же набор,
+// что держат ограничения `access_bindings_subject_ck` и
+// `access_binding_subjects_type_ck`. Нужен чтению, не знающему вида
+// (bindingNamesSubjectID), чтобы назвать ведущий столбец индекса субъекта.
+var bindingSubjectKinds = []domain.SubjectType{
+	domain.SubjectTypeUser,
+	domain.SubjectTypeServiceAccount,
+	domain.SubjectTypeGroup,
+	domain.SubjectTypeSystemClass,
+}
+
+// bindingSubjectKindsSQL — словарь литералом массива. Значения — константы
+// домена без кавычек внутри, вход вызывающего сюда не попадает.
+func bindingSubjectKindsSQL() string {
+	quoted := make([]string, len(bindingSubjectKinds))
+	for i, k := range bindingSubjectKinds {
+		quoted[i] = "'" + string(k) + "'"
+	}
+	return "ARRAY[" + strings.Join(quoted, ", ") + "]::text[]"
+}
+
+// bindingHasSubjectTypeInAccount — выдача несёт субъекта вида $typePos в паре
+// или в наборе (фильтр вида у ListByAccount); $accountPos — аккаунт области.
+//
+// Набор спрашивается той же формой `id = ANY (ARRAY(подзапрос))`, а подзапрос
+// сужен той же областью аккаунта, что и само чтение (accountScopePredicate по
+// столбцам области строки набора — их держит триггер набора), поэтому массив не
+// шире выдач этого аккаунта. Замер kaname#888 (EXPLAIN ANALYZE, 20000 выдач в
+// одном аккаунте, у каждой два субъекта-человека):
+//
+//	фильтр         прежняя пара   EXISTS под OR   эта форма
+//	group (редкий)   0,06 мс        5,6 мс          0,17 мс (BitmapOr по индексам)
+//	user (частый)    0,09 мс       12,1 мс          9,7 мс
+//
+// Цена названа: подзапрос строит массив ВСЕХ выдач аккаунта с субъектом этого
+// вида, и для частого вида он линеен по числу выдач аккаунта, хотя странице
+// нужно 50 строк. Граница этой цены — один аккаунт: подзапрос сужен его
+// областью, и выдачи других арендаторов в массив не входят, сколько бы их ни
+// было. Прежняя пара была дешевле и неверна.
+func bindingHasSubjectTypeInAccount(typePos, accountPos int) string {
+	return fmt.Sprintf(
+		`(subject_type = $%[1]d
+		   OR id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                       WHERE s.subject_type = $%[1]d AND %[2]s)))`,
+		typePos, accountScopePredicate(accountPos))
+}
+
+// List — единое чтение (redesign-2026 F11). Собирает WHERE из тех
+// необязательных предикатов, что несёт фильтр (субъект/роль/вид области/область),
+// и листает ключом (created_at, id) ASC. ВИДИМОСТЬ здесь НЕ предикат — сценарий
+// применяет её к каждому объекту отданной страницы (internal/authzfilter);
+// прежнее проталкивание видимых id из движка прав упиралось в его потолок 1000
+// объектов и молча прятало собственные выдачи арендатора. Разбор page_token —
+// окончательный рубеж формата (мусор → InvalidArgument), независимый от
+// предпроверки обработчика.
+//
+// IncludeRevoked по умолчанию ЛОЖЬ: мягкий отзыв F10 ОСТАВЛЯЕТ строку со
+// status='REVOKED', и без предиката отозванная выдача стояла бы в перечне рядом с
+// живыми, — а так как частичная UNIQUE действующей выдачи ключуется по
+// revoked_at, повторная такая же выдача даёт ВТОРУЮ строку, то есть одна выдача
+// показана дважды. Согласно с ListByAccount / ListByRole, где они скрыты по
+// умолчанию.
 func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]domain.AccessBinding, string, error) {
-	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
-	// answers 200 OK with a page shorter than asked for, and nothing in the
-	// response tells that apart from a complete answer.
+	// page_size вне [0..maxListPageSize] ОТВЕРГАЕТСЯ, а не усекается: усечение
+	// отвечает 200 OK страницей короче запрошенной, и ничто в ответе не отличает
+	// её от полного ответа.
 	pageSize, err := effectivePageSize(f.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -227,8 +362,11 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 		args = append(args, val)
 		argIdx++
 	}
+	// Субъект — любой из субъектов выдачи, а не только первый (kaname#888).
 	if f.SubjectID != "" {
-		addEq("subject_id", f.SubjectID)
+		conditions = append(conditions, bindingNamesSubjectID(argIdx))
+		args = append(args, f.SubjectID)
+		argIdx++
 	}
 	if f.RoleID != "" {
 		addEq("role_id", f.RoleID)
@@ -252,8 +390,8 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 		args = append(args, f.AccountID)
 		argIdx++
 	}
-	// Argument-free predicate (like ListByAccount/ListByRole) — appending it does not
-	// disturb argIdx.
+	// Предикат без параметра (как у ListByAccount/ListByRole) — его добавление не
+	// сдвигает argIdx.
 	if !f.IncludeRevoked {
 		conditions = append(conditions, "status <> 'REVOKED'")
 	}
@@ -339,42 +477,46 @@ func (r *abReader) ListByScope(ctx context.Context, resourceType domain.Resource
 		[]any{string(resourceType), resourceID})
 }
 
+// ListBySubject — выдачи, называющие субъекта, где бы он в выдаче ни стоял
+// (kaname#888): предикат bindingNamesSubject ссылается на оба параметра дважды,
+// поэтому условие собрано здесь готовым, а не шаблоном listWithConds.
 func (r *abReader) ListBySubject(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, f access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
-	return r.listWithConds(ctx, f,
-		[]string{"subject_type = $%d", "subject_id = $%d"},
+	return r.listWhere(ctx, f,
+		[]string{bindingNamesSubject("access_bindings", 1, 2)},
 		[]any{string(subjectType), string(subjectID)})
 }
 
-// ListByAccount — admin path returning every binding in an Account scope:
+// ListByAccount — путь администратора: каждая выдача в области аккаунта:
 //
-//   - bindings directly attached to the account (resource_type='account'
-//     AND resource_id = $accountID); plus
-//   - bindings on every Project whose account_id = $accountID
-//     (resource_type='project' AND resource_id IN (SELECT id FROM projects
-//     WHERE account_id = $accountID)).
+//   - выдачи прямо на аккаунт (`resource_type='account'`
+//     `AND resource_id = $accountID`); плюс
+//   - выдачи на каждый проект, чей `account_id = $accountID`
+//     (`resource_type='project' AND resource_id IN (SELECT id FROM projects`
+//     `WHERE account_id = $accountID)`).
 //
-// Optional SubjectTypeFilter narrows to a single subject_type.
-// IncludeRevoked=false (default) hides status='REVOKED' rows.
+// Необязательный SubjectTypeFilter сужает до одного вида субъекта — любого из
+// субъектов выдачи (kaname#888). IncludeRevoked=false (умолчание) скрывает
+// строки status='REVOKED'.
 //
-// Ordering: (created_at DESC, id ASC) — newest grants first; ties broken by
-// id ASC to keep keyset cursors deterministic.
+// Порядок: (created_at DESC, id ASC) — новые выдачи первыми; равенство
+// разрешает id ASC, чтобы курсор ключа был детерминирован.
 //
-// Keyset cursor format matches encodePageToken/decodePageToken (opaque
-// base64 (created_at, id)) but applies the DESC predicate
+// Формат курсора тот же, что у encodePageToken/decodePageToken (непрозрачный
+// base64 (created_at, id)), но предикат — убывающий
 // `(created_at, id) < ($prev_ts, $prev_id)`.
 //
-// Within-service refs (ban #10): the subquery uses
-// the FK-validated projects table — no cross-DB call required, no TOCTOU.
+// Ссылки внутри службы (запрет #10): подзапрос читает проверенную внешним
+// ключом таблицу projects — ни вызова в чужую базу, ни TOCTOU.
 func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID, f access_binding.AccountPageFilter) ([]domain.AccessBinding, string, error) {
-	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
-	// answers 200 OK with a page shorter than asked for, and nothing in the
-	// response tells that apart from a complete answer.
+	// page_size вне [0..maxListPageSize] ОТВЕРГАЕТСЯ, а не усекается: усечение
+	// отвечает 200 OK страницей короче запрошенной, и ничто в ответе не отличает
+	// её от полного ответа.
 	pageSize, err := effectivePageSize(f.PageSize)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// $1 = accountID — referenced twice (direct + project scope).
+	// $1 = accountID — упомянут дважды (прямо и через область проекта).
 	args := []any{string(accountID)}
 	argIdx := 2
 
@@ -386,8 +528,9 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 		conditions = append(conditions, `status <> 'REVOKED'`)
 	}
 
+	// Вид — любого из субъектов выдачи, а не только первого (kaname#888).
 	if f.SubjectTypeFilter != "" {
-		conditions = append(conditions, fmt.Sprintf("subject_type = $%d", argIdx))
+		conditions = append(conditions, bindingHasSubjectTypeInAccount(argIdx, 1))
 		args = append(args, f.SubjectTypeFilter)
 		argIdx++
 	}
@@ -397,9 +540,9 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 		if err != nil {
 			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page_token")
 		}
-		// DESC keyset predicate: (created_at, id) < (last_seen_created_at, last_seen_id)
-		// when ordered by created_at DESC + id ASC. We treat id ASC as a tiebreaker:
-		// (created_at < ts) OR (created_at = ts AND id > prev_id).
+		// Убывающий предикат ключа: (created_at, id) < (последний created_at,
+		// последний id) при порядке created_at DESC + id ASC. id ASC разрешает
+		// равенство: `(created_at < ts) OR (created_at = ts AND id > prev_id)`.
 		conditions = append(conditions,
 			fmt.Sprintf(`(created_at < $%d OR (created_at = $%d AND id > $%d))`,
 				argIdx, argIdx, argIdx+1))
@@ -439,49 +582,60 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 	return out, nextToken, nil
 }
 
-// ListSubjectPrivileges — enriched read for the subject-privileges view.
-// Returns the subject's DIRECT AccessBindings LEFT JOINed with
-// `roles` so the human-readable role_name is resolved server-side in ONE query
-// (access_bindings ab ⋈ roles r ON ab.role_id = r.id; same kaname schema,
-// FK access_bindings_role_fk — no per-row N+1).
+// ListSubjectPrivileges — обогащённое чтение для вида «права субъекта».
+// Отдаёт выдачи субъекта, соединённые LEFT JOIN с `roles`, чтобы читаемое имя
+// роли разрешалось на сервере ОДНИМ запросом (`access_bindings ab ⋈ roles r ON
+// ab.role_id = r.id`; та же схема kaname, внешний ключ access_bindings_role_fk —
+// без N+1 по строкам).
 //
-// LEFT JOIN (not INNER): a dangling role (deleted after a revoke) must not drop
-// the row — the binding is returned with role_name="" (graceful).
+// LEFT JOIN, а не INNER: висячая роль (удалённая после отзыва) не роняет строку —
+// выдача отдаётся с role_name="".
 //
-// Only PENDING/ACTIVE rows are returned (status <> 'REVOKED' — parity with
-// ListByAccount.include_revoked=false). v1 is DIRECT-only — subject_id literally
-// equals the requested subject.
+// Отдаются только строки PENDING/ACTIVE (status <> 'REVOKED' — как у
+// ListByAccount.include_revoked=false). Выдача принадлежит субъекту, когда
+// называет его — либо группу, где он состоит, — В ЛЮБОМ месте своего набора
+// субъектов, а не только первым (kaname#888).
 //
-// Ordering & keyset cursor match ListBySubject: (created_at, id) ASC with an
-// opaque base64 (created_at, id) page_token; (created_at, id) > (prev) predicate.
-// page_size: 0 → DefaultPageSize(50), capped at 1000.
+// Порядок и курсор — как у ListBySubject: (created_at, id) ASC с непрозрачным
+// base64 (created_at, id) в page_token; предикат (created_at, id) > (прежний).
+// page_size: 0 → DefaultPageSize(50), потолок 1000.
 //
-// Within-service refs (запрет #10): the JOIN reads the FK-validated `roles`
-// table — no cross-DB call, no TOCTOU. Read-only — no CAS/race path.
+// Ссылки внутри службы (запрет #10): JOIN читает проверенную внешним ключом
+// таблицу `roles` — ни вызова в чужую базу, ни TOCTOU. Только чтение — пути CAS
+// и гонки нет.
 func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, f access_binding.PageFilter) ([]domain.SubjectPrivilege, string, error) {
-	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
-	// answers 200 OK with a page shorter than asked for, and nothing in the
-	// response tells that apart from a complete answer.
+	// page_size вне [0..maxListPageSize] ОТВЕРГАЕТСЯ, а не усекается: усечение
+	// отвечает 200 OK страницей короче запрошенной, и ничто в ответе не отличает
+	// её от полного ответа.
 	pageSize, err := effectivePageSize(f.PageSize)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// Subject-match: DIRECT (the binding names the subject) OR GROUP-derived (the
-	// binding names a group the subject belongs to). Both branches are equality
-	// predicates on (subject_type, subject_id), so access_bindings_subject_idx
-	// serves them as a BitmapOr — the read stays index-driven, no seq-scan.
+	// Совпадение субъекта: ПРЯМОЕ (выдача называет самого субъекта) ИЛИ ЧЕРЕЗ
+	// ГРУППУ (выдача называет группу, где субъект состоит) — каждое по ОБЕИМ
+	// проекциям субъектов выдачи: одиночной паре строки (её ПЕРВЫЙ субъект) и
+	// набору access_binding_subjects (КАЖДЫЙ субъект). Вопрос к одной паре прятал
+	// выдачу от всех, кого она называла не первым (kaname#888).
 	//
-	// The group side reads kaname.group_members via group_members_member_idx.
-	// Groups do NOT nest (group_members_type_check allows only user /
-	// service_account), so this is exactly ONE hop and cannot recurse: when the
-	// REQUESTED subject is itself a group the sub-select is empty and only the
-	// DIRECT branch applies.
+	// Каждая ветвь — равенство либо `= ANY(массив InitPlan)`: ветви пары ведёт
+	// access_bindings_subject_idx, ветвь набора — первичный ключ по id, которые
+	// набор отдаёт через access_binding_subjects_subject_scope_idx; план замерен
+	// EXPLAIN в kaname#888.
+	//
+	// Групповая сторона читает kaname.group_members через group_members_member_idx.
+	// Группы НЕ вкладываются (group_members_type_check допускает только user /
+	// service_account), поэтому шаг ровно ОДИН и рекурсии нет: когда ЗАПРОШЕННЫЙ
+	// субъект сам группа, набор несущих групп пуст и действует только ПРЯМАЯ ветвь.
+	const carrierGroups = `ARRAY(SELECT gm.group_id FROM group_members gm
+		                         WHERE gm.member_type = $1 AND gm.member_id = $2)`
+	direct := bindingNamesSubject("ab", 1, 2)
 	conditions := []string{
-		`(   (ab.subject_type = $1 AND ab.subject_id = $2)
-		  OR (ab.subject_type = 'group' AND ab.subject_id IN (
-		        SELECT gm.group_id FROM group_members gm
-		         WHERE gm.member_type = $1 AND gm.member_id = $2)) )`,
+		`(   ` + direct + `
+		  OR (ab.subject_type = 'group' AND ab.subject_id = ANY (` + carrierGroups + `))
+		  OR ab.id = ANY (ARRAY(SELECT s.binding_id FROM access_binding_subjects s
+		                         WHERE s.subject_type = 'group'
+		                           AND s.subject_id = ANY (` + carrierGroups + `))) )`,
 		"ab.status <> 'REVOKED'",
 	}
 	args := []any{string(subjectType), string(subjectID)}
@@ -498,8 +652,8 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 		argIdx += 2
 	}
 
-	// COALESCE(r.name, '') so a LEFT JOIN miss (dangling role) scans as "" — the
-	// Go scan target is a plain string, never NULL.
+	// COALESCE(r.name, ''): промах LEFT JOIN (висячая роль) читается как "" —
+	// приёмник в Go — простая строка, NULL ему не годится.
 	//
 	// COALESCE(ab.role_id, '') — по той же причине, что в abCols: у ФОРМЫ
 	// ОТНОШЕНИЯ (системная выдача, access_bindings_grant_form_ck) роли нет и
@@ -508,24 +662,37 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	// ошибкой. Пустая строка — отсутствие роли в том виде, в каком его выражает
 	// весь домен; для такой строки LEFT JOIN не находит роли, и role_name тоже "".
 	//
-	// The last two columns attribute the row: `is_direct` is true when the binding
-	// names the subject itself; otherwise it was reached through the group named by
-	// `via_group_id`. A binding that is BOTH direct and group-carried resolves to
-	// DIRECT (the stronger, self-evident attribution) and yields ONE row — the
-	// predicate is a disjunction on the same row, never a join, so cardinality stays
-	// one-row-per-binding and the (created_at, id) keyset cursor stays valid.
+	// Два последних столбца объясняют строку: `is_direct` истинен, когда выдача
+	// называет самого субъекта (в любой проекции); иначе субъект дошёл до неё через
+	// группу, названную в `via_group_id`. Выдача, которая и прямая, и групповая,
+	// считается ПРЯМОЙ (более сильное, самоочевидное объяснение) и даёт ОДНУ
+	// строку: предикат — дизъюнкция над той же строкой, а не соединение, поэтому
+	// на выдачу приходится одна строка и курсор (created_at, id) остаётся верным.
+	//
+	// `via_group_id` называет группу, где субъект СОСТОИТ, — первую такую в порядке
+	// субъектов выдачи (пара — порядковый 0). Назвать первого субъекта выдачи лишь
+	// потому, что он группа, значило бы отправить администратора снимать членство,
+	// которого у субъекта нет, когда несущая группа стоит второй.
 	q := fmt.Sprintf(`
 		SELECT ab.id, COALESCE(ab.role_id, ''), COALESCE(r.name, ''),
 		       ab.resource_type, ab.resource_id, ab.scope, ab.status,
 		       ab.created_at, ab.granted_by_user_id, ab.expires_at,
-		       (ab.subject_type = $1 AND ab.subject_id = $2) AS is_direct,
-		       CASE WHEN ab.subject_type = 'group' AND NOT (ab.subject_type = $1 AND ab.subject_id = $2)
-		            THEN ab.subject_id ELSE '' END AS via_group_id
+		       %[1]s AS is_direct,
+		       CASE WHEN %[1]s THEN ''
+		            ELSE COALESCE(
+		                   CASE WHEN ab.subject_type = 'group' AND ab.subject_id = ANY (%[2]s)
+		                        THEN ab.subject_id END,
+		                   (SELECT s.subject_id FROM access_binding_subjects s
+		                     WHERE s.binding_id = ab.id AND s.subject_type = 'group'
+		                       AND s.subject_id = ANY (%[2]s)
+		                     ORDER BY s.ordinal ASC, s.subject_id ASC
+		                     LIMIT 1),
+		                   '') END AS via_group_id
 		  FROM access_bindings ab
 		  LEFT JOIN roles r ON ab.role_id = r.id
-		 WHERE %s
+		 WHERE %[3]s
 		 ORDER BY ab.created_at ASC, ab.id ASC
-		 LIMIT $%d`, strings.Join(conditions, " AND "), argIdx)
+		 LIMIT $%[4]d`, direct, carrierGroups, strings.Join(conditions, " AND "), argIdx)
 	args = append(args, pageSize+1)
 
 	rows, err := r.tx.Query(ctx, q, args...)
@@ -555,12 +722,11 @@ func (r *abReader) ListSubjectPrivileges(ctx context.Context, subjectType domain
 	return out, nextToken, nil
 }
 
-// scanSubjectPrivilege — maps a ListSubjectPrivileges row into the enriched
-// domain projection. role_id and role_name are already COALESCE'd to "" (the
-// relation form has no role; the LEFT JOIN then finds none).
-// scope is bounds-checked the same way as scanAB. The trailing
-// is_direct/via_group_id columns carry the derivation attribution (DIRECT vs
-// GROUP-derived — see the query comment).
+// scanSubjectPrivilege — переводит строку ListSubjectPrivileges в обогащённую
+// проекцию домена. role_id и role_name уже сведены COALESCE к "" (у формы
+// отношения роли нет, и LEFT JOIN её не находит). Границы scope проверяются так
+// же, как в scanAB. Замыкающие столбцы is_direct/via_group_id несут объяснение
+// происхождения (ПРЯМАЯ либо ЧЕРЕЗ ГРУППУ — см. комментарий у запроса).
 func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 	var (
 		sp         domain.SubjectPrivilege
@@ -620,22 +786,28 @@ func scanSubjectPrivilege(row scanner) (domain.SubjectPrivilege, error) {
 // Два смежных капкана той же строки: шаблон без `%d` молча вставит в SQL
 // `%!(EXTRA int=…)`, а шаблон с `%s` съест номер плейсхолдера как текст.
 func (r *abReader) listWithConds(ctx context.Context, f access_binding.PageFilter, condTmpls []string, condArgs []any) ([]domain.AccessBinding, string, error) {
-	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
-	// answers 200 OK with a page shorter than asked for, and nothing in the
-	// response tells that apart from a complete answer.
+	conditions := make([]string, 0, len(condTmpls))
+	for i, tmpl := range condTmpls {
+		conditions = append(conditions, fmt.Sprintf(tmpl, i+1))
+	}
+	return r.listWhere(ctx, f, conditions, condArgs)
+}
+
+// listWhere — страница выдач по готовым условиям: conditions уже ссылаются на
+// $1..$len(args), курсор и предел страницы встают следующими номерами. Тот же
+// запрет, что у listWithConds: в условие не попадает значение запроса, только
+// номер параметра.
+func (r *abReader) listWhere(ctx context.Context, f access_binding.PageFilter, conditions []string, condArgs []any) ([]domain.AccessBinding, string, error) {
+	// page_size вне [0..maxListPageSize] ОТВЕРГАЕТСЯ, а не усекается: усечение
+	// отвечает 200 OK страницей короче запрошенной, и ничто в ответе не отличает
+	// её от полного ответа.
 	pageSize, err := effectivePageSize(f.PageSize)
 	if err != nil {
 		return nil, "", err
 	}
-
-	conditions := []string{}
-	args := []any{}
-	argIdx := 1
-	for i, tmpl := range condTmpls {
-		conditions = append(conditions, fmt.Sprintf(tmpl, argIdx))
-		args = append(args, condArgs[i])
-		argIdx++
-	}
+	conditions = append([]string(nil), conditions...)
+	args := append([]any(nil), condArgs...)
+	argIdx := len(args) + 1
 	if f.PageToken != "" {
 		ts, id, err := decodePageToken(f.PageToken)
 		if err != nil {
@@ -685,7 +857,7 @@ type abWriter struct {
 // access_bindings_active_grant_uniq (миграция 0003) поднимает SQLSTATE 23505,
 // который маппится в ErrAlreadyExists с verbatim text:
 //
-//	"these permissions are already granted to <subject_id> on <resource_type>:<resource_id>"
+//	`these permissions are already granted to <subject_id> on <resource_type>:<resource_id>`
 //
 // Прежняя идемпотентность (ON CONFLICT DO UPDATE SET id = access_bindings.id)
 // удалена: silent-upsert скрывал реальный duplicate-grant и заставлял ревьюера
@@ -699,21 +871,22 @@ type abWriter struct {
 // nullableString/nullableTimePtr хелперы.
 func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	now := time.Now().UTC()
-	// Scope: explicit value when non-Unspecified, otherwise let the
-	// access_bindings_scope_default_trg trigger derive from resource_type
-	// (migration 0005). Passing SMALLINT NULL trips the NOT NULL constraint
-	// AFTER the trigger only when the trigger leaves NEW.scope NULL — which
-	// it never does (the trigger has an ELSE branch).
+	// Scope: явное значение, когда оно не Unspecified, иначе область выводит из
+	// resource_type триггер access_bindings_scope_default_trg (миграция 0005).
+	// SMALLINT NULL нарушил бы NOT NULL ПОСЛЕ триггера лишь тогда, когда триггер
+	// оставил бы NEW.scope пустым, — а он не оставляет никогда (у него есть ветвь
+	// ELSE).
 	// labels — own-resource tenant-facing метки самого binding-ресурса,
 	// делают AccessBinding label-selectable (catalog-видимость через viewer ∪ v_list).
 	labelsJSON, err := marshalLabels(b.Labels)
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
-	// F8: persist the object-selection (target) + its set-based digest. The digest
-	// is a key column of the active-grant partial UNIQUE (identical target →
-	// collision, distinct per-object targets coexist). Empty/whole-anchor → "all".
-	targetJSON, err := marshalTarget(b.Target)
+	// F8: сохраняется выбор объектов (target) и его отпечаток по множеству.
+	// Отпечаток — ключевой столбец частичной UNIQUE действующей выдачи (одинаковая
+	// цель → столкновение, разные пообъектные цели сосуществуют). Пусто или весь
+	// якорь → "all". Форма хранения одна — `relverdict.EncodeTarget`.
+	targetJSON, err := relverdict.EncodeTarget(b.Target)
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())
 	}
@@ -776,57 +949,9 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 	return out, nil
 }
 
-// targetPersistJSON is the JSONB persistence shape of AccessBinding.target (F8).
-type targetPersistJSON struct {
-	AllInScope bool                    `json:"allInScope,omitempty"`
-	Resources  []targetResourceRefJSON `json:"resources,omitempty"`
-}
-
-type targetResourceRefJSON struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
-}
-
-// marshalTarget serializes the domain target to its JSONB persistence shape. A
-// per-object set is written as {"resources":[…]}; AllInScope OR the empty
-// whole-anchor zero value is written as {"allInScope":true}.
-func marshalTarget(t domain.AccessTarget) ([]byte, error) {
-	tj := targetPersistJSON{}
-	if len(t.Resources) > 0 {
-		tj.Resources = make([]targetResourceRefJSON, 0, len(t.Resources))
-		for _, r := range t.Resources {
-			tj.Resources = append(tj.Resources, targetResourceRefJSON{Type: r.Type, ID: r.ID})
-		}
-	} else {
-		tj.AllInScope = true
-	}
-	return json.Marshal(tj)
-}
-
-// unmarshalTarget parses the JSONB persistence shape back to the domain target.
-// An empty/NULL column (defensive — every row is backfilled by migration 0055) →
-// the whole-anchor AllInScope grant.
-func unmarshalTarget(b []byte) (domain.AccessTarget, error) {
-	if len(b) == 0 {
-		return domain.AccessTarget{AllInScope: true}, nil
-	}
-	var tj targetPersistJSON
-	if err := json.Unmarshal(b, &tj); err != nil {
-		return domain.AccessTarget{}, err
-	}
-	if len(tj.Resources) > 0 {
-		out := make([]domain.ResourceRef, 0, len(tj.Resources))
-		for _, r := range tj.Resources {
-			out = append(out, domain.ResourceRef{Type: r.Type, ID: r.ID})
-		}
-		return domain.AccessTarget{Resources: out}, nil
-	}
-	return domain.AccessTarget{AllInScope: true}, nil
-}
-
-// Delete — простой DELETE. 0 rows → NotFound. Used by paths that have already
-// established the binding is deletable (reconcile/expire) or by tests; the public
-// Delete use-case goes through DeleteGuarded (P6 deletion_protection CAS).
+// Delete — простой DELETE. 0 строк → NotFound. Его зовут пути, уже установившие,
+// что выдачу можно удалить (reconcile/expire), и пробы; публичный сценарий Delete
+// идёт через DeleteGuarded (P6, CAS по deletion_protection).
 func (w *abWriter) Delete(ctx context.Context, id domain.AccessBindingID) error {
 	tag, err := w.tx.Exec(ctx, `DELETE FROM access_bindings WHERE id = $1`, string(id))
 	if err != nil {
@@ -853,7 +978,7 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 	if tag.RowsAffected() > 0 {
 		return nil
 	}
-	// 0 rows: not-found vs protected — re-read on this tx.
+	// 0 строк: нет строки либо защищена — перечитываем в этой же транзакции.
 	cur, gerr := w.Get(ctx, id)
 	if gerr != nil {
 		return gerr // ErrNotFound (или иная)
@@ -862,24 +987,26 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"access binding %s has deletion_protection enabled; clear it via Update before Delete", id)
 	}
-	// Row exists, unprotected, yet 0 rows deleted → concurrent delete won the race.
+	// Строка есть, не защищена, а удалено 0 строк → гонку выиграло соседнее удаление.
 	return iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 
-// RevokeGuarded — atomic CAS soft-revoke (redesign-2026 F10 IAM-1-28). Mirror of
-// DeleteGuarded's protection-CAS + TransitionStatus's REVOKED move, but RETAINS the
-// row: single-statement `UPDATE … SET status='REVOKED', revoked_at=now(),
-// revoked_by_user_id=$2 WHERE id=$1 AND status='ACTIVE' AND deletion_protection=false
-// RETURNING …` takes a row-lock, so exactly one revoke wins under concurrency (the
-// loser waits the commit, its WHERE status='ACTIVE' no longer matches → 0 rows, ban
-// #10 — no software TOCTOU). 0 rows → re-read on this tx disambiguates: absent →
-// NotFound; protected → FailedPrecondition; non-ACTIVE (terminal REVOKED / PENDING or
-// a concurrent revoke that won) → FailedPrecondition. revoked_at is stamped so the
-// partial active-grant UNIQUE (WHERE revoked_at IS NULL) frees the slot for re-grant.
+// RevokeGuarded — атомарный CAS мягкого отзыва (redesign-2026 F10 IAM-1-28).
+// Зеркало CAS защиты из DeleteGuarded и перехода в REVOKED из TransitionStatus, но
+// строка ОСТАЁТСЯ: один оператор `UPDATE … SET status='REVOKED', revoked_at=now(),`
+// `revoked_by_user_id=$2 WHERE id=$1 AND status='ACTIVE' AND deletion_protection=false`
+// `RETURNING …` берёт замок строки, и при гонке выигрывает ровно один отзыв
+// (проигравший ждёт фиксации, его `WHERE status='ACTIVE'` уже не совпадает → 0
+// строк, запрет #10 — без программного TOCTOU). 0 строк → перечитывание в этой
+// транзакции различает: нет строки → NotFound; защищена → FailedPrecondition; не
+// ACTIVE (конечное REVOKED / PENDING либо выигравший соседний отзыв) →
+// FailedPrecondition. revoked_at проставляется, чтобы частичная UNIQUE
+// действующей выдачи (`WHERE revoked_at IS NULL`) освободила место повторной выдаче.
 func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
 	if revokedBy == "" {
-		// CHECK access_bindings_revoked_consistency_ck requires revoked_at to move
-		// with status='REVOKED'; a REVOKED row without a revoker is not allowed.
+		// CHECK access_bindings_revoked_consistency_ck требует, чтобы revoked_at
+		// менялся вместе со status='REVOKED'; строка REVOKED без отозвавшего
+		// недопустима.
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg,
 			"revoked_by_user_id is required for REVOKED transition")
 	}
@@ -901,24 +1028,23 @@ func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID,
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return domain.AccessBinding{}, mapErr(err, "AccessBinding.RevokeGuarded", string(id))
 	}
-	// 0 rows updated — re-read on this tx to disambiguate the CAS miss.
+	// Обновлено 0 строк — перечитываем в этой транзакции, чтобы различить промах CAS.
 	cur, gerr := w.Get(ctx, id)
 	if gerr != nil {
-		return domain.AccessBinding{}, gerr // ErrNotFound (or a transient fault)
+		return domain.AccessBinding{}, gerr // ErrNotFound (либо временный сбой)
 	}
 	if cur.DeletionProtection {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"access binding %s has deletion_protection enabled; clear it via Update before revoke", id)
 	}
-	// Not-active (already REVOKED / PENDING, or a concurrent revoke won the row-lock).
+	// Не ACTIVE (уже REVOKED / PENDING либо замок строки выиграл соседний отзыв).
 	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 		"access binding %s is not active (status %s); cannot revoke", id, cur.Status)
 }
 
-// SetDeletionProtection — atomic CAS UPDATE of the deletion_protection flag.
-// Single-statement
-// `UPDATE … WHERE id=$1 RETURNING …`; 0 rows → NotFound. Used by the
-// Update(update_mask=["deletion_protection"]) path to clear the flag.
+// SetDeletionProtection — атомарный CAS UPDATE флага deletion_protection.
+// Один оператор `UPDATE … WHERE id=$1 RETURNING …`; 0 строк → NotFound. Его зовёт
+// путь `Update(update_mask=["deletion_protection"])`, снимающий флаг.
 func (w *abWriter) SetDeletionProtection(ctx context.Context, id domain.AccessBindingID, protected bool) (domain.AccessBinding, error) {
 	row := w.tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE access_bindings
@@ -935,8 +1061,8 @@ func (w *abWriter) SetDeletionProtection(ctx context.Context, id domain.AccessBi
 	return out, nil
 }
 
-// UpdateLabels — atomic single-statement UPDATE of the own-resource labels
-// (AB mutable set расширен до {deletion_protection, labels}).
+// UpdateLabels — атомарный одним оператором UPDATE собственных меток ресурса
+// (изменяемый набор выдачи расширен до {deletion_protection, labels}).
 // `UPDATE … SET labels=$2 WHERE id=$1 RETURNING …` берет row-lock: конкурентный
 // writer ждет commit и видит обновленный row (last-writer-wins, не TOCTOU, ban #10).
 // 0 rows RETURNING → NotFound. Identity/scope/subject поля не затрагиваются.
@@ -1002,7 +1128,7 @@ func (w *abWriter) TransitionStatus(
 		}
 		revByArg = string(*revokedByUserID)
 	} else {
-		// PENDING / ACTIVE — revoked_at / revoked_by must be NULL (CHECK).
+		// PENDING / ACTIVE — revoked_at / revoked_by обязаны быть NULL (CHECK).
 		revAtArg = nil
 		revByArg = nil
 	}
@@ -1034,11 +1160,11 @@ func scanAB(row scanner) (domain.AccessBinding, error) {
 }
 
 // scanABWithVersion — ЕДИНСТВЕННОЕ объявление порядка назначений под abCols.
-// When versionOut is provided (γ GetWithVersion) the query MUST prepend an
-// `xmin::text` column and the token is written into *versionOut[0] — the Scan
-// dest list is built with the version slot first to match. Without versionOut it
-// is the plain abCols scan: сюда делегирует `scanAB`, поэтому список один на
-// Get / GetWithVersion / list paths.
+// Когда передан versionOut (γ GetWithVersion), запрос ОБЯЗАН начинаться столбцом
+// `xmin::text`, и метка пишется в *versionOut[0] — список приёмников Scan
+// собирается со слотом версии первым, чтобы совпасть. Без versionOut это обычное
+// чтение abCols: сюда делегирует `scanAB`, поэтому список один на Get /
+// GetWithVersion / пути перечней.
 //
 // Прежняя редакция обещала «parity with the prior scanAB». Отдельного `scanAB`
 // со своим списком уже нет — сверять стало не с чем, и утверждение о совпадении
@@ -1088,7 +1214,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
-	ab.Target, err = unmarshalTarget(targetJSON)
+	ab.Target, err = relverdict.DecodeTarget(targetJSON)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
@@ -1104,10 +1230,9 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		u := domain.UserID(revokedByUID.String)
 		ab.RevokedByUserID = &u
 	}
-	// gosec G115 — bounds-check int16 → int8 conversion. Scope values are
-	// {0,1,2,3} guarded by access_bindings_scope_ck CHECK; any other value
-	// is a corrupt row that we surface as an explicit Unspecified rather
-	// than silently truncating.
+	// gosec G115 — проверка границ при переводе int16 → int8. Значения scope —
+	// {0,1,2,3}, их стережёт CHECK access_bindings_scope_ck; любое иное — испорченная
+	// строка, и она выходит наружу явным Unspecified, а не молча усекается.
 	if scopeI < 0 || scopeI > 3 {
 		ab.Scope = domain.ScopeUnspecified
 	} else {
@@ -1116,14 +1241,14 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 	return ab, nil
 }
 
-// EmitSubjectChangeEvent — writes both legacy denormalised
-// columns AND the canonical event_type + payload jsonb in a single INSERT.
-// Single-row INSERT is atomic by construction; combined with the enclosing
-// writer-tx, the outbox row is committed iff the surrounding domain mutation
-// commits (within-service refs must be enforced at the DB level).
+// EmitSubjectChangeEvent — пишет и унаследованные денормализованные столбцы, И
+// канонические event_type + payload jsonb одной вставкой. Вставка одной строки
+// атомарна по построению; вместе с объемлющей пишущей транзакцией строка журнала
+// фиксируется тогда и только тогда, когда фиксируется окружающая мутация домена
+// (ссылки внутри службы держит база).
 //
-// payload is REQUIRED by the corelib drainer SELECT contract — Decoder[T]
-// receives ONLY payload bytes, not other row columns.
+// payload ОБЯЗАТЕЛЕН по контракту SELECT дренажа corelib — Decoder[T] получает
+// ТОЛЬКО байты payload, а не прочие столбцы строки.
 func (w *abWriter) EmitSubjectChangeEvent(ctx context.Context, evt access_binding.SubjectChangeEvent) error {
 	if evt.SubjectID == "" {
 		return fmt.Errorf("emit subject_change_outbox: subject_id required")
@@ -1164,27 +1289,78 @@ func (w *abWriter) EmitSubjectChangeEvent(ctx context.Context, evt access_bindin
 	return nil
 }
 
-// EmitRelationWrite — atomically appends N grant rows into
-// kaname.fga_outbox (event_type='fga.tuple.write') in the current
-// writer-tx (atomicity required — see within-service refs). A trigger on that
-// INSERT folds each row into a direct fact in the same commit.
+// EmitRelationWrite — атомарно добавляет N строк выдачи в kaname.fga_outbox
+// (event_type='fga.tuple.write') в текущей пишущей транзакции (атомарность
+// обязательна — см. ссылки внутри службы). Триггер на этой вставке сворачивает
+// каждую строку в прямой факт в той же фиксации.
 //
-// The binding INSERT and the enqueue commit-or-rollback atomically — no
-// post-commit write that could diverge from the DB on failure.
+// Вставка выдачи и постановка в журнал фиксируются либо откатываются вместе —
+// записи после фиксации, способной разойтись с базой при сбое, нет.
 func (w *abWriter) EmitRelationWrite(ctx context.Context, tuples []access_binding.RelationTuple) error {
 	return w.emitFGAOutbox(ctx, "fga.tuple.write", tuples)
 }
 
-// EmitRelationDelete — mirror of EmitRelationWrite for revoke. Caller supplies the
-// EXACT tuples that were originally written by EmitRelationWrite (symmetric revoke).
+// EmitRelationDelete — зеркало EmitRelationWrite для отзыва. Вызывающий передаёт
+// ТОЧНО те кортежи, что когда-то записал EmitRelationWrite (симметричный отзыв).
 func (w *abWriter) EmitRelationDelete(ctx context.Context, tuples []access_binding.RelationTuple) error {
 	return w.emitFGAOutbox(ctx, "fga.tuple.delete", tuples)
 }
 
-// InsertEmittedTuples persists the EXACT FGA tuples emitted for a binding into
-// kaname.access_binding_emitted_tuples in the current writer-tx, co-committed
-// with the matching EmitRelationWrite (ban #10). ON CONFLICT DO NOTHING
-// keeps a repeated emit (idempotent re-grant / reconcile) a no-op. len==0 no-op.
+// LockLiveTargetTypes реализует access_binding.WriterIface (kaname#904, Р2).
+//
+// # Почему это не чтение-и-действие (запрет #10)
+//
+// Чтение стоит в ТОЙ ЖЕ транзакции, что вставка выдачи, и берёт замок на
+// прочитанные строки: снятие типа (применитель меняет `live`, входящий в
+// уникальные ограничения, — то есть обновляет КЛЮЧ и берёт `FOR UPDATE`) с этим
+// замком конфликтует и ждёт фиксации выдачи. В обратную сторону — запись ждёт
+// незафиксированного снятия, и при READ COMMITTED перепроверяет условие `live`
+// на зафиксированной версии строки: снятая строка в ответ не попадает.
+//
+// # Почему `FOR KEY SHARE`, а не внешний ключ
+//
+// Ключ на `(dotted, live)` запретил бы СНЯТИЕ типа, пока на него есть хоть одна
+// выдача, — а лежащая выдача обязана пережить снятие своего типа (Р5, приёмка
+// ATC-14). Условие приёма новой записи и постоянный инвариант — разные
+// утверждения; здесь нужно первое. Тот же замок и тот же порядок берёт писатель
+// селекторов роли (`roleWriter.ReplaceRuleSelectors`).
+//
+// # Порядок — `ORDER BY dotted`
+//
+// Применитель запирает строки модуля одним оператором в порядке `dotted`
+// (`catalogWriter.LockModuleResources`); здесь тот же порядок назначает та же
+// власть — база, — и взаимная блокировка на паре типов непредставима.
+func (w *abWriter) LockLiveTargetTypes(ctx context.Context, types []string) ([]string, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	rows, err := w.tx.Query(ctx, `
+		SELECT dotted FROM kaname.catalog_resource
+		 WHERE dotted = ANY($1) AND live
+		 ORDER BY dotted
+		   FOR KEY SHARE`, types)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	live := make([]string, 0, len(types))
+	for rows.Next() {
+		var dotted string
+		if err := rows.Scan(&dotted); err != nil {
+			return nil, mapErr(err, "", "")
+		}
+		live = append(live, dotted)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	return live, nil
+}
+
+// InsertEmittedTuples сохраняет ТОЧНЫЕ кортежи прав, выпущенные для выдачи, в
+// kaname.access_binding_emitted_tuples в текущей пишущей транзакции, вместе с
+// парным EmitRelationWrite (запрет #10). ON CONFLICT DO NOTHING делает повторный
+// выпуск (идемпотентная повторная выдача / реконсайл) пустым. len==0 — ничего.
 func (w *abWriter) InsertEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []access_binding.RelationTuple) error {
 	if len(tuples) == 0 {
 		return nil
@@ -1195,12 +1371,14 @@ func (w *abWriter) InsertEmittedTuples(ctx context.Context, bindingID domain.Acc
 				t.User, t.Relation, t.Object)
 		}
 		if _, err := w.tx.Exec(ctx,
-			// source='binding': written by Create + the Role.Update RoleTupleReconciler.
-			// ARM_LABELS per-member rows (source='member') are owned by the γ reconciler
-			// (RecordEmittedTuples) and MUST NOT be touched by the binding-level path.
+			// source='binding': пишут Create и RoleTupleReconciler из Role.Update. Строки
+			// ARM_LABELS по членам (source='member') принадлежат реконсайлеру γ
+			// (RecordEmittedTuples), и путь уровня выдачи их НЕ трогает.
+			// Координата члена у строки уровня выдачи пуста (kaname#933): умолчание
+			// колонок, и ключ конфликта — полный ключ реестра.
 			`INSERT INTO access_binding_emitted_tuples (binding_id, fga_user, relation, object, source)
 			 VALUES ($1, $2, $3, $4, 'binding')
-			 ON CONFLICT (binding_id, fga_user, relation, object) DO NOTHING`,
+			 ON CONFLICT (binding_id, member_object_type, member_object_id, fga_user, relation, object) DO NOTHING`,
 			string(bindingID), t.User, t.Relation, t.Object,
 		); err != nil {
 			return mapErr(err, "", string(bindingID))
@@ -1209,20 +1387,20 @@ func (w *abWriter) InsertEmittedTuples(ctx context.Context, bindingID domain.Acc
 	return nil
 }
 
-// ReplaceEmittedTuples atomically replaces a binding's persisted emitted-set
-// (DELETE all rows of the binding, then INSERT the new set) in the current
-// writer-tx — the Role.Update reconcile fan-out uses it so the ledger reflects
-// the CURRENT emitted projection after a permission change (ban #10).
-// An empty `tuples` clears the binding's ledger rows.
+// ReplaceEmittedTuples атомарно заменяет сохранённый выпущенный набор выдачи
+// (DELETE всех строк выдачи, затем INSERT нового набора) в текущей пишущей
+// транзакции — веер реконсайла Role.Update пользуется им, чтобы реестр отражал
+// ТЕКУЩУЮ выпущенную проекцию после смены прав (запрет #10). Пустой `tuples`
+// очищает строки реестра выдачи.
 func (w *abWriter) ReplaceEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, tuples []access_binding.RelationTuple) error {
-	// Scope the wholesale swap to the BINDING-LEVEL subset (source='binding'). The
-	// Role.Update reconcile (RoleTupleReconciler) owns only those tuples; the
-	// ARM_LABELS per-member rows (source='member', written by the γ reconciler) are
-	// owned by RoleMembershipFanout and MUST survive a binding-level reconcile —
-	// otherwise a rules-changing Role.Update of a custom role mixing a binding-level
-	// arm with an ARM_LABELS arm would revoke all label-selected access (the prior
-	// `DELETE … WHERE binding_id` wiped them). InsertEmittedTuples re-inserts the new
-	// set as source='binding'.
+	// Полная замена ограничена подмножеством УРОВНЯ ВЫДАЧИ (source='binding').
+	// Реконсайл Role.Update (RoleTupleReconciler) владеет только этими кортежами;
+	// строки ARM_LABELS по членам (source='member', их пишет реконсайлер γ)
+	// принадлежат RoleMembershipFanout и ОБЯЗАНЫ пережить реконсайл уровня выдачи —
+	// иначе Role.Update со сменой правил у своей роли, где ветвь уровня выдачи
+	// соседствует с ветвью ARM_LABELS, отозвал бы весь доступ, выбранный метками
+	// (прежний `DELETE … WHERE binding_id` стирал их). InsertEmittedTuples вставляет
+	// новый набор заново как source='binding'.
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM access_binding_emitted_tuples WHERE binding_id = $1 AND source = 'binding'`, string(bindingID),
 	); err != nil {
@@ -1231,16 +1409,16 @@ func (w *abWriter) ReplaceEmittedTuples(ctx context.Context, bindingID domain.Ac
 	return w.InsertEmittedTuples(ctx, bindingID, tuples)
 }
 
-// emitFGAOutbox enqueues the binding's tuples through the table's OWN emitter
-// rather than rendering a row here.
+// emitFGAOutbox ставит кортежи выдачи в журнал СОБСТВЕННЫМ выпускателем таблицы,
+// а не собирает строку здесь.
 //
-// It used to write its own INSERT, one row per tuple, with its own hand-built
-// payload — a second rendering of a shape whose whole point is that every producer
-// agrees on it. The two drifted the moment the row stopped being one tuple: this
-// path kept splitting a subject's relation set across rows, so a grant made through
-// a binding still landed one relation at a time while the same grant made
-// through the reconciler arrived whole. One emitter, one shape, one unit of
-// atomicity — the drift has nowhere to happen.
+// Прежде здесь стояла своя вставка, строка на кортеж, со своим рукописным
+// payload — второе написание формы, весь смысл которой в том, что все
+// производители согласны о ней. Они разошлись в тот момент, когда строка
+// перестала быть одним кортежем: этот путь продолжал дробить набор отношений
+// субъекта по строкам, и выдача через привязку приходила по одному отношению,
+// тогда как та же выдача через реконсайлер приходила целиком. Один выпускатель,
+// одна форма, одна единица атомарности — расхождению негде случиться.
 func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples []access_binding.RelationTuple) error {
 	if len(tuples) == 0 {
 		return nil
@@ -1271,24 +1449,25 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 	return mapErr(err, "", "")
 }
 
-// EmitAuditEvent atomically appends one durable compliance row into
-// kaname.audit_outbox in the current writer-tx (atomicity required — see
-// within-service refs, запрет #10). The binding INSERT/DELETE and the audit
-// enqueue commit-or-rollback together: a rolled-back grant leaves no audit row
-// claiming it happened, and a committed grant always leaves its trail.
+// EmitAuditEvent атомарно добавляет одну долговечную строку соответствия в
+// kaname.audit_outbox в текущей пишущей транзакции (атомарность обязательна — см.
+// ссылки внутри службы, запрет #10). Вставка либо удаление выдачи и постановка
+// аудита фиксируются либо откатываются вместе: откаченная выдача не оставляет
+// строки аудита, утверждающей, что она была, а зафиксированная всегда оставляет
+// след.
 //
-// The event_payload jsonb carries the compliance dimensions (actor / subject /
-// resource / role_id / binding_id) so the "who granted which role to whom on
-// which resource, and when" question is queryable; created_at supplies the
-// "when". The row starts status='pending' for the audit shipper (pkg/audit).
+// jsonb event_payload несёт измерения соответствия (actor / subject / resource /
+// role_id / binding_id), чтобы на вопрос «кто, какую роль, кому, на какой ресурс
+// и когда» отвечал запрос; «когда» даёт created_at. Строка начинает со
+// status='pending' для отправителя аудита (pkg/audit).
 func (w *abWriter) EmitAuditEvent(ctx context.Context, ev access_binding.AuditEvent) error {
 	if ev.EventType == "" {
 		return fmt.Errorf("emit audit_outbox: event_type required")
 	}
-	// Canonical compliance dimensions, then merge any event-specific
-	// ExtraPayload (e.g. selector_replaced's old/new diff). Build as map[string]any
-	// so heterogeneous extra fields (nested objects) are representable; keys in
-	// ExtraPayload override the canonical ones on collision.
+	// Канонические измерения соответствия, затем слияние с ExtraPayload события
+	// (например, разница старого и нового у selector_replaced). Собирается как
+	// map[string]any, чтобы разнородные дополнительные поля (вложенные объекты) были
+	// представимы; ключи ExtraPayload при совпадении перекрывают канонические.
 	fields := map[string]any{
 		"actor":         ev.Actor,
 		"subject_type":  ev.SubjectType,
@@ -1305,7 +1484,7 @@ func (w *abWriter) EmitAuditEvent(ctx context.Context, ev access_binding.AuditEv
 	if err != nil {
 		return fmt.Errorf("emit audit_outbox: marshal payload: %w", err)
 	}
-	// tenant_account_id is nullable (per-account scoping when known).
+	// tenant_account_id может отсутствовать (сужение до аккаунта, когда он известен).
 	tenant := nullableString(ev.TenantAccountID)
 	if _, err := w.tx.Exec(ctx,
 		`INSERT INTO kaname.audit_outbox
@@ -1318,18 +1497,18 @@ func (w *abWriter) EmitAuditEvent(ctx context.Context, ev access_binding.AuditEv
 	return nil
 }
 
-// newAuditEventID returns an audit_outbox id of the form `evt_<22-char
-// crockford-base32>`, satisfying the audit_outbox_id_check regex
-// (`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`). The 22-char body mirrors
-// the proven bootstrap-admin generator; domain.NewKac127ID produces only a
-// 17-char body, which is below the CHECK's 20-char floor.
+// newAuditEventID отдаёт id audit_outbox вида `evt_<22 знака crockford-base32>`,
+// удовлетворяющий регулярному выражению audit_outbox_id_check
+// (`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$`). Тело в 22 знака повторяет
+// проверенный генератор начального администратора; domain.NewKac127ID даёт тело
+// лишь в 17 знаков — ниже нижней границы CHECK в 20.
 func newAuditEventID() string {
 	const crockford = "0123456789abcdefghjkmnpqrstvwxyz"
 	const bodyLen = 22
 	var raw [14]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		// crypto/rand.Read does not fail on a healthy host; a failure means
-		// the system entropy source is broken — panic is the correct response.
+		// crypto/rand.Read на исправной машине не отказывает; отказ значит, что источник
+		// энтропии системы сломан, — panic здесь верный ответ.
 		panic("pg: crypto/rand failed: " + err.Error())
 	}
 	hi := binary.BigEndian.Uint64(raw[0:8])
@@ -1339,7 +1518,7 @@ func newAuditEventID() string {
 	sb.Grow(len("evt_") + bodyLen)
 	sb.WriteString("evt_")
 	for i := 0; i < bodyLen; i++ {
-		bitOff := uint(i*5) % 64 // i is the bounded loop index [0,bodyLen); i*5 cannot overflow uint.
+		bitOff := uint(i*5) % 64 // i — ограниченный индекс цикла [0,bodyLen); i*5 не переполняет uint.
 		src := hi
 		if i >= 12 {
 			src = lo
@@ -1350,8 +1529,8 @@ func newAuditEventID() string {
 	return sb.String()
 }
 
-// deriveEventTypeFromOp — canonical event_type for a legacy op alias.
-// binding_delete→binding_revoke, binding_upsert→binding_grant, else passthrough.
+// deriveEventTypeFromOp — канонический event_type для унаследованного имени op.
+// binding_delete→binding_revoke, binding_upsert→binding_grant, прочее — как есть.
 func deriveEventTypeFromOp(op string) string {
 	switch op {
 	case "binding_delete":
@@ -1363,9 +1542,9 @@ func deriveEventTypeFromOp(op string) string {
 	}
 }
 
-// deriveOpFromEventType — legacy op alias for a canonical event_type.
-// Inverse of deriveEventTypeFromOp; used when caller provides only event_type
-// (Op must satisfy DB CHECK subject_change_op_check, so we must populate it).
+// deriveOpFromEventType — унаследованное имя op для канонического event_type.
+// Обратная к deriveEventTypeFromOp; нужна, когда вызывающий дал только event_type
+// (Op обязан удовлетворять CHECK subject_change_op_check, поэтому его заполняем).
 func deriveOpFromEventType(eventType string) string {
 	switch eventType {
 	case "binding_revoke":
@@ -1377,15 +1556,16 @@ func deriveOpFromEventType(eventType string) string {
 	}
 }
 
-// SelectEmittedTuplesBySource reads only the emitted-set rows of a binding written
-// by ONE owner (source='binding' for Create + RoleTupleReconciler, source='member'
-// for the γ reconciler). The Role.Update reconcile fan-out reads the 'binding'
-// subset so its set-diff never sees — and so cannot revoke — the ARM_LABELS
-// per-member tuples (CRITICAL ledger-source fix). The full symmetric revoke
-// (delete.go) keeps using SelectEmittedTuples (the whole ledger). Zero rows ⇒ nil.
+// SelectEmittedTuplesBySource читает только строки выпущенного набора выдачи,
+// записанные ОДНИМ владельцем (source='binding' — Create и RoleTupleReconciler,
+// source='member' — реконсайлер γ). Веер реконсайла Role.Update читает
+// подмножество 'binding', поэтому его разница наборов никогда не видит — а значит,
+// не может отозвать — кортежи ARM_LABELS по членам (КРИТИЧНАЯ правка источника
+// реестра). Полный симметричный отзыв (delete.go) по-прежнему читает
+// SelectEmittedTuples (весь реестр). Ноль строк ⇒ nil.
 func (r *abReader) SelectEmittedTuplesBySource(ctx context.Context, bindingID domain.AccessBindingID, source string) ([]access_binding.RelationTuple, error) {
 	rows, err := r.tx.Query(ctx,
-		`SELECT fga_user, relation, object
+		`SELECT DISTINCT fga_user, relation, object
 		   FROM access_binding_emitted_tuples
 		  WHERE binding_id = $1 AND source = $2
 		  ORDER BY relation, object, fga_user`, string(bindingID), source)
@@ -1407,14 +1587,15 @@ func (r *abReader) SelectEmittedTuplesBySource(ctx context.Context, bindingID do
 	return out, nil
 }
 
-// SelectEmittedTuples reads the persisted exact emitted-set of a binding
-// (kaname.access_binding_emitted_tuples). The revoke (delete.go)
-// and the Role.Update reconcile fan-out use it as the source of truth for which
-// FGA tuples were actually written, so the revoke is byte-symmetric to the grant
-// regardless of the role's current permissions. Zero rows ⇒ empty slice (nil).
+// SelectEmittedTuples читает сохранённый точный выпущенный набор выдачи
+// (kaname.access_binding_emitted_tuples). Отзыв (delete.go) и веер реконсайла
+// Role.Update берут его источником правды о том, какие кортежи прав на деле
+// записаны, поэтому отзыв побайтно симметричен выдаче, каковы бы ни были текущие
+// права роли. Кортеж, выпущенный двумя членами выдачи (две координаты), — одна
+// строка ответа (kaname#933). Ноль строк ⇒ пустой срез (nil).
 func (r *abReader) SelectEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]access_binding.RelationTuple, error) {
 	rows, err := r.tx.Query(ctx,
-		`SELECT fga_user, relation, object
+		`SELECT DISTINCT fga_user, relation, object
 		   FROM access_binding_emitted_tuples
 		  WHERE binding_id = $1
 		  ORDER BY relation, object, fga_user`, string(bindingID))
@@ -1432,53 +1613,6 @@ func (r *abReader) SelectEmittedTuples(ctx context.Context, bindingID domain.Acc
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapErr(err, "", string(bindingID))
-	}
-	return out, nil
-}
-
-// SelectTuplesClaimedByOtherActiveBindings returns the subset of `tuples` that some
-// OTHER *ACTIVE* binding also records in the emitted-tuple ledger — the tuples a
-// revoke of excludeBinding must NOT strip (the tuple is not refcounted, the ledger
-// is keyed per binding; see the ReaderIface doc).
-//
-// ONE query for the whole candidate set: the triples are shipped as three parallel
-// arrays and unnested into a join against the ledger, so the probe costs one
-// round-trip regardless of set size (the reconciler's per-tuple EXISTS twin predates
-// this). DISTINCT because several other bindings may claim the same tuple. Zero
-// rows ⇒ nil (nothing survives ⇒ the whole set is revoked).
-func (r *abReader) SelectTuplesClaimedByOtherActiveBindings(ctx context.Context, excludeBinding domain.AccessBindingID, tuples []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
-	if len(tuples) == 0 {
-		return nil, nil
-	}
-	users := make([]string, len(tuples))
-	relations := make([]string, len(tuples))
-	objects := make([]string, len(tuples))
-	for i, t := range tuples {
-		users[i], relations[i], objects[i] = t.User, t.Relation, t.Object
-	}
-	rows, err := r.tx.Query(ctx,
-		`SELECT DISTINCT c.fga_user, c.relation, c.object
-		   FROM unnest($2::text[], $3::text[], $4::text[]) AS c(fga_user, relation, object)
-		   JOIN access_binding_emitted_tuples et
-		     ON et.fga_user = c.fga_user AND et.relation = c.relation AND et.object = c.object
-		   JOIN access_bindings ab ON ab.id = et.binding_id
-		  WHERE et.binding_id <> $1
-		    AND ab.status = 'ACTIVE'`,
-		string(excludeBinding), users, relations, objects)
-	if err != nil {
-		return nil, mapErr(err, "", string(excludeBinding))
-	}
-	defer rows.Close()
-	var out []access_binding.RelationTuple
-	for rows.Next() {
-		var t access_binding.RelationTuple
-		if err := rows.Scan(&t.User, &t.Relation, &t.Object); err != nil {
-			return nil, mapErr(err, "", string(excludeBinding))
-		}
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, mapErr(err, "", string(excludeBinding))
 	}
 	return out, nil
 }
@@ -1554,10 +1688,9 @@ func (r *abReader) ListActiveHoldingMembership(
 	return ids, total, nil
 }
 
-// ListActiveByRole returns every non-revoked (PENDING/ACTIVE) binding of a role
-// (Role.Update reconcile fan-out). The set is bounded by the active
-// bindings of the SINGLE mutated role. Ordered (created_at, id) ASC for
-// deterministic reconcile.
+// ListActiveByRole отдаёт каждую неотозванную (PENDING/ACTIVE) выдачу роли (веер
+// реконсайла Role.Update). Набор ограничен действующими выдачами ОДНОЙ изменённой
+// роли. Порядок (created_at, id) ASC — ради детерминированного реконсайла.
 func (r *abReader) ListActiveByRole(ctx context.Context, roleID domain.RoleID) ([]domain.AccessBinding, error) {
 	rows, err := r.tx.Query(ctx,
 		fmt.Sprintf(`SELECT %s FROM access_bindings
@@ -1581,8 +1714,8 @@ func (r *abReader) ListActiveByRole(ctx context.Context, roleID domain.RoleID) (
 	return out, nil
 }
 
-// CountActiveByRole returns the count of non-revoked bindings of a role — the
-// Role.Update fan-out bound-check (limit 10000). Cheap COUNT on role_id.
+// CountActiveByRole отдаёт число неотозванных выдач роли — проверка предела веера
+// Role.Update (10000). Дешёвый COUNT по role_id.
 func (r *abReader) CountActiveByRole(ctx context.Context, roleID domain.RoleID) (int, error) {
 	var n int
 	if err := r.tx.QueryRow(ctx,
@@ -1595,15 +1728,14 @@ func (r *abReader) CountActiveByRole(ctx context.Context, roleID domain.RoleID) 
 
 // ─── multi-subject set + ListByRole ───
 
-// ListByRole returns the bindings carrying roleID, keyset-paginated by
-// (created_at, id) ASC. Mirrors the other List queries' pagination/scan/
-// cursor semantics; the IncludeRevoked=false default hides REVOKED rows (a
-// static predicate with no bind-arg, so this query is built inline rather than
-// via listWithConds, which assumes one bind-arg per condition).
+// ListByRole отдаёт выдачи с roleID, листая ключом (created_at, id) ASC. Листание,
+// чтение и курсор — как у прочих перечней; умолчание IncludeRevoked=false скрывает
+// строки REVOKED (статичный предикат без параметра, поэтому запрос собран здесь,
+// а не через listWithConds, который ждёт по параметру на условие).
 func (r *abReader) ListByRole(ctx context.Context, roleID domain.RoleID, f access_binding.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
-	// page_size outside [0..maxListPageSize] is REJECTED, never clamped: a clamp
-	// answers 200 OK with a page shorter than asked for, and nothing in the
-	// response tells that apart from a complete answer.
+	// page_size вне [0..maxListPageSize] ОТВЕРГАЕТСЯ, а не усекается: усечение
+	// отвечает 200 OK страницей короче запрошенной, и ничто в ответе не отличает
+	// её от полного ответа.
 	pageSize, err := effectivePageSize(f.PageSize)
 	if err != nil {
 		return nil, "", err
@@ -1654,10 +1786,10 @@ func (r *abReader) ListByRole(ctx context.Context, roleID domain.RoleID, f acces
 	return out, nextToken, nil
 }
 
-// ListSubjects returns the multi-subject set of ONE binding ordered by
-// (ordinal, subject_type, subject_id). Zero rows ⇒ a
-// pre-backfill legacy binding; the read-side falls back to the legacy single
-// subject.
+// ListSubjects отдаёт набор субъектов ОДНОЙ выдачи в порядке (ordinal,
+// subject_type, subject_id). У сохранённой выдачи набор непуст — это держит база
+// (`access_bindings_carry_a_subject`, kaname#902); ноль строк значит, что выдачи
+// с таким идентификатором в таблице нет.
 func (r *abReader) ListSubjects(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.Subject, error) {
 	rows, err := r.tx.Query(ctx,
 		`SELECT subject_type, subject_id FROM access_binding_subjects
@@ -1681,8 +1813,9 @@ func (r *abReader) ListSubjects(ctx context.Context, bindingID domain.AccessBind
 	return out, nil
 }
 
-// ListSubjectsForBindings batch-loads the subjects of MANY bindings in one query
-// (no per-row N+1). Bindings with no rows are absent from the map.
+// ListSubjectsForBindings пачкой читает субъектов МНОГИХ выдач одним запросом (без
+// N+1 по строкам). У сохранённой выдачи набор непуст (`access_bindings_carry_a_subject`,
+// kaname#902), поэтому в карте нет только идентификаторов, которых нет в таблице.
 func (r *abReader) ListSubjectsForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error) {
 	out := make(map[domain.AccessBindingID][]domain.Subject, len(bindingIDs))
 	if len(bindingIDs) == 0 {
@@ -1715,15 +1848,15 @@ func (r *abReader) ListSubjectsForBindings(ctx context.Context, bindingIDs []dom
 	return out, nil
 }
 
-// ListMaterializedAtForBindings batch-loads each binding's materialization instant
-// — MAX(updated_at) over its ACTIVE rows in access_binding_target_members (the
-// reconciler's ledger). Bindings with no ACTIVE member are ABSENT from the map
-// (the caller leaves MaterializedAt zero → the API projects an unset field).
+// ListMaterializedAtForBindings пачкой читает момент материализации каждой выдачи
+// — MAX(updated_at) по её ACTIVE-строкам в access_binding_target_members (реестр
+// реконсайлера). Выдач без ACTIVE-члена в карте НЕТ (вызывающий оставляет
+// MaterializedAt нулевым → API отдаёт поле незаданным).
 //
-// PENDING_VERIFICATION rows are deliberately excluded by the WHERE: a pending
-// member is NOT live access, and reporting it would tell an administrator the
-// grant works when it does not. Served by the PK's leading binding_id column, so
-// this is one indexed aggregate, not an N+1 fan-out.
+// Строки PENDING_VERIFICATION исключены WHERE намеренно: ожидающий проверки член
+// доступом НЕ является, и показ его сказал бы администратору, что выдача работает,
+// когда она не работает. Ведущий столбец binding_id первичного ключа обслуживает
+// запрос, поэтому это один индексный агрегат, а не веер N+1.
 func (r *abReader) ListMaterializedAtForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
 	out := make(map[domain.AccessBindingID]time.Time, len(bindingIDs))
 	if len(bindingIDs) == 0 {
@@ -1759,11 +1892,14 @@ func (r *abReader) ListMaterializedAtForBindings(ctx context.Context, bindingIDs
 	return out, nil
 }
 
-// InsertSubjects persists the multi-subject set of a binding. One row per
-// subject, idempotent (ON CONFLICT DO NOTHING — re-insert is a no-op; the PK
-// row-lock serializes concurrent identical inserts to exactly one row, ban #10).
-// The ordinal preserves request order so subjects[0] (= the legacy single
-// projection) is deterministic.
+// InsertSubjects сохраняет набор субъектов выдачи. Строка на субъекта,
+// идемпотентно (ON CONFLICT DO NOTHING — повторная вставка пуста; замок строки
+// первичного ключа выстраивает одинаковые одновременные вставки в ровно одну
+// строку, запрет #10). ordinal хранит порядок запроса, поэтому subjects[0] (=
+// унаследованная одиночная проекция) детерминирован. Пустой набор не пишет
+// ничего, и коммит такой выдачи база отвергает (`access_bindings_carry_a_subject`,
+// kaname#902); набор без строки пары выдачи — тоже (kaname#907): набор пишется
+// в той же транзакции, что выдача.
 func (w *abWriter) InsertSubjects(ctx context.Context, bindingID domain.AccessBindingID, subjects []domain.Subject) error {
 	if len(subjects) == 0 {
 		return nil
@@ -1781,8 +1917,8 @@ func (w *abWriter) InsertSubjects(ctx context.Context, bindingID domain.AccessBi
 	return nil
 }
 
-// DeleteSubject removes ONE subject's row (per-subject revoke) and reports
-// whether a row was actually deleted (idempotent — a missing subject ⇒ false).
+// DeleteSubject снимает строку ОДНОГО субъекта (отзыв по субъекту) и сообщает, была
+// ли строка удалена на деле (идемпотентно — нет субъекта ⇒ false).
 func (w *abWriter) DeleteSubject(ctx context.Context, bindingID domain.AccessBindingID, subject domain.Subject) (bool, error) {
 	tag, err := w.tx.Exec(ctx,
 		`DELETE FROM access_binding_subjects

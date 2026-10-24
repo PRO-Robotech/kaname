@@ -55,6 +55,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // reasonReferenceInUse — машинный признак полосы «на ресурс ещё ссылаются»
@@ -400,9 +401,9 @@ func seedBindingWithLedger(t *testing.T, ctx context.Context, env *pneEnv, uid d
 		Scan(&roleID), "посев системной роли iam.project.admin")
 	acb := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	_, err := env.pool.Exec(ctx,
-		`INSERT INTO kaname.access_bindings
+		bindingset.With(`INSERT INTO kaname.access_bindings
 		     (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		 VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		 VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		string(acb), string(uid), roleID, string(prj))
 	require.NoError(t, err)
 

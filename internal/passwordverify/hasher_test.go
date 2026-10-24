@@ -49,13 +49,13 @@ func TestHasher_F3_41_WritesTheDeclaredFormatAndTheVerifierReadsItBack(t *testin
 	obs := &countingObserver{}
 	verifier, err := passwordverify.New(2, obs)
 	require.NoError(t, err)
-	res := verifier.Verify(v, "correct horse battery staple")
+	res := verify(t, verifier, v, "correct horse battery staple")
 	require.Equal(t, passwordverify.OutcomeMatched, res.Outcome)
 	require.Equal(t, domain.PasswordHashFormatArgon2id, res.Format)
 	require.Equal(t, uint32(65536), res.Params[domain.CostParamArgon2Memory])
 	require.Equal(t, uint32(3), res.Params[domain.CostParamArgon2Iterations])
 	require.Equal(t, uint32(4), res.Params[domain.CostParamArgon2Parallelism])
-	require.Equal(t, passwordverify.OutcomeMismatched, verifier.Verify(v, "wrong").Outcome)
+	require.Equal(t, passwordverify.OutcomeMismatched, verify(t, verifier, v, "wrong").Outcome)
 
 	meets, err := verifier.MeetsDeclared(v, declared)
 	require.NoError(t, err)

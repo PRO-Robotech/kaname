@@ -23,9 +23,10 @@ type StatusInput struct {
 	Bearer domain.SessionBearer
 }
 
-// BackupCodesView — остаток набора: величина ответа (Р6). При нуле — число,
-// не молчание.
-type BackupCodesView struct {
+// BackupCodeSetView — состояние набора запасных кодов (kaname#297 Р2): остаток,
+// размер, момент выпуска и момент последней траты; кодов и материала нет.
+// Строится только о ПРОЧИТАННОМ наборе — значений-заглушек нет.
+type BackupCodeSetView struct {
 	Remaining int
 	Total     int
 	// IssuedAt — момент выпуска набора (kaname#827, SUA Р6): момент строки
@@ -35,6 +36,13 @@ type BackupCodesView struct {
 	// после выпуска набора не тратили, и ключа в ответе нет.
 	LastUsedAt time.Time
 	LastUsed   bool
+}
+
+// mintedSetView — состояние только что выпущенного набора: все коды целы,
+// момент выпуска — момент строки набора (тот же, что ляжет в
+// `ReplaceLookupSet`), трат не было. Его же отдаёт следующее чтение состояния.
+func mintedSetView(codes []string, issuedAt time.Time) BackupCodeSetView {
+	return BackupCodeSetView{Remaining: len(codes), Total: passwordverify.BackupCodeCount, IssuedAt: issuedAt}
 }
 
 // StatusOutput — состояние строки `totp` и набора, способы повышения и
@@ -50,8 +58,10 @@ type StatusOutput struct {
 	// после подтверждения код не предъявляли, и ключа в ответе нет.
 	TOTPLastUsedAt time.Time
 	TOTPLastUsed   bool
-	// BackupCodes — есть только у заведённого фактора.
-	BackupCodes *BackupCodesView
+	// BackupCodeSet — есть только у заведённого фактора и только о
+	// ПРОЧИТАННОМ наборе (kaname#297 Р2, Д-4 «а»): строки набора нет либо её
+	// материал не открывается — nil, а не нулевой остаток и нулевой момент.
+	BackupCodeSet *BackupCodeSetView
 	// AccessKeysAvailable — ключи доступа на установке включены.
 	AccessKeysAvailable bool
 	// StepUpMethods — способы, которыми человек может повысить уровень этой
@@ -103,14 +113,14 @@ func (uc *SecondFactorStatusUseCase) Execute(ctx context.Context, in StatusInput
 	}
 	out.TOTPEnrolled, out.ConfirmedAt = true, row.CreatedAt
 	out.TOTPLastUsedAt, out.TOTPLastUsed = row.LastUsedAt, row.LastUsed
-	out.BackupCodes = &BackupCodesView{Total: passwordverify.BackupCodeCount}
 	set, err := uc.deps.Methods.Get(ctx, resolved.User.ID, domain.LoginMethodLookupSecret)
 	switch {
 	case err == nil:
-		out.BackupCodes.IssuedAt = set.CreatedAt
-		out.BackupCodes.LastUsedAt, out.BackupCodes.LastUsed = set.LastUsedAt, set.LastUsed
 		if n, ok := uc.deps.Sets.SetSize(set.Verifier); ok {
-			out.BackupCodes.Remaining = n
+			out.BackupCodeSet = &BackupCodeSetView{
+				Remaining: n, Total: passwordverify.BackupCodeCount,
+				IssuedAt: set.CreatedAt, LastUsedAt: set.LastUsedAt, LastUsed: set.LastUsed,
+			}
 		} else {
 			uc.deps.Logger.Error("second factor status: backup code set unreadable — our data, not the caller's input",
 				"user_id", string(resolved.User.ID))
