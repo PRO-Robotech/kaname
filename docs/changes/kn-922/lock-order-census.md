@@ -89,7 +89,12 @@ W11 судится на ОДНОЙ области (два сноса одног�
 нескольких выдач (W11, W13, W14) идут в порядке id; W16 держит одну строку и
 ничего больше не ждёт. Каждая из 36 пар — подтестом
 `TestGrantLockOrderCensusPairsDoNotDeadlock/<a>×<b>` (20 ходов, общий старт под
-держателем, счётчик базы `pg_stat_database.deadlocks`).
+держателем, счётчик базы `pg_stat_database.deadlocks`). Имена писателей пробы:
+revoke — W8, delete — W9, expiry — W10, scope — W11 (`RevokeBindingsInScope` в
+транзакции записи — тот захват, что у сноса проекта и аккаунта), full — W12,
+object — W13, objectForward — W14, bindingForward — W15, update — W16. Счётчик —
+прибор пробы, и у него свой положительный контроль:
+`TestDeadlockCounterSeesADeadlock` (ABBA на двух строках — ровно одна отметка).
 
 | пара (по писателям пробы) | инверсия |
 |---|---|
