@@ -205,6 +205,7 @@ grep -cE 'resourceNames|^\s*target:\s*resources' manifest.yaml internal/servicem
 | ссылки на объекты в объявлениях манифеста: выдачи посева с `target: resources`, `resourceNames` правила верхнего уровня и правила-владельца в ролях манифеста | загрузчик будет отвергать такие ссылки (`PRO-Robotech/kaname#965`). Имена ВЛОЖЕННОГО правила остаются в объёме (Р7) | `PRO-Robotech/kaname#965` |
 | снятие ТИПА из каталога | своё правило: выдача и цель переживают снятие типа | `module-withdrawal-is-described.md`, `plan-confirms-what-apply-withdraws.md`, ATC-14 |
 | цель `allInScope` | называет область, а не ключ. Будущие объекты, в том числе повторно зарегистрированные, она покрывает по построению | — |
+| запоздалое снятие регистрации и доступ владельца нового объекта (кортежи владельца при устаревшем надгробии) | порядок снятия кортежей владельца по версии — дефект, существовавший до `#963`, к предмету не относится. Утверждение о доступе владельца нового объекта из URG-30 снято | `PRO-Robotech/kaname#969` («Запоздалое снятие регистрации не трогает владельца нового объекта») |
 | строки журнала намерений с версией владельца (публикация) | их порядок и след снятия — предмет соседа. Снятие публикации здесь — только близнец URG-31 | `relation-fact-remembers-its-removal.md` |
 | обратное заполнение `revocation_reason` у строк, отозванных до миграции | причина не записывалась. Восстановить её можно было бы только выводом из `revoked_by_user_id`, а это вывод из истории писателей, а не факт | Д7 |
 | комментарий `AccessTargetResources` | его переписывает и сосед (ветка `746`, Р6 соседа). Две правки одного комментария свести при посадке, чтобы ни одна не стёрла другую | DoD п.1 |
@@ -405,18 +406,33 @@ grep -cE 'resourceNames|^\s*target:\s*resources' manifest.yaml internal/servicem
   rol-reg-names-X — то же с `["<X>"]`, rol-reg-names-X-Y — два правила `["<X>"]` и `["<Y>"]`,
   rol-reg-names-Y — `["<Y>"]`;
 - выдача ролью с названиями: человеку usr-B или usr-D на prj-A, цель `{"allInScope":{}}`;
-- мир П3-У для вложенных имён (Р7): фикстура манифеста
-  `internal/manifest/testdata/probemod.children-names-fixture.yaml` (заводится по образцу
-  `probemod.children-fixture.yaml`, тот же раздел `resources`: `boxes` → `items` → `tags`).
-  Роли в ней — правило над `boxes [get, list]` с вложенным правилом над `tags [get, list]`:
-  `probemod.reader_t13` (у вложенного `resourceNames: [t1, t3]`), `probemod.reader_t1`
-  (`[t1]`), `probemod.reader_t3` (`[t3]`). Доставка — `applyDelivered` мира П6 (каталог,
-  роли, самолечение отбора). Объекты регистрируются `Register` мира с цепью предков: ящик
-  `b1` (указатель на prj-A), предмет `i1` в `b1`, ярлыки `t1`, `t3` в `i1`
-  (`parentChain: ["probemod_item:i1","probemod_box:b1","project:<prj-A>","account:<acc-A>"]`),
-  позже — ярлык `t4` в `i1`. Форма имени `^[a-zA-Z0-9_-]+$` (соседний Р2) ярлыкам `t1`, `t3`
-  годна. Выдача — роль манифеста человеку usr-D на prj-A, цель `allInScope` (проверка
-  перечня типов цели к `allInScope` не применяется).
+- мир П3-У для вложенных имён (Р7) — `newP3UWorld`
+  (`internal/apps/kaname/api/access_binding/unregister_nested_names_world_integration_test.go:83`)
+  поверх мира У.
+  **Принятое решение диспетчера (2026-10-24):** мир собран на типах registry вместо пробного
+  модуля прошлой редакции — его типов нет в модели прав (решение по ним даёт отказ «тип не объявлен»). Контейнер —
+  реестр X (`registry_registry`), вложенный тип — репозитории (`registry_repository`).
+  Доставка — новая редакция манифеста registry П6 (`publicreadfixture.NewEditionFile`) с
+  тремя дописанными ролями, загрузка `manifest.Load`, применение `applyDelivered`. Каждая
+  роль — правило `{module: registry, resources: [registries], classes: [get, list]}` с одним
+  вложенным правилом `{resources: [repositories], classes: [get, list], resourceNames: …}`:
+  `registry.reader_t13` (`[t1, t3]`), `registry.reader_t1` (`[t1]`), `registry.reader_t3`
+  (`[t3]`). Репозитории `t1`, `t3`, позже `t4` регистрирует `registerTag`: кортежи
+  `{"subjectId":"registry_registry:<X>","relation":"parent","object":"registry_repository:<id>"}`
+  и `owner` usr-A, `parentChain: ["registry_registry:<X>","project:<prj-A>","account:<acc-A>"]`,
+  своя версия у каждого намерения. Снятие — `unregisterTag`: тот же кортеж `parent`, новая
+  версия. Id репозиториев мира — непрозрачные `t1`, `t3`, `t4` без `/`: форма имени
+  `^[a-zA-Z0-9_-]+$` им годна. Служба id не разбирает: регистрация принимает любой id формы
+  `<type>:<id>` (`validateRelationString`, `register_resource.go`). Выдача — `grantNamedRole`:
+  роль манифеста человеку usr-D на prj-A, цель `{"allInScope":{}}`, через `Create` от usr-A.
+  Чтение роли — строка роли (`Roles().Get`, `roleRules` мира), `Check` — `ask` мира.
+
+  | что в «Дано» мира П3-У | столбец | писатель, строка |
+  |---|---|---|
+  | роли `registry.reader_t1*` с вложенным правилом и именами | `roles.rules` | `internal/repo/kaname/pg/role_repo.go:643`, вставка `:658` (`UpsertSystemRole`) из `moduleroles.Applier.Apply` (`public_container_read_world_integration_test.go:292`) |
+  | отбор вложенного правила | `role_rule_selectors.resource_names`, `container_type`, `container_resource_names` | `internal/apps/kaname/seed/migrate_backfill.go:420` (`SyncAllSystemRoleSelectors`, `public_container_read_world_integration_test.go:296`) |
+  | репозитории `t1`, `t3`, `t4` под X | `resource_mirror`, `resource_parent_edge` | `internal/repo/kaname/pg/resource_mirror/emitter.go:197`, `:451` из `Register` (`registerTag`) |
+  | выдача роли usr-D | `access_bindings.(role_id, target)` | `internal/repo/kaname/pg/access_binding_repo.go:696` из воркера `Create` (`create.go:324`) |
 
 **Дано → писатель.** Каждый нетривиальный столбец «Дано» кладёт названный писатель:
 
@@ -705,41 +721,44 @@ grep -cE 'resourceNames|^\s*target:\s*resources' manifest.yaml internal/servicem
 
 #### URG-35 · имя убирается из вложенного правила, остальные действуют
 
-**Дано** мир П3-У, роль `probemod.reader_t13`, выдача человеку usr-D на prj-A, `allInScope`;
-`Check(usr-D, v_get, probemod_tag, t1)` → allow, `… t3` → allow (контроль фикстуры: без него
-красное ниже было бы о неработающих вложенных именах, а не о снятии)
+**Дано** мир П3-У, репозитории `t1`, `t3` под X, роль `registry.reader_t13`, выдача человеку
+usr-D на prj-A, `allInScope`; `Check(usr-D, v_get, registry_repository, t1)` → allow,
+`… t3` → allow (контроль фикстуры: без него красное ниже было бы о неработающих вложенных
+именах, а не о снятии)
 
-**Когда** `UnregisterResource` по `{"subjectId":"probemod_item:i1","relation":"item","object":"probemod_tag:t1","sourceVersion":"<v+1>"}`
+**Когда** `UnregisterResource` по `{"subjectId":"registry_registry:<X>","relation":"parent","object":"registry_repository:t1","sourceVersion":"<v+1>"}`
 
-**Тогда** `RoleService.Get(probemod.reader_t13).rules[0].children[0].resourceNames = ["t3"]`;
-правило-владелец и его глаголы не изменились
-**И** `Check(usr-D, v_get, probemod_tag, t1)` → deny, `… t3` → allow
-**И** после повторной регистрации `t1` в `i1` и перерасчёта роли и выдачи — `… t1` → deny
+**Тогда** у роли `registry.reader_t13` одно правило, у него одно вложенное правило с
+`resourceNames = ["t3"]`; `resources` и `verbs` правила-владельца не изменились
+**И** `Check(usr-D, v_get, registry_repository, t1)` → deny, `… t3` → allow
+**И** после повторной регистрации `t1` под X и перерасчёта — `… t1` → deny
 
 #### URG-36 · последнее имя — вложенное правило снимается, а не хранится пустым
 
-**Дано** мир П3-У, роль `probemod.reader_t1`, выдача человеку usr-D на prj-A, `allInScope`;
-`Check(usr-D, v_get, probemod_tag, t1)` → allow, `… t3` → deny (имена сужают)
+**Дано** мир П3-У, репозитории `t1`, `t3` под X, роль `registry.reader_t1`, выдача человеку
+usr-D на prj-A, `allInScope`; `Check(usr-D, v_get, registry_repository, t1)` → allow,
+`… t3` → deny (имена сужают)
 
 **Когда** снята регистрация `t1`, как в 35
 
-**Тогда** `RoleService.Get(probemod.reader_t1).rules[0].children` пуст; правило-владелец
-над `boxes` осталось
-**И** `Check(usr-D, v_get, probemod_tag, t3)` → deny и после регистрации ярлыка `t4` в `i1`
-`… t4` → deny: пустой перечень не стал ветвью `anchor`
-**И** `Check(usr-D, v_get, probemod_box, b1)` → allow: правило-владелец действует
+**Тогда** у роли `registry.reader_t1` одно правило, вложенных правил у него нет;
+`resources = ["registries"]`
+**И** `Check(usr-D, v_get, registry_repository, t3)` → deny и после регистрации репозитория
+`t4` под X `… t4` → deny: пустой перечень не стал ветвью `anchor`
+**И** `Check(usr-D, v_get, registry_registry, X)` → allow: правило-владелец действует
 
 Красна на реализации, которая хранит `resourceNames: []` у вложенного правила: открылись бы
 `t3` и `t4` (инъекция I8).
 
 #### URG-37 · близнец 35: вложенное правило без снятого имени не тронуто
 
-**Дано** мир П3-У, роль `probemod.reader_t3`, выдача человеку usr-D на prj-A, `allInScope`
+**Дано** мир П3-У, репозитории `t1`, `t3` под X, роль `registry.reader_t3`, выдача человеку
+usr-D на prj-A, `allInScope`; `Check(usr-D, v_get, registry_repository, t3)` → allow
 
 **Когда** снята регистрация `t1`, как в 35
 
-**Тогда** `RoleService.Get(probemod.reader_t3).rules` побайтово равны прежним
-**И** `Check(usr-D, v_get, probemod_tag, t3)` → allow
+**Тогда** правила роли `registry.reader_t3` равны прежним
+**И** `Check(usr-D, v_get, registry_repository, t3)` → allow
 **И** строки `iam.role.resource_unregistered_narrowed` с этим `role_id` нет
 
 От 35 отличается одним фактом: в именах вложенного правила нет снятого ключа.
@@ -884,7 +903,7 @@ usr-D с целью `[{registry.registries, K_i}]`; `Create` вернул `Opera
 
 **Когда** приходит снятие X с версией-надгробием `v2 < v3` (запоздалая доставка)
 
-**Тогда** gRPC OK; выдача usr-D `ACTIVE`; `Check(usr-D, …, X)` → allow; `Check(usr-C, …, X)` → allow
+**Тогда** gRPC OK; выдача usr-D `ACTIVE`; `Check(usr-D, …, X)` → allow
 
 Близнец 01: отличается одним фактом — версия надгробия.
 
@@ -985,7 +1004,7 @@ R0, отозванная до миграции (посев строки `REVOKED
 | 12 | защита уважается глаголом | `revoke.go:112-114` (без изменений) | существует |
 | 16 | потомки нового контейнера | ветвь выдач и материализатор (`grantarm.go`, `reconcile_adapter.go:472`) читают уже отозванную выдачу. Держатель — `require.False(… X/late …)` | RED до кода |
 | 19, 20, 21 | сужение роли, удаление правила, роль без правил | заказан: в той же транзакции снятия — правка `roles.rules` и `roles.permissions` (пересчёт `CompileRules`, `internal/domain/rule.go:402`) и трёх проекций (`role_rule_selectors`, `role_verb`, `role_rule_ref`) единственными писателями (`role_repo.ReplaceRuleSelectors` `:1091`, `ReplaceRoleVerbs` `:954`, `ReplaceRuleRefs` `:1000`); правило без названий не хранится (Д5); миграция Р6 — новая форма `roles_permissions_valid`. Держатель — `require.Equal(t, []string{Y}, role.GetRules()[0].GetResourceNames(), …)`, `require.Empty(t, role.GetRules(), …)`, для 20 — `SELECT rules, permissions` → `[]`, `[]` и `require.False(t, w.ask(usrD, "v_get", pcrRegType, pcrZ), …)` | RED до кода; 20 до миграции — отказ ограничения |
-| 35, 36 | имена вложенного правила | заказан: то же место, что 19–21, для `rules[i].children[j].resourceNames`; вложенное правило без имён снимается (Р7); строка отбора вложенного правила переписывается тем же писателем, что кладёт её на старте (`migrate_backfill.go:420`) либо `ReplaceRuleSelectors` — один писатель, форма — замысел. Держатель — новый файл `unregister_nested_names_world_integration_test.go`: `require.Equal(t, []string{"t3"}, role.GetRules()[0].GetChildren()[0].GetResourceNames(), …)`, для 36 — `require.Empty(t, role.GetRules()[0].GetChildren(), …)` и `require.False(t, w.ask(usrD, "v_get", "probemod_tag", "t4"), …)` | RED до кода |
+| 35, 36 | имена вложенного правила | заказан: то же место, что 19–21, для `rules[i].children[j].resourceNames`; вложенное правило без имён снимается (Р7); строка отбора вложенного правила переписывается тем же писателем, что кладёт её на старте (`migrate_backfill.go:420`) либо `ReplaceRuleSelectors` — один писатель, форма — замысел. Держатель — `unregister_nested_names_world_integration_test.go`, правила роли читаются `w.roleRules(role)` (строка роли через `Roles().Get`): `assert.Equal(t, []string{"t3"}, rules[0].Children[0].ResourceNames, "URG-35: имена вложенного правила не [t3]")`, `assert.False(t, w.tag("t1"), …)`; для 36 — `assert.Empty(t, rules[0].Children, "URG-36: вложенное правило без имён хранится")` и `assert.False(t, w.tag("t4"), "URG-36: пустой перечень стал ветвью anchor — t4 открыт")` | RED до кода |
 | 38, 40 | роль без правил ничего не даёт; отказ текстом покрытия | заказан: `tuples.go:73-93` — ветвь «только с перечнем прав» лишь при непустом `permissions`; `structural_gates.go:107-121` — проверка 3a лишь при непустом `permissions`, проверка покрытия (`:128-135`) и при пустых правилах. Держатель 38 — по его «Тогда»: `SELECT relation, object FROM kaname.access_binding_emitted_tuples WHERE binding_id = $1` → только указатель на родителя выдачи, и `require.False(t, w.ask(usrB, "v_get", pcrRegType, pcrY), …)`, `… pcrZ`; правку `tuples.go` держит инъекция I7 через URG-20. Для 40 — `require.Equal(t, codes.FailedPrecondition, …)` и текст дословно | RED до кода (38 — до миграции роль не строится; 40 — текст 3a) |
 | 39, 41 | роль с правилом | существующий путь. Держатель — `require.True(t, w.ask(usrB, …, Y), …)`, `require.Nil(t, op.GetError(), …)` | зелены до кода |
 | 24, 26 | отказ Т1/Т2 либо отзыв/сужение | заказан: запись выдачи и роли судит регистрацию названных ключей под замком, согласованным со снятием (форма — замысел). Держатель — счётчик итераций, `require.Zero(t, liveOnUnregistered, …)`, `require.GreaterOrEqual(t, writtenAfterUnregister, 1, …)`; точка удержания — обёртка порта `Repo` у `create.go:300` | RED до кода |
@@ -1096,4 +1115,4 @@ R0, отозванная до миграции (посев строки `REVOKED
 |---|---|---|
 | `access-target-names-live-catalog-types.md` · `18360285461ee74e59c92a0445fcff9d313e8c2e3ed99bb56b4efce209ff9bd9` (ветка `746`, APPROVED, круг 2) | цель — «graceful-dangling» (ATC-03); снятие типа выдачу не трогает (ATC-14, Р5) | Д6 читает Р2 через ATC-03: выдача, принятая после снятия, — выдача на свободный ключ (URG-25). Р5 соседа — о снятии ТИПА и чтении; здесь цель переписывается ЗАПИСЬЮ при снятии ОБЪЕКТА, чтение не фильтрует |
 | `relation-fact-remembers-its-removal.md` · `f5b979630f087295e8b8038a0ac4dbe43936c9522a920cfe1d9b96a3600b9304` (ветка `636`, APPROVED, круг 2) | след снятия судит только строки с версией владельца; строки выдачи упорядочены меткой журнала (Р4 соседа) | отзыв и сужение выдачи снимают кортежи строками без версии владельца — след соседа их не судит. Снятие публикации в URG-31 — путь соседа, без изменения |
-| `nested-rule-reaches-descendants-of-a-named-container.md` · `f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6` (APPROVED, запись `docs/specs/reviews/nested-rule-reaches-descendants-of-a-named-container/f12395ae…yaml`) | вложенное правило достаёт до потомков контейнера, выбранного целью или правилом-владельцем | URG-15–17: контейнер X, снятый с регистрации, снимается из цели. Имена правила-владельца в ролях манифеста — `#965` (§2); имена вложенного правила — URG-35–37 (Р7). Вложенных имён над `registry.repositories` форма имени не допускает (Р2 соседа), поэтому мир — П3-У на типах `probemod` |
+| `nested-rule-reaches-descendants-of-a-named-container.md` · `f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6` (APPROVED, запись `docs/specs/reviews/nested-rule-reaches-descendants-of-a-named-container/f12395ae…yaml`) | вложенное правило достаёт до потомков контейнера, выбранного целью или правилом-владельцем | URG-15–17: контейнер X, снятый с регистрации, снимается из цели. Имена правила-владельца в ролях манифеста — `#965` (§2); имена вложенного правила — URG-35–37 (Р7). Мир — П3-У на типах registry: репозитории под X с id без `/` (`t1`, `t3`, `t4`), которым форма имени `^[a-zA-Z0-9_-]+$` годна. Реальный registry таких id не создаёт (его id репозитория несёт `/`, Р2 соседа), и предмет держится на уровне контракта kaname, где id непрозрачен |
