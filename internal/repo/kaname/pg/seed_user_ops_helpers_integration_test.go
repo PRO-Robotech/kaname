@@ -3,24 +3,23 @@
 
 package pg_test
 
-// seed_user_ops_helpers_integration_test.go — общие подпорки интеграционных
-// проб пакета: посев пары (аккаунт, пользователь) и ожидание операции.
+// seed_user_ops_helpers_integration_test.go — общая подпорка интеграционных
+// проб пакета: посев пары (аккаунт, пользователь).
 //
-// Жили в файле проб снятого глагола обратного вызова прежнего поставщика
-// восстановления (kaname#564); их зовут пробы заведения личности и блокировки,
-// поэтому файл проб снят, а подпорки перенесены сюда без изменений.
+// Жила в файле проб снятого глагола обратного вызова прежнего поставщика
+// восстановления (kaname#564). Ожидание операции снято вместе с последним
+// вызывающим — пробами, гонявшими глагол заведения личности по внешнему
+// удостоверению (снят kaname#929): они идут теперь телом заведения напрямую.
 
 import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/ids"
-	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
@@ -52,20 +51,4 @@ func seedAccountAndUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, e
 	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 	return uid, accID
-}
-
-// awaitOp polls the ops repo until done (or timeout).
-func awaitOp(t *testing.T, ctx context.Context, opsRepo operations.Repo, id string) *operations.Operation {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		op, err := opsRepo.Get(ctx, id)
-		require.NoError(t, err)
-		if op.Done {
-			return op
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("operation %s not done within deadline", id)
-	return nil
 }

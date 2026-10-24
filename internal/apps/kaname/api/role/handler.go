@@ -6,6 +6,7 @@ package role
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/dto"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
 
@@ -48,6 +50,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 	if len(req.GetPermissions()) > 0 { //nolint:staticcheck // A-02: deprecated field read solely to reject it
 		return nil, shared.InvalidArg("permissions", "Illegal argument permissions (compiled/output-only)")
 	}
+	if err := refuseNestedRulesOnInput(req.GetRules()); err != nil {
+		return nil, err
+	}
 	r, err := roleFromCreateReq(req)
 	if err != nil {
 		return nil, err
@@ -60,6 +65,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateRoleRequest) (*operationpb.Operation, error) {
+	if err := refuseNestedRulesOnInput(req.GetRules()); err != nil {
+		return nil, err
+	}
 	in := UpdateRoleInput{
 		ID:              domain.RoleID(req.GetRoleId()),
 		ResourceVersion: req.GetResourceVersion(),
@@ -209,14 +217,38 @@ func rulesFromProto(in []*iamv1.Rule) domain.Rules {
 	return out
 }
 
+// roleToPb — роль в ответе ЧТЕНИЯ (`Get`, `List`).
+//
+// Вычисленное состояние — целость, состояния правил (и вложенных, kaname#874),
+// жизненное состояние, ведомости — сюда приложил `attachIntegrity` ЭТОГО же
+// чтения, и оно едет в ответ. Проекция ответа ОПЕРАЦИИ (`marshalRole`,
+// `domain.Role.WithoutComputedState`) его обнуляет намеренно — у мутации оно
+// посчитано не на том снимке, — и прежде она стояла и здесь: `declaredSegments`,
+// `health` и `ruleStates` на чтении были нулевыми всегда, то есть «не
+// вычислено» там, где вычислено.
 func roleToPb(r domain.Role) (*iamv1.Role, error) {
-	any, err := marshalRole(r)
-	if err != nil {
-		return nil, err
+	var dst *iamv1.Role
+	if err := dto.Transfer(dto.FromTo(r, &dst)); err != nil {
+		return nil, fmt.Errorf("dto.Transfer Role: %w", err)
 	}
-	var pb iamv1.Role
-	if err := any.UnmarshalTo(&pb); err != nil {
-		return nil, err
+	return dst, nil
+}
+
+// textNestedRulesNotOnInput — отказ входа с вложенными правилами (kaname#874,
+// ND-04 (ж)). Контракт тона — дословно приёмочный.
+const textNestedRulesNotOnInput = "Illegal argument children (nested rules are declared by a module manifest)"
+
+// refuseNestedRulesOnInput — в этой фазе вложенное правило объявляет только
+// манифест модуля (приёмка `nested-rule-reaches-descendants-of-a-named-container.md`,
+// Р4): непустое `children` на входе `Create` и `Update` — синхронный
+// INVALID_ARGUMENT с полем `rules[<i>].children`, а не молчаливый пропуск. Поле
+// контракта на входе то же, что `permissions` (вывод) — отказ стоит рядом и в
+// той же форме, до заведения операции.
+func refuseNestedRulesOnInput(rules []*iamv1.Rule) error {
+	for i, r := range rules {
+		if len(r.GetChildren()) > 0 {
+			return shared.InvalidArg(fmt.Sprintf("rules[%d].children", i), textNestedRulesNotOnInput)
+		}
 	}
-	return &pb, nil
+	return nil
 }

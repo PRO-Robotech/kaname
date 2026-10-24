@@ -88,7 +88,8 @@ var (
 		"user:usr-1",
 		"group:" + probeGroupID,
 		"group:" + probeGroupID + "#member",
-		"user:*",
+		"system_class:authenticated",
+		"system_class:anonymous",
 	}
 )
 
@@ -272,8 +273,9 @@ func seedProbeRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID, roleNam
 		`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 		roleID, probeCatalogType, probeVerb)
 	exec(t, ctx, tx,
-		`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, probeCatalogType)
+		`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb, jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+		roleID, probeCatalogType, probeVerb)
 }
 
 // growN — досыпать объектов зеркала до target.
@@ -369,8 +371,9 @@ func (f *gridFixture) growB(t *testing.T, ctx context.Context, target int) {
 			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 			roleID, probeCatalogType, probeVerb))
 		must(t, s.QueueRaw(ctx,
-			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, probeCatalogType))
+			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb, jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+			roleID, probeCatalogType, probeVerb))
 	}
 	if wantRoles > f.seedBRoles {
 		f.seedBRoles = wantRoles
@@ -427,8 +430,9 @@ func (f *gridFixture) setR(t *testing.T, ctx context.Context, target int, rec sc
 			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 			roleID, probeCatalogType, probeVerb))
 		must(t, s.QueueRaw(ctx,
-			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, probeCatalogType))
+			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb, jsonb_build_object($2::text, jsonb_build_array($3::text)))`,
+			roleID, probeCatalogType, probeVerb))
 	}
 	if target > f.seedRoles {
 		f.seedRoles = target
@@ -457,6 +461,10 @@ func (f *gridFixture) setR(t *testing.T, ctx context.Context, target int, rec sc
 // значит сотня фактов набирается двадцатью пятью отношениями. Совпадать с
 // атомами плана они не обязаны и в большинстве не совпадают — предмет оси в том,
 // СКОЛЬКО строк лежит на пути, а не сколько из них дали основание.
+//
+// Исключение — набор классом: классу факт допустим только на отношении чтения
+// (kaname#838), и его строки сверх цепи лежат на других объектах того же типа
+// (см. тело).
 func (f *gridFixture) setF(t *testing.T, ctx context.Context, target int, rec scalegrid.Recruit) {
 	t.Helper()
 	if rec != f.recF || target < f.seedF {
@@ -470,8 +478,8 @@ func (f *gridFixture) setF(t *testing.T, ctx context.Context, target int, rec sc
 	switch rec {
 	case scalegrid.RecruitFactGroup:
 		subject = "group:" + probeGroupID + "#member"
-	case scalegrid.RecruitFactWildcard:
-		subject = "user:*"
+	case scalegrid.RecruitFactClass:
+		subject = "system_class:authenticated"
 	}
 	chain := [][2]string{
 		{probeModelType, "repo-0000000"},
@@ -485,6 +493,16 @@ func (f *gridFixture) setF(t *testing.T, ctx context.Context, target int, rec sc
 		relation := probeRelation
 		if i >= len(chain) {
 			relation = fmt.Sprintf("v_probe_%04d", i/len(chain))
+			// Классу прямой факт допустим только на отношении чтения
+			// (`relation_fact_subject_class_reads_only`, kaname#838): двадцать
+			// пять отношений на объекте цепи для класса непредставимы. Сверх
+			// цепи его факты — публикации ДРУГИХ объектов того же типа:
+			// строки, называющие говорящего, которые вопросу основания не
+			// дают, — та же величина F, единственно представимой формой.
+			if rec == scalegrid.RecruitFactClass {
+				obj = [2]string{probeModelType, fmt.Sprintf("repo-c%06d", i)}
+				relation = probeRelation
+			}
 		}
 		must(t, s.QueueRaw(ctx,
 			`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
@@ -547,7 +565,7 @@ func recruitForR(p scalegrid.Point) scalegrid.Recruit {
 
 func recruitForF(p scalegrid.Point) scalegrid.Recruit {
 	switch p.Recruit {
-	case scalegrid.RecruitFactGroup, scalegrid.RecruitFactWildcard:
+	case scalegrid.RecruitFactGroup, scalegrid.RecruitFactClass:
 		return p.Recruit
 	}
 	return scalegrid.RecruitFactSelf
@@ -1278,7 +1296,7 @@ func TestScaleGrid_EveryRecruitVariantIsConstructible(t *testing.T) {
 	}
 	for _, want := range []scalegrid.Recruit{
 		scalegrid.RecruitDirect, scalegrid.RecruitViaGroup,
-		scalegrid.RecruitFactSelf, scalegrid.RecruitFactGroup, scalegrid.RecruitFactWildcard,
+		scalegrid.RecruitFactSelf, scalegrid.RecruitFactGroup, scalegrid.RecruitFactClass,
 	} {
 		if seenRecruits[want] == 0 {
 			t.Errorf("способ набора %q не исполнен ни разу: его конструируемость не проверена, "+

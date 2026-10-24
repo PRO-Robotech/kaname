@@ -12,8 +12,9 @@ package relverdict_test
 // Девять чтений глобального справочника (регионы, зоны, типы машин, типы дисков,
 // словарь прав) вернулись из полосы «проверки нет» под настоящую проверку:
 // отношение `viewer` на кластерном синглтоне. Весь этот перевод держится на ОДНОМ
-// утверждении о вердикте — что подстановочный субъект системной выдачи выполняет
-// это отношение за любого аутентифицированного. Пока утверждение не проверено
+// утверждении о вердикте — что субъект системной выдачи, класс
+// `system_class:authenticated`, выполняет это отношение за любого
+// аутентифицированного (переезд с подстановки — kaname#829, Р8). Пока утверждение не проверено
 // вопросом к вердикту, оно остаётся допущением, а цена ошибки — арендатор не
 // может выбрать ни зону, ни тип машины, то есть не может создать ничего.
 //
@@ -24,7 +25,7 @@ package relverdict_test
 // ТРИ УТВЕРЖДЕНИЯ, И НИ ОДНО НЕ СВОДИТСЯ К ДРУГОМУ
 //
 //	(а) субъект, которому НИЧЕГО не выдавали, читает справочник — разрешение
-//	    приходит от подстановки, а не от его собственных прав;
+//	    приходит от класса «вошедшие», а не от его собственных прав;
 //	(б) ЗАКОННЫЙ БЛИЗНЕЦ: тот же субъект НЕ получает административного отношения
 //	    того же объекта — подстановка расширяет ровно одно отношение, а не всё;
 //	(в) снятие факта, который производит системная выдача, ЗАКРЫВАЕТ доступ —
@@ -48,7 +49,7 @@ func TestAsk_R893_PublicCatalogReadComesFromTheSystemGrant(t *testing.T) {
 		if err := tx.QueryRow(ctx, `
 			SELECT count(*) FROM kaname.relation_fact
 			 WHERE object_type = 'cluster' AND object_id = $1
-			   AND relation = 'viewer' AND subject = 'user:*'`,
+			   AND relation = 'viewer' AND subject = 'system_class:authenticated'`,
 			domain.ClusterSingletonID).Scan(&seeded); err != nil {
 			t.Fatalf("предпосылка не прочитана: %v", err)
 		}
@@ -58,7 +59,14 @@ func TestAsk_R893_PublicCatalogReadComesFromTheSystemGrant(t *testing.T) {
 				"утверждалось бы о пустоте", seeded)
 		}
 
-		const nobody = "user:usr-nobody-has-granted-me-anything"
+		// Субъект — СТРОКОЙ учётки без единой выдачи: класс «вошедшие» выводится
+		// лишь существующей учётке (kaname#909), и говорящий без строки отвечал
+		// бы «нет» не по предмету пробы.
+		seedTenant(t, ctx, tx)
+		exec(t, ctx, tx,
+			`INSERT INTO kaname.users (id, external_id, email, account_id)
+			 VALUES ('usr-nobody', 'ext-nobody', 'usr-nobody@kacho.local', 'acc-1')`)
+		const nobody = "user:usr-nobody"
 
 		// (а) Субъект без единой собственной выдачи читает справочник.
 		got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
@@ -97,7 +105,7 @@ func TestAsk_R893_PublicCatalogReadComesFromTheSystemGrant(t *testing.T) {
 		exec(t, ctx, tx, `
 			DELETE FROM kaname.relation_fact
 			 WHERE object_type = 'cluster' AND object_id = $1
-			   AND relation = 'viewer' AND subject = 'user:*'`,
+			   AND relation = 'viewer' AND subject = 'system_class:authenticated'`,
 			domain.ClusterSingletonID)
 
 		after, _, err := relverdict.Ask(ctx, tx, relverdict.Query{

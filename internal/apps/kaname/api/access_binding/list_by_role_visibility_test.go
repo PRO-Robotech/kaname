@@ -7,7 +7,7 @@ package access_binding
 // role R" audit read.
 //
 // The catalog entry for this RPC asks `viewer` on the cluster singleton, and the
-// cluster bootstrap grants that relation to `user:*` so the global reference
+// cluster bootstrap grants that relation to the system class `authenticated` so the global reference
 // catalog stays readable — so every authenticated subject passes the front door
 // and the per-row scope filter in this use-case is the only narrowing there is.
 // The suite pinned the positive arm (an account owner sees the binding) but never

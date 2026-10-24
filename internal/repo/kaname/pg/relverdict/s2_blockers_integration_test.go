@@ -38,6 +38,15 @@ const probeObjectID = "repo-0000000"
 func askAndExplain(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCapture,
 	objectID string) (relverdict.Verdict, planrows.Measurement) {
 	t.Helper()
+	return askAndExplainAs(t, ctx, tx, cap, objectID, relverdict.VerdictQuerySQLForTest)
+}
+
+// askAndExplainAs — то же, со сверкой по тексту формы `want` (kaname#874: у
+// вопроса две формы сборки — без вложенных правил над типом и с ними, — и
+// проба называет, какую ждёт).
+func askAndExplainAs(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCapture,
+	objectID string, want func(labelTable string) string) (relverdict.Verdict, planrows.Measurement) {
+	t.Helper()
 	cap.reset()
 	v, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
 		Subject:    probeSubject,
@@ -52,7 +61,7 @@ func askAndExplain(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCap
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}
-	stmts := cap.matching(relverdict.VerdictQuerySQLForTest(axis))
+	stmts := cap.matching(want(axis))
 	if len(stmts) != 1 {
 		t.Fatalf("захвачено %d операторов, тождественных запросу вердикта, ожидался один: "+
 			"ноль означает, что продукт исполняет другой текст, больше одного — что мерятся два вопроса",
@@ -76,6 +85,22 @@ func rowsOf(m planrows.Measurement, relation string) int64 {
 	for _, a := range m.Accesses {
 		if a.Relation == relation {
 			n += a.Rows
+		}
+	}
+	return n
+}
+
+// touchedOf — отдано И отброшено узлами отношения: «тронуто» прибора сетки.
+//
+// Для субъектов выдач судится именно оно, а не отданное: обращение к ним идёт
+// вбок по паре «субъект + область» (kaname#829), и без индекса просмотр
+// отбрасывает чужие строки ФИЛЬТРОМ на самом узле — отданного при этом ноль,
+// а прочитано всё. Мера «отдано» эту стоимость не видела бы вовсе.
+func touchedOf(m planrows.Measurement, relation string) int64 {
+	var n int64
+	for _, a := range m.Accesses {
+		if a.Relation == relation {
+			n += a.Rows + a.Removed
 		}
 	}
 	return n
@@ -351,8 +376,8 @@ func TestR7_1_12_SubjectAndScopeResolveOnOneIndex(t *testing.T) {
 	if vWith != relverdict.Allow {
 		t.Fatalf("вердикт %s: мерилась бы стоимость неверного ответа", vWith)
 	}
-	subjWith := rowsOf(mWith, "access_binding_subjects")
-	t.Logf("с индексом: строк за вердикт %d, из них по строкам субъектов выдач %d "+
+	subjWith := touchedOf(mWith, "access_binding_subjects")
+	t.Logf("с индексом: строк за вердикт %d, тронуто строк субъектов выдач %d "+
 		"(в облаке %d чужих выдач)", mWith.Rows, subjWith, foreign)
 
 	// ── ИНЪЕКЦИЯ: индекс снят, всё прочее не тронуто ─────────────────────────
@@ -363,8 +388,8 @@ func TestR7_1_12_SubjectAndScopeResolveOnOneIndex(t *testing.T) {
 	}
 	f.analyze(t, ctx)
 	vNo, mNo := askAndExplain(t, ctx, tx, cap, probeObjectID)
-	subjNo := rowsOf(mNo, "access_binding_subjects")
-	t.Logf("без индекса: строк за вердикт %d, из них по строкам субъектов выдач %d", mNo.Rows, subjNo)
+	subjNo := touchedOf(mNo, "access_binding_subjects")
+	t.Logf("без индекса: строк за вердикт %d, тронуто строк субъектов выдач %d", mNo.Rows, subjNo)
 
 	// Ответ обязан совпасть: инъекция меняет СТОИМОСТЬ, а не смысл.
 	if vNo != vWith {

@@ -40,7 +40,9 @@
 //	                           субъекта на этом объекте; см. emitTx); у строки
 //	                           ПУБЛИКАЦИИ ещё "source_version" — версия
 //	                           владельца (см. EmitPublicationTx)
-//	created_at    timestamptz  default now()
+//	created_at    timestamptz  default now(); строка СНЯТИЯ без версии владельца
+//	                           несёт момент своей вставки, clock_timestamp()
+//	                           (см. deleteStamp)
 //
 // Величин доставки (`sent_at`, `last_error`, `attempt_count`) здесь НЕТ, и перечислять
 // их было бы не описанием, а обещанием: запрос по ним отвергается базой (42703).
@@ -74,9 +76,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/PRO-Robotech/corelib/authz/proxytuple"
-
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // EventTypeWrite / EventTypeDelete — the two event types this table carries.
@@ -126,7 +127,14 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 }
 
 // EmitPublicationTx кладёт строку журнала ПУБЛИКАЦИИ объекта для анонимного
-// чтения — кортеж `user:* #v_get @<object>`, — упорядоченную ВЕРСИЕЙ ВЛАДЕЛЬЦА.
+// чтения — кортеж `system_class:anonymous #v_get @<object>`, — упорядоченную
+// ВЕРСИЕЙ ВЛАДЕЛЬЦА.
+//
+// Хранимый субъект публикации — системный класс `anonymous`, а не входное слово
+// соседа (`user:*` либо `system_class:anonymous`, kaname#893): перевод живёт
+// ОДНИМ написанием,
+// `domain.PublicationSubject`, и его же называют снятие публикации, разбор
+// остаточных фактов и миграция переезда (kaname#829, SC-12, SC-13).
 //
 // # Чем эта строка отличается от всех остальных, и почему отличие несущее
 //
@@ -143,8 +151,8 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 //     выдача — её объявляет владелец ресурса, — и без факта её нет нигде.
 //
 // Поэтому функция принимает ТОЛЬКО объект: субъект и отношение она берёт у
-// правила приёма (`proxytuple.PublicReadSubject` / `PublicReadRelation`), а не у
-// вызывающего. Строку другой формы с этим полем положить нельзя by construction,
+// перевода входного слова (`domain.PublicationSubject` / `PublicationRelation`),
+// а не у вызывающего. Строку другой формы с этим полем положить нельзя by construction,
 // и глагол, выведенный из выдачи, мимо запрета проекции не проедет.
 //
 // # Кто зовёт
@@ -182,7 +190,7 @@ func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object st
 		 VALUES ($1, jsonb_build_object('user', $2::text, 'relation', $3::text,
 		                                'object', $4::text, 'source_version', $5::timestamptz),
 		         now())`,
-		eventType, proxytuple.PublicReadSubject, string(proxytuple.PublicReadRelation), object, ownerVersion,
+		eventType, domain.PublicationSubject, domain.PublicationRelation, object, ownerVersion,
 	); err != nil {
 		return fmt.Errorf("fga_outbox: insert publication %s: %w", eventType, err)
 	}
@@ -258,15 +266,52 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	// внутри оператора задаёт она сама — по (объект, субъект), строки одного ключа
 	// по id. Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
 	// коммутативны, и id второго вызова всегда больше id первого.
+	stamp := writeStamp
+	if eventType == EventTypeDelete {
+		stamp = deleteStamp
+	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, p::jsonb, now() FROM unnest($2::text[]) AS p`,
+		 SELECT $1, p::jsonb, `+stamp+` FROM unnest($2::text[]) AS p`,
 		eventType, payloads,
 	); err != nil {
 		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
 	}
 	return nil
 }
+
+// writeStamp / deleteStamp — метка created_at строки журнала, она же ВЕРСИЯ строки
+// для свёртки в прямой факт (kaname.relation_fact_fold_row: версия — поле владельца,
+// а без него — эта метка). Снятие применяется к факту, только если версия факта не
+// новее версии строки снятия.
+//
+// ПОЧЕМУ У СНЯТИЯ — МОМЕНТ ВСТАВКИ, А НЕ НАЧАЛО ТРАНЗАКЦИИ (kaname#919, kaname#923).
+// now() — момент НАЧАЛА транзакции. Снятие выдачи открывает транзакцию, ждёт на
+// своих замках (advisory выдачи, строка выдачи `FOR UPDATE`) и лишь потом читает
+// ведомость; аддитивный форвард, начавший транзакцию ПОЗЖЕ и зафиксированный до
+// того, как снятие получило строку, пишет факт с версией новее метки снятия.
+// Снятие видит его в ведомости и пишет строку снятия — а свёртка её отбрасывает
+// как устаревшую, и факт переживает снятие: доступ без выдачи. Замок строки
+// упорядочивал транзакции, но версия, которая решает исход, о замке не знала.
+//
+// clock_timestamp() — момент самой вставки строки снятия, то есть момент ПОСЛЕ
+// всех замков, под которыми снятие решило, что снимать. Любой факт, который
+// снятие увидело, зафиксирован раньше этого момента, и версия его — начало
+// зафиксированной транзакции — не новее. Строка снятия поэтому снимает всё, что
+// увидела, на любом порядке начала транзакций и на каждом пути снятия (отзыв,
+// удаление, истечение срока, снос области, полный проход), — все они пишут
+// снятие этой функцией. Это и порядок id журнала: строка, вставленная позже,
+// и упорядочена позже.
+//
+// Выдача остаётся на now(), и правки ей не нужно: начало её транзакции не позже
+// момента её вставки, поэтому снятие, свёрнутое после выдачи, снимает её при
+// любой из двух меток, а свёрнутое раньше ничего не находит — выдача ложится
+// заново. Правка меняет ровно одно — версию строки снятия. Строки,
+// упорядоченные владельцем (EmitPublicationTx), меткой не упорядочиваются вовсе.
+const (
+	writeStamp  = "now()"
+	deleteStamp = "clock_timestamp()"
+)
 
 // grantGroup — one subject's relation set on one object: the unit a row carries and
 // the unit the drainer's ordering partition covers.

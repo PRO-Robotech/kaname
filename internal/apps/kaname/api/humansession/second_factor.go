@@ -35,7 +35,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
@@ -43,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
 // TOTPVerifier — проверяющий кода по времени (порт по существующему типу).
@@ -54,7 +57,8 @@ type TOTPVerifier interface {
 // SetVerifier — проверяющий набора запасных кодов (порт по проверяющему
 // пароля: та же ёмкость — Р6).
 type SetVerifier interface {
-	SetCandidate(stored domain.LoginVerifier, presented string) passwordverify.SetCandidate
+	// SetCandidate — ошибка только конец вызова до места вычисления.
+	SetCandidate(ctx context.Context, stored domain.LoginVerifier, presented string) (passwordverify.SetCandidate, error)
 	MatchSet(stored domain.LoginVerifier, c passwordverify.SetCandidate) passwordverify.SetMatch
 	SetSize(stored domain.LoginVerifier) (int, bool)
 }
@@ -62,6 +66,43 @@ type SetVerifier interface {
 // SetHasher — чеканка набора тем же хешером, что пароль (Р6).
 type SetHasher interface {
 	HashSet(codes []string) (domain.LoginVerifier, error)
+}
+
+// StepUpKeys — ветвь ключа доступа у глаголов внутри сессии (kaname#827,
+// приёмка SUA Р2, Р6, Р7): хранилище испытаний повышения и чтения строк ключа,
+// привязка установки (три ручки Ф7 Р2) и две величины контракта Ф7 — срок
+// испытания и требование проверки пользователя. Своих ручек ветвь не заводит.
+//
+// Обязательна целиком: чтение состояния и вид `assurance` отвечают «доступны
+// ли ключи», и отвечать им без привязки установки значило бы угадывать.
+type StepUpKeys struct {
+	Store StepUpChallengeStore
+	// Binding — привязка установки; пустой перечень происхождений — «ключи
+	// выключены» ([webauthnverify.Binding.Disabled]), nil — не объявлено.
+	Binding webauthnverify.Binding
+	// ChallengeTTL — срок испытания: та же величина контракта, что у обеих
+	// процедур Ф7 (Ф7 §7 инв. 5).
+	ChallengeTTL time.Duration
+	// UserVerification — требование проверки пользователя, литерал Ф7 Р9.
+	UserVerification string
+}
+
+func (k StepUpKeys) validate(verb string) error {
+	switch {
+	case k.Store == nil:
+		return fmt.Errorf("%s: step-up challenge store required", verb)
+	case k.Binding.RPID == "":
+		return fmt.Errorf("%s: relying party id required", verb)
+	case k.Binding.Origins == nil:
+		return fmt.Errorf("%s: origin list required (empty list means nobody, nil means undeclared)", verb)
+	case len(k.Binding.Algorithms) == 0:
+		return fmt.Errorf("%s: algorithm list required", verb)
+	case k.ChallengeTTL <= 0:
+		return fmt.Errorf("%s: challenge ttl must be positive", verb)
+	case k.UserVerification == "":
+		return fmt.Errorf("%s: user verification literal required", verb)
+	}
+	return nil
 }
 
 // SecondFactorDeps — зависимости глаголов второго фактора; все обязательны,
@@ -78,7 +119,9 @@ type SecondFactorDeps struct {
 	// Freshness — окно свежести правки своих данных (Р8): ручка без умолчания.
 	Freshness time.Duration
 	// Domain — доменное имя посадки: издатель и метка в `otpauth`-адресе (Р5).
-	Domain   string
+	Domain string
+	// Keys — ветвь ключа доступа (kaname#827).
+	Keys     StepUpKeys
 	Observer Observer
 	Now      func() time.Time
 	Logger   *slog.Logger
@@ -104,6 +147,9 @@ func (d SecondFactorDeps) validate(verb string) (SecondFactorDeps, error) {
 		return d, fmt.Errorf("%s: posture domain required", verb)
 	}
 	if err := d.Limits.Validate(); err != nil {
+		return d, err
+	}
+	if err := d.Keys.validate(verb); err != nil {
 		return d, err
 	}
 	if d.Observer == nil {
@@ -143,36 +189,84 @@ func ParseSecondFactorMethod(field, s string) (assurance.Method, error) {
 	return assurance.Method{}, &FieldError{Field: field, Rule: "must be one of totp|lookup_secret"}
 }
 
-// ParseStepUpMethod — способ церемонии из строки формы: `password`, `totp`,
-// `lookup_secret` (ветвь пароля — Ф11-09, ветви кода — Ф12); иное — отказ
-// формы с именем поля. Словарь один: имена берутся у `assurance`.
-func ParseStepUpMethod(field, s string) (assurance.Method, error) {
-	switch s {
-	case assurance.MethodPassword.String():
-		return assurance.MethodPassword, nil
-	case assurance.MethodTOTP.String():
-		return assurance.MethodTOTP, nil
-	case assurance.MethodLookupSecret.String():
-		return assurance.MethodLookupSecret, nil
-	case "":
-		return assurance.Method{}, FieldRequired(field)
-	}
-	return assurance.Method{}, &FieldError{Field: field, Rule: "must be one of password|totp|lookup_secret"}
+// stepUpMethods — словарь способов церемонии (Ф11 Р8; ветвь пароля — Ф11-09,
+// ветви кода — Ф12, ветвь ключа — kaname#827) в порядке правила текста отказа.
+var stepUpMethods = []assurance.Method{
+	assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret, assurance.MethodWebAuthn,
 }
 
-// JudgeStepUpForm — форма церемонии по способу: у `password` — пароль, у кода
-// — форма кода (Н12). Судится и транспортом, и глаголом одним разбором.
+// stepUpMethodRule — правило текста отказа «способ вне словаря». Производитель
+// один: и разбор способа, и суждение формы берут его отсюда.
+var stepUpMethodRule = func() string {
+	names := make([]string, 0, len(stepUpMethods))
+	for _, m := range stepUpMethods {
+		names = append(names, m.String())
+	}
+	return "must be one of " + strings.Join(names, "|")
+}()
+
+// ParseStepUpMethod — способ церемонии из строки формы: словарь
+// `stepUpMethods`; иное — отказ формы с именем поля. Имена берутся у
+// `assurance`.
+func ParseStepUpMethod(field, s string) (assurance.Method, error) {
+	if s == "" {
+		return assurance.Method{}, FieldRequired(field)
+	}
+	for _, m := range stepUpMethods {
+		if m.String() == s {
+			return m, nil
+		}
+	}
+	return assurance.Method{}, &FieldError{Field: field, Rule: stepUpMethodRule}
+}
+
+// JudgeStepUpForm — форма церемонии по способу (приёмка SUA Р1): у `password` —
+// пароль, у кода — форма кода (Н12), у `webauthn` — утверждение
+// (`credential`) той же формы, что у входа ключом; поле ДРУГОГО способа —
+// отказ формы, называющий поле и способ. Судится и транспортом, и глаголом
+// одним разбором.
 func JudgeStepUpForm(in StepUpInput) error {
 	switch in.Method {
 	case assurance.MethodPassword:
 		if in.Password == "" {
 			return FieldRequired("password")
 		}
-		return nil
 	case assurance.MethodTOTP, assurance.MethodLookupSecret:
-		return JudgeCodeForm("code", SecondFactorPresentation{Method: in.Method, Code: in.Code})
+		if err := JudgeCodeForm("code", SecondFactorPresentation{Method: in.Method, Code: in.Code}); err != nil {
+			return err
+		}
+	case assurance.MethodWebAuthn:
+		if in.Assertion == nil {
+			return FieldRequired("credential")
+		}
+		if err := JudgeAssertionForm(*in.Assertion); err != nil {
+			return err
+		}
+	default:
+		return &FieldError{Field: "method", Rule: stepUpMethodRule}
 	}
-	return &FieldError{Field: "method", Rule: "must be one of password|totp|lookup_secret"}
+	return judgeForeignStepUpFields(in)
+}
+
+// judgeForeignStepUpFields — поле, которое принадлежит другому способу (Р1):
+// принять его и выбросить значило бы обещать вызывающему сверку, которой нет.
+func judgeForeignStepUpFields(in StepUpInput) error {
+	fields := []struct {
+		name    string
+		present bool
+		owners  []assurance.Method
+	}{
+		{"password", in.Password != "", []assurance.Method{assurance.MethodPassword}},
+		{"code", in.Code != "", []assurance.Method{assurance.MethodTOTP, assurance.MethodLookupSecret}},
+		{"credential", in.Assertion != nil, []assurance.Method{assurance.MethodWebAuthn}},
+	}
+	for _, f := range fields {
+		if !f.present || slices.Contains(f.owners, in.Method) {
+			continue
+		}
+		return &FieldError{Field: f.name, Rule: "not accepted with method " + in.Method.String()}
+	}
+	return nil
 }
 
 // JudgeCodeForm — форма кода по способу (Н12): шесть цифр у `totp`, десять
@@ -223,6 +317,21 @@ const (
 	ReasonSessionNotFresh             = "SESSION_NOT_FRESH"
 )
 
+// Отказы ветви ключа церемонии повышения (kaname#827, приёмка SUA Р3, Р5):
+// состояние, не попытка. Тексты — свои, не тексты регистрации Ф7: другое
+// слово церемонии; признаки испытания — те же три значения словаря, что у Ф7.
+const (
+	TextStepUpChallengeNotIssued = "step-up challenge was not issued: begin step-up again"
+	TextStepUpChallengePresented = "step-up challenge was already presented: begin step-up again"
+	TextStepUpChallengeExpired   = "step-up challenge expired: begin step-up again"
+	TextAccessKeyNotRegistered   = "no access key is registered: register an access key first"
+
+	ReasonStepUpChallengeNotIssued = "CHALLENGE_NOT_ISSUED"
+	ReasonStepUpChallengePresented = "CHALLENGE_ALREADY_PRESENTED"
+	ReasonStepUpChallengeExpired   = "CHALLENGE_EXPIRED"
+	ReasonAccessKeyNotRegistered   = "ACCESS_KEY_NOT_REGISTERED"
+)
+
 // Сентинелы состояния (FAILED_PRECONDITION / ALREADY_EXISTS / PERMISSION_DENIED
 // у транспорта) и недоступности материала (UNAVAILABLE, Р2).
 var (
@@ -231,6 +340,11 @@ var (
 	ErrEnrollmentNotPending        = errors.New(TextEnrollmentNotPending)
 	ErrSessionNotFresh             = errors.New(TextSessionNotFresh)
 	ErrSecondFactorUnavailable     = errors.New(TextSecondFactorUnavailable)
+	// Ветвь ключа повышения (kaname#827): FAILED_PRECONDITION у транспорта.
+	ErrStepUpChallengeNotIssued = errors.New(TextStepUpChallengeNotIssued)
+	ErrStepUpChallengePresented = errors.New(TextStepUpChallengePresented)
+	ErrStepUpChallengeExpired   = errors.New(TextStepUpChallengeExpired)
+	ErrAccessKeyNotRegistered   = errors.New(TextAccessKeyNotRegistered)
 )
 
 // --- события аудита (Р11) ---
@@ -269,9 +383,10 @@ func PresentationOutcomes() []PresentationOutcome {
 		PresentationMaterialUnreadable, PresentationCapacityExhausted}
 }
 
-// SecondFactorMethods — способы, по которым считаются предъявления.
+// SecondFactorMethods — способы, по которым считаются предъявления внутри
+// сессии: коды второго фактора и ключ доступа ветвью церемонии (kaname#827).
 func SecondFactorMethods() []assurance.Method {
-	return []assurance.Method{assurance.MethodTOTP, assurance.MethodLookupSecret}
+	return []assurance.Method{assurance.MethodTOTP, assurance.MethodLookupSecret, assurance.MethodWebAuthn}
 }
 
 // PresentationCell — пара способ × исход, которую полоса ПРОИЗВОДИТ.
@@ -283,7 +398,9 @@ type PresentationCell struct {
 // PresentationCells — закрытый перечень производимых пар: клетка, которая не
 // может вырасти ни при каком входе, не заводится (форма Ф-е). Повтор — только
 // у кода по времени (Р5); исчерпание ёмкости — только у запасного (Р6: HMAC
-// ёмкости не занимает).
+// ёмкости не занимает). У ключа (kaname#827, Р10) исходов два: сверен ·
+// суждённый отказ; причина отказа — клеткой полосы ключа повышения
+// ([Observer.StepUpAccessKeyObserved]), а не исходом предъявления.
 func PresentationCells() []PresentationCell {
 	return []PresentationCell{
 		{assurance.MethodTOTP, PresentationMatched},
@@ -294,6 +411,8 @@ func PresentationCells() []PresentationCell {
 		{assurance.MethodLookupSecret, PresentationMismatched},
 		{assurance.MethodLookupSecret, PresentationMaterialUnreadable},
 		{assurance.MethodLookupSecret, PresentationCapacityExhausted},
+		{assurance.MethodWebAuthn, PresentationMatched},
+		{assurance.MethodWebAuthn, PresentationMismatched},
 	}
 }
 
@@ -310,12 +429,17 @@ const (
 	// RefusalStepUpRequired — заведение кода у личности с ключом доступа из
 	// сессии ниже «2» (kaname#747, Р4): предъявитель повышает уровень.
 	RefusalStepUpRequired SecondFactorRefusal = "step-up-required"
+	// Выдача испытания повышения ключом (kaname#827, Р5, Р7): ключей у
+	// человека нет · ключи на установке выключены.
+	RefusalAccessKeyNotRegistered SecondFactorRefusal = "access-key-not-registered"
+	RefusalAccessKeysDisabled     SecondFactorRefusal = "access-keys-disabled"
 )
 
 // SecondFactorRefusals — закрытый перечень.
 func SecondFactorRefusals() []SecondFactorRefusal {
 	return []SecondFactorRefusal{RefusalNotEnrolled, RefusalAlreadyEnrolled, RefusalEnrollmentNotPending,
-		RefusalSessionNotFresh, RefusalUnavailable, RefusalStepUpRequired}
+		RefusalSessionNotFresh, RefusalUnavailable, RefusalStepUpRequired,
+		RefusalAccessKeyNotRegistered, RefusalAccessKeysDisabled}
 }
 
 // SecondFactorEvent — событие второго фактора.
@@ -351,12 +475,18 @@ type AssuranceView struct {
 
 // assuranceViewOf — вид из записи сессии и заведённых способов личности:
 // уровень — ЧТЕНИЕ записи (Ф11 Р1, kaname#208), недостающее — правилом над
-// множеством записи (§7 инв. 8).
+// множеством записи (§7 инв. 8). Недостающий способ судится предъявлением в
+// ХУДШЕМ исходе своих флагов (kaname#827, замысел §2.6): ключ обещает «2» при
+// любых флагах, а слово записи `webauthn` флагов не несёт и в правило не
+// переводится.
 func assuranceViewOf(rec PresentedRecord, enrolled []assurance.Method) AssuranceView {
 	presented := rec.Methods
 	level, _ := recordedLevel(rec.Level)
 	view := AssuranceView{Level: rec.Level, MissingForLevel2: []string{}}
-	for _, l := range assurance.PresentableLevels(enrolled) {
+	// Достижимость «2» — тем же правилом при ХУДШЕМ исходе флагов ключа
+	// (kaname#827): в лучшем ключ даёт «3», и строки «2» среди сочетаний не
+	// было бы, хотя «2» человек достигает ключом всегда.
+	for _, l := range assurance.GuaranteedLevels(enrolled) {
 		if l == assurance.Level2 {
 			view.Level2Reachable = true
 		}
@@ -372,8 +502,8 @@ func assuranceViewOf(rec PresentedRecord, enrolled []assurance.Method) Assurance
 		if have[m.String()] {
 			continue
 		}
-		with := append(append([]string(nil), presented...), m.String())
-		if l, ok := assurance.LevelOf(presentationsOf(with)); ok && l == assurance.Level2 {
+		with := append(presentationsOf(presented), assurance.WorstPresentation(m))
+		if l, ok := assurance.LevelOf(with); ok && l == assurance.Level2 {
 			view.MissingForLevel2 = append(view.MissingForLevel2, m.String())
 		}
 	}
@@ -404,6 +534,28 @@ func enrolledMethods(ctx context.Context, read loginMethodRead, userID domain.Us
 	case err == nil, isNotFound(err):
 	default:
 		return nil, err
+	}
+	return out, nil
+}
+
+// presentableMethods — способы, которые человек может ПРЕДЪЯВИТЬ внутри сессии
+// (kaname#827, приёмка SUA Р6): заведённые (`enrolledMethods`) и ключ доступа —
+// при включённых ключах установки и хотя бы одной строке ключа. Строку ключа
+// читает тот же оператор, что ось «заведено» обнуления счёта.
+func presentableMethods(ctx context.Context, d SecondFactorDeps, userID domain.UserID) ([]assurance.Method, error) {
+	out, err := enrolledMethods(ctx, d.Methods.Get, userID)
+	if err != nil {
+		return nil, err
+	}
+	if d.Keys.Binding.Disabled() {
+		return out, nil
+	}
+	has, err := d.Methods.AccessKeyEnrolled(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		out = append(out, assurance.MethodWebAuthn)
 	}
 	return out, nil
 }

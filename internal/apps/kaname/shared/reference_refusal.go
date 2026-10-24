@@ -21,6 +21,7 @@ package shared
 
 import (
 	stderrors "errors"
+	"strconv"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -38,6 +39,12 @@ const (
 	// reasonReferenceInUse — на ресурс ещё ссылаются, поэтому снять его нельзя.
 	// Следующий шаг вызывающего — освободить ссылки.
 	reasonReferenceInUse = "REFERENCE_IN_USE"
+
+	// metaResourceType / metaResourceID / metaRemaining — первый держащий
+	// снятия и число держащих его вида (kaname#725, Р3).
+	metaResourceType = "resource_type"
+	metaResourceID   = "resource_id"
+	metaRemaining    = "remaining"
 )
 
 // referenceRefusal — статус с признаком полосы, если ошибка несёт одну из двух
@@ -64,10 +71,21 @@ func referenceRefusal(err error) (error, bool) {
 	// предмета, который из службы выпиливается ЦЕЛИКОМ (kacho#2117). Связь была
 	// невыраженной, и отказ по ссылке перестал бы собираться вместе с чужим
 	// снятием. Задача продукта kacho#2099.
-	withDetails, derr := st.WithDetails(&errdetails.ErrorInfo{
+	info := &errdetails.ErrorInfo{
 		Reason: reason,
 		Domain: refusaldomain.For(refusaldomain.ServiceIAM),
-	})
+	}
+	// Отказ снятия, назвавший первого держащего (kaname#725, Р3), — вид и `id`
+	// держащего и их число. Не назвавший (держащих уже нет, Р2) — без ключей
+	// вовсе: отсутствие держащего представлено отсутствием, а не пустой строкой.
+	if h, ok := iamerr.HolderOf(err); ok {
+		info.Metadata = map[string]string{
+			metaResourceType: h.ResourceType,
+			metaResourceID:   h.ResourceID,
+			metaRemaining:    strconv.Itoa(h.Remaining),
+		}
+	}
+	withDetails, derr := st.WithDetails(info)
 	if derr != nil {
 		// Деталь не прикрепилась — код и текст важнее признака.
 		return st.Err(), true

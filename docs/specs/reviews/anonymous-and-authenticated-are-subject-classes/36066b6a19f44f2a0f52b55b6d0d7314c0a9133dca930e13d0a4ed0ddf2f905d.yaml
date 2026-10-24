@@ -1,0 +1,179 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d
+  revision: 5
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 22ba2f5d6
+  content_commit: eea47cf77
+  branch: 829-acc-rev2
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238, PRO-Robotech/kaname#832]
+  lines: 1064
+  round: 2
+  round_scope: >-
+    Проверка исполнения (fa-b8, решение диспетчера): правка одобренной редакции 4 (ae9ba373…) по
+    решениям диспетчера Д1–Д8. Нового круга нет; судится только внесение каждого Д и отсутствие
+    противоречия с Р1–Р6 и лишнего в дельте.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/sc-kaname @ eea47cf77 → 36066b6a…2f905d (совпало с заданием);
+    git show 22ba2f5d6:<док> | sha256sum → ae9ba373…427f51 (база дельты = одобренная редакция 4)
+  measurement_revisions: >-
+    kaname — дерево 22ba2f5d6 (git show / git grep); kacho — git show / git grep @2ec6e1e3d;
+    трекер — gh issue view/gh api kaname#832 на 2026-10-15.
+
+verdict: APPROVED
+verdict_note: проверка исполнения — Д1–Д8 внесены, противоречий с Р1–Р6 нет, лишнего в дельте нет
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T12:00:00+03:00'
+
+execution_check:
+  delta: >-
+    git diff 22ba2f5d6 eea47cf77 -- <док> → +188/−55, один файл документа (прочие файлы дельты
+    22ba2f5d6..eea47cf77 — нет; proto пришёл слиянием 1a398bdd8 и предметом записи не является).
+    Ханки: шапка, ревизии замера, Р2 (исключение), Р3, Р5 (таблица и абзац о кластере), право
+    выдать, П1 (usr-U, системные роли посева), П5, SC-11, SC-15, SC-16, SC-17, SC-19, SC-28,
+    SC-50, SC-53, таблица производителей (SC-10…18, SC-17, SC-20/28, SC-50…53), DoD S1/S3/целиком,
+    раздел «Редакция 5: что исправлено». Сценариев 49, ID не менялись.
+  decisions:
+    - n: Д1
+      result: >-
+        внесено — Р3 и SC-15: отказ подстановке — полоса L6 kaname#832 после выкатки L4, условие
+        старта с предикатом (FGASubjectPublicWildcard в fga_intent.go @kacho 2ec6e1e3d — строки
+        309 говорящего и 436 публикации есть); переход до L6 с двумя состояниями и близнецом
+        (system_class:anonymous; usr-B). DoD: SC-15 снят из newman S1, отказ — Tests-followup
+        на L6. kaname#832 OPEN, родитель #829 (gh api …/issues/832/parent → 829).
+    - n: Д2
+      result: внесено — SC-16 вызывающий usr-K, путь и «Тогда» развёртки не изменены.
+    - n: Д3
+      result: >-
+        внесено — Р2 «Исключение из Р2»; П1 usr-U (email_verified_at пуст); SC-11 «И» и близнец
+        usr-B (один факт — подтверждён ли адрес); производитель уже есть: admissionDenied
+        authorize_service.go:222/411/754, disclosed handler.go:174-179 @22ba2f5d6; DoD — integration
+        с причиной (край отвергает раньше, gateway/internal/middleware/address_refusal.go @kacho).
+    - n: Д4
+      result: >-
+        внесено — Р5 и SC-28: выдача классу на кластере глаголом Create недостижима; близнец —
+        usr-K → INVALID_ARGUMENT дословным текстом helpers.go:378-379 @22ba2f5d6; близнец с
+        человеком тем же текстом; контроль живости пути. По дереву: IsRoleAssignable
+        role_scope.go:97-116 (cluster ⇒ только системная); rolfe683216e63311d3f — правило
+        [list, get] без имён (0001_initial.sql:3813); ClusterAdminRoleID constants_extended.go:42.
+        rol-read-named из П1 снят (остатков вне раздела истории «Редакция 4» — 0).
+    - n: Д5
+      result: >-
+        внесено — SC-53: перечень арендатора — срез аккаунта (AccessBindingsPage.tsx:97
+        listAccessBindingsByAccount @kacho 2ec6e1e3d); кластерный администратор —
+        /system/cluster/admins (ClusterAdminsPage.tsx, clusterApi.listAdmins); метка
+        «платформенная» снята; кластерного среза ListByAccount нет.
+    - n: Д6
+      result: >-
+        внесено — SC-17: отрицательный близнец usr-C (чужой арендатор → пустая страница), «И» usr-K
+        с близнецом usr-A; производитель заказан (resolveSubjectHome subject_read_authority.go:267,
+        ветвь default). SC-19 и Р5 — по CE-19 (а), как Д4.
+    - n: Д7
+      result: внесено — SC-50 подпись `system_class`, как SC-51.
+    - n: Д8
+      result: >-
+        внесено в предмет документа — DoD «Изменение целиком»: красные пробы сдаются одним
+        изменением с реализацией, хук не обходится. Вторая половина (ветки полос в 829) — правило
+        процесса, не контракт; в документе её быть не обязано.
+
+summary:
+  scenarios: 49
+  producer_named: 49 of 49
+  twin_named_for_negatives: все (SC-28 — недостижимость объявлена утверждением, с контролем живости пути)
+  blocking: 0
+  blocking_kinds: []
+
+minor:
+  - kind: FORMAT
+    note: >-
+      Р5, абзац «Допущение автора (вопрос 1 круга 1 … вариант (б))» с условием «если диспетчер
+      выберет вариант (а) … SC-19 снимается» — устарел (вопрос решён в пользу (б), SC-19 стоит), а
+      «вариант (а)» теперь читается как CE-19 (а) из Д4/Д6. Вне дельты; при следующей правке —
+      снять или назвать вопрос решённым.
+  - kind: FORMAT
+    note: >-
+      Раздел «Редакция 5: что исправлено» перечисляет Д1–Д7, а DoD цитирует Д8 — строки Д8 в
+      таблице нет.
+  - kind: FORMAT
+    note: >-
+      Тело задачи kaname#832 расходится с документом: «системный класс не выступает говорящим»
+      и «SC-15 оставлен красным», тогда как в документе L6 — отказ подстановке `user:*`
+      (говорящий-класс — SC-14, остаётся в S1), а проба SC-15 из изменения снята. Предмет трекера,
+      не документа — привести тело задачи к SC-15.
+  - kind: FORMAT
+    note: minor круга 2 (порядок SC-19, исполнитель-учётка SC-27, пара края SC-18) остаются к учёту в S2/S3.
+
+constructibility:
+  method: >-
+    Посев не ставился — изоляции для посева задание не назвало. Новые элементы: usr-U — фикстура
+    без шага подтверждения адреса (названа в П1); rolfe683216e63311d3f и rol21232f297a57a5a74 —
+    посев миграций ствола (прочитано 0001_initial.sql:3813, constants_extended.go:42);
+    /system/cluster/admins — стенд П5 не поднимался.
+  seeded: 0
+  of: 3
+  named_fixture: 2
+  not_constructible: 0
+  not_executed: 1
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  reason: одобрение вступает в силу внешним событием; до публикации — not_performed
+
+event_body: "acceptance-reviewer · APPROVED · sha256 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d · проверка исполнения Д1–Д8"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: performed
+  published: true
+  database_id: 6183696161
+  node_id: IC_kwDOUO26pM8AAAABcJO3IQ
+  url: https://github.com/PRO-Robotech/kaname/issues/829#issuecomment-6183696161
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6183696161
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/829
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-15T03:25:52Z'
+  body_sha256: 776c603100ce79f533bae98b7f477827fbaba70adf3b10f22a09730f495ecbc3
+  subject_sha256: 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d
+  subject_revision: eea47cf7766d33c4461c40bbbafcba744a119019
+  verdict: APPROVED
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml

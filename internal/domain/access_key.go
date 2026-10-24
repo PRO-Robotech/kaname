@@ -22,7 +22,9 @@ package domain
 // Ф7-09); открытый ключ и алгоритм — сверка подписи (Ф7-07, Ф7-22); счётчик —
 // Ф7-17…20; имя и описание — Ф7-01, Ф7-46, Ф7-50; момент заведения — Ф7-01;
 // момент предъявления — Ф7-06, Ф7-07. Рукоятка — читатель Ф13 Р3 (полоса
-// входа сверяет `userHandle` со строкой). Признака резервного копирования и
+// входа сверяет `userHandle` со строкой). Признак обнаружимости — читатель
+// страж последнего способа входа (Ф7-56, Р12): он сообщается один раз, в
+// церемонии, и потому хранится. Признака резервного копирования и
 // проверки пользователя в строке НЕТ: различитель ступени берётся из флагов
 // каждого утверждения, а не из памяти о регистрации (Ф11 Р3). Аттестации нет
 // by construction (Р4).
@@ -118,7 +120,62 @@ type AccessKey struct {
 	// LastUsedAt — момент последнего успешного предъявления; нулевой указатель
 	// — предъявлений не было.
 	LastUsedAt *time.Time
+	// Discoverability — признак обнаружимости удостоверения (Р12): сообщается
+	// аутентификатором ОДИН раз, в церемонии регистрации, и после неё его
+	// негде прочитать заново. Читатель — страж последнего способа входа.
+	Discoverability Discoverability
 }
+
+// Discoverability — область значений признака обнаружимости: ТРИ состояния
+// (Р12). «Не сообщено» — своё значение, а не пустое и не «нет»: пустая
+// строка состоянием не является и до записи не доживает.
+type Discoverability string
+
+const (
+	// DiscoverabilityConfirmed — расширение результата церемонии сообщило
+	// «обнаруживаемое» (`credProps.rk = true`).
+	DiscoverabilityConfirmed Discoverability = "discoverable"
+	// DiscoverabilityNotDiscoverable — расширение сообщило «не обнаруживаемое».
+	// Писателя у состояния сегодня нет: приём церемонии такой результат
+	// отвергает (Ф7-41), — но область значений факта его содержит (Ф7-57).
+	DiscoverabilityNotDiscoverable Discoverability = "not-discoverable"
+	// DiscoverabilityUnreported — расширения в результате нет.
+	DiscoverabilityUnreported Discoverability = "unreported"
+)
+
+// AccessKeyDiscoverabilities — закрытый перечень, тот же, что у ограничения
+// схемы `user_access_keys_discoverability_check`.
+func AccessKeyDiscoverabilities() []Discoverability {
+	return []Discoverability{DiscoverabilityConfirmed, DiscoverabilityNotDiscoverable, DiscoverabilityUnreported}
+}
+
+// DiscoverabilityFromExtension — состояние по расширению `credProps.rk`:
+// nil — «не сообщено», а не «нет».
+func DiscoverabilityFromExtension(rk *bool) Discoverability {
+	switch {
+	case rk == nil:
+		return DiscoverabilityUnreported
+	case *rk:
+		return DiscoverabilityConfirmed
+	default:
+		return DiscoverabilityNotDiscoverable
+	}
+}
+
+// Validate — значение из закрытого перечня.
+func (d Discoverability) Validate() error {
+	for _, v := range AccessKeyDiscoverabilities() {
+		if d == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("Illegal argument discoverability: must be one of discoverable, not-discoverable, unreported")
+}
+
+// Presentable — годен ли ключ к предъявлению на полосе входа без пароля:
+// тогда и только тогда, когда его обнаружимость ПОДТВЕРЖДЕНА. «Не сообщено»
+// и «подтверждённо необнаружим» не годны — правило консервативно (Р12).
+func (k AccessKey) Presentable() bool { return k.Discoverability == DiscoverabilityConfirmed }
 
 // Validate — самопроверка записываемой строки (self-validating domain).
 func (k AccessKey) Validate() error {
@@ -153,7 +210,7 @@ func (k AccessKey) Validate() error {
 	if k.CreatedAt.IsZero() {
 		return fmt.Errorf("Illegal argument created_at: required")
 	}
-	return nil
+	return k.Discoverability.Validate()
 }
 
 // AccessKeyChallengePurpose — процедура, для которой выдано испытание.

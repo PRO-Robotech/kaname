@@ -79,7 +79,7 @@ func TestStepUp_F11_14_FallbackAttemptHasItsOwnBudget(t *testing.T) {
 	store := &poolSaturatedStore{fakeStore: h.store}
 	stepUp, err := humansession.NewStepUpUseCase(humansession.SecondFactorDeps{
 		Store: store, Methods: fakeMethods{h.store}, TOTP: h.totp, Sets: h.verifier, SetHasher: h.hasher,
-		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain,
+		Verifier: h.verifier, Limits: sfLimits(), Freshness: sfWindow, Domain: sfDomain, Keys: sfKeys(),
 		Observer: h.obs, Now: func() time.Time { return h.clock }, Logger: slog.New(slog.DiscardHandler),
 	})
 	require.NoError(t, err)

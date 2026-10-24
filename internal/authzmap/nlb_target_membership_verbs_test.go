@@ -263,10 +263,11 @@ func tmGrant(t *testing.T, ctx context.Context, tx pgx.Tx, account, project, sub
 		role, catalogType, canonical)
 	saExec(t, ctx, tx,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-tm', 'anchor', ARRAY[$2::text], '{}'::jsonb)
+		   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-tm', 'anchor', ARRAY[$2::text], '{}'::jsonb,
+		         jsonb_build_object($2::text, jsonb_build_array($3::text)))
 		 ON CONFLICT DO NOTHING`,
-		role, catalogType)
+		role, catalogType, canonical)
 	saExec(t, ctx, tx,
 		`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)

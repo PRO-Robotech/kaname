@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // dsnWithSchema — DSN этой пробы с путём поиска сервиса. Репозиторий пишет
@@ -98,15 +99,11 @@ func grantOnAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 ) string {
 	t.Helper()
 	bindingID := ids.NewID("acb")
-	_, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`),
 		bindingID, string(userID), roleID, string(accID))
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		VALUES ($1, 'user', $2, 0)`, bindingID, string(userID))
 	require.NoError(t, err)
 	return bindingID
 }
@@ -249,10 +246,10 @@ func TestRemoveFromAccount_RefusalNamesGrantsScopedOnAccountProjects(t *testing.
 	require.NoError(t, err)
 
 	bindingID := ids.NewID("acb")
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		bindingID, string(uid), role, projID)
 	require.NoError(t, err)
 

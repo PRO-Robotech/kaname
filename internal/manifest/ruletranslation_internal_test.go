@@ -81,6 +81,9 @@ func filledRule() Rule {
 		Classes:       []string{"get"},
 		ResourceNames: []string{"ntw000000000000001"},
 		MatchLabels:   map[string]string{"env": "prod"},
+		// Вложенное правило (kaname#874) — тоже часть права роли, и перевод
+		// обязан его донести.
+		Children: []ChildRule{{Resources: []string{"subnet"}, Classes: []string{"get"}}},
 	}
 }
 
@@ -176,6 +179,15 @@ func TestMODRC07NoKeyIsAcceptedAndDropped(t *testing.T) {
 				continue
 			}
 			inspected++
+			// Вложенные правила (kaname#874) — перечень другой формы (ChildRule →
+			// domain.Rule), поэтому сличается не весь перечень, а КАЖДЫЙ ключ
+			// каждого вложенного правила тем же способом — по значению.
+			if key == "children" {
+				if childKeysFound(t, form.name, src.Field(i), out.FieldByName("Children")) {
+					found++
+				}
+				continue
+			}
 			want := src.Field(i).Interface()
 			hit := false
 			for j := 0; j < dt.NumField(); j++ {
@@ -297,4 +309,38 @@ func TestMODRC08NameDivergenceIsDeclaredAndSelfExpiring(t *testing.T) {
 		"записей словаря расхождений %d · ключей с объявленной стороной %d",
 		len(manifestKeys), manifestKeys, len(domainKeys), domainKeys,
 		len(ruleKeyToDomainField), declared)
+}
+
+// childKeysFound — значение каждого непустого ключа каждого вложенного правила
+// найдено в соответствующем вложенном правиле домена.
+func childKeysFound(t *testing.T, form string, src, out reflect.Value) bool {
+	t.Helper()
+	if src.Len() == 0 || out.Len() != src.Len() {
+		t.Errorf("%s: вложенных правил в манифесте %d, в домене %d — перечень теряется переводом",
+			form, src.Len(), out.Len())
+		return false
+	}
+	ok := true
+	for k := 0; k < src.Len(); k++ {
+		sc, dc := src.Index(k), out.Index(k)
+		for i := 0; i < sc.NumField(); i++ {
+			if sc.Field(i).IsZero() {
+				continue
+			}
+			want := sc.Field(i).Interface()
+			hit := false
+			for j := 0; j < dc.NumField(); j++ {
+				if dc.Type().Field(j).IsExported() && reflect.DeepEqual(dc.Field(j).Interface(), want) {
+					hit = true
+					break
+				}
+			}
+			if !hit {
+				t.Errorf("%s: значение ключа children[%d].%s не найдено во вложенном правиле домена",
+					form, k, sc.Type().Field(i).Name)
+				ok = false
+			}
+		}
+	}
+	return ok
 }

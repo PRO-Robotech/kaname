@@ -52,8 +52,8 @@ func writeSelector(ctx context.Context, pool *pgxpool.Pool,
 	role domain.RoleID, fp string, types []string) error {
 	_, err := pool.Exec(ctx, `
 		INSERT INTO kaname.role_rule_selectors
-		  (role_id, rule_fp, arm, object_types, resource_names, match_labels, created_at, updated_at)
-		VALUES ($1, $2, 'anchor', $3, '{}', '{}'::jsonb, now(), now())`,
+		  (role_id, rule_fp, arm, object_types, resource_names, match_labels, verbs_by_type, created_at, updated_at)
+		VALUES ($1, $2, 'anchor', $3, '{}', '{}'::jsonb, '{}'::jsonb, now(), now())`,
 		string(role), fp, types)
 	return err
 }

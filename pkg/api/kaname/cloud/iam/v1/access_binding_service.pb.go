@@ -197,9 +197,10 @@ func (x *GetAccessBindingRequest) GetAccessBindingId() string {
 
 type CreateAccessBindingRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Тип subject'а: "user" | "service_account" | "group".
+	// Тип subject'а: "user" | "service_account" | "group" | "system_class".
 	SubjectType string `protobuf:"bytes,1,opt,name=subject_type,json=subjectType,proto3" json:"subject_type,omitempty"`
-	// ID subject'а.
+	// ID subject'а; при `subject_type = "system_class"` — имя класса
+	// "anonymous" | "authenticated".
 	SubjectId string `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	// ID of the Role to assign.
 	RoleId string `protobuf:"bytes,3,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
@@ -526,8 +527,9 @@ func (x *UpdateAccessBindingRequest) GetLabels() map[string]string {
 
 type ListAccessBindingsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The maximum number of results per page to return. Default 100; >1000 →
-	// INVALID_ARGUMENT (rejected, not clamped).
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token. A malformed token → INVALID_ARGUMENT (validated before the
 	// listauthz row-filter).
@@ -666,7 +668,9 @@ type ListAccessBindingsByScopeRequest struct {
 	ResourceType string `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
 	// DEPRECATED — use `scope_id` (field 6). Scope-anchor id.
 	ResourceId string `protobuf:"bytes,2,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
-	// The maximum number of results per page to return. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
@@ -767,11 +771,14 @@ func (x *ListAccessBindingsByScopeRequest) GetScopeId() string {
 
 type ListAccessBindingsBySubjectRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Тип subject'а.
+	// Тип subject'а: "user" | "service_account" | "group" | "system_class".
 	SubjectType string `protobuf:"bytes,1,opt,name=subject_type,json=subjectType,proto3" json:"subject_type,omitempty"`
-	// ID subject'а.
+	// ID subject'а; при `subject_type = "system_class"` — имя класса
+	// "anonymous" | "authenticated".
 	SubjectId string `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
-	// The maximum number of results per page to return. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken     string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
@@ -843,12 +850,14 @@ type ListAccessBindingsByAccountRequest struct {
 	// directly attached to the account AND bindings on every project owned by
 	// the account.
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// The maximum number of results per page to return. Default value: 100.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	// Optional: filter by subject_type ("user" | "service_account" | "group").
-	// Empty = no filter.
+	// Optional: filter by subject_type ("user" | "service_account" | "group" |
+	// "system_class"). Empty = no filter.
 	SubjectTypeFilter string `protobuf:"bytes,4,opt,name=subject_type_filter,json=subjectTypeFilter,proto3" json:"subject_type_filter,omitempty"`
 	// Optional: include revoked bindings (status='REVOKED'). Default false
 	// (only PENDING/ACTIVE are returned).
@@ -1025,7 +1034,9 @@ type ListAccessBindingOperationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the AccessBinding resource to list operations for.
 	AccessBindingId string `protobuf:"bytes,1,opt,name=access_binding_id,json=accessBindingId,proto3" json:"access_binding_id,omitempty"`
-	// The maximum number of results per page that should be returned.
+	// The maximum number of results per page to return. 0 selects the platform
+	// default (50), the same one every List of the service applies; a value outside
+	// [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
@@ -1888,7 +1899,8 @@ func (x *ExpandAccessRequest) GetMaxResults() int64 {
 }
 
 // Principal is a concrete grantee resolved by ExpandAccess — a USER or
-// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members).
+// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members; never a
+// SYSTEM_CLASS — a class names no concrete principal and is not enumerated).
 type Principal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Type of the principal (USER / SERVICE_ACCOUNT). Reuses SubjectType.

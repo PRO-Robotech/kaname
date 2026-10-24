@@ -11,6 +11,7 @@
 #   ./scripts/run.sh --service a --service b  # несколько коллекций, ОДИН вердикт
 #   ./scripts/run.sh --service disk --bail # прерывать после первого fail
 #   ./scripts/run.sh --delay 100           # задержка между запросами (ms)
+#   ./scripts/run.sh --remint-bootstrap …  # jwtBootstrap переиздаётся перед КАЖДОЙ коллекцией
 #
 # Exit-код: 0 ТОЛЬКО если каждая ожидаемая коллекция произвела отчёт И в нём
 # assertions.failed==0 И собственный exit-код newman==0 (плюс coverage-гейт ниже).
@@ -136,6 +137,7 @@ SSL_EXTRA_CA=""
 SHARD_PLAN=""
 SHARD=""
 LIST_ONLY=""
+REMINT_BOOTSTRAP=0
 
 # `--help` ОТВЕЧАЕТ И НЕ ГОНЯЕТ. Прежде его не было вовсе, и неизвестный флаг
 # уезжал в EXTRA: `run.sh --help` доходил до `newman run` и пытался обратиться к
@@ -150,7 +152,7 @@ LIST_ONLY=""
 _usage() {
   awk 'NR < 6 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
   echo
-  echo "Флаги: --service <stem> (можно повторить) | --shard-plan <файл> --shard <имя> | --list | --bail | --delay <мс> | --jobs <n> (принимается и игнорируется) | --help"
+  echo "Флаги: --service <stem> (можно повторить) | --shard-plan <файл> --shard <имя> | --list | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --help"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -172,6 +174,14 @@ while [[ $# -gt 0 ]]; do
     --list)       LIST_ONLY=1; shift ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
+    # СРОК БУТСТРАПА КОРОЧЕ ВОЛНЫ (kaname#868). Бутстрап живёт 15 минут (`MaxTTL`
+    # службы, мал намеренно), а волна автономного стенда идёт дольше: последняя
+    # коллекция получала «credential is not accepted». С флагом прогонщик перед
+    # каждой коллекцией переиздаёт `jwtBootstrap` посевом
+    # (`seed_own_stand.py --remint-bootstrap`: та же чеканка и то же утверждение
+    # приёма фронтом, что у шага 1 посева). Флаг — только у прогона против
+    # автономного стенда, где чеканка доступна по имени сертификата посева.
+    --remint-bootstrap) REMINT_BOOTSTRAP=1; shift ;;
     # --jobs: принят для паритета с vpc/nlb/compute run.sh + newman-parallel.sh
     # (директива #1). iam-суиты гоняются СЕРИЙНО намеренно (jit-pending reseed +
     # порядковые зависимости между матрицами) — флаг consume-and-ignore, а НЕ
@@ -244,6 +254,49 @@ _was_run() {
   return 1
 }
 
+# ОДНОРАЗОВОЕ «ДАНО» — ПЕРЕПОСЕВ ПЕРЕД КАЖДЫМ ПРОГОНОМ НАБОРА (kaname#860).
+#
+# Набор `kaname-access-keys` расходует личность без пароля, положенную посевом
+# (`f13Person`): Ф13-25 заводит ей пароль восстановлением, вход ключом двигает
+# счётчик подписи. Строку пароля снимает только запись мимо продукта — глагола
+# у продукта нет, — поэтому набор вернуть её сам не может. Второй прогон на
+# прежней строке получал единый отказ входа ключом: 48 упавших в Ф13-19, -22,
+# -23, -25, причина — состояние стенда, а не дерево.
+#
+# Стенд чарта (`.github/scripts/stand-chart.sh`, его каталог — KANAME_STAND_WORKDIR,
+# тот же, откуда прогонщику подаётся лист края) сеет личность заново подкомандой
+# `seed-key-person`; прочие строки окружения не трогаются. Отказ посева —
+# коллекция НЕ гоняется, её `.rc` — `unmet`, отчёта нет, вердикт красный по
+# отсутствию отчёта: на израсходованной строке она дала бы 48 ложных отказов.
+# Стенда чарта нет (окружение собрано иначе) — посева нет, и это сказано словами.
+_one_shot_reseed() {
+  local res="$1" cmd
+  case "$res" in
+    kaname-access-keys) cmd="seed-key-person" ;;
+    *) return 0 ;;
+  esac
+  local chart="$_CEREMONY_ROOT/.github/scripts/stand-chart.sh"
+  if [[ -z "${KANAME_STAND_WORKDIR:-}" || ! -s "${KANAME_STAND_WORKDIR}/edge/edge.crt" || ! -x "$chart" ]]; then
+    echo "[one-shot] ${res}: стенда чарта нет (KANAME_STAND_WORKDIR не назван либо листа края в нём нет) —" >&2
+    echo "[one-shot]   личность без пароля НЕ пересеяна; второй прогон на этом посеве покраснеет в Ф13" >&2
+    return 0
+  fi
+  local rc=0
+  "$chart" "$cmd" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "[one-shot] ${res}: посев «${cmd}» отказал (код ${rc}) — коллекция НЕ гоняется: вердикта о наборе нет" >&2
+    return 1
+  fi
+  echo "[one-shot] ${res}: одноразовое «Дано» посеяно заново (stand-chart.sh ${cmd})"
+  return 0
+}
+
+# _remint_bootstrap — переиздание jwtBootstrap посевом (kaname#868); код — посева.
+_remint_bootstrap() {
+  python3 "$NEWMAN_DIR/../authz-fixtures/seed_own_stand.py" --remint-bootstrap \
+    --env-file "$NEWMAN_DIR/$ENV"
+}
+
 # run_one — прогон одной коллекции. Пишет out/<res>.json|.cli|.rc.
 run_one() {
   RAN_STEMS+=("$1")
@@ -267,6 +320,13 @@ run_one() {
       echo "[delegated] ${res} запрошен ЯВНО — гоню; условие его волны прогонщик не создаёт и не проверяет: его создаёт посев волны ДО прогона (задание \`stand-ceremony\`: \`seed_ceremony.py --wave\`), а без него часть шагов ответит не тем принципалом" >&2
     fi
   fi
+  # Одноразовое «Дано» набора сеется перед КАЖДЫМ его прогоном (kaname#860). Порядок:
+  # посев раньше переиздания jwtBootstrap — посев бутстрапа не читает, а бутстрап,
+  # изданный последним, входит в коллекцию со всем окном срока (kaname#868).
+  if ! _one_shot_reseed "$res"; then
+    echo "unmet" > "out/${res}.rc"
+    return 0
+  fi
   local col="collections/${res}.postman_collection.json"
   if [[ ! -f "$col" ]]; then
     # Ожидаемая коллекция не сгенерирована = молчаливая потеря покрытия, не skip:
@@ -276,6 +336,18 @@ run_one() {
     return 0
   fi
   echo "===== ${res} ====="
+  # Переиздание — ДО коллекции, и его отказ коллекцию не запускает: прогон под
+  # просроченным бутстрапом дал бы красное по неверной причине. Отчёта нет —
+  # вердикт называет коллекцию MISSING, а строка ниже — причину.
+  if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
+    local rrc=0
+    _remint_bootstrap || rrc=$?
+    if [[ "$rrc" -ne 0 ]]; then
+      echo "[remint] ${res}: jwtBootstrap НЕ переиздан (код ${rrc}) — коллекция не запускалась, условие не создано" >&2
+      echo "remint-${rrc}" > "out/${res}.rc"
+      return 0
+    fi
+  fi
   # Берём PIPESTATUS[0] (newman), а НЕ статус tee и НЕ `|| true`: проглоченный код
   # возврата newman = ложный GREEN при красных проверках.
   set +e
@@ -477,6 +549,19 @@ _is_delegated() {
 #
 # ТРИ ИСХОДА, И КОД ЧИТАЕТСЯ КАК ДАННЫЕ, а не как условие продолжения: `set -e`
 # оборвал бы прогонщик молча, до развилки.
+# С `--remint-bootstrap` предполёт спрашивает фронт ПЕРЕИЗДАННЫМ бутстрапом: его
+# предмет — годность посева к прогону, а бутстрап посева к этому моменту законно
+# старше своего срока (kaname#868); иначе предполёт отверг бы волну по сроку,
+# который прогонщик и так снимает перед каждой коллекцией.
+if [[ "$REMINT_BOOTSTRAP" -eq 1 ]]; then
+  _remint_rc=0
+  _remint_bootstrap || _remint_rc=$?
+  if [[ "$_remint_rc" -ne 0 ]]; then
+    echo "ПРОГОН НЕ СОСТОЯЛСЯ: jwtBootstrap не переиздан перед предполётом (код $_remint_rc) —" >&2
+    echo "условие не создано, вердикта о дереве нет НИ ОДНОГО." >&2
+    exit 75
+  fi
+fi
 _preflight_rc=0
 python3 "$NEWMAN_DIR/scripts/seed_preflight.py" \
   --env "$ENV" \

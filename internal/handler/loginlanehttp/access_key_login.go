@@ -158,50 +158,67 @@ func (h *Handler) accessKeyLogin(w http.ResponseWriter, r *http.Request) {
 // accessKeyLoginInput — байты браузера из формы. Отсутствующее поле называется
 // полным именем ДО всякой сверки (Ф13-07).
 func accessKeyLoginInput(form accessKeyLoginForm) (humansession.AccessKeyLoginInput, error) {
-	var in humansession.AccessKeyLoginInput
-	if len(form.Credential) == 0 || string(form.Credential) == "null" {
-		return in, humansession.FieldRequired("credential")
+	if !credentialPresent(form.Credential) {
+		return humansession.AccessKeyLoginInput{}, humansession.FieldRequired("credential")
 	}
+	a, err := parseCredential(form.Credential)
+	if err != nil {
+		return humansession.AccessKeyLoginInput{}, err
+	}
+	return humansession.AccessKeyLoginInput{}.WithAssertion(a), nil
+}
+
+// credentialPresent — поле `credential` в форме есть: ни пусто, ни `null`.
+func credentialPresent(raw json.RawMessage) bool {
+	return len(raw) != 0 && string(raw) != "null"
+}
+
+// parseCredential — ЕДИНСТВЕННЫЙ разборщик объекта `credential` браузера: вход
+// ключом (Ф13) и ветвь ключа церемонии повышения (kaname#827, Р1) зовут его
+// оба. Форма закрыта, поля — base64url без дополнения; обязательность полей
+// судит одна функция домена полосы (`humansession.JudgeAssertionForm`).
+func parseCredential(raw json.RawMessage) (humansession.AssertionPresentation, error) {
+	var a humansession.AssertionPresentation
 	var cred credentialField
-	if err := decodeNested("credential", form.Credential, &cred); err != nil {
-		return in, err
+	if err := decodeNested("credential", raw, &cred); err != nil {
+		return a, err
 	}
 	if len(cred.Response) == 0 || string(cred.Response) == "null" {
-		return in, humansession.FieldRequired("credential.response")
+		return a, humansession.FieldRequired("credential.response")
 	}
 	var resp credentialResponseField
 	if err := decodeNested("credential.response", cred.Response, &resp); err != nil {
-		return in, err
+		return a, err
 	}
 	fields := []struct {
 		name  string
 		value string
 		into  *[]byte
 	}{
-		{"credential.id", cred.ID, &in.CredentialID},
-		{"credential.response.clientDataJSON", resp.ClientDataJSON, &in.ClientDataJSON},
-		{"credential.response.authenticatorData", resp.AuthenticatorData, &in.AuthenticatorData},
-		{"credential.response.signature", resp.Signature, &in.Signature},
-		{"credential.response.userHandle", resp.UserHandle, &in.UserHandle},
+		{"credential.id", cred.ID, &a.CredentialID},
+		{"credential.response.clientDataJSON", resp.ClientDataJSON, &a.ClientDataJSON},
+		{"credential.response.authenticatorData", resp.AuthenticatorData, &a.AuthenticatorData},
+		{"credential.response.signature", resp.Signature, &a.Signature},
+		{"credential.response.userHandle", resp.UserHandle, &a.UserHandle},
 	}
 	for _, f := range fields {
-		raw, err := b64urlField(f.name, f.value)
+		b, err := b64urlField(f.name, f.value)
 		if err != nil {
-			return humansession.AccessKeyLoginInput{}, err
+			return humansession.AssertionPresentation{}, err
 		}
-		*f.into = raw
+		*f.into = b
 	}
 	// `type` и `rawId` форма ПРИНИМАЕТ — значит обязана их читать: поле,
 	// принятое и выброшенное, обещает вызывающему проверку, которой нет.
 	// `rawId` — то же удостоверение вторым написанием, и расхождение двух
 	// написаний в одном запросе есть отказ формы, а не выбор одного из них.
 	if cred.Type != credentialTypePublicKey {
-		return humansession.AccessKeyLoginInput{}, &humansession.FieldError{
+		return humansession.AssertionPresentation{}, &humansession.FieldError{
 			Field: "credential.type", Rule: "must be " + credentialTypePublicKey}
 	}
 	if cred.RawID != "" && cred.RawID != cred.ID {
-		return humansession.AccessKeyLoginInput{}, &humansession.FieldError{
+		return humansession.AssertionPresentation{}, &humansession.FieldError{
 			Field: "credential.rawId", Rule: "must equal credential.id"}
 	}
-	return in, nil
+	return a, nil
 }

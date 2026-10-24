@@ -84,6 +84,38 @@ type ResourceRow struct {
 	// `CHECK catalog_resource_successor_only_when_retired`, — поэтому живая
 	// половина колонку и не выбирает: читать нечего by construction.
 	SupersededBy string
+	// ParentTypes — типы МОДЕЛИ ПРАВ, на которые указывают указатели ресурса
+	// (`parents` манифеста), в порядке манифеста: у `registry.repositories` —
+	// `registry_registry`, у `registry.registries` — `project`.
+	//
+	// Колонка `catalog_resource.parent_types`. Пусто у строки, которую не
+	// объявил доставленный манифест (посев литерала): тогда связь «ребёнок →
+	// контейнер» каталогу неизвестна, и публичное чтение через неё не
+	// открывается — отсутствие связи закрывает, а не открывает.
+	ParentTypes []string
+	// PublicReadToChildren — тип объявлен контейнером публичного чтения
+	// (`publicReadToChildren: true` манифеста, kaname#856). Колонка
+	// `catalog_resource.public_read_to_children`.
+	PublicReadToChildren bool
+}
+
+// SameForm — строки описывают ресурс одинаково по ВСЕМ величинам, которые
+// применение пишет: имя типа модели, указатели и признак контейнера.
+//
+// Одно место на всех, кто спрашивает «изменилась ли строка» (план применения и
+// перепись записанного): разойдясь, они дали бы оператору план «без изменений»
+// при применении, которое строку перепишет.
+func (r ResourceRow) SameForm(o ResourceRow) bool {
+	if r.ObjectType != o.ObjectType || r.PublicReadToChildren != o.PublicReadToChildren ||
+		len(r.ParentTypes) != len(o.ParentTypes) {
+		return false
+	}
+	for i := range r.ParentTypes {
+		if r.ParentTypes[i] != o.ParentTypes[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // VerbRow — одна ЖИВАЯ строка `kaname.catalog_verb`.

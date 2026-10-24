@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // seedCustomRoleSQL inserts a minimal custom (account-scoped) role directly so the
@@ -76,8 +77,8 @@ func TestMigration0026_RoleRuleSelectorsTable(t *testing.T) {
 	// role_rule_selectors_arm_shape). The 0026/0027 invariants under test (column
 	// existence, FK ON DELETE CASCADE, PK uniqueness) are unchanged.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_abc', ARRAY['compute.instance'], '{"env":"prod"}'::jsonb, 'labels', '{}')`,
+		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names, verbs_by_type)
+		VALUES ($1, 'fp_abc', ARRAY['compute.instance'], '{"env":"prod"}'::jsonb, 'labels', '{}', '{}'::jsonb)`,
 		roleID)
 	require.NoError(t, err, "insert role_rule_selectors row")
 
@@ -92,8 +93,8 @@ func TestMigration0026_RoleRuleSelectorsTable(t *testing.T) {
 	// — живая строка каталога, строки по-прежнему различаются, ключ по-прежнему
 	// один.
 	_, dErr := pool.Exec(ctx, `
-		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_abc', ARRAY['storage.volumes'], '{"env":"dev"}'::jsonb, 'labels', '{}')`,
+		INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names, verbs_by_type)
+		VALUES ($1, 'fp_abc', ARRAY['storage.volumes'], '{"env":"dev"}'::jsonb, 'labels', '{}', '{}'::jsonb)`,
 		roleID)
 	require.Error(t, dErr, "duplicate (role_id, rule_fp) must violate PK")
 	var pgErr *pgconn.PgError
@@ -135,9 +136,9 @@ func TestMigration0027_TargetMembersRekey(t *testing.T) {
 	prj := seedProject(t, ctx, repo, acc.ID, "tmrk-prj")
 	roleID := seedCustomRoleSQL(t, ctx, pool, acc.ID, "tmrk_role")
 	bindingID := "acb_tmrk_1"
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
+		VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`),
 		bindingID, string(owner), string(roleID), string(prj.ID))
 	require.NoError(t, err)
 

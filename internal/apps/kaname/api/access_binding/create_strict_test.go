@@ -44,6 +44,7 @@ import (
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists.
@@ -56,7 +57,7 @@ func TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists(t *testing.T
 
 	repo := newStrictDupFakeRepo(ownerUserID, accountID)
 	opsRepo := newStrictFakeOpsRepo()
-	uc := NewCreateAccessBindingUseCase(repo, opsRepo)
+	uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source())
 
 	ctx := operations.WithPrincipal(context.Background(), operations.Principal{
 		Type: "user",
@@ -233,10 +234,6 @@ func (r *strictDupABReader) SelectEmittedTuplesBySource(context.Context, domain.
 	return nil, nil
 }
 
-// No sibling binding claims anything in this fixture (strict-create duplicate path).
-func (r *strictDupABReader) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []repoab.RelationTuple) ([]repoab.RelationTuple, error) {
-	return nil, nil
-}
 func (r *strictDupABReader) ListByRole(context.Context, domain.RoleID, repoab.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
@@ -262,6 +259,10 @@ func (r *strictDupABReader) ListSubjectsForBindings(context.Context, []domain.Ac
 
 type strictDupABWriter struct{}
 
+func (w *strictDupABWriter) LockLiveTargetTypes(_ context.Context, types []string) ([]string, error) {
+	return fixtureLiveTargetTypes(types), nil
+}
+
 func (w *strictDupABWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	// Эмулирует Insert после migration 0003: дубль активного 5-tuple → ErrAlreadyExists.
 	idHint := string(b.SubjectID) + " on " + string(b.ResourceType) + ":" + b.ResourceID
@@ -273,6 +274,9 @@ func (w *strictDupABWriter) Delete(ctx context.Context, id domain.AccessBindingI
 }
 func (w *strictDupABWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID) error {
 	return stderrors.New("not stubbed")
+}
+func (w *strictDupABWriter) GetForDeactivation(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	return domain.AccessBinding{}, stderrors.New("not stubbed")
 }
 func (w *strictDupABWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, _ domain.UserID) (domain.AccessBinding, error) {
 	return domain.AccessBinding{}, stderrors.New("not stubbed")
@@ -443,4 +447,20 @@ func (r *strictDupRoleReader) UnresolvedSegments(context.Context, []domain.RoleS
 func (*strictDupRoleReader) Lifecycles(_ context.Context, _ []domain.RoleID) (
 	map[domain.RoleID]domain.RoleLifecycle, error) {
 	return nil, nil
+}
+
+// GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *strictDupABReader) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+// PublicReadContainer — публичное чтение контейнера (kaname#856) этим дублёром не
+// судится: тип цели не объявлен, детей нет.
+func (_ *strictDupABReader) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
+	return domain.PublicReadContainer{}, nil
+}
+
+// BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *strictDupRoleReader) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
+	return false, nil
 }

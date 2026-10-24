@@ -35,6 +35,9 @@ deploy/config_sections_have_a_reader_test.go: верхнеуровневые с�
 {{/* БОЕВАЯ ПОСАДКА БЕЗ ПОЧТОВОГО УЗЛА не собирается (kaname#475). Зовётся
 ЗДЕСЬ одним местом по той же причине, что страж токен-эндпоинта выше. */}}
 {{- include "kaname-svc.requireMailRelay" . -}}
+{{/* АНОНИМНЫЙ ПОТОК ДОКЕРНОЙ ПОЛОСЫ без своих условий не собирается
+(kaname#928, kaname#930). Зовётся ЗДЕСЬ одним местом по той же причине. */}}
+{{- include "kaname-svc.requireAnonymousRegistryLane" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -126,7 +129,7 @@ data:
         endpoint: {{ $jp.endpoint | quote }}
       {{- end }}
       {{- $rt := .Values.apiServer.registryToken | default dict }}
-      {{- if or $rt.issuer $rt.service (hasKey $rt "endpoint") }}
+      {{- if or $rt.issuer $rt.service $rt.anonymousClientId (hasKey $rt "endpoint") }}
       # Docker Registry v2 token shim. `service` — единственный адресат (`aud`)
       # токена этой полосы: `?service=`, который docker назвал отличным от него,
       # отвергается 401 и ломает login. На ключи служебных учёток значение не
@@ -141,6 +144,26 @@ data:
         {{- end }}
         {{- with $rt.service }}
         service: {{ . | quote }}
+        {{- end }}
+        {{- /* ПУБЛИЧНЫЙ ПРИНЦИПАЛ АНОНИМНОГО ЧТЕНИЯ (kaname#495). Ветвь `with`, а не
+        дословная подстановка: незаданное значение и пустая строка для процесса
+        одно и то же — анонимный поток выключен, и ключ тогда не рендерится вовсе.
+        Значение входит в условие блока выше: объявленное одно, без адресата и
+        издателя, оно иначе пропало бы из файла настроек молча. Форму значения
+        судит страж старта `RegistryTokenConfig.Validate`. */}}
+        {{- with $rt.anonymousClientId }}
+        anonymous-client-id: {{ . | quote }}
+        {{- /* ТЕМП И ПЕРЕСЫЛЬЩИК — ручки самого потока (kaname#928, kaname#930), и
+        рендерятся они только вместе с ним: без принципала процесс их не читает, а
+        объявленные отдельно они лежали бы в файле настроек, ничего не делая.
+        Целое — через `int64`: число из значений чарта приходит плавающим. Условия
+        потока целиком судит `kaname-svc.requireAnonymousRegistryLane`. */}}
+        {{- with $rt.anonymousPerSourcePerSec }}
+        anonymous-per-source-per-sec: {{ . | int64 }}
+        {{- end }}
+        {{- with $rt.anonymousForwarderSan }}
+        anonymous-forwarder-san: {{ . | quote }}
+        {{- end }}
         {{- end }}
       {{- end }}
 

@@ -1,0 +1,101 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/passwordless-login-with-access-key.md
+  sha256: c359d1a2419c264a1d6a1444785531e56af1964935ba5f20a10f83455d54955c
+  static_status_note: >-
+    Строка «редакция 10 — ВЕРДИКТА НА НЕЁ НЕТ» в шапке — статическая форма объявления, а не вердикт
+    (change-graph.md §2). Шапка документа намеренно не правлена; эта запись её не трогает.
+  base_commit: 8d11b5494
+  content_commit: null
+  content_commit_note: >-
+    Редакция 10 на момент ревью — правка рабочей копии tmp/w9/kn-acc поверх 8d11b5494, не
+    закоммичена; коммит — заказ git-operator (ветка 777-w9-kn-acc). Отпечаток судим по содержимому.
+  previous_sha256: 5fe6cca1aea606f96b2f24174a8f45411291f69250e6fb268b3274fd17a58af4
+  branch: 777-w9-kn-acc
+  worktree: tmp/w9/kn-acc
+  task: PRO-Robotech/kaname#777
+  scenarios: 32
+  round: 9
+  round_note: >-
+    Круг 2 из 2 пачки kn-acc (fa-b8); следующий за записью круга 8 этого документа (5fe6cca1…).
+    Третьего круга нет: спор, если возникнет, решает диспетчер.
+  predecessor_record: docs/specs/reviews/passwordless-login-with-access-key/5fe6cca1aea606f96b2f24174a8f45411291f69250e6fb268b3274fd17a58af4.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/passwordless-login-with-access-key.md на tmp/w9/kn-acc →
+    c359d1a2…; git show HEAD:<путь> | sha256sum → 5fe6cca1… (база дельты); оба совпали с заданием
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15'
+publication_mode: courier_of_agent_verdict
+delta:
+  predicate: "git diff 8d11b5494 -- <документ> → один файл; ханки: шапка, Р7, Р12 п.2 и абзац «Что Ф13 требует», предикат §5, Ф13-23 (одна скобка), Ф13-25, §6 строка Ф13-25, §7 инв. 4, §8 строка Ф13-25"
+  scope_of_review: только дельта к 5fe6cca1…; вне дельты пункты не переоткрывались (fa-b1)
+blocking: []
+checks:
+  neighbour_row: >-
+    Ф13-25 «Когда»/«Тогда» (4), (5) и два новых «И» совпадают по исходу со строкой «Ф13 · Ф13-25» §4
+    level-two-is-enrolled-at-level-two.md; строка побайтно одна на bbbe33524 (ред. 4) и 8d11b5494
+    (ред. 5): grep '^| Ф13 | Ф13-25' | sha256sum → 168ae013… на обеих; сосед — 76edcd5b… на
+    8d11b5494, сверено sha256sum. «Тогда» (2), (3) не тронуты.
+  producer: >-
+    Ф13-25 (4), (5): required_acr_min = "2" у BeginRegistration и Revoke —
+    git show 8d11b5494:proto/kaname/cloud/iam/v1/access_key_service.proto строки 86 и 157;
+    встроенный каталог internal/apps/kaname/seed/embedded/permission_catalog.json:2576
+    (BeginRegistration "2") и :2616 (Revoke "2") @8d11b5494; ResetAccessKeys с identity_suspender —
+    user_service.proto:543/550 @8d11b5494. Шаг (2) — по-прежнему условие §9 п. 7 (Ф5 по kacho#2698).
+    Сценариев без производителя — 0 (новых «Тогда» без производителя нет).
+  twins: >-
+    Отрицания (4), (5) называют положительных близнецов соседа KN747-14 и KN747-10; отличие —
+    один факт, уровень сессии; отсутствие близнеца на том же человеке объяснено свойством Р1
+    соседа (способа «2» у него нет). 2 из 2.
+  derived_numbers: >-
+    Предикат §5 исполнен на обеих ревизиях: c359d1a2… → «меток осмотрено 32 · ['03','06','08','20','21']»;
+    5fe6cca1… (git show 8d11b5494) → 32 и тот же перечень с '25'. Р7, §7 инв. 4 называют пять — сходится;
+    второй предикат по предмету: grep 'шест[ьи] мет|на **шести**|21 · 25' → пусто.
+  f13_23_reason: >-
+    Скобка Ф13-23 исправляет довод «Ф7 Р11 — пол «1»», ставший ложным: Ф7 ред. 16 (258d6838… на
+    8d11b5494) Р11 — «2» у BeginRegistration/FinishRegistration/Revoke; сессия, выданная ключом,
+    — «2» (Ф11 Р2). Исход «церемония проходит» прежний. Правка принята: оставленный ложный довод
+    был бы вводящим в заблуждение текстом о корректности (ban19-block-criterion), то есть
+    блокирующим, а не нейтральным.
+  constructibility: >-
+    Новых «Дано» нет (Ф13-25 и Ф13-23 — «Дано» без правки). Посев не выполнялся — стенд заданием не
+    назван: посеяно 0 из 0 новых, не выполнилось 0.
+  scope: >-
+    Своих решений не заведено; Р3/Р5 соседа не переоткрыты; число сценариев 32 и их ID не
+    сдвинуты; DoD (§9 п. 7) не тронут.
+non_blocking:
+  - id: N1
+    summary: >-
+      Р12 п. 2 сохраняет прежнюю фразу «заводит новый ключ из сессии (Ф7-01) и снимает утраченный
+      (Ф7-25)» и тут же опровергает её дописью «Дописано редакцией 10». Исход верен (Ф13-25 и
+      допись авторитетны), но фразу лучше переписать целиком следующей редакцией.
+  - id: N2
+    summary: >-
+      Урок автора («строка «стало» §4 называет и выводимые числа») — верный: правка соседа сдвинула
+      перечень единого отказа 6 → 5 в трёх местах; здесь сведено и перемерено.
+event_body: acceptance-reviewer · APPROVED · c359d1a2419c264a1d6a1444785531e56af1964935ba5f20a10f83455d54955c
+event:
+  status: not_performed
+  note: публикует курьер (git-operator) после коммита ревизии с этим отпечатком; тем же заходом блок приводится к факту
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  note: >-
+    Блок дописан поверх записи круга отдельной правкой (kaname#853): запись не называла учётку
+    события — ни effective_approval.publication_pending.expected_actor, ни
+    authority.authorized_actors, — и гейт review-event-silence не мог её судить (исход
+    «не выполнилось»). Учётка выведена из политики по полю policy_field; отпечаток политики —
+    sha256 файла на голове воркспейса. Вердикт, разбор, блок event и effective_approval не тронуты.

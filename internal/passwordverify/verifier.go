@@ -20,12 +20,15 @@ package passwordverify
 //
 // # Порядок внутри проверки — несущий, а не стилистический
 //
-//	ёмкость   →  материал есть?  →  признак формата  →  разбор тела и
-//	области допустимости  →  потолок  →  вычисление
+//	ёмкость   →  место процессора  →  материал есть?  →  признак формата  →
+//	разбор тела и области допустимости  →  потолок  →  вычисление
 //
 //   - ёмкость занимается ПЕРВОЙ: иначе полоса «материала нет» её не занимала
 //     бы, и под нагрузкой отказ по ёмкости сообщал бы, есть ли у личности
 //     пароль (15.4);
+//   - место процессора — сразу за ёмкостью и тоже ДО вопроса о материале:
+//     ожидание места не зависит от того, есть ли материал (kaname#882,
+//     `capacity.go`);
 //   - разбор идёт РАНЬШЕ сверки с потолком: значение за нижней границей
 //     допустимости обязано давать «тело не разбирается», а не «выше потолка», —
 //     библиотека на части таких значений падает, а при памяти ниже `8·p` молча
@@ -37,6 +40,7 @@ package passwordverify
 //     иначе «совпал» стало бы возможным на неразбираемом теле (05.5).
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
@@ -82,7 +86,10 @@ type Result struct {
 // смена настройки молча сделала бы нечитаемой уже лежащую популяцию.
 type Verifier struct {
 	capacity *capacityGate
-	observer Observer
+	// processor — места вычисления (не больше процессоров): занимается после
+	// ёмкости на всё время разбора и вычисления (`capacity.go`).
+	processor *processorGate
+	observer  Observer
 	// decoy — значение, против которого ВЫЧИСЛЯЕТСЯ проверка при отсутствии
 	// материала (PWV-06, Ф1-48): без него полоса «материала нет» отвечала бы
 	// мгновенно, и время отказа было бы оракулом существования личности. Исход
@@ -105,7 +112,7 @@ func New(capacity int, observer Observer) (*Verifier, error) {
 		return nil, fmt.Errorf("password_verifier.observer: required — " +
 			"проверяющий без приёмника исходов молчит обо всех отказах разом")
 	}
-	return &Verifier{capacity: gate, observer: observer}, nil
+	return &Verifier{capacity: gate, processor: newProcessorGate(capacity), observer: observer}, nil
 }
 
 // SetDecoy — значение объявленного класса записи, которым выравнивается полоса
@@ -144,12 +151,22 @@ func (v *Verifier) WithCapacity(work func()) bool {
 }
 
 // Verify — проверка предъявленного пароля против хранимого значения.
-func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result {
+//
+// Ошибка — только конец вызова (контекст ctx) раньше, чем проверке досталось
+// место вычисления (kaname#892): проверка не состоялась, исхода у неё нет, и
+// приёмник исходов её не слышит — словарь исходов закрыт, и конец вызова в
+// него не входит. Место ёмкости, взятое до очереди, отдаётся.
+func (v *Verifier) Verify(ctx context.Context, stored domain.LoginVerifier, presented string) (Result, error) {
 	release, ok := v.capacity.acquire()
 	if !ok {
-		return v.observed(Result{Outcome: OutcomeCapacityExhausted})
+		return v.observed(Result{Outcome: OutcomeCapacityExhausted}), nil
 	}
 	defer release()
+	computing, err := v.processor.acquire(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	defer computing()
 
 	// Отсутствие материала — ОТДЕЛЬНЫЙ исход, и оно не приводится к пустой
 	// строке: сравнение пустого с пустым дало бы «совпал» у человека, пароля не
@@ -160,9 +177,9 @@ func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result 
 		if !v.decoy.IsZero() {
 			_ = inspectAndCompare(v.decoy.Reveal(), presented, true)
 		}
-		return v.observed(Result{Outcome: OutcomeMaterialMissing})
+		return v.observed(Result{Outcome: OutcomeMaterialMissing}), nil
 	}
-	return v.observed(inspectAndCompare(stored.Reveal(), presented, true))
+	return v.observed(inspectAndCompare(stored.Reveal(), presented, true)), nil
 }
 
 // Presented — предъявленное значение, отдающее себя ОДНИМ методом.
@@ -179,16 +196,22 @@ type Presented interface {
 // VerifyPresented — [Verifier.Verify] для значения, отдающего себя методом:
 // тот же исход, та же ёмкость, тот же приёмник и то же выравнивание полосы
 // «материала нет».
-func (v *Verifier) VerifyPresented(stored domain.LoginVerifier, presented Presented) Result {
-	return v.Verify(stored, presented.Reveal())
+func (v *Verifier) VerifyPresented(ctx context.Context, stored domain.LoginVerifier, presented Presented) (Result, error) {
+	return v.Verify(ctx, stored, presented.Reveal())
 }
 
-// compute — вычисление против значения БЕЗ ёмкости и БЕЗ приёмника исходов:
+// compute — вычисление против значения БЕЗ ёмкости и БЕЗ приёмника исходов
+// (ошибка — конец вызова до места вычисления, как у [Verifier.Verify]):
 // путь калибровки огибающей (`envelope.go`). Ёмкость калибровка занимает
 // сама, на всё время прогона; исход ей не событие полосы — сосчитанный, он
 // читался бы как поток неверных паролей при каждом старте.
-func (v *Verifier) compute(stored domain.LoginVerifier, presented string) Result {
-	return inspectAndCompare(stored.Reveal(), presented, true)
+func (v *Verifier) compute(ctx context.Context, stored domain.LoginVerifier, presented string) (Result, error) {
+	computing, err := v.processor.acquire(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	defer computing()
+	return inspectAndCompare(stored.Reveal(), presented, true), nil
 }
 
 // MeetsDeclared — отвечает ли хранимое значение объявленному формату и
@@ -529,27 +552,33 @@ type SetMatch struct {
 
 // SetCandidate — см. шапку раздела. Занимает ёмкость проверяющего (та же, что
 // у пароля — PWV-15): «материала нет» платит ту же цену над холостым значением
-// (PWV-06, Ф12-33).
-func (v *Verifier) SetCandidate(stored domain.LoginVerifier, presented string) SetCandidate {
+// (PWV-06, Ф12-33). Ошибка — конец вызова до места вычисления, как у
+// [Verifier.Verify].
+func (v *Verifier) SetCandidate(ctx context.Context, stored domain.LoginVerifier, presented string) (SetCandidate, error) {
 	release, ok := v.capacity.acquire()
 	if !ok {
-		return SetCandidate{refusal: OutcomeCapacityExhausted}
+		return SetCandidate{refusal: OutcomeCapacityExhausted}, nil
 	}
 	defer release()
+	computing, err := v.processor.acquire(ctx)
+	if err != nil {
+		return SetCandidate{}, err
+	}
+	defer computing()
 	if stored.IsZero() {
 		if !v.decoy.IsZero() {
 			_ = inspectAndCompare(v.decoy.Reveal(), presented, true)
 		}
-		return SetCandidate{refusal: OutcomeMaterialMissing}
+		return SetCandidate{refusal: OutcomeMaterialMissing}, nil
 	}
 	hdr, res := inspectSet(stored.Reveal())
 	if res.Outcome != OutcomeMismatched {
-		return SetCandidate{refusal: res.Outcome}
+		return SetCandidate{refusal: res.Outcome}, nil
 	}
 	// Граница приведения проверена разбором: `inspectSet` отвечает не «читается»
 	// на параллельности выше MaxUint8, и сюда такой заголовок не доходит.
 	key := argon2.IDKey([]byte(normalizeBackupCode(presented)), hdr.salt, hdr.iterations, hdr.memory, uint8(hdr.parallelism), argon2idKeyLen) // #nosec G115 -- см. границу в inspectSet
-	return SetCandidate{box: &setCandidateBox{element: base64.RawStdEncoding.EncodeToString(key)}}
+	return SetCandidate{box: &setCandidateBox{element: base64.RawStdEncoding.EncodeToString(key)}}, nil
 }
 
 // MatchSet — сравнение кандидата с КАЖДЫМ элементом набора постоянным

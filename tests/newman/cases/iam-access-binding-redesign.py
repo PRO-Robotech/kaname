@@ -11,8 +11,9 @@ IAM Operation (id-prefix `iop`).
 Трассировка IAM-1-NN (verifies-аннотация в title):
   F7 scope-anchor rename resourceType/Id→scopeType(dotted)/scopeId; immutable (18/19) ·
      [scopeType prefix-derivation IAM-1-18/20 — PHASE-0-GATED B3, scopeType сейчас ОБЯЗАТЕЛЕН] ·
-  F8 target REQUIRED (allInScope{} | resources[ResourceRef{type,id}] closed-table, без name);
-     no-target → INVALID_ARGUMENT; unknown type → INVALID_ARGUMENT; RoleCoversType (21/22/23/24) ·
+  F8 target REQUIRED (allInScope{} | resources[ResourceRef{type,id}], без name; тип — живой в
+     каталоге платформы, kaname#904); no-target → INVALID_ARGUMENT; тип без живой строки
+     каталога → INVALID_ARGUMENT; RoleCoversType (21/22/23/24) ·
   F9 3 sync-гейта (scope-XOR/IsRoleAssignable/RoleCoversType) первыми стейтментами до Operation;
      malformed scopeId; missing anchor (24/25/26) ·
   F10 Delete=hard (Get→existence-hide 403/404) / :revoke=soft (status REVOKED, revokedAt);
@@ -54,8 +55,9 @@ SYS_VIEW = "rol1bda80f2be4d3658e"
 SYS_ADMIN = "rol21232f297a57a5a74"
 
 # A well-formed compute.instance target id (existence is NOT checked by IAM — target
-# ResourceRef is a graceful-dangling cross-DB soft-ref; only the closed type-registry
-# is validated). {{runId}} keeps the (subject,role,scope,target) tuple run-unique.
+# ResourceRef is a graceful-dangling cross-DB soft-ref; only the type is validated — against
+# the LIVE platform catalog, kaname#904). {{runId}} keeps the (subject,role,scope,target)
+# tuple run-unique.
 _TGT_INSTANCE = {"type": "compute.instance", "id": "ins-rdacb{{runId}}"}
 
 
@@ -174,7 +176,7 @@ CASES.append(Case(
     id="IAM-ACB-RD-CR-TARGET-RESOURCES-OK",
     title="IAM-1-21/23: Create target.resources=[ResourceRef{compute.instance, ins-…}] (per-object, "
           "role covers *) → op → Get target.resources.resources[0].type=='compute.instance', id совпал, "
-          "БЕЗ поля name (ResourceRef closed-table {type,id})",
+          "БЕЗ поля name (ResourceRef — пара {type,id})",
     classes=["CRUD", "CONF"],
     priority="P1",
     steps=[
@@ -210,7 +212,7 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# F8 — target REQUIRED + closed-table (IAM-1-22/23)
+# F8 — target REQUIRED + тип из живого каталога (IAM-1-22/23, kaname#904)
 # ===========================================================================
 
 CASES.append(Case(
@@ -241,14 +243,14 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG",
-    title="IAM-1-23: target.resources=[{type:'unknown.thing',id}] (тип вне закрытого type-registry) → "
-          "sync 400 INVALID_ARGUMENT 'Illegal argument target.resources[].type' (closed-table валидируется)",
+    title="IAM-1-23: target.resources=[{type:'unknown.thing',id}] (типа нет в живом каталоге платформы) → "
+          "sync 400 INVALID_ARGUMENT 'Illegal argument target.resources[].type' (тип судит живой каталог)",
     classes=["NEG"],
     priority="P1",
     steps=[
-        # targetFromProto validates the closed target type-registry in the HANDLER, before the
-        # use-case reads the role or checks authority — so a plain existing roleId (SYS_VIEW) and
-        # a valid dotted scopeType suffice to reach the target-type check.
+        # The target type is judged against the LIVE catalog snapshot as the FIRST statement of
+        # the Create use-case (kaname#904), before it reads the role or checks authority — so a
+        # plain existing roleId (SYS_VIEW) and a valid dotted scopeType suffice to reach it.
         Step(
             name="cr-unknown-type",
             method="POST",
@@ -263,6 +265,78 @@ CASES.append(Case(
                 "pm.test('unknown target type text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument target.resources[].type'));",
             ],
         ),
+    ],
+))
+
+
+# Т1 приёмки `access-target-names-live-catalog-types.md` (Р3) дословно: префикс до
+# скобки — прежний текст, продление называет адрес перечня годных типов.
+def _t1(typ):
+    return ('Illegal argument target.resources[].type "' + typ + '" (not a live entry of the platform '
+            'resource catalog; grantable types are published by GET /iam/v1/permissionCatalog)')
+
+
+_TGT_ADDRESS_POOL = {"type": "vpc.addressPool", "id": "ap1"}
+_POOL_RULES = [{"module": "vpc", "resources": ["addressPool"], "verbs": ["get"]}]
+
+
+CASES.append(Case(
+    id="IAM-ACB-RD-CR-TARGET-LIVE-CATALOG-OK",
+    title="ATC-E1 (kaname#904, verifies https://github.com/PRO-Robotech/kaname/issues/904): "
+          "target.resources=[{vpc.addressPool, ap1}] — тип живой в каталоге платформы, вне прежнего "
+          "закрытого перечня → 200 Operation → done без error; GET отдаёт цель дословно",
+    classes=["CRUD", "CONF"],
+    priority="P1",
+    steps=[
+        *_seed_role("lc", "rdRoleLc", rules=_POOL_RULES),
+        *_create_binding(
+            "cr-live-catalog",
+            _acb_body("rdRoleLc", {"resources": {"resources": [dict(_TGT_ADDRESS_POOL)]}}),
+            "rdAcbLc",
+        ),
+        retry_until_authorized(Step(
+            name="get-live-catalog",
+            method="GET",
+            path="/iam/v1/accessBindings/{{rdAcbLc}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('target.resources verbatim [{vpc.addressPool, ap1}]', () => {",
+                "  const j = pm.response.json();",
+                "  const refs = ((j.target||{}).resources||{}).resources||[];",
+                "  pm.expect(refs, JSON.stringify(j.target)).to.eql([{type: 'vpc.addressPool', id: 'ap1'}]);",
+                "});",
+            ],
+        )),
+        *_cleanup_binding("rdAcbLc"),
+        *_cleanup_role("rdRoleLc"),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-ACB-RD-CR-TARGET-MISSPELLED-TYPE-NEG",
+    title="ATC-E2 (kaname#904, verifies https://github.com/PRO-Robotech/kaname/issues/904): "
+          "тот же запрос с типом 'vpc.address_pool' (опечатка написания) → sync 400, code 3, message — "
+          "Т1 дословно с адресом перечня GET /iam/v1/permissionCatalog",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        *_seed_role("lm", "rdRoleLm", rules=_POOL_RULES),
+        Step(
+            name="cr-misspelled-type",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body=_acb_body("rdRoleLm", {"resources": {"resources": [{"type": "vpc.address_pool", "id": "ap1"}]}}),
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                "pm.test('T1 verbatim', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.eql("
+                + js_str(_t1("vpc.address_pool")) + "));",
+            ],
+        ),
+        *_cleanup_role("rdRoleLm"),
     ],
 ))
 

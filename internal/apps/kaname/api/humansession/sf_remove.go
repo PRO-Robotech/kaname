@@ -33,11 +33,6 @@ type RemoveSecondFactorOutput struct {
 	View      SessionView
 	Bearer    domain.SessionBearer
 	Assurance AssuranceView
-	// BackupCodesRemaining — всегда `0` (Р4 ред. 10, kaname#275): снятие любым
-	// годным кодом убирает фактор, набора запасных кодов больше нет; согласовано
-	// с `GET` того же человека («не заведён»). Стоит на выдаче всегда, а не
-	// только у ответа, потребившего запасной код.
-	BackupCodesRemaining *int
 }
 
 // RemoveSecondFactorUseCase — снятие.
@@ -125,7 +120,7 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonSecondFactorRemoved); err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, in.Factor.Method, bearer.Digest(), now)
+	rec, err := presentInSession(ctx, w, resolved.Session, codePresentation(in.Factor.Method), bearer.Digest(), now)
 	if err != nil {
 		return RemoveSecondFactorOutput{}, ErrStoreUnavailable
 	}
@@ -153,19 +148,15 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 
 	s := resolved.Session
 	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
-	out := RemoveSecondFactorOutput{
+	// Снятие убирает фактор целиком: набора запасных кодов больше нет, и выход
+	// состояния набора не несёт вовсе — ни остатка потреблённого набора, ни нуля
+	// (kaname#297 Р4, BCS-10, BCS-11; инвариант kaname#275 «остаток снятого
+	// набора наружу не выходит» сохранён): «набора нет» — отсутствие, как у `GET`.
+	return RemoveSecondFactorOutput{
 		View:      SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
 		Bearer:    bearer,
 		Assurance: assuranceAfter(ctx, uc.deps, user.ID, rec),
-	}
-	// Снятие убирает фактор целиком: набора запасных кодов больше нет, поэтому
-	// ответ несёт `backupCodesRemaining: 0` ВСЕГДА — и при снятии запасным кодом,
-	// и при снятии кодом по времени (Р4 ред. 10, Ф12-28, Ф12-45 «а», kaname#275).
-	// Остаток `st.remaining` потреблённого набора наружу не выходит: он был бы
-	// остатком уже снятого набора и расходился бы с `GET` («не заведён»).
-	zero := 0
-	out.BackupCodesRemaining = &zero
-	return out, nil
+	}, nil
 }
 
 func (uc *RemoveSecondFactorUseCase) refuse(ctx context.Context, v presentVerdict, addressKey, source string, at time.Time) error {

@@ -77,6 +77,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 	"github.com/PRO-Robotech/kaname/internal/totpverify"
+	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -120,6 +121,13 @@ type sessionVerbs struct {
 	// записи (kaname#458, A458-03, A458-11) читают «заведён ли» под новой
 	// сессией настоящим глаголом.
 	status *humansession.SecondFactorStatusUseCase
+	// stepUpBegin — выдача испытания повышения ключом (kaname#827): НАСТОЯЩИЙ
+	// глагол тем же составом, что корень композиции.
+	stepUpBegin *humansession.StepUpAccessKeyBeginUseCase
+}
+
+func (v sessionVerbs) BeginStepUpAccessKey(ctx context.Context, in humansession.StepUpAccessKeyBeginInput) (humansession.StepUpAccessKeyBeginOutput, error) {
+	return v.stepUpBegin.Execute(ctx, in)
 }
 
 func (v sessionVerbs) SecondFactorStatus(ctx context.Context, in humansession.StatusInput) (humansession.StatusOutput, error) {
@@ -233,6 +241,20 @@ type sessionLaneOptions struct {
 	// фактора: пробы заведения способа (kaname#747) ставят НАСТОЯЩИЕ `enroll` и
 	// `confirm` над швом хранилища способов; nil — глаголы стенда как есть.
 	verbs func(sessionVerbs, humansession.SecondFactorDeps) loginlanehttp.Lane
+	// keyBinding — привязка ключей стенда (три ручки Ф7 Р2) вместо
+	// `laneKeyBinding()`; nil — привязка стенда. Пробы «ключи на установке
+	// выключены» (kaname#827, SUA-22…24) подают перечень происхождений `[]`
+	// («никого», Ф7 Р2): величина входа — одна, и всякий читатель решения
+	// «выключено» на стенде берёт её отсюда.
+	keyBinding *webauthnverify.Binding
+	// ceremonyObserver — приёмник исходов церемонии повышения и второго фактора
+	// (`SecondFactorDeps.Observer`); nil — молчащий. Пробы клеток наблюдаемости
+	// повышения ключом (kaname#827, Р10) читают его.
+	ceremonyObserver humansession.Observer
+	// stepUpKeys — хранилище ветви ключа церемонии поверх настоящего адаптера
+	// (kaname#827, замысел §2.3 «шов пробы»); nil — сам адаптер. Шов — граница
+	// порта, а не ручка: прод-кода он не требует.
+	stepUpKeys func(humansession.StepUpChallengeStore) humansession.StepUpChallengeStore
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -346,11 +368,33 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 		Limits: limits, Observer: nop, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
+	var ceremonyObserver humansession.Observer = nop
+	if opts.ceremonyObserver != nil {
+		ceremonyObserver = opts.ceremonyObserver
+	}
+	// Хранилище ключей и привязка — те же, что у полосы входа ключом ниже, и
+	// ветвь ключа церемонии повышения собрана ими (kaname#827), как в корне.
+	accessKeys := kanamepg.NewAccessKeyRepo(pool)
+	keyBinding := laneKeyBinding()
+	if opts.keyBinding != nil {
+		keyBinding = *opts.keyBinding
+	}
+	var stepUpKeys humansession.StepUpChallengeStore = kanamepg.NewAccessKeyStepUpRepo(pool, accessKeys)
+	if opts.stepUpKeys != nil {
+		stepUpKeys = opts.stepUpKeys(stepUpKeys)
+	}
 	secondFactor := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
-		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: ceremonyNow, Logger: logger,
+		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain,
+		Keys: humansession.StepUpKeys{
+			Store: stepUpKeys, Binding: keyBinding,
+			ChallengeTTL: access_keys.ChallengeTTL, UserVerification: access_keys.UserVerificationAssertion,
+		},
+		Observer: ceremonyObserver, Now: ceremonyNow, Logger: logger,
 	}
 	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
+	require.NoError(t, err)
+	stepUpBegin, err := humansession.NewStepUpAccessKeyBeginUseCase(secondFactor)
 	require.NoError(t, err)
 	status, err := humansession.NewSecondFactorStatusUseCase(secondFactor)
 	require.NoError(t, err)
@@ -397,7 +441,6 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 
 	// Полоса входа ключом (Ф13) — теми же хранилищами и той же привязкой,
 	// что корень композиции, с привязкой стенда (`laneKeyBinding`).
-	accessKeys := kanamepg.NewAccessKeyRepo(pool)
 	var akKeys humansession.AccessKeyLoginStore = kanamepg.NewAccessKeyLoginRepo(pool, accessKeys)
 	if opts.akKeys != nil {
 		akKeys = opts.akKeys(akKeys)
@@ -405,7 +448,7 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	akDeps := humansession.AccessKeyLoginDeps{
 		CutoffClock: momentclock.Func(ceremonyNow),
 		Store:       sessions, Keys: akKeys, Methods: methods,
-		Binding: laneKeyBinding(), ChallengeTTL: access_keys.ChallengeTTL,
+		Binding: keyBinding, ChallengeTTL: access_keys.ChallengeTTL,
 		UserVerification: access_keys.UserVerificationAssertion,
 		Limits:           limits, TTL: laneSessionTTL, Observer: nop, Now: ceremonyNow, Logger: logger,
 	}
@@ -415,7 +458,8 @@ func newSessionLaneWith(t *testing.T, opts sessionLaneOptions) *sessionLane {
 	require.NoError(t, err)
 
 	verbs := sessionVerbs{stubLane: &stubLane{}, login: login, logout: logout, change: change,
-		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin, status: status}
+		stepUp: stepUp, request: request, complete: complete, akBegin: akBegin, akLogin: akLogin, status: status,
+		stepUpBegin: stepUpBegin}
 	var laneVerbs loginlanehttp.Lane = verbs
 	if opts.verbs != nil {
 		laneVerbs = opts.verbs(verbs, secondFactor)

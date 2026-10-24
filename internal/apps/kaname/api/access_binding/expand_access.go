@@ -194,7 +194,7 @@ func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID,
 	// object" — people and machine accounts, groups already expanded — to any
 	// authenticated caller, on any object, with nothing failing anywhere. The
 	// catalog entry cannot catch that either: it asks `viewer` on the cluster
-	// singleton, a relation the bootstrap grants to `user:*` so the global
+	// singleton, a relation the bootstrap grants to the class `authenticated` so the global
 	// reference catalog stays readable, so every authenticated subject is already
 	// through the front door by the time execution reaches here.
 	//

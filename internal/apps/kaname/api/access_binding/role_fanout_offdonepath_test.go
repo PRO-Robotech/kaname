@@ -195,3 +195,14 @@ func TestReconcileActiveBindings_ContinuesPastAFailingBinding(t *testing.T) {
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (rd *multiBindingReader) Visibility() visibility.ReaderIface { return nil }
+
+// GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
+func (_ *multiBindingABReader) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+// PublicReadContainer — публичное чтение контейнера (kaname#856) этим дублёром не
+// судится: тип цели не объявлен, детей нет.
+func (_ *multiBindingABReader) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
+	return domain.PublicReadContainer{}, nil
+}

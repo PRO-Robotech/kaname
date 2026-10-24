@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Фикстура проб S5 (kaname#856), SC-65 «И (механизм общий, У1)»: модуль,
+# отличный от registry. Контейнер `boxes` (`probemod_box`) объявляет переход
+# публичного чтения на детей; ребёнок `items` (`probemod_item`) указывает на
+# контейнер указателем `box`. Имени модуля в механизме быть не должно: те же
+# три следствия Р9 «Способ» обязаны появиться и здесь.
+#
+# Близнец «без ключа» эта фикстура не хранит: его выводит проба, вычёркивая
+# ровно одну строку ключа, и сверяет вычисленную дельту — один факт.
+#
+# Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
+# базовым именем, и фикстура, названная так, судилась бы как манифест модуля.
+
+apiVersion: iam/v1
+module: probemod
+
+resources:
+
+  - name: boxes
+    objectType: probemod_box
+    parents: [project]
+    producer: derived
+    publicReadToChildren: true
+    verbs: [get, list, create, update, delete]
+
+  - name: items
+    objectType: probemod_item
+    parents:
+      - {name: box, type: probemod_box}
+    producer: derived
+    verbs: [get, list, update, delete]

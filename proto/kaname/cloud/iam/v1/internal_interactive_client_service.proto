@@ -186,8 +186,9 @@ message GetInteractiveClientRequest {
 }
 
 message ListInteractiveClientsRequest {
-  // The maximum number of results per page. 0 → default; >1000 is REJECTED,
-  // not clamped (api-conventions).
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 1;
 
   // Opaque cursor from a previous response.

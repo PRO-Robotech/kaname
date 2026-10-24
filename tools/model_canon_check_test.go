@@ -185,10 +185,25 @@ func TestModelCanonCheckOnTheRealTreeComparesEveryOwnedBlock(t *testing.T) {
 			"не снимет никто\n%s", out)
 	}
 	compared, owned := comparedBlocks(t, out)
-	if compared == 0 || compared != owned {
-		t.Errorf("сверено %d из %d: «ноль прочитанного» неотличимо от «ноль находок», "+
-			"а недосверенное — от сверенного\n%s", compared, owned, out)
+	// Блок прежней редакции (Р10 приёмки anonymous-and-authenticated-are-subject-classes.md,
+	// до kaname#858) сверен с её байтами, а не с каноном, и перепись называет его
+	// отдельно: знаменатель обязан сойтись с их суммой, а не с одним «сверено».
+	prior := priorEditionBlocks(t, out)
+	if compared == 0 || compared+prior != owned {
+		t.Errorf("сверено %d и прежней редакции %d из %d: «ноль прочитанного» неотличимо от "+
+			"«ноль находок», а недосверенное — от сверенного\n%s", compared, prior, owned, out)
 	}
+}
+
+// priorEditionBlocks достаёт из переписи число блоков прежней редакции (Р10).
+func priorEditionBlocks(t *testing.T, out string) int {
+	t.Helper()
+	m := regexp.MustCompile(`прежней редакции \(Р10\) (\d+)`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("перепись не называет блоков прежней редакции (Р10)\n%s", out)
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
 }
 
 // comparedBlocks достаёт из переписи пару «сверено N из M».

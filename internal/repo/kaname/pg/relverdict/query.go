@@ -338,10 +338,18 @@ speaker_pair(s_type, s_id, via) AS (
      WHERE gm.member_type = split_part($1::text, ':', 1)
        AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION ALL
-    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
-    -- аутентифицированный) и потому перечислена явно, а не выведена из формы
-    -- имени.
-    SELECT 'user', '*', 'wildcard'
+    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
+    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
+    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
+    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
+    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
+    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class' WHERE ` + speakerExistsSQL + `
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class' WHERE ` + speakerExistsSQL + `
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
@@ -358,7 +366,10 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'user:*'
+    -- Классы — из пары колонок, где они уже прошли предикат существования
+    -- говорящего (speakerExistsSQL): второе написание параметров здесь вывело
+    -- бы класс учётке, которой нет.
+    SELECT 'system_class:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'class'
 ),
 fact_atom(parent_type, relation) AS (
     -- Источники-факты плана: где искать и что искать. Пустой тип предка означает
@@ -451,7 +462,7 @@ type Grounds struct {
 	// Ноль при этом по-прежнему отличим от «не спрашивали»: SetExhausted рядом,
 	// и наблюдатель считает недочитанные вердикты отдельным числом. Полное
 	// число потребовало бы второго арма, а он оплачивается внешним пределом на
-	// КАЖДОМ вопросе — измерено выше у grantArmPredicate.
+	// КАЖДОМ вопросе — измерено у grantArmPredicate (grantarm.go).
 	LabelArm bool
 	// SetExhausted — набор источников дочитан до конца.
 	//
@@ -490,11 +501,14 @@ type Grounds struct {
 // verdictQuerySQL — ГОТОВЫЙ запрос вердикта для выбранной оси меток (см. довод
 // у expandQuerySQL: собранный запрос читает не только продукт, но и гейт
 // словарей, и собирать его гейт не вправе).
-// grantArmSQL — ТЕЛО ВЕТВИ ВЫДАЧ, единственное в дереве.
+// grantArmSQL — ТЕЛО ВЕТВИ ВЫДАЧ прямого и страничного вопроса.
 //
-// Ветвь встаёт в запрос ДВАЖДЫ и различается ровно предикатом правила. Текст при
-// этом ОДИН: скопировать его значило бы завести два места, знающие, что такое
-// «выдача достаёт до объекта», и разойтись им молча — в сторону лишнего доступа.
+// Ветвь встаёт в эти два запроса и различается ровно подставленными выражениями
+// объекта. Сам предикат «выдача достаёт до объекта» (ветвь правила роли и цель
+// привязки) — общий для ВСЕХ форм вопроса, включая перечень, субъектов и разбор
+// оснований: `grantArmPredicate` в grantarm.go. Скопировать его значило бы
+// завести несколько мест, знающих одно и то же, и разойтись им молча — в
+// сторону лишнего доступа.
 const grantArmSQL = `
     -- ЗАХОД — С ПАРЫ «СУБЪЕКТ + ОБЛАСТЬ», и оба предиката сужают набор ДО
     -- чтения строк. Пока субъект жил на дочерней таблице, а область — на
@@ -507,16 +521,29 @@ const grantArmSQL = `
     --
     -- Обращений — не больше, чем произведение мощностей speaker_pair и scope,
     -- и каждое возвращает выдачи ровно этого субъекта ровно в этой области.
+    --
+    -- Обращение — ВБОК, по паре на строку, и это ДЕРЖИТ обещание абзацем выше,
+    -- а не надеется на план. Обычное соединение оставляло порядок планировщику,
+    -- и он менял его по оценке числа строк говорящего: при трёх строках
+    -- (говорящий и два его системных класса, kaname#829) он предпочитал полный
+    -- просмотр субъектов выдач с хэшем, и стоимость вопроса шла за числом выдач
+    -- в базе (замер — проба объёма матрицы и сетка масштаба). OFFSET 0 не даёт
+    -- подзапросу раствориться в соединении: он и есть ограда порядка.
     SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm
       FROM speaker_pair sp
       {{scope_join}}
-      JOIN kaname.access_binding_subjects bs
-        ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
-       AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
+      CROSS JOIN LATERAL (
+             SELECT s.binding_id, s.subject_type
+               FROM kaname.access_binding_subjects s
+              WHERE s.subject_type  = sp.s_type AND s.subject_id  = sp.s_id
+                AND s.resource_type = sc.s_type AND s.resource_id = sc.s_id
+             OFFSET 0
+           ) bs
       JOIN kaname.access_bindings b ON b.id = bs.binding_id
       JOIN kaname.role_verb rv
         ON rv.role_id = b.role_id AND rv.object_type = $9::text
        AND rv.verb = ANY ($6::text[])
+       AND ` + classVerbFilterSQL + `
       JOIN kaname.role_rule_selectors rs
         ON rs.role_id = b.role_id AND $9::text = ANY (rs.object_types)
       -- Метки нужны только ветви меток, и лежат они там, где велит ТИП: у чужого
@@ -530,30 +557,6 @@ const grantArmSQL = `
        AND b.revoked_at IS NULL
        AND ({{arm_predicate}})
 `
-
-// grantArmPredicate — три ветви правила ОДНИМ предикатом.
-//
-// РАЗДЕЛЯТЬ ИХ НА ДВА ЗАПРОШЕННЫХ АРМА НЕЛЬЗЯ, и это измерено, а не выведено.
-// Соблазн понятен: отдельная меточная ветвь сделала бы признак наблюдения
-// детерминированным. Но внешний предел вычерпывает КАЖДУЮ ветвь союза до своего
-// числа независимо от того, что отдали предыдущие, — значит вторая ветвь
-// оплачивается на ВСЯКОМ вопросе. Замер при трёхстах основаниях: 89 строк за
-// вердикт становятся 929 при меточной ветви впереди и 10032 по оси B при ней же
-// позади. То есть цена наблюдаемости здесь — сама константа, ради которой
-// стадия и делается.
-//
-// ФУНКЦИЯ, А НЕ КОНСТАНТА, и это не оформление. Ветвь имён сравнивает
-// идентификатор объекта, а он назван по-разному у двух форм вопроса: у прямого
-// — параметром запроса, у страничного — колонкой внешней стороны соединения
-// вбок. Написать предикат дважды значило бы завести два места, знающие, что
-// такое «выдача достаёт до объекта», и разойтись им молча — в сторону лишнего
-// доступа. Текст остаётся ОДИН, различается только подставленное выражение.
-func grantArmPredicate(objectIDExpr string) string {
-	return `rs.arm = 'anchor'
-          OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
-          OR (rs.arm = 'labels' AND m.labels IS NOT NULL
-                                AND m.labels @> rs.match_labels)`
-}
 
 // factArmSQL — ТЕЛО ВЕТВИ ПРЯМЫХ ФАКТОВ, единственное в дереве.
 //
@@ -588,7 +591,8 @@ const factArmSQL = `
 // запрос, у страничного она принадлежит СТРОКЕ и обязана быть сужена по ней —
 // иначе выдача, достающая до одного объекта страницы, разрешила бы всю страницу.
 const (
-	scopeJoinMark = "{{scope_join}}"
+	scopeJoinMark    = "{{scope_join}}"
+	armPredicateMark = "{{arm_predicate}}"
 
 	scopeJoinGrantOne  = "CROSS JOIN scope_distinct sc"
 	scopeJoinGrantMany = "JOIN scope_distinct sc ON sc.object_id = o.object_id"
@@ -604,19 +608,26 @@ const (
 // а расширение доступа: ветвь, соединённая с областями без сужения по строке,
 // отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
 // один из них.
-func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string) {
-	grant = strings.Replace(grantArmSQL, "{{arm_predicate}}", grantArmPredicate(objectIDExpr), 1)
+func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string, nesting bool) (grant, fact string, err error) {
+	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
+		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", nesting))
+	if err != nil {
+		return "", "", err
+	}
 	grant = strings.Replace(grant, scopeJoinMark, scopeJoinGrant, 1)
 	fact = strings.Replace(factArmSQL, scopeJoinMark, scopeJoinFact, 1)
-	return grant, fact
+	return grant, fact, nil
 }
 
-func verdictQuerySQL(labelTable string) string {
-	grant, fact := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne)
+func verdictQuerySQL(labelTable string, nesting bool) (string, error) {
+	grant, fact, err := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne, nesting)
+	if err != nil {
+		return "", err
+	}
 	sql := strings.Replace(verdictSQL, "{{grant_arm}}", grant, 1)
 	sql = strings.Replace(sql, "{{fact_arm}}", fact, 1)
 	return strings.ReplaceAll(sql, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$9", "$3"))
+		labelsJoinPinned(labelTable, "$9", "$3")), nil
 }
 
 func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
@@ -641,7 +652,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return Unknown, g, err
 	}
@@ -652,10 +663,14 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	g.LabelAxisTable = labelTable
 
-	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
+	sql, err := verdictQuerySQL(labelTable, nesting)
+	if err != nil {
+		return Unknown, g, err
+	}
+	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType,
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
@@ -873,9 +888,18 @@ speaker_pair(s_type, s_id, via) AS (
      WHERE gm.member_type = split_part($1::text, ':', 1)
        AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
   UNION ALL
-    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
-    -- аутентифицированный) и потому перечислена явно.
-    SELECT 'user', '*', 'wildcard'
+    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
+    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
+    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
+    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
+    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
+    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
+    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
+    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
+    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
+    SELECT 'system_class', $10::text, 'class' WHERE ` + speakerExistsSQL + `
+  UNION ALL
+    SELECT 'system_class', $11::text, 'class' WHERE ` + speakerExistsSQL + `
 ),
 speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов. Обе формы имени группы: канонический
@@ -886,7 +910,10 @@ speaker(subject) AS (
   UNION
     SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
   UNION
-    SELECT 'user:*'
+    -- Классы — из пары колонок, где они уже прошли предикат существования
+    -- говорящего (speakerExistsSQL): второе написание параметров здесь вывело
+    -- бы класс учётке, которой нет.
+    SELECT 'system_class:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'class'
 ),
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($4::text[], $5::text[])
@@ -916,15 +943,18 @@ SELECT o.ord, src.cond_name, src.cond_params, src.arm
 // verdictManyQuerySQL — ГОТОВЫЙ запрос вердикта о странице для выбранной оси
 // меток (довод — у verdictQuerySQL: собранный запрос читает не только продукт,
 // но и гейт словарей, и собирать его гейт не вправе).
-func verdictManyQuerySQL(labelTable string) string {
-	grant, fact := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany)
+func verdictManyQuerySQL(labelTable string, nesting bool) (string, error) {
+	grant, fact, err := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany, nesting)
+	if err != nil {
+		return "", err
+	}
 	sql := strings.Replace(verdictManySQL, "{{grant_arm}}", grant, 1)
 	sql = strings.Replace(sql, "{{fact_arm}}", fact, 1)
 	// Метки объекта присоединяются К СТРОКЕ партии, а не к параметру запроса:
 	// объект у каждой строки свой. Строитель — тот же самый; расходиться двум
 	// представлениям о том, где лежат метки, негде.
 	return strings.ReplaceAll(sql, labelsJoinMark,
-		labelsJoinPinned(labelTable, "$9", "o.object_id"))
+		labelsJoinPinned(labelTable, "$9", "o.object_id")), nil
 }
 
 // AskMany задаёт форме вопрос о СТРАНИЦЕ объектов одного типа — одним запросом.
@@ -971,7 +1001,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	catalogType, nesting, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -981,10 +1011,14 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		return nil, nil, err
 	}
 
-	rows, err := q.Query(ctx, verdictManyQuerySQL(labelTable),
+	sql, err := verdictManyQuerySQL(labelTable, nesting)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType,
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)

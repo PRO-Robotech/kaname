@@ -30,6 +30,7 @@ package humansession
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -58,8 +59,11 @@ const (
 
 // preparedPresentation — исход первой половины.
 type preparedPresentation struct {
-	method  assurance.Method
-	userID  domain.UserID
+	method assurance.Method
+	userID domain.UserID
+	// at — момент сверки, часами глагола: он же ложится моментом последнего
+	// предъявления способа при полном успехе (kaname#827, SUA Р6).
+	at      time.Time
 	verdict presentVerdict
 	outcome PresentationOutcome
 	// totp
@@ -72,9 +76,11 @@ type preparedPresentation struct {
 type settledPresentation struct {
 	verdict presentVerdict
 	outcome PresentationOutcome
-	// remaining — остаток набора ПОСЛЕ потребления (только у запасного кода).
-	remaining int
-	consumed  bool
+	// set — состояние набора ПОСЛЕ потребления (kaname#297 Р4): остаток,
+	// выпуск строки набора, момент траты — момент этой сверки; значимо только
+	// при consumed.
+	set      BackupCodeSetView
+	consumed bool
 }
 
 // presenter — сверка кода портами глагола.
@@ -85,8 +91,8 @@ type presenter struct {
 // prepare — см. шапку. Состояние судится РАНЬШЕ кода: при «нет» и `pending`
 // сверка холостая, исход — «не заведён».
 func (p presenter) prepare(ctx context.Context, userID domain.UserID, in SecondFactorPresentation) (preparedPresentation, error) {
-	out := preparedPresentation{method: in.Method, userID: userID}
 	now := p.deps.Now().UTC()
+	out := preparedPresentation{method: in.Method, userID: userID, at: now}
 	totp, found, err := factorState(ctx, p.deps.Methods, userID)
 	if err != nil {
 		return out, err
@@ -131,9 +137,15 @@ func (p presenter) prepare(ctx context.Context, userID domain.UserID, in SecondF
 				return out, serr
 			}
 		}
-		cand := p.deps.Sets.SetCandidate(stored, in.Code)
+		cand, cerr := p.deps.Sets.SetCandidate(ctx, stored, in.Code)
 		if !enrolled {
 			out.verdict = verdictNotEnrolled
+			return out, nil
+		}
+		if cerr != nil {
+			// Вызов кончился до места вычисления: сверка не состоялась — как
+			// исчерпание ёмкости, предъявлением это не судится (kaname#892).
+			out.verdict, out.outcome = verdictCapacity, PresentationCapacityExhausted
 			return out, nil
 		}
 		if !cand.Ready() {
@@ -165,7 +177,7 @@ func (p presenter) settle(ctx context.Context, w Writer, pr preparedPresentation
 		if !write {
 			return out, nil
 		}
-		recorded, err := w.RecordAcceptedStep(ctx, pr.userID, pr.step)
+		recorded, err := w.RecordAcceptedStep(ctx, pr.userID, pr.step, pr.at)
 		if err != nil {
 			return out, err
 		}
@@ -185,11 +197,10 @@ func (p presenter) settle(ctx context.Context, w Writer, pr preparedPresentation
 		match := p.deps.Sets.MatchSet(set.Verifier, pr.candidate)
 		switch match.Outcome {
 		case passwordverify.OutcomeMatched:
-			out.remaining = match.Remaining
 			if !write {
 				return out, nil
 			}
-			consumed, err := w.ConsumeLookupElement(ctx, pr.userID, pr.candidate.Element())
+			consumed, err := w.ConsumeLookupElement(ctx, pr.userID, pr.candidate.Element(), pr.at)
 			if err != nil {
 				return out, err
 			}
@@ -199,7 +210,10 @@ func (p presenter) settle(ctx context.Context, w Writer, pr preparedPresentation
 				return out, iamerr.Wrapf(iamerr.ErrInternal, "backup code matched but was not consumed")
 			}
 			out.consumed = true
-			out.remaining = match.Remaining - 1
+			out.set = BackupCodeSetView{
+				Remaining: match.Remaining - 1, Total: passwordverify.BackupCodeCount,
+				IssuedAt: set.CreatedAt, LastUsedAt: pr.at, LastUsed: true,
+			}
 		case passwordverify.OutcomeMismatched:
 			out.verdict, out.outcome = verdictMismatched, PresentationMismatched
 		default:

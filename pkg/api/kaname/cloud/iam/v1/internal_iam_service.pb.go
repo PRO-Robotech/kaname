@@ -173,7 +173,8 @@ type LookupSubjectRequest_ExternalId struct {
 }
 
 type LookupSubjectRequest_Id struct {
-	// kaname internal id (`usr-...` или `sva-...`).
+	// kaname internal id: префикс и 17 знаков без разделителя (`usr<17>` или
+	// `sva<17>`, 20 знаков в сумме).
 	Id string `protobuf:"bytes,2,opt,name=id,proto3,oneof"`
 }
 
@@ -280,6 +281,11 @@ type CheckRequest struct {
 	//	"user:<usr…>"
 	//	"service_account:<sva…>"
 	//	"group:<grp…>#member"
+	//	"system_class:anonymous" — вызывающий без личности (край спрашивает им на
+	//	  методе, допускающем анонима).
+	//
+	// "system_class:authenticated" и подстановка "user:*" говорящими не бывают →
+	// INVALID_ARGUMENT.
 	SubjectId string `protobuf:"bytes,1,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	// FGA-relation: "viewer" | "editor" | "admin" | "use" | "member" | etc.
 	// Допустимые значения зависят от authorization-model.
@@ -1036,7 +1042,8 @@ type SubjectChange struct {
 	SubjectId string                 `protobuf:"bytes,2,opt,name=subject_id,json=subjectId,proto3" json:"subject_id,omitempty"`
 	Op        string                 `protobuf:"bytes,3,opt,name=op,proto3" json:"op,omitempty"` // binding_upsert | binding_delete | group_member_change
 	// subject_type — тип субъекта в словаре модели прав: `user` |
-	// `service_account` | `group`.
+	// `service_account` | `group` | `system_class` (у выдачи системному классу
+	// `subject_id` — имя класса `anonymous` | `authenticated`).
 	//
 	// ПОЧЕМУ ЭТО ПОЛЕ ЕСТЬ. `subject_id` — голый идентификатор (`usrXXXX`), а
 	// субъектом модели он становится только в паре с типом (`user:usrXXXX`).

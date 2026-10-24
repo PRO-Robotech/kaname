@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -115,6 +116,16 @@ def test_runner_refuses_an_unknown_shard_and_a_mix_with_service() -> None:
     assert r.returncode == 2, (r.returncode, r.stderr)
 
 
+def test_runner_takes_the_tree_plan_shard_with_bootstrap_remint() -> None:
+    # Шард плана дерева и переиздание бутстрапа (kaname#868) — флаги одного вызова:
+    # `--list` печатает перечень шарда и выходит до предполёта и переиздания.
+    plan = shard_plan.parse(PLAN)
+    for shard, stems in plan.items():
+        r = _run("--shard-plan", str(PLAN), "--shard", shard, "--remint-bootstrap", "--list")
+        assert r.returncode == 0, (shard, r.returncode, r.stdout, r.stderr)
+        assert r.stdout.split() == stems, (shard, r.stdout)
+
+
 def test_plan_refuses_a_suite_in_two_shards() -> None:
     u = _universe()
     with tempfile.TemporaryDirectory() as t:
@@ -194,6 +205,85 @@ def test_verdict_reads_shard_dirs_by_artifact_prefix() -> None:
                                text=True, timeout=60)
     assert bare.returncode == 1, (bare.returncode, bare.stdout)
     assert named.returncode == 0, (named.returncode, named.stdout, named.stderr)
+
+
+# ── матрица задания и план: шарды совпадают в обе стороны ДО стенда ──────────
+#
+# Без этой пробы шард матрицы без строки плана краснел бы лишь прогонщиком на
+# стенде, а шард плана без задания матрицы — лишь сводным вердиктом: оба — через
+# 40 мин конвейера. Здесь — задание `suite`, до подъёма.
+
+WORKFLOW = NEWMAN.parents[1] / ".github" / "workflows" / "e2e-newman.yml"
+
+
+def _workflow() -> dict:
+    import yaml
+
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _matrix(doc: dict) -> dict:
+    return doc["jobs"]["chart-own"]["strategy"]["matrix"]
+
+
+def test_tree_workflow_matrix_matches_the_tree_plan() -> None:
+    found = shard_plan.matrix_findings(_workflow(), shard_plan.parse(PLAN), PLAN.name)
+    assert found == [], found
+
+
+def test_matrix_without_a_plan_shard_is_a_finding() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    gone = _matrix(doc)["shard"].pop()
+    found = shard_plan.matrix_findings(doc, plan, PLAN.name)
+    assert any(gone in f for f in found), found
+
+
+def test_matrix_shard_outside_the_plan_is_a_finding() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    _matrix(doc)["shard"].append("zz")
+    found = shard_plan.matrix_findings(doc, plan, PLAN.name)
+    assert any("zz" in f for f in found), found
+
+
+def test_reordered_matrix_is_silent() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    _matrix(doc)["shard"].reverse()
+    assert shard_plan.matrix_findings(doc, plan, PLAN.name) == []
+
+
+def test_matrix_without_a_shard_list_is_a_finding() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    doc["jobs"]["chart-own"]["strategy"]["matrix"] = {
+        "include": [{"half": "entry"}, {"half": "keys"}]}
+    found = shard_plan.matrix_findings(doc, plan, PLAN.name)
+    assert any("shard" in f for f in found), found
+
+
+def test_suite_step_not_taking_the_plan_is_a_finding() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    for st in doc["jobs"]["chart-own"]["steps"]:
+        if "--shard-plan" in str(st.get("run", "")):
+            st["run"] = st["run"].replace("--shard-plan", "--service kaname-login-lane --x")
+    found = shard_plan.matrix_findings(doc, plan, PLAN.name)
+    assert any("--shard-plan" in f for f in found), found
+
+
+def test_shard_not_from_the_matrix_is_a_finding() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    for st in doc["jobs"]["chart-own"]["steps"]:
+        if "--shard-plan" in str(st.get("run", "")):
+            st["run"] = re.sub(r'--shard\s+"?\$[{]?[A-Za-z_]+[}]?"?', "--shard sf", st["run"])
+    found = shard_plan.matrix_findings(doc, plan, PLAN.name)
+    assert any("matrix.shard" in f for f in found), found
+
+
+def test_artifact_prefix_drift_is_a_finding() -> None:
+    doc, plan = _workflow(), shard_plan.parse(PLAN)
+    for st in doc["jobs"]["chart-own"]["steps"]:
+        if "upload-artifact" in str(st.get("uses", "")):
+            st["with"]["name"] = "own-report-${{ matrix.shard }}"
+    found = shard_plan.matrix_findings(doc, plan, PLAN.name)
+    assert any("--prefix" in f for f in found), found
 
 
 def test_verdict_with_newman_judges_the_tree_plan_coverage() -> None:

@@ -28,6 +28,8 @@ import (
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/util/annotations"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // engineEvalAt — момент вычисления: двадцатая минута ряда; первые десять
@@ -62,6 +64,18 @@ func engineSeries() []cellTerm {
 	}
 	// Отказ сверх доли церемонии (kaname#693): ряд без меток.
 	out = append(out, ceremonyShareCell)
+	// Исходы нашей стороны подтверждения адреса, смены адреса, входа ключом и
+	// ветви ключа повышения (kaname#735) — весь словарь, сторона вызывающего тоже.
+	for _, v := range loginLaneOutcomeProducerValues() {
+		out = append(out, v.cell)
+	}
+	// Исходы почтовой полосы по виду письма (kaname#733): вся решётка «вид ×
+	// исход», сданные тоже — правило не обязано звонить на их рост.
+	for _, kind := range clients.MailEventTypes {
+		for _, o := range clients.InviteMailOutcomes {
+			out = append(out, mailCell(kind, o))
+		}
+	}
 	return out
 }
 

@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // newLockTimeoutPool — a pgxpool whose every session sets `lock_timeout` so a
@@ -103,7 +104,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 				_ = wIns.Rollback(ctx)
 			}
 		}()
-		_, err = wIns.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+		_, err = bindingset.Insert(ctx, wIns.AccessBindingsW(), domain.AccessBinding{
 			ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
 			SubjectType:  domain.SubjectTypeGroup,
 			SubjectID:    domain.SubjectID(g.ID),
@@ -152,7 +153,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		bindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 		wSeed, err := seedRepo.Writer(ctx)
 		require.NoError(t, err)
-		_, err = wSeed.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+		_, err = bindingset.Insert(ctx, wSeed.AccessBindingsW(), domain.AccessBinding{
 			ID:           bindingID,
 			SubjectType:  domain.SubjectTypeUser,
 			SubjectID:    domain.SubjectID(uid),

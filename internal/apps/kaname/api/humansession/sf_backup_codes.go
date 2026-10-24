@@ -29,7 +29,9 @@ type RegenerateBackupCodesOutput struct {
 	View        SessionView
 	Bearer      domain.SessionBearer
 	BackupCodes []string
-	Assurance   AssuranceView
+	// BackupCodeSet — состояние нового набора (kaname#297 Р4).
+	BackupCodeSet BackupCodeSetView
+	Assurance     AssuranceView
 }
 
 // RegenerateBackupCodesUseCase — перечеканка.
@@ -123,7 +125,7 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	}); err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, in.Factor.Method, bearer.Digest(), now)
+	rec, err := presentInSession(ctx, w, resolved.Session, codePresentation(in.Factor.Method), bearer.Digest(), now)
 	if err != nil {
 		return RegenerateBackupCodesOutput{}, ErrStoreUnavailable
 	}
@@ -152,10 +154,11 @@ func (uc *RegenerateBackupCodesUseCase) Execute(ctx context.Context, in Regenera
 	s := resolved.Session
 	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	return RegenerateBackupCodesOutput{
-		View:        SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
-		Bearer:      bearer,
-		BackupCodes: codes,
-		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, rec),
+		View:          SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
+		Bearer:        bearer,
+		BackupCodes:   codes,
+		BackupCodeSet: mintedSetView(codes, now),
+		Assurance:     assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}, nil
 }
 

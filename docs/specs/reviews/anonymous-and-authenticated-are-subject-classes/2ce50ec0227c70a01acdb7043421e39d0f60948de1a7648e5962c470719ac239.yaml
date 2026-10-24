@@ -1,0 +1,234 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: c753d1ee4
+  content_commit: 78a8f22fe
+  branch: '829'
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238]
+  lines: 580
+  round: 1
+  round_scope: Первый круг, судится вся редакция.
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+    в копии ветки 829 @ 78a8f22fe → 2ce50ec0…0719ac239 (совпало с заданием)
+  measurement_revisions: >-
+    kaname — дерево 78a8f22fe (дельта к c753d1ee4 — только документ); kacho — `git grep <образец>
+    2ec6e1e3d` и `git show 2ec6e1e3d:<путь>`; фундамент — corelib v1.14.0 (пин go.mod обоих
+    стволов), модульный кэш.
+  neighbours_pinned:
+    module-manifest-relation-grant.md: 1be08963319c6703d63b767a814e47346a311c72e74cc0381aff4e87af8e47ba
+    register-resource-checks-the-module-vocabulary.md: e7d64c5e5c5c9430582510fea92a488228e1a936d010b33fc4810e7774d3a3fc
+    composed-model-admits-only-what-it-owns.md: 9f1b5a8546b6803a9895eff59383c7e51fa513685416d251a9efccc3ad77f50d
+    model-composes-at-boot-from-delivered-manifests.md: d0e89a3b8572db7985afca7a251218eca6a12af987f079710572e62794505d64
+    retired-resource-names-its-successor.md: 966117c09d00c47cc03c1d51c78e6c3f1b51bbdecfc6c10847b064cabb83657c
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-15T00:00:00Z'
+
+summary:
+  scenarios: 46
+  producer_named: 46 of 46
+  twin_named_for_negatives: все, кроме SC-52 (неблокирующее)
+  blocking: 5
+  blocking_kinds: [NEGATIVE, CONSTRUCTIBILITY, COVERAGE, FORMAT, DoD]
+
+blocking:
+  - id: B1
+    kind: NEGATIVE
+    scenarios: [Р6, SC-30, SC-35, SC-36]
+    note: >-
+      Р6 даёт значению пола «0» новый смысл — «метод допускает вызывающего без личности». В
+      фундаменте, который судит пол на обоих краях, «0», пустое значение и любое нераспознанное
+      значение сегодня РАВНЫ: corelib v1.14.0 `acrlevel/acrlevel.go`, `Rank` — `case "0", "":
+      return 0`, `default: return 0`; `Satisfies` трактует ранг 0 как «пола нет». В каталоге края
+      kacho @2ec6e1e3d 29 из 359 строк несут пустой пол (разбор
+      `gateway/internal/middleware/embed/permission_catalog.json`, поле `required_acr_min`), а
+      шапка `PermissionRequirement` в `stepup_gate.go` прямо называет пустое значение «без
+      требования». Документ не говорит, что допуск анонима различает буквальное «0» и пустое
+      или неизвестное значение, и не несёт сценария, где строка с ПУСТЫМ полом при выдаче
+      анониму отвергает его до решения. Реализация по рангу — естественная по фундаменту —
+      открыла бы анониму решение на каждой строке без пола. Перепись SC-36 считает только
+      написание `required_acr_min) = "0"` (→ 0) и слепа к предмету: по рангу таких строк 29
+      (ban19-number-two-predicates). Нужно: (1) в Р6 — допуск анонима объявляется только
+      буквальным значением, отличимым от пустого и неизвестного, и где это различение живёт;
+      (2) новый отрицательный сценарий — строка с пустым полом, выдача анониму, запрос без
+      `Authorization` → `401` до решения, вопрос к модели не задан; близнец — SC-30 (один факт:
+      пустой пол против «0»); (3) в SC-35 — вид (г) нераспознанное значение пола; (4) перепись
+      SC-36 двумя предикатами: по написанию и по рангу, с числом каждого.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    scenarios: [П3, SC-30, SC-31, SC-32, SC-33, SC-34, SC-35, SC-38]
+    note: >-
+      П3 не строится в названной форме. `fixture.v1.ThingService` в kacho нет:
+      `git grep -l 'fixture\.v1\|ThingService' 2ec6e1e3d -- gateway` → 0 файлов. «Ответчик
+      модели — настоящий kaname на базе П1»: П1 строят фикстуры kaname из `internal/testsupport`
+      (`iampgtest`, `rightsfixture`, `momentclock`), а пакеты `internal/` другого модуля Go не
+      импортируются; ни одна проба края kacho живого kaname не поднимает:
+      `git grep -l 'kaname/internal' 2ec6e1e3d -- 'gateway/**/*_test.go'` → 0. Нужно назвать
+      строимую форму и её координату: например, образ kaname в testcontainers с посевом П1
+      через публичные глаголы, либо разнести утверждения — семантика классов доказывается в
+      kaname (S1), край — против ответчика, записывающего заданный ему субъект (тогда SC-30/34
+      утверждают субъект вопроса и исход края, а не решение модели).
+  - id: B3
+    kind: COVERAGE
+    scenarios: [Р5, П1, SC-01, SC-10, SC-11, SC-51]
+    note: >-
+      Граница класса `authenticated` между арендаторами не закреплена. В П1 не сказано, к
+      какому аккаунту относится `usr-B`; нет сценария, где человек и сервисная учётка ДРУГОГО
+      аккаунта (`acc-B`) читают по выдаче `authenticated` из `acc-A`. Р5 разрешает
+      `authenticated` цель `allInScope` на проекте и аккаунте по праву владельца арендатора:
+      тогда будущие объекты области сами становятся читаемыми для принципалов всех аккаунтов
+      кластера — то самое следствие, которым документ обосновывает запрет `allInScope` для
+      `anonymous` (SC-24). Расширение поверхности не названо (ban18-q-security), а
+      предупреждение консоли SC-51 есть только у анонима. Нужно: сценарий с принципалом `acc-B`
+      (положительный или отрицательный, по решению) и явное решение о `allInScope` у
+      `authenticated` вне кластера — с отрицанием и близнецом, если оно сужается. Вопрос
+      вынесен диспетчеру.
+  - id: B4
+    kind: FORMAT
+    scenarios: [SC-09, SC-16, SC-26, SC-39]
+    note: >-
+      У этих сценариев «Тогда» не задаёт наблюдаемого исхода, на котором проба могла бы упасть.
+      SC-09: не названы RPC, тело и текст или поле отказа `INVALID_ARGUMENT`. SC-16: «ответ
+      совпадает с сегодняшним» — не названы ни поле, ни значение. SC-26: «отказ пола «2» в
+      сегодняшней форме края» — для integration-пробы kaname нужны код и причина. SC-39:
+      отказ записи в `r1` — без кода. Нужно: код и содержимое `details` либо дословный текст.
+  - id: B5
+    kind: DoD
+    scenarios: [SC-53, SC-01…09, SC-17, SC-40, S2]
+    note: >-
+      SC-53 не входит в DoD ни одной стадии: S4 требует playwright только на SC-50…52. Сценарии
+      края kaname в S1 (SC-01…09, SC-17, SC-40 — все через `/iam/v1/…`) не имеют newman-кейса,
+      а S2 требует лишь «≥ 1 положительный и ≥ 1 отрицательный». Канон —
+      `testing-newman.md#edge-is-newman` и ban12-second-echelon: каждому сценарию края —
+      newman-кейс; невидимое краем — integration с названной причиной по каждому ID
+      (`#edge-internal-consequence`). Нужно: DoD по каждому ID стадии.
+
+minor:
+  - kind: FORMAT
+    note: >-
+      SC-07 и П1: тип ресурса `obj-1` не назван (`<тип obj-1>`), а от него зависят SC-10/11/23 —
+      назвать тип из закрытого словаря, допускающий цель `resources`.
+  - kind: FORMAT
+    note: >-
+      SC-13 и SC-34: «окно материализации» без числа — проба не знает предела опроса; назвать
+      предел числом с единицей.
+  - kind: FORMAT
+    note: SC-22 — близнец `rol-read2` отсутствует в П1; дописать его в посев.
+  - kind: FORMAT
+    note: >-
+      SC-41 опирается на SC-40 (П2, testcontainers), а утверждает край geo на стенде; назвать П4
+      и переезд, применённый на стенде.
+  - kind: TWIN
+    note: SC-52 — близнец не назван явно (по смыслу — SC-50 с целью `resources`).
+  - kind: PRODUCER
+    note: >-
+      SC-39: координата названа в kacho (`services/registry`), а предикат гонится по kaname
+      (`registry_token/token.go`); анонимный субъект `user:*` есть в обоих местах
+      (kacho `services/registry/internal/apps/kacho/config/config.go:422`) — назвать оба.
+  - kind: PRODUCER
+    note: >-
+      SC-43 «факты модели»: системная выдача несёт строку в `access_binding_emitted_tuples`
+      (`0001_initial.sql:3161`, `fga_user = 'user:*'`) — назвать таблицу в переписи переезда.
+  - kind: SCOPE
+    note: >-
+      У kaname нет `docs/specs/04-roadmap…`; объём закреплён решением владельца 2026-10-15
+      дословно и разделом «Что НЕ входит» — как у соседних приёмок kaname. Не блокирует.
+
+open_questions_defaults:
+  - question: Классы при решении — включение или взаимоисключение (Р2)
+    default: >-
+      (а) включение: у вошедшего оба класса. Дефолтабельно, принимается как допущение; не
+      блокирует.
+  - question: Открытие GetRepository анониму в этой под-фазе
+    default: Нет — отдельная приёмка (согласуется с «Что НЕ входит» п. 1).
+  - question: Правка `sec-exception-geo-public-read` под каталог
+    default: Вне предмета приёмки, полоса tooling-maintainer; не блокирует.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> @78a8f22fe → 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239
+    - git grep -n "SELECT 'user', '\*'\|SELECT 'user:\*'" -- internal/repo/kaname/pg/relverdict | wc -l → 6
+    - git grep -n "'user', '\*'" -- internal/migrations → 2 строки (0001_initial.sql:3175, :3195)
+    - git grep -h -o -E 'required_acr_min\) *= *"0"' -- proto | wc -l → 0
+    - разбор permission_catalog.json @2ec6e1e3d → строк 359; viewer на cluster 9; пол пустой 29, «1» 292, «2» 38
+    - grep 'case "0", ""' corelib@v1.14.0/acrlevel/acrlevel.go → :51 (ранг 0; default — тоже 0)
+    - git grep -l 'fixture\.v1\|ThingService' 2ec6e1e3d -- gateway → 0
+    - git grep -l 'kaname/internal' 2ec6e1e3d -- 'gateway/**/*_test.go' → 0
+    - тексты SC-03, SC-05, SC-07 — internal/domain/subject.go:50, :117; access_binding.go:145 (совпадают)
+
+constructibility:
+  method: >-
+    Посев не ставился — изоляции для посева задание не назвало, стенда нет. По названным
+    фикстурам: П1 — существующие фикстуры kaname (`create_subjects_test.go`,
+    `internal/testsupport/iampgtest`, `rightsfixture`, `momentclock` для окна SC-25,
+    `modulemanifests` для SC-23); П2 — миграции ствола плюс новая, форма поднимаемая;
+    П3 — в названной форме не строится (B2); П4/П5 — стенд не поднимался.
+  seeded: 0
+  of: 5
+  named_fixture: 2
+  not_constructible: 1
+  not_executed: 2
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: true
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  reason: вердикт — возврат; санкции на код нет
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: performed
+  published: true
+  database_id: 6180564637
+  node_id: IC_kwDOUO26pM8AAAABcGPunQ
+  url: https://github.com/PRO-Robotech/kaname/issues/829#issuecomment-6180564637
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6180564637
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/829
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-14T23:13:54Z'
+  body_sha256: 8a16af505f4150dcfc2523ff1457f44dcc7aecf296593251980d4d4e11a47ae9
+  subject_sha256: 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239
+  subject_revision: 78a8f22feba9a18c045a2383c2e7ba106a866ead
+  verdict: CHANGES_REQUESTED
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

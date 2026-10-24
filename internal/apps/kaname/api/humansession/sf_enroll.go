@@ -165,7 +165,9 @@ type ConfirmOutput struct {
 	View        SessionView
 	Bearer      domain.SessionBearer
 	BackupCodes []string
-	Assurance   AssuranceView
+	// BackupCodeSet — состояние только что выпущенного набора (kaname#297 Р4).
+	BackupCodeSet BackupCodeSetView
+	Assurance     AssuranceView
 }
 
 // ConfirmSecondFactorUseCase — подтвердить заведение.
@@ -301,7 +303,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	}); err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
-	rec, err := presentInSession(ctx, w, resolved.Session, assurance.MethodTOTP, bearer.Digest(), now)
+	rec, err := presentInSession(ctx, w, resolved.Session, assurance.TOTPPresented(), bearer.Digest(), now)
 	if err != nil {
 		return ConfirmOutput{}, ErrStoreUnavailable
 	}
@@ -330,10 +332,11 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 	s := resolved.Session
 	s.PresentedMethods, s.AssuranceLevel, s.LastPresentedAt = rec.Methods, rec.Level, now
 	return ConfirmOutput{
-		View:        SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
-		Bearer:      bearer,
-		BackupCodes: codes,
-		Assurance:   assuranceAfter(ctx, uc.deps, user.ID, rec),
+		View:          SessionView{User: user, Session: s, EmailVerified: resolved.EmailVerified},
+		Bearer:        bearer,
+		BackupCodes:   codes,
+		BackupCodeSet: mintedSetView(codes, now),
+		Assurance:     assuranceAfter(ctx, uc.deps, user.ID, rec),
 	}, nil
 }
 
@@ -341,7 +344,7 @@ func (uc *ConfirmSecondFactorUseCase) Execute(ctx context.Context, in ConfirmInp
 // заведённые способы читаются заново. Отказ чтения — журнал и вид без пути к
 // «2»: ответ уже выдан, лгать о достижимости нельзя, честнее назвать неизвестное.
 func assuranceAfter(ctx context.Context, d SecondFactorDeps, userID domain.UserID, rec PresentedRecord) AssuranceView {
-	enrolled, err := enrolledMethods(ctx, d.Methods.Get, userID)
+	enrolled, err := presentableMethods(ctx, d, userID)
 	if err != nil {
 		d.Logger.Error("second factor: enrolled methods unreadable after commit", "err", err.Error())
 	}

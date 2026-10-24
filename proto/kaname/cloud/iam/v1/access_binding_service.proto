@@ -126,8 +126,9 @@ service AccessBindingService {
     //
     // It used to declare `viewer` on the cluster singleton and call that a
     // "cluster-scoped catalog gate". `viewer` on the cluster is the relation of the
-    // global reference catalogue, granted to `user:*` by the bootstrap, so the
-    // check admitted every authenticated subject and narrowed nothing.
+    // global reference catalogue, granted by the bootstrap to every authenticated
+    // principal (the system class `authenticated`), so the check admitted every
+    // authenticated subject and narrowed nothing.
     option (corelib.authz.v1.permission)       = "iam.access_bindings.list";
     option (corelib.authz.v1.scope_filtered)   = true;
     option (corelib.authz.v1.required_acr_min) = "1";
@@ -228,8 +229,9 @@ service AccessBindingService {
   // cluster administrator — ONE predicate, shared with `ListBySubject`. That
   // account is not a request field — it is resolved from the subject — so the edge
   // has no object to check and declares `scope_filtered`. `subject_type ∈
-  // {"user","service_account","group"}`; malformed subject_id / prefix↔type
-  // mismatch → INVALID_ARGUMENT.
+  // {"user","service_account","group","system_class"}`; malformed subject_id /
+  // prefix↔type mismatch / class name outside `anonymous|authenticated` →
+  // INVALID_ARGUMENT.
   //
   // ДОПУСК НЕ ЕСТЬ ПОЛНОТА ОТВЕТА. Допуск решается по ДОМАШНЕМУ аккаунту
   // субъекта, а строки называют ОБЛАСТЬ каждой выдачи, и области одного человека
@@ -431,10 +433,11 @@ message GetAccessBindingRequest {
 }
 
 message CreateAccessBindingRequest {
-  // Тип subject'а: "user" | "service_account" | "group".
+  // Тип subject'а: "user" | "service_account" | "group" | "system_class".
   string subject_type = 1;
 
-  // ID subject'а.
+  // ID subject'а; при `subject_type = "system_class"` — имя класса
+  // "anonymous" | "authenticated".
   string subject_id = 2;
 
   // ID of the Role to assign.
@@ -551,8 +554,9 @@ message UpdateAccessBindingRequest {
 }
 
 message ListAccessBindingsRequest {
-  // The maximum number of results per page to return. Default 100; >1000 →
-  // INVALID_ARGUMENT (rejected, not clamped).
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 1;
 
   // Page token. A malformed token → INVALID_ARGUMENT (validated before the
@@ -629,7 +633,9 @@ message ListAccessBindingsByScopeRequest {
   // DEPRECATED — use `scope_id` (field 6). Scope-anchor id.
   string resource_id = 2;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 3;
 
   // Page token.
@@ -658,13 +664,16 @@ message ListAccessBindingsByScopeRequest {
 }
 
 message ListAccessBindingsBySubjectRequest {
-  // Тип subject'а.
+  // Тип subject'а: "user" | "service_account" | "group" | "system_class".
   string subject_type = 1;
 
-  // ID subject'а.
+  // ID subject'а; при `subject_type = "system_class"` — имя класса
+  // "anonymous" | "authenticated".
   string subject_id = 2;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 3;
 
   // Page token.
@@ -677,14 +686,16 @@ message ListAccessBindingsByAccountRequest {
   // the account.
   string account_id = 1;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.
   string page_token = 3;
 
-  // Optional: filter by subject_type ("user" | "service_account" | "group").
-  // Empty = no filter.
+  // Optional: filter by subject_type ("user" | "service_account" | "group" |
+  // "system_class"). Empty = no filter.
   string subject_type_filter = 4;
 
   // Optional: include revoked bindings (status='REVOKED'). Default false
@@ -737,7 +748,9 @@ message ListAccessBindingOperationsRequest {
   // ID of the AccessBinding resource to list operations for.
   string access_binding_id = 1;
 
-  // The maximum number of results per page that should be returned.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.
@@ -1010,7 +1023,8 @@ message ExpandAccessRequest {
 }
 
 // Principal is a concrete grantee resolved by ExpandAccess — a USER or
-// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members).
+// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members; never a
+// SYSTEM_CLASS — a class names no concrete principal and is not enumerated).
 message Principal {
   // Type of the principal (USER / SERVICE_ACCOUNT). Reuses SubjectType.
   SubjectType type = 1;

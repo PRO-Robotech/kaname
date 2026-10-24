@@ -6,12 +6,12 @@
 """ПЛАН ШАРДОВ НАБОРОВ СЛУШАТЕЛЯ ФОРМЫ И СВОДНЫЙ ВЕРДИКТ ШАРДОВ (kaname#848).
 
 ПРЕДМЕТ. Наборы слушателя формы гонялись одним вызовом на одном стенде задания
-`chart-own`: 60,4 мин шага при пределе 65 (прогоны 38585846056, 38566982383,
-38539188088 на `main`). Время шага — сумма наборов, и три из них длинные сами
-по себе (их окна — литералы профиля и контракта). Разрез — матрица шардов, у
-каждого шарда СВОЙ стенд; план разреза лежит в дереве одним файлом
-(`tests/newman/chart-own-shards.txt`) и читается здесь, прогонщиком и переписью
-долга набора — одним разбором.
+`chart-own` (3802–3905 с при пределе шага 3900 с), затем двумя половинами
+kaname#941 (шаг 30,3–35,1 мин). Время шага — сумма наборов, и три из них длинные
+сами по себе (их окна — литералы профиля и контракта). Разрез — матрица шардов,
+у каждого шарда СВОЙ стенд; план разреза лежит в дереве одним файлом
+(`tests/newman/chart-own-shards.txt`) и читается здесь, прогонщиком, переписью
+долга набора и пробой матрицы задания (`matrix_findings`) — одним разбором.
 
 ВСЕЛЕННАЯ ВЫВОДИТСЯ, А НЕ ВЫПИСЫВАЕТСЯ. Набор слушателя формы — тот, чей модуль
 кейсов либо коллекция читает `loginLaneBaseUrl`: эту переменную пишет ТОЛЬКО
@@ -146,6 +146,67 @@ def shard_stems(plan_path: pathlib.Path, shard: str,
         raise PlanError(f"шард {shard} планом {plan_path} не объявлен; "
                         f"объявлены: {', '.join(plan)}")
     return plan[shard]
+
+
+MATRIX_REF = "${{ matrix.shard }}"
+_SHARD_ARG_RE = re.compile(r'--shard\s+"?(\$\{\{\s*matrix\.shard\s*\}\}|\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?)"?')
+
+
+def matrix_findings(doc: dict, plan: dict[str, list[str]], plan_name: str,
+                    job: str = "chart-own",
+                    verdict_job: str = "chart-own-verdict") -> list[str]:
+    """Матрица задания и план — одно и то же в обе стороны; каждая находка — с именем.
+
+    `doc` — разобранный workflow (разбор у вызывающего: этот модуль идёт и на
+    голом python3 ранера, где yaml нет). Судится: шарды `strategy.matrix.shard`
+    против строк плана; шаг наборов берёт перечень из плана `--shard-plan
+    <plan_name>`, а шард — из `matrix.shard` (прямо либо через переменную env
+    задания или шага); имя артефакта шарда — `<префикс>${{ matrix.shard }}`, и тот
+    же префикс и план называет сводный вердикт `verdict_job`.
+    """
+    jobs = doc.get("jobs") or {}
+    j = jobs.get(job)
+    if not isinstance(j, dict):
+        return [f"задания {job} в workflow нет — судить матрицу не по чему"]
+    out: list[str] = []
+    matrix = ((j.get("strategy") or {}).get("matrix")) or {}
+    shards = matrix.get("shard") if isinstance(matrix, dict) else None
+    if not isinstance(shards, list) or not shards or not all(isinstance(s, str) for s in shards):
+        return [f"матрица задания {job} не перечисляет шарды списком ключа shard: {matrix!r}"]
+    out += [f"шард {s} плана {plan_name} в матрице задания {job} нет — его наборы не "
+            f"гонялись бы нигде" for s in plan if s not in shards]
+    out += [f"шард {s} матрицы задания {job} планом {plan_name} не объявлен"
+            for s in shards if s not in plan]
+    env = dict(j.get("env") or {})
+    runs = [(st, str(st.get("run", ""))) for st in j.get("steps") or []]
+    taking = [(st, body) for st, body in runs
+              if re.search(rf"--shard-plan\s+\S*{re.escape(plan_name)}\b", body)]
+    if not taking:
+        out.append(f"ни один шаг задания {job} не берёт перечень из плана "
+                   f"(`--shard-plan {plan_name}`)")
+    for st, body in taking:
+        m = _SHARD_ARG_RE.search(body)
+        senv = {**env, **(st.get("env") or {})}
+        if not m or (m.group(2) and str(senv.get(m.group(2), "")).replace(" ", "")
+                     != MATRIX_REF.replace(" ", "")):
+            out.append(f"шаг «{st.get('name')}» задания {job}: шард `--shard` не из "
+                       f"matrix.shard — матрица и прогон разошлись бы молча")
+    names = [str((st.get("with") or {}).get("name", "")) for st in j.get("steps") or []
+             if "upload-artifact" in str(st.get("uses", ""))]
+    prefixes = [n[: -len(MATRIX_REF)] for n in names if n.endswith(MATRIX_REF)]
+    v = jobs.get(verdict_job)
+    vbody = " ".join(str(st.get("run", "")) for st in (v or {}).get("steps") or [])
+    if not prefixes:
+        out.append(f"артефакт отчёта задания {job} не именуется `<префикс>{MATRIX_REF}`")
+    elif not isinstance(v, dict):
+        out.append(f"задания сводного вердикта {verdict_job} нет")
+    else:
+        if not any(re.search(rf"--prefix\s+{re.escape(p)}(\s|$)", vbody) for p in prefixes):
+            out.append(f"сводный вердикт {verdict_job} не читает отчёты по префиксу "
+                       f"артефакта ({', '.join(prefixes)}): `--prefix` разошёлся")
+        if not re.search(rf"--plan\s+\S*{re.escape(plan_name)}\b", vbody):
+            out.append(f"сводный вердикт {verdict_job} судит не план {plan_name}")
+    return out
 
 
 def _suite_line(d: pathlib.Path, stem: str) -> tuple[bool, str]:

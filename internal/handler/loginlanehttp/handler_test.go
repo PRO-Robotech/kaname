@@ -49,6 +49,9 @@ var base = time.Date(2026, 9, 16, 12, 0, 0, 123456000, time.UTC)
 
 // stubLane — дублёр глаголов: отвечает объявленным исходом и записывает вход.
 type stubLane struct {
+	// Выдача испытания повышения ключом (kaname#827).
+	stepUpBeginIn []humansession.StepUpAccessKeyBeginInput
+
 	loginOut    humansession.LoginOutput
 	loginErr    error
 	logoutErr   error
@@ -172,6 +175,13 @@ func (s *stubLane) BeginAccessKeyLogin(_ context.Context, in humansession.BeginA
 func (s *stubLane) AccessKeyLogin(_ context.Context, in humansession.AccessKeyLoginInput) (humansession.LoginOutput, error) {
 	s.akLoginIn = append(s.akLoginIn, in)
 	return s.akLoginOut, s.akLoginErr
+}
+
+// BeginStepUpAccessKey — дублёр выдачи испытания повышения ключом (kaname#827):
+// нулевой исход — пустое испытание, и проба, ждущая выдачу, его отличит.
+func (s *stubLane) BeginStepUpAccessKey(_ context.Context, in humansession.StepUpAccessKeyBeginInput) (humansession.StepUpAccessKeyBeginOutput, error) {
+	s.stepUpBeginIn = append(s.stepUpBeginIn, in)
+	return humansession.StepUpAccessKeyBeginOutput{}, nil
 }
 
 func (s *stubLane) RequestEmailVerification(_ context.Context, b domain.SessionBearer) (humansession.RequestVerificationOutput, error) {

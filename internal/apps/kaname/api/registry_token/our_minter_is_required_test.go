@@ -35,7 +35,7 @@ func anonOnOurMinting(t *testing.T, m LocalMinter) *IssueRegistryTokenUseCase {
 	return mustUseCase(t, Config{
 		AllowedAudiences: []string{"registry.kacho.local"},
 		DefaultService:   "registry.kacho.local",
-		Anonymous:        AnonymousIdentity{ClientID: "registry-anonymous"},
+		Anonymous:        AnonymousIdentity{ClientID: "registry-anonymous", Pace: ampleAnonPace()},
 	}, m)
 }
 
@@ -71,7 +71,7 @@ func TestExecuteAnonymous_IsEnabledByItsIdentityAlone(t *testing.T) {
 		t.Fatal("анонимный поток с объявленной идентичностью числится выключенным — включённость " +
 			"держится на поле, у которого не осталось читателя")
 	}
-	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
+	out, err := uc.ExecuteAnonymous(context.Background(), AnonymousInput{Service: "registry.kacho.local"})
 	if err != nil {
 		t.Fatalf("ExecuteAnonymous: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestExecuteAnonymous_OnOurMinting_ReadOnlyScopeCarriesNoWriteVerb(t *testin
 	// Включённость утверждает соседняя проба; эта — объём.
 	uc.cfg.Anonymous = anonConfig().Anonymous
 
-	if _, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local"); err != nil {
+	if _, err := uc.ExecuteAnonymous(context.Background(), AnonymousInput{Service: "registry.kacho.local"}); err != nil {
 		t.Fatalf("ExecuteAnonymous: %v", err)
 	}
 	if m.got.Scope != AnonymousReadScope {
@@ -115,7 +115,7 @@ func TestExecuteAnonymous_OnOurMinting_DisabledIsUnauthenticatedAndMintsNothing(
 	if uc.AnonymousEnabled() {
 		t.Fatal("анонимный поток без идентичности числится включённым")
 	}
-	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
+	out, err := uc.ExecuteAnonymous(context.Background(), AnonymousInput{Service: "registry.kacho.local"})
 	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("err = %v; ожидался ErrUnauthenticated (обработчик отдаёт 401-вызов)", err)
 	}
@@ -131,7 +131,7 @@ func TestExecuteAnonymous_OnOurMinting_MinterFailureIsIssuerUnavailable(t *testi
 	uc := anonOnOurMinting(t, &fakeMinter{err: errors.New("no signing key")})
 	uc.cfg.Anonymous = anonConfig().Anonymous
 
-	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
+	out, err := uc.ExecuteAnonymous(context.Background(), AnonymousInput{Service: "registry.kacho.local"})
 	if !errors.Is(err, ErrIssuerUnavailable) {
 		t.Fatalf("err = %v; ожидалась недоступность издателя", err)
 	}

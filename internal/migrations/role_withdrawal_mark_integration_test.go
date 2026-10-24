@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/stretchr/testify/require"
@@ -238,9 +239,10 @@ func seedWithdrawalFixture(t *testing.T, db *sql.DB) {
 
 	_, err = db.Exec(`
 		INSERT INTO kaname.role_rule_selectors
-		       (role_id, rule_fp, arm, object_types, resource_names, match_labels)
-		VALUES ('rol_rw_probe', 'fp-rw-probe', 'labels', ARRAY[$1], '{}', '{"k":"v"}'::jsonb)`,
-		dotted)
+		       (role_id, rule_fp, arm, object_types, resource_names, match_labels, verbs_by_type)
+		VALUES ('rol_rw_probe', 'fp-rw-probe', 'labels', ARRAY[$1], '{}', '{"k":"v"}'::jsonb,
+		        jsonb_build_object($1::text, jsonb_build_array($2::text)))`,
+		dotted, verb)
 	require.NoError(t, err, "фикстура проекции селекторов не легла")
 
 	require.NoError(t, seedTargetMemberFixture(db), "фикстура состава цели не легла")
@@ -271,17 +273,12 @@ func seedTargetMemberFixture(db *sql.DB) error {
 		COMMIT;`); err != nil {
 		return err
 	}
-	if _, err := db.Exec(`
+	// Выдача и строка её набора — одним оператором (kaname#902).
+	if _, err := db.Exec(bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		       (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		VALUES ('acb_rw_probe', 'user', 'usr_rw_probe', 'rol_rw_probe', 'cluster',
-		        'cluster_root', 'ACTIVE')`,
-	); err != nil {
-		return err
-	}
-	if _, err := db.Exec(`
-		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-		VALUES ('acb_rw_probe', 'user', 'usr_rw_probe')`,
+		        'cluster_root', 'ACTIVE')`),
 	); err != nil {
 		return err
 	}
@@ -322,11 +319,11 @@ func TestIntegration_NewGrantOnARetiredRoleIsRefused(t *testing.T) {
 	require.NoError(t, err, "пометка отказала — предмета для стража не создано")
 
 	// ── отрицание: НОВАЯ выдача на снятую роль отвергается ───────────────────
-	_, err = db.Exec(`
+	_, err = db.Exec(bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		       (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		VALUES ('acb_rw_new', 'user', 'usr_rw_probe', 'rol_rw_probe', 'cluster',
-		        'cluster_root', 'ACTIVE')`)
+		        'cluster_root', 'ACTIVE')`))
 	require.Error(t, err, "новая выдача на снятую роль прошла: продукт обещает право, "+
 		"которого не даёт")
 	require.Contains(t, err.Error(), "23000",
@@ -342,11 +339,11 @@ func TestIntegration_NewGrantOnARetiredRoleIsRefused(t *testing.T) {
 	require.NoError(t, db.QueryRow(
 		`SELECT id FROM kaname.roles WHERE live AND is_system ORDER BY id LIMIT 1`).
 		Scan(&liveRole), "живой системной роли нет — контроль беспредметен")
-	_, err = db.Exec(`
+	_, err = db.Exec(bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		       (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		VALUES ('acb_rw_live', 'user', 'usr_rw_probe', $1, 'cluster',
-		        'cluster_root', 'ACTIVE')`, liveRole)
+		        'cluster_root', 'ACTIVE')`), liveRole)
 	require.NoError(t, err,
 		"выдача на ЖИВУЮ роль отвергнута: страж отвергает всё, и отрицание выше "+
 			"зеленело бы на сломанном")

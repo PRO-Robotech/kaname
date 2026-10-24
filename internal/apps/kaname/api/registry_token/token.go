@@ -151,9 +151,10 @@ type Config struct {
 
 // AnonymousIdentity — объявленный публичный принципал, за которого наш
 // подписант выпускает токен анонимного чтения. Приёмная сторона реестра
-// резолвит его в подстановочного принципала AnonymousSubject (`user:*`); у
-// `user:*` есть только грант чтения публичных репозиториев, поэтому анонимный
-// токен читает публичный репозиторий и не пишет никогда (B13/B14).
+// резолвит его в принципала AnonymousSubject (системный класс
+// `system_class:anonymous`); у класса есть только чтение публичных
+// репозиториев, поэтому анонимный токен читает публичный репозиторий и не
+// пишет никогда (B13/B14).
 //
 // Поле ОДНО — идентичность. Прежде рядом стояли идентификатор ключа и закрытая
 // половина, которыми подписывалось утверждение для обмена у внешнего
@@ -164,20 +165,27 @@ type AnonymousIdentity struct {
 	// ClientID — субъект анонимного токена; приёмная сторона резолвит его в
 	// AnonymousSubject.
 	ClientID string
+	// Pace — темп анонимных входов на источник (kaname#928). При объявленном
+	// ClientID обязателен: построитель без него отказывает
+	// ([ErrAnonymousPaceRequired]). Разбор — anonymous_pace.go.
+	Pace AnonymousPacer
 }
 
 const (
-	// AnonymousSubject — the FGA principal an anonymous (no-credential) docker
-	// pull resolves to on the registry data-plane. The anonymous identity's token
-	// is mapped to this wildcard subject; `user:*` holds ONLY the per-repo `v_get`
-	// wildcard grant emitted for PUBLIC repositories, so it can pull a PUBLIC repo
-	// but can never write (D-7). PRIVATE/absent repos deny uniformly (404).
-	AnonymousSubject = "user:*"
-	// AnonymousReadScope — the ONLY scope an anonymous token requests: a read
-	// (pull) verb. The shim NEVER requests a write/push verb for `user:*` — the
-	// read-only floor is enforced HERE (IAM half) AND by the data-plane FGA Check
-	// on `user:*` (which carries no write relation). A push with an anon token is
-	// therefore denied (403 DENIED) even in a pull-able PUBLIC repo (B14).
+	// AnonymousSubject — субъект модели прав, которым плоскость данных реестра
+	// спрашивает о вызывающем без удостоверения (docker pull без входа):
+	// системный класс `anonymous` (kaname#829, SC-39). Класс держит ТОЛЬКО чтение
+	// публикованных репозиториев (публикация владельца выводится в выдачу этому
+	// классу), поэтому публичный репозиторий он читает, а писать не может
+	// никогда (D-7). Закрытый и отсутствующий репозиторий отвечают одинаково
+	// (404). Подстановка `user:*` говорящим не является (Р3).
+	AnonymousSubject = domain.SpeakerAnonymous
+	// AnonymousReadScope — ЕДИНСТВЕННАЯ область, которую просит анонимный токен:
+	// чтение (pull). Записи прослойка для анонима не просит НИКОГДА: пол «только
+	// чтение» держится ЗДЕСЬ (половина службы прав) И вопросом плоскости данных
+	// от класса `anonymous`, которому выдаётся только чтение (Р4). Поэтому push
+	// анонимным токеном отвергается (403 DENIED) даже в публичном репозитории
+	// (B14).
 	AnonymousReadScope = "registry:pull"
 )
 
@@ -242,6 +250,11 @@ type IssueRegistryTokenUseCase struct {
 func NewIssueRegistryTokenUseCase(cfg Config, m LocalMinter) (*IssueRegistryTokenUseCase, error) {
 	if m == nil {
 		return nil, ErrOwnMinterRequired
+	}
+	// Анонимный поток без темпа — выдача без предела чеканок на источник;
+	// такое состояние не строится (kaname#928).
+	if cfg.Anonymous.ClientID != "" && cfg.Anonymous.Pace == nil {
+		return nil, ErrAnonymousPaceRequired
 	}
 	return &IssueRegistryTokenUseCase{
 		cfg:    cfg,
@@ -461,19 +474,36 @@ func (u *IssueRegistryTokenUseCase) AnonymousEnabled() bool {
 // вызывающий — подстановочный принципал, а не конкретный субъект. Срок —
 // срок токенов полосы, объявленный её настройкой.
 //
-// Необъявленный анонимный поток — ErrUnauthenticated (→ 401-вызов); отказ нашей
-// чеканки — ErrIssuerUnavailable (→ 503, токена нет).
-func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, service string) (IssueOutput, error) {
+// Необъявленный анонимный поток — ErrUnauthenticated (→ 401-вызов); источник
+// сверх темпа — [AnonymousPaceExceededError] (→ 429); отказ нашей чеканки —
+// ErrIssuerUnavailable (→ 503, токена нет).
+//
+// Исход каждого входа объявленного потока — ровно одна клетка переписи полосы
+// (anonymous_pace.go).
+func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, in AnonymousInput) (IssueOutput, error) {
 	if !u.AnonymousEnabled() {
 		// Anonymous pull not configured → fail-closed (handler issues 401).
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
+	// Темп — до адресата и до чеканки: бережётся именно обращение к
+	// подписанту. Построитель не пускает поток без темпа; nil здесь означает
+	// обход построителя, и исход тот же — выдачи нет.
+	if u.cfg.Anonymous.Pace == nil {
+		u.observeKind(OutcomeAnonymousIssuerUnavailable)
+		return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, ErrAnonymousPaceRequired)
+	}
+	if _, after, ok := u.cfg.Anonymous.Pace.Reserve(in.Source); !ok {
+		u.observeKind(OutcomeAnonymousPaceExceeded)
+		return IssueOutput{}, &AnonymousPaceExceededError{RetryAfter: after}
+	}
+
 	// Сужения ключа здесь нет ПО ПОСТРОЕНИЮ — учётных данных не предъявляли, —
 	// поэтому остаётся внешняя граница. Она действует и тут: анонимный поток
 	// той же полосы адресата себе не назначает.
-	service, err := u.resolveAudience(u.cfg.Anonymous.ClientID, service)
+	service, err := u.resolveAudience(u.cfg.Anonymous.ClientID, in.Service)
 	if err != nil {
+		u.observeKind(OutcomeAnonymousAudienceRefused)
 		return IssueOutput{}, err
 	}
 	now := u.now()
@@ -486,8 +516,10 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 		Scope: AnonymousReadScope,
 	})
 	if merr != nil {
+		u.observeKind(OutcomeAnonymousIssuerUnavailable)
 		return IssueOutput{}, fmt.Errorf("%w: %w", ErrIssuerUnavailable, merr)
 	}
+	u.observeKind(OutcomeAnonymousIssued)
 	return IssueOutput{Token: out.AccessToken, ExpiresIn: out.ExpiresIn, IssuedAt: now.Unix()}, nil
 }
 

@@ -102,7 +102,8 @@ var strSpeakers = []string{
 	strSubject,
 	"group:" + strGroupID,
 	"group:" + strGroupID + "#member",
-	"user:*",
+	"system_class:authenticated",
+	"system_class:anonymous",
 }
 
 // strWantRelations — ПРЕДПОСЫЛКА замера: отношения, которые запрос обязан читать.
@@ -291,9 +292,9 @@ func strSeedRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID, roleName 
 		roleID, strCatalogType, strVerb)
 	for i := 0; i < k; i++ {
 		exec(t, ctx, tx,
-			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, $2, 'labels', ARRAY[$3::text], $4::jsonb)`,
-			roleID, fmt.Sprintf("fp-%04d", i), strCatalogType, strJSON(t, strSelectorLabels(i)))
+			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, $2, 'labels', ARRAY[$3::text], $4::jsonb, jsonb_build_object($3::text, jsonb_build_array($5::text)))`,
+			roleID, fmt.Sprintf("fp-%04d", i), strCatalogType, strJSON(t, strSelectorLabels(i)), strVerb)
 	}
 }
 
@@ -454,9 +455,9 @@ func (f *strFixture) setK(t *testing.T, ctx context.Context, target int) {
 	s := scalegrid.NewSeeder(f.tx)
 	for i := f.seedK; i < target; i++ {
 		must(t, s.QueueRaw(ctx,
-			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, $2, 'labels', ARRAY[$3::text], $4::jsonb)`,
-			strRoleID, fmt.Sprintf("fp-%04d", i), strCatalogType, strJSON(t, strSelectorLabels(i))))
+			`INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, $2, 'labels', ARRAY[$3::text], $4::jsonb, jsonb_build_object($3::text, jsonb_build_array($5::text)))`,
+			strRoleID, fmt.Sprintf("fp-%04d", i), strCatalogType, strJSON(t, strSelectorLabels(i)), strVerb))
 	}
 	must(t, s.Flush(ctx))
 	f.seedK = target
