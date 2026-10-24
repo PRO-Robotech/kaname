@@ -266,9 +266,12 @@ message AccessBinding {
   }
 
   // OUTPUT-ONLY. Причина отзыва. Задана ровно тогда, когда `status = REVOKED` и
-  // отзыв случился после заведения поля; у действующей выдачи не задана (proto3
-  // JSON поле по умолчанию опускает).
-  RevocationReason revocation_reason = 26;
+  // отзыв случился после заведения поля; у действующей выдачи и у выдачи,
+  // отозванной до заведения поля, не задана. Поле с присутствием (`optional`):
+  // незаданное не выходит ключом и в JSON, печатающем незаданные поля, — у
+  // действующей выдачи ключа `revocationReason` в теле нет (приёмка
+  // unregistration-revokes-its-grants.md, URG-E2).
+  optional RevocationReason revocation_reason = 26;
 }
 
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant
