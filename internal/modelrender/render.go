@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
@@ -73,12 +74,36 @@ var (
 // включительно, БЕЗ завершающей пустой строки — разделитель принадлежит файлу, а
 // не блоку.
 func Render(r manifest.Resource) ([]byte, error) {
+	blk, _, err := RenderWithKeyTerms(r)
+	return blk, err
+}
+
+// RenderWithKeyTerms — тот же блок и вместе с ним ТЕРМЫ, которые в него вписал
+// ключ публичного чтения (kaname#866, приёмка
+// public-read-container-of-a-module-type-is-admitted.md, Р1, Р4).
+//
+// Перечень производит ТОТ ЖЕ проход, что пишет строки: ветка ключа отмечает
+// терм там, где его пишет, и второго правила «что пишет ключ» в дереве нет. По
+// тексту блока перечень не восстановим — три следствия, написанные рукой, дают
+// побайтово тот же блок (замер приёмки, строки 5 и 6), — поэтому допуск получает
+// его рядом с текстом, а не выводит из текста.
+//
+// Термы трёх видов, и только эти:
+//
+//   - контейнер: голая запись класса в `public_reader`;
+//   - контейнер: голая запись класса в отношении действия чтения — только того
+//     отношения, которое порождает СОБСТВЕННОЕ действие ресурса (авторское
+//     отношение с тем же именем терма не получает: его пишет не ключ);
+//   - ребёнок: `public_reader from <указатель>` в отношении действия чтения, по
+//     каждому указателю из [manifest.Resource.PublicReadPointers].
+func RenderWithKeyTerms(r manifest.Resource) ([]byte, []authzmodel.KeyTerm, error) {
 	if r.ObjectType == "" {
-		return nil, ErrObjectTypeEmpty
+		return nil, nil, ErrObjectTypeEmpty
 	}
 	if len(r.Parents) == 0 {
-		return nil, ErrParentEmpty
+		return nil, nil, ErrParentEmpty
 	}
+	var terms []authzmodel.KeyTerm
 
 	var b strings.Builder
 	b.WriteString("type " + r.ObjectType + "\n")
@@ -137,6 +162,7 @@ func Render(r manifest.Resource) ([]byte, error) {
 	// ярусы и каскад ключ не трогает.
 	if r.PassesPublicRead() {
 		define(domain.PublicReaderRelation, "["+string(domain.SubjectTypeSystemClass)+"]")
+		terms = append(terms, authzmodel.KeyTerm{Type: r.ObjectType, Relation: domain.PublicReaderRelation})
 	}
 	inherits := r.PublicReadPointers()
 
@@ -162,40 +188,28 @@ func Render(r manifest.Resource) ([]byte, error) {
 			sources = verb.From
 		}
 		words := subjectWords(subjects)
-		if publicReadVerb(verb) {
+		relation := manifest.VerbRelationName(verb.Name)
+		// Судится ИМЯ действия, а не класс: следствие ключа касается ровно
+		// отношений `v_get` и `v_list` (Р9 «Способ»), а их порождают действия с
+		// этими именами; собственное действие с классом чтения пишет своё
+		// отношение, и публичное чтение его не открывает. Набор имён объявлен
+		// один раз — в `domain` (kaname#866, CE-03).
+		if domain.IsPublicReadVerb(verb.Name) {
 			if r.PassesPublicRead() {
 				words = withClassFirst(words)
+				terms = append(terms, authzmodel.KeyTerm{Type: r.ObjectType, Relation: relation})
 			}
 			for _, ptr := range inherits {
 				sources = append(append([]string(nil), sources...),
 					domain.PublicReaderRelation+" from "+ptr)
+				terms = append(terms, authzmodel.KeyTerm{Type: r.ObjectType, Relation: relation, Pointer: ptr})
 			}
 		}
-		define(manifest.VerbRelationName(verb.Name),
-			"["+strings.Join(words, ", ")+"] or "+strings.Join(sources, " or "))
+		define(relation, "["+strings.Join(words, ", ")+"] or "+strings.Join(sources, " or "))
 	}
 	writeAuthoredRelations(r, "afterVerbs", define)
 
-	return []byte(b.String()), nil
-}
-
-// publicReadVerbs — действия, которые наследуют публичное чтение контейнера:
-// метаданные объекта и перечень (Р9 п. 2). Пишущие — нет (Р9 п. 3).
-var publicReadVerbs = []string{"get", "list"}
-
-// publicReadVerb — действие порождает отношение, которого касается публичное
-// чтение. Судится ИМЯ действия, а не класс: следствие ключа касается ровно
-// отношений `v_get` и `v_list` (Р9 «Способ»), а их порождают действия с этими
-// именами; собственное действие с классом чтения пишет своё отношение, и
-// публичное чтение его не открывает.
-func publicReadVerb(v manifest.Verb) bool {
-	name := strings.ToLower(v.Name)
-	for _, c := range publicReadVerbs {
-		if name == c {
-			return true
-		}
-	}
-	return false
+	return []byte(b.String()), terms, nil
 }
 
 // withClassFirst — состав субъектов с классом `system_class` первым, без повтора:
@@ -212,10 +226,6 @@ func withClassFirst(words []string) []string {
 	}
 	return out
 }
-
-// publicWildcardWord — прежнее слово публичного чтения в составе субъектов
-// манифеста платформы.
-const publicWildcardWord = "user:*"
 
 // subjectWords — состав субъектов отношения в словах модели.
 //
@@ -239,7 +249,7 @@ const publicWildcardWord = "user:*"
 func subjectWords(subjects []string) []string {
 	out := make([]string, len(subjects))
 	for i, s := range subjects {
-		if s == publicWildcardWord {
+		if s == domain.LegacyPublicWildcardWord {
 			s = string(domain.SubjectTypeSystemClass)
 		}
 		out[i] = s

@@ -193,9 +193,6 @@ func (r *fakeUsrRdr) GetByAccountEmail(context.Context, domain.AccountID, domain
 func (r *fakeUsrRdr) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
 	return nil, nil
 }
-func (r *fakeUsrRdr) FindActiveByExternalID(context.Context, domain.ExternalSubject) ([]domain.User, error) {
-	return nil, nil
-}
 func (r *fakeUsrRdr) FindByExternalIDInStatuses(context.Context, domain.ExternalSubject, []domain.InviteStatus) ([]domain.User, error) {
 	return nil, nil
 }

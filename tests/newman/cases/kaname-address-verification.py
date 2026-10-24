@@ -116,6 +116,35 @@ Coverage (техники: классы эквивалентности сесси
                                           (уровень «2» глагола приглашения), адреса
                                           выдачи и фронта, клиент церемонии и ключи
                                           надзора пишет посев церемонии стенда чарта
+  IAM-ADDRVERIFY-OK-REFUSAL-NAMES-THE-STEP-THAT-LIFTS-IT — EV-14 (редакция 5,
+                                          kaname#526): смена пароля носителем N1 в
+                                          положении подтверждения — 403, тело Р3
+                                          дословно, путь из текста — путь
+                                          предъявления кода (вырез печатается); тем
+                                          же N1 код принят, выдан N2; то же
+                                          обращение носителем N2 — 200, пароль
+                                          сменён
+  IAM-ADDRVERIFY-OK-REGISTRATION-HAS-FOUR-CONSEQUENCES — Ф4-01, Ф4-13, Ф4-26
+                                          (kaname#925): свободный адрес свежего
+                                          носителя — зеркало, адрес не подтверждён и
+                                          письмо поставлено, сессия узнана сразу;
+                                          после подтверждения снимок «кто я» ОДНИМ
+                                          чтением — тот же userId, одна запись с owner
+  IAM-ADDRVERIFY-OK-FIRST-ACTION-IN-OWN-ACCOUNT — Ф4-21, Ф4-22: первое действие в
+                                          своём аккаунте той же сессией — проходит
+                                          либо отказ называет повтор; в пределах окна
+                                          — проходит
+  IAM-ADDRVERIFY-NEG-REGISTRATION-REFUSAL-HIDES-OCCUPANCY-AND-PACE — Ф4-11, Ф4-12:
+                                          занятый адрес и свободный адрес носителя с
+                                          полным окном (ушёл с адреса сменой) — один
+                                          отказ побайтово; у владельца по-прежнему
+                                          один личный аккаунт; близнец — носитель с
+                                          неполным окном регистрируется
+  IAM-ADDRVERIFY-OK-INVITEE-REGISTERS-BY-THE-SAME-LANE — Ф4-23: строка приглашения
+                                          сохранила id, она и членство ожидают,
+                                          личных аккаунтов ноль; после подтверждения —
+                                          действующие, личный аккаунт один с одним
+                                          проектом
   IAM-ADDRVERIFY-OK-OWN-SESSIONS-LISTED-AND-ENDED — OS-16 (приёмка kaname#634,
                                           `own-sessions-are-listed-and-ended-by-their-owner.md`):
                                           свежий человек с подтверждённым адресом
@@ -142,6 +171,7 @@ Coverage (техники: классы эквивалентности сесси
 #     EMAIL_NOT_VERIFIED) либо узнан в обычном положении (200), либо не узнан
 #     (401), — то есть ровно три ответа `Resolve`, которые различает край.
 
+import json as _json
 import pathlib as _pathlib
 import re as _re
 import urllib.parse as _urlparse
@@ -770,6 +800,78 @@ CASES.append(Case(
 ))
 
 # ───────────────────────────────────────────────────────────────────────────
+# EV-14 (редакция 5, kaname#526): текст отказа называет шаг, и названный шаг
+# снимает отказ. Одна сессия от начала до конца: носитель N1 в положении
+# подтверждения получает отказ смены пароля; путь, вырезанный из текста отказа,
+# — путь предъявления кода, и он открыт в положении подтверждения: тем же N1
+# код из письма принят, выдан N2; то же обращение носителем N2 проходит.
+# Близнец (б) отличается от (а) одним фактом — исполнен ли названный шаг.
+#
+# ЧЕГО КЕЙС НЕ ПЕРЕУТВЕРЖДАЕТ: равенство текста на публичном слушателе gRPC
+# (EV-60) и на круге края (EV-62) — последнее «И» позиции; первое держит
+# уровень I (`TestEV60_EveryPublicMethodRefusesTheUnverified`), копию края —
+# дом платформы. Здесь — текст полосы формы, ровно тот, что видит клиент.
+# ───────────────────────────────────────────────────────────────────────────
+_P14 = "avN"
+# Тело отказа Р3 — целиком: код, текст, единственная запись ErrorInfo с
+# признаком и доменом отказов службы (EV-14 (а)).
+_EV14_BODY = {"code": 7, "message": _NOT_VERIFIED,
+              "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                           "reason": _NOT_VERIFIED_REASON, "domain": _REFUSAL_DOMAIN}]}
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-REFUSAL-NAMES-THE-STEP-THAT-LIFTS-IT",
+    title="EV-14: смена пароля носителем в положении подтверждения — 403, тело Р3 целиком, путь из "
+          "текста — путь предъявления кода; тем же носителем код принят, выдан новый; то же "
+          "обращение новым носителем — 200, пароль сменён (близнец: исполнен ли названный шаг)",
+    classes=["NEG", "STATE", "CONF"],
+    priority="P0",
+    steps=[
+        *_register(_P14, "ev14"),
+        _await_letter(_P14, "ev14-letter"),
+        *_password_change(_P14, "ev14-refused", "SessionCookie", [
+            *_position_refused("EV14-A"),
+            "let __b = null; try { __b = JSON.parse(pm.response.text()); } catch (e) { __b = null; }",
+            f"pm.test('EV14-A: тело отказа — дословно тело Р3 (код, текст, одна запись ErrorInfo)', () => "
+            f"pm.expect(pm.response.text()).to.eql({js_str(_json.dumps(_EV14_BODY, ensure_ascii=False, separators=(',', ':')))}));",
+            *_no_cookies("EV14-A"),
+            # (в): путь — от «POST » до «)» текста отказа. Пустой вырез — отказ
+            # пробы, а не зелёное; вырезанное печатается.
+            "const __m = String((__b && __b.message) || '');",
+            "const __at = __m.indexOf('POST ');",
+            "const __end = __at < 0 ? -1 : __m.indexOf(')', __at);",
+            "const __cut = (__at < 0 || __end < 0) ? '' : __m.slice(__at + 5, __end);",
+            "console.log('[EV-14 (в)] путь шага, вырезанный из текста отказа: «' + __cut + '»');",
+            "pm.test('EV14-В: вырез пути из текста отказа непуст', () => pm.expect(__cut.length > 0).to.eql(true));",
+            f"pm.test('EV14-В: вырезанный путь — путь предъявления кода полосы формы', () => "
+            f"pm.expect(__cut).to.eql({js_str(_VERIFY_CONFIRM)}));",
+        ]),
+        # Пароль отказом не сменён: прежний входит в том же положении, новый — нет.
+        *_login(_P14, "ev14-old-password-still-signs-in", "Password", verified=False),
+        *_login_refused(_P14, "ev14-new-password-not-set", "NewPassword"),
+        # Названный шаг исполняется ТЕМ ЖЕ носителем N1 — путь доступен в положении
+        # подтверждения, и шаг снимает положение.
+        *_confirm(_P14, "ev14-named-step", "Code", test_script=[
+            f"pm.environment.set({js_str(_v(_P14, 'OldSessionCookie'))}, pm.environment.get({js_str(_v(_P14, 'SessionCookie'))}));",
+            *_confirmed(_P14, "EV14-STEP"),
+            "pm.test('EV14-STEP: выдан новый носитель N2, отличный от N1', () => "
+            f"pm.expect(!!pm.environment.get({js_str(_v(_P14, 'SessionCookie'))}) && pm.environment.get({js_str(_v(_P14, 'SessionCookie'))}) "
+            f"!== pm.environment.get({js_str(_v(_P14, 'OldSessionCookie'))})).to.eql(true));",
+        ]),
+        # (б) близнец: то же обращение с тем же телом — носителем N2.
+        *_password_change(_P14, "ev14-same-request-after-the-step", "SessionCookie", [
+            *_status_is(200, "EV14-B"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "pm.test('EV14-B: ответ — успех смены с сессией, а не отказ положения', () => "
+            "pm.expect([!!(__j.session && __j.session.expiresAt), __j.code === undefined]).to.eql([true, true]));",
+            "pm.test('EV14-B: признака EMAIL_NOT_VERIFIED в ответе нет', () => "
+            f"pm.expect(pm.response.text().indexOf({js_str(_NOT_VERIFIED_REASON)})).to.eql(-1));",
+        ]),
+        *_login(_P14, "ev14-new-password-signs-in", "NewPassword", verified=True),
+        *_login_refused(_P14, "ev14-old-password-refused", "Password"),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
 # EV-32: неверный код; близнец — EV-30 на том же человеке.
 # ───────────────────────────────────────────────────────────────────────────
 _P32 = "avW"
@@ -1214,6 +1316,565 @@ CASES.append(Case(
     ],
 ))
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ПРИЁМКА Ф4 — ПРОЧИЕ ПОЗИЦИИ УРОВНЯ E (kaname#925).
+#
+# `docs/engineering/acceptance/registration-and-its-three-consequences.md`.
+# Наблюдение исхода — тем же путём, что у Ф4-27 выше: регистрация и подтверждение
+# адреса на полосе формы, снимок «кто я» и чтения в аккаунте — токеном нашей
+# церемонии на собственном публичном фронте (§7а `e2e-flow.md`: сущности службы
+# проверяются в её доме, край службы — её REST-фронт). Печенье регистрации в
+# принципала здесь превращает не край, а точка авторизации службы; связку края
+# с полосой (форма Ф-ж через край платформы) этот набор не переутверждает.
+#
+# ЧЕГО ЭТОТ БЛОК НЕ УТВЕРЖДАЕТ — идентификаторы КОММЕНТАРИЕМ, а не строкой:
+#   · полоса времени Ф4-14…16 (критерий Ф1-48) — измерительная проба: на стенде
+#     `chart-own` (kind на общем ранере) размах выше потолка годности by
+#     construction; держатель — уровень I
+#     (`internal/apps/kaname/api/registration/timing_probe_test.go`);
+#   · проект «по умолчанию» личного аккаунта (форма Ф4-05) у человека с улицы —
+#     уровень I; у приглашённого его число читает кейс Ф4-23 ниже, потому что
+#     позиция называет его в «Тогда».
+# ═══════════════════════════════════════════════════════════════════════════
+_ACCOUNTS = "/iam/v1/accounts"
+_PROJECTS = "/iam/v1/projects"
+_CHANGE = "/iam/v1/auth/email-change"
+_CHANGE_CONFIRM = "/iam/v1/auth/email-change/confirm"
+_HEAD_CHANGE = "Код подтверждения смены:"
+# Потолок темпа заведения аккаунтов одной личностью — величина профиля, с которой
+# стенд поднят (`authn.registration.admissionsPerWindow`): регистрация списывает
+# первое заведение, прочие — `AccountService.Create`. Ключ узла в профиле один.
+_ADMISSIONS = _re.findall(r"^    admissionsPerWindow: (\d+)\s*$", _PROFILE.read_text(encoding="utf-8"), _re.M)
+if len(_ADMISSIONS) != 1:
+    raise SystemExit(f"kaname-address-verification: ключ профиля authn.registration.admissionsPerWindow "
+                     f"найден {len(_ADMISSIONS)} раз в {_PROFILE} — ждали ровно один")
+_ADMISSIONS = int(_ADMISSIONS[0])
+if _ADMISSIONS < 1:
+    raise SystemExit("kaname-address-verification: admissionsPerWindow < 1 — исчерпать окно сверх "
+                     "первого заведения нечем, «Дано» Ф4-12 не строится")
+# Отрицательный контроль текста единого отказа (Ф4-11, Р3 свойства 2 и 3).
+_REG_FORBIDDEN = ("in use", "taken", "exists", "registered", "limit", "rate", "quota", "seconds")
+
+
+def _token_guard(p, label):
+    return [
+        f"if (!pm.environment.get({js_str(_v(p, 'Token'))})) {{",
+        *report_then_skip(f"{label}: токен не выдан обменом выше",
+                          "обмен кода выше не выдал токен — фронту предъявить нечего; причина — "
+                          "в нём, не здесь", indent="  "),
+        "}",
+    ]
+
+
+def _own(p, name, method, path, test_script, *, body=None, need=()):
+    """Обращение к собственному публичному фронту токеном `<p>Token`.
+
+    `need` — переменные пути и тела, захваченные шагами выше: пустая — отказ с
+    именем и отмена запроса, а не запрос по адресу с `{{…}}`."""
+    label = name.upper()
+    guards = []
+    for var in need:
+        guards += [
+            f"if (!pm.environment.get({js_str(var)})) {{",
+            *report_then_skip(f"{label}: {var} не захвачен шагом выше",
+                              "шаг выше не назвал значение, без которого обращение не "
+                              "собрать; причина — в нём, не здесь", indent="  "),
+            "}",
+        ]
+    return Step(name=name, method=method, path=path, body=body, auth=_v(p, "Token"), insecure_tls=True,
+                pre_script=[*require_env_url("ownRestBaseUrl", path, _OWN_WHY), *_token_guard(p, label), *guards],
+                test_script=list(test_script))
+
+
+def _with_own_guard(step):
+    """Шаг опроса фронта (`poll_request_until_status`): фронт стенда — под своим УЦ."""
+    step.insecure_tls = True
+    return step
+
+
+def _op_done(p, name, op_var, tests):
+    """Опрос операции до done с настоящей паузой; затем — исход без ошибки и `tests`."""
+    label = name.upper()
+    path = "/operations/{{" + op_var + "}}"
+    counter, started = f"_op925_{name}".replace("-", "_"), f"_op925s_{name}".replace("-", "_")
+    return Step(
+        name=name, method="GET", path=path, auth=_v(p, "Token"), insecure_tls=True,
+        pre_script=[
+            *require_env_url("ownRestBaseUrl", path, _OWN_WHY),
+            f"if (!pm.environment.get({js_str(op_var)})) {{",
+            *report_then_skip(f"{label}: операция не возвращена шагом выше",
+                              "мутация выше отвергнута синхронно либо не вернула id операции — "
+                              "опрашивать нечего; причина — в ней, не здесь", indent="  "),
+            "}",
+            f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(counter)}, '0');",
+            f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+            "}",
+        ],
+        test_script=[
+            f"const __n = parseInt(pm.environment.get({js_str(counter)}) || '0', 10);",
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"if (pm.response.code === 200 && !__j.done && __n < {_OP_POLL_CAP}) {{",
+            f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
+            f"  const _o925 = Date.now(); while (Date.now() - _o925 < {_OP_POLL_MS}) {{ /* inter-poll delay: operation not done yet */ }}",
+            "  pm.execution.setNextRequest(pm.info.requestName);",
+            "  return;",
+            "}",
+            f"pm.environment.unset({js_str(counter)});",
+            f"pm.environment.unset({js_str(started)});",
+            *_status_is(200, label),
+            f"pm.test({js_str(label + ': операция завершена')}, () => pm.expect(__j.done).to.eql(true));",
+            f"pm.test({js_str(label + ': операция без ошибки и с ответом')}, () => "
+            "pm.expect([!!__j.error, !!__j.response], JSON.stringify(__j.error || {})).to.eql([false, true]));",
+            *tests,
+        ],
+    )
+
+
+def _mutation(p, name, method, path, body, op_var, *, need=()):
+    """Мутация фронта: 200 и операция с id в `op_var`."""
+    label = name.upper()
+    return _own(p, name, method, path, [
+        f"pm.environment.unset({js_str(op_var)});",
+        *_status_is(200, label),
+        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+        f"pm.test({js_str(label + ': ответ — операция с id')}, () => "
+        "pm.expect(typeof __j.id === 'string' && __j.id.length > 0).to.eql(true));",
+        f"if (typeof __j.id === 'string' && __j.id) {{ pm.environment.set({js_str(op_var)}, __j.id); }}",
+    ], body=body, need=need)
+
+
+def _token_of(p, tag):
+    """Токен человека `<p>` нашей церемонией под его сессией `<p>SessionCookie`."""
+    return [_authorize(p, f"{tag}-authorize"), _exchange(p, f"{tag}-exchange")]
+
+
+def _registration_refused(label, body_var):
+    """Единый отказ регистрации (Ф4-11, Р3 редакции 8): 400, code 9, текст дословно,
+    REGISTRATION_REFUSED, без Retry-After и носителя; текст не называет ни причины,
+    ни величины. Сырое тело — в `body_var` для побайтовой сверки с близнецом."""
+    return [
+        *_refused(400, 9, _REG_REFUSED, label, reason="REGISTRATION_REFUSED"),
+        f"pm.test({js_str(label + ': заголовка Retry-After нет')}, () => "
+        "pm.expect(pm.response.headers.has('Retry-After')).to.eql(false));",
+        f"pm.test({js_str(label + ': в тексте ни одной цифры')}, () => pm.expect(/[0-9]/.test(String(__r.message))).to.eql(false));",
+        *(f"pm.test({js_str(label + ': текст не называет «' + w + '»')}, () => "
+          f"pm.expect(String(__r.message).toLowerCase().indexOf({js_str(w)})).to.eql(-1));" for w in _REG_FORBIDDEN),
+        f"pm.environment.set({js_str(body_var)}, String(pm.response.code) + ' ' + pm.response.text());",
+    ]
+
+
+def _register_address(p, tag, email_var, tests):
+    """Регистрация адресом `email_var` человеком `<p>` (свой источник, свои пароли)."""
+    return [
+        _csrf_step(p, f"{tag}-csrf-register", "register", init=_person_init(p, tag), with_session=None),
+        _post(p, f"{tag}-register", _REGISTER,
+              {"email": "{{" + email_var + "}}", "password": f"{{{{{_v(p, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              extra_pre=[
+                  f"if (!pm.environment.get({js_str(email_var)})) {{",
+                  *report_then_skip(f"{tag.upper()}-REGISTER: адрес {email_var} не назначен шагом выше",
+                                    "адрес, которым регистрируется кейс, назначает шаг выше; "
+                                    "причина — в нём, не здесь", indent="  "),
+                  "}",
+              ],
+              test_script=tests),
+    ]
+
+
+def _owned_accounts_js(label, expected, user_var):
+    """Снимок «кто я»: записей с `owner` ровно `expected`, и снимок — того человека."""
+    return [
+        *_status_is(200, label),
+        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+        "const __acc = Array.isArray(__j.accounts) ? __j.accounts : [];",
+        "const __owned = __acc.filter((a) => Array.isArray(a.roles) && a.roles.includes('owner'));",
+        f"pm.test({js_str(label + ': снимок — того, кто зарегистрировался (userId ответа регистрации)')}, () => "
+        f"pm.expect(!!__j.userId && __j.userId === pm.environment.get({js_str(user_var)})).to.eql(true));",
+        f"pm.test({js_str(label + f': записей с owner ровно {expected}')}, () => pm.expect(__owned.length).to.eql({expected}));",
+    ]
+
+
+def _user_id_capture(p, label):
+    """Ответ регистрации называет `user.id` формы идентификатора — в `<p>UserId`."""
+    return [
+        f"pm.test({js_str(label + ': ответ называет user.id формы идентификатора человека')}, () => "
+        "pm.expect(/^usr[0-9a-z]{17}$/.test(String(__j.user && __j.user.id))).to.eql(true));",
+        f"if (__j.user && __j.user.id) {{ pm.environment.set({js_str(_v(p, 'UserId'))}, __j.user.id); }}",
+    ]
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф4-01, Ф4-13, Ф4-26: одна регистрация свободным адресом при неисчерпанном пределе
+# (свежий носитель) — четыре следствия; четвёртое видит снимок «кто я» сразу после
+# подтверждения, без ожидания (Ф-з читает базу службы, а не материализацию прав).
+# Ф4-13 — положительный контроль к отказам Ф4-11 и Ф4-12 следующего кейса.
+# ───────────────────────────────────────────────────────────────────────────
+_P01 = "avR"
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-REGISTRATION-HAS-FOUR-CONSEQUENCES",
+    title="Ф4-01, Ф4-13, Ф4-26: регистрация свободным адресом свежего носителя — 200: зеркало (user.id), "
+          "адрес не подтверждён и письмо с кодом поставлено, сессия выдана и узнана сразу; после "
+          "подтверждения снимок «кто я» без ожидания — тот же userId и ровно одна запись с owner",
+    classes=["CRUD", "STATE"],
+    priority="P0",
+    steps=[
+        *_register(_P01, "f401", extra_tests=[
+            *_user_id_capture(_P01, "F401-REGISTER"),
+            "pm.test('F401-REGISTER: адрес ответа — присланный', () => "
+            f"pm.expect(__j.user && __j.user.email).to.eql(pm.environment.get({js_str(_v(_P01, 'Email'))})));",
+            "pm.test('F401-REGISTER: сессия уровня «1»', () => pm.expect(__j.session && __j.session.assuranceLevel).to.eql('1'));",
+        ]),
+        # Сессия годна тем же ответом: носитель узнан — и назван положением.
+        _session_probe(_P01, "f401-session-recognized-at-once", "SessionCookie", "position"),
+        # Подтверждение затребовано: письмо с кодом дошло до приёмника стенда.
+        _await_letter(_P01, "f401-verification-requested"),
+        *_confirm(_P01, "f401-verify", "Code", test_script=_confirmed(_P01, "F401-VERIFY")),
+        *_token_of(_P01, "f426"),
+        # Ф4-26: ОДНО чтение, без опроса — запись снимка не ждёт доставки.
+        _me(_P01, "f426-snapshot-at-once", [
+            *_owned_accounts_js("F426-ME", 1, _v(_P01, "UserId")),
+            "pm.test('F426-ME: записей accounts ровно одна', () => pm.expect(__acc.length).to.eql(1));",
+            "pm.test('F426-ME: эта запись — личный аккаунт с owner', () => "
+            "pm.expect(__acc.length === 1 && __owned.length === 1 && __acc[0].accountId === __owned[0].accountId).to.eql(true));",
+        ]),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф4-21, Ф4-22: окно материализации — первое действие в своём аккаунте той же
+# сессией (носитель после подтверждения, токен её церемонии).
+#
+# Ф4-21 по приёмке — ДИЗЪЮНКЦИЯ, и это «Тогда» позиции, а не допуск кейса: либо
+# действие проходит, либо отказ называет следующий шаг (повторить) и не выглядит
+# как «прав нет». Каждая ветвь утверждается своими условиями, исполненная
+# печатается: отказ без названного шага (`AUTHZ_DENIED`, «permission denied») —
+# красное. Ф4-22: то же действие, повторённое в пределах окна, проходит — опрос
+# первого чтения своего свежего аккаунта с конечным пределом
+# (`poll_request_until_status`), по исчерпании судит настоящее утверждение.
+# ───────────────────────────────────────────────────────────────────────────
+_P21 = "avM"
+_F421_PATH = _ACCOUNTS + "/{{" + _v(_P21, "PersonalId") + "}}"
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-FIRST-ACTION-IN-OWN-ACCOUNT",
+    title="Ф4-21, Ф4-22: первое действие в своём аккаунте той же сессией — проходит либо отказ называет "
+          "повтор и не выглядит как «прав нет»; повторённое в пределах окна — проходит, аккаунт — его",
+    classes=["STATE", "AUTHZ"],
+    priority="P1",
+    steps=[
+        *_register(_P21, "f421", extra_tests=_user_id_capture(_P21, "F421-REGISTER")),
+        _await_letter(_P21, "f421-letter"),
+        *_confirm(_P21, "f421-verify", "Code", test_script=_confirmed(_P21, "F421-VERIFY")),
+        *_token_of(_P21, "f421"),
+        _me(_P21, "f421-personal-account", [
+            *_owned_accounts_js("F421-ME", 1, _v(_P21, "UserId")),
+            f"if (__owned.length === 1) {{ pm.environment.set({js_str(_v(_P21, 'PersonalId'))}, __owned[0].accountId); }}",
+        ]),
+        _own(_P21, "f421-first-action", "GET", _F421_PATH, [
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "if (pm.response.code === 200) {",
+            "  console.log('[Ф4-21] исполнена ветвь «действие проходит»');",
+            "  pm.test('F421: действие прошло — ответ называет свой аккаунт и его владельца', () => "
+            f"pm.expect([__j.id, __j.ownerUserId]).to.eql([pm.environment.get({js_str(_v(_P21, 'PersonalId'))}), "
+            f"pm.environment.get({js_str(_v(_P21, 'UserId'))})]));",
+            "} else {",
+            "  console.log('[Ф4-21] исполнена ветвь «отказ»: ' + pm.response.code + ' ' + pm.response.text());",
+            "  const __why = String(__j.message || '').toLowerCase();",
+            "  const __info = (Array.isArray(__j.details) ? __j.details : [])"
+            ".filter(d => d['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')[0] || {};",
+            "  pm.test('F421: отказ называет следующий шаг — повторить', () => "
+            "pm.expect(/try again|retry/.test(__why)).to.eql(true));",
+            "  pm.test('F421: отказ не выглядит как «прав нет» (не AUTHZ_DENIED)', () => "
+            "pm.expect(__info.reason !== 'AUTHZ_DENIED' && __why.indexOf('permission denied') < 0).to.eql(true));",
+            "}",
+        ], need=(_v(_P21, "PersonalId"),)),
+        _with_own_guard(poll_request_until_status(
+            "f422-after-delivery", "GET", _F421_PATH, [
+                *_status_is(200, "F422"),
+                "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                "pm.test('F422: действие прошло — аккаунт тот, владелец — зарегистрировавшийся', () => "
+                f"pm.expect([__j.id, __j.ownerUserId]).to.eql([pm.environment.get({js_str(_v(_P21, 'PersonalId'))}), "
+                f"pm.environment.get({js_str(_v(_P21, 'UserId'))})]));",
+            ], auth=_v(_P21, "Token"), retry_on=(403, 404, 503),
+            pre_script=[*require_env_url("ownRestBaseUrl", _F421_PATH, _OWN_WHY), *_token_guard(_P21, "F422")])),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф4-11, Ф4-12: занятый адрес и исчерпанный предел носителя отвечают ОДНИМ
+# отказом — побайтово.
+#
+# «ДАНО» Ф4-12 — СВОБОДНЫЙ адрес, чей носитель исчерпал окно. Носитель окна —
+# адрес в момент чеканки личности, и смена адреса окна не переносит
+# (`admission-rate-carrier-is-fixed-at-registration.md`, A197-01). Строится
+# глаголами продукта: X регистрируется (первое заведение), заводит ещё
+# `admissionsPerWindow − 1` аккаунтов, меняет адрес на X′ — адрес X свободен, а его
+# окно полно; регистрация адресом X отвергается.
+#
+# БЛИЗНЕЦ В ОДИН ФАКТ (отличает его только полнота окна): Y регистрируется, НЕ
+# заводит ни одного аккаунта сверх личного, меняет адрес — регистрация адресом Y
+# проходит. Без него отказ Ф4-12 был бы неотличим от «адрес, однажды бывший
+# занятым, не принимается никогда».
+#
+# Ф4-11: владелец O, регистрация его адресом — тот же отказ, тело побайтово равно
+# отказу Ф4-12; у O по-прежнему ровно один личный аккаунт. Положительный контроль
+# обоим — Ф4-13 (кейс выше).
+# ───────────────────────────────────────────────────────────────────────────
+_PX, _PXR, _PY, _PYR, _PO, _POR = "avX", "avXr", "avY", "avYr", "avO", "avOr"
+
+
+def _extra_account(p, tag, n):
+    """`AccountService.Create` — n-е заведение сверх личного аккаунта, до done без ошибки."""
+    op = _v(p, f"AccOp{n}")
+    return [
+        _mutation(p, f"{tag}-create-account-{n}", "POST", _ACCOUNTS,
+                  {"name": f"{{{{{_v(p, f'AccName{n}')}}}}}"}, op),
+        _op_done(p, f"{tag}-create-account-{n}-op", op, [
+            f"pm.test({js_str(tag.upper() + f'-ACCOUNT-{n}: ответ — аккаунт, которым он владеет')}, () => "
+            f"pm.expect(__j.response && __j.response.ownerUserId).to.eql(pm.environment.get({js_str(_v(p, 'UserId'))})));",
+        ]),
+    ]
+
+
+def _move_address(p, tag):
+    """Смена адреса на `<p>MovedEmail`: запрос, код из письма на новый адрес, предъявление."""
+    path = f"/codes?to={{{{{_v(p, 'MovedEmail')}}}}}&after={_urlparse.quote(_HEAD_CHANGE)}"
+    counter, started = f"_mv925_{tag}".replace("-", "_"), f"_mv925s_{tag}".replace("-", "_")
+    label = f"{tag.upper()}-MOVE"
+    return [
+        _csrf_step(p, f"{tag}-move-csrf", "email-change", init=[
+            f"pm.environment.set({js_str(_v(p, 'MovedEmail'))}, String(pm.environment.get({js_str(_v(p, 'Email'))})).replace('@', '-moved@'));",
+            f"pm.environment.set({js_str(_v(p, 'OldEmail'))}, pm.environment.get({js_str(_v(p, 'Email'))}));",
+        ]),
+        _post(p, f"{tag}-move-request", _CHANGE,
+              {"newEmail": f"{{{{{_v(p, 'MovedEmail')}}}}}", "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              with_session="SessionCookie", test_script=[
+                  *_status_is(200, label + "-REQUEST"),
+                  f"pm.test({js_str(label + '-REQUEST: тело — пустой объект')}, () => pm.expect(pm.response.text()).to.eql('{{}}'));",
+              ]),
+        Step(
+            name=f"{tag}-move-letter", method="GET", path=path, auth="anonymous", cookie_jar=False,
+            pre_script=[
+                *require_env_url("standMailboxUrl", path, _MAILBOX_WHY),
+                f"if (pm.environment.get({js_str(started)}) !== pm.info.requestName) {{",
+                f"  pm.environment.set({js_str(counter)}, '0');",
+                f"  pm.environment.set({js_str(started)}, pm.info.requestName);",
+                "}",
+            ],
+            test_script=[
+                f"const __n = parseInt(pm.environment.get({js_str(counter)}) || '0', 10);",
+                "let __codes = null; try { __codes = pm.response.json().codes; } catch (e) { __codes = null; }",
+                "const __all = (Array.isArray(__codes) ? __codes : []).filter((c) => typeof c === 'string');",
+                f"if (pm.response.code === 200 && __all.length === 0 && __n < {_MAIL_WAIT_CAP}) {{",
+                f"  pm.environment.set({js_str(counter)}, String(__n + 1));",
+                f"  const _mvd = Date.now(); while (Date.now() - _mvd < {_MAIL_WAIT_MS}) {{ /* inter-poll delay: letter not yet at the stand mailbox */ }}",
+                "  pm.execution.setNextRequest(pm.info.requestName);",
+                "  return;",
+                "}",
+                f"pm.environment.unset({js_str(counter)});",
+                f"pm.environment.unset({js_str(started)});",
+                *_status_is(200, label + "-LETTER"),
+                f"pm.test({js_str(label + '-LETTER: письмо смены с кодом формы XXXXX-XXXXX дошло на новый адрес')}, () => "
+                "pm.expect(__all.length === 1 && /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/.test(__all[0])).to.eql(true));",
+                f"if (__all.length > 0) {{ pm.environment.set({js_str(_v(p, 'ChangeCode'))}, __all[__all.length - 1]); }}",
+            ],
+        ),
+        _csrf_step(p, f"{tag}-move-confirm-csrf", "email-change-confirm"),
+        _post(p, f"{tag}-move-confirm", _CHANGE_CONFIRM,
+              {"code": f"{{{{{_v(p, 'ChangeCode')}}}}}", "csrfToken": f"{{{{{_v(p, 'Csrf')}}}}}"},
+              with_session="SessionCookie", test_script=[
+                  *_status_is(200, label + "-CONFIRM"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  f"pm.test({js_str(label + '-CONFIRM: смена принята — session с emailVerified true')}, () => "
+                  "pm.expect(!!__j.session && __j.session.emailVerified === true).to.eql(true));",
+              ]),
+    ]
+
+
+def _account_names_init(p, count):
+    return [
+        "{",
+        "  const __rn = () => Math.floor(Math.random() * 2176782336).toString(36);",
+        *(f"  pm.environment.set({js_str(_v(p, f'AccName{n}'))}, ('f412-' + String(pm.environment.get('runId') || '').slice(0, 12) + '-' + __rn() + {js_str('-' + str(n))}).toLowerCase().replace(/[^a-z0-9-]/g, '-'));"
+          for n in range(1, count + 1)),
+        "}",
+    ]
+
+
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-NEG-REGISTRATION-REFUSAL-HIDES-OCCUPANCY-AND-PACE",
+    title="Ф4-11, Ф4-12: занятый адрес и свободный адрес исчерпанного носителя — один отказ регистрации, "
+          "побайтово (400, code 9, REGISTRATION_REFUSED, текст Р3, без Retry-After, без цифр и причины); "
+          "у владельца адреса по-прежнему один личный аккаунт; близнец — носитель с неполным окном "
+          "после смены адреса регистрируется",
+    classes=["NEG", "SEC", "BVA"],
+    priority="P0",
+    steps=[
+        # Ф4-12 «Дано»: X исчерпывает окно своего носителя и уходит с адреса.
+        *_register(_PX, "f412x", extra_tests=_user_id_capture(_PX, "F412X-REGISTER")),
+        _await_letter(_PX, "f412x-letter"),
+        *_confirm(_PX, "f412x-verify", "Code", test_script=_confirmed(_PX, "F412X-VERIFY")),
+        *_token_of(_PX, "f412x"),
+        Step(name="f412x-account-names", method="GET", path=_ME, auth=_v(_PX, "Token"), insecure_tls=True,
+             pre_script=[*_account_names_init(_PX, _ADMISSIONS - 1),
+                         *require_env_url("ownRestBaseUrl", _ME, _OWN_WHY), *_token_guard(_PX, "F412X-ME")],
+             test_script=_owned_accounts_js("F412X-ME", 1, _v(_PX, "UserId"))),
+        *(s for n in range(1, _ADMISSIONS) for s in _extra_account(_PX, "f412x", n)),
+        *_move_address(_PX, "f412x"),
+        *_register_address(_PXR, "f412", _v(_PX, "OldEmail"),
+                           _registration_refused("F412", "avF412Refusal")),
+        # Близнец: Y — окно не полно (только личный аккаунт), та же смена адреса.
+        *_register(_PY, "f412y", extra_tests=_user_id_capture(_PY, "F412Y-REGISTER")),
+        _await_letter(_PY, "f412y-letter"),
+        *_confirm(_PY, "f412y-verify", "Code", test_script=_confirmed(_PY, "F412Y-VERIFY")),
+        *_move_address(_PY, "f412y"),
+        *_register_address(_PYR, "f412-twin", _v(_PY, "OldEmail"), [
+            *_status_is(200, "F412-TWIN"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "pm.test('F412-TWIN: адрес, с которого ушли при неполном окне, регистрируется — сессия выдана', () => "
+            "pm.expect(!!__j.session && __j.session.emailVerified === false).to.eql(true));",
+            *_capture(_PYR, "kaname_session", "SessionCookie", "F412-TWIN"),
+        ]),
+        # Ф4-11: занятый адрес — тот же отказ, у владельца ничего не заведено.
+        *_register(_PO, "f411o", extra_tests=_user_id_capture(_PO, "F411O-REGISTER")),
+        _await_letter(_PO, "f411o-letter"),
+        *_confirm(_PO, "f411o-verify", "Code", test_script=_confirmed(_PO, "F411O-VERIFY")),
+        *_register_address(_POR, "f411", _v(_PO, "Email"), [
+            *_registration_refused("F411", "avF411Refusal"),
+            "pm.test('F411: тело и код побайтово равны отказу Ф4-12', () => "
+            "pm.expect(String(pm.environment.get('avF411Refusal'))).to.eql(String(pm.environment.get('avF412Refusal'))));",
+        ]),
+        *_token_of(_PO, "f411o"),
+        _me(_PO, "f411-owner-still-one-personal-account", _owned_accounts_js("F411-OWNER-ME", 1, _v(_PO, "UserId"))),
+    ],
+))
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ф4-23 (редакция 6): приглашённый регистрируется той же полосой. До
+# подтверждения: строка приглашения сохранила идентификатор, она и членство в
+# аккаунте пригласившего ожидают, личных аккаунтов у приглашённого ноль. Близнец
+# в один факт (отметка подтверждения) — после подтверждения той же сессией: личный
+# аккаунт ровно один, его владелец — приглашённый, в нём один проект; строка и
+# членство действующие; аккаунт пригласившего владельца не сменил.
+#
+# Пригласивший — надзор облака (уровень «2» глагола приглашения), как у Ф4-27.
+# Чтения строки, членства и перечня аккаунтов — его токеном (`system_admin`
+# кластера). «Ноль личных аккаунтов» читается тем же перечнем, что «ровно один»
+# после подтверждения: положительный близнец доказывает, что перечень видит
+# аккаунт приглашённого, когда тот есть.
+# ───────────────────────────────────────────────────────────────────────────
+_P23S, _P23I = "avT", "avJ"
+_F423_USER = "/iam/v1/users/{{" + _v(_P23I, "InvitedUserId") + "}}"
+_F423_MEMBERS = _ACCOUNTS + "/{{" + _v(_P23S, "AccountId") + "}}/memberships?pageSize=1000"
+_F423_ACCOUNTS = _ACCOUNTS + "?pageSize=1000"
+
+
+def _f423_reads(phase, invite_status, member_state, owned):
+    up = phase.upper()
+    return [
+        _own(_P23S, f"f423-{phase}-invitee-row", "GET", _F423_USER, [
+            *_status_is(200, f"F423-{up}-ROW"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.test({js_str(f'F423-{up}-ROW: строка приглашённого — {invite_status}')}, () => "
+            f"pm.expect(__j.inviteStatus).to.eql({js_str(invite_status)}));",
+        ], need=(_v(_P23I, "InvitedUserId"),)),
+        _own(_P23S, f"f423-{phase}-membership", "GET", _F423_MEMBERS, [
+            *_status_is(200, f"F423-{up}-MEMBERSHIP"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            f"pm.test({js_str(f'F423-{up}-MEMBERSHIP: перечень членств — одной страницей')}, () => "
+            "pm.expect(String(__j.nextPageToken || '')).to.eql(''));",
+            f"const __m = (Array.isArray(__j.memberships) ? __j.memberships : []).filter((m) => m.userId === pm.environment.get({js_str(_v(_P23I, 'InvitedUserId'))}));",
+            f"pm.test({js_str(f'F423-{up}-MEMBERSHIP: членство приглашённого одно и {member_state}')}, () => "
+            f"pm.expect(__m.map((m) => m.state)).to.eql([{js_str(member_state)}]));",
+        ], need=(_v(_P23S, "AccountId"), _v(_P23I, "InvitedUserId"))),
+        (_with_own_guard(poll_request_until_status(
+            f"f423-{phase}-owned-accounts", "GET", _F423_ACCOUNTS, _f423_owned_js(up, owned),
+            auth=_v(_P23S, "Token"), retry_on=(),
+            retry_predicate=_f423_owned_short(owned),
+            pre_script=[*require_env_url("ownRestBaseUrl", _F423_ACCOUNTS, _OWN_WHY), *_token_guard(_P23S, f"F423-{up}")]))
+         if owned else
+         _own(_P23S, f"f423-{phase}-owned-accounts", "GET", _F423_ACCOUNTS, _f423_owned_js(up, owned))),
+    ]
+
+
+def _f423_owned_js(up, owned):
+    return [
+        *_status_is(200, f"F423-{up}-ACCOUNTS"),
+        "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+        f"pm.test({js_str(f'F423-{up}-ACCOUNTS: перечень аккаунтов — одной страницей')}, () => "
+        "pm.expect(String(__j.nextPageToken || '')).to.eql(''));",
+        f"const __o = (Array.isArray(__j.accounts) ? __j.accounts : []).filter((a) => a.ownerUserId === pm.environment.get({js_str(_v(_P23I, 'InvitedUserId'))}));",
+        f"pm.test({js_str(f'F423-{up}-ACCOUNTS: аккаунтов, которыми владеет приглашённый, — {owned}')}, () => "
+        f"pm.expect(__o.length).to.eql({owned}));",
+        f"if (__o.length === 1) {{ pm.environment.set({js_str(_v(_P23I, 'PersonalId'))}, __o[0].id); }}",
+        f"pm.test({js_str(f'F423-{up}-ACCOUNTS: аккаунт пригласившего — по-прежнему его')}, () => "
+        f"pm.expect((Array.isArray(__j.accounts) ? __j.accounts : []).filter((a) => a.id === pm.environment.get({js_str(_v(_P23S, 'AccountId'))}))"
+        ".map((a) => a.ownerUserId)).to.eql([pm.environment.get(" + js_str(_v(_P23S, "UserId")) + ")]));",
+    ]
+
+
+def _f423_owned_short(owned):
+    """Первое чтение свежего личного аккаунта: перечень ещё без него — опрос (конечный)."""
+    return ("(() => { let j; try { j = pm.response.json(); } catch (e) { return false; } "
+            f"return (Array.isArray(j.accounts) ? j.accounts : []).filter((a) => a.ownerUserId === "
+            f"pm.environment.get({js_str(_v(_P23I, 'InvitedUserId'))})).length < {owned}; }})()")
+
+
+CASES.append(Case(
+    id="IAM-ADDRVERIFY-OK-INVITEE-REGISTERS-BY-THE-SAME-LANE",
+    title="Ф4-23: приглашённый регистрируется той же полосой — строка приглашения сохранила id, она и "
+          "членство ожидают, личных аккаунтов ноль; после подтверждения той же сессией — строка и "
+          "членство действующие, личный аккаунт ровно один с одним проектом, аккаунт пригласившего — его",
+    classes=["CRUD", "STATE"],
+    priority="P1",
+    steps=[
+        *_supervisor_bearer(_P23S, "f423-inviter", init=_person_init(_P23I, "f423")),
+        _me(_P23S, "f423-inviter-owned-account", [
+            *_status_is(200, "F423-INVITER-ME"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "const __own = (Array.isArray(__j.accounts) ? __j.accounts : [])"
+            ".filter((a) => Array.isArray(a.roles) && a.roles.includes('owner'));",
+            "pm.test('F423-INVITER-ME: аккаунт, которым пригласивший владеет, ровно один (фикстура)', () => "
+            "pm.expect(__own.length).to.eql(1));",
+            f"if (__own.length === 1) {{ pm.environment.set({js_str(_v(_P23S, 'AccountId'))}, __own[0].accountId); }}",
+            f"if (__j.userId) {{ pm.environment.set({js_str(_v(_P23S, 'UserId'))}, __j.userId); }}",
+        ]),
+        _mutation(_P23S, "f423-invite", "POST", _INVITE,
+                  {"accountId": f"{{{{{_v(_P23S, 'AccountId')}}}}}", "email": f"{{{{{_v(_P23I, 'Email')}}}}}"},
+                  _v(_P23I, "InviteOp"), need=(_v(_P23S, "AccountId"),)),
+        _op_done(_P23S, "f423-invite-op", _v(_P23I, "InviteOp"), [
+            "pm.test('F423-INVITE-OP: строка приглашения — на адрес приглашённого и ожидает', () => "
+            f"pm.expect([__j.response && __j.response.email, __j.response && __j.response.inviteStatus])"
+            f".to.eql([pm.environment.get({js_str(_v(_P23I, 'Email'))}), 'PENDING']));",
+            f"if (!__j.error && __j.response && __j.response.id) {{ pm.environment.set({js_str(_v(_P23I, 'InvitedUserId'))}, __j.response.id); }}",
+        ]),
+        _csrf_step(_P23I, "f423-csrf-register", "register", with_session=None),
+        _post(_P23I, "f423-register", _REGISTER,
+              {"email": f"{{{{{_v(_P23I, 'Email')}}}}}", "password": f"{{{{{_v(_P23I, 'Password')}}}}}",
+               "csrfToken": f"{{{{{_v(_P23I, 'Csrf')}}}}}"},
+              test_script=[
+                  *_status_is(200, "F423-REGISTER"),
+                  "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+                  "pm.test('F423-REGISTER: сессия выдана, адрес не подтверждён', () => "
+                  "pm.expect(!!__j.session && __j.session.emailVerified === false).to.eql(true));",
+                  "pm.test('F423-REGISTER: способ входа лёг на строку приглашения — id тот же', () => "
+                  f"pm.expect(!!(__j.user && __j.user.id) && __j.user.id === pm.environment.get({js_str(_v(_P23I, 'InvitedUserId'))})).to.eql(true));",
+                  *_capture(_P23I, "kaname_session", "SessionCookie", "F423-REGISTER"),
+                  *_capture(_P23I, "kaname_form", "FormCookie", "F423-REGISTER", required=False),
+              ]),
+        *_f423_reads("before", "PENDING", "PENDING", 0),
+        _await_letter(_P23I, "f423-letter"),
+        *_confirm(_P23I, "f423-verify", "Code", test_script=_confirmed(_P23I, "F423-VERIFY")),
+        *_f423_reads("after", "ACTIVE", "ACTIVE", 1),
+        _own(_P23S, "f423-after-personal-project", "GET", _PROJECTS + "?accountId={{" + _v(_P23I, "PersonalId") + "}}", [
+            *_status_is(200, "F423-AFTER-PROJECTS"),
+            "let __j = {}; try { __j = pm.response.json(); } catch (e) { __j = {}; }",
+            "pm.test('F423-AFTER-PROJECTS: в личном аккаунте приглашённого проект ровно один', () => "
+            "pm.expect([(Array.isArray(__j.projects) ? __j.projects : []).length, String(__j.nextPageToken || '')]).to.eql([1, '']));",
+        ], need=(_v(_P23I, "PersonalId"),)),
+    ],
+))
 
 # ───────────────────────────────────────────────────────────────────────────
 # OS-16 (kaname#634): свои сессии сквозь стенд — две и более сессии, перечень,

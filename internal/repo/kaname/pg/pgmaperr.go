@@ -48,7 +48,8 @@ import (
 //	                              исправлять нечего; решение по каждой проверке —
 //	                              перепись `checkValueLanes`, #395)
 //	projects_account_fk (FK→accounts on INSERT project)        → ErrFailedPrecondition
-//	projects_account_fk (FK←projects on DELETE account, 23503) → ErrFailedPrecondition "Account %s contains projects and cannot be deleted"
+//	projects_account_fk (FK←projects on DELETE account, 23503) → полоса HeldBy(HoldProjects),
+//	                              текст и остаток — deletion_hold.go (kaname#725)
 //
 // The `kindHint` / `idHint` parameters supply context known only to the
 // caller (passed in for the canonical Kachō text). When hints are empty we fall back
@@ -159,6 +160,20 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// производителю. Числа здесь больше нет намеренно — у выписанного числа
 		// нет владельца, и переживает свой замер оно молча; сегодняшнее печатает
 		// перепись гейта (задача kacho#2018).
+		//
+		// Исключение класса — проверка «у выдачи в наборе субъектов есть строка
+		// её пары» (`access_bindings_carry_a_subject`; миграции
+		// `20261018214804_access_binding_carries_a_subject.sql`, kaname#902, и
+		// `20261019194800_access_binding_pair_is_in_its_subject_set.sql`,
+		// kaname#907). Запрос без субъектов отвергается до записи, пара выводится
+		// из subjects[0], и каждый путь записи выдачи пишет набор в той же
+		// транзакции; сработавшая проверка значит «служба записала выдачу без
+		// набора либо с парой вне набора». Вызывающему исправить нечего — ответ
+		// фиксированный INTERNAL, а сообщение сервера (в нём идентификатор
+		// выдачи) наружу не идёт.
+		if pgErr.ConstraintName == "access_bindings_carry_a_subject" {
+			return iamerr.Wrapf(iamerr.ErrInternal, "access binding subject set")
+		}
 		return iamerr.Wrapf(integritySentinel(pgErr, kindHint), "%s", integrityText(pgErr, kindHint, idHint))
 	case pgfault.Unique: // unique_violation
 		// Реестр выданных идентификаторов людей (kaname#664, Р11): вставка строки
@@ -493,7 +508,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		// подсказка снятия» было бы неверно — снятие соседнего ресурса этого
 		// ключа не касается.
 		if kindHint == "User.Delete" {
-			return fmt.Sprintf("User %s owns accounts and cannot be deleted", idHint), iamerr.ErrReferenceInUse
+			return holdBaseText(iamerr.HoldAccountsOwned, idHint), iamerr.HeldBy(iamerr.HoldAccountsOwned)
 		}
 		return fmt.Sprintf("User %s not found", idHint), iamerr.ErrReferenceMissing
 	case "projects_account_fk":
@@ -502,22 +517,22 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		//   DELETE account with dangling projects       → "Account <id> contains projects and cannot be deleted"
 		// kindHint decides: "Account.Delete" → reverse direction; otherwise INSERT-side.
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains projects and cannot be deleted", idHint), iamerr.ErrReferenceInUse
+			return holdBaseText(iamerr.HoldProjects, idHint), iamerr.HeldBy(iamerr.HoldProjects)
 		}
 		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "service_accounts_account_fk":
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains service accounts and cannot be deleted", idHint), iamerr.ErrReferenceInUse
+			return holdBaseText(iamerr.HoldServiceAccounts, idHint), iamerr.HeldBy(iamerr.HoldServiceAccounts)
 		}
 		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "groups_account_fk":
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains groups and cannot be deleted", idHint), iamerr.ErrReferenceInUse
+			return holdBaseText(iamerr.HoldGroups, idHint), iamerr.HeldBy(iamerr.HoldGroups)
 		}
 		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "roles_account_fk":
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains custom roles and cannot be deleted", idHint), iamerr.ErrReferenceInUse
+			return holdBaseText(iamerr.HoldCustomRoles, idHint), iamerr.HeldBy(iamerr.HoldCustomRoles)
 		}
 		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "user_login_methods_user_fk":
@@ -611,6 +626,12 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		// window the software NOT EXISTS guard (a stale snapshot) cannot close; the
 		// common case is already rejected with the same text by the guard's probe.
 		// kindHint = "<Resource>.Delete" (set by the repo Delete) → canonical text.
+		// Снятие ЧЕЛОВЕКА — предмет kaname#725: полоса несёт вид держащего, и
+		// репозиторий дочитывает выдачу и её область той же формой, что у
+		// охраны. Группа и сервисный аккаунт — не предмет и прежние.
+		if kindHint == "User.Delete" {
+			return holdBaseText(iamerr.HoldActiveBindings, idHint), iamerr.HeldBy(iamerr.HoldActiveBindings)
+		}
 		res := strings.TrimSuffix(kindHint, ".Delete")
 		if res == "" {
 			res = "Principal"

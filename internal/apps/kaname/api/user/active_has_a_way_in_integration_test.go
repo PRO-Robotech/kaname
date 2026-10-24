@@ -6,7 +6,7 @@ package user
 // active_has_a_way_in_integration_test.go — глаголы, которые производят строку
 // `ACTIVE`, на строке без способа входа завершают операцию ОТКАЗОМ, и исход
 // операции — наш фиксированный внутренний текст (задача PRO-Robotech/kaname#608,
-// приёмка `active-identity-has-a-way-in.md` AWI-01, AWI-06, AWI-08).
+// приёмка `active-identity-has-a-way-in.md` AWI-01, AWI-06).
 //
 // Предмет — исход ГЛАГОЛА, а не оператора репозитория: тот же отказ базы
 // (отложенный ключ `users_active_has_a_way_in_fk`) проходит сквозь транзакцию
@@ -14,18 +14,13 @@ package user
 // функция работы; `operations.Run` кладёт её статус в `Operation.error` как
 // есть, поэтому проба судит статус, возвращённый функцией работы.
 //
-// Три производителя, у каждого — близнец, отличающийся одним фактом:
+// Производитель — снятие блокировки (`Unblock`) на BLOCKED без пароля и без
+// отметки: отказ, строка BLOCKED, события аудита нет; близнец, отличающийся
+// одним фактом, — строка с отметкой открытого пути, исход ACTIVE.
 //
-//   - снятие блокировки (`Unblock`) на BLOCKED без пароля и без отметки —
-//     отказ, строка BLOCKED, события аудита нет; близнец — строка с отметкой
-//     открытого пути, исход ACTIVE;
-//   - внутреннее заведение личности по удостоверению на СВЕЖЕЙ личности — отказ,
-//     ни личности, ни аккаунта, ни выдач, ни намерений материализации; близнец
-//     — та же личность, у которой строка пароля уже есть (существующая
-//     личность), глагол завершается успехом без новой строки;
-//   - то же заведение на приглашении с подтверждённым адресом без пароля —
-//     отказ, строка PENDING; близнец — то же приглашение со строкой пароля
-//     (как после регистрации), исход ACTIVE.
+// Второй глагол этого вида — внутреннее заведение личности по удостоверению
+// внешнего поставщика — снят с контракта (kaname#929, AWI-09): производить
+// строку им больше нечем, и его пробы ушли вместе с ним.
 //
 // Текст отказа — `internal error`, код INTERNAL: строку без способа входа
 // производит наш код, а не ввод вызывающего (hard-no-err-echo). Ни имя
@@ -41,7 +36,6 @@ import (
 	"context"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -134,30 +128,6 @@ func (h *wayInVerbHarness) seedPersonWithAccount(t *testing.T, state, email, ext
 	return uid, acc
 }
 
-// seedVerifiedInvite — приглашение PENDING с подтверждённым адресом; password —
-// строка пароля (как после регистрации раньше активации).
-func (h *wayInVerbHarness) seedVerifiedInvite(t *testing.T, email string, password bool) domain.UserID {
-	t.Helper()
-	inviter, acc := h.seedPersonWithAccount(t, "ACTIVE",
-		"awi-inviter-"+ids.NewID("tst")[3:11]+"@example.invalid", "ext-awi-inviter-"+ids.NewID("tst")[3:11], true, false, true)
-	w, err := h.repo.Writer(h.ctx)
-	require.NoError(t, err)
-	row, _, err := w.UsersW().InsertPending(h.ctx, domain.User{
-		ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: acc, Email: domain.Email(email), DisplayName: "invitee",
-		InviteStatus: domain.InviteStatusPending, InvitedBy: inviter,
-	}, time.Now().Add(7*24*time.Hour))
-	require.NoError(t, err)
-	require.NoError(t, w.Commit(h.ctx))
-	_, err = h.pool.Exec(h.ctx, `UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(row.ID))
-	require.NoError(t, err)
-	if password {
-		_, err = h.pool.Exec(h.ctx, `INSERT INTO kaname.user_login_methods (user_id, kind, verifier)
-			VALUES ($1, 'password', 'fixture-password-row-without-a-known-password')`, string(row.ID))
-		require.NoError(t, err)
-	}
-	return row.ID
-}
-
 func freshWayInEmail(tag string) string {
 	return "awi-" + tag + "-" + ids.NewID("tst")[3:11] + "@example.invalid"
 }
@@ -182,61 +152,4 @@ func TestAWI06_UnblockVerbWithoutAWayInFailsItsOperation(t *testing.T) {
 	require.NoError(t, err, "близнец: строка с отметкой открытого пути возвращается из блокировки")
 	require.Equal(t, "ACTIVE", h.status(t, twin))
 	require.Equal(t, 1, h.count(t, `SELECT count(*) FROM kaname.audit_outbox WHERE event_payload->>'resource_id' = $1`, string(twin)))
-}
-
-// TestAWI08_IdentityProvisioningOfAFreshIdentityFailsItsOperation — внутреннее
-// заведение личности по удостоверению на свежей личности.
-func TestAWI08_IdentityProvisioningOfAFreshIdentityFailsItsOperation(t *testing.T) {
-	h := newWayInVerbHarness(t)
-	uc := NewUpsertFromIdentityUseCase(h.repo, nil).WithLogger(h.logger)
-
-	usersBefore := h.count(t, `SELECT count(*) FROM kaname.users`)
-	accountsBefore := h.count(t, `SELECT count(*) FROM kaname.accounts`)
-	bindingsBefore := h.count(t, `SELECT count(*) FROM kaname.access_bindings`)
-	intentsBefore := h.count(t, `SELECT count(*) FROM kaname.fga_outbox`)
-
-	email := freshWayInEmail("provision")
-	ext := domain.ExternalSubject("ext-awi-provision-" + ids.NewID("tst")[3:11])
-	candidate := ids.NewID(domain.PrefixUser)
-	_, err := uc.doUpsert(h.ctx, candidate, UpsertFromIdentityInput{ExternalID: ext, Email: domain.Email(email), DisplayName: "Fresh"}, "system")
-	h.requireRefusedOperation(t, err, email, "AWI-08/UpsertFromIdentity свежая личность")
-	require.Zero(t, h.count(t, `SELECT count(*) FROM kaname.users WHERE external_id = $1 OR id = $2`, string(ext), candidate),
-		"строки личности после отказа нет")
-	require.Equal(t, usersBefore, h.count(t, `SELECT count(*) FROM kaname.users`), "новых личностей ноль")
-	require.Equal(t, accountsBefore, h.count(t, `SELECT count(*) FROM kaname.accounts`), "новых аккаунтов ноль")
-	require.Equal(t, bindingsBefore, h.count(t, `SELECT count(*) FROM kaname.access_bindings`), "новых выдач ноль")
-	require.Equal(t, intentsBefore, h.count(t, `SELECT count(*) FROM kaname.fga_outbox`), "намерений материализации ноль")
-
-	// Близнец: та же форма входа на личности, у которой способ входа есть, —
-	// глагол находит её и завершается успехом, новой строки не заводя.
-	twinEmail := freshWayInEmail("provision-twin")
-	twinExt := "ext-awi-provision-twin-" + ids.NewID("tst")[3:11]
-	twin, _ := h.seedPersonWithAccount(t, "ACTIVE", twinEmail, twinExt, true, false, true)
-	_, err = uc.doUpsert(h.ctx, string(twin), UpsertFromIdentityInput{ExternalID: domain.ExternalSubject(twinExt), Email: domain.Email(twinEmail), DisplayName: "Twin"}, "system")
-	require.NoError(t, err, "близнец: личность со способом входа разрешается без отказа")
-	require.Equal(t, 1, h.count(t, `SELECT count(*) FROM kaname.users WHERE external_id = $1`, twinExt))
-}
-
-// TestAWI08_IdentityProvisioningOfAVerifiedInviteWithoutAWayInFailsItsOperation —
-// внутреннее заведение личности по удостоверению на приглашении с
-// подтверждённым адресом и без пароля.
-func TestAWI08_IdentityProvisioningOfAVerifiedInviteWithoutAWayInFailsItsOperation(t *testing.T) {
-	h := newWayInVerbHarness(t)
-	uc := NewUpsertFromIdentityUseCase(h.repo, nil).WithLogger(h.logger)
-
-	email := freshWayInEmail("invite")
-	refused := h.seedVerifiedInvite(t, email, false)
-	_, err := uc.doUpsert(h.ctx, string(refused), UpsertFromIdentityInput{
-		ExternalID: domain.ExternalSubject("ext-awi-invite-" + ids.NewID("tst")[3:11]), Email: domain.Email(email), DisplayName: "Invitee",
-	}, "system")
-	h.requireRefusedOperation(t, err, email, "AWI-08/UpsertFromIdentity приглашение")
-	require.Equal(t, "PENDING", h.status(t, refused), "после отказа приглашение остаётся PENDING")
-
-	twinEmail := freshWayInEmail("invite-twin")
-	twin := h.seedVerifiedInvite(t, twinEmail, true)
-	_, err = uc.doUpsert(h.ctx, string(twin), UpsertFromIdentityInput{
-		ExternalID: domain.ExternalSubject("ext-awi-invite-twin-" + ids.NewID("tst")[3:11]), Email: domain.Email(twinEmail), DisplayName: "Invitee",
-	}, "system")
-	require.NoError(t, err, "близнец: приглашение со строкой пароля активируется")
-	require.Equal(t, "ACTIVE", h.status(t, twin))
 }

@@ -269,7 +269,9 @@ jobs:
     needs: [changes]
     name: пробы -race -short (числовой вердикт)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Предел задания — предел `go test` ниже (45m) плюс подготовка и прогонщик вердикта:
+    # иначе зависший пакет снял бы задание раньше паники `-timeout`, и вердикта не было бы.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -294,10 +296,17 @@ jobs:
       # Код `go test` берётся ДАННЫМИ: под `-e` ненулевой оборвал бы шаг до
       # прогонщика, и вердикта — числа исполненного, отказов и пропущенного —
       # не было бы вовсе. Роняет шаг ПРОГОНЩИК, а не `go test`.
+      #
+      # `-timeout 45m` — запас к самому долгому пакету (kaname#949): `internal/check`
+      # на d34eab3f7 под этой формой — 1723,754 с, код 0 (внешний кластер, 4 CPU);
+      # при 25m тот же пакет снят паникой на 1501 с. 45m — 2700 с: доля пакета 64 %,
+      # запас 57 %. Предел растёт вслед за пакетом, а не вместо его ускорения: доля
+      # выше 75 % — предмет задачи, а не новое число. Маршрут `ci.yml:unit` стенда
+      # воркспейса (`scripts/stand-report.sh`) берёт эту команду из этого шага.
       - name: пробы (-race -short)
         run: |
           rc=0
-          go test ./... -race -short -count=1 -timeout 25m -json > test.json 2>&1 || rc=$?
+          go test ./... -race -short -count=1 -timeout 45m -json > test.json 2>&1 || rc=$?
           echo "go test завершился с кодом $rc (вердикт выносит прогонщик ниже)"
           python3 .github/scripts/go-test-verdict.py < test.json
 

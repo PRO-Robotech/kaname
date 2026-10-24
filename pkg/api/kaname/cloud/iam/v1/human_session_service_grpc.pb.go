@@ -42,11 +42,17 @@ const (
 //
 // WHAT THIS RPC DOES NOT DO — said so it is not inferred.
 //
-//   - It does NOT apply the revocation cutoff. The cutoff is asked separately
-//     (`SessionCutoffOf`) and compared INCLUSIVELY by the edge against
-//     `authenticated_at`. One reader of the cutoff, and it is on the edge (Р7):
-//     folding the cutoff in here would leave a second reader and make Ф1-56
-//     («UNIMPLEMENTED only about the cutoff — pass loudly») unbuildable.
+//   - It does NOT apply the revocation cutoff. On the edge's presentation lane
+//     the cutoff is asked separately (`SessionCutoffOf`) and compared
+//     INCLUSIVELY by the edge against `authenticated_at`; on that lane the edge
+//     alone compares it (Р7): folding the cutoff in here would put a second
+//     comparison on the same lane and make Ф1-56 («UNIMPLEMENTED only about the
+//     cutoff — pass loudly») unbuildable.
+//     The cutoff has TWO readers in all: the edge, and this service itself,
+//     with the same inclusive comparison wherever it acts on a session — its
+//     OAuth ceremony's authorization point answers `login_required` on a
+//     session authenticated no later than the person's cutoff, and the listing
+//     of a person's sessions does not show such a session.
 //   - It does NOT distinguish WHY there is no session. Unknown bearer, a
 //     record ended by a logout, an expired record and a blocked person are ONE
 //     answer (`found = false`, empty `session`). The reasons are visible only
@@ -97,11 +103,17 @@ func (c *internalHumanSessionServiceClient) Resolve(ctx context.Context, in *Res
 //
 // WHAT THIS RPC DOES NOT DO — said so it is not inferred.
 //
-//   - It does NOT apply the revocation cutoff. The cutoff is asked separately
-//     (`SessionCutoffOf`) and compared INCLUSIVELY by the edge against
-//     `authenticated_at`. One reader of the cutoff, and it is on the edge (Р7):
-//     folding the cutoff in here would leave a second reader and make Ф1-56
-//     («UNIMPLEMENTED only about the cutoff — pass loudly») unbuildable.
+//   - It does NOT apply the revocation cutoff. On the edge's presentation lane
+//     the cutoff is asked separately (`SessionCutoffOf`) and compared
+//     INCLUSIVELY by the edge against `authenticated_at`; on that lane the edge
+//     alone compares it (Р7): folding the cutoff in here would put a second
+//     comparison on the same lane and make Ф1-56 («UNIMPLEMENTED only about the
+//     cutoff — pass loudly») unbuildable.
+//     The cutoff has TWO readers in all: the edge, and this service itself,
+//     with the same inclusive comparison wherever it acts on a session — its
+//     OAuth ceremony's authorization point answers `login_required` on a
+//     session authenticated no later than the person's cutoff, and the listing
+//     of a person's sessions does not show such a session.
 //   - It does NOT distinguish WHY there is no session. Unknown bearer, a
 //     record ended by a logout, an expired record and a blocked person are ONE
 //     answer (`found = false`, empty `session`). The reasons are visible only

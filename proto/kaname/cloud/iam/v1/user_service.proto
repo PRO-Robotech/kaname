@@ -24,8 +24,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 //   приглашение живо (kaname#456): PENDING → ACTIVE. Регистрация тем же адресом
 //   пишет на строку приглашения способ входа и сессию, но приглашение не
 //   активирует.
-// - Create нет: личность заводят приглашение, регистрация без приглашения и
-//   внутренний `InternalUserService.UpsertFromIdentity`.
+// - Create нет: личность заводят приглашение и регистрация без приглашения.
 service UserService {
   // Returns the specified User resource.
   rpc Get (GetUserRequest) returns (User) {
@@ -218,10 +217,14 @@ service UserService {
   // EVERYTHING ISSUED TO THE IDENTITY ENDS WITH IT. Its sessions, login methods,
   // access keys, recovery codes, personal tokens and memberships go in the same
   // transaction, and every credential issued to it up to that moment is refused
-  // on presentation (UNAUTHENTICATED "credential is not accepted") no later than
-  // the declared revocation window after the deletion commits. Records that
-  // only attribute an act to the person (who issued a service-account key, who
-  // granted a binding) keep the identifier; it is never issued again.
+  // on presentation with UNAUTHENTICATED no later than the declared revocation
+  // window after the deletion commits. The body is the refusing surface's own:
+  // this service's public front answers "credential is not accepted", while a
+  // request through the platform edge — the path a person takes — gets the
+  // edge's single authentication refusal, described by the edge, not here.
+  // Records that only attribute an act to the person (who issued a
+  // service-account key, who granted a binding) keep the identifier; it is
+  // never issued again.
   //
   // IT ASKS FOR THE ELEVATED SESSION LEVEL, like `AccountService.Delete`. An
   // irreversible removal is never cheaper than the reversible operations on the
@@ -335,9 +338,9 @@ service UserService {
   // never ADDED to UpdateUserRequest, not a description of a bug that was there:
   // an empty `update_mask` means full-object replacement by platform convention,
   // and a proto3 enum cannot say "not sent", so the obvious design — one more
-  // maskable field — would let a client block a membership by simply not filling
+  // maskable field — would let a client block a person by simply not filling
   // it in. The state that decides whether a person still has access must not be
-  // reachable by forgetting something. It is also an EVENT ("this membership was
+  // reachable by forgetting something. It is also an EVENT ("this person was
   // suspended"), not the editing of an attribute, and the audit trail has to be
   // able to say so.
   //
@@ -377,8 +380,8 @@ service UserService {
   // platform-wide. He simply has his own verb now instead of a substitute.
   //
   // IDEMPOTENT: the argument is the STATE, not a transition. Blocking a
-  // membership that is already blocked succeeds and reports it blocked — the
-  // safe direction of this control must never be the one that fails on retry.
+  // person who is already blocked succeeds and reports him blocked — the safe
+  // direction of this control must never be the one that fails on retry.
   //
   // A PENDING invitation cannot be blocked: it carries no external identity yet
   // (DB CHECK `users_invite_status_consistency`), so there is nothing to refuse
@@ -422,12 +425,14 @@ service UserService {
     option (corelib.authz.v1.required_acr_min)  = "2";
   }
 
-  // Unblocks the specified User membership: it may authenticate into that
-  // Account again.
+  // Unblocks the specified person: the identity may authenticate anywhere on
+  // the platform again — in EVERY Account the person is in, because the state
+  // is one per person, exactly as Block wrote it. Memberships were not touched
+  // by Block and are not touched here.
   //
   // The counterpart of Block, and it exists for the same reason the state is a
-  // column rather than a deletion — a suspended membership has to be able to
-  // come back. A one-way control is one an operator will not reach for, and a
+  // column rather than a deletion — a suspended person has to be able to come
+  // back. A one-way control is one an operator will not reach for, and a
   // person with no administrative way back is locked out permanently: self-serve
   // password recovery deliberately does NOT lift a block (it proves ownership of
   // a mailbox, which is not what the administrator called into question).
@@ -438,7 +443,7 @@ service UserService {
   // fresh sign-in yields working credentials.
   //
   // Same shape throughout: action not field, Operation, step-up, idempotent
-  // (unblocking an active membership succeeds). A PENDING invitation is refused
+  // (unblocking a person who is not blocked succeeds). A PENDING invitation is refused
   // here too — turning an unconfirmed invitee into an active member is
   // activation by address confirmation on the service's sign-in lane, a
   // different path with a different subject.
@@ -578,7 +583,9 @@ message ListUsersRequest {
   // фильтрует Users по Account). system-admin может оставить пустым (видит всех).
   string account_id = 4;
 
-  // The maximum number of results per page to return. Default value: 100.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 1;
 
   // Page token.
@@ -679,13 +686,15 @@ message RemoveUserFromAccountRequest {
 }
 
 message BlockUserRequest {
-  // ID of the User membership row to block. The only input: the state is the
-  // verb, so there is no field that could be forgotten.
+  // ID of the User to block — the person, one row for the whole platform, not
+  // a membership in one Account. The only input: the state is the verb, so
+  // there is no field that could be forgotten.
   string user_id = 1;
 }
 
 message UnblockUserRequest {
-  // ID of the User membership row to unblock.
+  // ID of the User to unblock — the person, one row for the whole platform,
+  // not a membership in one Account.
   string user_id = 1;
 }
 
@@ -705,7 +714,9 @@ message ListUserOperationsRequest {
   // ID of the User resource to list operations for.
   string user_id = 1;
 
-  // The maximum number of results per page that should be returned.
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50), the same one every List of the service applies; a value outside
+  // [0..1000] is rejected with INVALID_ARGUMENT rather than clamped.
   int64 page_size = 2;
 
   // Page token.

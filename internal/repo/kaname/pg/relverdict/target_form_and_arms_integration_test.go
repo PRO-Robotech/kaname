@@ -3,8 +3,9 @@
 
 package relverdict_test
 
-// target_form_and_arms_integration_test.go — цель привязки (kaname#857): форма
-// цели, которую предикат не понимает, не даёт ничего; сужение цели
+// target_form_and_arms_integration_test.go — цель привязки (kaname#857): форму
+// цели вне контракта база не принимает (kaname#863), а выдачи без неё нет —
+// значит нет и права; сужение цели
 // пересекается с каждой ветвью правила роли; класс говорящего «аноним»
 // сужается так же, как человек.
 //
@@ -15,11 +16,14 @@ package relverdict_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // tgCheckReverse сверяет обратные формы (Subjects, Sources) на X и Y.
@@ -37,8 +41,27 @@ func tgCheckReverse(t *testing.T, ctx context.Context, a *relverdict.Asker, onX,
 	}
 }
 
-// Цель, корень которой не объект либо чей `resources` не перечень, не
-// совпадает ни с одним объектом — ни в одной форме вопроса. Близнец каждого
+// tgSeedBindingRefused — выдача с целью вне контракта: база отвергает вставку
+// ограничением формы (kaname#863). Отказ гасится точкой сохранения, чтобы
+// посев остального прошёл, и проба утверждает именно ОТКАЗ по имени
+// ограничения, а не любую ошибку.
+func tgSeedBindingRefused(t *testing.T, ctx context.Context, tx pgx.Tx, target string) {
+	t.Helper()
+	exec(t, ctx, tx, `SAVEPOINT tg_refused`)
+	_, err := tx.Exec(ctx,
+		bindingset.With(`INSERT INTO kaname.access_bindings
+		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status, target)
+		 VALUES ($1, 'user', 'usr-1', $2, 'account', 'acc-1', 'ACTIVE', $3::jsonb)`),
+		tgBinding, tgRole, target)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != relverdict.TargetFormConstraint {
+		t.Fatalf("цель %s: ждали отказ ограничением %s, получено %v", target, relverdict.TargetFormConstraint, err)
+	}
+	exec(t, ctx, tx, `ROLLBACK TO SAVEPOINT tg_refused`)
+}
+
+// Цель, корень которой не объект либо чей `resources` не перечень, база не
+// принимает, и права по ней нет ни в одной форме вопроса. Близнец каждого
 // случая — ближайшая законная форма той же цели.
 func TestTarget_UnrecognisedFormGrantsNothing(t *testing.T) {
 	net := func(t *testing.T) string { return catalogFormOf(t, "vpc_network") }
@@ -101,7 +124,7 @@ func TestTarget_UnrecognisedFormGrantsNothing(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			pool, ctx := withCommittedPool(t, func(ctx context.Context, tx pgx.Tx) {
 				tgSeedTopology(t, ctx, tx)
-				tgSeedBinding(t, ctx, tx, "user", "usr-1", c.target(t))
+				tgSeedBindingRefused(t, ctx, tx, c.target(t))
 			})
 			a := relverdict.NewAsker(pool)
 			tgAskAll(t, ctx, a, tgSpeaker, nothing)

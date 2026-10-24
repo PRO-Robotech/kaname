@@ -19,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 )
 
@@ -226,7 +227,35 @@ func (w *ceremonyWorld) raceExchange(c *ceremonyClient, forms []url.Values) []*h
 	}
 	close(start)
 	wg.Wait()
+	w.logOperationRefusals(out)
 	return out
+}
+
+// logOperationRefusals — на отказе ОПЕРАЦИИ (5xx) печатает записи полосы
+// «ceremony token refused» с их причиной: наружу ответ несёт только слово
+// словаря, и без журнала отказ 503 не называл бы слоя, который его дал
+// (kaname#818). Записей нет при 5xx — отказ дан до полосы церемонии, на
+// поверхности токен-эндпоинта (потолок одновременных обменов). Секретов в
+// причине нет: тексты отказов полосы называют клиента и исход.
+func (w *ceremonyWorld) logOperationRefusals(recs []*httptest.ResponseRecorder) {
+	w.t.Helper()
+	failed := 0
+	for _, rec := range recs {
+		if rec.Code >= http.StatusInternalServerError {
+			failed++
+		}
+	}
+	if failed == 0 {
+		return
+	}
+	var refusals []string
+	for _, line := range strings.Split(w.logs.String(), "\n") {
+		if strings.Contains(line, `"msg":"ceremony token refused"`) && strings.Contains(line, `"outcome":"`+string(ceremonyhttp.OutcomeExchangeUnavailable)+`"`) {
+			refusals = append(refusals, line)
+		}
+	}
+	w.t.Logf("%s: отказов операции %d из %d; записей полосы об отказе операции %d (нет записей — отказ дан до полосы):\n%s",
+		w.id, failed, len(recs), len(refusals), strings.Join(refusals, "\n"))
 }
 
 // requireExactlyOneWinner — ровно один 200, прочие — invalid_grant/400.
@@ -354,28 +383,59 @@ func TestLINEA1_24_RefusalsAfterCodeIsNamedAreByteIdentical(t *testing.T) {
 	w.redeem(w.issueCode(w.ic1, lineA1R))
 }
 
+// singleUseRacers — одновременных обменов в набеге LINE-A-1-26 и в его близнеце.
+const singleUseRacers = 16
+
 // TestLINEA1_26_CodeSingleUseAndExpiryHeldByTheDatabase — LINE-A-1-26:
 // одноразовость держит база (конкуренция даёт ровно один успех), срок — её
-// время (истёкший не потребляется и без конкуренции). Близнец — два разных
-// кода проходят оба.
+// время (истёкший не потребляется и без конкуренции).
+//
+// # Набег — публичным клиентом, и близнец меняет ровно один факт
+//
+// Предмет набега — погашение в базе. Конфиденциальный клиент перед погашением
+// доказывает секрет сверкой argon2id — вычислением, нарочно дорогим и
+// отмены не знающим, — и шестнадцать таких сверок разом делят процессор узла.
+// Срок операции учитывает их очередь (`ceremonyOperationDeadline`, kaname#882;
+// до него все обмены отвечали 503 `port_deadline`, kaname#818), но сверка
+// по-прежнему разносит обмены во времени — то есть ослабляет ровно способность
+// пробы упасть на погашении чтением-затем-записью. Публичный клиент сверки не
+// несёт, и обмены доходят до погашения разом (тот же довод — у проб пула,
+// kaname#423). Срок при очереди сверок держат пробы формулы срока
+// (`TestCeremonyOperationDeadline_CoversAFullQueueOfChecks`), проводки
+// стоимости проверки от полосы входа
+// (`TestLoginLaneSecretCheckCost_IsTheCalibratedEnvelopeFloor`) и порядка
+// прихода к месту вычисления
+// (`passwordverify.TestProcessorGate_WaitersTakeTheSlotInArrivalOrder`).
+//
+// Близнец — те же шестнадцать одновременных обменов того же клиента, но
+// РАЗНЫМИ кодами: все обязаны пройти. Он отличает «узел не обслуживает
+// шестнадцать обменов разом» (красный близнец) от «база не держит
+// одноразовость» (красный набег). Срок — конфиденциальным клиентом: он о
+// предикате базы и в конкуренции не участвует.
 func TestLINEA1_26_CodeSingleUseAndExpiryHeldByTheDatabase(t *testing.T) {
 	w := newCeremonyWorld(t, "LINE-A-1-26", "1")
 	w.requireGrant(grantAuthorizationCode)
 	w.requireAuthorizeEndpoint()
+	pub := w.seedPublicClient("ceremony-public", []string{lineA1R})
 
-	distinct := []url.Values{exchangeForm(w.issueCode(w.ic1, lineA1R)), exchangeForm(w.issueCode(w.ic1, lineA1R))}
-	for i, rec := range w.raceExchange(w.ic1, distinct) {
+	distinct := make([]url.Values, singleUseRacers)
+	for i := range distinct {
+		distinct[i] = exchangeForm(w.issueCode(pub, lineA1R))
+	}
+	for i, rec := range w.racePublic(distinct) {
 		if rec.Code != http.StatusOK {
-			t.Errorf("%s: близнец: разный код %d ответил %d; тело %q", w.id, i, rec.Code, rec.Body.String())
+			t.Errorf("%s: близнец: разный код %d из %d ответил %d — узел не обслуживает %d обменов разом, "+
+				"и красный набега был бы не о погашении; тело %q",
+				w.id, i, singleUseRacers, rec.Code, singleUseRacers, rec.Body.String())
 		}
 	}
 
-	ic := w.issueCode(w.ic1, lineA1R)
-	same := make([]url.Values, 16)
+	ic := w.issueCode(pub, lineA1R)
+	same := make([]url.Values, singleUseRacers)
 	for i := range same {
 		same[i] = exchangeForm(ic)
 	}
-	requireExactlyOneWinner(t, w.id, "потребление одного кода", w.raceExchange(w.ic1, same))
+	requireExactlyOneWinner(t, w.id, "потребление одного кода", w.racePublic(same))
 
 	stale := w.issueCode(w.ic1, lineA1R)
 	w.ageCodes()

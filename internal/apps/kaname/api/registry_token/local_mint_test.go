@@ -56,7 +56,7 @@ func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter) (*registrytoke
 	uc := mustLane(t, registrytokenuc.Config{
 		AllowedAudiences: []string{"registry.kacho.local"},
 		DefaultService:   "registry.kacho.local",
-		Anonymous:        registrytokenuc.AnonymousIdentity{ClientID: "anon-client"},
+		Anonymous:        registrytokenuc.AnonymousIdentity{ClientID: "anon-client", Pace: ampleAnonPace(t)},
 	}, minter).WithBasicCredentialResolver(authority)
 	return uc, secret
 }
@@ -93,7 +93,7 @@ func TestExecuteAnonymous_MintsWithOurSigner(t *testing.T) {
 	minter := &stubMinter{}
 	uc, _ := newUseCase(t, minter)
 
-	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
+	out, err := uc.ExecuteAnonymous(context.Background(), registrytokenuc.AnonymousInput{Service: "registry.kacho.local"})
 	require.NoError(t, err)
 	require.NotEmpty(t, out.Token)
 

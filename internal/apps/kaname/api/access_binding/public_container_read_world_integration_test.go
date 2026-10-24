@@ -300,7 +300,7 @@ func (p *pcrWorld) applyDelivered(what string, m *manifest.Manifest) {
 
 	src := catalog.Fixed{F: facts}
 	p.rec = reconcile.New(kanamepg.NewReconcileAdapter(p.pool, src), nil, src)
-	create := accessbindingapp.NewCreateAccessBindingUseCase(p.repo, p.ops).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(p.repo, p.ops, src).
 		WithRelationStore(p.door, nil).
 		WithReconciler(p.rec)
 	get := accessbindingapp.NewGetAccessBindingUseCase(p.repo).WithRelationStore(p.door, nil)

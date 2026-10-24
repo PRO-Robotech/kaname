@@ -70,7 +70,10 @@ func TestSC829_PublicWildcardWordRendersAsTheClassAndEqualsTheCanon(t *testing.T
 			repo = r
 		}
 	}
-	got, err := modelrender.Render(repo)
+	// Форма, в которой блок судят против канона: запись субъекта переводится
+	// сборщиком, проза примечаний — переводом прозы (kaname#855); фикстура П6
+	// несёт обе прежние записи.
+	got, err := modelrender.RenderForCanon(repo)
 	if err != nil {
 		t.Fatalf("рендер отказал: %v", err)
 	}

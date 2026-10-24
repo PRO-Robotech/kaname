@@ -73,10 +73,10 @@ func subjectTypeToProto(t domain.SubjectType) iamv1.SubjectType {
 	}
 }
 
-// projectSubjectsBatch loads the multi-subject set of MANY bindings in one query
-// and stamps each binding's Subjects (E-34 read-projection on List/ListByRole).
-// A binding with no child rows keeps Subjects nil; toPb then falls back to the
-// one-element legacy single. Mirrors projectTargetsBatch (no per-row N+1).
+// projectSubjectsBatch одним запросом читает набор субъектов МНОГИХ выдач и
+// ставит каждой её Subjects (проекция чтения E-34 у List/ListByRole), без N+1 по
+// строкам. У сохранённой выдачи набор непуст — это держит база
+// (`access_bindings_carry_a_subject`, kaname#902).
 func projectSubjectsBatch(ctx context.Context, rd Reader, bindings []domain.AccessBinding) error {
 	if len(bindings) == 0 {
 		return nil

@@ -104,9 +104,6 @@ func (r *scopeUserRdr) GetByAccountEmail(context.Context, domain.AccountID, doma
 func (r *scopeUserRdr) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
 	return nil, nil
 }
-func (r *scopeUserRdr) FindActiveByExternalID(context.Context, domain.ExternalSubject) ([]domain.User, error) {
-	return nil, nil
-}
 func (r *scopeUserRdr) FindByExternalIDInStatuses(context.Context, domain.ExternalSubject, []domain.InviteStatus) ([]domain.User, error) {
 	return nil, nil
 }

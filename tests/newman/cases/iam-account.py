@@ -1369,14 +1369,45 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 # IAM-ACC-DL-NEG-HAS-CHILDREN — Delete account with active Project → FailedPrecondition
 # Uses accountAId which already has projects (seeded by authz-fixtures).
+#
+# Отказ называет остаток и шаг (приёмка
+# `deletion-refusals-name-the-remainder-and-the-step.md`, Р1, APPROVED на
+# `b7a49bb0…`, kaname#725): «… : delete Project <P> first (projects: <N>)»,
+# где <P> — наименьший `id` среди проектов аккаунта, <N> — их число. Проекты
+# аккаунта A заводит не этот кейс (посев и соседние наборы), поэтому <P> и <N>
+# спрашиваются у края ПЕРЕД снятием (`e2e-flow.md#catalog-values-from-edge`):
+# литерал разошёлся бы с посадкой молча, а число — с порядком наборов.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ACC-DL-NEG-HAS-CHILDREN",
-    title="Delete account with active projects → Operation.error FAILED_PRECONDITION (9)",
+    title="Delete account with active projects → Operation.error FAILED_PRECONDITION (9), "
+          "the refusal names the first project and the count",
     classes=["NEG", "STATE"],
     priority="P1",
     steps=[
+        Step(
+            name="read-account-a-projects",
+            method="GET",
+            # pageSize=1000 и пустой nextPageToken: число <N> — весь набор, а не страница.
+            path="/iam/v1/projects?accountId={{accountAId}}&pageSize=1000",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "const ps = j.projects || [];",
+                "pm.test('account A carries at least one project — the condition of the refusal', () => "
+                "pm.expect(ps.length, JSON.stringify(j)).to.be.above(0));",
+                "pm.test('every listed project belongs to account A', () => "
+                "pm.expect(ps.every(p => p.accountId === pm.environment.get('accountAId')), "
+                "JSON.stringify(j)).to.eql(true));",
+                "pm.test('the list is one page — the count is the whole set', () => "
+                "pm.expect(j.nextPageToken || '', JSON.stringify(j)).to.eql(''));",
+                "const ids = ps.map(p => p.id).sort();",
+                "pm.environment.set('accHasChildrenFirstPrjId', ids.length ? ids[0] : '');",
+                "pm.environment.set('accHasChildrenPrjCount', String(ids.length));",
+            ],
+        ),
         Step(
             name="delete-with-children",
             method="DELETE",
@@ -1391,7 +1422,9 @@ CASES.append(Case(
         # отказов iam, и утверждение об общей части не различало, какая именно
         # помеха удержала удаление (kacho#1748).
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_text="Account {{accountAId}} contains projects and cannot be deleted"),
+                        msg_text="Account {{accountAId}} contains projects and cannot be deleted: "
+                                 "delete Project {{accHasChildrenFirstPrjId}} first "
+                                 "(projects: {{accHasChildrenPrjCount}})"),
     ],
 ))
 
@@ -1939,6 +1972,10 @@ CASES.append(Case(
             "pm.test('labels', () => pm.expect(j.labels).to.eql({k: 'v1'}));"]),
         _aid_create("repeat", {"id": "{{aid13X}}", "name": "aid13-{{runId}}", "labels": {"k": "v1"}}, _a13),
         assert_op_error(6, "ALREADY_EXISTS", msg_text="Account {{aid13X}} already exists"),
+        # Первая операция читается ПОСЛЕ опроса её же переменной: шаг ниже — одиночный
+        # GET, и без опроса той же операции его `done` судил бы расписание воркера
+        # (kaname#948, проба op_read_awaits_done_test.py).
+        assert_op_success(auth=_a13, op_var="aid13FirstOp"),
         Step(name="first-op-still-succeeded", method="GET", path="/operations/{{aid13FirstOp}}", auth=_a13,
              test_script=[*assert_status(200), "const j = pm.response.json();",
                           "pm.test('first op done with response.id = X', () => pm.expect(j.done && j.response && "

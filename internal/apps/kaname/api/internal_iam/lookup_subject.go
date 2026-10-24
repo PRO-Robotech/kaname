@@ -80,8 +80,8 @@ func (uc *LookupSubjectUseCase) byExternalID(ctx context.Context, ext string) (*
 	if err != nil {
 		return nil, status.Error(codes.Internal, "user lookup")
 	}
-	// Строки упорядочены по created_at ASC — каноническая личность та же, что
-	// резолвят остальные пути (UpsertFromIdentity.resolveUserID).
+	// Строки упорядочены по created_at ASC — каноническая личность та, что
+	// заведена первой.
 	for _, u := range rows {
 		if u.InviteStatus.MayAuthenticate() {
 			return responseUser(u)

@@ -74,3 +74,49 @@ func TestSystemClass_SC14_EverySubjectDoorRefusesTheAuthenticatedSpeaker(t *test
 		t.Errorf("Check человека = %+v, ждали отказ с причиной", usr)
 	}
 }
+
+// SC-15 — подстановка говорящим не бывает ни на одной двери (полоса L6,
+// kaname#832). Переходное отображение `user:*` в аноним снято: плоскость
+// данных реестра kacho спрашивает о вызывающем без личности классом
+// `system_class:anonymous` (SC-39), и вопрос от подстановки — отказ разбора.
+// Близнец — человек `user:usr-B`: разбор проходит на каждой двери, ответ по
+// выдачам. Отличие — один факт: говорящий.
+func TestSystemClass_SC15_EverySubjectDoorRefusesTheWildcardSpeaker(t *testing.T) {
+	const wcRefusal = "Illegal argument subject: wildcard is not a speaker"
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: &mockRelations{checkResp: false}})
+	ctx := context.Background()
+	req := func(subject string) CheckRequest {
+		return CheckRequest{Subject: subject, Resource: ResourceRef{Type: "vpc_network", ID: "enp00000000000000001"},
+			Action: "vpc.networks.get"}
+	}
+	rel := func(subject string) CheckRelationRequest {
+		return CheckRelationRequest{Subject: subject, Relation: "v_get", Object: "vpc_network:enp00000000000000001"}
+	}
+
+	if _, err := svc.Check(ctx, req("user:*")); err == nil || err.Error() != wcRefusal {
+		t.Errorf("Check: отказ %v, ждали %q", err, wcRefusal)
+	}
+	if _, err := svc.CheckRelation(ctx, rel("user:*")); err == nil || err.Error() != wcRefusal {
+		t.Errorf("CheckRelation: отказ %v, ждали %q", err, wcRefusal)
+	}
+	out, err := svc.BatchCheck(ctx, []CheckRequest{req("user:*"), req("user:usr-B")})
+	if err != nil {
+		t.Fatalf("BatchCheck: %v", err)
+	}
+	if len(out[0].DenyReasons) != 1 || out[0].DenyReasons[0] != wcRefusal || out[0].Allowed {
+		t.Errorf("BatchCheck: пункт подстановки = %+v, ждали отказ %q", out[0], wcRefusal)
+	}
+
+	// Близнец: человек проходит разбор на каждой двери.
+	if _, err := svc.Check(ctx, req("user:usr-B")); err != nil {
+		t.Errorf("Check человека: %v, ждали ответ по выдачам", err)
+	}
+	if _, err := svc.CheckRelation(ctx, rel("user:usr-B")); err != nil {
+		t.Errorf("CheckRelation человека: %v, ждали ответ по выдачам", err)
+	}
+	for _, r := range out[1].DenyReasons {
+		if r == wcRefusal {
+			t.Errorf("BatchCheck человека отвергнут разбором: %+v", out[1])
+		}
+	}
+}

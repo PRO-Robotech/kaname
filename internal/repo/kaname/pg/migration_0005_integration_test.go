@@ -65,6 +65,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // ЗДЕСЬ ЛЕЖАЛИ ДВА ПОМОЩНИКА ЛЕСТНИЦЫ ВЕРСИЙ — startPostgresUpTo и applyOneMore.
@@ -256,17 +257,17 @@ func TestRbacV2Grammar_SeededRolesAreAllFourSegment(t *testing.T) {
 // insertBinding — выдача с ЯВНО названной областью либо без неё (scope < 0).
 func (f *rbacFixture) insertBinding(ctx context.Context, id, resType, resID, subject string, scope int) error {
 	if scope < 0 {
-		_, err := f.pool.Exec(ctx, `
+		_, err := f.pool.Exec(ctx, bindingset.With(`
 			INSERT INTO kaname.access_bindings
 			    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-			VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`,
+			VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`),
 			id, subject, f.roleID, resType, resID)
 		return err
 	}
-	_, err := f.pool.Exec(ctx, `
+	_, err := f.pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, scope)
-		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE', $6)`,
+		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE', $6)`),
 		id, subject, f.roleID, resType, resID, scope)
 	return err
 }

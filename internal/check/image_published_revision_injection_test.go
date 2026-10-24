@@ -30,7 +30,7 @@ const (
 	publishedCheckRun    = `run: .github/scripts/image-published-revision.sh "$IMAGE_REF" "$REVISION" "$PLATFORMS"`
 	publishedSelfTestRun = `run: .github/scripts/image-published-revision.sh --self-test`
 	publishedCheckIf     = "        id: published\n        if: steps.gate.outputs.push == 'true'\n"
-	publishedCheckRefEnv = "/${{ env.IMAGE_NAME }}:${{ steps.subject.outputs.tag }}\n" +
+	publishedCheckRefEnv = "/${{ env.IMAGE_NAME }}:${{ steps.gate.outputs.tag }}\n" +
 		"          REVISION: ${{ steps.subject.outputs.revision }}\n          PLATFORMS:"
 	publishedCheckPlatformsEnv = "          PLATFORMS: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}\n" +
 		"        " + publishedCheckRun
@@ -115,7 +115,7 @@ func TestImagePublishedRevisionGateCanFail(t *testing.T) {
 		}, ""},
 		{"сверка спрашивает о движущемся теге", func(t *testing.T, r string) string {
 			return injectOnce(t, r, publishedCheckRefEnv, strings.Replace(publishedCheckRefEnv,
-				":${{ steps.subject.outputs.tag }}", ":latest", 1))
+				":${{ steps.gate.outputs.tag }}", ":latest", 1))
 		}, "IMAGE_REF у сверки"},
 		{"сверка сужена до одной платформы", func(t *testing.T, r string) string {
 			return injectOnce(t, r, publishedCheckPlatformsEnv,
