@@ -673,7 +673,38 @@ def shell_commands(body: str) -> list[list[str]]:
     return _shell_list(body, 0, None)[0]
 
 
-def runner_stems(argv: list[str]) -> list[str]:
+_SHARD_PLAN_PY = (pathlib.Path(__file__).resolve().parents[2]
+                  / "tests" / "newman" / "scripts" / "shard_plan.py")
+
+
+def _plan_stems(plan: str, base: pathlib.Path | None) -> list[str]:
+    """Все наборы плана шардов — тем же разбором, что у прогонщика (kaname#848).
+
+    Шаг с `--shard-plan <литерал>` гоняет ВЕСЬ план: шард выбирает матрица, и
+    шард плана без задания матрицы краснит сводный вердикт шардов отсутствующим
+    отчётом, а не эта перепись. Путь — относительно каталога набора: прогонщик
+    переходит в него сам до разбора флагов. План, который не читается, — третий
+    исход, а не «шаг ничего не гоняет».
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("shard_plan", _SHARD_PLAN_PY)
+    if spec is None or spec.loader is None:
+        raise Unmet(f"разбор плана шардов не загружен: {_SHARD_PLAN_PY}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    path = pathlib.Path(plan)
+    if not path.is_absolute():
+        if base is None:
+            raise Unmet(f"план шардов {plan} назван относительно, а каталог набора не известен")
+        path = base / path
+    try:
+        return [st for v in mod.parse(path).values() for st in v]
+    except mod.PlanError as e:
+        raise Unmet(str(e)) from e
+
+
+def runner_stems(argv: list[str], plan_base: pathlib.Path | None = None) -> list[str]:
     """Коллекции, которые называет ОДНА простая команда, — если она прогонщик."""
     k = 0
     while k < len(argv) and (argv[k] in _PREFIX_WORDS or _ASSIGN_RE.match(argv[k])):
@@ -683,7 +714,7 @@ def runner_stems(argv: list[str]) -> list[str]:
         while k < len(argv) and argv[k].startswith("-"):
             if argv[k] == "-c" and k + 1 < len(argv):
                 return [st for sub in shell_commands(argv[k + 1])
-                        for st in runner_stems(sub)]
+                        for st in runner_stems(sub, plan_base)]
             k += 1
     if k >= len(argv) or not RUNNER_RE.search(argv[k]):
         return []
@@ -695,6 +726,13 @@ def runner_stems(argv: list[str]) -> list[str]:
         if argv[j] == "--service" and j + 1 < len(argv):
             if STEM_RE.match(argv[j + 1]):
                 out.append(argv[j + 1])
+            j += 2
+            continue
+        # План шардов засчитывается только литералом пути: путь, собранный во
+        # время прогона, — не счёт, как и имя коллекции.
+        if argv[j] == "--shard-plan" and j + 1 < len(argv):
+            if STEM_RE.match(argv[j + 1].replace("/", "")):
+                out.extend(_plan_stems(argv[j + 1], plan_base))
             j += 2
             continue
         j += 1
@@ -730,6 +768,7 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
     import yaml  # локально: его отсутствие — третий исход, а не отказ разбора
 
     out: dict[str, list[str]] = {}
+    plan_base = workflows.parent.parent / "tests" / "newman"
     for f in workflow_files(workflows):
         try:
             doc = yaml.safe_load(f.read_text(encoding="utf-8"))
@@ -754,7 +793,7 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
                     continue
                 label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
                 for argv in shell_commands(body):
-                    for stem in runner_stems(argv):
+                    for stem in runner_stems(argv, plan_base):
                         out.setdefault(stem, []).append(label)
     return out
 
@@ -2533,6 +2572,36 @@ def self_test() -> int:
             _c(f"та же строка под `shell: {shell}` — "
                f"{'ПРОГОН' if runs_it else 'НЕ прогон'}",
                bool(parsed.get("own-only")) == runs_it, f"разборщик: {parsed}")
+
+        # Ось 6е (kaname#848): шаг гоняет коллекции по ПЛАНУ ШАРДОВ — литерал
+        # `--shard-plan` засчитывает все наборы плана тем же разбором, что у
+        # прогонщика. Близнецы: план без коллекции — не прогон её; план в
+        # комментарии — не прогон; план, который не читается, — третий исход.
+        plan_forms = (
+            ("план называет коллекцию", "x: own-only\n", True,
+             './scripts/run.sh --shard-plan plan.txt --shard "$S"'),
+            ("план её не называет", "x: other\n", False,
+             './scripts/run.sh --shard-plan plan.txt --shard "$S"'),
+            ("план только в комментарии", "x: own-only\n", False,
+             '# ./scripts/run.sh --shard-plan plan.txt --shard "$S"'),
+        )
+        for k, (label, plan_text, runs_it, body) in enumerate(plan_forms):
+            base = tmp / f"pipeline-plan-{k}"
+            nm = _mk(base, {"own-only": clean},
+                     {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+            (nm / "plan.txt").write_text(plan_text, encoding="utf-8")
+            parsed = pipeline_runs(_wf_body(base, "cd tests/newman\n" + body))
+            _c(f"`--shard-plan` в теле `run:` — {label}: "
+               f"{'ПРОГОН' if runs_it else 'НЕ прогон'}",
+               bool(parsed.get("own-only")) == runs_it, f"разборщик: {parsed}")
+        base = tmp / "pipeline-plan-unreadable"
+        _mk(base, {"own-only": clean}, {"runId": ""})
+        try:
+            pipeline_runs(_wf_body(base, './scripts/run.sh --shard-plan absent.txt --shard x'))
+            unmet = False
+        except Unmet:
+            unmet = True
+        _c("план шардов не читается — третий исход, а не «шаг ничего не гоняет»", unmet)
 
         # Ось 6в: объявлений конвейера НЕТ — третий исход, а не «гоняется 0».
         base = tmp / "pipeline-absent"

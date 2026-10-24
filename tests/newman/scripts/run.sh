@@ -127,6 +127,16 @@ EXTRA=()
 SSL_CLIENT_CERT=""
 SSL_CLIENT_KEY=""
 SSL_EXTRA_CA=""
+# ШАРД ПЛАНА (kaname#848). `--shard-plan <файл> --shard <имя>` берёт перечень
+# коллекций из плана шардов (`chart-own-shards.txt`), а не из `--service`: план —
+# единственный источник разреза, и прогонщик судит его ДО стенда — набор
+# слушателя формы, не попавший ни в один шард, отказ с его именем (код 2), а не
+# зелёный шард. Путь плана — относительно каталога набора (прогонщик стоит в нём).
+# `--list` печатает выбранные коллекции и выходит, не требуя стенда: этим
+# провязку разреза и проверяют (`scripts/shard_plan_test.py`).
+SHARD_PLAN=""
+SHARD=""
+LIST_ONLY=""
 REMINT_BOOTSTRAP=0
 
 # `--help` ОТВЕЧАЕТ И НЕ ГОНЯЕТ. Прежде его не было вовсе, и неизвестный флаг
@@ -142,7 +152,7 @@ REMINT_BOOTSTRAP=0
 _usage() {
   awk 'NR < 6 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
   echo
-  echo "Флаги: --service <stem> (можно повторить) | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --help"
+  echo "Флаги: --service <stem> (можно повторить) | --shard-plan <файл> --shard <имя> | --list | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --help"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -159,6 +169,9 @@ while [[ $# -gt 0 ]]; do
         fi
       done
       SERVICES+=("$2"); shift 2 ;;
+    --shard-plan) SHARD_PLAN="$2"; shift 2 ;;
+    --shard)      SHARD="$2"; shift 2 ;;
+    --list)       LIST_ONLY=1; shift ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
     # СРОК БУТСТРАПА КОРОЧЕ ВОЛНЫ (kaname#868). Бутстрап живёт 15 минут (`MaxTTL`
@@ -186,6 +199,37 @@ while [[ $# -gt 0 ]]; do
     *)         EXTRA+=("$1"); shift ;;
   esac
 done
+
+# Разрез судится ДО окружения и стенда: его отказ — свойство дерева, а не прогона.
+if [[ -n "$SHARD_PLAN" || -n "$SHARD" ]]; then
+  if [[ -z "$SHARD_PLAN" || -z "$SHARD" ]]; then
+    echo "ОТКАЗ: --shard-plan и --shard называются вместе — половина разреза не выбирает ничего" >&2
+    exit 2
+  fi
+  if [[ ${#SERVICES[@]} -gt 0 ]]; then
+    echo "ОТКАЗ: --shard и --service вместе — у перечня было бы два источника" >&2
+    exit 2
+  fi
+  _shard_rc=0
+  _shard_out="$(python3 "$NEWMAN_DIR/scripts/shard_plan.py" --plan "$SHARD_PLAN" \
+                  --shard "$SHARD" --newman "$NEWMAN_DIR")" || _shard_rc=$?
+  if [[ "$_shard_rc" -ne 0 ]]; then
+    echo "ОТКАЗ: план шардов $SHARD_PLAN не исполним (код $_shard_rc) — ни одна коллекция не гонялась" >&2
+    exit 2
+  fi
+  while IFS= read -r _s; do
+    [[ -n "$_s" ]] && SERVICES+=("$_s")
+  done <<< "$_shard_out"
+  echo "[shard] $SHARD плана $SHARD_PLAN: ${SERVICES[*]}" >&2
+fi
+if [[ -n "$LIST_ONLY" ]]; then
+  if [[ ${#SERVICES[@]} -eq 0 ]]; then
+    echo "ОТКАЗ: --list без --service и без --shard — перечислять нечего, и пустой вывод читался бы «ноль коллекций»" >&2
+    exit 2
+  fi
+  printf '%s\n' ${SERVICES[@]+"${SERVICES[@]}"}
+  exit 0
+fi
 
 ENV="environments/local.postman_environment.json"
 # Env-файл gitignore-ится (fixture-seed пишет в него живые токены), но НИКТО его
