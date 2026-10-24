@@ -17,7 +17,7 @@ package pg_test
 //	full           полный проход (ReconcileBinding) advisory(G) → G FOR NO KEY UPDATE
 //	object         проход по объекту (ReconcileObject) advisory(G…, по id) → G… FOR NO KEY UPDATE
 //	update         правка меток (use-case)          G UPDATE (FOR NO KEY UPDATE)
-//	objectForward  форвард по объекту               G… FOR KEY SHARE одним оператором по id
+//	objectForward  форвард по объекту (NoStale)      G… FOR KEY SHARE одним оператором по id
 //	bindingForward форвард по выдаче                G FOR KEY SHARE
 //
 // Пары форвардов между собой и с `full`/`object`/`update` в переписи не судятся:
@@ -221,7 +221,7 @@ func (e *grantEnv) run(ctx context.Context, w grantWriter, g grantTarget) <-chan
 		case gwObject:
 			out <- e.rec.ReconcileObject(ctx, "compute.instance", g.obj)
 		case gwObjectForward:
-			out <- e.rec.ReconcileObjectForward(ctx, "compute.instance", g.obj)
+			out <- e.rec.ReconcileObjectForwardNoStale(ctx, "compute.instance", g.obj)
 		case gwBindingForward:
 			out <- e.rec.ReconcileBindingForward(ctx, g.bid)
 		default:
