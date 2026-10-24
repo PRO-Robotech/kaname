@@ -72,8 +72,9 @@ func moduleManifestsEntry(i int, name string, keys ...string) []string {
 type podDelivery struct {
 	// Files — путь файла в контейнере службы → «ConfigMap/ключ».
 	Files map[string]string
-	// WholeMaps — ConfigMap, смонтированные целиком (без перечня элементов),
-	// → путь монтирования; их файлы рендер не называет.
+	// WholeMaps — чужие ConfigMap, смонтированные целиком (без перечня
+	// элементов), → путь монтирования; их файлы рендер не называет. Своя карта
+	// настроек сюда не входит: её монтирует чарт и судит соседняя проба.
 	WholeMaps map[string]string
 	// Referenced — каждый ConfigMap, на который ссылается хоть один том пода.
 	Referenced []string
@@ -162,9 +163,12 @@ func readPodDelivery(t *testing.T, rendered string) podDelivery {
 			vname, _ := m["name"].(string)
 			pd.Mounts[path] = vname
 			for _, src := range volumes[vname] {
-				if src.whole {
+				if src.whole && src.name != ownConfigMapName {
 					pd.WholeMaps[src.name] = path
 					continue
+				}
+				if src.whole {
+					continue // своя карта настроек: её файлы — config.yaml процесса, не доставка
 				}
 				for _, kp := range src.items {
 					pd.Files[strings.TrimSuffix(path, "/")+"/"+kp[1]] = src.name + "/" + kp[0]

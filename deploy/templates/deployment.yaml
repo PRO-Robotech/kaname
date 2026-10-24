@@ -234,14 +234,14 @@ spec:
         - name: module-manifests
           projected:
             sources:
-              {{- range $mmList }}
+              {{- range $i, $e := $mmList }}
               - configMap:
-                  name: {{ .name | quote }}
+                  name: {{ $e.name | quote }}
                   optional: false
                   items:
-                    {{- range .keys }}
-                    - key: {{ . | quote }}
-                      path: {{ . | quote }}
+                    {{- range $k := $e.keys }}
+                    - key: {{ $k | quote }}
+                      path: {{ $k | quote }}
                     {{- end }}
               {{- end }}
         {{- end }}
