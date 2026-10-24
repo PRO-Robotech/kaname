@@ -165,3 +165,11 @@ route_signs:
   ui: false
   new_domain: false
   security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
