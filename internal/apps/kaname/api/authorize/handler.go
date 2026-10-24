@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -123,7 +124,8 @@ func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
 
 // Check — see iamv1.AuthorizeServiceServer.
 func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (*iamv1.AuthorizeCheckResponse, error) {
-	if req.GetSubject() == "" {
+	anonymousSelf := authzguard.IsAnonymousSelfCheck(ctx, req)
+	if req.GetSubject() == "" && !anonymousSelf {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument subject: required")
 	}
 	if req.GetResource() == nil {
@@ -134,10 +136,12 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	}
 	// Inner defense-in-depth: a tenant principal may only Check about itself, a
 	// resource it administers, or as a cluster-admin (caller_authority.go).
-	if err := h.authorizeCaller(ctx, req.GetSubject(), req.GetResource()); err != nil {
-		return nil, err
+	if !anonymousSelf {
+		if err := h.authorizeCaller(ctx, req.GetSubject(), req.GetResource()); err != nil {
+			return nil, err
+		}
 	}
-	res, err := h.svc.Check(ctx, service.CheckRequest{
+	decision := service.CheckRequest{
 		Subject: req.GetSubject(),
 		Resource: service.ResourceRef{
 			Type: req.GetResource().GetType(),
@@ -146,7 +150,11 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 		Action:           req.GetAction(),
 		RequiredRelation: req.GetRequiredRelation(),
 		Context:          structToMap(req.GetContext()),
-	})
+	}
+	if anonymousSelf {
+		decision.Subject = domain.SpeakerAnonymous
+	}
+	res, err := h.svc.Check(ctx, decision)
 	if err != nil {
 		// Validation errors → InvalidArgument (verbatim, safe); backend errors →
 		// Unavailable/Internal with a fixed, redacted message (no raw pgx/FGA leak).
@@ -164,9 +172,11 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 			"err", err.Error(), shared.TraceAttr(req.GetTraceId()))
 		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
+	disclosure := reqToService(req)
+	disclosure.Subject = decision.Subject
 	return &iamv1.AuthorizeCheckResponse{
 		Allowed:     res.Allowed,
-		DenyReasons: h.disclosed(ctx, reqToService(req), res.DenyReasons),
+		DenyReasons: h.disclosed(ctx, disclosure, res.DenyReasons),
 		CheckedAt:   shared.TimestampProto(res.CheckedAt),
 	}, nil
 }
