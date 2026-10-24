@@ -125,7 +125,9 @@ func (c *hookClone) push(t *testing.T) (out string, pushed bool, err error) {
 	cmd := gitenv.Command(c.dir, "push", "origin", "HEAD:refs/heads/1")
 	cmd.Env = c.env
 	raw, err := cmd.CombinedOutput()
-	probe := gitenv.Command(c.remote, "rev-parse", "--verify", "--quiet", "refs/heads/1")
+	// Вопрос о СОСТАВЕ ССЫЛОК голого удалённого фикстуры («есть ли ссылка»), а не
+	// об истории: потому show-ref, а не rev-parse --verify.
+	probe := gitenv.Command(c.remote, "show-ref", "--verify", "--quiet", "refs/heads/1")
 	probe.Env = c.env
 	return string(raw), probe.Run() == nil, err
 }
@@ -171,7 +173,9 @@ func TestPrePush_SignerOutsideTheLedgerStopsThePush(t *testing.T) {
 	require.False(t, pushed, "ссылка уехала на сервер при отказе:\n%s", out)
 	require.Contains(t, out, head[:12], "отказ не называет коммит:\n%s", out)
 	require.Contains(t, out, hookIdentity.email, "отказ не называет адрес:\n%s", out)
-	require.Contains(t, out, "коммиттер", "отказ не называет роль коммиттера:\n%s", out)
+	// Форма находки «… <адрес> (роль) — причина»: перепись тоже называет роль
+	// «коммиттер», поэтому утверждается именно форма находки.
+	require.Contains(t, out, "<"+hookIdentity.email+"> (коммиттер)", "отказ не называет коммиттера находкой:\n%s", out)
 }
 
 // TestPrePush_WaiverDoesNotSignThePush — клетка «освобождение»: личность стоит
