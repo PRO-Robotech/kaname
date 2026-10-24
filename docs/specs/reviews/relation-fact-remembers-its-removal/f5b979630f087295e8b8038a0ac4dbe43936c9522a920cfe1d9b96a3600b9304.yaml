@@ -87,11 +87,26 @@ authority:
   expected_actor: pointpu
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
-    acceptance-reviewer · APPROVED · sha256 f5b979630f087295e8b8038a0ac4dbe43936c9522a920cfe1d9b96a3600b9304
+  type: issue_comment
+  target: PRO-Robotech/kaname#636
+  status: performed
+  published: true
+  database_id: 6379466575
+  node_id: IC_kwDOUO26pM8AAAABfD7vTw
+  url: https://github.com/PRO-Robotech/kaname/issues/636#issuecomment-6379466575
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6379466575
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/636
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-24T03:45:56Z'
+  body_sha256: 44cecec7424b8cadb87d8ca9f619e187882e98f4fb67fe719c7a906f58174e7b
+  subject_sha256: f5b979630f087295e8b8038a0ac4dbe43936c9522a920cfe1d9b96a3600b9304
+  subject_revision: 46a5d38b7c7a31e9328b073a07224d9f51180aa3
+  verdict: APPROVED
+  note: >-
+    Опубликовал курьер; блок приведён к факту по ответу API комментария; body_sha256 — sha256
+    тела комментария без перевода строки. effective_approval.issued: true — к факту события.
 
 attribution:
   reviewer_kind: claude_agent
