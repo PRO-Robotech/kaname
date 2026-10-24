@@ -9,7 +9,8 @@ package pg_test
 //
 //  1. КОНКУРЕНЦИЯ: форвард, пишущий реестр члена A (compute.instance:<id>), и полный
 //     проход реплики, не знающей типа члена B (vpc.network:<id>, тот же id, та же
-//     выдача), идут одновременно. При любом исходе гонки реестр и факт A остаются,
+//     выдача; объект B ушёл из зеркала, член выпал — kaname#937), идут одновременно.
+//     При любом исходе гонки реестр и факт A остаются,
 //     реестр и факт B сняты. Близнец — те же стороны по очереди.
 //  2. ДВЕ КООРДИНАТЫ, ОДИН КОРТЕЖ (тип переименован с сохранением типа модели): уход
 //     первой координаты оставляет факт, который держит строка второй; уход второй
@@ -71,6 +72,11 @@ func newCoordRaceProbe(t *testing.T, suffix string) *coordRaceProbe {
 	require.Positive(t, ledgerRowsOn(t, ctx, pool, bid, "vpc_network:iRace"), "БЛИЗНЕЦ: реестр сети B есть")
 	require.Positive(t, factsOn(t, ctx, pool, subj, "vpc_network", "iRace"), "БЛИЗНЕЦ: факт сети B есть")
 	require.Zero(t, ledgerRowsOn(t, ctx, pool, bid, "compute_instance:iRace"), "ПРЕДПОСЫЛКА: реестра инстанса A ещё нет")
+
+	// Сеть B уходит из зеркала: её член выпадает по-настоящему. Реплика без типа сети
+	// одним незнанием типа члена не снимает (kaname#937) — снимает выпадение.
+	_, err = pool.Exec(ctx, `DELETE FROM kaname.resource_mirror WHERE object_type = 'vpc.network' AND object_id = 'iRace'`)
+	require.NoError(t, err, "ПРЕДПОСЫЛКА: сеть B снята с зеркала")
 
 	seedMirrorRow(t, ctx, pool, "compute.instance", "iRace", string(fx.prj), string(fx.accID), nil, time.Now())
 	registerUnderProject(t, ctx, pool, fx, "compute_instance:iRace")
