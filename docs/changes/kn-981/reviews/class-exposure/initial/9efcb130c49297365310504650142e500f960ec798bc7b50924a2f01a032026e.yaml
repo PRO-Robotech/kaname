@@ -52,8 +52,8 @@ revisions:
   cutover_check: git merge-base --is-ancestor 1202e3cf… HEAD → 0
 
 inspected: >-
-  Тело kaname#981 и эпика #980 (с таблицей вариантов), тела #979 и #906, состояние
-  #964, #865, kacho#3303. В kaname@603bf6ca прочитаны: cmd/kaname/serve.go (цепочка
+  Тело kaname#981 и эпика kaname#980 (с таблицей вариантов), тела kaname#979 и kaname#906, состояние
+  kaname#964, kaname#865, kacho#3303. В kaname@603bf6ca прочитаны: cmd/kaname/serve.go (цепочка
   старта: доставка → опора паритета → композиция → допуск → установка → применение
   каталога → модель против каталога → страж паритета → снимок → роли → посев),
   module_manifests.go, module_delivery_source.go, module_catalog_apply.go,
@@ -121,7 +121,7 @@ items:
       в прод-коде = 1 производитель)
     state: open
   - id: CE-05
-    decision: Р1 + зависимость #906 — ревизия обязательна
+    decision: Р1 + зависимость kaname#906 — ревизия обязательна
     class: U
     condition: >-
       Publish отвергает документ без revision (INVALID_ARGUMENT с именем поля); Job
@@ -134,7 +134,7 @@ items:
 
   # ── Р2. Publish и Plan на внутреннем слушателе с mTLS ─────────────────────────────
   - id: CE-06
-    decision: Р2 — Publish принимает ТЕЛО манифеста (инверсия решения #865 «вход — имя модуля, никогда тело»)
+    decision: Р2 — Publish принимает ТЕЛО манифеста (инверсия решения kaname#865 «вход — имя модуля, никогда тело»)
     class: 'I; doc-truthfulness'
     condition: >-
       Оба довода прежнего решения сняты тем же изменением, а не обойдены: (1) «второй
@@ -164,7 +164,7 @@ items:
     decision: Р2 — Publish мутирует → Operation (ban #9); «реплики перешли» не входит в done
     class: R
     condition: >-
-      Operation терминальная (форма Apply #865): done = ревизия и модель закоммичены,
+      Operation терминальная (форма Apply kaname#865): done = ревизия и модель закоммичены,
       и только; ожидания перехода реплик внутри Publish нет (api-operation-done).
       Схождение реплик наблюдается отдельно — ревизией модели в решении и метрикой.
     held_by: >-
@@ -481,7 +481,7 @@ items:
       (internal/check/deferred_work_test.go) против маркеров отсрочки
     state: open
   - id: CE-36
-    decision: Р9 (неявное) — судьба Plan/Apply из #865
+    decision: Р9 (неявное) — судьба Plan/Apply из kaname#865
     class: 'K; api-outcome-remove'
     condition: >-
       Plan/Apply перечитывают каталог доставки — без него теряют вход. Исход
@@ -506,7 +506,7 @@ numbers:
       единица — файл
     result: >-
       0 из 5 несут revision (compute, nlb, registry, storage, vpc). Посылка уже, чем
-      дерево: ревизии нет ни у одного. kacho#3303 (П2 #865) — OPEN; #906 зависит от неё.
+      дерево: ревизии нет ни у одного. kacho#3303 (П2 kaname#865) — OPEN; kaname#906 зависит от неё.
   - id: N-03
     claim: модуль публикует расширение своих типов сам
     measured: >-
@@ -628,7 +628,7 @@ return_to_acceptance:
       подтверждения в окне W отвечает закрытым отказом ОДНОГО кода (рекомендация — UNAVAILABLE).
   - id: RA4
     item: CE-36
-    text: Исход Plan/Apply #865 и их маршрутов на крае kacho (N-06) — переоснование или снятие.
+    text: Исход Plan/Apply kaname#865 и их маршрутов на крае kacho (N-06) — переоснование или снятие.
   - id: RA5
     item: CE-05
     text: >-
@@ -663,9 +663,9 @@ return_to_acceptance:
 questions:
   - id: Q1
     text: >-
-      #981 Blocked by #906, а #906 требует kacho#3303 (П2, правка kacho) — владелец
+      kaname#981 Blocked by kaname#906, а kaname#906 требует kacho#3303 (П2, правка kacho) — владелец
       отложил kacho. Варианты: (а) ждать П2 — kaname не добивается до kacho, против
-      решения 2026-10-23; (б) требование ревизии вносится в Publish в kaname (S2 #906
+      решения 2026-10-23; (б) требование ревизии вносится в Publish в kaname (S2 kaname#906
       переезжает в проверку Publish, чтение каталога снимается всё равно), манифесты
       kacho получают revision при перепине; цена — сценарии Job импорта на
       манифестах kacho зеленеют только после перепина; (в) Publish принимает
