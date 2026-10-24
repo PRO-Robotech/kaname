@@ -173,10 +173,10 @@ func TestAnonymousRegistryToken_TrustedForwarderWithoutUsableAddressIsCountedOnT
 		clients []string
 		want    string
 	}{
-		"список адресов":          {[]string{"203.0.113.1, 198.51.100.1", "203.0.113.2, 198.51.100.1"}, "2"},
-		"не адрес":                {[]string{"not-an-address"}, "1"},
-		"пустое значение":         {[]string{""}, "1"},
-		"близнец: один адрес":     {[]string{"203.0.113.1", "203.0.113.2"}, "0"},
+		"список адресов":      {[]string{"203.0.113.1, 198.51.100.1", "203.0.113.2, 198.51.100.1"}, "2"},
+		"не адрес":            {[]string{"not-an-address"}, "1"},
+		"пустое значение":     {[]string{""}, "1"},
+		"близнец: один адрес": {[]string{"203.0.113.1", "203.0.113.2"}, "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain))
