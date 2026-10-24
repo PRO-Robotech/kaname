@@ -9,6 +9,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifestoracle"
 )
 
 // module_manifests.go — манифесты модулей ЧИТАЮТСЯ НА СТАРТЕ (задача kacho#1875).
@@ -67,7 +68,7 @@ func loadDeliveredManifests(logger *slog.Logger, cfg config.ManifestsConfig) ([]
 		return nil, nil
 	}
 
-	report, err := manifest.LoadDelivered(cfg.Dir)
+	report, err := loadDelivery(cfg.Dir)
 	logger.Info("перепись доставки манифестов модулей",
 		slog.String("dir", cfg.Dir),
 		slog.Bool("required", cfg.Required),
@@ -84,4 +85,23 @@ func loadDeliveredManifests(logger *slog.Logger, cfg config.ManifestsConfig) ([]
 		return nil, fmt.Errorf("доставка манифестов модулей: %w", err)
 	}
 	return report.Manifests, nil
+}
+
+// loadDelivery — ОДИН разбор каталога доставки для обоих путей, читающих его
+// (старт и перечитывание по запросу), с родством типов канона образа для судьи
+// вложенных правил ролей (kaname#951).
+//
+// Один дом, а не две строки вызова: путь, забывший внести канон, отверг бы
+// манифест модуля без раздела `resources`, который принимает соседний путь, — и
+// два ответа об одном каталоге разошлись бы молча.
+//
+// Канон не разобрался — отказ, а не разбор без канона: без него манифест, чьи
+// роли судятся родством канона, был бы отвергнут с причиной «не лежит под», и
+// оператор чинил бы манифест, а не образ.
+func loadDelivery(dir string) (manifest.CheckReport, error) {
+	canon, err := manifestoracle.CanonTypes()
+	if err != nil {
+		return manifest.CheckReport{}, fmt.Errorf("канон модели прав образа не разобран: %w", err)
+	}
+	return manifest.LoadDelivered(dir, manifest.WithTypeCanon(canon))
 }

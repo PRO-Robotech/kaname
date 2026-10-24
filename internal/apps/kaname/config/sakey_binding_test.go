@@ -48,6 +48,7 @@ func contourTranslated(t *testing.T) config.Config {
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
 		Endpoint: "tcp://0.0.0.0:9096",
 		Service:  "registry.kacho.local",
+		Issuer:   probeIssuer,
 	}
 	cfg.AuthN.TokenSigning = config.TokenSigningConfig{
 		Enabled:           true,

@@ -45,6 +45,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,6 +188,32 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	require.NoError(t, requireLoginLaneTLS(productionMode, laneCfg, mtlsCfg),
 		"боевой профиль не проходит стража старта полосы входа: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
 	t.Logf("полоса входа: адрес %q", laneCfg.APIServer.LoginLaneEndpoint)
+
+	// ── КРУГ ОТПРАВИТЕЛЕЙ ТЕМ ЖЕ ПРЕДИКАТОМ, ЧТО У ТРАНСПОРТА (kaname#308) ───
+	//
+	// Круг, домен и форма берутся у профиля. Имени собственного фронта проба
+	// не знает: оно выводится из смонтированного сертификата, которого в дереве
+	// нет, — поэтому стражу оно подаётся пустым, и каждая запись боевого круга
+	// обязана разбираться ФОРМОЙ. Круг без записей сделал бы вердикт вакуумным.
+	var forwardersCfg config.Config
+	forwardersCfg.AuthN.TrustDomainName = profileString(t, values, "authn", "trustDomain")
+	forwardersCfg.AuthN.ServiceNameFormRaw = profileString(t, values, "authn", "serviceNameForm")
+	forwardersRaw, found := dig(values, "authn", "trustedForwarderSANs")
+	require.True(t, found, "профиль не объявляет круга отправителей — страж круга был бы вакуумен")
+	forwardersList, ok := forwardersRaw.([]any)
+	require.True(t, ok, "круг отправителей объявлен не списком: %T", forwardersRaw)
+	for i, e := range forwardersList {
+		forwardersCfg.AuthN.TrustedForwarderSANs = append(forwardersCfg.AuthN.TrustedForwarderSANs,
+			valueAsString(t, fmt.Sprintf("authn.trustedForwarderSANs[%d]", i), e))
+	}
+	require.NotEmpty(t, forwardersCfg.AuthN.TrustedForwarderSANs,
+		"круг отправителей боевого профиля пуст — вердикт беспредметен")
+	require.NoError(t, requireForwardersRecognised(forwardersCfg.AuthN, ""),
+		"боевой профиль объявляет отправителя, которого транспорт не узнает модулем: он прошёл бы "+
+			"взаимный TLS и получал отказ на каждом вызове")
+	t.Logf("круг отправителей: записей %d · форма %q · домен %q",
+		len(forwardersCfg.AuthN.TrustedForwarderSANs), forwardersCfg.AuthN.ServiceNameFormRaw,
+		forwardersCfg.AuthN.TrustDomainName)
 
 	// ── РЕЖИМ СЛУШАТЕЛЯ ВЫДАЧИ (kaname#315, Р7 п.5) ────────────────────────
 	//
@@ -390,4 +417,13 @@ func valueAsString(t *testing.T, key string, value any) string {
 			"ключ %s несёт %T", key, value)
 		return ""
 	}
+}
+
+// profileString — строковая величина профиля по пути; её отсутствие — отказ
+// пробы: величина, которой профиль не объявил, вердикта о себе не даёт.
+func profileString(t *testing.T, values map[string]any, path ...string) string {
+	t.Helper()
+	raw, found := dig(values, path...)
+	require.Truef(t, found, "профиль не объявляет %s", strings.Join(path, "."))
+	return valueAsString(t, strings.Join(path, "."), raw)
 }

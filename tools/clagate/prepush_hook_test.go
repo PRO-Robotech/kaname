@@ -50,8 +50,10 @@ import (
 // каждый коммит, поэтому страж правила ветки и коммита молчит во всех кейсах.
 var hookIdentity = struct{ name, email string }{"Подписант", "signer@example.org"}
 
-// hookFiles — что хук отправки читает из своего каталога до наборов проверок.
-var hookFiles = []string{"pre-push", "prepush-rule.sh", "branch-rule.sh", "prepush-classify.sh"}
+// hookFiles — что хук отправки читает из своего каталога до наборов проверок:
+// страж правила, страж новых blob'ов (kaname#894; без него хук отказывает) и
+// определитель категории.
+var hookFiles = []string{"pre-push", "prepush-rule.sh", "branch-rule.sh", "prepush-added-files.sh", "prepush-classify.sh"}
 
 type hookClone struct {
 	dir, remote string

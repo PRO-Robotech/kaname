@@ -260,6 +260,8 @@ build_module() { # build_module <каталог> <тело пробы>
     # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
     cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
     cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
+    # Второй страж хука — новых blob'ов (kaname#894): без него хук отказывает.
+    cp "$ROOT/scripts/hooks/prepush-added-files.sh" "$d/scripts/hooks/prepush-added-files.sh" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/mask\n\ngo 1.21\n' > "$d/go.mod"
     printf 'scope:\n  - .\nowners:\n  - email: probe@example.invalid\n    note: корневая учётная запись фикстуры — подпись опыта\nsignatories: []\nwaivers: []\n' \

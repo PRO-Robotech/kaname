@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // HeaderForwardedFor — единственный заголовок, который правило читает, и
@@ -129,17 +130,20 @@ func RegistryTokenReasons() []RegistryTokenReason {
 // Rule — правило и его перепись.
 type Rule struct {
 	trust grpcsrv.TrustDomain
+	// form — форма имени службы, объявленная установкой: ею узнаётся край.
+	form servicesan.Form
 
 	mu       sync.Mutex
 	counts   map[Cell]uint64
 	registry map[RegistryTokenReason]uint64
 }
 
-// New собирает правило над доменом доверия процесса. Перепись засеяна нулём по
+// New собирает правило над доменом доверия и формой имени службы процесса:
+// по ним узнаётся край. Перепись засеяна нулём по
 // каждой клетке: клетка, появляющаяся при первом попадании, не отличает «ноль
 // случаев» от «счёта нет».
-func New(trust grpcsrv.TrustDomain) *Rule {
-	r := &Rule{trust: trust, counts: make(map[Cell]uint64, 4),
+func New(trust grpcsrv.TrustDomain, form servicesan.Form) *Rule {
+	r := &Rule{trust: trust, form: form, counts: make(map[Cell]uint64, 4),
 		registry: make(map[RegistryTokenReason]uint64, len(RegistryTokenReasons()))}
 	for _, c := range Cells() {
 		r.counts[c] = 0
@@ -183,7 +187,7 @@ func (r *Rule) resolve(req *http.Request, forwarderSAN string) (source string, r
 // пересыльщику точки. Сравнение точное: пересыльщик назван ручкой целиком,
 // а не узнан по форме имени.
 func (r *Rule) forwards(req *http.Request, forwarderSAN string) bool {
-	if authzguard.PeerIsGateway(r.trust, req.TLS) {
+	if authzguard.PeerIsGateway(r.trust, r.form, req.TLS) {
 		return true
 	}
 	return forwarderSAN != "" && authzguard.VerifiedPeerIdentity(r.trust, req.TLS) == forwarderSAN

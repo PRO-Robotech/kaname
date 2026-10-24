@@ -206,3 +206,7 @@ func (_ *multiBindingABReader) GrantorLastPresentedAt(context.Context, domain.Us
 func (_ *multiBindingABReader) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
 	return domain.PublicReadContainer{}, nil
 }
+
+func (_ *multiBindingABReader) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}

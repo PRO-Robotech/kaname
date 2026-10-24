@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 const (
@@ -33,7 +34,7 @@ const (
 
 func newRule(t *testing.T) *issuingsource.Rule {
 	t.Helper()
-	return issuingsource.New(grpcsrv.NewTrustDomain(trustDomain))
+	return issuingsource.New(grpcsrv.NewTrustDomain(trustDomain), servicesan.NewForm("kacho-{service}"))
 }
 
 // request — запрос от пира с адреса peer; san пуст — сертификата нет.

@@ -244,9 +244,10 @@ type CatalogWriter interface {
 	// (документ без ключа) не пишет ничего и только читает применённую пару.
 	// Отдаёт пару, стоявшую ДО оператора, и что он сделал.
 	AdvanceRevision(ctx context.Context, module string, declared *Edition) (RevisionWrite, error)
-	// UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля. `changed` ложно, когда
+	// UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля и приводит в ней признак
+	// ключа S7 (`classGrantsOnly`, kaname#950). `changed` ложно, когда
 	// объявленное состояние уже стоит в строке.
-	UpsertModule(ctx context.Context, module string) (bool, error)
+	UpsertModule(ctx context.Context, module string, classGrantsOnly bool) (bool, error)
 	// UpsertResource заводит либо оживляет строку ресурса.
 	UpsertResource(ctx context.Context, r catalog.ResourceRow) (bool, error)
 	// UpsertVerb заводит либо оживляет строку действия, приводя и признак словаря.
@@ -342,7 +343,8 @@ type Report struct {
 	// UnchangedResources / UnchangedVerbs — объявленное уже стояло в строке.
 	UnchangedResources int
 	UnchangedVerbs     int
-	// ModuleWritten — строка модуля заведена либо оживлена.
+	// ModuleWritten — строка модуля заведена, оживлена либо сменила признак
+	// ключа S7 (kaname#950).
 	ModuleWritten bool
 	// RetiredResources / RetiredVerbs — строк помечено снятыми.
 	RetiredResources int
@@ -646,7 +648,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			return fmt.Errorf("%w: чтение каталога модуля: %w", ErrWriteFailed, rerr)
 		}
 
-		if changed, uerr := w.UpsertModule(ctx, declared.Module); uerr != nil {
+		if changed, uerr := w.UpsertModule(ctx, declared.Module, declared.ClassGrantsOnlyOnContainers); uerr != nil {
 			return fmt.Errorf("%w: модуль %s: %w", ErrWriteFailed, declared.Module, uerr)
 		} else if changed {
 			rep.ModuleWritten = true

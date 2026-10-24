@@ -134,7 +134,7 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerIsCountedOnTheShowc
 		"близнец: доверенный пересыльщик": {anonLaneForwarderSAN, true, "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain))
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), probeServiceNameForm)
 			reg := metrics.NewRegistry()
 			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
 			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)
@@ -179,7 +179,7 @@ func TestAnonymousRegistryToken_TrustedForwarderWithoutUsableAddressIsCountedOnT
 		"близнец: один адрес": {[]string{"203.0.113.1", "203.0.113.2"}, "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain))
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), probeServiceNameForm)
 			reg := metrics.NewRegistry()
 			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
 			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)
@@ -206,7 +206,7 @@ func TestAnonymousRegistryToken_TrustedForwarderWithoutUsableAddressIsCountedOnT
 func anonymousLaneConfig() config.Config {
 	var cfg config.Config
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: anonLaneService,
+		Endpoint: "tcp://0.0.0.0:9096", Service: anonLaneService, Issuer: anonLaneIssuer,
 		AnonymousClientID: anonLanePrincipal, AnonymousPerSourcePerSec: 5,
 		AnonymousForwarderSAN: anonLaneForwarderSAN,
 	}

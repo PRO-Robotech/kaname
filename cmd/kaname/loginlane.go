@@ -774,13 +774,14 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
-		SessionTTL:    login.SessionTTL,
-		CookieDomain:  login.ResolvedCookieDomain(),
-		TrustDomain:   cfg.AuthN.TrustDomain(),
-		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
-		Logger:        logger,
-		Observer:      rec,
-		Verification:  rec,
+		SessionTTL:      login.SessionTTL,
+		CookieDomain:    login.ResolvedCookieDomain(),
+		TrustDomain:     cfg.AuthN.TrustDomain(),
+		ServiceNameForm: cfg.AuthN.ServiceNameForm(),
+		RefusalDomain:   refusaldomain.For(refusaldomain.ServiceIAM),
+		Logger:          logger,
+		Observer:        rec,
+		Verification:    rec,
 	}, laneVerbs{
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
