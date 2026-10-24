@@ -282,6 +282,8 @@ func TestRegistryTokenPointCensusIsSeededWithZeros(t *testing.T) {
 	}, issuingsource.RegistryTokenReasons())
 	require.Equal(t, "forwarded-from-unrecognized-peer",
 		string(issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer))
+	require.Equal(t, registryEdgeWithoutAddress, issuingsource.RegistryTokenReasonEdgeWithoutAddress,
+		"метка клетки — та же, что у клетки п. 4 точек приёмки")
 	requireRegistryTokenCensus(t, r, nil)
 	requireCells(t, r, nil)
 }
