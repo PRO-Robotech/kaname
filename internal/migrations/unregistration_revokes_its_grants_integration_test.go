@@ -53,6 +53,11 @@ func urgSeed(t *testing.T, db *sql.DB) {
 		`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		 VALUES ('acb-urg-live', 'user', 'usr-urg', 'rol-urg', 'account', 'acc-urg', 'ACTIVE')`,
+		// Набор субъектов каждой выдачи — той же транзакцией: выдача без строки
+		// набора к фиксации не допускается (миграция 20261018214804), пара выдачи
+		// обязана быть в её наборе (миграция 20261019194800).
+		`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
+		 VALUES ('acb-urg-r0', 'user', 'usr-urg', 0), ('acb-urg-live', 'user', 'usr-urg', 0)`,
 	} {
 		_, err := tx.Exec(q)
 		require.NoErrorf(t, err, "посев: %s", q)
