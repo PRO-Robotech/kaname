@@ -137,6 +137,13 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("api-server.rate-limit.internal.mutation-per-sec", 0.0)
 	v.SetDefault("api-server.rate-limit.internal.burst-factor", 0.0)
 	v.SetDefault("api-server.rate-limit.internal.in-flight", 0)
+	// api-server.rest-limits — потолки тела и одновременности собственного
+	// публичного REST-фронта (kaname#990). Умолчания — потолки, а не их снятие;
+	// числа и их цена — в шапке rest_limits.go.
+	//
+	// ENV: KANAME_API_SERVER__REST_LIMITS__{MAX_BODY_BYTES,MAX_IN_FLIGHT}
+	v.SetDefault("api-server.rest-limits.max-body-bytes", DefaultRESTMaxBodyBytes)
+	v.SetDefault("api-server.rest-limits.max-in-flight", DefaultRESTMaxInFlight)
 
 	// retention — фоновая уборка таблиц, чей рост задаёт внешний (задача kacho#1292).
 	//

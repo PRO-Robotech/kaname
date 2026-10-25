@@ -4,6 +4,7 @@
 package restfront
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // Пробы потолков публичного REST-фронта (kaname#990).
@@ -52,7 +54,7 @@ func echoLen(calls *atomic.Int64) http.Handler {
 	})
 }
 
-type refusal struct {
+type refusalSeen struct {
 	Code    int               `json:"code"`
 	Message string            `json:"message"`
 	Details []json.RawMessage `json:"details"`
@@ -66,7 +68,7 @@ func requireRefusal(t *testing.T, rec *httptest.ResponseRecorder, status int, ms
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type %q, ожидался application/json", ct)
 	}
-	var got refusal
+	var got refusalSeen
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("тело отказа не JSON формы фронта: %v (%q)", err, rec.Body.String())
 	}
@@ -187,7 +189,22 @@ func TestLimits_InFlightAboveCeilingIsRefusedNotQueued(t *testing.T) {
 	extra := &countingBody{left: 1 << 20}
 	req := httptest.NewRequest(http.MethodPost, "/iam/v1/authorize:check", extra)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	// Лишний запрос обязан вернуться СРАЗУ. Срок здесь — не ожидание исхода, а
+	// граница отказа пробы: без потолка лишний запрос встал бы за занятыми
+	// слотами навсегда, и проба повисла бы вместо того, чтобы покраснеть.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(rec, req)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(release)
+		wg.Wait()
+		<-done
+		t.Fatalf("лишний запрос не получил отказа, а ждал свободного слота (статус после освобождения %d)", rec.Code)
+	}
 	requireRefusal(t, rec, http.StatusTooManyRequests, TextTooManyConcurrent)
 	if extra.read.Load() != 0 {
 		t.Errorf("тело лишнего запроса прочитано (%d байт) — отказ обязан наступать до чтения", extra.read.Load())
@@ -230,5 +247,57 @@ func TestLimits_BodyRefusalReturnsTheSlot(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("после отказов по телу слот не вернулся: статус %d", rec.Code)
+	}
+}
+
+// Размещение: потолки стоят на пути запроса СОБРАННОГО публичного фронта, а не
+// только на самой обёртке. Адрес слушателя произволен — привязки поднимаются,
+// не соединяясь, и отказ по телу наступает раньше обращения к слушателю.
+func TestLimits_PublicFrontIsBuiltWithItsLimits(t *testing.T) {
+	h, err := NewPublic(context.Background(), "127.0.0.1:1", dialOpts(), Limits{MaxBodyBytes: 8, MaxInFlight: 4})
+	if err != nil {
+		t.Fatalf("сборка публичного фронта: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/iam/v1/authorize:check", strings.NewReader(strings.Repeat("a", 1024)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	requireRefusal(t, rec, http.StatusRequestEntityTooLarge, TextBodyTooLarge)
+
+	// Близнец: тело в пределах потолка до отказа по телу не доходит.
+	req = httptest.NewRequest(http.MethodPost, "/iam/v1/authorize:check", strings.NewReader("{}"))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusRequestEntityTooLarge {
+		t.Fatalf("тело в пределах потолка отвергнуто как слишком большое: %q", rec.Body.String())
+	}
+}
+
+// brokenBody — тело, оборвавшееся на чтении после нескольких байт.
+type brokenBody struct{ sent bool }
+
+func (b *brokenBody) Read(p []byte) (int, error) {
+	if !b.sent {
+		b.sent = true
+		return copy(p, "{\"a\""), nil
+	}
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (b *brokenBody) Close() error { return nil }
+
+// Оборванное тело — 400, а не разбор его части обработчиком.
+func TestLimits_BrokenBodyIsRefusedNotHalfParsed(t *testing.T) {
+	var calls atomic.Int64
+	h := WithLimits(echoLen(&calls), Limits{MaxBodyBytes: 1024, MaxInFlight: 4})
+	req := httptest.NewRequest(http.MethodPost, "/iam/v1/authorize:check", &brokenBody{})
+	req.ContentLength = -1
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || calls.Load() != 0 {
+		t.Fatalf("статус %d, вызовов обработчика %d; ожидалось 400 и 0", rec.Code, calls.Load())
+	}
+	var got refusalSeen
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Code != 3 || got.Message != TextBodyUnreadable {
+		t.Fatalf("отказ %+v (%v), ожидался {code:3, message:%q}", got, err, TextBodyUnreadable)
 	}
 }
