@@ -50,7 +50,7 @@ type smEmitter struct{}
 func (smEmitter) EmitWriteTx(context.Context, service.Tx, []service.RelationTuple) error  { return nil }
 func (smEmitter) EmitDeleteTx(context.Context, service.Tx, []service.RelationTuple) error { return nil }
 
-type mirrorAdapter struct{}
+type mirrorAdapter struct{ noDescendants }
 
 // UpsertTx always reports `applied` and never `projectionUnchanged` — these cases
 // exercise the materialisation path, not the redelivery gate (which

@@ -55,7 +55,10 @@ func (e *recordingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, t []ser
 // оператор каталога. Дублёр НЕ снисходительнее настоящего: он возвращает тот же
 // признак и тот же текст, поэтому проба меряет отображение отказа, а не свою
 // выдумку.
-type refusingMirror struct{ objectType string }
+type refusingMirror struct {
+	noDescendants
+	objectType string
+}
 
 func (m refusingMirror) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, bool, error) {
 	if row.ObjectType == m.objectType {

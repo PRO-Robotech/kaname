@@ -50,6 +50,7 @@ import (
 // written only when the incoming source_version is STRICTLY newer than the stored one,
 // and the emitter reports whether it changed anything.
 type versionedMirror struct {
+	noDescendants
 	mu       sync.Mutex
 	stored   map[string]time.Time
 	upserts  int // UpsertTx calls

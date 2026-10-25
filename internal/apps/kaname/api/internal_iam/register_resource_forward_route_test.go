@@ -46,6 +46,7 @@ import (
 // хранимой, и отдельно сообщается, что запись НЕ заменила проекцию — то есть
 // продвинула версию, оставив parent-область и метки байт-в-байт прежними.
 type projectionMirror struct {
+	noDescendants
 	mu     sync.Mutex
 	stored map[string]projectionRow
 }
