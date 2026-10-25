@@ -205,11 +205,11 @@ func TestModuleRoster_EveryCallerCheckPathDecidesTheSame(t *testing.T) {
 	t.Logf("перепись: форм %d · путей %d · решений %d", len(moduleroster.Forms()), len(names), len(moduleroster.Forms())*len(names))
 }
 
-// internalListenerServices — службы, которые композиционный корень поднимает на
+// internalListenerServiceDescriptors — службы, которые композиционный корень поднимает на
 // внутреннем слушателе: все `Internal*` контракта службы, служба решений и
 // поток изменений фундамента. Выводятся обходом реестра описаний, а не
 // перечнем имён.
-func internalListenerServices() []protoreflect.ServiceDescriptor {
+func internalListenerServiceDescriptors() []protoreflect.ServiceDescriptor {
 	var out []protoreflect.ServiceDescriptor
 	protoregistry.GlobalFiles.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
 		pkg := string(fd.Package())
@@ -247,7 +247,7 @@ func TestModuleProfiles_EveryInternalMethodIsClassifiedAndEveryEntryExists(t *te
 		}
 	}
 
-	services := internalListenerServices()
+	services := internalListenerServiceDescriptors()
 	if len(services) == 0 {
 		t.Fatal("предпосылка: обход реестра описаний не нашёл ни одной службы внутреннего слушателя — перепись не выполнилась")
 	}
