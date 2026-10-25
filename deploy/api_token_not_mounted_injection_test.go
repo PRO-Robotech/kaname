@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // api_token_not_mounted_injection_test.go — способность меры токена API упасть и
-// смолчать доказывается ИНЪЕКЦИЕЙ, а не прочтением (задача #997).
+// смолчать доказывается ИНЪЕКЦИЕЙ, а не прочтением (задача kaname#997).
 //
 // Прогонов три, и третий обязателен:
 //
 //	контроль          — чарт цел: мера молчит;
 //	снятое поле       — строка поля убрана из шаблона: краснеет;
-//	обратная величина — умолчание ручки `true`: краснеет, называя величину.
+//	обратная величина — литерал шаблона `true`: краснеет, называя величину.
 //
 // Каждая инъекция меняет против контроля РОВНО ОДИН факт. Вердикт снимается с
 // РЕНДЕРА копии чарта, а не с дерева: правка дерева сделала бы вердикт свойством
@@ -46,12 +46,12 @@ func TestProdProfile_RenderedTokenInjection_DroppedFieldIsFound(t *testing.T) {
 		"(spec пода %d, величины %#v)", m.Specs, m.Values)
 }
 
-// TestProdProfile_RenderedTokenInjection_OppositeDefaultIsFound — ДЕФЕКТ второй
-// оси: поле на месте, умолчание ручки обратное. Мера, проверяющая лишь НАЛИЧИЕ
+// TestProdProfile_RenderedTokenInjection_OppositeLiteralIsFound — ДЕФЕКТ второй
+// оси: поле на месте, литерал шаблона обратный. Мера, проверяющая лишь НАЛИЧИЕ
 // поля, зеленела бы на включённом монтировании.
-func TestProdProfile_RenderedTokenInjection_OppositeDefaultIsFound(t *testing.T) {
+func TestProdProfile_RenderedTokenInjection_OppositeLiteralIsFound(t *testing.T) {
 	dir := chartCopy(t)
-	patchInCopy(t, dir, "values.yaml", apiTokenKnob+": false", apiTokenKnob+": true")
+	patchInCopy(t, dir, "templates/deployment.yaml", apiTokenField+": false", apiTokenField+": true")
 	m := apiTokenMountInRender(renderChartAt2(t, dir, apiTokenInjectionChain, minimalOperatorCoordinates...))
 	require.NotZero(t, m.Specs, "обход пуст: вердикт беспредметен")
 	require.Zerof(t, m.SpecsOff, "мера сочла токен выключенным при величине %#v — она проверяет "+

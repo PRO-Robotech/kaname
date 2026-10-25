@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // api_token_not_mounted_test.go — ПОСТАВЛЯЕМЫЙ ЧАРТ НЕ МОНТИРУЕТ В ПОД ТОКЕН API
-// КЛАСТЕРА (задача #997).
+// КЛАСТЕРА (задача kaname#997).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕДМЕТ
@@ -22,8 +22,10 @@
 //	    чарт её заводит) — тоже;
 //	Р2  ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: прод-код службы клиента кластера не несёт и
 //	    файла токена не читает — иначе выключение сломало бы саму службу;
-//	Р3  величина — ручка значений с ОДНИМ адресом: включение ручкой меняет
-//	    рендер, небулево значение отвергается рендером с названием ручки;
+//	Р3  величина — ЛИТЕРАЛ шаблона, а не ручка значений: ни один поставляемый
+//	    файл значений ключа не объявляет, и попытка оператора включить
+//	    монтирование через `--set` рендер не сдвигает — включать нечего, а
+//	    ручка без потребителя была бы лишней поверхностью;
 //	Р4  перепись печатается величинами: «ноль находок» отличимо от «ноль
 //	    прочитанного».
 //
@@ -50,11 +52,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// apiTokenKnob — ручка значений; apiTokenField — поле spec пода и ServiceAccount.
-const (
-	apiTokenKnob  = "automountServiceAccountToken"
-	apiTokenField = "automountServiceAccountToken"
-)
+// apiTokenField — поле spec пода и ServiceAccount; тем же именем оператор
+// пытался бы завести ручку значений, которой у чарта нет (Р3).
+const apiTokenField = "automountServiceAccountToken"
 
 // apiTokenMount — что рендер объявляет о монтировании токена.
 type apiTokenMount struct {
@@ -128,43 +128,51 @@ func TestProdProfile_RenderedPodDoesNotMountTheClusterAPIToken(t *testing.T) {
 		"ServiceAccount в рендере %d", chains, specs, off, sas)
 }
 
-// TestProdProfile_RenderedTokenKnobIsTheOnlyAddress — Р3, первая половина: поле
-// spec пода берётся из ручки, а не стоит литералом рядом с ней. Иначе ручка была
-// бы объявленной и неисполнимой: оператор включил бы монтирование, а под остался
-// бы прежним.
-func TestProdProfile_RenderedTokenKnobIsTheOnlyAddress(t *testing.T) {
-	chain := []string{"values.yaml", "values.prod.yaml"}
-	sets := append(append([]string{}, minimalOperatorCoordinates...), apiTokenKnob+"=true")
-	m := apiTokenMountInRender(renderStandaloneChart(t, chain, sets...))
-	require.NotZero(t, m.Specs, "обход пуст: Deployment в рендере не найден")
-	require.Zerof(t, m.SpecsOff, "`%s=true` не сдвинул spec пода (величины %#v): поле стоит "+
-		"литералом, и у величины два адреса", apiTokenKnob, m.Values)
-	for _, v := range m.Values {
-		require.Equalf(t, true, v, "`%s=true` дал в spec пода %#v", apiTokenKnob, v)
+// TestProdProfile_RenderedTokenIgnoresAnOperatorOverride — Р3, рендер: поле spec
+// пода стоит литералом, и `--set` одноимённого ключа его не сдвигает. Будь поле
+// взято из значений, оператор включил бы монтирование одной строкой, и выключение
+// держалось бы умолчанием, а не построением.
+func TestProdProfile_RenderedTokenIgnoresAnOperatorOverride(t *testing.T) {
+	var specs int
+	for _, chain := range deliveredProfileChains {
+		sets := append(append([]string{}, minimalOperatorCoordinates...), apiTokenField+"=true")
+		m := apiTokenMountInRender(renderStandaloneChart(t, chain, sets...))
+		require.NotZerof(t, m.Specs, "цепочка %v: Deployment в рендере не найден — вердикт беспредметен", chain)
+		require.Equalf(t, m.Specs, m.SpecsOff, "цепочка %v: `--set %s=true` сдвинул spec пода "+
+			"(величины %#v) — поле берётся из значений, и у выключения появилась ручка",
+			chain, apiTokenField, m.Values)
+		specs += m.Specs
 	}
+	t.Logf("перепись: цепочек %d · spec пода под `--set %s=true` осмотрено %d · все без токена",
+		len(deliveredProfileChains), apiTokenField, specs)
 }
 
-// TestProdProfile_RenderedTokenKnobRefusesANonBoolean — Р3, вторая половина.
-//
-// Строка `"false"` в условии шаблона истинна, а в поле spec пода её не примет
-// API-сервер, — значит небулево значение обязано падать РЕНДЕРОМ с названием
-// ручки, а не установкой с текстом схемы. Снятый ключ — тот же отказ: величину
-// безопасности умолчание чарта не подставляет молча.
-func TestProdProfile_RenderedTokenKnobRefusesANonBoolean(t *testing.T) {
-	for _, tc := range []struct{ name, line string }{
-		{"string", apiTokenKnob + `: "false"`},
-		{"number", apiTokenKnob + `: 0`},
-		{"unset", apiTokenKnob + `:`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := chartCopy(t)
-			patchInCopy(t, dir, "values.yaml", apiTokenKnob+": false", tc.line)
-			out, err := renderChartAtAllowingFailure(t, dir,
-				[]string{"values.yaml", "values.prod.yaml"}, minimalOperatorCoordinates...)
-			require.Errorf(t, err, "рендер принял `%s` — небулево значение дошло бы до кластера", tc.line)
-			require.Containsf(t, out, apiTokenKnob, "отказ рендера не называет ручку:\n%s", out)
-		})
+// TestDeliveredValuesDeclareNoTokenKnob — Р3, объявления: ни один поставляемый
+// файл значений ключа не несёт. Судятся ОБЪЯВЛЕНИЯ значений, а не рендер: ключ,
+// который шаблон не читает, рендер не показал бы, а оператор принял бы его за
+// действующую настройку.
+func TestDeliveredValuesDeclareNoTokenKnob(t *testing.T) {
+	seen := map[string]bool{}
+	var files int
+	for _, chain := range deliveredProfileChains {
+		for _, f := range chain {
+			if seen[f] {
+				continue
+			}
+			seen[f] = true
+			b, err := os.ReadFile(f) // #nosec G304 -- имя из перечня поставляемых профилей
+			require.NoErrorf(t, err, "чтение %s", f)
+			var top map[string]any
+			require.NoErrorf(t, yaml.Unmarshal(b, &top), "разбор %s", f)
+			require.NotEmptyf(t, top, "%s: ключей верхнего уровня ноль — «ключа нет» "+
+				"неотличимо от «ничего не прочитано»", f)
+			files++
+			_, declared := top[apiTokenField]
+			require.Falsef(t, declared, "%s объявляет `%s` — шаблон его не читает (поле — литерал), "+
+				"и ключ выглядел бы настройкой, не будучи ею", f, apiTokenField)
+		}
 	}
+	t.Logf("перепись: файлов значений осмотрено %d · с ключом `%s` 0", files, apiTokenField)
 }
 
 // TestServiceProcessNeverReadsTheClusterAPI — Р2, ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ.
