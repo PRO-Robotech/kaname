@@ -303,8 +303,8 @@ func judgeByModelVerbs(facts VerbFacts, m *manifest.Manifest, roleID string, rul
 		class := classOf(m, verb)
 		judged++
 		// Отдельной охраны «набор типа пуст» здесь нет намеренно: `GrantedVerbs`
-		// сверяет каждый глагол, включая удаление, которое влечёт правка, с
-		// набором типа, и на пустом наборе отдаёт пусто на любом пути. Охрана
+		// сверяет каждый глагол с набором типа, и на пустом наборе отдаёт пусто
+		// на любом пути. Охрана
 		// была бы эквивалентным мутантом, а исход «тип без глаголов — находка»
 		// держит проба (TestRuleOnResourceWithoutOwnServiceRefusesATypeWithoutModelVerbs).
 		if len(facts.GrantedVerbs(fgaType, []string{class}, typeVerbs, policy)) > 0 {
