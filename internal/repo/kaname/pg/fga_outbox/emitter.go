@@ -38,8 +38,10 @@
 //	payload       jsonb        {"user":"…","object":"…"} плюс ЛИБО "relation"
 //	                           (одно отношение), ЛИБО "relations" (весь набор
 //	                           субъекта на этом объекте; см. emitTx); у строки
-//	                           ПУБЛИКАЦИИ ещё "source_version" — версия
-//	                           владельца (см. EmitPublicationTx)
+//	                           ПУБЛИКАЦИИ и у строки иерархии посредника
+//	                           регистрации ещё "source_version" — версия
+//	                           владельца (см. EmitPublicationTx,
+//	                           EmitOwnerOrderedTx)
 //	created_at    timestamptz  default now(); строка СНЯТИЯ без версии владельца
 //	                           несёт момент своей вставки, clock_timestamp()
 //	                           (см. deleteStamp)
@@ -155,6 +157,11 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 // перевода входного слова (`domain.PublicationSubject` / `PublicationRelation`),
 // а не у вызывающего. Строку другой формы с этим полем положить нельзя by construction,
 // и глагол, выведенный из выдачи, мимо запрета проекции не проедет.
+//
+// Тем же полем с kaname#969 упорядочены и строки иерархии посредника регистрации
+// (EmitOwnerOrderedTx): первое свойство выше — сравнение по версии владельца — у
+// них то же, второго у них нет, потому что глаголов и публикаций среди них нет
+// (EmitOwnerOrderedTx отвергает такие строки, а не пропускает).
 //
 // # Кто зовёт
 //
@@ -377,7 +384,8 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 // момента её вставки, поэтому снятие, свёрнутое после выдачи, снимает её при
 // любой из двух меток, а свёрнутое раньше ничего не находит — выдача ложится
 // заново. Правка меняет ровно одно — версию строки снятия. Строки,
-// упорядоченные владельцем (EmitPublicationTx), меткой не упорядочиваются вовсе.
+// упорядоченные владельцем (EmitPublicationTx, EmitOwnerOrderedTx), меткой не
+// упорядочиваются вовсе.
 const (
 	writeStamp  = "now()"
 	deleteStamp = "clock_timestamp()"
