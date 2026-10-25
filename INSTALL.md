@@ -103,7 +103,8 @@ authn.identity-provider (в чарте — `authn.identityProvider`, в окру
 установку не собирает сам чарт — отказ `helm install` называет
 `authn.clientToken.enabled`, — а включённый эндпоинт без любой из десяти величин
 отвергается рендером одним перечнем. Выключенный эндпоинт чарт собирает только в
-режиме разработчика (`authMode: dev`). Величины темпа — на реплику; при собранной
+режиме разработчика (`authMode: dev`), а его исполняет лишь тестовая сборка
+(`-tags kaname_testbuild`, kaname#985). Величины темпа — на реплику; при собранной
 церемонии слушатель выдачи обязан запрашивать клиентский сертификат
 (`KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE=optional-mutual` и корень
 внутреннего УЦ в `KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTCAFILES`), иначе служба

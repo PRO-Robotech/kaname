@@ -26,7 +26,9 @@ import (
 //	ModeDev              — anonymous-mode permitted (interceptor lets callers
 //	                       through without AuthN-headers as admin); insecure
 //	                       dev-defaults (TLS off, sslmode=disable) are only
-//	                       logged.
+//	                       logged. Исполняет его ТОЛЬКО тестовая сборка
+//	                       (kaname#985, `internal/buildflavor`): выпускной
+//	                       бинарь отказывает в старте.
 //	ModeProduction       — fail-closed: every request must carry a non-empty
 //	                       principal-ctx. Anonymous → PermissionDenied.
 //	ModeProductionStrict — production; СЕГОДНЯ отличается от ModeProduction

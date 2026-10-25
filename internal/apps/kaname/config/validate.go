@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/multierr"
 
+	"github.com/PRO-Robotech/kaname/internal/buildflavor"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
@@ -211,6 +212,7 @@ func (c Config) Validate() error {
 	errs = multierr.Append(errs, c.validateTrustedForwarders())
 	errs = multierr.Append(errs, c.validateTrustDomain())
 	errs = multierr.Append(errs, c.validateModuleIdentities())
+	errs = multierr.Append(errs, c.validateBuildFlavor(buildflavor.IsTestBuild()))
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
