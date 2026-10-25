@@ -108,12 +108,9 @@ func newSCWorld(t *testing.T) *scWorld {
 	ab := accessbindingapp.NewHandler(create, del, get, nil, listBySubject, nil, nil).
 		WithExpandAccess(accessbindingapp.NewExpandAccessUseCase(door).WithGrantAuthority(repo, door, nil))
 
-	// Каталог — тот же, что у выдачи и сверки мира, как в корне службы: вопрос
-	// действием (`check` ниже) берёт глагол типа из каталога модуля (kaname#995).
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           door,
 		ClusterAdminChecker: door,
-		Catalog:             catalogfixture.Source(),
 	})
 	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
 
@@ -135,13 +132,6 @@ func newSCWorld(t *testing.T) *scWorld {
 	w.rolRead = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_read", readRules)
 	w.rolRead2 = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_read2", readRules)
 	w.rolEdit = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_edit",
-		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list", "update"}}})
-	// Проекция глаголов ролей — третья сторона правила, как у `RoleService.Create`:
-	// без неё ветвь выдач решения роли не видит, и вопрос действием (глагол типа,
-	// kaname#995) не получил бы ответа, который продукт даёт.
-	projectRoleVerbs(t, ctx, repo, w.rolRead, readRules)
-	projectRoleVerbs(t, ctx, repo, w.rolRead2, readRules)
-	projectRoleVerbs(t, ctx, repo, w.rolEdit,
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list", "update"}}})
 
 	verifyAddresses(t, ctx, pool)
@@ -253,15 +243,27 @@ func moduleCtx() context.Context {
 }
 
 // check — `AuthorizeService.Check` через обработчик, действием `verb`
-// (`get` | `update`): отношение служба выводит из глагола, как в сценариях
-// приёмки («действием get»).
+// (`get` | `update`) и ярусом этого глагола, названным явно.
+//
+// Ярус назван явно, потому что выдача в этом мире материализуется на объекте
+// только ярусным кортежем: замер на `09ec0851e` — `current direct relations:
+// [viewer]`, и `v_get` ложен даже после проекции глаголов роли. Вопрос без
+// отношения берёт глагол типа (kaname#995), и ответить на него мир не может.
+// Вывод отношения из действия судят пробы мира П6 на настоящем решателе
+// (`action_only_check_module_verb_integration_test.go`); предмет этого мира —
+// классы субъектов, а не вывод отношения.
 func (w *scWorld) check(subject, verb, objID string) (*iamv1.AuthorizeCheckResponse, error) {
 	return w.authz.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  subject,
-		Resource: &iamv1.ResourceRef{Type: scModelType, Id: objID},
-		Action:   "vpc.networks." + verb,
+		Subject:          subject,
+		Resource:         &iamv1.ResourceRef{Type: scModelType, Id: objID},
+		Action:           "vpc.networks." + verb,
+		RequiredRelation: scTierOfVerb[verb],
 	})
 }
+
+// scTierOfVerb — ярус глагола, которым мир спрашивает: тот же, который вопрос
+// без отношения получал до kaname#995.
+var scTierOfVerb = map[string]string{"get": "viewer", "update": "editor"}
 
 func (w *scWorld) requireCheck(subject, verb, objID string, want bool, why string) {
 	w.t.Helper()
@@ -293,18 +295,3 @@ func (w *scWorld) pollCheck(subject, verb, objID string, want bool, why string) 
 
 // fmtSubject — субъект в форме вопроса к модели.
 func fmtSubject(kind, id string) string { return fmt.Sprintf("%s:%s", kind, id) }
-
-// projectRoleVerbs — проекция глаголов роли из каталожного факта мира
-// (`ReplaceRoleVerbs`), как третья сторона правила у `RoleService.Create`.
-func projectRoleVerbs(t *testing.T, ctx context.Context, repo *kanamepg.Repository, rid domain.RoleID, rules domain.Rules) {
-	t.Helper()
-	w, err := repo.Writer(ctx)
-	require.NoError(t, err)
-	defer func() { _ = w.Rollback(ctx) }()
-	facts := catalogfixture.Facts()
-	sels := facts.GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
-	pairs := facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
-	require.NotEmptyf(t, pairs, "проекция глаголов роли %s пуста — каталог не знает её типов", rid)
-	require.NoErrorf(t, w.RolesW().ReplaceRoleVerbs(ctx, rid, pairs), "проекция глаголов роли %s", rid)
-	require.NoError(t, w.Commit(ctx))
-}
