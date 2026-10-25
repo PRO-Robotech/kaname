@@ -770,11 +770,20 @@ func runServe(cfg config.Config) error {
 	// круг края он не проходит никогда, потому что краем не является и о том,
 	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
 	// который фронт предъявляет, — разойтись с проводом ей нечем.
+	//
+	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — ОДИН перечень на все пути признания
+	// вызывающего: обе политики вызывающего, пол системного читателя, посредник
+	// записи отношений, допуск пира у службы решений, полоса входа и
+	// поверхность выдачи спрашивают ЭТОТ объект. Модулем признаётся только
+	// объявленная пара, и признанная личность зовёт только методы своего
+	// профиля.
+	moduleRoster := cfg.AuthN.ModuleRoster()
 	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
 		}).
-		WithOwnFrontHop(ownFrontSAN)
+		WithOwnFrontHop(ownFrontSAN).
+		WithModuleRoster(moduleRoster)
 
 	// Per-RPC `system_viewer`-FLOOR on the internal READ-RPC set
 	// (authN+authZ enforced everywhere: read-RPC gate viewer-tier). For
@@ -799,6 +808,7 @@ func runServe(cfg config.Config) error {
 	// присутствовал, был провязан и исполнялся — снаружи неотличимо от
 	// исправного.
 	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs()).
+		WithModuleRoster(moduleRoster).
 		WithProductionMode(productionMode)
 
 	// Per-RPC `required_acr_min` (step-up) FLOOR on the internal
@@ -844,7 +854,8 @@ func runServe(cfg config.Config) error {
 		// Реализация порта присутствия удостоверения: КЛЮЧ метаданных и
 		// объявленная схема предъявления живут у читателя, и второй их разбор
 		// разошёлся бы с первым молча — на входе, который оба считают годным.
-		presentedcred.Presented)
+		presentedcred.Presented).
+		WithModuleRoster(moduleRoster)
 
 	// РУБЕЖ ПОЛОЖЕНИЯ ПОДТВЕРЖДЕНИЯ (kaname#456, Р4б, Р4в) — ОДНО значение на
 	// оба слушателя и обе полосы, сразу после политики вызывающего: человек с
@@ -1242,7 +1253,7 @@ func runServe(cfg config.Config) error {
 	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
 	// край и пересыльщик вообще узнаваемы, требует страж
 	// requireIssuingListenerAsksForACertificate.
-	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
+	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain(), moduleRoster)
 	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		logger: logger,
 		source: issuingSource,

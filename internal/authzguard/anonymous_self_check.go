@@ -6,7 +6,6 @@ package authzguard
 import (
 	"context"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/operations"
 	"google.golang.org/grpc/metadata"
 
@@ -40,10 +39,10 @@ func IsAnonymousSelfCheck(ctx context.Context, req *iamv1.AuthorizeCheckRequest,
 	}
 	// A verified module is a different caller. A non-module certificate used
 	// by our own REST front names the transport hop, not an end-user identity.
-	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
-		if _, module := SANToServiceDomain(grpcsrv.CertIdentityDomainFromContext(ctx), san); module {
-			return false
-		}
+	// Модуль — объявленная пара перечня (kaname#984): тот же разбор, что у
+	// политик вызывающего обоих слушателей.
+	if _, module := modules.FromContext(ctx); module {
+		return false
 	}
 	return true
 }

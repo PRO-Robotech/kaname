@@ -391,12 +391,10 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		return nil
 	}
 
-	san, verified := grpcsrv.CertIdentityFromContext(ctx)
-
-	svc, ok := "", false
-	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
-	}
+	// Признание модуля — объявленная пара перечня (kaname#984), тот же разбор,
+	// что у внутреннего слушателя.
+	module, ok := p.modules.FromContext(ctx)
+	svc := module.Service
 	if !ok {
 		// Проверенного модульного сертификата нет: dev — проход, prod — отказ
 		// по умолчанию.

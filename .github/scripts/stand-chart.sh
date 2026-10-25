@@ -651,6 +651,10 @@ authn:
   trustedForwarderSANs:
     - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
     - "spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA"
+  # Личность края стенда (kaname#984): модулем признаётся только объявленная
+  # пара, и посев, стоящий на месте края листом края, иначе краем не был бы.
+  moduleIdentities:
+    - "$NS/$EDGE_SA=edge"
   clientToken:
     enabled: true
     tokenTtl: 15m

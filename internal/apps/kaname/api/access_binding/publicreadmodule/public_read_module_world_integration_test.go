@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -150,7 +151,7 @@ func newP2(t *testing.T) *p2 {
 		Relations:           door,
 		ClusterAdminChecker: door,
 	})
-	w.authz = authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
+	w.authz = authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(t))
 	w.reg = internaliam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),

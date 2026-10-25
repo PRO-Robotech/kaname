@@ -10,7 +10,9 @@
 //  1. The mTLS client-cert SAN (SPIRE format
 //     spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>, extracted by SEC-B's
 //     grpcsrv.CertIdentityFromContext under the domain the installation
-//     declared) is mapped to a deterministic
+//     declared) is recognized against the installation's module roster
+//     (moduleidentity.Roster, kaname#984 — only a DECLARED namespace/account
+//     pair is a module) and mapped to a deterministic
 //     ServiceAccount id (`'sva' || substr(md5('kacho-<svc>'),1,17)`).
 //  2. A ReBAC Check `service_account:<sva>#fga_writer@cluster:cluster_root`
 //     is issued. ALLOW → the RPC proceeds; DENY → PermissionDenied. Право
@@ -26,7 +28,6 @@ package authzguard
 
 import (
 	"context"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -54,10 +55,10 @@ const (
 	// всему кластеру — честнее стало ОБЪЯВЛЕНИЕ этого права.
 	relationWriteObject = clusterRootObject
 
-	// sanSAInfix — the path segment that precedes the service-account name.
-	sanSAInfix = "/sa/"
-	// svcNamePrefix — module SAN service segment is always `kacho-<svc>`.
-	svcNamePrefix = "kacho-"
+	// svcNamePrefix — приставка учётки модуля (`kacho-<svc>`). Объявлена у
+	// разбора личности (`moduleidentity.AccountPrefix`): выводом имени службы из
+	// учётки и формулой идентификатора служебной учётки правит одна величина.
+	svcNamePrefix = moduleidentity.AccountPrefix
 	// saPrefix — приставка идентификатора служебной учётки.
 	//
 	// Объявлена именем, а не вписана в формулу литералом: круговая сверка с
@@ -121,11 +122,14 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		// Production-mode: unverified peer or no module identity → never trusted.
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
-	domain, ok := SANToServiceDomain(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+	// Признание — объявленная пара перечня (kaname#984): лист нашего домена с
+	// учёткой модуля из необъявленного пространства модулем не является.
+	module, ok := g.modules.FromContext(ctx)
 	if !ok {
-		// Malformed / foreign-trust-domain SAN → not a module identity.
+		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
+	domain := module.Service
 	if g.checker == nil {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return "", status.Error(codes.PermissionDenied, "permission denied")
@@ -145,61 +149,6 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
 	return domain, nil
-}
-
-// SANToServiceDomain maps a verified SPIRE SAN to the module service short-name
-// (the domain: `vpc`/`compute`/`nlb`). Accepts only
-// `spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>` with a non-empty <svc>; any
-// other shape returns ("", false). The domain drives object-type binding in
-// ValidateProxyTuple (a vpc module may only register `vpc_*` objects).
-//
-// # Почему домен доверия — АРГУМЕНТ, а не константа
-//
-// Домен объявляет установка, и разбор обязан спрашивать ТОТ ЖЕ домен, который
-// впустил эту личность (`grpcsrv.CertIdentityDomainFromContext`). Пока он стоял
-// здесь литералом, разбор утверждал о домене независимо от того, под каким
-// доменом установка выпускает сертификаты, — и утверждал бы это молча.
-//
-// Проверка домена здесь остаётся не как «второй независимый слой», а как
-// требование к ВХОДУ: строка, не прошедшая извлекатель, сюда попасть не должна,
-// и если попадёт — не будет принята. Называть это защитой в глубину было бы
-// неточно: предикат и величина у обоих слоёв одни.
-//
-// Необъявленный домен не признаёт своим никого (`TrustDomain.Matches`), поэтому
-// нулевое значение здесь фейл-клоуз.
-func SANToServiceDomain(d grpcsrv.TrustDomain, san string) (string, bool) {
-	nsPrefix := d.NamespacePrefix()
-	if nsPrefix == "" || !strings.HasPrefix(san, nsPrefix) {
-		return "", false
-	}
-	idx := strings.LastIndex(san, sanSAInfix)
-	if idx < 0 {
-		return "", false
-	}
-	saName := san[idx+len(sanSAInfix):]
-	if !strings.HasPrefix(saName, svcNamePrefix) {
-		return "", false
-	}
-	svc := strings.TrimPrefix(saName, svcNamePrefix)
-	if svc == "" {
-		return "", false
-	}
-	// The <ns> segment must be non-empty (rejects ns//sa/…).
-	ns := san[len(nsPrefix):idx]
-	if ns == "" || strings.HasPrefix(ns, "/") {
-		return "", false
-	}
-	return svc, true
-}
-
-// SANToServiceAccountID maps a verified SPIRE SAN to the deterministic module
-// ServiceAccount id.
-func SANToServiceAccountID(d grpcsrv.TrustDomain, san string) (string, bool) {
-	svc, ok := SANToServiceDomain(d, san)
-	if !ok {
-		return "", false
-	}
-	return ServiceAccountIDForService(svc), true
 }
 
 // ServiceAccountIDForService derives the deterministic module SA id from a

@@ -201,11 +201,13 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 	if !verified || san == "" {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
-	sva, ok := SANToServiceAccountID(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+	// Признание — объявленная пара перечня (kaname#984).
+	module, ok := f.modules.FromContext(ctx)
 	if !ok {
-		// Malformed / foreign-trust-domain SAN → not a module identity.
+		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
+	sva := ServiceAccountIDForService(module.Service)
 	if f.checker == nil {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return status.Error(codes.PermissionDenied, "permission denied")

@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -112,7 +113,7 @@ func newSCWorld(t *testing.T) *scWorld {
 		Relations:           door,
 		ClusterAdminChecker: door,
 	})
-	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
+	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(t))
 
 	w := &scWorld{t: t, ctx: ctx, pool: pool, repo: repo, ops: ops, door: door, rec: rec, ab: ab, authz: authz}
 
