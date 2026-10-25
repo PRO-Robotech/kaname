@@ -78,19 +78,31 @@ func NewUnregisteredKeyWithdrawal(store UnregisteredKeyStore, cat catalog.Source
 // WithdrawTx отзывает и сужает в транзакции снятия `tx` всё, что называет ключ.
 // `key.Type` — точечный тип каталога (тот же словарь, что в цели выдачи), `actor`
 // — проверенная личность вызывающего снятие (служебная учётка модуля).
+//
+// ПОРЯДОК ЗАМКОВ (kaname#974): выдачи, называющие ключ, затем роли, называющие его,
+// — оба набора под `FOR UPDATE`, каждый в порядке id и ДО первой записи отзыва. Тот
+// же порядок родов берёт проход материализации по объекту (выдачи веера, их роли,
+// затем записи — `reconcile.ReconcileStore.LockBindingsAndRoles`). Прежде роли
+// запирались после отзыва выдач, то есть после строк снятия их фактов: проход,
+// державший роль с именем ключа и пишущий тот же общий факт, сходился со снятием в
+// кольцо, и Postgres снимал одну из сторон (40P01).
 func (u *UnregisteredKeyWithdrawal) WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error {
-	w := u.store.WriterOn(tx)
-	if err := u.withdrawBindings(ctx, tx, w, key, actor); err != nil {
-		return fmt.Errorf("withdraw access bindings naming %s %s: %w", key.Type, key.ID, err)
-	}
-	return u.withdrawRoleNames(ctx, tx, w, key, actor)
-}
-
-func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx service.Tx, w Writer, key domain.ResourceRef, actor string) error {
-	ids, err := u.store.ActiveBindingsNamingKey(ctx, tx, key)
+	bindingIDs, err := u.store.ActiveBindingsNamingKey(ctx, tx, key)
 	if err != nil {
 		return fmt.Errorf("bindings naming %s %s: %w", key.Type, key.ID, err)
 	}
+	roleIDs, err := u.store.RolesNamingKey(ctx, tx, key)
+	if err != nil {
+		return fmt.Errorf("roles naming %s %s: %w", key.Type, key.ID, err)
+	}
+	w := u.store.WriterOn(tx)
+	if err := u.withdrawBindings(ctx, tx, w, bindingIDs, key, actor); err != nil {
+		return fmt.Errorf("withdraw access bindings naming %s %s: %w", key.Type, key.ID, err)
+	}
+	return u.withdrawRoleNames(ctx, tx, w, roleIDs, key, actor)
+}
+
+func (u *UnregisteredKeyWithdrawal) withdrawBindings(ctx context.Context, tx service.Tx, w Writer, ids []domain.AccessBindingID, key domain.ResourceRef, actor string) error {
 	unregistered := map[string]any{"type": key.Type, "id": key.ID}
 	for _, id := range ids {
 		b, err := w.AccessBindings().Get(ctx, id)
@@ -184,11 +196,7 @@ func withoutTargetKey(refs []domain.ResourceRef, key domain.ResourceRef) []domai
 	return out
 }
 
-func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx service.Tx, w Writer, key domain.ResourceRef, actor string) error {
-	ids, err := u.store.RolesNamingKey(ctx, tx, key)
-	if err != nil {
-		return fmt.Errorf("roles naming %s %s: %w", key.Type, key.ID, err)
-	}
+func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx service.Tx, w Writer, ids []domain.RoleID, key domain.ResourceRef, actor string) error {
 	if len(ids) == 0 {
 		return nil
 	}
