@@ -204,7 +204,10 @@ func TestGrantDelegation_GD15_DelegationGivesNoDataAccess(t *testing.T) {
 	w.pollAsk(fmtSubject("service_account", w.svaA), "v_get", pcrRegType, pcrX, true, "GD-15 близнец: sva-A")
 
 	w.requireAsk(fmtSubject("service_account", w.svaIss), "v_get", pcrRegType, pcrX, false, "GD-15: делегат")
-	resp, err := w.abx.ListBySubject(asUser(w.ctx, w.usrA), &iamv1.ListAccessBindingsBySubjectRequest{
+	// Перечень выдач учётки читает держатель права на ЕЁ аккаунт — владелец acc-S
+	// usr-S: sva-iss живёт в acc-S, и у владельца acc-A права читать выдачи чужой
+	// учётки нет (прогон: PERMISSION_DENIED). Вызывающего приёмка не называет.
+	resp, err := w.abx.ListBySubject(asUser(w.ctx, w.usrS), &iamv1.ListAccessBindingsBySubjectRequest{
 		SubjectType: "service_account", SubjectId: w.svaIss})
 	require.NoError(t, err, "GD-15: ListBySubject sva-iss")
 	assert.Empty(t, resp.GetAccessBindings(), "GD-15: выдач с субъектом sva-iss")

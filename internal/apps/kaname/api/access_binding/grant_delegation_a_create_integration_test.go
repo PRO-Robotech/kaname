@@ -93,7 +93,10 @@ func TestGrantDelegation_GD01_AccountOwnerCreatesADelegation(t *testing.T) {
 	require.NoError(t, err, "GD-01: Get делегирования от usr-A")
 	w.requireD1Body(body, id, w.usrA, "GD-01")
 
-	resp, err := w.abx.ListBySubject(asUser(w.ctx, w.usrA), &iamv1.ListAccessBindingsBySubjectRequest{
+	// Перечень выдач учётки читает держатель права на ЕЁ аккаунт — владелец acc-S
+	// usr-S: sva-iss живёт в acc-S, и у владельца acc-A права читать выдачи чужой
+	// учётки нет (прогон: PERMISSION_DENIED). Вызывающего приёмка не называет.
+	resp, err := w.abx.ListBySubject(asUser(w.ctx, w.usrS), &iamv1.ListAccessBindingsBySubjectRequest{
 		SubjectType: "service_account", SubjectId: w.svaIss})
 	require.NoError(t, err, "GD-01: ListBySubject sva-iss")
 	assert.Empty(t, resp.GetAccessBindings(), "GD-01: у sva-iss новых выдач нет")
