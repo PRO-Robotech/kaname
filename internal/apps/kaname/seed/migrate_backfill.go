@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -501,6 +502,10 @@ type BackfillConfig struct {
 	ChunkSize int
 	// Logger — optional; slog.Default() when nil.
 	Logger *slog.Logger
+	// BindingTimeout — срок одного вызова сведения выдачи.
+	BindingTimeout time.Duration
+	// Observer — исход по каждой выдаче; nil — не сообщается.
+	Observer BindingConvergeObserver
 }
 
 // BackfillResult — sweep outcome (observability / verify-gate / tests).
@@ -512,6 +517,10 @@ type BackfillResult struct {
 	BindingsReconciled int
 	// Chunks — number of listing batches consumed (Executed=true only).
 	Chunks int
+	// BindingsFailed — выдач, не сведённых и после повтора.
+	BindingsFailed int
+	// FailedBindings — их id.
+	FailedBindings []domain.AccessBindingID
 }
 
 // BackfillRunner — the singleton single-shot reconcile-backfill sweep.
