@@ -70,6 +70,8 @@ var deliveryRoster = []string{
 	"alert_rules_delivered_injection_test.go",
 	"alert_rules_delivered_test.go",
 	"anonymous_registry_lane_render_test.go",
+	"api_token_not_mounted_injection_test.go",
+	"api_token_not_mounted_test.go",
 	"block_switch_is_boolean_injection_test.go",
 	"block_switch_is_boolean_test.go",
 	"boot_guard_base_values_injection_test.go",
