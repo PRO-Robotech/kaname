@@ -1390,11 +1390,12 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			prevStatus = prev.VerificationStatus
 		}
 		if existed && prevStatus == d.Status {
-			// Ключ и статус совпали. У выдачи нескольким субъектам ключ не несёт
-			// субъектов, и член мог быть записан прежде не всем им — недостающее
-			// дописывается по реестру выпущенного (emitted_completion.go, kaname#880).
+			// Ключ и статус совпали. Набор кортежей члена ключом не определён: ключ
+			// не несёт ни субъектов выдачи (kaname#880), ни политики роли и каталога
+			// (kaname#1006), — член сводится к желаемому набору по реестру
+			// выпущенного (emitted_completion.go).
 			if d.Status == domain.VerificationActive {
-				if err := r.completeMemberTuples(ctx, s, bs, d, emitted, col); err != nil {
+				if err := r.convergeMemberTuples(ctx, s, bs, d, emitted, survivingClaims, col); err != nil {
 					return err
 				}
 			}

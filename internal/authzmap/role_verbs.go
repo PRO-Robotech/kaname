@@ -115,7 +115,14 @@ func GrantedVerbsWithDeclared(fgaType string, declaresVerbs bool, authored, type
 	// СВЕРКА С НАБОРОМ ТИПА ОБЯЗАТЕЛЬНА И ЗДЕСЬ, не только в цикле: приписанное
 	// строкой отношение обошло бы и набор, и таблицу, и тип, у которого удаления не
 	// объявлено, получил бы висячее отношение, как только роль назовёт правку.
-	if hasUpdate && !IsHierarchyScopeType(fgaType) && domain.IsVerbOfType("delete", typeVerbs) && !seen["delete"] {
+	//
+	// РОЛЬ МОДУЛЯ ИСКЛЮЧЕНА (kaname#1006). Её классы объявляет манифест модуля, и
+	// объявляет точно: удаление модуль называет классом сам, а роль, назвавшая
+	// только правку, удалять не вправе. Решение — у политики роли
+	// (`RulePolicy.UpdateImpliesDelete`), а не здесь: вывод «чья это роль» в дереве
+	// один, и второй разошёлся бы с ним молча.
+	if hasUpdate && policy.UpdateImpliesDelete() && !IsHierarchyScopeType(fgaType) &&
+		domain.IsVerbOfType("delete", typeVerbs) && !seen["delete"] {
 		out = append(out, "delete")
 	}
 	return out
