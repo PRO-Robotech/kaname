@@ -90,7 +90,7 @@ func registryDescendants() []service.RegisteredDescendant {
 
 func unregisterRegistry(t *testing.T, m *descendantMirror, w *recordingWithdrawal, e *recordingEmitter) {
 	t.Helper()
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, w)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, w, noAudit{})
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_a", relation: "project", object: "registry_registry:reg1",
 		version: time.Now(),

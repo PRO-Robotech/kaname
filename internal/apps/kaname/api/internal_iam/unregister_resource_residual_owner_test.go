@@ -185,7 +185,7 @@ func (journalEmitter) EmitOrderedDeleteTx(_ context.Context, tx service.Tx, tupl
 func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
 	txb := &factTxBeginner{store: s}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s, &recordingWithdrawal{}).
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s, &recordingWithdrawal{}, noAudit{}).
 		WithResidualTupleReader(s)
 	return uc, txb
 }
@@ -353,7 +353,7 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
 	store := &factStore{}
 	txb := &factTxBeginner{store: store}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}) // без WithResidualTupleReader
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}, noAudit{}) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
 	}))

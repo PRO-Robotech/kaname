@@ -160,6 +160,7 @@ func newP2(t *testing.T) *p2 {
 		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
 		// каталожным источником, что у сверки мира.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), src),
+		kanamepg.NewRegistrationAudit(),
 	).WithObjectReconciler(w.rec, nil)
 
 	w.box(pmB1)

@@ -292,6 +292,7 @@ type RegisterResourceUseCase struct {
 	catalogTypes catalogTypeReader     // ОБЯЗАТЕЛЕН, см. конструктор
 	publications publicReadPublisher   // ОБЯЗАТЕЛЕН, см. конструктор
 	withdrawal   keyWithdrawal         // ОБЯЗАТЕЛЕН, см. конструктор
+	audit        registrationAudit     // ОБЯЗАТЕЛЕН, см. конструктор
 	reconcile    reconcileEventEmitter // optional, nil-safe
 	accounts     accountResolver       // optional, nil-safe
 	objRecon     objectReconciler      // sync post-commit — optional, nil-safe
@@ -321,6 +322,11 @@ type RegisterResourceUseCase struct {
 // оставляло бы выдачи и названия правил на освободившийся ключ, и повторная
 // регистрация того же ключа другим владельцем наследовала бы их: опция с «нет —
 // значит не отзываем» и была тем дефектом.
+//
+// `audit` — ТОЖЕ ПАРАМЕТР (kaname#1005). Регистрация и снятие объекта модулем
+// меняют модель прав; опция с «нет — значит не пишем» оставила бы эти изменения
+// вне журнала аудита молча, и кто завёл или снял объект, восстановить было бы
+// нельзя.
 func NewRegisterResourceUseCase(
 	emitter relationOutboxEmitter,
 	mirror resourceMirrorEmitter,
@@ -328,9 +334,65 @@ func NewRegisterResourceUseCase(
 	catalogTypes catalogTypeReader,
 	publications publicReadPublisher,
 	withdrawal keyWithdrawal,
+	audit registrationAudit,
 ) *RegisterResourceUseCase {
 	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb, catalogTypes: catalogTypes,
-		publications: publications, withdrawal: withdrawal}
+		publications: publications, withdrawal: withdrawal, audit: audit}
+}
+
+// registrationAudit — узкий порт аудита регистрации объектов модулем
+// (kaname#1005): вопрос «стоит ли кортеж» и строка журнала аудита — в
+// транзакции изменения. Реализация — *repo/kaname/pg.RegistrationAudit.
+type registrationAudit interface {
+	TupleStandsTx(ctx context.Context, tx service.Tx, t service.RelationTuple) (bool, error)
+	EmitTx(ctx context.Context, tx service.Tx, ev service.AuditEvent) error
+}
+
+// Виды событий аудита регистрации. Объявлены здесь: вид события — факт
+// предметной области, а не деталь хранения.
+const (
+	AuditEventResourceRegistered   = "iam.resource_registration.registered"
+	AuditEventResourceUnregistered = "iam.resource_registration.unregistered"
+)
+
+// Исход события аудита регистрации. Набор закрыт.
+const (
+	// auditOutcomeRegistered — регистрация изменила состояние: объект заведён,
+	// перенесён или перемечен, либо лёг кортеж, которого не было.
+	auditOutcomeRegistered = "registered"
+	// auditOutcomeUnregistered — снятие удалило строку регистрации объекта.
+	auditOutcomeUnregistered = "unregistered"
+	// auditOutcomeSuperseded — надгробие старше хранимой регистрации: строка
+	// регистрации осталась, сняты лишь кортежи регистрации не новее надгробия
+	// (kaname#969).
+	auditOutcomeSuperseded = "superseded"
+)
+
+// auditEvent — строка аудита регистрации: действие, объект, модуль-актор, исход.
+//
+// Актор — машинная личность модуля по подтверждённому сертификату (та, чьё право
+// на запись проверили ворота обработчика), а не слово вызывающего; без неё —
+// проверенная личность из контекста (путь без mTLS вне боевой посадки).
+func auditEvent(ctx context.Context, eventType, outcome string, t tupleIntent, row service.ResourceMirrorRow, extra map[string]any) service.AuditEvent {
+	actor, module, ok := authzguard.ModuleActor(ctx)
+	if !ok {
+		actor = authzguard.PrincipalUserID(ctx)
+	}
+	payload := map[string]any{
+		"actor":    actor,
+		"module":   module,
+		"object":   map[string]any{"type": row.ObjectType, "id": row.ObjectID},
+		"relation": t.relation,
+		"subject":  t.subject,
+		"outcome":  outcome,
+	}
+	if !row.SourceVersion.IsZero() {
+		payload["source_version"] = row.SourceVersion.UTC().Format(time.RFC3339Nano)
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	return service.AuditEvent{EventType: eventType, TenantAccountID: row.ParentAccountID, Payload: payload}
 }
 
 // WithReconcile wires the reconcile-event emitter: a mirror change
@@ -875,6 +937,13 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 				row.ParentAccountID = accID
 			}
 		}
+		// АУДИТ НАЗЫВАЕТ ИЗМЕНЕНИЕ, А НЕ ДОСТАВКУ (kaname#1005). Стоит ли кортеж
+		// запроса — спрашивается ДО записи: свёртка журнала кладёт факт в конце
+		// оператора записи, и вопрос после него ответил бы «стоит» всегда.
+		stood, serr := uc.audit.TupleStandsTx(ctx, tx, tuples[0])
+		if serr != nil {
+			return "", false, false, fmt.Errorf("audit: read standing tuple: %w", serr)
+		}
 		// The mirror UPSERT runs FIRST so its monotonic verdict can gate the two
 		// enqueues below. Ordering within the tx is otherwise irrelevant — all three
 		// statements still commit together or roll back together (ban #10).
@@ -893,6 +962,9 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			}
 			return "", false, false, fmt.Errorf("upsert resource mirror: %w", err)
 		}
+		// Вердикт зеркала — СЫРЫМ, до поправки на производителя без версии ниже: та
+		// поправка о материализации, а не о том, изменилось ли что-то.
+		projectionReplaced := changed && !projectionUnchanged
 		// An UNVERSIONED producer ('-infinity') loses every monotonic comparison, so its
 		// `changed = false` proves nothing about redelivery — treat it as changed so a
 		// real registration is never suppressed (see the gate note in Register). For the
@@ -907,10 +979,31 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 				return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 			}
 		}
+		// Событие — когда регистрация изменила состояние: строка зеркала записана и
+		// её проекция (область, метки, цепь) сменилась, либо записан кортеж, которого
+		// не было. Повтор той же регистрации, вторая доставка той же проекции и
+		// запоздалая старая версия события не пишут.
+		if projectionReplaced || (changed && !stood) {
+			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceRegistered,
+				auditOutcomeRegistered, t, row, nil)); err != nil {
+				return "", false, false, fmt.Errorf("emit registration audit: %w", err)
+			}
+		}
 	} else {
+		// Кортежи, стоявшие до снятия, — чтобы событие аудита назвало, сколько их
+		// снято на самом деле: версия снятия решает это в свёртке, по каждому факту.
+		before, serr := uc.standing(ctx, tx, tuples)
+		if serr != nil {
+			return "", false, false, serr
+		}
 		if err = uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, row.SourceVersion); err != nil {
 			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
+		after, serr := uc.standing(ctx, tx, before)
+		if serr != nil {
+			return "", false, false, serr
+		}
+		withdrawn := len(before) - len(after)
 		deleted, derr := uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion)
 		if derr != nil {
 			return "", false, false, fmt.Errorf("delete resource mirror: %w", derr)
@@ -931,8 +1024,23 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			// Устаревшее надгробие (родитель зарегистрирован заново, новее) потомков
 			// нового родителя не трогает, а снятие незарегистрированного ключа не
 			// сносит ничего, что под ним числится.
-			if err = uc.dropDescendants(ctx, tx, t, row); err != nil {
-				return "", false, false, err
+			descendants, derr := uc.dropDescendants(ctx, tx, t, row)
+			if derr != nil {
+				return "", false, false, derr
+			}
+			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
+				auditOutcomeUnregistered, t, row, map[string]any{
+					"withdrawn_tuples": withdrawn, "descendants": descendants,
+				})); err != nil {
+				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
+			}
+		} else if withdrawn > 0 {
+			// Надгробие старше хранимой регистрации: строка осталась, но кортежи
+			// регистрации не новее надгробия сняты (kaname#969) — модель прав
+			// изменилась, и это тоже событие.
+			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
+				auditOutcomeSuperseded, t, row, map[string]any{"withdrawn_tuples": withdrawn})); err != nil {
+				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}
 		}
 		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE SAME VERSION.
@@ -1009,29 +1117,31 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 // перестаёт быть «да» в момент коммита — регистрация, цепь и отношения сняты,
 // выдачи отозваны, — а материализованное по ним снимает асинхронный проход по
 // событию перерасчёта, положенному здесь же.
-func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx service.Tx, t tupleIntent, parent service.ResourceMirrorRow) error {
+func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx service.Tx, t tupleIntent, parent service.ResourceMirrorRow) (int, error) {
 	parentModule, ok := catalogModule(parent.ObjectType)
 	if !ok {
-		return nil
+		return 0, nil
 	}
 	parentType, parentID := t.splitObject()
 	descendants, err := uc.mirror.DescendantsTx(ctx, tx, parentType, parentID)
 	if err != nil {
-		return fmt.Errorf("read descendants of unregistered resource: %w", err)
+		return 0, fmt.Errorf("read descendants of unregistered resource: %w", err)
 	}
 	actor := authzguard.PrincipalUserID(ctx)
+	count := 0
 	for _, d := range descendants {
 		catalogType, err := uc.catalogObjectType(ctx, tx, d.ModelType)
 		if err != nil {
-			return fmt.Errorf("resolve catalog type of descendant: %w", err)
+			return 0, fmt.Errorf("resolve catalog type of descendant: %w", err)
 		}
 		if module, ok := catalogModule(catalogType); !ok || module != parentModule {
 			continue
 		}
 		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
 		if err != nil {
-			return fmt.Errorf("drop descendant registration: %w", err)
+			return 0, fmt.Errorf("drop descendant registration: %w", err)
 		}
+		count++
 		// Надгробие кортежей потомка — не старше его последней регистрации
 		// (kaname#969): регистрация снята безусловно, и её кортежи уходят все, даже
 		// записанные версией новее надгробия родителя. Версия снятой строки и есть
@@ -1042,30 +1152,45 @@ func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx servi
 		}
 		if tuples := proxyOwned(d.Standing); len(tuples) > 0 {
 			if err := uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, tombstone); err != nil {
-				return fmt.Errorf("emit fga outbox for descendant: %w", err)
+				return 0, fmt.Errorf("emit fga outbox for descendant: %w", err)
 			}
 		}
 		if dropped {
 			if err := uc.withdrawal.WithdrawTx(ctx, tx, domain.ResourceRef{Type: catalogType, ID: d.ID}, actor); err != nil {
-				return fmt.Errorf("withdraw grants of descendant: %w", err)
+				return 0, fmt.Errorf("withdraw grants of descendant: %w", err)
 			}
 		}
 		if admitsPublication(d.ModelType) {
 			if _, err := uc.publications.ApplyTx(ctx, tx, d.ModelType, d.ID, false, parent.SourceVersion); err != nil {
-				return fmt.Errorf("withdraw public-read publication of descendant: %w", err)
+				return 0, fmt.Errorf("withdraw public-read publication of descendant: %w", err)
 			}
 		}
 		if uc.reconcile != nil {
 			if err := uc.reconcile.EmitTx(ctx, tx, "mirror.delete", catalogType, d.ID); err != nil {
-				return fmt.Errorf("emit reconcile event for descendant: %w", err)
+				return 0, fmt.Errorf("emit reconcile event for descendant: %w", err)
 			}
 		}
 	}
-	return nil
+	return count, nil
 }
 
 // catalogModule — модуль типа, названного словарём каталога (`<модуль>.<ресурс>`).
 func catalogModule(catalogType string) (string, bool) {
 	module, _, ok := authzmap.SplitObjectType(catalogType)
 	return module, ok
+}
+
+// standing — из кортежей те, чей прямой факт стоит в снимке транзакции.
+func (uc *RegisterResourceUseCase) standing(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) ([]service.RelationTuple, error) {
+	var out []service.RelationTuple
+	for _, tu := range tuples {
+		stands, err := uc.audit.TupleStandsTx(ctx, tx, tu)
+		if err != nil {
+			return nil, fmt.Errorf("audit: read standing tuple: %w", err)
+		}
+		if stands {
+			out = append(out, tu)
+		}
+	}
+	return out, nil
 }
