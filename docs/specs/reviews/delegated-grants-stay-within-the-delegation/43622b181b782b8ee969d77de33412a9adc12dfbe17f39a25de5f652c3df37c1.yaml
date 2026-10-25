@@ -1,0 +1,162 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/delegated-grants-stay-within-the-delegation.md
+  sha256: 43622b181b782b8ee969d77de33412a9adc12dfbe17f39a25de5f652c3df37c1
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 5c6b7c07804d6972f2e8a3eb3e8f92b92c7f43d0
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status` → `?? docs/engineering/acceptance/…`); судится
+    содержимое по отпечатку, а не коммит.
+  branch: 986-acceptance
+  task: PRO-Robotech/kaname#986
+  related_tasks: [PRO-Robotech/kaname#1003, PRO-Robotech/kaname#982, PRO-Robotech/kaname#963]
+  lines: 1377
+  round: 2
+  predecessor_record: docs/specs/reviews/delegated-grants-stay-within-the-delegation/51da4ac879859f6a11b5f92a72a62bc8372f434b7492507962ecb0252fe68165.yaml
+  diff_base: >-
+    копия редакции 1 `…/delegated-grants-stay-within-the-delegation.md.51da4ac8`
+    (sha256sum → 51da4ac8…52fe68165, совпало с записью круга 1); `diff | wc -l` = 706
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/delegated-grants-stay-within-the-delegation.md в копии
+    kacho-workspace/tmp/kn-986-acceptance @ 5c6b7c078 → 43622b18…37c1 (совпало с заданием)
+  measurement_revisions: >-
+    Чтение дерева kaname в той же копии @ 5c6b7c078; corelib v1.15.0 из кэша модулей (go.mod:8);
+    опора svc-registry — локальная копия kacho-workspace/tmp/svc-registry-target (origin —
+    gitlab.beget.ru, не GitHub).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25T13:40:00Z'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт роли — APPROVED; действующей санкцией он становится только с внешним событием,
+    которое публикует курьер (`change-graph.md` §3). До события блок event — not_performed.
+
+premise:
+  task_premise: >-
+    Подтверждена. B1 — аннотации Revoke/Delete v_delete (access_binding_service.proto:61-68,
+    :413-420; permission_catalog.json:2422-2430, :2539-2547), дверь serve.go:885. B2 — довод
+    круга 1 о `"system:revoke"` был ОШИБКОЙ рецензента: PrincipalUserID отдаёт p.ID для
+    service_account (principal.go:67-77), подстановка revoke.go:189-194 — только при пустом
+    actor. B3 — ValidateRawPagination (pagination.go:86-91) → corevalidate.PageSize
+    (corelib validate.go:250-253, сообщение `invalid argument` errors.go:80) и ValidatePageToken
+    → InvalidArg (errdetails.go:21). B4 — memberships.state PENDING/ACTIVE
+    (0001_initial.sql:2170), UserReader.Membership (user_repo.go:158), seedMembership
+    (membership_is_the_account_source_integration_test.go:77).
+    Посылка автора «опору svc-registry сверить нельзя, GitHub 404» опровергнута в части
+    недоступности: репозиторий на gitlab.beget.ru, локальная копия
+    tmp/svc-registry-target/registry-iam-and-tokens-acceptance.md → sha256 2717077568…22dc7,
+    то есть ровно отпечаток, закреплённый в §9; новее редакции локально нет.
+
+blocking_closed:
+  - id: B1
+    kind: PRODUCER
+    how: >-
+      Р1а: Revoke/Delete → `<exempt>` · HANDLER_DECIDES, прежний вопрос двери (v_delete на
+      iam_access_binding) переезжает в обработчик тем же портом и надзором администратора
+      облака (own_door.go шапка, checkAdapter); делегированный путь — после прежних. Отказ двери
+      на этих RPC — `permission denied` без hide_existence (catalog записи без флага;
+      corelib interceptor.go:216), поэтому отказ обработчика побайтово тот же (GD-30 f).
+      Держатели через слушатель — GD-32 (doorUnder, own_door_test.go:65-72) и GD-E5;
+      расширение поверхности (+6 освобождённых, «освобождённых 19» в шапке own_door.go)
+      названо в критерии безопасности; acr-пол — отдельный перехватчик (acr_floor.go), «2»
+      сохраняется. Делегат не получает v_delete материализацией: объектные глаголы выдачи
+      приезжают реконсайлом по ролям с правилами на iam.accessBinding (create.go:482-492), а
+      делегат выдач не держит (GD-15).
+  - id: B2
+    kind: PRODUCER
+    how: GD-30 a утверждает revokedByUserId = sva-iss; производитель revoke.go:119 + principal.go:72-74. Замечание круга 1 снято как ошибочное.
+  - id: B3
+    kind: PRODUCER
+    how: GD-61 b, c — один производитель ValidateRawPagination; message и field_violations[0] дословно совпадают с кодом.
+  - id: B4
+    kind: COVERAGE
+    how: Д6 определён предикатом (memberships ACTIVE); D-U со всеми четырьмя subjectTypes; GD-16 — три пары по одному факту, каждая на свежем мире.
+
+blocking: []
+
+defaults_fixed_at_review:
+  - "GD-E5 Given: Bp — тело V с ДРУГИМ субъектом (не Bd, не Bd') и deletionProtection: true. Уникальность активной выдачи — (subject_id, subject_type, role_id, resource_type, resource_id, target_digest) без deletion_protection (20261024050000_unregistration_revokes_its_grants.sql:89): Bp с телом Bd дал бы ALREADY_EXISTS в посеве."
+  - "GD-40 Given: B30 — тело V с субъектом, отличным от B10 (например sva-A3 с ролью pusher — у Bo роль puller), выдана и отозвана делегатом до When; иначе B10 и B30 конфликтуют по той же уникальности."
+  - "Полоса реализации правит врезку docs/engineering/components/08-access-binding.md:233-252 («две разные проверки… край — per-RPC Check») тем же изменением, что Р1а: после переезда v_delete в обработчик врезка станет ложной о защите (hard-misleading-security-comment). Исключение §2 п.10 на этот абзац не распространяется."
+
+important_nonblocking:
+  - "GD-32: строка d на 5c6b7c078 честно красная (метод не в карте → `permission denied (rpc not mapped)`, interceptor.go:243) — это и есть красный прогон, не поломка сборки; так и записать в DoD-proof."
+  - "GD-62 b и GD-20/GD-31 зависят от видимости admin в модели после done выдачи/отзыва; контроль Пути 2 назван — держать его ограниченным повтором, а не сном."
+  - "Новая коллекция newman (iam-grant-delegation.py) требует строки ведомости производителя — в задание полосе S2."
+  - "Опора svc-registry: §9 говорит «не сверена» — фактически сверена этим ревью (отпечаток совпал); при следующей правке приёмки поправить формулировку."
+
+confirmed:
+  - "Сценариев 39: `grep -c '^#### GD-'` = 39, `grep -c '^| GD-'` = 39, множества ID совпадают (diff пуст), дублей нет."
+  - "Производитель назван у 39 из 39 (§5.1); близнец у каждого отрицания назван (GD-16, 30, 31, 32, 62 b, 70, E5 — новые пары проверены)."
+  - "GD-22: labels — изменяемое поле выдачи (update.go:40-41, access_binding_service.proto:540-541) — близнец b производим."
+  - "GD-41 a: текст deletion_protection достижим только после права (revoke.go:102-115), делегат доходит до него Р2 после Р1а."
+  - "Порядок путей (Р2) и отсутствие delegationId у прежнего пути держит GD-62 b."
+  - "§5.3 сверена с опорой sha256 2717077568…22dc7: SRI-111 a–g (строки 1757-1771) покрыты GD-10 a, GD-11 b/c/d, GD-13, GD-25 a, d–f."
+  - "Объём не расширен против редакции 1; «Что НЕ входит» — 10 пунктов; край kacho — fail-closed (§7)."
+  - "Раскрытия дефекта защиты нет."
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    Существуют на 5c6b7c078: seedServiceAccount (:157), seedGroup (:168), mustSeedUser (:80),
+    seedAccountByOwner (:113), seedProjectInAccount (:125), verifyAddresses (:150), createDone
+    (:212), registerRegistry (:178), pollAsk (:353), deliverNewEdition (:230), newPCRWorld (:99),
+    WithPrincipal-образец (system_class_s2:334), seedMembership-образец (pg :77), функция
+    kaname.membership_mirror_id (0001_initial.sql:1251), CHECK memberships_state_check допускает
+    PENDING/ACTIVE (:2170). Заказаны: newGDWorld, помощник членства в пакете мира,
+    registry.delegation-fixture.yaml, вариант registerRegistry в чужом проекте.
+  not_constructible_as_written: []
+  not_executed: >-
+    Посев не ставился: testcontainers — тяжёлый класс, только внешним кластером слотом;
+    изоляции и разрешения на посев задание не назвало. Конструируемость — названными фикстурами
+    и ограничениями схемы, прочитанными на 5c6b7c078.
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: санкция на код (ban #1) — только после публикации события курьером и приведения блока event к факту
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · APPROVED · sha256 43622b181b782b8ee969d77de33412a9adc12dfbe17f39a25de5f652c3df37c1
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/delegated-grants-stay-within-the-delegation/51da4ac879859f6a11b5f92a72a62bc8372f434b7492507962ecb0252fe68165.yaml
