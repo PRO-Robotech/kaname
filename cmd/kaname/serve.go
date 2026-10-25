@@ -1148,20 +1148,25 @@ func runServe(cfg config.Config) error {
 	// конечного пользователя (за краем сидит арендатор, и предел объявлен на
 	// него), внутренний — личностью СЕРТИФИКАТА вызывающего модуля, потому что
 	// запрос модуля несёт личности разных арендаторов и ключ по арендатору
-	// дробил бы бюджет соседа на тысячу вёдер.
+	// дробил бы бюджет соседа на тысячу вёдер. У внутреннего этот ключ — уровень
+	// модуля; под ним стоит уровень экземпляра того же модуля (ниже).
 	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits, grpcsrv.PrincipalSubject)
 	if err != nil {
 		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
 	}
-	internalAdmission, err := grpcsrv.NewAdmission("internal", internalAdmissionLimits, grpcsrv.CertIdentitySubject)
+	// Внутренний слушатель — ДВА уровня (kaname#992): экземпляр вызывающего
+	// (личность и адрес) и модуль в целом (SAN, прежние величины посадки).
+	// Шумный экземпляр выбирает не больше своего ведра и соседа не душит.
+	internalAdmissions, err := newInternalAdmissions(internalAdmissionLimits, instanceAdmissionLimits(internalAdmissionLimits))
 	if err != nil {
 		return fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err)
 	}
-	admission := listenerAdmission{public: publicAdmission, internal: internalAdmission}
+	admission := listenerAdmission{public: publicAdmission,
+		internal: internalAdmissions.internal, internalInstance: internalAdmissions.internalInstance}
 	admission.arm(logger, cfg)
 
 	registerPublicServices(publicAdmission.Registrar(grpcSrv), svcs, opsRepo)
-	registerInternalServices(internalAdmission.Registrar(internalSrv), svcs, pool, cfg, logger)
+	registerInternalServices(admission.internalRegistrar(internalSrv), svcs, pool, cfg, logger)
 
 	publicAddr := cfg.APIServer.ListenAddress()
 	internalAddr := cfg.APIServer.InternalListenAddress()
