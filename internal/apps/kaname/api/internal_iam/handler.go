@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
@@ -133,6 +134,19 @@ type Handler struct {
 	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки ForceLogout
 	// (kaname#589). nil → ForceLogout fails closed Unavailable.
 	cutoffClock revocationpolicy.Clock
+
+	// modules — личности модулей установки (kaname#987): Check плоскости
+	// данных ограничен доменом её модуля. Нулевое значение не признаёт никого,
+	// и тогда привязка не применяется ни к кому — вызывающих этого глагола без
+	// признанной личности пропускает или отвергает политика вызывающего.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки — тот же,
+// что у политик вызывающего (kaname#984).
+func (h *Handler) WithModuleRoster(r moduleidentity.Roster) *Handler {
+	h.modules = r
+	return h
 }
 
 // NewHandler — builder. `authz` may be nil when the FGA stack is not
