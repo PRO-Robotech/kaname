@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // Config — root configuration struct for kaname.
@@ -440,6 +442,40 @@ type AuthNConfig struct {
 	//
 	// ENV `KANAME_AUTHN__TRUST_DOMAIN`, ключ YAML `authn.trust-domain`.
 	TrustDomainName string `mapstructure:"trust-domain"`
+
+	// ModuleIdentities — ЛИЧНОСТИ МОДУЛЕЙ установки (kaname#984): записи
+	// `<пространство>/<учётка>=<профиль>`.
+	//
+	// Домен выше отвечает, чьи предъявители наши; перечень — кто из наших
+	// модуль и что ему позволено звать. Модулем признаётся ТОЛЬКО объявленная
+	// пара: прежде им был любой проверенный лист домена с приставкой модулей в
+	// любом пространстве, и владелец постороннего пространства, получивший лист
+	// на учётку нужного имени, становился модулем. Профиль называет закрытый
+	// перечень методов внутреннего слушателя (`authzguard.ProfileMethods`).
+	//
+	// Умолчания нет: перечень — факт установки, и написанный здесь называл бы
+	// модули, которых у неё может не быть. Пустой перечень в боевом режиме —
+	// отказ старта (по нему не признаётся никто, край в том числе);
+	// неразбираемая запись — отказ старта в любом режиме.
+	//
+	// ENV `KANAME_AUTHN__MODULE_IDENTITIES` (через запятую), ключ YAML
+	// `authn.module-identities` (список).
+	ModuleIdentities []string `mapstructure:"module-identities"`
+}
+
+// ModuleRoster — перечень личностей модулей, который РЕАЛЬНО уезжает во все
+// пути признания вызывающего обоих слушателей и HTTP-поверхностей.
+//
+// Неразбираемый перечень даёт НУЛЕВОЕ значение — «не признаётся никто», а не
+// разобранную часть: страж старта (`validateModuleIdentities`) такой
+// установки не поднимает, а вызывающий мимо него получает отказ, а не меньший
+// круг.
+func (a AuthNConfig) ModuleRoster() moduleidentity.Roster {
+	r, err := moduleidentity.Parse(a.ModuleIdentities)
+	if err != nil {
+		return moduleidentity.Roster{}
+	}
+	return r
 }
 
 // TrustDomain — домен доверия, который РЕАЛЬНО уезжает в пару звеньев извлечения

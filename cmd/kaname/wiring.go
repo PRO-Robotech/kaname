@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -661,7 +662,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
-		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction())
+		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction(), cfg.AuthN.ModuleRoster())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -747,7 +748,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		registerResourceUC = registerResourceUC.WithMetrics(metricsReg.NewRegisterPostCommitRecorder())
 	}
 	regGate := authzguard.NewRelationWriteGate(relationStore).
-		WithProductionMode(cfg.AuthN.Mode.IsProduction())
+		WithProductionMode(cfg.AuthN.Mode.IsProduction()).
+		WithModuleRoster(cfg.AuthN.ModuleRoster())
 	// Session-revocation writer. Pool-scoped adapter over
 	// session_revocations — the InternalSessionRevocationsService Revoke path
 	// and its IsRevoked / ListByUser readers (one table). ForceLogout does not
@@ -1238,7 +1240,8 @@ type authzServiceBundle struct {
 // catalogSource — каталог модулей из живых строк, тот же экземпляр, что у ролей и
 // выдач: из него вопрос анонимной самопроверки берёт глагол типа (kaname#994).
 func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	sessions service.SessionRecords, catalogSource catalog.Source, metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
+	sessions service.SessionRecords, catalogSource catalog.Source, metricsReg *metrics.Registry, prodMode bool,
+	modules moduleidentity.Roster) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
@@ -1275,7 +1278,8 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 	}
 	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC).
 		WithCallerAuthority(ownGates).
-		WithInsecureAnonymousPeer(!prodMode)
+		WithInsecureAnonymousPeer(!prodMode).
+		WithModuleRoster(modules)
 
 	return authzServiceBundle{
 		authorize:    authzH,

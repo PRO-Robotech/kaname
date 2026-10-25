@@ -33,7 +33,9 @@ import (
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -49,7 +51,7 @@ func (p *pcrWorld) anonSelfCheckHandler() *authorizeapp.Handler {
 		ClusterAdminChecker: p.door,
 		Catalog:             catalog.Fixed{F: p.facts},
 	})
-	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
+	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(p.t))
 }
 
 // anonSelf — анонимная самопроверка: только ресурс и действие, контекст без
@@ -63,7 +65,7 @@ func anonSelf(t *testing.T, h *authorizeapp.Handler, action, modelType, id strin
 		Resource: &iamv1.ResourceRef{Type: modelType, Id: id},
 		Action:   action,
 	}
-	require.Truef(t, authzguard.IsAnonymousSelfCheck(ctx, req),
+	require.Truef(t, authzguard.IsAnonymousSelfCheck(ctx, req, moduleidentity.Roster{}),
 		"предусловие: вопрос %s %s:%s обязан быть анонимной формой", action, modelType, id)
 	resp, err := h.Check(ctx, req)
 	require.NoErrorf(t, err, "анонимная самопроверка %s %s:%s не ответила", action, modelType, id)

@@ -6,11 +6,11 @@ package authzguard
 import (
 	"context"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/operations"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -19,7 +19,7 @@ import (
 // shape (kaname#959). Both public unary admission and the handler use this
 // predicate. It grants no resource permission: the normal decision service
 // evaluates the server-selected anonymous subject.
-func IsAnonymousSelfCheck(ctx context.Context, req *iamv1.AuthorizeCheckRequest) bool {
+func IsAnonymousSelfCheck(ctx context.Context, req *iamv1.AuthorizeCheckRequest, modules moduleidentity.Roster) bool {
 	if req == nil || req.GetSubject() != "" || req.GetContext() != nil ||
 		req.GetRequiredRelation() != "" || req.GetResource() == nil || req.GetAction() == "" {
 		return false
@@ -39,10 +39,10 @@ func IsAnonymousSelfCheck(ctx context.Context, req *iamv1.AuthorizeCheckRequest)
 	}
 	// A verified module is a different caller. A non-module certificate used
 	// by our own REST front names the transport hop, not an end-user identity.
-	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
-		if _, module := SANToServiceDomain(grpcsrv.CertIdentityDomainFromContext(ctx), san); module {
-			return false
-		}
+	// Модуль — объявленная пара перечня (kaname#984): тот же разбор, что у
+	// политик вызывающего обоих слушателей.
+	if _, module := modules.FromContext(ctx); module {
+		return false
 	}
 	return true
 }

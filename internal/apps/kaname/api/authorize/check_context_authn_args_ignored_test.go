@@ -96,7 +96,7 @@ func newCredulousHandler() *Handler {
 		Relations: &credulousVerdict{stubVerdict: &stubVerdict{}},
 		Now:       func() time.Time { return authnArgsServerNow },
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil))
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRoster())
 }
 
 // authnArgsOutcome — то, что видит спросивший: вердикт и причины отказа.

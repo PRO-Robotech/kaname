@@ -40,7 +40,7 @@ func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: stub,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithCallerAuthority(auth)
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRoster()).WithCallerAuthority(auth)
 }
 
 // newHandlerWithAuthorityProd builds the handler in the DEFAULT posture, which

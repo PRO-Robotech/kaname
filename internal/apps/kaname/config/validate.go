@@ -13,6 +13,8 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"go.uber.org/multierr"
+
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // Validate checks Config invariants (pure function — no logger, no
@@ -208,6 +210,7 @@ func (c Config) Validate() error {
 	// `runServe`.
 	errs = multierr.Append(errs, c.validateTrustedForwarders())
 	errs = multierr.Append(errs, c.validateTrustDomain())
+	errs = multierr.Append(errs, c.validateModuleIdentities())
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
@@ -383,6 +386,32 @@ func (c Config) validateTrustDomain() error {
 	return c.AuthN.TrustDomain().Require(grpcsrv.TrustDomainGate{
 		Knob: "authn.trust-domain (env KANAME_AUTHN__TRUST_DOMAIN)",
 	})
+}
+
+// moduleIdentitiesKnob — имя ручки перечня личностей модулей для текстов отказа.
+const moduleIdentitiesKnob = "authn.module-identities (env KANAME_AUTHN__MODULE_IDENTITIES)"
+
+// validateModuleIdentities refuses to start a binary whose module roster is
+// malformed (any mode) or empty (production) — kaname#984.
+//
+// Неразбираемая запись — отказ в ЛЮБОМ режиме: установка, объявившая
+// личность, которую разбор не принял, иначе поднялась бы с меньшим перечнем,
+// чем написала, и законный модуль получал бы отказ, неотличимый от вызова без
+// личности.
+//
+// Пустой перечень — отказ в боевом режиме: модулем на нём не признаётся никто,
+// край в том числе, и процесс, выглядящий исправным, отвергал бы каждого.
+// Вне боевого режима пустой перечень допустим: стенд без взаимного TLS
+// проверенного листа не несёт, и решать по перечню там нечего.
+func (c Config) validateModuleIdentities() error {
+	r, err := moduleidentity.Parse(c.AuthN.ModuleIdentities)
+	if err != nil {
+		return fmt.Errorf("%s: %w", moduleIdentitiesKnob, err)
+	}
+	if !c.AuthN.Mode.IsProduction() {
+		return nil
+	}
+	return r.Require(moduleidentity.Gate{Knob: moduleIdentitiesKnob})
 }
 
 // validateMode ensures Mode is a known ENUM value.
