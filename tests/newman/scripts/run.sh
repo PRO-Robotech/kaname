@@ -584,6 +584,12 @@ else
   # (`revocationReason`, kaname#963, приёмка unregistration-revokes-its-grants.md,
   # URG-E1/E2). Зависимости окружения — те же, что у соседней коллекции.
   run_one "iam-access-binding-revocation-reason"
+  # iam-grant-delegation — делегирование права выдавать (kaname#986, приёмка
+  # delegated-grants-stay-within-the-delegation.md, GD-E1…E5). Посев набора —
+  # реестр, зарегистрированный модулем, роли модуля registry и учётка-делегат —
+  # краем не создаётся; без него кейсы отвечают «условие не создано» с именем
+  # переменной. Держатель посева и шага прогона — запись ведомости производителя.
+  run_one "iam-grant-delegation"
   # iam-permission-catalog — PermissionCatalogService.ListPermissionCatalog
   # (sub-phase G): backend-driven grantable role-rule catalog on the PUBLIC mux
   # (GET /iam/v1/permissionCatalog). Authenticated read + anonymous-deny. The CI
