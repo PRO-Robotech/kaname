@@ -15,16 +15,18 @@ package internal_iam
 // данных реестра узнавала права на сети, машины и проекты, хотя ей нужен только
 // свой реестр.
 //
-// Теперь личность профиля `data-plane` спрашивает только о типах объектов
-// своего модуля; вопрос о чужом типе — отказ до решателя.
+// Теперь личность профиля `data-plane` спрашивает только об объектах своего
+// модуля; вопрос о чужом объекте — отказ до решателя.
 //
-// # Чей тип — тем же словарём, что у посредника записи отношений
+// # «Свой объект» — ТЕМ ЖЕ правилом, что у посредника записи отношений
 //
-// Владение типом решает ПОРОЖДЁННАЯ таблица типов модели (`catalogTypeOwner`) и
-// словарь «служба ↔ модуль каталога» фундамента (`platformmodules`): тот же
-// словарь, которым посредник записи отношений ограничивает регистрацию
-// объекта доменом модуля. Тип, которого таблица не знает, судится приставкой
-// домена — как там же.
+// Своим считается объект, который модуль вправе регистрировать: правило
+// проксируемой записи фундамента (`proxytuple.ValidateTuple`) с отношением
+// иерархии и тем же словарём владения типом (`catalogTypeOwner`), что у
+// `RegisterResource`. Второго изложения «чей это тип» здесь нет — оно
+// разошлось бы с первым молча, — и словаря имён модулей на пути запроса тоже
+// нет: членство модуля решает порождённая таблица типов, а запретные типы
+// (кластер, свои типы службы доступа) отвергаются тем же правилом.
 //
 // # Граница
 //
@@ -35,39 +37,33 @@ package internal_iam
 // дверь и спрашивает за любого.
 
 import (
-	"strings"
-
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/corelib/platformmodules"
+	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
-// objectTypeInDomain — принадлежит ли тип объекта objType модулю службы
-// service.
-func objectTypeInDomain(service, objType string) bool {
-	if objType == "" {
-		return false
-	}
-	if module, known := (catalogTypeOwner{}).CatalogModuleOfObjectType(objType); known {
-		mine, ok := platformmodules.CatalogModuleOfService(service)
-		return ok && module == mine
-	}
-	domain, ok := platformmodules.ObjectDomainOfService(service)
-	return ok && domain != "" && strings.HasPrefix(objType, domain+"_")
+// objectInModuleDomain — объект того вида, который модуль службы service
+// вправе регистрировать через посредника записи отношений.
+//
+// Субъект пуст намеренно: правило судит субъекта только по его типу, а здесь
+// вопрос — о владении ОБЪЕКТОМ, и подставленный субъект был бы утверждением,
+// которого вызывающий не делал.
+func objectInModuleDomain(service, object string) bool {
+	return proxytuple.ValidateTuple(service, "", string(proxytuple.RelationParent), object,
+		proxytuple.WithTypeOwner(catalogTypeOwner{})) == nil
 }
 
-// requireCheckInCallerDomain — отказ, если признанная плоскость данных спрашивает о
-// объекте чужого домена. Прочие вызывающие проходят без суда здесь: их судит
+// requireCheckInCallerDomain — отказ, если признанная плоскость данных спрашивает
+// об объекте чужого домена. Прочие вызывающие проходят без суда здесь: их судит
 // политика вызывающего внутреннего слушателя.
 func (h *Handler) requireCheckInCallerDomain(module moduleidentity.Identity, object string) error {
 	if module.Profile != moduleidentity.ProfileDataPlane {
 		return nil
 	}
-	objType, _, found := strings.Cut(object, ":")
-	if !found || !objectTypeInDomain(module.Service, objType) {
+	if module.Service == "" || !objectInModuleDomain(module.Service, object) {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	return nil
