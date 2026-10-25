@@ -15,6 +15,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `docs/specs/reviews/object-keeps-its-project-after-unregistration/<sha256>.yaml`
   - 2026-10-25 · круг 1 · CHANGES_REQUESTED · `1864ef496efa810811281da7c1c90a90c62bfbf72c9d039f2263782eb61387ab` ·
     `docs/specs/reviews/object-keeps-its-project-after-unregistration/1864ef496efa810811281da7c1c90a90c62bfbf72c9d039f2263782eb61387ab.yaml`
+  - 2026-10-25 · круг 2 · APPROVED · `1d308bbd5d5bb6cee79994a67f7cf3664e475f504c65f323b983948139b26a72` ·
+    `docs/specs/reviews/object-keeps-its-project-after-unregistration/1d308bbd5d5bb6cee79994a67f7cf3664e475f504c65f323b983948139b26a72.yaml`
+  - 2026-10-25 · круг 3 (правка одобренной, §11) · CHANGES_REQUESTED · `4265bf69e5bdb6193867781de8440e975cd853ee5d9548943b31b0e6e44522d8` ·
+    `docs/specs/reviews/object-keeps-its-project-after-unregistration/4265bf69e5bdb6193867781de8440e975cd853ee5d9548943b31b0e6e44522d8.yaml`
 - **Дата:** 2026-10-25 · **редакция:** 2 (что изменено против редакции 1 — §10)
 - **Задача:** `PRO-Robotech/kaname#983` (эпик `#980`, вторая волна registry). Связь: `#982`
   (родителя регистрируемого объекта выводит kaname, закрытая политика записи модуля), `#963`
@@ -845,8 +849,15 @@ PB-18 и PB-19, PB-20 — там же либо в `internal/repo/kaname/pg/resou
    сверка проекта строки зеркала и каждого звена `project` цепи с привязкой на вставке и правке
    `resource_mirror` и `resource_parent_edge`, неизменность проекта привязки, запрет удаления и
    `TRUNCATE`).
-   Применённые миграции не правятся (ban #5). Гейт `TestNewMigrationCitesAnApprovedAcceptance`
-   зелёный со ссылкой на эту приёмку
+   Применённые миграции не правятся (ban #5). Основание кодирования — цитата этой приёмки в
+   шапке новой миграции: путь `docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md`
+   и SHA-256 одобренной редакции. Пройдено: `git grep -c 'object-keeps-its-project-after-unregistration' -- 'internal/migrations/<новая>.sql'`
+   ≥ 1, и отпечаток из шапки совпадает с отпечатком записи ревью с вердиктом APPROVED. Не
+   пройдено: 0 совпадений, либо отпечатка нет, либо он не совпадает ни с одной такой записью.
+   Гейта-держателя у этого пункта в kaname пока нет. Гейт
+   `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` читает только дифф дерева
+   kacho, и миграцию kaname он не видит никогда. Гейт миграций kaname заводится отдельной
+   задачей (задача kaname — гейт миграций). До его посадки пункт проверяется предикатом выше
 2. Загрузчик манифеста: ключ `permanentProject` и три отказа Р7; перенос признака в строку
    каталога (`modulecatalog/rows.go`) и в применитель; гейт паритета посева каталога
    (`internal/check/catalog_seed_parity.go`) знает новую колонку; у ключа есть читатель в прод-коде
@@ -883,7 +894,7 @@ PB-18 и PB-19, PB-20 — там же либо в `internal/repo/kaname/pg/resou
 |---|---|---|---|
 | `permanentProject: true` на ресурсах `registries` и `repositories` манифеста registry svc-registry | svc-registry (единый манифест модуля, Д3 приёмки svc-registry) | без ключа привязка на стенде svc-registry не заводится (Р1), SRI-23 a там — «не выполнилось» | ключ в манифесте svc-registry; SRI-23 a зелёный на `F-SR-KANAME` |
 | регистратор svc-registry шлёт `parentProjectId` (= звено `project` цепи) и цепь со звеном `project` для `registries` и `repositories` | svc-registry (таблица §4.1 приёмки svc-registry, строки 282-283: цепь названа, поле — нет) | Р2: с объявленным ключом регистрация без поля или без звена отвергается `INVALID_ARGUMENT`; Р4: поле, расходящееся с цепью, — Р4-отказ. Без строки объявление ключа уронит регистрации svc-registry | поле названо в таблице регистраций приёмки svc-registry; SRI-23 b (`Registered`) зелёный на `F-SR-KANAME` с объявленным ключом |
-| регистратор отображает `OBJECT_BOUND_TO_OTHER_PROJECT` в reason `KeyBoundToOtherProject`; двойник kaname `F-SR-IT` отвечает тем же телом Р4 | svc-registry | отличить отказ привязки от отказа цепи (`#982`) | `TestSRI23_ReleaseRetainedThenFresh` зелёный |
+| регистратор отображает `OBJECT_BOUND_TO_OTHER_PROJECT` в reason `KeyBoundToOtherProject`; двойник kaname `F-SR-IT` отвечает тем же телом Р4 | svc-registry | отличить отказ привязки от отказа цепи (`#982`) | SRI-23 a и b зелёные на `F-SR-IT` (a — reason `KeyBoundToOtherProject`, message — текст §4.2 приёмки svc-registry); держатель — проба `F-SR-IT`, которую строка SRI-23 таблицы проб приёмки svc-registry (строка 1854) называет «заводится» |
 | манифесты модулей `PRO-Robotech/kacho` | не меняются | перенос балансировщика и целевой группы — через перерегистрацию (§0.6) | — |
 | `PRO-Robotech/kaname#982` | не зависимость посадки (Д-983-1) | Р4 и Р9 сверяют оба носителя проекта сами; `#982` закрывает остатки §2 п.3 | — |
 
@@ -948,3 +959,16 @@ PB-18 и PB-19, PB-20 — там же либо в `internal/repo/kaname/pg/resou
 Попутно: тип ресурса vpc в PB-19 — `vpc.network` (ресурс `network` фикстуры), а не
 `vpc.networks`; строка `KnownFields(true)` — `manifest.go:450`; опора `#986` — одобренная
 редакция 3 (§9).
+
+## §11. Правка координат после одобрения редакции 2
+
+Одобренная редакция — SHA-256 `1d308bbd5d5bb6cee79994a67f7cf3664e475f504c65f323b983948139b26a72`.
+Наблюдаемое поведение и сценарии не меняются. Правка касается двух пунктов признака готовности,
+координаты которых мертвы для `TestAcceptanceProbeCoordinateResolves`. Пункт §6 S1 п.1 переписан
+повторно по возврату круга 3 (запись `4265bf69…22d8`): прежняя правка называла держателем гейт,
+который миграцию kaname не читает.
+
+| где | было | стало |
+|---|---|---|
+| §6 S1 п.1 | гейт без дома | основание кодирования — цитата этой приёмки и отпечатка одобренной редакции в шапке новой миграции, исход «не пройдено» задан предикатом `git grep -c`. Гейт kacho держателем не назван: он судит дифф своего дерева (`internal/repohygiene/acceptanceledger_test.go`, строки 149–159 на `origin/main` @`41d7edad9b`). Гейта-держателя в kaname нет, он заводится отдельной задачей (задача kaname — гейт миграций) |
+| §7 строка 3, признак готовности | имя пробы svc-registry координатой; функции нет ни в одном дереве — проба только заводится | признак — сценарий SRI-23 a и b на `F-SR-IT`, держатель — строка SRI-23 таблицы проб приёмки svc-registry; утверждение то же, адрес не ведёт в несуществующую функцию |
