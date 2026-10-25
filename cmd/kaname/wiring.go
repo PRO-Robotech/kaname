@@ -773,6 +773,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		log.Fatalf("basic credential authority: %v", basicAuthorityErr)
 	}
 	internalIAMHandler := internaliamapp.NewHandler(lookupSubject, checkAuthz).
+		// Личности модулей (kaname#987): Check плоскости данных ограничен
+		// доменом её модуля — тот же перечень, что у политик вызывающего.
+		WithModuleRoster(cfg.AuthN.ModuleRoster()).
 		// PollSubjectChanges drains subject_change_outbox for api-gateway
 		// authz-cache invalidation. Internal-only (port 9091).
 		//
