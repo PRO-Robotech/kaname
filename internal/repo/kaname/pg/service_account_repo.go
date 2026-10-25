@@ -282,6 +282,15 @@ func (w *saWriter) SetEnabled(ctx context.Context, id domain.ServiceAccountID, e
 // Считаются только ДЕЙСТВУЮЩИЕ выдачи (`revoked_at IS NULL`) — то же условие, что
 // у человека, группы и функции триггера (kaname#664, Р10).
 func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error {
+	// Строка учётки под `FOR UPDATE` — ПЕРВЫМ оператором (kaname#986, Д8).
+	// Вставка делегирования держит её `FOR KEY SHARE` своим внешним ключом
+	// `grant_delegations_active_delegate_fk`; замок ждёт фиксации вставки, и охрана
+	// ниже — уже следующий оператор со свежим снимком — видит зафиксированное
+	// делегирование и называет его текстом Р6. Без замка охрана судила бы снимок
+	// до вставки, а отказ отдал бы ключ общим текстом.
+	if _, err := w.tx.Exec(ctx, `SELECT 1 FROM service_accounts WHERE id = $1 FOR UPDATE`, string(id)); err != nil {
+		return mapErr(err, "ServiceAccount.Delete", string(id))
+	}
 	const q = `
 		WITH del AS (
 			DELETE FROM service_accounts s

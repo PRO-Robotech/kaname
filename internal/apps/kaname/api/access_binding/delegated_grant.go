@@ -57,7 +57,8 @@ func NewDelegatedGrantPath(repo Repo, relations clients.RelationStore) *Delegate
 // проект в нём; роль ∈ ролей; цель — названные объекты, тип каждого ∈ типов, и
 // каждый зарегистрирован в проекте этого аккаунта (Д7); тип каждого субъекта ∈
 // типов субъекта, субъект принадлежит аккаунту (Д6), системный класс — только
-// `anonymous` (Д5), субъект — не делегат (Д4); делегирующий держит право
+// `anonymous` (Д5), субъект — не делегат и не группа с делегатом в составе
+// (Д4); делегирующий держит право
 // выдавать на аккаунте сейчас (Д3). Отдаёт id делегирования — ссылку выдачи.
 //
 // Для ОТЗЫВА и УДАЛЕНИЯ (`removal = true`) — выдача несёт ссылку на действующее
@@ -66,6 +67,12 @@ func NewDelegatedGrantPath(repo Repo, relations clients.RelationStore) *Delegate
 //
 // Иначе — `PERMISSION_DENIED` `permission denied`, побайтово тот же отказ, что у
 // вызывающего без права. Неполадка хранилища или двери — её код, а не отказ.
+//
+// Читающая транзакция закрывается ДО вопроса о праве делегирующего: вопрос
+// берёт соединения того же пула (читатель хранилища и хранилище отношений), и
+// путь, держащий одно соединение в ожидании другого, при числе одновременных
+// выдач не меньше свободных соединений останавливает пул целиком (находка
+// ревью SD-986-C1).
 func delegatedGrantAuthority(ctx context.Context, p *DelegatedGrantPath, b domain.AccessBinding, removal bool) (domain.GrantDelegationID, error) {
 	if p == nil || p.repo == nil {
 		return "", authzguard.PermissionDenied()
@@ -74,9 +81,24 @@ func delegatedGrantAuthority(ctx context.Context, p *DelegatedGrantPath, b domai
 	if t, ok := domain.SubjectTypeOfPrincipal(caller.Type); !ok || t != domain.SubjectTypeServiceAccount || caller.ID == "" {
 		return "", authzguard.PermissionDenied()
 	}
-	rd, err := p.repo.Reader(ctx)
+	d, err := readDelegatedGrant(ctx, p.repo, b, caller, removal)
+	if err != nil || removal {
+		return d.ID, err
+	}
+	if err := delegatorStillHoldsAuthority(ctx, p, d); err != nil {
+		return "", err
+	}
+	return d.ID, nil
+}
+
+// readDelegatedGrant — всё, что делегированный путь читает из хранилища, одной
+// читающей транзакцией, закрытой к возврату. Для выдачи — делегирование
+// вызывающего, прошедшее оси, цель и субъектов; для отзыва и удаления —
+// делегирование, на которое ссылается выдача.
+func readDelegatedGrant(ctx context.Context, repo Repo, b domain.AccessBinding, caller operations.Principal, removal bool) (domain.GrantDelegation, error) {
+	rd, err := repo.Reader(ctx)
 	if err != nil {
-		return "", shared.MapRepoErr(err)
+		return domain.GrantDelegation{}, shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
@@ -86,44 +108,41 @@ func delegatedGrantAuthority(ctx context.Context, p *DelegatedGrantPath, b domai
 
 	account, err := delegationAccountOfScope(ctx, rd, b)
 	if err != nil {
-		return "", err
+		return domain.GrantDelegation{}, err
 	}
 	d, err := rd.AccessBindings().GrantDelegations().ActiveFor(ctx, account, domain.ServiceAccountID(caller.ID))
 	if err != nil {
-		return "", denyOnNotFound(err)
+		return domain.GrantDelegation{}, denyOnNotFound(err)
 	}
 	if !d.AllowsRole(b.RoleID) || b.GrantedRelation != "" {
-		return "", authzguard.PermissionDenied()
+		return domain.GrantDelegation{}, authzguard.PermissionDenied()
 	}
 	if err := delegatedTargetWithin(ctx, rd, d, b.Target); err != nil {
-		return "", err
+		return domain.GrantDelegation{}, err
 	}
 	for _, s := range b.Subjects {
 		if err := delegatedSubjectWithin(ctx, rd, d, s); err != nil {
-			return "", err
+			return domain.GrantDelegation{}, err
 		}
 	}
-	if err := delegatorStillHoldsAuthority(ctx, p, d); err != nil {
-		return "", err
-	}
-	return d.ID, nil
+	return d, nil
 }
 
 // removalByDelegate — отзыв и удаление выдачи делегатом: только выдача,
 // несущая ссылку на действующее делегирование, делегат которого — вызывающий
 // (пара «вид, идентификатор», условие CE-22).
-func removalByDelegate(ctx context.Context, rd Reader, b domain.AccessBinding, caller operations.Principal) (domain.GrantDelegationID, error) {
+func removalByDelegate(ctx context.Context, rd Reader, b domain.AccessBinding, caller operations.Principal) (domain.GrantDelegation, error) {
 	if b.DelegationID == "" {
-		return "", authzguard.PermissionDenied()
+		return domain.GrantDelegation{}, authzguard.PermissionDenied()
 	}
 	d, err := rd.AccessBindings().GrantDelegations().Get(ctx, b.DelegationID)
 	if err != nil {
-		return "", denyOnNotFound(err)
+		return domain.GrantDelegation{}, denyOnNotFound(err)
 	}
 	if !d.Active() || !d.IsDelegate(caller.Type, caller.ID) {
-		return "", authzguard.PermissionDenied()
+		return domain.GrantDelegation{}, authzguard.PermissionDenied()
 	}
-	return d.ID, nil
+	return d, nil
 }
 
 // delegationAccountOfScope — аккаунт области выдачи: сам аккаунт либо аккаунт
@@ -169,6 +188,11 @@ func delegatedTargetWithin(ctx context.Context, rd Reader, d domain.GrantDelegat
 // исчерпывающий, ветвь по умолчанию — отказ. Отсутствие строки — отказ, сбой
 // чтения — его код (условие CE-07). Состояние членства сравнивается
 // положительно: участник — только `ACTIVE`.
+//
+// Д4 судится на момент выдачи. Включение делегата в группу ПОСЛЕ выдачи — шаг
+// держателя права на группу (`v_update`, `GroupService.AddMember`): он отдаёт
+// учётке всё, что выдано группе, как при любом включении; сам делегат себя в
+// группу не включает (GD-25 e).
 func delegatedSubjectWithin(ctx context.Context, rd Reader, d domain.GrantDelegation, s domain.Subject) error {
 	if !d.AllowsSubjectType(s.Type) || d.IsDelegateSubject(s) {
 		return authzguard.PermissionDenied()
@@ -189,6 +213,18 @@ func delegatedSubjectWithin(ctx context.Context, rd Reader, d domain.GrantDelega
 			return denyOnNotFound(err)
 		}
 		if g.AccountID != d.AccountID {
+			return authzguard.PermissionDenied()
+		}
+		// Д4 по §1 приёмки (делегирование не даёт делегату доступа к данным):
+		// право роли, выданное группе, достаётся каждому её члену, поэтому
+		// группа, в составе которой делегат, — тот же делегат (находка ревью
+		// SEC-986-1). Состав читается одним уровнем: член группы — только
+		// человек или учётка (`group_members_type_check`), вложенных групп нет.
+		member, err := rd.Groups().IsMember(ctx, g.ID, domain.SubjectTypeServiceAccount, domain.SubjectID(d.DelegateID))
+		if err != nil {
+			return shared.MapRepoErr(err)
+		}
+		if member {
 			return authzguard.PermissionDenied()
 		}
 		return nil

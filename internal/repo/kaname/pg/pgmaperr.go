@@ -549,6 +549,19 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		return fmt.Sprintf("User %s not found", user), iamerr.ErrReferenceMissing
 	case "group_members_group_fk":
 		return fmt.Sprintf("Group %s not found", idHint), iamerr.ErrReferenceMissing
+	case "grant_delegations_active_delegate_fk":
+		// Учётка-делегат действующего делегирования (kaname#986, Д8, тексты Р6).
+		// Сторона ВСТАВКИ — подсказка grant_delegation.Insert «<делегат>|<аккаунт>»:
+		// учётку удалили после программной проверки заведения. Сторона СНЯТИЯ —
+		// `saWriter.Delete` берёт строку учётки `FOR UPDATE` первым оператором, и
+		// его охрана видит зафиксированное делегирование и называет его; здесь —
+		// запасной текст на случай, когда ключ всё же ответил раньше охраны.
+		if kindHint == "ServiceAccount.Delete" {
+			return fmt.Sprintf("service account %s holds an active grant delegation; revoke it first", idHint),
+				iamerr.ErrReferenceInUse
+		}
+		sva, _, _ := strings.Cut(idHint, "|")
+		return fmt.Sprintf("ServiceAccount %s not found", sva), iamerr.ErrReferenceMissing
 	case "access_bindings_role_fk":
 		// Direction-sensitive:
 		//   INSERT binding with a non-existent role_id → "Role <id> not found"

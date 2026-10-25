@@ -15,6 +15,7 @@ package grant_delegation
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
@@ -101,39 +103,89 @@ func (u *RevokeGrantDelegationUseCase) Execute(ctx context.Context, id domain.Gr
 	return &op, nil
 }
 
+// revokeAttempts — сколько раз тело отзыва исполняет СВОЮ транзакцию, если база
+// откатила её как сторону взаимной блокировки либо конфликта сериализации
+// (находка ревью SD-986-I1). Отзыв не берёт advisory-замков выдач (CE-10) и
+// делит строки выдач и прямых фактов с фоновой материализацией; цикл ожиданий
+// база разрывает откатом одной стороны ЦЕЛИКОМ, и отзыв права у делегата не
+// обязан проигрывать фоновой работе. Повтор безопасен по построению: тело — одна
+// транзакция записи, после коммита ничего не делает, на 40P01/40001 откатилось
+// целиком. Признак повтора — `iamerr.ErrAborted`, и только он. Число и отступ —
+// те же, что у снятия выдачи и по тому же основанию (`deleteAttempts`,
+// `access_binding/delete.go`, kaname#679).
+const revokeAttempts = 3
+
+// revokeRetryBackoff — отступ перед следующей попыткой: выжившей стороне цикла
+// нужно дойти до коммита.
+const revokeRetryBackoff = 50 * time.Millisecond
+
 // doRevoke — делегирование и его выдачи одной транзакцией писателя, аудит в ней
-// же (Р4, Р5).
+// же (Р4, Р5); жертва взаимной блокировки исполняется заново.
 func (u *RevokeGrantDelegationUseCase) doRevoke(ctx context.Context, id domain.GrantDelegationID, by domain.GrantDelegationActor, actor string) (*anypb.Any, error) {
-	revoked, err := shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
-		gw := w.AccessBindingsW().GrantDelegationsW()
-		if _, lerr := gw.LockForRevoke(ctx, id); lerr != nil {
-			return domain.GrantDelegation{}, lerr
+	for attempt := 1; ; attempt++ {
+		revoked, err := u.revokeOnce(ctx, id, by, actor)
+		if err == nil {
+			return marshalGD(revoked)
 		}
-		at := time.Now().UTC()
-		d, merr := gw.MarkRevoked(ctx, id, by, at)
-		if merr != nil {
-			return domain.GrantDelegation{}, merr
+		if !stderrors.Is(err, iamerr.ErrAborted) || attempt == revokeAttempts {
+			return nil, shared.MapRepoErrAt(ctx, err)
 		}
-		count, werr := accessbindingapp.WithdrawDelegatedBindings(ctx, w, d, actor, at)
-		if werr != nil {
-			return domain.GrantDelegation{}, werr
+		if u.logger != nil {
+			u.logger.WarnContext(ctx, "grant_delegation revoke: transaction lost a concurrent-change conflict, retrying",
+				"grant_delegation", string(id), "attempt", attempt, "of", revokeAttempts)
 		}
-		if aerr := w.EmitAuditEvent(ctx, outboxtypes.AuditEvent{
-			EventType:       auditEventRevoked,
-			TenantAccountID: string(d.AccountID),
-			Payload: map[string]any{
-				"actor":                 actor,
-				"delegation_id":         string(d.ID),
-				"account_id":            string(d.AccountID),
-				"revoked_binding_count": count,
-			},
-		}); aerr != nil {
-			return domain.GrantDelegation{}, aerr
+		timer := time.NewTimer(time.Duration(attempt) * revokeRetryBackoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, shared.MapRepoErrAt(ctx, ctx.Err())
+		case <-timer.C:
 		}
-		return d, nil
-	})
-	if err != nil {
-		return nil, err
 	}
-	return marshalGD(revoked)
+}
+
+// revokeOnce — ОДНА транзакция отзыва. Отказы возвращаются НЕпереведёнными в
+// статус: признак повтора читает [RevokeGrantDelegationUseCase.doRevoke], перевод
+// в gRPC-код — там же, один раз.
+func (u *RevokeGrantDelegationUseCase) revokeOnce(ctx context.Context, id domain.GrantDelegationID, by domain.GrantDelegationActor, actor string) (domain.GrantDelegation, error) {
+	w, err := u.repo.Writer(ctx)
+	if err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = w.Rollback(ctx)
+		}
+	}()
+	gw := w.AccessBindingsW().GrantDelegationsW()
+	if _, err := gw.LockForRevoke(ctx, id); err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	at := time.Now().UTC()
+	d, err := gw.MarkRevoked(ctx, id, by, at)
+	if err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	count, err := accessbindingapp.WithdrawDelegatedBindings(ctx, w, d, actor, at)
+	if err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	if err := w.EmitAuditEvent(ctx, outboxtypes.AuditEvent{
+		EventType:       auditEventRevoked,
+		TenantAccountID: string(d.AccountID),
+		Payload: map[string]any{
+			"actor":                 actor,
+			"delegation_id":         string(d.ID),
+			"account_id":            string(d.AccountID),
+			"revoked_binding_count": count,
+		},
+	}); err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	if err := w.Commit(ctx); err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	committed = true
+	return d, nil
 }
