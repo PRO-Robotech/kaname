@@ -58,6 +58,16 @@ seed:
       why: читает пределы квот на пути мутации, перед списанием
 `
 
+// renamedModule — тот же документ от имени другого модуля: имя модуля и вместе
+// с ним владелец ролей, которые выдаёт посев. Роль посева обязана принадлежать
+// модулю манифеста (kaname#979): смена одного `module` сделала бы свои роли
+// посева чужими, и документ перестал бы быть годным по причине, которой проба
+// имени не измеряет.
+func renamedModule(doc, module string) string {
+	doc = strings.Replace(doc, "module: vpc", "module: "+module, 1)
+	return strings.ReplaceAll(doc, "roleId: vpc.", "roleId: "+module+".")
+}
+
 // lineOf — номер строки, на которой в документе впервые встречается needle.
 // Ожидание номера ВЫВОДИТСЯ из документа, а не выписывается константой:
 // выписанное разошлось бы с фикстурой молча при первой же её правке.
@@ -355,7 +365,7 @@ func TestMODMF06ModuleNameIsJudgedByFormNotByTheShippedTable(t *testing.T) {
 
 	// Парный положительный — имя ГОДНОЙ формы, которого в порождённой таблице
 	// НЕТ. Без него отрицание зеленело бы на загрузчике, отвергающем всё.
-	twin := strings.Replace(compactManifest, "module: vpc", "module: acme", 1)
+	twin := renamedModule(compactManifest, "acme")
 	if _, err := manifest.Load([]byte(twin)); err != nil {
 		t.Fatalf("годное имя вне порождённой таблицы отвергнуто: %v", err)
 	}
@@ -391,7 +401,7 @@ func TestMODMF06LoaderVerdictDoesNotDependOnTheShippedTable(t *testing.T) {
 		len(owned), strings.Join(owned, ", "), len(outsiders), strings.Join(outsiders, ", "))
 
 	for _, m := range append(append([]string(nil), owned...), outsiders...) {
-		doc := strings.Replace(compactManifest, "module: vpc", "module: "+m, 1)
+		doc := renamedModule(compactManifest, m)
 		if _, err := manifest.Load([]byte(doc)); err != nil {
 			t.Errorf("имя %q годной формы отвергнуто загрузчиком: %v", m, err)
 		}
