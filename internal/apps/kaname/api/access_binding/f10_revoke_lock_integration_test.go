@@ -31,6 +31,7 @@ package access_binding_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,6 +78,26 @@ func (denyingRelations) Check(context.Context, string, string, string) (bool, er
 }
 
 var _ clients.RelationStore = (*denyingRelations)(nil)
+
+// ownerHoldsRemoval — порт отношений проб гонок отзыва и удаления: владелец
+// аккаунта ДЕРЖИТ отношение удаления на объектах выдач, прочие вопросы — «нет»,
+// как у `denyingRelations`.
+//
+// С PRO-Robotech/kaname#986 (Р1а) обработчик отзыва и удаления сам задаёт вопрос
+// `v_delete` на объекте выдачи — прежде его задавала дверь слушателя, мимо
+// которой эти пробы шли. В продукте отношение владельцу материализует
+// авто-выдача роли `owner`; предмет этих проб — порядок замков снятия, а не
+// материализация, поэтому факт продукта дан портом, а не посевом с
+// реконсайлером, который вмешался бы в измеряемые гонки. Право выдавать по-прежнему
+// судит владелец аккаунта по строке (Путь 1), как до задачи.
+type ownerHoldsRemoval struct{ owner string }
+
+func (o ownerHoldsRemoval) Check(_ context.Context, subject, relation, object string) (bool, error) {
+	return subject == "user:"+o.owner && relation == accessbindingapp.RemovalRelation &&
+		strings.HasPrefix(object, accessbindingapp.RemovalObjectType+":"), nil
+}
+
+var _ clients.RelationStore = ownerHoldsRemoval{}
 
 // journalDeletes — тройки, ЗАЯВЛЕННЫЕ к снятию в журнале.
 //
@@ -182,7 +203,7 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 		string(abID), "user:"+string(member), "v_get", "vpc_network:net-race")
 	require.NoError(t, err)
 
-	uc := accessbindingapp.NewRevokeAccessBindingUseCase(repo, opsRepo).WithRelationStore(denyingRelations{}, nil)
+	uc := accessbindingapp.NewRevokeAccessBindingUseCase(repo, opsRepo).WithRelationStore(ownerHoldsRemoval{owner: string(owner)}, nil)
 
 	op, err := uc.Execute(asUser(ctx, owner), abID)
 	require.NoError(t, err, "the sync path (authz + protection) must pass for the account owner")

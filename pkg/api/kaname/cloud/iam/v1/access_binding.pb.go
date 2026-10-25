@@ -291,6 +291,10 @@ const (
 	// (`InternalIAMService.UnregisterResource`); `revoked_by_user_id` пуст —
 	// отозвал не человек.
 	AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED AccessBinding_RevocationReason = 3
+	// Отозвано делегирование, по которому выдача сделана
+	// (`GrantDelegationService.Revoke`); `revoked_by_user_id` — отозвавший
+	// делегирование.
+	AccessBinding_REVOCATION_REASON_DELEGATION_REVOKED AccessBinding_RevocationReason = 4
 )
 
 // Enum value maps for AccessBinding_RevocationReason.
@@ -300,12 +304,14 @@ var (
 		1: "REVOCATION_REASON_REVOKE",
 		2: "REVOCATION_REASON_EXPIRED",
 		3: "REVOCATION_REASON_RESOURCE_UNREGISTERED",
+		4: "REVOCATION_REASON_DELEGATION_REVOKED",
 	}
 	AccessBinding_RevocationReason_value = map[string]int32{
 		"REVOCATION_REASON_UNSPECIFIED":           0,
 		"REVOCATION_REASON_REVOKE":                1,
 		"REVOCATION_REASON_EXPIRED":               2,
 		"REVOCATION_REASON_RESOURCE_UNREGISTERED": 3,
+		"REVOCATION_REASON_DELEGATION_REVOKED":    4,
 	}
 )
 
@@ -510,8 +516,14 @@ type AccessBinding struct {
 	// действующей выдачи ключа `revocationReason` в теле нет (приёмка
 	// unregistration-revokes-its-grants.md, URG-E2).
 	RevocationReason *AccessBinding_RevocationReason `protobuf:"varint,26,opt,name=revocation_reason,json=revocationReason,proto3,enum=kaname.cloud.iam.v1.AccessBinding_RevocationReason,oneof" json:"revocation_reason,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// OUTPUT-ONLY. Делегирование права выдавать (`GrantDelegation.id`), по которому
+	// выдача сделана делегатом; пусто у выдачи, сделанной держателем права выдавать.
+	// Ставит только делегированный путь права выдавать; на вход ни одного запроса
+	// поле не принимается. Делегат отзывает и удаляет только выдачи, несущие
+	// ссылку на его действующее делегирование.
+	DelegationId  string `protobuf:"bytes,27,opt,name=delegation_id,json=delegationId,proto3" json:"delegation_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AccessBinding) Reset() {
@@ -682,6 +694,13 @@ func (x *AccessBinding) GetRevocationReason() AccessBinding_RevocationReason {
 		return *x.RevocationReason
 	}
 	return AccessBinding_REVOCATION_REASON_UNSPECIFIED
+}
+
+func (x *AccessBinding) GetDelegationId() string {
+	if x != nil {
+		return x.DelegationId
+	}
+	return ""
 }
 
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant
@@ -1425,7 +1444,7 @@ var File_kaname_cloud_iam_v1_access_binding_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\n" +
-	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\xce\v\n" +
+	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\x9d\f\n" +
 	"\rAccessBinding\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fsubject_type\x18\x02 \x01(\tR\vsubjectType\x12\x1d\n" +
@@ -1452,7 +1471,8 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x0fmaterialized_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x0ematerializedAt\x12)\n" +
 	"\x10granted_relation\x18\x18 \x01(\tR\x0fgrantedRelation\x12\x16\n" +
 	"\x06system\x18\x19 \x01(\bR\x06system\x12e\n" +
-	"\x11revocation_reason\x18\x1a \x01(\x0e23.kaname.cloud.iam.v1.AccessBinding.RevocationReasonH\x00R\x10revocationReason\x88\x01\x01\x1a9\n" +
+	"\x11revocation_reason\x18\x1a \x01(\x0e23.kaname.cloud.iam.v1.AccessBinding.RevocationReasonH\x00R\x10revocationReason\x88\x01\x01\x12#\n" +
+	"\rdelegation_id\x18\x1b \x01(\tR\fdelegationId\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +
@@ -1466,12 +1486,13 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x11SCOPE_UNSPECIFIED\x10\x00\x12\v\n" +
 	"\aCLUSTER\x10\x01\x12\v\n" +
 	"\aACCOUNT\x10\x02\x12\v\n" +
-	"\aPROJECT\x10\x03\"\x9f\x01\n" +
+	"\aPROJECT\x10\x03\"\xc9\x01\n" +
 	"\x10RevocationReason\x12!\n" +
 	"\x1dREVOCATION_REASON_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18REVOCATION_REASON_REVOKE\x10\x01\x12\x1d\n" +
 	"\x19REVOCATION_REASON_EXPIRED\x10\x02\x12+\n" +
-	"'REVOCATION_REASON_RESOURCE_UNREGISTERED\x10\x03B\x14\n" +
+	"'REVOCATION_REASON_RESOURCE_UNREGISTERED\x10\x03\x12(\n" +
+	"$REVOCATION_REASON_DELEGATION_REVOKED\x10\x04B\x14\n" +
 	"\x12_revocation_reasonJ\x04\b\t\x10\n" +
 	"J\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13R\fcondition_idR\x11builtin_conditionR\x05scopeR\tscope_refR\n" +
 	"target_refR\bselector\"\xb5\x01\n" +

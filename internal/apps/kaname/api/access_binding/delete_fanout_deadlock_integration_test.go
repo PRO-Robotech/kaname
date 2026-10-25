@@ -213,7 +213,7 @@ func TestAB_DeleteAndObjectFanout_DoNotDeadlock(t *testing.T) {
 
 	// ── 1) СНЯТИЕ встаёт в очередь первым, не удерживая ничего ────────────────
 	delUC := accessbindingapp.NewDeleteAccessBindingUseCase(repo, opsRepo).
-		WithRelationStore(denyingRelations{}, nil)
+		WithRelationStore(ownerHoldsRemoval{owner: string(owner)}, nil)
 	op, err := delUC.Execute(asUser(ctx, owner), victim)
 	require.NoError(t, err, "снятие принято к исполнению")
 	waitAdvisoryWaiters(t, ctx, pool, 1, "снятие")

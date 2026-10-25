@@ -264,7 +264,7 @@ func startGrant(t *testing.T, ctx context.Context, fx sharedFixture, repo access
 func startRevoke(t *testing.T, ctx context.Context, fx sharedFixture, repo accessbindingapp.Repo, id domain.AccessBindingID) <-chan error {
 	t.Helper()
 	op, err := accessbindingapp.NewRevokeAccessBindingUseCase(repo, fx.opsRepo).
-		WithRelationStore(denyingRelations{}, nil).Execute(asUser(ctx, fx.owner), id)
+		WithRelationStore(ownerHoldsRemoval{owner: string(fx.owner)}, nil).Execute(asUser(ctx, fx.owner), id)
 	require.NoError(t, err, "синхронный путь Revoke (право владельца аккаунта) обязан пройти")
 	return awaitOutcome(ctx, fx.opsRepo, op.ID)
 }
@@ -272,7 +272,7 @@ func startRevoke(t *testing.T, ctx context.Context, fx sharedFixture, repo acces
 func startDelete(t *testing.T, ctx context.Context, fx sharedFixture, repo accessbindingapp.Repo, id domain.AccessBindingID) <-chan error {
 	t.Helper()
 	op, err := accessbindingapp.NewDeleteAccessBindingUseCase(repo, fx.opsRepo).
-		WithRelationStore(denyingRelations{}, nil).Execute(asUser(ctx, fx.owner), id)
+		WithRelationStore(ownerHoldsRemoval{owner: string(fx.owner)}, nil).Execute(asUser(ctx, fx.owner), id)
 	require.NoError(t, err, "синхронный путь Delete (право владельца аккаунта) обязан пройти")
 	return awaitOutcome(ctx, fx.opsRepo, op.ID)
 }

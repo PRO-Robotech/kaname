@@ -262,6 +262,10 @@ var Profile = listfiltergate.Profile{
 
 		// ---- one containing object, checked before the page is read ----
 		"access_binding.ListAssignableRoles": subjectGate("requireGrantAuthority"),
+		// Делегирования аккаунта (kaname#986): страница целиком лежит в ОДНОМ
+		// аккаунте из запроса, и право выдавать на нём (три пути) спрашивается до
+		// чтения страницы — оно и есть вся защита перечня.
+		"grant_delegation.List": subjectGate("requireAccountGrantAuthority"),
 		// ListAllOperations and ListIamOperations both gate first and then call the
 		// UNSCOPED operations repo — the one carrying an explicit IDOR warning — so
 		// the gate preceding the read is the whole of their protection, and a

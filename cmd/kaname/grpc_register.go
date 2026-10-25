@@ -74,6 +74,12 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.accessBindingHandler != nil {
 		iamv1.RegisterAccessBindingServiceServer(srv, svcs.accessBindingHandler)
 	}
+	// GrantDelegationService (kaname#986): делегирования права выдавать — только
+	// публичный (арендаторский) слушатель; дверь судит его по аннотациям, решение
+	// у обработчика (`HANDLER_DECIDES`). Наружу kaname не публикуется (Р-В5).
+	if svcs != nil && svcs.grantDelegationHandler != nil {
+		iamv1.RegisterGrantDelegationServiceServer(srv, svcs.grantDelegationHandler)
+	}
 	// AuthZ — public RPCs.
 	if svcs != nil && svcs.authorizeHandler != nil {
 		iamv1.RegisterAuthorizeServiceServer(srv, svcs.authorizeHandler)

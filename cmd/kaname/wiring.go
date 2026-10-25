@@ -25,6 +25,7 @@ import (
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	clusterpublicapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/clusterpublic"
+	grantdelegationapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/grant_delegation"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	identityquotaapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/identityquota"
@@ -83,6 +84,9 @@ type services struct {
 	membershipHandler    *membershipapp.Handler
 	roleHandler          *roleapp.Handler
 	accessBindingHandler *accessbindingapp.Handler
+	// grantDelegationHandler — GrantDelegationService (kaname#986): только
+	// публичный (арендаторский) слушатель.
+	grantDelegationHandler *grantdelegationapp.Handler
 	// internalIAMHandler — InternalIAMService (LookupSubject for the
 	// api-gateway auth-interceptor; Check delegates to AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
@@ -650,6 +654,22 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// SAME requireGrantAuthority predicate ListByScope/ListByRole enforce).
 	abExpandAccess := accessbindingapp.NewExpandAccessUseCase(relationStore).
 		WithGrantAuthority(kanameRepo, relationStore, logger)
+	// Делегированный путь права выдавать (kaname#986, Р2): делегат выдаёт, отзывает
+	// и удаляет выдачи в пределах своего делегирования. Один экземпляр на три глагола
+	// — тот же, что у мира проб (`gdWireGrantPath`).
+	abDelegated := accessbindingapp.NewDelegatedGrantPath(kanameRepo, relationStore)
+	abCreate.WithDelegatedGrantPath(abDelegated)
+	abRevoke.WithDelegatedGrantPath(abDelegated)
+	abDelete.WithDelegatedGrantPath(abDelegated)
+	// GrantDelegationService (kaname#986, Р1): делегирования права выдавать. Право
+	// на каждом глаголе решает обработчик (`HANDLER_DECIDES`).
+	grantDelegationHandler := grantdelegationapp.NewHandler(
+		grantdelegationapp.NewCreateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).
+			WithRelationStore(relationStore, logger),
+		grantdelegationapp.NewGetGrantDelegationUseCase(kanameRepo).WithRelationStore(relationStore),
+		grantdelegationapp.NewListGrantDelegationsUseCase(kanameRepo).WithRelationStore(relationStore),
+		grantdelegationapp.NewRevokeGrantDelegationUseCase(kanameRepo, opsRepo).WithRelationStore(relationStore, logger),
+	)
 	abHandler := accessbindingapp.NewHandler(abCreate, abDelete, abGet, abListByScope, abListBySub, abListByAcc,
 		abListSubjPriv).
 		WithUpdate(abUpdate).
@@ -999,6 +1019,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		membershipHandler:      membershipHandler,
 		roleHandler:            roleHandler,
 		accessBindingHandler:   abHandler,
+		grantDelegationHandler: grantDelegationHandler,
 		internalIAMHandler:     internalIAMHandler,
 		internalClusterHandler: internalClusterHandler,
 		publicClusterHandler:   publicClusterHandler,

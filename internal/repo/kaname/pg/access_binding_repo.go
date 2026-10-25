@@ -82,7 +82,8 @@ type abReader struct {
 // выдачи различает пара (role_id, granted_relation), и ровно одна из них непуста.
 const abCols = "id, subject_type, subject_id, COALESCE(role_id, '') AS role_id, resource_type, resource_id, " +
 	"status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
-	"deletion_protection, labels, target, granted_relation, is_system, COALESCE(revocation_reason, '') AS revocation_reason"
+	"deletion_protection, labels, target, granted_relation, is_system, COALESCE(revocation_reason, '') AS revocation_reason, " +
+	"COALESCE(delegation_id, '') AS delegation_id"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
@@ -901,7 +902,8 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		INSERT INTO access_bindings (
 			id, subject_type, subject_id, role_id, resource_type, resource_id,
 			status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope,
-			deletion_protection, labels, target, target_digest, granted_relation, is_system
+			deletion_protection, labels, target, target_digest, granted_relation, is_system,
+			delegation_id
 		)
 		VALUES (
 			$1, $2, $3,
@@ -910,7 +912,10 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 			-- ключ и дала бы отказ ссылочной целостности на несуществующую роль.
 			NULLIF($4, ''), $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			-- Ссылку на делегирование ставит только делегированный путь права
+			-- выдавать (kaname#986); у выдачи держателя права колонка NULL.
+			NULLIF($20, '')
 		)
 		RETURNING %s`, abCols)
 	var scopeArg any
@@ -935,6 +940,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		targetDigest,
 		b.GrantedRelation,
 		b.System,
+		string(b.DelegationID),
 	)
 	out, err := scanAB(row)
 	if err != nil {
@@ -1181,7 +1187,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		labelsJSON   []byte
 		targetJSON   []byte
 	)
-	dest := make([]any, 0, 20)
+	dest := make([]any, 0, 21)
 	if len(versionOut) > 0 {
 		dest = append(dest, versionOut[0])
 	}
@@ -1205,6 +1211,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		&ab.GrantedRelation,
 		&ab.System,
 		(*string)(&ab.RevocationReason),
+		(*string)(&ab.DelegationID),
 	)
 	err := row.Scan(dest...)
 	if err != nil {
