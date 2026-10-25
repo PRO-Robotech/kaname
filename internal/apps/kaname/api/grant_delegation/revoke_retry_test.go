@@ -27,6 +27,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/corelib/ids"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -91,13 +93,23 @@ func (g retryGDW) ActiveBindingIDs(context.Context, domain.GrantDelegationID) ([
 	return nil, nil
 }
 
+// Идентификаторы пробы — формой продукта (префикс и 17 знаков), как их судит
+// shared.ValidateResourceID.
+var (
+	retryID       = domain.GrantDelegationID(ids.NewID(domain.PrefixGrantDelegation))
+	retryAccount  = domain.AccountID(ids.NewID(domain.PrefixAccount))
+	retryDelegate = domain.ServiceAccountID(ids.NewID(domain.PrefixServiceAccount))
+	retryRole     = domain.RoleID(ids.NewID(domain.PrefixRole))
+	retryUser     = ids.NewID(domain.PrefixUser)
+)
+
 func retryDelegation(id domain.GrantDelegationID, st domain.GrantDelegationStatus) domain.GrantDelegation {
 	return domain.GrantDelegation{
-		ID: id, AccountID: "acc-retry", DelegateID: "sva-retry",
-		RoleIDs: []domain.RoleID{"rol-retry"}, TargetTypes: []string{"registry.registries"},
+		ID: id, AccountID: retryAccount, DelegateID: retryDelegate,
+		RoleIDs: []domain.RoleID{retryRole}, TargetTypes: []string{"registry.registries"},
 		SubjectTypes: []domain.SubjectType{domain.SubjectTypeServiceAccount},
 		Module:       "registry", Status: st,
-		DelegatedBy: domain.GrantDelegationActor{Type: "user", ID: "usr-retry"},
+		DelegatedBy: domain.GrantDelegationActor{Type: "user", ID: retryUser},
 		CreatedAt:   time.Unix(1_700_000_000, 0).UTC(),
 	}
 }
@@ -113,7 +125,7 @@ func TestRevokeGrantDelegation_SD986I1_DeadlockVictimIsRetried(t *testing.T) {
 		{name: "жертва взаимной блокировки — повтор, отзыв проходит",
 			lockErr: map[int]error{1: aborted}, wantErr: codes.OK, wantAttempts: 2},
 		{name: "близнец: уже отозвано — без повтора",
-			lockErr: map[int]error{1: iamerr.Wrapf(iamerr.ErrFailedPrecondition, "grant delegation gdl-retry is already revoked")},
+			lockErr: map[int]error{1: iamerr.Wrapf(iamerr.ErrFailedPrecondition, "grant delegation %s is already revoked", retryID)},
 			wantErr: codes.FailedPrecondition, wantAttempts: 1},
 		{name: "жертва на каждой попытке — прежний отказ после исчерпания",
 			lockErr: map[int]error{1: aborted, 2: aborted, 3: aborted, 4: aborted},
@@ -123,8 +135,8 @@ func TestRevokeGrantDelegation_SD986I1_DeadlockVictimIsRetried(t *testing.T) {
 			repo := &retryRepo{lockErr: tc.lockErr}
 			u := NewRevokeGrantDelegationUseCase(repo, nil)
 
-			res, err := u.doRevoke(context.Background(), "gdl-retry",
-				domain.GrantDelegationActor{Type: "user", ID: "usr-retry"}, "usr-retry")
+			res, err := u.doRevoke(context.Background(), retryID,
+				domain.GrantDelegationActor{Type: "user", ID: retryUser}, retryUser)
 
 			require.Equal(t, tc.wantAttempts, repo.attempts, "число транзакций отзыва")
 			require.Equal(t, tc.wantErr, status.Code(err), "код (ошибка %v)", err)

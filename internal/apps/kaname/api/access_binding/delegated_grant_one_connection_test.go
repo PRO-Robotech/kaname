@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -57,6 +58,7 @@ type connWorld struct {
 	delegate  domain.ServiceAccountID
 	subjectSA domain.ServiceAccountID
 	group     domain.GroupID
+	role      domain.RoleID
 	members   map[domain.SubjectID]bool
 	d         domain.GrantDelegation
 }
@@ -157,18 +159,19 @@ func (r connRelations) Check(context.Context, string, string, string) (bool, err
 
 func newConnWorld() *connWorld {
 	w := &connWorld{
-		acc:       "acc-conn",
-		owner:     "usr-conn-owner",
-		delegate:  "sva-conn-delegate",
-		subjectSA: "sva-conn-subject",
-		group:     "grp-conn",
+		acc:       domain.AccountID(ids.NewID(domain.PrefixAccount)),
+		owner:     domain.UserID(ids.NewID(domain.PrefixUser)),
+		delegate:  domain.ServiceAccountID(ids.NewID(domain.PrefixServiceAccount)),
+		subjectSA: domain.ServiceAccountID(ids.NewID(domain.PrefixServiceAccount)),
+		group:     domain.GroupID(ids.NewID(domain.PrefixGroup)),
+		role:      domain.RoleID(ids.NewID(domain.PrefixRole)),
 		members:   map[domain.SubjectID]bool{},
 	}
 	w.d = domain.GrantDelegation{
-		ID:           "gdl-conn",
+		ID:           domain.GrantDelegationID(ids.NewID(domain.PrefixGrantDelegation)),
 		AccountID:    w.acc,
 		DelegateID:   w.delegate,
-		RoleIDs:      []domain.RoleID{"rol-conn"},
+		RoleIDs:      []domain.RoleID{w.role},
 		TargetTypes:  []string{"registry.registries"},
 		SubjectTypes: []domain.SubjectType{domain.SubjectTypeServiceAccount, domain.SubjectTypeGroup},
 		Module:       "registry",
@@ -180,7 +183,7 @@ func newConnWorld() *connWorld {
 
 func (w *connWorld) binding(s domain.Subject) domain.AccessBinding {
 	return domain.AccessBinding{
-		RoleID:       "rol-conn",
+		RoleID:       w.role,
 		ResourceType: "account",
 		ResourceID:   string(w.acc),
 		Target:       domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "registry.registries", ID: "reg-conn"}}},
