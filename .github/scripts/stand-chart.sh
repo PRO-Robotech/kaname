@@ -578,9 +578,18 @@ build_image() {
 		if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
 			say "стенд: ВНИМАНИЕ — в дереве незакоммиченные правки; ревизия образа $REVISION их не называет"
 		fi
+		# Вывод сборки — в журнал рабочего каталога, а не в никуда (kaname#999).
+		# Отказ без текста docker нельзя процитировать и отнести к классу: поломка
+		# дерева неотличима от сбоя среды, и прогон признавался недействительным
+		# только по времени. При отказе хвост журнала печатается рядом с отказом;
+		# при успехе журнал остаётся в каталоге и в вывод не идёт.
+		local build_log="$WORK/image-build.log"
+		mkdir -p "$WORK"
 		docker build -f "$ROOT/Dockerfile" --build-arg "OCI_IMAGE_REVISION=$REVISION" \
-			-t "$IMAGE" "$ROOT" >/dev/null 2>&1 || {
-			unmet "образ $IMAGE не собрался"
+			-t "$IMAGE" "$ROOT" >"$build_log" 2>&1 || {
+			unmet "образ $IMAGE не собрался; хвост журнала сборки $build_log:"
+			# Печать хвоста не вправе подменить код отказа: он прежний при любом её исходе.
+			tail -n 40 "$build_log" | sed 's/^/  docker build: /' >&2 || true
 			exit "$RC_UNMET"
 		}
 		say "стенд: образ $IMAGE собран с ревизией ${REVISION:-<не названа>}"
