@@ -469,3 +469,7 @@ func (_ *strictDupRoleReader) BoundToSystemClass(context.Context, domain.RoleID)
 // GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
 // делегированного пути права выдавать не касаются.
 func (r *strictDupABReader) GrantDelegations() gdrepo.ReaderIface { return nil }
+
+// GrantDelegationsW — делегирований этот дублёр не несёт (kaname#986): пробы файла
+// делегированного пути права выдавать не касаются.
+func (w *strictDupABWriter) GrantDelegationsW() gdrepo.WriterIface { return nil }
