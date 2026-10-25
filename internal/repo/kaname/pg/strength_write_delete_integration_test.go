@@ -752,13 +752,25 @@ func writeWDReport(t *testing.T, prov scalegrid.Provenance, results []wdResult,
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	if err := os.WriteFile(path, []byte(header+renderWDReport(results, wall, final)), 0o644); err != nil {
+	text := header + renderWDReport(results, wall, final)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatalf("запись отчёта: %v", err)
 	}
 	if final {
 		t.Logf("отчёт записан: %s", path)
+		// Итоговый отчёт печатается ещё и в вывод прогона, между метками: замер
+		// идёт Job-ом внешнего кластера (машина владельца — не для прогонов), а файл
+		// дерева pod обратно не возвращается. Текст между метками побайтово равен
+		// записанному файлу — его и кладут в дерево.
+		fmt.Printf("%s\n%s%s\n", wdReportBeginMark, text, wdReportEndMark)
 	}
 }
+
+// Метки итогового отчёта в выводе прогона (writeWDReport).
+const (
+	wdReportBeginMark = "===R7-2-WRITE-DELETE-REPORT-BEGIN==="
+	wdReportEndMark   = "===R7-2-WRITE-DELETE-REPORT-END==="
+)
 
 func renderWDReport(results []wdResult, wall time.Duration, final bool) string {
 	var b strings.Builder
