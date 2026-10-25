@@ -913,6 +913,58 @@ func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, c
 	return out, nil
 }
 
+// LockMirrorObjectsSQL — замок строк зеркала набора объектов ($1 — типы, $2 — id,
+// попарно). Режим `FOR KEY SHARE`: конфликтует с удалением строки (снятие
+// регистрации) и не конфликтует с правкой меток. Порядок захвата задаёт
+// `ORDER BY` — узел замка стоит над сортировкой. Экспортирован ради пробы
+// (kaname#975): она судит этот самый текст.
+//
+// `SKIP LOCKED` — намеренно. Строку, которую снятие удаляет прямо сейчас, проход
+// не ждёт, а пропускает как отсутствующую: с `FOR KEY SHARE` конфликтует только
+// удаление (и смена ключа, которой у зеркала нет), а снятие после удаления строки
+// добирает выдачи и роли, записанные писателями, пока оно ждало. Проход,
+// ждущий строку под удалением и держащий такую выдачу, сходился бы со снятием в
+// кольцо (40P01, URG-24). Цена пропуска — только при откате снятия: член по
+// объекту появится со следующим проходом, а не этим; ошибка в сторону отказа.
+const LockMirrorObjectsSQL = `SELECT m.object_type, m.object_id
+		   FROM kaname.resource_mirror m
+		   JOIN unnest($1::text[], $2::text[]) AS u(object_type, object_id)
+		     ON m.object_type = u.object_type AND m.object_id = u.object_id
+		  ORDER BY m.object_type, m.object_id
+		    FOR KEY SHARE OF m SKIP LOCKED`
+
+// LockMirrorObjects — строки зеркала объектов `objs` под `FOR KEY SHARE`, одним
+// оператором в порядке (тип, id); возвращает объекты, строки которых есть
+// (kaname#975, контракт — у порта).
+func (s *reconcileStore) LockMirrorObjects(ctx context.Context, objs []reconcile.MemberCoord) (map[reconcile.MemberCoord]struct{}, error) {
+	present := make(map[reconcile.MemberCoord]struct{}, len(objs))
+	if len(objs) == 0 {
+		return present, nil
+	}
+	types := make([]string, 0, len(objs))
+	ids := make([]string, 0, len(objs))
+	for _, o := range objs {
+		types = append(types, o.ObjectType)
+		ids = append(ids, o.ObjectID)
+	}
+	rows, err := s.tx.Query(ctx, LockMirrorObjectsSQL, types, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: lock %d mirror objects: %w", len(objs), err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c reconcile.MemberCoord
+		if err := rows.Scan(&c.ObjectType, &c.ObjectID); err != nil {
+			return nil, fmt.Errorf("reconcile: scan locked mirror object: %w", err)
+		}
+		present[c] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reconcile: lock %d mirror objects: %w", len(objs), err)
+	}
+	return present, nil
+}
+
 // GetMirrorObject returns one mirror row (byName containment / PENDING verify).
 func (s *reconcileStore) GetMirrorObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error) {
 	row, ok, err := resource_mirror.GetByObject(ctx, s.tx, objectType, objectID)

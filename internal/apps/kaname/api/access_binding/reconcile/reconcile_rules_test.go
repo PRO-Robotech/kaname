@@ -95,6 +95,13 @@ type fakeStore struct {
 	rowLocks                []domain.AccessBindingID
 	rowLocksAfterFirstWrite []domain.AccessBindingID
 
+	// mirrorLocks / mirrorLocksAfterFirstWrite — замки строк зеркала объектов новых
+	// членов (LockMirrorObjects, kaname#975). vanished — объекты, строка которых
+	// снята между чтением отбора и замком: чтение их ещё вернуло, замок — нет.
+	mirrorLocks                []MemberCoord
+	mirrorLocksAfterFirstWrite []MemberCoord
+	vanished                   map[MemberCoord]bool
+
 	// scopeSelfVerbs seeds BindingScope.ScopeSelfVerbs — the role's verbs ON the
 	// binding's own scope anchor (account:<X>/project:<X>). Empty ⇒ no scope-self member
 	// (the default for the content-selector slices).
@@ -302,6 +309,26 @@ func (f *fakeStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string
 		}
 	}
 	return out, nil
+}
+
+// LockMirrorObjects — дублёр замка строк зеркала (kaname#975): строка есть, если
+// объект посеян в зеркало; запомнены запрошенные объекты и захваты после первой
+// записи прохода.
+func (f *fakeStore) LockMirrorObjects(_ context.Context, objs []MemberCoord) (map[MemberCoord]struct{}, error) {
+	present := make(map[MemberCoord]struct{}, len(objs))
+	for _, o := range objs {
+		f.mirrorLocks = append(f.mirrorLocks, o)
+		if f.wrote {
+			f.mirrorLocksAfterFirstWrite = append(f.mirrorLocksAfterFirstWrite, o)
+		}
+		for _, m := range f.mirror[o.ObjectType] {
+			if m.ObjectID == o.ObjectID && !f.vanished[o] {
+				present[o] = struct{}{}
+				break
+			}
+		}
+	}
+	return present, nil
 }
 
 func (f *fakeStore) GetMirrorObject(ctx context.Context, ot, oid string) (domain.MirrorObject, bool, error) {
