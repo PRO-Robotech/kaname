@@ -1,0 +1,113 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md
+  sha256: 69280aba687b7b3cb87b71a40c675b6ff8204405fd8550cfe98574d037fdbbd0
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Рецензент шапку документа намеренно не правил.
+  publication_mode: courier_of_agent_verdict
+  base_commit: 33831a737
+  content_commit: none
+  branch: 983
+  task: PRO-Robotech/kaname#983
+  related_tasks: [PRO-Robotech/kaname#982, PRO-Robotech/kaname#1010]
+  lines: 974
+  round: 4
+  round_note: >-
+    Не третий круг спора (fa-b8). Редакция 1d308bbd…6a72 одобрена записью круга 2. Это
+    второе ревью правки одобренного документа, только по дельте 4265bf69 → 69280aba.
+  predecessor_record: docs/specs/reviews/object-keeps-its-project-after-unregistration/4265bf69e5bdb6193867781de8440e975cd853ee5d9548943b31b0e6e44522d8.yaml
+  fingerprint_predicate: >-
+    `sha256sum` в копии kacho-workspace/tmp/kn-983-acceptance: `.md` → 69280aba…bbd0,
+    совпало с возвратом автора. Служебная копия `.md.4265bf69` → 4265bf69…22d8, совпала с
+    записью круга 3. `git show HEAD:<путь> | sha256sum` → 1d308bbd…6a72: в ветке лежит
+    одобренная редакция, правка не закоммичена.
+  measurement_revisions: >-
+    Дифф — `diff .md.4265bf69 .md`, три ханка: шапка 17a18-21, §6 S1 п.1 848-849 → 852-860,
+    §11 955-956 → 966-969 и 960 → 973. Других ханков нет. kacho — origin/main @41d7edad9b.
+    kaname#1010 — `gh issue view 1010 -R PRO-Robotech/kaname`: OPEN, «Гейт миграций: новая
+    миграция kaname цитирует одобренную приёмку».
+  premise: >-
+    «Правка касается §6 S1 п.1, §11 и истории в шапке; сценарии, производители и близнецы не
+    менялись» — подтверждена диффом. «Гейт kacho видит только дифф своего дерева» —
+    подтверждена: acceptanceledger_test.go @41d7edad9b, строки 149-150 (`diff --name-only
+    --diff-filter=A base...HEAD` от root дерева kacho), 158-159 (фильтр
+    `/internal/migrations/` и `.sql`).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Роль вынесла APPROVED о редакции 69280aba…bbd0. Санкция действует после публикации
+    внешнего события (`change-graph.md` §3), до неё блок event — not_performed. Вердикт
+    круга 2 о 1d308bbd…6a72 остаётся вердиктом о той редакции.
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · APPROVED · 69280aba687b7b3cb87b71a40c675b6ff8204405fd8550cfe98574d037fdbbd0"
+
+blocking: []
+
+blocking_closed:
+  - round3_kind: DoD
+    closed_by: §6 S1 п.1 (строки 852-860), §11 строка таблицы «§6 S1 п.1» (строка 973)
+    measured: >-
+      У пункта теперь есть исход «не пройдено»: 0 совпадений в новой миграции, отпечатка нет
+      или он не совпадает ни с одной записью APPROVED. Предикат способен упасть: на
+      33831a737 `grep -c 'object-keeps-its-project-after-unregistration'
+      internal/migrations/*.sql` даёт 0 во всех файлах. Близнец конструируем:
+      `git grep -c docs/engineering/acceptance -- 'internal/migrations/*.sql'` находит
+      миграции, которые цитируют другие приёмки по пути (например,
+      20260914090000_resource_journal_serves_the_subscription.sql:1). Гейт kacho держателем
+      больше не назван. Текст прямо говорит, что держателя в kaname нет и что гейт kacho
+      миграцию kaname не видит. Утверждение не ослаблено: прежний текст обещал держателя,
+      который предмет не держал, а новый задаёт исполнимый предикат.
+
+delta_checked:
+  - where: шапка, история ревью (строки 18-21)
+    result: >-
+      Принято. Дописаны две строки, прежние не тронуты. Отпечатки и пути совпадают с
+      записями 1d308bbd…6a72 (APPROVED) и 4265bf69…22d8 (CHANGES_REQUESTED) в каталоге
+      записей.
+  - where: §11, вводный абзац и строка «§6 S1 п.1»
+    result: >-
+      Соответствует диффу. Слова «DoD по существу не меняются» сняты честно: пункт DoD
+      изменился. Строки 149-159 @41d7edad9b перемерены.
+
+important:
+  - kind: FORMAT
+    where: §6 S1 п.1 строка 860, §11 строка 973
+    note: >-
+      Держатель назван описанием «задача kaname — гейт миграций», без номера. Задача
+      заведена: PRO-Robotech/kaname#1010. Не блокирует: текст не вводит в заблуждение и
+      исполнимый предикат у пункта есть. Номер можно вписать при следующей правке
+      документа. Новый отпечаток потребует ревью дельты только этой строки.
+
+constructibility:
+  seeded: 0
+  not_applicable: >-
+    В дельте «Дано» не менялись, посева не было. Конструируемость предиката DoD показана
+    чтением дерева (blocking_closed.measured), в зелёное посевом не зачитывается.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
