@@ -181,6 +181,11 @@ spec:
       # config/service_link_collision.go) — то есть отказ стал диагностируемым.
       # Здесь снимается ПРИЧИНА, там — молчание: одно другого не заменяет.
       enableServiceLinks: false
+      # ТОКЕН API КЛАСТЕРА НЕ МОНТИРУЕТСЯ (задача kaname#997): служба API
+      # кластера не вызывает, а умолчание платформы — монтировать токен
+      # ServiceAccount в каждый под. Величина — литерал, а не ручка значений:
+      # включать нечего, и ручка была бы лишней поверхностью без потребителя.
+      automountServiceAccountToken: false
       # Hardened pod security context (trivy AVD-KSV-0118): run as a
       # non-root user, drop the default ambient context.
       securityContext:
