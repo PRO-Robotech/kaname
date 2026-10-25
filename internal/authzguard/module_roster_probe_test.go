@@ -237,16 +237,6 @@ func internalListenerServiceDescriptors() []protoreflect.ServiceDescriptor {
 // метод контракта — запись о несуществующем методе ничего не открывает и
 // читается как объявление живой поверхности.
 func TestModuleProfiles_EveryInternalMethodIsClassifiedAndEveryEntryExists(t *testing.T) {
-	classified := map[string]struct{}{}
-	for _, m := range SANRestrictedInternalRPCs() {
-		classified[m] = struct{}{}
-	}
-	for _, p := range moduleidentity.Profiles() {
-		for _, m := range ProfileMethods(p) {
-			classified[m] = struct{}{}
-		}
-	}
-
 	services := internalListenerServiceDescriptors()
 	if len(services) == 0 {
 		t.Fatal("предпосылка: обход реестра описаний не нашёл ни одной службы внутреннего слушателя — перепись не выполнилась")
@@ -254,17 +244,71 @@ func TestModuleProfiles_EveryInternalMethodIsClassifiedAndEveryEntryExists(t *te
 	existing := map[string]struct{}{}
 	for _, sd := range services {
 		for i := 0; i < sd.Methods().Len(); i++ {
-			full := "/" + string(sd.FullName()) + "/" + string(sd.Methods().Get(i).Name())
-			existing[full] = struct{}{}
-			if _, ok := classified[full]; !ok {
-				t.Errorf("метод %s внутреннего слушателя не отнесён ни к одному профилю и ни к рукаву точных идентификаторов", full)
-			}
+			existing["/"+string(sd.FullName())+"/"+string(sd.Methods().Get(i).Name())] = struct{}{}
+		}
+	}
+	classified := classifiedInternalMethods()
+	for _, f := range profileCensusFindings(classified, existing) {
+		t.Error(f)
+	}
+	t.Logf("перепись: служб %d · методов %d · отнесённых имён %d", len(services), len(existing), len(classified))
+}
+
+// classifiedInternalMethods — имена, которые называют перечни профилей и рукав
+// точных идентификаторов.
+func classifiedInternalMethods() map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, m := range SANRestrictedInternalRPCs() {
+		out[m] = struct{}{}
+	}
+	for _, p := range moduleidentity.Profiles() {
+		for _, m := range ProfileMethods(p) {
+			out[m] = struct{}{}
+		}
+	}
+	return out
+}
+
+// profileCensusFindings — суд переписи в обе стороны: метод без отнесения и
+// имя перечня без метода. Вынесен функцией, чтобы его способность упасть
+// доказывалась синтетикой ниже на каждом прогоне.
+func profileCensusFindings(classified, existing map[string]struct{}) []string {
+	var out []string
+	for m := range existing {
+		if _, ok := classified[m]; !ok {
+			out = append(out, "метод "+m+" внутреннего слушателя не отнесён ни к одному профилю и ни к рукаву точных идентификаторов")
 		}
 	}
 	for m := range classified {
 		if _, ok := existing[m]; !ok {
-			t.Errorf("перечень называет %s, а такого метода у служб внутреннего слушателя нет", m)
+			out = append(out, "перечень называет "+m+", а такого метода у служб внутреннего слушателя нет")
 		}
 	}
-	t.Logf("перепись: служб %d · методов %d · отнесённых имён %d", len(services), len(existing), len(classified))
+	sort.Strings(out)
+	return out
+}
+
+// TestModuleProfilesCensus_FindsBothDefectsAndStaysSilentOnTheTwin — инъекция
+// в обе стороны: новый метод без отнесения найден, имя перечня без метода
+// найдено, совпадающие множества — молчание.
+func TestModuleProfilesCensus_FindsBothDefectsAndStaysSilentOnTheTwin(t *testing.T) {
+	set := func(names ...string) map[string]struct{} {
+		out := map[string]struct{}{}
+		for _, n := range names {
+			out[n] = struct{}{}
+		}
+		return out
+	}
+	const known, added, phantom = "/svc.A/Known", "/svc.A/Added", "/svc.A/Removed"
+	if got := profileCensusFindings(set(known), set(known)); len(got) != 0 {
+		t.Fatalf("близнец: совпадающие множества дали находки %v", got)
+	}
+	got := profileCensusFindings(set(known), set(known, added))
+	if len(got) != 1 || !strings.Contains(got[0], added) {
+		t.Fatalf("метод без отнесения не найден с именем: %v", got)
+	}
+	got = profileCensusFindings(set(known, phantom), set(known))
+	if len(got) != 1 || !strings.Contains(got[0], phantom) {
+		t.Fatalf("имя перечня без метода не найдено с именем: %v", got)
+	}
 }
