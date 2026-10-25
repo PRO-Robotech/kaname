@@ -255,11 +255,11 @@ func (w *p2) role(name string, rules domain.Rules) domain.RoleID {
 	}
 	// Глаголы каждого правила вычисляет каталог мира (kaname#878), как в
 	// продуктовом создании роли: селектор без них писатель отвергает.
-	sels := w.facts.GrantSelectors(r.Rules.MaterializingSelectors())
+	sels := w.facts.GrantSelectors(r.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", name, err)
 	}
-	pairs := w.facts.RoleVerbsFromSelectors(sels)
+	pairs := w.facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		w.t.Fatalf("проекция глаголов роли %s пуста — каталог П1 не знает её типов", name)
 	}

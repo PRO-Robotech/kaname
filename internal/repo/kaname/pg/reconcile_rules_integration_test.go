@@ -69,7 +69,7 @@ func seedRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *
 	defer func() { _ = w.Rollback(ctx) }()
 	inserted, err := w.RolesW().Insert(ctx, role)
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 	return rid
 }
@@ -230,7 +230,7 @@ func TestC20C21_RuleRemoved_EagerRevokeByRuleFP_NoResidual(t *testing.T) {
 		Rules: domain.Rules{ruleKeep}, Permissions: mustCompile(t, domain.Rules{ruleKeep}), IsSystem: false}
 	_, err = w.RolesW().Update(ctx, updated, []string{"rules"})
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, catalogfixture.Facts().GrantSelectors(updated.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, catalogfixture.Facts().GrantSelectors(updated.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 
 	// Fan-out reconcile of the binding picks up the new role.rules.
@@ -404,7 +404,7 @@ func seedAccountRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	defer func() { _ = w.Rollback(ctx) }()
 	inserted, err := w.RolesW().Insert(ctx, role)
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 	return rid
 }

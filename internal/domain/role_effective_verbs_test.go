@@ -142,3 +142,24 @@ func TestRole_PreviewOfARetiredResourceShowsNoVerb(t *testing.T) {
 		alive.EffectiveVerbs(lookup),
 		"живой ресурс отдаёт СВОЙ набор — предикат различает живое и снятое")
 }
+
+// TestRole_ModuleRolePreviewCarriesNoEditorDelete — превью роли модуля не обещает
+// удаления, которое материализация ей не даёт (kaname#1006): роль модуля с
+// правкой не редактор плоской модели, её классы объявлены манифестом точно.
+//
+// Близнец меняет ровно один факт — владельца: та же роль платформы квалификатор
+// `delete*` с пояснением по-прежнему несёт.
+func TestRole_ModuleRolePreviewCarriesNoEditorDelete(t *testing.T) {
+	rules := Rules{{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"get", "list", "update"}}}
+
+	module := Role{IsSystem: true, OwnerModule: "registry", Rules: rules}
+	assert.Equal(t, []string{"get", "list", "update"}, module.EffectiveVerbs(lookupFive),
+		"превью роли модуля обещает удаление, которого манифест не объявлял")
+	assert.NotContains(t, module.VerbNotes(lookupFive), EditorDeleteVerb,
+		"пояснение к удалению у роли модуля, которой удаление не приписывается")
+
+	platform := Role{IsSystem: true, Rules: rules}
+	assert.Equal(t, []string{"get", "list", "update", EditorDeleteVerb}, platform.EffectiveVerbs(lookupFive),
+		"близнец: роль платформы с правкой потеряла квалификатор удаления")
+	assert.Equal(t, editorDeleteNote, platform.VerbNotes(lookupFive)[EditorDeleteVerb])
+}

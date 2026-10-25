@@ -324,15 +324,17 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			if slices.Contains(changed, "rules") {
 				// Каталожный факт — один на обе стороны (довод — на создании).
 				facts := u.cat.Facts()
+				// Политика — та же, которой правила судились (kaname#1006).
+				policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
 				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
-					facts.GrantSelectors(upd.Rules.MaterializingSelectors())); serr != nil {
+					facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
 					return domain.Role{}, serr
 				}
 				// Та же пара, что на создании: снятый из правил глагол обязан
 				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
 				// потому что добавление проходит успешно.
 				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
+					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
 					return domain.Role{}, verr
 				}
 				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и

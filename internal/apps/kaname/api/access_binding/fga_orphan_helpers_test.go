@@ -380,8 +380,8 @@ func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicR
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *fakeRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
 
-func (w *fakeRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, bool, error) {
-	return nil, false, nil
+func (w *fakeRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
+	return nil, domain.RulePolicy{}, false, nil
 }
 
 // GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла

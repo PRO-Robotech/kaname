@@ -32,21 +32,21 @@ func TestGrantedVerbs_WildcardExpandsToTheTypeSet(t *testing.T) {
 			"и её «ноль» ничего не утверждал бы", fgaType)
 	}
 
-	got := GrantedVerbs(fgaType, []string{"*"}, typeVerbs)
+	got := GrantedVerbs(fgaType, []string{"*"}, typeVerbs, domain.TenantPolicy())
 	if len(got) != len(typeVerbs) {
 		t.Fatalf("подстановка дала %v (глаголов %d), набор типа — %v (%d)",
 			sortedCopy(got), len(got), sortedCopy(typeVerbs), len(typeVerbs))
 	}
 
 	// Отрицание рядом: чужой глагол не появляется оттого, что его назвали.
-	if extra := GrantedVerbs(fgaType, []string{"teleport"}, typeVerbs); len(extra) != 0 {
+	if extra := GrantedVerbs(fgaType, []string{"teleport"}, typeVerbs, domain.TenantPolicy()); len(extra) != 0 {
 		t.Errorf("глагол вне набора типа дал %v", extra)
 	}
 }
 
 // Правка влечёт удаление НА ЛИСТЕ и не влечёт на области иерархии.
 func TestGrantedVerbs_UpdateImpliesDeleteOnLeavesOnly(t *testing.T) {
-	leaf := GrantedVerbs("vpc_network", []string{"update"}, VerbsOfType("vpc_network"))
+	leaf := GrantedVerbs("vpc_network", []string{"update"}, VerbsOfType("vpc_network"), domain.TenantPolicy())
 	if !contains(leaf, "delete") {
 		t.Errorf("редактор листа не получил удаления: %v — уборка за своим же ресурсом "+
 			"отказывает", sortedCopy(leaf))
@@ -58,10 +58,75 @@ func TestGrantedVerbs_UpdateImpliesDeleteOnLeavesOnly(t *testing.T) {
 	// Законный близнец: область иерархии удаления не получает — снос области
 	// принадлежит владельцу, а не редактору содержимого.
 	for _, scope := range []string{"account", "project"} {
-		got := GrantedVerbs(scope, []string{"update"}, VerbsOfType(scope))
+		got := GrantedVerbs(scope, []string{"update"}, VerbsOfType(scope), domain.TenantPolicy())
 		if contains(got, "delete") {
 			t.Errorf("редактор получил удаление области %s: %v", scope, sortedCopy(got))
 		}
+	}
+}
+
+// Роль МОДУЛЯ получает ровно объявленные классы: правка у неё удаления не влечёт
+// (kaname#1006). Типы — те, на которых дефект наблюдался: роль публикации образов
+// с классом `update` на регистри и его репозиториях получала их удаление.
+//
+// Близнец меняет ровно один факт — владельца роли: та же правка на том же типе у
+// роли платформы и арендатора удаление по-прежнему влечёт. Второй близнец —
+// роль модуля, назвавшая удаление классом, его сохраняет: правило снимает только
+// ПРИПИСАННОЕ удаление, а не объявленное.
+func TestGrantedVerbs_ModuleRoleUpdateDoesNotImplyDelete(t *testing.T) {
+	module := domain.PolicyOfRole(true, "registry")
+	for _, fgaType := range []string{"registry_repository", "registry_registry"} {
+		typeVerbs := VerbsOfType(fgaType)
+		if !contains(typeVerbs, "delete") || !contains(typeVerbs, "update") {
+			t.Fatalf("у типа %s набор %v без правки или удаления — предпосылка пробы не "+
+				"выполнена, и её молчание ничего не утверждало бы", fgaType, sortedCopy(typeVerbs))
+		}
+
+		got := GrantedVerbs(fgaType, []string{"get", "list", "update"}, typeVerbs, module)
+		if contains(got, "delete") {
+			t.Errorf("роль модуля с правкой получила удаление на %s: %v — манифест удаления "+
+				"не объявлял", fgaType, sortedCopy(got))
+		}
+		if !contains(got, "update") {
+			t.Errorf("названный глагол потерян на %s: %v", fgaType, sortedCopy(got))
+		}
+
+		for name, policy := range map[string]domain.RulePolicy{
+			"платформы":  domain.PolicyOfRole(true, ""),
+			"арендатора": domain.TenantPolicy(),
+		} {
+			if twin := GrantedVerbs(fgaType, []string{"update"}, typeVerbs, policy); !contains(twin, "delete") {
+				t.Errorf("роль %s с правкой на %s не получила удаления: %v — правило «правка "+
+					"влечёт удаление» снято шире предмета", name, fgaType, sortedCopy(twin))
+			}
+		}
+
+		if named := GrantedVerbs(fgaType, []string{"update", "delete"}, typeVerbs, module); !contains(named, "delete") {
+			t.Errorf("роль модуля, назвавшая удаление, его потеряла на %s: %v", fgaType, sortedCopy(named))
+		}
+	}
+}
+
+// Проекция роли модуля — тем же предикатом: пары «тип × delete» у правки нет.
+func TestRoleVerbsFromSelectors_ModuleRoleCarriesNoImpliedDelete(t *testing.T) {
+	dotted, ok := DottedType("registry_repository")
+	if !ok {
+		t.Fatal("у registry_repository нет точечного имени — предпосылка пробы не выполнена")
+	}
+	sel := []domain.RuleSelector{{ObjectTypes: []string{dotted}, Verbs: []string{"get", "list", "update"}}}
+	has := func(pairs []domain.RoleVerb) bool {
+		for _, p := range pairs {
+			if p.Verb == "delete" {
+				return true
+			}
+		}
+		return false
+	}
+	if has(RoleVerbsFromSelectors(sel, domain.PolicyOfRole(true, "registry"))) {
+		t.Error("проекция роли модуля несёт удаление, которого манифест не объявлял")
+	}
+	if !has(RoleVerbsFromSelectors(sel, domain.PolicyOfRole(true, ""))) {
+		t.Error("проекция роли платформы с правкой потеряла удаление — правило снято шире предмета")
 	}
 }
 
@@ -72,7 +137,7 @@ func TestGrantedVerbs_TypeWithoutDeclaredVerbsGetsNone(t *testing.T) {
 	if len(VerbsOfType(undeclared)) != 0 {
 		t.Skipf("у типа %s появился набор глаголов — предпосылка пробы истекла", undeclared)
 	}
-	if got := GrantedVerbs(undeclared, []string{"*"}, CommonVerbVocabulary()); len(got) != 0 {
+	if got := GrantedVerbs(undeclared, []string{"*"}, CommonVerbVocabulary(), domain.TenantPolicy()); len(got) != 0 {
 		t.Errorf("тип без объявленного набора получил %v", sortedCopy(got))
 	}
 }
@@ -86,7 +151,7 @@ func TestRoleVerbsFromSelectors_KeepsTheDottedTypeAndExpandsTheWildcard(t *testi
 	}
 	pairs := RoleVerbsFromSelectors([]domain.RuleSelector{
 		{ObjectTypes: []string{dotted}, Verbs: []string{"*"}},
-	})
+	}, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		t.Fatal("роль с подстановкой не дала ни одной пары — ровно этот дефект и чинится")
 	}
@@ -103,12 +168,12 @@ func TestRoleVerbsFromSelectors_KeepsTheDottedTypeAndExpandsTheWildcard(t *testi
 	// набор значило бы дать право, которого движок не даёт.
 	if n := len(RoleVerbsFromSelectors([]domain.RuleSelector{
 		{ObjectTypes: []string{"nosuch.type"}, Verbs: []string{"get"}},
-	})); n != 0 {
+	}, domain.TenantPolicy())); n != 0 {
 		t.Errorf("неизвестный тип дал %d пар", n)
 	}
 
 	// Пустой вход — пустая проекция, а не «все права».
-	if n := len(RoleVerbsFromSelectors(nil)); n != 0 {
+	if n := len(RoleVerbsFromSelectors(nil, domain.TenantPolicy())); n != 0 {
 		t.Errorf("пустые селекторы дали %d пар", n)
 	}
 }

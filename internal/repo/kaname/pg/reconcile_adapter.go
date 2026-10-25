@@ -436,6 +436,9 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 		// column by scanAB (relverdict.DecodeTarget). AllInScope/empty ⇒ whole-anchor grant.
 		Target: b.Target,
 		RoleID: string(b.RoleID),
+		// Политика роли — из той же строки, тем же единственным выводом: от
+		// владельца роли зависит, влечёт ли правка удаление (kaname#1006).
+		Policy: domain.PolicyOfRole(role.IsSystem, role.OwnerModule),
 		Active: b.Status == domain.AccessBindingStatusActive,
 	}
 }
