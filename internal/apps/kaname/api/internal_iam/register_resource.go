@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -65,6 +66,11 @@ type relationOutboxEmitter interface {
 type resourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
 	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) (deleted bool, err error)
+	// DescendantsTx и DropRegistrationTx — снятие потомков снимаемого объекта
+	// (kaname#1002, см. dropDescendants). Часть ОБЯЗАТЕЛЬНОГО порта, а не опция:
+	// «нет читателя — потомков не снимаем» и было дефектом.
+	DescendantsTx(ctx context.Context, tx service.Tx, parentType, parentID string) ([]service.RegisteredDescendant, error)
+	DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (deleted bool, err error)
 }
 
 // keyWithdrawal — узкий порт: снятие регистрации объекта снимает его выдачи
@@ -644,11 +650,26 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 		// Never echo the store's transport text (endpoint + store id leak).
 		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "authz backend unavailable")
 	}
-	out := make([]service.RelationTuple, 0, len(standing))
-	for _, have := range standing {
+	var out []service.RelationTuple
+	for _, have := range proxyOwned(standing) {
 		if have.Relation == t.relation && have.User == t.subject {
 			continue // the request already carries this one
 		}
+		out = append(out, have)
+	}
+	for range out {
+		uc.observe(stepResidualWithdraw, nil)
+	}
+	return out, nil
+}
+
+// proxyOwned — из отношений, стоящих на объекте, те, что вправе снять снятие его
+// регистрации: записанные этим посредником, кроме публикации (её снимает свой путь
+// в порядке версий владельца). Одно правило на снимаемый объект и на его потомков
+// (kaname#1002): второе изложение разошлось бы с первым молча.
+func proxyOwned(standing []service.RelationTuple) []service.RelationTuple {
+	var out []service.RelationTuple
+	for _, have := range standing {
 		// ХРАНИМАЯ публикация узнаётся по хранимой паре, а не по входному слову
 		// соседа: после переезда на системные классы (kaname#829, разбор CE-08)
 		// факт несёт `system_class:anonymous`, и предикаты входного слова ниже его
@@ -658,7 +679,7 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 			continue
 		}
 		if !proxytuple.IsProxyWritable(have.User, have.Relation) {
-			continue // not ours to remove — see the doc above
+			continue // not ours to remove — see residualTuples
 		}
 		if proxytuple.IsPublicReadGrant(have.User, have.Relation) {
 			// The publication is withdrawn by its own path, in the owner's order (see
@@ -668,13 +689,7 @@ func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIn
 		}
 		out = append(out, have)
 	}
-	for range out {
-		uc.observe(stepResidualWithdraw, nil)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
+	return out
 }
 
 // tupleInput — the minimal transport-agnostic shape both RPCs share. Satisfied
@@ -904,6 +919,14 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 				authzguard.PrincipalUserID(ctx)); err != nil {
 				return "", false, false, fmt.Errorf("withdraw grants of unregistered resource: %w", err)
 			}
+			// ПОТОМКИ УХОДЯТ ВМЕСТЕ С РОДИТЕЛЕМ (kaname#1002) — под тем же условием,
+			// что отзыв выдач: только снятие, удалившее строку регистрации родителя.
+			// Устаревшее надгробие (родитель зарегистрирован заново, новее) потомков
+			// нового родителя не трогает, а снятие незарегистрированного ключа не
+			// сносит ничего, что под ним числится.
+			if err = uc.dropDescendants(ctx, tx, t, row); err != nil {
+				return "", false, false, err
+			}
 		}
 		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE SAME VERSION.
 		//
@@ -949,4 +972,85 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	return objectType, changed, projectionUnchanged, nil
+}
+
+// dropDescendants снимает, В ТРАНЗАКЦИИ СНЯТИЯ РОДИТЕЛЯ, каждого его потомка по
+// цепи предков: регистрацию (строку зеркала и цепь), отношения, записанные этим
+// посредником (владелец, указатель на родителя), выдачи на него, его публикацию —
+// и кладёт событие перерасчёта по каждому (kaname#1002).
+//
+// ПОЧЕМУ ЗДЕСЬ, А НЕ У РЕГИСТРАТОРА. Снятие называет один объект. Перечислить
+// потомков регистратор модуля не может: чтения зеркала kaname у него нет, а
+// потомки, заведённые вне его учёта, ему не видны. Цепь предков хранит kaname,
+// поэтому и потомков называет он. Оставленный потомок — зарегистрированный объект
+// без живого родителя: его отношения и выдачи продолжают отвечать «доступ есть» о
+// том, чего уже нет.
+//
+// ТОЛЬКО ПОТОМКИ ТОГО ЖЕ МОДУЛЯ. Право снимать регистрацию у модуля — на объекты
+// своих типов (проверка владения типом в обработчике). Потомок чужого модуля,
+// снятый здесь, был бы снят модулем, у которого такого права нет, — снятие
+// родителя стало бы путём к чужим объектам. Модуль сравнивается по имени
+// КАТАЛОГА (`<модуль>.<ресурс>`), спрошенному у живой строки в этой же транзакции;
+// тип, чей модуль не выводится, не снимается — по той же причине.
+//
+// ПОЧЕМУ ВСЁ В ОДНОЙ ТРАНЗАКЦИИ. Снятие родителя без снятия потомков и наоборот не
+// фиксируется: отказ любого шага откатывает всё, и потребитель доставляет то же
+// намерение снова (повтор — без изменений: строки родителя уже нет, и его
+// снятие сюда не доходит).
+//
+// Пост-коммитного прохода по потомкам нет намеренно: ответ о доступе к ним
+// перестаёт быть «да» в момент коммита — регистрация, цепь и отношения сняты,
+// выдачи отозваны, — а материализованное по ним снимает асинхронный проход по
+// событию перерасчёта, положенному здесь же.
+func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx service.Tx, t tupleIntent, parent service.ResourceMirrorRow) error {
+	parentModule, ok := catalogModule(parent.ObjectType)
+	if !ok {
+		return nil
+	}
+	parentType, parentID := t.splitObject()
+	descendants, err := uc.mirror.DescendantsTx(ctx, tx, parentType, parentID)
+	if err != nil {
+		return fmt.Errorf("read descendants of unregistered resource: %w", err)
+	}
+	actor := authzguard.PrincipalUserID(ctx)
+	for _, d := range descendants {
+		catalogType, err := uc.catalogObjectType(ctx, tx, d.ModelType)
+		if err != nil {
+			return fmt.Errorf("resolve catalog type of descendant: %w", err)
+		}
+		if module, ok := catalogModule(catalogType); !ok || module != parentModule {
+			continue
+		}
+		dropped, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
+		if err != nil {
+			return fmt.Errorf("drop descendant registration: %w", err)
+		}
+		if tuples := proxyOwned(d.Standing); len(tuples) > 0 {
+			if err := uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
+				return fmt.Errorf("emit fga outbox for descendant: %w", err)
+			}
+		}
+		if dropped {
+			if err := uc.withdrawal.WithdrawTx(ctx, tx, domain.ResourceRef{Type: catalogType, ID: d.ID}, actor); err != nil {
+				return fmt.Errorf("withdraw grants of descendant: %w", err)
+			}
+		}
+		if admitsPublication(d.ModelType) {
+			if _, err := uc.publications.ApplyTx(ctx, tx, d.ModelType, d.ID, false, parent.SourceVersion); err != nil {
+				return fmt.Errorf("withdraw public-read publication of descendant: %w", err)
+			}
+		}
+		if uc.reconcile != nil {
+			if err := uc.reconcile.EmitTx(ctx, tx, "mirror.delete", catalogType, d.ID); err != nil {
+				return fmt.Errorf("emit reconcile event for descendant: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// catalogModule — модуль типа, названного словарём каталога (`<модуль>.<ресурс>`).
+func catalogModule(catalogType string) (string, bool) {
+	module, _, ok := authzmap.SplitObjectType(catalogType)
+	return module, ok
 }

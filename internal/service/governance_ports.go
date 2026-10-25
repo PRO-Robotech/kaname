@@ -89,6 +89,21 @@ type ResourceMirrorEmitter interface {
 	// регистрации. deleted — строка была и снята: только такое снятие есть снятие
 	// регистрации объекта (kaname#963, Д1), и только оно отзывает его выдачи.
 	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) (deleted bool, err error)
+	// DescendantsTx — каждый объект, в цепи предков которого на любой глубине стоит
+	// (parentType, parentID), с отношениями, стоящими на нём, — в снимке транзакции
+	// вызывающего (kaname#1002).
+	DescendantsTx(ctx context.Context, tx Tx, parentType, parentID string) ([]RegisteredDescendant, error)
+	// DropRegistrationTx снимает регистрацию потомка безусловно: строку зеркала
+	// (`catalogType`) и всю цепь предков (`modelType`). deleted — строка зеркала была.
+	DropRegistrationTx(ctx context.Context, tx Tx, catalogType, modelType, objectID string) (deleted bool, err error)
+}
+
+// RegisteredDescendant — потомок снимаемого объекта по цепи предков и отношения,
+// стоящие на нём в момент чтения (kaname#1002). `ModelType` — словарь модели прав.
+type RegisteredDescendant struct {
+	ModelType string
+	ID        string
+	Standing  []RelationTuple
 }
 
 // PublicReadPublisher — применяет намерение владельца о публикации объекта для

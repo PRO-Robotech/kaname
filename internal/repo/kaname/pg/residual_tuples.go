@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -89,6 +90,18 @@ func (r *ResidualTupleReader) ObjectTuples(ctx context.Context, object string) (
 	if r == nil || r.pool == nil || object == "" {
 		return nil, nil
 	}
+	return objectTuples(ctx, r.pool, object)
+}
+
+// rowsQuerier — общее у пула и транзакции: перечисление читается одним телом и
+// там, где читатель остатка спрашивает до транзакции снятия, и там, где снятие
+// потомков спрашивает внутри неё (kaname#1002).
+type rowsQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// objectTuples — перечисление отношений объекта страницами, тело ObjectTuples.
+func objectTuples(ctx context.Context, q rowsQuerier, object string) ([]outboxtypes.RelationTuple, error) {
 	objectType, objectID, ok := splitObjectRef(object)
 	if !ok {
 		return nil, fmt.Errorf("relation_fact: объект %q не разбирается как «тип:идентификатор»", object)
@@ -100,7 +113,7 @@ func (r *ResidualTupleReader) ObjectTuples(ctx context.Context, object string) (
 		afterSubj string
 	)
 	for page := 0; page < residualReadPageCap; page++ {
-		rows, err := r.pool.Query(ctx, `
+		rows, err := q.Query(ctx, `
 			SELECT f.relation, f.subject
 			  FROM kaname.relation_fact f
 			 WHERE f.object_type = $1
