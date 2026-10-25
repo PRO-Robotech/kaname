@@ -10,9 +10,12 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
-// priorNoteProse — прежняя проза примечаний публичного чтения → её запись после
-// перевода на класс субъекта: строка блока целиком (с отступом блока), ключ —
-// прежняя, значение — новая.
+// priorNoteProse — прежняя проза примечаний канона → новая: строка блока целиком
+// (с отступом блока), ключ — прежняя, значение — новая.
+//
+// Переходов в таблице ДВА, и условие снятия у каждого своё: публичное чтение
+// (ниже, kaname#855) и примечание о `v_create` реестра (kaname#953 — условие
+// стоит при его парах в литерале).
 //
 // Манифесты registry и nlb ствола kacho описывали публичное чтение словом
 // `user:*`, а канон после классов субъектов (kaname#829) называет класс
@@ -40,6 +43,19 @@ var priorNoteProse = map[string]string{
 	"    # the wildcard — no write relation does (anon is a read-only floor, B14).":    "    # the class — no write relation does (anon is a read-only floor, B14).",
 	"    # the repo owner fully manages their own repository; `user:*` wildcard stays": "    # the repo owner fully manages their own repository; the `system_class` subject stays",
 	"    #   * `[service_account]` ONLY — no `user`, no `group#member`, no `user:*`.":  "    #   * `[service_account]` ONLY — no `user`, no `group#member`, no `system_class`.",
+
+	// Примечание `registry_registry` о `v_create` (PRO-Robotech/kaname#953):
+	// прежняя проза называла `v_create` вопросом заведения репозитория у ВСЯКОГО
+	// модуля, а модуль может заводить репозиторий по `v_update` реестра.
+	// Потребители раздела (манифест registry ствола kacho и раздел resources
+	// registry-operator) несут прежнюю прозу и переходят на новую перепином
+	// вслед за каноном; до того их раздел обязан собираться — тем же переводом.
+	// Условие снятия этих трёх пар: прежней прозы нет ни в одном доставляемом
+	// манифесте registry — `git grep -c 'the first-push blob-reveal guard'` по
+	// стволам kacho и registry-operator даёт пусто.
+	"    # asked — by the control plane (CreateRepository / RenameRepository) and by the": "    # asked — by modules that gate repository creation on the container (create and",
+	"    # data plane (docker push to a new repo, cross-repo mount into a new dst, and":   "    # rename, push to a new repo, cross-repo mount, first-push blob guard); a module",
+	"    # the first-push blob-reveal guard). Every other type answered a question no":    "    # may ask `v_update` here instead. Every other type answered a question no",
 }
 
 // newNoteProse — обратная таблица: новая проза → прежняя. Нужна одному читателю,
