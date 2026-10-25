@@ -96,3 +96,19 @@ func (l listenerAdmission) arm(logger *slog.Logger, cfg config.Config) {
 func (l listenerAdmission) report(ctx context.Context, logger *slog.Logger) {
 	grpcsrv.ReportAdmission(ctx, logger, "", l.public, l.internal)
 }
+
+// publicAdmissionSubject — ключ публичного ограничителя.
+func publicAdmissionSubject(frontHop string) grpcsrv.SubjectFunc {
+	_ = frontHop
+	return grpcsrv.PrincipalSubject
+}
+
+// publicCallClass — класс вызова на публичном слушателе.
+func publicCallClass(fullMethod string) grpcsrv.CallClass {
+	return grpcsrv.ClassifyByKachoConvention(fullMethod)
+}
+
+// publicAdmissionOptions — опции публичного ограничителя.
+func publicAdmissionOptions() []grpcsrv.AdmissionOption {
+	return nil
+}

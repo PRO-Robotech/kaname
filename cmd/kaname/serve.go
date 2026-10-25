@@ -1131,7 +1131,8 @@ func runServe(cfg config.Config) error {
 	// него), внутренний — личностью СЕРТИФИКАТА вызывающего модуля, потому что
 	// запрос модуля несёт личности разных арендаторов и ключ по арендатору
 	// дробил бы бюджет соседа на тысячу вёдер.
-	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits, grpcsrv.PrincipalSubject)
+	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits,
+		publicAdmissionSubject(ownFrontSAN), publicAdmissionOptions()...)
 	if err != nil {
 		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
 	}
