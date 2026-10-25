@@ -374,6 +374,11 @@ func (w *gdWorld) newGrantVerbs(ops operations.Repo) (*accessbindingapp.CreateAc
 
 // ── вызывающие ────────────────────────────────────────────────────────────
 
+// asUserID — вызывающий-человек по строковому id.
+func asUserID(w *gdWorld, id string) context.Context {
+	return asUser(w.ctx, domain.UserID(id))
+}
+
 func asSA(ctx context.Context, id string) context.Context {
 	return operations.WithPrincipal(ctx, operations.Principal{Type: "service_account", ID: id})
 }
@@ -516,6 +521,15 @@ func delegationIDOf(t *testing.T, pb *iamv1.AccessBinding) (string, bool) {
 // проекции чтения (`Get` каждой выдачи субъектов мира), а не по имени колонки.
 func (w *gdWorld) countDelegated(gdl string) int {
 	w.t.Helper()
+	return w.delegatedBindings(gdl, false)
+}
+
+// delegatedBindings — выдач с `delegationId` = gdl (только ACTIVE — при
+// activeOnly). Перепись прочитанного отделена от находок: ноль прочитанных
+// выдач — отказ, а не «выдач с этой ссылкой ноль» (в мире Д usr-A видит как
+// минимум выдачу usr-B мира П6 и выдачу admin человеку usr-E).
+func (w *gdWorld) delegatedBindings(gdl string, activeOnly bool) int {
+	w.t.Helper()
 	rows, err := w.pool.Query(w.ctx, `SELECT id FROM kaname.access_bindings`)
 	require.NoError(w.t, err)
 	var ids []string
@@ -526,16 +540,21 @@ func (w *gdWorld) countDelegated(gdl string) int {
 	}
 	rows.Close()
 	require.NoError(w.t, rows.Err())
-	n := 0
+	n, read := 0, 0
 	for _, id := range ids {
 		pb, err := w.abx.Get(asUser(w.ctx, w.usrA), &iamv1.GetAccessBindingRequest{AccessBindingId: id})
 		if err != nil {
 			continue // выдача вне видимости usr-A (другой аккаунт) к делегированию acc-A не относится
 		}
+		read++
+		if activeOnly && pb.GetStatus() != iamv1.AccessBinding_ACTIVE {
+			continue
+		}
 		if got, ok := delegationIDOf(w.t, pb); ok && got == gdl {
 			n++
 		}
 	}
+	require.Positivef(w.t, read, "перепись выдач: строк %d, прочитано Get от usr-A 0 — счёт по ссылке %s вакуумен", len(ids), gdl)
 	return n
 }
 
