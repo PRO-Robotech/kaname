@@ -219,15 +219,27 @@ func subjectTypesOf(names []string) ([]domain.SubjectType, error) {
 	return out, nil
 }
 
-// validateComposition — состав делегирования, после права (GD-06): каждая роль
-// существует и объявлена манифестом модуля; роли, их правила и типы цели —
-// одного модуля M; M ≠ `iam`; делегат существует. Отдаёт M.
+// validateComposition — состав делегирования, после права (GD-06): аккаунт
+// существует; каждая роль существует и объявлена манифестом модуля; роли, их
+// правила и типы цели — одного модуля M; M ≠ `iam`; делегат существует.
+// Отдаёт M.
 func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, d domain.GrantDelegation) (string, error) {
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
 		return "", shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
+
+	// Аккаунт области существует. Владельцу и администратору аккаунта это
+	// доказало право выдавать; администратор облака проходит право, не читая
+	// аккаунта (Путь 0), и без этой проверки завёл бы делегирование на
+	// несуществующий аккаунт: ссылка `account_id` внешнего ключа не несёт.
+	if _, gerr := rd.Accounts().Get(ctx, d.AccountID); gerr != nil {
+		if stderrors.Is(gerr, iamerr.ErrNotFound) {
+			return "", status.Errorf(codes.FailedPrecondition, "Account %s not found", d.AccountID)
+		}
+		return "", shared.MapRepoErr(gerr)
+	}
 
 	modules := map[string]struct{}{}
 	for _, id := range d.RoleIDs {
