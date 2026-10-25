@@ -251,18 +251,33 @@ func TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied(t *testing.T) {
 		"explicit deny (allowed=false, nil err) must be PermissionDenied, not Unavailable")
 }
 
+// rosterOf — перечень личностей из тех ИДЕНТИФИКАТОРОВ, которые предъявляют
+// пробы: пара берётся разбором самого идентификатора, а не пишется второй раз
+// рядом — разойтись предъявленному и объявленному негде.
+func rosterOf(t *testing.T, profile moduleidentity.Profile, sans ...string) moduleidentity.Roster {
+	t.Helper()
+	d := grpcsrv.NewTrustDomain("kacho.cloud")
+	entries := make([]string, 0, len(sans))
+	for _, san := range sans {
+		ns, account, ok := moduleidentity.ParseSAN(d, san)
+		require.True(t, ok, "идентификатор проб %q не разобрался", san)
+		entries = append(entries, ns+"/"+account+"="+string(profile))
+	}
+	r, err := moduleidentity.Parse(entries)
+	require.NoError(t, err)
+	return r
+}
+
 // writerRoster — перечень личностей проб посредника (kaname#984): модулем
 // признаётся только объявленная пара. `kacho-geo` и `kacho-unknown` объявлены
 // намеренно — их пробы утверждают отказ ОТНОШЕНИЯ, а не признания.
 func writerRoster(t *testing.T) moduleidentity.Roster {
 	t.Helper()
-	r, err := moduleidentity.Parse([]string{
-		"kacho-system/kacho-vpc=module-writer",
-		"kacho-system/kacho-unknown=module-writer",
-		"kacho/kacho-geo=module-writer",
-	})
-	require.NoError(t, err)
-	return r
+	return rosterOf(t, moduleidentity.ProfileModuleWriter,
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc",
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-unknown",
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo",
+	)
 }
 
 // TestRosterIdentityDerivesTheDeterministicServiceAccountID — признанная
@@ -270,22 +285,20 @@ func writerRoster(t *testing.T) moduleidentity.Roster {
 // посев: `'sva' || substr(md5('kacho-<svc>'),1,17)`. Своё пространство имён у
 // пира — законный случай: сегмент ns приходит из чарта самого пира.
 func TestRosterIdentityDerivesTheDeterministicServiceAccountID(t *testing.T) {
-	r, err := moduleidentity.Parse([]string{
-		"kacho-system/kacho-vpc=module-writer",
-		"kacho-system/kacho-compute=module-writer",
-		"kacho-system/kacho-nlb=module-writer",
-		"kacho-storage/kacho-storage=module-writer",
-		"kacho-system/kacho-api-gateway=edge",
-	})
-	require.NoError(t, err)
-	d := grpcsrv.NewTrustDomain("kacho.cloud")
-	for san, svc := range map[string]string{
+	want := map[string]string{
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc":         "vpc",
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-compute":     "compute",
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-nlb":         "nlb",
 		"spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage":    "storage",
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway": "api-gateway",
-	} {
+	}
+	sans := make([]string, 0, len(want))
+	for san := range want {
+		sans = append(sans, san)
+	}
+	r := rosterOf(t, moduleidentity.ProfileModuleWriter, sans...)
+	d := grpcsrv.NewTrustDomain("kacho.cloud")
+	for san, svc := range want {
 		id, ok := r.Lookup(d, san)
 		require.True(t, ok, "san=%q не признан", san)
 		require.Equal(t, sva(svc), authzguard.ServiceAccountIDForService(id.Service), "san=%q → sva-id", san)

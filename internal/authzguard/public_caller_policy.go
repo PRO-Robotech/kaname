@@ -166,7 +166,8 @@ func PublicGatewayFloorExemptRPCs() map[string]string {
 // а не свою копию.
 const UnnamedCallerMessage = "no credential presented; authenticate with authorization: Bearer <token>"
 
-// Короткие имена служб-модулей (как их разбирает ServiceNameFromSAN),
+// Короткие имена служб-модулей (как их выводит из учётки
+// moduleidentity.ServiceFromAccount),
 // встречающиеся в таблице вызываемых соседями.
 const (
 	svcVPC      = "vpc"
