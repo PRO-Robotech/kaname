@@ -18,14 +18,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
+	accountapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/account"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -277,4 +280,39 @@ func TestGrantDelegation_CE06_DelegatorAuthorityOutageIsUnavailable(t *testing.T
 
 	// Близнец — хранилище отвечает.
 	requireGranted(t, w.tryGrant(asSA(w.ctx, w.svaIss2), w.v()), "CE-06 близнец: хранилище отвечает")
+}
+
+// CE-13 — делегирование не меняет исход удаления аккаунта (§2 п.6 приёмки):
+// ссылка `grant_delegations.account_id` внешнего ключа не несёт, охрана
+// удаления аккаунта делегирований не называет. Близнец — такой же аккаунт без
+// делегирования; исходы сравниваются кодом и текстом (с id аккаунта, заменённым
+// меткой), а не «оба прошли».
+func TestGrantDelegation_CE13_AccountDeleteOutcomeIsUnchangedByADelegation(t *testing.T) {
+	w := newGDWorld(t)
+	w.requireSubject("CE-13")
+	del := accountapp.NewDeleteAccountUseCase(w.repo, w.ops)
+	outcome := func(withDelegation bool, tag string) string {
+		owner := mustSeedUser(t, w.ctx, w.pool, "ce13"+tag)
+		verifyAddresses(t, w.ctx, w.pool)
+		acc := seedAccountByOwner(t, w.ctx, w.pool, "acc-ce13-"+tag, owner)
+		if withDelegation {
+			w.createDelegation(asUser(w.ctx, owner), w.delegationBody(acc, w.svaIss,
+				[]domain.RoleID{w.rolPuller}, []string{"registry.registries"}, []string{"SUBJECT_TYPE_SERVICE_ACCOUNT"}),
+				"CE-13 Дано: делегирование на аккаунт "+tag)
+		}
+		op, err := del.Execute(asUser(w.ctx, owner), acc)
+		if err != nil {
+			st, _ := status.FromError(err)
+			return fmt.Sprintf("sync %v %s", st.Code(), strings.ReplaceAll(st.Message(), string(acc), "<acc>"))
+		}
+		done := awaitOp(t, w.ctx, w.ops, op.ID)
+		if done.Error != nil {
+			return fmt.Sprintf("op %v %s", codes.Code(done.Error.Code), strings.ReplaceAll(done.Error.Message, string(acc), "<acc>"))
+		}
+		return "done"
+	}
+	with := outcome(true, "d")
+	without := outcome(false, "n")
+	t.Logf("CE-13: удаление аккаунта с делегированием — %s; без делегирования — %s", with, without)
+	assert.Equal(t, without, with, "CE-13: делегирование изменило исход удаления аккаунта")
 }
