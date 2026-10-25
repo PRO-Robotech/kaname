@@ -203,7 +203,7 @@ func TestSystemClass_SC23_WriteVerbUnreachableForAClassOnAnyRolePath(t *testing.
 	role.Rules, role.Permissions = writeRules(), compiled
 	_, err = wr.RolesW().Update(w.ctx, role, []string{"rules"})
 	require.NoError(t, err, "SC-23 Дано: правила роли сменены мимо правки роли")
-	require.NoError(t, wr.RolesW().ReplaceRuleSelectors(w.ctx, w.rolRead, catalogfixture.Facts().GrantSelectors(writeRules().MaterializingSelectors())))
+	require.NoError(t, wr.RolesW().ReplaceRuleSelectors(w.ctx, w.rolRead, catalogfixture.Facts().GrantSelectors(writeRules().MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, wr.Commit(w.ctx))
 	require.NoError(t, w.rec.ReconcileBindingForward(w.ctx, domain.AccessBindingID(id)), "SC-23: повторная материализация")
 

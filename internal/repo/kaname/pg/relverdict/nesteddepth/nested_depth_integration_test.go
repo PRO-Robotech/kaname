@@ -141,11 +141,11 @@ func (w *p3) role(id string, rules domain.Rules) {
 	if err != nil {
 		w.t.Fatalf("роль %s: %v", id, err)
 	}
-	sels := facts.GrantSelectors(r.Rules.MaterializingSelectors())
+	sels := facts.GrantSelectors(r.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", id, err)
 	}
-	pairs := facts.RoleVerbsFromSelectors(sels)
+	pairs := facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		w.t.Fatalf("проекция глаголов роли %s пуста — каталог П3 не знает её типов", id)
 	}

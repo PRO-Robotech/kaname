@@ -106,6 +106,18 @@ type fakeStore struct {
 	// subjects — перечень субъектов выдачи (kaname#880); пусто — один субъект
 	// subjectType/subjectID.
 	subjects []domain.Subject
+
+	// policy — политика роли выдачи (BindingScope.Policy, kaname#1006); nil —
+	// арендаторская: прежние пробы судят роль без владельца.
+	policy *domain.RulePolicy
+}
+
+// rolePolicy — политика роли, которую двойник отдаёт в BindingScope.
+func (f *fakeStore) rolePolicy() domain.RulePolicy {
+	if f.policy != nil {
+		return *f.policy
+	}
+	return domain.TenantPolicy()
 }
 
 // bindingSubjects — перечень субъектов, который двойник отдаёт в BindingScope.
@@ -145,6 +157,7 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Policy:         f.rolePolicy(),
 		Target:         f.target,
 		Active:         f.active,
 	}, true, nil
@@ -162,6 +175,7 @@ func (f *fakeStore) LoadBindingForForward(ctx context.Context, id domain.AccessB
 		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Policy:         f.rolePolicy(),
 		Target:         f.target,
 		Active:         f.active,
 	}, true, nil
@@ -182,6 +196,7 @@ func (f *fakeStore) LoadBindingsForForward(ctx context.Context, ids []domain.Acc
 			Subjects:       f.bindingSubjects(),
 			Selectors:      f.selectors,
 			ScopeSelfVerbs: f.scopeSelfVerbs,
+			Policy:         f.rolePolicy(),
 			Target:         f.target,
 			Active:         f.active,
 		}

@@ -49,6 +49,11 @@ type BindingScope struct {
 	// проекцией первого субъекта, и выдача разворачивалась ему одному.
 	Subjects []domain.Subject
 	RoleID   string
+	// Policy — политика роли выдачи ([domain.PolicyOfRole] её строки). От неё
+	// зависит набор глаголов правила: правка влечёт удаление у ролей платформы и
+	// арендатора и не влечёт у роли модуля (kaname#1006). Нулевая — самая строгая
+	// ветвь: удаление не приписывается.
+	Policy domain.RulePolicy
 	// Selectors — the role's UNIFIED materializing selectors (flat explicit
 	// RBAC model): ARM_ANCHOR(all) + ARM_NAMES + ARM_LABELS. When non-empty the
 	// binding has dynamic per-rule membership: each selector (rule_fp) is matched
@@ -1099,7 +1104,7 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 		} else if !inTarget || !selectorMatchesObject(sel, o) {
 			continue
 		}
-		dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
+		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
 		if !ok {
 			// A type the model has no FGA object for → no tuple → skip the object
 			// (fail-closed: a typo'd type never grants).
@@ -1276,7 +1281,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 				return nil, err
 			}
 			for _, o := range matched {
-				if dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope); ok {
+				if dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope); ok {
 					out = append(out, dm)
 				}
 			}
@@ -1295,7 +1300,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// (desiredMemberForObject), so the full recompute and the forward path
 			// derive BYTE-IDENTICAL tuples (idempotency: forward + async full both
 			// emit the same set, and the read-delta FGA writer skips duplicates).
-			dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
+			dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
 			if !ok {
 				// A type the model has no FGA object for → no tuple → skip the object
 				// (fail-closed: a typo'd type never grants).
@@ -1324,7 +1329,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 //     excluded from CompileRules, so the tuples come from the rule verbs, not RolePerms.
 //   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
 //     grants, fail-closed).
-func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
 	if !o.IsContainedIn(scope) {
 		return DesiredMember{
 			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
@@ -1336,7 +1341,7 @@ func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSel
 	// не зависит: первый же отказ — отказ всего члена.
 	var tuples []domain.MembershipTuple
 	for _, g := range gs {
-		t, ok := ruleObjectTuples(cat, g.subject, g.verbs, o.ObjectType, o.ObjectID)
+		t, ok := ruleObjectTuples(cat, policy, g.subject, g.verbs, o.ObjectType, o.ObjectID)
 		if !ok {
 			return DesiredMember{}, false
 		}

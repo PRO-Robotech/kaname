@@ -88,7 +88,7 @@ func BenchmarkRoleVerbsFromSelectors(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if len(f.RoleVerbsFromSelectors(sel)) == 0 {
+		if len(f.RoleVerbsFromSelectors(sel, domain.TenantPolicy())) == 0 {
 			b.Fatal("пар ноль — замер беспредметен")
 		}
 	}

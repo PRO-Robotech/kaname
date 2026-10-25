@@ -400,6 +400,6 @@ func (_ *rlRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, er
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
 
-func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, bool, error) {
-	return nil, false, nil
+func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
+	return nil, domain.RulePolicy{}, false, nil
 }

@@ -203,7 +203,7 @@ func TestIAMCT2_06_07_RetiredAfterStartDoesNotReachTheProjection(t *testing.T) {
 
 	// ДО снятия — пары есть. Без этого контроля «пар ноль» зеленело бы и на
 	// порте, который их не производит никогда.
-	if got := snap.Facts().RoleVerbsFromSelectors(sel); len(got) == 0 {
+	if got := snap.Facts().RoleVerbsFromSelectors(sel, domain.TenantPolicy()); len(got) == 0 {
 		t.Fatalf("до снятия у %q ноль пар — контроль не выполнен", dotted)
 	}
 
@@ -228,7 +228,7 @@ func TestIAMCT2_06_07_RetiredAfterStartDoesNotReachTheProjection(t *testing.T) {
 	if got := snap.Facts().VerbsOfType(fgaType); len(got) != 0 {
 		t.Errorf("после снятия набор глаголов %q = %v — снятый тип доехал до проекции", fgaType, got)
 	}
-	if got := snap.Facts().RoleVerbsFromSelectors(sel); len(got) != 0 {
+	if got := snap.Facts().RoleVerbsFromSelectors(sel, domain.TenantPolicy()); len(got) != 0 {
 		t.Errorf("после снятия пары по %q = %v — пересчёт произвёл бы их, и отказ пришёл бы "+
 			"ЧУЖОЙ полосой: внешним ключом role_verb_type_fk", dotted, got)
 	}
@@ -343,7 +343,7 @@ func TestIAMCT2_14_AppliedAfterStartReachesTheProjection(t *testing.T) {
 
 	// ДО применения — пар нет. Отрицательный контроль: без него «пары есть»
 	// зеленело бы на снимке, который знал тип с самого начала.
-	if got := snap.Facts().RoleVerbsFromSelectors(sel); len(got) != 0 {
+	if got := snap.Facts().RoleVerbsFromSelectors(sel, domain.TenantPolicy()); len(got) != 0 {
 		t.Fatalf("до применения у %q уже %d пар — контроль не выполнен", appliedDotted, len(got))
 	}
 
@@ -368,7 +368,7 @@ func TestIAMCT2_14_AppliedAfterStartReachesTheProjection(t *testing.T) {
 		t.Errorf("набор глаголов заведённого типа %q пуст — имя типа не доехало строкой", appliedType)
 	}
 
-	pairs := snap.Facts().RoleVerbsFromSelectors(sel)
+	pairs := snap.Facts().RoleVerbsFromSelectors(sel, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		t.Fatalf("после применения пар по %q ноль: строки каталога записаны, членство модуля "+
 			"живо, роль создалась бы без отказа — и арендатор не получил бы НИЧЕГО", appliedDotted)
@@ -480,7 +480,7 @@ func TestWithdrawnRowDoesNotBlockTheNextBoot(t *testing.T) {
 		t.Fatalf("снимок каталога не построился после снятия: %v", serr)
 	}
 	if got := snap.Facts().RoleVerbsFromSelectors(
-		[]domain.RuleSelector{{ObjectTypes: []string{dotted}, Verbs: []string{"*"}}}); len(got) != 0 {
+		[]domain.RuleSelector{{ObjectTypes: []string{dotted}, Verbs: []string{"*"}}}, domain.TenantPolicy()); len(got) != 0 {
 		t.Errorf("снимок по-прежнему производит %d пар на снятом %q — тогда звено 3 "+
 			"упёрлось бы в ключ role_verb_type_fk", len(got), dotted)
 	}

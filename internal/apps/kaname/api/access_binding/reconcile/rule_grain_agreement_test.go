@@ -49,7 +49,7 @@ func TestRuleGrain_MaterializerAndVerdictAgreeOnEveryRule(t *testing.T) {
 	}
 	checked := 0
 	for name, rules := range roles {
-		sels := cat.GrantSelectors(rules.MaterializingSelectors())
+		sels := cat.GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 		if len(sels) == 0 {
 			t.Fatalf("%s: селекторов ноль — сверять нечего", name)
 		}
@@ -58,7 +58,7 @@ func TestRuleGrain_MaterializerAndVerdictAgreeOnEveryRule(t *testing.T) {
 				t.Fatalf("%s: селектор %s без вычисленных глаголов", name, sel.RuleFP)
 			}
 			for _, dotted := range sel.ObjectTypes {
-				tuples, ok := ruleObjectTuples(cat, "user:u", sel.Verbs, dotted, "obj-1")
+				tuples, ok := ruleObjectTuples(cat, domain.TenantPolicy(), "user:u", sel.Verbs, dotted, "obj-1")
 				var materialized []string
 				if ok {
 					for _, tp := range tuples {
