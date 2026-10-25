@@ -41,7 +41,8 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-25T16:13:56Z'
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-25T19:14:18Z"
   ban1_lifted: false
   why: >-
     Вердикт роли — APPROVED, блокирующих 0. Санкция на код открывается внешним событием, которого
@@ -154,13 +155,23 @@ publication_pending:
   note: санкцию на код открывает только опубликованное событие этого вердикта
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    «Не выполнилось» — третий исход. Событие публикует курьер (git-operator) и тем же заходом
-    приводит этот блок к факту: status performed, адрес события. Тело:
-    acceptance-reviewer · APPROVED · sha256 cd31c47cb19dea4163a70a4e181545c2462e0ef0a62d5f330a23f66fe14bc08f
-
+  type: issue_comment
+  target: PRO-Robotech/kaname#1003
+  status: performed
+  published: true
+  database_id: 6401980777
+  node_id: "IC_kwDOUO26pM8AAAABfZZ5aQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/1003#issuecomment-6401980777"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6401980777"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-25T19:14:18Z"
+  body_sha256: "871f5a91dbf320a7f2f117da44b0ac2cd3307a7a421a4b1062ba30189844162f"
+  subject_sha256: "cd31c47cb19dea4163a70a4e181545c2462e0ef0a62d5f330a23f66fe14bc08f"
+  subject_revision_commit: "5dad8418cd4d7703315de01ee8ccd7acb52ad3ce"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: claude_agent
   assigned_agent: acceptance-reviewer
