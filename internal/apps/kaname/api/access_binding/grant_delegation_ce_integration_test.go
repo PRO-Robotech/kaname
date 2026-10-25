@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -235,4 +236,44 @@ func TestGrantDelegation_CE16_DeleteAuditCarriesTheDelegationReference(t *testin
 	require.Len(t, got, 1, "CE-16: строк iam.access_binding.revoked у удалённой B10")
 	assert.Equal(t, d1, got[0].payload["delegation_id"], "CE-16: delegation_id")
 	assert.Equal(t, w.svaIss, fmt.Sprint(got[0].payload["actor"]), "CE-16: actor")
+}
+
+// ceFailFor — порт отношений, отказывающий ошибкой на любом вопросе об одном
+// субъекте; прочие вопросы — настоящей двери решения.
+type ceFailFor struct {
+	inner   clients.RelationStore
+	subject string
+	hits    int
+}
+
+func (f *ceFailFor) Check(ctx context.Context, subject, relation, object string) (bool, error) {
+	if subject == f.subject {
+		f.hits++
+		return false, errors.New("инъекция: хранилище отношений не ответило")
+	}
+	return f.inner.Check(ctx, subject, relation, object)
+}
+
+// CE-06 — у вопроса о праве делегирующего (Д3) три исхода: неполадка хранилища —
+// `UNAVAILABLE` `authz backend unavailable`, а не отказ в праве и не выдача.
+// Делегирующий — usr-E (Путь 2, вопрос к модели); близнец — тот же вызов при
+// отвечающем хранилище.
+func TestGrantDelegation_CE06_DelegatorAuthorityOutageIsUnavailable(t *testing.T) {
+	w := newGDWorld(t)
+	w.requireSubject("CE-06")
+	w.createDelegation(asUser(w.ctx, w.usrE), w.d1Body(w.svaIss2), "CE-06 Дано: D-E от usr-E")
+
+	fail := &ceFailFor{inner: w.door, subject: "user:" + string(w.usrE)}
+	create, _, _ := w.newGrantVerbs(w.ops)
+	create.WithDelegatedGrantPath(accessbindingapp.NewDelegatedGrantPath(w.repo, fail))
+	h := accessbindingapp.NewHandler(create, nil, nil, nil, nil, nil, nil)
+	op, err := h.Create(asSA(w.ctx, w.svaIss2), w.v())
+	t.Logf("CE-06: вопросов о субъекте usr-E к хранилищу — %d", fail.hits)
+	require.Nilf(t, op, "CE-06: выдача заведена при неотвечающем хранилище")
+	requireRefusal(t, err, codes.Unavailable, "authz backend unavailable",
+		"CE-06: неполадка на вопросе о праве делегирующего")
+	require.Positive(t, fail.hits, "CE-06 контроль: вопрос о праве делегирующего не задан — инъекция вакуумна")
+
+	// Близнец — хранилище отвечает.
+	requireGranted(t, w.tryGrant(asSA(w.ctx, w.svaIss2), w.v()), "CE-06 близнец: хранилище отвечает")
 }
