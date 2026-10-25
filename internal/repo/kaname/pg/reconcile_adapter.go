@@ -915,12 +915,20 @@ func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, c
 // регистрации) и не конфликтует с правкой меток. Порядок захвата задаёт
 // `ORDER BY` — узел замка стоит над сортировкой. Экспортирован ради пробы
 // (kaname#975): она судит этот самый текст.
+//
+// `SKIP LOCKED` — намеренно. Строку, которую снятие удаляет прямо сейчас, проход
+// не ждёт, а пропускает как отсутствующую: с `FOR KEY SHARE` конфликтует только
+// удаление (и смена ключа, которой у зеркала нет), а снятие после удаления строки
+// добирает выдачи и роли, записанные писателями, пока оно ждало. Проход,
+// ждущий строку под удалением и держащий такую выдачу, сходился бы со снятием в
+// кольцо (40P01, URG-24). Цена пропуска — только при откате снятия: член по
+// объекту появится со следующим проходом, а не этим; ошибка в сторону отказа.
 const LockMirrorObjectsSQL = `SELECT m.object_type, m.object_id
 		   FROM kaname.resource_mirror m
 		   JOIN unnest($1::text[], $2::text[]) AS u(object_type, object_id)
 		     ON m.object_type = u.object_type AND m.object_id = u.object_id
 		  ORDER BY m.object_type, m.object_id
-		    FOR KEY SHARE OF m`
+		    FOR KEY SHARE OF m SKIP LOCKED`
 
 // LockMirrorObjects — строки зеркала объектов `objs` под `FOR KEY SHARE`, одним
 // оператором в порядке (тип, id); возвращает объекты, строки которых есть

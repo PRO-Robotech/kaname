@@ -225,11 +225,13 @@ func scanRows(rows pgx.Rows) ([]MirrorRow, error) {
 // зеркала (ярус иерархии, собственный объект iam) не возвращается: контейнером
 // вложенного правила он быть не может (Р1 п. 2).
 //
-// Строки предков запираются `FOR KEY SHARE OF m` (kaname#975): охват потомка
-// вложенным правилом держится на строке контейнера, и снятие регистрации
+// Строки предков запираются `FOR KEY SHARE OF m SKIP LOCKED` (kaname#975): охват
+// потомка вложенным правилом держится на строке контейнера, и снятие регистрации
 // контейнера (удаление строки) ждёт фиксации прохода, решившего по ней, а проход,
-// пришедший после снятия, контейнера не видит. Единственный потребитель —
-// транзакция записи материализатора (`reconcileStore.AncestorObjects`).
+// пришедший после снятия или во время него, контейнера не видит — строку под
+// удалением он пропускает, а не ждёт (довод — у `pg.LockMirrorObjectsSQL`).
+// Единственный потребитель — транзакция записи материализатора
+// (`reconcileStore.AncestorObjects`).
 func AncestorsOf(ctx context.Context, q querier, objectType, objectID string) ([]MirrorRow, error) {
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
@@ -245,7 +247,7 @@ func AncestorsOf(ctx context.Context, q querier, objectType, objectID string) ([
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
 		  WHERE co.dotted = $1 AND co.live
 		  ORDER BY pe.depth ASC
-		    FOR KEY SHARE OF m`,
+		    FOR KEY SHARE OF m SKIP LOCKED`,
 		objectType, objectID,
 	)
 	if err != nil {
