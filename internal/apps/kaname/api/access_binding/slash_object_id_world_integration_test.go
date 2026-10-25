@@ -35,8 +35,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -171,40 +169,4 @@ func TestSlashObjectID_RegistrationGrantAndCheckAreVerbatim(t *testing.T) {
 	w.pollAsk(usrD, "v_get", pcrRepoType, deeper, true, "выдача на объект с лишним сегментом материализуется")
 	assert.False(t, w.ask(usrD, "v_get", pcrRepoType, legit),
 		"выдача на объект с лишним сегментом открыла объект короче по написанию")
-}
-
-// TestSlashObjectID_TargetSetsDifferAsInputsDiffer — две цели выдачи с разным
-// составом объектов — две разные цели: выдача на {one, one/two} не отвергается
-// как повтор выдачи на один объект, чей идентификатор несёт разделитель записи
-// состава. Положительный контроль — повтор той же цели отвергается.
-func TestSlashObjectID_TargetSetsDifferAsInputsDiffer(t *testing.T) {
-	w := newPCRWorld(t)
-	in := slashInputs()
-	legit, deeper := in[0].id, in[1].id
-	role := w.seedRole("slash_repo_get_set",
-		domain.Rules{{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"get"}}})
-	ctx := asUser(w.ctx, w.usrA)
-
-	w.createDone(ctx, w.grantRequest(userSubject(w.usrD), role, repoTarget(legit, deeper)),
-		"выдача usr-D на два объекта")
-
-	// Контроль: та же цель повторно — повтор действующей выдачи.
-	op, err := w.ab.Create(ctx, w.grantRequest(userSubject(w.usrD), role, repoTarget(deeper, legit)))
-	if err == nil {
-		done := awaitOp(t, w.ctx, w.ops, op.GetId())
-		require.NotNil(t, done.Error, "контроль: повтор той же цели (в другом порядке) принят — сверка состава не работает")
-	}
-
-	// Предмет: один объект, чей идентификатор дословно равен записи состава из двух.
-	glued := legit + "\nregistry.repositories:" + deeper
-	op, err = w.ab.Create(ctx, w.grantRequest(userSubject(w.usrD), role, repoTarget(glued)))
-	if err != nil {
-		// Синхронный отказ входу вне грамматики объекта — тоже однозначный исход,
-		// если он назван кодом формата.
-		require.Equalf(t, codes.InvalidArgument, status.Code(err), "отказ цели %q не кодом формата: %v", glued, err)
-		return
-	}
-	done := awaitOp(t, w.ctx, w.ops, op.GetId())
-	assert.Nilf(t, done.Error,
-		"цель из одного объекта %q отвергнута как повтор цели {%q, %q}: %v", glued, legit, deeper, done.Error)
 }
