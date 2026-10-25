@@ -28,8 +28,8 @@ func (noDescendants) DescendantsTx(context.Context, service.Tx, string, string) 
 	return nil, nil
 }
 
-func (noDescendants) DropRegistrationTx(context.Context, service.Tx, string, string, string) (bool, error) {
-	return false, nil
+func (noDescendants) DropRegistrationTx(context.Context, service.Tx, string, string, string) (bool, time.Time, error) {
+	return false, time.Time{}, nil
 }
 
 // descendantMirror — двойник зеркала: родитель снимается (или нет — `parentGone`),
@@ -51,9 +51,9 @@ func (m *descendantMirror) DescendantsTx(context.Context, service.Tx, string, st
 	return m.descendants, nil
 }
 
-func (m *descendantMirror) DropRegistrationTx(_ context.Context, _ service.Tx, catalogType, _ string, id string) (bool, error) {
+func (m *descendantMirror) DropRegistrationTx(_ context.Context, _ service.Tx, catalogType, _ string, id string) (bool, time.Time, error) {
 	m.dropped = append(m.dropped, catalogType+"/"+id)
-	return true, nil
+	return true, time.Time{}, nil
 }
 
 // withdrawnKeys — ключи, чьи выдачи отозваны, строками «тип/id».

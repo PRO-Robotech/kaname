@@ -32,6 +32,7 @@ package access_binding_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,4 +117,41 @@ func TestUnregister_TimelyTombstoneRemovesTheOwner(t *testing.T) {
 	w.registerKAs(w.usrC)
 	assert.True(t, w.ask(usrC, "v_get", pcrRegType, lateK), "kaname#969 близнец: новый владелец usr-C не читает K")
 	assert.False(t, w.ask(usrB, "v_get", pcrRegType, lateK), "kaname#969 близнец: прежний владелец usr-B читает K")
+}
+
+// TestUnregister_DescendantNewerThanParentTombstoneGoesWhole — потомок, чья
+// регистрация новее надгробия родителя, снимается вместе с родителем ЦЕЛИКОМ:
+// регистрация потомка снимается безусловно (kaname#1002), и его кортежи — тоже,
+// хотя записаны версией новее надгробия (kaname#969). Иначе владелец потомка
+// сохранил бы доступ к объекту, регистрации которого уже нет.
+func TestUnregister_DescendantNewerThanParentTombstoneGoesWhole(t *testing.T) {
+	w := newURWorld(t)
+	usrC := fmtSubject("user", string(w.usrC))
+	parentTombstone := w.nextVersion()
+	newer := timestamppb.New(w.ver.Add(time.Hour)) // версия регистрации потомка новее надгробия
+	obj := pcrRepoType + ":" + pcrX + "/fresh"
+	for _, r := range []*iamv1.RegisterResourceRequest{
+		{SubjectId: pcrRegType + ":" + pcrX, Relation: "parent", Object: obj},
+		{SubjectId: "user:" + string(w.usrC), Relation: "owner", Object: obj},
+	} {
+		r.ParentProjectId, r.ParentAccountId = string(w.prjA), string(w.accA)
+		r.ParentChain = []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)}
+		r.SourceVersion = newer
+		newer = timestamppb.New(newer.AsTime().Add(time.Second))
+		require.NoErrorf(t, w.reg.Register(w.ctx, r), "регистрация потомка X/fresh (%s)", r.GetRelation())
+	}
+	w.pollAsk(usrC, "v_get", pcrRepoType, pcrX+"/fresh", true, "kaname#969 контроль фикстуры: владелец usr-C не читает X/fresh")
+
+	require.NoError(t, w.reg.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
+		SubjectId: "project:" + string(w.prjA), Relation: "project", Object: pcrRegType + ":" + pcrX,
+		SourceVersion: parentTombstone,
+	}), "снятие регистрации реестра X")
+
+	var facts int
+	require.NoError(t, w.pool.QueryRow(w.ctx,
+		`SELECT count(*) FROM kaname.relation_fact WHERE object_type = $1 AND object_id = $2`,
+		pcrRepoType, pcrX+"/fresh").Scan(&facts))
+	assert.Zero(t, facts, "kaname#969: кортежи потомка новее надгробия родителя пережили снятие его регистрации")
+	assert.False(t, w.ask(usrC, "v_get", pcrRepoType, pcrX+"/fresh"),
+		"kaname#969: владелец снятого потомка usr-C читает X/fresh")
 }
