@@ -80,9 +80,10 @@ func TestProjectionColumnCounterKnowsParentheses(t *testing.T) {
 	// Запятая внутри скобок — не разделитель.
 	require.Equal(t, 2, countProjectionColumns("id, COALESCE(role_id, '') AS role_id"))
 	require.Equal(t, 1, countProjectionColumns("COALESCE(a, b, c)"))
-	// Живая проекция со скобками — девятнадцать колонок, а не двадцать одна
-	// (две COALESCE; причина отзыва — kaname#963).
-	require.Equal(t, 19, countProjectionColumns(abCols),
+	// Живая проекция со скобками — двадцать колонок, а не двадцать три
+	// (три COALESCE; причина отзыва — kaname#963, ссылка на делегирование —
+	// kaname#986).
+	require.Equal(t, 20, countProjectionColumns(abCols),
 		"abCols: считалка обязана пропустить запятую внутри COALESCE")
 }
 

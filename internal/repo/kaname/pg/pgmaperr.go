@@ -460,6 +460,13 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	// Прежний частичный ключ `access_bindings_unique` (0001) снят миграцией
 	// 0003 в пользу более сильного `access_bindings_active_grant_uniq`;
 	// сервер его имени больше не назовёт.
+	// Одно действующее делегирование на пару «аккаунт, делегат» (kaname#986, Д1).
+	// Подсказка от grant_delegation.Insert: «<делегат>|<аккаунт>».
+	case "grant_delegations_active_pair_uniq":
+		if sva, acc, ok := strings.Cut(idHint, "|"); ok {
+			return fmt.Sprintf("an active grant delegation to service account %s in account %s already exists", sva, acc)
+		}
+		return "an active grant delegation to this service account in this account already exists"
 	case "access_bindings_active_grant_uniq":
 		// Подсказка от access_binding.Insert — единственного места, где под рукой
 		// сразу субъект, область и роль. Разбирается общим splitBindingHint,
