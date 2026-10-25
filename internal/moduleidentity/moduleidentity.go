@@ -275,9 +275,6 @@ func profileList() string {
 // IsDeclared — объявила ли установка хотя бы одну личность.
 func (r Roster) IsDeclared() bool { return len(r.byPair) > 0 }
 
-// Len — число объявленных личностей.
-func (r Roster) Len() int { return len(r.byPair) }
-
 // Identities — объявленные личности в порядке пары: для самоотчёта и проб.
 func (r Roster) Identities() []Identity {
 	out := make([]Identity, 0, len(r.byPair))
