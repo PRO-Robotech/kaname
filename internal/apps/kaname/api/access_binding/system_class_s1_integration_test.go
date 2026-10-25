@@ -308,6 +308,7 @@ func TestSystemClass_SC18_SignedInOfAnotherTenantReadsTheNamedObject(t *testing.
 	w.requireCheck(fmtSubject("service_account", w.svaB), "get", scObj1, true, "SC-18: sva-B из acc-B")
 	w.requireCheck(fmtSubject("user", string(w.usrC)), "get", scObj2, false, "SC-18: соседний объект закрыт")
 
+	w.ownerMayRemove("SC-18 близнец Дано", id)
 	op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err, "SC-18 близнец: отзыв")
 	require.Nil(t, awaitOp(t, w.ctx, w.ops, op.GetId()).Error)

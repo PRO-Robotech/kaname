@@ -82,6 +82,10 @@ type scWorld struct {
 	grpA             string
 
 	rolRead, rolRead2, rolEdit domain.RoleID
+
+	// ownerSeeded — авто-выдача владельца usr-A и указатель prj-A на acc-A
+	// заведены (`ownerMayRemove`): единожды на мир.
+	ownerSeeded bool
 }
 
 // newSCWorld поднимает П1. Пропуск в -short — по форме пакета.

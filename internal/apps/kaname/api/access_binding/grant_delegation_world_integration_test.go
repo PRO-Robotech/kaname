@@ -217,6 +217,9 @@ func newGDWorld(t *testing.T) *gdWorld {
 			Target:    allInScopeTarget(),
 		}, "мир Д: авто-выдача владельца "+string(own.user))
 	}
+	// Авто-выдача владельца acc-A заведена здесь — общий помощник мира П1
+	// (`ownerMayRemove`) её второй раз не заводит.
+	w.ownerSeeded = true
 
 	// Администратор аккаунта usr-E: выдача канонической `admin` на acc-A от
 	// владельца, цель — вся область.
