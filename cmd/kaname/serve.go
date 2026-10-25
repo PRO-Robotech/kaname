@@ -1949,22 +1949,33 @@ func runServe(cfg config.Config) error {
 		return reconcileWorker.Run(taskCtx)
 	})
 
-	// RBAC explicit-model 2026 — MIGRATE-phase one-shot backfill
-	// (singleton). On boot (best-effort, non-fatal): (1) owner-binding
-	// data-backfill for any account a migration could not see (idempotent SQL); (2)
-	// the reconcile-backfill SWEEP over every active binding under a process-wide
-	// pg_advisory_lock so at N replicas exactly ONE executor runs it (chunked);
-	// (3) the forward-aware verify-gate, logged as the contract-phase gate.
-	// The steady-state reconciler-worker above keeps memberships converged
-	// afterwards — the backfill just front-loads convergence before the next sweep.
-	// ONE BackfillAdapter over the pool, shared by the backfill-runner and the
-	// verify-gate.
+	// Досев и сводящий проход на старте (старт не роняют): (1) выдача владельца
+	// аккаунтам, которых миграция не видела (идемпотентный SQL); (2) СВОДЯЩИЙ
+	// проход по всем действующим выдачам под замком-одиночкой процесса — при N
+	// репликах его исполняет одна; (3) отчёт сверки, журналируемый как ворота.
+	// Обход по таймеру реконсайлера выше держит сведёнными выдачи с селектором и
+	// с двумя и более субъектами; у выдачи одному субъекту лишний кортеж после
+	// смены вычисления снимает только сводящий проход, поэтому он повторяется по
+	// такту (kaname#1006). Один BackfillAdapter над пулом — у прохода и у отчёта.
 	backfillAdapter := kanamepg.NewBackfillAdapter(pool)
+	// Сводящий проход — путь отзыва лишнего кортежа у выдачи одному субъекту
+	// (kaname#1006): у каждой выдачи свой срок, исход по выдаче — в счётчик, и
+	// проход повторяется по такту (задача ниже), а не только при старте. Ручки —
+	// `binding_converge_wiring.go`, читаются один раз.
+	convergeWindows := readBindingConvergeWindows()
 	backfillRunner := seed.NewBackfillRunner(
 		reconcileEngine,
 		backfillAdapter,
-		seed.BackfillConfig{Logger: logger.With(slog.String("component", "p8_backfill"))},
+		seed.BackfillConfig{
+			Logger:         logger.With(slog.String("component", "p8_backfill")),
+			BindingTimeout: convergeWindows.BindingTimeout,
+			Observer:       metricsReg.NewBindingConvergeRecorder(),
+		},
 	)
+	tasks = append(tasks, func() error {
+		backfillRunner.RunEvery(taskCtx, convergeWindows.Interval)
+		return nil
+	})
 	verifyGate := seed.NewVerifyGate(reconcileEngine, backfillAdapter,
 		logger.With(slog.String("component", "p8_verify_gate"))).
 		// Design-B cutover gate: a REAL FGA Check per active binding's
@@ -2159,10 +2170,16 @@ func runServe(cfg config.Config) error {
 		// предмет kacho#893/#895, — поэтому их отсутствие обязано быть видно оператору, а
 		// не выглядеть поломкой продукта.
 		seed.LogSystemGrantCensus(taskCtx, pool, logger.With(slog.String("component", "system_grants")))
+		// Перепись прохода печатает сам проход, на любом исходе. Отказ старт не
+		// роняет: отказавшие выдачи повторяет такт `RunEvery` (задача выше), без
+		// перезапуска процесса.
 		res, berr := backfillRunner.RunOnce(taskCtx)
 		if berr != nil {
-			logger.Warn("p8 backfill: reconcile-sweep failed (next boot/sweep will retry)", slog.Any("err", berr))
-			return nil // non-fatal — never crash the server on a best-effort backfill
+			logger.Error("сводящий проход по выдачам на старте свёл не все — повторит такт",
+				slog.Duration("interval", convergeWindows.Interval),
+				slog.Bool("executed", res.Executed),
+				slog.Int("bindings_failed", res.BindingsFailed),
+				slog.Any("err", berr))
 		}
 		if res.Executed {
 			report, verr := verifyGate.Verify(taskCtx)
