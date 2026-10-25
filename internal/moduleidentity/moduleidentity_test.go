@@ -21,7 +21,7 @@ var domain = grpcsrv.NewTrustDomain("kaname.test")
 func TestParse_DeclaredPairIsRecognizedWithItsProfile(t *testing.T) {
 	r, err := Parse([]string{" kacho/kacho-vpc=module-writer ", "", "edge-ns/kacho-api-gateway=edge"})
 	require.NoError(t, err)
-	require.Equal(t, 2, r.Len(), "пустая запись записью не становится")
+	require.Len(t, r.Identities(), 2, "пустая запись записью не становится")
 
 	id, ok := r.Lookup(domain, "spiffe://kaname.test/ns/kacho/sa/kacho-vpc")
 	require.True(t, ok)
