@@ -52,6 +52,7 @@ func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
+		kanamepg.NewRegistrationAudit(),
 	)
 	return uc, &mirrorProbe{pool: pool}
 }

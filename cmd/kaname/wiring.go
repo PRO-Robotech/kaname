@@ -700,6 +700,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// же транзакции (kaname#963). Параметр, а не опция: без него освободившийся
 		// ключ наследовал бы выдачи прежнего объекта.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogSource),
+		// Регистрация и снятие объекта модулем пишут событие аудита той же
+		// транзакцией (kaname#1005). Параметр, а не опция: без него изменения модели
+		// прав модулем оставались бы вне журнала аудита молча.
+		kanamepg.NewRegistrationAudit(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
