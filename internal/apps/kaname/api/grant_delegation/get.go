@@ -16,7 +16,6 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
-	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
@@ -62,7 +61,7 @@ func (u *GetGrantDelegationUseCase) Execute(ctx context.Context, id domain.Grant
 	if d.IsDelegate(caller.Type, caller.ID) {
 		return d, nil
 	}
-	if err := accessbindingapp.RequireAccountGrantAuthority(ctx, u.repo, u.relations, d.AccountID); err != nil {
+	if err := requireAccountGrantAuthority(ctx, u.repo, u.relations, d.AccountID); err != nil {
 		return domain.GrantDelegation{}, err
 	}
 	return d, nil

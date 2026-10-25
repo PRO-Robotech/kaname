@@ -71,7 +71,7 @@ func (u *RevokeGrantDelegationUseCase) Execute(ctx context.Context, id domain.Gr
 	if err != nil {
 		return nil, err
 	}
-	if err := accessbindingapp.RequireAccountGrantAuthority(ctx, u.repo, u.relations, d.AccountID); err != nil {
+	if err := requireAccountGrantAuthority(ctx, u.repo, u.relations, d.AccountID); err != nil {
 		return nil, err
 	}
 	if !d.Active() {

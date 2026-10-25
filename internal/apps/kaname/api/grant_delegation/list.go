@@ -10,7 +10,6 @@ import (
 
 	"github.com/PRO-Robotech/corelib/safeconv"
 
-	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
@@ -60,7 +59,7 @@ func (u *ListGrantDelegationsUseCase) Execute(ctx context.Context, in ListInput)
 		return nil, "", err
 	}
 	account := domain.AccountID(in.AccountID)
-	if err := accessbindingapp.RequireAccountGrantAuthority(ctx, u.repo, u.relations, account); err != nil {
+	if err := requireAccountGrantAuthority(ctx, u.repo, u.relations, account); err != nil {
 		return nil, "", err
 	}
 	rd, err := u.repo.Reader(ctx)

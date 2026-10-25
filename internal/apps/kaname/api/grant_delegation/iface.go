@@ -6,7 +6,7 @@
 // docs/engineering/acceptance/delegated-grants-stay-within-the-delegation.md).
 //
 // Право на каждом глаголе решает обработчик (`HANDLER_DECIDES`): право выдавать
-// на аккаунте — три прежних пути (`access_binding.RequireAccountGrantAuthority`),
+// на аккаунте — три прежних пути (`requireAccountGrantAuthority`),
 // у `Get` к ним добавляется «вызывающий — делегат». Делегированного пути у
 // глаголов этой службы нет: делегат делегирований не заводит и не отзывает.
 package grant_delegation

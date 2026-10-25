@@ -29,7 +29,6 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
-	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -84,7 +83,7 @@ func (u *CreateGrantDelegationUseCase) Execute(ctx context.Context, in CreateInp
 	if err != nil {
 		return nil, err
 	}
-	if err := accessbindingapp.RequireAccountGrantAuthority(ctx, u.repo, u.relations, d.AccountID); err != nil {
+	if err := requireAccountGrantAuthority(ctx, u.repo, u.relations, d.AccountID); err != nil {
 		return nil, err
 	}
 	module, err := u.validateComposition(ctx, d)

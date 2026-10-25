@@ -244,17 +244,3 @@ func denyOnNotFound(err error) error {
 func isPermissionDenied(err error) bool {
 	return status.Code(err) == codes.PermissionDenied
 }
-
-// RequireAccountGrantAuthority — право выдавать на аккаунте ТРЕМЯ прежними
-// путями (администратор облака, владелец аккаунта, `admin` на аккаунте) для
-// глаголов службы делегирований (kaname#986, Р1). Делегированного пути здесь нет
-// by construction: делегат делегирований не заводит, не читает перечнем и не
-// отзывает (GD-21, GD-44 c). Несуществующий аккаунт — отказ в праве, побайтово
-// как у вызывающего без права (скрытие существования).
-func RequireAccountGrantAuthority(ctx context.Context, repo Repo, relations clients.RelationStore, accountID domain.AccountID) error {
-	err := requireGrantAuthority(ctx, repo, relations, "account", string(accountID))
-	if err != nil && status.Code(err) == codes.NotFound {
-		return authzguard.PermissionDenied()
-	}
-	return err
-}
