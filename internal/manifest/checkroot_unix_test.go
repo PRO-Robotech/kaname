@@ -62,7 +62,7 @@ func TestCheckTreeReadsOnlyWhatLiesUnderTheRoot(t *testing.T) {
 	// негодное дало бы находку и без всякого ограничения корнем, и проба
 	// зеленела бы на отказе разбора, ничего не сказав о том, читали мы за
 	// корнем или нет.
-	beyond := strings.Replace(goodManifest(t), "module: vpc", "module: loadbalancer", 1)
+	beyond := asModule(goodManifest(t), "loadbalancer")
 	beyondPath := filepath.Join(outside, "за-корнем.yaml")
 	if err := os.WriteFile(beyondPath, []byte(beyond), 0o600); err != nil {
 		t.Fatalf("файл за корнем: %v", err)
