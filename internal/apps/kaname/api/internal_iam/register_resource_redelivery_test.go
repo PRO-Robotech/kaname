@@ -116,14 +116,14 @@ type countingEmitter struct {
 	deletes int
 }
 
-func (e *countingEmitter) EmitWriteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple) error {
+func (e *countingEmitter) EmitOrderedWriteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple, _ time.Time) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.writes += len(ts)
 	return nil
 }
 
-func (e *countingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple) error {
+func (e *countingEmitter) EmitOrderedDeleteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple, _ time.Time) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deletes += len(ts)

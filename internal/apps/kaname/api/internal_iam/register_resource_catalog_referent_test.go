@@ -41,12 +41,12 @@ import (
 // намерение не должно доехать до очереди вовсе.
 type recordingEmitter struct{ writes, deletes [][]service.RelationTuple }
 
-func (e *recordingEmitter) EmitWriteTx(_ context.Context, _ service.Tx, t []service.RelationTuple) error {
+func (e *recordingEmitter) EmitOrderedWriteTx(_ context.Context, _ service.Tx, t []service.RelationTuple, _ time.Time) error {
 	e.writes = append(e.writes, t)
 	return nil
 }
 
-func (e *recordingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, t []service.RelationTuple) error {
+func (e *recordingEmitter) EmitOrderedDeleteTx(_ context.Context, _ service.Tx, t []service.RelationTuple, _ time.Time) error {
 	e.deletes = append(e.deletes, t)
 	return nil
 }

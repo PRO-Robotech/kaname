@@ -47,8 +47,12 @@ func (b *smTxBeginner) Begin(context.Context) (service.Tx, error) {
 
 type smEmitter struct{}
 
-func (smEmitter) EmitWriteTx(context.Context, service.Tx, []service.RelationTuple) error  { return nil }
-func (smEmitter) EmitDeleteTx(context.Context, service.Tx, []service.RelationTuple) error { return nil }
+func (smEmitter) EmitOrderedWriteTx(context.Context, service.Tx, []service.RelationTuple, time.Time) error {
+	return nil
+}
+func (smEmitter) EmitOrderedDeleteTx(context.Context, service.Tx, []service.RelationTuple, time.Time) error {
+	return nil
+}
 
 type mirrorAdapter struct{ noDescendants }
 

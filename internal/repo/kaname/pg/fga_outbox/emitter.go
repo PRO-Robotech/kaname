@@ -72,6 +72,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -193,6 +194,75 @@ func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object st
 		eventType, domain.PublicationSubject, domain.PublicationRelation, object, ownerVersion,
 	); err != nil {
 		return fmt.Errorf("fga_outbox: insert publication %s: %w", eventType, err)
+	}
+	return nil
+}
+
+// EmitOwnerOrderedTx кладёт строки журнала отношений, которые записал посредник
+// регистрации объектов (иерархия объекта: указатель области, родитель, владелец),
+// упорядоченные ВЕРСИЕЙ РЕГИСТРАЦИИ владельца — по строке на кортеж, с полем
+// `source_version` (kaname#969).
+//
+// # Зачем строке версия регистрации
+//
+// Без неё свёртка упорядочивает строку меткой журнала, и снятие регистрации,
+// дошедшее позже повторной регистрации того же ключа, оказывается НОВЕЕ её
+// кортежей: оно снимает и владельца нового объекта, и его указатель области.
+// С версией свёртка сравнивает версию снятия с версией КАЖДОГО факта
+// (`DELETE … WHERE source_version <= версия снятия`): снятие версии v2 снимает
+// владельца регистрации v1 и не трогает кортежи регистрации v3 — тот же порядок,
+// которым строка зеркала (`resource_mirror`) уже отличает устаревшее надгробие.
+// Запись применяется монотонно (`ON CONFLICT … WHERE хранимая < новой`), поэтому
+// запоздавшая доставка старой регистрации не опускает версию факта.
+//
+// # Чего здесь нет
+//
+// Глаголов и публикации: глагол выводится из выдачи, а публикация упорядочена
+// своим путём (EmitPublicationTx). Вызывающий отдаёт сюда только иерархические
+// отношения посредника; проверка ниже отвергает остальное, а не пропускает.
+//
+// Версия приходит значением `pgtype.Timestamptz` и кладётся приведением в том же
+// операторе — как у публикации, до микросекунды, включая '-infinity'.
+func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, ownerVersion pgtype.Timestamptz) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if eventType != EventTypeWrite && eventType != EventTypeDelete {
+		return fmt.Errorf("fga_outbox: unknown event type %q", eventType)
+	}
+	if len(tuples) == 0 {
+		return nil
+	}
+	if !ownerVersion.Valid {
+		// Недействительная версия уехала бы в полезную нагрузку как null, и свёртка
+		// молча упорядочила бы строку меткой журнала — ровно то, от чего поле защищает.
+		return fmt.Errorf("fga_outbox: owner-ordered tuples without an owner version")
+	}
+	users := make([]string, 0, len(tuples))
+	relations := make([]string, 0, len(tuples))
+	objects := make([]string, 0, len(tuples))
+	seen := make(map[clients.RelationTuple]struct{}, len(tuples))
+	for _, t := range tuples {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		if t.User == "" || t.Relation == "" || t.Object == "" {
+			return fmt.Errorf("fga_outbox: owner-ordered tuple without user/relation/object")
+		}
+		if domain.IsStoredPublication(t.User, t.Relation) || strings.HasPrefix(t.Relation, "v_") {
+			return fmt.Errorf("fga_outbox: owner-ordered row of relation %q: verbs and publications are ordered by their own paths", t.Relation)
+		}
+		users, relations, objects = append(users, t.User), append(relations, t.Relation), append(objects, t.Object)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+		 SELECT $1, jsonb_build_object('user', u, 'relation', r, 'object', o, 'source_version', $5::timestamptz), now()
+		   FROM unnest($2::text[], $3::text[], $4::text[]) AS t(u, r, o)
+		  ORDER BY o, u, r`,
+		eventType, users, relations, objects, ownerVersion,
+	); err != nil {
+		return fmt.Errorf("fga_outbox: insert owner-ordered %s: %w", eventType, err)
 	}
 	return nil
 }
