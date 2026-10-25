@@ -29,6 +29,7 @@ var rosterConsumers = []string{
 	"authzguard.NewSystemViewerFloor",
 	"authzguard.NewRelationWriteGate",
 	"authorizeapp.NewHandler",
+	"internaliamapp.NewHandler",
 }
 
 // rosterWiringCensus — перепись провязки одного исходника.

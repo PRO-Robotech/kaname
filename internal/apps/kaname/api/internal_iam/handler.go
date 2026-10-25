@@ -291,6 +291,13 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 	if req.GetObject() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument object: required")
 	}
+	// Плоскость данных спрашивает только о типах объектов своего модуля
+	// (kaname#987): вопрос о чужом типе — отказ до решателя.
+	if module, recognized := h.modules.FromContext(ctx); recognized {
+		if err := h.requireCheckInCallerDomain(module, req.GetObject()); err != nil {
+			return nil, err
+		}
+	}
 	if h.authz == nil {
 		// Источник вердикта не провязан — fail-closed (интерсептор читает
 		// Unavailable как отказ, а не как «пропустить страж»).
