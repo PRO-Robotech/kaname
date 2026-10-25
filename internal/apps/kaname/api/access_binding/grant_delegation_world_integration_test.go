@@ -99,7 +99,7 @@ const (
 	gdQ        = "reg00000000000000009"
 	gdRepoTgt  = "registry.repositories"
 	gdFixture  = "registry.delegation-fixture.yaml"
-	gdVPCFixt  = "vpc.resources-fixture.yaml"
+	gdVPCFixt  = "vpc.delegation-fixture.yaml"
 	gdIAMRole  = "rol674f6a6d7e4eeb3b6" // iam.project.admin, миграция 0001
 	gdIAMName  = "iam.project.admin"
 	gdAdminRID = domain.ClusterAdminRoleID // каноническая `admin` каталога ролей
