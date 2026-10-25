@@ -32,6 +32,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"google.golang.org/grpc"
+
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -95,4 +97,28 @@ func (l listenerAdmission) arm(logger *slog.Logger, cfg config.Config) {
 // именно этого процесса.
 func (l listenerAdmission) report(ctx context.Context, logger *slog.Logger) {
 	grpcsrv.ReportAdmission(ctx, logger, "", l.public, l.internal)
+}
+
+// newInternalAdmissions — ограничители внутреннего слушателя (kaname#992).
+func newInternalAdmissions(module, instance grpcsrv.AdmissionLimits, opts ...grpcsrv.AdmissionOption) (listenerAdmission, error) {
+	internal, err := grpcsrv.NewAdmission("internal", module, grpcsrv.CertIdentitySubject, opts...)
+	if err != nil {
+		return listenerAdmission{}, err
+	}
+	return listenerAdmission{internal: internal}, nil
+}
+
+// instanceAdmissionLimits — величины уровня экземпляра.
+func instanceAdmissionLimits(module grpcsrv.AdmissionLimits) grpcsrv.AdmissionLimits {
+	return module
+}
+
+// instanceSubject — ключ экземпляра вызывающего.
+func instanceSubject(ctx context.Context) string {
+	return grpcsrv.CertIdentitySubject(ctx)
+}
+
+// internalRegistrar — обёртка регистратора внутреннего слушателя.
+func (l listenerAdmission) internalRegistrar(next grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+	return l.internal.Registrar(next)
 }
