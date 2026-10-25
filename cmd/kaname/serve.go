@@ -1972,7 +1972,15 @@ func runServe(cfg config.Config) error {
 			Observer:       metricsReg.NewBindingConvergeRecorder(),
 		},
 	)
+	// Такт стартует ПОСЛЕ стартовой задачи досева (на любом её исходе): первый
+	// проход обязан идти после пересчёта проекций ролей, а не наперегонки с ним.
+	startupSeedDone := make(chan struct{})
 	tasks = append(tasks, func() error {
+		select {
+		case <-startupSeedDone:
+		case <-taskCtx.Done():
+			return nil
+		}
 		backfillRunner.RunEvery(taskCtx, convergeWindows.Interval)
 		return nil
 	})
@@ -2038,6 +2046,7 @@ func runServe(cfg config.Config) error {
 	// где перестаёт работать наша собственная проверка (kacho#1821).
 	ruleRefReseed := metricsReg.NewRuleRefReseedRecorder()
 	tasks = append(tasks, func() error {
+		defer close(startupSeedDone)
 		if ores, oerr := orphanScopeSweeper.RunOnce(taskCtx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
 				slog.Any("err", oerr),
