@@ -210,10 +210,11 @@ func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx se
 			return fmt.Errorf("rewrite rules of role %s: %w", id, err)
 		}
 		sels := rules.MaterializingSelectors()
-		if err := w.RolesW().ReplaceRuleSelectors(ctx, id, facts.GrantSelectors(sels)); err != nil {
+		policy := domain.PolicyOfRole(role.IsSystem, role.OwnerModule)
+		if err := w.RolesW().ReplaceRuleSelectors(ctx, id, facts.GrantSelectors(sels, policy)); err != nil {
 			return fmt.Errorf("replace rule selectors of role %s: %w", id, err)
 		}
-		if err := w.RolesW().ReplaceRoleVerbs(ctx, id, facts.RoleVerbsFromSelectors(sels)); err != nil {
+		if err := w.RolesW().ReplaceRoleVerbs(ctx, id, facts.RoleVerbsFromSelectors(sels, policy)); err != nil {
 			return fmt.Errorf("replace verbs of role %s: %w", id, err)
 		}
 		if err := w.RolesW().ReplaceRuleRefs(ctx, id, domain.RuleRefsOf(rules)); err != nil {

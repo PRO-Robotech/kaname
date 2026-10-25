@@ -215,8 +215,11 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// селекторах и проекция роли — объединение тех же наборов (kaname#878),
 			// и два снимка каталога развели бы их.
 			facts := u.cat.Facts()
+			// Политика — та же, которой правила судились выше: от владельца роли
+			// зависит, влечёт ли правка удаление (kaname#1006).
+			policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
 			if serr := w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID,
-				facts.GrantSelectors(inserted.Rules.MaterializingSelectors())); serr != nil {
+				facts.GrantSelectors(inserted.Rules.MaterializingSelectors(), policy)); serr != nil {
 				return domain.Role{}, serr
 			}
 			// Проекция глаголов — ВТОРАЯ сторона того же правила, и пишется она в
@@ -225,7 +228,7 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// вердикт наполовину определённым, а расхождение проявится не отказом,
 			// а неверным ответом.
 			if verr := w.RolesW().ReplaceRoleVerbs(ctx, inserted.ID,
-				facts.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors())); verr != nil {
+				facts.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors(), policy)); verr != nil {
 				return domain.Role{}, verr
 			}
 			// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и

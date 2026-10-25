@@ -162,9 +162,9 @@ func (p *pcrWorld) seedRole(name string, rules domain.Rules) domain.RoleID {
 		Rules:       rules, Permissions: compiled,
 	})
 	require.NoError(p.t, err, "посев роли %s", name)
-	sels := p.facts.GrantSelectors(inserted.Rules.MaterializingSelectors())
+	sels := p.facts.GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	require.NoError(p.t, w.RolesW().ReplaceRuleSelectors(p.ctx, inserted.ID, sels), "посев роли %s: селекторы", name)
-	pairs := p.facts.RoleVerbsFromSelectors(sels)
+	pairs := p.facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	require.NotEmptyf(p.t, pairs, "посев роли %s: проекция глаголов пуста — каталог не знает её типов", name)
 	require.NoError(p.t, w.RolesW().ReplaceRoleVerbs(p.ctx, inserted.ID, pairs), "посев роли %s: проекция глаголов", name)
 	require.NoError(p.t, w.Commit(p.ctx))

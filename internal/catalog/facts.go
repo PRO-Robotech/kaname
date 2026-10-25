@@ -450,9 +450,9 @@ func (f *Facts) RolePreviewLookup() domain.TypeVerbLookup {
 // который зависит от каталога, — объявляет ли ЖИВОЙ тип набор глаголов вообще.
 // Повторить вычисление здесь значило бы завести второе место об одном предмете:
 // ровно так роль-администратор однажды давала движку всё, а проекции — ничего.
-func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []string {
+func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string, policy domain.RulePolicy) []string {
 	return authzmap.GrantedVerbsWithDeclared(fgaType, len(f.verbsByFGAType[fgaType]) > 0,
-		authored, typeVerbs)
+		authored, typeVerbs, policy)
 }
 
 // RoleVerbsFromSelectors — проекция «тип × глагол» из тех же селекторов,
@@ -477,10 +477,10 @@ func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []str
 //
 // Проекция роли есть ОБЪЕДИНЕНИЕ глаголов её правил (`GrantSelectors`): одно
 // вычисление на обе стороны, и разойтись роль с правилом не может.
-func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
+func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector, policy domain.RulePolicy) []domain.RoleVerb {
 	seen := make(map[domain.RoleVerb]bool)
 	out := make([]domain.RoleVerb, 0, len(selectors))
-	for _, sel := range f.GrantSelectors(selectors) {
+	for _, sel := range f.GrantSelectors(selectors, policy) {
 		for _, dotted := range sel.ObjectTypes {
 			for _, verb := range sel.Grants[dotted] {
 				pair := domain.RoleVerb{ObjectType: dotted, Verb: verb}
@@ -510,7 +510,11 @@ func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain
 //
 // Возвращаются КОПИИ: вход вызывающему принадлежит, и портить его заполнением на
 // месте нельзя.
-func (f *Facts) GrantSelectors(selectors []domain.RuleSelector) []domain.RuleSelector {
+//
+// policy — политика роли-владельца селекторов ([domain.PolicyOfRole]): от неё
+// зависит, влечёт ли правка удаление (kaname#1006), поэтому карта есть функция
+// отпечатка правила, каталога И владельца роли.
+func (f *Facts) GrantSelectors(selectors []domain.RuleSelector, policy domain.RulePolicy) []domain.RuleSelector {
 	out := make([]domain.RuleSelector, len(selectors))
 	for i, sel := range selectors {
 		grants := make(map[string][]string, len(sel.ObjectTypes))
@@ -522,7 +526,7 @@ func (f *Facts) GrantSelectors(selectors []domain.RuleSelector) []domain.RuleSel
 			if !ok {
 				continue
 			}
-			verbs := f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType))
+			verbs := f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType), policy)
 			if len(verbs) == 0 {
 				continue
 			}
