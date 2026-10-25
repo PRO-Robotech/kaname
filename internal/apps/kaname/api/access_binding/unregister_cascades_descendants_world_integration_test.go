@@ -85,12 +85,12 @@ func (w *cascadeWorld) registered(modelType, id string) bool {
 	w.t.Helper()
 	var mirror, edges int
 	require.NoError(w.t, w.pool.QueryRow(w.ctx,
-		`SELECT (SELECT count(*) FROM kaname.resource_mirror
-		          WHERE object_type = $1 AND object_id = $3),
-		        (SELECT count(*) FROM kaname.resource_parent_edge
-		          WHERE object_type = $2 AND object_id = $3)`,
+		`SELECT count(*) FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`,
 		map[string]string{pcrRegType: pcrRegTgt, pcrRepoType: "registry.repositories"}[modelType],
-		modelType, id).Scan(&mirror, &edges))
+		id).Scan(&mirror))
+	require.NoError(w.t, w.pool.QueryRow(w.ctx,
+		`SELECT count(*) FROM kaname.resource_parent_edge WHERE object_type = $1 AND object_id = $2`,
+		modelType, id).Scan(&edges))
 	return mirror > 0 || edges > 0
 }
 
