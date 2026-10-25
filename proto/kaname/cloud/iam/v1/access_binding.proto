@@ -263,6 +263,10 @@ message AccessBinding {
     // (`InternalIAMService.UnregisterResource`); `revoked_by_user_id` пуст —
     // отозвал не человек.
     REVOCATION_REASON_RESOURCE_UNREGISTERED = 3;
+    // Отозвано делегирование, по которому выдача сделана
+    // (`GrantDelegationService.Revoke`); `revoked_by_user_id` — отозвавший
+    // делегирование.
+    REVOCATION_REASON_DELEGATION_REVOKED    = 4;
   }
 
   // OUTPUT-ONLY. Причина отзыва. Задана ровно тогда, когда `status = REVOKED` и
@@ -272,6 +276,13 @@ message AccessBinding {
   // действующей выдачи ключа `revocationReason` в теле нет (приёмка
   // unregistration-revokes-its-grants.md, URG-E2).
   optional RevocationReason revocation_reason = 26;
+
+  // OUTPUT-ONLY. Делегирование права выдавать (`GrantDelegation.id`), по которому
+  // выдача сделана делегатом; пусто у выдачи, сделанной держателем права выдавать.
+  // Ставит только делегированный путь права выдавать; на вход ни одного запроса
+  // поле не принимается. Делегат отзывает и удаляет только выдачи, несущие
+  // ссылку на его действующее делегирование.
+  string delegation_id = 27;
 }
 
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant
