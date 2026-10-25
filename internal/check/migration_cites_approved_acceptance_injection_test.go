@@ -12,9 +12,9 @@ import (
 	"testing"
 )
 
-// injWorld — три приёмки: одобренная на текущей редакции, отвергнутая на
+// mcaWorld — три приёмки: одобренная на текущей редакции, отвергнутая на
 // текущей и одобренная на ПРЕЖНЕЙ редакции (правленая после вердикта).
-func injWorld() (map[string][]byte, []acceptanceRecord) {
+func mcaWorld() (map[string][]byte, []acceptanceRecord) {
 	approved := []byte("# Приёмка: одобренная\n")
 	rejected := []byte("# Приёмка: отвергнутая\n")
 	edited := []byte("# Приёмка: правленая после вердикта, редакция 2\n")
@@ -31,20 +31,20 @@ func injWorld() (map[string][]byte, []acceptanceRecord) {
 	return docs, records
 }
 
-const injMig = "internal/migrations/20991231000000_injected.sql"
+const mcaMig = "internal/migrations/20991231000000_injected.sql"
 
-func injAudit(t *testing.T, body string) ([]string, int) {
+func mcaAudit(t *testing.T, body string) ([]string, int) {
 	t.Helper()
-	docs, records := injWorld()
-	return migrationAcceptanceAudit(map[string]string{injMig: body}, docs, records)
+	docs, records := mcaWorld()
+	return migrationAcceptanceAudit(map[string]string{mcaMig: body}, docs, records)
 }
 
-func requireOneFinding(t *testing.T, findings []string, wants ...string) {
+func mcaRequireOneFinding(t *testing.T, findings []string, wants ...string) {
 	t.Helper()
 	if len(findings) != 1 {
 		t.Fatalf("ждали ровно одну находку, получили %d: %q", len(findings), findings)
 	}
-	for _, w := range append([]string{injMig}, wants...) {
+	for _, w := range append([]string{mcaMig}, wants...) {
 		if !strings.Contains(findings[0], w) {
 			t.Fatalf("находка не называет %q: %s", w, findings[0])
 		}
@@ -53,45 +53,45 @@ func requireOneFinding(t *testing.T, findings []string, wants ...string) {
 
 func TestMigrationAcceptanceInjection_NoCitationIsFound(t *testing.T) {
 	t.Parallel()
-	findings, _ := injAudit(t, "-- миграция без основания\nALTER TABLE x ADD COLUMN y int;\n")
-	requireOneFinding(t, findings, "не цитирует")
+	findings, _ := mcaAudit(t, "-- миграция без основания\nALTER TABLE x ADD COLUMN y int;\n")
+	mcaRequireOneFinding(t, findings, "не цитирует")
 }
 
 func TestMigrationAcceptanceInjection_BareNameOutsideTheHomeIsNotACitation(t *testing.T) {
 	t.Parallel()
-	findings, citations := injAudit(t, "-- см. README.md и change-graph.md\nSELECT 1;\n")
+	findings, citations := mcaAudit(t, "-- см. README.md и change-graph.md\nSELECT 1;\n")
 	if citations != 0 {
 		t.Fatalf("голое имя вне дома приёмок засчитано цитатой: %d", citations)
 	}
-	requireOneFinding(t, findings, "не цитирует")
+	mcaRequireOneFinding(t, findings, "не цитирует")
 }
 
 func TestMigrationAcceptanceInjection_RejectedAcceptanceIsFound(t *testing.T) {
 	t.Parallel()
-	findings, _ := injAudit(t, "-- САНКЦИЯ: приёмка "+acceptanceHomeRel+"/rejected-one.md\n")
-	requireOneFinding(t, findings, "rejected-one.md", "CHANGES_REQUESTED", "r2.yaml")
+	findings, _ := mcaAudit(t, "-- САНКЦИЯ: приёмка "+acceptanceHomeRel+"/rejected-one.md\n")
+	mcaRequireOneFinding(t, findings, "rejected-one.md", "CHANGES_REQUESTED", "r2.yaml")
 }
 
 func TestMigrationAcceptanceInjection_ApprovalOfAPriorEditionIsFound(t *testing.T) {
 	t.Parallel()
-	findings, _ := injAudit(t, "-- САНКЦИЯ: приёмка "+acceptanceHomeRel+"/edited-one.md\n")
-	requireOneFinding(t, findings, "edited-one.md", "записи ревью нет", "другие отпечатки: 1")
+	findings, _ := mcaAudit(t, "-- САНКЦИЯ: приёмка "+acceptanceHomeRel+"/edited-one.md\n")
+	mcaRequireOneFinding(t, findings, "edited-one.md", "записи ревью нет", "другие отпечатки: 1")
 }
 
 func TestMigrationAcceptanceInjection_MissingDocumentIsFound(t *testing.T) {
 	t.Parallel()
-	findings, _ := injAudit(t, "-- САНКЦИЯ: приёмка "+acceptanceHomeRel+"/never-written.md\n")
-	requireOneFinding(t, findings, "never-written.md", "нет")
+	findings, _ := mcaAudit(t, "-- САНКЦИЯ: приёмка "+acceptanceHomeRel+"/never-written.md\n")
+	mcaRequireOneFinding(t, findings, "never-written.md", "нет")
 }
 
 func TestMigrationAcceptanceInjection_OneUnapprovedAmongApprovedIsFound(t *testing.T) {
 	t.Parallel()
-	findings, citations := injAudit(t, "-- САНКЦИЯ: "+acceptanceHomeRel+"/approved-one.md;\n"+
+	findings, citations := mcaAudit(t, "-- САНКЦИЯ: "+acceptanceHomeRel+"/approved-one.md;\n"+
 		"-- опора: rejected-one.md\n")
 	if citations != 2 {
 		t.Fatalf("цитат две (полный путь и голое имя), засчитано %d", citations)
 	}
-	requireOneFinding(t, findings, "rejected-one.md")
+	mcaRequireOneFinding(t, findings, "rejected-one.md")
 }
 
 // Законные близнецы: те же формы цитаты, документ одобрен на текущей редакции.
@@ -102,7 +102,7 @@ func TestMigrationAcceptanceInjection_ApprovedTwinIsSilent(t *testing.T) {
 		"голое имя":     "-- приёмка `approved-one.md` (задача #1)\n",
 		"начало строки": "approved-one.md\n",
 	} {
-		findings, citations := injAudit(t, body)
+		findings, citations := mcaAudit(t, body)
 		if len(findings) != 0 {
 			t.Errorf("%s: законный близнец дал находки: %q", name, findings)
 		}
@@ -114,7 +114,7 @@ func TestMigrationAcceptanceInjection_ApprovedTwinIsSilent(t *testing.T) {
 
 func TestMigrationAcceptanceInjection_NothingAddedIsSilent(t *testing.T) {
 	t.Parallel()
-	docs, records := injWorld()
+	docs, records := mcaWorld()
 	findings, citations := migrationAcceptanceAudit(map[string]string{}, docs, records)
 	if len(findings) != 0 || citations != 0 {
 		t.Fatalf("без добавленных миграций судить нечего, а вышло находок %d, цитат %d", len(findings), citations)
