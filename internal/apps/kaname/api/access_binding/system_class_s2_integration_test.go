@@ -440,6 +440,7 @@ func TestSystemClass_SC29_AuditNamesTheClassAndTheActor(t *testing.T) {
 		w.auditOf(userID, "iam.access_binding.granted"), "SC-29 близнец: форма записи")
 
 	id := w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-29 Дано: SC-01")
+	w.ownerMayRemove("SC-29 Дано", id)
 	op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err)
 	require.Nil(t, awaitOp(t, w.ctx, w.ops, op.GetId()).Error)

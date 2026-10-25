@@ -112,6 +112,12 @@ type AccessBinding struct {
 	// действующей выдачи и у отозванной до заведения поля (Д7).
 	RevocationReason RevocationReason
 
+	// DelegationID — делегирование права выдавать, по которому выдачу сделал
+	// делегат (kaname#986, Р2). Пусто у выдачи держателя права выдавать. Ставит
+	// только делегированный путь права выдавать; на вход запроса поле не
+	// принимается.
+	DelegationID GrantDelegationID
+
 	// HeldTargets — НЕ ХРАНИТСЯ. Объекты цели, которые на приёме выдачи были
 	// зарегистрированы (Р8 приёмки `unregistration-revokes-its-grants.md`). Запись
 	// выдачи берёт на каждом замок строки регистрации и отказывает, если строки
@@ -133,6 +139,9 @@ const (
 	RevocationReasonExpired RevocationReason = "EXPIRED"
 	// RevocationReasonResourceUnregistered — снята регистрация объекта цели.
 	RevocationReasonResourceUnregistered RevocationReason = "RESOURCE_UNREGISTERED"
+	// RevocationReasonDelegationRevoked — отозвано делегирование, по которому
+	// выдача сделана (kaname#986, Р4).
+	RevocationReasonDelegationRevoked RevocationReason = "DELEGATION_REVOKED"
 )
 
 func (b AccessBinding) Validate() error {
