@@ -19,14 +19,18 @@ import (
 // moduleVerbFacts — синтетический живой каталог: реестр с репозиториями и тип,
 // которого порождённая сборкой таблица не знает (`billing_invoice`) — без него
 // «ответил каталог» было бы неотличимо от «ответила таблица сборки».
+// Модуль vpc ключуется в единственном числе (`vpc.network`), а действие приходит
+// токеном права во множественном (`vpc.networks.get`): так расходятся словари
+// на настоящих манифестах (kaname#995).
 func moduleVerbFacts(t *testing.T) *catalog.Facts {
 	t.Helper()
 	f, err := catalog.NewFacts(catalog.Halves{Live: catalog.Rows{
-		Modules: []string{"billing", "registry"},
+		Modules: []string{"billing", "registry", "vpc"},
 		Resources: []catalog.ResourceRow{
 			{Module: "billing", Resource: "invoice", ObjectType: "billing_invoice"},
 			{Module: "registry", Resource: "registries", ObjectType: "registry_registry"},
 			{Module: "registry", Resource: "repositories", ObjectType: "registry_repository"},
+			{Module: "vpc", Resource: "network", ObjectType: "vpc_network"},
 		},
 		Verbs: []catalog.VerbRow{
 			{Module: "billing", Resource: "invoice", Verb: "get", PerObject: true},
@@ -37,6 +41,8 @@ func moduleVerbFacts(t *testing.T) *catalog.Facts {
 			{Module: "registry", Resource: "repositories", Verb: "list", PerObject: true},
 			{Module: "registry", Resource: "repositories", Verb: "delete", PerObject: true},
 			{Module: "registry", Resource: "repositories", Verb: "create", PerObject: false},
+			{Module: "vpc", Resource: "network", Verb: "get", PerObject: true},
+			{Module: "vpc", Resource: "network", Verb: "list", PerObject: true},
 		},
 	}})
 	if err != nil {
@@ -60,7 +66,12 @@ func TestModuleVerbRelation_TakesTheVerbOfTheObjectTypeFromTheCatalog(t *testing
 		{"глагол, которого тип не объявляет", "registry.repositories.update", "registry_repository", ""},
 		{"действие о другом ресурсе", "registry.registries.get", "registry_repository", ""},
 		{"тип без глаголов в каталоге", "iam.cluster.get", "cluster", ""},
-		{"ресурс вне каталога", "vpc.networks.get", "vpc_network", ""},
+		{"ключ каталога в единственном числе", "vpc.network.get", "vpc_network", "v_get"},
+		{"токен права во множественном числе — судится модулем", "vpc.networks.get", "vpc_network", "v_get"},
+		{"токен права, глагол без отношения у типа", "vpc.networks.delete", "vpc_network", ""},
+		{"токен права чужого модуля", "compute.networks.get", "vpc_network", ""},
+		{"токен права модуля, не объявляющего тип", "billing.networks.get", "vpc_network", ""},
+		{"модуль вне каталога", "compute.instances.get", "compute_instance", ""},
 		{"две части", "registry.get", "registry_repository", ""},
 		{"пустой глагол", "registry.repositories.", "registry_repository", ""},
 		{"пустое действие", "", "registry_repository", ""},

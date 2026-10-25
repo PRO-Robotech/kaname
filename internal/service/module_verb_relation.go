@@ -37,13 +37,29 @@ func (s *AuthorizeService) catalogFacts() *catalog.Facts {
 //
 // # Когда ответа нет — пустая строка, и это отказ
 //
-// Пусто в четырёх случаях, и в каждом подстановки умолчанием нет:
+// Пусто в пяти случаях, и в каждом подстановки умолчанием нет:
 //   - каталог не провязан;
 //   - действие не названо тремя частями;
-//   - ресурс действия в каталоге не соответствует типу объекта: глагол берётся
-//     у ТИПА ОБЪЕКТА, и действие о другом ресурсе спросило бы не то, что назвало;
+//   - ресурс действия — ключ каталога, и этот ключ называет ДРУГОЙ тип, чем тип
+//     объекта: глагол берётся у ТИПА ОБЪЕКТА, и действие о другом ресурсе
+//     спросило бы не то, что назвало;
+//   - ресурс действия — не ключ каталога, а модуль действия тип объекта не
+//     объявляет;
 //   - тип объекта такого глагола в каталоге не объявляет (у `cluster` глаголов
 //     нет вовсе).
+//
+// # Два словаря имени ресурса: ключ каталога и токен права
+//
+// Действие приходит в словаре ТОКЕНА ПРАВА (`vpc.networks.get` — множественное
+// число, путь коллекции), а каталог ключуется словарём ТИПА (`vpc.network`).
+// У registry, storage и loadbalancer написания совпадают, у vpc, compute и iam
+// нет, и сводить их правилом склонения нельзя: токены несут и змеиный регистр, и
+// составные формы (`network_interfaces`, `used_addresses`), а расхождение
+// намеренное (`authzmap/fga_types.go`). Поэтому ключ каталога судится строго —
+// он обязан называть тип объекта, — а токен права, которого среди ключей нет,
+// судится МОДУЛЕМ: тип объекта обязан принадлежать модулю действия. Действие
+// чужого модуля ответа не получает; ресурс внутри своего модуля задаёт тип
+// объекта, а не сегмент действия.
 //
 // Каталог — живые строки (`catalog.Facts`), а не таблица, порождённая сборкой:
 // тип, заведённый доставкой манифеста в работающем процессе, таблица сборки не
@@ -57,10 +73,15 @@ func moduleVerbRelation(facts *catalog.Facts, action, objectType string) string 
 		return ""
 	}
 	dotted, verb := action[:cut], domain.NormalizeVerb(action[cut+1:])
-	if !strings.Contains(dotted, ".") {
+	dot := strings.IndexByte(dotted, '.')
+	if dot <= 0 {
 		return ""
 	}
-	if fgaType, ok := facts.FGAObjectType(dotted); !ok || fgaType != objectType {
+	if fgaType, isKey := facts.FGAObjectType(dotted); isKey {
+		if fgaType != objectType {
+			return ""
+		}
+	} else if !moduleDeclaresType(facts, dotted[:dot], objectType) {
 		return ""
 	}
 	for _, declared := range facts.VerbsOfType(objectType) {
@@ -69,4 +90,14 @@ func moduleVerbRelation(facts *catalog.Facts, action, objectType string) string 
 		}
 	}
 	return ""
+}
+
+// moduleDeclaresType — тип объекта объявлен ЖИВЫМ ресурсом модуля.
+func moduleDeclaresType(facts *catalog.Facts, module, objectType string) bool {
+	for _, r := range facts.Resources() {
+		if r.Module == module && r.ObjectType == objectType {
+			return true
+		}
+	}
+	return false
 }
