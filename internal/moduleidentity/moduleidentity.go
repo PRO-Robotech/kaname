@@ -35,6 +35,7 @@ package moduleidentity
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"sort"
 	"strings"
@@ -90,7 +91,16 @@ type Identity struct {
 	Service string
 	// Profile — профиль, объявленный установкой для этой пары.
 	Profile Profile
+	// Issuer — имя доверенного удостоверяющего центра, который ВПРАВЕ выпускать
+	// лист этой личности (kaname#988). Пусто — привязки нет: такая запись
+	// законна только вне боевого режима ([Roster.RequireIssuerBinding]).
+	Issuer string
 }
+
+// IssuerSet — доверенные удостоверяющие центры установки: имя → якоря.
+// Лист признаётся личностью с привязкой, только если его проверенная цепочка
+// оканчивается якорем именно её центра.
+type IssuerSet map[string][]*x509.Certificate
 
 // ParseSAN — ЕДИНСТВЕННЫЙ разбор SPIFFE-идентификатора рабочей нагрузки:
 // `spiffe://<домен>/ns/<пространство>/sa/<учётка>`.
@@ -128,6 +138,9 @@ func ServiceFromAccount(account string) (string, bool) {
 // не признаётся никто.
 type Roster struct {
 	byPair map[string]Identity
+	// anchors — сырые якоря центров по имени: сравнение цепочки — побайтовое,
+	// по `Raw`, а не по имени субъекта, которое повторить может кто угодно.
+	anchors map[string][][]byte
 }
 
 // pairKey — ключ пары. Косая черта в пространстве и учётке невозможна (их
@@ -135,16 +148,32 @@ type Roster struct {
 func pairKey(namespace, account string) string { return namespace + "/" + account }
 
 // EntryShape — форма записи перечня для текстов отказа и справки.
-const EntryShape = "<namespace>/<service-account>=<profile>"
+const EntryShape = "<namespace>/<service-account>=<profile>[@<issuer>]"
 
-// Parse собирает перечень из записей установки.
+// Parse собирает перечень из записей установки без доверенных центров: запись,
+// называющая центр, отвергается как называющая необъявленный.
+func Parse(entries []string) (Roster, error) {
+	return ParseWithIssuers(entries, nil)
+}
+
+// ParseWithIssuers собирает перечень из записей установки и её доверенных
+// центров.
 //
 // Запись — [EntryShape]. Пробелы по краям срезаются, пустые записи
 // отбрасываются: случайно пустая величина (`""` в переменной окружения) не
 // должна становиться записью. Всякая иная неисправность — ошибка с названной
 // записью: страж старта отвергает установку, а не признаёт меньше, чем она
-// объявила.
-func Parse(entries []string) (Roster, error) {
+// объявила. Центр, названный записью, обязан быть объявлен и нести хотя бы
+// один якорь.
+func ParseWithIssuers(entries []string, issuers IssuerSet) (Roster, error) {
+	anchors := make(map[string][][]byte, len(issuers))
+	for name, certs := range issuers {
+		for _, c := range certs {
+			if c != nil && len(c.Raw) > 0 {
+				anchors[name] = append(anchors[name], c.Raw)
+			}
+		}
+	}
 	byPair := make(map[string]Identity, len(entries))
 	for _, raw := range entries {
 		entry := strings.TrimSpace(raw)
@@ -154,6 +183,11 @@ func Parse(entries []string) (Roster, error) {
 		id, err := parseEntry(entry)
 		if err != nil {
 			return Roster{}, err
+		}
+		if id.Issuer != "" && len(anchors[id.Issuer]) == 0 {
+			return Roster{}, fmt.Errorf("module identity %q names the issuer %q, which the installation "+
+				"has not declared (or declared without a single certificate): its leaf could never be "+
+				"bound to the authority that issued it", entry, id.Issuer)
 		}
 		key := pairKey(id.Namespace, id.Account)
 		if prev, dup := byPair[key]; dup {
@@ -166,12 +200,12 @@ func Parse(entries []string) (Roster, error) {
 	if len(byPair) == 0 {
 		return Roster{}, nil
 	}
-	return Roster{byPair: byPair}, nil
+	return Roster{byPair: byPair, anchors: anchors}, nil
 }
 
 // parseEntry разбирает одну непустую запись.
 func parseEntry(entry string) (Identity, error) {
-	pair, profile, found := strings.Cut(entry, "=")
+	pair, rest, found := strings.Cut(entry, "=")
 	if !found {
 		return Identity{}, fmt.Errorf("module identity %q carries no profile: write it as %s", entry, EntryShape)
 	}
@@ -192,11 +226,16 @@ func parseEntry(entry string) (Identity, error) {
 		return Identity{}, fmt.Errorf("module identity %q: service account %q does not carry the module "+
 			"prefix %q followed by the service name, so no service name can be read from it", entry, account, AccountPrefix)
 	}
+	profile, issuer, bound := strings.Cut(rest, "@")
 	p := Profile(profile)
 	if !p.known() {
 		return Identity{}, fmt.Errorf("module identity %q: unknown profile %q (known: %s)", entry, profile, profileList())
 	}
-	return Identity{Namespace: ns, Account: account, Service: svc, Profile: p}, nil
+	if bound && !isDNSLabel(issuer) {
+		return Identity{}, fmt.Errorf("module identity %q: issuer name %q is not a name "+
+			"(lower-case latin letters, digits and '-', starting and ending with a letter or a digit)", entry, issuer)
+	}
+	return Identity{Namespace: ns, Account: account, Service: svc, Profile: p, Issuer: issuer}, nil
 }
 
 // profileList — словарь профилей строкой для текста отказа.
