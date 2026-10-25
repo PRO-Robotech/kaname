@@ -53,6 +53,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // gatewayServiceName — the module service short-name of the api-gateway SA
@@ -216,6 +218,9 @@ type CallerPolicy struct {
 	// Величина СРАВНИВАЕТСЯ ЦЕЛИКОМ, как в третьем рукаве: пространство имён и
 	// учётная запись — части личности, и «похожее» здесь не годится.
 	ownFrontHop string
+	// modules — личности модулей, объявленные установкой, и их профили
+	// (kaname#984). Нулевое значение не признаёт никого.
+	modules moduleidentity.Roster
 }
 
 // NewCallerPolicy builds the caller policy. gatewayOnlyRPCs is the set of
@@ -263,6 +268,17 @@ func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolic
 		out[method] = set
 	}
 	p.sanAllow = out
+	return p
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки
+// (kaname#984): модулем признаётся только объявленная пара (пространство,
+// учётка), и звать она вправе только методы своего профиля ([ProfileMethods]).
+//
+// Политика, собранная без перечня, не признаёт модулем НИКОГО: пропущенная
+// подстановка обязана дать отказ, а не прежнее «любой лист с приставкой».
+func (p *CallerPolicy) WithModuleRoster(r moduleidentity.Roster) *CallerPolicy {
+	p.modules = r
 	return p
 }
 

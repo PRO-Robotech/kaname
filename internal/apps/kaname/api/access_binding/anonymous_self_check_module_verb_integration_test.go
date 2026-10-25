@@ -33,6 +33,7 @@ import (
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -63,7 +64,7 @@ func anonSelf(t *testing.T, h *authorizeapp.Handler, action, modelType, id strin
 		Resource: &iamv1.ResourceRef{Type: modelType, Id: id},
 		Action:   action,
 	}
-	require.Truef(t, authzguard.IsAnonymousSelfCheck(ctx, req),
+	require.Truef(t, authzguard.IsAnonymousSelfCheck(ctx, req, moduleidentity.Roster{}),
 		"предусловие: вопрос %s %s:%s обязан быть анонимной формой", action, modelType, id)
 	resp, err := h.Check(ctx, req)
 	require.NoErrorf(t, err, "анонимная самопроверка %s %s:%s не ответила", action, modelType, id)

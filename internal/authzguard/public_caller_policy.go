@@ -81,6 +81,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -235,6 +236,18 @@ type PublicCallerPolicy struct {
 	// реализацией проверки удостоверения, то есть два предмета, которые меняются
 	// порознь. Реализацию подставляет композиционный корень.
 	presented CredentialPresence
+	// modules — личности модулей установки (kaname#984): модулем на этом
+	// слушателе признаётся только объявленная пара. Нулевое значение не
+	// признаёт никого.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки. Тот же
+// перечень и тот же разбор, что у внутреннего слушателя: признание модуля одно
+// на оба слушателя.
+func (p *PublicCallerPolicy) WithModuleRoster(r moduleidentity.Roster) *PublicCallerPolicy {
+	p.modules = r
+	return p
 }
 
 // CredentialPresence — приложил ли вызывающий удостоверение к ЭТОМУ запросу.
@@ -560,7 +573,7 @@ func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 		// open the method-only policy used by streams or other RPCs.
 		if info.FullMethod == iamv1.AuthorizeService_Check_FullMethodName {
 			check, ok := req.(*iamv1.AuthorizeCheckRequest)
-			if ok && IsAnonymousSelfCheck(ctx, check) {
+			if ok && IsAnonymousSelfCheck(ctx, check, p.modules) {
 				return handler(ctx, req)
 			}
 		}

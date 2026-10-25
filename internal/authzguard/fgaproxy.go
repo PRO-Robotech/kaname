@@ -33,6 +33,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 const (
@@ -76,6 +77,17 @@ type RelationWriteGate struct {
 	// with no verified client-cert is allowed (backward-compat);
 	// in production-mode (true) the gate is strictly fail-closed.
 	prodMode bool
+	// modules — личности модулей установки (kaname#984). Нулевое значение не
+	// признаёт никого.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки: писать
+// отношения вправе только объявленная пара, и домен записи — имя службы её
+// учётки.
+func (g *RelationWriteGate) WithModuleRoster(r moduleidentity.Roster) *RelationWriteGate {
+	g.modules = r
+	return g
 }
 
 // NewRelationWriteGate — constructor. Defaults to dev-mode (backward-compat); use
