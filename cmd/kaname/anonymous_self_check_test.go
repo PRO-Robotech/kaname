@@ -133,12 +133,6 @@ func TestAnonymousSelfCheck_PublicChainInfersOnlyAnonymous(t *testing.T) {
 			if got.Subject != "system_class:anonymous" || got.Resource.Type != req.Resource.Type || got.Resource.ID != req.Resource.Id || got.Action != req.Action || len(got.Context) != 0 || got.RequiredRelation != "" {
 				t.Fatalf("unexpected decision request: %+v", got)
 			}
-			// Отношение анонимной формы выводит служба глаголом типа из каталога
-			// модуля, а не общим умолчанием (kaname#994); исход на настоящем
-			// решателе — access_binding/anonymous_self_check_module_verb_integration_test.go.
-			if !got.RelationByModuleVerb {
-				t.Fatalf("anonymous decision must resolve the action by the module verb: %+v", got)
-			}
 			if req.Subject != "" {
 				t.Fatal("handler mutated the caller's request")
 			}

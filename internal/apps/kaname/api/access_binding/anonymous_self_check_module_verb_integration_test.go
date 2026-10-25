@@ -139,35 +139,3 @@ func TestAnonymousSelfCheck_RoleWithoutRepositoryGetStaysRefused(t *testing.T) {
 	assert.False(t, anonSelf(t, h, "registry.registries.list", pcrRegType, pcrX),
 		"kaname#994: роль без list над реестром list анониму не открывает")
 }
-
-// TestAnonymousSelfCheck_SignedInActionOnlyCheckKeepsItsRelation — kaname#994,
-// п. 3 предиката: вошедший субъект без отношения — исход без изменений.
-// Вопрос без отношения от вошедшего по-прежнему разрешается общим умолчанием
-// (`get` → `viewer`): ответ равен ответу с явным `viewer` на объекте, где
-// `v_get` вошедшего истинен.
-func TestAnonymousSelfCheck_SignedInActionOnlyCheckKeepsItsRelation(t *testing.T) {
-	p := newPCRWorld(t)
-	p.deliverNewEdition("kaname#994 вошедший")
-	usrB := fmtSubject("user", string(p.usrB))
-	p.requireAsk(usrB, "v_get", pcrRegType, pcrX, true, "контроль: выдача rol-reg-get человеку usr-B действует")
-	h := p.anonSelfCheckHandler()
-
-	ask := func(relation string) bool {
-		t.Helper()
-		resp, err := h.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-			Subject:          usrB,
-			Resource:         &iamv1.ResourceRef{Type: pcrRegType, Id: pcrX},
-			Action:           "registry.registries.get",
-			RequiredRelation: relation,
-		})
-		require.NoErrorf(t, err, "Check вошедшего (отношение %q) не ответил", relation)
-		return resp.GetAllowed()
-	}
-	viaModuleVerb := ask("v_get")
-	viaDefault := ask("viewer")
-	actionOnly := ask("")
-	require.True(t, viaModuleVerb, "контроль: явный v_get вошедшего истинен")
-	assert.Equal(t, viaDefault, actionOnly,
-		"kaname#994: вопрос вошедшего без отношения обязан отвечать как явный viewer (поведение прежнее)")
-	t.Logf("вошедший usr-B на X: v_get=%v viewer=%v без отношения=%v", viaModuleVerb, viaDefault, actionOnly)
-}

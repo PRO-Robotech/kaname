@@ -16,6 +16,9 @@ package access_binding_test
 // Мир — П6 (`public_container_read_world_integration_test.go`): человеку usr-B
 // выдана роль `pcr_reg_get` (только `registries:get`) на реестр X. Порядок в
 // каждой пробе: контроль фикстуры явным отношением → вопрос без отношения.
+//
+// Здесь же снята проба kaname#994 «вошедший без отношения отвечает как явный
+// viewer»: её предмет — ярус у вошедшего — снят этой задачей.
 
 import (
 	"context"
@@ -88,8 +91,9 @@ func TestActionOnlyCheck_ExplicitRelationKeepsItsAnswer(t *testing.T) {
 		"kaname#995: явное v_get при выданном get — прежний ответ")
 	assert.False(t, askCheck(t, h, ctx, usrB, "registry.registries.list", "v_list"),
 		"kaname#995: явное v_list без выдачи list — прежний ответ")
-	viewer := askCheck(t, h, ctx, usrB, "registry.registries.list", "viewer")
-	t.Logf("явный viewer человека usr-B на X: %v", viewer)
+	// Явный ярус спрашивает ярус, как прежде: до правки этот вопрос отвечал «да».
+	assert.True(t, askCheck(t, h, ctx, usrB, "registry.registries.list", "viewer"),
+		"kaname#995: явный viewer при выданном get — прежний ответ")
 }
 
 // TestActionOnlyCheck_ListGrantAnswersList — kaname#995, п. 2 предиката: выдача
