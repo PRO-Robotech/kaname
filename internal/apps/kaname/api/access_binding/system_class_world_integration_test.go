@@ -244,15 +244,27 @@ func moduleCtx() context.Context {
 }
 
 // check — `AuthorizeService.Check` через обработчик, действием `verb`
-// (`get` | `update`): отношение служба выводит из глагола, как в сценариях
-// приёмки («действием get»).
+// (`get` | `update`) и ярусом этого глагола, названным явно.
+//
+// Ярус назван явно, потому что выдача в этом мире материализуется на объекте
+// только ярусным кортежем: замер на `09ec0851e` — `current direct relations:
+// [viewer]`, и `v_get` ложен даже после проекции глаголов роли. Вопрос без
+// отношения берёт глагол типа (kaname#995), и ответить на него мир не может.
+// Вывод отношения из действия судят пробы мира П6 на настоящем решателе
+// (`action_only_check_module_verb_integration_test.go`); предмет этого мира —
+// классы субъектов, а не вывод отношения.
 func (w *scWorld) check(subject, verb, objID string) (*iamv1.AuthorizeCheckResponse, error) {
 	return w.authz.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  subject,
-		Resource: &iamv1.ResourceRef{Type: scModelType, Id: objID},
-		Action:   "vpc.networks." + verb,
+		Subject:          subject,
+		Resource:         &iamv1.ResourceRef{Type: scModelType, Id: objID},
+		Action:           "vpc.networks." + verb,
+		RequiredRelation: scTierOfVerb[verb],
 	})
 }
+
+// scTierOfVerb — ярус глагола, которым мир спрашивает: тот же, который вопрос
+// без отношения получал до kaname#995.
+var scTierOfVerb = map[string]string{"get": "viewer", "update": "editor"}
 
 func (w *scWorld) requireCheck(subject, verb, objID string, want bool, why string) {
 	w.t.Helper()

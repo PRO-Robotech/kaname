@@ -84,9 +84,10 @@ func TestCallerAuthority_Check_ForeignSubject_Denied(t *testing.T) {
 	auth := &authorityStub{allow: map[string]bool{}}
 	h := newHandlerWithAuthority(true, auth)
 	_, err := h.Check(userCtx("usr_alice"), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_victim"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_bob",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_victim"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	requireDenied(t, err)
 }
@@ -97,9 +98,10 @@ func TestCallerAuthority_Check_SelfQuery_Allowed(t *testing.T) {
 	auth := &authorityStub{allow: map[string]bool{}}
 	h := newHandlerWithAuthority(true, auth)
 	resp, err := h.Check(userCtx("usr_alice"), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_a"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_alice",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_a"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("self-query must pass the gate: %v", err)
@@ -123,9 +125,10 @@ func TestCallerAuthority_Check_ClusterAdmin_Allowed(t *testing.T) {
 	}}
 	h := newHandlerWithAuthority(true, auth)
 	_, err := h.Check(userCtx("usr_admin"), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_victim"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_bob",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_victim"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("cluster-admin must pass the gate: %v", err)
@@ -140,9 +143,10 @@ func TestCallerAuthority_Check_ResourceAdmin_Allowed(t *testing.T) {
 	}}
 	h := newHandlerWithAuthority(true, auth)
 	_, err := h.Check(userCtx("usr_alice"), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_a"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_bob",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_a"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("resource-admin must pass the gate: %v", err)
@@ -158,9 +162,10 @@ func TestCallerAuthority_Anonymous_PassesThrough(t *testing.T) {
 	auth := &authorityStub{allow: map[string]bool{}}
 	h := newHandlerWithAuthorityInsecure(true, auth)
 	resp, err := h.Check(context.Background(), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_bob",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("anonymous module PDP call must pass through: %v", err)
@@ -182,9 +187,10 @@ func TestCallerAuthority_Anonymous_ProdMode_NoCert_Denied(t *testing.T) {
 	auth := &authorityStub{allow: map[string]bool{}}
 	h := newHandlerWithAuthorityProd(true, auth)
 	_, err := h.Check(context.Background(), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_victim",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_victim",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	requireDenied(t, err)
 	if auth.calls != 0 {
@@ -212,9 +218,10 @@ func TestCallerAuthority_Anonymous_ProdMode_VerifiedModuleCert_Allowed(t *testin
 	auth := &authorityStub{allow: map[string]bool{}}
 	h := newHandlerWithAuthorityProd(true, auth)
 	resp, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_bob",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("verified module PDP peer must pass through in prod: %v", err)
@@ -262,8 +269,8 @@ func TestCallerAuthority_BatchCheck_OneForeign_DeniesBatch(t *testing.T) {
 	h := newHandlerWithAuthority(true, auth)
 	_, err := h.BatchCheck(userCtx("usr_alice"), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
-			{Subject: "user:usr_alice", Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_a"}, Action: "iam.accounts.get"},
-			{Subject: "user:usr_bob", Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_victim"}, Action: "iam.accounts.get"},
+			{Subject: "user:usr_alice", Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_a"}, Action: "iam.accounts.get", RequiredRelation: "viewer"},
+			{Subject: "user:usr_bob", Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_victim"}, Action: "iam.accounts.get", RequiredRelation: "viewer"},
 		},
 	})
 	requireDenied(t, err)
@@ -285,9 +292,10 @@ func TestCallerAuthority_BatchCheck_OneForeign_DeniesBatch(t *testing.T) {
 func TestCallerAuthority_StoreOutage_IsUnavailableNotDenied(t *testing.T) {
 	req := func() *iamv1.AuthorizeCheckRequest {
 		return &iamv1.AuthorizeCheckRequest{
-			Subject:  "user:usr_bob",
-			Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_x"},
-			Action:   "iam.accounts.get",
+			Subject:          "user:usr_bob",
+			Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_x"},
+			Action:           "iam.accounts.get",
+			RequiredRelation: "viewer",
 		}
 	}
 
@@ -332,9 +340,10 @@ func TestCallerAuthority_StoreOutageOnTheSuperGateAlone_IsUnavailable(t *testing
 	h := newHandlerWithAuthorityProd(true, auth)
 
 	_, err := h.Check(userCtx("usr_alice"), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "*"},
-		Action:   "iam.accounts.get",
+		Subject:          "user:usr_bob",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "*"},
+		Action:           "iam.accounts.get",
+		RequiredRelation: "viewer",
 	})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("want Unavailable, got %v", err)

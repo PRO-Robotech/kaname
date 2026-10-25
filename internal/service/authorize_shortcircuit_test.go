@@ -55,9 +55,10 @@ func TestAuthorize_Check_ClusterAdminShortCircuit(t *testing.T) {
 	})
 
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_root",
-		Resource: ResourceRef{Type: "compute_instance", ID: "inst_9"},
-		Action:   "compute.instances.delete",
+		Subject:          "user:usr_root",
+		Resource:         ResourceRef{Type: "compute_instance", ID: "inst_9"},
+		Action:           "compute.instances.delete",
+		RequiredRelation: "admin",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -88,9 +89,10 @@ func TestAuthorize_Check_NonClusterAdmin_NoShortCircuit(t *testing.T) {
 	})
 
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_other",
-		Resource: ResourceRef{Type: "compute_instance", ID: "inst_9"},
-		Action:   "compute.instances.delete",
+		Subject:          "user:usr_other",
+		Resource:         ResourceRef{Type: "compute_instance", ID: "inst_9"},
+		Action:           "compute.instances.delete",
+		RequiredRelation: "admin",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -143,9 +145,10 @@ func TestAuthorize_Check_Allow_NoClusterAdminRoundTrip(t *testing.T) {
 	})
 
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_x",
-		Resource: ResourceRef{Type: "compute_instance", ID: "inst_9"},
-		Action:   "compute.instances.delete",
+		Subject:          "user:usr_x",
+		Resource:         ResourceRef{Type: "compute_instance", ID: "inst_9"},
+		Action:           "compute.instances.delete",
+		RequiredRelation: "admin",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -176,9 +179,10 @@ func TestAuthorize_BatchCheck_ClusterAdmin_SingleShortCircuit(t *testing.T) {
 	reqs := make([]CheckRequest, 100)
 	for i := range reqs {
 		reqs[i] = CheckRequest{
-			Subject:  "user:usr_root",
-			Resource: ResourceRef{Type: "compute_instance", ID: "inst_x"},
-			Action:   "compute.instances.delete",
+			Subject:          "user:usr_root",
+			Resource:         ResourceRef{Type: "compute_instance", ID: "inst_x"},
+			Action:           "compute.instances.delete",
+			RequiredRelation: "admin",
 		}
 	}
 	results, err := svc.BatchCheck(context.Background(), reqs)
@@ -203,9 +207,10 @@ func TestAuthorize_Check_NilClusterChecker_NoShortCircuit(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
 
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_root",
-		Resource: ResourceRef{Type: "compute_instance", ID: "inst_9"},
-		Action:   "compute.instances.delete",
+		Subject:          "user:usr_root",
+		Resource:         ResourceRef{Type: "compute_instance", ID: "inst_9"},
+		Action:           "compute.instances.delete",
+		RequiredRelation: "admin",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)

@@ -108,9 +108,10 @@ type authnArgsOutcome struct {
 func authnArgsQuestion(t *testing.T, args map[string]any) *iamv1.AuthorizeCheckRequest {
 	t.Helper()
 	req := &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: &iamv1.ResourceRef{Type: "vpc_network", Id: "vpcn_x"},
-		Action:   "vpc.networks.update",
+		Subject:          "user:usr_alice",
+		Resource:         &iamv1.ResourceRef{Type: "vpc_network", Id: "vpcn_x"},
+		Action:           "vpc.networks.update",
+		RequiredRelation: "editor",
 	}
 	if args != nil {
 		st, err := structpb.NewStruct(args)
