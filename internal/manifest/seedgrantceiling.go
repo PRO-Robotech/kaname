@@ -50,7 +50,11 @@ package manifest
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -69,3 +73,57 @@ var seedGrantableRelations = []string{"system_viewer", "fga_writer"}
 // SeedGrantableRelations — перечень посева копией: вызывающий не расширит приём,
 // правя чужой срез.
 func SeedGrantableRelations() []string { return slices.Clone(seedGrantableRelations) }
+
+// validateSeedGrantCeiling — одна выдача посева против закрытого перечня.
+//
+// canonRefused — канон модели прав уже отверг выдачу отношением (отношение не
+// объявлено, вычисляемое, получатель не того вида). Тогда перечень не
+// спрашивается: выдача уже отвергнута, и второй отказ за одну ошибку отправил
+// бы автора чинить не то. Без внесённого канона судит только перечень — и он
+// отвергает имя вне себя сам, ничего не зная о модели.
+//
+// Роль, которой манифест при объявленном разделе `roles` не объявляет, здесь не
+// судится по той же причине: её уже отверг отказ связности «роль не объявлена».
+func validateSeedGrantCeiling(m *Manifest, doc *yaml.Node, i int, b AccessBinding, roles roleIDs, canonRefused bool) []error {
+	if relation := strings.TrimSpace(b.GrantedRelation); relation != "" {
+		if canonRefused || slices.Contains(seedGrantableRelations, relation) {
+			return nil
+		}
+		return []error{linkFault{
+			kind:  ErrSeedGrantBeyondTier,
+			coord: locate(doc, "seed", "accessBindings", i, "grantedRelation"),
+			detail: fmt.Sprintf(
+				"seed.accessBindings[%d].grantedRelation: отношение %q посев модуля не выдаёт — оно выходит "+
+					"за ярус модуля; посеву даны: %s", i, relation, strings.Join(seedGrantableRelations, ", ")),
+		}}
+	}
+
+	roleID := strings.TrimSpace(b.RoleID)
+	if roleID == "" || (roles.declared && !roles.has(roleID)) {
+		return nil
+	}
+	if owner, _, ok := strings.Cut(roleID, "."); !ok || owner != m.Module {
+		return []error{linkFault{
+			kind:  ErrSeedGrantForeignModule,
+			coord: locate(doc, "seed", "accessBindings", i, "roleId"),
+			detail: fmt.Sprintf(
+				"seed.accessBindings[%d].roleId: роль %q не принадлежит модулю %q манифеста — посев выдаёт "+
+					"только роли своего модуля, названные идентификатором `<модуль>.<имя>`; идентификатор "+
+					"строки хранилища модуля-владельца не несёт", i, roleID, m.Module),
+		}}
+	}
+	for _, r := range m.Roles {
+		if r.ID != roleID || r.Tier == nil || r.Tier.TierType == seedGrantAnchorScopeType {
+			continue
+		}
+		return []error{linkFault{
+			kind:  ErrSeedGrantBeyondTier,
+			coord: locate(doc, "seed", "accessBindings", i, "roleId"),
+			detail: fmt.Sprintf(
+				"seed.accessBindings[%d].roleId: роль %q определена на ярусе %q, а выдача посева стоит на "+
+					"якоре %q — она действовала бы на всю установку правом, объявленным для одного объекта "+
+					"яруса ниже", i, roleID, r.Tier.TierType, seedGrantAnchorScopeType),
+		}}
+	}
+	return nil
+}
