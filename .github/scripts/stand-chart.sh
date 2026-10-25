@@ -932,6 +932,46 @@ self_test() {
 	fi
 	RESOLVER_POLL="$saved_poll"
 
+	# ── СБОРКА ОБРАЗА: ОТКАЗ НЕСЁТ ТЕКСТ docker (kaname#999) ────────────────
+	#
+	# Настоящий `build_image` против подставных docker и kind: docker отвечает
+	# так, как отвечает на сломанный Dockerfile, — текстом отказа в поток ошибок
+	# и ненулевым кодом. Отказ без этого текста нельзя процитировать и отнести к
+	# классу: поломка дерева неотличима от сбоя среды. Близнец — исправный
+	# docker: образ собран, журнал сборки в выводе не печатается. Различие двух
+	# миров — один исход подставного docker.
+	local bfake bout brc
+	bfake="$(mktemp -d)"
+	mkdir -p "$bfake/bin" "$bfake/work"
+	printf '#!/bin/sh\necho "#1 [internal] load build definition from Dockerfile"\necho "ERROR: failed to build: failed to solve: dockerfile parse error on line 2: unknown instruction: BROKENINSTRUCTION" >&2\nexit 1\n' \
+		> "$bfake/bin/docker"
+	printf '#!/bin/sh\nexit 0\n' > "$bfake/bin/kind"
+	chmod +x "$bfake/bin/docker" "$bfake/bin/kind"
+	brc=0
+	bout="$( (PATH="$bfake/bin:$PATH"; WORK="$bfake/work"; KANAME_STAND_SKIP_BUILD=0; build_image) 2>&1 )" || brc=$?
+	probe "сборка образа отказала — код прежний ($RC_UNMET)"
+	[ "$brc" -eq "$RC_UNMET" ] || { fail "самопроба: отказ сборки образа вернул код $brc вместо $RC_UNMET"; rc=1; }
+	probe "сборка образа отказала — текст отказа docker в выводе стенда"
+	case "$bout" in
+		*"unknown instruction: BROKENINSTRUCTION"*) ;;
+		*) fail "самопроба: отказ сборки образа без текста docker — вывод стенда: «$bout»"; rc=1 ;;
+	esac
+	printf '#!/bin/sh\necho "#1 [internal] load build definition from Dockerfile"\necho "#9 naming to docker.io/library/kaname:stand done"\nexit 0\n' \
+		> "$bfake/bin/docker"
+	brc=0
+	bout="$( (PATH="$bfake/bin:$PATH"; WORK="$bfake/work"; KANAME_STAND_SKIP_BUILD=0; build_image) 2>&1 )" || brc=$?
+	probe "сборка образа прошла — образ собран, журнала сборки в выводе нет"
+	if [ "$brc" -ne 0 ]; then
+		fail "самопроба: исправная сборка образа вернула код $brc — вывод: «$bout»"; rc=1
+	else
+		case "$bout" in
+			*"load build definition"*|*"naming to"*) fail "самопроба: исправная сборка печатает журнал сборки — вывод: «$bout»"; rc=1 ;;
+			*"собран"*) ;;
+			*) fail "самопроба: исправная сборка не сказала, что образ собран — вывод: «$bout»"; rc=1 ;;
+		esac
+	fi
+	rm -rf "$bfake"
+
 	# Оба числа ВЫВЕДЕНЫ: утверждений — из объявлений `probe`, осей — из того
 	# перечня, который судит `assert`. Выписанные, они расходились бы с
 	# исполненным молча — здесь так и стояло «22», пережив смену состава.
