@@ -168,18 +168,6 @@ func newGDWorld(t *testing.T) *gdWorld {
 	w.prjA2 = seedProjectInAccount(t, ctx, pool, w.accA, "prj-gd-a2")
 	w.prjC = seedProjectInAccount(t, ctx, pool, w.accB, "prj-gd-c")
 
-	// Владельцы аккаунтов держат `admin` на своём аккаунте — как после
-	// `AccountService.Create`, где владельцу заводится авто-выдача. Посев мира
-	// кладёт аккаунт строкой, мимо глагола, и без этого факта у владельца не было
-	// бы ни `v_delete` на объекте выдачи (дверь, Р1а), ни `editor` на аккаунте
-	// (дверь глаголов проекта, группы, роли, учётки — близнецы GD-25).
-	for _, own := range []struct {
-		user domain.UserID
-		acc  domain.AccountID
-	}{{w.usrA, w.accA}, {w.usrC, w.accB}, {w.usrS, w.accS}} {
-		gdSeedTuple(t, ctx, pool, "user:"+string(own.user), "admin", "account:"+string(own.acc))
-	}
-
 	// Роли модуля registry — новая редакция манифеста registry, доставленная
 	// путём старта (Р10 мира П6: загрузка → каталог → роли).
 	w.deliverDoc(gdFixture, "мир Д: доставка редакции registry с ролями делегирования")
@@ -199,6 +187,27 @@ func newGDWorld(t *testing.T) *gdWorld {
 
 	w.buildHandlers()
 
+	// Авто-выдача владельца: роль `owner` на своём аккаунте, цель — вся область,
+	// — как её заводит `AccountService.Create` (`domain.OwnerRoleID`). Посев мира
+	// кладёт аккаунт строкой, мимо глагола, и без неё у владельца нет ни
+	// пообъектных прав на проекты (дверь глаголов проекта — близнецы GD-25), ни
+	// `v_delete` на объекте выдачи (вопрос двери, переезжающий в обработчик, Р1а).
+	// Первый прогон мира Д стоял на прямом факте `admin` на аккаунте и показал,
+	// что пообъектных прав он не даёт: «дверь не пропустила владельца» на правке
+	// проекта и контроль `v_delete` usr-A за 30 с не дошёл до true.
+	for _, own := range []struct {
+		user domain.UserID
+		acc  domain.AccountID
+	}{{w.usrA, w.accA}, {w.usrC, w.accB}, {w.usrS, w.accS}} {
+		w.createDoneX(asUser(ctx, own.user), &iamv1.CreateAccessBindingRequest{
+			Subjects:  []*iamv1.Subject{userSubject(own.user)},
+			RoleId:    domain.OwnerRoleID,
+			ScopeType: "iam.account",
+			ScopeId:   string(own.acc),
+			Target:    allInScopeTarget(),
+		}, "мир Д: авто-выдача владельца "+string(own.user))
+	}
+
 	// Администратор аккаунта usr-E: выдача канонической `admin` на acc-A от
 	// владельца, цель — вся область.
 	w.grantE = w.createDoneX(asUser(ctx, w.usrA), &iamv1.CreateAccessBindingRequest{
@@ -213,6 +222,12 @@ func newGDWorld(t *testing.T) *gdWorld {
 	// usr-E проходит Путь 2 (`admin` на области acc-A).
 	w.pollRelation("user:"+string(w.usrE), "admin", "account:"+string(w.accA), true,
 		"контроль мира Д: usr-E держит admin на acc-A (Путь 2)")
+	// Владелец: пообъектные права авто-выдачи материализованы — правка проекта
+	// и удаление объекта выдачи.
+	w.pollRelation("user:"+string(w.usrA), "v_update", "project:"+string(w.prjA2), true,
+		"контроль мира Д: usr-A держит v_update на prj-A2 (авто-выдача владельца)")
+	w.pollRelation("user:"+string(w.usrA), "v_delete", "iam_access_binding:"+w.grantE, true,
+		"контроль мира Д: usr-A держит v_delete на объекте выдачи (авто-выдача владельца)")
 	// Членство: usr-M — ACTIVE, usr-P — PENDING, usr-C — строки нет.
 	w.requireMembership(w.usrM, w.accA, domain.MembershipStateActive)
 	w.requireMembership(w.usrP, w.accA, domain.MembershipStatePending)

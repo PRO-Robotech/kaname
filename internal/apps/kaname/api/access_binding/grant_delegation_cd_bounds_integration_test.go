@@ -183,7 +183,7 @@ func gd25Rows() []gd25Row {
 			})
 		}},
 		{"f RoleService.Create", func(w *gdWorld, ctx context.Context) (*operationpb.Operation, bool, error) {
-			req := &iamv1.CreateRoleRequest{AccountId: string(w.accA), Name: "gd25-role", Description: "GD-25",
+			req := &iamv1.CreateRoleRequest{AccountId: string(w.accA), Name: "gd25_role", Description: "GD-25",
 				Rules: []*iamv1.Rule{{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}}}}
 			return w.viaDoor(ctx, svc+"RoleService/Create", req, func(ctx context.Context) (*operationpb.Operation, error) {
 				return w.roles.Create(ctx, req)
