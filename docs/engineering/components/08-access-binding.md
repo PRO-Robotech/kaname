@@ -54,8 +54,10 @@ Grant-идентичность AccessBinding (5-tuple subject↔role↔resource)
 **DB table:** `kaname.access_bindings` (`CREATE TABLE kaname.access_bindings` в `0001_initial.sql`).
 
 **UNIQUE constraint:** partial UNIQUE `access_bindings_active_grant_uniq ON
-(subject_type, subject_id, role_id, resource_type, resource_id) WHERE
-revoked_at IS NULL` — основа strict-create (дубль активного гранта → 23505).
+(subject_id, subject_type, role_id, resource_type, resource_id, target_digest) WHERE
+revoked_at IS NULL AND narrowed_at IS NULL` — основа strict-create (дубль активного
+гранта → 23505). Выдача, цель которой сузило снятие регистрации объекта, слот не
+занимает (kaname#963, миграция `20261024050000`).
 
 **ResourceType whitelist** (см. `internal/domain/types.go`):
 
@@ -289,8 +291,10 @@ go test -short -count=1 -timeout 120s \
   revoked_at, revoked_by, deletion_protection, labels, created_at)`.
 - **Indexes:** PK; partial UNIQUE `access_bindings_active_grant_uniq` ON 6-tuple
   `(subject_id, subject_type, role_id, resource_type, resource_id, target_digest)`
-  `WHERE revoked_at IS NULL` (миграция `0055_access_binding_target.sql` — шестым членом
-  добавлен `target_digest`); INDEX по subject; INDEX по resource.
+  `WHERE revoked_at IS NULL AND narrowed_at IS NULL` (миграция `0055_access_binding_target.sql` —
+  шестым членом добавлен `target_digest`; `20261024050000` — условие сужения); GIN
+  `access_bindings_target_resources_live_idx` по `target -> 'resources'` действующих выдач
+  (поиск выдач по ключу снятого объекта); INDEX по subject; INDEX по resource.
 - **CHECK:** `access_bindings_status_ck` (`PENDING`/`ACTIVE`/`REVOKED`);
   `access_bindings_resource_ck` — **регулярное выражение** `^[a-z][a-z0-9_]*$` либо `*`,
   не перечень допустимых типов; `access_bindings_subject_ck`;
@@ -323,6 +327,21 @@ go test -short -count=1 -timeout 120s \
   скоупится `WHERE revoked_at IS NULL`, поэтому после Delete (status=REVOKED,
   `revoked_at` set) повторный Create той же 5-tuple проходит и дает НОВЫЙ id.
   Активный дубль (`revoked_at IS NULL`) → 23505 → `ErrAlreadyExists`.
+- **Снятие регистрации объекта снимает его выдачи** (kaname#963, приёмка
+  `unregistration-revokes-its-grants.md`). `InternalIAMService.UnregisterResource`,
+  удаливший строку регистрации, в той же транзакции отзывает выдачи, цель которых —
+  только этот объект (`revocation_reason = RESOURCE_UNREGISTERED`, защита от удаления не
+  мешает), сужает выдачи с несколькими объектами цели и убирает ключ из `resourceNames`
+  правил ролей. Правило над несколькими типами с общим перечнем имён расщепляется:
+  имя снимается только для типа снятого объекта, тот же id другого типа остаётся
+  названным. Причину отзыва пишут и глагол `Revoke` (`REVOKE`), и проход срока
+  (`EXPIRED`); у строк, отозванных до миграции `20261024050000`, причина пуста.
+  Порядок замков: снятие запирает выдачи по ключу `FOR UPDATE`, проход материализации
+  после создания читает выдачу `FOR KEY SHARE` — одно ждёт другого, и член, реестр
+  выпущенного и факт не пишутся для уже отозванной выдачи. Так же — для имени в правиле
+  роли: снятие запирает роли, называющие ключ, `FOR UPDATE`, проходы материализации
+  читают роль `FOR KEY SHARE`. С `FOR NO KEY UPDATE` полного прохода и правки роли эти
+  чтения не конфликтуют.
 - **Выдача действует с фиксации.** До стадии S6 здесь было окно между `COMMIT` и
   вывозом строки журнала во внешний движок, в котором проверка отвечала
   `allowed=false`. Окна нет: прямой факт складывается той же транзакцией, а

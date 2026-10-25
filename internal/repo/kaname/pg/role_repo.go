@@ -550,6 +550,9 @@ type roleWriter struct {
 // the roles_definition_tier_xor CHECK and the roles_acc/prj_custom_unique partial indexes,
 // and by the account_id/project_id FK (an ” would dangle).
 func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, error) {
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
+	}
 	permsJSON, err := json.Marshal(stringSlice(r.Permissions))
 	if err != nil {
 		return domain.Role{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument permissions: %s", err.Error())
@@ -697,6 +700,9 @@ func (w *roleWriter) UpsertSystemRole(ctx context.Context, r domain.Role) (domai
 // Update — UPDATE на mutable полях. Custom-role: name (с UNIQUE check),
 // description, permissions. System-role caller отвергает на use-case-уровне.
 func (w *roleWriter) Update(ctx context.Context, r domain.Role, updateMask []string) (domain.Role, error) {
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
+	}
 	args, changed, err := roleUpdateArgs(r, updateMask)
 	if err != nil {
 		return domain.Role{}, err
@@ -728,6 +734,9 @@ func (w *roleWriter) Update(ctx context.Context, r domain.Role, updateMask []str
 func (w *roleWriter) UpdateCAS(ctx context.Context, r domain.Role, updateMask []string, expectedVersion string) (domain.Role, error) {
 	if expectedVersion == "" {
 		return w.Update(ctx, r, updateMask)
+	}
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
 	}
 	args, _, err := roleUpdateArgs(r, updateMask)
 	if err != nil {

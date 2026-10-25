@@ -115,6 +115,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_granted_relation_shape_ck",
 			"access_bindings_relation_form_anchor_ck",
 			"access_bindings_relation_form_is_system_ck",
+			// Причину отзыва ставит служба из своего закрытого словаря (kaname#963).
+			"access_bindings_revocation_reason_ck",
 			"access_bindings_revoked_by_check",
 			"access_bindings_revoked_consistency_ck",
 			"access_bindings_scope_ck",

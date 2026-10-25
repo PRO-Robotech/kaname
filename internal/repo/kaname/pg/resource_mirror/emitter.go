@@ -523,18 +523,20 @@ func splitObjectRef(ref string) (typ, id string, ok bool) {
 // нечем, а строка зеркала продолжала бы участвовать в подборе по признакам.
 // Отказ на снятии дороже отказа на приёме и в очереди потребителя: невыполнимое
 // снятие означает право, которое не отзывается.
-func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombstone time.Time) error {
+func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombstone time.Time) (bool, error) {
 	if tx == nil {
-		return fmt.Errorf("resource_mirror: tx must not be nil")
+		return false, fmt.Errorf("resource_mirror: tx must not be nil")
 	}
-	if _, err := tx.Exec(ctx,
+	tag, err := tx.Exec(ctx,
 		`DELETE FROM kaname.resource_mirror
 		  WHERE object_type = $1 AND object_id = $2
 		    AND source_version <= $3`,
 		objectType, objectID, versionOr(tombstone),
-	); err != nil {
-		return fmt.Errorf("resource_mirror: delete: %w", err)
+	)
+	if err != nil {
+		return false, fmt.Errorf("resource_mirror: delete: %w", err)
 	}
+	deleted := tag.RowsAffected() > 0
 	// Цепь предков — вторая половина той же регистрации. Перевод словаря берётся
 	// ЕДИНСТВЕННЫЙ и тот же, которым цепь писалась (`modelTypeName` в
 	// `upsertParentEdges`): назови её здесь словарём каталога — снятие не совпало
@@ -546,7 +548,7 @@ func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombs
 	// мягкое, строка каталога остаётся, и имя по ней резолвится по-прежнему.
 	modelType, err := modelTypeName(ctx, tx, objectType)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM kaname.resource_parent_edge
@@ -554,7 +556,7 @@ func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombs
 		    AND source_version <= $3`,
 		modelType, objectID, versionOr(tombstone),
 	); err != nil {
-		return fmt.Errorf("resource_parent_edge: delete: %w", err)
+		return false, fmt.Errorf("resource_parent_edge: delete: %w", err)
 	}
-	return nil
+	return deleted, nil
 }

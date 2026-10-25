@@ -114,7 +114,7 @@ type reconcileStore struct {
 // GetForNoKeyUpdate: он не конфликтует с `FOR KEY SHARE` дочерних вставок, поэтому
 // аддитивный форвард пути создания больше не стоит в очереди за фоновым проходом.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, rowLockNoKeyUpdate)
+	return s.loadBinding(ctx, bindingID, lockNoKeyUpdate)
 }
 
 // LoadBindingForForward — те же факты выдачи, что LoadBinding, под замком строки
@@ -127,7 +127,10 @@ func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.Acces
 // верным до коммита: снятие берёт строку `FOR UPDATE`
 // (LockBindingForDeactivation), а это единственный режим, конфликтующий с
 // `FOR KEY SHARE`. Поэтому снятие ждёт коммита форварда и видит его членов, а
-// форвард, пришедший после снятия, дождётся его коммита и прочитает REVOKED.
+// форвард, пришедший после снятия, дождётся его коммита и прочитает REVOKED. Тем же
+// режимом `FOR UPDATE` выдачи запирает отзыв по снятию регистрации объекта
+// (`UnregisteredKeyStore.ActiveBindingsNamingKey`, kaname#963, F1): член, реестр
+// выпущенного и факт не пишутся для выдачи, отзыв которой уже прочитал реестр.
 //
 // ПОЧЕМУ ИМЕННО `FOR KEY SHARE`. Полный проход держит строку `FOR NO KEY UPDATE`
 // (GetForNoKeyUpdate), и с `FOR KEY SHARE` этот режим совместим — форвард пути
@@ -136,7 +139,7 @@ func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.Acces
 // дочерние вставки форварда и так брали на этой строке проверкой внешнего ключа;
 // новым здесь стал только МОМЕНТ — до решения, а не после него.
 func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, rowLockKeyShare)
+	return s.loadBinding(ctx, bindingID, lockKeyShare)
 }
 
 // LoadBindingsForForward — те же факты BindingScope, что LoadBindingForForward, для
@@ -155,11 +158,13 @@ func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID do
 //
 // ЗАМОК. Строки выдач берутся `FOR KEY SHARE` одним оператором в порядке `id` — тот
 // же режим и то же основание, что у одиночного LoadBindingForForward (kaname#919):
-// снятие выдачи (истечение срока, LockBindingForDeactivation) не может прочитать
-// набор членов, пока форвард, решивший «выдача жива», не зафиксировал своих. С полным
-// проходом (`FOR NO KEY UPDATE`) режим совместим, advisory-замка путь не берёт (см.
-// reconcile/forward.go «LOCK CHOICE»). Порядок `id` — общий для всех выдач веера, и
-// подмножества одного порядка инверсии не дают. Проекция BindingScope собирается тем
+// снятие выдачи (истечение срока, LockBindingForDeactivation; отзыв по снятию
+// регистрации, kaname#963, F1) не может прочитать набор членов и реестр, пока
+// форвард, решивший «выдача жива», не зафиксировал своих. С полным проходом
+// (`FOR NO KEY UPDATE`) режим совместим, advisory-замка путь не берёт (см.
+// reconcile/forward.go «LOCK CHOICE»). Порядок `id` — общий для всех выдач веера и
+// тот же, что у отзыва по снятию регистрации: подмножества одного порядка инверсии
+// не дают, кольца ожидания нет. Проекция BindingScope собирается тем
 // же bindingScopeFrom, что и у поштучного чтения, поэтому пакетный и одиночный пути
 // выводят ПОБАЙТОВО те же факты.
 // Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
@@ -179,7 +184,7 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 		raw = append(raw, string(id))
 	}
 	rows, err := s.tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC FOR KEY SHARE`, abCols), raw)
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC %s`, abCols, lockKeyShare), raw)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
@@ -238,33 +243,24 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 	return out, nil
 }
 
-// bindingRowLock — режим замка строки выдачи, под которым читаются её факты.
-type bindingRowLock int
-
-const (
-	// rowLockNoKeyUpdate — полный проход: взаимное исключение проходов одной выдачи.
-	rowLockNoKeyUpdate bindingRowLock = iota
-	// rowLockKeyShare — аддитивный форвард: «выдача жива» верно до коммита.
-	rowLockKeyShare
-)
-
-// loadBinding — общий читатель LoadBinding (rowLockNoKeyUpdate) и
-// LoadBindingForForward (rowLockKeyShare). Проекция BindingScope ОДИНАКОВА в обоих
-// режимах — различается лишь замок строки, — поэтому полный проход и форвард
-// выводят одни и те же факты области, селекторов и субъектов.
-func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock bindingRowLock) (reconcile.BindingScope, bool, error) {
+// loadBinding — общий читатель LoadBinding (lockNoKeyUpdate) и
+// LoadBindingForForward (lockKeyShare); режим — закрытый набор rowLock
+// (access_binding_repo.go). Проекция BindingScope ОДИНАКОВА в обоих режимах —
+// различается лишь замок строки, — поэтому полный проход и форвард выводят одни и
+// те же факты области, селекторов и субъектов.
+func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock rowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
 	var (
 		b   domain.AccessBinding
 		err error
 	)
 	switch lock {
-	case rowLockNoKeyUpdate:
+	case lockNoKeyUpdate:
 		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
-	case rowLockKeyShare:
+	case lockKeyShare:
 		b, err = r.GetForKeyShare(ctx, bindingID)
 	default:
-		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %d", lock)
+		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %q", lock)
 	}
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
@@ -334,6 +330,17 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 // `roleCols` состояния не несёт НАМЕРЕННО: тот же перечень читают пути ответа
 // операции, а ответ операции жизненного состояния не вычисляет (§2.6 приёмки).
 // Поэтому живость дочитывается ОТДЕЛЬНОЙ колонкой здесь, а не добавляется туда.
+//
+// ЗАМОК. Строки ролей читаются под `FOR KEY SHARE` в порядке id до конца транзакции
+// прохода (kaname#963, F4). Имя объекта в `resourceNames` правила — второй путь, по
+// которому выдача получает ключ (первый — цель, его держит замок строки выдачи).
+// Снятие регистрации вычёркивает имя под `FOR UPDATE` строки роли
+// (`RolesNamingKeySQL`) — единственным режимом, с которым `FOR KEY SHARE` конфликтует.
+// Поэтому одно ждёт другого: либо снятие ждёт фиксации прохода, и его пост-фиксационный
+// проход по объекту снимает записанное; либо проход ждёт фиксации снятия и читает роль
+// уже без имени (запирающее чтение отдаёт последнюю зафиксированную версию строки).
+// С `FOR NO KEY UPDATE` правки роли и с `FOR KEY SHARE` вставок членов режим не
+// конфликтует, так что проходы по-прежнему не встают в очередь за правкой роли.
 func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 	map[domain.RoleID]domain.Role, error,
 ) {
@@ -342,7 +349,7 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 		return out, nil
 	}
 	rows, err := tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1)`, roleCols), ids)
+		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lockKeyShare), ids)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load roles: %w", err)
 	}
@@ -1488,7 +1495,7 @@ func (s *reconcileStore) EmitAuditEvent(ctx context.Context, ev access_binding.A
 func (s *reconcileStore) RevokeExpiredBinding(ctx context.Context, bindingID domain.AccessBindingID) (bool, error) {
 	tag, err := s.tx.Exec(ctx,
 		`UPDATE kaname.access_bindings
-		    SET status = 'REVOKED', revoked_at = now()
+		    SET status = 'REVOKED', revoked_at = now(), revocation_reason = 'EXPIRED'
 		  WHERE id = $1 AND status = 'ACTIVE'`,
 		string(bindingID),
 	)

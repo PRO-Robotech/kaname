@@ -157,6 +157,9 @@ func newP2(t *testing.T) *p2 {
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
+		// каталожным источником, что у сверки мира.
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), src),
 	).WithObjectReconciler(w.rec, nil)
 
 	w.box(pmB1)

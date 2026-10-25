@@ -85,7 +85,10 @@ type ResourceMirrorRow struct {
 // Reporting both costs nothing: the statements already evaluate the conditions.
 type ResourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
-	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) error
+	// DeleteTx снимает строку зеркала, если надгробие не старше хранимой
+	// регистрации. deleted — строка была и снята: только такое снятие есть снятие
+	// регистрации объекта (kaname#963, Д1), и только оно отзывает его выдачи.
+	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) (deleted bool, err error)
 }
 
 // PublicReadPublisher — применяет намерение владельца о публикации объекта для
