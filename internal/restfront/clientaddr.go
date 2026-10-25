@@ -3,6 +3,8 @@
 
 package restfront
 
+import "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+
 // clientaddr.go — адрес клиента публичного фронта, донесённый до собственного
 // слушателя (kaname#991).
 //
@@ -31,3 +33,6 @@ package restfront
 // MetadataClientAddr — ключ метаданных, которым публичный фронт сообщает
 // собственному слушателю адрес своего клиента (без порта).
 const MetadataClientAddr = "x-kaname-front-client-addr"
+
+// newPublicMux — мультиплексор публичного фронта.
+func newPublicMux() *runtime.ServeMux { return newMux() }
