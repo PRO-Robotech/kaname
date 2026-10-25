@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -50,7 +51,7 @@ func (p *pcrWorld) anonSelfCheckHandler() *authorizeapp.Handler {
 		ClusterAdminChecker: p.door,
 		Catalog:             catalog.Fixed{F: p.facts},
 	})
-	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
+	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(p.t))
 }
 
 // anonSelf — анонимная самопроверка: только ресурс и действие, контекст без

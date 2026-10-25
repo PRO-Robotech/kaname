@@ -40,7 +40,7 @@ func anonymousPublicChain(t *testing.T, reader *presentedcred.Reader) grpc.Unary
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented)
+	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented).WithModuleRoster(testModuleRoster())
 	door, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{SelfCheck: anonymousDoor{}})
 	if err != nil {
 		t.Fatal(err)

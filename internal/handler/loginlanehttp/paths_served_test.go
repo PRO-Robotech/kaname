@@ -33,6 +33,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 )
 
 // probeMethod — метод, которого не принимает ни один глагол полосы: запрос им
@@ -149,6 +151,7 @@ func laneMux(t *testing.T) *http.ServeMux {
 	h, err := New(Config{
 		SessionTTL:  time.Hour,
 		TrustDomain: grpcsrv.NewTrustDomain("kacho.cloud"),
+		Modules:     moduleroster.Roster(t),
 		Logger:      slog.New(slog.DiscardHandler),
 	}, unusedLane{})
 	if err != nil {
