@@ -108,9 +108,8 @@ func newSCWorld(t *testing.T) *scWorld {
 	ab := accessbindingapp.NewHandler(create, del, get, nil, listBySubject, nil, nil).
 		WithExpandAccess(accessbindingapp.NewExpandAccessUseCase(door).WithGrantAuthority(repo, door, nil))
 
-	// Каталог — тот же, что у выдачи и сверки мира: вопрос без отношения
-	// (`check` ниже) берёт глагол типа из каталога модуля (kaname#995), как в
-	// корне службы.
+	// Каталог — тот же, что у выдачи и сверки мира, как в корне службы: вопрос
+	// действием (`check` ниже) берёт глагол типа из каталога модуля (kaname#995).
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           door,
 		ClusterAdminChecker: door,
@@ -136,6 +135,13 @@ func newSCWorld(t *testing.T) *scWorld {
 	w.rolRead = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_read", readRules)
 	w.rolRead2 = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_read2", readRules)
 	w.rolEdit = seedRulesRoleWithSelectors(t, ctx, repo, w.accA, "sc_edit",
+		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list", "update"}}})
+	// Проекция глаголов ролей — третья сторона правила, как у `RoleService.Create`:
+	// без неё ветвь выдач решения роли не видит, и вопрос действием (глагол типа,
+	// kaname#995) не получил бы ответа, который продукт даёт.
+	projectRoleVerbs(t, ctx, repo, w.rolRead, readRules)
+	projectRoleVerbs(t, ctx, repo, w.rolRead2, readRules)
+	projectRoleVerbs(t, ctx, repo, w.rolEdit,
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list", "update"}}})
 
 	verifyAddresses(t, ctx, pool)
@@ -287,3 +293,18 @@ func (w *scWorld) pollCheck(subject, verb, objID string, want bool, why string) 
 
 // fmtSubject — субъект в форме вопроса к модели.
 func fmtSubject(kind, id string) string { return fmt.Sprintf("%s:%s", kind, id) }
+
+// projectRoleVerbs — проекция глаголов роли из каталожного факта мира
+// (`ReplaceRoleVerbs`), как третья сторона правила у `RoleService.Create`.
+func projectRoleVerbs(t *testing.T, ctx context.Context, repo *kanamepg.Repository, rid domain.RoleID, rules domain.Rules) {
+	t.Helper()
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	facts := catalogfixture.Facts()
+	sels := facts.GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
+	pairs := facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
+	require.NotEmptyf(t, pairs, "проекция глаголов роли %s пуста — каталог не знает её типов", rid)
+	require.NoErrorf(t, w.RolesW().ReplaceRoleVerbs(ctx, rid, pairs), "проекция глаголов роли %s", rid)
+	require.NoError(t, w.Commit(ctx))
+}
