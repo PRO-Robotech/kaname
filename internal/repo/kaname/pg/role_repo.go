@@ -1253,25 +1253,32 @@ func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.Rol
 // RulesForRegrain читает правила роли под замком строки (FOR SHARE) — в той
 // транзакции, где затем идёт RegrainSelectorVerbs (довод — у него). `live=false`
 // — роль снята либо её нет: строк селекторов у неё нет, пересчитывать нечего.
-func (w *roleWriter) RulesForRegrain(ctx context.Context, roleID domain.RoleID) (domain.Rules, bool, error) {
+//
+// Политика роли читается ТЕМ ЖЕ оператором и под тем же замком: от владельца
+// роли зависит, влечёт ли правка удаление (kaname#1006), и пересчёт по правилам
+// без владельца дал бы роли модуля удаление, которого её манифест не объявлял.
+func (w *roleWriter) RulesForRegrain(ctx context.Context, roleID domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
 	var (
-		raw  []byte
-		live bool
+		raw         []byte
+		isSystem    bool
+		ownerModule sql.NullString
+		live        bool
 	)
 	err := w.tx.QueryRow(ctx,
-		`SELECT CASE WHEN jsonb_typeof(rules) = 'array' THEN rules ELSE '[]'::jsonb END, live
-		   FROM kaname.roles WHERE id = $1 FOR SHARE`, string(roleID)).Scan(&raw, &live)
+		`SELECT CASE WHEN jsonb_typeof(rules) = 'array' THEN rules ELSE '[]'::jsonb END,
+		        is_system, owner_module, live
+		   FROM kaname.roles WHERE id = $1 FOR SHARE`, string(roleID)).Scan(&raw, &isSystem, &ownerModule, &live)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
+		return nil, domain.RulePolicy{}, false, nil
 	}
 	if err != nil {
-		return nil, false, mapErr(err, "", string(roleID))
+		return nil, domain.RulePolicy{}, false, mapErr(err, "", string(roleID))
 	}
 	rules, derr := domain.DecodeRules(raw)
 	if derr != nil {
-		return nil, false, fmt.Errorf("правила роли %s не разбираются: %w", roleID, derr)
+		return nil, domain.RulePolicy{}, false, fmt.Errorf("правила роли %s не разбираются: %w", roleID, derr)
 	}
-	return rules, live, nil
+	return rules, domain.PolicyOfRole(isSystem, ownerModule.String), live, nil
 }
 
 // dequeueSelectorVerbs — роль снимается из очереди пересчёта глаголов правил.

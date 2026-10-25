@@ -102,7 +102,7 @@ func TestIAMCT2_14_AppliedTypeReachesTheProjection(t *testing.T) {
 		Verbs:       []string{"*"},
 	}}
 
-	pairs := f.RoleVerbsFromSelectors(sel)
+	pairs := f.RoleVerbsFromSelectors(sel, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		t.Fatalf("проекция по заведённому типу %q пуста: пар 0.\n"+
 			"Строки каталога записаны, членство модуля отвечает «да», роль создалась бы без "+

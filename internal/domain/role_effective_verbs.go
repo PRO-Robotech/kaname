@@ -174,9 +174,16 @@ func (r Role) AuthoredVerbs(lookup TypeVerbLookup) []string {
 	return orderVerbs(set)
 }
 
-// isEditorTier reports whether the role is editor-tier: it grants `update` but not
-// `delete` and did not use the `*` wildcard (an admin/owner already carries delete).
+// isEditorTier — роль-редактор: правку даёт, удаления и подстановки `*` не
+// называет (администратор удаление уже несёт), и правка у неё ВЛЕЧЁТ удаление.
+//
+// Последнее условие — то же, что у материализации (`RulePolicy.UpdateImpliesDelete`,
+// kaname#1006): роль модуля удаление к правке не получает, и превью, обещавшее
+// ей `delete*`, разошлось бы с выданным.
 func (r Role) isEditorTier(lookup TypeVerbLookup) bool {
+	if !PolicyOfRole(r.IsSystem, r.OwnerModule).UpdateImpliesDelete() {
+		return false
+	}
 	set, wildcard := r.expandedVerbSet(lookup)
 	return !wildcard && set["update"] && !set["delete"]
 }

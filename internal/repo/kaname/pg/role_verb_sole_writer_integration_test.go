@@ -20,7 +20,7 @@ package pg_test
 // Приёмка формулирует -02 и -03 через вызовы клиента (`RoleService.Create` /
 // `Update` + поллинг операции). Пробы ниже подают тот же вход слоем ниже: пары
 // берутся ТОЙ ЖЕ производственной функцией перевода, которой пользуются оба пути
-// (`authzmap.RoleVerbsFromSelectors(rules.MaterializingSelectors())`), а не
+// (`authzmap.RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())`), а не
 // вычисляются проверкой по-своему. Замещение сужает утверждение: о транспорте,
 // операции и правах эти пробы не говорят НИЧЕГО, и их зелёный этого не покрывает.
 
@@ -49,7 +49,7 @@ import (
 // записи. Своя копия перевода в пробе завела бы второе место, знающее
 // соответствие, и разошлась бы с продуктом молча.
 func roleVerbPairsOf(rules domain.Rules) []domain.RoleVerb {
-	return authzmap.RoleVerbsFromSelectors(rules.MaterializingSelectors())
+	return authzmap.RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 }
 
 // writeRoleVerbs — вызов писателя через ПОРТ, в собственной транзакции.
