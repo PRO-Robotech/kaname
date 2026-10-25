@@ -71,6 +71,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
+// ErrSeedRoleNotResolved — выдача посева ролью называет идентификатор, под
+// которым живой роли кластерного яруса нет (kaname#979). Отказ называет роль, а
+// не ограничение ключа: автор манифеста чинит имя роли, а не схему.
+var ErrSeedRoleNotResolved = errors.New("pg: seed role grant names no live cluster role")
+
 // ModuleSeedWriteRepo — исполнитель транзакций применителя посева над пулом.
 type ModuleSeedWriteRepo struct {
 	tx *coredb.Transactor

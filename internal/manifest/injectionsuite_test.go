@@ -216,7 +216,7 @@ const rolesSectionOnlyFirst = `
 roles:
   - id: vpc.internal_consumer
     description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
-    tier: {tierType: iam.project, tierId: prj000000000000000}
+    tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - {module: vpc, resources: [address], classes: [get, list]}
 `
