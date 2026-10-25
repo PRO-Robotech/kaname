@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -250,6 +251,61 @@ func TestGrantDelegation_GD16_PersonAndGroupOnlyFromTheDelegationAccount(t *test
 				w.pollAsk(fmtSubject("user", string(r.person(w))), "v_get", pcrRegType, pcrX, true,
 					"GD-16 "+r.name+": участник получает v_get на X")
 			}
+		})
+	}
+}
+
+// Д4 по §1 приёмки («делегирование не даёт делегату доступа к данным»):
+// субъект-группа, в составе которой делегат, — тот же делегат: право роли через
+// состав группы дошло бы до него самого. Держатель права выдавать включает
+// учётку-делегата в группу acc-A прежним глаголом `GroupService.AddMember`, затем
+// делегат выдаёт этой группе роль модуля на X. Близнец — та же группа без
+// делегата (GD-16 a): отличается ровно составом группы. Каждая строка — на
+// свежем мире.
+func TestGrantDelegation_D4_GroupHoldingTheDelegateIsRefused(t *testing.T) {
+	for _, r := range []struct {
+		name           string
+		delegateMember bool
+	}{
+		{name: "a: делегат в составе группы", delegateMember: true},
+		{name: "b: близнец — группа без делегата", delegateMember: false},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			w := newGDWorld(t)
+			w.requireSubject("Д4 " + r.name)
+			dU := w.dU()
+			if r.delegateMember {
+				add := groupapp.NewAddMemberUseCase(w.repo, w.ops)
+				op, err := add.Execute(asUser(w.ctx, w.usrA), groupapp.AddMemberInput{
+					GroupID: domain.GroupID(w.grpA), MemberType: domain.SubjectTypeServiceAccount,
+					MemberID: domain.SubjectID(w.svaIss2),
+				})
+				require.NoError(t, err, "Д4 Дано: usr-A включает sva-iss2 в grp-A")
+				require.Nil(t, awaitOp(t, w.ctx, w.ops, op.ID).Error, "Д4 Дано: включение done без error")
+			}
+			var members int
+			require.NoError(t, w.pool.QueryRow(w.ctx, `
+				SELECT count(*) FROM kaname.group_members
+				 WHERE group_id = $1 AND member_type = 'service_account' AND member_id = $2`,
+				w.grpA, w.svaIss2).Scan(&members))
+			want := 0
+			if r.delegateMember {
+				want = 1
+			}
+			require.Equalf(t, want, members, "Д4 контроль %s: делегат в составе grp-A", r.name)
+
+			req := w.vWith(func(q *iamv1.CreateAccessBindingRequest) {
+				q.RoleId, q.Subjects = string(w.rolPuller), []*iamv1.Subject{groupSubject(w.grpA)}
+			})
+			before := w.countDelegated(dU)
+			o := w.tryGrant(asSA(w.ctx, w.svaIss2), req)
+			if r.delegateMember {
+				requireDenied(t, o, "Д4 "+r.name)
+				assert.Equal(t, before, w.countDelegated(dU), "Д4 %s: выдач с delegationId D-U прибавилось", r.name)
+				return
+			}
+			id := requireGranted(t, o, "Д4 "+r.name)
+			w.requireDelegatedBinding(id, dU, "Д4 "+r.name)
 		})
 	}
 }
