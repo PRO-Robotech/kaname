@@ -496,7 +496,7 @@ var catalogReannotatedEntries = []CatalogReannotatedEntry{
   }`,
 		OwnBody: `  {
     "fqn": "kaname.cloud.iam.v1.AccessBindingService/Delete",
-    "permission": "<exempt>",
+    "permission": "\u003cexempt\u003e",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
@@ -523,7 +523,7 @@ var catalogReannotatedEntries = []CatalogReannotatedEntry{
   }`,
 		OwnBody: `  {
     "fqn": "kaname.cloud.iam.v1.AccessBindingService/Revoke",
-    "permission": "<exempt>",
+    "permission": "\u003cexempt\u003e",
     "required_relation": "",
     "scope_extractor": {
       "object_type": "",
