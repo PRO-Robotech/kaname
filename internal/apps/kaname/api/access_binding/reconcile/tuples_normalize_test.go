@@ -14,11 +14,12 @@ package reconcile
 import (
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func TestRuleObjectTuples_RelationNameUsesNormalizedVerb(t *testing.T) {
-	got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a", []string{"Update", "Get"}, "vpc.network", "net_1")
+	got, ok := ruleObjectTuples(catalogfixture.Facts(), domain.TenantPolicy(), "user:usr_a", []string{"Update", "Get"}, "vpc.network", "net_1")
 	if !ok {
 		t.Fatalf("эмиссия не состоялась вовсе — утверждения ниже были бы бессодержательными")
 	}

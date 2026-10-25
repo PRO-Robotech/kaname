@@ -22,10 +22,10 @@ import (
 //
 // Множество производимого ВЫВОДИТСЯ у тех же двух функций, которыми его строит
 // эмиттер кортежей: `authzmap.GrantedVerbs` даёт набор глаголов (включая
-// разворачивание подстановки `*`, отсев чужого глагола и удаление, которое
-// влечёт правка), `domain.ResolveVerbsAndTier` — ярус. Выписанный перечень имён
-// разошёлся бы с эмиттером молча: обе стороны отвечают одинаково на входе, где
-// они совпадают.
+// разворачивание подстановки `*` и отсев чужого глагола; удаления к правке роли
+// модуля он не приписывает — kaname#1006), `domain.ResolveVerbsAndTier` — ярус.
+// Выписанный перечень имён разошёлся бы с эмиттером молча: обе стороны отвечают
+// одинаково на входе, где они совпадают.
 //
 // # Ярусный кортеж эмитится БЕЗУСЛОВНО, и это проверено, а не предположено
 //
@@ -57,7 +57,7 @@ import (
 type VerbFacts interface {
 	VerbsOfType(fgaType string) []string
 	CommonVerbVocabulary() []string
-	GrantedVerbs(fgaType string, authored, typeVerbs []string) []string
+	GrantedVerbs(fgaType string, authored, typeVerbs []string, policy domain.RulePolicy) []string
 }
 
 // roleTierCascade — ярусы правила роли от слабого к сильному.
@@ -88,13 +88,27 @@ func typeVerbsOf(facts VerbFacts, fgaType string) []string {
 	return facts.CommonVerbVocabulary()
 }
 
+// rolePolicy — политика роли, которую судит этот пакет.
+//
+// Каждая роль сюда приходит из манифеста модуля, и применитель пишет её
+// системной с владельцем — модулем манифеста (`moduleroles.roleOf`). Политика
+// выводится тем же [domain.PolicyOfRole], а не выписывается: от неё зависит,
+// влечёт ли правка удаление (kaname#1006), и проверка сборки, считавшая правку
+// производящей удаление, объявляла бы покрытым действие, которого
+// материализация роли модуля не даёт.
+func rolePolicy(module string) domain.RulePolicy {
+	return domain.PolicyOfRole(true, module)
+}
+
 // Produces отвечает, пишет ли правило роли с глаголом `verb` на ресурсе типа
 // `fgaType` тот кортеж, который спрашивает гейт: отношение `relation` на объекте
 // типа `object`.
 //
 // `fgaType` пуст (пара «модуль, ресурс» вне закрытой таблицы типов) — правило
 // адресовать нечего, и ответ «нет» без исключений: fail-closed.
-func Produces(facts VerbFacts, verb, fgaType, relation, object string) bool {
+//
+// policy — политика роли-владельца правила ([rolePolicy]).
+func Produces(facts VerbFacts, policy domain.RulePolicy, verb, fgaType, relation, object string) bool {
 	if fgaType == "" || relation == "" {
 		return false
 	}
@@ -107,7 +121,7 @@ func Produces(facts VerbFacts, verb, fgaType, relation, object string) bool {
 		return false
 	}
 	typeVerbs := typeVerbsOf(facts, fgaType)
-	for _, granted := range facts.GrantedVerbs(fgaType, []string{verb}, typeVerbs) {
+	for _, granted := range facts.GrantedVerbs(fgaType, []string{verb}, typeVerbs, policy) {
 		if relation == "v_"+granted {
 			return true
 		}
@@ -153,13 +167,13 @@ func Produces(facts VerbFacts, verb, fgaType, relation, object string) bool {
 // ПОИМЁННОЕ право этой ветвью НЕ затрагивается: назвать действие по имени —
 // осознанный акт автора роли, и разбирает его `namedverbs`. Здесь закрыт ровно
 // автоматический путь, о котором запрет и говорит.
-func Covers(facts VerbFacts, actions []Action, fgaType, verb string) []Action {
+func Covers(facts VerbFacts, policy domain.RulePolicy, actions []Action, fgaType, verb string) []Action {
 	var out []Action
 	for _, a := range actions {
 		if a.Exempt() || a.Internal {
 			continue
 		}
-		if Produces(facts, verb, fgaType, a.Relation, a.Object) {
+		if Produces(facts, policy, verb, fgaType, a.Relation, a.Object) {
 			out = append(out, a)
 		}
 	}
@@ -172,13 +186,13 @@ func Covers(facts VerbFacts, actions []Action, fgaType, verb string) []Action {
 // пропущенное поимённо, иначе «класс ничего не покрывает» читается как опечатка
 // в манифесте, и автор идёт искать её у себя — при том что действия у ресурса
 // есть и они просто не его плоскости.
-func SkippedByPlane(facts VerbFacts, actions []Action, fgaType, verb string) []Action {
+func SkippedByPlane(facts VerbFacts, policy domain.RulePolicy, actions []Action, fgaType, verb string) []Action {
 	var out []Action
 	for _, a := range actions {
 		if a.Exempt() || !a.Internal {
 			continue
 		}
-		if Produces(facts, verb, fgaType, a.Relation, a.Object) {
+		if Produces(facts, policy, verb, fgaType, a.Relation, a.Object) {
 			out = append(out, a)
 		}
 	}
