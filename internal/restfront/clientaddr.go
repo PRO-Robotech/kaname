@@ -3,7 +3,15 @@
 
 package restfront
 
-import "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+import (
+	"context"
+	"net"
+	"net/http"
+	"net/netip"
+
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"google.golang.org/grpc/metadata"
+)
 
 // clientaddr.go — адрес клиента публичного фронта, донесённый до собственного
 // слушателя (kaname#991).
@@ -34,5 +42,30 @@ import "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 // собственному слушателю адрес своего клиента (без порта).
 const MetadataClientAddr = "x-kaname-front-client-addr"
 
-// newPublicMux — мультиплексор публичного фронта.
-func newPublicMux() *runtime.ServeMux { return newMux() }
+// newPublicMux — мультиплексор публичного фронта: общий конструктор плюс
+// запись адреса клиента. Внутреннему фронту запись не нужна — его слушатель
+// ключуется листом модуля, а не адресом.
+func newPublicMux() *runtime.ServeMux {
+	return newMux(runtime.WithMetadata(clientAddrMetadata))
+}
+
+// clientAddrMetadata — адрес соединения HTTP-запроса без порта, ровно одним
+// значением.
+//
+// Берётся адрес СОЕДИНЕНИЯ, а не заголовок пересылки: клиент пишет заголовки
+// сам. Адрес за балансировщиком сюда приходит тем же полем — его подставляет
+// слушатель, принявший заголовок объявленного балансировщика (#989).
+//
+// Негодный адрес соединения не записывается: тогда слушатель отнесёт вызов к
+// ключу самого фронта, а не к ключу, выбранному содержимым строки.
+func clientAddrMetadata(_ context.Context, r *http.Request) metadata.MD {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil || addr.Zone() != "" {
+		return nil
+	}
+	return metadata.Pairs(MetadataClientAddr, addr.Unmap().String())
+}

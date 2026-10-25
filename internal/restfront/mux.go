@@ -31,13 +31,22 @@ import (
 // без него выяснение перечня допустимых методов исполняло бы обработчики.
 // Библиотека навешивает слой при регистрации маршрута, поэтому он объявлен
 // здесь, до первой регистрации, а не снаружи.
-func newMux() *runtime.ServeMux {
-	return runtime.NewServeMux(
+//
+// extra — опции ОДНОГО фронта поверх общих (публичный пишет адрес клиента,
+// clientaddr.go). Применяются после конструктора, а не передаются ему списком:
+// гейт сопоставителя читает аргументы вызова конструктора, и общий набор
+// обязан оставаться там явным.
+func newMux(extra ...runtime.ServeMuxOption) *runtime.ServeMux {
+	mux := runtime.NewServeMux(
 		narrowingHeaderMatcherOption(),
 		runtime.WithRoutingErrorHandler(routingErrorHandler),
 		runtime.WithErrorHandler(stepUpErrorHandler),
 		runtime.WithMiddlewares(routeProbeMiddleware),
 	)
+	for _, opt := range extra {
+		opt(mux)
+	}
+	return mux
 }
 
 // TextMethodNotAllowed — текст отказа на неверный метод: дословно тот, которым
