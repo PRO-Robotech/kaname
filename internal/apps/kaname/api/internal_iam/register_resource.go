@@ -77,7 +77,7 @@ type resourceMirrorEmitter interface {
 	// (kaname#1002, см. dropDescendants). Часть ОБЯЗАТЕЛЬНОГО порта, а не опция:
 	// «нет читателя — потомков не снимаем» и было дефектом.
 	DescendantsTx(ctx context.Context, tx service.Tx, parentType, parentID string) ([]service.RegisteredDescendant, error)
-	DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (deleted bool, err error)
+	DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (deleted bool, version time.Time, err error)
 }
 
 // keyWithdrawal — узкий порт: снятие регистрации объекта снимает его выдачи
@@ -1028,12 +1028,20 @@ func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx servi
 		if module, ok := catalogModule(catalogType); !ok || module != parentModule {
 			continue
 		}
-		dropped, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
+		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
 		if err != nil {
 			return fmt.Errorf("drop descendant registration: %w", err)
 		}
+		// Надгробие кортежей потомка — не старше его последней регистрации
+		// (kaname#969): регистрация снята безусловно, и её кортежи уходят все, даже
+		// записанные версией новее надгробия родителя. Версия снятой строки и есть
+		// версия последней регистрации — кортежи пишутся ею в той же транзакции.
+		tombstone := parent.SourceVersion
+		if version.After(tombstone) {
+			tombstone = version
+		}
 		if tuples := proxyOwned(d.Standing); len(tuples) > 0 {
-			if err := uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, parent.SourceVersion); err != nil {
+			if err := uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, tombstone); err != nil {
 				return fmt.Errorf("emit fga outbox for descendant: %w", err)
 			}
 		}

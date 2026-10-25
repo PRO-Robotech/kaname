@@ -73,7 +73,7 @@ func (e *ResourceMirrorEmitter) DescendantsTx(ctx context.Context, tx service.Tx
 }
 
 // DropRegistrationTx — безусловное снятие регистрации потомка (kaname#1002).
-func (e *ResourceMirrorEmitter) DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (bool, error) {
+func (e *ResourceMirrorEmitter) DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (bool, time.Time, error) {
 	return resource_mirror.DropRegistrationTx(ctx, txAsPgx(tx), catalogType, modelType, objectID)
 }
 

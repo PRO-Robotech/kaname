@@ -26,9 +26,12 @@ package resource_mirror
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Descendant — объект, в цепи предков которого стоит снимаемый родитель.
@@ -81,20 +84,37 @@ func DescendantsTx(ctx context.Context, tx pgx.Tx, parentType, parentID string) 
 // зеркала (словарь каталога, `catalogType`) и всю его цепь предков (словарь
 // модели, `modelType`). deleted — строка зеркала была и снята: только такое
 // снятие есть снятие регистрации и отзывает выдачи объекта (kaname#963, Д1).
-func DropRegistrationTx(ctx context.Context, tx pgx.Tx, catalogType, modelType, objectID string) (bool, error) {
+//
+// version — версия снятой регистрации (kaname#969): кортежи потомка записаны
+// версиями его регистраций, и снять их ВСЕ можно лишь надгробием не старше
+// последней из них. Нулевая — строки не было либо регистрация без версии
+// ('-infinity'): тогда надгробие выбирает вызывающий.
+func DropRegistrationTx(ctx context.Context, tx pgx.Tx, catalogType, modelType, objectID string) (bool, time.Time, error) {
 	if tx == nil {
-		return false, fmt.Errorf("resource_mirror: tx must not be nil")
+		return false, time.Time{}, fmt.Errorf("resource_mirror: tx must not be nil")
 	}
-	tag, err := tx.Exec(ctx,
-		`DELETE FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`,
-		catalogType, objectID)
-	if err != nil {
-		return false, fmt.Errorf("resource_mirror: drop descendant: %w", err)
+	var (
+		version pgtype.Timestamptz
+		deleted bool
+	)
+	err := tx.QueryRow(ctx,
+		`DELETE FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2
+		 RETURNING source_version`,
+		catalogType, objectID).Scan(&version)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return false, time.Time{}, fmt.Errorf("resource_mirror: drop descendant: %w", err)
+	default:
+		deleted = true
 	}
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM kaname.resource_parent_edge WHERE object_type = $1 AND object_id = $2`,
 		modelType, objectID); err != nil {
-		return false, fmt.Errorf("resource_parent_edge: drop descendant: %w", err)
+		return false, time.Time{}, fmt.Errorf("resource_parent_edge: drop descendant: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	if !version.Valid || version.InfinityModifier != pgtype.Finite {
+		return deleted, time.Time{}, nil
+	}
+	return deleted, version.Time, nil
 }
