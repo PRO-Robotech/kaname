@@ -90,9 +90,11 @@ func TestGrantDelegation_GD70_EveryStepIsAudited(t *testing.T) {
 	op, err := w.revokeBinding(sa, b10)
 	w.requireVerbDone(op.GetId(), err, "GD-70 шаг 3")
 	// 4. usr-A отзывает B14 прежним путём; выдаёт Bo и отзывает её.
+	w.awaitRemovalRight(w.usrA, b14, "GD-70 шаг 4 Дано: у владельца v_delete на B14")
 	op, err = w.revokeBinding(ua, b14)
 	w.requireVerbDone(op.GetId(), err, "GD-70 шаг 4: B14")
 	bo := w.boOf()
+	w.awaitRemovalRight(w.usrA, bo, "GD-70 шаг 4 Дано: у владельца v_delete на Bo")
 	op, err = w.revokeBinding(ua, bo)
 	w.requireVerbDone(op.GetId(), err, "GD-70 шаг 4: Bo")
 	// 5. sva-iss пытается выдать по телу GD-11 a.

@@ -121,6 +121,7 @@ func TestGrantDelegation_CE02_VDeleteQuestionOutageIsUnavailable(t *testing.T) {
 	assert.Equal(t, iamv1.AccessBinding_ACTIVE, w.getBinding(bo).GetStatus(), "CE-02: Bo действует")
 
 	// Близнец — тот же отзыв при отвечающем хранилище.
+	w.awaitRemovalRight(w.usrA, twinBinding, "CE-02 близнец Дано: у владельца v_delete на выдаче близнеца")
 	op2, err := w.revokeBinding(asUser(w.ctx, w.usrA), twinBinding)
 	w.requireVerbDone(op2.GetId(), err, "CE-02 близнец: хранилище отвечает")
 }

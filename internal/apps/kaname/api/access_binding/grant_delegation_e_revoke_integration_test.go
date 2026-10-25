@@ -143,6 +143,7 @@ func TestGrantDelegation_GD30_DelegateRevokesOnlyWhatItsDelegationGranted(t *tes
 	})
 	t.Run("g: владелец прежним путём", func(t *testing.T) {
 		g := newGD30World(t, "GD-30 g", true)
+		g.awaitRemovalRight(g.usrA, g.bo, "GD-30 g Дано: у владельца v_delete на Bo")
 		op, err := g.revokeBinding(asUser(g.ctx, g.usrA), g.bo)
 		g.requireVerbDone(op.GetId(), err, "GD-30 g")
 		pb := g.getBinding(g.bo)

@@ -893,3 +893,15 @@ func (q *gdQuestionLog) Check(ctx context.Context, subject, relation, object str
 }
 
 var _ authzguard.RelationChecker = (*gdQuestionLog)(nil)
+
+// awaitRemovalRight — контроль «Дано» перед отзывом или удалением выдачи прежним
+// путём: у держателя права выдавать материализовалось отношение удаления на
+// объекте выдачи. С kaname#986 этот вопрос задаёт обработчик (Р1а), а
+// пообъектные права на свежий объект выдачи материализуются после коммита —
+// окно, которое закрывает ограниченный повтор клиента (ban #9), а не барьер
+// операции. Опрос — тем же окном материализации, что `pollRelation`.
+func (w *gdWorld) awaitRemovalRight(user domain.UserID, bindingID, why string) {
+	w.t.Helper()
+	w.pollRelation("user:"+string(user), accessbindingapp.RemovalRelation,
+		accessbindingapp.RemovalObjectType+":"+bindingID, true, why)
+}
