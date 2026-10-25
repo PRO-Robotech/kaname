@@ -187,14 +187,24 @@ func newGDWorld(t *testing.T) *gdWorld {
 
 	w.buildHandlers()
 
+	// Указатель проекта на аккаунт — строка журнала `project:<p>#account@account:<a>`,
+	// которую продукт со-коммитит с проектом (`ProjectService.Create`; образец
+	// посева — `internal/repo/kaname/pg/parentedge/rootreach_integration_test.go`).
+	// Посев мира кладёт проект строкой таблицы, мимо глагола, и без указателя
+	// `project.super_admin = admin from account` не выводится: у владельца нет
+	// ни правки проекта (дверь, близнецы GD-25), ни `v_delete` на объекте выдачи
+	// проекта (вопрос двери, переезжающий в обработчик, Р1а). Замер: прогон мира Д
+	// без указателя — «дверь не пропустила владельца» на правке prj-A2 и контроль
+	// `v_update` usr-A за 30 с не дошёл до true.
+	for _, pa := range []struct {
+		prj domain.ProjectID
+		acc domain.AccountID
+	}{{w.prjA, w.accA}, {w.prjA2, w.accA}, {w.prjC, w.accB}} {
+		gdSeedTuple(t, ctx, pool, "account:"+string(pa.acc), "account", "project:"+string(pa.prj))
+	}
+
 	// Авто-выдача владельца: роль `owner` на своём аккаунте, цель — вся область,
-	// — как её заводит `AccountService.Create` (`domain.OwnerRoleID`). Посев мира
-	// кладёт аккаунт строкой, мимо глагола, и без неё у владельца нет ни
-	// пообъектных прав на проекты (дверь глаголов проекта — близнецы GD-25), ни
-	// `v_delete` на объекте выдачи (вопрос двери, переезжающий в обработчик, Р1а).
-	// Первый прогон мира Д стоял на прямом факте `admin` на аккаунте и показал,
-	// что пообъектных прав он не даёт: «дверь не пропустила владельца» на правке
-	// проекта и контроль `v_delete` usr-A за 30 с не дошёл до true.
+	// — как её заводит `AccountService.Create` (`domain.OwnerRoleID`).
 	for _, own := range []struct {
 		user domain.UserID
 		acc  domain.AccountID
