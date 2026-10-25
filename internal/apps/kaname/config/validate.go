@@ -13,6 +13,8 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"go.uber.org/multierr"
+
+	"github.com/PRO-Robotech/kaname/internal/buildflavor"
 )
 
 // Validate checks Config invariants (pure function — no logger, no
@@ -208,6 +210,7 @@ func (c Config) Validate() error {
 	// `runServe`.
 	errs = multierr.Append(errs, c.validateTrustedForwarders())
 	errs = multierr.Append(errs, c.validateTrustDomain())
+	errs = multierr.Append(errs, c.validateBuildFlavor(buildflavor.IsTestBuild()))
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
