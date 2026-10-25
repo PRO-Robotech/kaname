@@ -451,7 +451,6 @@ func TestURG11_ProtectedGrantRevokedByUnregistration(t *testing.T) {
 func TestURG12_RevokeVerbHonorsProtection(t *testing.T) {
 	w := newURXWorld(t)
 	p := w.grantTo(w.usrD, w.rolRegGet, urTarget(pcrX), true, "URG-12: защищённая P на X")
-	w.ownerMayRemove("URG-12 Дано", p)
 
 	_, err := w.abx.Revoke(asUser(w.ctx, w.usrA), &iamv1.RevokeAccessBindingRequest{AccessBindingId: p})
 	require.Error(t, err, "URG-12: отзыв защищённой принят")
@@ -779,7 +778,6 @@ func TestURG34_ReasonOnRevokeAndExpiryPaths(t *testing.T) {
 	w := newURXWorld(t)
 	r1 := w.grantTo(w.usrD, w.rolRegGet, urTarget(pcrY), false, "URG-34: R1 на Y")
 	r2 := w.grantTo(w.usrB, w.rolRegGet, urTarget(pcrY), false, "URG-34: R2 на Y")
-	w.ownerMayRemove("URG-34 Дано", r1)
 	// Срок R2 — «сейчас + 2 с» приёмки. Вход создания требует не меньше
 	// MinExpiresIn, поэтому срок ставится строкой после приёма, а проход срока —
 	// глагол реконсайлера, который его и отзывает.

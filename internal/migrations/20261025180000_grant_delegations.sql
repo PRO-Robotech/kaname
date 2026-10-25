@@ -90,8 +90,13 @@ CREATE UNIQUE INDEX grant_delegations_active_pair_uniq ON kaname.grant_delegatio
     USING btree (account_id, delegate_id)
     WHERE (status = 'ACTIVE');
 
-CREATE INDEX grant_delegations_account_page_idx ON kaname.grant_delegations
-    USING btree (account_id, created_at, id);
+-- Курсор перечня `(created_at, id)` — той же формы, что у соседних таблиц
+-- (`groups_cursor_idx`, `projects_cursor_idx`), и аккаунт — отдельным индексом.
+CREATE INDEX grant_delegations_cursor_idx ON kaname.grant_delegations
+    USING btree (created_at, id);
+
+CREATE INDEX grant_delegations_account_idx ON kaname.grant_delegations
+    USING btree (account_id);
 
 ALTER TABLE kaname.access_bindings
     ADD COLUMN delegation_id text;
