@@ -811,6 +811,10 @@ type failingWithdrawal struct {
 	inner *accessbindingapp.UnregisteredKeyWithdrawal
 }
 
+func (f failingWithdrawal) LockTx(ctx context.Context, tx service.Tx, key domain.ResourceRef) error {
+	return f.inner.LockTx(ctx, tx, key)
+}
+
 func (f failingWithdrawal) WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error {
 	if err := f.inner.WithdrawTx(ctx, tx, key, actor); err != nil {
 		return err

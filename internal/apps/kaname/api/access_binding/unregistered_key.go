@@ -75,6 +75,26 @@ func NewUnregisteredKeyWithdrawal(store UnregisteredKeyStore, cat catalog.Source
 	return &UnregisteredKeyWithdrawal{store: store, cat: cat}
 }
 
+// LockTx запирает в транзакции снятия `tx` выдачи, называющие ключ, затем роли,
+// называющие его, — оба набора `FOR UPDATE` в порядке id (kaname#975). Снятие
+// зовёт его ДО первой записи транзакции, то есть до удаления строки зеркала:
+// проход материализации берёт выдачи, их роли и лишь затем строки зеркала
+// объектов, по которым пишет члены (`reconcile.ReconcileStore.LockMirrorObjects`),
+// и снятие, удалившее строку раньше, чем заперло роль с именем ключа, сходилось бы
+// с таким проходом в кольцо. Порядок родов у сторон один — выдачи, роли, строка
+// зеркала. WithdrawTx после удаления строки запирает те же наборы повторно: замки
+// уже удержаны, а выдача или роль, чей писатель держал строку зеркала и
+// зафиксировался, пока снятие ждало, добирается тем же чтением.
+func (u *UnregisteredKeyWithdrawal) LockTx(ctx context.Context, tx service.Tx, key domain.ResourceRef) error {
+	if _, err := u.store.ActiveBindingsNamingKey(ctx, tx, key); err != nil {
+		return fmt.Errorf("lock bindings naming %s %s: %w", key.Type, key.ID, err)
+	}
+	if _, err := u.store.RolesNamingKey(ctx, tx, key); err != nil {
+		return fmt.Errorf("lock roles naming %s %s: %w", key.Type, key.ID, err)
+	}
+	return nil
+}
+
 // WithdrawTx отзывает и сужает в транзакции снятия `tx` всё, что называет ключ.
 // `key.Type` — точечный тип каталога (тот же словарь, что в цели выдачи), `actor`
 // — проверенная личность вызывающего снятие (служебная учётка модуля).

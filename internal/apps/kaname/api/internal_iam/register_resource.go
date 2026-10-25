@@ -74,7 +74,12 @@ type resourceMirrorEmitter interface {
 // `resourceNames` правил ролей. `key.Type` — точечный тип каталога, `actor` —
 // проверенная личность вызывающего. Реализация —
 // *access_binding.UnregisteredKeyWithdrawal.
+//
+// LockTx запирает выдачи и роли, называющие ключ, ДО первой записи транзакции
+// снятия (kaname#975): порядок родов снятия — выдачи и роли, строка зеркала,
+// факты — тот же, что у прохода материализации.
 type keyWithdrawal interface {
+	LockTx(ctx context.Context, tx service.Tx, key domain.ResourceRef) error
 	WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error
 }
 
@@ -886,12 +891,25 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			}
 		}
 	} else {
-		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
-			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
+		key := domain.ResourceRef{Type: row.ObjectType, ID: row.ObjectID}
+		// ПОРЯДОК РОДОВ СНЯТИЯ (kaname#974, kaname#975): выдачи и роли, называющие
+		// ключ, — строка зеркала — факты. Тот же порядок берёт проход
+		// материализации: выдачи, их роли, строки зеркала объектов, по которым он
+		// пишет члены, затем факты. Поэтому выдачи и роли запираются ДО первой
+		// записи транзакции, а удаление строки зеркала идёт раньше строк снятия
+		// фактов: снятие, удержавшее факт и ждущее строку зеркала, которую запер
+		// проход, пишущий тот же факт, сходилось бы с ним в кольцо (40P01).
+		// Запираются они и тогда, когда строку удалить не выйдет (устаревшее
+		// надгробие, повтор): исход удаления известен лишь после него.
+		if err = uc.withdrawal.LockTx(ctx, tx, key); err != nil {
+			return "", false, false, fmt.Errorf("lock grants of unregistered resource: %w", err)
 		}
 		deleted, derr := uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion)
 		if derr != nil {
 			return "", false, false, fmt.Errorf("delete resource mirror: %w", derr)
+		}
+		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
+			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
 		// СНЯТИЕ РЕГИСТРАЦИИ СНИМАЕТ ВЫДАЧИ ОБЪЕКТА (kaname#963, Д1). Только снятие,
 		// удалившее строку регистрации, есть снятие регистрации: устаревшее
@@ -899,9 +917,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// ключа строки не удаляют и выдач не трогают. В той же транзакции —
 		// отзыв не фиксируется без снятия, и снятие без отзыва.
 		if deleted {
-			if err = uc.withdrawal.WithdrawTx(ctx, tx,
-				domain.ResourceRef{Type: row.ObjectType, ID: row.ObjectID},
-				authzguard.PrincipalUserID(ctx)); err != nil {
+			if err = uc.withdrawal.WithdrawTx(ctx, tx, key, authzguard.PrincipalUserID(ctx)); err != nil {
 				return "", false, false, fmt.Errorf("withdraw grants of unregistered resource: %w", err)
 			}
 		}
