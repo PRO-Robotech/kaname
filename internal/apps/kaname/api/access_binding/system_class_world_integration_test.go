@@ -108,9 +108,13 @@ func newSCWorld(t *testing.T) *scWorld {
 	ab := accessbindingapp.NewHandler(create, del, get, nil, listBySubject, nil, nil).
 		WithExpandAccess(accessbindingapp.NewExpandAccessUseCase(door).WithGrantAuthority(repo, door, nil))
 
+	// Каталог — тот же, что у выдачи и сверки мира: вопрос без отношения
+	// (`check` ниже) берёт глагол типа из каталога модуля (kaname#995), как в
+	// корне службы.
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           door,
 		ClusterAdminChecker: door,
+		Catalog:             catalogfixture.Source(),
 	})
 	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
 
