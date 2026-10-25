@@ -169,9 +169,9 @@ func TestReconcileMultiSubject_ConvergedBindingIsNotRewritten(t *testing.T) {
 				t.Errorf("проход по сошедшейся выдаче записал: кортежей %d, реестра %d, снятий %d, забытого %d",
 					len(f.writes), len(f.recorded), len(f.tdeletes), len(f.forgotten))
 			}
-			// Цена: полный проход читает реестр выдачи не более одного раза при
-			// любом числе субъектов — им сводятся неизменные члены (kaname#1006).
-			if want := 1; f.ledgerReads != want {
+			// Цена: реестр выдачи одному субъекту не читается, нескольким — не
+			// более одного раза за проход.
+			if want := min(len(refs)-1, 1); f.ledgerReads != want {
 				t.Errorf("чтений реестра выдачи за проход %d, ждали %d", f.ledgerReads, want)
 			}
 		})

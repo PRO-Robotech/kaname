@@ -468,8 +468,14 @@ func selectorArmText(a domain.Arm) string {
 
 // BackfillReconcileEngine — the reconcile surface the sweep drives (one binding at
 // a time; the reconciler opens its own writer-tx + per-binding xact-lock).
+//
+// Проход при старте — СВОДЯЩИЙ (`ConvergeBinding`, kaname#1006): набор кортежей
+// члена зависит от вычисления (политика роли, каталог), а вычисление меняется
+// выкаткой; этот проход идёт после пересчёта проекций ролей и доводит до нового
+// вычисления и неизменных членов. Обход по таймеру этого не делает — его цена
+// платилась бы каждые полминуты (reconcile/emitted_completion.go).
 type BackfillReconcileEngine interface {
-	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
+	ConvergeBinding(ctx context.Context, bindingID domain.AccessBindingID) error
 }
 
 // BackfillStore — the narrow port the runner needs: the process-wide singleton
@@ -566,7 +572,7 @@ func (r *BackfillRunner) RunOnce(ctx context.Context) (BackfillResult, error) {
 		}
 		res.Chunks++
 		for _, bID := range chunk {
-			if rerr := r.engine.ReconcileBinding(ctx, bID); rerr != nil {
+			if rerr := r.engine.ConvergeBinding(ctx, bID); rerr != nil {
 				return res, fmt.Errorf("backfill: reconcile binding %s: %w", bID, rerr)
 			}
 			res.BindingsReconciled++

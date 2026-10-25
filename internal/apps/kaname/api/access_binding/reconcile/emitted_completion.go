@@ -32,16 +32,21 @@ package reconcile
 //
 // # Где сводится и цена
 //
-// ПОЛНЫЙ проход (обход по таймеру, проход при старте, правка роли) сводит
-// каждого неизменного действующего члена при любом числе субъектов: реестр
-// выдачи читается лениво — когда нашёлся неизменный действующий член — и не
-// более раза за проход, одним обращением по префиксу первичного ключа реестра
-// (binding_id); строк столько, сколько выдача выпустила, — того же порядка, что
-// чтение её членов, которое полный проход делает всегда. Проход ПО ОБЪЕКТУ —
-// горячий путь регистрации — реестр читает, как прежде, лишь у выдачи с двумя и
-// более субъектами, одним обращением по объекту; выдачу одному субъекту по
-// объекту сводит следующий полный проход. У сошедшейся выдачи ни недостающего,
-// ни лишнего нет, и проход ничего не пишет (пробы
+// СВОДЯЩИЙ проход (`Reconciler.ConvergeBinding`) сводит каждого неизменного
+// действующего члена при любом числе субъектов. Его зовёт проход при старте по
+// всем действующим выдачам (`seed.BackfillRunner`, после пересчёта проекций
+// ролей), — то есть сведение к новому вычислению приезжает с выкаткой, тем же
+// шагом, что и само вычисление. Реестр выдачи читается лениво — когда нашёлся
+// неизменный действующий член — и не более раза за проход, одним обращением по
+// префиксу первичного ключа реестра (binding_id); строк столько, сколько выдача
+// выпустила. Цена платится РАЗ на старт, а не на каждый обход.
+//
+// Обход по таймеру, правка роли и проход ПО ОБЪЕКТУ (горячий путь регистрации)
+// реестр читают, как прежде, лишь у выдачи с двумя и более субъектами: обход
+// идёт по каждой выдаче каждые полминуты, и чтение реестра выдачи одному
+// субъекту на каждом обходе удвоило бы его чтения ради расхождения, которое
+// возникает только со сменой вычисления — а та приезжает выкаткой. У сошедшейся
+// выдачи ни недостающего, ни лишнего нет, и проход ничего не пишет (пробы
 // TestReconcileMultiSubject_ConvergedBindingIsNotRewritten,
 // TestReconcile_ConvergedModuleRoleBindingIsNotRewritten).
 //
@@ -68,18 +73,18 @@ import (
 // его (kaname#933).
 type emittedView struct {
 	load func(ctx context.Context) ([]LedgerRow, error)
-	// whole — реестр всей выдачи (полный проход): неизменный член сводится при
-	// любом числе субъектов.
-	whole bool
-	set   map[LedgerRow]struct{}
+	// converge — сводящий проход: неизменный член сводится при любом числе
+	// субъектов.
+	converge bool
+	set      map[LedgerRow]struct{}
 	// byCoord — те же строки по координате члена: сведение одного члена не
 	// обходит реестр всей выдачи.
 	byCoord map[MemberCoord]map[domain.MembershipTuple]struct{}
 }
 
-// bindingEmitted — реестр всей выдачи (полный проход).
-func bindingEmitted(s ReconcileStore, bindingID domain.AccessBindingID) *emittedView {
-	return &emittedView{whole: true, load: func(ctx context.Context) ([]LedgerRow, error) {
+// bindingEmitted — реестр всей выдачи (полный проход); converge — проход сводящий.
+func bindingEmitted(s ReconcileStore, bindingID domain.AccessBindingID, converge bool) *emittedView {
+	return &emittedView{converge: converge, load: func(ctx context.Context) ([]LedgerRow, error) {
 		return s.LedgerTuples(ctx, bindingID)
 	}}
 }
@@ -104,7 +109,7 @@ func objectEmitted(s ReconcileStore, bindingID domain.AccessBindingID, objectTyp
 
 // converges — сводит ли проход неизменного члена выдачи `bs`.
 func (v *emittedView) converges(bs BindingScope) bool {
-	return v != nil && (v.whole || len(bs.Subjects) >= 2)
+	return v != nil && (v.converge || len(bs.Subjects) >= 2)
 }
 
 func (v *emittedView) ensure(ctx context.Context) error {

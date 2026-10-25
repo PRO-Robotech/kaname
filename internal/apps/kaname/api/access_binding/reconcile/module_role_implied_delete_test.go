@@ -5,13 +5,13 @@ package reconcile
 
 // module_role_implied_delete_test.go — материализация роли МОДУЛЯ не приписывает
 // удаление к правке (kaname#1006), и выдача, материализованная прежним
-// вычислением, сходится к новому набору полным проходом.
+// вычислением, сходится к новому набору сводящим проходом (проход при старте).
 //
 // Прежнее состояние строится не руками, а тем же материализатором: проход по той
 // же выдаче с ролью без владельца даёт ровно тот состав и те кортежи, что давало
 // прежнее вычисление роли модуля (правило «правка влечёт удаление» владельца не
 // спрашивало). Ключ члена от владельца роли не зависит — отпечаток правила тот
-// же, — поэтому полный проход видит члена НЕИЗМЕННЫМ, и именно эта ветвь обязана
+// же, — поэтому проход видит члена НЕИЗМЕННЫМ, и именно эта ветвь обязана
 // снять лишний кортеж.
 
 import (
@@ -44,11 +44,21 @@ func miStore(policy domain.RulePolicy) *fakeStore {
 	}
 }
 
+// miReconcile — полный проход обхода по таймеру.
 func miReconcile(t *testing.T, f *fakeStore) {
 	t.Helper()
 	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	if err := rec.ReconcileBinding(context.Background(), miBinding); err != nil {
 		t.Fatalf("полный проход: %v", err)
+	}
+}
+
+// miConverge — сводящий проход (проход при старте).
+func miConverge(t *testing.T, f *fakeStore) {
+	t.Helper()
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
+	if err := rec.ConvergeBinding(context.Background(), miBinding); err != nil {
+		t.Fatalf("сводящий проход: %v", err)
 	}
 }
 
@@ -92,11 +102,11 @@ func TestReconcile_ModuleRoleUpdateMaterializesNoDelete(t *testing.T) {
 	}
 }
 
-// TestReconcile_StaleImpliedDeleteIsRevokedOnTheFullPass — выдача роли модуля,
-// материализованная прежним вычислением (с `v_delete`), после полного прохода
-// не несёт `v_delete` ни в движке, ни в реестре выпущенного; прочие кортежи члена
-// не трогаются и не переписываются.
-func TestReconcile_StaleImpliedDeleteIsRevokedOnTheFullPass(t *testing.T) {
+// TestReconcile_StaleImpliedDeleteIsRevokedOnTheConvergingPass — выдача роли
+// модуля, материализованная прежним вычислением (с `v_delete`), после сводящего
+// прохода (проход при старте) не несёт `v_delete` ни в движке, ни в реестре
+// выпущенного; прочие кортежи члена не трогаются и не переписываются.
+func TestReconcile_StaleImpliedDeleteIsRevokedOnTheConvergingPass(t *testing.T) {
 	const object = "vpc_network:net-1"
 
 	// Прежнее состояние — то, что писало прежнее вычисление.
@@ -109,10 +119,10 @@ func TestReconcile_StaleImpliedDeleteIsRevokedOnTheFullPass(t *testing.T) {
 	f := miStore(domain.PolicyOfRole(true, "vpc"))
 	f.current = slices.Clone(pre.upserts)
 	f.ledger = slices.Clone(pre.ledgerNow())
-	miReconcile(t, f)
+	miConverge(t, f)
 
 	if !hasTuple(miFlatten(f.tdeletes), "v_delete", object) {
-		t.Errorf("полный проход не снял v_delete с %s: снятий %v", object, miFlatten(f.tdeletes))
+		t.Errorf("сводящий проход не снял v_delete с %s: снятий %v", object, miFlatten(f.tdeletes))
 	}
 	if miLedgerHas(f, "v_delete", object) {
 		t.Errorf("реестр выпущенного по-прежнему несёт v_delete на %s", object)
@@ -130,8 +140,35 @@ func TestReconcile_StaleImpliedDeleteIsRevokedOnTheFullPass(t *testing.T) {
 	}
 }
 
+// TestReconcile_PeriodicPassDoesNotReadTheLedgerOfASingleSubjectBinding — граница
+// цены: обход по таймеру (ReconcileBinding) реестр выдачи одному субъекту не
+// читает и неизменного члена не сводит — сведение платится раз на старт, а не
+// каждые полминуты. Близнец — тот же вход сводящим проходом: реестр прочитан
+// ровно один раз.
+func TestReconcile_PeriodicPassDoesNotReadTheLedgerOfASingleSubjectBinding(t *testing.T) {
+	pre := miStore(domain.PolicyOfRole(true, ""))
+	miReconcile(t, pre)
+
+	periodic := miStore(domain.PolicyOfRole(true, "vpc"))
+	periodic.current = slices.Clone(pre.upserts)
+	periodic.ledger = slices.Clone(pre.ledgerNow())
+	miReconcile(t, periodic)
+	if periodic.ledgerReads != 0 || len(periodic.forgotten) != 0 {
+		t.Errorf("обход по таймеру прочитал реестр %d раз и забыл %d строк — цена сведения "+
+			"платилась бы на каждом обходе", periodic.ledgerReads, len(periodic.forgotten))
+	}
+
+	converging := miStore(domain.PolicyOfRole(true, "vpc"))
+	converging.current = slices.Clone(pre.upserts)
+	converging.ledger = slices.Clone(pre.ledgerNow())
+	miConverge(t, converging)
+	if converging.ledgerReads != 1 {
+		t.Errorf("сводящий проход прочитал реестр %d раз, ждали 1", converging.ledgerReads)
+	}
+}
+
 // TestReconcile_ConvergedModuleRoleBindingIsNotRewritten — близнец: выдача роли
-// модуля, уже материализованная новым вычислением, следующим полным проходом не
+// модуля, уже материализованная новым вычислением, сводящим проходом не
 // трогается — ни записи, ни снятия, ни забытого.
 func TestReconcile_ConvergedModuleRoleBindingIsNotRewritten(t *testing.T) {
 	fresh := miStore(domain.PolicyOfRole(true, "vpc"))
@@ -140,7 +177,7 @@ func TestReconcile_ConvergedModuleRoleBindingIsNotRewritten(t *testing.T) {
 	f := miStore(domain.PolicyOfRole(true, "vpc"))
 	f.current = slices.Clone(fresh.upserts)
 	f.ledger = slices.Clone(fresh.ledgerNow())
-	miReconcile(t, f)
+	miConverge(t, f)
 
 	if len(f.writes) != 0 || len(f.recorded) != 0 || len(f.tdeletes) != 0 || len(f.forgotten) != 0 {
 		t.Errorf("проход по сошедшейся выдаче записал: кортежей %d, реестра %d, снятий %d, забытого %d",

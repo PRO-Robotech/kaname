@@ -641,9 +641,23 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 // ReconcileBinding recomputes the full desired membership of one binding from the
 // mirror and diffs it against the materialized set (trigger (a) + sweep (c)).
 func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
+	return r.fullPass(ctx, bindingID, false)
+}
+
+// ConvergeBinding — тот же полный проход, но СВОДЯЩИЙ: каждый неизменный
+// действующий член доводится до своего желаемого набора кортежей при любом числе
+// субъектов — недостающее дописывается, лишнее снимается (emitted_completion.go,
+// kaname#1006). Его зовёт проход при старте по всем действующим выдачам: набор
+// кортежей члена зависит не только от ключа члена, но и от вычисления (политика
+// роли, каталог), а вычисление меняется выкаткой.
+func (r *Reconciler) ConvergeBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
+	return r.fullPass(ctx, bindingID, true)
+}
+
+func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindingID, converge bool) error {
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
-		if err := r.reconcileBinding(ctx, s, bindingID, col); err != nil {
+		if err := r.reconcileBinding(ctx, s, bindingID, converge, col); err != nil {
 			return err
 		}
 		// Отложенные строки снятия — в конце прохода; факт, который ещё держит
@@ -947,7 +961,7 @@ func emitRevokedAuditOfExpiry(ctx context.Context, s ReconcileStore, bs BindingS
 
 // reconcileBinding is the core diff. It computes the desired member set for a
 // binding and reconciles it against the materialized set within the caller's tx.
-func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, col *syncFGACollector) error {
+func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, converge bool, col *syncFGACollector) error {
 	// Serialize concurrent reconcile passes of the same binding on the
 	// xact-scoped advisory lock BEFORE any read/write, so the exactly-once
 	// materialization invariant holds under N replicas.
@@ -978,7 +992,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 		return fmt.Errorf("current members %s: %w", bindingID, err)
 	}
 
-	return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID), col)
+	return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID, converge), col)
 }
 
 // reconcileBindingForObject is the OBJECT-NARROWED twin of reconcileBinding: it diffs
@@ -1034,7 +1048,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		if err != nil {
 			return fmt.Errorf("current members %s: %w", bindingID, err)
 		}
-		return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID), col)
+		return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID, false), col)
 	}
 
 	var desired []DesiredMember
