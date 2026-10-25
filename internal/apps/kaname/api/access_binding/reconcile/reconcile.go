@@ -189,6 +189,23 @@ type ReconcileStore interface {
 	// возвращается немедленно.
 	AcquireBindingLocks(ctx context.Context, bindingIDs []domain.AccessBindingID) error
 
+	// LockBindingsAndRoles берёт строки выдач набора `FOR NO KEY UPDATE` (тот же
+	// режим, что LoadBinding), а затем строки их ролей `FOR KEY SHARE` (тот же
+	// режим, что чтение роли прохода), каждый род — одним оператором в порядке id и
+	// ДО первой записи прохода (kaname#974).
+	//
+	// ЗАЧЕМ. Снятие регистрации объекта запирает выдачи, чья цель называет ключ, и
+	// роли, чьи правила называют его, и только потом пишет (UnregisteredKeyWithdrawal).
+	// Проход по объекту прежде брал строку выдачи и её роль ПЕРЕД работой каждой
+	// выдачи веера — то есть приходил к роли следующей выдачи, уже записав прямой
+	// факт предыдущей, а к выдаче следующей — уже держа роль предыдущей. Общий факт
+	// двух выдач одного субъекта на одном объекте и роль с именем ключа замыкали
+	// кольцо со снятием: Postgres снимал одну сторону (40P01). Порядок родов у обеих
+	// сторон теперь один — выдачи, роли, затем записи, — и кольца нет by
+	// construction. Идемпотентен внутри транзакции: последующие чтения прохода берут
+	// уже удерживаемые замки.
+	LockBindingsAndRoles(ctx context.Context, bindingIDs []domain.AccessBindingID) error
+
 	// LoadBinding — минимальные факты выдачи: область, селекторы, роль. ok=false —
 	// выдачи больше нет (удалена: проходу делать нечего, каскад уже снял её членов).
 	//
@@ -774,6 +791,13 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// общей строки, — и цикла ожидания не существует by construction.
 		if err := s.AcquireBindingLocks(ctx, union); err != nil {
 			return fmt.Errorf("acquire binding locks for object %s:%s: %w", objectType, objectID, err)
+		}
+		// Строки выдач и их ролей — тоже ВСЕ вперёд, тем же порядком родов, что у
+		// снятия регистрации объекта: выдачи, роли, затем записи (kaname#974, шапка
+		// LockBindingsAndRoles). Иначе проход брал роль очередной выдачи, уже
+		// записав общий прямой факт предыдущей, а снятие — наоборот.
+		if err := s.LockBindingsAndRoles(ctx, union); err != nil {
+			return fmt.Errorf("lock bindings and roles for object %s:%s: %w", objectType, objectID, err)
 		}
 		for _, bID := range union {
 			if err := r.reconcileBindingForObject(ctx, s, bID, objectType, objectID, obj, objPresent, ancestors, col); err != nil {

@@ -483,6 +483,42 @@ func (s *reconcileStore) AcquireBindingLocks(ctx context.Context, bindingIDs []d
 	return nil
 }
 
+// LockBindingsSQL — замок строк выдач набора ($1 — их id), режим тот же, что
+// у LoadBinding (`GetForNoKeyUpdate`). LockRolesOfBindingsSQL — замок строк их ролей,
+// режим тот же, что у loadRolesWithLifecycle. Порядок захвата задаёт `ORDER BY id`:
+// узел замка стоит над сортировкой, поэтому строки запираются в порядке id.
+// Экспортированы ради пробы порядка (kaname#974): она судит этот самый текст.
+const (
+	LockBindingsSQL = `SELECT b.id FROM kaname.access_bindings b
+		  WHERE b.id = ANY($1)
+		  ORDER BY b.id
+		    FOR NO KEY UPDATE`
+	LockRolesOfBindingsSQL = `SELECT r.id FROM kaname.roles r
+		  WHERE r.id IN (SELECT b.role_id FROM kaname.access_bindings b WHERE b.id = ANY($1))
+		  ORDER BY r.id
+		    FOR KEY SHARE OF r`
+)
+
+// LockBindingsAndRoles — строки выдач набора, затем строки их ролей, каждый род одним
+// оператором в порядке id и до первой записи прохода (kaname#974, контракт — у порта).
+// Выдача, которой нет, просто не запирается: её LoadBinding вернёт ok=false.
+func (s *reconcileStore) LockBindingsAndRoles(ctx context.Context, bindingIDs []domain.AccessBindingID) error {
+	if len(bindingIDs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(bindingIDs))
+	for _, id := range bindingIDs {
+		ids = append(ids, string(id))
+	}
+	if _, err := s.tx.Exec(ctx, LockBindingsSQL, ids); err != nil {
+		return fmt.Errorf("reconcile: lock %d binding rows: %w", len(ids), err)
+	}
+	if _, err := s.tx.Exec(ctx, LockRolesOfBindingsSQL, ids); err != nil {
+		return fmt.Errorf("reconcile: lock roles of %d bindings: %w", len(ids), err)
+	}
+	return nil
+}
+
 // MatchAllInScope returns the mirror objects of the given types NARROWED to the binding's
 // containment scope (ARM_ANCHOR/`all`, P4) — no label filter. The scope is pushed into the
 // SQL (resource_mirror.AllByTypes) as a PROVEN SUPERSET of the use-case's IsContainedIn
