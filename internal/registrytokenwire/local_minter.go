@@ -9,6 +9,7 @@ import (
 	"time"
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -47,6 +48,13 @@ func (a *LocalMintAdapter) MintToken(ctx context.Context, in registrytokenuc.Min
 	claims := map[string]any{}
 	if in.Scope != "" {
 		claims["scope"] = in.Scope
+	}
+	// Ключ отсечки удостоверения (kaname#947): имя — то же, что кладёт своя
+	// чеканка по ключу служебной учётки и что читает правило отзыва. Своего
+	// имени у докерной полосы нет: второе имя одного ключа отсечки правило не
+	// читало бы, и отзыв не доезжал бы до этого токена молча.
+	if in.CredentialID != "" {
+		claims[domain.ClaimSAKeyID] = in.CredentialID
 	}
 	req := tokensigner.Request{
 		Subject:   in.Subject,
