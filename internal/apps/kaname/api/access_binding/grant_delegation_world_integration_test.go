@@ -291,11 +291,14 @@ func (w *gdWorld) registerRegistryIn(id string, prj domain.ProjectID, acc domain
 	}
 }
 
-func (w *gdWorld) mirrorHas(objType, id string) bool {
+// mirrorHas — есть ли строка регистрации объекта. Тип строки зеркала пишется
+// именем каталога живой строки (`NewCatalogTypeReader`), а не именем модели,
+// поэтому счёт идёт по id объекта: id реестров мира Д различны.
+func (w *gdWorld) mirrorHas(_ string, id string) bool {
 	w.t.Helper()
 	var n int
 	require.NoError(w.t, w.pool.QueryRow(w.ctx,
-		`SELECT count(*) FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`, objType, id).Scan(&n))
+		`SELECT count(*) FROM kaname.resource_mirror WHERE object_id = $1`, id).Scan(&n))
 	return n > 0
 }
 
