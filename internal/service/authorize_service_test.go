@@ -58,12 +58,16 @@ type mockRelations struct {
 	// relation store, so a test can assert the server sanitised it (no forged
 	// principal/connection attributes; server-forced current_time / trusted acr).
 	lastCondCtx map[string]any
+	// lastRelation — отношение последнего вопроса к хранилищу: проба вывода
+	// отношения (kaname#994) утверждает, ЧТО спросили, а не только ответ.
+	lastRelation string
 }
 
 func (m *mockRelations) CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
 	m.mu.Lock()
 	m.checkCalls++
 	m.lastCondCtx = condCtx
+	m.lastRelation = relation
 	m.mu.Unlock()
 	return m.checkResp, m.checkErr
 }

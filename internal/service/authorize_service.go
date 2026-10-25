@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
@@ -163,6 +164,10 @@ type AuthorizeService struct {
 	// session_record_check.go). nil — доводов нет нигде, и условие ложно, как
 	// до исхода (а).
 	sessions SessionRecords
+	// catalog — каталог модулей из живых строк: из него вопрос без отношения
+	// анонимной самопроверки берёт глагол типа объекта (`moduleVerbRelation`,
+	// kaname#994). nil — каталога нет, и такой вопрос получает отказ.
+	catalog catalog.Source
 	// now — часы службы: «сейчас» условий и живости записи сессии.
 	now func() time.Time
 }
@@ -196,6 +201,11 @@ type AuthorizeServiceConfig struct {
 	// SessionRecords — записи сессий человека, из которых выводятся доводы
 	// способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
 	SessionRecords SessionRecords
+	// Catalog — каталог модулей из ЖИВЫХ строк (тот же источник, что у ролей и
+	// выдач корня службы). Нужен вопросу без отношения, который разрешает действие
+	// глаголом типа (`CheckRequest.RelationByModuleVerb`); nil — такой вопрос
+	// получает отказ, а не общее умолчание.
+	Catalog catalog.Source
 	// Now — часы службы; nil — часы процесса.
 	Now func() time.Time
 }
@@ -212,6 +222,7 @@ func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
 		clusterAdmin: cfg.ClusterAdminChecker,
 		admission:    adm,
 		sessions:     cfg.SessionRecords,
+		catalog:      cfg.Catalog,
 		now:          now,
 	}
 }
@@ -242,7 +253,18 @@ type CheckRequest struct {
 	// on the explicit relation instead of the auto-derived `viewer` which
 	// would slip through `cluster.viewer` (выдано классу «вошедшие»).
 	RequiredRelation string
-	Context          map[string]any // optional CEL-context
+	// RelationByModuleVerb — вопрос без `RequiredRelation` разрешает действие
+	// глаголом типа объекта из каталога модуля (`v_<глагол>`), а не общим
+	// умолчанием `resolveActionToRelation` (kaname#994).
+	//
+	// Ставит его ТОЛЬКО анонимная самопроверка (kaname#959): отношение в ней
+	// запрещено, и выводит его служба. Умолчание `get` → `viewer` у типов
+	// модулей системного класса не охватывает, поэтому выдача анониму не
+	// давала ответа «да» никогда. Прочие вызывающие без отношения — вошедшие
+	// и модули — флага не ставят и разрешаются, как прежде: подстановка
+	// глагола им изменила бы ответ, а предмета для этого у правки нет.
+	RelationByModuleVerb bool
+	Context              map[string]any // optional CEL-context
 }
 
 // ResourceRef — typed resource ref.
@@ -404,7 +426,7 @@ func (s *AuthorizeService) checkInPass(ctx context.Context, req CheckRequest, ca
 	now := s.now().UTC().Truncate(time.Second)
 	result = &CheckResult{CheckedAt: now}
 
-	p := planCheck(ctx, req, now)
+	p := planCheck(ctx, req, now, s.catalogFacts())
 	if p.invalid != nil {
 		return result, p.invalid
 	}
@@ -483,7 +505,9 @@ type checkPlan struct {
 // Часы — параметром: у партии они ОДНИ на весь проход, иначе пункты одной
 // страницы получили бы разное «сейчас» при вычислении условий, и страница
 // описывала бы состояние, которого не было ни в один момент.
-func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
+//
+// Каталог — параметром по той же причине: у партии он ОДИН на весь проход.
+func planCheck(ctx context.Context, req CheckRequest, now time.Time, facts *catalog.Facts) checkPlan {
 	p := checkPlan{subject: req.Subject, action: req.Action}
 
 	// Input validation.
@@ -512,7 +536,12 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 	// fallback only applies when override is empty (legacy peer-service
 	// callers still work).
 	relation := strings.TrimSpace(req.RequiredRelation)
-	if relation == "" {
+	switch {
+	case relation != "":
+		// Отношение названо явно — его и спрашиваем.
+	case req.RelationByModuleVerb:
+		relation = moduleVerbRelation(facts, req.Action, req.Resource.Type)
+	default:
 		relation = resolveActionToRelation(req.Action)
 	}
 	if relation == "" {
@@ -627,7 +656,7 @@ func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relati
 // нет»: записи о выдаче неподтверждённому, существующие у него, спросившему о
 // нём наружу не называются.
 func (s *AuthorizeService) NeutralDenyReasons(ctx context.Context, req CheckRequest) []string {
-	p := planCheck(ctx, req, s.now().UTC())
+	p := planCheck(ctx, req, s.now().UTC(), s.catalogFacts())
 	if p.invalid != nil {
 		return []string{p.invalid.Error()}
 	}
@@ -903,8 +932,10 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	// Допуск субъекта (kaname#456, Р4а) — по вопросу на СУБЪЕКТ прохода, до
 	// прогонов: неподтверждённому «нет» на каждом его пункте, с причиной.
 	denied := make(map[string]bool, 1)
+	// Каталожный факт — один снимок на проход, как и часы.
+	facts := s.catalogFacts()
 	for i, req := range reqs {
-		p := planCheck(ctx, req, now)
+		p := planCheck(ctx, req, now, facts)
 		plans[i] = p
 		if p.invalid != nil {
 			// Genuine per-item validation failure (e.g. "Illegal argument …",

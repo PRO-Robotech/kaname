@@ -152,7 +152,10 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 		Context:          structToMap(req.GetContext()),
 	}
 	if anonymousSelf {
+		// Отношения анонимная форма не несёт: его выводит служба глаголом типа
+		// из каталога модуля, а не общим умолчанием (kaname#994).
 		decision.Subject = domain.SpeakerAnonymous
+		decision.RelationByModuleVerb = true
 	}
 	res, err := h.svc.Check(ctx, decision)
 	if err != nil {
