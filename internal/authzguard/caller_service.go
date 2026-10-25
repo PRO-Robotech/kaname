@@ -26,12 +26,11 @@ import (
 // приёмка ceremony-pace-is-named-by-number.md Р7). Сертификат, которого слушатель
 // не проверил (нет проверенной цепочки), личности не доказывает. Необъявленный
 // домен доверия и необъявленная пара не узнают никого.
+//
+// Привязка к выпустившему центру (kaname#988) судится ТЕМ ЖЕ перечнем, что на
+// gRPC-слушателях: лист края, выпущенный не центром края, краем не признаётся.
 func PeerIsGateway(modules moduleidentity.Roster, d grpcsrv.TrustDomain, st *tls.ConnectionState) bool {
-	san := VerifiedPeerIdentity(d, st)
-	if san == "" {
-		return false
-	}
-	id, ok := modules.Lookup(d, san)
+	id, ok := modules.FromTLSState(d, st)
 	return ok && id.Service == GatewayServiceName()
 }
 

@@ -777,7 +777,14 @@ func runServe(cfg config.Config) error {
 	// поверхность выдачи спрашивают ЭТОТ объект. Модулем признаётся только
 	// объявленная пара, и признанная личность зовёт только методы своего
 	// профиля.
-	moduleRoster := cfg.AuthN.ModuleRoster()
+	//
+	// Центры, к которым привязаны личности (kaname#988), читаются ЗДЕСЬ, при
+	// подъёме: нечитаемый файл центра — отказ старта, а не перечень, молча
+	// признающий меньше, чем объявила установка.
+	moduleRoster, err := cfg.AuthN.LoadModuleRoster()
+	if err != nil {
+		return fmt.Errorf("module identities: %w", err)
+	}
 	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),

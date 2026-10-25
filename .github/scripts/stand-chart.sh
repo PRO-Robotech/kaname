@@ -654,7 +654,7 @@ authn:
   # Личность края стенда (kaname#984): модулем признаётся только объявленная
   # пара, и посев, стоящий на месте края листом края, иначе краем не был бы.
   moduleIdentities:
-    - "$NS/$EDGE_SA=edge"
+    - "$NS/$EDGE_SA=edge@internal"
   clientToken:
     enabled: true
     tokenTtl: 15m

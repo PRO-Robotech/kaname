@@ -34,10 +34,16 @@
 package moduleidentity
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"sort"
 	"strings"
+
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
@@ -90,7 +96,16 @@ type Identity struct {
 	Service string
 	// Profile — профиль, объявленный установкой для этой пары.
 	Profile Profile
+	// Issuer — имя доверенного удостоверяющего центра, который ВПРАВЕ выпускать
+	// лист этой личности (kaname#988). Пусто — привязки нет: такая запись
+	// законна только вне боевого режима ([Roster.RequireIssuerBinding]).
+	Issuer string
 }
+
+// IssuerSet — доверенные удостоверяющие центры установки: имя → якоря.
+// Лист признаётся личностью с привязкой, только если его проверенная цепочка
+// оканчивается якорем именно её центра.
+type IssuerSet map[string][]*x509.Certificate
 
 // ParseSAN — ЕДИНСТВЕННЫЙ разбор SPIFFE-идентификатора рабочей нагрузки:
 // `spiffe://<домен>/ns/<пространство>/sa/<учётка>`.
@@ -128,6 +143,9 @@ func ServiceFromAccount(account string) (string, bool) {
 // не признаётся никто.
 type Roster struct {
 	byPair map[string]Identity
+	// anchors — сырые якоря центров по имени: сравнение цепочки — побайтовое,
+	// по `Raw`, а не по имени субъекта, которое повторить может кто угодно.
+	anchors map[string][][]byte
 }
 
 // pairKey — ключ пары. Косая черта в пространстве и учётке невозможна (их
@@ -135,16 +153,52 @@ type Roster struct {
 func pairKey(namespace, account string) string { return namespace + "/" + account }
 
 // EntryShape — форма записи перечня для текстов отказа и справки.
-const EntryShape = "<namespace>/<service-account>=<profile>"
+const EntryShape = "<namespace>/<service-account>=<profile>[@<issuer>]"
 
-// Parse собирает перечень из записей установки.
+// Parse собирает перечень из записей установки без доверенных центров: запись,
+// называющая центр, отвергается как называющая необъявленный.
+func Parse(entries []string) (Roster, error) {
+	return ParseWithIssuers(entries, nil)
+}
+
+// ParseDeclared — суд записей БЕЗ чтения центров: форма каждой записи, единство
+// пары и то, что названный записью центр объявлен по имени (issuerNames).
+//
+// Это суд стража настройки: он не читает файлов и потому судит профиль
+// посадки на любой машине. Перечень, собранный им, якорей не несёт, и личность
+// с привязкой по нему не признаётся — признаёт перечень [ParseWithIssuers],
+// собранный из прочитанных центров.
+func ParseDeclared(entries []string, issuerNames []string) (Roster, error) {
+	declared := make(map[string]bool, len(issuerNames))
+	for _, n := range issuerNames {
+		declared[n] = true
+	}
+	return parseRoster(entries, func(issuer string) bool { return declared[issuer] }, nil)
+}
+
+// ParseWithIssuers собирает перечень из записей установки и её прочитанных
+// доверенных центров.
 //
 // Запись — [EntryShape]. Пробелы по краям срезаются, пустые записи
 // отбрасываются: случайно пустая величина (`""` в переменной окружения) не
 // должна становиться записью. Всякая иная неисправность — ошибка с названной
 // записью: страж старта отвергает установку, а не признаёт меньше, чем она
-// объявила.
-func Parse(entries []string) (Roster, error) {
+// объявила. Центр, названный записью, обязан быть объявлен и нести хотя бы
+// один якорь.
+func ParseWithIssuers(entries []string, issuers IssuerSet) (Roster, error) {
+	anchors := make(map[string][][]byte, len(issuers))
+	for name, certs := range issuers {
+		for _, c := range certs {
+			if c != nil && len(c.Raw) > 0 {
+				anchors[name] = append(anchors[name], c.Raw)
+			}
+		}
+	}
+	return parseRoster(entries, func(issuer string) bool { return len(anchors[issuer]) > 0 }, anchors)
+}
+
+// parseRoster — общий разбор записей: known отвечает, объявлен ли центр.
+func parseRoster(entries []string, known func(issuer string) bool, anchors map[string][][]byte) (Roster, error) {
 	byPair := make(map[string]Identity, len(entries))
 	for _, raw := range entries {
 		entry := strings.TrimSpace(raw)
@@ -154,6 +208,11 @@ func Parse(entries []string) (Roster, error) {
 		id, err := parseEntry(entry)
 		if err != nil {
 			return Roster{}, err
+		}
+		if id.Issuer != "" && !known(id.Issuer) {
+			return Roster{}, fmt.Errorf("module identity %q names the issuer %q, which the installation "+
+				"has not declared (or declared without a single certificate): its leaf could never be "+
+				"bound to the authority that issued it", entry, id.Issuer)
 		}
 		key := pairKey(id.Namespace, id.Account)
 		if prev, dup := byPair[key]; dup {
@@ -166,12 +225,12 @@ func Parse(entries []string) (Roster, error) {
 	if len(byPair) == 0 {
 		return Roster{}, nil
 	}
-	return Roster{byPair: byPair}, nil
+	return Roster{byPair: byPair, anchors: anchors}, nil
 }
 
 // parseEntry разбирает одну непустую запись.
 func parseEntry(entry string) (Identity, error) {
-	pair, profile, found := strings.Cut(entry, "=")
+	pair, rest, found := strings.Cut(entry, "=")
 	if !found {
 		return Identity{}, fmt.Errorf("module identity %q carries no profile: write it as %s", entry, EntryShape)
 	}
@@ -192,11 +251,16 @@ func parseEntry(entry string) (Identity, error) {
 		return Identity{}, fmt.Errorf("module identity %q: service account %q does not carry the module "+
 			"prefix %q followed by the service name, so no service name can be read from it", entry, account, AccountPrefix)
 	}
+	profile, issuer, bound := strings.Cut(rest, "@")
 	p := Profile(profile)
 	if !p.known() {
 		return Identity{}, fmt.Errorf("module identity %q: unknown profile %q (known: %s)", entry, profile, profileList())
 	}
-	return Identity{Namespace: ns, Account: account, Service: svc, Profile: p}, nil
+	if bound && !isDNSLabel(issuer) {
+		return Identity{}, fmt.Errorf("module identity %q: issuer name %q is not a name "+
+			"(lower-case latin letters, digits and '-', starting and ending with a letter or a digit)", entry, issuer)
+	}
+	return Identity{Namespace: ns, Account: account, Service: svc, Profile: p, Issuer: issuer}, nil
 }
 
 // profileList — словарь профилей строкой для текста отказа.
@@ -223,10 +287,8 @@ func (r Roster) Identities() []Identity {
 	return out
 }
 
-// Lookup — признание идентификатора san, впущенного доменом d.
-//
-// Ложь — идентификатор формы не имеет либо его пары нет в перечне.
-func (r Roster) Lookup(d grpcsrv.TrustDomain, san string) (Identity, bool) {
+// pair — личность по разобранному идентификатору, без суда о выпустившем.
+func (r Roster) pair(d grpcsrv.TrustDomain, san string) (Identity, bool) {
 	ns, account, ok := ParseSAN(d, san)
 	if !ok {
 		return Identity{}, false
@@ -235,16 +297,99 @@ func (r Roster) Lookup(d grpcsrv.TrustDomain, san string) (Identity, bool) {
 	return id, ok
 }
 
-// FromContext — признание вызывающего gRPC-слушателя: идентификатор
-// ПРОВЕРЕННОГО клиентского листа, разобранный доменом, который его впустил.
+// Lookup — признание идентификатора san, впущенного доменом d, когда цепочки
+// листа под рукой нет.
 //
-// Непроверенный пир, пустой идентификатор и пара вне перечня — не модуль.
+// Личность с привязкой к центру (kaname#988) здесь НЕ признаётся: без
+// проверенной цепочки нечем доказать, что лист выпустил её центр, а признать её
+// по одному имени значило бы снять привязку на этом пути. Ложь — идентификатор
+// формы не имеет, его пары нет в перечне либо личность привязана к центру.
+func (r Roster) Lookup(d grpcsrv.TrustDomain, san string) (Identity, bool) {
+	id, ok := r.pair(d, san)
+	if !ok || id.Issuer != "" {
+		return Identity{}, false
+	}
+	return id, true
+}
+
+// FromContext — признание вызывающего gRPC-слушателя: идентификатор
+// ПРОВЕРЕННОГО клиентского листа, разобранный доменом, который его впустил, и —
+// у личности с привязкой — проверенная цепочка, оканчивающаяся якорем её
+// центра (kaname#988).
+//
+// Непроверенный пир, пустой идентификатор, пара вне перечня и лист чужого
+// доверенного центра — не модуль.
 func (r Roster) FromContext(ctx context.Context) (Identity, bool) {
 	san, verified := grpcsrv.CertIdentityFromContext(ctx)
 	if !verified || san == "" {
 		return Identity{}, false
 	}
-	return r.Lookup(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+	id, ok := r.pair(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+	if !ok {
+		return Identity{}, false
+	}
+	if id.Issuer == "" {
+		return id, true
+	}
+	if !r.issuedBy(id.Issuer, peerVerifiedChains(ctx)) {
+		return Identity{}, false
+	}
+	return id, true
+}
+
+// FromTLSState — признание пира HTTP-слушателя: URI SAN нашего домена с
+// проверенного листа и — у личности с привязкой — цепочка до якоря её центра.
+// Тот же суд, что [Roster.FromContext], на состоянии рукопожатия.
+func (r Roster) FromTLSState(d grpcsrv.TrustDomain, st *tls.ConnectionState) (Identity, bool) {
+	if st == nil || len(st.VerifiedChains) == 0 || len(st.VerifiedChains[0]) == 0 {
+		return Identity{}, false
+	}
+	san := d.CertIdentity(st.VerifiedChains[0][0])
+	if san == "" {
+		return Identity{}, false
+	}
+	id, ok := r.pair(d, san)
+	if !ok {
+		return Identity{}, false
+	}
+	if id.Issuer != "" && !r.issuedBy(id.Issuer, st.VerifiedChains) {
+		return Identity{}, false
+	}
+	return id, true
+}
+
+// issuedBy — оканчивается ли хотя бы одна проверенная цепочка якорем центра
+// issuer. Якорь — последний сертификат цепочки, которую построил слушатель от
+// своего пула доверенных центров; сравнение побайтовое.
+func (r Roster) issuedBy(issuer string, chains [][]*x509.Certificate) bool {
+	anchors := r.anchors[issuer]
+	for _, chain := range chains {
+		if len(chain) == 0 {
+			continue
+		}
+		root := chain[len(chain)-1]
+		for _, a := range anchors {
+			if bytes.Equal(root.Raw, a) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// peerVerifiedChains — проверенные слушателем цепочки пира gRPC-вызова.
+// Пусто — пира без проверенной цепочки нет (открытый текст, лист не
+// предъявлен либо не проверен).
+func peerVerifiedChains(ctx context.Context) [][]*x509.Certificate {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.AuthInfo == nil {
+		return nil
+	}
+	info, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return nil
+	}
+	return info.State.VerifiedChains
 }
 
 // Gate — вход стража перечня: имя ручки для текста отказа.
@@ -265,6 +410,28 @@ func (r Roster) Require(g Gate) error {
 	return fmt.Errorf("%s is empty: the installation has not declared its module identities, so no "+
 		"client certificate is recognized as a module — every module call is refused, the edge "+
 		"included; list each module as %s (profiles: %s)", g.Knob, EntryShape, profileList())
+}
+
+// RequireIssuerBinding — страж привязки боевой посадки (kaname#988): каждая
+// объявленная личность называет центр, который вправе выпускать её лист.
+//
+// Без привязки доверие ко всем объявленным центрам общее: лист с допустимым
+// SAN признаётся, какой бы из доверенных центров его ни выпустил, и разделение
+// «лист края — только от центра края» держится на порядке выпуска, а не на
+// проверке. Отказ называет каждую непривязанную личность.
+func (r Roster) RequireIssuerBinding(g Gate) error {
+	var unbound []string
+	for _, id := range r.Identities() {
+		if id.Issuer == "" {
+			unbound = append(unbound, pairKey(id.Namespace, id.Account))
+		}
+	}
+	if len(unbound) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s: module identities %s name no issuer, so a leaf carrying their SAN is "+
+		"recognized whichever trusted authority issued it; bind each one to its authority as %s",
+		g.Knob, strings.Join(unbound, ", "), EntryShape)
 }
 
 // isDNSLabel — имя пространства кластера: строчные латинские, цифры и `-`, на

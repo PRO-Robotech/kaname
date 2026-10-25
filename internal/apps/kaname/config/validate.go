@@ -404,15 +404,32 @@ const moduleIdentitiesKnob = "authn.module-identities (env KANAME_AUTHN__MODULE_
 // Вне боевого режима пустой перечень допустим: стенд без взаимного TLS
 // проверенного листа не несёт, и решать по перечню там нечего.
 func (c Config) validateModuleIdentities() error {
-	r, err := moduleidentity.Parse(c.AuthN.ModuleIdentities)
+	issuers, err := clientIssuerEntries(c.AuthN.ClientIssuers)
 	if err != nil {
-		return fmt.Errorf("%s: %w", moduleIdentitiesKnob, err)
+		return fmt.Errorf("%s: %w", clientIssuersKnob, err)
+	}
+	names := make([]string, 0, len(issuers))
+	for _, i := range issuers {
+		names = append(names, i.name)
+	}
+	r, err := moduleidentity.ParseDeclared(c.AuthN.ModuleIdentities, names)
+	if err != nil {
+		return fmt.Errorf("%s / %s: %w", moduleIdentitiesKnob, clientIssuersKnob, err)
 	}
 	if !c.AuthN.Mode.IsProduction() {
 		return nil
 	}
-	return r.Require(moduleidentity.Gate{Knob: moduleIdentitiesKnob})
+	if err := r.Require(moduleidentity.Gate{Knob: moduleIdentitiesKnob}); err != nil {
+		return err
+	}
+	// Привязка к выпустившему центру (kaname#988) обязательна в боевом режиме:
+	// без неё доверие ко всем центрам пула общее. Файлы центров здесь не
+	// читаются — их читает корень при подъёме (`AuthNConfig.LoadModuleRoster`).
+	return r.RequireIssuerBinding(moduleidentity.Gate{Knob: moduleIdentitiesKnob})
 }
+
+// clientIssuersKnob — имя ручки доверенных центров для текстов отказа.
+const clientIssuersKnob = "authn.client-issuers (env KANAME_AUTHN__CLIENT_ISSUERS)"
 
 // validateMode ensures Mode is a known ENUM value.
 func (c Config) validateMode() error {
