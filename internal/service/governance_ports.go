@@ -94,8 +94,9 @@ type ResourceMirrorEmitter interface {
 	// вызывающего (kaname#1002).
 	DescendantsTx(ctx context.Context, tx Tx, parentType, parentID string) ([]RegisteredDescendant, error)
 	// DropRegistrationTx снимает регистрацию потомка безусловно: строку зеркала
-	// (`catalogType`) и всю цепь предков (`modelType`). deleted — строка зеркала была.
-	DropRegistrationTx(ctx context.Context, tx Tx, catalogType, modelType, objectID string) (deleted bool, err error)
+	// (`catalogType`) и всю цепь предков (`modelType`). deleted — строка зеркала была;
+	// version — версия снятой регистрации, нулевая без версии (kaname#969).
+	DropRegistrationTx(ctx context.Context, tx Tx, catalogType, modelType, objectID string) (deleted bool, version time.Time, err error)
 }
 
 // RegisteredDescendant — потомок снимаемого объекта по цепи предков и отношения,

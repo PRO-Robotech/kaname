@@ -44,12 +44,19 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// relationOutboxEmitter — narrow write port: emit FGA tuple
-// write/delete rows inside a caller-owned tx. Implemented by
+// relationOutboxEmitter — узкий порт записи: кортежи иерархии, которые пишет
+// посредник (указатель области, родитель, владелец), в транзакции вызывающего,
+// УПОРЯДОЧЕННЫЕ ВЕРСИЕЙ РЕГИСТРАЦИИ владельца. Реализация —
 // *repo/kaname/pg.FGAOutboxEmitter.
+//
+// ВЕРСИЯ — ЧАСТЬ ПОРТА, А НЕ ОПЦИЯ (kaname#969). Без неё кортеж упорядочен меткой
+// журнала, и снятие регистрации, дошедшее после повторной регистрации того же
+// ключа, снимало владельца и указатель области НОВОГО объекта: метка снятия новее
+// любого факта. С версией снятие v2 снимает факты не новее v2, и кортежи
+// регистрации v3 остаются — тот же порядок, что у строки зеркала.
 type relationOutboxEmitter interface {
-	EmitWriteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error
-	EmitDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error
+	EmitOrderedWriteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, version time.Time) error
+	EmitOrderedDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, tombstone time.Time) error
 }
 
 // resourceMirrorEmitter — narrow write port for the
@@ -70,7 +77,7 @@ type resourceMirrorEmitter interface {
 	// (kaname#1002, см. dropDescendants). Часть ОБЯЗАТЕЛЬНОГО порта, а не опция:
 	// «нет читателя — потомков не снимаем» и было дефектом.
 	DescendantsTx(ctx context.Context, tx service.Tx, parentType, parentID string) ([]service.RegisteredDescendant, error)
-	DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (deleted bool, err error)
+	DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (deleted bool, version time.Time, err error)
 }
 
 // keyWithdrawal — узкий порт: снятие регистрации объекта снимает его выдачи
@@ -896,12 +903,12 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			projectionUnchanged = false
 		}
 		if changed {
-			if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
+			if err = uc.emitter.EmitOrderedWriteTx(ctx, tx, tuples, row.SourceVersion); err != nil {
 				return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 			}
 		}
 	} else {
-		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
+		if err = uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, row.SourceVersion); err != nil {
 			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
 		deleted, derr := uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion)
@@ -1021,12 +1028,20 @@ func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx servi
 		if module, ok := catalogModule(catalogType); !ok || module != parentModule {
 			continue
 		}
-		dropped, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
+		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
 		if err != nil {
 			return fmt.Errorf("drop descendant registration: %w", err)
 		}
+		// Надгробие кортежей потомка — не старше его последней регистрации
+		// (kaname#969): регистрация снята безусловно, и её кортежи уходят все, даже
+		// записанные версией новее надгробия родителя. Версия снятой строки и есть
+		// версия последней регистрации — кортежи пишутся ею в той же транзакции.
+		tombstone := parent.SourceVersion
+		if version.After(tombstone) {
+			tombstone = version
+		}
 		if tuples := proxyOwned(d.Standing); len(tuples) > 0 {
-			if err := uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
+			if err := uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, tombstone); err != nil {
 				return fmt.Errorf("emit fga outbox for descendant: %w", err)
 			}
 		}

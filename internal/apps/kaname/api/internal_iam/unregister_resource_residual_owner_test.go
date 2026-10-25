@@ -172,12 +172,12 @@ func (s *factStore) ApplyTx(_ context.Context, tx service.Tx, objectType, object
 // свойство коммита, как и в базе.
 type journalEmitter struct{}
 
-func (journalEmitter) EmitWriteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+func (journalEmitter) EmitOrderedWriteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple, _ time.Time) error {
 	tx.(*factTx).writes = append(tx.(*factTx).writes, tuples...)
 	return nil
 }
 
-func (journalEmitter) EmitDeleteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+func (journalEmitter) EmitOrderedDeleteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple, _ time.Time) error {
 	tx.(*factTx).deletes = append(tx.(*factTx).deletes, tuples...)
 	return nil
 }
