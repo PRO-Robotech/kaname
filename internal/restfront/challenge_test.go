@@ -106,7 +106,7 @@ func TestChallenge_HintNamesTheSchemeAndNothingElse(t *testing.T) {
 // дрейф, из-за которого проводка меняется, а замок этого не замечает. Адрес
 // слушателя произволен — привязки поднимаются, не соединяясь.
 func TestChallenge_PublicFrontIsWrapped(t *testing.T) {
-	h, err := NewPublic(context.Background(), "127.0.0.1:1", dialOpts())
+	h, err := NewPublic(context.Background(), "127.0.0.1:1", dialOpts(), Limits{})
 	if err != nil {
 		t.Fatalf("сборка публичного фронта: %v", err)
 	}

@@ -138,6 +138,11 @@ func (c Config) Validate() error {
 	// приём аккаунта отвергается отказом «потолок не назван».
 	errs = multierr.Append(errs, c.OwnCeilings.Validate())
 
+	// Потолки публичного REST-фронта (kaname#990): отрицательное — отказ в
+	// любой посадке, снятие — в боевой. Края у отдельно поставленной службы нет,
+	// и держать потолок, кроме неё самой, некому.
+	errs = multierr.Append(errs, c.APIServer.RESTLimits.Validate(c.AuthN.Mode.IsProduction()))
+
 	// logger.level must be a known level so a typo fails fast at boot rather
 	// than silently degrading observability. SlogLevel reports the allowed set.
 	if _, err := c.Logger.SlogLevel(); err != nil {

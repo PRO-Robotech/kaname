@@ -209,6 +209,9 @@ type APIServerConfig struct {
 	// только ВЕСЬ набор из четырёх осей — частичное объявление отвергается
 	// стартом с именем слушателя.
 	RateLimit RateLimitConfig `mapstructure:"rate-limit"`
+	// RESTLimits — потолки размера тела и одновременности собственного
+	// публичного REST-фронта (kaname#990). Разбор — в шапке rest_limits.go.
+	RESTLimits RESTLimitsConfig `mapstructure:"rest-limits"`
 	// LoginLaneEndpoint — адрес HTTP-слушателя полосы входа паролем (Ф3,
 	// kacho#1269): глаголы формы (перечень — `loginlanehttp.Paths()`),
 	// ретранслируемые краем; TLS взаимный, допуск — ровно край. Пустой —

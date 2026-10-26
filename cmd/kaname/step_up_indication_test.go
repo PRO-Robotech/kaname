@@ -83,7 +83,7 @@ func newStepUpStand(t *testing.T, floor string) stepUpStand {
 	t.Cleanup(srv.Stop)
 
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
-	front, err := restfront.NewPublic(context.Background(), lis.Addr().String(), opts)
+	front, err := restfront.NewPublic(context.Background(), lis.Addr().String(), opts, restfront.Limits{})
 	if err != nil {
 		t.Fatalf("сборка публичного фронта: %v", err)
 	}
