@@ -158,6 +158,13 @@ func declaredVerbs(m *Manifest, resources []string) (map[string]bool, []string) 
 				set[v.Name] = true
 			}
 		}
+		// Контейнерное действие (kaname#1003) правило вправе назвать ПОИМЁННО: оно
+		// объявлено ресурсом, хоть и не входит в набор его глаголов.
+		for _, cv := range res.ContainerVerbs {
+			if cv.Name != "" {
+				set[cv.Name] = true
+			}
+		}
 	}
 	names := make([]string, 0, len(set))
 	for n := range set {

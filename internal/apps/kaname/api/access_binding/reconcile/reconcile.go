@@ -277,6 +277,14 @@ type ReconcileStore interface {
 	MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error)
 	MatchByIDsIAMDirect(ctx context.Context, types []string, ids []string) ([]domain.MirrorObject, error)
 
+	// MatchCreatedByIAMDirect — собственные объекты iam типов `types` в области
+	// `scope`, создатель которых — учётка из `creators` (kaname#1003, селектор
+	// создателя). Отбор — по индексу «аккаунт, создатель», а не перебором объектов
+	// области: число строк пропорционально числу учёток создателя. Тип, факт
+	// создателя которого не хранится, не даёт ни одного объекта. Сужение по
+	// области — то же доказанное надмножество IsContainedIn, что у ветви якоря.
+	MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error)
+
 	// MatchIAMDirect returns IAM's OWN objects matching a selector's
 	// types+matchLabels read SAME-DB from the native tables (FeedIAMDirect —
 	// iam.project/iam.account). The returned MirrorObject carries the iam-hierarchy
@@ -1155,6 +1163,12 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 			out = append(out, sm)
 		}
 	}
+	// Контейнерные действия правил (kaname#1003, creator.go) — члены на объекте
+	// ОБЛАСТИ: путь по объекту обязан их выводить, иначе событие аккаунта сняло бы
+	// их как устаревшие.
+	if o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
+		out = append(out, containerMembers(cat, bs)...)
+	}
 	// Per-object target least-priv (F8, IAM-1-21): a rule may only grant an object the
 	// binding's target also lists. Uniform across all arms, exactly as
 	// matchSelectorObjects intersects the matched set. Вложенное правило (kaname#874)
@@ -1355,11 +1369,27 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			}
 			continue
 		}
-		// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
-		// per the target (by-id when per-object; O(scope) push-down otherwise), and every
-		// arm's matches are intersected with the target. IsContainedIn below stays the
-		// authoritative containment re-verify.
-		matched, err := r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+		// Правило, которое на своих типах называет одни контейнерные действия
+		// (kaname#1003), объектам не даёт ничего: его член — на объекте области
+		// (containerMembers). Кандидатов оно не ищет вовсе — перебора учёток
+		// аккаунта у выдачи роли создателя нет.
+		if !selectorWritesObjects(cat, sel) {
+			continue
+		}
+		var matched []domain.MirrorObject
+		var err error
+		if sel.CreatedBySubject {
+			// Селектор создателя: кандидаты — объекты области, созданные
+			// субъектами-учётками выдачи, отбором по индексу (аккаунт, создатель),
+			// а не перебором объектов области (§3 приёмки, «производительность»).
+			matched, err = r.matchCreatorObjects(ctx, s, sel, bs)
+		} else {
+			// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
+			// per the target (by-id when per-object; O(scope) push-down otherwise), and every
+			// arm's matches are intersected with the target. IsContainedIn below stays the
+			// authoritative containment re-verify.
+			matched, err = r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1377,6 +1407,9 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			out = append(out, dm)
 		}
 	}
+	// Контейнерные действия правил (kaname#1003, creator.go): члены на объекте
+	// области — тот же вывод, что у пути по объекту.
+	out = append(out, containerMembers(cat, bs)...)
 	// Публичное чтение детям (kaname#856): член `public_reader` на каждом
 	// объявленном контейнере, который выдача уже даёт действующим членом, — тот
 	// же вывод, что у прямого пути по объекту (desiredMembersForObject).
@@ -1398,6 +1431,13 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 //   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
 //     grants, fail-closed).
 func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+	// Селектор создателя (kaname#1003, creator.go): объект входит в охват правила
+	// только для субъекта, который его создал. Никому — объект правилом не
+	// выбран вовсе (ни члена, ни отвергнутого члена: охвата нет, а не вне области).
+	gs = creatorGrantees(sel, gs, o)
+	if len(gs) == 0 {
+		return DesiredMember{}, false
+	}
 	if !o.IsContainedIn(scope) {
 		return DesiredMember{
 			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
@@ -1409,9 +1449,19 @@ func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []g
 	// не зависит: первый же отказ — отказ всего члена.
 	var tuples []domain.MembershipTuple
 	for _, g := range gs {
-		t, ok := ruleObjectTuples(cat, policy, g.subject, g.verbs, o.ObjectType, o.ObjectID)
+		// Контейнерные действия кортежей на объекте не пишут (kaname#1003): их
+		// отношение лежит на родителе (containerMembers). Правило, у которого на
+		// типе объекта кроме них ничего нет, объекту не даёт ничего — даже яруса.
+		verbs := objectVerbsOf(cat, o.ObjectType, g.verbs)
+		if len(verbs) == 0 {
+			continue
+		}
+		t, ok := ruleObjectTuples(cat, policy, g.subject, verbs, o.ObjectType, o.ObjectID)
 		if !ok {
 			return DesiredMember{}, false
+		}
+		if sel.CreatedBySubject {
+			t = verbTuplesOnly(t)
 		}
 		tuples = append(tuples, t...)
 	}
