@@ -48,9 +48,11 @@ import (
 // object ALREADY has a member row — the one this same create's ReconcileBindingForward
 // pass wrote moments ago for the new binding itself.
 func ownerAccessBindingStore(sameCreateMembers []domain.AccessBindingID) *fakeStore {
+	// Владелец (`*.*`) несёт подстановку `*`: поимённый набор тех же глаголов
+	// ярус `admin` не даёт (удаление яруса не выводит, kaname#1035).
 	fp := domain.Rule{
 		Module: "iam", Resources: []string{"accessBinding"},
-		Verbs: []string{"get", "list", "create", "update", "delete"},
+		Verbs: []string{"*"},
 	}.Fingerprint()
 	return &fakeStore{
 		scope:       domain.ScopeAnchor{Type: "account", ID: "acc-1"},
@@ -58,7 +60,7 @@ func ownerAccessBindingStore(sameCreateMembers []domain.AccessBindingID) *fakeSt
 		selectors: []domain.RuleSelector{{
 			Arm: domain.ArmAnchor, RuleFP: fp,
 			ObjectTypes: []string{"iam.accessBinding"},
-			Verbs:       []string{"get", "list", "create", "update", "delete"},
+			Verbs:       []string{"*"},
 		}},
 		iamDirect: map[string][]domain.MirrorObject{
 			"iam.accessBinding": {

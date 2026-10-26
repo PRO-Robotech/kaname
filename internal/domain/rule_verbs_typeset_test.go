@@ -71,14 +71,15 @@ func TestIsVerbOfType_IsScopedToTheTypeSet(t *testing.T) {
 }
 
 // TestScopeSelfVerbs_ExpandsWildcardToTheScopeTypeSet — проекция на собственный
-// якорь привязки тоже разворачивает `*` по набору ТИПА якоря.
+// якорь привязки тоже разворачивает `*` по набору ТИПА якоря; знак `*` остаётся
+// рядом с развёрнутым набором — из него выводится ярус (kaname#1035).
 func TestScopeSelfVerbs_ExpandsWildcardToTheScopeTypeSet(t *testing.T) {
 	superuser := Rules{{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}}}
 	wide := []string{"get", "list", "create", "update", "delete", "addtargets"}
-	require.ElementsMatch(t, wide, superuser.ScopeSelfVerbs("account", wide))
+	require.ElementsMatch(t, append(append([]string(nil), wide...), wildcard), superuser.ScopeSelfVerbs("account", wide))
 
 	narrow := []string{"get", "list"}
-	require.ElementsMatch(t, narrow, superuser.ScopeSelfVerbs("account", narrow))
+	require.ElementsMatch(t, append(append([]string(nil), narrow...), wildcard), superuser.ScopeSelfVerbs("account", narrow))
 }
 
 // TestDomainStaysStdlibOnly — объявление файла обязано остаться правдой.

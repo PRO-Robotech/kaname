@@ -71,7 +71,9 @@ func TestTierParityPredicateFallsOnAnInjectedDivergenceAndIsSilentOnItsLegalTwin
 	// `delete`, и `update`.
 	twin := []tierParityRole{
 		parityRoleOf("iam.user.view", "iam", "user", "get", "list"),
-		parityRoleOf("vpc.network.admin", "vpc", "network", "delete"),
+		// Администратор — подстановкой `*`, как у посеянных ролей: поимённое
+		// `delete` яруса не даёт (kaname#1035), ярус `admin` правила даёт только `*`.
+		parityRoleOf("vpc.network.admin", "vpc", "network", "*"),
 		parityRoleOf("vpc.network.edit", "vpc", "network", "update"),
 		parityRoleOf("vpc.network.view", "vpc", "network", "get"),
 	}

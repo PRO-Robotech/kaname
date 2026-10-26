@@ -138,6 +138,17 @@ func wildcardTier(expanded []string) string {
 // Returns nil when no rule applies to the scope self (a content-only role —
 // e.g. `compute.instance` rules — grants nothing ON the account/project object,
 // only on its content; the scope-self member is then absent, fail-closed).
+//
+// # Подстановка сохраняется знаком `*` рядом с развёрнутым набором
+//
+// Подстановка `*` разворачивается в набор ТИПА якоря — из него пишутся отношения
+// `v_*`. Сам знак `*` при этом остаётся в ответе: ярус выводится из него
+// ([ResolveVerbsAndTier]), и только подстановка даёт ярус `admin` — правило,
+// перечислившее те же глаголы поимённо, его не даёт (удаление яруса не даёт,
+// kaname#1035). Без знака сборщик кортежей якоря видел бы развёрнутый набор, и
+// владелец аккаунта (`*.*`) молча понизился бы до редактора. Знак отношением не
+// становится: глаголом типа он не является ([IsVerbOfType]), и классу он не
+// достаётся (класс получает только чтение, [IsClassReadVerb]).
 func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []string {
 	var collected []string
 	matched := false
@@ -170,6 +181,11 @@ func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []strin
 		return nil
 	}
 	verbs, _ := ResolveVerbsAndTier(collected, typeVerbs)
+	for _, v := range collected {
+		if v == wildcard {
+			return append(append([]string(nil), verbs...), wildcard)
+		}
+	}
 	return verbs
 }
 
