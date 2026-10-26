@@ -31,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -96,6 +97,17 @@ type Handler struct {
 	// A knob may carry the exception; it may not carry the rule. Set via
 	// WithInsecureAnonymousPeer.
 	insecureAnonymousPeer bool
+	// modules — личности модулей установки (kaname#984): пиром-модулем без
+	// переданной личности признаётся только объявленная пара. Нулевое значение
+	// не признаёт никого.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки — тот же,
+// что у политик вызывающего обоих слушателей.
+func (h *Handler) WithModuleRoster(r moduleidentity.Roster) *Handler {
+	h.modules = r
+	return h
 }
 
 // NewHandler — builder. Both svc and whoAmI are required (composition root
@@ -124,7 +136,7 @@ func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
 
 // Check — see iamv1.AuthorizeServiceServer.
 func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (*iamv1.AuthorizeCheckResponse, error) {
-	anonymousSelf := authzguard.IsAnonymousSelfCheck(ctx, req)
+	anonymousSelf := authzguard.IsAnonymousSelfCheck(ctx, req, h.modules)
 	if req.GetSubject() == "" && !anonymousSelf {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument subject: required")
 	}
@@ -153,9 +165,8 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	}
 	if anonymousSelf {
 		// Отношения анонимная форма не несёт: его выводит служба глаголом типа
-		// из каталога модуля, а не общим умолчанием (kaname#994).
+		// из каталога модуля, как всякому вопросу без отношения (kaname#994).
 		decision.Subject = domain.SpeakerAnonymous
-		decision.RelationByModuleVerb = true
 	}
 	res, err := h.svc.Check(ctx, decision)
 	if err != nil {

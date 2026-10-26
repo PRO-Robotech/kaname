@@ -76,6 +76,9 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		System:          b.System,
 		// Причина отзыва (kaname#963, Д2) — на каждом чтении, как статус.
 		RevocationReason: revocationReasonToProto(b.RevocationReason),
+		// Делегирование, по которому выдачу сделал делегат (kaname#986) — на
+		// каждом чтении: единая проекция Get и всех перечней (CE-15).
+		DelegationId: string(b.DelegationID),
 	}, nil
 }
 
@@ -94,6 +97,8 @@ func revocationReasonToProto(r domain.RevocationReason) *iamv1.AccessBinding_Rev
 		v = iamv1.AccessBinding_REVOCATION_REASON_EXPIRED
 	case domain.RevocationReasonResourceUnregistered:
 		v = iamv1.AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED
+	case domain.RevocationReasonDelegationRevoked:
+		v = iamv1.AccessBinding_REVOCATION_REASON_DELEGATION_REVOKED
 	default:
 		return nil
 	}

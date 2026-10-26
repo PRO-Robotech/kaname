@@ -66,6 +66,7 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
+		kanamepg.NewRegistrationAudit(),
 	)
 	return uc, &outboxProbe{pool: pool}
 }

@@ -25,6 +25,7 @@ import (
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	clusterpublicapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/clusterpublic"
+	grantdelegationapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/grant_delegation"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	identityquotaapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/identityquota"
@@ -47,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -82,6 +84,9 @@ type services struct {
 	membershipHandler    *membershipapp.Handler
 	roleHandler          *roleapp.Handler
 	accessBindingHandler *accessbindingapp.Handler
+	// grantDelegationHandler — GrantDelegationService (kaname#986): только
+	// публичный (арендаторский) слушатель.
+	grantDelegationHandler *grantdelegationapp.Handler
 	// internalIAMHandler — InternalIAMService (LookupSubject for the
 	// api-gateway auth-interceptor; Check delegates to AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
@@ -252,7 +257,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// есть чем завтра.
 	catalogRows moduleapp.CatalogStateSource,
 	metricsReg *metrics.Registry,
-	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
+	cfg config.Config,
+	// moduleRoster — перечень личностей модулей, прочитанный корнем ОДИН раз с
+	// проверкой ошибки (kaname#987): обработчик внутреннего Check, посредник записи
+	// отношений и допуск пира у службы решений судят по тому же значению, что
+	// политики вызывающего.
+	moduleRoster moduleidentity.Roster,
+	tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
 	_ = slavePool // kanameRepo is built and passed in by main()
 
 	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
@@ -649,6 +660,22 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// SAME requireGrantAuthority predicate ListByScope/ListByRole enforce).
 	abExpandAccess := accessbindingapp.NewExpandAccessUseCase(relationStore).
 		WithGrantAuthority(kanameRepo, relationStore, logger)
+	// Делегированный путь права выдавать (kaname#986, Р2): делегат выдаёт, отзывает
+	// и удаляет выдачи в пределах своего делегирования. Один экземпляр на три глагола
+	// — тот же, что у мира проб (`gdWireGrantPath`).
+	abDelegated := accessbindingapp.NewDelegatedGrantPath(kanameRepo, relationStore)
+	abCreate.WithDelegatedGrantPath(abDelegated)
+	abRevoke.WithDelegatedGrantPath(abDelegated)
+	abDelete.WithDelegatedGrantPath(abDelegated)
+	// GrantDelegationService (kaname#986, Р1): делегирования права выдавать. Право
+	// на каждом глаголе решает обработчик (`HANDLER_DECIDES`).
+	grantDelegationHandler := grantdelegationapp.NewHandler(
+		grantdelegationapp.NewCreateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).
+			WithRelationStore(relationStore, logger),
+		grantdelegationapp.NewGetGrantDelegationUseCase(kanameRepo).WithRelationStore(relationStore),
+		grantdelegationapp.NewListGrantDelegationsUseCase(kanameRepo).WithRelationStore(relationStore),
+		grantdelegationapp.NewRevokeGrantDelegationUseCase(kanameRepo, opsRepo).WithRelationStore(relationStore, logger),
+	)
 	abHandler := accessbindingapp.NewHandler(abCreate, abDelete, abGet, abListByScope, abListBySub, abListByAcc,
 		abListSubjPriv).
 		WithUpdate(abUpdate).
@@ -661,7 +688,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
-		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction())
+		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction(), moduleRoster)
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -700,6 +727,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// же транзакции (kaname#963). Параметр, а не опция: без него освободившийся
 		// ключ наследовал бы выдачи прежнего объекта.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogSource),
+		// Регистрация и снятие объекта модулем пишут событие аудита той же
+		// транзакцией (kaname#1005). Параметр, а не опция: без него изменения модели
+		// прав модулем оставались бы вне журнала аудита молча.
+		kanamepg.NewRegistrationAudit(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
@@ -743,7 +774,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		registerResourceUC = registerResourceUC.WithMetrics(metricsReg.NewRegisterPostCommitRecorder())
 	}
 	regGate := authzguard.NewRelationWriteGate(relationStore).
-		WithProductionMode(cfg.AuthN.Mode.IsProduction())
+		WithProductionMode(cfg.AuthN.Mode.IsProduction()).
+		WithModuleRoster(moduleRoster)
 	// Session-revocation writer. Pool-scoped adapter over
 	// session_revocations — the InternalSessionRevocationsService Revoke path
 	// and its IsRevoked / ListByUser readers (one table). ForceLogout does not
@@ -767,6 +799,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		log.Fatalf("basic credential authority: %v", basicAuthorityErr)
 	}
 	internalIAMHandler := internaliamapp.NewHandler(lookupSubject, checkAuthz).
+		// Личности модулей (kaname#987): Check плоскости данных ограничен
+		// доменом её модуля — тот же перечень, что у политик вызывающего.
+		WithModuleRoster(moduleRoster).
 		// PollSubjectChanges drains subject_change_outbox for api-gateway
 		// authz-cache invalidation. Internal-only (port 9091).
 		//
@@ -990,6 +1025,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		membershipHandler:      membershipHandler,
 		roleHandler:            roleHandler,
 		accessBindingHandler:   abHandler,
+		grantDelegationHandler: grantDelegationHandler,
 		internalIAMHandler:     internalIAMHandler,
 		internalClusterHandler: internalClusterHandler,
 		publicClusterHandler:   publicClusterHandler,
@@ -1234,7 +1270,8 @@ type authzServiceBundle struct {
 // catalogSource — каталог модулей из живых строк, тот же экземпляр, что у ролей и
 // выдач: из него вопрос анонимной самопроверки берёт глагол типа (kaname#994).
 func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	sessions service.SessionRecords, catalogSource catalog.Source, metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
+	sessions service.SessionRecords, catalogSource catalog.Source, metricsReg *metrics.Registry, prodMode bool,
+	modules moduleidentity.Roster) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
@@ -1271,7 +1308,8 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 	}
 	authzH := authorizeapp.NewHandler(edgeAuthz, whoAmIUC).
 		WithCallerAuthority(ownGates).
-		WithInsecureAnonymousPeer(!prodMode)
+		WithInsecureAnonymousPeer(!prodMode).
+		WithModuleRoster(modules)
 
 	return authzServiceBundle{
 		authorize:    authzH,

@@ -65,8 +65,14 @@ var subjectChangeProducerRoster = map[string]int{
 	// поэтому реплики края, которой самосбрасываться, у этой мутации нет — кэш
 	// края гасит чтение очереди.
 	"internal/apps/kaname/api/access_binding/unregistered_key.go": 1,
-	"internal/apps/kaname/api/group/add_member.go":                1,
-	"internal/apps/kaname/api/group/remove_member.go":             1,
+	// Отзыв выдачи отзывом делегирования права выдавать (kaname#986, Р4): строка на
+	// каждого субъекта отозванной выдачи, `op` = `binding_delete`. Мутацию
+	// обслуживает `GrantDelegationService.Revoke` арендаторского слушателя kaname;
+	// самосброс края kacho для неё — заказ платформы после перезакрепления каталога
+	// (условие CE-20 разбора классов), край вне пути службы registry (Р-В5).
+	"internal/apps/kaname/api/access_binding/delegation_withdrawal.go": 1,
+	"internal/apps/kaname/api/group/add_member.go":                     1,
+	"internal/apps/kaname/api/group/remove_member.go":                  1,
 	// Исход смены адреса (kaname#635, приёмка email-change-is-confirmed-from-the-new-address.md,
 	// Р8 п. 8, Р9): строка о человеке, `op` = `user_email_change`. Самосброс
 	// реплики края, обслужившей смену, — сторона края (приёмка F8-S5).

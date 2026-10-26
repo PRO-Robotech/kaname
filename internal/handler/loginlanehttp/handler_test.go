@@ -36,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 const (
@@ -292,6 +293,7 @@ func newLaneOver(t *testing.T, verbs loginlanehttp.Lane, cookieDomain string) *l
 		SessionTTL:    24 * time.Hour,
 		CookieDomain:  cookieDomain,
 		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
+		Modules:       laneRoster(t),
 		RefusalDomain: "iam.kaname.cloud",
 		Logger:        slog.New(slog.DiscardHandler),
 	}, verbs)
@@ -625,7 +627,12 @@ func TestLane_F3_29_51_OnlyTheGatewayIsAdmitted(t *testing.T) {
 	form := map[string]string{"currentPassword": "old", "newPassword": "new passphrase", "csrfToken": tok}
 	sess := &http.Cookie{Name: "kaname_session", Value: "bearer"}
 
-	for name, san := range map[string]string{"из круга, не край": vpcSAN, "вне круга": strangerSAN} {
+	for name, san := range map[string]string{
+		"из круга, не край": vpcSAN, "вне круга": strangerSAN,
+		// kaname#984: учётка края в пространстве, которого установка не
+		// объявляла, — не край.
+		"учётка края в необъявленном пространстве": "spiffe://kacho.cloud/ns/intruder/sa/kacho-api-gateway",
+	} {
 		t.Run(name, func(t *testing.T) {
 			before := len(stub.changeIn)
 			r := l.do(t, l.client(t, san), http.MethodPost, "/iam/v1/auth/password", form, nil, ctxCk, sess)
@@ -673,4 +680,25 @@ func TestLane_UnknownPathAndMethod(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, r.status, "«кто я» — маршрут края, не службы")
 	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/login", nil, nil)
 	require.Equal(t, http.StatusMethodNotAllowed, r.status)
+}
+
+// laneRoster — перечень личностей проб полосы (kaname#984): край и сосед
+// объявлены парами своих SAN; краем слушатель признаёт только объявленную пару.
+func laneRoster(t *testing.T) moduleidentity.Roster {
+	t.Helper()
+	r, err := moduleidentity.Parse([]string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
+	require.NoError(t, err)
+	return r
+}
+
+// TestLane_UndeclaredModuleRosterRefusesToBuild — слушатель без перечня
+// личностей не строится (kaname#984): по пустому перечню край не признаётся, и
+// поднятый слушатель отвергал бы каждый запрос молча.
+func TestLane_UndeclaredModuleRosterRefusesToBuild(t *testing.T) {
+	_, err := loginlanehttp.New(loginlanehttp.Config{
+		SessionTTL:  24 * time.Hour,
+		TrustDomain: grpcsrv.NewTrustDomain(trustDomain),
+	}, &stubLane{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "module identities must be declared")
 }

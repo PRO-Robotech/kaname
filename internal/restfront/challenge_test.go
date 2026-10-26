@@ -23,6 +23,7 @@ package restfront
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -119,7 +120,7 @@ func TestChallenge_PublicFrontIsWrapped(t *testing.T) {
 // совет «предъяви Bearer» указал бы им действие, которого у них нет. Различие
 // полос названо утверждением, а не оставлено умолчанием.
 func TestChallenge_InternalFrontIsNotWrapped(t *testing.T) {
-	h, err := NewInternal(context.Background(), "127.0.0.1:1", dialOpts())
+	h, err := NewInternal(context.Background(), "127.0.0.1:1", dialOpts(), func(*tls.ConnectionState) bool { return true })
 	if err != nil {
 		t.Fatalf("сборка внутреннего фронта: %v", err)
 	}

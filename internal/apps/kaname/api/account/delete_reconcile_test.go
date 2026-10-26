@@ -33,6 +33,7 @@ import (
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
+	gdrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
@@ -459,3 +460,7 @@ func (_ delABReader) GrantorLastPresentedAt(context.Context, domain.UserID) (tim
 func (_ delABReader) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
 	return domain.PublicReadContainer{}, nil
 }
+
+// GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
+// делегированного пути права выдавать не касаются.
+func (delABReader) GrantDelegations() gdrepo.ReaderIface { return nil }

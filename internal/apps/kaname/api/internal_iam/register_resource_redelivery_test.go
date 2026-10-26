@@ -50,6 +50,7 @@ import (
 // written only when the incoming source_version is STRICTLY newer than the stored one,
 // and the emitter reports whether it changed anything.
 type versionedMirror struct {
+	noDescendants
 	mu       sync.Mutex
 	stored   map[string]time.Time
 	upserts  int // UpsertTx calls
@@ -115,14 +116,14 @@ type countingEmitter struct {
 	deletes int
 }
 
-func (e *countingEmitter) EmitWriteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple) error {
+func (e *countingEmitter) EmitOrderedWriteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple, _ time.Time) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.writes += len(ts)
 	return nil
 }
 
-func (e *countingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple) error {
+func (e *countingEmitter) EmitOrderedDeleteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple, _ time.Time) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deletes += len(ts)
@@ -179,7 +180,7 @@ func newRedeliveryRig() *redeliveryRig {
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	rec := &smObjectReconciler{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).
 		WithReconcile(ev).
 		WithObjectReconciler(rec, nil)
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}

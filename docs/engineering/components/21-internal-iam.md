@@ -17,6 +17,17 @@ kacho-loadbalancer) общаются с kaname:
   указателя для ресурса чужого сервиса. Намерение ложится строкой журнала
   `kaname.fga_outbox`, и триггер журнала складывает из неё прямой факт **в той же
   транзакции**: дренажа наружу нет — применять не к чему и некому.
+  - Кортежи посредника упорядочены **версией регистрации** владельца: снятие
+    версии v2 снимает кортежи не новее v2, и запоздалое снятие не трогает
+    владельца и указатель области регистрации новее себя (kaname#969).
+  - Снятие, удалившее строку регистрации, снимает и выдачи на объект
+    (kaname#963), и **потомков объекта по цепи предков** того же модуля — их
+    регистрацию, кортежи, выдачи и публикацию; регистратору перечислять их не
+    нужно (kaname#1002).
+  - Регистрация, изменившая состояние, и снятие пишут событие аудита той же
+    транзакцией — `iam.resource_registration.registered` /
+    `iam.resource_registration.unregistered`: модуль-актор, объект, исход
+    (kaname#1005). Повтор без изменения события не пишет.
 
 **Use-cases:**
 - api-gateway: validate JWT → LookupSubject → resolve principal → propagate to backend.
@@ -38,7 +49,7 @@ kacho-loadbalancer) общаются с kaname:
 | `ListPermissions`       | sync             | Catalog all permissions (debug).                |
 | `PollSubjectChanges`    | sync             | Drain subject_change_outbox (since_id ledger).  |
 | `RegisterResource`      | sync             | Постановка иерархического указателя через журнал. |
-| `UnregisterResource`    | sync             | Снятие того же указателя.                        |
+| `UnregisterResource`    | sync             | Снятие регистрации: указатель, кортежи, выдачи, потомки. |
 
 > [!note] Здесь стоял `WriteCreatorTuple` — RPC снят (kacho#788)
 > Он писал кортёж создателя в движок НАПРЯМУЮ, мимо журнала `kaname.fga_outbox`,

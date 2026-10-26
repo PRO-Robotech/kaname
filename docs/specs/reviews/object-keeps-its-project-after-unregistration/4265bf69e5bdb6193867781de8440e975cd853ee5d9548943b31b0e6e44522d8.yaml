@@ -1,0 +1,119 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md
+  sha256: 4265bf69e5bdb6193867781de8440e975cd853ee5d9548943b31b0e6e44522d8
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Рецензент шапку документа намеренно не правил.
+  base_commit: 33831a737
+  content_commit: none
+  branch: 983
+  task: PRO-Robotech/kaname#983
+  related_tasks: [PRO-Robotech/kaname#982]
+  lines: 961
+  round: 3
+  round_note: >-
+    Не третий круг спора (fa-b8): редакция 1d308bbd…6a72 одобрена записью круга 2.
+    Это ревью правки одобренного документа, только по дельте 1d308bbd → 4265bf69.
+  predecessor_record: docs/specs/reviews/object-keeps-its-project-after-unregistration/1d308bbd5d5bb6cee79994a67f7cf3664e475f504c65f323b983948139b26a72.yaml
+  fingerprint_predicate: >-
+    `sha256sum` в копии kacho-workspace/tmp/kn-983-acceptance: `.md` → 4265bf69…22d8,
+    совпало с возвратом автора; служебная копия `.md.1d308bbd` → 1d308bbd…6a72,
+    совпало с одобренной записью; `git show HEAD:<путь> | sha256sum` → 1d308bbd…6a72
+    (в ветке лежит одобренная редакция, правка не закоммичена).
+  measurement_revisions: >-
+    Дифф — `diff .md.1d308bbd .md`: изменены строки 848 и 886, добавлены 951–961 (§11).
+    Других ханков нет. kacho — origin/main @41d7edad9b; svc-registry — копия
+    tmp/svc-registry-target, SHA-256 2717077568…22dc7 (прежний, совпал с записью круга 2).
+  premise: >-
+    «Правка касается только двух координат проб и §11; сценарии и стадии не менялись» —
+    подтверждена диффом (три ханка, сценарии, производители и близнецы не тронуты).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Возврат. Действующим остаётся вердикт о редакции 1d308bbd…6a72; на 4265bf69 он не
+    переносится (`change-graph.md` §2).
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · CHANGES_REQUESTED · 4265bf69e5bdb6193867781de8440e975cd853ee5d9548943b31b0e6e44522d8"
+
+blocking:
+  - kind: DoD
+    scenario: §6 S1 п.1 (строка 848), §11 строка таблицы «§6 S1 п.1»
+    claim: >-
+      Правка называет держателем гейт kacho, который миграцию kaname прочитать не может.
+      Пункт «гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` зелёный со
+      ссылкой на эту приёмку» поэтому выполняется при любом содержимом миграции. Это пункт
+      DoD без исхода «не пройдено». §11 подаёт правку как устранение дефекта: «дом назван».
+      Координата резолвится, но держатель предмет не держит.
+    measured: >-
+      `git -C project/kacho show origin/main:internal/repohygiene/acceptanceledger_test.go`
+      @41d7edad9b: на входе гейта `gitenv.Command(root, "diff", "--name-only",
+      "--diff-filter=A", base+"...HEAD")` (строки 149-150), где root — дерево kacho.
+      Фильтр — `/internal/migrations/` и `.sql` (строки 158-159). Новый файл
+      `internal/migrations/*.sql` дерева kaname в этот дифф не попадает никогда, поэтому
+      added=0 и находок 0. Своего гейта цитирования приёмки в kaname нет:
+      `git grep -n -i acceptance -- '*_test.go' | grep -i migrat` в tmp/kn-983-acceptance
+      находит только комментарии-ссылки. Цитирование в шапках миграций kaname — соглашение
+      без держателя (`git grep -l docs/engineering/acceptance -- 'internal/migrations/*.sql'`
+      → 3 файла).
+    fix: >-
+      Пункт переписать так, чтобы у него был исход «не пройдено». Шапка новой миграции
+      цитирует путь этой приёмки и одобренный SHA-256; предикат, например,
+      `git grep -c 'object-keeps-its-project-after-unregistration' -- internal/migrations/<новая>.sql`
+      ≥ 1. Явно сказать, что гейт kacho дерево kaname не читает и что гейта-держателя в
+      kaname нет. Если держатель нужен — заводится отдельной задачей (вариант (б) автора).
+      Строку §11 привести к тому же. Утверждение не ослабляется: прежний текст обещал
+      держателя, которого нет.
+
+blocking_closed: []
+
+delta_checked:
+  - where: §7 строка 3, признак готовности (строка 886)
+    result: >-
+      Принято. Утверждение не ослаблено: SRI-23 a и b на `F-SR-IT`, a — reason
+      `KeyBoundToOtherProject` и message по §4.2. Держатель назван. Строка 1854 приёмки
+      svc-registry (2717077568…22dc7) называет `TestSRI23_ReleaseRetainedThenFresh`
+      (`F-SR-IT`, a, b) «заводится». Reason — строка 300, message — строка 334 той же
+      приёмки. Производитель «Тогда» прежний: регистратор svc-registry и двойник `F-SR-IT`.
+  - where: §11 строка таблицы «§7 строка 3»
+    result: Соответствует диффу.
+  - where: координаты проб, прогон автора
+    result: >-
+      Прочитано в журналах автора, не перемерено. go-unit: PASS, находок 0,
+      НЕ ПРОВЕРЕНО 165. ci-local: проверено в доме 165, находок 0, PASS. Резолвимость
+      координаты блокирующее выше не снимает: предмет блокирующего — исход держателя, а не
+      существование функции.
+
+important: []
+
+constructibility:
+  seeded: 0
+  not_applicable: >-
+    «Дано» в дельте не менялись. Посева не было, и в зелёное он не зачитывается.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
