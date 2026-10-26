@@ -45,6 +45,9 @@ type descendantMirror struct {
 	parentDels  int
 	dropped     []string
 	droppedIDs  map[string]bool
+	// removedMeanwhile — потомки, чью строку зеркала уже убрал встречный вызов:
+	// в перечне они есть, а снятие их строки ничего не удаляет (kaname#1020).
+	removedMeanwhile map[string]bool
 }
 
 func (m *descendantMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) (bool, error) {
@@ -69,7 +72,7 @@ func (m *descendantMirror) DropRegistrationTx(_ context.Context, _ service.Tx, c
 		m.droppedIDs = map[string]bool{}
 	}
 	m.droppedIDs[id] = true
-	return true, time.Time{}, nil
+	return !m.removedMeanwhile[id], time.Time{}, nil
 }
 
 // withdrawnKeys — ключи, чьи выдачи отозваны, строками «тип/id».
@@ -198,4 +201,52 @@ func TestUnregister_LateDescendantIsTakenToo(t *testing.T) {
 	assert.Equal(t, []domain.ResourceRef{{Type: "registry.repositories", ID: "reg1/late"}}, w.locked[1],
 		"kaname#1019: второй замок не на позднего потомка")
 	assert.Contains(t, withdrawnKeys(w), "registry.repositories/reg1/late", "kaname#1019: выдачи позднего потомка не отозваны")
+}
+
+// recordingAudit — двойник аудита регистрации, запоминающий события.
+type recordingAudit struct {
+	noAudit
+	events []service.AuditEvent
+}
+
+func (a *recordingAudit) EmitTx(_ context.Context, _ service.Tx, ev service.AuditEvent) error {
+	a.events = append(a.events, ev)
+	return nil
+}
+
+// unregisteredDescendantsCount — число потомков в единственном событии снятия.
+func unregisteredDescendantsCount(t *testing.T, a *recordingAudit) any {
+	t.Helper()
+	require.Len(t, a.events, 1, "kaname#1020: событий снятия не одно")
+	require.Equal(t, AuditEventResourceUnregistered, a.events[0].EventType, "kaname#1020: тип события")
+	return a.events[0].Payload["descendants"]
+}
+
+// TestUnregister_AuditCountsOnlyDescendantsThisCallRemoved — в перечне два
+// потомка своего модуля, строку одного уже убрал встречный вызов: событие снятия
+// родителя называет одного снятого потомка (kaname#1020). Близнец — оба живы:
+// число два.
+func TestUnregister_AuditCountsOnlyDescendantsThisCallRemoved(t *testing.T) {
+	two := func() []service.RegisteredDescendant {
+		return append(registryDescendants(), service.RegisteredDescendant{ModelType: "registry_repository", ID: "reg1/web"})
+	}
+	for _, tc := range []struct {
+		name    string
+		removed map[string]bool
+		want    int
+	}{
+		{"один снят встречным вызовом", map[string]bool{"reg1/app": true}, 1},
+		{"близнец: оба живы", nil, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &descendantMirror{parentGone: true, descendants: two(), removedMeanwhile: tc.removed}
+			a := &recordingAudit{}
+			uc := NewRegisterResourceUseCase(&recordingEmitter{}, m, &smTxBeginner{}, seededCatalogTypes{},
+				&recordingPublisher{}, &recordingWithdrawal{}, a, unitScopes())
+			require.NoError(t, uc.Unregister(context.Background(), &unregReq{
+				subject: "project:prj_a", relation: "project", object: "registry_registry:reg1", version: time.Now(),
+			}))
+			assert.Equal(t, tc.want, unregisteredDescendantsCount(t, a), "kaname#1020: число снятых потомков в событии")
+		})
+	}
 }
