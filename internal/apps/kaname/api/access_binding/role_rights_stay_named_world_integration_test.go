@@ -26,11 +26,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/corelib/operations"
+
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
@@ -205,9 +208,21 @@ func (w *escWorld) buildEscHandlers() {
 
 // escRoleUpdate — правка роли теми же частями, что корень службы.
 func (w *escWorld) escRoleUpdate() *roleapp.UpdateRoleUseCase {
-	return roleapp.NewUpdateRoleUseCase(w.repo, w.ops, catalog.Fixed{F: w.facts}).
+	return w.escRoleUpdateOver(w.door)
+}
+
+// escRoleUpdateOver — та же правка с проверкой Р2 над названной дверью решения.
+func (w *escWorld) escRoleUpdateOver(relations clients.RelationStore) *roleapp.UpdateRoleUseCase {
+	return w.escRoleUpdateOn(w.ops, relations)
+}
+
+// escRoleUpdateOn — та же правка над названным хранилищем операций (гонка
+// подставляет хранилище с задвижкой).
+func (w *escWorld) escRoleUpdateOn(ops operations.Repo, relations clients.RelationStore) *roleapp.UpdateRoleUseCase {
+	u := roleapp.NewUpdateRoleUseCase(w.repo, ops, catalog.Fixed{F: w.facts}).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec))
+	return escWireRoleAuthority(w, u, relations)
 }
 
 // statusesByRole — статусы выдач роли по `ListByRole` от владельца, включая
