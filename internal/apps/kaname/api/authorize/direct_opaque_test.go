@@ -105,7 +105,7 @@ func TestDirectOpaqueWhoAmIAndCheck(t *testing.T) {
 		t.Fatalf("direct identity: %v, %v", me, err)
 	}
 	req := &iamv1.AuthorizeCheckRequest{Subject: subject,
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_a"}, Action: "iam.accounts.get"}
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_a"}, Action: "iam.accounts.get", RequiredRelation: "viewer"}
 	decision, err := client.Check(ctx, req)
 	if err != nil || !decision.GetAllowed() {
 		t.Fatalf("self check: %v, %v", decision, err)

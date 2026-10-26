@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // Идентичности проб: домен доверия, SAN края и SAN соседней службы того же УЦ.
@@ -153,4 +154,15 @@ func writePEM(t *testing.T, dir, name, kind string, der []byte) string {
 		t.Fatalf("issuinglistener: write %s: %v", name, err)
 	}
 	return path
+}
+
+// ModuleRoster — перечень личностей модулей проб (kaname#984): край и сосед
+// объявлены парами своих SAN. Краем правило источника признаёт только
+// объявленную пару, поэтому проба края без перечня судила бы мир без края.
+func ModuleRoster() moduleidentity.Roster {
+	r, err := moduleidentity.Parse([]string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
+	if err != nil {
+		panic("перечень личностей проб не разобрался: " + err.Error())
+	}
+	return r
 }

@@ -477,9 +477,15 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 				census.RelationGrantsJudged++
 			}
 		}
+		var canonFaults []error
 		if anchorUsable {
-			faults = append(faults, validateRelationGrant(doc, i, b, anchorObjectType, seededSubjects, oracle)...)
+			canonFaults = validateRelationGrant(doc, i, b, anchorObjectType, seededSubjects, oracle)
+			faults = append(faults, canonFaults...)
 		}
+
+		// Потолок — ПОСЛЕ канона: он судит цену выдачи, а не её существование,
+		// и выдачу, которую канон уже отверг, второй раз не судит (kaname#979).
+		faults = append(faults, validateSeedGrantCeiling(m, doc, i, b, roles, len(canonFaults) > 0)...)
 	}
 
 	for i, sa := range seed.ServiceAccounts {

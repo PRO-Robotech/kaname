@@ -20,6 +20,12 @@ type recordingWithdrawal struct {
 	keys []domain.ResourceRef
 }
 
+// LockTx — замок выдач и ролей ключа (kaname#975): поддельной транзакции запирать
+// нечего.
+func (r *recordingWithdrawal) LockTx(context.Context, service.Tx, domain.ResourceRef) error {
+	return nil
+}
+
 func (r *recordingWithdrawal) WithdrawTx(_ context.Context, _ service.Tx, key domain.ResourceRef, _ string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

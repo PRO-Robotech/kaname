@@ -50,6 +50,7 @@ func TestRegisterResourceUseCase_BeginFailure_MapsUnavailable(t *testing.T) {
 		seededCatalogTypes{},
 		&recordingPublisher{},
 		&recordingWithdrawal{},
+		noAudit{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

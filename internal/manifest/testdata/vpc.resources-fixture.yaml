@@ -150,7 +150,7 @@ roles:
     description: >
       Ходит в vpc на пути запроса: аллокация адресов, ссылки, привязка
       интерфейсов.
-    tier: {tierType: iam.project, tierId: prj000000000000000}
+    tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: vpc
         resources: [address, networkInterface, subnet]

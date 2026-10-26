@@ -47,10 +47,14 @@ func (b *smTxBeginner) Begin(context.Context) (service.Tx, error) {
 
 type smEmitter struct{}
 
-func (smEmitter) EmitWriteTx(context.Context, service.Tx, []service.RelationTuple) error  { return nil }
-func (smEmitter) EmitDeleteTx(context.Context, service.Tx, []service.RelationTuple) error { return nil }
+func (smEmitter) EmitOrderedWriteTx(context.Context, service.Tx, []service.RelationTuple, time.Time) error {
+	return nil
+}
+func (smEmitter) EmitOrderedDeleteTx(context.Context, service.Tx, []service.RelationTuple, time.Time) error {
+	return nil
+}
 
-type mirrorAdapter struct{}
+type mirrorAdapter struct{ noDescendants }
 
 // UpsertTx always reports `applied` and never `projectionUnchanged` — these cases
 // exercise the materialisation path, not the redelivery gate (which
@@ -119,7 +123,7 @@ func (r *smObjectReconciler) snapshot() [][2]string {
 func newRegUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
 	t.Helper()
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{})
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{})
 	if rec != nil {
 		uc = uc.WithObjectReconciler(rec, nil)
 	}

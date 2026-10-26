@@ -40,7 +40,7 @@ const (
 
 // mintPolicy builds a CallerPolicy with the mint allow-list populated.
 func mintPolicy(prod bool, sans ...string) *CallerPolicy {
-	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).
+	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster()).
 		WithSANAllowlist(map[string][]string{bootstrapMintMethod: sans})
 }
 

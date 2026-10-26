@@ -158,11 +158,16 @@ func (w *saWriter) Insert(ctx context.Context, sa domain.ServiceAccount) (domain
 		return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	q := fmt.Sprintf(`
-		INSERT INTO service_accounts (id, account_id, name, description, labels, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO service_accounts (id, account_id, name, description, labels, created_at,
+		                              created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''))
 		RETURNING %s`, saCols)
+	// Факт создателя (kaname#1003, Р4) — тем же оператором, что строка учётки:
+	// учётки без создателя при созданной глаголом не бывает. Пустая пара — NULL
+	// обеими колонками (проверка пары в схеме).
 	row := w.tx.QueryRow(ctx, q,
 		string(sa.ID), string(sa.AccountID), string(sa.Name), string(sa.Description), labelsJSON, now,
+		string(sa.CreatedBy.Type), string(sa.CreatedBy.ID),
 	)
 	out, err := scanSA(row)
 	if err != nil {
@@ -282,6 +287,15 @@ func (w *saWriter) SetEnabled(ctx context.Context, id domain.ServiceAccountID, e
 // Считаются только ДЕЙСТВУЮЩИЕ выдачи (`revoked_at IS NULL`) — то же условие, что
 // у человека, группы и функции триггера (kaname#664, Р10).
 func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error {
+	// Строка учётки под `FOR UPDATE` — ПЕРВЫМ оператором (kaname#986, Д8).
+	// Вставка делегирования держит её `FOR KEY SHARE` своим внешним ключом
+	// `grant_delegations_active_delegate_fk`; замок ждёт фиксации вставки, и охрана
+	// ниже — уже следующий оператор со свежим снимком — видит зафиксированное
+	// делегирование и называет его текстом Р6. Без замка охрана судила бы снимок
+	// до вставки, а отказ отдал бы ключ общим текстом.
+	if _, err := w.tx.Exec(ctx, `SELECT 1 FROM service_accounts WHERE id = $1 FOR UPDATE`, string(id)); err != nil {
+		return mapErr(err, "ServiceAccount.Delete", string(id))
+	}
 	const q = `
 		WITH del AS (
 			DELETE FROM service_accounts s
@@ -289,6 +303,7 @@ func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error
 			  AND NOT EXISTS (SELECT 1 FROM access_bindings b WHERE b.subject_type = 'service_account' AND b.subject_id = $1 AND b.revoked_at IS NULL)
 			  AND NOT EXISTS (SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id WHERE s.subject_type = 'service_account' AND s.subject_id = $1 AND b.revoked_at IS NULL)
 			  AND NOT EXISTS (SELECT 1 FROM group_members WHERE member_type = 'service_account' AND member_id = $1)
+			  AND NOT EXISTS (SELECT 1 FROM grant_delegations g WHERE g.active_delegate_id = $1)
 			RETURNING 1
 		)
 		SELECT
@@ -298,13 +313,15 @@ func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error
 		           WHERE b.subject_type = 'service_account' AND b.subject_id = $1 AND b.revoked_at IS NULL)
 		   OR EXISTS(SELECT 1 FROM access_binding_subjects s JOIN access_bindings b ON b.id = s.binding_id
 		              WHERE s.subject_type = 'service_account' AND s.subject_id = $1 AND b.revoked_at IS NULL)) AS has_bindings,
-		  EXISTS(SELECT 1 FROM group_members WHERE member_type='service_account' AND member_id = $1)                          AS has_group_mems
+		  EXISTS(SELECT 1 FROM group_members WHERE member_type='service_account' AND member_id = $1)                          AS has_group_mems,
+		  COALESCE((SELECT g.id FROM grant_delegations g WHERE g.active_delegate_id = $1 ORDER BY g.id LIMIT 1), '')          AS active_delegation
 	`
 	var (
 		deleted                             int
 		saExists, hasBindings, hasGroupMems bool
+		activeDelegation                    string
 	)
-	err := w.tx.QueryRow(ctx, q, string(id)).Scan(&deleted, &saExists, &hasBindings, &hasGroupMems)
+	err := w.tx.QueryRow(ctx, q, string(id)).Scan(&deleted, &saExists, &hasBindings, &hasGroupMems, &activeDelegation)
 	if err != nil {
 		return mapErr(err, "ServiceAccount.Delete", string(id))
 	}
@@ -315,6 +332,12 @@ func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error
 		return iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount %s not found", id)
 	}
 	switch {
+	// Учётка-делегат действующего делегирования права выдавать (kaname#986, Д8):
+	// тот же порядок «сперва отозвать права», что у членства. Держит базу внешний
+	// ключ `grant_delegations_active_delegate_fk`; здесь — текст отказа.
+	case activeDelegation != "":
+		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"service account %s holds an active grant delegation %s; revoke it first", id, activeDelegation)
 	case hasBindings:
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"ServiceAccount %s has active access bindings and cannot be deleted", id)

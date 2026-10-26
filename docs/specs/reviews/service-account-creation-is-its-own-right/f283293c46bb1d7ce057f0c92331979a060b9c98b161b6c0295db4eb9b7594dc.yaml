@@ -1,0 +1,211 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/service-account-creation-is-its-own-right.md
+  sha256: f283293c46bb1d7ce057f0c92331979a060b9c98b161b6c0295db4eb9b7594dc
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: 5c6b7c07804d6972f2e8a3eb3e8f92b92c7f43d0
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status` → `?? docs/engineering/acceptance/…`). Судится
+    содержимое по отпечатку, а не коммит.
+  branch: 1003-acceptance
+  task: PRO-Robotech/kaname#1003
+  related_tasks: [PRO-Robotech/kaname#986, PRO-Robotech/kaname#980]
+  lines: 1166
+  round: 2
+  round_note: >-
+    Круг 2 из 2 — последний (`flow-acceleration.md#fa-b8-acceptance-two-rounds`). Спор по этому
+    возврату решает диспетчер.
+  predecessor_record: docs/specs/reviews/service-account-creation-is-its-own-right/4dcce34d1cf7a3d2b618bddfe50a47979914726898a250be27db198958ad43ab.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/service-account-creation-is-its-own-right.md в копии
+    kacho-workspace/tmp/kn-1003-acceptance @ 5c6b7c078 → f283293c…94dc (совпало с возвратом автора);
+    служебная копия прошлой редакции `.md.4dcce34d` → 4dcce34d…43ab (совпало с записью круга 1).
+  measurement_revisions: >-
+    Дерево kaname читалось в той же копии @ 5c6b7c078. Сосед #986 — копия
+    kacho-workspace/tmp/kn-986-acceptance @ 4d0a479a3: sha256 7512fd96…0fe6, совпало с §9; запись
+    `7512fd96…0fe6.yaml`: verdict APPROVED, effective_approval.issued true, event.status performed.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25T16:02:01Z'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт роли — CHANGES_REQUESTED: один блокирующий, новый в редакции 2. Три блокирующих
+    круга 1 закрыты. Санкции на код нет.
+
+premise:
+  task_premise: >-
+    Подтверждена. Блокирующие круга 1 закрыты (раздел closed_from_round_1). Координаты автора
+    перемерены: UNIQUE действующей выдачи по subject_id с якорем subjects[0]
+    (0001_initial.sql:4443, create.go:213-224). Охрана удаления учётки по subjects[0] и по
+    access_binding_subjects (service_account_repo.go:286-317). ExpireBinding — reconcile.go:829.
+    Приём срока строкой — URG-34 (:784-796); CHECK на expires_at у access_bindings нет. Отзыв
+    применяет прямой факт в своей транзакции (revoke.go:160-215). Поэтому ожидания «окно двери»
+    в SAC-32 a достаточно: правильное ведение отличимо от снятого. Produces отвечает «нет»,
+    если объект гейта не тип правила (producibility.go:97-110). Подстановка — role_verbs.go:51.
+    У Rule занят номер 7, номер 1 зарезервирован. Номер 8 свободен.
+
+closed_from_round_1:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    status: closed
+    where: §0.11, Р2, Р2 п.4, Р2а, SAC-40 d, SAC-41, SAC-42
+    note: >-
+      Названа третья форма: `containerVerbs` с проекцией на отношение родителя. Её следствия
+      расписаны для загрузчика, roleexport (MOD-RL-18/19), генератора, раскрытия `*`,
+      материализации и RoleService. Предикат «сегодня не объявимо» стоит в переписи §0.11 и
+      держится SAC-42 b. `*` не достигает контейнерного действия: SAC-11 c, SAC-42 h. Каталог
+      показывает оба правила: SAC-41, поле `Rule.created_by_subject`.
+  - id: B2
+    kind: NEGATIVE
+    status: closed
+    where: Р3 п.4, SAC-34, SAC-35
+    note: >-
+      Обе гонки есть: 10 раундов × 16 Create. Повторная проверка после дренажа
+      resource_reconcile_outbox. У каждой гонки близнец меняет один факт. Механизм отдан
+      замыслу (fa-b2).
+  - id: B3
+    kind: COVERAGE
+    status: closed
+    where: Р3 пп.1–2, SAC-32, SAC-33
+    note: >-
+      Вторая выдача G' с субъектами [sva-iss2, sva-iss] строится: якорь UNIQUE — sva-iss2.
+      Delete и истечение разведены (SAC-33 a, b; REVOCATION_REASON_EXPIRED).
+
+blocking:
+  - id: B4
+    kind: COVERAGE
+    scenario: Р3, «Исход для самого создателя», пункт «Выключение» (строки 433-436)
+    claim: >-
+      Документ называет неверный исход на поверхности безопасности. Текст: «Останавливается
+      выпуск ей новых токенов (`service_account/set_enabled.go:43-48`), поэтому действовать она
+      не может». Указанные строки говорят обратное: «Access tokens already minted are not
+      invalidated here; they run out on their own schedule». Дверь выключенность учётки не
+      проверяет: решатель композиционного корня — relverdict + personmarks, а personmarks
+      читает только подтверждённость адреса человека. Выключенная учётка-создатель с уже
+      выпущенным токеном до его истечения продолжает создавать учётки и выпускать им ключи.
+      Это следует из Р1 и Р2 п.2. Абзац написан в ответ на важное замечание 4 круга 1. Его
+      прочтёт потребитель svc-registry, когда будет выбирать рычаг на случай инцидента:
+      Disable выпускающего ведение не останавливает, отзыв выдачи роли C останавливает
+      (SAC-30, SAC-33). Текст, вводящий в заблуждение о безопасности, блокирует
+      (`00-kacho-core.md#ban19-block-criterion`).
+    measured: >-
+      sed -n 43,48p internal/apps/kaname/api/service_account/set_enabled.go @5c6b7c078 — цитата
+      выше. grep -n -i -E 'service_account|enabled|SELECT' internal/repo/kaname/pg/personmarks/*.go
+      → одна строка запроса, `SELECT id, (email_verified_at IS NOT NULL)`. В cmd/kaname/wiring.go:275
+      решатель — authzcascade.WrapAdmitted(verdictAsker, personmarks.New(pool)). git grep
+      проверки выключенной учётки на пути двери и проверки токена → 0 о предмете.
+    fix: >-
+      Переписать пункт «Выключение». Disable останавливает выпуск новых токенов и ключей. Уже
+      выпущенные токены действуют до своего срока, и пока они действуют, учётка-создатель
+      создаёт и ведёт учётки по роли C. Немедленно снимает право создателя конец выдачи роли C
+      (Р3 п.2; держатели SAC-30, SAC-33). Нового поведения нет, новых сценариев не нужно.
+      Правится одна фраза, предмет остального документа не меняется.
+
+defaults_fixed_at_review: []
+
+important_nonblocking:
+  - kind: COVERAGE
+    text: >-
+      Р2 п.4 отвергает `createdBySubject` и в `RoleService.Create`, и в `Update`. SAC-40 держит
+      `Update` только для глагола `create` (строка b). Для селектора `Update` не держит
+      (строка d — только Create). Чтобы пара была полной, к SAC-40 стоит добавить строку
+      `RoleService.Update` rol-own, `updateMask: ["rules"]`, правило d.
+  - kind: SCOPE
+    text: >-
+      Рост контракта `Rule.created_by_subject` (вопрос автора 1) рецензент принимает по
+      существу. Поле только вывода, аддитивное, по образцу `children`. Без него каталог
+      показывает меньше, чем роль даёт, а это часть B1. Поле названо в «Типе изменения», в
+      критериях безопасности (п.4) и в DoD S1 п.1. На входе оно отвергается с именем поля
+      (`api-outcome-reject`). Имя поля в нарушении — `rules[<i>].createdBySubject`, оно
+      согласовано с соседним `rules[%d].resourceNames` (registered_keys.go:160).
+  - kind: SCOPE
+    text: >-
+      Д-1003 записан как решение диспетчера. Рецензент его подлинности не проверял: решение
+      пришло со слов автора. Само прочтение, что кортежи ведения — проекция выдачи, укладывается
+      в Р-В3. Диспетчеру — подтвердить, что это его решение.
+  - kind: DoD
+    text: >-
+      DoD S1 п.6 требует «сперва красные» у всех 22. До изменения роль C не существует, поэтому
+      «Дано» с выдачей G на 5c6b7c078 не строится. Часть отрицательных строк (SAC-13, SAC-20
+      слева, SAC-22 a) кончится «не выполнилось», а не красным. Это не дефект контракта: в
+      DoD-proof исход называть тремя категориями.
+
+defaults_fixed_at_review_note: >-
+  Открытые вопросы В1–В7 дефолтабельны: у каждого есть рекомендация с ценой, и ни один не
+  блокирует реализацию kaname. В1 и В7 адресованы приёмке потребителя.
+
+confirmed:
+  - "Сценариев 27: `grep -c '^#### SAC-'` = 27, `grep -c '^| SAC-'` = 27, множества ID совпадают (diff пуст)."
+  - "Производитель назван у 27 из 27 (§5.1). Близнец назван у каждого отрицания, в том числе у гонок SAC-34/35 и строк SAC-42 b–g."
+  - "§0.11 воспроизводится по координатам: rolenamedverbs.go:117-135, producibility.go:97-110 (объект ≠ тип → false), role_verbs.go:51, namedverbs.go:72 (ErrNamedVerbNotProducibleByRoleRule), namedVerbManifest — rolenamedverbs_test.go:49."
+  - "Rule (role.proto:683-760): reserved 1, поля 2..7, children = 7 — номер 8 для created_by_subject свободен."
+  - "REST края SAC-E2/E4: POST/DELETE /iam/v1/serviceAccounts/{service_account_id}/keys[/{key_id}] (sa_key_service.proto:52, :90); CREDENTIAL_KIND_SECRET = 2; ttl_seconds есть."
+  - "SAKeyService/List — v_list на iam_service_account; ServiceAccountService/List — без отношения у двери (пообъектное сужение). Правило 2 (v_list) их производит; SAC-12 шаг 3 и SAC-15 a достижимы."
+  - "Охрана удаления учётки читает и subject_id, и access_binding_subjects под revoked_at IS NULL (service_account_repo.go:286-317) — исход удаления создателя в Р3 верен."
+  - "Сосед #986 редакция 3 (7512fd96…0fe6) одобрена, событие опубликовано. Д2, Д4 («право писать выдачи не даёт права на данные»), Д6, GD-06, GD-25 g на месте (строки 471, 481, 488, 686, 850) — опора §9 верна."
+  - "Раскрытия дефекта защиты в публичном тексте нет: состав с #986 и B4 названы классом, без пошаговых условий."
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    Существуют на 5c6b7c078: seedServiceAccount, seedAccountByOwner, seedProjectInAccount,
+    mustSeedUser, seedClusterAdmin, seedLiveHumanSession, pollAsk, newPCRWorld, newSCWorld,
+    WithPrincipal-образец, IssueSAKeyUseCase с WithOwnIssuance, приём срока URG-34 +
+    Reconciler.ExpireBinding, namedVerbManifest. Заказаны: newSACWorld, сборка двери мира,
+    посев S2 saCreatorId/jwtSaCreator, варианты манифеста SAC-42.
+  not_constructible_as_written: []
+  not_executed: >-
+    Посев не ставился. testcontainers — тяжёлый класс, только на внешнем кластере слотом;
+    изоляции и разрешения на посев задание не назвало. Конструируемость установлена чтением
+    писателей на 5c6b7c078. Прежняя неконструируемость роли C (B1) снята формой Р2а: её
+    держит SAC-42 a, вариант «как есть», и он заказан.
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: false
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: вердикт — возврат; санкции не открывает
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · CHANGES_REQUESTED · sha256 f283293c46bb1d7ce057f0c92331979a060b9c98b161b6c0295db4eb9b7594dc
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/service-account-creation-is-its-own-right/4dcce34d1cf7a3d2b618bddfe50a47979914726898a250be27db198958ad43ab.yaml

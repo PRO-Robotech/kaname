@@ -263,6 +263,34 @@ func (r Report) String() string {
 // разрешения — сворачиванием правил. Ничего из выведенного манифест не несёт, и
 // принимать его оттуда было бы вторым объявлением одного предмета.
 func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest, actor string) (Report, error) {
+	return a.apply(ctx, m, actor, m.Module)
+}
+
+// ApplyImage — тот же применитель для манифеста, встроенного в ОБРАЗ службы
+// (`internal/servicemanifest`, модуль `iam`; kaname#1003).
+//
+// # Чем отличается от Apply — ровно владельцем строки
+//
+// Роли манифеста образа лежат в базе строками без владельца (`owner_module`
+// NULL): их завела начальная миграция как роли платформы, и политика их правил —
+// платформенная (`domain.PolicyOfRole`: правка влечёт удаление на листе). Перевод
+// их под владельца-модуль — отдельное решение с ценой (приёмка
+// `roles-come-as-data-not-migrations.md`, §3.4: «переезжают к применителю на
+// общих основаниях»; kaname#1006 — у роли модуля правка удаления не влечёт), и
+// применение образа его молча не делает: строки пишутся с прежним — пустым —
+// владельцем. Объявленные роли, которых в базе ещё нет (роль создателя
+// `iam.service_account.creator`, kaname#1003), заводятся тем же путём, а не
+// миграцией: новая миграция роль модуля с манифестом не вставляет
+// (`TestMODRD23MigrationDoesNotWriteARoleOfAManifestBearingModule`).
+//
+// Снятие, приведение по `id` и перепись — те же, что у Apply.
+func (a *Applier) ApplyImage(ctx context.Context, m *manifest.Manifest, actor string) (Report, error) {
+	return a.apply(ctx, m, actor, "")
+}
+
+// apply — тело Apply и ApplyImage; `owner` — владелец записываемых строк
+// (пусто — роль платформы).
+func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, actor, owner string) (Report, error) {
 	rep := Report{Module: m.Module, SectionDeclared: m.RolesDeclared()}
 
 	// Автор — ПАРАМЕТР, а не умолчание. Подставить здесь «system» значило бы
@@ -307,7 +335,7 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest, actor string)
 			// применителя тут быть не может — перечень классов знает экспортёр.
 			return rep, namedRightRefusal(m.Module, mr.ID, faults)
 		}
-		r, err := roleOf(m.Module, mr, rules)
+		r, err := roleOf(m.Module, owner, mr, rules)
 		if err != nil {
 			return rep, err
 		}
@@ -434,7 +462,7 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest, actor string)
 // Различие двух предметов названо, чтобы его не свели: kacho#1902 отвечает на «вправе
 // ли модуль раздавать права в ЧУЖОМ домене» (не вправе), kacho#1032 — на «докуда
 // достаёт ПОДСТАНОВКА в роли, которой модуль владеет» (до границы его модуля).
-func roleOf(module string, mr *manifest.Role, produced []domain.Rule) (domain.Role, error) {
+func roleOf(module, owner string, mr *manifest.Role, produced []domain.Rule) (domain.Role, error) {
 	name := domain.RoleName(mr.ID)
 	rules := domain.Rules(produced)
 	compiled, cerr := domain.CompileRules(rules)
@@ -454,7 +482,7 @@ func roleOf(module string, mr *manifest.Role, produced []domain.Rule) (domain.Ro
 		// Владелец — модуль МАНИФЕСТА, и другого источника у него нет. Отсюда
 		// политика роли становится МОДУЛЬНОЙ: подстановка ресурса законна ровно
 		// в пределах этого модуля, подстановка модуля — не законна вовсе.
-		OwnerModule: module,
+		OwnerModule: owner,
 	}
 	// Набор — МОДУЛЬ ЭТОГО МАНИФЕСТА, и другого правило назвать не вправе:
 	// раздача прав в чужом домене отвергается загрузчиком

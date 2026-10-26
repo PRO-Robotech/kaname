@@ -1,0 +1,140 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md
+  sha256: 9bd07e389bdce22cad13b556b4fe78cfda3f878285895282a5580fa211e5122a
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Рецензент шапку документа намеренно не правил.
+  publication_mode: courier_of_agent_verdict
+  base_commit: dd1963427
+  content_commit: none
+  branch: 983
+  task: PRO-Robotech/kaname#983
+  related_tasks: [PRO-Robotech/kaname#982, PRO-Robotech/kaname#1010]
+  lines: 1010
+  round: 5
+  round_note: >-
+    Это не третий круг спора (fa-b8). Редакция 69280aba…bbd0 одобрена записью круга 4.
+    Здесь ревью правки одобренного документа, только по дельте 69280aba → 9bd07e38.
+  predecessor_record: docs/specs/reviews/object-keeps-its-project-after-unregistration/69280aba687b7b3cb87b71a40c675b6ff8204405fd8550cfe98574d037fdbbd0.yaml
+  fingerprint_predicate: >-
+    `sha256sum` в копии kacho-workspace/tmp/kn-983-acceptance. `.md` даёт 9bd07e38…122a и
+    совпадает с возвратом автора. Служебная копия `.md.69280aba` даёт 69280aba…bbd0.
+    `git show HEAD:<путь> | sha256sum` на dd1963427 тоже даёт 69280aba…bbd0: в ветке лежит
+    одобренная редакция, а правка не закоммичена.
+    `git show 14e656ff1:<путь> | sha256sum` даёт 9bd07e38…122a: пробы автора исполнены на
+    рассмотренной редакции.
+  measurement_revisions: >-
+    Дифф — `diff .md.69280aba .md`. Ханков три: шапка 21a22-26, §6 S1 п.1 854-856 → 859-880,
+    §11.1 974a999-1010. Других ханков нет. origin/955 @36d849463, и он же равен
+    `git merge-base HEAD origin/955`.
+  premise: >-
+    Посылка «правка только в форме предиката и в записи о правке; утверждение не ослаблено;
+    сценарии не менялись» подтверждена диффом и прогоном предиката (см. delta_checked).
+    Посылка «обе пробы PASS, находок 0» подтверждена чтением журнала
+    tmp/kn-983-probe-3371633.log, строки 291-299, и кода 0 в строке 301. Пробы исполнены
+    на 14e656ff1, содержимое которого по документу равно 9bd07e38.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25'
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-25T20:38:17Z"
+  ban1_lifted: false
+  why: >-
+    Роль вынесла APPROVED о редакции 9bd07e38…122a. Санкция действует после публикации
+    внешнего события (`change-graph.md` §3), до неё блок event — not_performed. Вердикт
+    круга 4 о 69280aba…bbd0 остаётся вердиктом о той редакции.
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#983
+  status: performed
+  published: true
+  database_id: 6402938116
+  node_id: "IC_kwDOUO26pM8AAAABfaUVBA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/983#issuecomment-6402938116"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6402938116"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-25T20:38:17Z"
+  body_sha256: "deee07de8eb43d0b8c4198289a87e251f604016089a0c09076f8f90934e832cb"
+  subject_sha256: "9bd07e389bdce22cad13b556b4fe78cfda3f878285895282a5580fa211e5122a"
+  subject_revision_commit: "facf6e3250625c5576348a76d1a291d3a45ce7ae"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+blocking: []
+
+delta_checked:
+  - where: §6 S1 п.1 (строки 859-880)
+    result: >-
+      Принято. Путь миграции теперь выдаёт производитель (дифф полосы с фильтром A против
+      origin/955), а не заготовка. Условия пункта прежние: цитата приёмки и отпечаток с
+      записью APPROVED. Пустой дифф объявлен отказом. Предикат исполнен рецензентом в обе
+      стороны в корне копии @dd1963427. Голова даёт «новых миграций: 0», это «не пройдено».
+      Четыре фикстуры в scratchpad: цитата и 69280aba (APPROVED) — «цитат 1 · одобренных 1»;
+      цитата и 4265bf69 (CHANGES_REQUESTED) — «цитат 1 · одобренных 0»; без цитаты и с
+      69280aba — «цитат 0 · одобренных 1»; цитата и 9bd07e38 без записи — «цитат 1 ·
+      одобренных 0». Каждое из трёх условий отказа способно сработать, а законный близнец
+      проходит. `grep -qx 'verdict: APPROVED'` совпадает только со строкой верхнего уровня:
+      проверено `grep -n '^verdict:'` по четырём записям каталога, у двух APPROVED, у двух
+      CHANGES_REQUESTED.
+  - where: шапка, история ревью (строки 22-26)
+    result: >-
+      Принято. Дописаны две строки, прежние не тронуты. Отпечаток и путь круга 4 совпадают с
+      записью 69280aba…bbd0.yaml (verdict: APPROVED). Строка о правке честно говорит, что
+      вердикта на новую редакцию нет. Строка статуса (8) не тронута.
+  - where: §11.1 (строки 999-1010)
+    result: >-
+      Таблица «где / было / стало» соответствует диффу. Слова «сценарии, производители и
+      близнецы не меняются» подтверждены: других ханков нет.
+
+important:
+  - kind: FORMAT
+    where: §6 S1 п.1, строка 860
+    note: >-
+      База названа ветке по имени (`origin/955`). Если ветку эпика снимут при вливании,
+      `git diff` упадёт, вывод будет пустым и пункт честно покажет «не пройдено»: это
+      fail-closed, утверждение не ослабляется. Пункт гонится до вливания полосы в эпик, так
+      что ничего не блокирует.
+  - kind: FORMAT
+    where: §6 S1 п.1, строка 877
+    note: >-
+      «В каждой строке» строже гейта kacho: тот требует от новой миграции цитату ЛЮБОЙ
+      одобренной приёмки. Если полоса 983 заведёт вторую миграцию по другой приёмке, пункт
+      покраснеет ложно. Это строгость, а не ослабление, и до появления такого состава не
+      блокирует. Отпечаток прежней одобренной редакции (1d308bbd, 69280aba) предикат
+      засчитывает. Прежний текст поступал так же, и это не дефект дельты.
+  - kind: FORMAT
+    where: §6 S1 п.1, строка 884
+    note: >-
+      Повтор замечания круга 4: держатель назван описанием без номера PRO-Robotech/kaname#1010.
+
+constructibility:
+  seeded: 0
+  not_applicable: >-
+    В дельте «Дано» не менялись, посева не было. Исполнимость предиката DoD показана
+    прогоном на голове и на четырёх фикстурах (delta_checked), в зелёное посевом не
+    зачитывается.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: false
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu

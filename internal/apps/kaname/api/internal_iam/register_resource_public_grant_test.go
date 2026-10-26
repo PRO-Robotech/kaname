@@ -40,6 +40,7 @@ import (
 // mirrorSpy records the mirror rows written and removed, keeping the last state
 // per object so the test can assert the repository's parent scope survives.
 type mirrorSpy struct {
+	noDescendants
 	mu      sync.Mutex
 	rows    map[string]service.ResourceMirrorRow
 	upserts int
@@ -116,7 +117,7 @@ func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	pub := &recordingPublisher{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}).WithReconcile(ev)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}).WithReconcile(ev)
 	return uc, m, e, ev, pub
 }
 

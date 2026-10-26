@@ -249,6 +249,17 @@ func refuseNestedRulesOnInput(rules []*iamv1.Rule) error {
 		if len(r.GetChildren()) > 0 {
 			return shared.InvalidArg(fmt.Sprintf("rules[%d].children", i), textNestedRulesNotOnInput)
 		}
+		// Селектор создателя (kaname#1003, Р2 п.4) — тем же отказом и в той же
+		// форме: объявляет его только манифест модуля, а роль аккаунта, несущая
+		// его, вела бы «созданное субъектом» по правилу, которое автор аккаунта мог
+		// не понять (§8 В6).
+		if r.GetCreatedBySubject() {
+			return shared.InvalidArg(fmt.Sprintf("rules[%d].createdBySubject", i), textCreatorRulesNotOnInput)
+		}
 	}
 	return nil
 }
+
+// textCreatorRulesNotOnInput — отказ входа с селектором создателя (kaname#1003,
+// Р6). Контракт тона — дословно приёмочный.
+const textCreatorRulesNotOnInput = "Illegal argument createdBySubject (creator-scoped rules are declared by a module manifest)"

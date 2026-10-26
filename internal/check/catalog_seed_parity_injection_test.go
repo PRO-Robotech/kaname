@@ -739,3 +739,40 @@ UPDATE kaname.catalog_resource SET parent_types = (SELECT p FROM x WHERE y), liv
 		}
 	}
 }
+
+// TestIAMCT114_Injection_Chain_VerbAttributeOnlyUpdateIsKnown — правка у ОДНОЙ
+// живой строки глагола только пары контейнерного действия (kaname#1003) —
+// признанная форма: находки нет. Близнецы той же формы — с живостью, со ссылкой
+// вместо литерала, с отбором больше одной строки — неизвестная форма, находка.
+func TestIAMCT114_Injection_Chain_VerbAttributeOnlyUpdateIsKnown(t *testing.T) {
+	const lawful = `
+-- +goose Up
+UPDATE kaname.catalog_verb
+   SET container_parent = 'account', container_relation = 'thing_creator'
+ WHERE module = 'alpha' AND resource = 'thing' AND verb = 'get' AND live;
+`
+	withLive := strings.Replace(lawful, "container_relation = 'thing_creator'",
+		"container_relation = 'thing_creator', live = false", 1)
+	byRef := strings.Replace(lawful, "container_parent = 'account'", "container_parent = v.parent", 1)
+	wide := strings.Replace(lawful, " AND verb = 'get' AND live", " AND live", 1)
+	perObject := strings.Replace(lawful, "container_parent = 'account', ", "per_object = 'false', ", 1)
+	for _, tc := range []struct {
+		name, body string
+		finding    bool
+	}{
+		{"только пара контейнерного действия", lawful, false},
+		{"пара и живость", withLive, true},
+		{"ссылка вместо литерала", byRef, true},
+		{"отбор больше одной строки", wide, true},
+		{"признак словаря той же формой", perObject, true},
+	} {
+		corpus := []catalogSeedMigration{
+			{Name: "0001_initial.sql", Body: goodSeed},
+			{Name: "20261026090000_container.sql", Body: tc.body},
+		}
+		_, _, findings := catalogCorpus(corpus)
+		if got := containsSub(findings, "форма которого разбору НЕИЗВЕСТНА"); got != tc.finding {
+			t.Errorf("%s: находка неизвестной формы %v, ждали %v; находки: %v", tc.name, got, tc.finding, findings)
+		}
+	}
+}

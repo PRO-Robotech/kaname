@@ -460,6 +460,13 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	// Прежний частичный ключ `access_bindings_unique` (0001) снят миграцией
 	// 0003 в пользу более сильного `access_bindings_active_grant_uniq`;
 	// сервер его имени больше не назовёт.
+	// Одно действующее делегирование на пару «аккаунт, делегат» (kaname#986, Д1).
+	// Подсказка от grant_delegation.Insert: «<делегат>|<аккаунт>».
+	case "grant_delegations_active_pair_uniq":
+		if sva, acc, ok := strings.Cut(idHint, "|"); ok {
+			return fmt.Sprintf("an active grant delegation to service account %s in account %s already exists", sva, acc)
+		}
+		return "an active grant delegation to this service account in this account already exists"
 	case "access_bindings_active_grant_uniq":
 		// Подсказка от access_binding.Insert — единственного места, где под рукой
 		// сразу субъект, область и роль. Разбирается общим splitBindingHint,
@@ -542,6 +549,19 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		return fmt.Sprintf("User %s not found", user), iamerr.ErrReferenceMissing
 	case "group_members_group_fk":
 		return fmt.Sprintf("Group %s not found", idHint), iamerr.ErrReferenceMissing
+	case "grant_delegations_active_delegate_fk":
+		// Учётка-делегат действующего делегирования (kaname#986, Д8, тексты Р6).
+		// Сторона ВСТАВКИ — подсказка grant_delegation.Insert «<делегат>|<аккаунт>»:
+		// учётку удалили после программной проверки заведения. Сторона СНЯТИЯ —
+		// `saWriter.Delete` берёт строку учётки `FOR UPDATE` первым оператором, и
+		// его охрана видит зафиксированное делегирование и называет его; здесь —
+		// запасной текст на случай, когда ключ всё же ответил раньше охраны.
+		if kindHint == "ServiceAccount.Delete" {
+			return fmt.Sprintf("service account %s holds an active grant delegation; revoke it first", idHint),
+				iamerr.ErrReferenceInUse
+		}
+		sva, _, _ := strings.Cut(idHint, "|")
+		return fmt.Sprintf("ServiceAccount %s not found", sva), iamerr.ErrReferenceMissing
 	case "access_bindings_role_fk":
 		// Direction-sensitive:
 		//   INSERT binding with a non-existent role_id → "Role <id> not found"

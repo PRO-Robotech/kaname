@@ -271,3 +271,46 @@ func applyDeliveredModuleRoles(
 	}
 	return nil
 }
+
+// applyImageModuleRoles приводит системные роли СВОЕГО манифеста службы,
+// встроенного в образ (модуль `iam`), к объявленному (kaname#1003).
+//
+// # Зачем, если роли модуля iam лежат в базе с начальной миграции
+//
+// Лежат те, что были объявлены к моменту среза миграций. Новую роль модуля iam
+// (роль создателя `iam.service_account.creator`, приёмка
+// `service-account-creation-is-its-own-right.md`, Р2: «посев ролей модуля при
+// старте из встроенного манифеста») миграция завести не вправе — роль модуля с
+// манифестом объявляется манифестом, и второй писатель одной строки замолчал бы
+// правку манифеста (`TestMODRD23MigrationDoesNotWriteARoleOfAManifestBearingModule`).
+// Значит производитель — этот путь старта.
+//
+// Применяется `ApplyImage`, а не `Apply`: строки ролей образа остаются без
+// владельца (роли платформы, политика их правил прежняя); перевод под владельца —
+// отдельное решение (шапка `ApplyImage`). Объявленное, совпадающее со строкой,
+// не пишется (приведение по отличию), поэтому на базе, где роли iam уже стоят,
+// путь меняет ровно новые строки.
+//
+// Отказ — ОТКАЗ ПУСКА, по тому же доводу, что у доставленных (шапка файла).
+func applyImageModuleRoles(
+	ctx context.Context,
+	logger *slog.Logger,
+	applier *moduleroles.Applier,
+	own *manifest.Manifest,
+) error {
+	rep, err := applier.ApplyImage(ctx, own, moduleroles.BootActorID)
+	logger.Info("перепись применения ролей своего манифеста службы",
+		slog.String("module", own.Module),
+		slog.Bool("section_declared", rep.SectionDeclared),
+		slog.Int("declared", rep.Declared),
+		slog.Int("written", rep.Written),
+		slog.Int("unchanged", rep.Unchanged),
+		slog.Int("skipped", rep.Skipped),
+		slog.Int("retired", rep.Retired),
+		slog.Any("names", rep.Names),
+		slog.Any("retired_names", rep.RetiredNames))
+	if err != nil {
+		return fmt.Errorf("роли своего манифеста службы %s: %w", own.Module, err)
+	}
+	return nil
+}

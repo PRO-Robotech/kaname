@@ -13,6 +13,9 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"go.uber.org/multierr"
+
+	"github.com/PRO-Robotech/kaname/internal/buildflavor"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // Validate checks Config invariants (pure function — no logger, no
@@ -208,6 +211,8 @@ func (c Config) Validate() error {
 	// `runServe`.
 	errs = multierr.Append(errs, c.validateTrustedForwarders())
 	errs = multierr.Append(errs, c.validateTrustDomain())
+	errs = multierr.Append(errs, c.validateModuleIdentities())
+	errs = multierr.Append(errs, c.validateBuildFlavor(buildflavor.IsTestBuild()))
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
@@ -384,6 +389,49 @@ func (c Config) validateTrustDomain() error {
 		Knob: "authn.trust-domain (env KANAME_AUTHN__TRUST_DOMAIN)",
 	})
 }
+
+// moduleIdentitiesKnob — имя ручки перечня личностей модулей для текстов отказа.
+const moduleIdentitiesKnob = "authn.module-identities (env KANAME_AUTHN__MODULE_IDENTITIES)"
+
+// validateModuleIdentities refuses to start a binary whose module roster is
+// malformed (any mode) or empty (production) — kaname#984.
+//
+// Неразбираемая запись — отказ в ЛЮБОМ режиме: установка, объявившая
+// личность, которую разбор не принял, иначе поднялась бы с меньшим перечнем,
+// чем написала, и законный модуль получал бы отказ, неотличимый от вызова без
+// личности.
+//
+// Пустой перечень — отказ в боевом режиме: модулем на нём не признаётся никто,
+// край в том числе, и процесс, выглядящий исправным, отвергал бы каждого.
+// Вне боевого режима пустой перечень допустим: стенд без взаимного TLS
+// проверенного листа не несёт, и решать по перечню там нечего.
+func (c Config) validateModuleIdentities() error {
+	issuers, err := clientIssuerEntries(c.AuthN.ClientIssuers)
+	if err != nil {
+		return fmt.Errorf("%s: %w", clientIssuersKnob, err)
+	}
+	names := make([]string, 0, len(issuers))
+	for _, i := range issuers {
+		names = append(names, i.name)
+	}
+	r, err := moduleidentity.ParseDeclared(c.AuthN.ModuleIdentities, names)
+	if err != nil {
+		return fmt.Errorf("%s / %s: %w", moduleIdentitiesKnob, clientIssuersKnob, err)
+	}
+	if !c.AuthN.Mode.IsProduction() {
+		return nil
+	}
+	if err := r.Require(moduleidentity.Gate{Knob: moduleIdentitiesKnob}); err != nil {
+		return err
+	}
+	// Привязка к выпустившему центру (kaname#988) обязательна в боевом режиме:
+	// без неё доверие ко всем центрам пула общее. Файлы центров здесь не
+	// читаются — их читает корень при подъёме (`AuthNConfig.LoadModuleRoster`).
+	return r.RequireIssuerBinding(moduleidentity.Gate{Knob: moduleIdentitiesKnob})
+}
+
+// clientIssuersKnob — имя ручки доверенных центров для текстов отказа.
+const clientIssuersKnob = "authn.client-issuers (env KANAME_AUTHN__CLIENT_ISSUERS)"
 
 // validateMode ensures Mode is a known ENUM value.
 func (c Config) validateMode() error {

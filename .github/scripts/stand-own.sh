@@ -269,6 +269,15 @@ stand_env() {
   # подтверждения глагола читает принципал как непроверенный и отвечает
   # `authz.step_up` (замер на стенде: 403, PreconditionFailure).
   export KANAME_AUTHN__TRUSTED_FORWARDER_SANS="spiffe://kaname.local/ns/kaname/sa/kaname,spiffe://kaname.local/ns/kaname/sa/$EDGE_SA"
+  # ЛИЧНОСТЬ КРАЯ СТЕНДА (kaname#984): модулем признаётся только объявленная
+  # пара, и посев, стоящий на месте края листом края, иначе краем не был бы.
+  # Перечень же судит допуск внутреннего фронта (SEC-1017-1): имени службы в нём
+  # нет и не заводится, поэтому внутреннему фронту прогонщик и утверждения стенда
+  # предъявляют лист края (`run.sh --internal-front-client-*`, `stand-assert.py`).
+  export KANAME_AUTHN__MODULE_IDENTITIES="kaname/$EDGE_SA=edge@internal"
+  # Центр личности края — внутренний центр стенда (kaname#988): тот же файл,
+  # что у пула клиентских центров слушателей ниже.
+  export KANAME_AUTHN__CLIENT_ISSUERS="internal=$PKI/ca.crt"
   export KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE=registry.kaname.local
   export KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY=3
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5

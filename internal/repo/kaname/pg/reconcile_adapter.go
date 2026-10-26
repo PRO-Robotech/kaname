@@ -486,6 +486,42 @@ func (s *reconcileStore) AcquireBindingLocks(ctx context.Context, bindingIDs []d
 	return nil
 }
 
+// LockBindingsSQL — замок строк выдач набора ($1 — их id), режим тот же, что
+// у LoadBinding (`GetForNoKeyUpdate`). LockRolesOfBindingsSQL — замок строк их ролей,
+// режим тот же, что у loadRolesWithLifecycle. Порядок захвата задаёт `ORDER BY id`:
+// узел замка стоит над сортировкой, поэтому строки запираются в порядке id.
+// Экспортированы ради пробы порядка (kaname#974): она судит этот самый текст.
+const (
+	LockBindingsSQL = `SELECT b.id FROM kaname.access_bindings b
+		  WHERE b.id = ANY($1)
+		  ORDER BY b.id
+		    FOR NO KEY UPDATE`
+	LockRolesOfBindingsSQL = `SELECT r.id FROM kaname.roles r
+		  WHERE r.id IN (SELECT b.role_id FROM kaname.access_bindings b WHERE b.id = ANY($1))
+		  ORDER BY r.id
+		    FOR KEY SHARE OF r`
+)
+
+// LockBindingsAndRoles — строки выдач набора, затем строки их ролей, каждый род одним
+// оператором в порядке id и до первой записи прохода (kaname#974, контракт — у порта).
+// Выдача, которой нет, просто не запирается: её LoadBinding вернёт ok=false.
+func (s *reconcileStore) LockBindingsAndRoles(ctx context.Context, bindingIDs []domain.AccessBindingID) error {
+	if len(bindingIDs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(bindingIDs))
+	for _, id := range bindingIDs {
+		ids = append(ids, string(id))
+	}
+	if _, err := s.tx.Exec(ctx, LockBindingsSQL, ids); err != nil {
+		return fmt.Errorf("reconcile: lock %d binding rows: %w", len(ids), err)
+	}
+	if _, err := s.tx.Exec(ctx, LockRolesOfBindingsSQL, ids); err != nil {
+		return fmt.Errorf("reconcile: lock roles of %d bindings: %w", len(ids), err)
+	}
+	return nil
+}
+
 // MatchAllInScope returns the mirror objects of the given types NARROWED to the binding's
 // containment scope (ARM_ANCHOR/`all`, P4) — no label filter. The scope is pushed into the
 // SQL (resource_mirror.AllByTypes) as a PROVEN SUPERSET of the use-case's IsContainedIn
@@ -531,6 +567,65 @@ func (s *reconcileStore) MatchByIDs(ctx context.Context, types, ids []string) ([
 // arm no longer scans EVERY iam-native row of the type cluster-wide.
 func (s *reconcileStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	return s.iamDirectQuery(ctx, types, "", nil, scope)
+}
+
+// MatchCreatedByIAMDirect — объекты типов `types` в области `scope`, созданные
+// учётками `creators` (kaname#1003, контракт — у порта). Предикат области — тот же
+// `iamDirectScopePredicate`, что у ветви якоря; создатель — равенством вида и
+// вхождением id, чтобы отбор шёл по частичному индексу
+// `service_accounts_creator_idx (account_id, created_by_id) WHERE created_by_type =
+// 'service_account'`. Все идентификаторы запроса — литералы закрытой карты.
+func (s *reconcileStore) MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error) {
+	if len(types) == 0 || len(creators) == 0 {
+		return nil, nil
+	}
+	var out []domain.MirrorObject
+	for _, t := range types {
+		spec, ok := iamDirectScanSpecs[t]
+		if !ok || spec.creatorIDCol == "" {
+			continue
+		}
+		q, args := matchCreatedBySQL(spec, scope, creators)
+		rows, err := s.tx.Query(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("reconcile: iam-direct %s by creator: %w", spec.objectType, err)
+		}
+		objs, serr := scanIAMDirect(rows, spec.objectType)
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, objs...)
+	}
+	return out, nil
+}
+
+// matchCreatedBySQL — текст и доводы отбора по создателю для одного вида.
+// Отдельной функцией ради пробы плана (DoD S1 п.8 приёмки kaname#1003): `EXPLAIN`
+// обязан судить ТОТ ЖЕ текст, которым отбирает проход, а не выписанную копию.
+func matchCreatedBySQL(spec iamDirectScanSpec, scope domain.ScopeAnchor, creators []string) (string, []any) {
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
+		" FROM " + spec.table + " o"
+	if spec.join != "" {
+		q += " " + spec.join
+	}
+	where := "o.created_by_type = 'service_account' AND " + spec.creatorIDCol + " = ANY($1)"
+	args := []any{creators}
+	// Область — тем же надмножеством IsContainedIn, что у ветви якоря, но СКАЛЯРНЫМ
+	// равенством колонки аккаунта, где вид его объявляет: так предикат ложится
+	// на первую колонку индекса «аккаунт, создатель».
+	switch scope.Type {
+	case "account":
+		if spec.parentAccountExpr != "" {
+			where += " AND " + spec.parentAccountExpr + " = $2"
+		} else {
+			where += " AND $2 = ANY(" + spec.accountsExpr() + ")"
+		}
+		args = append(args, scope.ID)
+	case "project":
+		where += " AND " + spec.parentProjectExpr + " = $2"
+		args = append(args, scope.ID)
+	}
+	return q + " WHERE " + where + " ORDER BY o.id ASC", args
 }
 
 // MatchByIDsIAMDirect returns the IAM-OWN objects of the given iam-direct types
@@ -583,6 +678,23 @@ type iamDirectScanSpec struct {
 	parentProjectExpr  string
 	// join is an optional LEFT JOIN clause (e.g. resolve a project's account_id).
 	join string
+	// creatorExpr — ссылка на субъекта-СОЗДАТЕЛЯ объекта в форме субъекта модели
+	// (`service_account:<id>`, `user:<id>`), пустая строка — создатель не записан
+	// (kaname#1003, Р4). Пусто у вида, факт создателя которого не хранится:
+	// селектор создателя такой объект не выбирает никогда (сторона отказа).
+	creatorExpr string
+	// creatorIDCol — колонка идентификатора создателя-учётки для отбора по индексу
+	// «аккаунт, создатель» (`service_accounts_creator_idx`); пусто — факт создателя
+	// у вида не хранится.
+	creatorIDCol string
+}
+
+// creator — выражение создателя вида либо пустая строка.
+func (s iamDirectScanSpec) creator() string {
+	if s.creatorExpr != "" {
+		return s.creatorExpr
+	}
+	return "''"
 }
 
 // accountsExpr — КАНОНИЧЕСКАЯ форма источника аккаунтов: SQL-выражение типа
@@ -631,6 +743,10 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 	"iam.serviceAccount": {
 		objectType: "iam.serviceAccount", table: "kaname.service_accounts",
 		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
+		// Факт создателя (kaname#1003, Р4): вид и id создателя — в форме субъекта
+		// модели, тем же написанием, что `domain.FGASubjectRef`.
+		creatorExpr:  "COALESCE(o.created_by_type || ':' || o.created_by_id, '')",
+		creatorIDCol: "o.created_by_id",
 	},
 	// ЛИЧНОСТЬ — аккаунты из СВЯЗИ, а не из колонки строки (kacho#1172).
 	//
@@ -723,7 +839,7 @@ func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mod
 		}
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe.
-		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr +
+		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
 			" FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
@@ -797,7 +913,7 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe. The own-table
 		// `labels @> $1` probe is served by the per-table GIN index (migration 0041).
-		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr +
+		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
 			" FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
@@ -832,9 +948,9 @@ func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, err
 	defer rows.Close()
 	var out []domain.MirrorObject
 	for rows.Next() {
-		var id, parentProject string
+		var id, parentProject, creator string
 		var parentAccounts []string
-		if err := rows.Scan(&id, &parentAccounts, &parentProject); err != nil {
+		if err := rows.Scan(&id, &parentAccounts, &parentProject, &creator); err != nil {
 			return nil, fmt.Errorf("reconcile: scan iam-direct %s row: %w", objectType, err)
 		}
 		out = append(out, domain.MirrorObject{
@@ -842,6 +958,7 @@ func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, err
 			ObjectID:         id,
 			ParentAccountIDs: parentAccounts,
 			ParentProjectID:  parentProject,
+			CreatedBy:        creator,
 		})
 	}
 	return out, rows.Err()
@@ -875,6 +992,58 @@ func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, c
 		out = append(out, mirrorRowToDomain(row))
 	}
 	return out, nil
+}
+
+// LockMirrorObjectsSQL — замок строк зеркала набора объектов ($1 — типы, $2 — id,
+// попарно). Режим `FOR KEY SHARE`: конфликтует с удалением строки (снятие
+// регистрации) и не конфликтует с правкой меток. Порядок захвата задаёт
+// `ORDER BY` — узел замка стоит над сортировкой. Экспортирован ради пробы
+// (kaname#975): она судит этот самый текст.
+//
+// `SKIP LOCKED` — намеренно. Строку, которую снятие удаляет прямо сейчас, проход
+// не ждёт, а пропускает как отсутствующую: с `FOR KEY SHARE` конфликтует только
+// удаление (и смена ключа, которой у зеркала нет), а снятие после удаления строки
+// добирает выдачи и роли, записанные писателями, пока оно ждало. Проход,
+// ждущий строку под удалением и держащий такую выдачу, сходился бы со снятием в
+// кольцо (40P01, URG-24). Цена пропуска — только при откате снятия: член по
+// объекту появится со следующим проходом, а не этим; ошибка в сторону отказа.
+const LockMirrorObjectsSQL = `SELECT m.object_type, m.object_id
+		   FROM kaname.resource_mirror m
+		   JOIN unnest($1::text[], $2::text[]) AS u(object_type, object_id)
+		     ON m.object_type = u.object_type AND m.object_id = u.object_id
+		  ORDER BY m.object_type, m.object_id
+		    FOR KEY SHARE OF m SKIP LOCKED`
+
+// LockMirrorObjects — строки зеркала объектов `objs` под `FOR KEY SHARE`, одним
+// оператором в порядке (тип, id); возвращает объекты, строки которых есть
+// (kaname#975, контракт — у порта).
+func (s *reconcileStore) LockMirrorObjects(ctx context.Context, objs []reconcile.MemberCoord) (map[reconcile.MemberCoord]struct{}, error) {
+	present := make(map[reconcile.MemberCoord]struct{}, len(objs))
+	if len(objs) == 0 {
+		return present, nil
+	}
+	types := make([]string, 0, len(objs))
+	ids := make([]string, 0, len(objs))
+	for _, o := range objs {
+		types = append(types, o.ObjectType)
+		ids = append(ids, o.ObjectID)
+	}
+	rows, err := s.tx.Query(ctx, LockMirrorObjectsSQL, types, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: lock %d mirror objects: %w", len(objs), err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c reconcile.MemberCoord
+		if err := rows.Scan(&c.ObjectType, &c.ObjectID); err != nil {
+			return nil, fmt.Errorf("reconcile: scan locked mirror object: %w", err)
+		}
+		present[c] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reconcile: lock %d mirror objects: %w", len(objs), err)
+	}
+	return present, nil
 }
 
 // GetMirrorObject returns one mirror row (byName containment / PENDING verify).
@@ -913,18 +1082,18 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		// forward path only routes iam-direct types here).
 		return domain.MirrorObject{}, false, nil
 	}
-	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", o.labels" +
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() + ", o.labels" +
 		" FROM " + spec.table + " o"
 	if spec.join != "" {
 		q += " " + spec.join
 	}
 	q += " WHERE o.id = $1"
 	var (
-		id, parentProject string
-		parentAccounts    []string
-		labelsJSON        []byte
+		id, parentProject, creator string
+		parentAccounts             []string
+		labelsJSON                 []byte
 	)
-	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &labelsJSON); err != nil {
+	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &creator, &labelsJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.MirrorObject{}, false, nil
 		}
@@ -935,6 +1104,7 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		ObjectID:         id,
 		ParentAccountIDs: parentAccounts,
 		ParentProjectID:  parentProject,
+		CreatedBy:        creator,
 	}
 	if len(labelsJSON) > 0 {
 		if err := json.Unmarshal(labelsJSON, &obj.Labels); err != nil {
@@ -1673,4 +1843,18 @@ func bindingSubjects(b domain.AccessBinding) []domain.Subject {
 		return b.Subjects
 	}
 	return []domain.Subject{{Type: b.SubjectType, ID: b.SubjectID}}
+}
+
+// MatchCreatedByQuery — текст и доводы отбора по создателю для вида `objectType`
+// (kaname#1003) — ТОТ ЖЕ, которым отбирает `MatchCreatedByIAMDirect`. Экспортирован
+// ради пробы плана (DoD S1 п.8 приёмки): `EXPLAIN` обязан судить исполняемый
+// текст, а не выписанную копию, — копия разошлась бы с ним молча. ok=false — у
+// вида факт создателя не хранится, и отбирать нечего.
+func MatchCreatedByQuery(objectType string, scope domain.ScopeAnchor, creators []string) (string, []any, bool) {
+	spec, ok := iamDirectScanSpecs[objectType]
+	if !ok || spec.creatorIDCol == "" {
+		return "", nil, false
+	}
+	q, args := matchCreatedBySQL(spec, scope, creators)
+	return q, args, true
 }

@@ -2420,13 +2420,14 @@
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessBindingService/Delete",
-    "permission": "iam.access_bindings.delete",
-    "required_relation": "v_delete",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "iam_access_binding",
-      "from_request_field": "access_binding_id"
+      "object_type": "",
+      "from_request_field": ""
     },
-    "required_acr_min": "2"
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessBindingService/ExpandAccess",
@@ -2537,13 +2538,14 @@
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessBindingService/Revoke",
-    "permission": "iam.access_bindings.revoke",
-    "required_relation": "v_delete",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
     "scope_extractor": {
-      "object_type": "iam_access_binding",
-      "from_request_field": "access_binding_id"
+      "object_type": "",
+      "from_request_field": ""
     },
-    "required_acr_min": "2"
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
   },
   {
     "fqn": "kaname.cloud.iam.v1.AccessBindingService/Update",
@@ -2777,6 +2779,50 @@
       "from_request_field": "*"
     },
     "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.GrantDelegationService/Create",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.GrantDelegationService/Get",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.GrantDelegationService/List",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.GrantDelegationService/Revoke",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
   },
   {
     "fqn": "kaname.cloud.iam.v1.GroupService/AddMember",
@@ -3384,7 +3430,7 @@
   {
     "fqn": "kaname.cloud.iam.v1.ServiceAccountService/Create",
     "permission": "iam.service_accounts.create",
-    "required_relation": "editor",
+    "required_relation": "service_account_creator",
     "scope_extractor": {
       "object_type": "account",
       "from_request_field": "account_id"
