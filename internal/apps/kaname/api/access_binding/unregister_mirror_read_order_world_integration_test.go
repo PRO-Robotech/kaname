@@ -304,6 +304,7 @@ func (w *urxWorld) bareRegister() *internaliam.RegisterResourceUseCase {
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
+		kanamepg.NewRegistrationAudit(),
 	)
 }
 
