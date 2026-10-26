@@ -78,7 +78,7 @@ func TestCreateGroup_StampsAccountID(t *testing.T) {
 
 func TestAddGroupMember_StampsAccountID(t *testing.T) {
 	opsRepo := newFakeGrpOps()
-	uc := NewAddMemberUseCase(newFakeGrpRepo(), opsRepo)
+	uc := NewAddMemberUseCase(newFakeGrpRepo(), opsRepo).WithGrantAuthority(&groupGrantAuthorityAnswer{})
 	op, err := uc.Execute(ownerCtx(), AddMemberInput{
 		GroupID: metaGrp, MemberType: domain.SubjectTypeUser, MemberID: "usr0000000000000mmmm",
 	})

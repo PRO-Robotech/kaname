@@ -90,7 +90,7 @@ func TestDeleteGroup_NonOwnerPrincipal_NotRejectedInService(t *testing.T) {
 func TestAddGroupMember_NonOwnerPrincipal_NotRejectedInService(t *testing.T) {
 	for name, ctx := range nonOwnerCtxs() {
 		t.Run(name, func(t *testing.T) {
-			uc := NewAddMemberUseCase(newFakeGrpRepo(), newFakeGrpOps())
+			uc := NewAddMemberUseCase(newFakeGrpRepo(), newFakeGrpOps()).WithGrantAuthority(&groupGrantAuthorityAnswer{})
 			op, err := uc.Execute(ctx, AddMemberInput{
 				GroupID: metaGrp, MemberType: domain.SubjectTypeUser, MemberID: "usr0000000000000mmmm",
 			})

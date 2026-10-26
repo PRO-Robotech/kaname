@@ -373,7 +373,8 @@ func (w *gdWorld) buildHandlers() {
 		projectapp.NewDeleteProjectUseCase(w.repo, w.ops), nil, nil)
 	w.groups = groupapp.NewHandler(
 		groupapp.NewCreateGroupUseCase(w.repo, w.ops).WithRelationStore(w.door, nil),
-		nil, nil, nil, nil, groupapp.NewAddMemberUseCase(w.repo, w.ops), nil, nil)
+		nil, nil, nil, nil, groupapp.NewAddMemberUseCase(w.repo, w.ops).
+			WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door)), nil, nil)
 	w.roles = roleapp.NewHandler(
 		roleapp.NewCreateRoleUseCase(w.repo, w.ops, src).WithRelationStore(w.door, nil), nil, nil, nil, nil)
 	w.sas = serviceaccountapp.NewHandler(

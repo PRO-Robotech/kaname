@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -275,7 +276,8 @@ func TestGrantDelegation_D4_GroupHoldingTheDelegateIsRefused(t *testing.T) {
 			w.requireSubject("Д4 " + r.name)
 			dU := w.dU()
 			if r.delegateMember {
-				add := groupapp.NewAddMemberUseCase(w.repo, w.ops)
+				add := groupapp.NewAddMemberUseCase(w.repo, w.ops).
+					WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door))
 				op, err := add.Execute(asUser(w.ctx, w.usrA), groupapp.AddMemberInput{
 					GroupID: domain.GroupID(w.grpA), MemberType: domain.SubjectTypeServiceAccount,
 					MemberID: domain.SubjectID(w.svaIss2),

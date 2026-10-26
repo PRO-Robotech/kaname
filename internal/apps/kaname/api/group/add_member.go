@@ -11,7 +11,10 @@ package group
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -35,10 +38,31 @@ type AddMemberInput struct {
 type AddMemberUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
+	// authority — право добавляющего выдавать на областях действующих выдач
+	// группы (Р3, kaname#1037). Без провязки добавление отказывает (fail-closed):
+	// контроль, которому нечем исполниться, не должен молча пропускать.
+	authority MembersGrantAuthority
 }
 
 func NewAddMemberUseCase(r Repo, opsRepo operations.Repo) *AddMemberUseCase {
 	return &AddMemberUseCase{repo: r, opsRepo: opsRepo}
+}
+
+// WithGrantAuthority — проверка Р3 перед добавлением участника. Провязывает
+// корень службы (`access_binding.NewScopeGrantAuthority`).
+func (u *AddMemberUseCase) WithGrantAuthority(a MembersGrantAuthority) *AddMemberUseCase {
+	u.authority = a
+	return u
+}
+
+// requireMembersGrantAuthority — проверка Р3. Непровязанный порт — отказ, а не
+// пропуск; текст наружу фиксированный (§Hardening #1), причина — в журнал.
+func (u *AddMemberUseCase) requireMembersGrantAuthority(ctx context.Context, id domain.GroupID) error {
+	if u.authority == nil {
+		slog.ErrorContext(ctx, "group add member: members grant authority is not wired — refusing the add", "group_id", string(id))
+		return status.Error(codes.Internal, "internal error")
+	}
+	return u.authority.RequireForGroup(ctx, id)
 }
 
 func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*operations.Operation, error) {
@@ -76,6 +100,13 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 	default:
 		return nil, shared.InvalidArg("member_type",
 			"member_type must be 'user' or 'service_account'")
+	}
+	// Р3 (kaname#1037): участник в группу с действующими выдачами — только с
+	// правом выдавать на каждой их области. Порядок несущий (Д-4): форма,
+	// существование группы и вид участника уже проверены, об участнике отказ не
+	// говорит ничего. Отказ синхронный, операции нет.
+	if err := u.requireMembersGrantAuthority(ctx, in.GroupID); err != nil {
+		return nil, err
 	}
 
 	op, err := operations.NewFromContext(ctx,
