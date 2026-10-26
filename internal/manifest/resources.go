@@ -204,6 +204,16 @@ var (
 	ErrWriteSubjectsInvalid = errors.New("manifest: write subjects are empty, repeated or outside the closed set")
 	// ErrWriteDuplicate — одно отношение в двух записях `writes` ресурса.
 	ErrWriteDuplicate = errors.New("manifest: two writes of the resource name one relation")
+	// ErrPermanentProjectFalse — `permanentProject: false`: второй способ сказать
+	// «не объявлено» рядом с отсутствием ключа (kaname#983, Р7).
+	ErrPermanentProjectFalse = errors.New("manifest: permanentProject is either absent or true")
+	// ErrPermanentProjectWithoutProject — ключ на типе, у которого нет пути к
+	// проекту: среди указателей нет ни якоря `project`, ни указателя на тип того
+	// же документа.
+	ErrPermanentProjectWithoutProject = errors.New("manifest: permanentProject is declared on a type with no path to a project")
+	// ErrPermanentProjectParentUnbound — указатель типа с ключом называет тип того
+	// же документа без ключа: родитель мог бы сменить проект, а ребёнок — нет.
+	ErrPermanentProjectParentUnbound = errors.New("manifest: permanentProject is declared on a type whose parent of the same module does not declare it")
 )
 
 // canonicalVerbClasses — ЕДИНСТВЕННОЕ в дереве объявление правила «класс из
