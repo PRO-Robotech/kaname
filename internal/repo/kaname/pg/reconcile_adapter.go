@@ -1844,3 +1844,17 @@ func bindingSubjects(b domain.AccessBinding) []domain.Subject {
 	}
 	return []domain.Subject{{Type: b.SubjectType, ID: b.SubjectID}}
 }
+
+// MatchCreatedByQuery — текст и доводы отбора по создателю для вида `objectType`
+// (kaname#1003) — ТОТ ЖЕ, которым отбирает `MatchCreatedByIAMDirect`. Экспортирован
+// ради пробы плана (DoD S1 п.8 приёмки): `EXPLAIN` обязан судить исполняемый
+// текст, а не выписанную копию, — копия разошлась бы с ним молча. ok=false — у
+// вида факт создателя не хранится, и отбирать нечего.
+func MatchCreatedByQuery(objectType string, scope domain.ScopeAnchor, creators []string) (string, []any, bool) {
+	spec, ok := iamDirectScanSpecs[objectType]
+	if !ok || spec.creatorIDCol == "" {
+		return "", nil, false
+	}
+	q, args := matchCreatedBySQL(spec, scope, creators)
+	return q, args, true
+}
