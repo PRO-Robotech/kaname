@@ -42,9 +42,9 @@ const (
 	internalPollSubjectChangesMethod   = "/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges"
 	internalRegisterResourceMethod     = "/kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
 	internalUnregisterResourceMethod   = "/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource"
-	internalResolveBasicCredential     = "/kaname.cloud.iam.v1.InternalIAMService/ResolveBasicCredential"
+	internalResolveBasicMethod         = "/kaname.cloud.iam.v1.InternalIAMService/ResolveBasicCredential"
 	internalGetRoleCompiledMethod      = "/kaname.cloud.iam.v1.InternalIAMService/GetRoleCompiled"
-	internalCheckBasicCredentialLive   = "/kaname.cloud.iam.v1.InternalIAMService/CheckBasicCredentialLive"
+	internalCheckBasicLiveMethod       = "/kaname.cloud.iam.v1.InternalIAMService/CheckBasicCredentialLive"
 	internalIsRevokedMethod            = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
 	internalSessionCutoffOfMethod      = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/SessionCutoffOf"
 	internalUserGetMethod              = "/kaname.cloud.iam.v1.InternalUserService/Get"
@@ -66,9 +66,9 @@ func ProfileMethods(p moduleidentity.Profile) []string {
 			internalCheckMethod,
 			internalLookupSubjectMethod,
 			internalPollSubjectChangesMethod,
-			internalResolveBasicCredential,
+			internalResolveBasicMethod,
 			internalGetRoleCompiledMethod,
-			internalCheckBasicCredentialLive,
+			internalCheckBasicLiveMethod,
 			internalIsRevokedMethod,
 			internalSessionCutoffOfMethod,
 			internalUserGetMethod,

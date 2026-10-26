@@ -109,8 +109,8 @@ func TestModuleRoster_DataPlaneOutsideItsListIsRefused(t *testing.T) {
 	for _, method := range []string{
 		internalLookupSubjectMethod,
 		internalPollSubjectChangesMethod,
-		internalResolveBasicCredential,
-		internalCheckBasicCredentialLive,
+		internalResolveBasicMethod,
+		internalCheckBasicLiveMethod,
 		internalGetRoleCompiledMethod,
 		internalRegisterResourceMethod,
 		internalUnregisterResourceMethod,
