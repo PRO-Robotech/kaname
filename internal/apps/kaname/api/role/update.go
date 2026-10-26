@@ -89,6 +89,17 @@ type UpdateRoleUseCase struct {
 	cat catalog.Source
 	// keys — какие ключи, названные правилами, зарегистрированы на приёме (kaname#963).
 	keys shared.RegisteredKeys
+	// authority — право правящего выдавать роль на областях её действующих выдач
+	// (Р2, kaname#1036). Без провязки правка правил отказывает (fail-closed): контроль,
+	// которому нечем исполниться, не должен молча пропускать.
+	authority RulesGrantAuthority
+}
+
+// WithGrantAuthority — проверка Р2 перед правкой правил роли. Провязывает корень
+// службы (`access_binding.NewScopeGrantAuthority`).
+func (u *UpdateRoleUseCase) WithGrantAuthority(a RulesGrantAuthority) *UpdateRoleUseCase {
+	u.authority = a
+	return u
 }
 
 // WithRegisteredKeys — чтение регистрации ключей, названных в resourceNames, на
@@ -222,6 +233,17 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	}
 	if err := target.Validate(facts); err != nil {
 		return nil, shared.MapValidationErr(err)
+	}
+
+	// Р2 (kaname#1036): правка правил роли с действующими выдачами — только с
+	// правом выдавать её на каждой области этих выдач. Порядок несущий (Д-4):
+	// форма, существование, системность и правила уже проверены — отказ в праве не
+	// говорит ни о чём, кроме права. Отказ синхронный, операции нет. Правка, не
+	// называющая правил (имя, описание, метки), права выдавать не требует (Д-5).
+	if slices.Contains(changed, "rules") {
+		if err := u.requireRulesGrantAuthority(ctx, in.ID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Роль, выданная системному классу, пишущего глагола не получает (Р4,
@@ -455,6 +477,17 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 	// вернул бы превью, собранное другим источником, чем последующий `Get`.
 	updated.TypeVerbs = u.cat.Facts().RolePreviewLookup()
 	return marshalRole(updated)
+}
+
+// requireRulesGrantAuthority — проверка Р2. Непровязанный порт — отказ, а не
+// пропуск: ошибка провязки обязана стоить отказа правке, а не права, выданного
+// мимо проверки. Текст наружу — фиксированный (§Hardening #1); причина — в журнал.
+func (u *UpdateRoleUseCase) requireRulesGrantAuthority(ctx context.Context, id domain.RoleID) error {
+	if u.authority == nil {
+		slog.ErrorContext(ctx, "role update: rules grant authority is not wired — refusing the rules change", "role_id", string(id))
+		return status.Error(codes.Internal, "internal error")
+	}
+	return u.authority.RequireForRole(ctx, id)
 }
 
 // refuseIfBoundToSystemClass — синхронный отказ правке, дающей пишущий глагол

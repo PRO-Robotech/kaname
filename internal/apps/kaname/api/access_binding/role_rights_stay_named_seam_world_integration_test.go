@@ -12,13 +12,14 @@ package access_binding_test
 // частями, что композиционный корень (`cmd/kaname/wiring.go`).
 
 import (
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // escWireRoleAuthority — проверка Р2 в правку роли мира Э над дверью решения
 // `relations` (ESC-14 подставляет дверь, отказывающую ошибкой на вопросах об
-// одном субъекте). До реализации порта нет: правка отдаётся как есть.
-func escWireRoleAuthority(_ *escWorld, u *roleapp.UpdateRoleUseCase, _ clients.RelationStore) *roleapp.UpdateRoleUseCase {
-	return u
+// одном субъекте).
+func escWireRoleAuthority(w *escWorld, u *roleapp.UpdateRoleUseCase, relations clients.RelationStore) *roleapp.UpdateRoleUseCase {
+	return u.WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, relations))
 }
