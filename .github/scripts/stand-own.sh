@@ -2597,6 +2597,13 @@ case "$line" in
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
   *"logs "*) echo "журнал службы из пода" ;;
   *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
+  # `exec -i` настоящего клиента передаёт приёмнику pod поток до конца. Подставной, вышедший
+  # недочитав, ронял пишущую сторону конвейера сигналом SIGPIPE, и pipefail доставки
+  # принимал это за отказ — исход зависел от того, кто первым успел (kaname#1025).
+  *"exec -i "*)
+    cat > /dev/null
+    [ -e "$S/exec-in-fail" ] || exit 0
+    echo "gzip: stdin: not in gzip format" >&2; echo "command terminated with exit code 2" >&2; exit 2 ;;
   *) exit 0 ;;
 esac
 EOF
@@ -2790,6 +2797,11 @@ EOF
     rw_pod_gone()  { rm -f "$SELFTEST_KC/rc"; echo Failed > "$SELFTEST_KC/phase"; }
     rw_dirty()     { echo '// правка' >> "$R/go.mod"; }
     rw_unnamed()   { KANAME_STAND_KUBECONFIG=""; }
+    # Исходники больше буфера канала: пишущая сторона доставки ещё пишет, когда приёмник
+    # уже мог выйти, — подставной, не дочитавший поток, роняет доставку на каждом прогоне.
+    rw_big_src()   { head -c 262144 /dev/urandom > "$R/blob" && git -C "$R" add blob &&
+                     git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m blob; }
+    rw_src_refused() { : > "$SELFTEST_KC/exec-in-fail"; }
     # Забор настоящим текстом перечня и потока над «pod»-каталогом: один отчёт, каталогов
     # шаблонов без подстановочных знаков нет — код команды доходит (kaname#940); cut
     # обрывает поток в каждой попытке — неполная доставка, 125.
@@ -2809,6 +2821,8 @@ EOF
     world_runner_pod_gone()  { runner_world rw_pod_gone; }
     world_runner_dirty()     { runner_world rw_dirty; }
     world_runner_unnamed()   { runner_world rw_unnamed; }
+    world_runner_big_src()   { runner_world rw_big_src; }
+    world_runner_src_refused() { runner_world rw_src_refused; }
     world_runner_ns_exists() { runner_world rw_ns_exists; }
     world_runner_no_cmd()    { ( SELFTEST_RUNNER_ARGS=""; runner_world ); }
     world_runner_reports()     { runner_world rw_reports; }
@@ -3003,6 +3017,8 @@ EOF
     assert 0  "(−) команда pod 0 — код 0, пространство снято, перепись 0"    world_runner_ok "раннер: код 0" "задачи 841 во внешнем кластере: 0" "УСЛОВИЕ НЕ СОЗДАНО"
     assert 3  "(+) команда pod 3 — код 3, пространство снято всё равно"      world_runner_rc3 "раннер: код 3" "задачи 841 во внешнем кластере: 0" "УСЛОВИЕ НЕ СОЗДАНО"
     assert 125 "(+) pod вышел без кода — 125, не красное"                    world_runner_pod_gone "кода команды из pod нет" "задачи 841 во внешнем кластере: 0" "раннер: код 0"
+    assert 0  "(−) исходники больше буфера канала — доставлены, код 0"      world_runner_big_src "раннер: код 0" "-" "в pod не доставлены"
+    assert 125 "(+) приёмник исходников в pod отказал — 125, не красное"     world_runner_src_refused "в pod не доставлены" "задачи 841 во внешнем кластере: 0" "раннер: код 0"
     assert 64 "(+) правка вне коммита — 64 до записи"                        world_runner_dirty "правки вне коммита" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 125 "(+) кубконфиг не назван — 125, локального подъёма нет"      world_runner_unnamed "pod раннеру ставить негде" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 1  "(+) пространство уже есть — 1 до записи"                      world_runner_ns_exists "уже есть" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
