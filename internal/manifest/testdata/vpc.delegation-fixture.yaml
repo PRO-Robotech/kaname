@@ -15,6 +15,16 @@
 # контроле «роль vpc.address_pool_admin в базе: no rows in result set». Прочее —
 # дословно как в исходной фикстуре.
 #
+# Ярус роли `vpc.internal_consumer` — кластер, как в исходной фикстуре с
+# kaname#979. Первая редакция этой фикстуры была снята с исходной ДО #979, где
+# роль стояла на проекте, и потолок посева (`seedgrantceiling.go`) её отвергал:
+# выдача посева стоит на якоре кластера, а роль, определённая на проекте,
+# действовала бы на всю установку. Перенести выдачу на проект нельзя — якорь
+# посева пиннут кластером (`grantanchor.go`). Мир Д этой роли и её выдачи не
+# касается: сценарии GD* берут из манифеста vpc одну `vpc.address_pool_admin`.
+# Что каждая фикстура каталога проходит загрузчик, держит
+# `TestEveryTestdataFixtureFacesTheLoaderWithTheSeedGrantCeiling`.
+#
 # Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
 # базовым именем, и фикстура, названная так, судилась бы как манифест модуля.
 
@@ -155,7 +165,7 @@ roles:
     description: >
       Ходит в vpc на пути запроса: аллокация адресов, ссылки, привязка
       интерфейсов.
-    tier: {tierType: iam.project, tierId: prj000000000000000}
+    tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: vpc
         resources: [address, networkInterface, subnet]
