@@ -92,7 +92,10 @@
 //     там, где дерево дома есть;
 //  2. приставка, домом НЕ являющаяся (`kacho:TestFoo`, `IAM-MV-04:TestFoo`), —
 //     НАХОДКА. Без этого любой не-разобранный префикс снимал бы координату с
-//     суждения, и приставка стала бы способом спрятать адрес, а не назвать дом;
+//     суждения, и приставка стала бы способом спрятать адрес, а не назвать дом.
+//     Строка итога `go test` (`--- PASS: TestX`, глаголы PASS · FAIL · SKIP)
+//     приставкой не является: это цитата прогона, и имя в ней судится в СВОЁМ
+//     дереве, как голое (`probeCoordinateGoTestResult`, kaname#1037);
 //  3. ДВА СТОРОЖА, и живут они в гейте (`acceptance_probe_coordinate_test.go`), а
 //     не здесь, потому что им нужен дом ЭТОГО дерева — ядро судит значения, и для
 //     него всякий непустой дом чужой. Первый отвергает корпус, где ВСЕ координаты
@@ -134,6 +137,10 @@ var (
 	probeCoordinateFence  = regexp.MustCompile("^\\s*(```|~~~)")
 	probeCoordinateInline = regexp.MustCompile("`([^`\n]+)`")
 	probeCoordinateDecl   = regexp.MustCompile(`(?m)^func ((?:Test|Fuzz|Benchmark|Example)[A-Za-z0-9_]*)\s*\(`)
+	// probeCoordinateGoTestResult — строка итога `go test -v`: `--- PASS: TestX`,
+	// необязательно с длительностью `(0.01s)`. Глаголы — ровно те, что печатает
+	// `go test` в строке итога; иной глагол остаётся приставкой и судится как дом.
+	probeCoordinateGoTestResult = regexp.MustCompile(`^--- (?:PASS|FAIL|SKIP): (\S+)(?: \([0-9.]+s\))?$`)
 )
 
 // ProbeCoordinate — одно вхождение координаты: имя, дом и место, где оно стоит.
@@ -231,7 +238,12 @@ func ProbeCoordinatesIn(doc, body string) []ProbeCoordinate {
 // двоеточие штатно, и отделение по первому сделало бы домом кусок пути.
 func probeCoordinateOf(span string) (ProbeCoordinate, bool) {
 	head, name := "", span
-	if i := strings.LastIndexByte(span, ':'); i >= 0 {
+	if m := probeCoordinateGoTestResult.FindStringSubmatch(span); m != nil {
+		// Строка итога `go test` цитирует прогон: «--- PASS» домом себя не
+		// называет, и имя судится в СВОЁМ дереве, как голое, — координата с
+		// суждения не снимается.
+		name = m[1]
+	} else if i := strings.LastIndexByte(span, ':'); i >= 0 {
 		head, name = strings.TrimSpace(span[:i]), strings.TrimSpace(span[i+1:])
 	}
 	// `TestFoo/подпроба` — координата семейства; судится основание.
