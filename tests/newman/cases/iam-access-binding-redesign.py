@@ -269,6 +269,66 @@ CASES.append(Case(
 ))
 
 
+# kaname#1004, приёмка `access-target-object-id-follows-the-object-grammar.md`, DoD п.3 — край
+# ATI-02 (и строки «перевод строки» ATI-03). Отрицание и близнец различаются ровно хвостом
+# идентификатора «перевод строки + `compute.instance:<id>-2`»: одна строка идентификатора не
+# выдаёт себя за два объекта. Текст отказа — ATI-02 дословно: негодный элемент один, позиция
+# [0], склейки отказов нет.
+_ATI02 = ("Illegal argument target.resources[0].id (not a valid object id: space, tab, newline, "
+          "'#' and ':' are not allowed)")
+
+CASES.append(Case(
+    id="IAM-ACB-RD-CR-TARGET-OBJECT-ID-GRAMMAR-NEG",
+    title="kaname#1004 ATI-02: target.resources=[{compute.instance, id с переводом строки и вторым "
+          "двоеточием}] → sync 400 INVALID_ARGUMENT, текст ATI-02 дословно; близнец — тот же "
+          "идентификатор без хвоста → op done=true без error",
+    classes=["NEG"],
+    priority="P1",
+    steps=[
+        *_seed_role("og", "rdRoleOg"),
+        Step(
+            name="cr-object-id-newline",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body=_acb_body("rdRoleOg", {"resources": {"resources": [
+                {"type": "compute.instance",
+                 "id": "ins-rdacb{{runId}}\ncompute.instance:ins-rdacb{{runId}}-2"}]}}),
+            auth="jwtAccountAdminA",
+            test_script=[
+                # Сборка без проверки формы примет вызов и заведёт выдачу. Её id берётся
+                # только с принятого ответа, чтобы уборка ниже сняла и её.
+                "pm.environment.unset('rdAcbOgLeak');",
+                "try {",
+                "  const j = pm.response.json();",
+                "  if (pm.response.code === 200 && j.metadata && j.metadata.accessBindingId) {",
+                "    pm.environment.set('rdAcbOgLeak', String(j.metadata.accessBindingId));",
+                "  }",
+                "} catch (e) {}",
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                *assert_refusal_message(_ATI02, "ATI-02 refusal text verbatim"),
+            ],
+        ),
+        *_create_binding(
+            "cr-object-id-twin",
+            _acb_body("rdRoleOg", {"resources": {"resources": [
+                {"type": "compute.instance", "id": "ins-rdacb{{runId}}"}]}}),
+            "rdAcbOg",
+        ),
+        *_cleanup_binding("rdAcbOg"),
+        Step(name="cleanup-binding-accepted-negative", method="DELETE",
+             path="/iam/v1/accessBindings/{{rdAcbOgLeak}}", auth="jwtAccountAdminA",
+             pre_script=[
+                 "// Выдача отрицания есть, только если сборка его приняла.",
+                 "if (!pm.environment.get('rdAcbOgLeak')) { pm.execution.skipRequest(); }",
+             ],
+             test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(required=False),
+        *_cleanup_role("rdRoleOg"),
+    ],
+))
+
+
 # Т1 приёмки `access-target-names-live-catalog-types.md` (Р3) дословно: префикс до
 # скобки — прежний текст, продление называет адрес перечня годных типов.
 def _t1(typ):
