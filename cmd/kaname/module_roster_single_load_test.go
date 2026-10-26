@@ -56,8 +56,8 @@ func rosterReads(fset *token.FileSet, files []*ast.File) (loads, swallows []stri
 	return loads, swallows
 }
 
-// parseSources — разбор набора исходников «имя → текст».
-func parseSources(t *testing.T, fset *token.FileSet, sources map[string]string) []*ast.File {
+// parseRosterSources — разбор набора исходников «имя → текст».
+func parseRosterSources(t *testing.T, fset *token.FileSet, sources map[string]string) []*ast.File {
 	t.Helper()
 	files := make([]*ast.File, 0, len(sources))
 	for name, src := range sources {
@@ -120,18 +120,18 @@ func other(cfg Config) { r, _ := cfg.AuthN.LoadModuleRoster(); _ = r }
 `
 	t.Run("законная форма — молчание", func(t *testing.T) {
 		fset := token.NewFileSet()
-		loads, swallows := rosterReads(fset, parseSources(t, fset, map[string]string{"serve.go": lawful}))
+		loads, swallows := rosterReads(fset, parseRosterSources(t, fset, map[string]string{"serve.go": lawful}))
 		require.Len(t, loads, 1)
 		require.Empty(t, swallows)
 	})
 	t.Run("чтение, глотающее ошибку, — находка с координатой", func(t *testing.T) {
 		fset := token.NewFileSet()
-		_, swallows := rosterReads(fset, parseSources(t, fset, map[string]string{"serve.go": lawful, "wiring.go": swallowing}))
+		_, swallows := rosterReads(fset, parseRosterSources(t, fset, map[string]string{"serve.go": lawful, "wiring.go": swallowing}))
 		require.Equal(t, []string{"wiring.go:2:54"}, swallows)
 	})
 	t.Run("второе чтение с ошибкой — находка с координатой", func(t *testing.T) {
 		fset := token.NewFileSet()
-		loads, _ := rosterReads(fset, parseSources(t, fset, map[string]string{"serve.go": lawful, "other.go": secondLoad}))
+		loads, _ := rosterReads(fset, parseRosterSources(t, fset, map[string]string{"serve.go": lawful, "other.go": secondLoad}))
 		require.Len(t, loads, 2)
 		require.Contains(t, loads, "other.go:2:34")
 	})
