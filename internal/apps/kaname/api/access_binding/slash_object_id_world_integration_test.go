@@ -94,14 +94,6 @@ func parentEdges(w *pcrWorld, id string) [][3]string {
 	return out
 }
 
-func repoTarget(ids ...string) *iamv1.AccessTarget {
-	refs := make([]*iamv1.ResourceRef, 0, len(ids))
-	for _, id := range ids {
-		refs = append(refs, &iamv1.ResourceRef{Type: "registry.repositories", Id: id})
-	}
-	return resourcesTarget(refs...)
-}
-
 // TestSlashObjectID_RegistrationGrantAndCheckAreVerbatim — законный
 // идентификатор с `/` регистрируется с переданной цепью, на него выдаётся роль,
 // вопрос о доступе по нему отвечает «да»; каждая граница `/` — свой объект, и
