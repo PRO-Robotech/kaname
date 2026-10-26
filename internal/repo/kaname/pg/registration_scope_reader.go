@@ -25,6 +25,39 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
+// Операторы чтений вывода. Экспортированы ради замера (DoD п.8 приёмки): план
+// снимается ТЕМ ЖЕ текстом, каким читает адаптер, — выписанная у пробы копия
+// разошлась бы с этой молча (тот же довод, что у `CatalogLockKey`).
+const (
+	// ProjectAccountQuery — аккаунт проекта по первичному ключу `projects_pkey`.
+	ProjectAccountQuery = `SELECT account_id FROM kaname.projects WHERE id = $1`
+	// ContainerScopeQuery — записанная область контейнера: строка зеркала по
+	// `resource_mirror_pkey`, ближайшее звено `project` цепи по
+	// `resource_parent_edge_pkey`, аккаунт проекта по `projects_pkey`.
+	ContainerScopeQuery = `
+		SELECT s.project, coalesce(p.account_id, '')
+		  FROM (SELECT coalesce(nullif(m.parent_project_id, ''),
+		                        (SELECT e.parent_id
+		                           FROM kaname.resource_parent_edge e
+		                          WHERE e.object_type = $1 AND e.object_id = $2
+		                            AND e.parent_type = 'project'
+		                          ORDER BY e.depth
+		                          LIMIT 1),
+		                        '') AS project
+		          FROM kaname.catalog_resource c
+		          JOIN kaname.resource_mirror m ON m.object_type = c.dotted AND m.object_id = $2
+		         WHERE c.object_type = $1
+		         ORDER BY c.live DESC
+		         LIMIT 1) s
+		  LEFT JOIN kaname.projects p ON p.id = s.project`
+	// PointerSubjectsQuery — субъекты фактов указателя по префиксу
+	// `relation_fact_pkey (object_type, object_id, relation, subject)`.
+	PointerSubjectsQuery = `
+		SELECT subject FROM kaname.relation_fact
+		 WHERE object_type = $1 AND object_id = $2 AND relation = ANY ($3)
+		 ORDER BY subject`
+)
+
 // RegistrationScopeReader — адаптер порта чтений вывода родителя. Без состояния.
 type RegistrationScopeReader struct{}
 
@@ -34,8 +67,7 @@ func NewRegistrationScopeReader() *RegistrationScopeReader { return &Registratio
 // ProjectAccountTx — аккаунт проекта; ok=false — строки проекта нет.
 func (RegistrationScopeReader) ProjectAccountTx(ctx context.Context, tx service.Tx, projectID string) (string, bool, error) {
 	var acc string
-	err := txAsPgx(tx).QueryRow(ctx,
-		`SELECT account_id FROM kaname.projects WHERE id = $1`, projectID).Scan(&acc)
+	err := txAsPgx(tx).QueryRow(ctx, ProjectAccountQuery, projectID).Scan(&acc)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return "", false, nil
@@ -60,23 +92,7 @@ func (RegistrationScopeReader) ContainerScopeTx(
 	ctx context.Context, tx service.Tx, modelType, id string,
 ) (domain.ContainerScope, error) {
 	var scope domain.ContainerScope
-	err := txAsPgx(tx).QueryRow(ctx, `
-		SELECT s.project, coalesce(p.account_id, '')
-		  FROM (SELECT coalesce(nullif(m.parent_project_id, ''),
-		                        (SELECT e.parent_id
-		                           FROM kaname.resource_parent_edge e
-		                          WHERE e.object_type = $1 AND e.object_id = $2
-		                            AND e.parent_type = 'project'
-		                          ORDER BY e.depth
-		                          LIMIT 1),
-		                        '') AS project
-		          FROM kaname.catalog_resource c
-		          JOIN kaname.resource_mirror m ON m.object_type = c.dotted AND m.object_id = $2
-		         WHERE c.object_type = $1
-		         ORDER BY c.live DESC
-		         LIMIT 1) s
-		  LEFT JOIN kaname.projects p ON p.id = s.project`,
-		modelType, id).Scan(&scope.ProjectID, &scope.AccountID)
+	err := txAsPgx(tx).QueryRow(ctx, ContainerScopeQuery, modelType, id).Scan(&scope.ProjectID, &scope.AccountID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return domain.ContainerScope{}, nil
@@ -97,10 +113,7 @@ func (RegistrationScopeReader) PointerSubjectsTx(
 	if len(pointers) == 0 {
 		return nil, nil
 	}
-	rows, err := txAsPgx(tx).Query(ctx, `
-		SELECT subject FROM kaname.relation_fact
-		 WHERE object_type = $1 AND object_id = $2 AND relation = ANY ($3)
-		 ORDER BY subject`, modelType, id, pointers)
+	rows, err := txAsPgx(tx).Query(ctx, PointerSubjectsQuery, modelType, id, pointers)
 	if err != nil {
 		return nil, fmt.Errorf("relation_fact: факты указателя %s:%s: %w", modelType, id, err)
 	}
