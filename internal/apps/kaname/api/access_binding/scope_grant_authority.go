@@ -19,9 +19,20 @@ package access_binding
 //
 // По каждой РАЗЛИЧНОЙ области действующих выдач — тот же вопрос, что у выдачи
 // (`requireGrantAuthority`): администратор облака, владелец аккаунта области либо
-// ярус `admin` на объекте области. Надзор администратора облака не зависит от
-// области и задаётся один раз на всю проверку, а не на каждую область. Число
-// вопросов к хранилищу не больше числа различных областей плюс один.
+// ярус `admin` на объекте области. Цена вопроса к хранилищу отношений НЕ растёт с
+// числом областей — а оно растёт с тем, что уже выдано, и до проверки ничем не
+// ограничено:
+//
+//   - надзор администратора облака — один вопрос на всю проверку: он о личности
+//     вызывающего, а не об области;
+//   - ярус `admin` — один партийный вопрос о всех областях сразу
+//     (`authzfilter.HeldOn`): по партии на тип области (`account`, `project`,
+//     `cluster`), ceil(n / authzfilter.MaxBatchChecksPerRequest) запросов на тип;
+//   - владелец аккаунта — только для областей, где яруса нет, чтением в ОДНОЙ
+//     читающей транзакции, открытой ПОСЛЕ вопросов к хранилищу (довод — у
+//     `scopeOwnerUserID`, kaname#1015), до первой области без права.
+//
+// Цена закреплена пробой `TestScopeGrantAuthority_RelationQuestionsDoNotGrowWithScopes`.
 //
 // Делегированный путь права выдавать (PRO-Robotech/kaname#986) правом здесь не считается (Д-2):
 // делегирование ограничено ролями и целями модуля, а правка роли аккаунта и
@@ -44,6 +55,7 @@ import (
 	"sort"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzfilter"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -53,16 +65,26 @@ import (
 // grantScope — область выдачи: тип (`account` | `project` | `cluster`) и id.
 type grantScope struct{ resourceType, resourceID string }
 
+// GrantAuthorityRelations — дверь решения проверки права выдавать на областях:
+// одиночный вопрос надзора (`Check`) и партийный вопрос о наборе областей
+// (`BatchCheckWithContext`). Партийная форма объявлена в порту, а не спрошена у
+// значения: провязка без неё — ошибка компиляции, а не тихий возврат к вопросу на
+// область.
+type GrantAuthorityRelations interface {
+	clients.RelationStore
+	authzfilter.BatchObjectChecker
+}
+
 // ScopeGrantAuthority — право вызывающего выдавать на областях действующих выдач
 // роли либо группы-субъекта.
 type ScopeGrantAuthority struct {
 	repo      Repo
-	relations clients.RelationStore
+	relations GrantAuthorityRelations
 }
 
 // NewScopeGrantAuthority — над тем же хранилищем и той же дверью решения, что
 // `CreateAccessBindingUseCase`.
-func NewScopeGrantAuthority(repo Repo, relations clients.RelationStore) *ScopeGrantAuthority {
+func NewScopeGrantAuthority(repo Repo, relations GrantAuthorityRelations) *ScopeGrantAuthority {
 	return &ScopeGrantAuthority{repo: repo, relations: relations}
 }
 
@@ -160,8 +182,12 @@ func distinctScopes(bindings []domain.AccessBinding) []grantScope {
 }
 
 // requireOnScopes — право выдавать на КАЖДОЙ области набора. Надзор
-// администратора облака — один вопрос на весь набор: он о личности вызывающего, а
-// не об области.
+// администратора облака — один вопрос на весь набор; ярус `admin` — один
+// партийный вопрос о всех областях; владелец — только там, где яруса нет.
+//
+// Исходы те же, что у requireGrantAuthority на каждой области по очереди:
+// хранилище не ответило — `AuthzBackendUnavailable`; область без права —
+// `PermissionDenied`; ошибка чтения владельца — её отображение.
 func (a *ScopeGrantAuthority) requireOnScopes(ctx context.Context, scopes []grantScope) error {
 	if len(scopes) == 0 {
 		return nil
@@ -173,9 +199,63 @@ func (a *ScopeGrantAuthority) requireOnScopes(ctx context.Context, scopes []gran
 	if admin {
 		return nil
 	}
+	held, err := a.scopeAdminHeld(ctx, scopes)
+	if err != nil {
+		// «Спросить не удалось» ≠ «не положено»: повтор осмыслен.
+		return authzguard.AuthzBackendUnavailable()
+	}
+	unheld := make([]grantScope, 0, len(scopes))
 	for _, s := range scopes {
-		if err := grantAuthorityBeyondClusterAdmin(ctx, a.repo, a.relations, s.resourceType, s.resourceID); err != nil {
+		if !held[fgaAdminObject(s.resourceType, s.resourceID)] {
+			unheld = append(unheld, s)
+		}
+	}
+	return a.requireOwnerOfEach(ctx, unheld)
+}
+
+// scopeAdminHeld — объекты областей, на которых вызывающий держит ярус `admin`,
+// одним партийным вопросом (authzfilter.HeldOn). Без двери либо без субъекта
+// (аноним, неизвестный тип принципала) — пустой набор без вопроса: право даёт
+// только Путь 1, как у fgaHoldsScopeAdminE.
+func (a *ScopeGrantAuthority) scopeAdminHeld(ctx context.Context, scopes []grantScope) (map[string]bool, error) {
+	if a.relations == nil {
+		return map[string]bool{}, nil
+	}
+	subject, ok := authzguard.PrincipalSubject(ctx)
+	if !ok {
+		return map[string]bool{}, nil
+	}
+	objects := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		objects = append(objects, fgaAdminObject(s.resourceType, s.resourceID))
+	}
+	return authzfilter.HeldOn(ctx, a.relations, subject, "admin", objects)
+}
+
+// requireOwnerOfEach — Путь 1 на каждой области, где яруса `admin` нет:
+// вызывающий — владелец аккаунта области. Одна читающая транзакция на весь
+// остаток, открытая после вопросов к хранилищу отношений; первая область без
+// права — отказ, дальше не читается. У области без владельца на стороне
+// хранилища (`cluster`) Путь 1 не срабатывает.
+func (a *ScopeGrantAuthority) requireOwnerOfEach(ctx context.Context, scopes []grantScope) error {
+	if len(scopes) == 0 {
+		return nil
+	}
+	if a.repo == nil {
+		return authzguard.PermissionDenied()
+	}
+	rd, err := a.repo.Reader(ctx)
+	if err != nil {
+		return shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	for _, s := range scopes {
+		owner, err := scopeOwnerUserIDIn(ctx, rd, s.resourceType, s.resourceID)
+		if err != nil {
 			return err
+		}
+		if owner == "" || !authzguard.IsSelf(ctx, owner) {
+			return authzguard.PermissionDenied()
 		}
 	}
 	return nil

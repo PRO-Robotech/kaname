@@ -13,12 +13,11 @@ package access_binding_test
 import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // escWireGroupAuthority — проверка Р3 в добавление участника мира Э над дверью
 // решения `relations` (ESC-25 подставляет дверь, отказывающую ошибкой на
 // вопросах об одном субъекте).
-func escWireGroupAuthority(w *escWorld, u *groupapp.AddMemberUseCase, relations clients.RelationStore) *groupapp.AddMemberUseCase {
+func escWireGroupAuthority(w *escWorld, u *groupapp.AddMemberUseCase, relations accessbindingapp.GrantAuthorityRelations) *groupapp.AddMemberUseCase {
 	return u.WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, relations))
 }
