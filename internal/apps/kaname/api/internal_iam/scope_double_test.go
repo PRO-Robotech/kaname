@@ -33,9 +33,38 @@ type sceneScopes struct {
 	pointers   map[string][]string              // «тип:id» → субъекты фактов указателя
 }
 
-// unitScopes — сцена по умолчанию: один проект prj_unit в аккаунте acc_unit.
+// unitScopes — сцена по умолчанию: проекты, под которыми регистрируют пробы на
+// подставных портах, каждый в своём аккаунте.
 func unitScopes() sceneScopes {
-	return sceneScopes{projects: map[string]string{unitProject: unitAccount}}
+	return sceneScopes{projects: map[string]string{
+		unitProject:            unitAccount,
+		"prj-1":                "acc-1",
+		"prj-2":                "acc-2",
+		"prj_1":                "acc_1",
+		"prj_home":             "acc_home",
+		"prj0000000000000proj": "acc0000000000000acc1",
+	}}
+}
+
+// deliveredRegistryTypes — каталог после доставки манифеста registry с записью
+// `writes: owner` (документ W приёмки kaname#982): политика посева плюс запись
+// создателя человеком либо учёткой у обоих типов registry. Нужен пробам, чей
+// «Дано» — потребитель, пишущий `owner`: при одном посеве такая запись — отказ
+// политики, и сцена не строилась бы.
+type deliveredRegistryTypes struct{ seededCatalogTypes }
+
+// WritePolicyTx — политика посева; у типов registry — плюс запись `owner`.
+func (d deliveredRegistryTypes) WritePolicyTx(ctx context.Context, tx service.Tx, typeName string) (string, domain.WritePolicy, bool, error) {
+	dotted, policy, live, err := d.seededCatalogTypes.WritePolicyTx(ctx, tx, typeName)
+	if err != nil || !live {
+		return dotted, policy, live, err
+	}
+	if policy.ObjectType == "registry_registry" || policy.ObjectType == "registry_repository" {
+		for _, s := range domain.WriteSubjectTypes() {
+			policy.Writes = append(policy.Writes, domain.WriteGrant{Relation: "owner", SubjectType: s})
+		}
+	}
+	return dotted, policy, true, nil
 }
 
 func (s sceneScopes) ProjectAccountTx(_ context.Context, _ service.Tx, projectID string) (string, bool, error) {

@@ -138,9 +138,10 @@ func TestRegisterResource_VBC15_SyncReconcileAfterCommit(t *testing.T) {
 	uc, txb := newRegUC(t, rec)
 
 	err := uc.Register(context.Background(), &regReq{
-		subject: "user:usr_creator",
-		// vpc fgaproxy register: creator gets v_get on the freshly-created network.
-		relation: "v_get",
+		// Указатель области — единственное, что модуль vpc пишет на сеть по политике
+		// записи посева (kaname#982); прежняя форма «создатель с v_get» ею отвергается.
+		subject:  "project:" + unitProject,
+		relation: "project",
 		object:   "vpc_network:vpcn_new",
 	})
 	require.NoError(t, err)
@@ -158,7 +159,7 @@ func TestRegisterResource_VBC15_SyncReconcileAfterCommit(t *testing.T) {
 func TestRegisterResource_VBC15_NilReconciler_NonFatal(t *testing.T) {
 	uc, txb := newRegUC(t, nil) // no WithObjectReconciler
 	err := uc.Register(context.Background(), &regReq{
-		subject: "user:usr_creator", relation: "v_get", object: "vpc_network:vpcn_new",
+		subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_new",
 	})
 	require.NoError(t, err, "VBC-15: nil reconciler must be a non-fatal no-op")
 	require.True(t, txb.tx.committed)
@@ -171,7 +172,7 @@ func TestRegisterResource_VBC15_ReconcileError_NonFatal(t *testing.T) {
 	rec := &smObjectReconciler{err: errors.New("reconcile transient")}
 	uc, txb := newRegUC(t, rec)
 	err := uc.Register(context.Background(), &regReq{
-		subject: "user:usr_creator", relation: "v_get", object: "vpc_network:vpcn_new",
+		subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_new",
 	})
 	require.NoError(t, err,
 		"VBC-15: a post-commit reconcile error must NOT fail Register (outbox/sweep backstop)")

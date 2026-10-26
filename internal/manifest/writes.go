@@ -23,17 +23,20 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
+// writesKey — ключ записи ресурса в документе (тег поля [Resource.Writes]).
+const writesKey = "writes"
+
 // validateResourceWrites — ключ `writes` ресурса resources[i].
 func validateResourceWrites(r *Resource, doc *yaml.Node, i int) []error {
 	// Присутствие ключа спрашивается у УЗЛА документа, а не у длины перечня:
 	// «ключа нет» и «ключ пуст» дают один и тот же пустой срез, а значат разное.
-	if mapValue(seqItem(mapValue(doc, "resources"), i), WritesKey) == nil {
+	if mapValue(seqItem(mapValue(doc, "resources"), i), writesKey) == nil {
 		return nil
 	}
 	if len(r.Writes) == 0 {
 		return []error{linkFault{
 			kind:  ErrWritesEmpty,
-			coord: locate(doc, "resources", i, WritesKey),
+			coord: locate(doc, "resources", i, writesKey),
 			detail: fmt.Sprintf("resources[%d].writes: пустой перечень не принимается — ключ либо "+
 				"отсутствует (модуль пишет только указатель), либо называет хотя бы одну запись", i),
 		}}
@@ -51,7 +54,7 @@ func validateResourceWrites(r *Resource, doc *yaml.Node, i int) []error {
 	var faults []error
 	seen := map[string]int{}
 	for j, w := range r.Writes {
-		coord := locate(doc, "resources", i, WritesKey, j, "relation")
+		coord := locate(doc, "resources", i, writesKey, j, "relation")
 		field := fmt.Sprintf("resources[%d].writes[%d].relation", i, j)
 		if first, dup := seen[w.Relation]; dup {
 			faults = append(faults, linkFault{
@@ -69,7 +72,7 @@ func validateResourceWrites(r *Resource, doc *yaml.Node, i int) []error {
 		if detail, bad := writeSubjectsFault(w.Subjects); bad {
 			faults = append(faults, linkFault{
 				kind:  ErrWriteSubjectsInvalid,
-				coord: locate(doc, "resources", i, WritesKey, j, "subjects"),
+				coord: locate(doc, "resources", i, writesKey, j, "subjects"),
 				detail: fmt.Sprintf("resources[%d].writes[%d].subjects: %s; принимаются: %s, каждый не более одного раза",
 					i, j, detail, strings.Join(domain.WriteSubjectTypes(), ", ")),
 			})

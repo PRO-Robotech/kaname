@@ -365,7 +365,7 @@ func TestRegisterResource_UnversionedProducer_IsNeverGated(t *testing.T) {
 	// An unversioned producer: source_version is the zero time ⇒ '-infinity'.
 	unversioned := func() *versionedReq {
 		return &versionedReq{
-			subject: "project:prj-1", relation: "project", object: "registry_repository:rep-1",
+			subject: "project:prj-1", relation: "project", object: "registry_registry:rep-1",
 			labels: map[string]string{"tier": "gold"}, version: time.Time{},
 		}
 	}
