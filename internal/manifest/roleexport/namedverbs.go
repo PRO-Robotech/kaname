@@ -291,6 +291,16 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 			census.Reduced++
 			reduced := rule.DomainRule()
 			reduced.Verbs = append(classes, containerNamed...)
+			// Правило с селектором создателя (kaname#1003, Р2 п.3) уезжает ОБЪЯВЛЕННЫМИ
+			// глаголами, без сведения к классам: сведение считается покрытием действий
+			// каталога и опускает глагол без действия ЭТОГО ресурса (`v_list` на учётке
+			// спрашивают список её ключей и фильтр списка учёток), тогда как селектор пишет на
+			// объекте только кортежи глаголов и ярусом опущенное не возвращает:
+			// создатель терял бы список своих учёток и их ключей (SAC-12, SAC-15).
+			// Полнота перечня уже проверена строкой выше.
+			if rule.CreatedBySubject {
+				reduced.Verbs = append(append([]string(nil), objectVerbs...), containerNamed...)
+			}
 			reduced.Children = children
 			rules = append(rules, reduced)
 		}
@@ -396,15 +406,6 @@ func reduceNamed(facts VerbFacts, m *manifest.Manifest, rule manifest.Rule, name
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		return classes, missing
-	}
-	// Правило с селектором создателя (kaname#1003, Р2 п.3) к наименьшему набору
-	// НЕ сводится: наименьший набор считается покрытием действий, а оно
-	// предполагает ярус на объекте — селектор же пишет на объекте только кортежи
-	// глаголов. Класс, «покрытый» соседним через ярус, создатель терял бы на деле
-	// (`list` — и его список своих учёток пустел бы, SAC-15). Полный набор
-	// затронутых классов уже проверен на полноту строкой выше.
-	if rule.CreatedBySubject {
-		return classes, nil
 	}
 	return minimalClasses(facts, rule, classes, byResource), nil
 }
