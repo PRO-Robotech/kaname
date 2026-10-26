@@ -35,6 +35,13 @@ package internal_iam
 // объектах, которые его ресурс использует; сужать его без переписи таких
 // вопросов по дереву платформы значило бы оборвать живые пути. Край — парадная
 // дверь и спрашивает за любого.
+//
+// # HTTP-полоса (SEC-1017-1)
+//
+// Через собственный внутренний REST-фронт пиром здесь оказывается сам фронт, и
+// личности за ним этот обработчик не видит: сузить довод на хопе нечем. Поэтому
+// сужение держит и ДОПУСК фронта (`authzguard.HopAdmits`): плоскость данных и лист
+// вне перечня фронт не пускает вовсе, и HTTP-полоса не шире gRPC-полосы.
 
 import (
 	"google.golang.org/grpc/codes"
@@ -42,7 +49,9 @@ import (
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // objectInModuleDomain — объект того вида, который модуль службы service
@@ -59,8 +68,13 @@ func objectInModuleDomain(service, object string) bool {
 // requireCheckInCallerDomain — отказ, если признанная плоскость данных спрашивает
 // об объекте чужого домена. Прочие вызывающие проходят без суда здесь: их судит
 // политика вызывающего внутреннего слушателя.
+//
+// К кому сужение применяется, объявлено у стража
+// ([authzguard.NarrowsCallerArgument]): по тому же объявлению собственный
+// внутренний REST-фронт не пускает тех, кого сузить не может (SEC-1017-1) —
+// личности за хопом обработчик не видит.
 func (h *Handler) requireCheckInCallerDomain(module moduleidentity.Identity, object string) error {
-	if module.Profile != moduleidentity.ProfileDataPlane {
+	if !authzguard.NarrowsCallerArgument(iamv1.InternalIAMService_Check_FullMethodName, module.Profile) {
 		return nil
 	}
 	if module.Service == "" || !objectInModuleDomain(module.Service, object) {

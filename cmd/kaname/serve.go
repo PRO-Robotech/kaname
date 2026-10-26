@@ -534,11 +534,29 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
+	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — ОДИН перечень на все пути признания
+	// вызывающего, прочитанный ОДИН раз и ДО сборки служб (kaname#987): обе
+	// политики вызывающего, пол системного читателя, посредник записи отношений,
+	// допуск пира у службы решений, обработчик внутреннего Check, полоса входа и
+	// поверхность выдачи получают ЭТОТ объект. Второго чтения нет: у нулевого
+	// перечня разная семантика у потребителей — политике это отказ, обработчику
+	// Check «сужать некого», — и чтение, глотающее ошибку, развело бы их молча.
+	// Модулем признаётся только объявленная пара, и признанная личность зовёт
+	// только методы своего профиля.
+	//
+	// Центры, к которым привязаны личности (kaname#988), читаются ЗДЕСЬ, при
+	// подъёме: нечитаемый файл центра — отказ старта, а не перечень, молча
+	// признающий меньше, чем объявила установка.
+	moduleRoster, err := cfg.AuthN.LoadModuleRoster()
+	if err != nil {
+		return fmt.Errorf("module identities: %w", err)
+	}
+
 	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
-		metricsReg, cfg, tokenSigner, logger)
+		metricsReg, cfg, moduleRoster, tokenSigner, logger)
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть
@@ -546,7 +564,7 @@ func runServe(cfg config.Config) error {
 	// ПРИНИМАЕТ тот же реконсайлер материализации привязки, что путь запроса
 	// (`sign_in_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(ctx, cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
 		return err
 	}
@@ -771,20 +789,8 @@ func runServe(cfg config.Config) error {
 	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
 	// который фронт предъявляет, — разойтись с проводом ей нечем.
 	//
-	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — ОДИН перечень на все пути признания
-	// вызывающего: обе политики вызывающего, пол системного читателя, посредник
-	// записи отношений, допуск пира у службы решений, полоса входа и
-	// поверхность выдачи спрашивают ЭТОТ объект. Модулем признаётся только
-	// объявленная пара, и признанная личность зовёт только методы своего
-	// профиля.
-	//
-	// Центры, к которым привязаны личности (kaname#988), читаются ЗДЕСЬ, при
-	// подъёме: нечитаемый файл центра — отказ старта, а не перечень, молча
-	// признающий меньше, чем объявила установка.
-	moduleRoster, err := cfg.AuthN.LoadModuleRoster()
-	if err != nil {
-		return fmt.Errorf("module identities: %w", err)
-	}
+	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — перечень прочитан выше, до сборки служб,
+	// и это тот же объект, что получили обработчики (см. `moduleRoster`).
 	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
@@ -1557,7 +1563,10 @@ func runServe(cfg config.Config) error {
 	internalRESTAddr := internalRESTFront.addr
 	var internalRESTHandler http.Handler
 	if internalRESTFront.Enabled() {
-		internalRESTHandler, err = restfront.NewInternal(surfaceCtx, restfront.DialTarget(internalAddr), restDialOpts)
+		internalRESTHandler, err = restfront.NewInternal(surfaceCtx, restfront.DialTarget(internalAddr), restDialOpts,
+			// Кого фронт пускает, решает фронт: слушатель видит пиром сам фронт
+			// (SEC-1017-1). Тот же перечень личностей, что у политик вызывающего.
+			authzguard.InternalFrontAdmission(productionMode, moduleRoster, cfg.AuthN.TrustDomain()))
 		if err != nil {
 			return fmt.Errorf("внутренний REST-фронт: %w", err)
 		}

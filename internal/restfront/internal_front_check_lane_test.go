@@ -133,7 +133,8 @@ func newLaneWorld(t *testing.T) *laneWorld {
 		MinVersion:   tls.VersionTLS12,
 	})
 	front, err := restfront.NewInternal(ctx, lis.Addr().String(),
-		[]grpc.DialOption{grpc.WithTransportCredentials(hopCreds)})
+		[]grpc.DialOption{grpc.WithTransportCredentials(hopCreds)},
+		authzguard.InternalFrontAdmission(true, roster, d))
 	require.NoError(t, err)
 	hs := httptest.NewUnstartedServer(front)
 	hs.TLS = ca.serverTLS(t)
@@ -289,4 +290,12 @@ func (c *laneCA) serverTLS(t *testing.T) *tls.Config {
 		ClientCAs:    c.pool(),
 		MinVersion:   tls.VersionTLS12,
 	}
+}
+
+// TestInternalFront_RefusesToBuildWithoutAnAdmission — фронт без названного
+// допуска не собирается: молчание значило бы «пускать всех», то есть прежнюю
+// дыру.
+func TestInternalFront_RefusesToBuildWithoutAnAdmission(t *testing.T) {
+	_, err := restfront.NewInternal(context.Background(), "127.0.0.1:1", nil, nil)
+	require.EqualError(t, err, "внутренний REST-фронт: допуск предъявителя не назван")
 }

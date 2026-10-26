@@ -74,9 +74,9 @@ func TestLoadModuleRoster_ReadsTheIssuerAndRefusesAnUnreadableOne(t *testing.T) 
 
 	for name, path := range map[string]string{"файла нет": filepath.Join(dir, "absent.pem"), "сертификата нет": empty} {
 		a.ClientIssuers = []string{"internal=" + path}
-		_, err := a.LoadModuleRoster()
+		r, err := a.LoadModuleRoster()
 		require.Error(t, err, name)
 		require.Contains(t, err.Error(), `client issuer "internal"`, name)
-		require.False(t, a.ModuleRoster().IsDeclared(), "%s: перечень мимо ошибки не пуст", name)
+		require.False(t, r.IsDeclared(), "%s: перечень рядом с ошибкой не пуст", name)
 	}
 }

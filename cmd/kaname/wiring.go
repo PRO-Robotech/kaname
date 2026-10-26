@@ -257,7 +257,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// есть чем завтра.
 	catalogRows moduleapp.CatalogStateSource,
 	metricsReg *metrics.Registry,
-	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
+	cfg config.Config,
+	// moduleRoster — перечень личностей модулей, прочитанный корнем ОДИН раз с
+	// проверкой ошибки (kaname#987): обработчик внутреннего Check, посредник записи
+	// отношений и допуск пира у службы решений судят по тому же значению, что
+	// политики вызывающего.
+	moduleRoster moduleidentity.Roster,
+	tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
 	_ = slavePool // kanameRepo is built and passed in by main()
 
 	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
@@ -682,7 +688,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
-		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction(), cfg.AuthN.ModuleRoster())
+		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction(), moduleRoster)
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -769,7 +775,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	}
 	regGate := authzguard.NewRelationWriteGate(relationStore).
 		WithProductionMode(cfg.AuthN.Mode.IsProduction()).
-		WithModuleRoster(cfg.AuthN.ModuleRoster())
+		WithModuleRoster(moduleRoster)
 	// Session-revocation writer. Pool-scoped adapter over
 	// session_revocations — the InternalSessionRevocationsService Revoke path
 	// and its IsRevoked / ListByUser readers (one table). ForceLogout does not
@@ -795,7 +801,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	internalIAMHandler := internaliamapp.NewHandler(lookupSubject, checkAuthz).
 		// Личности модулей (kaname#987): Check плоскости данных ограничен
 		// доменом её модуля — тот же перечень, что у политик вызывающего.
-		WithModuleRoster(cfg.AuthN.ModuleRoster()).
+		WithModuleRoster(moduleRoster).
 		// PollSubjectChanges drains subject_change_outbox for api-gateway
 		// authz-cache invalidation. Internal-only (port 9091).
 		//
