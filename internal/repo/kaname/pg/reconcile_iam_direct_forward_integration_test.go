@@ -176,7 +176,8 @@ func TestIAMDirectForward_02_Project_ForwardEqualsFull(t *testing.T) {
 	require.NotEmpty(t, relFwd, "forward materialized SOME owner tuples on the new project")
 	assert.Equal(t, relFull, relFwd,
 		"forward and full derive a BYTE-IDENTICAL owner relation-set on an identical project (no drift)")
-	// The owner tier is admin (owner `*.*` role — delete ⇒ admin).
+	// Ярус владельца — admin: роль владельца `*.*` несёт подстановку `*` (удаление
+	// яруса не даёт, kaname#1035; admin выводит только подстановка).
 	assert.True(t, ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", "project:"+string(prjFwd.ID)),
 		"forward materializes the owner admin tuple on the new project")
 }
@@ -366,7 +367,7 @@ func TestIAMDirectForward_06_DeleteStaleGuard_ProjectLabelFlip(t *testing.T) {
 // COALESCE-through-project join) — so routing the create-path to forward cannot over-/
 // under-grant vs the full recompute.
 //
-// The account-owner (`*.*`, delete ⇒ admin tier) materializes on the project-scoped role
+// The account-owner (`*.*`, ярус admin — от подстановки `*`, kaname#1035) materializes on the project-scoped role
 // too: the COALESCE join resolves the project's account, IsContainedIn(account) accepts it.
 func TestIAMDirectForward_07_Role_ForwardEqualsFull_AccountAndProjectScoped(t *testing.T) {
 	if testing.Short() {
