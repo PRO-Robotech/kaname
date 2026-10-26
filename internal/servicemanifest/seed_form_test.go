@@ -138,9 +138,17 @@ func TestMRW09_RelationOutsideTheCanonIsRefusedByTheTreeJudge(t *testing.T) {
 			t.Fatalf("объявленное отношение отвергнуто: %v", err)
 		}
 	})
-	t.Run("вне канона, без оракула — отказ не производится (путь старта)", func(t *testing.T) {
-		if _, err := manifest.Load(outside); err != nil {
+	// MRW-09 говорит об ЭТОМ отказе — «канон отношения не объявляет»: на пути
+	// старта его нет. Документ там всё равно отвергается, но другим судьёй —
+	// потолком посева (kaname#979), который судит имя по закрытому перечню без
+	// модели.
+	t.Run("вне канона, без оракула — отказ о существовании не производится (путь старта)", func(t *testing.T) {
+		_, err := manifest.Load(outside)
+		if errors.Is(err, manifest.ErrRelationNotDeclared) {
 			t.Fatalf("без оракула судья утверждает о существовании отношения: %v", err)
+		}
+		if !errors.Is(err, manifest.ErrSeedGrantBeyondTier) {
+			t.Fatalf("без оракула отношение вне перечня посева обязано отвергаться потолком посева: %v", err)
 		}
 	})
 }

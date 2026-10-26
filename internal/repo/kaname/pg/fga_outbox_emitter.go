@@ -14,6 +14,9 @@ package pg
 
 import (
 	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
@@ -38,6 +41,36 @@ func (e *FGAOutboxEmitter) EmitWriteTx(ctx context.Context, tx service.Tx, tuple
 // EmitDeleteTx — symmetric revoke counterpart.
 func (e *FGAOutboxEmitter) EmitDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error {
 	return fga_outbox.EmitDeleteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples))
+}
+
+// EmitOrderedWriteTx — запись отношений посредника регистрации, упорядоченная
+// версией регистрации владельца (kaname#969). Намерение без версии (производитель
+// прежней формы) кладётся с версией '-infinity' — тем же значением, которым его
+// хранит строка зеркала: такая запись ложится на пустое место и не опускает
+// факт, записанный версией, и снятие любой версии её снимает.
+func (e *FGAOutboxEmitter) EmitOrderedWriteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, version time.Time) error {
+	return fga_outbox.EmitOwnerOrderedTx(ctx, txAsPgx(tx), fga_outbox.EventTypeWrite,
+		serviceTuplesToClients(tuples), ownerVersionOrMinusInfinity(version))
+}
+
+// EmitOrderedDeleteTx — снятие отношений посредника регистрации версией надгробия
+// (kaname#969): снимаются факты не новее надгробия, кортежи регистрации новее
+// него остаются. Надгробие без версии упорядочить нечем, и снятие идёт прежней
+// формой — меткой момента вставки, то есть снимает всё, что видит (fail-closed).
+func (e *FGAOutboxEmitter) EmitOrderedDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, tombstone time.Time) error {
+	if tombstone.IsZero() {
+		return e.EmitDeleteTx(ctx, tx, tuples)
+	}
+	return fga_outbox.EmitOwnerOrderedTx(ctx, txAsPgx(tx), fga_outbox.EventTypeDelete,
+		serviceTuplesToClients(tuples), pgtype.Timestamptz{Time: tombstone, Valid: true})
+}
+
+// ownerVersionOrMinusInfinity — версия владельца; нулевая — '-infinity'.
+func ownerVersionOrMinusInfinity(v time.Time) pgtype.Timestamptz {
+	if v.IsZero() {
+		return pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
+	}
+	return pgtype.Timestamptz{Time: v, Valid: true}
 }
 
 // serviceTuplesToClients — service-layer RelationTuple → clients.RelationTuple (the

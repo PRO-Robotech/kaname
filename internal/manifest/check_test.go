@@ -55,12 +55,23 @@ func goodManifest(t *testing.T) string {
 	return string(mustReadFixture(t))
 }
 
+// asModule — тот же документ от имени другого модуля: имя модуля и вместе с ним
+// владелец ролей, которые выдаёт посев.
+//
+// Роль посева обязана принадлежать модулю манифеста (kaname#979), поэтому
+// переименование одного `module` превратило бы свои роли посева в чужие — и
+// документ перестал бы быть годным по причине, которой проба не измеряет.
+func asModule(doc, module string) string {
+	doc = strings.Replace(doc, "module: vpc", "module: "+module, 1)
+	return strings.ReplaceAll(doc, "roleId: vpc.", "roleId: "+module+".")
+}
+
 // TestMODMF17GoodTreeExitsZeroAndNamesTheVolume — годное дерево: ноль и число
 // прочитанных манифестов.
 func TestMODMF17GoodTreeExitsZeroAndNamesTheVolume(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"services/vpc/manifest.yaml":     goodManifest(t),
-		"services/compute/manifest.yaml": strings.Replace(goodManifest(t), "module: vpc", "module: compute", 1),
+		"services/compute/manifest.yaml": asModule(goodManifest(t), "compute"),
 		"services/vpc/README.md":         "не манифест",
 	})
 

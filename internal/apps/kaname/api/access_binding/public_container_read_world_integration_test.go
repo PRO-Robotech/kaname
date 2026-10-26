@@ -112,6 +112,7 @@ func newPCRWorld(t *testing.T) *pcrWorld {
 		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
+		kanamepg.NewRegistrationAudit(),
 	)
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           w.door,

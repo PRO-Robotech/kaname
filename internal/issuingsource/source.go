@@ -44,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // HeaderForwardedFor — единственный заголовок, который правило читает, и
@@ -117,17 +118,21 @@ func RegistryTokenReasons() []RegistryTokenReason {
 // Rule — правило и его перепись.
 type Rule struct {
 	trust grpcsrv.TrustDomain
+	// modules — личности модулей установки (kaname#984): краем признаётся
+	// только объявленная пара, чья служба — край.
+	modules moduleidentity.Roster
 
 	mu       sync.Mutex
 	counts   map[Cell]uint64
 	registry map[RegistryTokenReason]uint64
 }
 
-// New собирает правило над доменом доверия процесса. Перепись засеяна нулём по
+// New собирает правило над доменом доверия процесса и перечнем личностей его
+// модулей (kaname#984): краем признаётся объявленная пара. Перепись засеяна нулём по
 // каждой клетке: клетка, появляющаяся при первом попадании, не отличает «ноль
 // случаев» от «счёта нет».
-func New(trust grpcsrv.TrustDomain) *Rule {
-	r := &Rule{trust: trust, counts: make(map[Cell]uint64, 4),
+func New(trust grpcsrv.TrustDomain, modules moduleidentity.Roster) *Rule {
+	r := &Rule{trust: trust, modules: modules, counts: make(map[Cell]uint64, 4),
 		registry: make(map[RegistryTokenReason]uint64, len(RegistryTokenReasons()))}
 	for _, c := range Cells() {
 		r.counts[c] = 0
@@ -171,7 +176,7 @@ func (r *Rule) resolve(req *http.Request, forwarderSAN string) (source string, r
 // пересыльщику точки. Сравнение точное: пересыльщик назван ручкой целиком,
 // а не узнан по форме имени.
 func (r *Rule) forwards(req *http.Request, forwarderSAN string) bool {
-	if authzguard.PeerIsGateway(r.trust, req.TLS) {
+	if authzguard.PeerIsGateway(r.modules, r.trust, req.TLS) {
 		return true
 	}
 	return forwarderSAN != "" && authzguard.VerifiedPeerIdentity(r.trust, req.TLS) == forwarderSAN

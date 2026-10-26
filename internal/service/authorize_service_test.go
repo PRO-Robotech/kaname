@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
@@ -91,9 +92,10 @@ func TestAuthorize_Check_AllowsWhenTheRelationStoreAllows(t *testing.T) {
 		Relations: &mockRelations{checkResp: true},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
-		Action:   "vpc.networks.list",
+		Subject:          "user:usr_alice",
+		Resource:         ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
+		Action:           "vpc.networks.list",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -112,9 +114,10 @@ func TestAuthorize_Check_DeniesNoPath(t *testing.T) {
 		Relations: &mockRelations{checkResp: false /* no directResp -> no relations */},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_bob",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_y"},
-		Action:   "vpc.networks.delete",
+		Subject:          "user:usr_bob",
+		Resource:         ResourceRef{Type: "vpc_network", ID: "vpcn_y"},
+		Action:           "vpc.networks.delete",
+		RequiredRelation: "admin",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -157,9 +160,10 @@ func TestAuthorize_Check_RichDenyIncludesCurrentRelations(t *testing.T) {
 		},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
-		Action:   "vpc.networks.delete",
+		Subject:          "user:usr_alice",
+		Resource:         ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
+		Action:           "vpc.networks.delete",
+		RequiredRelation: "admin",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -203,9 +207,10 @@ func TestAuthorize_Check_RichDenyDirectRelationsFailureFallsBackCleanly(t *testi
 		},
 	})
 	res, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_charlie",
-		Resource: ResourceRef{Type: "account", ID: "acc_xyz"},
-		Action:   "iam.accounts.update",
+		Subject:          "user:usr_charlie",
+		Resource:         ResourceRef{Type: "account", ID: "acc_xyz"},
+		Action:           "iam.accounts.update",
+		RequiredRelation: "editor",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -275,9 +280,9 @@ func TestAuthorize_BatchCheck_PerItemFailureDoesNotAbort(t *testing.T) {
 		Relations: &mockRelations{checkResp: true},
 	})
 	results, err := svc.BatchCheck(context.Background(), []CheckRequest{
-		{Subject: "user:usr_alice", Resource: ResourceRef{Type: "x", ID: "1"}, Action: "x.x.list"},
-		{Subject: "", Resource: ResourceRef{Type: "x", ID: "2"}, Action: "x.x.list"}, // bad
-		{Subject: "user:usr_carol", Resource: ResourceRef{Type: "x", ID: "3"}, Action: "x.x.list"},
+		{Subject: "user:usr_alice", Resource: ResourceRef{Type: "x", ID: "1"}, Action: "x.x.list", RequiredRelation: "viewer"},
+		{Subject: "", Resource: ResourceRef{Type: "x", ID: "2"}, Action: "x.x.list", RequiredRelation: "viewer"}, // bad
+		{Subject: "user:usr_carol", Resource: ResourceRef{Type: "x", ID: "3"}, Action: "x.x.list", RequiredRelation: "viewer"},
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -319,7 +324,7 @@ func TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak(t *testing.T) {
 		Relations: &mockRelations{checkErr: errors.New(storeTransportLeak)},
 	})
 	results, err := svc.BatchCheck(context.Background(), []CheckRequest{
-		{Subject: "user:usr_alice", Resource: ResourceRef{Type: "x", ID: "1"}, Action: "x.x.list"},
+		{Subject: "user:usr_alice", Resource: ResourceRef{Type: "x", ID: "1"}, Action: "x.x.list", RequiredRelation: "viewer"},
 	})
 	if err == nil {
 		t.Fatalf("ждали отказа ВСЕЙ пачки на недоступном хранилище; got results=%v err=nil", results)
@@ -355,9 +360,10 @@ func TestAuthorize_RelationStoreUnavailable_ReturnsUnavailable(t *testing.T) {
 		Relations: &mockRelations{checkErr: errors.New("connection refused")},
 	})
 	_, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:x",
-		Resource: ResourceRef{Type: "x", ID: "y"},
-		Action:   "x.x.list",
+		Subject:          "user:x",
+		Resource:         ResourceRef{Type: "x", ID: "y"},
+		Action:           "x.x.list",
+		RequiredRelation: "viewer",
 	})
 	if err == nil || !strings.Contains(err.Error(), "authz unavailable") {
 		t.Errorf("expected authz unavailable; got %v", err)
@@ -405,17 +411,18 @@ func TestResolveActionToRelation(t *testing.T) {
 }
 
 // TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject — M2: a subject
-// the relation store would happily allow at `viewer` (checkResp:true) must STILL
-// be denied for an unknown verb, because the verb does not resolve to a known
-// relation. Fail-closed: an unrecognised (possibly mutating) action is never
-// silently downgraded to the viewer relation.
+// the relation store would happily allow (checkResp:true) must STILL be denied
+// for a verb the object type does not declare in the module catalog. Fail-closed:
+// an unrecognised (possibly mutating) action is never silently downgraded to a
+// read relation. Близнец — TestAuthorize_Check_KnownMutatingVerb_StillMaps: тот
+// же каталог, объявленный глагол.
 func TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject(t *testing.T) {
-	mock := &mockRelations{checkResp: true} // the relation store would ALLOW viewer
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: mock})
+	mock := &mockRelations{checkResp: true} // the relation store would ALLOW
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: mock, Catalog: catalog.Fixed{F: moduleVerbFacts(t)}})
 	res, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_readonly",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
-		Action:   "vpc.networks.frobnicate", // unknown verb
+		Resource: ResourceRef{Type: "registry_repository", ID: "reg00000000000000001/app"},
+		Action:   "registry.repositories.frobnicate", // verb the type does not declare
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -431,15 +438,16 @@ func TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject(t *testing.T) {
 	}
 }
 
-// TestAuthorize_Check_KnownMutatingVerb_StillMaps — guard: the fix must NOT
-// break the known-verb CRUD mappings (delete → admin).
+// TestAuthorize_Check_KnownMutatingVerb_StillMaps — guard: a mutating verb the
+// object type declares in the module catalog resolves to its verb relation
+// (delete → v_delete) and reaches the per-object question.
 func TestAuthorize_Check_KnownMutatingVerb_StillMaps(t *testing.T) {
 	mock := &mockRelations{checkResp: true}
-	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: mock})
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: mock, Catalog: catalog.Fixed{F: moduleVerbFacts(t)}})
 	res, err := svc.Check(context.Background(), CheckRequest{
 		Subject:  "user:usr_admin",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
-		Action:   "vpc.networks.delete", // known mutating verb -> admin
+		Resource: ResourceRef{Type: "registry_repository", ID: "reg00000000000000001/app"},
+		Action:   "registry.repositories.delete", // declared mutating verb -> v_delete
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -449,6 +457,9 @@ func TestAuthorize_Check_KnownMutatingVerb_StillMaps(t *testing.T) {
 	}
 	if mock.checkCalls != 1 {
 		t.Errorf("known verb must reach the per-object question exactly once; got %d", mock.checkCalls)
+	}
+	if mock.lastRelation != "v_delete" {
+		t.Errorf("declared verb must ask its verb relation v_delete; got %q", mock.lastRelation)
 	}
 }
 

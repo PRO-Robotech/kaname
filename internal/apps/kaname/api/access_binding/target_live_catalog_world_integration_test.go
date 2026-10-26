@@ -118,6 +118,7 @@ func newATCWorld(t *testing.T) *atcWorld {
 		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
+		kanamepg.NewRegistrationAudit(),
 	)
 	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")

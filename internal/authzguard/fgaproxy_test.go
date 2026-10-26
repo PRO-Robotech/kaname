@@ -42,6 +42,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // sva derives the deterministic ServiceAccount id for a module svc-name
@@ -79,7 +80,7 @@ func (f *fakeChecker) Check(_ context.Context, subject, relation, object string)
 
 func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
@@ -99,7 +100,7 @@ func TestRelationWriteGate_B08_NoFGAWriterRelationDenied(t *testing.T) {
 	// A well-formed module SAN resolves to its deterministic SA id, and ReBAC
 	// then denies it: geo holds no fga_writer relation.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo", true)
@@ -110,7 +111,7 @@ func TestRelationWriteGate_B08_NoFGAWriterRelationDenied(t *testing.T) {
 
 func TestRelationWriteGate_C03_MalformedOrForeignSANDenied(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	for _, san := range []string{
 		"spiffe://other-trust-domain/x",      // foreign trust domain — never extracted
@@ -126,7 +127,7 @@ func TestRelationWriteGate_C03_MalformedOrForeignSANDenied(t *testing.T) {
 
 func TestRelationWriteGate_C05_UnverifiedPeerDenied(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	// Verified=false (TLS peer without verified client-cert) → never trusted.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
@@ -137,7 +138,7 @@ func TestRelationWriteGate_C05_UnverifiedPeerDenied(t *testing.T) {
 
 func TestRelationWriteGate_C02_UnknownSADenied(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	// Well-formed SPIRE SAN, but the resolved SA has no fga_writer relation
 	// (unknown / unregistered module) → fail-closed PermissionDenied.
@@ -151,7 +152,7 @@ func TestRelationWriteGate_B09_NoACRConsulted(t *testing.T) {
 	// service→service (mTLS-SA) is exempt from required_acr_min: the gate
 	// decision is purely the ReBAC relation; there is no ACR floor in the SA path.
 	chk := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	// ctx carries NO acr claim of any kind — must still pass on relation alone.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
@@ -164,7 +165,7 @@ func TestRelationWriteGate_D01_DevModeInsecureAllowed(t *testing.T) {
 	// Dev-mode (production=false): insecure listener, no verified cert →
 	// backward-compat allow. New RPCs must not break dev flow.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
-	gate := authzguard.NewRelationWriteGate(chk) // dev-mode default
+	gate := authzguard.NewRelationWriteGate(chk).WithModuleRoster(writerRoster(t)) // dev-mode default
 
 	ctx := context.Background() // no cert-identity ever set (insecure listener)
 	dom, err := gate.Authorize(ctx)
@@ -175,7 +176,7 @@ func TestRelationWriteGate_D01_DevModeInsecureAllowed(t *testing.T) {
 func TestRelationWriteGate_D02_ProdModeAnonymousFailClosed(t *testing.T) {
 	// Production-mode: no verified cert (anonymous) → fail-closed.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := context.Background()
 	_, err := gate.Authorize(ctx)
@@ -210,7 +211,7 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 				allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true},
 				err:           tc.err,
 			}
-			gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+			gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 				"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
@@ -240,7 +241,7 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 func TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied(t *testing.T) {
 	// Known SA, Check succeeds (nil err) but returns allowed==false.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}} // empty → allowed=false, err=nil
-	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true)
+	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
@@ -250,48 +251,56 @@ func TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied(t *testing.T) {
 		"explicit deny (allowed=false, nil err) must be PermissionDenied, not Unavailable")
 }
 
-// TestSANToServiceAccountID — the deterministic mapping contract.
-func TestSANToServiceAccountID(t *testing.T) {
-	cases := []struct {
-		san  string
-		want string
-		ok   bool
-	}{
-		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", sva("vpc"), true},
-		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-compute", sva("compute"), true},
-		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-nlb", sva("nlb"), true},
-		// Своё пространство имён у пира — законный случай, а не описка: сегмент ns
-		// приходит из чарта самого пира и единообразным быть не обязан.
-		{"spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage", sva("storage"), true},
-		{"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway", sva("api-gateway"), true},
-		{"spiffe://other/ns/x/sa/kacho-vpc", "", false},
-		{"garbage", "", false},
-		{"", "", false},
-	}
+// rosterOf — перечень личностей из тех ИДЕНТИФИКАТОРОВ, которые предъявляют
+// пробы: пара берётся разбором самого идентификатора, а не пишется второй раз
+// рядом — разойтись предъявленному и объявленному негде.
+func rosterOf(t *testing.T, profile moduleidentity.Profile, sans ...string) moduleidentity.Roster {
+	t.Helper()
 	d := grpcsrv.NewTrustDomain("kacho.cloud")
-	for _, c := range cases {
-		got, ok := authzguard.SANToServiceAccountID(d, c.san)
-		require.Equal(t, c.ok, ok, "san=%q parse-ok", c.san)
-		if c.ok {
-			require.Equal(t, c.want, got, "san=%q → sva-id", c.san)
-		}
+	entries := make([]string, 0, len(sans))
+	for _, san := range sans {
+		ns, account, ok := moduleidentity.ParseSAN(d, san)
+		require.True(t, ok, "идентификатор проб %q не разобрался", san)
+		entries = append(entries, ns+"/"+account+"="+string(profile))
 	}
+	r, err := moduleidentity.Parse(entries)
+	require.NoError(t, err)
+	return r
+}
 
-	// Домен приезжает величиной, а не сборкой: под ДРУГИМ объявленным доменом та
-	// же строка перестаёт быть нашей, а строка того домена — становится. Без этой
-	// половины проба зеленела бы на разборе, который домен вообще не читает.
-	other := grpcsrv.NewTrustDomain("kaname.local")
-	if _, ok := authzguard.SANToServiceAccountID(other, "spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc"); ok {
-		t.Fatalf("SAN чужого домена признан своим — разбор читает не объявленный домен")
+// writerRoster — перечень личностей проб посредника (kaname#984): модулем
+// признаётся только объявленная пара. `kacho-geo` и `kacho-unknown` объявлены
+// намеренно — их пробы утверждают отказ ОТНОШЕНИЯ, а не признания.
+func writerRoster(t *testing.T) moduleidentity.Roster {
+	t.Helper()
+	return rosterOf(t, moduleidentity.ProfileModuleWriter,
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc",
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-unknown",
+		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo",
+	)
+}
+
+// TestRosterIdentityDerivesTheDeterministicServiceAccountID — признанная
+// личность выводит идентификатор служебной учётки тем же производителем, что
+// посев: `'sva' || substr(md5('kacho-<svc>'),1,17)`. Своё пространство имён у
+// пира — законный случай: сегмент ns приходит из чарта самого пира.
+func TestRosterIdentityDerivesTheDeterministicServiceAccountID(t *testing.T) {
+	want := map[string]string{
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc":         "vpc",
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-compute":     "compute",
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-nlb":         "nlb",
+		"spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage":    "storage",
+		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway": "api-gateway",
 	}
-	got, ok := authzguard.SANToServiceAccountID(other, "spiffe://kaname.local/ns/kaname/sa/kacho-vpc")
-	require.True(t, ok, "SAN ОБЪЯВЛЕННОГО домена обязан разбираться — иначе отрицание выше "+
-		"зеленело бы на разборе, не признающем никого")
-	require.Equal(t, sva("vpc"), got)
-
-	// Необъявленный домен не признаёт своим никого.
-	var undeclared grpcsrv.TrustDomain
-	if _, ok := authzguard.SANToServiceAccountID(undeclared, "spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc"); ok {
-		t.Fatalf("необъявленный домен признал своим предъявителя")
+	sans := make([]string, 0, len(want))
+	for san := range want {
+		sans = append(sans, san)
+	}
+	r := rosterOf(t, moduleidentity.ProfileModuleWriter, sans...)
+	d := grpcsrv.NewTrustDomain("kacho.cloud")
+	for san, svc := range want {
+		id, ok := r.Lookup(d, san)
+		require.True(t, ok, "san=%q не признан", san)
+		require.Equal(t, sva(svc), authzguard.ServiceAccountIDForService(id.Service), "san=%q → sva-id", san)
 	}
 }

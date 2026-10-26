@@ -62,6 +62,7 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
+		kanamepg.NewRegistrationAudit(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver())
