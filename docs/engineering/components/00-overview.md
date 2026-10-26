@@ -220,6 +220,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `GroupService`                  | CRUD Group + member-операции                           |
 | `:9090`   | `RoleService`                   | CRUD Role (system seed + custom)                       |
 | `:9090`   | `AccessBindingService`          | Create / Delete (immutable)                            |
+| `:9090`   | `GrantDelegationService`        | Create / Get / List / Revoke делегирований права выдавать (kaname#986) |
 | `:9090`   | `AuthorizeService`              | Check / BatchCheck / ListSubjects / ExpandRelations / WhoAmI |
 | `:9090`   | `PermissionCatalogService`      | грантуемая таксономия прав                              |
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |

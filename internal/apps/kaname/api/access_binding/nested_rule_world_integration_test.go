@@ -435,6 +435,7 @@ func TestNestedWorld_ND06_DeleteRemovesTheRightFromAllDescendants(t *testing.T) 
 			w.pollAsk(sp, "v_get", o.modelType, o.id, true, "ND-06 близнец до удаления")
 		}
 	}
+	w.ownerMayRemove("ND-06 Дано", idD, idA)
 	for _, id := range []string{idD, idA} {
 		op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 		require.NoError(t, err, "ND-06: удаление %s", id)

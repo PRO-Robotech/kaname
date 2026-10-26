@@ -46,6 +46,7 @@ import (
 // хранимой, и отдельно сообщается, что запись НЕ заменила проекцию — то есть
 // продвинула версию, оставив parent-область и метки байт-в-байт прежними.
 type projectionMirror struct {
+	noDescendants
 	mu     sync.Mutex
 	stored map[string]projectionRow
 }
@@ -146,7 +147,7 @@ func (r *guardedReconciler) snapshotPasses() []string {
 
 func newRouteRig() (*RegisterResourceUseCase, *guardedReconciler) {
 	rec := newGuardedReconciler()
-	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
+	uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).
 		WithReconcile(&countingReconcileEvents{}).
 		WithObjectReconciler(rec, nil)
 	return uc, rec
@@ -326,7 +327,7 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 	t.Run("успешные запуски посчитаны, и метка называет выбранный путь", func(t *testing.T) {
 		rec := newGuardedReconciler()
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(rec, nil).
 			WithMetrics(met)
@@ -348,7 +349,7 @@ func TestRegisterResource_PostCommitSteps_AreCounted_RunsAndFailures(t *testing.
 
 	t.Run("отказ ускорителя посчитан, а не только залогирован", func(t *testing.T) {
 		met := &recordingMetrics{}
-		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}).
+		uc := NewRegisterResourceUseCase(&countingEmitter{}, newProjectionMirror(), &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).
 			WithReconcile(&countingReconcileEvents{}).
 			WithObjectReconciler(&failingReconciler{err: assertAnError}, nil).
 			WithMetrics(met)

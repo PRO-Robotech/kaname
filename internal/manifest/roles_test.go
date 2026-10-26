@@ -62,8 +62,14 @@ func TestMODMR10RolesSectionLoads(t *testing.T) {
 	if len(m.Roles) != 2 {
 		t.Fatalf("ролей прочитано %d, в фикстуре две", len(m.Roles))
 	}
-	if m.Roles[0].Tier == nil || m.Roles[0].Tier.TierType != "iam.project" {
-		t.Errorf("ярус роли прочитан неверно: %+v", m.Roles[0].Tier)
+	// Ярус читается у ОБЕИХ ролей фикстуры: первую выдаёт посев, и она
+	// определена на кластере, ярусе якоря посева (kaname#979); вторая посевом не
+	// выдаётся и определена на аккаунте — ярус ниже кластера читается так же.
+	if m.Roles[0].Tier == nil || m.Roles[0].Tier.TierType != "iam.cluster" {
+		t.Errorf("ярус первой роли прочитан неверно: %+v", m.Roles[0].Tier)
+	}
+	if m.Roles[1].Tier == nil || m.Roles[1].Tier.TierType != "iam.account" {
+		t.Errorf("ярус второй роли прочитан неверно: %+v", m.Roles[1].Tier)
 	}
 	if len(m.Roles[0].Rules) != 1 || m.Roles[0].Rules[0].Module != "vpc" {
 		t.Errorf("выдача роли прочитана неверно: %+v", m.Roles[0].Rules)

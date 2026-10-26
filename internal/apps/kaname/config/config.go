@@ -4,12 +4,16 @@
 package config
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // Config — root configuration struct for kaname.
@@ -440,6 +444,128 @@ type AuthNConfig struct {
 	//
 	// ENV `KANAME_AUTHN__TRUST_DOMAIN`, ключ YAML `authn.trust-domain`.
 	TrustDomainName string `mapstructure:"trust-domain"`
+
+	// ModuleIdentities — ЛИЧНОСТИ МОДУЛЕЙ установки (kaname#984): записи
+	// `<пространство>/<учётка>=<профиль>`.
+	//
+	// Домен выше отвечает, чьи предъявители наши; перечень — кто из наших
+	// модуль и что ему позволено звать. Модулем признаётся ТОЛЬКО объявленная
+	// пара: прежде им был любой проверенный лист домена с приставкой модулей в
+	// любом пространстве, и владелец постороннего пространства, получивший лист
+	// на учётку нужного имени, становился модулем. Профиль называет закрытый
+	// перечень методов внутреннего слушателя (`authzguard.ProfileMethods`).
+	//
+	// Умолчания нет: перечень — факт установки, и написанный здесь называл бы
+	// модули, которых у неё может не быть. Пустой перечень в боевом режиме —
+	// отказ старта (по нему не признаётся никто, край в том числе);
+	// неразбираемая запись — отказ старта в любом режиме.
+	//
+	// ENV `KANAME_AUTHN__MODULE_IDENTITIES` (через запятую), ключ YAML
+	// `authn.module-identities` (список).
+	ModuleIdentities []string `mapstructure:"module-identities"`
+
+	// ClientIssuers — ДОВЕРЕННЫЕ УДОСТОВЕРЯЮЩИЕ ЦЕНТРЫ установки поимённо
+	// (kaname#988): записи `<имя>=<путь к PEM с сертификатами центра>`.
+	//
+	// Личность модуля называет центр, который вправе выпускать её лист
+	// (`…=<профиль>@<имя>`), и лист признаётся, только если его проверенная
+	// цепочка оканчивается якорем именно этого центра. Без привязки доверие ко
+	// всем центрам пула слушателя общее: лист с допустимым SAN признаётся, какой
+	// бы из них его ни выпустил. Файл центра обязан входить и в пул клиентских
+	// центров слушателя — иначе лист этого центра не проверится вовсе.
+	//
+	// Умолчания нет. В боевом режиме каждая личность обязана быть привязана
+	// (отказ старта); неразбираемая запись и нечитаемый файл — отказ старта в
+	// любом режиме.
+	//
+	// ENV `KANAME_AUTHN__CLIENT_ISSUERS` (через запятую), ключ YAML
+	// `authn.client-issuers` (список).
+	ClientIssuers []string `mapstructure:"client-issuers"`
+}
+
+// LoadModuleRoster — перечень личностей модулей, который уезжает во все пути
+// признания вызывающего обоих слушателей и HTTP-поверхностей, вместе с
+// прочитанными центрами и причиной, по которой он не собрался. Читает файлы
+// центров: его зовёт корень при подъёме, ОДИН раз и до сборки служб, а не страж
+// настройки, который судит профиль на любой машине.
+//
+// Формы, глотающей ошибку, нет намеренно (kaname#987): нулевой перечень значит
+// разное у потребителей — политике вызывающего «модуль никто», то есть отказ,
+// обработчику внутреннего Check «сужать некого», то есть привязка плоскости
+// данных к домену не применяется. Нулевое значение мимо ошибки открыло бы
+// второму потребителю то, что первый закрывает.
+func (a AuthNConfig) LoadModuleRoster() (moduleidentity.Roster, error) {
+	entries, err := clientIssuerEntries(a.ClientIssuers)
+	if err != nil {
+		return moduleidentity.Roster{}, err
+	}
+	issuers, err := loadClientIssuers(entries)
+	if err != nil {
+		return moduleidentity.Roster{}, err
+	}
+	return moduleidentity.ParseWithIssuers(a.ModuleIdentities, issuers)
+}
+
+// clientIssuer — запись доверенного центра: имя и путь к его PEM.
+type clientIssuer struct{ name, path string }
+
+// clientIssuerEntries разбирает записи `<имя>=<путь>` без чтения файлов. Имя
+// объявляется один раз.
+func clientIssuerEntries(raw []string) ([]clientIssuer, error) {
+	var out []clientIssuer
+	seen := map[string]bool{}
+	for _, r := range raw {
+		entry := strings.TrimSpace(r)
+		if entry == "" {
+			continue
+		}
+		name, path, ok := strings.Cut(entry, "=")
+		name, path = strings.TrimSpace(name), strings.TrimSpace(path)
+		if !ok || name == "" || path == "" {
+			return nil, fmt.Errorf("client issuer %q: write it as <name>=<path to the PEM of the authority>", entry)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("client issuer %q is declared twice", name)
+		}
+		seen[name] = true
+		out = append(out, clientIssuer{name: name, path: path})
+	}
+	return out, nil
+}
+
+// loadClientIssuers читает центры: каждый файл — PEM хотя бы с одним
+// сертификатом.
+func loadClientIssuers(entries []clientIssuer) (moduleidentity.IssuerSet, error) {
+	out := moduleidentity.IssuerSet{}
+	for _, e := range entries {
+		// #nosec G304 -- путь из настройки оператора (смонтированный пакет центра),
+		// а не вход запроса.
+		pemBytes, err := os.ReadFile(e.path)
+		if err != nil {
+			return nil, fmt.Errorf("client issuer %q: read %q: %w", e.name, e.path, err)
+		}
+		var certs []*x509.Certificate
+		for rest := pemBytes; len(rest) > 0; {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			if block.Type != "CERTIFICATE" {
+				continue
+			}
+			c, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("client issuer %q: parse a certificate of %q: %w", e.name, e.path, err)
+			}
+			certs = append(certs, c)
+		}
+		if len(certs) == 0 {
+			return nil, fmt.Errorf("client issuer %q: no certificate in %q", e.name, e.path)
+		}
+		out[e.name] = certs
+	}
+	return out, nil
 }
 
 // TrustDomain — домен доверия, который РЕАЛЬНО уезжает в пару звеньев извлечения

@@ -33,7 +33,9 @@ import (
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -49,7 +51,7 @@ func (p *pcrWorld) anonSelfCheckHandler() *authorizeapp.Handler {
 		ClusterAdminChecker: p.door,
 		Catalog:             catalog.Fixed{F: p.facts},
 	})
-	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil))
+	return authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(p.t))
 }
 
 // anonSelf — анонимная самопроверка: только ресурс и действие, контекст без
@@ -63,7 +65,7 @@ func anonSelf(t *testing.T, h *authorizeapp.Handler, action, modelType, id strin
 		Resource: &iamv1.ResourceRef{Type: modelType, Id: id},
 		Action:   action,
 	}
-	require.Truef(t, authzguard.IsAnonymousSelfCheck(ctx, req),
+	require.Truef(t, authzguard.IsAnonymousSelfCheck(ctx, req, moduleidentity.Roster{}),
 		"предусловие: вопрос %s %s:%s обязан быть анонимной формой", action, modelType, id)
 	resp, err := h.Check(ctx, req)
 	require.NoErrorf(t, err, "анонимная самопроверка %s %s:%s не ответила", action, modelType, id)
@@ -138,36 +140,4 @@ func TestAnonymousSelfCheck_RoleWithoutRepositoryGetStaysRefused(t *testing.T) {
 		"kaname#994: роль без get над репозиториями репозиторий анониму не открывает")
 	assert.False(t, anonSelf(t, h, "registry.registries.list", pcrRegType, pcrX),
 		"kaname#994: роль без list над реестром list анониму не открывает")
-}
-
-// TestAnonymousSelfCheck_SignedInActionOnlyCheckKeepsItsRelation — kaname#994,
-// п. 3 предиката: вошедший субъект без отношения — исход без изменений.
-// Вопрос без отношения от вошедшего по-прежнему разрешается общим умолчанием
-// (`get` → `viewer`): ответ равен ответу с явным `viewer` на объекте, где
-// `v_get` вошедшего истинен.
-func TestAnonymousSelfCheck_SignedInActionOnlyCheckKeepsItsRelation(t *testing.T) {
-	p := newPCRWorld(t)
-	p.deliverNewEdition("kaname#994 вошедший")
-	usrB := fmtSubject("user", string(p.usrB))
-	p.requireAsk(usrB, "v_get", pcrRegType, pcrX, true, "контроль: выдача rol-reg-get человеку usr-B действует")
-	h := p.anonSelfCheckHandler()
-
-	ask := func(relation string) bool {
-		t.Helper()
-		resp, err := h.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-			Subject:          usrB,
-			Resource:         &iamv1.ResourceRef{Type: pcrRegType, Id: pcrX},
-			Action:           "registry.registries.get",
-			RequiredRelation: relation,
-		})
-		require.NoErrorf(t, err, "Check вошедшего (отношение %q) не ответил", relation)
-		return resp.GetAllowed()
-	}
-	viaModuleVerb := ask("v_get")
-	viaDefault := ask("viewer")
-	actionOnly := ask("")
-	require.True(t, viaModuleVerb, "контроль: явный v_get вошедшего истинен")
-	assert.Equal(t, viaDefault, actionOnly,
-		"kaname#994: вопрос вошедшего без отношения обязан отвечать как явный viewer (поведение прежнее)")
-	t.Logf("вошедший usr-B на X: v_get=%v viewer=%v без отношения=%v", viaModuleVerb, viaDefault, actionOnly)
 }

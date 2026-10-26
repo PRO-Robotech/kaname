@@ -63,6 +63,16 @@ type RevokeAccessBindingUseCase struct {
 	// отзыв (стадия S6, эпик kacho#747).
 	relations clients.RelationStore
 	logger    *slog.Logger
+	// delegated — делегированный путь права выдавать (kaname#986, Р2); nil —
+	// выключен.
+	delegated *DelegatedGrantPath
+}
+
+// WithDelegatedGrantPath — делегат отзывает выдачи своего делегирования
+// (kaname#986, Р2). Провязывает корень службы.
+func (u *RevokeAccessBindingUseCase) WithDelegatedGrantPath(p *DelegatedGrantPath) *RevokeAccessBindingUseCase {
+	u.delegated = p
+	return u
 }
 
 func NewRevokeAccessBindingUseCase(r Repo, opsRepo operations.Repo) *RevokeAccessBindingUseCase {
@@ -102,8 +112,12 @@ func (u *RevokeAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	// AUTHZ FIRST (security-ordering): grant-authority MUST run before the
 	// deletion_protection state-dependent response, otherwise a caller without
 	// authority learns the binding exists AND is protected. Exact mirror of Delete.
-	if err := requireGrantAuthority(ctx, u.repo, u.relations,
-		string(binding.ResourceType), binding.ResourceID); err != nil {
+	//
+	// Право отозвать и удалить (kaname#986, Р1а, Р2): прежний вопрос двери
+	// слушателя (`v_delete` на объекте выдачи) переехал сюда дословно, вместе с
+	// правом выдавать на области; делегат проходит только по выдаче своего
+	// действующего делегирования (`removalAuthority`).
+	if err := removalAuthority(ctx, u.repo, u.relations, u.delegated, binding); err != nil {
 		return nil, err
 	}
 	// Sync deletion_protection pre-check for a friendly FAILED_PRECONDITION on the
@@ -229,7 +243,7 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	}
 	// Durable compliance audit event in the SAME writer-tx (ban #10) — на каждого
 	// субъекта, симметрично аудиту создания.
-	if err := revokedAuditFor(ctx, w.AccessBindingsW().EmitAuditEvent, subjects, revokeActor, binding); err != nil {
+	if err := revokedAuditFor(ctx, w, subjects, revokeActor, binding); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	if err := w.Commit(ctx); err != nil {
