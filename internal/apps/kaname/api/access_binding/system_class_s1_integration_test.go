@@ -324,6 +324,10 @@ func TestSystemClass_SC08_ClassIsNotAGroupMember(t *testing.T) {
 	add := groupapp.NewAddMemberUseCase(w.repo, w.ops).
 		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door))
 
+	// Близнец — человек, состоящий в аккаунте группы: участник группы обязан
+	// принадлежать её аккаунту (Д-3 приёмки role-rights-stay-within-what-is-named.md),
+	// и без членства близнец мерил бы не вид участника, а принадлежность.
+	gdSeedMembership(t, w.ctx, w.pool, w.usrB, w.accA, "ACTIVE")
 	op, err := add.Execute(asUser(w.ctx, w.usrA), groupapp.AddMemberInput{
 		GroupID: domain.GroupID(w.grpA), MemberType: domain.SubjectTypeUser, MemberID: domain.SubjectID(w.usrB),
 	})

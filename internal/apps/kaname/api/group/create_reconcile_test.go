@@ -97,6 +97,9 @@ func (g *fakeGroupCreateGroupWriter) Delete(context.Context, domain.GroupID) err
 func (g *fakeGroupCreateGroupWriter) AddMember(context.Context, domain.GroupMember) error {
 	return assertNotCalled("group.AddMember")
 }
+func (g *fakeGroupCreateGroupWriter) RequireMemberOfGroupAccount(context.Context, domain.GroupMember) error {
+	return assertNotCalled("group.RequireMemberOfGroupAccount")
+}
 func (g *fakeGroupCreateGroupWriter) RemoveMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) error {
 	return assertNotCalled("group.RemoveMember")
 }

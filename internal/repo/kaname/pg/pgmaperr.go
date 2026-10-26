@@ -675,9 +675,15 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		return "resource is still referenced by other resources; release those references before deleting it",
 			iamerr.ErrReferenceInUse
 	}
-	return "referenced resource does not exist; create it or correct the reference before retrying",
-		iamerr.ErrReferenceMissing
+	return referenceMissingText, iamerr.ErrReferenceMissing
 }
+
+// referenceMissingText — общий текст «ссылки нет» со стороны ссылки: ни вида, ни
+// идентификатора, ни имени связи. Его же отдаёт участник группы не из аккаунта
+// группы (`groupWriter.RequireMemberOfGroupAccount`, Д-3 приёмки
+// role-rights-stay-within-what-is-named.md): одна константа — одна форма, и два
+// отказа не расходятся ни текстом, ни признаком.
+const referenceMissingText = "referenced resource does not exist; create it or correct the reference before retrying"
 
 // isDeletingHint — глагол подсказки `<Ресурс>.<Глагол>` означает снятие строки.
 // Перечень глаголов закрыт и совпадает с тем, что требует гейт подсказок:

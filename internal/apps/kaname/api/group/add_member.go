@@ -4,9 +4,18 @@
 package group
 
 // add_member.go — AddMemberUseCase.
-// INSERT INTO group_members ON CONFLICT DO NOTHING. DB-триггер
-// group_members_member_exists_trg делает EXISTS-check → SQLSTATE 23503 при
-// отсутствии member → FailedPrecondition с verbatim "<member_type> <member_id> not found".
+//
+// Синхронно, до операции: форма → существование группы → вид участника → право
+// выдавать на каждой области действующих выдач группы (Р3). В операции, одной
+// транзакцией записи: принадлежность участника аккаунту группы (Д-3) → INSERT
+// INTO group_members ON CONFLICT DO NOTHING (DB-триггер
+// group_members_member_exists_trg проверяет существование участника).
+//
+// Участник не из аккаунта группы и несуществующий участник завершают операцию
+// ОДНОЙ формой: FAILED_PRECONDITION с общим текстом «ссылки нет» (`pgmaperr.go`,
+// неразобранная связь 23503) — без вида и идентификатора участника. Различие
+// «нет такого» и «есть в другом аккаунте» было бы оракулом существования чужих
+// субъектов.
 
 import (
 	"context"
@@ -136,6 +145,12 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 	}
 	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
 		func(ctx context.Context, w Writer) error {
+			// Д-3 (kaname#1037): участник — только из аккаунта группы. Той же
+			// транзакцией, что вставка, и под FOR SHARE строки, на которой
+			// держится ответ: снятое конкурентно членство не проходит в группу.
+			if err := w.GroupsW().RequireMemberOfGroupAccount(ctx, m); err != nil {
+				return err
+			}
 			if err := w.GroupsW().AddMember(ctx, m); err != nil {
 				return err
 			}

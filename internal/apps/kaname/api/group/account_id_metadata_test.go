@@ -191,6 +191,9 @@ func (w *fakeGrpWtr) Update(_ context.Context, g domain.Group, _ []string) (doma
 }
 func (w *fakeGrpWtr) Delete(context.Context, domain.GroupID) error        { return nil }
 func (w *fakeGrpWtr) AddMember(context.Context, domain.GroupMember) error { return nil }
+func (w *fakeGrpWtr) RequireMemberOfGroupAccount(context.Context, domain.GroupMember) error {
+	return nil
+}
 func (w *fakeGrpWtr) RemoveMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) error {
 	return nil
 }

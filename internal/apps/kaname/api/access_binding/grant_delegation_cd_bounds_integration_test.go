@@ -177,7 +177,10 @@ func gd25Rows() []gd25Row {
 			})
 		}},
 		{"e GroupService.AddMember", func(w *gdWorld, ctx context.Context) (*operationpb.Operation, bool, error) {
-			req := &iamv1.AddGroupMemberRequest{GroupId: w.grpA, MemberType: "user", MemberId: string(w.usrB)}
+			// Участник — usr-M, член acc-A (`ACTIVE`): участник группы обязан
+			// принадлежать её аккаунту (Д-3 приёмки role-rights-stay-within-what-is-named.md,
+			// решение В-4.2). Свойство строки прежнее: делегату — отказ, владельцу — done.
+			req := &iamv1.AddGroupMemberRequest{GroupId: w.grpA, MemberType: "user", MemberId: string(w.usrM)}
 			return w.viaDoor(ctx, svc+"GroupService/AddMember", req, func(ctx context.Context) (*operationpb.Operation, error) {
 				return w.groups.AddMember(ctx, req)
 			})

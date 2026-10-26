@@ -68,6 +68,12 @@ type WriterIface interface {
 	// group_members_member_exists_trg проверяет существование member_id в
 	// users / service_accounts → SQLSTATE 23503 → ErrFailedPrecondition.
 	AddMember(ctx context.Context, m domain.GroupMember) error
+	// RequireMemberOfGroupAccount — участник принадлежит аккаунту группы (Д-3,
+	// kaname#1037): учётка — своим аккаунтом, человек — членством ACTIVE. Иначе —
+	// ErrReferenceMissing с тем же текстом, что у несуществующего участника.
+	// Строка, на которой держится ответ, берётся под FOR SHARE до коммита
+	// транзакции вызывающего.
+	RequireMemberOfGroupAccount(ctx context.Context, m domain.GroupMember) error
 	// RemoveMember — DELETE. Идемпотентен (повторное удаление участника).
 	RemoveMember(ctx context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) error
 }

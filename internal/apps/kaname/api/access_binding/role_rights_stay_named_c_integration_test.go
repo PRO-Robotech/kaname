@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -136,25 +135,29 @@ func TestRoleRightsStayNamed_ESC23_MemberOnlyFromTheGroupAccount(t *testing.T) {
 		}
 		refusal[r.name] = o.opErr
 		assert.Equalf(t, codes.FailedPrecondition, o.opErr.Code(), "ESC-23 %s: код (текст %q)", r.name, o.opErr.Message())
-		assert.Equalf(t, r.memberType+" "+r.memberID+" not found", o.opErr.Message(), "ESC-23 %s: текст", r.name)
+		assert.Equalf(t, escTextMemberMissing, o.opErr.Message(), "ESC-23 %s: текст T-нет", r.name)
 	}
 	assert.Equal(t, []string{"service_account:" + w.svaA2, "user:" + string(w.usrM)}, w.membersOf(w.grpE0),
 		"ESC-23: в grp-e0 только участники a и c")
 
-	// b против f и d против f: код, шаблон текста и детали — одни, отличие — идентификатор.
-	shape := func(st *status.Status, id string) string {
+	// b против f и d против f: код, текст и детали — одни (В-4.1: идентификатора
+	// участника в тексте нет, поэтому равенство — полное, без подстановки).
+	shape := func(st *status.Status) string {
 		if st == nil {
 			return "<нет отказа>"
 		}
-		return fmt.Sprintf("%v %s деталей %d", st.Code(), strings.ReplaceAll(st.Message(), id, "<id>"), len(st.Details()))
+		return fmt.Sprintf("%v %s деталей %d", st.Code(), st.Message(), len(st.Details()))
 	}
 	f := refusal["f учётки нет нигде"]
-	assert.Equal(t, shape(f, absentSA), shape(refusal["b sva-B (учётка acc-B)"], w.svaB),
-		"ESC-23: отказ по чужой учётке отличим от отказа по несуществующей не только идентификатором")
-	assert.Equal(t, strings.Replace(shape(f, absentSA), "service_account", "user", 1),
-		shape(refusal["d usr-C (членства в acc-A нет)"], string(w.usrC)),
-		"ESC-23: отказ по человеку без членства отличим от отказа по несуществующему не только идентификатором")
+	assert.Equal(t, shape(f), shape(refusal["b sva-B (учётка acc-B)"]),
+		"ESC-23: отказ по чужой учётке отличим от отказа по несуществующей")
+	assert.Equal(t, shape(f), shape(refusal["d usr-C (членства в acc-A нет)"]),
+		"ESC-23: отказ по человеку без членства отличим от отказа по несуществующему")
 }
+
+// escTextMemberMissing — T-нет: текст отказа «участника нет», измеренный на базе
+// (§0.2, §11 приёмки; решение В-4.1).
+const escTextMemberMissing = "referenced resource does not exist; create it or correct the reference before retrying"
 
 // ESC-24 — убрать участника права выдавать не требует.
 func TestRoleRightsStayNamed_ESC24_RemoveMemberNeedsNoGrantAuthority(t *testing.T) {
