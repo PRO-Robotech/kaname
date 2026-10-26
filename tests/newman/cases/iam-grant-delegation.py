@@ -380,6 +380,27 @@ CASES.append(Case(
 _D4_SUBJECT_TYPES = ["SUBJECT_TYPE_GROUP", "SUBJECT_TYPE_SERVICE_ACCOUNT"]
 
 
+def _member_known(member_var):
+    """Pre-request шага состава: член группы назван.
+
+    Ни адреса, ни тела шаг состава члену не отдаёт, поэтому страж незахваченной
+    переменной генератора его не видит, и без этой проверки утверждения состава
+    судили бы пустую группу. Член из посева (учётка-делегат) — третий исход
+    («условие не создано»); член, заведённый кейсом, — отказ без метки: его не
+    создал предыдущий шаг, и это находка о продукте или о кейсе.
+    """
+    seeded = member_var in {v for v, _ in _SEED_VARS}
+    guard = precondition_not_met if seeded else report_then_skip
+    detail = (f"{member_var} не задана: учётку-делегата заводит производитель посева, а не край"
+              if seeded else
+              f"{member_var} не захвачена: заведение учётки-члена кейсом не вернуло id")
+    return [
+        f"if (!pm.environment.get({js_str(member_var)})) {{",
+        *guard(f"GD-D4 Дано: член группы {member_var} назван", detail, indent="  "),
+        "}",
+    ]
+
+
 def _group_with_member(prefix, group_var, member_var):
     """Группа аккаунта A, заведённая владельцем, и один член — учётка из `member_var`.
 
@@ -405,6 +426,7 @@ def _group_with_member(prefix, group_var, member_var):
         assert_op_success(),
         Step(name=f"{prefix}-members", method="GET",
              path="/iam/v1/groups/{{" + group_var + "}}:listMembers", auth=OWNER,
+             pre_script=_member_known(member_var),
              test_script=[
                  *assert_status(200),
                  "const ms = pm.response.json().members || [];",
