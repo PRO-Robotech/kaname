@@ -31,11 +31,12 @@ package group
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -210,7 +211,12 @@ func TestAddMember_MemberOutsideTheGroupAccountLeavesNothing(t *testing.T) {
 	w.gw.notMember = true
 	_, err := NewAddMemberUseCase(repo, nil).doAdd(context.Background(), in)
 	require.Error(t, err, "Д-3: участник не из аккаунта группы принят")
-	assert.True(t, errors.Is(err, iamerr.ErrReferenceMissing), "Д-3: признак отказа — «ссылки нет» (%v)", err)
+	// Отказ хранилища проходит отображение транзакции записи (shared.MapRepoErrAt):
+	// наружу — `FailedPrecondition` с общим текстом «ссылки нет», тем же, что у
+	// несуществующего участника (ESC-23 f).
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err), "Д-3: код отказа (%v)", err)
+	assert.Equal(t, "referenced resource does not exist; create it or correct the reference before retrying",
+		status.Convert(err).Message(), "Д-3: текст отказа — «ссылки нет»")
 	assert.Empty(t, w.gw.added, "Д-3: строка состава вставлена")
 	assert.Empty(t, w.writeEmitted, "Д-3: факт модели записан")
 	assert.False(t, w.committed, "Д-3: транзакция записи закоммичена")
