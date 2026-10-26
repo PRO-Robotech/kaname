@@ -215,6 +215,29 @@ func TestServiceAccountCreator_SAC14_TwoCreatorsDoNotManageEachOthersAccounts(t 
 	requireSACDone(t, w.keyIssue(iss2, cr2), "SAC-14 c (близнец): sva-iss2 Issue sva-cr2")
 }
 
+// SAC-14 d — сверх таблицы сценария: ОДНА выдача роли C двум учёткам. Ведение
+// своей учётки каждый получает по своей строке субъекта выдачи, а не по выдаче
+// целиком (`reconcile.creatorGrantees`): иначе сосед по выдаче вёл бы учётки
+// другого. Пара — «своя учётка» против «учётка соседа по той же выдаче».
+func TestServiceAccountCreator_SAC14d_OneGrantTwoSubjectsEachManagesOnlyHisOwn(t *testing.T) {
+	w := newSACWorld(t)
+	w.requireCreatorRole("SAC-14 d")
+	w.grantC("SAC-14 d Дано: G на двоих", w.svaIss, w.svaOther)
+	cr1 := w.createSADone(asSA(w.ctx, w.svaIss), string(w.accA), "cr-1", "SAC-14 d Дано: sva-cr1 от sva-iss")
+	crO := w.createSADone(asSA(w.ctx, w.svaOther), string(w.accA), "cr-o", "SAC-14 d Дано: sva-crO от sva-other")
+	w.pollRelation("service_account:"+w.svaIss, "v_update", sacSAModelType+":"+cr1, true,
+		"SAC-14 d контроль: sva-iss ведёт sva-cr1")
+	w.pollRelation("service_account:"+w.svaOther, "v_update", sacSAModelType+":"+crO, true,
+		"SAC-14 d близнец: sva-other ведёт sva-crO")
+
+	w.requireRelation("service_account:"+w.svaOther, "v_update", sacSAModelType+":"+cr1, false,
+		"SAC-14 d: sva-other не ведёт sva-cr1 соседа по выдаче")
+	w.requireRelation("service_account:"+w.svaIss, "v_update", sacSAModelType+":"+crO, false,
+		"SAC-14 d: sva-iss не ведёт sva-crO соседа по выдаче")
+	requireSACDenied(t, w.keyIssue(asSA(w.ctx, w.svaOther), cr1), "SAC-14 d: sva-other Issue sva-cr1")
+	requireSACDone(t, w.keyIssue(asSA(w.ctx, w.svaOther), crO), "SAC-14 d (близнец): sva-other Issue sva-crO")
+}
+
 // SAC-15 — список создателя — только его учётки.
 func TestServiceAccountCreator_SAC15_CreatorsListShowsOnlyHisAccounts(t *testing.T) {
 	w := newSACWorld(t)
