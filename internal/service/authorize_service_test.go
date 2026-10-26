@@ -133,7 +133,7 @@ func TestAuthorize_Check_DeniesNoPath(t *testing.T) {
 	// and the "no direct relations granted" tail.
 	for _, want := range []string{
 		"user:usr_bob",
-		"admin", // vpc.networks.delete -> admin
+		"admin", // отношение, названное явно (RequiredRelation)
 		"vpc_network:vpcn_y",
 		"vpc.networks.delete",
 		"no direct relations granted",
