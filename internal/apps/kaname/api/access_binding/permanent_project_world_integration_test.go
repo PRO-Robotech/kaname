@@ -662,17 +662,34 @@ func TestPermanentProject_PB18_RegistrationDuringDeclarationIsBoundEitherWay(t *
 			}
 			first, err := holder(ctx)
 			require.NoError(t, err, "PB-18 %s: первая транзакция", name)
-			done := make(chan error, 1)
-			var second service.Tx
+			type txResult struct {
+				tx  service.Tx
+				err error
+			}
+			res := make(chan txResult, 1)
 			go func() {
 				tx, werr := waiter(ctx)
-				second = tx
-				done <- werr
+				res <- txResult{tx: tx, err: werr}
 			}()
+			// Уборка — ДО первого утверждения: проба, упавшая с открытыми
+			// транзакциями, держала бы соединения пула, и снятие базы мира ждало
+			// бы их до предела прогона. Откат после коммита ничего не меняет.
+			var second txResult
+			received := false
+			t.Cleanup(func() {
+				_ = first.Rollback(context.Background())
+				if !received {
+					second = <-res
+				}
+				if second.tx != nil {
+					_ = second.tx.Rollback(context.Background())
+				}
+			})
 			w.waitForLockWaiter("PB-18 " + name)
 			require.NoError(t, first.Commit(ctx), "PB-18 %s: коммит первой", name)
-			require.NoError(t, <-done, "PB-18 %s: вторая транзакция", name)
-			require.NoError(t, second.Commit(ctx), "PB-18 %s: коммит второй", name)
+			second, received = <-res, true
+			require.NoError(t, second.err, "PB-18 %s: вторая транзакция", name)
+			require.NoError(t, second.tx.Commit(ctx), "PB-18 %s: коммит второй", name)
 
 			requireP4(t, w.call(w.regReq(dpQ3, w.prjC, w.accB)), ppObj(dpQ3), w.prjA, "PB-18 "+name+": prj-C")
 			require.NoError(t, w.call(w.regReq(dpQ3, w.prjA, w.accA)), "PB-18 %s: prj-A", name)
