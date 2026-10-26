@@ -56,10 +56,13 @@ func TestIsVerbOfType_UsesTheSameNormalizationOnBothSides(t *testing.T) {
 }
 
 // TestResolveVerbsAndTier_TierIsSpellingInsensitive — вывод яруса тоже приводится:
-// иначе `Delete` дал бы ярус редактора вместо администратора.
+// иначе `Get` дал бы ярус редактора вместо наблюдателя, а `Delete` — редактора
+// вместо отсутствия яруса (удаление яруса не даёт, kaname#1035).
 func TestResolveVerbsAndTier_TierIsSpellingInsensitive(t *testing.T) {
-	_, tier := ResolveVerbsAndTier([]string{"Delete"}, []string{"get", "delete"})
-	require.Equal(t, "admin", tier)
+	_, tier := ResolveVerbsAndTier([]string{"Get"}, []string{"get", "delete"})
+	require.Equal(t, "viewer", tier)
+	_, tier = ResolveVerbsAndTier([]string{"Delete"}, []string{"get", "delete"})
+	require.Equal(t, "", tier)
 }
 
 // TestAuthoredVerbs_FoldsSpellingIntoOneEntry — превью не показывает одно и то же
