@@ -21,6 +21,10 @@
 package manifest_test
 
 import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -157,4 +161,91 @@ func TestSeedGrantRoleBeyondItsTierIsRefused(t *testing.T) {
 	broken := replaceOnce(t, legal, clusterTier, projectTier)
 	mustRefuseGrant(t, []byte(broken), manifest.ErrSeedGrantBeyondTier,
 		"seed.accessBindings", "vpc.internal_consumer", domain.ScopeTypeProjectDotted)
+}
+
+// testdataRefusedByDesign — ЯВНЫЙ перечень фикстур `testdata`, которые
+// загрузчик обязан ОТВЕРГАТЬ, с видом отказа. Сегодня он пуст: все фикстуры
+// каталога — законные манифесты. Запись без файла — находка (перечень истекает
+// вместе со своим предметом); файл из перечня, принятый загрузчиком, — тоже.
+var testdataRefusedByDesign = map[string]error{}
+
+// TestEveryTestdataFixtureFacesTheLoaderWithTheSeedGrantCeiling — загрузчик
+// вместе с потолком посева прогоняется по ВСЕМ фикстурам `testdata/*.yaml`.
+//
+// # Что было неверно
+//
+// Потолок посева (kaname#979) судили синтетические документы этого файла да
+// одна фикстура (`vpc.resources-fixture.yaml`), которую #979 и поправил.
+// Фикстура мира Д (`vpc.delegation-fixture.yaml`, kaname#1009) была снята с
+// прежней редакции той же фикстуры — роль `vpc.internal_consumer` на ярусе
+// проекта и её выдача посевом на кластере — и новым запретом стала отвергаться.
+// Ни одна проба пакета об этом не узнала: фикстуру грузит лишь интеграционный
+// мир, и отказ пришёл шестьюдесятью шестью отказами шарда интеграции после
+// сведения волны.
+//
+// # Что держит проба
+//
+// Каждая фикстура каталога грузится обоими путями, которыми её берут пробы:
+// без оракула (так её грузят миры интеграции) и с каноном модели (так судят
+// пробы потолка). Законная обязана пройти оба; намеренно плохая — только по
+// перечню [testdataRefusedByDesign] и только названным отказом. Новый запрет
+// загрузчика, ломающий фикстуру, краснеет здесь, в модульной пробе, с именем
+// файла.
+//
+// Предпосылка обхода проверяется: обход, не нашедший ни одной фикстуры, —
+// «не выполнилось», а не «нарушений нет».
+func TestEveryTestdataFixtureFacesTheLoaderWithTheSeedGrantCeiling(t *testing.T) {
+	entries, err := os.ReadDir("testdata")
+	if err != nil {
+		t.Fatalf("каталог фикстур не прочитан — судить нечего: %v", err)
+	}
+	forms := []struct {
+		name string
+		opts []manifest.LoadOption
+	}{
+		{"без оракула", nil},
+		{"с каноном модели", []manifest.LoadOption{canonOracle(t)}},
+	}
+	var files, lines, lawful, refused int
+	seen := map[string]bool{}
+	for _, e := range entries {
+		name := e.Name()
+		if ext := filepath.Ext(name); e.IsDir() || (ext != ".yaml" && ext != ".yml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatalf("фикстура %s не прочитана: %v", name, err)
+		}
+		files++
+		lines += bytes.Count(data, []byte("\n"))
+		seen[name] = true
+
+		want, refusedByDesign := testdataRefusedByDesign[name]
+		for _, form := range forms {
+			_, err := manifest.Load(data, form.opts...)
+			switch {
+			case refusedByDesign && err == nil:
+				t.Errorf("%s (%s): фикстура из перечня намеренно плохих принята загрузчиком", name, form.name)
+			case refusedByDesign && !errors.Is(err, want):
+				t.Errorf("%s (%s): отказ не того вида — ждали %v: %v", name, form.name, want, err)
+			case !refusedByDesign && err != nil:
+				t.Errorf("%s (%s): законная фикстура отвергнута загрузчиком: %v", name, form.name, err)
+			}
+		}
+		if refusedByDesign {
+			refused++
+		} else {
+			lawful++
+		}
+	}
+	if files == 0 {
+		t.Fatalf("в testdata ни одной фикстуры *.yaml — обход пуст, это «не выполнилось», а не «нарушений нет»")
+	}
+	for name := range testdataRefusedByDesign {
+		if !seen[name] {
+			t.Errorf("перечень намеренно плохих называет %s, а файла в testdata нет — запись пережила свой предмет", name)
+		}
+	}
+	t.Logf("осмотрено фикстур %d · строк %d · законных %d · намеренно плохих по перечню %d", files, lines, lawful, refused)
 }
