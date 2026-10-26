@@ -39,11 +39,10 @@
 --   4. `kaname.iam_rules_valid` — хранимая форма правила роли несёт ключ
 --      `created_by_subject` только значением true, без `resource_names`,
 --      `match_labels`, `children` и без подстановки в модуле и ресурсе.
---   5. Системная роль `iam.service_account.creator` (Р2) — строкой роли, как
---      прочие роли модуля iam (их объявляет манифест службы, а строки заводит
---      миграция; согласие держит `internal/moduleroleparity`). Селекторы и проекцию
---      глаголов роли досевает старт (`SyncAllSystemRoleSelectors`,
---      `ReseedSystemRoleVerbs`) — как у любой системной роли.
+--   Системную роль `iam.service_account.creator` (Р2) эта миграция НЕ заводит: роль
+--   модуля с манифестом объявляется манифестом, и строку пишет применитель ролей
+--   на старте (`moduleroles.Applier.ApplyImage` над манифестом образа) —
+--   `TestMODRD23MigrationDoesNotWriteARoleOfAManifestBearingModule`.
 
 -- +goose Up
 
@@ -237,21 +236,13 @@ END;
 $$;
 -- +goose StatementEnd
 
--- 5. Системная роль создателя.
-INSERT INTO kaname.roles (id, account_id, name, description, permissions, cluster_id, project_id, rules, labels)
-VALUES ('rol' || left(md5('iam.service_account.creator'), 17), NULL, 'iam.service_account.creator',
-        'Create service accounts and manage the ones you created',
-        '["iam.serviceAccount.*.create"]'::jsonb, 'cluster_root', NULL,
-        '[{"module": "iam", "resources": ["serviceAccount"], "verbs": ["create"]},
-          {"module": "iam", "resources": ["serviceAccount"], "verbs": ["delete", "get", "list", "update"], "created_by_subject": true}]'::jsonb,
-        '{}'::jsonb)
-ON CONFLICT (id) DO NOTHING;
 
 -- +goose Down
 
-DELETE FROM kaname.role_rule_selectors WHERE role_id = 'rol' || left(md5('iam.service_account.creator'), 17);
-DELETE FROM kaname.role_verb WHERE role_id = 'rol' || left(md5('iam.service_account.creator'), 17);
-DELETE FROM kaname.roles WHERE id = 'rol' || left(md5('iam.service_account.creator'), 17);
+-- Роль создателя заводит применитель ролей, но её правило с селектором создателя
+-- без колонки селектора читалось бы «глаголы на всех учётках»: откат схемы снимает
+-- строку роли (выдачи на неё откат останавливают ключом — громко, а не молча).
+DELETE FROM kaname.roles WHERE name = 'iam.service_account.creator';
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.iam_rules_valid(rules jsonb) RETURNS boolean

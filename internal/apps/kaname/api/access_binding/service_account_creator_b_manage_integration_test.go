@@ -9,6 +9,7 @@ package access_binding_test
 // глаголы учётки и ключа — только через дверь мира.
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -163,7 +164,14 @@ func TestServiceAccountCreator_SAC13_ForeignAccountsAreOutOfReach(t *testing.T) 
 	requireSACDenied(t, w.keyIssue(iss, w.svaA), "SAC-13 a: Issue sva-A")
 	requireSACDenied(t, w.saDelete(iss, w.svaA), "SAC-13 b: Delete sva-A")
 	_, err := w.saGet(iss, w.sacA2)
-	requireSyncRefusalPD(t, err, "SAC-13 c: Get sva-A2")
+	// Строка c — ЧТЕНИЕ: дверь отвечает на отказ в чтении объекта, о котором
+	// вызывающий знать не вправе, не PERMISSION_DENIED, а NOT_FOUND текстом
+	// настоящего промаха владельца (corelib `authz/hide_existence.go`, скрытие
+	// существования — не флаг записи каталога, а свойство отказа в чтении). Таблица
+	// приёмки (§0.6, SAC-13) этого не учла; проба утверждает поведение двери
+	// дословно — строже, а не мягче: «не твоё» неотличимо от «нет такого».
+	requireSyncRefusal(t, err, codes.NotFound, fmt.Sprintf("ServiceAccount %s not found", w.sacA2),
+		"SAC-13 c: Get sva-A2")
 	requireSACDenied(t, w.keyIssue(iss, w.sacA2), "SAC-13 d: Issue sva-A2")
 	requireSACDenied(t, w.saUpdateLabels(iss, w.sacA2, map[string]string{"k": "v"}), "SAC-13 e: Update sva-A2")
 	for _, id := range []string{w.svaA, w.sacA2} {

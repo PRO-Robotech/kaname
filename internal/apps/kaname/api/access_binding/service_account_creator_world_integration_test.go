@@ -47,6 +47,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -67,11 +69,15 @@ import (
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	sakeysapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys"
 	serviceaccountapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/service_account"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/servicemanifest"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -161,7 +167,17 @@ func newSACWorld(t *testing.T) *sacWorld {
 	w.usrR = mustSeedUser(t, ctx, pool, "sacr")
 	verifyAddresses(t, ctx, pool)
 	seedClusterAdmin(t, ctx, pool, w.usrR)
+	// Назначение администратора облака держит свой прямой факт
+	// `cluster:cluster_root#system_admin` — его кладёт путь назначения строкой
+	// журнала; посев мира повторяет оба шага (образец — SD-919-C).
+	gdSeedTuple(t, ctx, pool, "user:"+string(w.usrR), "system_admin", "cluster:"+domain.ClusterSingletonID)
 	seedLiveHumanSession(t, g.scWorld, w.usrR)
+
+	// Роли своего манифеста службы — тем путём, что старт (`cmd/kaname`,
+	// `applyImageModuleRoles`): роль C объявлена встроенным манифестом iam и
+	// заводится применителем ролей, а не миграцией (§4.1, «посев ролей модуля при
+	// старте»). Затем — самолечение старта: селекторы и проекция глаголов.
+	w.applyImageRoles()
 
 	w.buildSACHandlers()
 
@@ -186,6 +202,9 @@ func newSACWorld(t *testing.T) *sacWorld {
 		"контроль мира С: usr-A держит editor на acc-A")
 	w.pollRelation("user:"+string(g.usrA), "v_update", sacSAModelType+":"+w.sacA2, true,
 		"контроль мира С: usr-A держит v_update на sva-A2 (каскад владельца)")
+	// usr-R — администратор облака: держит system_admin на кластере.
+	w.pollRelation("user:"+string(w.usrR), "system_admin", "cluster:"+domain.ClusterSingletonID, true,
+		"контроль мира С: usr-R — администратор облака")
 	// Учётки acc-S прав в acc-A не держат.
 	for _, sva := range []string{g.svaIss, g.svaIss2, w.svaAdm} {
 		w.requireRelation("service_account:"+sva, "editor", "account:"+string(g.accA), false,
@@ -673,4 +692,34 @@ func (w *sacWorld) plans() *authzmodel.Plans {
 	p, err := authzmodel.New(authzmodel.DSL)
 	require.NoError(w.t, err, "модель прав мира")
 	return p
+}
+
+// applyImageRoles — применение ролей манифеста образа глаголами пути старта
+// (`moduleroles.Applier.ApplyImage`) и самолечение селекторов и проекции глаголов
+// системных ролей (`seed.SyncAllSystemRoleSelectors`, `seed.ReseedSystemRoleVerbs`)
+// — те же шаги, что `applyDelivered` мира П6 делает для доставленного манифеста.
+func (w *sacWorld) applyImageRoles() {
+	w.t.Helper()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	own, err := servicemanifest.Load()
+	require.NoError(w.t, err, "мир С: встроенный манифест службы")
+	reg, err := seed.LoadPermissionRegistry(w.ctx, logger)
+	require.NoError(w.t, err, "мир С: каталог прав")
+	rows := reg.All()
+	entries := make([]roleexport.CatalogEntry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, roleexport.CatalogEntry{
+			FQN: r.FQN, RequiredRelation: r.RequiredRelation, ScopeObjectType: r.ScopeExtractor.ObjectType,
+		})
+	}
+	attributed, _ := roleexport.Attribute(entries)
+	rights, err := moduleroles.NewRightsExport(w.facts, attributed)
+	require.NoError(w.t, err, "мир С: производитель правил роли")
+	rep, err := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(w.repo), rights).
+		ApplyImage(w.ctx, own, moduleroles.BootActorID)
+	require.NoErrorf(w.t, err, "мир С: применение ролей своего манифеста (%s)", rep)
+	w.t.Logf("мир С: роли своего манифеста — %s", rep)
+	require.NoError(w.t, seed.SyncAllSystemRoleSelectors(w.ctx, w.pool), "мир С: селекторы системных ролей")
+	_, err = seed.ReseedSystemRoleVerbs(w.ctx, w.repo, w.pool, w.facts, nil)
+	require.NoError(w.t, err, "мир С: проекция глаголов системных ролей")
 }
