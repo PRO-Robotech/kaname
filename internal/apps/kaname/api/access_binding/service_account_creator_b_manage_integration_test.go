@@ -222,7 +222,7 @@ func TestServiceAccountCreator_SAC14_TwoCreatorsDoNotManageEachOthersAccounts(t 
 func TestServiceAccountCreator_SAC14d_OneGrantTwoSubjectsEachManagesOnlyHisOwn(t *testing.T) {
 	w := newSACWorld(t)
 	w.requireCreatorRole("SAC-14 d")
-	w.grantC("SAC-14 d Дано: G на двоих", w.svaIss, w.svaOther)
+	gm := w.grantC("SAC-14 d Дано: G на двоих", w.svaIss, w.svaOther)
 	cr1 := w.createSADone(asSA(w.ctx, w.svaIss), string(w.accA), "cr-1", "SAC-14 d Дано: sva-cr1 от sva-iss")
 	crO := w.createSADone(asSA(w.ctx, w.svaOther), string(w.accA), "cr-o", "SAC-14 d Дано: sva-crO от sva-other")
 	w.pollRelation("service_account:"+w.svaIss, "v_update", sacSAModelType+":"+cr1, true,
@@ -234,6 +234,27 @@ func TestServiceAccountCreator_SAC14d_OneGrantTwoSubjectsEachManagesOnlyHisOwn(t
 		"SAC-14 d: sva-other не ведёт sva-cr1 соседа по выдаче")
 	w.requireRelation("service_account:"+w.svaIss, "v_update", sacSAModelType+":"+crO, false,
 		"SAC-14 d: sva-iss не ведёт sva-crO соседа по выдаче")
+	// Выпущенное выдачей — реестр материализации: на sva-cr1 кортежи только у
+	// создателя. Решение двери выше судит строку селектора с осью создателя и
+	// материализации не видит; читатели кортежей видят ровно реестр.
+	emitted := func(user, object string) int {
+		var n int
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM kaname.access_binding_emitted_tuples
+			 WHERE binding_id = $1 AND fga_user = $2 AND object = $3`, gm, user, object).Scan(&n), "SAC-14 d: реестр выпущенного")
+		return n
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for emitted("service_account:"+w.svaIss, sacSAModelType+":"+cr1) == 0 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	require.NotZero(t, emitted("service_account:"+w.svaIss, sacSAModelType+":"+cr1),
+		"SAC-14 d контроль: выдача выпустила кортежи sva-iss на sva-cr1")
+	require.NotZero(t, emitted("service_account:"+w.svaOther, sacSAModelType+":"+crO),
+		"SAC-14 d близнец: выдача выпустила кортежи sva-other на sva-crO")
+	require.Zero(t, emitted("service_account:"+w.svaOther, sacSAModelType+":"+cr1),
+		"SAC-14 d: выдача выпустила кортежи sva-other на sva-cr1 соседа")
+	require.Zero(t, emitted("service_account:"+w.svaIss, sacSAModelType+":"+crO),
+		"SAC-14 d: выдача выпустила кортежи sva-iss на sva-crO соседа")
 	requireSACDenied(t, w.keyIssue(asSA(w.ctx, w.svaOther), cr1), "SAC-14 d: sva-other Issue sva-cr1")
 	requireSACDone(t, w.keyIssue(asSA(w.ctx, w.svaOther), crO), "SAC-14 d (близнец): sva-other Issue sva-crO")
 }

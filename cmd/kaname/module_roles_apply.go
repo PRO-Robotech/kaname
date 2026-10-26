@@ -272,8 +272,8 @@ func applyDeliveredModuleRoles(
 	return nil
 }
 
-// applyImageModuleRoles приводит системные роли СВОЕГО манифеста службы,
-// встроенного в образ (модуль `iam`), к объявленному (kaname#1003).
+// applyImageModuleRoles заводит недостающие системные роли СВОЕГО манифеста
+// службы, встроенного в образ (модуль `iam`; kaname#1003).
 //
 // # Зачем, если роли модуля iam лежат в базе с начальной миграции
 //
@@ -287,9 +287,9 @@ func applyDeliveredModuleRoles(
 //
 // Применяется `ApplyImage`, а не `Apply`: строки ролей образа остаются без
 // владельца (роли платформы, политика их правил прежняя); перевод под владельца —
-// отдельное решение (шапка `ApplyImage`). Объявленное, совпадающее со строкой,
-// не пишется (приведение по отличию), поэтому на базе, где роли iam уже стоят,
-// путь меняет ровно новые строки.
+// отдельное решение (шапка `ApplyImage`). Стоящая роль платформы не приводится
+// вовсе (`Report.Kept`), поэтому на базе, где роли iam уже стоят, путь пишет
+// ровно новые строки.
 //
 // Отказ — ОТКАЗ ПУСКА, по тому же доводу, что у доставленных (шапка файла).
 func applyImageModuleRoles(
@@ -306,6 +306,7 @@ func applyImageModuleRoles(
 		slog.Int("written", rep.Written),
 		slog.Int("unchanged", rep.Unchanged),
 		slog.Int("skipped", rep.Skipped),
+		slog.Int("kept", rep.Kept),
 		slog.Int("retired", rep.Retired),
 		slog.Any("names", rep.Names),
 		slog.Any("retired_names", rep.RetiredNames))
