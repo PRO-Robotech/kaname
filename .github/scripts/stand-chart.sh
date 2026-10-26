@@ -222,8 +222,92 @@ export KUBECONFIG="${KUBECONFIG:-$WORK/kubeconfig}"
 say()   { printf '%s\n' "$*"; }
 fail()  { printf 'НАХОДКА: %s\n' "$*" >&2; }
 unmet() { printf 'УСЛОВИЕ НЕ СОЗДАНО: %s\n' "$*" >&2; }
+refuse() { printf 'ОТКАЗ: %s\n' "$*" >&2; }
 
-KCTL=(kubectl --context "kind-$CLUSTER")
+# ─── СТЕНД ИЗНУТРИ POD РАННЕРА: СВОЁ ПРОСТРАНСТВО ВНЕШНЕГО КЛАСТЕРА (kaname#964) ──
+#
+# Решение владельца 2026-10-22 (kacho-workspace#1301): машина разработчика — не
+# место прогонов, пока внешний кластер доступен. Подъём kind на машине там
+# запрещён, а внешнего пути у `helm install` с машины нет. Путь есть у раннера
+# (`stand-own.sh runner -- КОМАНДА`): pod в своём пространстве внешнего
+# кластера, учётка с ролью лишь в нём, пространство снимается всегда. Этот
+# скрипт, позванный командой раннера, ставит чарт ТУДА (KANAME_STAND_IN_POD=1,
+# его выставляет раннер):
+#   пространство  СВОЁ пространство учётки pod; оно же обязано быть названо
+#                 KANAME_STAND_EXT_NS, а KANAME_STAND_NS — либо не назван, либо
+#                 равен ему (иначе 64: роль учётки лишь в своём);
+#   кубконфиг     файл рабочего каталога из учётки pod (сертификат кластера и
+#                 ФАЙЛ токена — сам токен в файл не переписывается), контекст `in-pod`;
+#   образ         не собирается: docker в pod нет. KANAME_STAND_IMAGE — координата
+#                 реестра с отпечатком (`repo:tag@sha256:…`), иначе 64: изменяемый
+#                 тег назвал бы не то, что исполняется;
+#   ревизия       KANAME_STAND_REVISION, иначе RUNNER_SHA раннера: голова дерева в
+#                 pod — коммит, который раннер завёл над исходниками, а не их ревизия;
+#   правила       вид PrometheusRule учётка раннера не читает: KANAME_STAND_ALERT_RULES=off
+#   тревоги       обязателен (иначе 64), и стенд этого не прячет;
+#   снос          релиз и объекты стенда; пространство снимает раннер.
+# Посадку это не трогает: профиль и накладки — те же, что у подъёма в kind.
+IN_POD="${KANAME_STAND_IN_POD:-}"
+SA_DIR="${KANAME_STAND_SA_DIR:-/var/run/secrets/kubernetes.io/serviceaccount}"
+KUBE_CTX="kind-$CLUSTER"
+
+# in_pod_setup — маршрут изнутри pod раннера; код 64 — вызов вне pod раннера либо
+# с координатой, которой этот путь исполнить не может.
+in_pod_setup() {
+	local own host
+	if [ -z "${KUBERNETES_SERVICE_HOST:-}" ] || [ ! -r "$SA_DIR/namespace" ] || [ ! -r "$SA_DIR/token" ] || [ ! -r "$SA_DIR/ca.crt" ]; then
+		refuse "KANAME_STAND_IN_POD — лишь изнутри pod раннера (stand-own.sh runner): учётки pod нет"
+		return 64
+	fi
+	own="$(cat "$SA_DIR/namespace")"
+	if [ -z "${KANAME_STAND_EXT_NS:-}" ] || [ "$own" != "$KANAME_STAND_EXT_NS" ]; then
+		refuse "pod раннера в пространстве «$own», а стенд назван «${KANAME_STAND_EXT_NS:-}» — стенд ставится лишь в своё пространство"
+		return 64
+	fi
+	if [ -n "${KANAME_STAND_NS:-}" ] && [ "$KANAME_STAND_NS" != "$own" ]; then
+		refuse "KANAME_STAND_NS=«$KANAME_STAND_NS», а pod раннера живёт в «$own» — роль учётки лишь в своём пространстве"
+		return 64
+	fi
+	case "$IMAGE" in
+		*@sha256:*) ;;
+		*) refuse "изнутри pod образ не собирается (docker нет): KANAME_STAND_IMAGE — координата реестра с отпечатком (repo:tag@sha256:…), а не «$IMAGE»"
+		   return 64 ;;
+	esac
+	if [ "$ALERT_RULES" != "off" ]; then
+		refuse "учётка раннера видов кластера не читает — есть ли PrometheusRule, не спросить: KANAME_STAND_ALERT_RULES=off"
+		return 64
+	fi
+	NS="$own"
+	[ -n "${KANAME_STAND_REVISION:-}" ] || REVISION="${RUNNER_SHA:-}"
+	host="$KUBERNETES_SERVICE_HOST"
+	case "$host" in *:*) host="[$host]" ;; esac
+	mkdir -p "$WORK"
+	KUBECONFIG="$WORK/in-pod.kubeconfig"; export KUBECONFIG
+	cat > "$KUBECONFIG" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+  - name: in-pod
+    cluster: {server: "https://$host:${KUBERNETES_SERVICE_PORT:-443}", certificate-authority: "$SA_DIR/ca.crt"}
+users:
+  - name: in-pod
+    user: {tokenFile: "$SA_DIR/token"}
+contexts:
+  - name: in-pod
+    context: {cluster: in-pod, user: in-pod, namespace: "$own"}
+current-context: in-pod
+EOF
+	KUBE_CTX=in-pod
+	say "стенд: изнутри pod раннера — пространство $NS, образ $IMAGE, ревизия ${REVISION:-<не названа>}"
+}
+
+# Самопроверка окружением pod не уводится: шаг конвейера в pod наследует его, а миры
+# самопроверки свою настройку ставят сами (урок kaname#940 у stand-own.sh).
+if [ -n "$IN_POD" ] && [ "${1:-}" != "--self-test" ]; then
+	in_pod_setup || exit $?
+fi
+
+KCTL=(kubectl --context "$KUBE_CTX")
 
 need_tool() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -569,6 +653,12 @@ make_secrets() {
 }
 
 build_image() {
+	if [ -n "$IN_POD" ]; then
+		# Узлы внешнего кластера тянут образ из реестра сами; отпечаток в
+		# координате связывает установленное с опубликованным (in_pod_setup).
+		say "стенд: образ по отпечатку $IMAGE — сборки и загрузки в узлы нет (изнутри pod раннера)"
+		return 0
+	fi
 	if [ "${KANAME_STAND_SKIP_BUILD:-0}" = "1" ]; then
 		say "стенд: сборка образа пропущена по KANAME_STAND_SKIP_BUILD=1"
 	else
@@ -708,15 +798,85 @@ env:
 EOF
 }
 
+# ─── ДОСТАВКА МАНИФЕСТА МОДУЛЯ ЧАРТОМ (kaname#964) ──────────────────────────
+#
+# Чарт монтирует перечисленные ConfigMap пространства релиза в каталог доставки
+# (`moduleManifests`), а процесс применяет их раздел `seed` на старте. Стенд
+# создаёт условие этого утверждения: ConfigMap с манифестом модуля в своём
+# пространстве и накладку с его именем в перечне. По умолчанию доставки НЕТ —
+# подъём прежний, служба стоит самостоятельной установкой (набор полосы входа
+# этим и судится); включает её KANAME_STAND_MODULE_MANIFEST:
+#   probe   манифест модуля стенда ниже: служебная учётка в аккаунте `system` и
+#           её вступление в группу пишущих кортежи — та же форма, что у модуля
+#           реестра (служебная учётка модуля и одно вступление);
+#   <путь>  файл манифеста модуля (`apiVersion: iam/v1`, `module: <имя>`).
+# Ключ ConfigMap — `<модуль>.manifest.yaml`: им файл ляжет в каталог доставки.
+# Утверждает доставку подкоманда `assert-module`: файл в каталоге пода, запись
+# процесса о посеве доставленного манифеста и учётка модуля со стороны базы.
+MODULE_MANIFEST="${KANAME_STAND_MODULE_MANIFEST:-}"
+MODULE_CM="$RELEASE-module-manifest"
+
+# probe_module_manifest — манифест модуля стенда. Имя модуля своё: модулю
+# платформы стенд не подражает, а форма раздела `seed` — общая для всех.
+probe_module_manifest() {
+	cat <<'EOF'
+apiVersion: iam/v1
+module: standprobe
+revision: 1
+seed:
+  serviceAccounts:
+    - name: standprobe
+      account: system
+      description: "Stand probe module identity: proves a manifest delivered by the chart is applied at boot"
+  joins:
+    - serviceAccount: {account: system, name: standprobe}
+      group: {account: system, name: module-relation-writers}
+      why: "the probe module joins the relation writers group the way a real module does"
+EOF
+}
+
+# module_name_of <файл> — имя модуля манифеста; пусто — не манифест модуля.
+module_name_of() {
+	sed -n 's/^module:[[:space:]]*\([a-z][a-z0-9-]*\)[[:space:]]*$/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+deliver_module_manifest() {
+	local src module
+	[ -n "$MODULE_MANIFEST" ] || { rm -f "$WORK/values.stand-module.yaml"; return 0; }
+	if [ "$MODULE_MANIFEST" = "probe" ]; then
+		src="$WORK/standprobe.manifest.src.yaml"
+		probe_module_manifest > "$src"
+	else
+		src="$MODULE_MANIFEST"
+		[ -f "$src" ] || { refuse "KANAME_STAND_MODULE_MANIFEST=«$src» — файла нет"; exit 64; }
+	fi
+	module="$(module_name_of "$src")"
+	[ -n "$module" ] || { refuse "манифест $src не называет модуль строкой «module: <имя>»"; exit 64; }
+	"${KCTL[@]}" -n "$NS" delete configmap "$MODULE_CM" >/dev/null 2>&1 || true
+	"${KCTL[@]}" -n "$NS" create configmap "$MODULE_CM" \
+		--from-file="$module.manifest.yaml=$src" >/dev/null || {
+		unmet "ConfigMap $MODULE_CM с манифестом модуля $module не заведён"
+		exit "$RC_UNMET"
+	}
+	cat > "$WORK/values.stand-module.yaml" <<EOF
+moduleManifests:
+  configMaps:
+    - name: $MODULE_CM
+      keys: [$module.manifest.yaml]
+EOF
+	say "стенд: манифест модуля $module — ConfigMap $MODULE_CM (ключ $module.manifest.yaml, sha256 $(sha256sum < "$src" | cut -c1-12)), перечень доставки — накладкой"
+}
+
 install_chart() {
 	local extra=()
 	[ "$ALERT_RULES" = "off" ] && extra+=(--set alertRules.enabled=false)
+	[ -f "$WORK/values.stand-module.yaml" ] && extra+=(-f "$WORK/values.stand-module.yaml")
 	helm upgrade --install "$RELEASE" "$ROOT/deploy" \
 		-f "$ROOT/deploy/values.yaml" \
 		-f "$ROOT/deploy/values.prod.yaml" \
 		-f "$WORK/values.stand.yaml" \
 		-f "$WORK/values.stand-own.yaml" \
-		--kube-context "kind-$CLUSTER" -n "$NS" "${extra[@]}" || {
+		--kube-context "$KUBE_CTX" -n "$NS" "${extra[@]}" || {
 		fail "чарт не поставился — вердикт о дереве"
 		exit 1
 	}
@@ -985,6 +1145,55 @@ self_test() {
 	fi
 	rm -rf "$bfake"
 
+	# ── ИЗНУТРИ POD РАННЕРА (kaname#964) ───────────────────────────────────
+	#
+	# Настоящий `in_pod_setup` на подложной учётке pod: законный близнец ставит
+	# своё пространство, контекст `in-pod` и ревизию раннера, а каждый близнец с
+	# ОДНИМ дефектом получает отказ 64 до первой записи в кластер.
+	local pfake prc pout dig case_ what pimg prule pns psa
+	pfake="$(mktemp -d)"; mkdir -p "$pfake/sa"
+	printf 't964-kaname-own' > "$pfake/sa/namespace"
+	printf 'TOKEN-MUST-NOT-LEAK' > "$pfake/sa/token"; : > "$pfake/sa/ca.crt"
+	dig="docker.io/x/kaname:t@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	_in_pod() { # _in_pod <образ> <правила тревоги> <пространство раннера> <каталог учётки>
+		( SA_DIR="$4"; WORK="$pfake/work"; IMAGE="$1"; ALERT_RULES="$2"; RUNNER_SHA=abc1234
+		  KUBERNETES_SERVICE_HOST=10.0.0.1; KANAME_STAND_EXT_NS="$3"
+		  export KUBERNETES_SERVICE_HOST KANAME_STAND_EXT_NS
+		  unset KANAME_STAND_NS KANAME_STAND_REVISION
+		  in_pod_setup >/dev/null 2>&1 || exit $?
+		  printf 'NS=%s CTX=%s REV=%s\n' "$NS" "$KUBE_CTX" "$REVISION"; cat "$KUBECONFIG" )
+	}
+	prc=0; pout="$(_in_pod "$dig" off t964-kaname-own "$pfake/sa")" || prc=$?
+	probe "изнутри pod: законный вызов — своё пространство, контекст in-pod, ревизия раннера"
+	case "$prc:$pout" in
+		"0:NS=t964-kaname-own CTX=in-pod REV=abc1234"*) ;;
+		*) fail "самопроба: законный вызов изнутри pod — код $prc, вывод «$(head -n 1 <<< "$pout")»"; rc=1 ;;
+	esac
+	probe "изнутри pod: кубконфиг несёт ФАЙЛ токена, а не сам токен"
+	case "$pout" in
+		*TOKEN-MUST-NOT-LEAK*) fail "самопроба: токен учётки переписан в кубконфиг"; rc=1 ;;
+		*"tokenFile: \"$pfake/sa/token\""*) ;;
+		*) fail "самопроба: кубконфиг не называет файл токена учётки"; rc=1 ;;
+	esac
+	for case_ in "образ без отпечатка|${dig%@*}|off|t964-kaname-own|$pfake/sa" \
+		"правила тревоги не выключены|$dig|on|t964-kaname-own|$pfake/sa" \
+		"стенд назван в чужом пространстве|$dig|off|t1-other|$pfake/sa" \
+		"учётки pod нет|$dig|off|t964-kaname-own|$pfake/none"; do
+		IFS='|' read -r what pimg prule pns psa <<< "$case_"
+		prc=0; _in_pod "$pimg" "$prule" "$pns" "$psa" >/dev/null 2>&1 || prc=$?
+		probe "изнутри pod: $what — отказ 64"
+		[ "$prc" -eq 64 ] || { fail "самопроба: изнутри pod «$what» — код $prc вместо 64"; rc=1; }
+	done
+
+	# ── ДОСТАВКА МАНИФЕСТА МОДУЛЯ (kaname#964) ─────────────────────────────
+	probe_module_manifest > "$pfake/probe.yaml"
+	probe "манифест модуля стенда называет модуль standprobe"
+	[ "$(module_name_of "$pfake/probe.yaml")" = "standprobe" ] || { fail "самопроба: имя модуля манифеста стенда — «$(module_name_of "$pfake/probe.yaml")»"; rc=1; }
+	grep -v '^module:' "$pfake/probe.yaml" > "$pfake/nomodule.yaml"
+	probe "файл без строки module — имени модуля нет"
+	[ -z "$(module_name_of "$pfake/nomodule.yaml")" ] || { fail "самопроба: имя модуля выведено из файла без строки module"; rc=1; }
+	rm -rf "$pfake"
+
 	# Оба числа ВЫВЕДЕНЫ: утверждений — из объявлений `probe`, осей — из того
 	# перечня, который судит `assert`. Выписанные, они расходились бы с
 	# исполненным молча — здесь так и стояло «22», пережив смену состава.
@@ -1091,6 +1300,83 @@ assert_posture() {
 		return 1
 	fi
 	say "===== посадка сошлась по обоим источникам ====="
+	return 0
+}
+
+# ─── МАНИФЕСТ МОДУЛЯ, ДОСТАВЛЕННЫЙ ЧАРТОМ, ПРИМЕНЁН (kaname#964) ────────────
+#
+# Три независимых источника, и каждый нужен: файл в каталоге доставки ПОДА
+# (смонтировал чарт, а не руки), запись ПРОЦЕССА о посеве доставленного
+# манифеста (применил старт, а не прежний прогон) и учётка модуля со
+# вступлением СО СТОРОНЫ БАЗЫ (применение дошло до строк). «Под готов» не
+# утверждает ни одного из трёх. Перепись печатается всегда: «ноль учёток» и
+# «ноль прочитанного» — разные исходы.
+assert_module() {
+	local rc=0 pod dir files f module pgpod q n acc said gname gacc joined decl=0 logl
+	pod="$("${KCTL[@]}" -n "$NS" get pod -l "app=$RELEASE" \
+		--sort-by=.metadata.creationTimestamp \
+		-o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}' \
+		2>/dev/null | tail -1 || true)"
+	[ -n "$pod" ] || { unmet "готового пода службы нет — сверять доставку не на чем"; exit "$RC_UNMET"; }
+	pgpod="$("${KCTL[@]}" -n "$NS" get pod -l "app=$RELEASE-postgres" \
+		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+	[ -n "$pgpod" ] || { unmet "пода базы нет — учётку модуля спросить не у кого"; exit "$RC_UNMET"; }
+	say "сверяется под: $pod"
+	dir="$("${KCTL[@]}" -n "$NS" exec "$pod" -c "$RELEASE" -- printenv KANAME_MANIFESTS__DIR 2>/dev/null | tr -d '\r')"
+	[ -n "$dir" ] || { fail "процессу не отдан каталог доставки (KANAME_MANIFESTS__DIR пуст) — доставка не объявлена"; return 1; }
+	files="$("${KCTL[@]}" -n "$NS" exec "$pod" -c "$RELEASE" -- ls -1 "$dir" 2>/dev/null | tr -d '\r' | grep '\.manifest\.yaml$' || true)"
+	say "  каталог доставки $dir: манифестов $(grep -c . <<< "$files")"
+	[ -n "$files" ] || { fail "в каталоге доставки пода нет ни одного манифеста"; return 1; }
+	mkdir -p "$WORK/delivered"
+	for f in $files; do
+		"${KCTL[@]}" -n "$NS" exec "$pod" -c "$RELEASE" -- cat "$dir/$f" > "$WORK/delivered/$f" 2>/dev/null || {
+			fail "манифест $dir/$f в поде не прочитан"; rc=1; continue; }
+		module="$(module_name_of "$WORK/delivered/$f")"
+		say "  доставлен: $f — модуль ${module:-<не назван>}, sha256 $(sha256sum < "$WORK/delivered/$f" | cut -c1-12)"
+		[ -n "$module" ] || { fail "файл $f не называет модуль"; rc=1; continue; }
+		logl="$("${KCTL[@]}" -n "$NS" logs "$pod" -c "$RELEASE" 2>/dev/null | grep 'посев манифеста' | grep -F "\"module\":\"$module\"" || true)"
+		if grep -q 'доставленный' <<< "$logl"; then
+			say "  процесс: $(grep -m1 'доставленный' <<< "$logl")"
+		else
+			fail "процесс не записал посев доставленного манифеста модуля $module"; rc=1
+		fi
+		# Учётки и вступления раздела seed — строками «учётка<TAB>аккаунт<TAB>группа<TAB>аккаунт группы».
+		q="$(python3 -c '
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1])) or {}
+s = d.get("seed") or {}
+joins = s.get("joins") or []
+for sa in s.get("serviceAccounts") or []:
+    js = [j for j in joins if (j.get("serviceAccount") or {}).get("name") == sa.get("name")]
+    if not js:
+        print("%s\t%s\t\t" % (sa.get("name"), sa.get("account")))
+    for j in js:
+        print("%s\t%s\t%s\t%s" % (sa.get("name"), sa.get("account"), j["group"].get("name"), j["group"].get("account")))
+' "$WORK/delivered/$f")" || { fail "раздел seed манифеста $f не разобран"; rc=1; continue; }
+		while IFS=$'\t' read -r n acc gname gacc; do
+			[ -n "$n" ] || continue
+			decl=$((decl + 1))
+			said="$("${KCTL[@]}" -n "$NS" exec "$pgpod" -c postgres -- psql -U iam -d kaname -tAF '|' -c \
+				"SELECT sa.id, a.name, sa.enabled FROM kaname.service_accounts sa JOIN kaname.accounts a ON a.id = sa.account_id WHERE sa.name = '$n';" 2>/dev/null | tr -d '\r')"
+			if [ "$(grep -c . <<< "$said")" -ne 1 ]; then
+				fail "учётка модуля $module «$n»: строк в базе $(grep -c . <<< "$said"), ждали ровно одну"; rc=1; continue
+			fi
+			say "  база: учётка «$n» — id ${said%%|*}, аккаунт $(cut -d'|' -f2 <<< "$said"), включена $(cut -d'|' -f3 <<< "$said") (объявлен аккаунт $acc)"
+			[ "$(cut -d'|' -f2 <<< "$said")" = "$acc" ] || { fail "учётка «$n» заведена в аккаунте $(cut -d'|' -f2 <<< "$said"), а манифест объявил $acc"; rc=1; }
+			[ -n "$gname" ] || continue
+			joined="$("${KCTL[@]}" -n "$NS" exec "$pgpod" -c postgres -- psql -U iam -d kaname -tAc \
+				"SELECT count(*) FROM kaname.group_members gm JOIN kaname.groups g ON g.id = gm.group_id JOIN kaname.accounts a ON a.id = g.account_id WHERE gm.member_type = 'service_account' AND gm.member_id = '${said%%|*}' AND g.name = '$gname' AND a.name = '$gacc';" 2>/dev/null | tr -d ' \r')"
+			say "  база: вступление «$n» в группу $gacc/$gname — строк ${joined:-?}"
+			[ "${joined:-0}" -eq 1 ] || { fail "вступление учётки «$n» в группу $gacc/$gname не заведено"; rc=1; }
+		done <<< "$q"
+	done
+	say "  перепись: учёток модуля объявлено $decl"
+	[ "$decl" -gt 0 ] || { fail "доставленные манифесты не объявляют ни одной учётки модуля — утверждать нечего"; rc=1; }
+	if [ "$rc" -ne 0 ]; then
+		fail "манифест модуля, доставленный чартом, применён не целиком"
+		return 1
+	fi
+	say "===== манифест модуля доставлен чартом и применён: файл в поде, запись процесса, учётка со стороны базы ====="
 	return 0
 }
 
@@ -1388,7 +1674,7 @@ lane_and_store() {
 	else
 		start_lane_forward
 	fi
-	STORE_EXEC="kubectl --context kind-$CLUSTER -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname"
+	STORE_EXEC="kubectl --context $KUBE_CTX -n $NS exec -i $pgpod -c postgres -- psql -U iam -d kaname"
 }
 
 seed_stored_value() {
@@ -1466,6 +1752,18 @@ seed_store_companions() {
 down() {
 	stop_lane_forward
 	stop_forwards
+	if [ -n "$IN_POD" ]; then
+		# Пространство — раннера, и снимает его раннер; стенд снимает своё.
+		helm uninstall "$RELEASE" --kube-context "$KUBE_CTX" -n "$NS" >/dev/null 2>&1 || true
+		"${KCTL[@]}" -n "$NS" delete deployment "$RELEASE-postgres" "$MAIL_SVC" --ignore-not-found >/dev/null 2>&1 || true
+		"${KCTL[@]}" -n "$NS" delete service "$RELEASE-postgres" "$MAIL_SVC" --ignore-not-found >/dev/null 2>&1 || true
+		"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-db" "$RELEASE-server-tls" "$RELEASE-client-tls" "$RELEASE-authn" \
+			"$RELEASE-edge-client-tls" "$RELEASE-bootstrap" "$RELEASE-pg-tls" "$MAIL_SVC-tls" --ignore-not-found >/dev/null 2>&1 || true
+		"${KCTL[@]}" -n "$NS" delete configmap "$MAIL_SVC-script" "$MODULE_CM" --ignore-not-found >/dev/null 2>&1 || true
+		say "стенд: в пространстве раннера $NS сняты релиз $RELEASE и объекты стенда; пространство снимет раннер"
+		rm -rf "$WORK"
+		return 0
+	fi
 	if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 		if [ -f "$CREATED_MARK" ]; then
 			kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
@@ -1485,10 +1783,12 @@ down() {
 case "${1:-}" in
 	up)
 		say "===== стенд чартом: подъём ====="
-		need_tool openssl; need_tool docker; need_tool kind
-		need_tool kubectl; need_tool helm
+		need_tool openssl; need_tool kubectl; need_tool helm
 		mkdir -p "$WORK"
-		start_cluster
+		if [ -z "$IN_POD" ]; then
+			need_tool docker; need_tool kind
+			start_cluster
+		fi
 		check_alert_rules_kind
 		make_pki
 		start_pg
@@ -1496,12 +1796,17 @@ case "${1:-}" in
 		make_secrets
 		build_image
 		write_overlay
+		deliver_module_manifest
 		install_chart
 		say "===== стенд поднят чартом (посадка own, условия набора полосы входа созданы), без платформы и без поставщика ====="
 		;;
 	assert)
 		need_tool kubectl
 		assert_posture
+		;;
+	assert-module)
+		need_tool kubectl; need_tool python3
+		assert_module
 		;;
 	--self-test)
 		self_test
@@ -1523,11 +1828,11 @@ case "${1:-}" in
 		seed_key_person_once
 		;;
 	down)
-		need_tool kind
+		[ -n "$IN_POD" ] || need_tool kind
 		down
 		;;
 	*)
-		printf 'использование: %s {up|assert|seed-login-lane|seed-ceremony|seed-stored-value|seed-key-person|down|--self-test}\n' "$0" >&2
+		printf 'использование: %s {up|assert|assert-module|seed-login-lane|seed-ceremony|seed-stored-value|seed-key-person|down|--self-test}\n' "$0" >&2
 		exit 2
 		;;
 esac

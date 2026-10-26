@@ -1625,14 +1625,20 @@ ext_unfold() {
 #                 снимает; кластер недоступен — 125, локального подъёма раннер не делает;
 #   pod и учётка  `kaname-runner`; роль — ТОЛЬКО в своём пространстве: поды (завести,
 #                 снять, прочитать), exec и проброс, журнал, секреты и карты конфигурации
-#                 стенда, события. Форму судит runner_judge ДО записи в кластер; пространство
+#                 стенда, события; для стенда ЧАРТОМ (`stand-chart.sh` изнутри pod,
+#                 kaname#964) — ещё Deployment и Service стенда и чтение ReplicaSet, а у
+#                 секретов и карт — перечень и правка (хранилище релиза helm, перекат).
+#                 Ступени прав это не добавляет: кто заводит поды в пространстве, тот уже
+#                 исполняет в нём что угодно, а Deployment — тот же под через контроллер.
+#                 Форму судит runner_judge ДО записи в кластер; пространство
 #                 несёт посадку pod `baseline` — привилегированного пода учётка не заведёт;
 #   образ         golang версии `toolchain` из go.mod ревизии (ту же ставит конвейеру
 #                 setup-go; тот же образ — у Job тяжёлых прогонов); поверх — apt (python3, pyyaml, cryptography, venv, pip, jq,
 #                 openssl), node мажорной версии KANAME_STAND_RUNNER_NODE (умолчание 20 —
 #                 её несёт ранер конвейера, дерево версии node не объявляет) выпуском с
 #                 суммой из SHASUMS256 того же выпуска, kubectl — клиент машины потоком
-#                 либо версия сервера кластера с суммой; не поставлено — 125 с именем;
+#                 либо версия сервера кластера с суммой, helm версии HELM_VERSION задания
+#                 `chart.yml` с суммой выпуска; не поставлено — 125 с именем;
 #   исходники     `git archive` головы рабочей копии потоком в /src, дерево — репозиторием
 #                 git (наборы читают состав индексом); правка вне коммита — отказ 64 до
 #                 первой записи; --ship — файлы машины в /work/ship (исполнитель шагов
@@ -1734,6 +1740,14 @@ else
     echo "$(curl -fsSL --retry 3 --max-time 60 "$ku.sha256")  /usr/local/bin/kubectl" | sha256sum -c --quiet - &&
     chmod +x /usr/local/bin/kubectl; } || unmet "kubectl $RUNNER_KUBECTL не получен либо сумма не сошлась"
 fi
+# helm — версией задания публикации чарта (`chart.yml`, HELM_VERSION) и суммой ЕГО выпуска:
+# стенд чартом (`stand-chart.sh`) ставит релиз той же версией, что судит чарт конвейер.
+hf="helm-$RUNNER_HELM-linux-$ka.tar.gz"
+{ curl -fsSL --retry 3 --speed-limit 200000 --speed-time 60 -o "/work/$hf" "https://get.helm.sh/$hf" &&
+  echo "$(curl -fsSL --retry 3 --max-time 60 "https://get.helm.sh/$hf.sha256sum" | cut -d' ' -f1)  /work/$hf" | sha256sum -c --quiet --strict - &&
+  tar -xz -C /work -f "/work/$hf" "linux-$ka/helm" && install -m 0755 "/work/linux-$ka/helm" /usr/local/bin/helm &&
+  rm -rf "/work/$hf" "/work/linux-$ka"; } || unmet "helm $RUNNER_HELM не получен, сумма не сошлась либо он не распакован"
+say "инструменты: helm $(helm version --short 2>/dev/null)"
 nb="https://nodejs.org/dist/latest-v$RUNNER_NODE.x"
 sums="$(curl -fsSL --retry 3 --max-time 60 "$nb/SHASUMS256.txt")" || unmet "node $RUNNER_NODE: перечень сумм выпуска не получен"
 line="$(grep -E "^[0-9a-f]{64}  node-v[0-9]+\.[0-9]+\.[0-9]+-linux-$na\.tar\.xz\$" <<< "$sums")"
@@ -1800,6 +1814,15 @@ runner_go() {
   printf '%s\n' "$v"
 }
 
+# runner_helm РЕВИЗИЯ — версия helm задания публикации чарта ревизии (`chart.yml`,
+# HELM_VERSION): одна величина у конвейера и у стенда, второго места о ней нет.
+runner_helm() {
+  local v
+  v="$(git -C "$ROOT" show "$1:.github/workflows/chart.yml" 2>/dev/null | sed -n 's/^  HELM_VERSION: \(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | head -n 1)"
+  [[ "$v" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { runner_warn "chart.yml ревизии $1 не называет HELM_VERSION vX.Y.Z"; return 1; }
+  printf '%s\n' "$v"
+}
+
 # Тот же образ, что у Job тяжёлых прогонов внешнего кластера (golang версии toolchain).
 runner_image() { printf 'docker.io/library/golang:%s' "$1"; }
 
@@ -1853,11 +1876,11 @@ runner_fetch() {
   return 1
 }
 
-# runner_objects ПРОСТРАНСТВО ОБРАЗ РЕВИЗИЯ ЗАДАЧА KUBECTL GO КОМАНДА РЕПОЗИТОРИЙ — учётка,
+# runner_objects ПРОСТРАНСТВО ОБРАЗ РЕВИЗИЯ ЗАДАЧА KUBECTL GO КОМАНДА РЕПОЗИТОРИЙ HELM — учётка,
 # роль, привязка и pod раннера (список JSON для kubectl apply). Всё — в ПРОСТРАНСТВЕ.
 runner_objects() {
   jq -n --arg ns "$1" --arg image "$2" --arg sha "$3" --arg task "$4" --arg kver "$5" --arg go "$6" \
-    --arg cmd "$7" --arg repo "$8" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
+    --arg cmd "$7" --arg repo "$8" --arg helm "${9:-}" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
     --arg name "$RUNNER_POD" --argjson deadline "$RUNNER_DEADLINE" '
     def meta: {name: $name, namespace: $ns, labels: {"kaname.io/stand": "runner", "app.kubernetes.io/name": $name}};
     def env($n; $v): {name: $n, value: $v};
@@ -1867,8 +1890,11 @@ runner_objects() {
         {apiGroups: [""], resources: ["pods"], verbs: ["get", "list", "watch", "create", "delete"]},
         {apiGroups: [""], resources: ["pods/exec", "pods/portforward"], verbs: ["get", "create"]},
         {apiGroups: [""], resources: ["pods/log"], verbs: ["get"]},
-        {apiGroups: [""], resources: ["secrets", "configmaps"], verbs: ["get", "create", "delete"]},
-        {apiGroups: [""], resources: ["events"], verbs: ["get", "list", "watch"]}]},
+        {apiGroups: [""], resources: ["secrets", "configmaps"], verbs: ["get", "list", "create", "update", "patch", "delete"]},
+        {apiGroups: [""], resources: ["services"], verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]},
+        {apiGroups: [""], resources: ["events"], verbs: ["get", "list", "watch"]},
+        {apiGroups: ["apps"], resources: ["deployments"], verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]},
+        {apiGroups: ["apps"], resources: ["replicasets"], verbs: ["get", "list", "watch"]}]},
       {apiVersion: "rbac.authorization.k8s.io/v1", kind: "RoleBinding", metadata: meta,
         roleRef: {apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: $name},
         subjects: [{kind: "ServiceAccount", name: $name, namespace: $ns}]},
@@ -1877,7 +1903,7 @@ runner_objects() {
         enableServiceLinks: false, terminationGracePeriodSeconds: 10,
         containers: [{name: "run", image: $image, command: ["bash", "-c", $sh], workingDir: "/src",
           env: [env("RUNNER_SHA"; $sha), env("RUNNER_CMD"; $cmd), env("RUNNER_KUBECTL"; $kver),
-                env("RUNNER_GO"; $go), env("RUNNER_NODE"; $node), env("RUNNER_REPO"; $repo), env("RUNNER_GH_SH"; $gh),
+                env("RUNNER_GO"; $go), env("RUNNER_HELM"; $helm), env("RUNNER_NODE"; $node), env("RUNNER_REPO"; $repo), env("RUNNER_GH_SH"; $gh),
                 env("KANAME_STAND_IN_POD"; "1"), env("KANAME_STAND_EXT_NS"; $ns), env("KANAME_STAND_TASK"; $task),
                 env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")],
           resources: {requests: {cpu: "1", memory: "2Gi"}, limits: {memory: "6Gi"}},
@@ -1899,10 +1925,18 @@ bad = []
 # Что учётке раннера нужно в своём пространстве — и ни глагола сверх: поды стенда она
 # заводит и снимает, в них исполняет и пробрасывает, читает журнал; секреты и карту
 # конфигурации стенда заводит и снимает; события читает для объяснения отказа.
-ALLOWED = {"pods": {"get", "list", "watch", "create", "delete"},
-           "pods/exec": {"get", "create"}, "pods/portforward": {"get", "create"},
-           "pods/log": {"get"}, "secrets": {"get", "create", "delete"},
-           "configmaps": {"get", "create", "delete"}, "events": {"get", "list", "watch"}}
+# Стенд чартом (kaname#964) ставит релиз helm: Deployment и Service стенда, хранилище
+# релиза — секреты (перечень и правка), перекат — правка карты; готовность выката
+# читается через ReplicaSet. Группы API — ровно две: основная и apps.
+ALLOWED = {"": {"pods": {"get", "list", "watch", "create", "delete"},
+                "pods/exec": {"get", "create"}, "pods/portforward": {"get", "create"},
+                "pods/log": {"get"},
+                "secrets": {"get", "list", "create", "update", "patch", "delete"},
+                "configmaps": {"get", "list", "create", "update", "patch", "delete"},
+                "services": {"get", "list", "watch", "create", "update", "patch", "delete"},
+                "events": {"get", "list", "watch"}},
+           "apps": {"deployments": {"get", "list", "watch", "create", "update", "patch", "delete"},
+                    "replicasets": {"get", "list", "watch"}}}
 kinds = sorted(i.get("kind", "") for i in items)
 if kinds != ["Pod", "Role", "RoleBinding", "ServiceAccount"]:
     bad.append("виды объектов %s, ждали Pod, Role, RoleBinding, ServiceAccount" % kinds)
@@ -1928,14 +1962,16 @@ for i in items:
     if k == "Role":
         for r in i.get("rules", []):
             rules += 1
-            if r.get("apiGroups") != [""] or r.get("nonResourceURLs"):
-                bad.append("правило роли вне основной группы API: %s" % r)
+            groups = r.get("apiGroups") or []
+            if len(groups) != 1 or groups[0] not in ALLOWED or r.get("nonResourceURLs"):
+                bad.append("правило роли вне групп API стенда (основная, apps): %s" % r)
                 continue
+            allowed = ALLOWED[groups[0]]
             for res in r.get("resources", []):
-                if res not in ALLOWED:
+                if res not in allowed:
                     bad.append("роль даёт %s на %s — вне нужного стенду" % (sorted(r.get("verbs", [])), res))
                     continue
-                extra = set(r.get("verbs", [])) - ALLOWED[res]
+                extra = set(r.get("verbs", [])) - allowed[res]
                 if extra:
                     bad.append("роль даёт %s на %s сверх нужного" % (sorted(extra), res))
             if "*" in r.get("resources", []) or "*" in r.get("verbs", []):
@@ -1997,7 +2033,7 @@ runner_on_signal() {
 # runner_main [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА… — раздел выше. Код — код
 # команды; 125 — не исполнялась; 64 — вызов неверен; 1 — пространство уже есть.
 runner_main() {
-  local sha url repo gov kver image objs mark mrc rc="" phase miss=0 fetch=0 t f base want got
+  local sha url repo gov hver kver image objs mark mrc rc="" phase miss=0 fetch=0 t f base want got
   local -A seen=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2034,10 +2070,11 @@ runner_main() {
     *) return "$RUNNER_UNMET" ;;
   esac
   gov="$(runner_go "$sha")" || return "$RUNNER_UNMET"
+  hver="$(runner_helm "$sha")" || return "$RUNNER_UNMET"
   kver="$(kq version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion // empty' 2>/dev/null)"
   [[ "$kver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { unmet "версия сервера кластера не прочитана — kubectl pod не выбрать"; return "$RUNNER_UNMET"; }
   image="$(runner_image "$gov")"
-  objs="$(runner_objects "$EXT_NS" "$image" "$sha" "$EXT_TASK" "$kver" "$gov" "$(printf '%q ' "$@")" "$repo")" ||
+  objs="$(runner_objects "$EXT_NS" "$image" "$sha" "$EXT_TASK" "$kver" "$gov" "$(printf '%q ' "$@")" "$repo" "$hver")" ||
     { unmet "объекты раннера не построены"; return "$RUNNER_UNMET"; }
   runner_judge "$EXT_NS" <<< "$objs" >&2 || { unmet "форма объектов раннера не прошла суд (выше)"; return "$RUNNER_UNMET"; }
   RUNNER_OUT="${RUNNER_OUT:-$ROOT/.stand/runner-out/$EXT_NS}"
@@ -2674,7 +2711,7 @@ EOF
     # порча — jq-фильтр, меняющий ОДИН факт против законного близнеца.
     runner_form_world() {
         ( objs="$(runner_objects t841-kaname-own docker.io/library/golang:1.26.10 \
-                    0123456789abcdef0123456789abcdef01234567 841 v1.31.2 1.26.10 'true ' PRO-Robotech/kaname)" || exit 9
+                    0123456789abcdef0123456789abcdef01234567 841 v1.31.2 1.26.10 'true ' PRO-Robotech/kaname v3.22.1)" || exit 9
           if [ -n "${1:-}" ]; then objs="$(jq "$1" <<< "$objs")" || exit 9; fi
           runner_judge t841-kaname-own <<< "$objs" )
     }
@@ -2687,6 +2724,9 @@ EOF
     world_rf_namespaces()  { runner_form_world "$RF_ROLE.rules += [{apiGroups: [\"\"], resources: [\"namespaces\"], verbs: [\"get\"]}]"; }
     world_rf_rbac()        { runner_form_world "$RF_ROLE.rules += [{apiGroups: [\"rbac.authorization.k8s.io\"], resources: [\"roles\"], verbs: [\"create\"]}]"; }
     world_rf_binding()     { runner_form_world '(.items[] | select(.kind == "RoleBinding")).roleRef.name = "admin"'; }
+    world_rf_apps_kind()   { runner_form_world "$RF_ROLE.rules += [{apiGroups: [\"apps\"], resources: [\"daemonsets\"], verbs: [\"create\"]}]"; }
+    world_rf_apps_verb()   { runner_form_world "($RF_ROLE.rules[] | select(.resources == [\"replicasets\"])).verbs += [\"create\"]"; }
+    world_rf_two_groups()  { runner_form_world "($RF_ROLE.rules[] | select(.resources == [\"deployments\"])).apiGroups = [\"apps\", \"\"]"; }
     world_rf_sa()          { runner_form_world "$RF_POD.spec.serviceAccountName = \"default\""; }
     world_rf_hostpath()    { runner_form_world "$RF_POD.spec.volumes += [{name: \"h\", hostPath: {path: \"/\"}}]"; }
     world_rf_hostnet()     { runner_form_world "$RF_POD.spec.hostNetwork = true"; }
@@ -2972,12 +3012,15 @@ EOF
 
     echo "--- ось 12: раннер — форма объектов судится до записи, роль лишь в своём пространстве (kaname#940)"
     RF_BAD="$(printf 'RUNNER-FORM\t')"
-    assert 0  "(−) настоящий вывод runner_objects — форма сошлась"           world_rf_ok "RUNNER-FORM-OK" "правил роли 5" "$RF_BAD"
+    assert 0  "(−) настоящий вывод runner_objects — форма сошлась"           world_rf_ok "RUNNER-FORM-OK" "правил роли 8" "$RF_BAD"
     assert 1  "(+) ClusterRole вместо роли пространства"                     world_rf_clusterrole "виды объектов" "-" "RUNNER-FORM-OK"
     assert 1  "(+) глагол сверх нужного на подах"                            world_rf_verb "['update'] на pods сверх нужного" "-" "RUNNER-FORM-OK"
     assert 1  "(+) звезда в глаголах"                                        world_rf_star "роль со звездой" "-" "RUNNER-FORM-OK"
     assert 1  "(+) пространства — вне нужного стенду"                        world_rf_namespaces "на namespaces — вне нужного стенду" "-" "RUNNER-FORM-OK"
-    assert 1  "(+) правило вне основной группы API"                          world_rf_rbac "вне основной группы API" "-" "RUNNER-FORM-OK"
+    assert 1  "(+) правило вне групп API стенда"                             world_rf_rbac "вне групп API стенда" "-" "RUNNER-FORM-OK"
+    assert 1  "(+) apps — вид вне нужного стенду"                           world_rf_apps_kind "на daemonsets — вне нужного стенду" "-" "RUNNER-FORM-OK"
+    assert 1  "(+) apps — глагол сверх нужного на ReplicaSet"              world_rf_apps_verb "['create'] на replicasets сверх нужного" "-" "RUNNER-FORM-OK"
+    assert 1  "(+) две группы API в одном правиле"                          world_rf_two_groups "вне групп API стенда" "-" "RUNNER-FORM-OK"
     assert 1  "(+) привязка к чужой роли"                                    world_rf_binding "а не к роли раннера" "-" "RUNNER-FORM-OK"
     assert 1  "(+) pod под чужой учёткой"                                    world_rf_sa "pod под учёткой default" "-" "RUNNER-FORM-OK"
     assert 1  "(+) том узла"                                                 world_rf_hostpath "том hostPath h" "-" "RUNNER-FORM-OK"
