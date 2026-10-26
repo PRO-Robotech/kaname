@@ -97,10 +97,24 @@ func (w *descendantRingWorld) ringOn(parent string) descendantRing {
 	b1 := w.grantTo(w.usrD, w.roleRepo, repoTarget(child), false, "1019: выдача B1 на потомка")
 	bx := w.grantTo(w.usrD, w.roleNested, urTarget(parent), false, "1019: выдача BX на родителя")
 	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, child, true, "1019 контроль фикстуры: usr-D не читает потомка")
-	require.NotZerof(w.t, w.membersOn(b1, child), "1019 контроль фикстуры: у B1 нет члена на %s", child)
-	require.NotZerof(w.t, w.membersOn(bx, child), "1019 контроль фикстуры: у BX нет члена на %s (вложенное правило)", child)
+	// Члены выдач пишет проход материализации после создания выдачи; ответ о
+	// доступе выше даёт уже одна B1, поэтому член BX ждётся отдельно.
+	w.pollMember(b1, child, "1019 контроль фикстуры: у B1 нет члена на "+child)
+	w.pollMember(bx, child, "1019 контроль фикстуры: у BX нет члена на "+child+" (вложенное правило)")
 	require.NotZerof(w.t, w.factsOf(w.usr(w.usrD), pcrRepoType, child), "1019 контроль фикстуры: общего факта usr-D на %s нет", child)
 	return descendantRing{parent: parent, child: child, b1: b1, bx: bx}
+}
+
+// pollMember — ждёт член выдачи `binding` на объекте `objectID` не дольше 15 с.
+func (w *descendantRingWorld) pollMember(binding, objectID, why string) {
+	w.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for w.membersOn(binding, objectID) == 0 {
+		if time.Now().After(deadline) {
+			w.t.Fatal(why)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // orderedDescendantRing — фикстура, в которой проход по потомку берёт B1 раньше
