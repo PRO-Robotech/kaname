@@ -1086,13 +1086,13 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			}
 			// Отношения, выдачи, публикации и события перерасчёта потомков, чьи
 			// строки зеркала сняты выше (kaname#1002).
-			descendants, derr := uc.withdrawDescendants(ctx, tx, row, gone)
+			removedDescendants, derr := uc.withdrawDescendants(ctx, tx, row, gone)
 			if derr != nil {
 				return "", false, false, derr
 			}
 			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
 				auditOutcomeUnregistered, t, row, map[string]any{
-					"withdrawn_tuples": withdrawn, "descendants": descendants,
+					"withdrawn_tuples": withdrawn, "descendants": removedDescendants,
 				})); err != nil {
 				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}
@@ -1296,11 +1296,18 @@ func (uc *RegisterResourceUseCase) dropRegistrations(ctx context.Context, tx ser
 
 // withdrawDescendants снимает отношения, записанные посредником, выдачи,
 // публикацию потомков `gone` и кладёт событие перерасчёта по каждому — третий род,
-// после строк зеркала. Возвращает число потомков для события аудита снятия.
+// после строк зеркала.
+//
+// Возвращает число потомков, чью регистрацию снял ЭТОТ вызов (kaname#1020): строка
+// зеркала была и удалена им (`dropped`, то же условие, что у отзыва выдач,
+// kaname#963 Д1). Потомок из перечня, чью строку к моменту снятия убрал встречный
+// вызов, в число не входит: событие аудита называет изменение, сделанное вызовом, а
+// не попытку.
 func (uc *RegisterResourceUseCase) withdrawDescendants(ctx context.Context, tx service.Tx,
 	parent service.ResourceMirrorRow, gone []droppedDescendant,
 ) (int, error) {
 	actor := authzguard.PrincipalUserID(ctx)
+	removed := 0
 	for _, d := range gone {
 		// Надгробие кортежей потомка — не старше его последней регистрации
 		// (kaname#969): регистрация снята безусловно, и её кортежи уходят все, даже
@@ -1319,6 +1326,7 @@ func (uc *RegisterResourceUseCase) withdrawDescendants(ctx context.Context, tx s
 			if err := uc.withdrawal.WithdrawTx(ctx, tx, domain.ResourceRef{Type: d.catalogType, ID: d.ID}, actor); err != nil {
 				return 0, fmt.Errorf("withdraw grants of descendant: %w", err)
 			}
+			removed++
 		}
 		if admitsPublication(d.ModelType) {
 			if err := uc.withdrawDescendantPublication(ctx, tx, d.ModelType, d.ID, d.version); err != nil {
@@ -1331,7 +1339,7 @@ func (uc *RegisterResourceUseCase) withdrawDescendants(ctx context.Context, tx s
 			}
 		}
 	}
-	return len(gone), nil
+	return removed, nil
 }
 
 // withdrawDescendantPublication снимает публикацию потомка при ЛЮБОМ порядке
