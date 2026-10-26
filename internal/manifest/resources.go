@@ -185,6 +185,25 @@ var (
 	// блок с такой записью побайтово равен блоку из одного ключа (kaname#866, Р2) —
 	// два объявления одного следствия, которые допуск различить не может.
 	ErrPublicReadClassInReadVerb = errors.New("manifest: a read verb of a public read container names a subject class the key already brings")
+	// ErrWritesEmpty — `writes: []`: второй способ сказать «модуль пишет только
+	// указатель» рядом с отсутствием ключа (kaname#982, Р2).
+	ErrWritesEmpty = errors.New("manifest: writes is either absent or non-empty")
+	// ErrWriteIsPointer — запись `writes` называет указатель ресурса: регистрацию
+	// указателем уже объявил `parents`, и второе объявление того же — ложь одного
+	// из двух мест.
+	ErrWriteIsPointer = errors.New("manifest: a write names a parent pointer of the resource")
+	// ErrWriteRelationUndeclared — запись `writes` называет отношение, которого
+	// нет среди авторских отношений ресурса (`relations`).
+	ErrWriteRelationUndeclared = errors.New("manifest: a write names a relation the resource does not declare")
+	// ErrWriteRelationNotWritable — отношение объявлено, но модулю его писать не
+	// дано правилом проксируемой записи: ключ обещал бы запись, которую правило
+	// отвергнет на каждой доставке.
+	ErrWriteRelationNotWritable = errors.New("manifest: a write names a relation the module may not write")
+	// ErrWriteSubjectsInvalid — перечень субъектов записи пуст, называет тип вне
+	// закрытого перечня либо называет тип дважды.
+	ErrWriteSubjectsInvalid = errors.New("manifest: write subjects are empty, repeated or outside the closed set")
+	// ErrWriteDuplicate — одно отношение в двух записях `writes` ресурса.
+	ErrWriteDuplicate = errors.New("manifest: two writes of the resource name one relation")
 )
 
 // canonicalVerbClasses — ЕДИНСТВЕННОЕ в дереве объявление правила «класс из
