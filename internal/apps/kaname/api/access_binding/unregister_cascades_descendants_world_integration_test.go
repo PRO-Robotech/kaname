@@ -31,9 +31,11 @@ package access_binding_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -178,4 +180,79 @@ func TestUnregister_RepeatedParentWithdrawalChangesNothing(t *testing.T) {
 	w.assertDescendantGone(pcrXApp, w.grantXApp, "kaname#1002 повтор")
 	w.assertDescendantGone(pcrXWeb, w.grantXWeb, "kaname#1002 повтор")
 	w.assertAlive(pcrRepoType, pcrYApp, w.grantYApp, "kaname#1002 повтор: потомок соседнего реестра")
+}
+
+// publishRepo — публикация репозитория для анонимного чтения владельцем
+// (`user:*` + v_get) с версией владельца ver: у объекта своя упорядочивающая
+// версия, с версией родителя она не сравнима.
+func (w *cascadeWorld) publishRepo(id string, ver time.Time, why string) {
+	w.t.Helper()
+	require.NoErrorf(w.t, w.reg.Register(w.ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "user:*", Relation: "v_get", Object: pcrRepoType + ":" + id,
+		SourceVersion: timestamppb.New(ver),
+	}), "%s: публикация репозитория %s", why, id)
+}
+
+// publication — хранимое направление публикации объекта: есть ли строка
+// надгробия и открыта ли она.
+func (w *cascadeWorld) publication(id string) (exists, published bool) {
+	w.t.Helper()
+	var n int
+	require.NoError(w.t, w.pool.QueryRow(w.ctx,
+		`SELECT count(*), coalesce(bool_or(published), false) FROM kaname.public_read_publication
+		  WHERE object_type = $1 AND object_id = $2`,
+		pcrRepoType, id).Scan(&n, &published), "чтение публикации %s", id)
+	return n > 0, published
+}
+
+// assertPublicationGone — публикация потомка снята вместе с ним: аноним не
+// читает, надгробие стоит закрытым.
+func (w *cascadeWorld) assertPublicationGone(id, why string) {
+	w.t.Helper()
+	assert.Falsef(w.t, w.ask(pcrAnon, "v_get", pcrRepoType, id), "%s: аноним читает снятого потомка %s", why, id)
+	exists, published := w.publication(id)
+	assert.Truef(w.t, exists, "%s: надгробия публикации потомка %s нет", why, id)
+	assert.Falsef(w.t, published, "%s: публикация потомка %s стоит открытой", why, id)
+}
+
+// TestUnregister_ParentTakesDescendantPublicationNewerThanItsTombstone —
+// SD-1017-C1: потомок опубликован СВОЕЙ версией, новее надгробия родителя.
+// Снятие родителя обязано снять и эту публикацию: регистрации у потомка больше
+// нет, а id репозитория — его имя, и уцелевшая публикация отдала бы анонимное
+// чтение следующему объекту под тем же ключом.
+//
+// Запоздавшая повторная доставка того же открытия после снятия публикацию не
+// возвращает: надгробие помнит версию открытия, и повтор не новее.
+func TestUnregister_ParentTakesDescendantPublicationNewerThanItsTombstone(t *testing.T) {
+	w := newCascadeWorld(t)
+	w.deliverNewEdition("kaname#1002 SD-1017-C1")
+	w.rewire()
+	ahead := w.ver.Add(time.Hour) // своя версия потомка новее надгробия родителя
+	w.publishRepo(pcrXApp, ahead, "SD-1017-C1")
+	w.pollAsk(pcrAnon, "v_get", pcrRepoType, pcrXApp, true, "SD-1017-C1 контроль фикстуры: публикация X/app не открыла")
+
+	w.withdrawX()
+
+	w.assertDescendantGone(pcrXApp, w.grantXApp, "SD-1017-C1")
+	w.assertPublicationGone(pcrXApp, "SD-1017-C1")
+
+	w.publishRepo(pcrXApp, ahead, "SD-1017-C1 повторная доставка")
+	assert.False(t, w.ask(pcrAnon, "v_get", pcrRepoType, pcrXApp),
+		"SD-1017-C1: повторная доставка открытия вернула анонимное чтение снятому потомку")
+}
+
+// TestUnregister_ParentTakesDescendantPublicationOlderThanItsTombstone —
+// близнец SD-1017-C1: та же публикация версией СТАРШЕ надгробия родителя.
+// Отличие от предмета — один факт: порядок версий публикации и надгробия.
+func TestUnregister_ParentTakesDescendantPublicationOlderThanItsTombstone(t *testing.T) {
+	w := newCascadeWorld(t)
+	w.deliverNewEdition("kaname#1002 SD-1017-C1 близнец")
+	w.rewire()
+	w.publishRepo(pcrXApp, w.nextVersion().AsTime(), "SD-1017-C1 близнец")
+	w.pollAsk(pcrAnon, "v_get", pcrRepoType, pcrXApp, true, "SD-1017-C1 близнец, контроль фикстуры: публикация X/app не открыла")
+
+	w.withdrawX()
+
+	w.assertDescendantGone(pcrXApp, w.grantXApp, "SD-1017-C1 близнец")
+	w.assertPublicationGone(pcrXApp, "SD-1017-C1 близнец")
 }
