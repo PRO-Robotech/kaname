@@ -23,13 +23,16 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -102,11 +105,33 @@ func (w *dpWorld) register(module string, req *iamv1.RegisterResourceRequest) er
 }
 
 // dpReq — тело регистрации.
+//
+// Версия владельца — СВОЯ у каждого запроса и монотонная (`dpVersion`): без неё
+// повторная регистрация того же объекта (перенос под другой контейнер, правка
+// сведений) была бы доставкой без версии, а такая строку зеркала не
+// переписывает (`source_version` '-infinity' не новее хранимой), и «Дано» сцены
+// не строилось бы.
 func dpReq(subject, relation, object, prj, acc string, chain ...string) *iamv1.RegisterResourceRequest {
 	return &iamv1.RegisterResourceRequest{
 		SubjectId: subject, Relation: relation, Object: object,
 		ParentProjectId: prj, ParentAccountId: acc, ParentChain: chain,
+		SourceVersion: dpVersion(),
 	}
+}
+
+// dpClock — счётчик версий запросов мира ДР: каждая следующая новее прежней на
+// микросекунду от общего начала, при любом разрешении часов машины.
+var dpClock = struct {
+	sync.Mutex
+	at time.Time
+}{at: time.Now()}
+
+// dpVersion — следующая версия владельца.
+func dpVersion() *timestamppb.Timestamp {
+	dpClock.Lock()
+	defer dpClock.Unlock()
+	dpClock.at = dpClock.at.Add(time.Microsecond)
+	return timestamppb.New(dpClock.at)
 }
 
 // regIn — регистрация реестра указателем `project` в проекте prj аккаунта acc.
@@ -640,7 +665,7 @@ func TestDeriveParent_DP17_CreatorAnchorIsTheDerivedParent(t *testing.T) {
 			return r
 		}, typ: pcrRegType, id: dpD, refuse: true},
 		{name: "c", given: givenB, when: whenC, typ: pcrRegType, id: dpB,
-			chain: func(*dpWorld) []string { return nil }},
+			chain: func(*dpWorld) []string { return []string{} }},
 		{name: "d", given: givenB, when: func(w *dpWorld) *iamv1.RegisterResourceRequest {
 			r := whenC(w)
 			r.ParentProjectId = string(w.prjA2)
