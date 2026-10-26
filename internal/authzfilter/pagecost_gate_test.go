@@ -514,24 +514,6 @@ var declaredPerRowQuestions = map[string]string{
 		"carries only Check (BatchCheckWithContext is on RelationQueries), and the " +
 		"loop interleaves relation questions with DB reads — a request-path change " +
 		"to an authorization surface, with its own acceptance.",
-	"../apps/kaname/api/access_binding/scope_grant_authority.go: grantAuthorityBeyondClusterAdmin": "" +
-		"NOT A READ SURFACE: the right to grant on every scope of the live bindings " +
-		"of a role whose rules are edited (RoleService.Update, mask names rules) or " +
-		"of a group that gains a member (GroupService.AddMember) — kaname#1036, " +
-		"kaname#1037, acceptance role-rights-stay-within-what-is-named.md (Р2, Р3). " +
-		"Asked once per DISTINCT scope after ONE cluster-administrator question for " +
-		"the whole request, so a request costs 1 + distinct scopes relation " +
-		"questions plus an owner read per account or project scope; the questions " +
-		"stop at the first refusal. THE COUNT GROWS WITH THE DISTINCT SCOPES of what " +
-		"is already granted, which is why this stays declared: neither set is " +
-		"capped before these questions (the Role.Update fan-out bound is checked " +
-		"AFTER the authority, so a caller without the right does not learn the " +
-		"count). What keeps it off the batched question is the same as " +
-		"list_by_role.go above: the value is a clients.RelationStore (Check only), " +
-		"the batched door answers ONE object type per call while scopes mix " +
-		"account, project, cluster and leaf types, and each scope interleaves the " +
-		"owner read with the relation question — a change to an authorization " +
-		"surface with its own acceptance, not something this gate can demand inline.",
 	"../apps/kaname/api/authorize/handler.go: authorizeCaller": "" +
 		"Per-item caller authority in BatchCheck, bounded by the contract at 100 " +
 		"items (rejected above that). SAME CORRECTION: this declaration used to say " +
