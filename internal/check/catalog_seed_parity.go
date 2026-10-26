@@ -743,6 +743,8 @@ var reAttrAssignment = regexp.MustCompile(
 var resourceAttributeColumns = map[string]bool{
 	"parent_types":            true, // указатели ресурса (kaname#856)
 	"public_read_to_children": true, // признак контейнера публичного чтения (kaname#856)
+	"parent_names":            true, // имена указателей ресурса (kaname#982)
+	"writes":                  true, // записи сверх указателя — политика записи модуля (kaname#982)
 }
 
 // resourceAttributeOnlyUpdate — оператор правит у строк ресурса ТОЛЬКО колонки

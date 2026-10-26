@@ -82,6 +82,7 @@ func newRegisterUCApplied(t *testing.T) (*internaliam.RegisterResourceUseCase, *
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	return uc, pool
 }

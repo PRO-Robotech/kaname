@@ -201,7 +201,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"catalog_module_live_matches_retired",
 		},
 	},
-	// Каталог ресурса: модуль, ресурс, тип модели и типы указателей — из
+	// Каталог ресурса: модуль, ресурс, тип модели, типы и имена указателей и
+	// записи сверх указателя (kaname#982) — из
 	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
 	// ставит служба.
 	"catalog_resource": {
@@ -209,8 +210,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"catalog_resource_module_undotted",
 			"catalog_resource_nonempty",
 			"catalog_resource_object_type_form",
+			"catalog_resource_parent_names_form",
 			"catalog_resource_parent_types_form",
 			"catalog_resource_resource_undotted",
+			"catalog_resource_writes_form",
 		},
 		service: []string{
 			"catalog_resource_dotted_form",

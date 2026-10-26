@@ -731,6 +731,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// транзакцией (kaname#1005). Параметр, а не опция: без него изменения модели
 		// прав модулем оставались бы вне журнала аудита молча.
 		kanamepg.NewRegistrationAudit(),
+		// Родителя регистрируемого объекта выводит kaname и сверяет с ним сведения
+		// модуля в транзакции регистрации (kaname#982). Параметр, а не опция: без
+		// него регистрация верила бы модулю.
+		kanamepg.NewRegistrationScopeReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).

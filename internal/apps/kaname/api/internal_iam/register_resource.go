@@ -21,6 +21,11 @@
 // payload already carries the pre-composed FGA strings ({subject_id, relation,
 // object}), so this use-case is the generic owner-tuple relay, not a
 // resource-type-aware composer.
+//
+// Ретранслятор при этом НЕ доверчив (kaname#982, derive_parent.go): регистрацию
+// судит закрытая политика записи модуля из живой строки каталога, а сведения
+// модуля о родителе сверяются с иерархией, которую kaname выводит сам, — в
+// транзакции регистрации, до первого оператора записи.
 package internal_iam
 
 import (
@@ -294,14 +299,15 @@ type RegisterResourceUseCase struct {
 	emitter      relationOutboxEmitter
 	mirror       resourceMirrorEmitter
 	txb          service.TxBeginner
-	catalogTypes catalogTypeReader     // ОБЯЗАТЕЛЕН, см. конструктор
-	publications publicReadPublisher   // ОБЯЗАТЕЛЕН, см. конструктор
-	withdrawal   keyWithdrawal         // ОБЯЗАТЕЛЕН, см. конструктор
-	audit        registrationAudit     // ОБЯЗАТЕЛЕН, см. конструктор
-	reconcile    reconcileEventEmitter // optional, nil-safe
-	accounts     accountResolver       // optional, nil-safe
-	objRecon     objectReconciler      // sync post-commit — optional, nil-safe
-	residual     residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
+	catalogTypes catalogTypeReader       // ОБЯЗАТЕЛЕН, см. конструктор
+	publications publicReadPublisher     // ОБЯЗАТЕЛЕН, см. конструктор
+	withdrawal   keyWithdrawal           // ОБЯЗАТЕЛЕН, см. конструктор
+	audit        registrationAudit       // ОБЯЗАТЕЛЕН, см. конструктор
+	scopes       registrationScopeReader // ОБЯЗАТЕЛЕН, см. конструктор
+	reconcile    reconcileEventEmitter   // optional, nil-safe
+	accounts     accountResolver         // optional, nil-safe
+	objRecon     objectReconciler        // sync post-commit — optional, nil-safe
+	residual     residualTupleReader     // names what the withdrawal must still take away — optional, nil-safe
 	metrics      materializationRecorder
 	logger       *slog.Logger
 }
@@ -332,6 +338,10 @@ type RegisterResourceUseCase struct {
 // меняют модель прав; опция с «нет — значит не пишем» оставила бы эти изменения
 // вне журнала аудита молча, и кто завёл или снял объект, восстановить было бы
 // нельзя.
+//
+// `scopes` — ТОЖЕ ПАРАМЕТР (kaname#982). Регистрация выводит родителя объекта из
+// данных kaname и сверяет с ним сведения модуля; опция с «нет — значит верим
+// модулю» и была признаком задачи.
 func NewRegisterResourceUseCase(
 	emitter relationOutboxEmitter,
 	mirror resourceMirrorEmitter,
@@ -340,9 +350,10 @@ func NewRegisterResourceUseCase(
 	publications publicReadPublisher,
 	withdrawal keyWithdrawal,
 	audit registrationAudit,
+	scopes registrationScopeReader,
 ) *RegisterResourceUseCase {
 	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb, catalogTypes: catalogTypes,
-		publications: publications, withdrawal: withdrawal, audit: audit}
+		publications: publications, withdrawal: withdrawal, audit: audit, scopes: scopes}
 }
 
 // registrationAudit — узкий порт аудита регистрации объектов модулем
@@ -917,8 +928,16 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
-	// Имя типа КАТАЛОГА — у живой строки, в этом же снимке (kacho#1990).
-	if row.ObjectType, err = uc.catalogObjectType(ctx, tx, row.ObjectType); err != nil {
+	// Имя типа КАТАЛОГА — у живой строки, в этом же снимке (kacho#1990). На пути
+	// регистрации та же строка несёт политику записи модуля, и регистрацию судят
+	// политика и вывод родителя ДО первого оператора записи (kaname#982):
+	// отказ откатывает транзакцию, и ничего не записано. Отказ возвращается
+	// необёрнутым — его вид узнаёт переводчик.
+	if write {
+		if row.ObjectType, err = uc.admitRegistration(ctx, tx, t, row); err != nil {
+			return "", false, false, err
+		}
+	} else if row.ObjectType, err = uc.catalogObjectType(ctx, tx, row.ObjectType); err != nil {
 		return "", false, false, fmt.Errorf("resolve catalog object type: %w", err)
 	}
 	objectType = row.ObjectType

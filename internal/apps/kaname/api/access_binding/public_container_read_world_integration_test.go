@@ -113,6 +113,7 @@ func newPCRWorld(t *testing.T) *pcrWorld {
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           w.door,

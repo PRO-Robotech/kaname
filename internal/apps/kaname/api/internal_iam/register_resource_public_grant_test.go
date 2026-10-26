@@ -117,7 +117,7 @@ func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	pub := &recordingPublisher{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}).WithReconcile(ev)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithReconcile(ev)
 	return uc, m, e, ev, pub
 }
 

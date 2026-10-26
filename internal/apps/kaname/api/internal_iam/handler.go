@@ -198,9 +198,18 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	// именовании, и тип, чьё имя приставке не подчиняется, был бы невыразим (kacho#1885).
 	if err := proxytuple.ValidateTuple(callerDomain, subject, relation, object,
 		proxytuple.WithTypeOwner(catalogTypeOwner{})); err != nil {
-		return status.Error(codes.PermissionDenied, "permission denied")
+		return proxyWriteRefusal()
 	}
 	return nil
+}
+
+// proxyWriteRefusal — ЕДИНСТВЕННЫЙ производитель отказа проксируемой записи по
+// правам: его отдают и правило приёма здесь, и политика записи модуля в use-case
+// (kaname#982, Р3). Ответ побайтово один — `PERMISSION_DENIED`, `permission
+// denied`, деталей нет, — и какая оговорка отвергла, не наблюдаемо; второй
+// производитель того же текста разошёлся бы с первым молча.
+func proxyWriteRefusal() error {
+	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
 // RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write

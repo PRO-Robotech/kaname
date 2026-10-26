@@ -95,6 +95,12 @@ func MapRepoErr(err error) error {
 	if refusal, ok := referenceRefusal(err); ok {
 		return refusal
 	}
+	// Отказ по объекту регистрации (kaname#982) — по той же причине и тем же
+	// порядком: полоса вложена в `ErrFailedPrecondition`, и признак различает её
+	// с отказом по ссылке.
+	if refusal, ok := objectRefusal(err); ok {
+		return refusal
+	}
 	// Отказ «членство несёт права» — по той же причине и ДО общего switch'а: он
 	// несёт признак полосы, по которому исключение человека узнаёт, что перечень
 	// мешающих выдач можно дочитать. Sentinel-ветка ниже пересобирает статус

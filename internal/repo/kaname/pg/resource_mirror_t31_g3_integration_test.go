@@ -80,6 +80,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 
 	const objType, objID = "vpc.network", "net-g3"

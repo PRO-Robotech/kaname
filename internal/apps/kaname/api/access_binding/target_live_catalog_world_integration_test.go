@@ -119,6 +119,7 @@ func newATCWorld(t *testing.T) *atcWorld {
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")

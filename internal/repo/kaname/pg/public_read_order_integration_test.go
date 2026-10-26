@@ -76,6 +76,7 @@ func publicReadRig(t *testing.T) (*internal_iam.RegisterResourceUseCase, *pgxpoo
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).

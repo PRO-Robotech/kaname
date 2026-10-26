@@ -180,7 +180,7 @@ func newRedeliveryRig() *redeliveryRig {
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	rec := &smObjectReconciler{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).
 		WithReconcile(ev).
 		WithObjectReconciler(rec, nil)
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}

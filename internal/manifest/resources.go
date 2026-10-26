@@ -487,6 +487,16 @@ type Resource struct {
 	// сказать «нет», и отличить его от отсутствия можно только по указателю;
 	// загрузка его отвергает (SC-71 (в)). Читатели спрашивают [Resource.PassesPublicRead].
 	PublicReadToChildren *bool `yaml:"publicReadToChildren"`
+	// Writes — отношения СВЕРХ указателя, которые модуль пишет на объект этого
+	// типа сам (kaname#982, приёмка kaname-derives-the-parent-of-a-registered-object.md,
+	// Р2): вместе с указателями из `parents` это закрытая политика записи модуля,
+	// и регистрация вне неё отвергается.
+	//
+	// Значение выражается ОДНИМ способом: ключ отсутствует (модуль пишет только
+	// указатель) либо перечень непуст. `writes: []` — второй способ сказать «только
+	// указатель», и загрузка его отвергает ([ErrWritesEmpty]). Указатели здесь
+	// вторично не объявляются: их объявил `parents`.
+	Writes []Write `yaml:"writes"`
 
 	// publicReadVia — имена указателей ЭТОГО ресурса на контейнеры ТОГО ЖЕ
 	// документа, объявившие публичное чтение детям, в порядке указателей.
@@ -497,6 +507,17 @@ type Resource struct {
 	// именно ребёнку. Неэкспортировано, чтобы его нельзя было объявить рукой
 	// в обход ключа контейнера.
 	publicReadVia []string
+}
+
+// Write — одна запись `writes`: отношение, которое модуль пишет сам, и типы
+// субъекта, которыми он вправе его писать (kaname#982, Р2).
+type Write struct {
+	// Relation — имя АВТОРСКОГО отношения ресурса (`relations`), которое модулю
+	// дано писать правилом проксируемой записи.
+	Relation string `yaml:"relation"`
+	// Subjects — типы субъекта записи; перечень закрыт
+	// ([domain.WriteSubjectTypes]), непуст и без повторов.
+	Subjects []string `yaml:"subjects"`
 }
 
 // PassesPublicRead — тип объявлен контейнером публичного чтения
@@ -883,6 +904,7 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 		faults = append(faults, validateResourceTiers(r, doc, i)...)
 		faults = append(faults, validateResourceBaseRoles(r, doc, i)...)
 		faults = append(faults, validateResourcePublicRead(m, r, doc, i)...)
+		faults = append(faults, validateResourceWrites(r, doc, i)...)
 		faults = append(faults, validateResourceVerbs(r, doc, i)...)
 		faults = append(faults, validateResourceRelations(r, doc, i)...)
 		faults = append(faults, validateResourceNotes(r, doc, i)...)

@@ -48,6 +48,7 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 
 	req := &iamv1.RegisterResourceRequest{

@@ -87,6 +87,7 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		&recordingPublisher{},
 		&recordingWithdrawal{},
 		noAudit{},
+		unitScopes(),
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -137,6 +138,7 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		&recordingPublisher{},
 		&recordingWithdrawal{},
 		noAudit{},
+		unitScopes(),
 	)
 
 	err := uc.Register(context.Background(), &regReq{

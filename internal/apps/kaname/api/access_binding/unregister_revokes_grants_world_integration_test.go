@@ -834,6 +834,7 @@ func TestURG01_RevokeCommitsOnlyWithUnregistration(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		failingWithdrawal{inner: accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld})},
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	err := uc.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:" + string(w.prjA), Relation: "project", Object: pcrRegType + ":" + pcrX,
