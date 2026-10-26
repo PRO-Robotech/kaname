@@ -160,7 +160,8 @@ func (w *urxWorld) roleHandler(hold *holdingRepo) *roleapp.Handler {
 	update := roleapp.NewUpdateRoleUseCase(hold, w.ops, src).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(w.pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
-		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec))
+		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec)).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door))
 	return roleapp.NewHandler(create, update, nil, nil, nil)
 }
 

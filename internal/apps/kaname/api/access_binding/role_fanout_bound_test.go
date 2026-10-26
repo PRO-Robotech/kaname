@@ -92,7 +92,8 @@ func TestRoleUpdate_C21_FanoutBoundExceeded_FailedPrecondition(t *testing.T) {
 
 	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithTupleReconciler(NewRoleTupleReconciler()).
-		WithMembershipFanout(fan)
+		WithMembershipFanout(fan).
+		WithGrantAuthority(NewScopeGrantAuthority(repo, nil))
 
 	_, err := uc.Execute(newOwnerContext(ownerID), roleUpdateInput(roleID178a, domain.Rules{
 		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"},
@@ -116,7 +117,8 @@ func TestRoleUpdate_C21_FanoutWithinBound_Runs(t *testing.T) {
 
 	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithTupleReconciler(NewRoleTupleReconciler()).
-		WithMembershipFanout(fan)
+		WithMembershipFanout(fan).
+		WithGrantAuthority(NewScopeGrantAuthority(repo, nil))
 
 	op, err := uc.Execute(newOwnerContext(ownerID), roleUpdateInput(roleID178b, domain.Rules{
 		{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"},

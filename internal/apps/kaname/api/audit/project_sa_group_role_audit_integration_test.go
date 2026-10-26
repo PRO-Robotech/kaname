@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/project"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
@@ -182,7 +183,9 @@ func TestRoleAudit_5_2_17_CrudEmits(t *testing.T) {
 	// no full permissions blob required — name is fine, but the secret-free
 	// payload must not embed an exploded permission matrix beyond changed_fields.
 
-	_, err = role.NewUpdateRoleUseCase(env.repo, env.opsRepo, catalogfixture.Source()).Execute(
+	// Выдач у роли нет — право выдавать (Р2, kaname#1036) не спрашивается.
+	_, err = role.NewUpdateRoleUseCase(env.repo, env.opsRepo, catalogfixture.Source()).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(env.repo, nil)).Execute(
 		withPrincipal(owner), role.UpdateRoleInput{
 			ID:         domain.RoleID(rolID),
 			Rules:      domain.Rules{{Module: "vpc", Resources: []string{"network", "subnet"}, Verbs: []string{"get"}}},
