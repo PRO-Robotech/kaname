@@ -397,6 +397,15 @@ func reduceNamed(facts VerbFacts, m *manifest.Manifest, rule manifest.Rule, name
 	if len(missing) > 0 {
 		return classes, missing
 	}
+	// Правило с селектором создателя (kaname#1003, Р2 п.3) к наименьшему набору
+	// НЕ сводится: наименьший набор считается покрытием действий, а оно
+	// предполагает ярус на объекте — селектор же пишет на объекте только кортежи
+	// глаголов. Класс, «покрытый» соседним через ярус, создатель терял бы на деле
+	// (`list` — и его список своих учёток пустел бы, SAC-15). Полный набор
+	// затронутых классов уже проверен на полноту строкой выше.
+	if rule.CreatedBySubject {
+		return classes, nil
+	}
 	return minimalClasses(facts, rule, classes, byResource), nil
 }
 

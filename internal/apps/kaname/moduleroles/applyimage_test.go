@@ -85,7 +85,8 @@ func TestApplyImageAddsAbsentRolesAndLeavesPlatformRolesAsTheyStand(t *testing.T
 	if len(store.refs[added]) == 0 {
 		t.Errorf("у новой роли образа не записана проекция сегментов")
 	}
-	if rep.Written != 1 {
-		t.Errorf("перепись применения образа не та: записано %d (ждали 1): %s", rep.Written, rep)
+	if rep.Written != 1 || rep.Kept != 1 {
+		t.Errorf("перепись применения образа не та: записано %d (ждали 1), оставлено %d (ждали 1): %s",
+			rep.Written, rep.Kept, rep)
 	}
 }
