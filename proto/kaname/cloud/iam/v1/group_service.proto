@@ -105,7 +105,11 @@ service GroupService {
 
   // Adds a member (User или ServiceAccount) to the group.
   // Идемпотентно: повторное добавление того же member'а — no-op.
-  // Несуществующий member → FailedPrecondition.
+  // Если у группы есть действующие выдачи, вызывающий обязан иметь право
+  // выдавать на каждой их области; иначе — PermissionDenied синхронно, операции нет.
+  // Участник обязан принадлежать аккаунту группы (учётка — своим аккаунтом,
+  // человек — активным членством); иначе, как и для несуществующего member'а,
+  // операция завершается FailedPrecondition одной и той же формой отказа.
   rpc AddMember (AddGroupMemberRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/groups/{group_id}:addMember" body: "*" };
     option (corelib.api.v1.operation) = {
