@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -33,26 +34,41 @@ func (noDescendants) DropRegistrationTx(context.Context, service.Tx, string, str
 }
 
 // descendantMirror — двойник зеркала: родитель снимается (или нет — `parentGone`),
-// потомки отдаются заданным списком, снятые записываются.
+// потомки отдаются заданным списком, снятые записываются. Как и настоящее
+// зеркало, снятие потомка убирает его цепь: следующее чтение перечня его не
+// называет.
 type descendantMirror struct {
 	mirrorAdapter
 	parentGone  bool
 	descendants []service.RegisteredDescendant
 	asked       int
+	parentDels  int
 	dropped     []string
+	droppedIDs  map[string]bool
 }
 
 func (m *descendantMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) (bool, error) {
+	m.parentDels++
 	return m.parentGone, nil
 }
 
 func (m *descendantMirror) DescendantsTx(context.Context, service.Tx, string, string) ([]service.RegisteredDescendant, error) {
 	m.asked++
-	return m.descendants, nil
+	var out []service.RegisteredDescendant
+	for _, d := range m.descendants {
+		if !m.droppedIDs[d.ID] {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (m *descendantMirror) DropRegistrationTx(_ context.Context, _ service.Tx, catalogType, _ string, id string) (bool, time.Time, error) {
 	m.dropped = append(m.dropped, catalogType+"/"+id)
+	if m.droppedIDs == nil {
+		m.droppedIDs = map[string]bool{}
+	}
+	m.droppedIDs[id] = true
 	return true, time.Time{}, nil
 }
 
@@ -118,7 +134,9 @@ func TestUnregister_DescendantsOfOwnModuleGoWithTheParent(t *testing.T) {
 
 // TestUnregister_StaleTombstoneLeavesDescendants — близнец: снятие, не удалившее
 // строку родителя (устаревшее надгробие, незарегистрированный ключ), потомков не
-// читает и не снимает.
+// снимает и их выдач не отзывает. Перечень оно читает — до первой записи, когда
+// исход удаления строки родителя ещё не известен (kaname#1019), — и ключи
+// потомков запирает вместе с ключом родителя.
 func TestUnregister_StaleTombstoneLeavesDescendants(t *testing.T) {
 	m := &descendantMirror{parentGone: false, descendants: registryDescendants()}
 	w := &recordingWithdrawal{}
@@ -126,7 +144,58 @@ func TestUnregister_StaleTombstoneLeavesDescendants(t *testing.T) {
 
 	unregisterRegistry(t, m, w, e)
 
-	assert.Zero(t, m.asked, "kaname#1002: потомки прочитаны при снятии, не удалившем родителя")
+	assert.Equal(t, 1, m.asked, "kaname#1019: перечень потомков прочитан не один раз до первой записи")
 	assert.Empty(t, m.dropped, "kaname#1002: потомки сняты при снятии, не удалившем родителя")
 	assert.Empty(t, w.keys, "kaname#1002: выдачи отозваны при снятии, не удалившем родителя")
+}
+
+// TestUnregister_LocksParentAndDescendantsBeforeTheFirstWrite — порядок родов
+// замков kaname#975 на пути снятия потомков (kaname#1019): ключи родителя и
+// потомков своего модуля запираются ОДНИМ вызовом замка, до удаления строки
+// родителя, до снятия первого потомка и до первой строки снятия фактов.
+func TestUnregister_LocksParentAndDescendantsBeforeTheFirstWrite(t *testing.T) {
+	m := &descendantMirror{parentGone: true, descendants: registryDescendants()}
+	e := &recordingEmitter{}
+	type snapshot struct{ asked, parentDels, dropped, deletes int }
+	var at []snapshot
+	w := &recordingWithdrawal{}
+	w.onLock = func([]domain.ResourceRef) {
+		at = append(at, snapshot{m.asked, m.parentDels, len(m.dropped), len(e.deletes)})
+	}
+
+	unregisterRegistry(t, m, w, e)
+
+	require.Len(t, w.locked, 1, "kaname#1019: замков выдач и ролей не один")
+	assert.Equal(t, []domain.ResourceRef{
+		{Type: "registry.registries", ID: "reg1"},
+		{Type: "registry.repositories", ID: "reg1/app"},
+	}, w.locked[0], "kaname#1019: замок не на родителя и потомка своего модуля")
+	assert.Equal(t, snapshot{asked: 1}, at[0],
+		"kaname#1019: к замку перечень не прочитан либо запись уже была (строка родителя, потомок, факты)")
+	assert.Equal(t, []string{"registry.repositories/reg1/app"}, m.dropped, "kaname#1002: снят не ровно потомок своего модуля")
+}
+
+// TestUnregister_LateDescendantIsTakenToo — потомок, зарегистрированный после
+// чтения перечня и до снятия строки родителя, снимается тем же вызовом: перечень
+// дочитывается после снятия известных потомков, и ключ позднего запирается
+// отдельным замком.
+func TestUnregister_LateDescendantIsTakenToo(t *testing.T) {
+	late := service.RegisteredDescendant{ModelType: "registry_repository", ID: "reg1/late"}
+	m := &descendantMirror{parentGone: true, descendants: registryDescendants()}
+	w := &recordingWithdrawal{}
+	w.onLock = func([]domain.ResourceRef) {
+		if len(m.descendants) == 2 {
+			m.descendants = append(m.descendants, late)
+		}
+	}
+	e := &recordingEmitter{}
+
+	unregisterRegistry(t, m, w, e)
+
+	assert.Equal(t, []string{"registry.repositories/reg1/app", "registry.repositories/reg1/late"}, m.dropped,
+		"kaname#1019: поздний потомок не снят")
+	require.Len(t, w.locked, 2, "kaname#1019: ключ позднего потомка не заперт отдельным замком")
+	assert.Equal(t, []domain.ResourceRef{{Type: "registry.repositories", ID: "reg1/late"}}, w.locked[1],
+		"kaname#1019: второй замок не на позднего потомка")
+	assert.Contains(t, withdrawnKeys(w), "registry.repositories/reg1/late", "kaname#1019: выдачи позднего потомка не отозваны")
 }

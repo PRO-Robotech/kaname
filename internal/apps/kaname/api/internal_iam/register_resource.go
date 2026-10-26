@@ -79,7 +79,7 @@ type resourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx service.Tx, row service.ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
 	DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) (deleted bool, err error)
 	// DescendantsTx и DropRegistrationTx — снятие потомков снимаемого объекта
-	// (kaname#1002, см. dropDescendants). Часть ОБЯЗАТЕЛЬНОГО порта, а не опция:
+	// (kaname#1002, см. шапку «Снятие потомков»). Часть ОБЯЗАТЕЛЬНОГО порта, а не опция:
 	// «нет читателя — потомков не снимаем» и было дефектом.
 	DescendantsTx(ctx context.Context, tx service.Tx, parentType, parentID string) ([]service.RegisteredDescendant, error)
 	DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (deleted bool, version time.Time, err error)
@@ -93,11 +93,13 @@ type resourceMirrorEmitter interface {
 // проверенная личность вызывающего. Реализация —
 // *access_binding.UnregisteredKeyWithdrawal.
 //
-// LockTx запирает выдачи и роли, называющие ключ, ДО первой записи транзакции
-// снятия (kaname#975): порядок родов снятия — выдачи и роли, строка зеркала,
-// факты — тот же, что у прохода материализации.
+// LockTx запирает выдачи и роли, называющие ЛЮБОЙ из ключей `keys`, ДО первой
+// записи транзакции снятия (kaname#975): порядок родов снятия — выдачи и роли,
+// строки зеркала, факты — тот же, что у прохода материализации. Ключи — родитель
+// и все его потомки разом (kaname#1019): выдачи всех ключей берутся одним набором
+// в порядке id, роли — следом, тоже одним набором.
 type keyWithdrawal interface {
-	LockTx(ctx context.Context, tx service.Tx, key domain.ResourceRef) error
+	LockTx(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error
 	WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error
 }
 
@@ -1022,22 +1024,42 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		}
 	} else {
 		key := domain.ResourceRef{Type: row.ObjectType, ID: row.ObjectID}
-		// ПОРЯДОК РОДОВ СНЯТИЯ (kaname#974, kaname#975): выдачи и роли, называющие
-		// ключ, — строка зеркала — факты. Тот же порядок берёт проход
-		// материализации: выдачи, их роли, строки зеркала объектов, по которым он
-		// пишет члены, затем факты. Поэтому выдачи и роли запираются ДО первой
-		// записи транзакции, а удаление строки зеркала идёт раньше строк снятия
-		// фактов: снятие, удержавшее факт и ждущее строку зеркала, которую запер
-		// проход, пишущий тот же факт, сходилось бы с ним в кольцо (40P01). Сам
-		// проход строку зеркала под удалением не ждёт (`SKIP LOCKED`).
+		// ПОРЯДОК РОДОВ СНЯТИЯ (kaname#974, kaname#975, kaname#1019): выдачи и роли,
+		// называющие ключ родителя ИЛИ ключ любого его потомка, — строки зеркала
+		// (родителя, затем потомков) — факты и отзыв. Тот же порядок берёт проход
+		// материализации: выдачи своего веера, их роли, строки зеркала объектов, по
+		// которым он пишет члены, затем факты. Поэтому перечень потомков читается
+		// ДО первой записи, выдачи и роли родителя и всех потомков запираются
+		// одним набором в порядке id, а строки зеркала потомков снимаются раньше
+		// строк снятия фактов родителя. Прежде выдачи потомка запирались уже после
+		// фактов родителя, у каждого потомка по очереди: проход по потомку, взявший
+		// выдачу потомка раньше выдачи, названной родителем, сходился со снятием в
+		// кольцо (40P01). Сам проход строку зеркала под удалением не ждёт
+		// (`SKIP LOCKED`).
 		// Запираются они и тогда, когда строку удалить не выйдет (устаревшее
 		// надгробие, повтор): исход удаления известен лишь после него.
-		if err = uc.withdrawal.LockTx(ctx, tx, key); err != nil {
+		descendants, derr := uc.descendantsOf(ctx, tx, t, row)
+		if derr != nil {
+			return "", false, false, derr
+		}
+		if err = uc.withdrawal.LockTx(ctx, tx, append([]domain.ResourceRef{key}, descendantKeys(descendants)...)); err != nil {
 			return "", false, false, fmt.Errorf("lock grants of unregistered resource: %w", err)
 		}
 		deleted, derr := uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion)
 		if derr != nil {
 			return "", false, false, fmt.Errorf("delete resource mirror: %w", derr)
+		}
+		// ПОТОМКИ УХОДЯТ ВМЕСТЕ С РОДИТЕЛЕМ (kaname#1002) — под тем же условием,
+		// что отзыв выдач: только снятие, удалившее строку регистрации родителя.
+		// Устаревшее надгробие (родитель зарегистрирован заново, новее) потомков
+		// нового родителя не трогает, а снятие незарегистрированного ключа не
+		// сносит ничего, что под ним числится. Строки зеркала потомков — здесь,
+		// вторым родом, до фактов; их факты и выдачи — ниже, с фактами родителя.
+		var gone []droppedDescendant
+		if deleted {
+			if gone, err = uc.dropDescendantRegistrations(ctx, tx, t, row, descendants); err != nil {
+				return "", false, false, err
+			}
 		}
 		// Кортежи, стоявшие до снятия, — чтобы событие аудита назвало, сколько их
 		// снято на самом деле: версия снятия решает это в свёртке, по каждому факту.
@@ -1062,12 +1084,9 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			if err = uc.withdrawal.WithdrawTx(ctx, tx, key, authzguard.PrincipalUserID(ctx)); err != nil {
 				return "", false, false, fmt.Errorf("withdraw grants of unregistered resource: %w", err)
 			}
-			// ПОТОМКИ УХОДЯТ ВМЕСТЕ С РОДИТЕЛЕМ (kaname#1002) — под тем же условием,
-			// что отзыв выдач: только снятие, удалившее строку регистрации родителя.
-			// Устаревшее надгробие (родитель зарегистрирован заново, новее) потомков
-			// нового родителя не трогает, а снятие незарегистрированного ключа не
-			// сносит ничего, что под ним числится.
-			descendants, derr := uc.dropDescendants(ctx, tx, t, row)
+			// Отношения, выдачи, публикации и события перерасчёта потомков, чьи
+			// строки зеркала сняты выше (kaname#1002).
+			descendants, derr := uc.withdrawDescendants(ctx, tx, row, gone)
 			if derr != nil {
 				return "", false, false, derr
 			}
@@ -1132,10 +1151,10 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	return objectType, changed, projectionUnchanged, nil
 }
 
-// dropDescendants снимает, В ТРАНЗАКЦИИ СНЯТИЯ РОДИТЕЛЯ, каждого его потомка по
-// цепи предков: регистрацию (строку зеркала и цепь), отношения, записанные этим
-// посредником (владелец, указатель на родителя), выдачи на него, его публикацию —
-// и кладёт событие перерасчёта по каждому (kaname#1002).
+// Снятие потомков: В ТРАНЗАКЦИИ СНЯТИЯ РОДИТЕЛЯ у каждого его потомка по цепи
+// предков снимаются регистрация (строка зеркала и цепь), отношения, записанные
+// этим посредником (владелец, указатель на родителя), выдачи на него и его
+// публикация, и по каждому кладётся событие перерасчёта (kaname#1002).
 //
 // ПОЧЕМУ ЗДЕСЬ, А НЕ У РЕГИСТРАТОРА. Снятие называет один объект. Перечислить
 // потомков регистратор модуля не может: чтения зеркала kaname у него нет, а
@@ -1160,61 +1179,159 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 // перестаёт быть «да» в момент коммита — регистрация, цепь и отношения сняты,
 // выдачи отозваны, — а материализованное по ним снимает асинхронный проход по
 // событию перерасчёта, положенному здесь же.
-func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx service.Tx, t tupleIntent, parent service.ResourceMirrorRow) (int, error) {
+//
+// # ТРИ ШАГА, А НЕ ОДИН ЦИКЛ (kaname#1019)
+//
+// Снятие потомков разложено по родам замков kaname#975 — перечень, строки
+// зеркала, факты и выдачи — и каждый род берётся у ВСЕХ потомков раньше
+// следующего: `descendantsOf` читает перечень до первой записи транзакции (его
+// ключи запираются вместе с ключом родителя), `dropDescendantRegistrations`
+// снимает строки зеркала и цепи до строк снятия фактов, `withdrawDescendants`
+// пишет факты, отзыв, публикации и события перерасчёта. Один цикл «строка зеркала,
+// факты, выдачи» на потомка брал выдачи второго потомка после фактов первого.
+
+// unregisteredDescendant — потомок снимаемого объекта того же модуля: строка
+// перечня (`service.RegisteredDescendant`) и имя его типа словарём каталога.
+type unregisteredDescendant struct {
+	service.RegisteredDescendant
+	catalogType string
+}
+
+// droppedDescendant — потомок, чью регистрацию сняла транзакция: dropped — строка
+// зеркала была и удалена этим вызовом; version — версия снятой регистрации
+// (нулевая — строки не было либо регистрация без версии).
+type droppedDescendant struct {
+	unregisteredDescendant
+	dropped bool
+	version time.Time
+}
+
+// descendantsOf — потомки снимаемого объекта по цепи предков, только того же
+// модуля, с именем типа каталога, в порядке ключа перечня (kaname#1002). Только
+// чтения — зовётся до первой записи транзакции снятия (kaname#1019).
+func (uc *RegisterResourceUseCase) descendantsOf(ctx context.Context, tx service.Tx, t tupleIntent, parent service.ResourceMirrorRow) ([]unregisteredDescendant, error) {
 	parentModule, ok := catalogModule(parent.ObjectType)
 	if !ok {
-		return 0, nil
+		return nil, nil
 	}
 	parentType, parentID := t.splitObject()
-	descendants, err := uc.mirror.DescendantsTx(ctx, tx, parentType, parentID)
+	found, err := uc.mirror.DescendantsTx(ctx, tx, parentType, parentID)
 	if err != nil {
-		return 0, fmt.Errorf("read descendants of unregistered resource: %w", err)
+		return nil, fmt.Errorf("read descendants of unregistered resource: %w", err)
 	}
-	actor := authzguard.PrincipalUserID(ctx)
-	count := 0
-	for _, d := range descendants {
+	var out []unregisteredDescendant
+	for _, d := range found {
 		catalogType, err := uc.catalogObjectType(ctx, tx, d.ModelType)
 		if err != nil {
-			return 0, fmt.Errorf("resolve catalog type of descendant: %w", err)
+			return nil, fmt.Errorf("resolve catalog type of descendant: %w", err)
 		}
 		if module, ok := catalogModule(catalogType); !ok || module != parentModule {
 			continue
 		}
-		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, catalogType, d.ModelType, d.ID)
+		out = append(out, unregisteredDescendant{RegisteredDescendant: d, catalogType: catalogType})
+	}
+	return out, nil
+}
+
+// descendantKeys — ключи потомков словарём каталога: им названа цель выдачи.
+func descendantKeys(ds []unregisteredDescendant) []domain.ResourceRef {
+	keys := make([]domain.ResourceRef, 0, len(ds))
+	for _, d := range ds {
+		keys = append(keys, domain.ResourceRef{Type: d.catalogType, ID: d.ID})
+	}
+	return keys
+}
+
+// dropDescendantRegistrations снимает регистрацию (строку зеркала и цепь) каждого
+// потомка перечня, в его порядке, — второй род замков, до строк снятия фактов.
+//
+// # ДОЧИТЫВАНИЕ ПЕРЕЧНЯ
+//
+// Перечень прочитан до замков, а потомок, чья регистрация зафиксировалась после
+// этого чтения (регистрация потомка строку родителя не запирает), в нём
+// отсутствует. Оставленный, он остался бы зарегистрированным объектом без живого
+// родителя. Поэтому после снятия известных потомков перечень читается ещё раз: у
+// снятых цепи уже нет, и второе чтение называет только поздних. Их выдачи и роли
+// запираются здесь — позже записи строки родителя, то есть вне порядка kaname#975;
+// встречный проход по такому потомку может закончиться отказом 40P01, и
+// потребитель доставит то же снятие повторно — тогда потомок уже в первом
+// перечне. Окно, в котором потомок пропускался бы, не шире прежнего: второе чтение
+// стоит после записи строки родителя, где перечень читался и раньше.
+func (uc *RegisterResourceUseCase) dropDescendantRegistrations(ctx context.Context, tx service.Tx,
+	t tupleIntent, parent service.ResourceMirrorRow, known []unregisteredDescendant,
+) ([]droppedDescendant, error) {
+	gone, err := uc.dropRegistrations(ctx, tx, known)
+	if err != nil {
+		return nil, err
+	}
+	late, err := uc.descendantsOf(ctx, tx, t, parent)
+	if err != nil {
+		return nil, err
+	}
+	if len(late) == 0 {
+		return gone, nil
+	}
+	if err := uc.withdrawal.LockTx(ctx, tx, descendantKeys(late)); err != nil {
+		return nil, fmt.Errorf("lock grants of late descendants: %w", err)
+	}
+	lateGone, err := uc.dropRegistrations(ctx, tx, late)
+	if err != nil {
+		return nil, err
+	}
+	return append(gone, lateGone...), nil
+}
+
+// dropRegistrations снимает строку зеркала и цепь каждого потомка `ds`.
+func (uc *RegisterResourceUseCase) dropRegistrations(ctx context.Context, tx service.Tx, ds []unregisteredDescendant) ([]droppedDescendant, error) {
+	out := make([]droppedDescendant, 0, len(ds))
+	for _, d := range ds {
+		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, d.catalogType, d.ModelType, d.ID)
 		if err != nil {
-			return 0, fmt.Errorf("drop descendant registration: %w", err)
+			return nil, fmt.Errorf("drop descendant registration: %w", err)
 		}
-		count++
+		out = append(out, droppedDescendant{unregisteredDescendant: d, dropped: dropped, version: version})
+	}
+	return out, nil
+}
+
+// withdrawDescendants снимает отношения, записанные посредником, выдачи,
+// публикацию потомков `gone` и кладёт событие перерасчёта по каждому — третий род,
+// после строк зеркала. Возвращает число потомков для события аудита снятия.
+func (uc *RegisterResourceUseCase) withdrawDescendants(ctx context.Context, tx service.Tx,
+	parent service.ResourceMirrorRow, gone []droppedDescendant,
+) (int, error) {
+	actor := authzguard.PrincipalUserID(ctx)
+	for _, d := range gone {
 		// Надгробие кортежей потомка — не старше его последней регистрации
 		// (kaname#969): регистрация снята безусловно, и её кортежи уходят все, даже
 		// записанные версией новее надгробия родителя. Версия снятой строки и есть
 		// версия последней регистрации — кортежи пишутся ею в той же транзакции.
 		tombstone := parent.SourceVersion
-		if version.After(tombstone) {
-			tombstone = version
+		if d.version.After(tombstone) {
+			tombstone = d.version
 		}
 		if tuples := proxyOwned(d.Standing); len(tuples) > 0 {
 			if err := uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, tombstone); err != nil {
 				return 0, fmt.Errorf("emit fga outbox for descendant: %w", err)
 			}
 		}
-		if dropped {
-			if err := uc.withdrawal.WithdrawTx(ctx, tx, domain.ResourceRef{Type: catalogType, ID: d.ID}, actor); err != nil {
+		if d.dropped {
+			if err := uc.withdrawal.WithdrawTx(ctx, tx, domain.ResourceRef{Type: d.catalogType, ID: d.ID}, actor); err != nil {
 				return 0, fmt.Errorf("withdraw grants of descendant: %w", err)
 			}
 		}
 		if admitsPublication(d.ModelType) {
-			if err := uc.withdrawDescendantPublication(ctx, tx, d.ModelType, d.ID, version); err != nil {
+			if err := uc.withdrawDescendantPublication(ctx, tx, d.ModelType, d.ID, d.version); err != nil {
 				return 0, err
 			}
 		}
 		if uc.reconcile != nil {
-			if err := uc.reconcile.EmitTx(ctx, tx, "mirror.delete", catalogType, d.ID); err != nil {
+			if err := uc.reconcile.EmitTx(ctx, tx, "mirror.delete", d.catalogType, d.ID); err != nil {
 				return 0, fmt.Errorf("emit reconcile event for descendant: %w", err)
 			}
 		}
 	}
-	return count, nil
+	return len(gone), nil
 }
 
 // withdrawDescendantPublication снимает публикацию потомка при ЛЮБОМ порядке

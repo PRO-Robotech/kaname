@@ -57,6 +57,11 @@ const (
 type UnregisteredKeyStore interface {
 	WriterOn(tx service.Tx) Writer
 	ActiveBindingsNamingKey(ctx context.Context, tx service.Tx, key domain.ResourceRef) ([]domain.AccessBindingID, error)
+	// LockBindingsNamingKeys и LockRolesNamingKeys — замки выдач и ролей,
+	// называющих любой из ключей, каждый род одним оператором в порядке id
+	// (kaname#1019, см. LockTx).
+	LockBindingsNamingKeys(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error
+	LockRolesNamingKeys(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error
 	RevokeForUnregistered(ctx context.Context, tx service.Tx, id domain.AccessBindingID) (bool, error)
 	NarrowTarget(ctx context.Context, tx service.Tx, id domain.AccessBindingID, target domain.AccessTarget) (bool, error)
 	RolesNamingKey(ctx context.Context, tx service.Tx, key domain.ResourceRef) ([]domain.RoleID, error)
@@ -86,12 +91,22 @@ func NewUnregisteredKeyWithdrawal(store UnregisteredKeyStore, cat catalog.Source
 // строку зеркала и зафиксировался, пока снятие ждало, добирается тем же чтением
 // (проход по такой выдаче строку под удалением не ждёт — `SKIP LOCKED` замка
 // строки зеркала, — поэтому позднее чтение кольца не замыкает).
-func (u *UnregisteredKeyWithdrawal) LockTx(ctx context.Context, tx service.Tx, key domain.ResourceRef) error {
-	if _, err := u.store.ActiveBindingsNamingKey(ctx, tx, key); err != nil {
-		return fmt.Errorf("lock bindings naming %s %s: %w", key.Type, key.ID, err)
+//
+// КЛЮЧЕЙ НЕСКОЛЬКО (kaname#1019): снятие родителя снимает и потомков, и выдачи
+// всех ключей — родителя и каждого потомка — запираются ОДНИМ оператором в порядке
+// id, роли — следующим, тоже одним. Поочерёдный замок по ключу брал выдачи в
+// порядке ключей, а проход по потомку — свой веер в порядке id: выдача потомка с
+// меньшим id и выдача, названная родителем, у сторон шли в обратном порядке, и
+// они сходились в кольцо.
+func (u *UnregisteredKeyWithdrawal) LockTx(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error {
+	if len(keys) == 0 {
+		return nil
 	}
-	if _, err := u.store.RolesNamingKey(ctx, tx, key); err != nil {
-		return fmt.Errorf("lock roles naming %s %s: %w", key.Type, key.ID, err)
+	if err := u.store.LockBindingsNamingKeys(ctx, tx, keys); err != nil {
+		return fmt.Errorf("lock bindings naming %d keys: %w", len(keys), err)
+	}
+	if err := u.store.LockRolesNamingKeys(ctx, tx, keys); err != nil {
+		return fmt.Errorf("lock roles naming %d keys: %w", len(keys), err)
 	}
 	return nil
 }
