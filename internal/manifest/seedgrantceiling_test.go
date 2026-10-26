@@ -164,10 +164,14 @@ func TestSeedGrantRoleBeyondItsTierIsRefused(t *testing.T) {
 }
 
 // testdataRefusedByDesign — ЯВНЫЙ перечень фикстур `testdata`, которые
-// загрузчик обязан ОТВЕРГАТЬ, с видом отказа. Сегодня он пуст: все фикстуры
-// каталога — законные манифесты. Запись без файла — находка (перечень истекает
-// вместе со своим предметом); файл из перечня, принятый загрузчиком, — тоже.
-var testdataRefusedByDesign = map[string]error{}
+// загрузчик обязан ОТВЕРГАТЬ, с видом отказа. Запись без файла — находка
+// (перечень истекает вместе со своим предметом); файл из перечня, принятый
+// загрузчиком либо отвергнутый не тем отказом, — тоже.
+var testdataRefusedByDesign = map[string]error{
+	// Выдача посева на перечень объектов — вход отказа проб `object_refs_test.go`
+	// (kaname#965): манифест модуля конкретных объектов не называет.
+	"vpc.binding-resources-fixture.yaml": manifest.ErrObjectRefInManifest,
+}
 
 // TestEveryTestdataFixtureFacesTheLoaderWithTheSeedGrantCeiling — загрузчик
 // вместе с потолком посева прогоняется по ВСЕМ фикстурам `testdata/*.yaml`.
