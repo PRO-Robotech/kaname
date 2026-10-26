@@ -1,0 +1,205 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+  sha256: 20039abfd0d6e89d3e6aa10f5a48d0f9a9fb5886639e090738ef83c2388883ab
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи и внешнего события
+    (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: ddd5681afbd48393f6af372b5359d2aacdb095c8
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status --short` → `?? docs/engineering/acceptance/…`).
+    Судится содержимое по отпечатку, а не коммит.
+  branch: esc-acc
+  task: PRO-Robotech/kaname#1034
+  related_tasks: [PRO-Robotech/kaname#1035, PRO-Robotech/kaname#1036, PRO-Robotech/kaname#1037, PRO-Robotech/kaname#1039, PRO-Robotech/kaname#986]
+  lines: 734
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/role-rights-stay-within-what-is-named.md в копии
+    kacho-workspace/tmp/kn-esc-acc @ ddd5681af → 20039abf…88883ab (совпало с заданием)
+  measurement_revisions: >-
+    Все замеры — чтение дерева kaname в той же копии @ ddd5681af (HEAD = origin/955) и corelib
+    v1.15.0 из кэша модулей (go.mod:8).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26T09:51:05Z'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих четыре: CONSTRUCTIBILITY, DoD, COVERAGE, TWIN. По этой редакции санкции на код
+    нет.
+
+premise:
+  task_premise: >-
+    Посылка подтверждена. Смежная задача о праве удалять — #1039; #1038 — «шаг установки
+    registry заводит доверенность на svc-registry» (`gh issue view 1038 -R PRO-Robotech/kaname`).
+    База ddd5681af = origin/955 (`git rev-parse HEAD origin/955`). Восемь строк каталога,
+    спрашивающих ярус на листовом объекте, — все из модулей kacho (viewer 2, editor 5, admin 1;
+    jq по permission_catalog.json @ddd5681af). Сегодня ярус из `delete` выводится как `admin`:
+    domain/rule_verbs.go:163 (verbBackCompatTier).
+
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    scenario: ESC-30
+    claim: >-
+      «Дано» ESC-30 не строит состояние прежней редакции. (1) Кортежи `admin` для usr-D
+      посеяны через `gdSeedTuple`. Это строка `fga_outbox` без выдачи-владельца
+      (grant_delegation_world_integration_test.go:278-285). При прежней редакции такой кортеж
+      писала материализация выдачи, и у него есть строка в
+      `kaname.access_binding_emitted_tuples` с `binding_id` выдачи usr-D. Реконсайл снимает
+      кортежи только по этому реестру: ForgetEmittedTuples, reconcile_adapter.go:1451-1466,
+      `WHERE et.binding_id = $1`. Тогда утверждение `Check(usr-D, admin, project:prj-A) = false`
+      честный производитель не даст. Чтобы ESC-30 стал зелёным, реализации пришлось бы снимать
+      непривязанные факты. Но той же формой мир Д кладёт структурные указатели
+      `project#account` (grant_delegation_world_integration_test.go:203), и такой проход снял бы
+      их тоже. (2) Строка sva-B в grp-e0 держится на том, что «триггер проверяет существование,
+      а не аккаунт» (§5.2). Однако Р3 вводит инвариант внутри службы. По ban #10 его место — на
+      уровне БД, а Д-4 («как сегодня несуществующий участник») указывает на тот же триггер
+      0001_initial.sql:357. Расширенный триггер отвергнет такой посев.
+    measured: >-
+      Прочтено @ddd5681af: grant_delegation_world_integration_test.go:189-203, :276-285;
+      reconcile_adapter.go:1444-1466; migrate_backfill_p8_integration_test.go:91-98 (реестр
+      access_binding_emitted_tuples); 0001_initial.sql:350-361.
+    fix: >-
+      Сеять прежнее состояние так, как его оставила прежняя редакция: факт вместе со строкой
+      реестра, привязанной к выдаче usr-D (или прежней функцией вывода через шов). Писателя
+      назвать в §5.2. Для строки sva-B назвать способ посева, который не зависит от того, где
+      живёт инвариант Р3 (посев до миграции либо явный обход триггера как посев наследия), и
+      снять посылку «триггер не проверяет аккаунт».
+  - id: B2
+    kind: DoD
+    scenario: §6 S1 п.7
+    claim: >-
+      Требование «ESC-01…ESC-30 сперва красные на ddd5681af» невыполнимо для ESC-05, ESC-11,
+      ESC-12, ESC-21, ESC-24: на базе они зелёные по построению. ESC-05: Check с `action`
+      берёт глагол типа из каталога (`moduleVerbRelation`, authorize_service.go:527) →
+      `v_delete`, и usr-D его держит уже сейчас. ESC-11, ESC-12, ESC-21: проверки права выдавать
+      сегодня нет, поэтому `done`. ESC-24: RemoveMember не меняется. Пункт DoD не может быть
+      исполнен, как написан.
+    measured: прочтено @ddd5681af authorize_service.go:520-530; role_service.proto:108-115; group_service.proto:109-133.
+    fix: >-
+      Разделить на два перечня: «сперва красные» (ESC-01–04, 10, 13, 14, 20, 22, 23, 25, 30 — по
+      строкам с новым свойством) и «охрана: зелёные до и после» (ESC-05, 11, 12, 21, 24 и
+      положительные строки пар).
+  - id: B3
+    kind: COVERAGE
+    scenario: Р1 — следствия вне четырёх названных глаголов
+    claim: >-
+      Р1 меняет ответ публичного `AuthorizeService.ListSubjects` для действия удаления:
+      `resolveActionToRelation` отображает `delete` в `admin` (authorize_service.go:1258,
+      case "delete" :1349). После Р1 держатель одного удаления пропадёт из «кто может удалить X», хотя
+      `Check(delete)` для него остаётся истиной (ESC-05). Два ответа на один вопрос
+      разойдутся, и это вводит в заблуждение о правах. Нет ни сценария, ни пункта в §2. Кроме
+      того, «Тип изменения» называет только `AccessBindingService.Create`. Сужённый ярус читают
+      и другие места: requireGrantAuthority в update.go:167, removal_authority.go:72 (отзыв и удаление выдачи), get.go:125, list_by_scope.go:60,
+      list_by_account.go:77, list_assignable_roles.go:81, expand_access.go:204, право
+      делегирующего delegated_grant.go:258; право спрашивать о чужом субъекте
+      authorize/caller_authority.go:55. Последнее касается и Р4: делегирование, у которого право
+      делегирующего держалось лишь на ярусе из `delete`, перестанет выдавать. Это следствие
+      документ не называет.
+    measured: >-
+      `git grep -n 'requireGrantAuthority(' -- internal ':!*_test.go'` @ddd5681af → 12 строк (из них 2 — определения helpers.go:155, :337);
+      прочтено authorize_service.go:1251-1262, :1329-1356.
+    fix: >-
+      В §0 дать перепись читателей выведенного яруса (команда и число), назвать их в «Типе
+      изменения». Добавить сценарий ListSubjects(action `registry.registries.delete`, X) с парой
+      usr-D / usr-M либо вынести это в §2 с причиной и носителем. Одной фразой в Р4/§2 сказать,
+      что происходит с делегированием, чей делегирующий держал право только через `delete`.
+  - id: B4
+    kind: TWIN
+    scenario: ESC-13 a
+    claim: >-
+      Названный близнец ESC-10 b отличается двумя фактами, а не одним: субъект выдачи на prj-A
+      (usr-R у rol-e1 против sva-A3 у rol-e2) и вторая выдача на acc-A.
+    measured: прочтено в документе §4.1 «Выдачи ролей под правку» и ESC-10, ESC-13.
+    fix: >-
+      У rol-e2 выдачи: usr-R на prj-A и sva-A3 на acc-A. Либо дать близнеца строкой внутри
+      ESC-13, отличной ровно второй выдачей.
+
+important_nonblocking:
+  - "ESC-10 a, ESC-20 a «побайтово равна ошибке ESC-01 a (детали)»: это разные методы. На слушателе DenyDetailUnary добавляет к PERMISSION_DENIED `action`/`fqn` метода (authzguard/deny_details.go:117-160), и равенство не выполнится. В мире без перехватчика оно вакуумно. Эталон Р2/Р3 — отказ без права НА ТОМ ЖЕ методе (так сделано в ESC-E3/E4); переформулировать."
+  - "ESC-E1, ESC-E4: предъявитель H не назван. У AccessBindingService.Create и GroupService.AddMember в каталоге `required_acr_min: \"2\"`, и с `jwtHumanEsc` отказом будет отказ повышения уровня, а не Р1/Р3. Назвать `jwtHumanEscStepUp` (как в ESC-E3)."
+  - "«Вопрос модели» в интеграционных пробах: вызывающий AuthorizeService.Check не назван. Право спрашивать о чужом субъекте — self ∨ cluster-admin ∨ admin на ресурсе (authorize_service.proto:76-79, caller_authority.go:55). Назвать запрос о себе либо прямой вопрос двери для `required_relation`."
+  - "Д-3: не сказано, участник ли владелец аккаунта и администратор аккаунта без строки `memberships`. В мире Д членство посеяно только usr-M и usr-P (newGDWorld)."
+  - "Раскрытие: §0.3 («права выдавать сегодня не спрашивают») и «Как сейчас» новых путей не собирают — задачи #1035–#1039 публичны и формулируют то же свойство (`gh issue view 1036`). Не расширять."
+  - "DoD п.6: комментарий поля `action` (authorize_service.proto:229-233, «delete → admin») устарел уже на базе (Check берёт moduleVerbRelation, kaname#995). Правка верная."
+
+defaults_fixed:
+  - "В1 → (а), Д-1 принимается: «только право удалять» по Р1 читается буквально, и роли с `delete` во встроенном манифесте нет (`git grep -n -E 'classes:.*delete' -- manifest.yaml` → 0)."
+  - "В2 — решение диспетчера. Рекомендация рецензента — (а) с условием: предикат §7 строка 1 («§0.5 → 0») — ворота перезакрепления kaname в kacho, а не DoD S1. Пока край не правлен, копия каталога kaname сохраняет восемь строк, и check-permission-catalog зелёный."
+
+confirmed:
+  - "Производитель назван у 22 из 22 (`grep -c '^#### ESC-'` = 22, `grep -c '^| ESC-'` = 22)."
+  - "Формы отказов: PermissionDenied — authzguard.go:63-65; AuthzBackendUnavailable `authz backend unavailable` — :86-87; «участника нет» — 0001_initial.sql:357-358, add_member.go:7-9."
+  - "Дверь RoleService.Update и GroupService.AddMember — v_update без hide_existence (permission_catalog.json), а iam_role нет в таблице скрытия corelib (authz/hide_existence.go:47-55). Поэтому T0 и T1 в ESC-E3/E4 — 403/7, и сравнение тел осмысленно."
+  - "ESC-04, ESC-05 от восьми строк каталога kacho не зависят: registry.registries.update/delete уже `v_update`/`v_delete`."
+  - "ESC-14, ESC-25 конструируемы: ceFailFor отказывает на любом вопросе о субъекте (grant_delegation_ce_integration_test.go:247-259), и Путь 0 requireGrantAuthority даёт UNAVAILABLE (helpers.go:177-180)."
+  - "Модель: project.super_admin = admin from account (fga_model.fga:427); registry_registry.v_* ← super_admin from project (:1309-1338). Поэтому строки usr-E в ESC-02 и ESC-05 выводимы."
+  - "Координаты помощников мира проверены: newGDWorld :144, gdSeedMembership :266, gdSeedTuple :278, roleByName :298, pollRelation :439, createDoneX :470; seedRole и registerRegistry — мир П6 :152, :179; pollAsk — public_container_read_world_integration_test.go:354; mustSeedUser :80; seedGroup :173; роли iam.role.edit и iam.group.edit — manifest.yaml:995, :935."
+  - "«Что НЕ входит» — восемь пунктов, у каждого носитель."
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    9 из 12 строк §5.2: мир Д, seedRole, mustSeedUser, seedGroup, createDoneX, Revoke,
+    gdSeedMembership, роли модуля iam по имени, посев набора делегирования. Заказаны: newEscWorld
+    с провязкой RoleService.Update и GroupService.AddMember (в buildHandlers мира Д у ролей и
+    групп только Create), помощник строки group_members, посев человека H для S2.
+  not_constructible_as_written: [ESC-30]
+  not_executed: >-
+    Посев не ставился: testcontainers — тяжёлый класс, только на внешнем кластере через слот, а
+    изоляции и разрешения на посев в задании нет. Вывод B1 сделан по чтению реестра выдачи и
+    реконсайла @ddd5681af.
+
+route_signs:
+  proto: true
+  proto_note: только комментарии контракта (DoD п.6)
+  schema: false
+  schema_note: появится при DB-уровне инварианта Р3 (B1 п.2)
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: false
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Вердикт не является одобрением, события санкции нет. Тело события возврата ниже публикует
+    курьер, если так решит диспетчер.
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · CHANGES_REQUESTED · sha256 20039abfd0d6e89d3e6aa10f5a48d0f9a9fb5886639e090738ef83c2388883ab
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    note: до этой записи ревью этого документа не было (каталог создан этой записью)
