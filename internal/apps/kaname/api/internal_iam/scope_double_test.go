@@ -33,9 +33,14 @@ type sceneScopes struct {
 	pointers   map[string][]string              // «тип:id» → субъекты фактов указателя
 }
 
-// unitScopes — сцена по умолчанию: один проект prj_unit в аккаунте acc_unit.
+// unitScopes — сцена по умолчанию: проекты, под которыми регистрируют пробы на
+// подставных портах, каждый в своём аккаунте.
 func unitScopes() sceneScopes {
-	return sceneScopes{projects: map[string]string{unitProject: unitAccount}}
+	return sceneScopes{projects: map[string]string{
+		unitProject: unitAccount,
+		"prj-1":     "acc-1",
+		"prj-2":     "acc-2",
+	}}
 }
 
 func (s sceneScopes) ProjectAccountTx(_ context.Context, _ service.Tx, projectID string) (string, bool, error) {

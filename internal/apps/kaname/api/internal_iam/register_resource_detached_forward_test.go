@@ -77,7 +77,7 @@ func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := uc.Register(ctx, &regReq{subject: "user:usr_creator", relation: "v_get", object: "vpc_network:vpcn_detached"})
+	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_detached"})
 
 	require.NoError(t, err, "отказ форварда не фатален — этого VBC-15 и требует")
 	require.True(t, txb.tx.committed, "writer-tx коммитится независимо от отмены")
@@ -104,7 +104,7 @@ func TestRegisterResource_DetachedForwardKeepsItsOwnBudget(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
 
-	err := uc.Register(ctx, &regReq{subject: "user:usr_creator", relation: "v_get", object: "vpc_network:vpcn_budget"})
+	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_budget"})
 	require.NoError(t, err)
 
 	require.Equal(t, 1, rec.calls)
