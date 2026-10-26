@@ -210,11 +210,12 @@ func (w *escWorld) escRoleUpdate() *roleapp.UpdateRoleUseCase {
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec))
 }
 
-// statusesByRole — статусы выдач роли по `ListByRole` от владельца, по порядку ответа.
+// statusesByRole — статусы выдач роли по `ListByRole` от владельца, включая
+// отозванные, по порядку ответа.
 func (w *escWorld) statusesByRole(role domain.RoleID) []iamv1.AccessBinding_Status {
 	w.t.Helper()
 	resp, err := w.abx.ListByRole(asUser(w.ctx, w.usrA),
-		&iamv1.ListAccessBindingsByRoleRequest{RoleId: string(role), PageSize: 1000})
+		&iamv1.ListAccessBindingsByRoleRequest{RoleId: string(role), PageSize: 1000, IncludeRevoked: true})
 	require.NoErrorf(w.t, err, "ListByRole(%s) от usr-A", role)
 	out := []iamv1.AccessBinding_Status{}
 	for _, b := range resp.GetAccessBindings() {
