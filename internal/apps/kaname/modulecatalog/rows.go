@@ -147,7 +147,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		out.Resources = append(out.Resources, catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
 			ParentTypes: parentTypes, ParentNames: parentNames, Writes: writes,
-			PublicReadToChildren: r.PassesPublicRead(),
+			PublicReadToChildren: r.PassesPublicRead(), PermanentProject: r.HoldsPermanentProject(),
 		})
 
 		// declaredBy — токен → имя, каким его написал манифест. Нужен ИМЕННО для

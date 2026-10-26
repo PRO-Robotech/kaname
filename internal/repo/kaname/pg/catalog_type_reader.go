@@ -83,12 +83,13 @@ func (r *CatalogTypeReader) WritePolicyTx(
 	var (
 		dotted, objectType   string
 		names, types, writes []string
+		permanent            bool
 	)
 	err := txAsPgx(tx).QueryRow(ctx,
-		`SELECT dotted, object_type, parent_names, parent_types, writes
+		`SELECT dotted, object_type, parent_names, parent_types, writes, permanent_project
 		   FROM kaname.catalog_resource
 		  WHERE (object_type = $1 OR dotted = $1) AND live`,
-		typeName).Scan(&dotted, &objectType, &names, &types, &writes)
+		typeName).Scan(&dotted, &objectType, &names, &types, &writes, &permanent)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return "", domain.WritePolicy{}, false, nil
@@ -102,7 +103,7 @@ func (r *CatalogTypeReader) WritePolicyTx(
 		return "", domain.WritePolicy{}, false, fmt.Errorf(
 			"catalog_resource: у типа %q имён указателей %d при типах %d", typeName, len(names), len(types))
 	}
-	policy := domain.WritePolicy{ObjectType: objectType}
+	policy := domain.WritePolicy{ObjectType: objectType, PermanentProject: permanent}
 	for i := range names {
 		policy.Pointers = append(policy.Pointers, domain.ParentPointer{Name: names[i], Type: types[i]})
 	}

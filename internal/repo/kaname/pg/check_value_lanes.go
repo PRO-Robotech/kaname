@@ -316,6 +316,16 @@ var checkValueLanes = map[string]*checkTableLanes{
 		caller:  []string{"minted_token_revocations_reason_ck", "minted_token_revocations_subject_ck"},
 		service: []string{"minted_token_revocations_decider_ck"},
 	},
+	// Привязка объекта к проекту (kaname#983): id объекта и проект пришли
+	// регистрацией вызывающего (строкой зеркала), модельное имя типа выводит
+	// служба из строки каталога.
+	"object_project_binding": {
+		caller: []string{"object_project_binding_object_id_nonempty", "object_project_binding_project_id_nonempty"},
+		service: []string{
+			"object_project_binding_object_type_model_dictionary",
+			"object_project_binding_object_type_nonempty",
+		},
+	},
 	// Операция — вид принципала ставит служба.
 	"operations": nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.

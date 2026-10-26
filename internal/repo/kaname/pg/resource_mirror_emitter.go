@@ -12,8 +12,13 @@ package pg
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -41,7 +46,27 @@ func (e *ResourceMirrorEmitter) UpsertTx(ctx context.Context, tx service.Tx, row
 		Labels:          row.Labels,
 		SourceVersion:   row.SourceVersion,
 	})
+	if refusedByBinding(err) {
+		// Привязку держит база (kaname#983, Р9): отказ триггера записи зеркала
+		// либо цепи — это ОТКАЗ ВХОДУ, а не сбой записи. Он переводится здесь, у
+		// единственного, кто видит драйвер, в признак полосы; текст драйвера
+		// наружу не идёт.
+		return false, false, iamerr.Wrapf(iamerr.ErrObjectBoundToOtherProject,
+			"%s:%s is bound to another project", row.ObjectType, row.ObjectID)
+	}
 	return out.Applied, out.ProjectionUnchanged, err
+}
+
+// bindingHoldsConstraint — имя, которым триггеры записи зеркала и цепи называют
+// отказ привязки объекта к проекту (миграция 20261026120000, kaname#983).
+const bindingHoldsConstraint = "object_project_binding_holds"
+
+// refusedByBinding — ошибка есть отказ базы по привязке объекта к проекту:
+// SQLSTATE класса 23 с именем ограничения [bindingHoldsConstraint].
+func refusedByBinding(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "23") &&
+		pgErr.ConstraintName == bindingHoldsConstraint
 }
 
 // DeleteTx — implements service.ResourceMirrorEmitter.

@@ -273,13 +273,14 @@ func Test865_31_RaceOfTwoContentsUnderOneRevision(t *testing.T) {
 // TestFingerprintSeesEveryColumnTheApplierWrites — отпечаток шести таблиц
 // видит КАЖДУЮ колонку, которую пишет применитель и которую называет условие
 // CE-18: применённую пару (`applied_revision`, `applied_digest`) строки модуля
-// и имя типа, указатели, их имена, записи сверх указателя и признак контейнера
-// (`object_type`, `parent_types`, `parent_names`, `writes`,
+// и имя типа, указатели, их имена, записи сверх указателя, признаки контейнера и
+// неизменного проекта
+// (`object_type`, `parent_types`, `parent_names`, `writes`, `permanent_project`,
 // `public_read_to_children`) строки ресурса. Каждая колонка меняется ОДНА, от
 // состояния после предыдущей: равенство отпечатков, которым пробы утверждают
 // «ничего не изменилось», обязано краснеть на любой из них.
 //
-// Проба держит СОСТАВ отпечатка: снятие любой из семи колонок из
+// Проба держит СОСТАВ отпечатка: снятие любой из восьми колонок из
 // `catalogstate.Fingerprint` краснит её строку, называя колонку (CV-865-2:
 // проба, менявшая только `applied_digest`, оставалась зелёной при снятом
 // `applied_revision`).
@@ -319,6 +320,9 @@ func TestFingerprintSeesEveryColumnTheApplierWrites(t *testing.T) {
 			[]any{rev865Module, rev865Resource}},
 		{"catalog_resource.public_read_to_children",
 			`UPDATE kaname.catalog_resource SET public_read_to_children = NOT public_read_to_children ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+		{"catalog_resource.permanent_project",
+			`UPDATE kaname.catalog_resource SET permanent_project = NOT permanent_project ` + resourceRow,
 			[]any{rev865Module, rev865Resource}},
 	}
 	for _, c := range cases {

@@ -110,3 +110,24 @@ func (RegistrationScopeReader) PointerSubjectsTx(
 	}
 	return out, nil
 }
+
+// BindingRefusesTx — привязка объекта к проекту отвергает регистрацию с проектом
+// поля project и цепью chain (kaname#983). Спрашивается ТОТ ЖЕ предикат базы,
+// которым судят триггеры записи зеркала и цепи
+// (`kaname.object_project_binding_refuses`): use-case зовёт его, когда к запросу
+// приложимы и отказ вывода родителя, и отказ привязки (порядок Р10 приёмки
+// kaname#982), и второго предиката привязки в коде не заводит.
+func (RegistrationScopeReader) BindingRefusesTx(
+	ctx context.Context, tx service.Tx, modelType, id, project string, chain []string,
+) (bool, error) {
+	if chain == nil {
+		chain = []string{}
+	}
+	var refuses bool
+	if err := txAsPgx(tx).QueryRow(ctx,
+		`SELECT kaname.object_project_binding_refuses($1, $2, $3, $4)`,
+		modelType, id, project, chain).Scan(&refuses); err != nil {
+		return false, fmt.Errorf("object_project_binding: суд привязки %s:%s: %w", modelType, id, err)
+	}
+	return refuses, nil
+}

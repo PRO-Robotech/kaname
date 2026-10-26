@@ -79,3 +79,9 @@ func (s sceneScopes) ContainerScopeTx(_ context.Context, _ service.Tx, modelType
 func (s sceneScopes) PointerSubjectsTx(_ context.Context, _ service.Tx, modelType, id string, _ []string) ([]string, error) {
 	return s.pointers[modelType+":"+id], nil
 }
+
+// BindingRefusesTx — привязок у сцены проб на подставных портах нет: их держит
+// база (kaname#983), и судят их пробы на живой базе.
+func (s sceneScopes) BindingRefusesTx(context.Context, service.Tx, string, string, string, []string) (bool, error) {
+	return false, nil
+}

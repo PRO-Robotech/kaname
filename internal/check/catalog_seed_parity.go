@@ -745,6 +745,7 @@ var resourceAttributeColumns = map[string]bool{
 	"public_read_to_children": true, // признак контейнера публичного чтения (kaname#856)
 	"parent_names":            true, // имена указателей ресурса (kaname#982)
 	"writes":                  true, // записи сверх указателя — политика записи модуля (kaname#982)
+	"permanent_project":       true, // признак неизменного проекта (kaname#983)
 }
 
 // resourceAttributeOnlyUpdate — оператор правит у строк ресурса ТОЛЬКО колонки

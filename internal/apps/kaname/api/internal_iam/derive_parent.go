@@ -38,9 +38,11 @@ package internal_iam
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -58,6 +60,10 @@ type registrationScopeReader interface {
 	ContainerScopeTx(ctx context.Context, tx service.Tx, modelType, id string) (domain.ContainerScope, error)
 	// PointerSubjectsTx — субъекты фактов указателя объекта.
 	PointerSubjectsTx(ctx context.Context, tx service.Tx, modelType, id string, pointers []string) ([]string, error)
+	// BindingRefusesTx — привязка объекта к проекту (kaname#983) отвергает
+	// регистрацию с проектом поля project и цепью chain. Тот же предикат базы,
+	// которым судят триггеры записи зеркала и цепи.
+	BindingRefusesTx(ctx context.Context, tx service.Tx, modelType, id, project string, chain []string) (bool, error)
 }
 
 // anchorProjectType — тип опоры-проекта: его иерархию даёт строка проекта, а не
@@ -91,6 +97,9 @@ func (uc *RegisterResourceUseCase) admitRegistration(
 		}
 		return catalogType, nil
 	}
+	if err := permanentProjectForm(policy, row); err != nil {
+		return "", err
+	}
 	subjectType, _, _ := strings.Cut(t.subject, ":")
 	if !policy.Admits(t.relation, subjectType) {
 		return "", proxyWriteRefusal()
@@ -100,9 +109,56 @@ func (uc *RegisterResourceUseCase) admitRegistration(
 		AccountID: row.ParentAccountID,
 		Chain:     row.ParentChain,
 	}); err != nil {
-		return "", err
+		return "", uc.preferBindingRefusal(ctx, tx, t, policy, row, err)
 	}
 	return dotted, nil
+}
+
+// permanentProjectForm — форма регистрации типа с неизменным проектом
+// (kaname#983, Р2): проект обязан стоять и полем `parentProjectId`, и хотя бы одним
+// звеном `project:<id>` цепи — без звена второй носитель проекта, из которого
+// решение о доступе берёт область, сверять с привязкой нечем. Поле судится
+// первым: при обоих нарушениях отказ называет `parent_project_id`.
+func permanentProjectForm(policy domain.WritePolicy, row service.ResourceMirrorRow) error {
+	if !policy.PermanentProject {
+		return nil
+	}
+	if row.ParentProjectID == "" {
+		return shared.InvalidArg("parent_project_id", fmt.Sprintf(
+			"parent_project_id: required for object type %s with a permanent project", policy.ObjectType))
+	}
+	for _, link := range row.ParentChain {
+		if typ, id, ok := strings.Cut(link, ":"); ok && typ == anchorProjectType && id != "" {
+			return nil
+		}
+	}
+	return shared.InvalidArg("parent_chain", fmt.Sprintf(
+		"parent_chain: must name the project for object type %s with a permanent project", policy.ObjectType))
+}
+
+// preferBindingRefusal — порядок двух отказов, когда к регистрации приложимы оба
+// (Р10 приёмки kaname#982, §7 строка 4): отказ привязки объекта к проекту
+// (kaname#983) возвращается раньше отказа вывода родителя. Привязку судит база
+// на уровне записи зеркала и цепи, а вывод стоит до первой записи; поэтому отказ
+// вывода не возвращается, пока тем же предикатом базы не установлено, что
+// привязка этот запрос пропускает. Второго предиката привязки здесь нет.
+//
+// derr — отказ вывода; прочие ошибки проходят как есть.
+func (uc *RegisterResourceUseCase) preferBindingRefusal(ctx context.Context, tx service.Tx, t tupleIntent,
+	policy domain.WritePolicy, row service.ResourceMirrorRow, derr error,
+) error {
+	if !stderrors.Is(derr, iamerr.ErrParentScopeMismatch) {
+		return derr
+	}
+	_, objID := t.splitObject()
+	refuses, err := uc.scopes.BindingRefusesTx(ctx, tx, policy.ObjectType, objID, row.ParentProjectID, row.ParentChain)
+	if err != nil {
+		return fmt.Errorf("derive parent: judge project binding: %w", err)
+	}
+	if refuses {
+		return iamerr.ObjectBoundToOtherProject(t.object, policy.ObjectType, objID)
+	}
+	return derr
 }
 
 // deriveParent — вывод родителя (Р4) и сверка сведений модуля с ним (Р6).

@@ -507,6 +507,16 @@ type Resource struct {
 	// указатель», и загрузка его отвергает ([ErrWritesEmpty]). Указатели здесь
 	// вторично не объявляются: их объявил `parents`.
 	Writes []Write `yaml:"writes"`
+	// PermanentProject — объект типа привязан к проекту своей первой регистрации,
+	// и привязка переживает снятие регистрации: регистрация того же id под другим
+	// проектом отвергается (kaname#983, приёмка
+	// object-keeps-its-project-after-unregistration.md, Р1, Р7).
+	//
+	// Указатель, а не значение, — по той же причине, что у
+	// [Resource.PublicReadToChildren]: значение выражается ОДНИМ способом, ключ
+	// отсутствует либо равен true, а `false` загрузка отвергает
+	// ([ErrPermanentProjectFalse]). Читатели спрашивают [Resource.HoldsPermanentProject].
+	PermanentProject *bool `yaml:"permanentProject"`
 
 	// publicReadVia — имена указателей ЭТОГО ресурса на контейнеры ТОГО ЖЕ
 	// документа, объявившие публичное чтение детям, в порядке указателей.
@@ -528,6 +538,12 @@ type Write struct {
 	// Subjects — типы субъекта записи; перечень закрыт
 	// ([domain.WriteSubjectTypes]), непуст и без повторов.
 	Subjects []string `yaml:"subjects"`
+}
+
+// HoldsPermanentProject — тип объявил неизменность проекта своих объектов
+// (`permanentProject: true`).
+func (r Resource) HoldsPermanentProject() bool {
+	return r.PermanentProject != nil && *r.PermanentProject
 }
 
 // PassesPublicRead — тип объявлен контейнером публичного чтения
@@ -915,6 +931,7 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 		faults = append(faults, validateResourceBaseRoles(r, doc, i)...)
 		faults = append(faults, validateResourcePublicRead(m, r, doc, i)...)
 		faults = append(faults, validateResourceWrites(r, doc, i)...)
+		faults = append(faults, validateResourcePermanentProject(m, r, doc, i, ownTypes)...)
 		faults = append(faults, validateResourceVerbs(r, doc, i)...)
 		faults = append(faults, validateResourceRelations(r, doc, i)...)
 		faults = append(faults, validateResourceNotes(r, doc, i)...)

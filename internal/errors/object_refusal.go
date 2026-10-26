@@ -72,3 +72,22 @@ func RefusedObjectOf(err error) (RefusedObject, bool) {
 	}
 	return RefusedObject{}, false
 }
+
+// ErrObjectBoundToOtherProject — регистрация называет проект (полем либо звеном
+// `project` цепи), отличный от проекта, к которому id объекта привязан (kaname#983,
+// приёмка object-keeps-its-project-after-unregistration.md, Р4). Привязку держит
+// база (триггеры записи зеркала и цепи); адаптер записи узнаёт её отказ по имени
+// ограничения и отдаёт этот признак, а use-case — отказ с объектом
+// ([ObjectBoundToOtherProject]). Ответ один, действует ли регистрация или снята и
+// каким носителем назван другой проект; проект привязки он не называет.
+var ErrObjectBoundToOtherProject error = &objectLane{name: "object bound to another project"}
+
+// ObjectBoundToOtherProject — отказ привязки для объекта object (значение поля
+// `object` запроса дословно) модельного типа resourceType с id resourceID.
+func ObjectBoundToOtherProject(object, resourceType, resourceID string) error {
+	return &objectRefusal{
+		lane:   ErrObjectBoundToOtherProject,
+		text:   object + " is bound to another project",
+		object: RefusedObject{ResourceType: resourceType, ResourceID: resourceID},
+	}
+}

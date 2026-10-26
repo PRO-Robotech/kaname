@@ -984,6 +984,13 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			if stderrors.Is(err, iamerr.ErrUnknownResourceType) {
 				return "", false, false, shared.InvalidArg("object", iamerr.StripSentinel(err))
 			}
+			// Отказ привязки объекта к проекту (kaname#983, Р4) — тоже отказ входу:
+			// его держит база на записи зеркала и цепи, а ответ называет объект
+			// запроса и не называет проект привязки.
+			if stderrors.Is(err, iamerr.ErrObjectBoundToOtherProject) {
+				modelType, objID := t.splitObject()
+				return "", false, false, iamerr.ObjectBoundToOtherProject(t.object, modelType, objID)
+			}
 			return "", false, false, fmt.Errorf("upsert resource mirror: %w", err)
 		}
 		// Вердикт зеркала — СЫРЫМ, до поправки на производителя без версии ниже: та

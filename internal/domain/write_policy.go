@@ -80,6 +80,10 @@ type WritePolicy struct {
 	ObjectType string
 	Pointers   []ParentPointer
 	Writes     []WriteGrant
+	// PermanentProject — тип объявил неизменность проекта своих объектов
+	// (kaname#983): регистрация обязана нести проект и полем, и звеном `project`
+	// цепи, и сверяется с привязкой объекта к проекту.
+	PermanentProject bool
 }
 
 // Admits — кортеж с отношением relation и субъектом типа subjectType проходит

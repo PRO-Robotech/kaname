@@ -107,6 +107,10 @@ type ResourceRow struct {
 	// (`publicReadToChildren: true` манифеста, kaname#856). Колонка
 	// `catalog_resource.public_read_to_children`.
 	PublicReadToChildren bool
+	// PermanentProject — тип объявил неизменность проекта своих объектов
+	// (`permanentProject: true` манифеста, kaname#983). Колонка
+	// `catalog_resource.permanent_project`.
+	PermanentProject bool
 }
 
 // sameStrings — два перечня равны поэлементно и по порядку.
@@ -124,7 +128,7 @@ func sameStrings(a, b []string) bool {
 
 // SameForm — строки описывают ресурс одинаково по ВСЕМ величинам, которые
 // применение пишет: имя типа модели, указатели (типы и имена), записи сверх
-// указателя и признак контейнера.
+// указателя, признак контейнера и признак неизменного проекта.
 //
 // Одно место на всех, кто спрашивает «изменилась ли строка» (план применения и
 // перепись записанного): разойдясь, они дали бы оператору план «без изменений»
@@ -132,7 +136,7 @@ func sameStrings(a, b []string) bool {
 func (r ResourceRow) SameForm(o ResourceRow) bool {
 	return r.ObjectType == o.ObjectType && r.PublicReadToChildren == o.PublicReadToChildren &&
 		sameStrings(r.ParentTypes, o.ParentTypes) && sameStrings(r.ParentNames, o.ParentNames) &&
-		sameStrings(r.Writes, o.Writes)
+		sameStrings(r.Writes, o.Writes) && r.PermanentProject == o.PermanentProject
 }
 
 // VerbRow — одна ЖИВАЯ строка `kaname.catalog_verb`.

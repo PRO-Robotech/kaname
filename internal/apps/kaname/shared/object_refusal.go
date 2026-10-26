@@ -32,6 +32,10 @@ import (
 // расходятся с иерархией kaname либо опоры нет.
 const reasonParentScopeMismatch = "PARENT_SCOPE_MISMATCH"
 
+// reasonObjectBoundToOtherProject — регистрация называет проект, отличный от
+// проекта, к которому id объекта привязан (kaname#983).
+const reasonObjectBoundToOtherProject = "OBJECT_BOUND_TO_OTHER_PROJECT"
+
 // objectRefusal — статус с признаком полосы, если ошибка — отказ по объекту
 // регистрации; на всём прочем false, и общий switch отрабатывает как прежде.
 //
@@ -42,6 +46,8 @@ func objectRefusal(err error) (error, bool) {
 	switch {
 	case stderrors.Is(err, iamerr.ErrParentScopeMismatch):
 		reason = reasonParentScopeMismatch
+	case stderrors.Is(err, iamerr.ErrObjectBoundToOtherProject):
+		reason = reasonObjectBoundToOtherProject
 	default:
 		return nil, false
 	}

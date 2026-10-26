@@ -73,7 +73,7 @@ const CatalogLockKey = "kaname.module_catalog"
 //
 //	`catalog_module`    `live` — оживление модуля есть изменение
 //	`catalog_resource`  `resource`, `object_type`, `parent_types`,
-//	                    `parent_names`, `writes`,
+//	                    `parent_names`, `writes`, `permanent_project`,
 //	                    `public_read_to_children`, `live` — ровно то, что читает
 //	                    условие изменения `UpsertResource`, плюс ключ снятия
 //	`catalog_verb`      `resource`, `verb`, `per_object`, `live` — ровно условие
@@ -110,7 +110,7 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 	    UNION ALL
 	    SELECT 'r:' || resource || ':' || object_type || ':' || array_to_string(parent_types, ',')
 	           || ':' || array_to_string(parent_names, ',') || ':' || array_to_string(writes, ',')
-	           || ':' || public_read_to_children::text || ':' || live::text
+	           || ':' || public_read_to_children::text || ':' || permanent_project::text || ':' || live::text
 	      FROM kaname.catalog_resource WHERE module = $1
 	    UNION ALL
 	    SELECT 'v:' || resource || '.' || verb || ':' || live::text || ':' || per_object::text
@@ -255,7 +255,7 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 
 	resRows, err := w.tx.Query(ctx,
-		`SELECT module, resource, object_type, parent_types, parent_names, writes, public_read_to_children
+		`SELECT module, resource, object_type, parent_types, parent_names, writes, public_read_to_children, permanent_project
 		   FROM kaname.catalog_resource
 		  WHERE module = $1 AND live
 		  ORDER BY resource`, module)
@@ -265,7 +265,7 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	out.Resources, err = pgx.CollectRows(resRows, func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
 		var r catalog.ResourceRow
 		return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.ParentNames, &r.Writes,
-			&r.PublicReadToChildren)
+			&r.PublicReadToChildren, &r.PermanentProject)
 	})
 	if err != nil {
 		return out, fmt.Errorf("прочитать ресурсы модуля %s: %w", module, err)
@@ -431,28 +431,33 @@ func (w catalogWriter) UpsertModule(ctx context.Context, module string) (bool, e
 // Имена указателей и записи сверх указателя (kaname#982) входят по той же
 // причине: снятая с манифеста запись `writes`, не доехавшая до строки, оставила
 // бы модулю право писать отношение, которого манифест больше не объявляет.
+// Признак неизменного проекта (kaname#983) — тоже: объявление, впервые
+// выставленное строкой, привязывает зарегистрированные объекты типа триггером
+// той же транзакции, а снятое перестаёт заводить привязки новым объектам.
 func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow) (bool, error) {
 	// Пустые перечни, а не NULL: колонки NOT NULL, и «нет» выражается в них одним
 	// способом.
 	return w.changed(ctx, `
 		INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types,
-		                                     parent_names, writes, public_read_to_children)
-		VALUES ($1, $2, $1 || '.' || $2, $3, $4, $5, $6, $7)
+		                                     parent_names, writes, public_read_to_children, permanent_project)
+		VALUES ($1, $2, $1 || '.' || $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (module, resource) DO UPDATE
 		   SET retired_at = NULL, live = true, retired_reason = NULL, superseded_by = NULL,
 		       object_type = EXCLUDED.object_type,
 		       parent_types = EXCLUDED.parent_types,
 		       parent_names = EXCLUDED.parent_names,
 		       writes = EXCLUDED.writes,
-		       public_read_to_children = EXCLUDED.public_read_to_children
+		       public_read_to_children = EXCLUDED.public_read_to_children,
+		       permanent_project = EXCLUDED.permanent_project
 		 WHERE catalog_resource.live IS DISTINCT FROM true
 		    OR catalog_resource.object_type IS DISTINCT FROM EXCLUDED.object_type
 		    OR catalog_resource.parent_types IS DISTINCT FROM EXCLUDED.parent_types
 		    OR catalog_resource.parent_names IS DISTINCT FROM EXCLUDED.parent_names
 		    OR catalog_resource.writes IS DISTINCT FROM EXCLUDED.writes
 		    OR catalog_resource.public_read_to_children IS DISTINCT FROM EXCLUDED.public_read_to_children
+		    OR catalog_resource.permanent_project IS DISTINCT FROM EXCLUDED.permanent_project
 		RETURNING 1`, r.Module, r.Resource, r.ObjectType, nonNilStrings(r.ParentTypes),
-		nonNilStrings(r.ParentNames), nonNilStrings(r.Writes), r.PublicReadToChildren)
+		nonNilStrings(r.ParentNames), nonNilStrings(r.Writes), r.PublicReadToChildren, r.PermanentProject)
 }
 
 // UpsertVerb заводит, оживляет либо приводит признак словаря.
