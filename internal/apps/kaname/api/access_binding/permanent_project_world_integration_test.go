@@ -121,9 +121,9 @@ func (w *ppWorld) regReq(id string, prj domain.ProjectID, acc domain.AccountID) 
 	return r
 }
 
-// reg — регистрация реестра: кортеж `project`, затем `owner` usr-A с теми же
+// regObj — регистрация реестра: кортеж `project`, затем `owner` usr-A с теми же
 // полями области. Возвращает первый отказ.
-func (w *ppWorld) reg(id string, prj domain.ProjectID, acc domain.AccountID) error {
+func (w *ppWorld) regObj(id string, prj domain.ProjectID, acc domain.AccountID) error {
 	r := w.regReq(id, prj, acc)
 	if err := w.call(r); err != nil {
 		return err
@@ -136,7 +136,7 @@ func (w *ppWorld) reg(id string, prj domain.ProjectID, acc domain.AccountID) err
 // requireReg — регистрация реестра обязана пройти.
 func (w *ppWorld) requireReg(id string, prj domain.ProjectID, acc domain.AccountID, why string) {
 	w.t.Helper()
-	require.NoErrorf(w.t, w.reg(id, prj, acc), "%s: регистрация %s в %s обязана пройти", why, id, prj)
+	require.NoErrorf(w.t, w.regObj(id, prj, acc), "%s: регистрация %s в %s обязана пройти", why, id, prj)
 }
 
 // repoReq — регистрация ребёнка `<registry><name>` указателем `parent`.
@@ -223,7 +223,7 @@ func TestPermanentProject_PB02_OtherProjectAfterUnregistrationIsRefused(t *testi
 	require.False(t, ok, "PB-02 «Дано»: строка зеркала Q осталась после снятия")
 	events := w.snap(pcrRegType, dpQ).events
 
-	requireP4(t, w.reg(dpQ, w.prjC, w.accB), ppObj(dpQ), w.prjA, "PB-02")
+	requireP4(t, w.regObj(dpQ, w.prjC, w.accB), ppObj(dpQ), w.prjA, "PB-02")
 	after := w.snap(pcrRegType, dpQ)
 	require.Equal(t, dpSnap{events: events}, after, "PB-02: у Q записано")
 }
@@ -265,7 +265,7 @@ func TestPermanentProject_PB05_OtherProjectOfTheSameAccountIsRefused(t *testing.
 	w.deliverDK()
 	w.requireReg(dpQ, w.prjA, w.accA, "PB-05 «Дано»")
 	w.unregReg(dpQ, w.prjA, "PB-05 «Дано»")
-	requireP4(t, w.reg(dpQ, w.prjA2, w.accA), ppObj(dpQ), w.prjA, "PB-05")
+	requireP4(t, w.regObj(dpQ, w.prjA2, w.accA), ppObj(dpQ), w.prjA, "PB-05")
 	_, _, ok := w.mirrorScope(pcrRegType, dpQ)
 	require.False(t, ok, "PB-05: строка зеркала Q записана")
 }
@@ -416,7 +416,7 @@ func TestPermanentProject_PB08_RegisteredBeforeDeclarationIsBoundByDelivery(t *t
 	t.Run("a", func(t *testing.T) {
 		w := newPPWorld(t)
 		w.deliverDK()
-		requireP4(t, w.reg(pcrX, w.prjC, w.accB), ppObj(pcrX), w.prjA, "PB-08 a")
+		requireP4(t, w.regObj(pcrX, w.prjC, w.accB), ppObj(pcrX), w.prjA, "PB-08 a")
 		prj, _, _ := w.mirrorScope(pcrRegType, pcrX)
 		require.Equal(t, string(w.prjA), prj, "PB-08 a: проект строки X")
 	})
@@ -424,7 +424,7 @@ func TestPermanentProject_PB08_RegisteredBeforeDeclarationIsBoundByDelivery(t *t
 		w := newPPWorld(t)
 		w.deliverDK()
 		w.unregReg(pcrX, w.prjA, "PB-08 b")
-		requireP4(t, w.reg(pcrX, w.prjC, w.accB), ppObj(pcrX), w.prjA, "PB-08 b")
+		requireP4(t, w.regObj(pcrX, w.prjC, w.accB), ppObj(pcrX), w.prjA, "PB-08 b")
 		_, _, ok := w.mirrorScope(pcrRegType, pcrX)
 		require.False(t, ok, "PB-08 b: строка зеркала X записана")
 	})
@@ -438,7 +438,7 @@ func TestPermanentProject_PB09_UnregisteredBeforeDeclarationIsNotBound(t *testin
 	w.requireReg(pcrX, w.prjC, w.accB, "PB-09")
 	prj, _, _ := w.mirrorScope(pcrRegType, pcrX)
 	require.Equal(t, string(w.prjC), prj, "PB-09: проект строки X")
-	requireP4(t, w.reg(pcrX, w.prjA, w.accA), ppObj(pcrX), w.prjC, "PB-09: привязка заведена регистрацией")
+	requireP4(t, w.regObj(pcrX, w.prjA, w.accA), ppObj(pcrX), w.prjC, "PB-09: привязка заведена регистрацией")
 }
 
 // TestPermanentProject_PB10_ChildUnderOtherProjectContainerIsRefused — PB-10.
@@ -732,7 +732,7 @@ func TestPermanentProject_PB20_BindingCannotBeChangedOrRemoved(t *testing.T) {
 		require.ErrorAsf(t, err, &pg, "PB-20 %s: ожидался отказ базы, получено %v", tc.name, err)
 		require.Truef(t, strings.HasPrefix(pg.Code, "23"), "PB-20 %s: SQLSTATE %s не класса 23", tc.name, pg.Code)
 	}
-	requireP4(t, w.reg(dpQ, w.prjC, w.accB), ppObj(dpQ), w.prjA, "PB-20: привязка прежняя")
+	requireP4(t, w.regObj(dpQ, w.prjC, w.accB), ppObj(dpQ), w.prjA, "PB-20: привязка прежняя")
 }
 
 // TestPermanentProject_PB21_BindingDoesNotHoldProjectDeletion — PB-21.
@@ -758,7 +758,7 @@ func TestPermanentProject_PB21_BindingDoesNotHoldProjectDeletion(t *testing.T) {
 		w.unregReg(dpQ2, w.prjA2, "PB-21 «Дано»")
 		require.NoError(t, deleteA2(w), "PB-21 a: удаление проекта")
 		require.False(t, projectExists(w), "PB-21 a: проект на месте")
-		requireP4(t, w.reg(dpQ2, w.prjA, w.accA), ppObj(dpQ2), w.prjA2, "PB-21 a: привязка пережила проект")
+		requireP4(t, w.regObj(dpQ2, w.prjA, w.accA), ppObj(dpQ2), w.prjA2, "PB-21 a: привязка пережила проект")
 	})
 	t.Run("b", func(t *testing.T) {
 		w := newPPWorld(t)
@@ -797,7 +797,7 @@ func TestPermanentProject_PB23_WithdrawnDeclarationKeepsBindings(t *testing.T) {
 	require.NoError(t, err)
 	w.deliver("PB-23: D-K без ключа", keyless)
 
-	requireP4(t, w.reg(dpQ, w.prjC, w.accB), ppObj(dpQ), w.prjA, "PB-23 a")
+	requireP4(t, w.regObj(dpQ, w.prjC, w.accB), ppObj(dpQ), w.prjA, "PB-23 a")
 
 	w.requireReg(dpQ2, w.prjA, w.accA, "PB-23 b")
 	w.unregReg(dpQ2, w.prjA, "PB-23 b")
