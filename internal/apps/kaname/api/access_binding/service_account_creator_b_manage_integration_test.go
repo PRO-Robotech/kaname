@@ -110,6 +110,13 @@ func TestServiceAccountCreator_SAC12_CreatorManagesHisAccountTheWholeCycle(t *te
 	got, err := w.saGet(iss, cr1)
 	require.NoError(t, err, "SAC-12 шаг 1")
 	require.Equal(t, cr1, got.GetId(), "SAC-12 шаг 1: тело sva-cr1")
+	// Ведение — глаголами, без яруса (Р2 п.3: «ярус на учётках не
+	// материализуется»): сверх таблицы сценария, чтобы проба различала «глаголы
+	// на своей учётке» и «ярус на ней».
+	for _, r := range []string{"viewer", "editor", "admin"} {
+		w.requireRelation("service_account:"+w.svaIss, r, sacSAModelType+":"+cr1, false,
+			"SAC-12: у создателя на своей учётке нет яруса "+r)
+	}
 	// 2) два ключа.
 	o := w.keyIssue(iss, cr1)
 	requireSACDone(t, o, "SAC-12 шаг 2: K1")
@@ -206,6 +213,29 @@ func TestServiceAccountCreator_SAC14_TwoCreatorsDoNotManageEachOthersAccounts(t 
 	require.NoError(t, err, "SAC-14: sva-cr1 на месте")
 	require.Zero(t, w.keyCensus(cr1), "SAC-14: ключей у sva-cr1")
 	requireSACDone(t, w.keyIssue(iss2, cr2), "SAC-14 c (близнец): sva-iss2 Issue sva-cr2")
+}
+
+// SAC-14 d — сверх таблицы сценария: ОДНА выдача роли C двум учёткам. Ведение
+// своей учётки каждый получает по своей строке субъекта выдачи, а не по выдаче
+// целиком (`reconcile.creatorGrantees`): иначе сосед по выдаче вёл бы учётки
+// другого. Пара — «своя учётка» против «учётка соседа по той же выдаче».
+func TestServiceAccountCreator_SAC14d_OneGrantTwoSubjectsEachManagesOnlyHisOwn(t *testing.T) {
+	w := newSACWorld(t)
+	w.requireCreatorRole("SAC-14 d")
+	w.grantC("SAC-14 d Дано: G на двоих", w.svaIss, w.svaOther)
+	cr1 := w.createSADone(asSA(w.ctx, w.svaIss), string(w.accA), "cr-1", "SAC-14 d Дано: sva-cr1 от sva-iss")
+	crO := w.createSADone(asSA(w.ctx, w.svaOther), string(w.accA), "cr-o", "SAC-14 d Дано: sva-crO от sva-other")
+	w.pollRelation("service_account:"+w.svaIss, "v_update", sacSAModelType+":"+cr1, true,
+		"SAC-14 d контроль: sva-iss ведёт sva-cr1")
+	w.pollRelation("service_account:"+w.svaOther, "v_update", sacSAModelType+":"+crO, true,
+		"SAC-14 d близнец: sva-other ведёт sva-crO")
+
+	w.requireRelation("service_account:"+w.svaOther, "v_update", sacSAModelType+":"+cr1, false,
+		"SAC-14 d: sva-other не ведёт sva-cr1 соседа по выдаче")
+	w.requireRelation("service_account:"+w.svaIss, "v_update", sacSAModelType+":"+crO, false,
+		"SAC-14 d: sva-iss не ведёт sva-crO соседа по выдаче")
+	requireSACDenied(t, w.keyIssue(asSA(w.ctx, w.svaOther), cr1), "SAC-14 d: sva-other Issue sva-cr1")
+	requireSACDone(t, w.keyIssue(asSA(w.ctx, w.svaOther), crO), "SAC-14 d (близнец): sva-other Issue sva-crO")
 }
 
 // SAC-15 — список создателя — только его учётки.
