@@ -34,6 +34,11 @@ const (
 )
 
 // SAC-40 — роль аккаунта не называет `create` на учётках и не несёт селектора создателя.
+//
+// Имена ролей — с подчёркиванием (`r_40a`), а не с дефисом, как в теле приёмки
+// (`r-40a`): имя роли аккаунта судит `roles_custom_name_check`
+// (`^[a-z][a-z0-9_]{0,40}$`), и дефис отвергся бы ДО предмета — отказом имени, а не
+// отказом права. Остальное тело — дословно.
 func TestServiceAccountCreator_SAC40_TenantRoleNamesNoCreateAndNoCreatorSelector(t *testing.T) {
 	w := newSACWorld(t)
 	owner := asUser(w.ctx, w.usrA)
@@ -64,12 +69,12 @@ func TestServiceAccountCreator_SAC40_TenantRoleNamesNoCreateAndNoCreatorSelector
 		}
 	}
 
-	requireRefused(create("r-40a", ruleA), sac40VerbsText, "", "SAC-40 a: Create с create на serviceAccount")
+	requireRefused(create("r_40a", ruleA), sac40VerbsText, "", "SAC-40 a: Create с create на serviceAccount")
 	requireRefused(update(ruleA), sac40VerbsText, "", "SAC-40 b: Update rol-own тем же правилом")
 	require.Equal(t, ownRules, w.roleRules(w.rolOwn), "SAC-40 b: правила rol-own прежние")
-	requireSACDone(t, create("r-40c", `{"module":"iam","resources":["serviceAccount"],"verbs":["get"]}`),
+	requireSACDone(t, create("r_40c", `{"module":"iam","resources":["serviceAccount"],"verbs":["get"]}`),
 		"SAC-40 c (близнец): Create с get")
-	requireRefused(create("r-40d", ruleD), sac40SelectorText, "rules[0].createdBySubject",
+	requireRefused(create("r_40d", ruleD), sac40SelectorText, "rules[0].createdBySubject",
 		"SAC-40 d: Create с createdBySubject")
 	requireRefused(update(ruleD), sac40SelectorText, "rules[0].createdBySubject",
 		"SAC-40 e: Update rol-own правилом d")

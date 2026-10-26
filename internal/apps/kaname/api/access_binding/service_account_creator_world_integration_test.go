@@ -172,7 +172,7 @@ func newSACWorld(t *testing.T) *sacWorld {
 	// Роль аккаунта rol-own — глаголом от usr-A, до `done`.
 	w.rolOwn = w.createRoleDone(asUser(ctx, g.usrA), &iamv1.CreateRoleRequest{
 		AccountId: string(g.accA),
-		Name:      "rol-own-" + strings.ToLower(ids6(t)),
+		Name:      "rol_own_" + ids6(t),
 		Rules:     []*iamv1.Rule{{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}}},
 	}, "мир С: роль аккаунта rol-own")
 
