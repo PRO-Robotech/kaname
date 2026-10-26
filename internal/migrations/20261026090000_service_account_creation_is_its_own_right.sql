@@ -241,7 +241,7 @@ $$;
 INSERT INTO kaname.roles (id, account_id, name, description, permissions, cluster_id, project_id, rules, labels)
 VALUES ('rol' || left(md5('iam.service_account.creator'), 17), NULL, 'iam.service_account.creator',
         'Create service accounts and manage the ones you created',
-        '["iam.serviceAccount.*.create"]'::jsonb, 'cluster_kacho_root', NULL,
+        '["iam.serviceAccount.*.create"]'::jsonb, 'cluster_root', NULL,
         '[{"module": "iam", "resources": ["serviceAccount"], "verbs": ["create"]},
           {"module": "iam", "resources": ["serviceAccount"], "verbs": ["delete", "get", "list", "update"], "created_by_subject": true}]'::jsonb,
         '{}'::jsonb)
