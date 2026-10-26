@@ -218,8 +218,14 @@ func TestServiceAccountCreator_SAC21_CensusCreatorHoldsExactlyOneAccountRight(t 
 					continue
 				}
 				asked++
-				got := w.relation(subject.ref, r, o.typ+":"+o.id)
-				require.Equalf(t, subject.twin, got, "SAC-21: Check(%s, %s, %s:%s)", subject.ref, r, o.typ, o.id)
+				if subject.twin {
+					// Близнец: пообъектные права владельца на объекте, заведённом
+					// глаголом в этом мире (rol-own), материализуются после коммита —
+					// окно, которое закрывает опрос, а не барьер операции (ban #9).
+					w.pollRelation(subject.ref, r, o.typ+":"+o.id, true, "SAC-21 (близнец)")
+					continue
+				}
+				w.requireRelation(subject.ref, r, o.typ+":"+o.id, false, "SAC-21")
 			}
 		}
 	}
