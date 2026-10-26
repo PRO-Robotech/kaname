@@ -93,7 +93,7 @@ func newLedgerProbe(t *testing.T, suffix string, retired bool) *ledgerProbe {
 	// Цепь предков объекта — тем же входом, каким её пишет продукт: без указателя на
 	// проект вердикт области объекта не видит, и прямой факт отказывает ещё до снятия.
 	require.NoError(t, newRegisterUCWired(pool).Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:" + string(fx.prj), Relation: "parent", Object: "compute_instance:iRace",
+		SubjectId: "project:" + string(fx.prj), Relation: "project", Object: "compute_instance:iRace",
 		ParentProjectId: string(fx.prj), ParentAccountId: string(fx.accID),
 		SourceVersion: timestamppb.New(time.Now().Add(time.Minute)),
 	}))

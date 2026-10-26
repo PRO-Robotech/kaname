@@ -289,6 +289,13 @@ func (w *gdWorld) deliverDoc(file, what string) {
 	w.t.Helper()
 	doc, err := publicreadfixture.Read(file)
 	require.NoErrorf(w.t, err, "%s: фикстура %s", what, file)
+	if file == gdFixture {
+		// Редакция registry несёт запись `writes: owner`, как у мира П6 (kaname#982):
+		// доставка заменяет политику записи, и регистрации `owner` мира без неё были
+		// бы отказом.
+		doc, err = publicreadfixture.WithWrites(doc)
+		require.NoErrorf(w.t, err, "%s: фикстура %s с writes", what, file)
+	}
 	m, err := manifest.Load(doc)
 	require.NoErrorf(w.t, err, "%s: загрузчик отверг фикстуру %s", what, file)
 	w.applyDelivered(what, m)

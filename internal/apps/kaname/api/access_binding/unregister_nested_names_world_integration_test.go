@@ -42,8 +42,12 @@ import (
 func newP3UWorld(t *testing.T) *urxWorld {
 	t.Helper()
 	w := newURXWorld(t)
-	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	edition, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
 	require.NoError(t, err, "фикстура П3-У")
+	// Запись `writes: owner`, как у мира П6 (kaname#982): доставка заменяет политику
+	// записи модуля, и регистрации `owner` мира без неё были бы отказом.
+	doc, err := publicreadfixture.WithWrites(edition)
+	require.NoError(t, err, "фикстура П3-У с writes")
 	m, err := manifest.Load(doc)
 	require.NoError(t, err, "фикстура П3-У обязана загружаться")
 	w.applyDelivered("П3-У: доставка новой редакции registry", m)
