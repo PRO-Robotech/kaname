@@ -179,7 +179,7 @@ var testdataRefusedByDesign = map[string]error{
 // # Что было неверно
 //
 // Потолок посева (kaname#979) судили синтетические документы этого файла да
-// одна фикстура (`vpc.resources-fixture.yaml`), которую #979 и поправил.
+// одна фикстура (`vpc.resources-fixture.yaml`), которую kaname#979 и поправил.
 // Фикстура мира Д (`vpc.delegation-fixture.yaml`, kaname#1009) была снята с
 // прежней редакции той же фикстуры — роль `vpc.internal_consumer` на ярусе
 // проекта и её выдача посевом на кластере — и новым запретом стала отвергаться.
