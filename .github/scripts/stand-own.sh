@@ -2813,6 +2813,8 @@ EOF
         ( PATH="$TMP/kc:$PATH"; kc_reset
           R="$TMP/rrepo"; rm -rf "$R"; mkdir -p "$R"
           { git -C "$R" init -q && printf 'module x\n\ngo 1.26.0\n\ntoolchain go1.26.10\n' > "$R/go.mod" && git -C "$R" add go.mod &&
+            mkdir -p "$R/.github/workflows" && printf 'env:\n  HELM_VERSION: v3.22.1\n' > "$R/.github/workflows/chart.yml" &&
+            git -C "$R" add .github/workflows/chart.yml &&
             git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m t &&
             git -C "$R" remote add origin https://github.com/PRO-Robotech/kaname.git; } || exit 9
           ROOT="$R"; RUNDIR="$TMP/run-runner"; rm -rf "$RUNDIR"

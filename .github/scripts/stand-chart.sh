@@ -925,6 +925,10 @@ probe() {
 
 self_test() {
 	local legal off unnamed rc=0 out
+	# Окружение pod раннера самопроверку не уводит: pod несёт KANAME_STAND_IN_POD, и
+	# снос и сборка судили бы путь pod, а не свою настройку (4 провала на первом
+	# прогоне в pod, kaname#964). Мир, которому путь pod нужен, ставит его сам.
+	IN_POD=""
 	legal='{"msg":"boot security posture","auth_mode":"production-strict","db_sslmode":"require","public_mtls":true,"internal_mtls":"true","authz_check":true,"trusted_forwarders":true,"identity_provider":"own"}'
 	# ОДИН факт против законного близнеца, не два: иначе неизвестно, который
 	# из них дал красное, и вердикт пробы недействителен.
