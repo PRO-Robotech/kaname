@@ -110,6 +110,13 @@ func TestServiceAccountCreator_SAC12_CreatorManagesHisAccountTheWholeCycle(t *te
 	got, err := w.saGet(iss, cr1)
 	require.NoError(t, err, "SAC-12 шаг 1")
 	require.Equal(t, cr1, got.GetId(), "SAC-12 шаг 1: тело sva-cr1")
+	// Ведение — глаголами, без яруса (Р2 п.3: «ярус на учётках не
+	// материализуется»): сверх таблицы сценария, чтобы проба различала «глаголы
+	// на своей учётке» и «ярус на ней».
+	for _, r := range []string{"viewer", "editor", "admin"} {
+		w.requireRelation("service_account:"+w.svaIss, r, sacSAModelType+":"+cr1, false,
+			"SAC-12: у создателя на своей учётке нет яруса "+r)
+	}
 	// 2) два ключа.
 	o := w.keyIssue(iss, cr1)
 	requireSACDone(t, o, "SAC-12 шаг 2: K1")
