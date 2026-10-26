@@ -36,7 +36,9 @@ GD-E1…GD-E5. Интеграционные пробы GD-01…GD-70 —
 по делегированию, выдача несёт `delegationId`. E4 — близнец E3 (роль вне
 делегирования): 403/7. E5 — отзыв и удаление делегатом проходят слушатель
 (держатель GD-30, GD-41 a): своя выдача против чужой, защита от удаления,
-правка за дверью.
+правка за дверью. GD-D4 (kaname#1011, Д4 §1 приёмки) — пара близнецов о
+субъекте-группе: выдача делегатом группе, в составе которой он сам, — 403/7;
+та же выдача группе, член которой — учётка аккаунта, — 200 и `delegationId`.
 
 Дисциплина (testing.md): каждый кейс сеет своё и за собой убирает (уборка
 best-effort, отказ теардауна — не дефект предмета); имена — через {{runId}}.
@@ -80,21 +82,24 @@ def _seeded():
     return lines
 
 
-def _d1_body():
+_D1_SUBJECT_TYPES = ["SUBJECT_TYPE_SERVICE_ACCOUNT", "SUBJECT_TYPE_SYSTEM_CLASS"]
+
+
+def _d1_body(subject_types=None):
     return {
         "accountId": "{{accountAId}}",
         "delegate": {"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": "{{gdDelegateSaId}}"},
         "roleIds": ["{{gdRolePullerId}}", "{{gdRolePusherId}}", "{{gdRoleAdminId}}"],
         "targetTypes": ["registry.registries", "registry.repositories"],
-        "subjectTypes": ["SUBJECT_TYPE_SERVICE_ACCOUNT", "SUBJECT_TYPE_SYSTEM_CLASS"],
+        "subjectTypes": list(subject_types or _D1_SUBJECT_TYPES),
     }
 
 
-def _create_d1(prefix, var, first=True):
+def _create_d1(prefix, var, first=True, subject_types=None):
     """Заведение D1 владельцем до `done` без ошибки; id — в `var`."""
     return [
         Step(name=f"{prefix}-create-delegation", method="POST", path="/iam/v1/grantDelegations",
-             body=_d1_body(), auth=OWNER_STEP_UP,
+             body=_d1_body(subject_types), auth=OWNER_STEP_UP,
              pre_script=_seeded() if first else [],
              test_script=[*assert_status(200),
                           *save_from_response("j.id", "opId"),
@@ -139,10 +144,11 @@ def _cleanup_sa(prefix, var):
     ]
 
 
-def _v_body(subject_var, role_var="gdRolePusherId", protection=False):
+def _v_body(subject_var, role_var="gdRolePusherId", protection=False,
+            subject_type="SUBJECT_TYPE_SERVICE_ACCOUNT"):
     """Тело выдачи V (§4.1): область — проект реестра, роль pusher, цель — реестр."""
     body = {
-        "subjects": [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": "{{" + subject_var + "}}"}],
+        "subjects": [{"type": subject_type, "id": "{{" + subject_var + "}}"}],
         "roleId": "{{" + role_var + "}}",
         "scopeType": "iam.project",
         "scopeId": "{{gdRegistryProjectId}}",
@@ -153,10 +159,11 @@ def _v_body(subject_var, role_var="gdRolePusherId", protection=False):
     return body
 
 
-def _grant(prefix, subject_var, out_var, auth=DELEGATE, protection=False, role_var="gdRolePusherId"):
+def _grant(prefix, subject_var, out_var, auth=DELEGATE, protection=False, role_var="gdRolePusherId",
+           subject_type="SUBJECT_TYPE_SERVICE_ACCOUNT"):
     return [
         Step(name=f"{prefix}-grant", method="POST", path="/iam/v1/accessBindings",
-             body=_v_body(subject_var, role_var, protection), auth=auth,
+             body=_v_body(subject_var, role_var, protection, subject_type), auth=auth,
              test_script=[*assert_status(200),
                           *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.accessBindingId", out_var)]),
@@ -352,6 +359,118 @@ CASES.append(Case(
         *_cleanup_sa("gde5s2", "gdE5Sa2"),
         *_cleanup_sa("gde5s3", "gdE5Sa3"),
         *_cleanup_sa("gde5s4", "gdE5Sa4"),
+    ],
+))
+
+
+# ===========================================================================
+# GD-D4 — субъект-группа: делегат не получает права и через группу
+# (verifies https://github.com/PRO-Robotech/kaname/issues/1011)
+# ===========================================================================
+#
+# Д4 §1 приёмки: делегирование не даёт делегату доступа к данным. Право роли,
+# выданное группе, достаётся каждому её члену, поэтому группа, в составе которой
+# делегат, — тот же делегат. Пара близнецов различается РОВНО одним фактом —
+# кто член группы: учётка-делегат (отказ) либо учётка аккаунта A, заведённая
+# кейсом (выдача проходит). Обе группы непусты, делегирование, роль, область и
+# цель — одни и те же; так отказ первого кейса нельзя списать ни на тип субъекта
+# «группа», ни на пустую группу. Техники: таблица решений (член группы × исход),
+# угадывание ошибки (обход запрета через косвенного субъекта).
+
+_D4_SUBJECT_TYPES = ["SUBJECT_TYPE_GROUP", "SUBJECT_TYPE_SERVICE_ACCOUNT"]
+
+
+def _group_with_member(prefix, group_var, member_var):
+    """Группа аккаунта A, заведённая владельцем, и один член — учётка из `member_var`.
+
+    Шаг состава утверждает себя: член в группе есть (иначе исход выдачи судил бы
+    не предмет, а несозданное условие).
+    """
+    return [
+        Step(name=f"{prefix}-group", method="POST", path="/iam/v1/groups",
+             body={"accountId": "{{accountAId}}", "name": prefix + "-{{runId}}",
+                   "description": "GD-D4: субъект-группа выдачи"},
+             auth=OWNER,
+             test_script=[*assert_status(200),
+                          *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.groupId", group_var)]),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(name=f"{prefix}-add-member", method="POST",
+             path="/iam/v1/groups/{{" + group_var + "}}:addMember",
+             body={"memberType": "service_account", "memberId": "{{" + member_var + "}}"},
+             auth=OWNER,
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(name=f"{prefix}-members", method="GET",
+             path="/iam/v1/groups/{{" + group_var + "}}:listMembers", auth=OWNER,
+             test_script=[
+                 *assert_status(200),
+                 "const ms = pm.response.json().members || [];",
+                 "const ids = ms.map((m) => m.memberId);",
+                 f"pm.test({js_str('GD-D4 Дано: член группы — ' + member_var)}, () =>",
+                 f"  pm.expect(ids, JSON.stringify(ms)).to.include(pm.environment.get({js_str(member_var)})));",
+                 "pm.test('GD-D4 Дано: в группе ровно один член', () =>",
+                 "  pm.expect(ms.length, JSON.stringify(ms)).to.eql(1));",
+             ]),
+    ]
+
+
+def _cleanup_group(prefix, group_var):
+    return [
+        Step(name=f"{prefix}-cleanup-group", method="DELETE",
+             path="/iam/v1/groups/{{" + group_var + "}}", auth=OWNER,
+             test_script=[*save_from_response("j.id", "opId")]),
+        poll_operation_until_done(required=False),
+    ]
+
+
+CASES.append(Case(
+    id="IAM-GD-D4-GROUP-HOLDING-DELEGATE-DENIED",
+    title="GD-D4 (kaname#1011, verifies https://github.com/PRO-Robotech/kaname/issues/1011): делегат выдаёт "
+          "pusher на реестр группе аккаунта, в составе которой он сам, — 403, code 7, permission denied",
+    classes=["AUTHZ", "NEG"],
+    priority="P1",
+    steps=[
+        *_create_d1("gdd4n", "gdD4nId", subject_types=_D4_SUBJECT_TYPES),
+        *_group_with_member("gdd4n", "gdD4nGrp", "gdDelegateSaId"),
+        Step(name="gdd4n-grant-group-holding-delegate", method="POST", path="/iam/v1/accessBindings",
+             body=_v_body("gdD4nGrp", subject_type="SUBJECT_TYPE_GROUP"), auth=DELEGATE,
+             test_script=_denied("GD-D4")),
+        *_revoke_delegation("gdd4n-cleanup", "gdD4nId", required=False),
+        *_cleanup_group("gdd4n", "gdD4nGrp"),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-GD-D4-GROUP-WITHOUT-DELEGATE-OK",
+    title="GD-D4 близнец (kaname#1011, verifies https://github.com/PRO-Robotech/kaname/issues/1011): та же выдача "
+          "группе, член которой — учётка аккаунта, а не делегат, — 200, операция без ошибки, выдача несёт delegationId",
+    classes=["AUTHZ", "CRUD"],
+    priority="P1",
+    steps=[
+        *_create_d1("gdd4p", "gdD4pId", subject_types=_D4_SUBJECT_TYPES),
+        *_subject_sa("gdd4ps", "gdD4pSa"),
+        *_group_with_member("gdd4p", "gdD4pGrp", "gdD4pSa"),
+        *_grant("gdd4p", "gdD4pGrp", "gdD4pAcb", subject_type="SUBJECT_TYPE_GROUP"),
+        retry_until_present(Step(
+            name="gdd4p-get-binding", method="GET", path="/iam/v1/accessBindings/{{gdD4pAcb}}", auth=OWNER,
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('GD-D4 близнец: delegationId — делегирование кейса', () =>",
+                "  pm.expect(j.delegationId, pm.response.text()).to.eql(pm.environment.get('gdD4pId')));",
+                "pm.test('GD-D4 близнец: субъект — группа кейса', () =>",
+                "  pm.expect(j.subjects, pm.response.text()).to.eql("
+                "[{type: 'SUBJECT_TYPE_GROUP', id: pm.environment.get('gdD4pGrp')}]));",
+                "pm.test('GD-D4 близнец: status ACTIVE', () => pm.expect(j.status).to.eql('ACTIVE'));",
+            ],
+        ), "gdD4pAcb"),
+        *_revoke_delegation("gdd4p-cleanup", "gdD4pId", required=False),
+        *_cleanup_group("gdd4p", "gdD4pGrp"),
+        *_cleanup_sa("gdd4ps", "gdD4pSa"),
     ],
 ))
 
