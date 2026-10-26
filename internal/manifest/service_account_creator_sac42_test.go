@@ -194,6 +194,19 @@ func TestServiceAccountCreator_SAC42_ManifestFormLoaderRoleexportGeneratorWildca
 	if got := rules[1]; !ruleCreatedBySubject(t, got) {
 		t.Errorf("SAC-42 a: правило 2 роли C экспортировано без селектора создателя: %#v", got)
 	}
+	// Правило 2 уезжает ровно объявленным набором глаголов (SAC-41: get, list,
+	// update, delete как множество). Сведение к наименьшему набору классов по
+	// покрытию действий здесь неприменимо: селектор создателя пишет на объекте
+	// только кортежи глаголов (Р2 п.3), и «list», покрытый другим классом через
+	// ярус, создатель терял бы — его список своих учёток пустел бы (SAC-15).
+	if got := append([]string(nil), rules[1].Verbs...); len(got) > 0 {
+		sort.Strings(got)
+		if strings.Join(got, ",") != "delete,get,list,update" {
+			t.Errorf("SAC-42 a: правило 2 роли C экспортировано глаголами %v, ждали множество [get list update delete]", rules[1].Verbs)
+		}
+	} else {
+		t.Errorf("SAC-42 a: правило 2 роли C экспортировано без глаголов: %#v", rules[1])
+	}
 	acc, err := modelrender.Render(resourceNamed(t, m, "account"))
 	if err != nil {
 		t.Fatalf("SAC-42 a: рендер account: %v", err)
