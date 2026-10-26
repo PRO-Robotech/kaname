@@ -43,14 +43,15 @@ import (
 )
 
 // unregisteredEvents — полезные нагрузки событий снятия объекта `id` реестра в
-// порядке записи.
+// порядке записи: по времени транзакции (`created_at`), а не по id — id события
+// случаен и порядка не несёт.
 func (w *cascadeWorld) unregisteredEvents(id string) []map[string]any {
 	w.t.Helper()
 	rows, err := w.pool.Query(w.ctx,
 		`SELECT event_payload FROM kaname.audit_outbox
 		  WHERE event_type = $1 AND event_payload #>> '{object,type}' = $2
 		    AND event_payload #>> '{object,id}' = $3
-		  ORDER BY id`,
+		  ORDER BY created_at, id`,
 		auditUnregistered, pcrRegTgt, id)
 	require.NoError(w.t, err, "события снятия %s", id)
 	defer rows.Close()
