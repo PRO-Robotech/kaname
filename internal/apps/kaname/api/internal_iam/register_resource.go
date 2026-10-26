@@ -1178,8 +1178,8 @@ func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx servi
 			}
 		}
 		if admitsPublication(d.ModelType) {
-			if _, err := uc.publications.ApplyTx(ctx, tx, d.ModelType, d.ID, false, parent.SourceVersion); err != nil {
-				return 0, fmt.Errorf("withdraw public-read publication of descendant: %w", err)
+			if err := uc.withdrawDescendantPublication(ctx, tx, d.ModelType, d.ID, version); err != nil {
+				return 0, err
 			}
 		}
 		if uc.reconcile != nil {
@@ -1189,6 +1189,45 @@ func (uc *RegisterResourceUseCase) dropDescendants(ctx context.Context, tx servi
 		}
 	}
 	return count, nil
+}
+
+// withdrawDescendantPublication снимает публикацию потомка при ЛЮБОМ порядке
+// версий (SD-1017-C1).
+//
+// # Почему не одним применением с версией
+//
+// Публикация упорядочена СВОЕЙ версией владельца объекта, и снятие применяется
+// только строго новее хранимого. Версия надгробия родителя с ней не сравнима
+// (шапка `descendants.go`) и сюда не идёт вовсе: поднятое ею надгробие глотало бы
+// публикации объекта, заново заведённого под тем же ключом. Версия последней
+// регистрации потомка сравнима, но публикация, поставленная после регистрации,
+// новее неё. Снятие, проглоченное как «не новее», оставило бы анонимное чтение
+// объекту без регистрации — и следующему объекту под тем же ключом: id
+// репозитория — его имя.
+//
+// # Порядок двух применений
+//
+// Сперва — с версией последней регистрации registered: если она новее хранимого,
+// надгробие поднимается до неё, и запоздавшее открытие старше регистрации найдёт
+// его, а не пустое место. Не применилось — хранимое не старше; тогда снятие без
+// версии, которое применяется всегда и версию хранимого назад не отодвигает
+// (`greatest`): повтор того открытия, что стояло, по-прежнему не новее и ничего
+// не открывает. Нулевая registered (строки регистрации не было) сразу даёт
+// снятие без версии.
+func (uc *RegisterResourceUseCase) withdrawDescendantPublication(ctx context.Context, tx service.Tx,
+	modelType, id string, registered time.Time,
+) error {
+	applied, err := uc.publications.ApplyTx(ctx, tx, modelType, id, false, registered)
+	if err != nil {
+		return fmt.Errorf("withdraw public-read publication of descendant: %w", err)
+	}
+	if applied {
+		return nil
+	}
+	if _, err := uc.publications.ApplyTx(ctx, tx, modelType, id, false, time.Time{}); err != nil {
+		return fmt.Errorf("withdraw public-read publication of descendant without a version: %w", err)
+	}
+	return nil
 }
 
 // catalogModule — модуль типа, названного словарём каталога (`<модуль>.<ресурс>`).
