@@ -181,7 +181,7 @@ func (w *dpWorld) redeliverP0() {
 type dpSnap struct {
 	mirror string // «проект|аккаунт|метки»; пусто — строки нет
 	chain  string
-	facts  int
+	facts  string // факты объекта «отношение@субъект» через запятую, по порядку
 	events int
 }
 
@@ -199,7 +199,8 @@ func (w *dpWorld) snap(modelType, id string) dpSnap {
 	}
 	s.chain = strings.Join(w.chain(modelType, id), ",")
 	require.NoError(w.t, w.pool.QueryRow(w.ctx,
-		`SELECT count(*) FROM kaname.relation_fact WHERE object_type = $1 AND object_id = $2`,
+		`SELECT coalesce(string_agg(relation || '@' || subject, ',' ORDER BY relation, subject), '')
+		   FROM kaname.relation_fact WHERE object_type = $1 AND object_id = $2`,
 		modelType, id).Scan(&s.facts))
 	require.NoError(w.t, w.pool.QueryRow(w.ctx,
 		`SELECT count(*) FROM kaname.resource_reconcile_outbox WHERE object_type IN ($1, $2) AND object_id = $3`,
@@ -504,38 +505,44 @@ func TestDeriveParent_DP12_ChildAgainstContainerIsRefused(t *testing.T) {
 	w := newDPWorld(t)
 	prjA, accA := string(w.prjA), string(w.accA)
 	childX := pcrRepoType + ":" + pcrX + "/new"
-	snapX, snapY := w.snap(pcrRegType, pcrX), w.snap(pcrRegType, pcrY)
+	containers := []string{pcrX, pcrY}
+	// refused — запрос отвергнут отказом вывода, у ребёнка ничего не записано, и
+	// снимки контейнеров до и после ИМЕННО ЭТОГО запроса равны.
+	refused := func(name string, req *iamv1.RegisterResourceRequest, child string) {
+		t.Helper()
+		before := make([]dpSnap, len(containers))
+		for i, c := range containers {
+			before[i] = w.snap(pcrRegType, c)
+		}
+		requireP8(t, w.register("registry", req), child, "DP-12 "+name)
+		_, childID, _ := strings.Cut(child, ":")
+		w.requireNothing(pcrRepoType, childID, "DP-12 "+name)
+		for i, c := range containers {
+			require.Equalf(t, before[i], w.snap(pcrRegType, c), "DP-12 %s: С(%s) изменился", name, c)
+		}
+	}
 
 	a := w.r2()
 	a.ParentChain = []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA2), "account:" + accA}
-	requireP8(t, w.register("registry", a), childX, "DP-12 a")
-	w.requireNothing(pcrRepoType, pcrX+"/new", "DP-12 a")
+	refused("a", a, childX)
 
 	b := w.r2()
 	b.ParentProjectId = string(w.prjA2)
-	requireP8(t, w.register("registry", b), childX, "DP-12 b")
-	w.requireNothing(pcrRepoType, pcrX+"/new", "DP-12 b")
+	refused("b", b, childX)
 
 	w.requireOK("registry", w.regIn(dpQ, w.prjA, w.accA), "DP-12 c: «Дано»")
-	snapQ := w.snap(pcrRegType, dpQ)
+	containers = append(containers, dpQ)
 	c := dpReq(pcrRegType+":"+dpQ, "parent", pcrRepoType+":"+dpQ+"/new", string(w.prjC), string(w.accB),
 		pcrRegType+":"+dpQ, "project:"+string(w.prjC), "account:"+string(w.accB))
-	requireP8(t, w.register("registry", c), pcrRepoType+":"+dpQ+"/new", "DP-12 c")
-	w.requireNothing(pcrRepoType, dpQ+"/new", "DP-12 c")
+	refused("c", c, pcrRepoType+":"+dpQ+"/new")
 
 	d := w.r2()
 	d.ParentChain = []string{pcrRegType + ":" + pcrY, "project:" + prjA, "account:" + accA}
-	requireP8(t, w.register("registry", d), childX, "DP-12 d")
-	w.requireNothing(pcrRepoType, pcrX+"/new", "DP-12 d")
+	refused("d", d, childX)
 
 	e := dpReq(pcrRegType+":"+dpQ2, "parent", pcrRepoType+":"+dpQ2+"/new", prjA, accA,
 		pcrRegType+":"+dpQ2, "project:"+prjA, "account:"+accA)
-	requireP8(t, w.register("registry", e), pcrRepoType+":"+dpQ2+"/new", "DP-12 e")
-	w.requireNothing(pcrRepoType, dpQ2+"/new", "DP-12 e")
-
-	require.Equal(t, snapX, w.snap(pcrRegType, pcrX), "DP-12: С(X) изменился")
-	require.Equal(t, snapY, w.snap(pcrRegType, pcrY), "DP-12: С(Y) изменился")
-	require.Equal(t, snapQ, w.snap(pcrRegType, dpQ), "DP-12: С(Q) изменился")
+	refused("e", e, pcrRepoType+":"+dpQ2+"/new")
 }
 
 // TestDeriveParent_DP13_ChildAgreeingWithContainerPasses — DP-13.
@@ -607,6 +614,10 @@ func TestDeriveParent_DP15_CreatorIsCheckedAgainstTheDerivedParent(t *testing.T)
 	w.requireNothing(pcrRegType, dpQ3, "DP-15 b")
 
 	w.requireOK("registry", w.regIn(dpQ3, w.prjA, w.accA), "DP-15 c: «Дано»")
+	// Тот же кортеж — новым намерением со своей версией: прежняя версия старше той,
+	// с которой Q3 только что зарегистрирован указателем, и такую доставку зеркало
+	// законно читает как запоздавшую — кортеж не ставится.
+	b.SourceVersion = dpVersion()
 	w.requireOK("registry", b, "DP-15 c")
 	_, with := w.ownerFacts(pcrRegType, dpQ3, usrB)
 	require.True(t, with, "DP-15 c: факта owner usr-B на Q3 нет")
