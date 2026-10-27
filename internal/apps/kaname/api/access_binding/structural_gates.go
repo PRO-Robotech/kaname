@@ -113,7 +113,12 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 	// target on it is impossible, so it would SILENTLY grant the WHOLE scope (over-grant,
 	// same class as Finding 1). Reject it fail-closed; an allInScope target on the same
 	// role stays valid (scope-level access is the legacy role's intended semantics).
-	if len(b.Target.Resources) > 0 && len(role.Rules) == 0 {
+	//
+	// Роль без правил И без прав (kaname#963, Р6) — роль, все правила которой
+	// потеряли адресатов снятием регистрации, — веткой «только с перечнем прав» не
+	// читается: она не даёт ничего, и отказ ей называет проверка покрытия ниже, а не
+	// этот текст.
+	if len(b.Target.Resources) > 0 && len(role.Rules) == 0 && len(role.Permissions) > 0 {
 		return status.Errorf(codes.FailedPrecondition,
 			"role %s has no rules; a per-object target requires a rules-role "+
 				"(a permissions-only role grants scope-level access — use target.allInScope)",
@@ -125,7 +130,7 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 	// checked at materialization); a permissions-only role (no authored rules) is
 	// rejected above when it carries a per-object target (Gate 3a) and needs no
 	// coverage check for an allInScope grant (its coverage lives in compiled permissions).
-	if len(role.Rules) > 0 {
+	if len(role.Rules) > 0 || len(role.Permissions) == 0 {
 		for _, ref := range b.Target.Resources {
 			if !role.Rules.CoversType(ref.Type) {
 				return status.Errorf(codes.FailedPrecondition,

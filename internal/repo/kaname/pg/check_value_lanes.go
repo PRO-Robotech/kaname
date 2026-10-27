@@ -115,6 +115,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_granted_relation_shape_ck",
 			"access_bindings_relation_form_anchor_ck",
 			"access_bindings_relation_form_is_system_ck",
+			// Причину отзыва ставит служба из своего закрытого словаря (kaname#963).
+			"access_bindings_revocation_reason_ck",
 			"access_bindings_revoked_by_check",
 			"access_bindings_revoked_consistency_ck",
 			"access_bindings_scope_ck",
@@ -261,6 +263,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	}},
 	// Очередь кортежей модели прав — пишет служба.
 	"fga_outbox": nil,
+	// Делегирование права выдавать (kaname#986): оси проверены формой запроса до
+	// записи (размер, повторы, типы субъекта), модуль, состояние, ссылку на учётку
+	// и принципалов шагов служба выводит сама — отказ проверки здесь дефект службы.
+	"grant_delegations": nil,
 	// Участник группы: слово вида прислал вызывающий.
 	"group_members": {caller: []string{"group_members_type_check"}},
 	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).

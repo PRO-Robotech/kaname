@@ -578,9 +578,18 @@ build_image() {
 		if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
 			say "стенд: ВНИМАНИЕ — в дереве незакоммиченные правки; ревизия образа $REVISION их не называет"
 		fi
+		# Вывод сборки — в журнал рабочего каталога, а не в никуда (kaname#999).
+		# Отказ без текста docker нельзя процитировать и отнести к классу: поломка
+		# дерева неотличима от сбоя среды, и прогон признавался недействительным
+		# только по времени. При отказе хвост журнала печатается рядом с отказом;
+		# при успехе журнал остаётся в каталоге и в вывод не идёт.
+		local build_log="$WORK/image-build.log"
+		mkdir -p "$WORK"
 		docker build -f "$ROOT/Dockerfile" --build-arg "OCI_IMAGE_REVISION=$REVISION" \
-			-t "$IMAGE" "$ROOT" >/dev/null 2>&1 || {
-			unmet "образ $IMAGE не собрался"
+			-t "$IMAGE" "$ROOT" >"$build_log" 2>&1 || {
+			unmet "образ $IMAGE не собрался; хвост журнала сборки $build_log:"
+			# Печать хвоста не вправе подменить код отказа: он прежний при любом её исходе.
+			tail -n 40 "$build_log" | sed 's/^/  docker build: /' >&2 || true
 			exit "$RC_UNMET"
 		}
 		say "стенд: образ $IMAGE собран с ревизией ${REVISION:-<не названа>}"
@@ -651,6 +660,10 @@ authn:
   trustedForwarderSANs:
     - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"
     - "spiffe://$DOMAIN/ns/$NS/sa/$EDGE_SA"
+  # Личность края стенда (kaname#984): модулем признаётся только объявленная
+  # пара, и посев, стоящий на месте края листом края, иначе краем не был бы.
+  moduleIdentities:
+    - "$NS/$EDGE_SA=edge@internal"
   clientToken:
     enabled: true
     tokenTtl: 15m
@@ -931,6 +944,46 @@ self_test() {
 		rc=1
 	fi
 	RESOLVER_POLL="$saved_poll"
+
+	# ── СБОРКА ОБРАЗА: ОТКАЗ НЕСЁТ ТЕКСТ docker (kaname#999) ────────────────
+	#
+	# Настоящий `build_image` против подставных docker и kind: docker отвечает
+	# так, как отвечает на сломанный Dockerfile, — текстом отказа в поток ошибок
+	# и ненулевым кодом. Отказ без этого текста нельзя процитировать и отнести к
+	# классу: поломка дерева неотличима от сбоя среды. Близнец — исправный
+	# docker: образ собран, журнал сборки в выводе не печатается. Различие двух
+	# миров — один исход подставного docker.
+	local bfake bout brc
+	bfake="$(mktemp -d)"
+	mkdir -p "$bfake/bin" "$bfake/work"
+	printf '#!/bin/sh\necho "#1 [internal] load build definition from Dockerfile"\necho "ERROR: failed to build: failed to solve: dockerfile parse error on line 2: unknown instruction: BROKENINSTRUCTION" >&2\nexit 1\n' \
+		> "$bfake/bin/docker"
+	printf '#!/bin/sh\nexit 0\n' > "$bfake/bin/kind"
+	chmod +x "$bfake/bin/docker" "$bfake/bin/kind"
+	brc=0
+	bout="$( (PATH="$bfake/bin:$PATH"; WORK="$bfake/work"; KANAME_STAND_SKIP_BUILD=0; build_image) 2>&1 )" || brc=$?
+	probe "сборка образа отказала — код прежний ($RC_UNMET)"
+	[ "$brc" -eq "$RC_UNMET" ] || { fail "самопроба: отказ сборки образа вернул код $brc вместо $RC_UNMET"; rc=1; }
+	probe "сборка образа отказала — текст отказа docker в выводе стенда"
+	case "$bout" in
+		*"unknown instruction: BROKENINSTRUCTION"*) ;;
+		*) fail "самопроба: отказ сборки образа без текста docker — вывод стенда: «$bout»"; rc=1 ;;
+	esac
+	printf '#!/bin/sh\necho "#1 [internal] load build definition from Dockerfile"\necho "#9 naming to docker.io/library/kaname:stand done"\nexit 0\n' \
+		> "$bfake/bin/docker"
+	brc=0
+	bout="$( (PATH="$bfake/bin:$PATH"; WORK="$bfake/work"; KANAME_STAND_SKIP_BUILD=0; build_image) 2>&1 )" || brc=$?
+	probe "сборка образа прошла — образ собран, журнала сборки в выводе нет"
+	if [ "$brc" -ne 0 ]; then
+		fail "самопроба: исправная сборка образа вернула код $brc — вывод: «$bout»"; rc=1
+	else
+		case "$bout" in
+			*"load build definition"*|*"naming to"*) fail "самопроба: исправная сборка печатает журнал сборки — вывод: «$bout»"; rc=1 ;;
+			*"собран"*) ;;
+			*) fail "самопроба: исправная сборка не сказала, что образ собран — вывод: «$bout»"; rc=1 ;;
+		esac
+	fi
+	rm -rf "$bfake"
 
 	# Оба числа ВЫВЕДЕНЫ: утверждений — из объявлений `probe`, осей — из того
 	# перечня, который судит `assert`. Выписанные, они расходились бы с

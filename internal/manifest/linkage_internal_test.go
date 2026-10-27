@@ -47,12 +47,12 @@ const declaredRolesSection = `
 roles:
   - id: vpc.internal_consumer
     description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
-    tier: {tierType: iam.project, tierId: prj000000000000000}
+    tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - {module: vpc, resources: [address], classes: [get, list]}
   - id: vpc.address_pool_admin
     description: Ведёт адресные пулы облака.
-    tier: {tierType: iam.account, tierId: acc000000000000000}
+    tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - {module: vpc, resources: [addressPool], classes: [get, list]}
 `

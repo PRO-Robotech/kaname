@@ -43,8 +43,10 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
@@ -63,6 +65,8 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
+		kanamepg.NewRegistrationAudit(),
 	)
 	return uc, &outboxProbe{pool: pool}
 }

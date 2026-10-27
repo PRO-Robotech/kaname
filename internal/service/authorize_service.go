@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
@@ -163,6 +164,10 @@ type AuthorizeService struct {
 	// session_record_check.go). nil — доводов нет нигде, и условие ложно, как
 	// до исхода (а).
 	sessions SessionRecords
+	// catalog — каталог модулей из живых строк: из него вопрос без отношения
+	// берёт глагол типа объекта (`moduleVerbRelation`, kaname#994, kaname#995).
+	// nil — каталога нет, и такой вопрос получает отказ.
+	catalog catalog.Source
 	// now — часы службы: «сейчас» условий и живости записи сессии.
 	now func() time.Time
 }
@@ -196,6 +201,11 @@ type AuthorizeServiceConfig struct {
 	// SessionRecords — записи сессий человека, из которых выводятся доводы
 	// способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
 	SessionRecords SessionRecords
+	// Catalog — каталог модулей из ЖИВЫХ строк (тот же источник, что у ролей и
+	// выдач корня службы). Нужен вопросу без отношения: он разрешает действие
+	// глаголом типа (`moduleVerbRelation`); nil — такой вопрос получает отказ, а
+	// не ярус.
+	Catalog catalog.Source
 	// Now — часы службы; nil — часы процесса.
 	Now func() time.Time
 }
@@ -212,6 +222,7 @@ func NewAuthorizeService(cfg AuthorizeServiceConfig) *AuthorizeService {
 		clusterAdmin: cfg.ClusterAdminChecker,
 		admission:    adm,
 		sessions:     cfg.SessionRecords,
+		catalog:      cfg.Catalog,
 		now:          now,
 	}
 }
@@ -235,12 +246,11 @@ type CheckRequest struct {
 	Subject  string // "user:usr_xxx" / "service_account:sva_xxx" / "group:grp_xxx#member"
 	Resource ResourceRef
 	Action   string // "<domain>.<resource>.<verb>"
-	// RequiredRelation — when non-empty, overrides verb-derived relation.
-	// api-gateway middleware populates this from the catalog's
-	// `required_relation` annotation so admin-only RPCs (e.g.
-	// `vpc.address_pools.list` with `required_relation=system_admin`) gate
-	// on the explicit relation instead of the auto-derived `viewer` which
-	// would slip through `cluster.viewer` (выдано классу «вошедшие»).
+	// RequiredRelation — отношение, названное явно: спрашивается дословно.
+	// Край заполняет его из аннотации `required_relation` своего каталога, и
+	// RPC администратора (`required_relation=system_admin`) спрашивают именно
+	// его. Пусто — отношение выводится из действия глаголом типа объекта по
+	// каталогу модуля (`moduleVerbRelation`, kaname#994, kaname#995).
 	RequiredRelation string
 	Context          map[string]any // optional CEL-context
 }
@@ -404,7 +414,7 @@ func (s *AuthorizeService) checkInPass(ctx context.Context, req CheckRequest, ca
 	now := s.now().UTC().Truncate(time.Second)
 	result = &CheckResult{CheckedAt: now}
 
-	p := planCheck(ctx, req, now)
+	p := planCheck(ctx, req, now, s.catalogFacts())
 	if p.invalid != nil {
 		return result, p.invalid
 	}
@@ -483,7 +493,9 @@ type checkPlan struct {
 // Часы — параметром: у партии они ОДНИ на весь проход, иначе пункты одной
 // страницы получили бы разное «сейчас» при вычислении условий, и страница
 // описывала бы состояние, которого не было ни в один момент.
-func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
+//
+// Каталог — параметром по той же причине: у партии он ОДИН на весь проход.
+func planCheck(ctx context.Context, req CheckRequest, now time.Time, facts *catalog.Facts) checkPlan {
 	p := checkPlan{subject: req.Subject, action: req.Action}
 
 	// Input validation.
@@ -505,15 +517,14 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		p.invalid = fmt.Errorf("Illegal argument action: required")
 		return p
 	}
-	// Explicit relation override. When the api-gateway
-	// passes `required_relation` from the catalog, we honor it verbatim
-	// instead of deriving from action verb — the catalog is the single
-	// source of truth for what FGA relation gates each RPC. Verb-derived
-	// fallback only applies when override is empty (legacy peer-service
-	// callers still work).
+	// Отношение, названное явно (край передаёт `required_relation` своего
+	// каталога), спрашивается дословно. Вопрос без отношения разрешает действие
+	// глаголом типа объекта из каталога модуля — у ВСЕХ вызывающих, а не
+	// ярусом: ярус `viewer` объединяет `get` и `list`, и выданный `get` отвечал
+	// «да» на вопрос о `list` (kaname#995). Глагола в каталоге нет — отказ.
 	relation := strings.TrimSpace(req.RequiredRelation)
 	if relation == "" {
-		relation = resolveActionToRelation(req.Action)
+		relation = moduleVerbRelation(facts, req.Action, req.Resource.Type)
 	}
 	if relation == "" {
 		// Cluster-admin fallback: even an unresolvable relation is allowed for a
@@ -627,7 +638,7 @@ func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relati
 // нет»: записи о выдаче неподтверждённому, существующие у него, спросившему о
 // нём наружу не называются.
 func (s *AuthorizeService) NeutralDenyReasons(ctx context.Context, req CheckRequest) []string {
-	p := planCheck(ctx, req, s.now().UTC())
+	p := planCheck(ctx, req, s.now().UTC(), s.catalogFacts())
 	if p.invalid != nil {
 		return []string{p.invalid.Error()}
 	}
@@ -903,8 +914,10 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	// Допуск субъекта (kaname#456, Р4а) — по вопросу на СУБЪЕКТ прохода, до
 	// прогонов: неподтверждённому «нет» на каждом его пункте, с причиной.
 	denied := make(map[string]bool, 1)
+	// Каталожный факт — один снимок на проход, как и часы.
+	facts := s.catalogFacts()
 	for i, req := range reqs {
-		p := planCheck(ctx, req, now)
+		p := planCheck(ctx, req, now, facts)
 		plans[i] = p
 		if p.invalid != nil {
 			// Genuine per-item validation failure (e.g. "Illegal argument …",
@@ -1309,6 +1322,10 @@ func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandReques
 // verbs in {get,list,update,delete,create} mapped to {viewer,viewer,editor,
 // admin,editor}. For domain-specific actions we fall back to the verb
 // directly (`compute.instances.ssh` → `ssh`).
+//
+// Читатель у него один — `ListSubjects`. Вопрос `Check` без отношения ярусом
+// больше не разрешается: он берёт глагол типа из каталога модуля
+// (`moduleVerbRelation`, kaname#995).
 func resolveActionToRelation(action string) string {
 	parts := strings.Split(action, ".")
 	if len(parts) < 2 {

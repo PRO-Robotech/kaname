@@ -1,0 +1,10 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# В пакет чарта уезжают Chart.yaml, профили значений и шаблоны. Пробы чарта
+# (`*_test.go`) и полоса рендера (`render-guard.sh`) живут рядом с ним в дереве,
+# но установке не нужны: helm их не читает, а пакет, опубликованный в реестр
+# (`.github/scripts/chart-publish.sh`), нёс бы сотню файлов кода, которого у
+# получателя нет чем исполнить (kaname#964).
+*_test.go
+*.sh

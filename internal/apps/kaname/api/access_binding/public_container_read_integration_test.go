@@ -142,6 +142,7 @@ func TestPublicContainerRead_SC63_RevokeRemovesReadFromAllRepositoriesAtOnce(t *
 		p.pollAsk(pcrAnon, q.relation, q.modelType, q.id, true, "SC-63 близнец: до отзыва "+q.String())
 	}
 
+	p.ownerMayRemove("SC-63 Дано", id)
 	op, err := p.ab.Delete(asUser(p.ctx, p.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err, "SC-63: отзыв выдачи ПЧ")
 	done := awaitOp(t, p.ctx, p.ops, op.GetId())
@@ -222,6 +223,7 @@ func TestPublicContainerRead_SC66_TargetCapFreshnessAndFloorAsToday(t *testing.T
 	requireSyncRefusal(t, err, codes.InvalidArgument, "Illegal argument target.resources (must be 1..256)", "SC-66 (а)")
 	req.Target = targetOf(256)
 	id := p.createDone(asUser(p.ctx, p.usrA), req, "SC-66 (б): 256 объектов")
+	p.ownerMayRemove("SC-66 Дано", id)
 	op, err := p.ab.Delete(asUser(p.ctx, p.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err, "SC-66: снятие (б) перед (в), (г)")
 	require.Nil(t, awaitOp(t, p.ctx, p.ops, op.GetId()).Error, "SC-66: снятие (б)")

@@ -43,6 +43,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
@@ -80,6 +81,44 @@ func actingAsGateFromCatalog(t *testing.T, fqn string) (relation, objectType str
 	}
 	t.Fatalf("каталог не знает %s — проба утверждала бы о несуществующем гейте", fqn)
 	return "", ""
+}
+
+// removalGateFromHandler — вопрос, которым судится снятие выдачи держателем права
+// выдавать: отношение и тип объекта.
+//
+// До PRO-Robotech/kaname#986 его задавала ДВЕРЬ слушателя по строке каталога
+// `AccessBindingService/Delete`, и проба читала его там. Аннотация глагола стала
+// `<exempt>` · `HANDLER_DECIDES` (Р1а приёмки делегированных выдач): вопрос
+// переехал в обработчик дословно, и его единственный источник — экспортированные
+// отношение и тип объекта обработчика (`accessbindingapp.RemovalRelation`,
+// `RemovalObjectType`; условие CE-17 разбора классов). Проба утверждает и сам
+// переезд: строка каталога обязана объявлять, что решает обработчик, — иначе
+// источник раздвоился бы молча.
+func removalGateFromHandler(t *testing.T) (relation, objectType string) {
+	t.Helper()
+	const fqn = "kaname.cloud.iam.v1.AccessBindingService/Delete"
+	const rel = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
+	data, err := os.ReadFile(platformtree.RequirePath(t, rel))
+	require.NoErrorf(t, err, "каталог прав %s не прочитан", rel)
+	var entries []struct {
+		FQN          string `json:"fqn"`
+		Permission   string `json:"permission"`
+		ExemptReason string `json:"exempt_reason"`
+	}
+	require.NoError(t, json.Unmarshal(data, &entries))
+	found := false
+	for _, e := range entries {
+		if e.FQN != fqn {
+			continue
+		}
+		found = true
+		require.Equalf(t, "<exempt>", e.Permission, "%s: дверь снова судит снятие выдачи — источник вопроса раздвоился", fqn)
+		require.Equalf(t, "HANDLER_DECIDES", e.ExemptReason, "%s: причина освобождения не «решает обработчик»", fqn)
+	}
+	require.Truef(t, found, "каталог не знает %s", fqn)
+	require.NotEmpty(t, accessbindingapp.RemovalRelation, "у обработчика нет отношения снятия выдачи")
+	require.NotEmpty(t, accessbindingapp.RemovalObjectType, "у обработчика нет типа объекта выдачи")
+	return accessbindingapp.RemovalRelation, accessbindingapp.RemovalObjectType
 }
 
 // TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount — вердикт по

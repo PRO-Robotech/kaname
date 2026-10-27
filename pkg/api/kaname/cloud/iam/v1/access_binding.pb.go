@@ -275,6 +275,73 @@ func (AccessBinding_Scope) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_access_binding_proto_rawDescGZIP(), []int{0, 1}
 }
 
+// Почему выдача отозвана. Закрытый набор, значение выразимо ровно одним
+// способом (приёмка `unregistration-revokes-its-grants.md`, Д2).
+type AccessBinding_RevocationReason int32
+
+const (
+	// Выдача не отозвана; либо отозвана до заведения поля — тогда пустое значение
+	// значит «отозвана до заведения поля», а не «причину потеряли» (Д7).
+	AccessBinding_REVOCATION_REASON_UNSPECIFIED AccessBinding_RevocationReason = 0
+	// Отозвана глаголом `Revoke`; `revoked_by_user_id` — вызывающий.
+	AccessBinding_REVOCATION_REASON_REVOKE AccessBinding_RevocationReason = 1
+	// Истёк `expires_at`, выдачу отозвал проход срока; `revoked_by_user_id` пуст.
+	AccessBinding_REVOCATION_REASON_EXPIRED AccessBinding_RevocationReason = 2
+	// Снята регистрация объекта, который цель выдачи называла
+	// (`InternalIAMService.UnregisterResource`); `revoked_by_user_id` пуст —
+	// отозвал не человек.
+	AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED AccessBinding_RevocationReason = 3
+	// Отозвано делегирование, по которому выдача сделана
+	// (`GrantDelegationService.Revoke`); `revoked_by_user_id` — отозвавший
+	// делегирование.
+	AccessBinding_REVOCATION_REASON_DELEGATION_REVOKED AccessBinding_RevocationReason = 4
+)
+
+// Enum value maps for AccessBinding_RevocationReason.
+var (
+	AccessBinding_RevocationReason_name = map[int32]string{
+		0: "REVOCATION_REASON_UNSPECIFIED",
+		1: "REVOCATION_REASON_REVOKE",
+		2: "REVOCATION_REASON_EXPIRED",
+		3: "REVOCATION_REASON_RESOURCE_UNREGISTERED",
+		4: "REVOCATION_REASON_DELEGATION_REVOKED",
+	}
+	AccessBinding_RevocationReason_value = map[string]int32{
+		"REVOCATION_REASON_UNSPECIFIED":           0,
+		"REVOCATION_REASON_REVOKE":                1,
+		"REVOCATION_REASON_EXPIRED":               2,
+		"REVOCATION_REASON_RESOURCE_UNREGISTERED": 3,
+		"REVOCATION_REASON_DELEGATION_REVOKED":    4,
+	}
+)
+
+func (x AccessBinding_RevocationReason) Enum() *AccessBinding_RevocationReason {
+	p := new(AccessBinding_RevocationReason)
+	*p = x
+	return p
+}
+
+func (x AccessBinding_RevocationReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccessBinding_RevocationReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_kaname_cloud_iam_v1_access_binding_proto_enumTypes[4].Descriptor()
+}
+
+func (AccessBinding_RevocationReason) Type() protoreflect.EnumType {
+	return &file_kaname_cloud_iam_v1_access_binding_proto_enumTypes[4]
+}
+
+func (x AccessBinding_RevocationReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccessBinding_RevocationReason.Descriptor instead.
+func (AccessBinding_RevocationReason) EnumDescriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_access_binding_proto_rawDescGZIP(), []int{0, 2}
+}
+
 // An AccessBinding resource. Связывает (subject_type, subject_id) с (role_id) на
 // scope-anchor (scope_type, scope_id) — redesign-2026 F7 rename (было
 // resource_type/resource_id; слово «resource» отдано target'у).
@@ -374,6 +441,12 @@ type AccessBinding struct {
 	// under the anchor, including future) is reachable ONLY via explicit
 	// `target.allInScope{}` opt-in; there is no default sentinel. NEW tag — the
 	// earlier target/target_ref (tags 16/18) stay tombstoned.
+	//
+	// Клиентом цель не меняется, но снятие регистрации объекта её сужает: объект
+	// убирается из перечня, остальные сохраняют порядок. Перечень, из которого
+	// вынули последний объект, не хранится (пустой читался бы как вся область):
+	// выдача отзывается с причиной `REVOCATION_REASON_RESOURCE_UNREGISTERED`, и в
+	// цели отозванной выдачи остаётся последний снятый объект.
 	Target *AccessTarget `protobuf:"bytes,22,opt,name=target,proto3" json:"target,omitempty"`
 	// OUTPUT-ONLY. When this binding's per-object access last became live —
 	// `MAX(updated_at)` over the binding's ACTIVE materialized members. Ignored on
@@ -435,7 +508,20 @@ type AccessBinding struct {
 	// (`subject_type = "system_class"`, `subject_id = "authenticated"`). Подстановка
 	// `subject_id = "*"` субъектом выдачи не является ни у какой выдачи: у обычной
 	// она отвергается, у платформенной заменена системным классом.
-	System        bool `protobuf:"varint,25,opt,name=system,proto3" json:"system,omitempty"`
+	System bool `protobuf:"varint,25,opt,name=system,proto3" json:"system,omitempty"`
+	// OUTPUT-ONLY. Причина отзыва. Задана ровно тогда, когда `status = REVOKED` и
+	// отзыв случился после заведения поля; у действующей выдачи и у выдачи,
+	// отозванной до заведения поля, не задана. Поле с присутствием (`optional`):
+	// незаданное не выходит ключом и в JSON, печатающем незаданные поля, — у
+	// действующей выдачи ключа `revocationReason` в теле нет (приёмка
+	// unregistration-revokes-its-grants.md, URG-E2).
+	RevocationReason *AccessBinding_RevocationReason `protobuf:"varint,26,opt,name=revocation_reason,json=revocationReason,proto3,enum=kaname.cloud.iam.v1.AccessBinding_RevocationReason,oneof" json:"revocation_reason,omitempty"`
+	// OUTPUT-ONLY. Делегирование права выдавать (`GrantDelegation.id`), по которому
+	// выдача сделана делегатом; пусто у выдачи, сделанной держателем права выдавать.
+	// Ставит только делегированный путь права выдавать; на вход ни одного запроса
+	// поле не принимается. Делегат отзывает и удаляет только выдачи, несущие
+	// ссылку на его действующее делегирование.
+	DelegationId  string `protobuf:"bytes,27,opt,name=delegation_id,json=delegationId,proto3" json:"delegation_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -603,6 +689,20 @@ func (x *AccessBinding) GetSystem() bool {
 	return false
 }
 
+func (x *AccessBinding) GetRevocationReason() AccessBinding_RevocationReason {
+	if x != nil && x.RevocationReason != nil {
+		return *x.RevocationReason
+	}
+	return AccessBinding_REVOCATION_REASON_UNSPECIFIED
+}
+
+func (x *AccessBinding) GetDelegationId() string {
+	if x != nil {
+		return x.DelegationId
+	}
+	return ""
+}
+
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant
 // applies to (redesign-2026 F8). Exactly one arm is set.
 type AccessTarget struct {
@@ -694,9 +794,22 @@ func (*AccessTarget_AllInScope) isAccessTarget_Target() {}
 // polymorphic ResourceRef{type,id} (graceful-dangling; `type` is the dotted name
 // of a type live in the platform resource catalog, e.g. `compute.instance`; the
 // grantable types are published by `GET /iam/v1/permissionCatalog`).
+//
+// Снятие регистрации объекта, выполненное после того, как выдача сделана, убирает
+// объект из перечня в той же транзакции; опустевший перечень — отзыв выдачи
+// (`AccessBinding.target`).
 type AccessTargetResources struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Resources     []*ResourceRef         `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The objects of the grant. Each `id` follows the object grammar, the same one
+	// object registration enforces: it is non-empty and contains none of space,
+	// tab, newline, `#` (the subject-set separator) or `:` (a second colon of the
+	// object `type:id`). `/` is legal and taken verbatim: the service neither
+	// splits nor normalizes the id. A forbidden character fails `Create`
+	// synchronously with INVALID_ARGUMENT before any `Operation` is issued, with
+	// the message `Illegal argument target.resources[N].id (not a valid object id:
+	// space, tab, newline, '#' and ':' are not allowed)`, where N is the element's
+	// index.
+	Resources     []*ResourceRef `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1340,7 +1453,7 @@ var File_kaname_cloud_iam_v1_access_binding_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\n" +
-	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\xaf\t\n" +
+	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\x9d\f\n" +
 	"\rAccessBinding\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fsubject_type\x18\x02 \x01(\tR\vsubjectType\x12\x1d\n" +
@@ -1366,7 +1479,9 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x06target\x18\x16 \x01(\v2!.kaname.cloud.iam.v1.AccessTargetR\x06target\x12C\n" +
 	"\x0fmaterialized_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x0ematerializedAt\x12)\n" +
 	"\x10granted_relation\x18\x18 \x01(\tR\x0fgrantedRelation\x12\x16\n" +
-	"\x06system\x18\x19 \x01(\bR\x06system\x1a9\n" +
+	"\x06system\x18\x19 \x01(\bR\x06system\x12e\n" +
+	"\x11revocation_reason\x18\x1a \x01(\x0e23.kaname.cloud.iam.v1.AccessBinding.RevocationReasonH\x00R\x10revocationReason\x88\x01\x01\x12#\n" +
+	"\rdelegation_id\x18\x1b \x01(\tR\fdelegationId\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +
@@ -1380,7 +1495,14 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x11SCOPE_UNSPECIFIED\x10\x00\x12\v\n" +
 	"\aCLUSTER\x10\x01\x12\v\n" +
 	"\aACCOUNT\x10\x02\x12\v\n" +
-	"\aPROJECT\x10\x03J\x04\b\t\x10\n" +
+	"\aPROJECT\x10\x03\"\xc9\x01\n" +
+	"\x10RevocationReason\x12!\n" +
+	"\x1dREVOCATION_REASON_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18REVOCATION_REASON_REVOKE\x10\x01\x12\x1d\n" +
+	"\x19REVOCATION_REASON_EXPIRED\x10\x02\x12+\n" +
+	"'REVOCATION_REASON_RESOURCE_UNREGISTERED\x10\x03\x12(\n" +
+	"$REVOCATION_REASON_DELEGATION_REVOKED\x10\x04B\x14\n" +
+	"\x12_revocation_reasonJ\x04\b\t\x10\n" +
 	"J\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10J\x04\b\x10\x10\x11J\x04\b\x11\x10\x12J\x04\b\x12\x10\x13R\fcondition_idR\x11builtin_conditionR\x05scopeR\tscope_refR\n" +
 	"target_refR\bselector\"\xb5\x01\n" +
 	"\fAccessTarget\x12J\n" +
@@ -1453,53 +1575,55 @@ func file_kaname_cloud_iam_v1_access_binding_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_access_binding_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_access_binding_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_kaname_cloud_iam_v1_access_binding_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_kaname_cloud_iam_v1_access_binding_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_kaname_cloud_iam_v1_access_binding_proto_goTypes = []any{
 	(SubjectType)(0),                    // 0: kaname.cloud.iam.v1.SubjectType
 	(GrantSurfaceKind)(0),               // 1: kaname.cloud.iam.v1.GrantSurfaceKind
 	(AccessBinding_Status)(0),           // 2: kaname.cloud.iam.v1.AccessBinding.Status
 	(AccessBinding_Scope)(0),            // 3: kaname.cloud.iam.v1.AccessBinding.Scope
-	(*AccessBinding)(nil),               // 4: kaname.cloud.iam.v1.AccessBinding
-	(*AccessTarget)(nil),                // 5: kaname.cloud.iam.v1.AccessTarget
-	(*AccessTargetResources)(nil),       // 6: kaname.cloud.iam.v1.AccessTargetResources
-	(*AccessTargetAllInScope)(nil),      // 7: kaname.cloud.iam.v1.AccessTargetAllInScope
-	(*Subject)(nil),                     // 8: kaname.cloud.iam.v1.Subject
-	(*GroupMembershipRecord)(nil),       // 9: kaname.cloud.iam.v1.GroupMembershipRecord
-	(*ClusterAdminRecord)(nil),          // 10: kaname.cloud.iam.v1.ClusterAdminRecord
-	(*GrantSurfaceRecord)(nil),          // 11: kaname.cloud.iam.v1.GrantSurfaceRecord
-	(*CreateAccessBindingMetadata)(nil), // 12: kaname.cloud.iam.v1.CreateAccessBindingMetadata
-	(*DeleteAccessBindingMetadata)(nil), // 13: kaname.cloud.iam.v1.DeleteAccessBindingMetadata
-	(*UpdateAccessBindingMetadata)(nil), // 14: kaname.cloud.iam.v1.UpdateAccessBindingMetadata
-	(*RevokeAccessBindingMetadata)(nil), // 15: kaname.cloud.iam.v1.RevokeAccessBindingMetadata
-	nil,                                 // 16: kaname.cloud.iam.v1.AccessBinding.LabelsEntry
-	(*timestamppb.Timestamp)(nil),       // 17: google.protobuf.Timestamp
-	(*ResourceRef)(nil),                 // 18: kaname.cloud.iam.v1.ResourceRef
+	(AccessBinding_RevocationReason)(0), // 4: kaname.cloud.iam.v1.AccessBinding.RevocationReason
+	(*AccessBinding)(nil),               // 5: kaname.cloud.iam.v1.AccessBinding
+	(*AccessTarget)(nil),                // 6: kaname.cloud.iam.v1.AccessTarget
+	(*AccessTargetResources)(nil),       // 7: kaname.cloud.iam.v1.AccessTargetResources
+	(*AccessTargetAllInScope)(nil),      // 8: kaname.cloud.iam.v1.AccessTargetAllInScope
+	(*Subject)(nil),                     // 9: kaname.cloud.iam.v1.Subject
+	(*GroupMembershipRecord)(nil),       // 10: kaname.cloud.iam.v1.GroupMembershipRecord
+	(*ClusterAdminRecord)(nil),          // 11: kaname.cloud.iam.v1.ClusterAdminRecord
+	(*GrantSurfaceRecord)(nil),          // 12: kaname.cloud.iam.v1.GrantSurfaceRecord
+	(*CreateAccessBindingMetadata)(nil), // 13: kaname.cloud.iam.v1.CreateAccessBindingMetadata
+	(*DeleteAccessBindingMetadata)(nil), // 14: kaname.cloud.iam.v1.DeleteAccessBindingMetadata
+	(*UpdateAccessBindingMetadata)(nil), // 15: kaname.cloud.iam.v1.UpdateAccessBindingMetadata
+	(*RevokeAccessBindingMetadata)(nil), // 16: kaname.cloud.iam.v1.RevokeAccessBindingMetadata
+	nil,                                 // 17: kaname.cloud.iam.v1.AccessBinding.LabelsEntry
+	(*timestamppb.Timestamp)(nil),       // 18: google.protobuf.Timestamp
+	(*ResourceRef)(nil),                 // 19: kaname.cloud.iam.v1.ResourceRef
 }
 var file_kaname_cloud_iam_v1_access_binding_proto_depIdxs = []int32{
-	17, // 0: kaname.cloud.iam.v1.AccessBinding.created_at:type_name -> google.protobuf.Timestamp
+	18, // 0: kaname.cloud.iam.v1.AccessBinding.created_at:type_name -> google.protobuf.Timestamp
 	2,  // 1: kaname.cloud.iam.v1.AccessBinding.status:type_name -> kaname.cloud.iam.v1.AccessBinding.Status
-	17, // 2: kaname.cloud.iam.v1.AccessBinding.expires_at:type_name -> google.protobuf.Timestamp
-	17, // 3: kaname.cloud.iam.v1.AccessBinding.revoked_at:type_name -> google.protobuf.Timestamp
-	8,  // 4: kaname.cloud.iam.v1.AccessBinding.subjects:type_name -> kaname.cloud.iam.v1.Subject
-	16, // 5: kaname.cloud.iam.v1.AccessBinding.labels:type_name -> kaname.cloud.iam.v1.AccessBinding.LabelsEntry
-	5,  // 6: kaname.cloud.iam.v1.AccessBinding.target:type_name -> kaname.cloud.iam.v1.AccessTarget
-	17, // 7: kaname.cloud.iam.v1.AccessBinding.materialized_at:type_name -> google.protobuf.Timestamp
-	6,  // 8: kaname.cloud.iam.v1.AccessTarget.resources:type_name -> kaname.cloud.iam.v1.AccessTargetResources
-	7,  // 9: kaname.cloud.iam.v1.AccessTarget.all_in_scope:type_name -> kaname.cloud.iam.v1.AccessTargetAllInScope
-	18, // 10: kaname.cloud.iam.v1.AccessTargetResources.resources:type_name -> kaname.cloud.iam.v1.ResourceRef
-	0,  // 11: kaname.cloud.iam.v1.Subject.type:type_name -> kaname.cloud.iam.v1.SubjectType
-	17, // 12: kaname.cloud.iam.v1.GroupMembershipRecord.added_at:type_name -> google.protobuf.Timestamp
-	17, // 13: kaname.cloud.iam.v1.ClusterAdminRecord.granted_at:type_name -> google.protobuf.Timestamp
-	1,  // 14: kaname.cloud.iam.v1.GrantSurfaceRecord.kind:type_name -> kaname.cloud.iam.v1.GrantSurfaceKind
-	4,  // 15: kaname.cloud.iam.v1.GrantSurfaceRecord.binding:type_name -> kaname.cloud.iam.v1.AccessBinding
-	9,  // 16: kaname.cloud.iam.v1.GrantSurfaceRecord.group_membership:type_name -> kaname.cloud.iam.v1.GroupMembershipRecord
-	10, // 17: kaname.cloud.iam.v1.GrantSurfaceRecord.cluster_admin:type_name -> kaname.cloud.iam.v1.ClusterAdminRecord
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	18, // 2: kaname.cloud.iam.v1.AccessBinding.expires_at:type_name -> google.protobuf.Timestamp
+	18, // 3: kaname.cloud.iam.v1.AccessBinding.revoked_at:type_name -> google.protobuf.Timestamp
+	9,  // 4: kaname.cloud.iam.v1.AccessBinding.subjects:type_name -> kaname.cloud.iam.v1.Subject
+	17, // 5: kaname.cloud.iam.v1.AccessBinding.labels:type_name -> kaname.cloud.iam.v1.AccessBinding.LabelsEntry
+	6,  // 6: kaname.cloud.iam.v1.AccessBinding.target:type_name -> kaname.cloud.iam.v1.AccessTarget
+	18, // 7: kaname.cloud.iam.v1.AccessBinding.materialized_at:type_name -> google.protobuf.Timestamp
+	4,  // 8: kaname.cloud.iam.v1.AccessBinding.revocation_reason:type_name -> kaname.cloud.iam.v1.AccessBinding.RevocationReason
+	7,  // 9: kaname.cloud.iam.v1.AccessTarget.resources:type_name -> kaname.cloud.iam.v1.AccessTargetResources
+	8,  // 10: kaname.cloud.iam.v1.AccessTarget.all_in_scope:type_name -> kaname.cloud.iam.v1.AccessTargetAllInScope
+	19, // 11: kaname.cloud.iam.v1.AccessTargetResources.resources:type_name -> kaname.cloud.iam.v1.ResourceRef
+	0,  // 12: kaname.cloud.iam.v1.Subject.type:type_name -> kaname.cloud.iam.v1.SubjectType
+	18, // 13: kaname.cloud.iam.v1.GroupMembershipRecord.added_at:type_name -> google.protobuf.Timestamp
+	18, // 14: kaname.cloud.iam.v1.ClusterAdminRecord.granted_at:type_name -> google.protobuf.Timestamp
+	1,  // 15: kaname.cloud.iam.v1.GrantSurfaceRecord.kind:type_name -> kaname.cloud.iam.v1.GrantSurfaceKind
+	5,  // 16: kaname.cloud.iam.v1.GrantSurfaceRecord.binding:type_name -> kaname.cloud.iam.v1.AccessBinding
+	10, // 17: kaname.cloud.iam.v1.GrantSurfaceRecord.group_membership:type_name -> kaname.cloud.iam.v1.GroupMembershipRecord
+	11, // 18: kaname.cloud.iam.v1.GrantSurfaceRecord.cluster_admin:type_name -> kaname.cloud.iam.v1.ClusterAdminRecord
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_access_binding_proto_init() }
@@ -1508,6 +1632,7 @@ func file_kaname_cloud_iam_v1_access_binding_proto_init() {
 		return
 	}
 	file_kaname_cloud_iam_v1_authorize_service_proto_init()
+	file_kaname_cloud_iam_v1_access_binding_proto_msgTypes[0].OneofWrappers = []any{}
 	file_kaname_cloud_iam_v1_access_binding_proto_msgTypes[1].OneofWrappers = []any{
 		(*AccessTarget_Resources)(nil),
 		(*AccessTarget_AllInScope)(nil),
@@ -1522,7 +1647,7 @@ func file_kaname_cloud_iam_v1_access_binding_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_access_binding_proto_rawDesc), len(file_kaname_cloud_iam_v1_access_binding_proto_rawDesc)),
-			NumEnums:      4,
+			NumEnums:      5,
 			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,

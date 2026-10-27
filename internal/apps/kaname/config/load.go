@@ -131,6 +131,8 @@ func load(path string) (Config, *viper.Viper, error) {
 		"authn.self-service-freshness":      "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
 		"authn.trusted-forwarder-sans":      "KANAME_AUTHN__TRUSTED_FORWARDER_SANS",
 		"authn.trust-domain":                "KANAME_AUTHN__TRUST_DOMAIN",
+		"authn.module-identities":           "KANAME_AUTHN__MODULE_IDENTITIES",
+		"authn.client-issuers":              "KANAME_AUTHN__CLIENT_ISSUERS",
 		"authn.trust-any-forwarder":         "KANAME_AUTHN__TRUST_ANY_FORWARDER",
 		"api-server.registry-token.service": "KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE",
 	} {

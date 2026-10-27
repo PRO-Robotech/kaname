@@ -172,12 +172,12 @@ func (s *factStore) ApplyTx(_ context.Context, tx service.Tx, objectType, object
 // свойство коммита, как и в базе.
 type journalEmitter struct{}
 
-func (journalEmitter) EmitWriteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+func (journalEmitter) EmitOrderedWriteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple, _ time.Time) error {
 	tx.(*factTx).writes = append(tx.(*factTx).writes, tuples...)
 	return nil
 }
 
-func (journalEmitter) EmitDeleteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+func (journalEmitter) EmitOrderedDeleteTx(_ context.Context, tx service.Tx, tuples []service.RelationTuple, _ time.Time) error {
 	tx.(*factTx).deletes = append(tx.(*factTx).deletes, tuples...)
 	return nil
 }
@@ -185,7 +185,7 @@ func (journalEmitter) EmitDeleteTx(_ context.Context, tx service.Tx, tuples []se
 func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
 	txb := &factTxBeginner{store: s}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s).
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s, &recordingWithdrawal{}, noAudit{}).
 		WithResidualTupleReader(s)
 	return uc, txb
 }
@@ -353,7 +353,7 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
 	store := &factStore{}
 	txb := &factTxBeginner{store: store}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store) // без WithResidualTupleReader
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}, noAudit{}) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
 	}))

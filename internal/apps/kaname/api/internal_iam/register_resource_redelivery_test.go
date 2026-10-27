@@ -50,6 +50,7 @@ import (
 // written only when the incoming source_version is STRICTLY newer than the stored one,
 // and the emitter reports whether it changed anything.
 type versionedMirror struct {
+	noDescendants
 	mu       sync.Mutex
 	stored   map[string]time.Time
 	upserts  int // UpsertTx calls
@@ -94,7 +95,7 @@ func sameStringMap(a, b map[string]string) bool {
 	return true
 }
 
-func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
@@ -103,8 +104,9 @@ func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid stri
 		delete(m.stored, key)
 		delete(m.labelsOf, key)
 		m.mutated++
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 // countingEmitter counts the owner-tuple rows enqueued into fga_outbox.
@@ -114,14 +116,14 @@ type countingEmitter struct {
 	deletes int
 }
 
-func (e *countingEmitter) EmitWriteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple) error {
+func (e *countingEmitter) EmitOrderedWriteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple, _ time.Time) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.writes += len(ts)
 	return nil
 }
 
-func (e *countingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple) error {
+func (e *countingEmitter) EmitOrderedDeleteTx(_ context.Context, _ service.Tx, ts []service.RelationTuple, _ time.Time) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deletes += len(ts)
@@ -178,7 +180,7 @@ func newRedeliveryRig() *redeliveryRig {
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	rec := &smObjectReconciler{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}).
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).
 		WithReconcile(ev).
 		WithObjectReconciler(rec, nil)
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}

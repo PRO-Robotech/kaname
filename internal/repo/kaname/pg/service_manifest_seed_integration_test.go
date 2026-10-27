@@ -28,6 +28,7 @@ package pg_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,8 +95,11 @@ seed:
       target: allInScope
 `
 
-// deliveredVpcRoleProbe — выдача РОЛЬЮ служебной записи (MRW-14): роль —
-// системная строка свода `iam.account.admin`, живая и назначаемая на кластере.
+// deliveredVpcRoleProbe — выдача РОЛЬЮ служебной записи (MRW-14): роль СВОЕГО
+// модуля `vpc.network.admin`, живая строка свода кластерного яруса, названная
+// идентификатором контракта `<модуль>.<имя>` (kaname#979). Прежде здесь стояла
+// строка хранилища системной роли `iam.account.admin` — роль чужого модуля,
+// которую потолок посева теперь отвергает.
 const deliveredVpcRoleProbe = `
 apiVersion: iam/v1
 module: vpc
@@ -108,7 +112,7 @@ seed:
   accessBindings:
     - subjects:
         - {type: serviceAccount, name: kacho-vpc}
-      roleId: rol6307d201bf18e6763
+      roleId: vpc.network.admin
       scopeType: iam.cluster
       scopeId: cluster_root
       target: allInScope
@@ -513,7 +517,7 @@ func TestMRW14_RoleGrantIsAdoptedByItsNaturalKey(t *testing.T) {
 		_, err := pool.Exec(ctx, bindingset.With(`
 			INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, is_system,
 			    resource_type, resource_id, status, deletion_protection, granted_by_user_id)
-			VALUES ($1, 'service_account', $2, 'rol6307d201bf18e6763', true, 'cluster', $3, 'ACTIVE', true, '')`),
+			VALUES ($1, 'service_account', $2, 'rol8ed48ecc3878c2e73', true, 'cluster', $3, 'ACTIVE', true, '')`),
 			foreignID, saID, clusterAnchor)
 		require.NoError(t, err, "дом не построен: строка выдачи роли не легла")
 
@@ -523,7 +527,7 @@ func TestMRW14_RoleGrantIsAdoptedByItsNaturalKey(t *testing.T) {
 		var rows int
 		require.NoError(t, pool.QueryRow(ctx, `
 			SELECT count(*) FROM kaname.access_bindings
-			 WHERE subject_type = 'service_account' AND subject_id = $1 AND role_id = 'rol6307d201bf18e6763'
+			 WHERE subject_type = 'service_account' AND subject_id = $1 AND role_id = 'rol8ed48ecc3878c2e73'
 			   AND revoked_at IS NULL`, saID).Scan(&rows))
 		require.Equal(t, 1, rows, "строк выдачи роли не одна")
 	})
@@ -533,5 +537,33 @@ func TestMRW14_RoleGrantIsAdoptedByItsNaturalKey(t *testing.T) {
 		census := applySeed(ctx, t, pool, nil, loadProbe(t, deliveredVpcRoleProbe))
 		require.Len(t, census.Reports, 1)
 		require.Equal(t, 1, census.Reports[0].WrittenGrants, "выдача роли не записана")
+		// Выдача ссылается на СТРОКУ роли, найденную по идентификатору
+		// контракта, а не на сам идентификатор (kaname#979).
+		var roleID string
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT b.role_id FROM kaname.access_bindings b
+			  JOIN kaname.service_accounts sa ON sa.id = b.subject_id
+			 WHERE b.subject_type = 'service_account' AND sa.name = 'kacho-vpc'
+			   AND b.role_id IS NOT NULL AND b.revoked_at IS NULL`).Scan(&roleID))
+		require.Equal(t, "rol8ed48ecc3878c2e73", roleID, "выдача сослалась не на строку роли vpc.network.admin")
 	})
+}
+
+// TestSeedRoleGrantResolvesOnlyALiveClusterRoleOfItsName — выдача ролью
+// резолвит СТРОКУ роли по идентификатору контракта, и только живую роль
+// кластерного яруса (kaname#979).
+//
+// Роль, которой под таким именем нет, — отказ применения с именем роли, а не
+// нарушение чужого ключа, называющее ограничение вместо предмета.
+func TestSeedRoleGrantResolvesOnlyALiveClusterRoleOfItsName(t *testing.T) {
+	ctx := context.Background()
+	pool := seedPool(ctx, t)
+	absent := strings.Replace(deliveredVpcRoleProbe, "roleId: vpc.network.admin", "roleId: vpc.no_such_role", 1)
+	require.NotEqual(t, deliveredVpcRoleProbe, absent, "инъекция не изменила документ")
+
+	tx := kanamepg.NewModuleSeedWriteRepo(pool)
+	_, err := moduleseed.NewApplier(tx).Apply(ctx, nil, []*manifest.Manifest{loadProbe(t, absent)})
+	require.Error(t, err, "выдача роли, которой нет, применена")
+	require.ErrorIs(t, err, kanamepg.ErrSeedRoleNotResolved)
+	require.Contains(t, err.Error(), "vpc.no_such_role")
 }

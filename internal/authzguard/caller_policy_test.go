@@ -71,7 +71,7 @@ func newVPCCtx() context.Context {
 
 // testPolicy builds a CallerPolicy with the canonical gateway-only set.
 func testPolicy(prod bool) *CallerPolicy {
-	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs())
+	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster())
 }
 
 // ── allow(): gateway-only RPC ──────────────────────────────────────────────
@@ -301,10 +301,12 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 // the consumer list-filter edge.
 
 // TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — a verified module SA
-// (kacho-vpc) may call AuthorizeService.{BatchCheck,Check,ListSubjects} on the
-// internal listener, prod AND dev (they are floor-only, not gateway-fronted).
+// (kacho-vpc) may call AuthorizeService.{BatchCheck,Check} on the internal
+// listener, prod AND dev (they are not gateway-fronted and are in the
+// module-writer profile). ListSubjects is NOT in that profile (kaname#984):
+// no module calls it, and in prod it is refused — see the sibling below.
 func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
-	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod, authorizeListSubjectsMethod}
+	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod}
 	for _, prod := range []bool{true, false} {
 		p := testPolicy(prod)
 		for _, m := range methods {
@@ -312,6 +314,19 @@ func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 				t.Errorf("prod=%v vpc cert on %s: unexpected error %v (consumer list-filter edge must be admitted)", prod, m, err)
 			}
 		}
+	}
+}
+
+// TestCallerPolicy_AuthorizeService_ListSubjectsOutsideModuleProfile — a
+// module-writer identity on AuthorizeService.ListSubjects (outside its profile,
+// kaname#984): prod → PermissionDenied; the edge, whose profile names it, passes.
+func TestCallerPolicy_AuthorizeService_ListSubjectsOutsideModuleProfile(t *testing.T) {
+	p := testPolicy(true)
+	if err := p.allow(newVPCCtx(), authorizeListSubjectsMethod); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("prod vpc on ListSubjects: code = %v, want PermissionDenied", status.Code(err))
+	}
+	if err := p.allow(newGatewayCtx(), authorizeListSubjectsMethod); err != nil {
+		t.Errorf("prod gateway on ListSubjects: unexpected error %v", err)
 	}
 }
 

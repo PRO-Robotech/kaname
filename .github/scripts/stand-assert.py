@@ -220,7 +220,12 @@ def require_listener(host: str, port: int) -> bool:
 
 def run(host: str, pki: pathlib.Path, ports: dict[str, int]) -> int:
     ca, cert, key = str(pki / "ca.crt"), str(pki / "srv.crt"), str(pki / "srv.key")
-    for f in (ca, cert, key):
+    # Внутреннему фронту — лист КРАЯ стенда (`make_pki`, `edge.crt`): фронт сам
+    # допускает лишь личности перечня (SEC-1017-1), и лист службы получил бы 403
+    # фронта до слушателя — утверждения о маршрутизаторе и о разборе доступа
+    # слушателя судили бы тогда допуск фронта, а не свой предмет.
+    edge_cert, edge_key = str(pki / "edge.crt"), str(pki / "edge.key")
+    for f in (ca, cert, key, edge_cert, edge_key):
         if not pathlib.Path(f).is_file():
             print(f"УСЛОВИЕ НЕ СОЗДАНО: нет {f} — стенд не поднимался.", file=sys.stderr)
             return RC_UNMET
@@ -257,12 +262,14 @@ def run(host: str, pki: pathlib.Path, ports: dict[str, int]) -> int:
           "(голое «Not Found», без имени и идентификатора)",
           "Not Found" in a_int_on_pub.body and "admin" not in a_int_on_pub.body.lower(),
           f"тело {a_int_on_pub.body[:200]!r}")
-    a_pub_on_int = ask(f"{intl}/iam/v1/accounts", ca=ca, cert=cert, key=key)
+    a_pub_on_int = ask(f"{intl}/iam/v1/accounts", ca=ca, cert=edge_cert, key=edge_key)
     check("публичный путь НЕ резолвится на внутреннем фронте",
           a_pub_on_int.status == 404, f"код {a_pub_on_int.status}")
 
     print("── разбор доступа стоит и на ВНУТРЕННЕМ слушателе ───────────────────")
-    a_int = ask(f"{intl}{INTERNAL_PROBE_PATH}", ca=ca, cert=cert, key=key)
+    # Фронт лист края пускает, а слушатель видит пиром сам фронт: хоп краем не
+    # становится, и отказ здесь — разбор доступа слушателя, а не допуск фронта.
+    a_int = ask(f"{intl}{INTERNAL_PROBE_PATH}", ca=ca, cert=edge_cert, key=edge_key)
     check("внутренний метод с модульным сертификатом отвечает 403, а не 200",
           a_int.status == 403, f"код {a_int.status}, тело {a_int.body[:200]!r}")
     check("и отказ несёт МАШИННЫЙ признак полосы, а не только прозу",
@@ -386,6 +393,10 @@ def _throwaway_pki() -> pathlib.Path:
     # Свой же сертификат служит и корнем доверия: подставной сервер один, и
     # цепочка из двух звеньев ничего к доказательству не добавила бы.
     (d / "ca.crt").write_bytes((d / "srv.crt").read_bytes())
+    # Лист края — тот же лист: подставному фронту личность предъявителя не важна,
+    # а без файла утверждения ответили бы «условие не создано» по ложной причине.
+    (d / "edge.crt").write_bytes((d / "srv.crt").read_bytes())
+    (d / "edge.key").write_bytes((d / "srv.key").read_bytes())
     return d
 
 

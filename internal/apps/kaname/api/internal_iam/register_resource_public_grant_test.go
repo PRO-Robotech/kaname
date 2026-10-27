@@ -40,6 +40,7 @@ import (
 // mirrorSpy records the mirror rows written and removed, keeping the last state
 // per object so the test can assert the repository's parent scope survives.
 type mirrorSpy struct {
+	noDescendants
 	mu      sync.Mutex
 	rows    map[string]service.ResourceMirrorRow
 	upserts int
@@ -64,15 +65,16 @@ func (m *mirrorSpy) UpsertTx(_ context.Context, _ service.Tx, row service.Resour
 	return true, false, nil
 }
 
-func (m *mirrorSpy) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) error {
+func (m *mirrorSpy) DeleteTx(_ context.Context, _ service.Tx, ot, oid string, tombstone time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
 	key := ot + ":" + oid
 	if prev, ok := m.rows[key]; ok && !prev.SourceVersion.After(tombstone) {
 		delete(m.rows, key)
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func (m *mirrorSpy) row(key string) (service.ResourceMirrorRow, bool) {
@@ -115,7 +117,7 @@ func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	pub := &recordingPublisher{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub).WithReconcile(ev)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}).WithReconcile(ev)
 	return uc, m, e, ev, pub
 }
 

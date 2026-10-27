@@ -110,6 +110,8 @@ var mintedPrefixes = []mintedPrefix{
 	{"grp", mintConcatenated, "ids.NewID(domain.PrefixGroup)", []string{"services/iam"}},
 	{"rol", mintConcatenated, "ids.NewID(domain.PrefixRole)", []string{"services/iam"}},
 	{"acb", mintConcatenated, "ids.NewID(domain.PrefixAccessBinding)", []string{"services/iam"}},
+	// Делегирование права выдавать (kaname#986): слитная форма, `ids.NewID`.
+	{"gdl", mintConcatenated, "ids.NewID(domain.PrefixGrantDelegation)", []string{"services/iam"}},
 	{"uoc", mintConcatenated, "ids.NewID(domain.PrefixUserOAuthClient)", []string{"services/iam"}},
 	{"soc", mintConcatenated, "ids.NewID(domain.PrefixSAOAuthClient)", []string{"services/iam"}},
 	{"iop", mintConcatenated, "domain.PrefixOperationIAM", []string{"services/iam"}},

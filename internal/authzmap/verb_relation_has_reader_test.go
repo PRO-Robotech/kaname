@@ -97,6 +97,11 @@ var handlerEnforcedPairs = map[verbPair]string{
 	{Type: "registry_repository", Relation: "v_list"}:   "services/registry/internal/handler/listauthz.go (filterRepos — ListRepositories/ListTags/_catalog)",
 	{Type: "registry_repository", Relation: "v_update"}: "services/registry/internal/handler/repository.go (UpdateRepository, RenameRepository) + dataplane push в СУЩЕСТВУЮЩИЙ repo",
 	{Type: "registry_repository", Relation: "v_delete"}: "services/registry/internal/handler/repository.go (DeleteRepository) + DeleteTag",
+
+	// Отзыв и удаление выдачи (kaname#986, Р1а): аннотация `<exempt>` ·
+	// `HANDLER_DECIDES`, вопрос `v_delete` на объекте выдачи задаёт обработчик —
+	// тот же, что прежде задавала дверь слушателя.
+	{Type: "iam_access_binding", Relation: "v_delete"}: "internal/apps/kaname/api/access_binding/removal_authority.go (priorRemovalAuthority — Revoke, Delete)",
 }
 
 // declaredWithoutReader — пары, которые модель объявляет и НИКТО не спрашивает.

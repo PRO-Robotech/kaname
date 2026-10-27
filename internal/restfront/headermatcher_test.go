@@ -231,6 +231,22 @@ func TestNarrowingMatcherDropsBothFormsAndKeepsTheCredential(t *testing.T) {
 	}
 }
 
+// An explicitly empty or unsupported credential is still PRESENT. The
+// anonymous self-check must not infer anonymity after the HTTP front loses it.
+func TestAnonymousSelfCheck_HeaderPresenceSurvivesRESTFront(t *testing.T) {
+	for _, value := range []string{"", "Bearer ", "Other credential"} {
+		md := metadataThroughMux(t, newMux(), map[string]string{"Authorization": value})
+		got, exists := md["authorization"]
+		if !exists || len(got) != 1 || got[0] != value {
+			t.Fatalf("credential presence changed: input=%q metadata=%v", value, got)
+		}
+	}
+	md := metadataThroughMux(t, newMux(), map[string]string{})
+	if _, exists := md["authorization"]; exists {
+		t.Fatal("front fabricated a credential for the anonymous twin")
+	}
+}
+
 // TestLibraryDefaultWouldLetThePrincipalThrough — измерение, на котором стоит
 // решение, а не проверка нашего кода.
 //

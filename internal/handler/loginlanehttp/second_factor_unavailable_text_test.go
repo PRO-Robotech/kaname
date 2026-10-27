@@ -103,6 +103,7 @@ func newLaneLogged(t *testing.T, stub *stubLane, logger *slog.Logger) *lane {
 	h, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    24 * time.Hour,
 		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
+		Modules:       laneRoster(t),
 		RefusalDomain: "iam.kaname.cloud",
 		Logger:        logger,
 	}, stub)
