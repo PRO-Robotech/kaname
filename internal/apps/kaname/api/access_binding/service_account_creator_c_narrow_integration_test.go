@@ -156,7 +156,6 @@ func TestServiceAccountCreator_SAC20_CreatorDoesNotTouchProjectsGroupsRoles(t *t
 		if !row.fresh {
 			continue
 		}
-		row := row
 		t.Run(row.name+" (близнец, свежий мир)", func(t *testing.T) {
 			fw := newSACWorld(t)
 			requireSACDone(t, row.call(fw, asUser(fw.ctx, fw.usrA)), "SAC-20 "+row.name+" (близнец): от usr-A")
