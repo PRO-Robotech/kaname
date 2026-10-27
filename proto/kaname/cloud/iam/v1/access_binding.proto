@@ -307,6 +307,15 @@ message AccessTarget {
 // объект из перечня в той же транзакции; опустевший перечень — отзыв выдачи
 // (`AccessBinding.target`).
 message AccessTargetResources {
+  // The objects of the grant. Each `id` follows the object grammar, the same one
+  // object registration enforces: it is non-empty and contains none of space,
+  // tab, newline, `#` (the subject-set separator) or `:` (a second colon of the
+  // object `type:id`). `/` is legal and taken verbatim: the service neither
+  // splits nor normalizes the id. A forbidden character fails `Create`
+  // synchronously with INVALID_ARGUMENT before any `Operation` is issued, with
+  // the message `Illegal argument target.resources[N].id (not a valid object id:
+  // space, tab, newline, '#' and ':' are not allowed)`, where N is the element's
+  // index.
   repeated ResourceRef resources = 1;
 }
 
