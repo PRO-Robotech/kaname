@@ -1170,8 +1170,8 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			`INSERT INTO kaname.role_rule_selectors
 			   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 			    container_type, container_arm, container_resource_names, container_match_labels,
-			    verbs_by_type, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, now(), now())
+			    verbs_by_type, created_by_subject, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, $12, now(), now())
 			 ON CONFLICT (role_id, rule_fp) DO UPDATE
 			    SET arm                      = EXCLUDED.arm,
 			        object_types             = EXCLUDED.object_types,
@@ -1182,9 +1182,11 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			        container_resource_names = EXCLUDED.container_resource_names,
 			        container_match_labels   = EXCLUDED.container_match_labels,
 			        verbs_by_type            = EXCLUDED.verbs_by_type,
+			        created_by_subject       = EXCLUDED.created_by_subject,
 			        updated_at               = now()`,
 			string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 			cont.typ, cont.arm, cont.names, cont.labels, grants,
+			sel.CreatedBySubject,
 		); err != nil {
 			// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
 			// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx

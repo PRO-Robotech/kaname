@@ -305,6 +305,14 @@ type Rule struct {
 	// типами, лежащими под ЕДИНСТВЕННЫМ ресурсом этого правила по объявленным
 	// `parents`, на любой глубине. nil — ключа нет; пустой перечень — находка.
 	Children []ChildRule `yaml:"children"`
+	// CreatedBySubject — селектор СОЗДАТЕЛЯ (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р2а): правило даёт свои глаголы
+	// только на объекты, созданные самим субъектом выдачи. Принимается лишь в правиле
+	// над ресурсом, объявившим контейнерное действие `create`, и без
+	// `resourceNames`/`matchLabels` (селектор у правила один) —
+	// `validateRuleCreatedBySubject`. Ключа нет — селектора нет; `false` вторым
+	// способом сказать «нет» не является, и разбор его не различает.
+	CreatedBySubject bool `yaml:"createdBySubject"`
 }
 
 // ruleKeyToDomainField — СЛОВАРЬ объявленных расхождений «ключ манифеста → поле
@@ -341,12 +349,13 @@ var ruleKeyToDomainField = map[string]string{"classes": "Verbs", "verbs": "Verbs
 // поимённой формы — `roleexport.ExportRoleRules`, и он единственный.
 func (r Rule) DomainRule() domain.Rule {
 	return domain.Rule{
-		Module:        r.Module,
-		Resources:     r.Resources,
-		Verbs:         r.Classes,
-		ResourceNames: r.ResourceNames,
-		MatchLabels:   r.MatchLabels,
-		Children:      domainChildren(r.Children, false),
+		Module:           r.Module,
+		Resources:        r.Resources,
+		Verbs:            r.Classes,
+		ResourceNames:    r.ResourceNames,
+		MatchLabels:      r.MatchLabels,
+		Children:         domainChildren(r.Children, false),
+		CreatedBySubject: r.CreatedBySubject,
 	}
 }
 
@@ -374,12 +383,13 @@ func (r Rule) Right() (values []string, named bool) {
 func (r Rule) formRule() domain.Rule {
 	values, _ := r.Right()
 	return domain.Rule{
-		Module:        r.Module,
-		Resources:     r.Resources,
-		Verbs:         values,
-		ResourceNames: r.ResourceNames,
-		MatchLabels:   r.MatchLabels,
-		Children:      domainChildren(r.Children, true),
+		Module:           r.Module,
+		Resources:        r.Resources,
+		Verbs:            values,
+		ResourceNames:    r.ResourceNames,
+		MatchLabels:      r.MatchLabels,
+		Children:         domainChildren(r.Children, true),
+		CreatedBySubject: r.CreatedBySubject,
 	}
 }
 
@@ -421,6 +431,12 @@ func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []erro
 			// не сказав, что не так с вложенностью (kaname#874, ND-04).
 			if nestFaults := validateRuleChildren(m, rule, doc, i, j); len(nestFaults) > 0 {
 				faults = append(faults, nestFaults...)
+				continue
+			}
+			// Контейнерное действие и селектор создателя (kaname#1003) — раньше судьи
+			// домена по той же причине: находка называет причину с координатой.
+			if cfaults := validateRuleContainerForm(m, rule, role.ID, doc, i, j); len(cfaults) > 0 {
+				faults = append(faults, cfaults...)
 				continue
 			}
 			if err := rule.formRule().Validate(domain.TenantPolicy(), modules); err != nil {

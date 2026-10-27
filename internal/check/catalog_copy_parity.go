@@ -421,7 +421,29 @@ type CatalogRevisedEntry struct {
 // объявлено 5 · применено 0). Пустой перечень — цель, а не отказ:
 // TestDeclaredRevisedEntriesCarryASubject проходит на пустом, а способность
 // записи истечь доказывается синтетикой (TestDeclaredRevisedEntryExpiresOnItsOwn).
-var catalogRevisedEntries = []CatalogRevisedEntry{}
+//
+// Запись заведена 2026-10-26 (kaname#1003, приёмка
+// `service-account-creation-is-its-own-right.md`, Р1, §7): контракт службы сменил
+// отношение `ServiceAccountService/Create` с `editor` на `service_account_creator`
+// (`[service_account] or editor` — шире прежнего). До подъёма пина край требует
+// `editor`, то есть строже службы: отказ создателю через край уже, а не шире
+// (fail-closed, §7 приёмки), и svc-registry ходит к службе напрямую.
+var catalogRevisedEntries = []CatalogRevisedEntry{
+	{
+		FQN:       "kaname.cloud.iam.v1.ServiceAccountService/Create",
+		Field:     "required_relation",
+		EdgeValue: "editor",
+		OwnValue:  "service_account_creator",
+		Why: "контракт службы сменил отношение создания учётки на отдельное право " +
+			"service_account_creator (kaname#1003, Р1): оно выводится и из editor, поэтому прежние " +
+			"создатели права не теряют; край порождает свою копию по пину службы и несёт прежнее " +
+			"значение до подъёма пина — строже службы, а не мягче (§7 приёмки)",
+		Removal: "копия края на стволе платформы несёт у ServiceAccountService/Create " +
+			"required_relation service_account_creator — платформа подняла пин службы до ревизии " +
+			"kaname#1003 и перегенерировала каталог; тогда запись снимается",
+		Refs: "PRO-Robotech/kaname#1003",
+	},
+}
 
 // CatalogRevisedEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
 func CatalogRevisedEntries() []CatalogRevisedEntry {

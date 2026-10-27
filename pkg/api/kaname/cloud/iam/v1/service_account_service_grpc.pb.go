@@ -47,6 +47,13 @@ type ServiceAccountServiceClient interface {
 	// Retrieves the list of ServiceAccount resources. account_id фильтр обязателен.
 	List(ctx context.Context, in *ListServiceAccountsRequest, opts ...grpc.CallOption) (*ListServiceAccountsResponse, error)
 	// Creates a service account in the specified account.
+	//
+	// Право — `service_account_creator` на аккаунте (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р1): отдельное от `editor`,
+	// которым гейтятся создание проекта, группы и роли. Отношение выводится и из
+	// `editor` (`[service_account] or editor`), поэтому прежние создатели права не
+	// теряют; прямо его даёт системная роль `iam.service_account.creator`, выданная
+	// учётке на аккаунт, — без прав на проекты, группы и роли.
 	Create(ctx context.Context, in *CreateServiceAccountRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Updates the specified service account.
 	// account_id is immutable.
@@ -209,6 +216,13 @@ type ServiceAccountServiceServer interface {
 	// Retrieves the list of ServiceAccount resources. account_id фильтр обязателен.
 	List(context.Context, *ListServiceAccountsRequest) (*ListServiceAccountsResponse, error)
 	// Creates a service account in the specified account.
+	//
+	// Право — `service_account_creator` на аккаунте (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р1): отдельное от `editor`,
+	// которым гейтятся создание проекта, группы и роли. Отношение выводится и из
+	// `editor` (`[service_account] or editor`), поэтому прежние создатели права не
+	// теряют; прямо его даёт системная роль `iam.service_account.creator`, выданная
+	// учётке на аккаунт, — без прав на проекты, группы и роли.
 	Create(context.Context, *CreateServiceAccountRequest) (*operation.Operation, error)
 	// Updates the specified service account.
 	// account_id is immutable.

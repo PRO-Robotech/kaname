@@ -3430,7 +3430,7 @@
   {
     "fqn": "kaname.cloud.iam.v1.ServiceAccountService/Create",
     "permission": "iam.service_accounts.create",
-    "required_relation": "editor",
+    "required_relation": "service_account_creator",
     "scope_extractor": {
       "object_type": "account",
       "from_request_field": "account_id"

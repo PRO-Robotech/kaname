@@ -180,7 +180,7 @@ var (
 		modules: `SELECT module FROM kaname.catalog_module WHERE live`,
 		resources: `SELECT module, resource, object_type, parent_types, public_read_to_children
 		              FROM kaname.catalog_resource WHERE live`,
-		verbs: `SELECT module, resource, verb, per_object FROM kaname.catalog_verb WHERE live`,
+		verbs: `SELECT module, resource, verb, per_object, COALESCE(container_parent, ''), COALESCE(container_relation, '') FROM kaname.catalog_verb WHERE live`,
 		// Преемника живая половина НЕ выбирает: у живой строки он невыразим в
 		// базе, и колонка в выборке объявляла бы величину, которой не бывает.
 		// Указатели и признак контейнера — выбирает: по ним разворачивание
@@ -198,7 +198,7 @@ var (
 		modules: `SELECT module FROM kaname.catalog_module WHERE NOT live`,
 		resources: `SELECT module, resource, object_type, COALESCE(superseded_by, '')
 		              FROM kaname.catalog_resource WHERE NOT live`,
-		verbs: `SELECT module, resource, verb, per_object FROM kaname.catalog_verb WHERE NOT live`,
+		verbs: `SELECT module, resource, verb, per_object, COALESCE(container_parent, ''), COALESCE(container_relation, '') FROM kaname.catalog_verb WHERE NOT live`,
 		// Преемник читается ВМЕСТЕ со строкой — иначе он существует данными и не
 		// доезжает до арендатора ни одним путём чтения (kacho#1814).
 		//
@@ -251,7 +251,7 @@ func readCatalogHalf(ctx context.Context, q catalogQuerier, h catalogHalf) (cata
 	}
 	out.Verbs, err = pgx.CollectRows(verbRows, func(row pgx.CollectableRow) (catalog.VerbRow, error) {
 		var v catalog.VerbRow
-		return v, row.Scan(&v.Module, &v.Resource, &v.Verb, &v.PerObject)
+		return v, row.Scan(&v.Module, &v.Resource, &v.Verb, &v.PerObject, &v.ContainerParent, &v.ContainerRelation)
 	})
 	if err != nil {
 		return out, fmt.Errorf("прочитать %s: действия: %w", h.what, err)
