@@ -242,7 +242,7 @@ func chainUnaryServer(interceptors ...grpc.UnaryServerInterceptor) grpc.UnarySer
 	}
 }
 
-func mustParseURIs(t *testing.T, raw ...string) []*url.URL {
+func mustParseURIs(t testing.TB, raw ...string) []*url.URL {
 	t.Helper()
 	out := make([]*url.URL, 0, len(raw))
 	for _, r := range raw {

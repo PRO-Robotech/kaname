@@ -40,13 +40,9 @@ func anonymousPublicChain(t *testing.T, reader *presentedcred.Reader) grpc.Unary
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented).WithModuleRoster(testModuleRoster())
-	door, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{SelfCheck: anonymousDoor{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return chainUnaryServer(append(publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader),
-		policy.Unary(), authzguard.NewAddressGate(chainRevocations{}).Unary(), authzguard.AntiAnonymousUnary(slog.Default()), door.Unary())...)
+	// Цепочку собирает сборщик корня, а не перечисление звеньев здесь: ручная
+	// копия молча осталась бы без звена, добавленного в корень.
+	return testPublicChain(t, testPublicChainInputs{reader: reader, catalog: catalog, decider: anonymousDoor{}, prodMode: true})
 }
 
 // The transport and public identity chain are real. Only the decision port is

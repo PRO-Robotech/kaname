@@ -31,25 +31,22 @@ package main
 //
 // # Перечень глаголов ВЫВОДИТСЯ
 //
-// Класс — аннотации тех же дескрипторов, из которых дверь строит карту
-// (`catalogderive.RangeAnnotated` по `authzguard.OwnDoorProtoPackages()`):
-// конкретное поле области (не пустое и не `*`), без поля вида области, не
-// `scope_filtered`, — пересечённые с методами, которые корень МОНТИРУЕТ на
-// публичный сервер (`registerPublicServices`), а не с приставкой имени службы.
-// Условие KE-1 разбора требует, чтобы ступень и проба звали ОДНУ функцию
-// класса прод-кода; её в дереве ещё нет, и до неё класс выводится здесь, из
-// того же источника, — полоса реализации переводит пробу на ту функцию.
+// Класс берётся у функции прод-кода `authzguard.ObjectScopedRPCs` — той же,
+// по которой звено формы решает, что оно судит (условие KE-1 разбора): она
+// выводит его из аннотаций тех же дескрипторов, из которых дверь строит карту
+// (конкретное поле области, не пустое и не `*`, без поля вида области, не
+// `scope_filtered`, не исключение). Проба пересекает класс с методами, которые
+// корень МОНТИРУЕТ на публичный сервер (`registerPublicServices`), а не с
+// приставкой имени службы.
 //
 // # Одна цепочка на корень и пробу (условие ревью K6-N2)
 //
-// Цепочку, которую судит проба, строит `publicChainUnderProbe`. Пока общего
-// сборщика публичной цепочки в прод-коде нет, это сборка по месту в тестовом
-// файле, повторяющая порядок `serve.go` (её звенья — ниже), — то есть вторая
-// проводка. Поэтому проба утверждает и это: функция, собравшая её цепочку,
-// объявлена вне тестовых файлов и её зовёт корень. Сегодня утверждение
-// красное по предмету — сборщика нет; полоса реализации заводит его в
-// `serve.go`, переводит на него корень и `publicChainUnderProbe`, и тем самым
-// снимает эту копию.
+// Цепочку, которую судит проба, строит `publicChainUnderProbe` — сборщик
+// корня `publicListenerChain` (`serve.go`), от измерителя задержки до двери.
+// Свои у пробы лишь звенья с зависимостями мира (политика, ворота адреса,
+// дверь с решателем-подделкой). Проба утверждает и это: функция, собравшая
+// её цепочку, объявлена вне тестовых файлов и её зовёт корень, — иначе она
+// судила бы вторую проводку.
 //
 // # Чем проба НЕ является
 //
@@ -76,6 +73,7 @@ import (
 	"unsafe"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -84,6 +82,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/PRO-Robotech/corelib/authz/catalogderive"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
@@ -136,40 +135,41 @@ func (d *formProbeDecider) Check(_ context.Context, subject, relation, object st
 	return false, nil
 }
 
-// formProbeChainInputs — то, что цепочке приносит мир пробы: читатель
+// testPublicChainInputs — то, что цепочке приносит мир пробы: читатель
 // предъявленного, каталог прав (порог доверия и действие отказа), решатель и
 // режим посадки политики вызывающего.
-type formProbeChainInputs struct {
+type testPublicChainInputs struct {
 	reader   *presentedcred.Reader
 	catalog  *seed.PermissionRegistry
 	decider  authzguard.RelationChecker
 	prodMode bool
 }
 
-// publicChainUnderProbe — сборщик цепочки, которую судит проба. Утверждение
-// K6-N2 ниже читает, ГДЕ объявлена эта функция и зовёт ли её корень.
-var publicChainUnderProbe = handAssembledPublicChain
+// publicChainUnderProbe — сборщик цепочки, которую судит проба: ТОТ ЖЕ, что
+// зовёт корень. Утверждение K6-N2 ниже читает, где объявлена эта функция и
+// зовёт ли её корень, — сборка по месту в тестовом файле его бы не прошла.
+var publicChainUnderProbe = publicListenerChain
 
-// handAssembledPublicChain — сборка по месту в порядке `serve.go`: обогатитель
-// отказа → личность (пара извлечения и читатель предъявленного) → политика
-// вызывающего → ворота адреса → анти-аноним → дверь. Измеритель задержки и
-// перехват паники опущены: решения о доступе они не несут. Это вторая
-// проводка, и проба красная на ней по условию K6-N2, пока её не сменит
-// общий сборщик прод-кода.
-func handAssembledPublicChain(t *testing.T, in formProbeChainInputs) grpc.UnaryServerInterceptor {
+// testPublicChain собирает публичную цепочку сборщиком корня. Свои у пробы —
+// только звенья, несущие зависимости мира: политика вызывающего (режим
+// посадки, каталог), ворота адреса (читатель отметок без строк людей) и дверь
+// (решатель-подделка); измеритель задержки — на своём реестре серий.
+func testPublicChain(t testing.TB, in testPublicChainInputs) grpc.UnaryServerInterceptor {
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	latency, err := grpcsrv.NewServerLatency(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("измеритель задержки не собран — условие пробы не создано: %v", err)
+	}
 	policy := authzguard.NewPublicCallerPolicy(in.prodMode, authzguard.PublicPeerCallableRPCs(), in.catalog,
 		presentedcred.Presented).WithModuleRoster(testModuleRoster())
 	door, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{SelfCheck: in.decider, Logger: quiet})
 	if err != nil {
 		t.Fatalf("дверь не собрана — условие пробы не создано: %v", err)
 	}
-	links := append([]grpc.UnaryServerInterceptor{authzguard.DenyDetailUnary(in.catalog)},
-		publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), in.reader)...)
-	links = append(links, policy.Unary(), authzguard.NewAddressGate(chainRevocations{}).Unary(),
-		authzguard.AntiAnonymousUnary(quiet), door.Unary())
-	return chainUnaryServer(links...)
+	unary, _ := publicChainUnderProbe(fwdCfg(fwdGatewaySAN, fwdVPCSAN), quiet, latency, in.catalog, in.reader,
+		policy, authzguard.NewAddressGate(chainRevocations{}), door)
+	return chainUnaryServer(unary...)
 }
 
 // formProbeRegistrar запоминает имена служб, которые корень монтирует.
@@ -220,31 +220,34 @@ type formProbeVerb struct {
 	kind   string
 }
 
-// formProbeClass выводит класс и контроли вне класса из аннотаций дескрипторов
-// двери, пересечённых с публичным сервером корня.
+// formProbeClass — класс и контроли вне класса, пересечённые с публичным
+// сервером корня.
+//
+// Класс берётся у ТОЙ функции прод-кода, по которой звено формы решает, какие
+// глаголы оно судит (`authzguard.ObjectScopedRPCs`, условие KE-1): проба,
+// выписавшая свой отбор, судила бы звено по чужому перечню. Контроль вне
+// класса — глаголы с полем вида области — выводится из тех же аннотаций
+// отдельно: в класс они не входят, и функция класса их не возвращает.
 func formProbeClass(t *testing.T) (class, typedScope []formProbeVerb) {
 	t.Helper()
 	public := formProbePublicMethods(t)
 	if len(public) == 0 {
 		t.Fatal("корень не смонтировал на публичный сервер ни одного метода — перепись беспредметна")
 	}
+	for _, rpc := range authzguard.ObjectScopedRPCs() {
+		if _, mounted := public[rpc.Method]; mounted {
+			class = append(class, formProbeVerb{method: rpc.Method, field: rpc.Field, kind: rpc.ObjectType})
+		}
+	}
 	catalogderive.RangeAnnotated(authzguard.OwnDoorProtoPackages(),
 		func(full string, _ protoreflect.MethodDescriptor, a catalogderive.Annotations) {
-			if _, mounted := public[full]; !mounted || a.ScopeFiltered {
+			if _, mounted := public[full]; !mounted || a.ScopeFiltered || a.ScopeObjectTypeFromRequest == "" {
 				return
 			}
-			field := a.ScopeFromRequestField
-			if field == "" || field == catalogderive.WildcardField {
-				return
+			if field := a.ScopeFromRequestField; field != "" && field != catalogderive.WildcardField {
+				typedScope = append(typedScope, formProbeVerb{method: full, field: field, kind: a.ScopeObjectType})
 			}
-			v := formProbeVerb{method: full, field: field, kind: a.ScopeObjectType}
-			if a.ScopeObjectTypeFromRequest != "" {
-				typedScope = append(typedScope, v)
-				return
-			}
-			class = append(class, v)
 		})
-	sort.Slice(class, func(i, j int) bool { return class[i].method < class[j].method })
 	sort.Slice(typedScope, func(i, j int) bool { return typedScope[i].method < typedScope[j].method })
 	return class, typedScope
 }
@@ -317,11 +320,11 @@ func (o formProbeOutcome) String() string {
 // formProbeCall — один вызов цепочки свежим решателем.
 type formProbeCall func(ctx context.Context, method string, req any) formProbeOutcome
 
-func formProbeCaller(t *testing.T, in formProbeChainInputs) formProbeCall {
+func formProbeCaller(t *testing.T, in testPublicChainInputs) formProbeCall {
 	t.Helper()
 	decider := &formProbeDecider{}
 	in.decider = decider
-	chain := publicChainUnderProbe(t, in)
+	chain := testPublicChain(t, in)
 	return func(ctx context.Context, method string, req any) formProbeOutcome {
 		decider.asked = nil
 		reached := false
@@ -364,7 +367,7 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 		domain.ClaimPrincipalType: "service_account",
 		domain.ClaimPrincipalID:   formProbeSA,
 	}))
-	call := formProbeCaller(t, formProbeChainInputs{reader: reader, catalog: catalog, prodMode: true})
+	call := formProbeCaller(t, testPublicChainInputs{reader: reader, catalog: catalog, prodMode: true})
 
 	class, typedScope := formProbeClass(t)
 	if len(class) == 0 {
@@ -456,7 +459,7 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 	}
 	// (б) безымянный вызывающий (KE-3): в непроизводственной посадке политика
 	// его пропускает, и ступень формы ему не отвечает.
-	anonCall := formProbeCaller(t, formProbeChainInputs{reader: reader, catalog: catalog, prodMode: false})
+	anonCall := formProbeCaller(t, testPublicChainInputs{reader: reader, catalog: catalog, prodMode: false})
 	// (в) пустое поле (KE-9): отсутствие — не неверная форма.
 	for _, v := range class {
 		kind, known := formProbeKinds[v.kind]

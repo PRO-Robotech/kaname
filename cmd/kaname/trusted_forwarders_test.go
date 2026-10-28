@@ -223,7 +223,7 @@ func forwardedIdentity(ctx context.Context, userID string) context.Context {
 
 // verifiedCertPeer — пир, прошедший проверку клиентского сертификата, с
 // указанной личностью сертификата.
-func verifiedCertPeer(t *testing.T, san string) context.Context {
+func verifiedCertPeer(t testing.TB, san string) context.Context {
 	t.Helper()
 	leaf := &x509.Certificate{URIs: mustParseURIs(t, san)}
 	return peer.NewContext(context.Background(), &peer.Peer{AuthInfo: credentials.TLSInfo{
