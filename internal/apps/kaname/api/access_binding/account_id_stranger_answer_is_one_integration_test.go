@@ -566,7 +566,7 @@ func aid36Rows() []aid36Row {
 			return w.via(ctx, m("AuthorizeService", "Check"), req, func(c context.Context) (proto.Message, error) { return w.authz.Check(c, req) })
 		}, false},
 		{m("AuthorizeService", "BatchCheck"), aid36ClassModel, func(w *aid36World, ctx context.Context, id string) (proto.Message, error) {
-			req := &iamv1.BatchAuthorizeCheckRequest{ScopeId: string(w.ph), Checks: []*iamv1.AuthorizeCheckRequest{w.checkReq(ctx, id)}}
+			req := &iamv1.BatchAuthorizeCheckRequest{ScopeId: w.ownProject(ctx), Checks: []*iamv1.AuthorizeCheckRequest{w.checkReq(ctx, id)}}
 			return w.via(ctx, m("AuthorizeService", "BatchCheck"), req, func(c context.Context) (proto.Message, error) { return w.authz.BatchCheck(c, req) })
 		}, false},
 		{m("AuthorizeService", "ListSubjects"), aid36ClassModel, func(w *aid36World, ctx context.Context, id string) (proto.Message, error) {
@@ -585,6 +585,16 @@ func aid36Rows() []aid36Row {
 	}
 }
 
+// ownProject — проект, который вызывающий видит (дверь BatchCheck спрашивает
+// `viewer` на проекте из `scope_id`): у H — Ph, у O — Pf. Одно различие близнеца
+// — вызывающий, и область вопроса — его собственная.
+func (w *aid36World) ownProject(ctx context.Context) string {
+	if operations.PrincipalFromContext(ctx).ID == string(w.h) {
+		return string(w.ph)
+	}
+	return string(w.pf)
+}
+
 // checkReq — вопрос о САМОМ вызывающем: subject — его принципал.
 func (w *aid36World) checkReq(ctx context.Context, id string) *iamv1.AuthorizeCheckRequest {
 	p := operations.PrincipalFromContext(ctx)
@@ -596,7 +606,8 @@ func (w *aid36World) checkReq(ctx context.Context, id string) *iamv1.AuthorizeCh
 // scopeType на идентификатор id.
 func (w *aid36World) grant(h *accessbindingapp.Handler, ctx context.Context, scopeType, id string) (proto.Message, error) {
 	req := &iamv1.CreateAccessBindingRequest{SubjectType: "user", SubjectId: string(w.member),
-		RoleId: systemViewRole, ScopeType: scopeType, ScopeId: id}
+		RoleId: systemViewRole, ScopeType: scopeType, ScopeId: id,
+		Target: &iamv1.AccessTarget{Target: &iamv1.AccessTarget_AllInScope{AllInScope: &iamv1.AccessTargetAllInScope{}}}}
 	return w.via(ctx, m("AccessBindingService", "Create"), req, func(c context.Context) (proto.Message, error) { return h.Create(c, req) })
 }
 
@@ -829,9 +840,13 @@ func aid36RequireClassAnswer(t *testing.T, r aid36Row, out proto.Message, err er
 		require.Equal(t, codes.PermissionDenied, st.Code(), "%s: %s", r.method, ans)
 		require.Equal(t, "permission denied", st.Message(), "%s", r.method)
 	case aid36ClassFilter:
+		// Фильтр перечня сужает выдачу построчно: строк присланного аккаунта в
+		// ответе нет. Приёмка называет ответ «пустая страница»; `RoleService/List`
+		// отдаёт постороннему и системные роли, не принадлежащие ни одному
+		// аккаунту, поэтому утверждается отсутствие строк аккаунта, а не пустота.
 		require.NoError(t, err, "%s: фильтр перечня ответил отказом: %s", r.method, ans)
-		body, _ := protojson.Marshal(out)
-		require.JSONEq(t, `{}`, string(body), "%s: посторонний видит строки чужого аккаунта", r.method)
+		require.NotContains(t, ans, aid36Mask, "%s: посторонний видит строки чужого аккаунта: %s", r.method, ans)
+		t.Logf("%s: ответ фильтра постороннему: %.300s", r.method, ans)
 	case aid36ClassModel:
 		switch r.method {
 		case m("AuthorizeService", "Check"):
@@ -868,9 +883,17 @@ func aid36Twin(t *testing.T, w *aid36World, r aid36Row, asO, asA context.Context
 		}
 		out, err := r.call(w, ctx, aid36Foreign)
 		ans := aid36Answer(out, err, aid36Foreign)
+		t.Logf("%s: ответ близнецу: %.300s", r.method, ans)
 		require.NotEqual(t, codes.PermissionDenied, aid36Code(err), "%s: близнец получил отказ права: %s", r.method, ans)
-		if st := status.Convert(err); st.Code() == codes.NotFound {
+		st := status.Convert(err)
+		if st.Code() == codes.NotFound {
 			require.NotEqual(t, "Account "+aid36Foreign+" not found", st.Message(), "%s: близнец не видит аккаунт", r.method)
+		}
+		// Отказ формы — не ответ о праве и существовании: путь, не принявший F,
+		// близнецом строки не служит.
+		if st.Code() == codes.InvalidArgument {
+			require.False(t, strings.HasPrefix(st.Message(), "invalid account id "),
+				"%s: близнец отвергнут формой идентификатора аккаунта: %s", r.method, ans)
 		}
 		switch r.method {
 		case m("AuthorizeService", "Check"):

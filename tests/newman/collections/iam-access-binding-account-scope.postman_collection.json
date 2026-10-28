@@ -4174,14 +4174,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings?pageSize=100&accountId=not-an-id",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings?pageSize=100&accountId=not_an_id",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings?pageSize=100&accountId=not-an-id"
+                "accessBindings?pageSize=100&accountId=not_an_id"
               ]
             }
           },
@@ -4205,7 +4205,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings?pageSize=100&accountId=not-an-id');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings?pageSize=100&accountId=not_an_id');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -4345,7 +4345,7 @@
       ]
     },
     {
-      "name": "IAM-AB-SIA-12-MALFORMED-NEG — IAM-AB-SIA-12: ?accountId=not-an-id → 400 INVALID_ARGUMENT, тело плоское \"invalid account id 'not-an-id'\" — производитель ВЛАДЕЛЕЦ (фильтр `List`)",
+      "name": "IAM-AB-SIA-12-MALFORMED-NEG — IAM-AB-SIA-12: ?accountId=not_an_id → 400 INVALID_ARGUMENT, тело плоское \"invalid account id 'not_an_id'\" — производитель ВЛАДЕЛЕЦ (фильтр `List`)",
       "description": "class:NEG | class:VAL | priority:P0",
       "item": [
         {
@@ -4359,14 +4359,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings?pageSize=100&accountId=not-an-id",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings?pageSize=100&accountId=not_an_id",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings?pageSize=100&accountId=not-an-id"
+                "accessBindings?pageSize=100&accountId=not_an_id"
               ]
             }
           },
@@ -4390,7 +4390,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings?pageSize=100&accountId=not-an-id');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings?pageSize=100&accountId=not_an_id');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -4431,7 +4431,7 @@
                   "});",
                   "pm.test('контракт-тон сообщения', () =>",
                   "  pm.expect(pm.response.json().message, pm.response.text())",
-                  "    .to.eql(\"invalid account id 'not-an-id'\"));"
+                  "    .to.eql(\"invalid account id 'not_an_id'\"));"
                 ]
               }
             }
@@ -4635,14 +4635,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/iam/v1/accessBindings?accountId=not-an-id",
+              "raw": "{{baseUrl}}/iam/v1/accessBindings?accountId=not_an_id",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "iam",
                 "v1",
-                "accessBindings?accountId=not-an-id"
+                "accessBindings?accountId=not_an_id"
               ]
             }
           },
@@ -4666,7 +4666,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings?accountId=not-an-id');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings?accountId=not_an_id');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
                   "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
@@ -4707,7 +4707,7 @@
                   "});",
                   "pm.test('пустой грант не превращает 400 в 200 []', () =>",
                   "  pm.expect(pm.response.json().message, pm.response.text())",
-                  "    .to.eql(\"invalid account id 'not-an-id'\"));"
+                  "    .to.eql(\"invalid account id 'not_an_id'\"));"
                 ]
               }
             }

@@ -130,6 +130,9 @@ func seedOwner(t *testing.T, db *sql.DB, tag string) string {
 	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
 		VALUES ($1, $2, $3, '{}'::jsonb)`, personal, "personal-"+tag+"-"+personal[len(personal)-6:], uid)
 	require.NoError(t, err)
+	// Действующей личности нужен путь входа (kaname#608, `users_active_has_a_way_in_fk`);
+	// на версиях до этого ограничения посев — пустая операция.
+	activewayin.SeedGuarded(t, tx)
 	require.NoError(t, tx.Commit())
 	return uid
 }

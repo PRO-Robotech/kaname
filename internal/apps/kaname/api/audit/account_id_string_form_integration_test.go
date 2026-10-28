@@ -415,10 +415,15 @@ func aid29ForeignAnswer(where, v string) string {
 	return "invalid account id '" + v + "'"
 }
 
-// aid29StringFormRefusals — ответы, которые на годной заданной форме означают
-// «отвергнуто формой»: текст отказа формы аккаунта и отказ якоря привязки.
-func aid29StringFormRefusals(v string) []string {
-	return []string{"invalid account id '" + v + "'", "scope does not match resource_type / resource_id"}
+// aid29RefusedByForm — означает ли ответ на годной заданной форме «отвергнуто
+// формой»: текст отказа формы аккаунта либо отказ якоря привязки. Якорь
+// отвечает отказом домена `AccessBinding.Validate` — «Illegal argument scope
+// <ярус> vs resource_type=account resource_id=<X>» (обёртка `ErrScopeMismatch`,
+// `domain/access_binding.go:164-167`), а не голым текстом `ErrScopeMismatch`, как
+// пишет приёмка (§1.3, AID-29): распознаётся тот ответ, который отдаёт дерево.
+func aid29RefusedByForm(msg, v string) bool {
+	return msg == "invalid account id '"+v+"'" || msg == domain.ErrScopeMismatch.Error() ||
+		(strings.HasPrefix(msg, "Illegal argument scope ") && strings.HasSuffix(msg, " resource_id="+v))
 }
 
 // aid29Sites — перепись мест §1.3 на голове ветки: 17 проверок
@@ -561,15 +566,14 @@ func TestAccountID29_EveryConsumerAcceptsTheStringFormAndRefusesAForeignOne(t *t
 		t.Run(site.where+"/string_form", func(t *testing.T) {
 			rel := &relationDouble{}
 			err := site.call(ctx, rel, ownerLoginGodjee)
+			t.Logf("%s: ответ на заданную форму %q: %v", site.where, ownerLoginGodjee, err)
 			st, ok := status.FromError(err)
 			if !ok || err == nil || st.Code() != codes.InvalidArgument {
 				return
 			}
-			for _, refusal := range aid29StringFormRefusals(ownerLoginGodjee) {
-				if st.Message() == refusal {
-					refusedForm = append(refusedForm, site.where)
-					t.Errorf("%s: идентификатор заданной формы %q отвергнут формой: %v", site.where, ownerLoginGodjee, err)
-				}
+			if aid29RefusedByForm(st.Message(), ownerLoginGodjee) {
+				refusedForm = append(refusedForm, site.where)
+				t.Errorf("%s: идентификатор заданной формы %q отвергнут формой: %v", site.where, ownerLoginGodjee, err)
 			}
 		})
 		t.Run(site.where+"/empty", func(t *testing.T) {

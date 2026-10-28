@@ -33,6 +33,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 func acceptAccountIDs(idsAxis ...string) error {
@@ -91,7 +92,7 @@ func TestAccountID31_JournalRecordsTheStringFormVerbatim(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
-		VALUES ($1, $2, $3, $4, 'AID-31', 'INVITED')`, uid, personal, "ext-aid31-"+uid, "aid31-"+uid+"@example.invalid")
+		VALUES ($1, $2, $3, $4, 'AID-31', 'ACTIVE')`, uid, personal, "ext-aid31-"+uid, "aid31-"+uid+"@example.invalid")
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
 		VALUES ($1, $2, $3, '{}'::jsonb)`, personal, "aid31-personal-"+personal[len(personal)-6:], uid)
@@ -99,6 +100,7 @@ func TestAccountID31_JournalRecordsTheStringFormVerbatim(t *testing.T) {
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
 		VALUES ('godjee', 'godjee', $1, '{}'::jsonb)`, uid)
 	require.NoError(t, err)
+	activewayin.Seed(t, ctx, tx)
 	require.NoError(t, tx.Commit(ctx))
 
 	var n int
