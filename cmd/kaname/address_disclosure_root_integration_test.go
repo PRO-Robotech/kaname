@@ -32,7 +32,6 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"

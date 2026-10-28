@@ -1520,7 +1520,7 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	// Объект, по которому проход ПИШЕТ член, — под замком строки зеркала до первой
 	// записи (kaname#975): объект, чью регистрацию сняли после чтения отбора, члена
 	// не получает, а снятие ждёт фиксации прохода, если замок взят раньше.
-	desired, err := keepLiveDesired(ctx, s, desired, currentByKey)
+	desired, err = keepLiveDesired(ctx, s, desired, currentByKey)
 	if err != nil {
 		return err
 	}

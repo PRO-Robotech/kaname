@@ -42,7 +42,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/issuinglistener"
 )
 

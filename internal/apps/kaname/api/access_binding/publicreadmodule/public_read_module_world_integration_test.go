@@ -60,7 +60,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"

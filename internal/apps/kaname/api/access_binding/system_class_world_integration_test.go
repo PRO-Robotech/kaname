@@ -46,7 +46,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
