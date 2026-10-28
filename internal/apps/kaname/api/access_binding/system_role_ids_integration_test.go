@@ -13,6 +13,7 @@ package access_binding_test
 // до предмета, краснеет текстом «НЕ-ВЫПОЛНИЛОСЬ(фикстура)», а не «ИСПЫТУЕМОГО НЕТ».
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -576,7 +577,7 @@ func TestSystemRoleIDs_SRCI11_GrantRacingTheMigration(t *testing.T) {
 
 	const n = 8
 	for i := 0; i < n; i++ {
-		w.racers = append(w.racers, mustSeedUser(t, w.ctx, w.pool, "srcir"))
+		w.racers = append(w.racers, mustSeedUser(t, w.ctx, w.pool, fmt.Sprintf("srcir%d", i)))
 	}
 
 	w.subj.requireSubject(t, "SRCI-11")
