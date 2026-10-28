@@ -135,7 +135,7 @@ func seedSCWorld(t *testing.T, ctx context.Context, w *scWorld) *scWorld {
 	pool, repo := w.pool, w.repo
 	// Арендатор acc-A: владелец usr-A, проект prj-A, человек usr-B, учётка sva-A.
 	w.usrA = mustSeedUser(t, ctx, pool, "sca")
-	w.accA =seedAccountByOwner(t, ctx, pool, "acc-sc-a", w.usrA)
+	w.accA = seedAccountByOwner(t, ctx, pool, "acc-sc-a", w.usrA)
 	w.prjA = seedProjectInAccount(t, ctx, pool, w.accA, "prj-sc-a")
 	w.usrB = mustSeedUser(t, ctx, pool, "scb")
 	w.svaA = seedServiceAccount(t, ctx, pool, w.accA, "sva-sc-a")

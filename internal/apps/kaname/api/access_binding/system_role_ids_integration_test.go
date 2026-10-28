@@ -652,8 +652,8 @@ func TestSystemRoleIDs_SRCI12_SubscriptionJournalTellsOfTheNewIDs(t *testing.T) 
 		assert.Falsef(t, createdOrDeleted[id], "SRCI-12: CREATED/DELETED о выдаче %s", id)
 	}
 	allowed := map[string]bool{
-		subscriptionjournal.KindRole + "|" + subj.oldAdmin:            true,
-		subscriptionjournal.KindRole + "|" + subj.oldViewer:           true,
+		subscriptionjournal.KindRole + "|" + subj.oldAdmin:             true,
+		subscriptionjournal.KindRole + "|" + subj.oldViewer:            true,
 		subscriptionjournal.KindRole + "|" + domain.SystemAdminRoleID:  true,
 		subscriptionjournal.KindRole + "|" + domain.SystemViewerRoleID: true,
 	}
