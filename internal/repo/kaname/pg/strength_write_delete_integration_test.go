@@ -752,13 +752,25 @@ func writeWDReport(t *testing.T, prov scalegrid.Provenance, results []wdResult,
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	if err := os.WriteFile(path, []byte(header+renderWDReport(results, wall, final)), 0o644); err != nil {
+	text := header + renderWDReport(results, wall, final)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatalf("запись отчёта: %v", err)
 	}
 	if final {
 		t.Logf("отчёт записан: %s", path)
+		// Тот же текст — в поток прогона, дословно, между метками. Замер идёт
+		// заданием во внешнем кластере (решение владельца 2026-10-22: машина
+		// владельца для прогонов не используется), файл дерева остаётся в pod, а
+		// наружу доезжает лишь поток; отчёт в дерево кладётся из него без правки.
+		fmt.Fprintf(os.Stdout, "%s %s\n%s%s\n", wdReportStreamBegin, wdReportPath, text, wdReportStreamEnd)
 	}
 }
+
+// wdReportStreamBegin / wdReportStreamEnd — метки текста отчёта в потоке прогона.
+const (
+	wdReportStreamBegin = "=== R7-2 REPORT BEGIN"
+	wdReportStreamEnd   = "=== R7-2 REPORT END"
+)
 
 func renderWDReport(results []wdResult, wall time.Duration, final bool) string {
 	var b strings.Builder

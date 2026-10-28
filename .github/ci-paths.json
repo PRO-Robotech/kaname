@@ -160,7 +160,8 @@
    "jobs": [
     "e2e-newman.yml:stand",
     "e2e-newman.yml:stand-ceremony",
-    "e2e-newman.yml:chart-own"
+    "e2e-newman.yml:chart-own",
+    "e2e-newman.yml:chart-own-verdict"
    ],
    "paths": [
     "**/*.go",
