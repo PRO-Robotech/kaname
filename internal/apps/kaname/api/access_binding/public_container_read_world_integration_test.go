@@ -194,17 +194,22 @@ func (p *pcrWorld) registerRegistry(id string) {
 }
 
 // labelRegistry — повторная регистрация реестра id службой-владельцем с
-// метками labels: так владелец сообщает метки объекта (зеркало `labels`,
-// селектор `matchLabels`). Версии владельца нет — регистрация применяется
-// всегда, как и первая (legacy-форма мира П6).
+// метками labels — тем же путём, что registerRegistry (обе строки регистрации),
+// плюс метки зеркала: так владелец сообщает метки объекта (селектор
+// `matchLabels`). Версии владельца нет — регистрация применяется всегда, как и
+// первая (legacy-форма мира П6).
 func (p *pcrWorld) labelRegistry(id string, labels map[string]string) {
 	p.t.Helper()
-	r := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:" + string(p.prjA), Relation: "project", Object: pcrRegType + ":" + id,
-		Labels: labels, ParentProjectId: string(p.prjA), ParentAccountId: string(p.accA),
-		ParentChain: []string{"project:" + string(p.prjA), "account:" + string(p.accA)},
+	obj := pcrRegType + ":" + id
+	for _, r := range []*iamv1.RegisterResourceRequest{
+		{SubjectId: "project:" + string(p.prjA), Relation: "project", Object: obj},
+		{SubjectId: "user:" + string(p.usrA), Relation: "owner", Object: obj},
+	} {
+		r.ParentProjectId, r.ParentAccountId = string(p.prjA), string(p.accA)
+		r.ParentChain = []string{"project:" + string(p.prjA), "account:" + string(p.accA)}
+		r.Labels = labels
+		require.NoErrorf(p.t, p.reg.Register(p.ctx, r), "метки реестра %s (%s)", id, r.GetRelation())
 	}
-	require.NoErrorf(p.t, p.reg.Register(p.ctx, r), "метки реестра %s", id)
 }
 
 // registerRepository — регистрация репозитория службой-владельцем: указатель

@@ -73,7 +73,7 @@ const namedRolesBlock = `
         matchLabels: {s7: x}
         children:
           - resources: [repositories]
-            classes: [get]
+            classes: [get, list]
 
   - id: registry.reg_reader_named
     description: >
