@@ -17,7 +17,9 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // INVALID_ARGUMENT) and immutable after Create (not in UpdateAccountRequest.update_mask
 // → "ownerUserId is immutable after Account.Create").
 //
-// Resource id prefix: `acc` (concatenated form, `ids.NewID`).
+// Resource id prefix: `acc` (concatenated form, `ids.NewID`) — for an id the
+// service mints. An id set in `CreateAccountRequest.id` is a string chosen by
+// the creator and may carry no prefix (`godjee`).
 message Account {
   // ID of the account.
   string id = 1;

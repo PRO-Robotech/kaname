@@ -480,7 +480,7 @@ message WhoAmIResponse {
 // derived from ACTIVE AccessBindings on the account object (best-effort
 // classification — see WhoAmIResponse).
 message AccountMembership {
-  // Account id (`acc…`).
+  // Account id (the form of `CreateAccountRequest.id`).
   string account_id = 1;
 
   // Account display name (may be empty when the account row was created

@@ -398,7 +398,8 @@ message RegisterResourceRequest {
   // iam→owner. Пусто для не-project-scoped объектов.
   string parent_project_id = 6;
 
-  // Parent account id ресурса (`acc…`), если применимо. Mirror /
+  // Parent account id ресурса (форма `CreateAccountRequest.id`), если
+  // применимо. Mirror /
   // containment на account-scope.
   string parent_account_id = 7;
 

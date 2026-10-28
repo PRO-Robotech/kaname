@@ -108,9 +108,11 @@ func (u *ListAssignableRolesUseCase) Execute(ctx context.Context, resourceType, 
 	return out, next, nil
 }
 
-// validateAssignableResource enforces D-6: resource_type ∈ {account, project,
-// cluster} and resource_id matches the type (account⇒acc-, project⇒prj-,
-// cluster⇒exactly cluster_root). All errors are sync InvalidArgument.
+// validateAssignableResource держит D-6: resource_type ∈ {account, project,
+// cluster}, resource_id — в форме своего типа: у account — форма идентификатора
+// аккаунта (`shared.ValidateAccountID`, kaname#1052: префикса может не быть),
+// у project — префикс prj, у cluster — ровно cluster_root. Все отказы —
+// синхронный InvalidArgument.
 func validateAssignableResource(resourceType, resourceID string) error {
 	switch resourceType {
 	case "account":

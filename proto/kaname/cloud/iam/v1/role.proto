@@ -663,7 +663,8 @@ message DefinitionTier {
   // Dotted tier type: `iam.cluster` | `iam.account` | `iam.project`.
   string tier_type = 1;
 
-  // Anchor object id (`cluster_root` | `acc…` | `prj…`).
+  // Anchor object id (`cluster_root` | an account id in the form of
+  // `CreateAccountRequest.id` | `prj…`).
   string tier_id = 2;
 }
 

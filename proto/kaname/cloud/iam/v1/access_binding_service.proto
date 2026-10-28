@@ -271,9 +271,10 @@ service AccessBindingService {
   // PROJECT) so the UI groups without any client-side scope logic.
   //
   //   - `resource_type ∈ {"account","project","cluster"}` for v1; otherwise
-  //     INVALID_ARGUMENT. `resource_id` must match the type's prefix
-  //     (account⇒acc, project⇒prj; cluster⇒exactly cluster_root) —
-  //     mismatch → INVALID_ARGUMENT.
+  //     INVALID_ARGUMENT. `resource_id` must be in the form of its type
+  //     (account ⇒ the account id form of `CreateAccountRequest.id`, which
+  //     may carry no prefix; project ⇒ prefix `prj`; cluster ⇒ exactly
+  //     cluster_root) — mismatch → INVALID_ARGUMENT.
   //   - well-formed-but-missing resource → NOT_FOUND (existence-resolve is
   //     required for authz); existing resource with 0 assignable roles →
   //     empty `roles` (not an error).
@@ -450,7 +451,8 @@ message CreateAccessBindingRequest {
   // unknown value → sync INVALID_ARGUMENT.
   string scope_type = 4;
 
-  // Scope-anchor ID — the anchor object id (`cluster_root` | `acc…` | `prj…`).
+  // Scope-anchor ID — the anchor object id (`cluster_root` | an account id in
+  // the form of `CreateAccountRequest.id` | `prj…`).
   string scope_id = 5;
 
   // TOMBSTONE. Tags 6/7 held an ABAC condition overlay on the binding
@@ -658,8 +660,8 @@ message ListAccessBindingsByScopeRequest {
   // pair), so the backend needs no further change.
   string scope_type = 5;
 
-  // Scope-anchor ID (`cluster_root` | `acc…` | `prj…`). Paired with
-  // `scope_type`; supersedes the legacy `resource_id`. Same migration caveat.
+  // Scope-anchor ID (`cluster_root` | an account id in the form of
+  // `CreateAccountRequest.id` | `prj…`). Paired with `scope_type`; supersedes the legacy `resource_id`. Same migration caveat.
   string scope_id = 6;
 }
 
@@ -869,8 +871,8 @@ message SubjectPrivilege {
   // `resource_type` (field 4) is populated alongside it.
   string scope_type = 12;
 
-  // Scope-anchor ID (`cluster_root` | `acc…` | `prj…`). Always populated
-  // alongside the legacy `resource_id` (field 5).
+  // Scope-anchor ID (`cluster_root` | an account id in the form of
+  // `CreateAccountRequest.id` | `prj…`). Always populated alongside the legacy `resource_id` (field 5).
   string scope_id = 13;
 
   // The GROUP through which the subject holds this privilege (`grp…`), when
@@ -889,9 +891,10 @@ message ListAssignableRolesRequest {
   // fallback when `scope_type` is empty.
   string resource_type = 1;
 
-  // DEPRECATED — use `scope_id` (field 6). Scope-anchor id; must match the
-  // type's prefix (account⇒acc, project⇒prj; cluster⇒exactly
-  // cluster_root) — otherwise INVALID_ARGUMENT.
+  // DEPRECATED — use `scope_id` (field 6). Scope-anchor id; must be in the
+  // form of its type (account ⇒ the account id form of
+  // `CreateAccountRequest.id`, which may carry no prefix; project ⇒ prefix
+  // `prj`; cluster ⇒ exactly cluster_root) — otherwise INVALID_ARGUMENT.
   string resource_id = 2;
 
   // The maximum number of results per page to return. Default value: 50,

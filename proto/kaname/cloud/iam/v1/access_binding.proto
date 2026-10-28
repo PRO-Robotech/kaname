@@ -60,7 +60,8 @@ message AccessBinding {
   // after Create.
   string scope_type = 5;
 
-  // Scope-anchor ID — the anchor object id (`cluster_root` | `acc…` | `prj…`).
+  // Scope-anchor ID — the anchor object id (`cluster_root` | an account id in
+  // the form of `CreateAccountRequest.id` | `prj…`).
   // Immutable after Create.
   string scope_id = 6;
 
