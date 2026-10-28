@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,12 @@ type pcrWorld struct {
 
 	facts     *catalog.Facts // каталожный факт из живых строк после последней доставки
 	delivered bool
+
+	// deliveryFail — приёмник провала доставки; nil — сама проба (`t` мира).
+	// Подменяет его лишь проба помощника доставки
+	// (`public_container_read_world_delivery_applied_integration_test.go`):
+	// так провал сцены ей виден исходом, а не роняет её саму.
+	deliveryFail require.TestingT
 }
 
 // newPCRWorld поднимает П6 БЕЗ доставки новой редакции и доказывает живость
@@ -275,6 +282,7 @@ func (p *pcrWorld) applyDelivered(what string, m *manifest.Manifest) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	census, err := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(p.pool)).ApplyAll(p.ctx, []*manifest.Manifest{m})
 	require.NoErrorf(p.t, err, "%s — применение каталога (%+v)", what, census)
+	requireDeliveryApplied(p.deliverySink(), what, census)
 
 	live, err := kanamepg.NewCatalogRepo(p.pool).ReadLiveCatalog(p.ctx)
 	require.NoErrorf(p.t, err, "%s — живые строки каталога", what)
@@ -390,3 +398,55 @@ func sixPairs() []pcrPair {
 type pcrFacts struct{ p *pcrWorld }
 
 func (s pcrFacts) Facts() *catalog.Facts { return s.p.facts }
+
+// deliverySink — куда помощник доставки сообщает провал: приёмник пробы
+// помощника, если он поставлен, иначе сама проба мира.
+func (p *pcrWorld) deliverySink() require.TestingT {
+	if p.deliveryFail != nil {
+		return p.deliveryFail
+	}
+	return p.t
+}
+
+// requireDeliveryApplied — «Дано» доставкой держится, лишь если доставка
+// ПРИМЕНЕНА. Младшую редакцию и конфликт содержимого применитель каталога
+// возвращает ИСХОДОМ, а не ошибкой (`Census.NotApplied`, Д3): каталог прежний,
+// и сцена без этой проверки судила бы прежний мир под именем нового. Непустой
+// перечень — провал сцены с именем каждого модуля и видом пропуска.
+func requireDeliveryApplied(t require.TestingT, what string, census modulecatalog.Census) {
+	if h, ok := t.(interface{ Helper() }); ok {
+		h.Helper()
+	}
+	if len(census.NotApplied) == 0 {
+		return
+	}
+	skipped := make([]string, 0, len(census.NotApplied))
+	for _, s := range census.NotApplied {
+		skipped = append(skipped, fmt.Sprintf("модуль %q — %s (объявлена %s, применена %s)",
+			s.Module, notAppliedKind(s.Outcome), editionText(s.Declared), editionText(s.Previous)))
+	}
+	t.Errorf("%s — доставка не применена, сцена судила бы прежний мир: %s",
+		what, strings.Join(skipped, "; "))
+	t.FailNow()
+}
+
+// notAppliedKind — вид пропуска словами провала. `NotApplied` собирается
+// ровно из двух исходов; иной назван своим именем, а не отнесён к одному из них.
+func notAppliedKind(o modulecatalog.RevisionOutcome) string {
+	switch o {
+	case modulecatalog.RevisionStale:
+		return "младшая редакция"
+	case modulecatalog.RevisionConflict:
+		return "конфликт содержимого"
+	default:
+		return "исход " + o.String()
+	}
+}
+
+// editionText — пара редакции строкой; nil — редакции нет.
+func editionText(e *modulecatalog.Edition) string {
+	if e == nil {
+		return "нет"
+	}
+	return fmt.Sprintf("%d %s", e.Revision, e.Digest)
+}
