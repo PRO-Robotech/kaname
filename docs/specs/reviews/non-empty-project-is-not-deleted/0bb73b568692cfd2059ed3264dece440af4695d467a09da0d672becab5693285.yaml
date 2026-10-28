@@ -1,0 +1,172 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/non-empty-project-is-not-deleted.md
+  sha256: 0bb73b568692cfd2059ed3264dece440af4695d467a09da0d672becab5693285
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена (change-graph.md §2): слово DRAFT и «круг
+    четвёртый» — то, что туда вписали. Вердикт APPROVED круга 5 вынесен редакции
+    db46a803c1f4fbeeb7597bd51f72e220b7e0735ac103ef086c4cadbaafac1cc6 и к этой
+    редакции не переносится. Действующий вердикт об этой редакции — эта запись.
+  base_commit: 092bee4fb3220215da255258dfa6fe0da9214f34
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена (ветка `168` @092bee4fb, правка в рабочей копии автора).
+    Отпечаток снят рецензентом с файла рабочей копии.
+  branch: '168'
+  task: https://github.com/PRO-Robotech/kaname/issues/168
+  lines: 3431
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/non-empty-project-is-not-deleted.md
+  compared_against:
+    sha256: db46a803c1f4fbeeb7597bd51f72e220b7e0735ac103ef086c4cadbaafac1cc6
+    copy: docs/engineering/acceptance/non-empty-project-is-not-deleted.md.db46a803
+    record: docs/specs/reviews/non-empty-project-is-not-deleted/db46a803c1f4fbeeb7597bd51f72e220b7e0735ac103ef086c4cadbaafac1cc6.yaml
+  round: 1
+  round_note: Круг 1 правки после вердикта (kaname#168); всего по документу — шестой.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-29'
+
+event:
+  type: none
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 0bb73b568692cfd2059ed3264dece440af4695d467a09da0d672becab5693285"
+  rationale: >-
+    Вердикт — отказ. Событие публикует курьер (git-operator) и тем же заходом приводит
+    этот блок к факту. Отказ полномочия не выдаёт и ничего не открывает.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: [7055ddb1b1e6a9553f342a4e3225802685cba3e1419d2aa9dcfe9512248977cf.yaml, db46a803c1f4fbeeb7597bd51f72e220b7e0735ac103ef086c4cadbaafac1cc6.yaml]
+
+scope:
+  reviewed: >-
+    Дельта к одобренной редакции db46a803 (diff -u, 421 строка): пункт шапки «Правка
+    ПОСЛЕ вердикта», дом З, строки 1-01/1-08/1-09/1-21 оси 4, переписанный IAM-PNE-1-08,
+    новый IAM-PNE-1-21 (полосы А и Б), строки §6 и §6.1, пункт S1 §10, раздел §11.
+    Вне дельты пункты не переоткрывались (fa-b1).
+  method: >-
+    Перемер чисел и координат дельты на 092bee4fb собственными командами; прочтение
+    производителя каждого «Тогда» дельты в коде службы и corelib@v1.15.0. Посев не
+    ставился: «Дано» правки — литералы, предъявители посева стенда и вывод из карты
+    двери; их существование проверено по названной фикстуре.
+
+blocking:
+  - id: K6-B1
+    kind: TWIN
+    where: "IAM-PNE-1-21 полоса А, положительный близнец — строка 2450; §11.7 строка 3401"
+    claim: >-
+      Близнец утверждает «решатель спрошен ровно один раз» для того же именованного
+      субъекта без прав. Производитель этого «Тогда» на правильной форме задаёт ДВА
+      вопроса: checkAdapter (internal/authzguard/own_door.go:469–489) после отказа по
+      объекту спрашивает надзор SubjectIsClusterAdminPlainE (own_door.go:485 →
+      cluster_admin_shortcircuit.go:99, `system_admin` на кластере). Подделка решателя
+      считает оба (grantStore.asked, own_door_test.go:47). Близнец краснеет на
+      правильной реализации: утверждение строже производителя.
+    predicate: >-
+      sed -n 469,489p internal/authzguard/own_door.go → ветвь `admin, adminErr :=
+      SubjectIsClusterAdminPlainE(ctx, a.inner, subject)` после `allowed == false`.
+      Действующая проба держит то же: own_door_every_gated_rpc_test.go проверяет
+      `len(denyStore.asked) == 0` и берёт `asked[0]`, а не «ровно один».
+    fix: >-
+      Утверждать «первый вопрос решателю — о `<вид>:<значение>` с отношением записи
+      каталога» (вопросов ≥ 1). Либо разрешить спрошенную тройку, как в действующей
+      пробе, — тогда вопрос ровно один. Строку §11.7 привести к тому же.
+  - id: K6-B2
+    kind: CONSTRUCTIBILITY
+    where: "IAM-PNE-1-21 полоса А, «Дано» — «именованный субъект без прав»; §11.5 строка перечня 58 глаголов"
+    claim: >-
+      Дом З гоняет цепочку публичного слушателя в составе композиционного корня.
+      Политика вызывающего стоит раньше формы (§11.3; cmd/kaname/serve.go:1030) и
+      применяет повышение ступени (internal/authzguard/public_caller_policy.go:384,
+      :492, grpcsrv.EvaluateStepUp). У всех 58 глаголов класса required_acr_min ≥ 1
+      (31 — «1», 27 — «2»). Освобождён только машинный субъект (corelib@v1.15.0
+      grpcsrv/acr.go:181). Человек без уровня получит отказ повышения ступени до
+      формы на каждом из 58 глаголов: ни отказа по форме, ни близнеца «решатель
+      спрошен». Фикстура, названная §11.5 образцом (TestOwnDoor_EveryObjectScopedRPCRefusesAStranger),
+      заводит именно человека: tenantCtx → Principal{Type:"user"}, own_door_test.go:59.
+      Эта проба собирает одну дверь, без политики вызывающего, поэтому там это верно,
+      а в доме З — нет.
+    predicate: >-
+      jq по internal/apps/kaname/seed/embedded/permission_catalog.json (отбор §11.2 без
+      Internal) | .required_acr_min → 31×"1", 27×"2", 0×"0" @092bee4fb.
+    fix: >-
+      В «Дано» назвать вид субъекта: служебная учётка (машинный принципал, освобождён
+      первой ветвью EvaluateStepUp) — как jwtAccountAdminA у 1-08. Либо человек с
+      доверенным уровнем ≥ required_acr_min каждого глагола. В §11.5 назвать писателя
+      этого субъекта в пробе.
+
+non_blocking:
+  - id: K6-N1
+    kind: FORMAT
+    where: "§11.2 строка 3276; §11.4 строки 3361, 3362"
+    claim: >-
+      «64 строки, имён 7» не воспроизводится командой самого документа @092bee4fb:
+      `git grep -h 'shared.ValidateResourceID(' -- 'internal/apps/kaname/api/**.go'
+      ':!*_test.go' | wc -l` → 62. Литеральных имён 8: account 19 · user 10 · group 7
+      · service account 7 · project 6 · role 6 · access binding 5 · grant delegation 1.
+      Таблица §11.3 на 7 видов двери верна. Число и «64 обработчиков» исправить.
+  - id: K6-N2
+    kind: CONVENTION
+    where: "дом З, §0.2в; §11.7 «код»"
+    claim: >-
+      Цепочку публичного слушателя корень собирает по месту (serve.go:1018–1037).
+      Проба «в том составе и порядке, в каком её собирает корень» без общего
+      конструктора была бы второй проводкой — дверь сама предупреждает об этом
+      (own_door.go, godoc OwnDoor). Это условие к коду, а не к приёмке (fa-b2), —
+      передать замыслу или go-implementer: один конструктор цепочки на корень и пробу.
+  - id: K6-N3
+    kind: COVERAGE
+    where: "IAM-PNE-1-21 полоса А"
+    claim: >-
+      AuthorizeService/BatchCheck входит в 58 и одновременно в CallerAuthorityGatedMethods
+      (own_door.go:229). Безымянного вызывающего и пустое scope_id дверь отдаёт
+      обработчику (own_door.go:375–381). Класс держится только при названном субъекте и
+      непустом поле. Действующая проба BatchCheck исключает — построитель запроса
+      придётся расширить. Полезно сказать это строкой в §11.5.
+  - id: K6-N4
+    kind: DoD
+    where: "§11.7 «сквозной прогон»"
+    claim: >-
+      «при названных числах запросов и утверждений» — чисел в документе нет. Пусть
+      отчёт посадки назовёт их, иначе «0 упавших» неотличимо от «0 исполненных».
+
+checked_and_holds:
+  - "Перепись класса 58: jq по каталогу → 59, из них Internal 1; разбивка по видам — account 16 · iam_user 15 · iam_service_account 9 · iam_group 7 · project 5 · iam_role 3 · iam_access_binding 3 — сходится с §11.2 @092bee4fb"
+  - "Разметка proto: from_request_field конкретных 59, «*» 19, пара resource_type/resource_id ×2 — сходится"
+  - "Шесть Get с v_get и сокрытием существования — каталог плюс corelib@v1.15.0 authz/hide_existence.go:171–178 и таблица видов :48–55 — сходится (MembershipService/Get — viewer, вне)"
+  - "Порядок звеньев публичного слушателя serve.go:1030/1031/1032/1037 — сходится; обогатитель AUTHZ_DENIED трогает только PERMISSION_DENIED (deny_details.go:135) — сходится"
+  - "Форма службы ids.go:47–60 — приставка, затем длина 20 либо посеянное; текст `invalid %s id '%s'` — сходится; rol000000000sysviewer длиной 21 — constants_extended.go:65"
+  - "jwtAccountAdminA и jwtBootstrap — машинные принципалы (seed_own_stand.py:193–205; бутстрап — служебная учётка, bootstrap_token/ids.go), повышение ступени на ProjectService/Delete (acr_min 2) их не останавливает — 1-08 и 1-21 Б конструируемы"
+  - "Кейсы-опоры: IAM-ACC-GT-NEG-ID-MALFORMED (iam-account.py:616, oneOf([400,404])), IAM-ACC-GT-NEG-NOTFOUND (iam-account.py:592, 404/5), комментарий вместо IAM-PRJ-DL-NEG-MALFORMED-PREFIX (iam-project.py:1237); модулей с address_own_front 43; анонимных шагов 149; литералов неверной формы в путях 2 — всё сходится"
+  - "Близнец 1-08 (prj00000000000notfnd → 403/7 AUTHZ_DENIED) отличается одним фактом; ProjectService/Delete без сокрытия существования (каталог: v_delete) — производим"
+  - "Канон решения: security-hardening.md hard-format-before-authz, api-conventions.md api-malformed-id-sync, testing.md malformed-id-not-weakened — опора верна"
+
+constructibility:
+  seeded: 0
+  by_named_fixture_confirmed: 6
+  refuted: 1
+  not_performed: 0
+  note: >-
+    Нетривиальных «Дано» дельты — 7: jwtAccountAdminA, jwtBootstrap, аноним, вывод 58
+    глаголов, посеянный rol000000000sysviewer, близнец IAM-ACC-GT-NEG-NOTFOUND —
+    подтверждены по фикстуре в дереве. «Именованный субъект без прав» дома З
+    опровергнут (K6-B2). Литералы неверной формы писателя не требуют.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
