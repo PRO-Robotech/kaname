@@ -197,15 +197,15 @@ func (e *grantEnv) run(ctx context.Context, w grantWriter, g grantTarget) <-chan
 		switch w {
 		case gwRevoke:
 			op, err := accessbindingapp.NewRevokeAccessBindingUseCase(e.fx.repo, e.ops).
-				WithRelationStore(ownerPathOnlyRelations{}, nil).Execute(asOwner, g.bid)
+				WithRelationStore(ownerRemovalOnlyRelations{owner: string(e.fx.owner)}, nil).Execute(asOwner, g.bid)
 			out <- awaitOpDone(ctx, e.ops, op, err)
 		case gwDelete:
 			op, err := accessbindingapp.NewDeleteAccessBindingUseCase(e.fx.repo, e.ops).
-				WithRelationStore(ownerPathOnlyRelations{}, nil).Execute(asOwner, g.bid)
+				WithRelationStore(ownerRemovalOnlyRelations{owner: string(e.fx.owner)}, nil).Execute(asOwner, g.bid)
 			out <- awaitOpDone(ctx, e.ops, op, err)
 		case gwUpdate:
 			op, err := accessbindingapp.NewUpdateAccessBindingUseCase(e.fx.repo, e.ops).
-				WithRelationStore(ownerPathOnlyRelations{}, nil).
+				WithRelationStore(ownerRemovalOnlyRelations{owner: string(e.fx.owner)}, nil).
 				Execute(asOwner, g.bid, []string{"labels"}, false, domain.Labels{"census": "922"})
 			out <- awaitOpDone(ctx, e.ops, op, err)
 		case gwExpiry:

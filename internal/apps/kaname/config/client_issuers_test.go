@@ -64,6 +64,7 @@ func TestLoadModuleRoster_ReadsTheIssuerAndRefusesAnUnreadableOne(t *testing.T) 
 	require.NoError(t, os.WriteFile(empty, []byte("no certificate here\n"), 0o600))
 
 	var a config.AuthNConfig
+	a.ServiceNameFormRaw = moduleroster.NameFormRaw
 	a.ModuleIdentities = []string{"kacho/kacho-vpc=module-writer@internal"}
 
 	a.ClientIssuers = []string{"internal=" + good}

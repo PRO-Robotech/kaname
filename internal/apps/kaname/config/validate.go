@@ -428,11 +428,15 @@ const moduleIdentitiesKnob = "authn.module-identities (env KANAME_AUTHN__MODULE_
 // Учётку каждой записи читает форма имени службы (kaname#308). Необъявленная
 // либо незаконная форма здесь не судится: о ней отказывает её страж
 // (validateServiceNameForm), и второе сообщение о том же предмете разошлось бы
-// с первым — запись перечня тогда судится на следующем старте, с объявленной
-// формой.
+// с первым — записи перечня тогда судятся на следующем старте, с объявленной
+// формой. Пустота перечня от формы не зависит и судится всегда: ручка
+// обязательна безусловно, и отказ о ней не ждёт, пока объявят форму.
 func (c Config) validateModuleIdentities() error {
 	form := c.AuthN.ServiceNameForm()
 	if !form.Valid() {
+		if c.AuthN.Mode.IsProduction() && !anyNonBlank(c.AuthN.ModuleIdentities) {
+			return moduleidentity.Roster{}.Require(moduleidentity.Gate{Knob: moduleIdentitiesKnob})
+		}
 		return nil
 	}
 	issuers, err := clientIssuerEntries(c.AuthN.ClientIssuers)
@@ -571,4 +575,15 @@ func RedactDSN(dsn string) string {
 		return "(строка подключения не разобрана; не печатается, чтобы не раскрыть пароль)"
 	}
 	return parsed.Redacted()
+}
+
+// anyNonBlank — есть ли среди записей хотя бы одна непустая после среза
+// пробелов: пустые записи перечень отбрасывает тем же правилом.
+func anyNonBlank(entries []string) bool {
+	for _, e := range entries {
+		if strings.TrimSpace(e) != "" {
+			return true
+		}
+	}
+	return false
 }
