@@ -222,7 +222,8 @@ publication_pending:
     и гейт TestNewMigrationCitesAnApprovedAcceptance не сняты.
 
 effective_approval:
-  issued: false
+  issued: true
+  issued_at: "2026-10-28T21:53:27Z"
   ban1_lifted: false
   pending_on: публикация события курьером (git-operator) и приведение блока event к факту тем же заходом
 
@@ -231,8 +232,24 @@ event_body: "acceptance-reviewer · APPROVED · sha256 27295473fda44228a6fc8426d
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#543
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6481608730
+  node_id: IC_kwDOUO26pM8AAAABglWAGg
+  url: https://github.com/PRO-Robotech/kaname/issues/543#issuecomment-6481608730
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6481608730
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-28T21:53:27Z"
+  body: acceptance-reviewer · APPROVED · sha256 27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877
+  body_sha256: 252c6b944a8a79d2cbf9bb67abeac7b9059946dcbb1b6ca4231dd264101dfb63
+  subject_sha256: 27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877
+  subject_revision_commit: 8d632855f4495cd4c4d9d830a8aeb164eba55534
+  subject_revision_on_origin: false
+  verdict: APPROVED
+  publication_mode: 'git-operator: gh api POST repos/PRO-Robotech/kaname/issues/543/comments'
+  publication_note: Ревизия документа закоммичена локально в ветку и на origin ещё не отправлена (по заданию ветку отправляет исполнитель кода); тело события несёт отпечаток содержимого, сверяемый по файлу на любой ревизии.
 
 attribution:
   reviewer_kind: claude_agent
