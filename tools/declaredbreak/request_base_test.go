@@ -378,6 +378,6 @@ func TestStepJudgesTheRequestAgainstItsBase(t *testing.T) {
 	t.Run("запрос, а клон — не коммит слияния головы — третий исход 2", func(t *testing.T) {
 		s, head := lagScene(t, []int{1, 2, 3})
 		o := s.judge(s.checkout("refs/heads/848"), adj, script, "pull_request", "942", head)
-		expect(t, o, 2, "ГЕЙТ НЕ СДЕЛАЛ СВОЕЙ РАБОТЫ", "коммит слияния")
+		expect(t, o, 2, "ГЕЙТ НЕ СДЕЛАЛ СВОЕЙ РАБОТЫ", "клон не на коммите слияния головы "+head)
 	})
 }
