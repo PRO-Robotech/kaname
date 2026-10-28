@@ -913,7 +913,7 @@ func (x *WhoAmIResponse) GetCheckedAt() *timestamppb.Timestamp {
 // classification — see WhoAmIResponse).
 type AccountMembership struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Account id (`acc…`).
+	// Account id (the form of `CreateAccountRequest.id`).
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// Account display name (may be empty when the account row was created
 	// but the name was not set).

@@ -467,7 +467,8 @@ type RegisterResourceRequest struct {
 	// Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
 	// iam→owner. Пусто для не-project-scoped объектов.
 	ParentProjectId string `protobuf:"bytes,6,opt,name=parent_project_id,json=parentProjectId,proto3" json:"parent_project_id,omitempty"`
-	// Parent account id ресурса (`acc…`), если применимо. Mirror /
+	// Parent account id ресурса (форма `CreateAccountRequest.id`), если
+	// применимо. Mirror /
 	// containment на account-scope.
 	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
 	// Монотонный per-object source-version. Маркер «версии

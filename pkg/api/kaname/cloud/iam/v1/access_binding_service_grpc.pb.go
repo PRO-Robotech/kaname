@@ -195,9 +195,10 @@ type AccessBindingServiceClient interface {
 	// PROJECT) so the UI groups without any client-side scope logic.
 	//
 	//   - `resource_type ∈ {"account","project","cluster"}` for v1; otherwise
-	//     INVALID_ARGUMENT. `resource_id` must match the type's prefix
-	//     (account⇒acc, project⇒prj; cluster⇒exactly cluster_root) —
-	//     mismatch → INVALID_ARGUMENT.
+	//     INVALID_ARGUMENT. `resource_id` must be in the form of its type
+	//     (account ⇒ the account id form of `CreateAccountRequest.id`, which
+	//     may carry no prefix; project ⇒ prefix `prj`; cluster ⇒ exactly
+	//     cluster_root) — mismatch → INVALID_ARGUMENT.
 	//   - well-formed-but-missing resource → NOT_FOUND (existence-resolve is
 	//     required for authz); existing resource with 0 assignable roles →
 	//     empty `roles` (not an error).
@@ -592,9 +593,10 @@ type AccessBindingServiceServer interface {
 	// PROJECT) so the UI groups without any client-side scope logic.
 	//
 	//   - `resource_type ∈ {"account","project","cluster"}` for v1; otherwise
-	//     INVALID_ARGUMENT. `resource_id` must match the type's prefix
-	//     (account⇒acc, project⇒prj; cluster⇒exactly cluster_root) —
-	//     mismatch → INVALID_ARGUMENT.
+	//     INVALID_ARGUMENT. `resource_id` must be in the form of its type
+	//     (account ⇒ the account id form of `CreateAccountRequest.id`, which
+	//     may carry no prefix; project ⇒ prefix `prj`; cluster ⇒ exactly
+	//     cluster_root) — mismatch → INVALID_ARGUMENT.
 	//   - well-formed-but-missing resource → NOT_FOUND (existence-resolve is
 	//     required for authz); existing resource with 0 assignable roles →
 	//     empty `roles` (not an error).

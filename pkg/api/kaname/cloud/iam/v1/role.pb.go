@@ -1389,7 +1389,8 @@ type DefinitionTier struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Dotted tier type: `iam.cluster` | `iam.account` | `iam.project`.
 	TierType string `protobuf:"bytes,1,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`
-	// Anchor object id (`cluster_root` | `acc…` | `prj…`).
+	// Anchor object id (`cluster_root` | an account id in the form of
+	// `CreateAccountRequest.id` | `prj…`).
 	TierId        string `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

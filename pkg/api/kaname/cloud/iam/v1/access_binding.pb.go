@@ -312,7 +312,8 @@ type AccessBinding struct {
 	// (cluster/account/project); the dotted form is the API projection. Immutable
 	// after Create.
 	ScopeType string `protobuf:"bytes,5,opt,name=scope_type,json=scopeType,proto3" json:"scope_type,omitempty"`
-	// Scope-anchor ID — the anchor object id (`cluster_root` | `acc…` | `prj…`).
+	// Scope-anchor ID — the anchor object id (`cluster_root` | an account id in
+	// the form of `CreateAccountRequest.id` | `prj…`).
 	// Immutable after Create.
 	ScopeId string `protobuf:"bytes,6,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
 	// Creation timestamp.
