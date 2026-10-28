@@ -502,27 +502,28 @@ jobs:
       # Свойство «шаг не сужен событием» держит проба
       # `tools/declaredbreak` TestGateRunsWhereItsSubjectExpires, а не этот
       # комментарий.
-      - name: adjudicate breaking (vs main)
+      #
+      # БАЗА СРАВНЕНИЯ — БАЗА ЗАПРОСА, А НЕ `main` (kaname#1055). Запрос в ветку
+      # эпика, отставшую от `main`, сравнением с `main` получал «разрывы», которых
+      # голова не вносила: PR kaname#977 с нулевым диффом контрактов к своей базе был
+      # красен шестью чужими изменениями `main`. Базу берёт сценарий из
+      # GITHUB_BASE_REF (на push её нет — `main`), голову запроса — из HEAD_SHA;
+      # отказ называет по каждой находке, есть ли её предмет в общем предке.
+      # Сравнение с базой держит проба TestStepJudgesTheRequestAgainstItsBase
+      # шагом ниже — на настоящем buf.
+      - name: adjudicate breaking (vs база запроса)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -uo pipefail
           go build -o "$RUNNER_TEMP/adjudicate" ./tools/declaredbreak/cmd/adjudicate-declared-breaks
-          cd proto
-          set +e
-          buf breaking \
-            --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto" \
-            --error-format=json > "$RUNNER_TEMP/buf-breaking.jsonl" 2>"$RUNNER_TEMP/buf-breaking.err"
-          rc=$?
-          set -e
-          case "$rc" in
-            0|100) ;;
-            *)
-              echo "::error title=ГЕЙТ НЕ СДЕЛАЛ СВОЕЙ РАБОТЫ::buf breaking вышел кодом $rc — это НЕ «разрывов нет»"
-              cat "$RUNNER_TEMP/buf-breaking.err" >&2 || true
-              exit 2
-              ;;
-          esac
-          cd ..
-          "$RUNNER_TEMP/adjudicate" proto/declared-breaks.yaml < "$RUNNER_TEMP/buf-breaking.jsonl"
+          tools/declaredbreak/against-request-base.sh "$RUNNER_TEMP/adjudicate" proto/declared-breaks.yaml
+
+      # Проба шага выше пропускается под `-short` задания unit: её сцене нужен
+      # buf, а он стоит здесь. Без этого прогона её зелёного не наблюдал бы
+      # никто — провязку держит TestRequestBaseProbeRunsWhereBufIs.
+      - name: проба базы запроса (настоящий buf)
+        run: go test ./tools/declaredbreak/ -count=1 -run 'TestStepJudgesTheRequestAgainstItsBase' -v
 
       # Стабы закоммичены → они ОБЯЗАНЫ совпадать с .proto. Иначе кто-то правил
       # порождённое руками (что вдобавок бьёт rawDesc) либо забыл
