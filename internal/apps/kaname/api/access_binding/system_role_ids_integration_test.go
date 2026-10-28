@@ -185,13 +185,58 @@ func srciRequireCheckColumn(t *testing.T, snap []*iamv1.AuthorizeCheckResponse, 
 	}
 }
 
-// seedSRCI05Materialized — посев SRCI-05 и ожидание окна материализации Ч1, Ч2.
+// seedSRCI05Materialized — посев SRCI-05 и ожидание окна материализации: срез Ч1–Ч4
+// обязан дать столбец «ожидание» (опрос раз в 200 мс до 30 с, окно SC-13). Не дал —
+// отказ называет все четыре ответа и то, из чего доступ выводится, чтобы несозданное
+// условие читалось условием, а не предметом.
 func (w *srciWorld) seedSRCI05Materialized() {
 	w.seedSRCI05()
-	w.pollCheck(fmtSubject("user", string(w.u1)), "update", srciObj, true,
-		"НЕ-ВЫПОЛНИЛОСЬ(фикстура) SRCI-05 Ч1: B1 материализуется")
-	w.pollCheck(fmtSubject("user", string(w.u2)), "get", srciObj, true,
-		"НЕ-ВЫПОЛНИЛОСЬ(фикстура) SRCI-05 Ч2: B2 материализуется")
+	want := []bool{true, true, false, false}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		snap := w.srciCheckSnapshot()
+		got := make([]bool, len(snap))
+		for i, r := range snap {
+			got[i] = r.GetAllowed()
+		}
+		if assert.ObjectsAreEqual(want, got) {
+			return
+		}
+		if time.Now().After(deadline) {
+			w.t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура) SRCI-05: срез до за 30 с не дал столбец «ожидание» "+
+				"(Ч1 U1 update, Ч2 U2 get, Ч3 U2 update, Ч4 U3 get): ждали %v, получили %v; %s",
+				want, got, w.srciGrantBasis())
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// srciGrantBasis — из чего выводится доступ по B1 и B2: селекторы и глаголы ролей,
+// факты о субъектах на объекте и кластере, члены цели.
+func (w *srciWorld) srciGrantBasis() string {
+	w.t.Helper()
+	q := func(sql string, args ...any) string {
+		rows, err := w.pool.Query(w.ctx, sql, args...)
+		if err != nil {
+			return "ошибка чтения: " + err.Error()
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				return "ошибка чтения: " + err.Error()
+			}
+			out = append(out, s)
+		}
+		return "[" + strings.Join(out, "; ") + "]"
+	}
+	roles := []string{w.roleIDByName(domain.SystemAdminRoleName), w.roleIDByName(domain.SystemViewerRoleName)}
+	subjects := []string{fmtSubject("user", string(w.u1)), fmtSubject("group", w.g1+"#member"), fmtSubject("user", string(w.u2))}
+	return "селекторы ролей " + q(`SELECT role_id || ' ' || arm::text || ' ' || object_types::text FROM kaname.role_rule_selectors WHERE role_id = ANY($1)`, roles) +
+		"; глаголы на vpc_network " + q(`SELECT role_id || ' ' || verb FROM kaname.role_verb WHERE role_id = ANY($1) AND object_type = 'vpc_network'`, roles) +
+		"; факты " + q(`SELECT object_type || ':' || object_id || '#' || relation || '@' || subject FROM kaname.relation_fact WHERE subject = ANY($1)`, subjects) +
+		"; члены цели " + q(`SELECT binding_id || ' ' || t::text FROM kaname.access_binding_target_members t WHERE binding_id = ANY($1)`, []string{w.b1, w.b2})
 }
 
 // SRCI-05 — выдачи работающей базы переходят на новые id без потери.
