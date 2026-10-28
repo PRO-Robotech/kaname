@@ -169,7 +169,9 @@ bypass_case() {
     for f in install.sh prepush-rule.sh branch-rule.sh prepush-added-files.sh prepush-classify.sh; do
         cp "$ROOT/scripts/hooks/$f" "$d/scripts/hooks/$f" || return 1
     done
-    [ -f "$ROOT/scripts/hooks/prepush-added-files.allow" ] && cp "$ROOT/scripts/hooks/prepush-added-files.allow" "$d/scripts/hooks/"
+    # Перечень исключений стража blob'ов НЕ копируется: его строки судят дерево
+    # продукта, в песочнице им исключать нечего, и страж отверг бы их как
+    # пережившие предмет — отказ пришёл бы от соседа, а не от обхода.
     chmod +x "$d/scripts/hooks/"*
     echo probe > "$d/README.txt"
     git -C "$d" init -q . && git -C "$d" add -A && git -C "$d" commit -q -m "#1 фикстура опыта" || return 1
