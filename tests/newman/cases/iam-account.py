@@ -2191,17 +2191,23 @@ CASES.append(Case(
                   extra=["pm.test('stranger does not create a project in Xl', () => pm.expect(pm.response.code).to.not.eql(200));"]),
         _aid_pair("stranger-project-in-yl", "POST", "/iam/v1/projects",
                   {"accountId": "{{aid19Y}}", "name": "aid19-{{runId}}"}, "aid19Y", "aid19Prjc", _hs, False),
+        # Создание привязки чувствительно (`required_acr_min = "2"` у
+        # `AccessBindingService/Create` в каталоге): обычный вход край отвергает
+        # `UNAUTHENTICATED` об уровне входа раньше вопроса о праве, и пара Xl/Yl
+        # сошлась бы на отказе, не знающем об аккаунте. Посторонний поэтому идёт
+        # поднятым входом — до вопроса о праве и сокрытии существования.
         _aid_pair("stranger-binding-on-xl", "POST", "/iam/v1/accessBindings", _aid_binding_body(_hsu, "aid19X"),
-                  "aid19X", "aid19Ab", _hs, True,
+                  "aid19X", "aid19Ab", _hss, True,
                   extra=[*assert_status(403), *assert_grpc_code(7, "PERMISSION_DENIED"),
                          *assert_refusal_message("permission denied")]),
         _aid_pair("stranger-binding-on-yl", "POST", "/iam/v1/accessBindings", _aid_binding_body(_hsu, "aid19Y"),
-                  "aid19Y", "aid19Ab", _hs, False,
+                  "aid19Y", "aid19Ab", _hss, False,
                   extra=[*assert_status(403), *assert_grpc_code(7, "PERMISSION_DENIED"),
                          *assert_refusal_message("permission denied")]),
         # Близнец создания привязки: тот же запрос на Xl под A — Operation, response.scopeId = Xl.
+        # Близнец меняет ровно субъекта: тот же поднятый уровень входа, что у постороннего.
         Step(name="twin-admin-binding-on-xl", method="POST", path="/iam/v1/accessBindings",
-             body=_aid_binding_body(_hsu, "aid19X"), auth=_a19,
+             body=_aid_binding_body(_hsu, "aid19X"), auth=_a19s,
              test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.accessBindingId", "aid19AbId")]),
         poll_operation_until_done(),
@@ -2288,7 +2294,8 @@ CASES.append(Case(
         _aid_op_response("group-created", _a30, [
             "pm.test('group.accountId = Xg', () => pm.expect(r.accountId).to.eql(pm.environment.get('aid30Xg')));",
             "pm.environment.set('aid30Grp', r.id || '');"]),
-        Step(name="grant-stranger-view-on-xg", method="POST", path="/iam/v1/accessBindings", auth=_a30,
+        # Создание привязки чувствительно (acr>=2 по каталогу) → поднятый вход.
+        Step(name="grant-stranger-view-on-xg", method="POST", path="/iam/v1/accessBindings", auth=_a30s,
              body=_aid_binding_body(_hsu, "aid30Xg"),
              test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId"),
                           *save_from_response("j.metadata && j.metadata.accessBindingId", "aid30Ab")]),
