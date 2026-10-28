@@ -301,11 +301,12 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 // would accidentally gateway-front (or floor-gate) AuthorizeService and break
 // the consumer list-filter edge.
 
-// TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — a verified module SA
-// (kacho-vpc) may call AuthorizeService.{BatchCheck,Check} on the internal
-// listener, prod AND dev (they are not gateway-fronted and are in the
-// module-writer profile). ListSubjects is NOT in that profile (kaname#984):
-// no module calls it, and in prod it is refused — see the sibling below.
+// TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — проверенная учётка
+// модуля (vpc) вправе звать AuthorizeService.{BatchCheck,Check} на внутреннем
+// слушателе в боевой посадке И в посадке разработки: за краем они не стоят и
+// входят в профиль модуля-владельца. ListSubjects в этот профиль не входит
+// (kaname#984): его не зовёт ни один модуль, и в боевой посадке он отвергается —
+// см. соседнюю пробу ниже.
 func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod}
 	for _, prod := range []bool{true, false} {

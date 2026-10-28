@@ -143,8 +143,8 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 // (PrincipalSubject !ok) reaching the inner gate. The only legitimate
 // no-tenant-principal caller of AuthorizeService is a cluster-internal module
 // PDP peer, which is identified by a VERIFIED mTLS module SAN
-// (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`, учётка — объявленной установкой
-// формы имени службы, NewHandler) on the :9091 internal listener —
+// (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`, пара — объявленная перечнем
+// личностей модулей, WithModuleRoster) on the :9091 internal listener —
 // NOT by the mere absence of a principal. It returns nil (allow) only when:
 //
 //   - a verified module SAN is present (genuine internal PDP peer — the internal
