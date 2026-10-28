@@ -29,6 +29,10 @@
 #     0; строка обхода; «исполнено групп проверок: 0»; КАЖДАЯ пара «задание ·
 #     метка» исхода «не-гоняется» ведомости ТОГО ЖЕ хука стоит в перечне строкой
 #     задания; ссылка доехала до удалённого (обход действует).
+#  C. НЕОТФОРМАТИРОВАННОЕ ОТВЕРГНУТО (предикат #273, п. 4). Настоящий хук без
+#     обхода на синтетическом модуле, пара одно-фактных близнецов: файл Go
+#     отформатирован — отправка проходит, «исполнено 6 из 6»; тот же файл без
+#     отступа — отказ, красная ровно группа gofmt, файл назван.
 #
 # --self-test добавляет инъекции на копиях настоящих входов, по одному факту:
 #  A1 в копию ci.yml дописан шаг с `run:` без строки ведомости — красное, ключ назван;
@@ -238,6 +242,55 @@ else
     esac
 fi
 
+# ── ОСЬ C: НЕОТФОРМАТИРОВАННОЕ ОТВЕРГНУТО, БЛИЗНЕЦ ПРОХОДИТ ─────────────────
+#
+# module_case <имя> <тело fmt.go> — синтетический модуль с настоящим хуком и
+# всеми его группами; отправка без обхода. Выставляет out, rc.
+module_case() {
+    local d="$work/$1" f
+    mkdir -p "$d/scripts/hooks" "$d/.github/scripts" || return 1
+    cp "$HOOK" "$d/scripts/hooks/pre-push" || return 1
+    for f in install.sh prepush-rule.sh branch-rule.sh prepush-added-files.sh prepush-classify.sh; do
+        cp "$ROOT/scripts/hooks/$f" "$d/scripts/hooks/$f" || return 1
+    done
+    cp "$ROOT/.github/scripts/go-test-verdict.py" "$d/.github/scripts/" || return 1
+    chmod +x "$d/scripts/hooks/"*
+    printf 'module probe.invalid/fmtprobe\n\ngo 1.21\n' > "$d/go.mod"
+    printf '%s\n' "$2" > "$d/fmt.go"
+    printf 'package fmtprobe\n\nimport "testing"\n\nfunc TestFmtProbe(t *testing.T) {\n\tif Probe() != 1 {\n\t\tt.Fatal("Probe")\n\t}\n}\n' > "$d/fmt_test.go"
+    printf '.PHONY: vet audit-list-filter\nvet:\n\t@go vet ./...\naudit-list-filter:\n\t@echo ok\n' > "$d/Makefile"
+    git -C "$d" init -q . && git -C "$d" add -A && git -C "$d" commit -q -m "#1 фикстура опыта" || return 1
+    git init --bare -q "$d.git" && git -C "$d" remote add origin "$d.git" || return 1
+    ( cd "$d" && bash scripts/hooks/install.sh install ) >/dev/null 2>&1 || return 1
+    out="$(cd "$d" && PATH="$stub:$PATH" git push origin HEAD:refs/heads/1 2>&1)"
+    rc=$?
+    return 0
+}
+
+echo "── ось C: неотформатированный файл отвергнут, отформатированный близнец проходит"
+c_missing=""
+for tool in go make gofmt; do command -v "$tool" >/dev/null 2>&1 || c_missing="$c_missing $tool"; done
+if [ -n "$c_missing" ]; then
+    void "ось C не исполнялась — нет в PATH:$c_missing"
+    void "ось C (инъекция) не исполнялась — нет в PATH:$c_missing"
+else
+    if module_case fmt-twin "$(printf 'package fmtprobe\n\nfunc Probe() int {\n\treturn 1\n}')"; then
+        if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'зелёное — исполнено 6 из 6 групп'; then
+            ok "близнец C: отформатированный модуль проходит — исполнено 6 из 6"
+        else
+            bad "близнец C: отформатированный модуль отвергнут (код $rc): $(printf '%s' "$out" | grep -E 'красные|ОТКАЗ|НЕ ВЫПОЛНИЛОСЬ' | head -3)"
+        fi
+    else void "песочница близнеца C не собрана"; fi
+    if module_case fmt-red "$(printf 'package fmtprobe\n\nfunc Probe() int {\nreturn    1\n}')"; then
+        if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qE '^красные +: gofmt$' \
+            && printf '%s' "$out" | grep -qx 'fmt.go'; then
+            ok "инъекция C: неотформатированный fmt.go — отказ (код $rc), красная ровно группа gofmt, файл назван"
+        else
+            bad "инъекция C НЕ ПОЙМАНА как ждали (код $rc): $(printf '%s' "$out" | grep -E 'красные|требуется|ОТКАЗ|зелёное' | head -4)"
+        fi
+    else void "песочница инъекции C не собрана"; fi
+fi
+
 if [ "$SELF_TEST" -eq 1 ]; then
     # expect_red <имя> <код судьи> <вывод судьи> <обязательная подстрока>
     expect_red() {
@@ -304,7 +357,7 @@ echo "=== prepush-coverage-inject: перепись ==="
 echo "утверждений исполнено : $checks"
 echo "из них не сошлось     : $failed"
 echo "условие не создано    : $unmet  (в зачёт прохода НЕ идёт)"
-want=2; [ "$SELF_TEST" -eq 1 ] && want=8
+want=4; [ "$SELF_TEST" -eq 1 ] && want=10
 echo "утверждений объявлено : $want"
 if [ "$failed" -gt 0 ]; then
     echo "ОТКАЗ: перечень непроверенного хука разошёлся с конвейером либо обход молчит." >&2; exit 1
