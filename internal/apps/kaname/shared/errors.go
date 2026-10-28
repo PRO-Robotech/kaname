@@ -63,8 +63,11 @@ const MomentUnavailableMessage = "moment of record not established; try again la
 //     хранилища на кончившемся контексте судит [MapRepoErrAt];
 //   - если err-текст начинается с "Illegal argument" — YC-style InvalidArgument
 //     (parity с verbatim-формой error-сообщений);
-//   - иначе — Internal с переданным err-текстом (StripSentinel снимает
-//     sentinel-prefix чтобы клиент не увидел "not found: ...").
+//   - иначе — Internal с ФИКСИРОВАННЫМ текстом `internal error`. Такой отказ
+//     не классифицировал никто, и другого читателя, кроме этого переводчика, у
+//     него нет: его СТРУКТУРА (место вызова, типы звеньев цепочки, код
+//     состояния) уходит в журнал записью уровня ERROR, текст — нет
+//     ([journalUnclassified], kaname#662).
 //
 // Порядок веток — сначала pass-through, потом sentinel-switch (форма kacho-nlb).
 // Он несущий, а не косметический: pkg/validate кладёт имя поля ТОЛЬКО в
@@ -154,10 +157,16 @@ func MapRepoErr(err error) error {
 	if strings.HasPrefix(err.Error(), "Illegal argument") {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
-	// Defense-in-depth: an unexpected non-sentinel error must never surface its
-	// raw text (could carry pgx/SQL detail) as the gRPC INTERNAL message
-	// (INTERNAL = fixed text, no leak). The detail stays in
-	// the error chain for server-side logging.
+	// Ветка по умолчанию: отказ не опознала ни одна ветка выше. Текст на проводе
+	// фиксирован — цепочка ведёт к драйверу и к обёрткам вызывающего, а они несут
+	// значения арендатора. Причину называет журнал, и только структурой.
+	//
+	// Запись стоит ЗДЕСЬ, в самой ветке, а не у обёртки над переводчиком: место
+	// записи совпадает с местом решения «не опознан» построением, и второго
+	// утверждения о том, какие отказы опознаны, не заводится. Переводчик
+	// остаётся одной функцией с одним результатом — эту форму читают гейты
+	// словаря и паритета переводчиков (`internal/errors`, `internal/check`).
+	journalUnclassified(err)
 	return status.Error(codes.Internal, "internal error")
 }
 
@@ -186,13 +195,41 @@ func MapRepoErr(err error) error {
 // кончившемся контексте читается концом контекста, и решение правдиво в обе
 // стороны: повтор на свежем сроке либо пройдёт, либо упрётся в тот же отказ и
 // получит его уже на живом контексте.
+//
+// # Журнал на кончившемся контексте молчит
+//
+// Отказ, переклассифицированный концом срока, — не поломка службы, и записи
+// уровня ERROR о нём быть не должно: иначе каждая отмена клиентом посреди
+// запроса писала бы «не классифицирован» (kaname#662). Переводчик при этом
+// ОДИН — [MapRepoErr]; на кончившемся контексте отказ подаётся ему в прозрачной
+// обёртке [contextEnded], по которой запись узнаёт конец срока. Ветви её не
+// видят: `Error()` и цепочка те же.
 func MapRepoErrAt(ctx context.Context, err error) error {
-	gerr := MapRepoErr(err)
-	if gerr != nil && ctx.Err() != nil && status.Code(gerr) == codes.Internal {
+	if err == nil || ctx.Err() == nil {
+		return MapRepoErr(err)
+	}
+	carrier := &contextEnded{err}
+	gerr := MapRepoErr(carrier)
+	if gerr == error(carrier) { //nolint:errorlint // тождество намеренно: сквозной статус вернул саму обёртку
+		// Сквозной статус: переводчик вернул поданное значение как есть, и
+		// наружу уходит исходное, а не обёртка.
+		gerr = err
+	}
+	if status.Code(gerr) == codes.Internal {
 		return status.Error(codes.Unavailable, UnavailableMessage)
 	}
 	return gerr
 }
+
+// contextEnded — отказ, поданный переводчику ПОСЛЕ конца контекста вызова
+// ([MapRepoErrAt]). Обёртка прозрачна для разбора: собственный `Error()` — текст
+// подкладки, `Unwrap` — сама подкладка, поэтому `errors.Is`/`errors.As`, разбор
+// статуса и снятие имени признака видят ровно тот же отказ. Читает её только
+// [journalUnclassified] — и молчит.
+type contextEnded struct{ error }
+
+// Unwrap — подкладка: обёртка не звено цепочки, а пометка поверх неё.
+func (e *contextEnded) Unwrap() error { return e.error }
 
 // MapValidationErr — обертка для результатов `domain.<Type>.Validate()`
 // (cumulative multierr). Все sync-handler'ы вызывают ее на validation-stage
