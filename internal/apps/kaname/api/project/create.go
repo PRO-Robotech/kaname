@@ -98,7 +98,7 @@ func (u *CreateProjectUseCase) Execute(ctx context.Context, p domain.Project) (*
 	if p.AccountID == "" {
 		return nil, shared.InvalidArg("account_id", "account_id required")
 	}
-	if err := shared.ValidateResourceID(string(p.AccountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(p.AccountID)); err != nil {
 		return nil, err
 	}
 	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный

@@ -35,7 +35,7 @@ func (u *GetMembershipUseCase) Execute(
 	// ОБЪЯВЛЕННЫЙ префикс форму ПРОХОДИТ и уходит в полосу отсутствия. Так и
 	// надо: терминальный отказ формы на строке, которая в этом дереве является
 	// законным идентификатором, солгал бы вызывающему о его же ресурсе.
-	if err := shared.ValidateResourceID(string(accountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(accountID)); err != nil {
 		return domain.Membership{}, err
 	}
 	// Префикс берётся ИМЕНОВАННОЙ КОНСТАНТОЙ платформенного каталога, а не

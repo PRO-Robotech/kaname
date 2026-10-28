@@ -49,7 +49,7 @@ func (u *DeleteAccountUseCase) Execute(ctx context.Context, id domain.AccountID)
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
-	if err := shared.ValidateResourceID(string(id), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(id)); err != nil {
 		return nil, err
 	}
 	// Existence pre-check (NOT authz): a well-formed-but-absent id resolves to a

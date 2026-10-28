@@ -216,21 +216,43 @@ type CreateAccountRequest struct {
 	// OPTIONAL. ID of the account to create. Empty — the service mints it, exactly
 	// as without the field; an empty string and an absent field are the same.
 	//
-	// When set, it is accepted only in the generator's own form: prefix `acc` and
-	// 17 characters of `0123456789abcdefghjkmnpqrstvwxyz`, 20 bytes in all
-	// (for example `acc7m3k9q2x5v8b4n6t1`). No normalisation: case is not folded,
-	// spaces are not trimmed. Any other value is a sync INVALID_ARGUMENT
-	// "invalid account id '<id>'" on field `id`, before the Operation is minted
-	// and before any rights question.
+	// When set, it is a string chosen by whoever creates the account (for example
+	// a login of the consumer's platform: `dlputi1u`, `godjee`). It is accepted
+	// when all of the following hold:
+	//   - 3 to 30 characters;
+	//   - only lowercase latin letters `a`-`z`, digits `0`-`9` and hyphen `-`;
+	//   - the first character is a letter, the last is a letter or a digit;
+	//   - no two hyphens in a row;
+	//   - it is not in the reserve: not the fused generator form of another kind
+	//     (20 characters: three lowercase letters or digits other than `acc`,
+	//     then 17 characters of `0123456789abcdefghjkmnpqrstvwxyz`); not the
+	//     hyphen generator form of any kind (ends with a hyphen and 17 such
+	//     characters); not the seeded literal `rol000000000sysviewer`; does not
+	//     start with `personal-cloud-`, as is or after folding `o` to `0` and
+	//     `i`, `l` to `1`.
+	// The generator's form (`acc` and 17 characters of its alphabet, for example
+	// `acc7m3k9q2x5v8b4n6t1`) satisfies all of them. No normalisation: case is not
+	// folded, spaces are not trimmed. A value outside the form is a sync
+	// INVALID_ARGUMENT on field `id`, before the Operation is minted and before any
+	// rights question, with one of two messages:
+	//   "invalid account id '<id>': an account id is 3 to 30 characters of
+	//    lowercase letters, digits and single hyphens, starts with a letter and
+	//    ends with a letter or digit";
+	//   "invalid account id '<id>': this id has a reserved form and cannot be
+	//    supplied".
 	//
 	// Only a holder of `system_admin` on the cluster may set it; anyone else gets
 	// a sync PERMISSION_DENIED "permission denied", and an unreachable rights
 	// model is a sync UNAVAILABLE "authz backend unavailable". The model is not
 	// asked when the field is empty.
 	//
-	// An ID held by a live account, or ever issued before — also to an account
-	// deleted since — is refused in the Operation outcome with ALREADY_EXISTS
-	// "Account <id> already exists". An issued ID is never issued again.
+	// An ID held by a live account, ever issued before — also to an account
+	// deleted since — or equal, after folding `o` to `0` and `i`, `l` to `1`, to the
+	// ID or the name of another live account is refused in the Operation outcome
+	// with ALREADY_EXISTS "Account <id> already exists", whatever the name. An
+	// issued ID is never issued again. A name equal, after the same folding, to
+	// the ID of another live account is refused with "Account with name <name>
+	// already exists".
 	Id            string `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

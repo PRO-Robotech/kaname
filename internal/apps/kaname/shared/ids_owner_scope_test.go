@@ -62,6 +62,16 @@ const strictValidatorName = "ValidateResourceID"
 // prefixConstPrefix — приставка имён констант-префиксов в пакете domain.
 const prefixConstPrefix = "Prefix"
 
+// accountPrefixConst — константа префикса аккаунта. Идентификатор аккаунта —
+// строка, заданная клиентом (kaname#1052, приёмка
+// `account-id-may-be-supplied-at-create.md`, Р10, AID-34): его форма — не
+// «префикс и 17 знаков», и строгая проверка, наведённая на него константой,
+// отвергла бы законный идентификатор. Его судит один распознаватель формы
+// аккаунта; вызов строгой проверки с этой константой — находка редакции гейта
+// kaname#1052. Граница: префикс, пришедший ПЕРЕМЕННОЙ, здесь по значению не
+// судится — его держит предикат AID-34 по написанию.
+const accountPrefixConst = "PrefixAccount"
+
 // sourceFile — разобранный файл вместе со своим путём: путь нужен и переписи, и
 // тексту находки.
 type sourceFile struct {
@@ -357,6 +367,11 @@ func inspectOwnerScope(files []sourceFile) ownerScopeCensus {
 					// гейт, падающий паникой вместо вердикта, снимают первым.
 					if sel, ok := arg.(*ast.SelectorExpr); ok {
 						c.PrefixesUsed[sel.Sel.Name]++
+						if sel.Sel.Name == accountPrefixConst {
+							c.Findings = append(c.Findings, sf.Path+
+								": идентификатор аккаунта судит распознаватель формы аккаунта "+
+								"(shared.ValidateAccountID), а не строгая проверка префикса и длины")
+						}
 					}
 					return true
 				}

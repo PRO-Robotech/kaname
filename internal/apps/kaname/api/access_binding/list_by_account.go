@@ -68,7 +68,7 @@ func (u *ListByAccountUseCase) Execute(
 	accountID string,
 	f repoab.AccountPageFilter,
 ) ([]domain.AccessBinding, string, error) {
-	if err := shared.ValidateResourceID(accountID, domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(accountID); err != nil {
 		return nil, "", err
 	}
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {

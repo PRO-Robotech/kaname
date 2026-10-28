@@ -34,6 +34,9 @@ import (
 // предикат пересмотра записаны решением:
 // `docs/engineering/architecture/known-divergences.md`, §19.
 //
+// ИДЕНТИФИКАТОР АККАУНТА ЗДЕСЬ НЕ СУДИТСЯ: у него своя форма и свой
+// распознаватель (`ValidateAccountID` ниже, задача kaname#1052).
+//
 // ЗВАТЬ ТОЛЬКО ДЛЯ СВОЕГО ИДЕНТИФИКАТОРА. Тип чужого решает его владелец;
 // строгая сверка префикса на чужой ссылке — нарушение конвенции, и она
 // стережётся гейтом `TestStrictIDFormatCheckStaysOwnerScoped` (ids_owner_scope_test.go):
@@ -57,6 +60,30 @@ func ValidateResourceID(id, prefix, resourceName string) error {
 	// посеянный id роли не пройдёт там, где ждут аккаунт.
 	if len(id) != domain.ShortIDLen && !domain.IsSeededResourceID(id) {
 		return status.Errorf(codes.InvalidArgument, "invalid %s id '%s'", resourceName, id)
+	}
+	return nil
+}
+
+// ValidateAccountID — проверка ССЫЛКИ на аккаунт: строка обязана быть
+// идентификатором аккаунта формы Р2 (а)–(д) приёмки
+// `account-id-may-be-supplied-at-create.md` (задача kaname#1052, Р10).
+//
+// Идентификатор аккаунта больше не судится префиксом и длиной
+// (`ValidateResourceID`): его выбирает тот, кто заводит аккаунт, и форма у него
+// своя — распознаватель `domain.JudgeAccountID`, единственное её написание в Go.
+// Посеянный `acc1a18042d81fb438d6` и любой выданный идентификатор принимаются;
+// строка вне формы и строка резерва отвергаются прежним текстом прежним кодом —
+// `INVALID_ARGUMENT` `invalid account id '<X>'`, как прежде отвергался
+// идентификатор другого вида. Пояснение правила в тексте даёт только вход
+// создания: там значение выбирает вызывающий, а здесь переносит из ответа
+// службы.
+//
+// Пустая строка формой не является и отвергается тем же текстом — так же, как
+// прежде; места, где поле обязательно, отвечают своим отказом обязательности
+// раньше этой проверки.
+func ValidateAccountID(id string) error {
+	if !domain.IsAccountID(id) {
+		return status.Errorf(codes.InvalidArgument, "invalid account id '%s'", id)
 	}
 	return nil
 }

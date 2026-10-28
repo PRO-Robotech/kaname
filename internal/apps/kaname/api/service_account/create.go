@@ -89,7 +89,7 @@ func (u *CreateServiceAccountUseCase) Execute(ctx context.Context, sa domain.Ser
 	if sa.AccountID == "" {
 		return nil, shared.InvalidArg("account_id", "account_id required")
 	}
-	if err := shared.ValidateResourceID(string(sa.AccountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(sa.AccountID)); err != nil {
 		return nil, err
 	}
 	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный

@@ -90,7 +90,7 @@ func (uc *ResendInviteUseCase) Execute(ctx context.Context, userID domain.UserID
 	if err := shared.ValidateResourceID(string(userID), domain.PrefixUser, "user"); err != nil {
 		return nil, err
 	}
-	if err := shared.ValidateResourceID(string(accountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(accountID)); err != nil {
 		return nil, err
 	}
 

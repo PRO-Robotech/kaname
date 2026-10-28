@@ -255,8 +255,19 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// every member, so an admin/editor-tier binding with a GROUP subject must be
 	// authored by a grant-authority holder on the scope. Enforced for EVERY Create,
 	// so the guard holds by construction.
+	//
+	// Сокрытие существования (kaname#1052, Р15): ворота разрешают область
+	// аккаунта и проекта чтением хранилища, и у того, кто права не имеет, промах
+	// чтения давал `NOT_FOUND` «Account <id> not found», а чужая область —
+	// `PERMISSION_DENIED`. Пока идентификатор аккаунта чеканил генератор, это
+	// различие перебором не пользовалось; идентификатор, заданный клиентом, —
+	// логин, его угадывают. Поэтому промах сводится к отказу права тем же
+	// `hideObjectExistence`, что у `ExpandAccess` на тех же воротах. Неполадка
+	// хранилища сохраняет свой код: повтор осмыслен. Администратор облака,
+	// владелец и держатель права выдачи до промаха не доходят — существование
+	// для них не тайна, и ответы у них прежние.
 	if err := u.requireGrantAuthority(ctx, string(b.ResourceType), string(b.ResourceID)); err != nil {
-		return nil, err
+		return nil, hideObjectExistence(err)
 	}
 	// F9 gates 2 & 3 (IAM-1-24/25): IsRoleAssignable + RoleCoversType — SYNC, before
 	// any Operation is minted (Operation.error reserved for truly-async FGA

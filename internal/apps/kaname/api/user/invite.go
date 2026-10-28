@@ -325,7 +325,7 @@ func (uc *InviteUserUseCase) admit(ctx context.Context, in InviteUserInput) (adm
 	// Форма СВОЕГО идентификатора судится здесь, до вопроса к модели прав:
 	// негодная строка не станет аккаунтом ни при каком ответе модели, и отвечать
 	// на неё отказом прав значило бы предлагать просить права на то, чего нет.
-	if err := shared.ValidateResourceID(string(in.AccountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(in.AccountID)); err != nil {
 		return admission{}, err
 	}
 	if err := in.Email.Validate(); err != nil {

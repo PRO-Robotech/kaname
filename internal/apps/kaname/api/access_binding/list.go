@@ -215,7 +215,7 @@ func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) (ListPag
 	// Производитель — тот же, что у ListByAccount на этом же поле, поэтому оба
 	// глагола отвечают на один вход побайтово одинаково (IAM-AB-SIA-12/16).
 	if f.AccountID != "" {
-		if err := shared.ValidateResourceID(f.AccountID, domain.PrefixAccount, "account"); err != nil {
+		if err := shared.ValidateAccountID(f.AccountID); err != nil {
 			return ListPage{}, err
 		}
 	}

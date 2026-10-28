@@ -162,7 +162,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccountsRequest) (*ia
 // Project / ServiceAccount). Malformed id → InvalidArgument (first statement);
 // well-formed-but-no-ops → empty list, not NotFound.
 func (h *Handler) ListOperations(ctx context.Context, req *iamv1.ListAccountOperationsRequest) (*iamv1.ListAccountOperationsResponse, error) {
-	if err := shared.ValidateResourceID(req.GetAccountId(), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(req.GetAccountId()); err != nil {
 		return nil, err
 	}
 	ops, next, err := h.listOp.Execute(ctx, req.GetAccountId(), req.GetPageSize(), req.GetPageToken())

@@ -91,7 +91,7 @@ func (u *CreateGroupUseCase) Execute(ctx context.Context, g domain.Group) (*oper
 	if g.AccountID == "" {
 		return nil, shared.InvalidArg("account_id", "account_id required")
 	}
-	if err := shared.ValidateResourceID(string(g.AccountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(g.AccountID)); err != nil {
 		return nil, err
 	}
 	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный

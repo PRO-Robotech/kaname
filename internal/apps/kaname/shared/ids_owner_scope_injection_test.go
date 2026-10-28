@@ -111,7 +111,7 @@ func f(id string) error { return shared.ValidateResourceID(id, "zzz", "thing") }
 // ЗАКОННЫЙ БЛИЗНЕЦ: та же форма, идентификатор СВОЙ. Гейт обязан молчать.
 func TestInjection_OwnPrefixStaysSilent(t *testing.T) {
 	files := syntheticTree(t, withDomain(callSiteSource(ownDomainImport, `
-func f(id string) error { return shared.ValidateResourceID(id, domain.PrefixAccount, "account") }
+func f(id string) error { return shared.ValidateResourceID(id, domain.PrefixGroup, "group") }
 `)))
 	c := inspectOwnerScope(files)
 	if len(c.Findings) != 0 {
@@ -119,6 +119,23 @@ func f(id string) error { return shared.ValidateResourceID(id, domain.PrefixAcco
 	}
 	if c.OwnedSelector != 1 {
 		t.Fatalf("перепись не зачла законный вызов: константой %d", c.OwnedSelector)
+	}
+}
+
+// Дефект (kaname#1052, Р10): строгая проверка префикса и длины наведена на
+// идентификатор АККАУНТА. Префикс свой, но форма у аккаунта своя — строка,
+// заданная клиентом, — и судит её распознаватель формы аккаунта. Близнец той
+// же формы — свой префикс другого ресурса (`TestInjection_OwnPrefixStaysSilent`).
+func TestInjection_AccountPrefixIsFound(t *testing.T) {
+	files := syntheticTree(t, withDomain(callSiteSource(ownDomainImport, `
+func f(id string) error { return shared.ValidateResourceID(id, domain.PrefixAccount, "account") }
+`)))
+	c := inspectOwnerScope(files)
+	if c.Calls != 1 {
+		t.Fatalf("распознаватель не увидел вызов: вызовов %d", c.Calls)
+	}
+	if len(c.Findings) != 1 || !strings.Contains(c.Findings[0], "распознаватель формы аккаунта") {
+		t.Fatalf("строгая проверка идентификатора аккаунта не найдена либо находка не называет причину: %v", c.Findings)
 	}
 }
 
@@ -199,7 +216,7 @@ func f(id string, p, n string) error { return shared.ValidateResourceID(id, p, n
 func TestInjection_MissingOwnDomainIsVisibleInTheCensus(t *testing.T) {
 	files := syntheticTree(t, map[string]string{
 		"internal/apps/kaname/api/x/call.go": callSiteSource(ownDomainImport, `
-func f(id string) error { return shared.ValidateResourceID(id, domain.PrefixAccount, "account") }
+func f(id string) error { return shared.ValidateResourceID(id, domain.PrefixGroup, "group") }
 `),
 	})
 	c := inspectOwnerScope(files)

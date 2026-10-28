@@ -130,6 +130,30 @@ const (
 	idSourceGenerated = "generated"
 )
 
+// Тексты отказа формы присланного идентификатора (приёмка, Р2 «Отказ»). Их два
+// и только два; оба начинаются каноническим `invalid account id '<X>'` и
+// называют допустимую форму либо причину. `<X>` — присланное значение как есть.
+const (
+	suppliedIDMalformedRule = "an account id is 3 to 30 characters of lowercase letters, digits and " +
+		"single hyphens, starts with a letter and ends with a letter or digit"
+	suppliedIDReservedRule = "this id has a reserved form and cannot be supplied"
+)
+
+// suppliedAccountIDRefusal — синхронный отказ формы присланного `id` либо nil.
+// Исход распознавателя трёхзначен, и каждое значение отвечает своим текстом:
+// корзины «прочее» нет — неизвестный вердикт отвергается текстом формы, а не
+// пропускается.
+func suppliedAccountIDRefusal(id string) error {
+	switch domain.JudgeAccountID(id) {
+	case domain.AccountIDAccepted:
+		return nil
+	case domain.AccountIDReserved:
+		return shared.InvalidArg("id", fmt.Sprintf("invalid account id '%s': %s", id, suppliedIDReservedRule))
+	default:
+		return shared.InvalidArg("id", fmt.Sprintf("invalid account id '%s': %s", id, suppliedIDMalformedRule))
+	}
+}
+
 // CreateAccountUseCase инициирует создание Account.
 //
 // Скоупный гэп с kacho-vpc-pattern: kaname НЕ имеет folder/parent peer-check
@@ -175,8 +199,9 @@ func (u *CreateAccountUseCase) WithRelationStore(relations clients.RelationStore
 // тривиальных `CreateInput`-оберток. Поле `a.ID` на входе — идентификатор,
 // присланный вызывающим (`CreateAccountRequest.id`), либо пусто. Пусто —
 // идентификатор чеканит генератор, побайтово как до появления поля; указан —
-// принимается только форма генератора и только от администратора облака
-// (приёмка «идентификатор аккаунта можно указать при создании», Р1–Р3).
+// принимается заданная форма (строка, выбранная тем, кто заводит аккаунт; форма
+// генератора — её часть) и только от администратора облака (приёмка
+// «идентификатор аккаунта можно указать при создании», Р1–Р3, kaname#1052).
 //
 // Порядок синхронных проверок (там же, §7 п. 3): аутентификация → поле
 // `ownerUserId` и род принципала → форма `id` → право задавать `id` → имя и
@@ -244,10 +269,12 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	idSource := idSourceGenerated
 	if a.ID != "" {
 		idSource = idSourceSupplied
-		// ФОРМА — ровно форма генератора, без нормализации: регистр не
-		// сворачивается, пробелы не срезаются. Второго написания формы нет.
-		if !ids.IsValid(string(a.ID), domain.PrefixAccount) {
-			return nil, shared.InvalidArg("id", fmt.Sprintf("invalid account id '%s'", string(a.ID)))
+		// ФОРМА — заданная форма Р2 (kaname#1052), одним распознавателем
+		// `domain.JudgeAccountID`, без нормализации: регистр не сворачивается,
+		// пробелы не срезаются. Форма генератора — её часть, поэтому всё, что
+		// принималось прежде, принимается и теперь.
+		if err := suppliedAccountIDRefusal(string(a.ID)); err != nil {
+			return nil, err
 		}
 		// ПРАВО задавать идентификатор — вопрос модели, и задаётся он только при
 		// непустом поле: без него поведение генератора от хранилища прав не

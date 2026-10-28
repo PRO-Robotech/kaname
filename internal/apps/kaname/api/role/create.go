@@ -106,7 +106,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	case !accountSet && !projectSet:
 		return nil, shared.InvalidArg("account_id", "Illegal argument: one of account_id / project_id required (system roles are seeded via migration, not API)")
 	case accountSet:
-		if err := shared.ValidateResourceID(string(r.AccountID), domain.PrefixAccount, "account"); err != nil {
+		if err := shared.ValidateAccountID(string(r.AccountID)); err != nil {
 			return nil, err
 		}
 	default: // projectSet

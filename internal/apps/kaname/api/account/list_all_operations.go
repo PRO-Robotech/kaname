@@ -77,7 +77,7 @@ func (u *ListAllOperationsUseCase) WithRelationStore(relations clients.RelationS
 // missing / forbidden account → PermissionDenied (existence hiding, parity with
 // requireAccountAdmin).
 func (u *ListAllOperationsUseCase) Execute(ctx context.Context, accountID string, pageSize int64, pageToken string) ([]operations.Operation, string, error) {
-	if err := shared.ValidateResourceID(accountID, domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(accountID); err != nil {
 		return nil, "", err
 	}
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {

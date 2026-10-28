@@ -114,7 +114,7 @@ func (u *ListAssignableRolesUseCase) Execute(ctx context.Context, resourceType, 
 func validateAssignableResource(resourceType, resourceID string) error {
 	switch resourceType {
 	case "account":
-		return shared.ValidateResourceID(resourceID, domain.PrefixAccount, "account")
+		return shared.ValidateAccountID(resourceID)
 	case "project":
 		return shared.ValidateResourceID(resourceID, domain.PrefixProject, "project")
 	case "cluster":

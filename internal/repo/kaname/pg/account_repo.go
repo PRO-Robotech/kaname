@@ -10,6 +10,10 @@ package pg
 //
 // Within-service refs — DB-level invariants:
 //   - UNIQUE (name) — accounts_name_unique → 23505 → ErrAlreadyExists.
+//   - строка обозначает не больше одного аккаунта (Р6а, kaname#1052) — ключ
+//     account_handles, который ведёт триггер на accounts; реестр выданных
+//     (Р5) — ключ issued_account_ids. Оба поднимает триггер вставки, и текст
+//     выбирает insertConflict.
 //   - FK accounts_owner_fk on users(id) RESTRICT — 23503 → ErrFailedPrecondition.
 //   - Delete-non-empty (projects/SAs/groups/custom-roles) — atomic
 //     DELETE-WHERE-NOT-EXISTS (see Delete below): 0 rows RETURNING + probe to
@@ -199,23 +203,6 @@ type accountWriter struct {
 	ownerFKHintSink *string
 }
 
-// accountInsertHint — подсказка отказа уникальности вставки аккаунта:
-// идентификатор и имя через `|`. Ни один из них `|` не содержит: идентификатор
-// принимается только в форме генератора, имя — по RFC 1123.
-func accountInsertHint(id domain.AccountID, name domain.AccountName) string {
-	return string(id) + "|" + string(name)
-}
-
-// splitAccountInsertHint — обратный разбор. Короткая форма — одно имя, как её
-// передаёт правка имени, — возвращает пустой идентификатор.
-func splitAccountInsertHint(hint string) (id, name string) {
-	id, name, ok := strings.Cut(hint, "|")
-	if !ok {
-		return "", hint
-	}
-	return id, name
-}
-
 // Insert — INSERT INTO accounts ... RETURNING (id, created_at).
 // CreatedAt здесь явно проставляется в UTC для детерминированности тестов.
 //
@@ -247,31 +234,49 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 	//
 	// Гонку одного id решает та же спекулятивная вставка (AID-14): конкурирующая
 	// незафиксированная строка дожидается своего исхода до решения арбитра.
-	// Конфликт с реестром выданных — по-прежнему отказ его ключа из триггера: он
-	// арбитром не является и поднимается как 23505.
+	//
+	// Ключи, которые поднимают ТРИГГЕРЫ вставки, арбитрами не являются и
+	// приходят сырым 23505: реестр выданных (Р5) и строки аккаунтов (Р6а,
+	// `account_handles`, kaname#1052). Поэтому вставка идёт под ТОЧКОЙ
+	// СОХРАНЕНИЯ: отказ такого ключа откатывается до неё, транзакция остаётся
+	// годной (перебор имени личного аккаунта той же транзакцией, AID-41), и
+	// какой ключ занят, решает то же чтение «сначала идентификатор», что и для
+	// нуля строк (`insertConflict`). Текст тогда не зависит от того, какое
+	// ограничение база проверила первым (Р4, AID-40).
 	q := fmt.Sprintf(`
 		INSERT INTO accounts (id, name, description, labels, owner_user_id, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT DO NOTHING
 		RETURNING %s`, accountCols)
 
-	row := w.tx.QueryRow(ctx, q,
+	sp, err := w.tx.Begin(ctx)
+	if err != nil {
+		return domain.Account{}, mapErr(err, "", string(a.ID))
+	}
+	row := sp.QueryRow(ctx, q,
 		string(a.ID), string(a.Name), string(a.Description), labelsJSON,
 		string(a.OwnerUserID), now,
 	)
 	out, err := scanAccount(row)
+	if err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			return domain.Account{}, mapErr(rbErr, "", string(a.ID))
+		}
+	} else if err = sp.Commit(ctx); err != nil {
+		return domain.Account{}, mapErr(err, "", string(a.ID))
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Account{}, w.insertConflict(ctx, a)
 	}
 	if err != nil {
-		// Прочие UNIQUE (ключ реестра выданных из триггера) / FK / CHECK — через
-		// mapErr с verbatim-text hint'ами.
+		// FK / CHECK — через mapErr с verbatim-text hint'ами; UNIQUE триггеров —
+		// тем же чтением, что ноль строк.
+		if accountStringKeyRefusal(err) {
+			return domain.Account{}, w.insertConflict(ctx, a)
+		}
 		switch pgfault.Classify(err).Class {
 		case pgfault.Unique:
-			// Подсказка несёт И идентификатор, И имя: ключ реестра выданных
-			// поднимается триггером, и текст обязан не зависеть от того, какой
-			// ключ сработал.
-			return domain.Account{}, mapErr(err, "", accountInsertHint(a.ID, a.Name))
+			return domain.Account{}, mapErr(err, "", string(a.ID))
 		case pgfault.ForeignKey:
 			return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
 		case pgfault.Check:
@@ -288,11 +293,32 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 	return out, nil
 }
 
-// insertConflict — какой ключ занял вставку, ответившую нолём строк. Арбитров
-// два (первичный и имени), и порядок ответа — «сначала идентификатор» (AID-13):
-// занятый id называется идентификатором, иначе занятым было имя. Транзакция
-// после нуля строк годна, поэтому чтение идёт ею же и видит строку, решившую
-// арбитра: она зафиксирована к моменту решения.
+// accountStringKeyRefusal — отказ ключа, который поднимает ТРИГГЕР вставки
+// аккаунта: реестр выданных (Р5) либо строки аккаунтов (Р6а). Прочие отказы
+// уникальности текстом аккаунта не отвечают.
+func accountStringKeyRefusal(err error) bool {
+	f := pgfault.Classify(err)
+	if !f.Is(pgfault.Unique) {
+		return false
+	}
+	switch f.Constraint {
+	case "issued_account_ids_pkey", "account_handles_pkey":
+		return true
+	}
+	return false
+}
+
+// insertConflict — какой ключ занял вставку: ту, что ответила нолём строк
+// (арбитры `accounts_pkey` и `accounts_name_unique`), и ту, что отвергнул ключ
+// триггера (реестр выданных и строки аккаунтов). Порядок ответа — «сначала
+// идентификатор» (AID-13, Р4, AID-40): присланный идентификатор занят, если он
+// — идентификатор живого аккаунта, когда-либо выдан либо после свёртки похожих
+// знаков совпадает с идентификатором или именем другого живого аккаунта (Р6а);
+// тогда текст — идентификатора, при любом имени. Иначе занятым было имя.
+//
+// Транзакция годна (ноль строк либо откат до точки сохранения), поэтому чтение
+// идёт ею же и видит строку, решившую ключ: она зафиксирована к моменту решения
+// — конкурирующая незафиксированная строка сперва дожидается своего исхода.
 //
 // Признак — ErrAlreadyExists в обеих ветвях, текст — тот же, что у сырого
 // 23505 соответствующего ключа (`uniqueText`), так что контракт глагола
@@ -301,8 +327,11 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 // тем же id отвергнется ключом реестра выданных текстом идентификатора.
 func (w *accountWriter) insertConflict(ctx context.Context, a domain.Account) error {
 	var idTaken bool
-	if err := w.tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM accounts WHERE id = $1)`, string(a.ID)).Scan(&idTaken); err != nil {
+	if err := w.tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM accounts WHERE id = $1)
+		    OR EXISTS (SELECT 1 FROM issued_account_ids WHERE id = $1)
+		    OR EXISTS (SELECT 1 FROM account_handles WHERE handle = account_handle_fold($1))`,
+		string(a.ID)).Scan(&idTaken); err != nil {
 		return mapErr(err, "", string(a.ID))
 	}
 	if idTaken {

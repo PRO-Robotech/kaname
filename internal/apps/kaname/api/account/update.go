@@ -123,7 +123,7 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
-	if err := shared.ValidateResourceID(string(in.ID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(in.ID)); err != nil {
 		return nil, err
 	}
 	if err := shared.ValidateUpdateMask(in.UpdateMask, accountMutableFields, accountImmutableFields); err != nil {

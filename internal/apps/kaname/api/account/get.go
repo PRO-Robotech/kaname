@@ -39,8 +39,9 @@ func (u *GetAccountUseCase) WithRelationStore(relations clients.RelationStore) *
 	return u
 }
 
-// Execute — sync read. Malformed id (нет prefix `acc` или длина ≠ 20) →
-// InvalidArgument; well-formed-но-несуществующий → NotFound.
+// Execute — синхронное чтение. Строка вне формы идентификатора аккаунта
+// (распознаватель `shared.ValidateAccountID`, Р10 kaname#1052) →
+// InvalidArgument; годная формой, но несуществующая → NotFound.
 //
 // Authz (Design B, D-6/D-9): the caller must hold `v_get` on account:<id>
 // (owner-binding materializes it for the owner; an explicit `iam.account.get`
@@ -49,7 +50,7 @@ func (u *GetAccountUseCase) WithRelationStore(relations clients.RelationStore) *
 // no enumeration). Replaces the legacy owner-only `IsSelf(OwnerUserID)` gate that
 // produced the "granted invitee → 404" bug.
 func (u *GetAccountUseCase) Execute(ctx context.Context, id domain.AccountID) (domain.Account, error) {
-	if err := shared.ValidateResourceID(string(id), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(id)); err != nil {
 		return domain.Account{}, err
 	}
 	rd, err := u.repo.Reader(ctx)

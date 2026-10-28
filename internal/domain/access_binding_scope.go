@@ -104,7 +104,7 @@ var scopeVocabulary = map[string]scopeKind{
 	"account": {
 		tier:   ScopeAccount,
 		dotted: ScopeTypeAccountDotted,
-		idOK:   func(id string) bool { return strings.HasPrefix(id, PrefixAccount) },
+		idOK:   IsAccountID,
 	},
 	"project": {
 		tier:   ScopeProject,

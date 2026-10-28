@@ -45,7 +45,7 @@ func (u *ListMembershipsUseCase) Execute(
 	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
 		return nil, "", err
 	}
-	if err := shared.ValidateResourceID(string(f.AccountID), domain.PrefixAccount, "account"); err != nil {
+	if err := shared.ValidateAccountID(string(f.AccountID)); err != nil {
 		return nil, "", err
 	}
 	// Терм и оператор — тем же разбором, что исполнится в адаптере. Отказ
