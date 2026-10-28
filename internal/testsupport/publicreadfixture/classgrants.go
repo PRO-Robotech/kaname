@@ -17,7 +17,7 @@ package publicreadfixture
 //     П6 с теми же ролями.
 //
 // Каждый близнец строится правкой основы, и дельту сверяет [Delta]: ключ — одна
-// добавленная строка, роли — двадцать добавленных строк, удалённых ноль.
+// добавленная строка, роли — двадцать три добавленные строки, удалённых ноль.
 //
 // Роли И сужают объекты МЕТКАМИ (`matchLabels`), а не именами: манифест модуля
 // не называет конкретных объектов (kaname#965 — ссылка, снятая снятием
@@ -55,18 +55,25 @@ const (
 	ReaderRoleID   = "rolb812261cfaa239694"
 )
 
-// namedRolesBlock — две роли модуля, дописываемые в конец раздела `roles`:
-// по 10 строк каждая (пустая строка и 9 строк роли), ярус — кластер.
+// namedRolesBlock — две роли модуля, дописываемые в конец раздела `roles`,
+// ярус — кластер: роль И — 13 строк (пустая строка и 12 строк роли), роль И2 —
+// 10 строк (пустая и 9). Тип репозиториев ленты ресурса не несёт и метками не
+// выбирается (загрузка отвергает `matchLabels` над ним), поэтому роль И сужает
+// метками реестры, а тип репозиториев покрывает её вложенное правило — то
+// самое покрытие необъявленного типа, которое судят ворота S7 (Р11 п. 2 (б)).
 const namedRolesBlock = `
   - id: registry.repo_reader_named
     description: >
-      Пробная роль S7: чтение репозиториев, сужено метками.
+      Пробная роль S7: чтение репозиториев реестров, суженных метками.
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: registry
-        resources: [repositories]
+        resources: [registries]
         classes: [get]
-        matchLabels: {s7: app}
+        matchLabels: {s7: x}
+        children:
+          - resources: [repositories]
+            classes: [get]
 
   - id: registry.reg_reader_named
     description: >
@@ -98,7 +105,7 @@ func WithClassGrantsKeyValue(doc []byte, value string) ([]byte, error) {
 
 // WithNamedRoles — документ с ролями И и И2 в конце раздела `roles`. Основа
 // обязана кончаться разделом `roles` (иначе роли встали бы в чужой раздел) и
-// переводом строки. Дельта — двадцать добавленных строк.
+// переводом строки. Дельта — двадцать три добавленные строки.
 func WithNamedRoles(doc []byte) ([]byte, error) {
 	if !bytes.HasSuffix(doc, []byte("\n")) {
 		return nil, fmt.Errorf("publicreadfixture: документ не кончается переводом строки — роли И слились бы с последней строкой")
@@ -108,8 +115,8 @@ func WithNamedRoles(doc []byte) ([]byte, error) {
 	}
 	twin := append(append([]byte(nil), doc...), namedRolesBlock...)
 	r, a := Delta(doc, twin)
-	if len(r) != 0 || len(a) != 20 {
-		return nil, fmt.Errorf("publicreadfixture: роли И: удалено %d (объявлено 0), добавлено %d (объявлено 20)", len(r), len(a))
+	if len(r) != 0 || len(a) != 23 {
+		return nil, fmt.Errorf("publicreadfixture: роли И: удалено %d (объявлено 0), добавлено %d (объявлено 23)", len(r), len(a))
 	}
 	return twin, nil
 }
