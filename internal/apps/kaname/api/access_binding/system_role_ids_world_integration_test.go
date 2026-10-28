@@ -21,9 +21,12 @@ package access_binding_test
 // # ПРЕЖНИЕ ИДЕНТИФИКАТОРЫ — РАЗБОРОМ, НЕ ЛИТЕРАЛОМ
 //
 // Литерала прежнего id в этом файле нет (предикат DoD п.6 приёмки): обе строки
-// берутся разбором вставки ролей `0001_initial.sql` по имени роли, которое та
-// вставка пишет. Применённая миграция не правится (ban #5), поэтому разбор
-// устойчив by construction.
+// берутся разбором вставки ролей `0001_initial.sql` по имени роли. Имя берётся у
+// `domain` (нынешнее), а к строке вставки свода его ведёт применённая миграция
+// перевода имён — тройкой «id, прежнее имя, объявленное имя». Прежнее написание
+// имени здесь не выписывается: его остаток судит перепись приёмки
+// seed-identity-names-its-own-service.md, и проба его не умножает. Применённые
+// миграции не правятся (ban #5), поэтому разбор устойчив by construction.
 //
 // # МИР
 //
@@ -72,13 +75,6 @@ import (
 // srciAcceptance — имя приёмки, которое цитирует испытуемая миграция.
 const srciAcceptance = "system-roles-carry-canonical-ids.md"
 
-// Имена, которыми вставка `0001_initial.sql` сеет две роли предмета, и имена,
-// которые они носят после всей цепочки (`domain` — единственное объявление).
-const (
-	srciSeedNameAdmin  = "kacho-system.admin"
-	srciSeedNameViewer = "kacho-system.viewer"
-)
-
 // srciObj — объект O1 (`vpc.network` в P1): id канонической формы `enp…`.
 const srciObj = "enp00000000000000543"
 
@@ -92,7 +88,19 @@ type srciSubject struct {
 	seeded    []string
 }
 
-var reSRCIRoleInsert = regexp.MustCompile(`^INSERT INTO kaname\.roles \(id, [^)]*\) VALUES \('([^']*)', (?:NULL|'[^']*'), '([^']*)'`)
+var (
+	reSRCIRoleInsert = regexp.MustCompile(`^INSERT INTO kaname\.roles \(id, [^)]*\) VALUES \('([^']*)', (?:NULL|'[^']*'), '([^']*)'`)
+	reSRCIRename     = regexp.MustCompile(`\('(rol[0-9a-z]*)',\s*'([^']*)',\s*'([^']*)'\)`)
+)
+
+func srciSortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // srciReadSubject — перепись каталога миграций и разбор посева ролей.
 func srciReadSubject(t *testing.T) srciSubject {
@@ -100,6 +108,7 @@ func srciReadSubject(t *testing.T) srciSubject {
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): каталог миграций читается")
 	var s srciSubject
+	bodies := map[string]string{}
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".sql") {
@@ -115,28 +124,34 @@ func srciReadSubject(t *testing.T) srciSubject {
 		if strings.Contains(string(body), srciAcceptance) && (s.migration == 0 || v < s.migration) {
 			s.migration, s.file = v, name
 		}
-		if name != "0001_initial.sql" {
-			continue
-		}
-		for _, line := range strings.Split(string(body), "\n") {
-			m := reSRCIRoleInsert.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
+		bodies[name] = string(body)
+	}
+	// Вставка свода: id → имя, которым она его посеяла.
+	seededName := map[string]string{}
+	for _, line := range strings.Split(bodies["0001_initial.sql"], "\n") {
+		if m := reSRCIRoleInsert.FindStringSubmatch(line); m != nil {
 			s.seeded = append(s.seeded, m[1])
-			switch m[2] {
-			case srciSeedNameAdmin:
-				s.oldAdmin = m[1]
-			case srciSeedNameViewer:
-				s.oldViewer = m[1]
+			seededName[m[1]] = m[2]
+		}
+	}
+	// Перевод имени — тройка (id, прежнее имя, объявленное имя) применённой
+	// миграции. Тройка засчитывается, лишь когда свод посеял именно этот id именно
+	// под прежним именем: так разбор адресует строку вставки свода по имени, а
+	// прежнее написание имени в этом файле не выписывается.
+	found := map[string][]string{}
+	for _, name := range srciSortedKeys(bodies) {
+		for _, m := range reSRCIRename.FindAllStringSubmatch(bodies[name], -1) {
+			if seededName[m[1]] == m[2] && (m[3] == domain.SystemAdminRoleName || m[3] == domain.SystemViewerRoleName) {
+				found[m[3]] = append(found[m[3]], m[1])
 			}
 		}
 	}
 	sort.Slice(s.versions, func(i, j int) bool { return s.versions[i] < s.versions[j] })
 	require.NotEmpty(t, s.versions, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): каталог миграций пуст")
 	require.Len(t, s.seeded, 48, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): разбор вставок ролей 0001 (§0.1 приёмки — 48)")
-	require.NotEmpty(t, s.oldAdmin, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вставка роли %s в 0001 не разобрана", srciSeedNameAdmin)
-	require.NotEmpty(t, s.oldViewer, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вставка роли %s в 0001 не разобрана", srciSeedNameViewer)
+	require.Lenf(t, found[domain.SystemAdminRoleName], 1, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вставка свода роли %s по переводу имени", domain.SystemAdminRoleName)
+	require.Lenf(t, found[domain.SystemViewerRoleName], 1, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вставка свода роли %s по переводу имени", domain.SystemViewerRoleName)
+	s.oldAdmin, s.oldViewer = found[domain.SystemAdminRoleName][0], found[domain.SystemViewerRoleName][0]
 	// Контроль разборщика: найдено ровно два прежних id, и оба судье формы фундамента
 	// негодны — иначе разобрано не то, о чём приёмка.
 	require.NotEqual(t, s.oldAdmin, s.oldViewer, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): прежние id admin и viewer совпали")
