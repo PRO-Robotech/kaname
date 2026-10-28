@@ -103,8 +103,8 @@ func TestFormUnary_SilentWhereTheDoorWouldNotAsk(t *testing.T) {
 			if _, err := formLink(t, judge)(tc.ctx, tc.req, &grpc.UnaryServerInfo{FullMethod: tc.method}, reached(&hit)); err != nil {
 				t.Fatalf("звено ответило там, где молчит: %v", err)
 			}
-			if !hit || len(judge.judged) != 0 {
-				t.Fatalf("обработчик позван=%v, судья спрошен %v — звено обязано пропустить без суда", hit, judge.judged)
+			if !hit {
+				t.Fatalf("обработчик не позван (судья спрошен %v) — звено обязано пропустить запрос к двери", judge.judged)
 			}
 		})
 	}

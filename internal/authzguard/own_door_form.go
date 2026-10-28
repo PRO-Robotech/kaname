@@ -182,7 +182,7 @@ func (d *OwnDoor) FormUnary(judge IDFormJudge) (grpc.UnaryServerInterceptor, err
 	}
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		extract, judged := extractors[info.FullMethod]
-		if !judged || !callerNamed(ctx) || d.questionGoesToItsOwnDecider(ctx, info.FullMethod, req) {
+		if !judged {
 			return handler(ctx, req)
 		}
 		objectType, objectID, err := extract(req)
@@ -191,9 +191,14 @@ func (d *OwnDoor) FormUnary(judge IDFormJudge) (grpc.UnaryServerInterceptor, err
 			// остаётся двери и обработчику, как и до звена.
 			return handler(ctx, req)
 		}
-		if err := judge.Check(objectType, objectID); err != nil {
-			return nil, err
+		refusal := judge.Check(objectType, objectID)
+		// Порядок «сперва форма, потом вызывающий» — ради цены годного входа,
+		// а не ради исхода: годная форма проходит, не строя субъекта (это
+		// выделение памяти на каждом вызове). Исход тот же, что при обратном
+		// порядке: отказ формы отдаётся лишь тому, о ком дверь спросила бы модель.
+		if refusal == nil || !callerNamed(ctx) || d.questionGoesToItsOwnDecider(ctx, info.FullMethod, req) {
+			return handler(ctx, req)
 		}
-		return handler(ctx, req)
+		return nil, refusal
 	}, nil
 }

@@ -29,8 +29,10 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -61,6 +63,36 @@ func BenchmarkPublicListenerChain_WellFormedID(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := chain(ctx, req, info, handler); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkFormLink_WellFormedID — звено формы В ОДИНОЧКУ с боевым судьёй на
+// правильной форме: цена самой ступени без цены места в цепочке (каждое звено
+// цепочки gRPC обходится ещё одним замыканием на вызов, и это свойство
+// цепочки, а не ступени). Ожидание §11.6 — ноль выделений памяти.
+func BenchmarkFormLink_WellFormedID(b *testing.B) {
+	door, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{SelfCheck: benchAllowAll{}})
+	if err != nil {
+		b.Fatalf("дверь не собрана: %v", err)
+	}
+	link, err := door.FormUnary(publicIDForm{})
+	if err != nil {
+		b.Fatalf("звено формы не собрано: %v", err)
+	}
+	ctx := operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: "service_account", ID: "sva-benchchain000001"})
+	req := &iamv1.GetProjectRequest{ProjectId: domain.PrefixProject + "00000000000notfnd"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Get"}
+	handler := func(context.Context, any) (any, error) { return nil, nil }
+	if _, err := link(ctx, req, info, handler); err != nil {
+		b.Fatalf("правильная форма отвергнута звеном — замер беспредметен: %v", err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := link(ctx, req, info, handler); err != nil {
 			b.Fatal(err)
 		}
 	}
