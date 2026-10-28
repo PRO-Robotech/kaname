@@ -119,6 +119,16 @@ event_body: acceptance-reviewer · APPROVED · sha256 218c1fa2a1eb432df9a37e9110
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#1052
-  status: not_performed
-  published: false
-  note: публикует курьер; до публикации роль в записи — координата, а не доказательство личности.
+  status: performed
+  published: true
+  database_id: 6476232974
+  node_id: IC_kwDOUO26pM8AAAABggN5Dg
+  url: https://github.com/PRO-Robotech/kaname/issues/1052#issuecomment-6476232974
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6476232974
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-28T17:40:41Z'
+  body_sha256: eea8cf4b2622fbd22b68406a1c5ad910bffe7f3e7cfbc4ba9f5f9c6db3341919
+  subject_sha256: 218c1fa2a1eb432df9a37e911051a92dc3663443dd8fc1f16252be68b718bc4c
+  subject_revision_commit: 23a1db68009e5dc0cf3815019a6acd97d72767df
