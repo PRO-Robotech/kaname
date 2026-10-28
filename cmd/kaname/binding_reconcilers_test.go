@@ -85,8 +85,10 @@ func (thinBindingTx) WithTx(ctx context.Context, fn func(context.Context, reconc
 	return fn(ctx, thinBindingStore{})
 }
 
-// materializationPasses — число наблюдений полосы по величине объектов.
-func materializationPasses(t *testing.T, reg *metrics.Registry, lane string) uint64 {
+// materializationPasses — число наблюдений полосы по величине объектов и есть
+// ли ряд полосы на проводе вовсе. Отсутствие ряда — не отказ пробы, а ответ:
+// реконсайлер без приёмника не регистрирует семейства, и это ровно дефект.
+func materializationPasses(t *testing.T, reg *metrics.Registry, lane string) (count uint64, present bool) {
 	t.Helper()
 	g, ok := reg.Registerer().(prometheus.Gatherer)
 	if !ok {
@@ -103,13 +105,12 @@ func materializationPasses(t *testing.T, reg *metrics.Registry, lane string) uin
 		for _, m := range mf.GetMetric() {
 			for _, lp := range m.GetLabel() {
 				if lp.GetName() == "lane" && lp.GetValue() == lane {
-					return m.GetHistogram().GetSampleCount()
+					return m.GetHistogram().GetSampleCount(), true
 				}
 			}
 		}
 	}
-	t.Fatalf("ряда %s{lane=%q} нет на проводе вовсе", metrics.BindingMaterializationObjectsMetric, lane)
-	return 0
+	return 0, false
 }
 
 // bindingReconcilerLanes — сборщики полос и полоса каждого. Перечень закрыт:
@@ -147,12 +148,12 @@ func TestBindingReconcilerPassMovesItsOwnLane(t *testing.T) {
 					"тогда не пройден, и молчание ряда сказано ни о чём", err)
 			}
 			for _, other := range metrics.BindingMaterializationLanes {
-				got := materializationPasses(t, reg, other)
+				got, present := materializationPasses(t, reg, other)
 				switch {
-				case other == lane && got != 1:
-					t.Errorf("проход реконсайлера %s НЕ сдвинул ряд своей полосы %q (наблюдений %d) — "+
-						"материализации этой полосы вне гистограммы, и она читается как полоса "+
-						"без трафика", name, lane, got)
+				case other == lane && (!present || got != 1):
+					t.Errorf("проход реконсайлера %s НЕ сдвинул ряд своей полосы %q (ряд на проводе: %t, "+
+						"наблюдений %d) — материализации этой полосы вне гистограммы, и она читается "+
+						"как полоса без трафика", name, lane, present, got)
 				case other != lane && got != 0:
 					t.Errorf("проход реконсайлера %s сдвинул ряд ЧУЖОЙ полосы %q (наблюдений %d) — "+
 						"полосы снова читаются слитно", name, other, got)
