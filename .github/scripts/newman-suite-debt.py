@@ -3088,7 +3088,8 @@ def self_test() -> int:
                       "**ID: SYN-05** · отрицание; близнец — SYN-01, довод словами\n")
         (pn / "cases").mkdir(parents=True, exist_ok=True)
         (pn / "cases" / "carrier.py").write_text(
-            '"""Модуль кейсов: несёт SYN-01."""\n# SYN-03 здесь только комментарием\nCASES = []\n',
+            '"""Модуль кейсов."""\n# SYN-03 здесь только комментарием\n'
+            'CASES = [Case(title="SYN-01 — несётся кейсом")]\n',
             encoding="utf-8")
         hold = "PRO-Robotech/kaname#1 — синтетика: заведёт кейс"
         pled = {"carrier": ("A", "довод", "")}
@@ -3125,6 +3126,35 @@ def self_test() -> int:
             _c(f"позиции: перепись числом — {label}", rc == 0 and want in buf.getvalue(),
                f"код {rc}; {buf.getvalue()[-700:]}")
 
+        # Ось 17б: НОСИТЕЛЬ — ИСПОЛНЯЕМЫЙ ЛИТЕРАЛ, А НЕ ДОКСТРОКА (kaname#619). Трасса
+        # «сценарий — кейс» в шапке модуля переживала снятый кейс: позиция значилась
+        # несомой, а законная запись долга о ней получала ложное «пережила предмет».
+        # Пара по каждому месту голой строки; близнец отличается ровно тем, что тот
+        # же ID стоит ещё и в метке шага либо в аргументе построителя.
+        carrier_mod = (pn / "cases" / "carrier.py").read_text(encoding="utf-8")
+        for label, mod, want_rc, want_text in (
+                ("кейс снят, трасса в докстроке модуля осталась — находка",
+                 '"""Трасса: SYN-01 — кейс SYN-01-OK."""\nCASES = []\n', 1, "позиция SYN-01"),
+                ("ID только в докстроке функции — находка",
+                 'def build():\n    """SYN-01 — трасса."""\n    return []\n', 1, "позиция SYN-01"),
+                ("ID только в голой строке-выражении — находка",
+                 'CASES = []\n"SYN-01 — пояснение без исполнения"\n', 1, "позиция SYN-01"),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: та же трасса и ID в метке шага — несётся",
+                 '"""Трасса: SYN-01 — кейс SYN-01-OK."""\n'
+                 'CASES = [Case(title="SYN-01 — несётся кейсом")]\n', 0, ""),
+                ("ЗАКОННЫЙ БЛИЗНЕЦ: та же трасса и ID в аргументе построителя — несётся",
+                 '"""Трасса: SYN-01 — кейс SYN-01-OK."""\nCASES = [Case(id="SYN-01-OK")]\n',
+                 0, "")):
+            (pn / "cases" / "carrier.py").write_text(mod, encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run(pn, workflows=pwf_runs, ledger=pled,
+                         scenario_debt={"SYN-03": ("довод", hold)})
+            _c(f"носитель позиции: {label} (код {want_rc})",
+               rc == want_rc and (not want_text or want_text in err.getvalue()),
+               f"код {rc}; {err.getvalue()[:400]}")
+        (pn / "cases" / "carrier.py").write_text(carrier_mod, encoding="utf-8")
+
         # Ось 18: ВСЕ ЗАКОННЫЕ ФОРМЫ ЗАГОЛОВКА СЦЕНАРИЯ (kaname#449, опыт J4).
         # Приёмки пишут уровни тремя формами, выведенными обходом каталога: ID-префикс
         # `**ID: X** · I + E — …`, жирный ID с заголовком `**X — …** · E + I` (уровни
@@ -3149,7 +3179,8 @@ def self_test() -> int:
                   "**SYN-24 (RED)** пометка, а не уровни\n")
         (fn / "cases").mkdir(parents=True, exist_ok=True)
         (fn / "cases" / "carrier.py").write_text(
-            '"""Модуль кейсов: несёт SYN-11."""\nCASES = []\n', encoding="utf-8")
+            '"""Модуль кейсов."""\nCASES = [Case(title="SYN-11 — несётся кейсом")]\n',
+            encoding="utf-8")
         ftwin = {s: ("довод", hold) for s in ("SYN-01", "SYN-12", "SYN-13", "SYN-21")}
 
         def _less(sid):
