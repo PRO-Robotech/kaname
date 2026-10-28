@@ -193,6 +193,20 @@ func (p *pcrWorld) registerRegistry(id string) {
 	}
 }
 
+// labelRegistry — повторная регистрация реестра id службой-владельцем с
+// метками labels: так владелец сообщает метки объекта (зеркало `labels`,
+// селектор `matchLabels`). Версии владельца нет — регистрация применяется
+// всегда, как и первая (legacy-форма мира П6).
+func (p *pcrWorld) labelRegistry(id string, labels map[string]string) {
+	p.t.Helper()
+	r := &iamv1.RegisterResourceRequest{
+		SubjectId: "project:" + string(p.prjA), Relation: "project", Object: pcrRegType + ":" + id,
+		Labels: labels, ParentProjectId: string(p.prjA), ParentAccountId: string(p.accA),
+		ParentChain: []string{"project:" + string(p.prjA), "account:" + string(p.accA)},
+	}
+	require.NoErrorf(p.t, p.reg.Register(p.ctx, r), "метки реестра %s", id)
+}
+
 // registerRepository — регистрация репозитория службой-владельцем: указатель
 // `parent` на свой реестр и владелец объекта usr-A.
 func (p *pcrWorld) registerRepository(registry, name string) {

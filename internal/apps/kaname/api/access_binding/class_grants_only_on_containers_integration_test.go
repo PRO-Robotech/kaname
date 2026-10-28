@@ -61,6 +61,12 @@ func newS7World(t *testing.T, sc string, keyed, rolesI bool) *s7World {
 	t.Helper()
 	p := newPCRWorld(t)
 	w := &s7World{pcrWorld: p, keyed: keyed}
+	if rolesI {
+		// Роль И2 сужает тип реестров до реестра X МЕТКАМИ (kaname#965: манифест
+		// модуля не называет объектов), поэтому X несёт метку её селектора —
+		// повторной регистрацией службы-владельца, как владелец сообщает метки.
+		p.labelRegistry(pcrX, publicreadfixture.RegistryXLabels())
+	}
 
 	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
 	require.NoError(t, err, "фикстура П6")

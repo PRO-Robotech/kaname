@@ -18,6 +18,14 @@ package publicreadfixture
 //
 // Каждый близнец строится правкой основы, и дельту сверяет [Delta]: ключ — одна
 // добавленная строка, роли — двадцать добавленных строк, удалённых ноль.
+//
+// Роли И сужают объекты МЕТКАМИ (`matchLabels`), а не именами: манифест модуля
+// не называет конкретных объектов (kaname#965 — ссылка, снятая снятием
+// регистрации, вернулась бы на следующем старте), и загрузка отвергает
+// `resourceNames` в правиле роли модуля. Ворот S7 это не меняет: вид селектора
+// они не судят (Р11 п. 2 (б) приёмки) — роль модуля, сужающая его тип метками,
+// открывает тот же обход, что и сужающая именами. Метки реестра X
+// ([RegistryXLabels]) кладёт его регистрация в мире SC-81.
 
 import (
 	"bytes"
@@ -52,23 +60,23 @@ const (
 const namedRolesBlock = `
   - id: registry.repo_reader_named
     description: >
-      Пробная роль S7: чтение репозиториев, сужено именами.
+      Пробная роль S7: чтение репозиториев, сужено метками.
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: registry
         resources: [repositories]
         classes: [get]
-        resourceNames: [app]
+        matchLabels: {s7: app}
 
   - id: registry.reg_reader_named
     description: >
-      Пробная роль S7: чтение реестра X, сужено именами.
+      Пробная роль S7: чтение реестра X, сужено метками.
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - module: registry
         resources: [registries]
         classes: [get]
-        resourceNames: [reg00000000000000001]
+        matchLabels: {s7: x}
 `
 
 // WithClassGrantsKey — документ с ключом S7, равным true: строка ключа встаёт
@@ -105,3 +113,8 @@ func WithNamedRoles(doc []byte) ([]byte, error) {
 	}
 	return twin, nil
 }
+
+// RegistryXLabels — метки, которыми регистрация реестра X в мире SC-81
+// отвечает селектору правила роли И2 (`matchLabels: {s7: x}`): роль сужает тип
+// реестров до реестра X метками, как прежде — именем (kaname#965).
+func RegistryXLabels() map[string]string { return map[string]string{"s7": "x"} }
