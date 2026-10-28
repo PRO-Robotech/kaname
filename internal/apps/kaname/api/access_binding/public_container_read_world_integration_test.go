@@ -92,6 +92,12 @@ type pcrWorld struct {
 
 	facts     *catalog.Facts // каталожный факт из живых строк после последней доставки
 	delivered bool
+
+	// deliveryFail — приёмник провала доставки; nil — сама проба (`t` мира).
+	// Подменяет его лишь проба помощника доставки
+	// (`public_container_read_world_delivery_applied_integration_test.go`):
+	// так провал сцены ей виден исходом, а не роняет её саму.
+	deliveryFail require.TestingT
 }
 
 // newPCRWorld поднимает П6 БЕЗ доставки новой редакции и доказывает живость
@@ -390,3 +396,12 @@ func sixPairs() []pcrPair {
 type pcrFacts struct{ p *pcrWorld }
 
 func (s pcrFacts) Facts() *catalog.Facts { return s.p.facts }
+
+// deliverySink — куда помощник доставки сообщает провал: приёмник пробы
+// помощника, если он поставлен, иначе сама проба мира.
+func (p *pcrWorld) deliverySink() require.TestingT {
+	if p.deliveryFail != nil {
+		return p.deliveryFail
+	}
+	return p.t
+}
