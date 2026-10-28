@@ -412,7 +412,13 @@ func asPrincipal(uid domain.UserID) context.Context {
 // aid36Answer — ответ одной строкой после замены присланного идентификатора меткой:
 // пара (код, сообщение) и `details` либо тело ответа.
 func aid36Answer(out proto.Message, err error, id string) string {
-	mask := func(s string) string { return strings.ReplaceAll(s, id, aid36Mask) }
+	// Метка момента ответа (`checkedAt` вопросов модели) — время вызова, а не
+	// свойство объекта: два вызова на один и тот же идентификатор различаются им
+	// на границе секунды (замер красного 5abdaac0a, BatchCheck на форме
+	// генератора). Она заменяется меткой, как и присланный идентификатор.
+	mask := func(s string) string {
+		return aid36Moment.ReplaceAllString(strings.ReplaceAll(s, id, aid36Mask), `"<МОМЕНТ>"`)
+	}
 	if err != nil {
 		st := status.Convert(err)
 		details, _ := protojson.Marshal(st.Proto())
@@ -424,6 +430,9 @@ func aid36Answer(out proto.Message, err error, id string) string {
 	}
 	return mask("OK " + string(body))
 }
+
+// aid36Moment — метка времени RFC 3339 в теле ответа.
+var aid36Moment = regexp.MustCompile(`"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z"`)
 
 // aid36Code — код ответа строки (OK для успешного).
 func aid36Code(err error) codes.Code { return status.Code(err) }
