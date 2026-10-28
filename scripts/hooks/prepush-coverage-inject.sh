@@ -184,7 +184,9 @@ bypass_case() {
     out="$(cd "$d" && KANAME_SKIP_PREPUSH=1 PATH="$stub:$PATH" git push origin HEAD:refs/heads/1 2>&1)"
     rc=$?
     pushed=0
-    git -C "$d.git" rev-parse -q --verify refs/heads/1 >/dev/null && pushed=1
+    # Наличие ссылки на удалённом песочницы — перечнем ссылок, а не вопросом
+    # об истории: вершины здесь нет, есть «доехала ли ссылка».
+    [ -n "$(git -C "$d.git" for-each-ref --format='%(refname)' refs/heads/1)" ] && pushed=1
     return 0
 }
 
