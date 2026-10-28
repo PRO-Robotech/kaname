@@ -61,6 +61,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
@@ -166,9 +167,12 @@ type KeySetSource interface {
 // тем же вопросом к тому же правилу, с тем же окном кеша (kaname#319).
 type RevocationReader = tokenrevocation.Reader
 
-// Config — настройка читателя. Каждое поле ОБЯЗАТЕЛЬНО: незаданное здесь
-// означает «не сужаем», а не «взять разумное».
+// Config — настройка читателя. Обязательные ограничения JWT проверяет New;
+// отсутствие BasicCredentials закрывает opaque-полосу, а не меняет способ проверки.
 type Config struct {
+	// BasicCredentials — авторитет базового секрета; отсутствие не открывает полосу.
+	// Боевой корень передаёт тот же ограниченный по времени репозиторий, что внутреннему API.
+	BasicCredentials BasicCredentialResolver
 	// Issuer — издатель, которым установка объявила СЕБЯ.
 	Issuer string
 	// Audience — адресат ЭТОЙ поверхности. Токен, выданный для другой,
@@ -495,6 +499,9 @@ type verified struct {
 
 // verify исполняет все одиннадцать проверок единого перечня.
 func (r *Reader) verify(ctx context.Context, raw string) (verified, error) {
+	if credsecret.HasMark(raw) {
+		return r.verifyBasic(ctx, raw)
+	}
 	byKID, err := r.keySnapshot(ctx, false)
 	if err != nil {
 		// Нечитаемый реестр НЕ ЕСТЬ «ключ не найден»: это третий исход, и

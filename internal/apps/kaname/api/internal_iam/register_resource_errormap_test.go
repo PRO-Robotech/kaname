@@ -49,6 +49,8 @@ func TestRegisterResourceUseCase_BeginFailure_MapsUnavailable(t *testing.T) {
 		failBeginTxBeginner{err: errors.New("failed to connect to `host=iamdb port=5432 user=kaname`: connection refused")},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		&recordingWithdrawal{},
+		noAudit{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

@@ -49,6 +49,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
@@ -114,6 +115,10 @@ func newATCWorld(t *testing.T) *atcWorld {
 		kanamepg.NewPoolTxBeginner(w.pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
+		// каталожным фактом, что у мира после последней доставки.
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
+		kanamepg.NewRegistrationAudit(),
 	)
 	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")

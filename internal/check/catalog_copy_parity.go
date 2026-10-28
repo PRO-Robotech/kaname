@@ -50,10 +50,11 @@
 // ЧТО СВЕРКА УТВЕРЖДАЕТ ТЕПЕРЬ
 //
 // Норма прежняя и НЕ ослаблена: копии — ОДИН порождённый артефакт. Изменилось
-// то, что у равенства появились ЧЕТЫРЕ закрытых перечня объявленных окон —
+// то, что у равенства появились ПЯТЬ закрытых перечней объявленных окон —
 // переименования фундамента, записи службы, ждущие края (kaname#181),
-// глаголы, снятые службой, которые край ещё называет (kaname#564), и записи,
-// у которых служба сменила значение одного поля (kaname#720), — и каждая
+// глаголы, снятые службой, которые край ещё называет (kaname#564), записи,
+// у которых служба сменила значение одного поля (kaname#720), и записи,
+// которые служба переаннотировала целиком (kaname#986), — и каждая
 // запись обязана держать себя САМА в обе стороны. Остаток после их
 // применения — находка с прежним текстом.
 //
@@ -238,7 +239,52 @@ type CatalogPendingEntry struct {
 // изменением наша копия синхронизирована с копией края: край завёл шесть
 // глаголов `kacho.cloud.geo.v1` (Region/Zone Create/Update/Delete, kacho#3092),
 // которых у нас не было.
-var catalogPendingEntries = []CatalogPendingEntry{}
+//
+// Перечень снова непуст с 2026-10-26: четыре глагола службы делегированных
+// выдач `GrantDelegationService` (kaname#986) заведены контрактом службы, а
+// копия края на стволе платформы `41d7edad9b` их ещё не называет (перепись
+// против этого ствола: «есть у нас, нет у края» — ровно эти четыре). Наша копия
+// несёт их в форме генератора края: обход `catalog_covers_contract.go` сверяет
+// каждую строку с аннотациями метода по каждой оси каталога. До подъёма пина
+// край отвечает на эти глаголы отказом «нет записи каталога» — окно закрыто, а
+// не открыто (fail-closed).
+var catalogPendingEntries = []CatalogPendingEntry{
+	{
+		OwnFQN:  "kaname.cloud.iam.v1.GrantDelegationService/Create",
+		Why:     grantDelegationPendingWhy,
+		Removal: grantDelegationPendingRemoval,
+		Refs:    "PRO-Robotech/kaname#986",
+	},
+	{
+		OwnFQN:  "kaname.cloud.iam.v1.GrantDelegationService/Get",
+		Why:     grantDelegationPendingWhy,
+		Removal: grantDelegationPendingRemoval,
+		Refs:    "PRO-Robotech/kaname#986",
+	},
+	{
+		OwnFQN:  "kaname.cloud.iam.v1.GrantDelegationService/List",
+		Why:     grantDelegationPendingWhy,
+		Removal: grantDelegationPendingRemoval,
+		Refs:    "PRO-Robotech/kaname#986",
+	},
+	{
+		OwnFQN:  "kaname.cloud.iam.v1.GrantDelegationService/Revoke",
+		Why:     grantDelegationPendingWhy,
+		Removal: grantDelegationPendingRemoval,
+		Refs:    "PRO-Robotech/kaname#986",
+	},
+}
+
+const (
+	// grantDelegationPendingWhy — общая причина четырёх записей одного предмета.
+	grantDelegationPendingWhy = "глагол службы делегированных выдач заведён контрактом службы (kaname#986); " +
+		"край порождает свою копию из контракта службы по пину и назовёт глагол после подъёма пина " +
+		"(перепись против ствола платформы 41d7edad9b: «есть у нас, нет у края» — ровно четыре глагола " +
+		"GrantDelegationService); до того край отвечает на глагол отказом «нет записи каталога»"
+	// grantDelegationPendingRemoval — внешний предикат снятия тех же четырёх записей.
+	grantDelegationPendingRemoval = "копия края на стволе платформы несёт глагол — платформа подняла пин " +
+		"службы до ревизии с GrantDelegationService и перегенерировала каталог; тогда запись снимается"
+)
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
 func CatalogPendingEntries() []CatalogPendingEntry {
@@ -375,12 +421,162 @@ type CatalogRevisedEntry struct {
 // объявлено 5 · применено 0). Пустой перечень — цель, а не отказ:
 // TestDeclaredRevisedEntriesCarryASubject проходит на пустом, а способность
 // записи истечь доказывается синтетикой (TestDeclaredRevisedEntryExpiresOnItsOwn).
-var catalogRevisedEntries = []CatalogRevisedEntry{}
+//
+// Запись заведена 2026-10-26 (kaname#1003, приёмка
+// `service-account-creation-is-its-own-right.md`, Р1, §7): контракт службы сменил
+// отношение `ServiceAccountService/Create` с `editor` на `service_account_creator`
+// (`[service_account] or editor` — шире прежнего). До подъёма пина край требует
+// `editor`, то есть строже службы: отказ создателю через край уже, а не шире
+// (fail-closed, §7 приёмки), и svc-registry ходит к службе напрямую.
+var catalogRevisedEntries = []CatalogRevisedEntry{
+	{
+		FQN:       "kaname.cloud.iam.v1.ServiceAccountService/Create",
+		Field:     "required_relation",
+		EdgeValue: "editor",
+		OwnValue:  "service_account_creator",
+		Why: "контракт службы сменил отношение создания учётки на отдельное право " +
+			"service_account_creator (kaname#1003, Р1): оно выводится и из editor, поэтому прежние " +
+			"создатели права не теряют; край порождает свою копию по пину службы и несёт прежнее " +
+			"значение до подъёма пина — строже службы, а не мягче (§7 приёмки)",
+		Removal: "копия края на стволе платформы несёт у ServiceAccountService/Create " +
+			"required_relation service_account_creator — платформа подняла пин службы до ревизии " +
+			"kaname#1003 и перегенерировала каталог; тогда запись снимается",
+		Refs: "PRO-Robotech/kaname#1003",
+	},
+}
 
 // CatalogRevisedEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
 func CatalogRevisedEntries() []CatalogRevisedEntry {
 	out := make([]CatalogRevisedEntry, len(catalogRevisedEntries))
 	copy(out, catalogRevisedEntries)
+	return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ПЯТЫЙ ВИД ЗАПИСИ — ЗАПИСЬ, КОТОРУЮ СЛУЖБА ПЕРЕАННОТИРОВАЛА ЦЕЛИКОМ (kaname#986)
+//
+// Тот же класс окна, что у смены значения одного поля, но служба сменила ВИД
+// аннотации глагола: охраняемый глагол (право, отношение, область) стал
+// решаемым обработчиком (`<exempt>` с причиной). Порождённая запись расходится
+// не одним полем — сменились значения четырёх полей и появилось поле
+// `exempt_reason`, которого прежняя форма не несла вовсе. Четвёртый вид
+// объясняет ровно одну подстановку значения и такого расхождения не покрывает
+// by construction: появление поля подстановкой значения не выражается.
+//
+// Запись объявляет ОБЕ стороны дословно: у края запись `FQN` побайтово равна
+// `EdgeBody`, у нас — `OwnBody`. Только при обеих совпавших сторонах блок края
+// заменяется нашим, и ровно он один; всё прочее судится побайтово, как прежде.
+// Держит себя во все стороны: край несёт новую запись либо глагола у края нет —
+// предикат снятия наступил; у края запись иная, чем объявленная прежней, у нас
+// иная, чем объявленная новой, либо нашей записи нет — ведомость утверждает о
+// дереве неправду. Послабления сверх объявленного нет: обе стороны пришпилены
+// побайтово, и любая иная правка любой из них — находка.
+
+// CatalogReannotatedEntry — объявленная смена вида аннотации записи, которую
+// край ещё не породил.
+type CatalogReannotatedEntry struct {
+	// FQN — полное имя метода; у обеих копий одно.
+	FQN string
+	// EdgeBody — запись в копии края (прежняя) дословно, в форме генератора.
+	EdgeBody string
+	// OwnBody — запись в нашей копии (новая, порождённая из контракта) дословно.
+	OwnBody string
+	// Why — почему расхождение не дефект.
+	Why string
+	// Removal — ПРЕДИКАТ СНЯТИЯ, внешний по отношению к этому дереву.
+	Removal string
+	// Refs — где предмет ведётся.
+	Refs string
+}
+
+// catalogReannotatedEntries — ЗАКРЫТЫЙ перечень переаннотированных записей,
+// ждущих края.
+//
+// Записи заведены 2026-10-26 (kaname#986, приёмка делегированных выдач, Р1а):
+// контракт службы перевёл `AccessBindingService/Delete` и `/Revoke` из глаголов,
+// охраняемых отношением `v_delete` на привязке, в глаголы, решаемые
+// обработчиком (`HANDLER_DECIDES`): право снять выдачу теперь даёт и
+// делегирование, а его край по одному отношению на объекте не выразит. Наша
+// копия несёт обе записи в форме генератора края (обход
+// `catalog_covers_contract.go` сверяет их с аннотациями метода по каждой оси),
+// копия края на стволе платформы `41d7edad9b` — прежние (перепись против этого
+// ствола: «запись расходится содержимым» — ровно эти две). До подъёма пина край
+// требует у этих глаголов прежнего отношения — то есть строже службы, а не
+// мягче: окно закрыто, а не открыто.
+var catalogReannotatedEntries = []CatalogReannotatedEntry{
+	{
+		FQN: "kaname.cloud.iam.v1.AccessBindingService/Delete",
+		EdgeBody: `  {
+    "fqn": "kaname.cloud.iam.v1.AccessBindingService/Delete",
+    "permission": "iam.access_bindings.delete",
+    "required_relation": "v_delete",
+    "scope_extractor": {
+      "object_type": "iam_access_binding",
+      "from_request_field": "access_binding_id"
+    },
+    "required_acr_min": "2"
+  }`,
+		OwnBody: `  {
+    "fqn": "kaname.cloud.iam.v1.AccessBindingService/Delete",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
+  }`,
+		Why:     accessBindingReannotatedWhy,
+		Removal: accessBindingReannotatedRemoval,
+		Refs:    "PRO-Robotech/kaname#986",
+	},
+	{
+		FQN: "kaname.cloud.iam.v1.AccessBindingService/Revoke",
+		EdgeBody: `  {
+    "fqn": "kaname.cloud.iam.v1.AccessBindingService/Revoke",
+    "permission": "iam.access_bindings.revoke",
+    "required_relation": "v_delete",
+    "scope_extractor": {
+      "object_type": "iam_access_binding",
+      "from_request_field": "access_binding_id"
+    },
+    "required_acr_min": "2"
+  }`,
+		OwnBody: `  {
+    "fqn": "kaname.cloud.iam.v1.AccessBindingService/Revoke",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
+  }`,
+		Why:     accessBindingReannotatedWhy,
+		Removal: accessBindingReannotatedRemoval,
+		Refs:    "PRO-Robotech/kaname#986",
+	},
+}
+
+const (
+	// accessBindingReannotatedWhy — общая причина двух записей одного предмета.
+	accessBindingReannotatedWhy = "контракт службы перевёл глагол снятия выдачи из охраняемого отношением " +
+		"v_delete на привязке в решаемый обработчиком (HANDLER_DECIDES, kaname#986, Р1а): право снять " +
+		"выдачу даёт и делегирование; край порождает свою копию по пину службы и несёт прежнюю запись до " +
+		"подъёма пина (перепись против ствола платформы 41d7edad9b: «запись расходится содержимым» — ровно " +
+		"Delete и Revoke); до того край требует прежнего отношения — строже службы"
+	// accessBindingReannotatedRemoval — внешний предикат снятия тех же двух записей.
+	accessBindingReannotatedRemoval = "копия края на стволе платформы несёт у глагола новую запись " +
+		"(permission <exempt>, exempt_reason HANDLER_DECIDES) — платформа подняла пин службы до ревизии " +
+		"с переаннотацией и перегенерировала каталог; тогда запись снимается"
+)
+
+// CatalogReannotatedEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
+func CatalogReannotatedEntries() []CatalogReannotatedEntry {
+	out := make([]CatalogReannotatedEntry, len(catalogReannotatedEntries))
+	copy(out, catalogReannotatedEntries)
 	return out
 }
 
@@ -426,6 +622,11 @@ type CatalogParityCensus struct {
 	// RevisedApplied — сколько из них ДЕЙСТВИТЕЛЬНО применены к копии края:
 	// у края прежнее значение, у нас новое.
 	RevisedApplied int
+	// ReannotatedDeclared — записей о переаннотации целиком в ведомости.
+	ReannotatedDeclared int
+	// ReannotatedApplied — сколько из них ДЕЙСТВИТЕЛЬНО применены к копии края:
+	// у края прежняя запись дословно, у нас новая дословно.
+	ReannotatedApplied int
 	// BytesEqual — совпали ли копии побайтово ДО применения ведомости.
 	BytesEqual bool
 }
@@ -435,18 +636,19 @@ func (c CatalogParityCensus) String() string {
 	return fmt.Sprintf(
 		"перепись: записей у края %d · записей у нас %d · переименований объявлено %d · применено %d · "+
 			"ожидающих края объявлено %d · применено %d · снятых службой объявлено %d · применено %d · "+
-			"смен значения объявлено %d · применено %d · побайтово до ведомости %v",
+			"смен значения объявлено %d · применено %d · переаннотированных объявлено %d · применено %d · "+
+			"побайтово до ведомости %v",
 		c.EdgeEntries, c.OwnEntries, c.RenamesDeclared, c.RenamesApplied,
 		c.PendingDeclared, c.PendingApplied, c.RetiredDeclared, c.RetiredApplied,
-		c.RevisedDeclared, c.RevisedApplied, c.BytesEqual)
+		c.RevisedDeclared, c.RevisedApplied, c.ReannotatedDeclared, c.ReannotatedApplied, c.BytesEqual)
 }
 
 // CompareCatalogCopies — сверка против ДЕЙСТВУЮЩЕЙ ведомости дерева. Возвращает
 // перечень находок (пустой = зелёное) и перепись. Ошибка — это ТРЕТИЙ ИСХОД:
 // разобрать не удалось, вердикта о совпадении копий НЕТ (не путать с находкой).
 func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, CatalogParityCensus, error) {
-	return compareCatalogCopiesWithAllLedgers(catalogFoundationRenames, catalogPendingEntries, catalogRetiredEntries,
-		catalogRevisedEntries, edgeRaw, ownRaw)
+	return compareCatalogCopiesWithEveryLedger(catalogFoundationRenames, catalogPendingEntries, catalogRetiredEntries,
+		catalogRevisedEntries, catalogReannotatedEntries, edgeRaw, ownRaw)
 }
 
 // compareCatalogCopiesWith — та же сверка с ЯВНЫМИ ведомостями.
@@ -469,18 +671,28 @@ func compareCatalogCopiesWithLedgers(
 	return compareCatalogCopiesWithAllLedgers(renames, pending, retired, nil, edgeRaw, ownRaw)
 }
 
-// compareCatalogCopiesWithAllLedgers — та же сверка со всеми четырьмя ЯВНЫМИ
-// ведомостями. Прод-вход (`CompareCatalogCopies`) зовёт её со своими.
+// compareCatalogCopiesWithAllLedgers — та же сверка с четырьмя ЯВНЫМИ
+// ведомостями (форма для проб первых четырёх видов записи).
 func compareCatalogCopiesWithAllLedgers(
 	renames []CatalogFoundationRename, pending []CatalogPendingEntry, retired []CatalogRetiredEntry,
 	revised []CatalogRevisedEntry, edgeRaw, ownRaw string,
 ) ([]CatalogParityFinding, CatalogParityCensus, error) {
+	return compareCatalogCopiesWithEveryLedger(renames, pending, retired, revised, nil, edgeRaw, ownRaw)
+}
+
+// compareCatalogCopiesWithEveryLedger — та же сверка со всеми пятью ЯВНЫМИ
+// ведомостями. Прод-вход (`CompareCatalogCopies`) зовёт её со своими.
+func compareCatalogCopiesWithEveryLedger(
+	renames []CatalogFoundationRename, pending []CatalogPendingEntry, retired []CatalogRetiredEntry,
+	revised []CatalogRevisedEntry, reannotated []CatalogReannotatedEntry, edgeRaw, ownRaw string,
+) ([]CatalogParityFinding, CatalogParityCensus, error) {
 	census := CatalogParityCensus{
-		RenamesDeclared: len(renames),
-		PendingDeclared: len(pending),
-		RetiredDeclared: len(retired),
-		RevisedDeclared: len(revised),
-		BytesEqual:      edgeRaw == ownRaw,
+		RenamesDeclared:     len(renames),
+		PendingDeclared:     len(pending),
+		RetiredDeclared:     len(retired),
+		RevisedDeclared:     len(revised),
+		ReannotatedDeclared: len(reannotated),
+		BytesEqual:          edgeRaw == ownRaw,
 	}
 
 	edgeBlocks, err := splitCatalogBlocks(edgeRaw)
@@ -605,6 +817,48 @@ func compareCatalogCopiesWithAllLedgers(
 		}
 		revisedEdge[e.FQN] = strings.Replace(eb.body, edgeLit, ownLit, 1)
 		census.RevisedApplied++
+	}
+
+	// ── ПЕРЕАННОТИРОВАННЫЕ ЗАПИСИ ДЕРЖАТ СЕБЯ ВО ВСЕ СТОРОНЫ ──────────────────
+	//
+	// Блок края заменяется нашим только тогда, когда у края стоит дословно
+	// объявленная прежняя запись, а у нас — дословно объявленная новая. Край
+	// уже несёт новую либо глагола у края нет → предикат снятия наступил.
+	// Прочее — ведомость утверждает о дереве неправду. Остаток — побайтово.
+	for _, e := range reannotated {
+		if _, dup := revisedEdge[e.FQN]; dup {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"глагол %q объявлен вторым окном (сменой значения поля либо повторной "+
+					"переаннотацией) — одна запись объясняется одним окном. %s", e.FQN, e.Refs)})
+			continue
+		}
+		eb, ok := edgeByFQN[e.FQN]
+		if !ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"у края нет глагола %q — переаннотации нечего объяснять: снимите запись. %s", e.FQN, e.Refs)})
+			continue
+		}
+		if eb.body == e.OwnBody {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"край уже несёт у %q новую запись — предикат снятия наступил: снимите запись. %s",
+				e.FQN, e.Refs)})
+			continue
+		}
+		if eb.body != e.EdgeBody {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись называет у края %q прежнюю запись, а край несёт иную — "+
+					"она утверждает о дереве неправду. %s", e.FQN, e.Refs)})
+			continue
+		}
+		ob, ok := ownByFQN[e.FQN]
+		if !ok || ob.body != e.OwnBody {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись называет у НАС %q новую запись, которой в нашей копии нет дословно — "+
+					"она утверждает о дереве неправду. %s", e.FQN, e.Refs)})
+			continue
+		}
+		revisedEdge[e.FQN] = e.OwnBody
+		census.ReannotatedApplied++
 	}
 
 	ownCompared := ownBlocks

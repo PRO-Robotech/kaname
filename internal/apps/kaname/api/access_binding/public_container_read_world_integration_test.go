@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -109,7 +110,14 @@ func newPCRWorld(t *testing.T) *pcrWorld {
 		kanamepg.NewPoolTxBeginner(w.pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
-	)
+		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
+		// каталожным фактом, что у мира после последней доставки.
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
+		kanamepg.NewRegistrationAudit(),
+	).
+		// Актор события аудита называет службу формой имени службы перечня — тем
+		// же, которым ворота записи признают модуль (kaname#308, kaname#1005).
+		WithModuleRoster(moduleroster.Roster(t))
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           w.door,
 		ClusterAdminChecker: w.door,
@@ -159,9 +167,9 @@ func (p *pcrWorld) seedRole(name string, rules domain.Rules) domain.RoleID {
 		Rules:       rules, Permissions: compiled,
 	})
 	require.NoError(p.t, err, "посев роли %s", name)
-	sels := p.facts.GrantSelectors(inserted.Rules.MaterializingSelectors())
+	sels := p.facts.GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	require.NoError(p.t, w.RolesW().ReplaceRuleSelectors(p.ctx, inserted.ID, sels), "посев роли %s: селекторы", name)
-	pairs := p.facts.RoleVerbsFromSelectors(sels)
+	pairs := p.facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	require.NotEmptyf(p.t, pairs, "посев роли %s: проекция глаголов пуста — каталог не знает её типов", name)
 	require.NoError(p.t, w.RolesW().ReplaceRoleVerbs(p.ctx, inserted.ID, pairs), "посев роли %s: проекция глаголов", name)
 	require.NoError(p.t, w.Commit(p.ctx))
@@ -379,3 +387,10 @@ func sixPairs() []pcrPair {
 	}
 	return out
 }
+
+// pcrFacts — каталожный факт мира П6 после ПОСЛЕДНЕЙ доставки: доставка
+// (`applyDelivered`) пересобирает факт, и отзыв по снятию регистрации обязан
+// видеть тот же, что разворачивание выдачи.
+type pcrFacts struct{ p *pcrWorld }
+
+func (s pcrFacts) Facts() *catalog.Facts { return s.p.facts }

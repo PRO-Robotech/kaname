@@ -1,0 +1,81 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/module-manifest-resources-roles-deprecated.md
+  sha256: 363399f031e391e258b031f498a4913735ebb59cb6167a8994bcaf92f424e094
+  static_status_note: >-
+    Вердикт круга 3 стоит в §16 и шапке самого документа (APPROVED) и относится к редакции
+    0c2e48ca. Это первая запись ревью этого документа в docs/specs/reviews. Вердикт о
+    редакции 363399f0 выводится из ЭТОЙ записи. Шапку рецензент не правил.
+  approved_predecessor: >-
+    0c2e48ca9c793ea7eb22d4e0b3b31bef3363dd86386cfada4433d3c91d2ff32e — круг 3, вердикт в документе
+    (строка 8 одобренной копии); `git show abbcb5558:docs/engineering/acceptance/module-manifest-resources-roles-deprecated.md | sha256sum`
+    → 0c2e48ca…
+  code_branch: '965'
+  code_commit: abbcb5558
+  task: PRO-Robotech/kaname#965
+  review_form: delta_after_approval
+  fingerprint_predicate: >-
+    sha256sum kacho-workspace/tmp/965-acc/module-manifest-resources-roles-deprecated.md → 363399f0…e094;
+    одобренная копия …0c2e48ca.md → 0c2e48ca…f32e. Совпали с заданием.
+  delta_predicate: >-
+    diff -u …0c2e48ca.md …deprecated.md → 94 строки, 5 участков: шапка; врезка MOD-MR-10;
+    близнец MOD-MR-13; новый MOD-MR-13а; таблицы §6 и §8.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  scope: Только редакция 363399f0…. Вердикт круга 3 о 0c2e48ca на неё не переносится.
+
+checks:
+  scope_limited: >-
+    Да. Тронуты только места о ключе `resourceNames` в правиле роли манифеста. Сценариев
+    30 → 31.
+  new_scenario: >-
+    MOD-MR-13а. Производитель — object_refs.go (`refuseObjectRefs`, ветвь правила роли) и
+    схема `not: {required: [resourceNames]}` (schema/module-manifest.schema.json:306, :360)
+    @abbcb5558. Держатель — `TestObjectRefs_RoleRuleResourceNamesIsRefused`
+    (object_refs_test.go:105), подтесты «непустой» и «пустой перечень». Близнецы —
+    `TestObjectRefs_RoleRuleOverATypeLoads` (:119): без ключа и с `matchLabels` — оба в
+    дереве.
+  removed_positive: >-
+    Близнец MOD-MR-13 «только resourceNames» заменён на «только matchLabels». Замена
+    верная: одиночное имя в манифесте теперь отвергается само по себе, и прежний близнец
+    отличался бы от отрицательного не одним фактом.
+  constructibility_MOD_MR_13: >-
+    Отрицательный MOD-MR-13 (оба ключа) по-прежнему строится. Поле `ResourceNames`
+    осталось в структуре (internal/manifest/roles.go:296), декодер с `KnownFields` его
+    принимает. Находки ролей и ссылок на объекты собираются вместе (manifest.go:451-470,
+    `errors.Join`), поэтому дословный текст домена «mutually exclusive» остаётся в выводе
+    рядом с находкой 13а. Схемы загрузчик не читает (`git grep jsonschema` в
+    internal/manifest → 0).
+  disclosure: >-
+    В добавленных строках нет связки «координата + условие + следствие» о прежнем
+    поведении: только довод про идентификатор объекта.
+
+important: []
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · APPROVED · 363399f031e391e258b031f498a4913735ebb59cb6167a8994bcaf92f424e094"
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true

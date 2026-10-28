@@ -133,7 +133,7 @@ func TestOwnRESTFrontHop_PresentedCredentialThroughTheFrontPassesThrough(t *test
 // множество в кейсе, не подняв стенд: она называет ровно ту причину, по которой
 // сужать сегодня нельзя.
 func TestOwnRESTFrontHop_DevPostureStillPassesTheUnnamedCallerThrough(t *testing.T) {
-	dev := NewPublicCallerPolicy(false, PublicPeerCallableRPCs(), nil, bearerPresent, testServiceNameForm)
+	dev := NewPublicCallerPolicy(false, PublicPeerCallableRPCs(), nil, bearerPresent).WithModuleRoster(testModuleRoster())
 	_, err := dev.Unary()(newOwnRESTFrontCtx(), nil,
 		&grpc.UnaryServerInfo{FullMethod: projectGetMethod},
 		func(context.Context, any) (any, error) { return nil, nil })

@@ -29,9 +29,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Fixed client-facing messages for non-validation failures. Raw use-case or
@@ -96,22 +97,25 @@ type Handler struct {
 	// A knob may carry the exception; it may not carry the rule. Set via
 	// WithInsecureAnonymousPeer.
 	insecureAnonymousPeer bool
-	// moduleForm — форма имени службы, объявленная установкой: ею внутренний
-	// страж узнаёт пира-модуля по учётке его сертификата. Нулевая не узнаёт
-	// никого — анонимный пир тогда отвергается, как без сертификата вовсе.
-	// Задаётся конструктором (NewHandler) и обязательна.
-	moduleForm servicesan.Form
+	// modules — личности модулей установки (kaname#984): пиром-модулем без
+	// переданной личности признаётся только объявленная пара. Нулевое значение
+	// не признаёт никого.
+	modules moduleidentity.Roster
 }
 
-// NewHandler — построитель. svc, whoAmI и form обязательны: композиционный
-// корень провязывает их безусловно, и nil при сборке означает ошибку провязки.
-//
-// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm()):
-// ею внутренний страж узнаёт пира-модуля. Параметр позиционный намеренно —
-// сборка, забывшая форму, не соберётся, тогда как умолчание отвергало бы
-// каждого пира-модуля молча.
-func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase, form servicesan.Form) *Handler {
-	return &Handler{svc: svc, whoAmI: whoAmI, moduleForm: form}
+// WithModuleRoster подставляет перечень личностей модулей установки — тот же,
+// что у политик вызывающего обоих слушателей.
+func (h *Handler) WithModuleRoster(r moduleidentity.Roster) *Handler {
+	h.modules = r
+	return h
+}
+
+// NewHandler — построитель. svc и whoAmI обязательны: композиционный корень
+// провязывает их безусловно, и nil при сборке означает ошибку провязки. Пира-модуля
+// обработчик признаёт только по перечню личностей (WithModuleRoster), и форму
+// имени службы установки перечень несёт сам (kaname#308).
+func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase) *Handler {
+	return &Handler{svc: svc, whoAmI: whoAmI}
 }
 
 // WithCallerAuthority injects the FGA relation checker used by the inner
@@ -134,7 +138,8 @@ func (h *Handler) WithInsecureAnonymousPeer(insecure bool) *Handler {
 
 // Check — see iamv1.AuthorizeServiceServer.
 func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (*iamv1.AuthorizeCheckResponse, error) {
-	if req.GetSubject() == "" {
+	anonymousSelf := authzguard.IsAnonymousSelfCheck(ctx, req, h.modules)
+	if req.GetSubject() == "" && !anonymousSelf {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument subject: required")
 	}
 	if req.GetResource() == nil {
@@ -145,10 +150,12 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	}
 	// Inner defense-in-depth: a tenant principal may only Check about itself, a
 	// resource it administers, or as a cluster-admin (caller_authority.go).
-	if err := h.authorizeCaller(ctx, req.GetSubject(), req.GetResource()); err != nil {
-		return nil, err
+	if !anonymousSelf {
+		if err := h.authorizeCaller(ctx, req.GetSubject(), req.GetResource()); err != nil {
+			return nil, err
+		}
 	}
-	res, err := h.svc.Check(ctx, service.CheckRequest{
+	decision := service.CheckRequest{
 		Subject: req.GetSubject(),
 		Resource: service.ResourceRef{
 			Type: req.GetResource().GetType(),
@@ -157,7 +164,13 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 		Action:           req.GetAction(),
 		RequiredRelation: req.GetRequiredRelation(),
 		Context:          structToMap(req.GetContext()),
-	})
+	}
+	if anonymousSelf {
+		// Отношения анонимная форма не несёт: его выводит служба глаголом типа
+		// из каталога модуля, как всякому вопросу без отношения (kaname#994).
+		decision.Subject = domain.SpeakerAnonymous
+	}
+	res, err := h.svc.Check(ctx, decision)
 	if err != nil {
 		// Validation errors → InvalidArgument (verbatim, safe); backend errors →
 		// Unavailable/Internal with a fixed, redacted message (no raw pgx/FGA leak).
@@ -175,9 +188,11 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 			"err", err.Error(), shared.TraceAttr(req.GetTraceId()))
 		return nil, status.Error(codes.Internal, msgAuthzInternal)
 	}
+	disclosure := reqToService(req)
+	disclosure.Subject = decision.Subject
 	return &iamv1.AuthorizeCheckResponse{
 		Allowed:     res.Allowed,
-		DenyReasons: h.disclosed(ctx, reqToService(req), res.DenyReasons),
+		DenyReasons: h.disclosed(ctx, disclosure, res.DenyReasons),
 		CheckedAt:   shared.TimestampProto(res.CheckedAt),
 	}, nil
 }

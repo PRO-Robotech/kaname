@@ -198,10 +198,33 @@ func admitted(p *CallerPolicy, ctx context.Context, methods []string) map[string
 // модуля (полоса HTTP шире полосы gRPC), `missing` — чего ему не хватает
 // (поверхность поднята и не обслуживает). Одна величина скрыла бы ровно тот
 // случай, ради которого утверждение и написано.
+//
+// «Проверенный модуль» с перечнем личностей (kaname#984) — ЛЮБАЯ признанная
+// личность: допуск модуля здесь — пересечение допусков личностей каждого
+// профиля, то есть то, что позволено каждой из них.
 func hopVersusModule(decide hopDecision, methods []string) (extra, missing []string) {
 	hop := admittedBy(decide, newOwnFrontHopCtx(), methods)
-	module := admittedBy(decide, newVPCCtx(), methods)
+	module := anyModuleAdmittedBy(decide, methods)
 	return diff(hop, module), diff(module, hop)
+}
+
+// anyModuleAdmittedBy — методы, которые решение пропускает КАЖДОЙ личности
+// перечня проб: края, модуля-владельца и плоскости данных.
+func anyModuleAdmittedBy(decide hopDecision, methods []string) map[string]bool {
+	var out map[string]bool
+	for _, san := range []string{gatewaySAN, vpcSAN, "spiffe://kacho.cloud/ns/registry/sa/mod-registry-dp"} {
+		got := admittedBy(decide, grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true), methods)
+		if out == nil {
+			out = got
+			continue
+		}
+		for m := range out {
+			if !got[m] {
+				delete(out, m)
+			}
+		}
+	}
+	return out
 }
 
 func diff(a, b map[string]bool) []string {
@@ -236,7 +259,7 @@ func TestOwnFrontHop_AdmittedToExactlyWhatAnyVerifiedModuleIs(t *testing.T) {
 	for _, prod := range []bool{true, false} {
 		p := hopPolicy(prod)
 		hop := admitted(p, newOwnFrontHopCtx(), methods)
-		module := admitted(p, newVPCCtx(), methods)
+		module := anyModuleAdmittedBy(p.allow, methods)
 		extra, missing := hopVersusModule(p.allow, methods)
 
 		if len(extra) > 0 {

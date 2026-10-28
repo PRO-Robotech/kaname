@@ -82,7 +82,8 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // Публичные глаголы, которые законно зовёт модуль, не являющийся краем.
@@ -166,7 +167,8 @@ func PublicGatewayFloorExemptRPCs() map[string]string {
 // а не свою копию.
 const UnnamedCallerMessage = "no credential presented; authenticate with authorization: Bearer <token>"
 
-// Короткие имена служб-модулей (как их разбирает ServiceNameFromSAN),
+// Короткие имена служб-модулей (как их выводит из учётки
+// moduleidentity.Roster.ServiceFromAccount формой имени службы установки),
 // встречающиеся в таблице вызываемых соседями.
 const (
 	svcVPC      = "vpc"
@@ -236,9 +238,18 @@ type PublicCallerPolicy struct {
 	// реализацией проверки удостоверения, то есть два предмета, которые меняются
 	// порознь. Реализацию подставляет композиционный корень.
 	presented CredentialPresence
-	// form — форма имени службы, объявленная установкой: ею учётка
-	// сертификата разбирается в короткое имя службы. Нулевая не узнаёт никого.
-	form servicesan.Form
+	// modules — личности модулей установки (kaname#984): модулем на этом
+	// слушателе признаётся только объявленная пара. Нулевое значение не
+	// признаёт никого.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки. Тот же
+// перечень и тот же разбор, что у внутреннего слушателя: признание модуля одно
+// на оба слушателя.
+func (p *PublicCallerPolicy) WithModuleRoster(r moduleidentity.Roster) *PublicCallerPolicy {
+	p.modules = r
+	return p
 }
 
 // CredentialPresence — приложил ли вызывающий удостоверение к ЭТОМУ запросу.
@@ -256,16 +267,14 @@ type CredentialPresence func(ctx context.Context) bool
 // позиционен: сборка, забывшая его подставить, не соберётся вовсе — тогда как
 // умолчание сделало бы её молча отвечающей «назовись» тому, кто назвался.
 //
-// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm()):
-// ею учётка сертификата разбирается в короткое имя службы. Обязательна и
-// позиционна по той же причине: нулевая не узнаёт никого, и забытая сборкой
-// она сделала бы пол молча отвергающим каждый модуль, край в том числе.
+// Модулем политика признаёт только пару перечня личностей (WithModuleRoster):
+// нулевой перечень не признаёт никого, и форму имени службы установки перечень
+// несёт сам (kaname#308).
 func NewPublicCallerPolicy(
 	prodMode bool,
 	peerCallable map[string][]string,
 	acrCatalog ACRRequirementLookup,
 	presented CredentialPresence,
-	form servicesan.Form,
 ) *PublicCallerPolicy {
 	m := make(map[string]map[string]struct{}, len(peerCallable))
 	for method, svcs := range peerCallable {
@@ -281,7 +290,7 @@ func NewPublicCallerPolicy(
 	}
 	return &PublicCallerPolicy{
 		prodMode: prodMode, peerCallable: m, gatewayFloorExempt: exempt,
-		acrCatalog: acrCatalog, presented: presented, form: form,
+		acrCatalog: acrCatalog, presented: presented,
 	}
 }
 
@@ -388,12 +397,10 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		return nil
 	}
 
-	san, verified := grpcsrv.CertIdentityFromContext(ctx)
-
-	svc, ok := "", false
-	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), p.form, san)
-	}
+	// Признание модуля — объявленная пара перечня (kaname#984), тот же разбор,
+	// что у внутреннего слушателя.
+	module, ok := p.modules.FromContext(ctx)
+	svc := module.Service
 	if !ok {
 		// Проверенного модульного сертификата нет: dev — проход, prod — отказ
 		// по умолчанию.
@@ -566,6 +573,14 @@ func stepUpTrailer(err error) (metadata.MD, bool) {
 // подсказку — ответ беднее, но не ложен и не шире.
 func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		// The anonymous exception is unary and request-shaped. It must never
+		// open the method-only policy used by streams or other RPCs.
+		if info.FullMethod == iamv1.AuthorizeService_Check_FullMethodName {
+			check, ok := req.(*iamv1.AuthorizeCheckRequest)
+			if ok && IsAnonymousSelfCheck(ctx, check, p.modules) {
+				return handler(ctx, req)
+			}
+		}
 		if err := p.allow(ctx, info.FullMethod); err != nil {
 			if md, ok := stepUpTrailer(err); ok {
 				_ = grpc.SetTrailer(ctx, md) // исход отказа от хвоста не зависит — см. выше

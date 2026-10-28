@@ -1,11 +1,12 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// servicesan_test.go — разбор идентификатора модуля по объявленной форме.
+// servicesan_test.go — чтение имени службы из учётки по объявленной форме.
 //
 // Каждое отрицание стоит в паре с положительным близнецом, отличным от него
-// ровно одним фактом: разбор, отвергающий всё, проходил бы по всякому
-// отрицанию и не проверял бы ничего.
+// ровно одним фактом: чтение, отвергающее всё, проходило бы по всякому
+// отрицанию и не проверяло бы ничего. Разбор самого SPIFFE-идентификатора —
+// у перечня личностей модулей (`moduleidentity.ParseSAN`) и судится его пробами.
 package servicesan_test
 
 import (
@@ -14,100 +15,80 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
-
 	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
-const probeDomain = "trust.example.test"
-
-var domain = grpcsrv.NewTrustDomain(probeDomain)
-
-// san — идентификатор рабочей нагрузки домена пробы.
-func san(ns, account string) string {
-	return "spiffe://" + probeDomain + "/ns/" + ns + "/sa/" + account
-}
-
 // Инъекция предмета задачи: учётка чужой формы. Установка объявила `acme-`, а
-// предъявлено имя с другой приставкой — модулем оно не признаётся. Близнец —
-// тот же идентификатор с объявленной приставкой.
-func TestParse_AccountOfAForeignFormIsNotAModule(t *testing.T) {
+// предъявлено имя с другой приставкой — службы в нём форма не читает. Близнец —
+// та же учётка с объявленной приставкой.
+func TestService_AccountOfAForeignFormIsNotAModule(t *testing.T) {
 	form := servicesan.NewForm("acme-{service}")
 
-	_, ok := form.Parse(domain, san("platform", "other-api-gateway"))
-	require.False(t, ok, "учётка чужой формы признана модулем: разбор не спрашивает объявленную форму")
+	_, ok := form.Service("other-api-gateway")
+	require.False(t, ok, "учётка чужой формы прочитана службой: чтение не спрашивает объявленную форму")
 
-	id, ok := form.Parse(domain, san("platform", "acme-api-gateway"))
-	require.True(t, ok, "учётка объявленной формы не узнана — близнец отрицания")
-	require.Equal(t, servicesan.Identity{Service: "api-gateway", Account: "acme-api-gateway"}, id)
+	svc, ok := form.Service("acme-api-gateway")
+	require.True(t, ok, "учётка объявленной формы не прочитана — близнец отрицания")
+	require.Equal(t, "api-gateway", svc)
 }
 
 // Инъекция F1 ревью сборки k1: форма без приставки модуль не сужает ничем,
 // кроме совпадения имени учётки с коротким именем службы, — и потому не форма.
-// По ней не узнаётся никто, в том числе учётка, равная имени службы, и учётка
+// По ней не читается никто, в том числе учётка, равная имени службы, и учётка
 // с окончанием формы. Близнец — та же учётка под формой с приставкой: отличие
 // ровно одно, приставка.
-func TestParse_FormWithoutAPrefixRecognizesNobody(t *testing.T) {
+func TestService_FormWithoutAPrefixRecognizesNobody(t *testing.T) {
 	for raw, account := range map[string]string{
 		"{service}":    "api-gateway",
 		"{service}-sa": "api-gateway-sa",
 	} {
-		_, ok := servicesan.NewForm(raw).Parse(domain, san("platform", account))
-		require.Falsef(t, ok, "форма %q без приставки узнала модулем учётку %q: модульность решает "+
+		_, ok := servicesan.NewForm(raw).Service(account)
+		require.Falsef(t, ok, "форма %q без приставки прочитала службой учётку %q: модульность решает "+
 			"одно совпадение имени учётки с именем службы", raw, account)
 
-		id, ok := servicesan.NewForm("acme-"+raw).Parse(domain, san("platform", "acme-"+account))
-		require.Truef(t, ok, "та же учётка под формой с приставкой не узнана — близнец отрицания")
-		require.Equal(t, "api-gateway", id.Service)
+		svc, ok := servicesan.NewForm("acme-" + raw).Service("acme-" + account)
+		require.Truef(t, ok, "та же учётка под формой с приставкой не прочитана — близнец отрицания")
+		require.Equal(t, "api-gateway", svc)
 	}
 }
 
 // Окончание формы снимается так же, как приставка.
-func TestParse_SuffixIsCut(t *testing.T) {
+func TestService_SuffixIsCut(t *testing.T) {
 	form := servicesan.NewForm("acme-{service}-sa")
-	id, ok := form.Parse(domain, san("platform", "acme-vpc-sa"))
+	svc, ok := form.Service("acme-vpc-sa")
 	require.True(t, ok)
-	require.Equal(t, "vpc", id.Service)
+	require.Equal(t, "vpc", svc)
 
-	_, ok = form.Parse(domain, san("platform", "acme-vpc"))
-	require.False(t, ok, "учётка без объявленного окончания признана модулем")
+	_, ok = form.Service("acme-vpc")
+	require.False(t, ok, "учётка без объявленного окончания прочитана службой")
 }
 
-// Необъявленная форма и необъявленный домен не узнают никого.
-func TestParse_ZeroValuesRecognizeNobody(t *testing.T) {
+// Необъявленная форма не читает никого.
+func TestService_ZeroFormRecognizesNobody(t *testing.T) {
 	var zeroForm servicesan.Form
-	_, ok := zeroForm.Parse(domain, san("platform", "vpc"))
-	require.False(t, ok, "необъявленная форма узнала модуль")
-
-	var zeroDomain grpcsrv.TrustDomain
-	_, ok = servicesan.NewForm("acme-{service}").Parse(zeroDomain, san("platform", "acme-vpc"))
-	require.False(t, ok, "необъявленный домен узнал модуль")
+	_, ok := zeroForm.Service("vpc")
+	require.False(t, ok, "необъявленная форма прочитала службу")
 }
 
-// Незаконная запись формы не разбирает ничего — даже учётку, похожую на неё.
-func TestParse_InvalidFormRecognizesNobody(t *testing.T) {
+// Незаконная запись формы не читает ничего — даже учётку, похожую на неё.
+func TestService_InvalidFormRecognizesNobody(t *testing.T) {
 	form := servicesan.NewForm("acme-")
-	_, ok := form.Parse(domain, san("platform", "acme-vpc"))
+	_, ok := form.Service("acme-vpc")
 	require.False(t, ok)
 }
 
-// Формы идентификатора, которые модулем не являются при законной форме учётки.
-func TestParse_MalformedIdentifiersAreRefused(t *testing.T) {
+// Учётки, в которых законная форма службы не читает.
+func TestService_MalformedAccountsAreRefused(t *testing.T) {
 	form := servicesan.NewForm("acme-{service}")
-	for name, v := range map[string]string{
-		"чужой домен":             "spiffe://other.example/ns/platform/sa/acme-vpc",
-		"пустое пространство":     "spiffe://" + probeDomain + "/ns//sa/acme-vpc",
-		"пространство с чертой":   "spiffe://" + probeDomain + "/ns///sa/acme-vpc",
-		"пустое имя службы":       san("platform", "acme-"),
-		"нет сегмента учётки":     "spiffe://" + probeDomain + "/ns/platform",
-		"хвост после учётки":      san("platform", "acme-vpc/extra"),
-		"не идентификатор вовсе":  "acme-vpc",
-		"схема без пространства":  "spiffe://" + probeDomain + "/sa/acme-vpc",
-		"приставка внутри учётки": san("platform", "x-acme-vpc"),
+	for name, account := range map[string]string{
+		"пустое имя службы":       "acme-",
+		"хвост после учётки":      "acme-vpc/extra",
+		"приставка внутри учётки": "x-acme-vpc",
+		"пустая учётка":           "",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, ok := form.Parse(domain, v)
-			require.Falsef(t, ok, "%q признан модулем", v)
+			_, ok := form.Service(account)
+			require.Falsef(t, ok, "%q прочитана службой", account)
 		})
 	}
 }

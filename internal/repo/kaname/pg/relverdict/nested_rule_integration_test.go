@@ -138,11 +138,11 @@ func ndSeedRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id string
 	if err != nil {
 		t.Fatalf("роль %s: %v", id, err)
 	}
-	sels := catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())
+	sels := catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	if err := w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, sels); err != nil {
 		t.Fatalf("селекторы роли %s: %v", id, err)
 	}
-	pairs := catalogfixture.Facts().RoleVerbsFromSelectors(sels)
+	pairs := catalogfixture.Facts().RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	if err := w.RolesW().ReplaceRoleVerbs(ctx, inserted.ID, pairs); err != nil {
 		t.Fatalf("проекция глаголов роли %s: %v", id, err)
 	}

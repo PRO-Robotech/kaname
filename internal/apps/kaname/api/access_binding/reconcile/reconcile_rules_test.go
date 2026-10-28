@@ -89,6 +89,19 @@ type fakeStore struct {
 	wrote                bool
 	locksAfterFirstWrite []domain.AccessBindingID
 
+	// rowLocks / rowLocksAfterFirstWrite — строчные замки выдач и их ролей
+	// (LockBindingsAndRoles, kaname#974): тот же вопрос о порядке родов, что у
+	// advisory, против снятия регистрации объекта.
+	rowLocks                []domain.AccessBindingID
+	rowLocksAfterFirstWrite []domain.AccessBindingID
+
+	// mirrorLocks / mirrorLocksAfterFirstWrite — замки строк зеркала объектов новых
+	// членов (LockMirrorObjects, kaname#975). vanished — объекты, строка которых
+	// снята между чтением отбора и замком: чтение их ещё вернуло, замок — нет.
+	mirrorLocks                []MemberCoord
+	mirrorLocksAfterFirstWrite []MemberCoord
+	vanished                   map[MemberCoord]bool
+
 	// scopeSelfVerbs seeds BindingScope.ScopeSelfVerbs — the role's verbs ON the
 	// binding's own scope anchor (account:<X>/project:<X>). Empty ⇒ no scope-self member
 	// (the default for the content-selector slices).
@@ -112,6 +125,18 @@ type fakeStore struct {
 	// liveCatalogReads — обращений LiveCatalogTypes.
 	liveCatalog      map[string]bool
 	liveCatalogReads int
+
+	// policy — политика роли выдачи (BindingScope.Policy, kaname#1006); nil —
+	// арендаторская: прежние пробы судят роль без владельца.
+	policy *domain.RulePolicy
+}
+
+// rolePolicy — политика роли, которую двойник отдаёт в BindingScope.
+func (f *fakeStore) rolePolicy() domain.RulePolicy {
+	if f.policy != nil {
+		return *f.policy
+	}
+	return domain.TenantPolicy()
 }
 
 // bindingSubjects — перечень субъектов, который двойник отдаёт в BindingScope.
@@ -140,6 +165,16 @@ func (f *fakeStore) AcquireBindingLocks(ctx context.Context, ids []domain.Access
 	return nil
 }
 
+// LockBindingsAndRoles — строчные замки выдач и ролей (kaname#974): дублёр
+// запоминает, взяты ли они до первой записи прохода.
+func (f *fakeStore) LockBindingsAndRoles(_ context.Context, ids []domain.AccessBindingID) error {
+	f.rowLocks = append(f.rowLocks, ids...)
+	if f.wrote {
+		f.rowLocksAfterFirstWrite = append(f.rowLocksAfterFirstWrite, ids...)
+	}
+	return nil
+}
+
 // note отмечает, что проход что-то ЗАПИСАЛ. Дальше всякий захват advisory попадёт
 // в locksAfterFirstWrite.
 func (f *fakeStore) note() { f.wrote = true }
@@ -151,6 +186,7 @@ func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) 
 		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Policy:         f.rolePolicy(),
 		Target:         f.target,
 		Active:         f.active,
 	}, true, nil
@@ -168,6 +204,7 @@ func (f *fakeStore) LoadBindingForForward(ctx context.Context, id domain.AccessB
 		Subjects:       f.bindingSubjects(),
 		Selectors:      f.selectors,
 		ScopeSelfVerbs: f.scopeSelfVerbs,
+		Policy:         f.rolePolicy(),
 		Target:         f.target,
 		Active:         f.active,
 	}, true, nil
@@ -188,6 +225,7 @@ func (f *fakeStore) LoadBindingsForForward(ctx context.Context, ids []domain.Acc
 			Subjects:       f.bindingSubjects(),
 			Selectors:      f.selectors,
 			ScopeSelfVerbs: f.scopeSelfVerbs,
+			Policy:         f.rolePolicy(),
 			Target:         f.target,
 			Active:         f.active,
 		}
@@ -263,6 +301,24 @@ func (f *fakeStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string
 	return out, nil
 }
 
+// MatchCreatedByIAMDirect — объекты типов, созданные одной из учёток `creators`
+// (kaname#1003); область не сужается — как у MatchAllInScopeIAMDirect выше.
+func (f *fakeStore) MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error) {
+	want := make(map[string]bool, len(creators))
+	for _, c := range creators {
+		want["service_account:"+c] = true
+	}
+	var out []domain.MirrorObject
+	for _, t := range types {
+		for _, o := range f.iamDirect[t] {
+			if want[o.CreatedBy] {
+				out = append(out, o)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string) ([]domain.MirrorObject, error) {
 	want := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -277,6 +333,26 @@ func (f *fakeStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string
 		}
 	}
 	return out, nil
+}
+
+// LockMirrorObjects — дублёр замка строк зеркала (kaname#975): строка есть, если
+// объект посеян в зеркало; запомнены запрошенные объекты и захваты после первой
+// записи прохода.
+func (f *fakeStore) LockMirrorObjects(_ context.Context, objs []MemberCoord) (map[MemberCoord]struct{}, error) {
+	present := make(map[MemberCoord]struct{}, len(objs))
+	for _, o := range objs {
+		f.mirrorLocks = append(f.mirrorLocks, o)
+		if f.wrote {
+			f.mirrorLocksAfterFirstWrite = append(f.mirrorLocksAfterFirstWrite, o)
+		}
+		for _, m := range f.mirror[o.ObjectType] {
+			if m.ObjectID == o.ObjectID && !f.vanished[o] {
+				present[o] = struct{}{}
+				break
+			}
+		}
+	}
+	return present, nil
 }
 
 func (f *fakeStore) GetMirrorObject(ctx context.Context, ot, oid string) (domain.MirrorObject, bool, error) {
@@ -871,4 +947,38 @@ func TestReconcileObject_FanOut_LocksBeforeAnyWrite(t *testing.T) {
 	assert.Empty(t, f.locksAfterFirstWrite,
 		"веер не вправе брать advisory после первой записи: ожидание чужого замка с "+
 			"удерживаемой строкой прямого факта и есть цикл, снимаемый как 40P01")
+}
+
+// TestReconcileObject_FanOut_LocksRowsAndRolesBeforeAnyWrite — строки выдач веера и
+// их ролей запираются ВСЕ, одним вызовом и до первой записи прохода (kaname#974):
+// снятие регистрации объекта запирает выдачи и роли до своих записей, и проход,
+// бравший роль очередной выдачи после записи общего факта предыдущей, сходился с
+// ним в кольцо (40P01). Что из порядка следует на живой базе, утверждает проба мира
+// unregister_object_pass_lock_order_world_integration_test.go.
+func TestReconcileObject_FanOut_LocksRowsAndRolesBeforeAnyWrite(t *testing.T) {
+	rule := domain.Rule{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}}
+	f := &fakeStore{
+		scope:       domain.ScopeAnchor{Type: "project", ID: "prj-1"},
+		subjectType: "user", subjectID: "usr-1", active: true,
+		selectors: []domain.RuleSelector{{
+			Arm: domain.ArmAnchor, RuleFP: rule.Fingerprint(),
+			ObjectTypes: []string{"compute.instance"},
+			Verbs:       []string{"get"},
+		}},
+		mirror: map[string][]domain.MirrorObject{
+			"compute.instance": {
+				{ObjectType: "compute.instance", ObjectID: "iX", ParentProjectID: "prj-1"},
+			},
+		},
+		bindingsForObject: []domain.AccessBindingID{"acb-c", "acb-a"},
+		selectorBindings:  []domain.AccessBindingID{"acb-b"},
+	}
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
+	require.NoError(t, rec.ReconcileObject(context.Background(), "compute.instance", "iX"))
+
+	require.True(t, f.wrote, "контроль: проход обязан что-то записать")
+	assert.Equal(t, []domain.AccessBindingID{"acb-a", "acb-b", "acb-c"}, f.rowLocks,
+		"строки выдач и ролей веера запираются всем набором, в порядке id")
+	assert.Empty(t, f.rowLocksAfterFirstWrite,
+		"строки выдач и ролей веера не вправе запираться после первой записи прохода")
 }

@@ -62,6 +62,7 @@ import (
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	acct_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
+	gdrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 	proj_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
 	role_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
@@ -1281,3 +1282,7 @@ func (*fakeRoleRdr) Lifecycles(_ context.Context, _ []domain.RoleID) (
 func (_ *fakeRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
 	return false, nil
 }
+
+// GrantDelegationsW — делегирований этот дублёр не несёт (kaname#986): пробы файла
+// делегированного пути права выдавать не касаются.
+func (w *fakeABWtr) GrantDelegationsW() gdrepo.WriterIface { return nil }

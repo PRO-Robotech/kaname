@@ -34,6 +34,7 @@ package pg_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,16 +51,21 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// ownerPathOnlyRelations — хранилище прав, отвечающее «нет» на любой вопрос:
-// право снимать выдачу обязано прийти путём ВЛАДЕЛЬЦА аккаунта, а не коротким
-// замыканием администратора облака.
-type ownerPathOnlyRelations struct{}
+// ownerRemovalOnlyRelations — хранилище прав, отвечающее «нет» на любой вопрос,
+// кроме ОДНОГО: владелец аккаунта держит отношение удаления на объектах выдач.
+// С PRO-Robotech/kaname#986 (Р1а) обработчик отзыва и удаления сам задаёт
+// вопрос `v_delete` на объекте выдачи — прежде его задавала дверь слушателя,
+// мимо которой идут эти пробы; в продукте отношение владельцу материализует
+// авто-выдача роли `owner`. Право выдавать по-прежнему приходит путём ВЛАДЕЛЬЦА
+// (строка аккаунта), а не замыканием администратора облака.
+type ownerRemovalOnlyRelations struct{ owner string }
 
-func (ownerPathOnlyRelations) Check(context.Context, string, string, string) (bool, error) {
-	return false, nil
+func (o ownerRemovalOnlyRelations) Check(_ context.Context, subject, relation, object string) (bool, error) {
+	return subject == "user:"+o.owner && relation == accessbindingapp.RemovalRelation &&
+		strings.HasPrefix(object, accessbindingapp.RemovalObjectType+":"), nil
 }
 
-var _ clients.RelationStore = ownerPathOnlyRelations{}
+var _ clients.RelationStore = ownerRemovalOnlyRelations{}
 
 // startUseCaseDeactivation запускает отзыв либо удаление выдачи, либо снос её
 // области (проекта, аккаунта) настоящим use-case и возвращает канал исхода его
@@ -75,10 +81,10 @@ func startUseCaseDeactivation(t *testing.T, ctx context.Context, pool *pgxpool.P
 	switch deact {
 	case revokeDeactivation:
 		op, err = accessbindingapp.NewRevokeAccessBindingUseCase(fx.repo, opsRepo).
-			WithRelationStore(ownerPathOnlyRelations{}, nil).Execute(asOwner, bid)
+			WithRelationStore(ownerRemovalOnlyRelations{owner: string(fx.owner)}, nil).Execute(asOwner, bid)
 	case deleteDeactivation:
 		op, err = accessbindingapp.NewDeleteAccessBindingUseCase(fx.repo, opsRepo).
-			WithRelationStore(ownerPathOnlyRelations{}, nil).Execute(asOwner, bid)
+			WithRelationStore(ownerRemovalOnlyRelations{owner: string(fx.owner)}, nil).Execute(asOwner, bid)
 	case projectDeleteDeactivation:
 		op, err = projectapp.NewDeleteProjectUseCase(fx.repo, opsRepo).Execute(asOwner, fx.prj)
 	case accountDeleteDeactivation:

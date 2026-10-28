@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
@@ -34,7 +35,9 @@ const (
 
 func newRule(t *testing.T) *issuingsource.Rule {
 	t.Helper()
-	return issuingsource.New(grpcsrv.NewTrustDomain(trustDomain), servicesan.NewForm("kacho-{service}"))
+	roster, err := moduleidentity.Parse(servicesan.NewForm("kacho-{service}"), []string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
+	require.NoError(t, err)
+	return issuingsource.New(grpcsrv.NewTrustDomain(trustDomain), roster)
 }
 
 // request — запрос от пира с адреса peer; san пуст — сертификата нет.
@@ -117,6 +120,20 @@ func TestNeighborCertificateIsNotTheEdge(t *testing.T) {
 	requireCells(t, r, map[issuingsource.Cell]uint64{
 		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
 	})
+}
+
+// kaname#984 на правиле: лист с учёткой края из НЕОБЪЯВЛЕННОГО пространства —
+// не край. Ключ — адрес пира, заголовок не читается; близнец — тот же
+// заголовок от объявленной пары края — читается.
+func TestEdgeAccountFromAnUndeclaredNamespaceIsNotTheEdge(t *testing.T) {
+	r := newRule(t)
+	intruder := "spiffe://kacho.cloud/ns/intruder/sa/kacho-api-gateway"
+	require.Equal(t, peer, r.Of(request(t, intruder, xff("203.0.113.1")), issuingsource.PointToken))
+	requireCells(t, r, map[issuingsource.Cell]uint64{
+		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
+	})
+	require.Equal(t, "203.0.113.1", r.Of(request(t, edgeSAN, xff("203.0.113.1")), issuingsource.PointToken),
+		"близнец: объявленная пара края — край")
 }
 
 // KN-PACE-35 на правиле: край без годного адреса делит ключ своего пира.

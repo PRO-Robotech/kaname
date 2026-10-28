@@ -53,7 +53,7 @@ func stageStaleTenantRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		 VALUES ($1, $2, $3, '[]'::jsonb, $4::jsonb)`, id, accID, "probe_"+id[len(id)-4:], raw)
 	require.NoErrorf(t, err, "роль %s", id)
 	union := map[string][]string{}
-	for _, p := range catalogfixture.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors()) {
+	for _, p := range catalogfixture.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy()) {
 		union[p.ObjectType] = append(union[p.ObjectType], p.Verb)
 		_, err := pool.Exec(ctx, `INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
 			id, p.ObjectType, p.Verb)
@@ -80,7 +80,7 @@ func stageStaleTenantRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 // exactMaps — карты, которые обязан записать пересчёт: по правилу.
 func exactMaps(rules domain.Rules) map[string]map[string][]string {
 	out := map[string]map[string][]string{}
-	for _, s := range catalogfixture.Facts().GrantSelectors(rules.MaterializingSelectors()) {
+	for _, s := range catalogfixture.Facts().GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy()) {
 		m := map[string][]string{}
 		for k, v := range s.Grants {
 			m[k] = slices.Sorted(slices.Values(v))
@@ -283,10 +283,10 @@ func editRoleRules(ctx context.Context, pool *pgxpool.Pool, id string, rules dom
 		return err
 	}
 	facts := catalogfixture.Facts()
-	if err := w.RolesW().ReplaceRuleSelectors(ctx, r.ID, facts.GrantSelectors(rules.MaterializingSelectors())); err != nil {
+	if err := w.RolesW().ReplaceRuleSelectors(ctx, r.ID, facts.GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())); err != nil {
 		return err
 	}
-	if err := w.RolesW().ReplaceRoleVerbs(ctx, r.ID, facts.RoleVerbsFromSelectors(rules.MaterializingSelectors())); err != nil {
+	if err := w.RolesW().ReplaceRoleVerbs(ctx, r.ID, facts.RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())); err != nil {
 		return err
 	}
 	return w.Commit(ctx)
@@ -377,7 +377,7 @@ func TestSelectorVerbsUpperBound_CoversTheExactGrants(t *testing.T) {
 	}
 	ctx, pool := newReseedPool(t)
 	rules := domain.Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}
-	sels := catalogfixture.Facts().GrantSelectors(rules.MaterializingSelectors())
+	sels := catalogfixture.Facts().GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 	checked := 0
 	for _, s := range sels {
 		var raw []byte

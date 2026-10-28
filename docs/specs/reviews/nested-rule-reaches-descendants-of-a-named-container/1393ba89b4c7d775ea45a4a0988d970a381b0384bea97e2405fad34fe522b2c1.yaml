@@ -1,0 +1,93 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/nested-rule-reaches-descendants-of-a-named-container.md
+  sha256: 1393ba89b4c7d775ea45a4a0988d970a381b0384bea97e2405fad34fe522b2c1
+  static_status_note: >-
+    Слово в шапке — то, что туда вписали. Вердикт о редакции 3 выводится из ЭТОЙ записи.
+    Шапку рецензент не правил.
+  approved_predecessor: >-
+    f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6 — запись
+    docs/specs/reviews/nested-rule-reaches-descendants-of-a-named-container/f12395ae….yaml (круг 2, APPROVED)
+  code_branch: '965'
+  code_commit: abbcb5558
+  task: PRO-Robotech/kaname#965
+  related_tasks: [PRO-Robotech/kaname#874]
+  review_form: delta_after_approval
+  fingerprint_predicate: >-
+    sha256sum kacho-workspace/tmp/965-acc/nested-rule-reaches-descendants-of-a-named-container.md
+    → 1393ba89…2c1; одобренная копия …f12395ae.md → f12395ae…d9f6. Совпали с заданием.
+  delta_predicate: >-
+    diff -u …f12395ae.md …container.md → 137 строк, 11 участков: шапка; «Вне объёма» п.2;
+    опора на соседа (пин doc1); таблица ролей П1; описание П3; ND-04 (з); близнец (з);
+    ND-05 (б); ND-08 «И»; таблица производителей (ND-04 (з), ND-08); DoD.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  scope: Только редакция 1393ba89…. Вердикт f12395ae на неё не переносится.
+
+checks:
+  scope_limited: >-
+    Да. Все участки — о `resourceNames` у правила-владельца с `children` и во вложенном
+    правиле. Исходы ND-01…ND-11 не изменились.
+  neighbour_pin: >-
+    Doc1 закреплён на 89c6cf6c007d3751146d3bb4f88588b1820bda2ae90eb0e0fc3666719c73c51d с пометкой
+    «правка kaname#965 после вердикта круга 6» — ровно та редакция, что одобрена
+    отдельной записью в этом же заходе.
+  new_scenario: >-
+    ND-04 (з). Производитель — object_refs.go (`objectRefRuleFault`) @abbcb5558. Текст
+    находки в документе совпадает с форматом производителя («<путь>.resourceNames: …;
+    <довод>»). Держатели — `TestObjectRefs_NestedRuleResourceNamesIsRefused`
+    (object_refs_test.go:146) и `TestObjectRefs_OwnerRuleWithChildrenResourceNamesIsRefused`
+    (:152). Близнец — `TestObjectRefs_NestedRuleOverATypeLoads` (:162): немодифицированная
+    фикстура П1 и фикстура П3, отличие в один факт. Пустой перечень в обоих местах —
+    подтесты, помечены «заказан».
+  removed_positive_and_fixtures: >-
+    Роль `registry.reader_named` из фикстуры П1 и `probemod.reader_b1` из фикстуры П3
+    убраны. Сценарии на них остались строимыми:
+    - ND-05 (б): строку `rolc8f851eb7a5da3d9f` кладёт применитель, минуя загрузчик.
+      Держатель уже в дереве — `seedNamedReader`
+      (internal/apps/kaname/api/access_binding/nested_rule_world_integration_test.go:365-393,
+      контроль «ровно одна строка»).
+    - ND-08 «И»: роль-близнец пишется продуктовым писателем роли из правил домена. Тем же
+      способом её уже пишет nested_depth_integration_test.go (`w.role`, `p3Rules(names)`).
+    Фикстуры @abbcb5558 ссылок на объекты не несут: `resourceNames` в
+    probemod.children-fixture.yaml и registry.public-read-fixture.yaml встречается только
+    в комментариях (строки 15 и 19).
+  reachability_note: >-
+    Строка роли «имена у правила-владельца + children» после kaname#965 производителя на
+    входе не имеет: API не принимает `children` (ND-04 (ж)), манифест не принимает имена
+    (ND-04 (з)). Документ говорит прямо, что её семантика утверждается на уровне решения
+    («Вне объёма» п.2). Это защита про запас, а не дефект.
+  disclosure: >-
+    В добавленных строках нет связки «координата + условие + следствие»: «Прежняя
+    редакция строила фикстуры П1 и П3 на такой роли» — о приёмке, не о поведении
+    применителя.
+
+important: []
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · APPROVED · 1393ba89b4c7d775ea45a4a0988d970a381b0384bea97e2405fad34fe522b2c1"
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true

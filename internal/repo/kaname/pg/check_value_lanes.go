@@ -115,6 +115,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_granted_relation_shape_ck",
 			"access_bindings_relation_form_anchor_ck",
 			"access_bindings_relation_form_is_system_ck",
+			// Причину отзыва ставит служба из своего закрытого словаря (kaname#963).
+			"access_bindings_revocation_reason_ck",
 			"access_bindings_revoked_by_check",
 			"access_bindings_revoked_consistency_ck",
 			"access_bindings_scope_ck",
@@ -217,10 +219,21 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 	},
 	// Каталог глагола: глагол — из манифеста; каноническую форму наводит служба
-	// (`modulecatalog.canonicalVerb`), живость — служба.
+	// (`modulecatalog.canonicalVerb`), живость — служба. Контейнерное действие
+	// (kaname#1003): родитель и отношение — из `containerVerbs` манифеста, а ярусность
+	// строки (`per_object`) выводит служба.
 	"catalog_verb": {
-		caller:  []string{"catalog_verb_nonempty", "catalog_verb_undotted"},
-		service: []string{"catalog_verb_canonical", "catalog_verb_live_matches_retired"},
+		caller: []string{
+			"catalog_verb_container_pair_ck",
+			"catalog_verb_container_relation_form_ck",
+			"catalog_verb_nonempty",
+			"catalog_verb_undotted",
+		},
+		service: []string{
+			"catalog_verb_canonical",
+			"catalog_verb_container_is_tier_ck",
+			"catalog_verb_live_matches_retired",
+		},
 	},
 	// Повтор утверждения клиента: идентификаторы утверждения и клиента — из
 	// утверждения, которое предъявил вызывающий.
@@ -261,6 +274,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	}},
 	// Очередь кортежей модели прав — пишет служба.
 	"fga_outbox": nil,
+	// Делегирование права выдавать (kaname#986): оси проверены формой запроса до
+	// записи (размер, повторы, типы субъекта), модуль, состояние, ссылку на учётку
+	// и принципалов шагов служба выводит сама — отказ проверки здесь дефект службы.
+	"grant_delegations": nil,
 	// Участник группы: слово вида прислал вызывающий.
 	"group_members": {caller: []string{"group_members_type_check"}},
 	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).
@@ -395,6 +412,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"role_rule_selectors_container_labels_valid",
 			"role_rule_selectors_container_not_own_type",
 			"role_rule_selectors_container_shape",
+			"role_rule_selectors_creator_is_top_anchor_ck",
 			"role_rule_selectors_labels_valid",
 			"role_rule_selectors_types_live",
 			"role_rule_selectors_types_nonempty",
@@ -461,9 +479,15 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 	},
 	// Описание и метки прислал вызывающий; форму имени служба судит сама (kacho#718).
+	// Факт создателя (kaname#1003) служба берёт у принципала вызова, а не из запроса.
 	"service_accounts": {
-		caller:  []string{"service_accounts_description_check", "service_accounts_labels_valid"},
-		service: []string{"service_accounts_name_check"},
+		caller: []string{"service_accounts_description_check", "service_accounts_labels_valid"},
+		service: []string{
+			"service_accounts_creator_id_nonempty_ck",
+			"service_accounts_creator_pair_ck",
+			"service_accounts_creator_type_ck",
+			"service_accounts_name_check",
+		},
 	},
 	// Отзыв токена: идентификатор токена, причину и срок хранения прислал
 	// вызывающий; отозвавшего называет служба.

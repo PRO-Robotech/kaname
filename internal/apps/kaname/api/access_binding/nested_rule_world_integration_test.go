@@ -362,9 +362,41 @@ func TestNestedWorld_ND04_g_RoleServiceRefusesChildrenOnInput(t *testing.T) {
 	require.Nil(t, awaitOp(t, w.ctx, w.ops, op.GetId()).Error, "ND-04 (ж) близнец: PATCH done")
 }
 
+// seedNamedReader — строка роли registry.reader_named (у вложенного правила
+// `resourceNames: [app]`), положенная применителем НАПРЯМУЮ, минуя загрузчик.
+//
+// Манифест модуля конкретных объектов не называет (kaname#965), и из фикстуры
+// П1 роль снята: загрузчик её отверг бы. Строка такой роли остаётся возможной
+// как доставленная до запрета, и ворота класса судят её по-прежнему — ровно это
+// утверждает ND-05 (б). Документ строится разобранным, а не текстом: текстом он
+// снова прошёл бы через загрузчик.
+func (w *ndWorld) seedNamedReader() {
+	w.t.Helper()
+	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	require.NoError(w.t, err, "ND-05 (б): фикстура П1")
+	m, err := manifest.Load(doc)
+	require.NoError(w.t, err, "ND-05 (б): фикстура П1 обязана загружаться")
+	m.Roles = append(m.Roles, manifest.Role{
+		ID:          "registry.reader_named",
+		Description: "Пробная роль: как registry.reader, но вложенное правило сужено именами.",
+		Tier:        &manifest.Tier{TierType: "iam.cluster", TierID: "cluster_root"},
+		Rules: []manifest.Rule{{
+			Module: "registry", Resources: []string{"registries"}, Classes: []string{"get", "list"},
+			Children: []manifest.ChildRule{{
+				Resources: []string{"repositories"}, Classes: []string{"get", "list"}, ResourceNames: []string{"app"},
+			}},
+		}},
+	})
+	w.applyDelivered("ND-05 (б): строка роли, доставленная до запрета", m)
+	var n int
+	require.NoError(w.t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM kaname.roles WHERE id = $1`, string(ndRolReaderName)).Scan(&n))
+	require.Equal(w.t, 1, n, "ND-05 (б): контроль — строки роли registry.reader_named нет после применения")
+}
+
 // ND-05: классу не выдаётся вложенное правило, не выполняющее условий Р5.
 func TestNestedWorld_ND05_ClassGateRefusesNestedRulesThatDoNotQualify(t *testing.T) {
 	w := newNDWorld(t, "ND-05", nil)
+	w.seedNamedReader()
 	notWhole := func(r domain.RoleID) string {
 		return fmt.Sprintf("Role %s nests a rule over registry.repositories that does not read it whole "+
 			"(get and list, without resourceNames or matchLabels); a system class reads children only whole", r)
@@ -403,6 +435,7 @@ func TestNestedWorld_ND06_DeleteRemovesTheRightFromAllDescendants(t *testing.T) 
 			w.pollAsk(sp, "v_get", o.modelType, o.id, true, "ND-06 близнец до удаления")
 		}
 	}
+	w.ownerMayRemove("ND-06 Дано", idD, idA)
 	for _, id := range []string{idD, idA} {
 		op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 		require.NoError(t, err, "ND-06: удаление %s", id)

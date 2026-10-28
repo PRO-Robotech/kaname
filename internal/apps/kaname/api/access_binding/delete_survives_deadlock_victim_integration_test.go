@@ -165,7 +165,7 @@ func deleteLosesDeadlock(t *testing.T, form deadlockHolderForm) {
 
 	// ── 2) СНЯТИЕ: advisory выдачи взят, ждёт строку держателя ──────────────
 	delUC := accessbindingapp.NewDeleteAccessBindingUseCase(repo, opsRepo).
-		WithRelationStore(denyingRelations{}, nil)
+		WithRelationStore(ownerHoldsRemoval{owner: string(owner)}, nil)
 	op, err := delUC.Execute(asUser(ctx, owner), victim)
 	require.NoError(t, err, "снятие принято к исполнению")
 	waitRowLockWaiters(t, ctx, pool, 1, "снятие")

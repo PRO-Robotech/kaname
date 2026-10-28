@@ -4,8 +4,8 @@
 package authzguard
 
 // service_name_form_probe_test.go — форма имени службы, которой пробы пакета
-// объявляют установку, и доказательство того, что читатели разбора спрашивают
-// именно объявленную форму (kaname#308).
+// объявляют установку, и доказательство того, что читатели признания спрашивают
+// именно объявленную форму (kaname#308) через перечень личностей (kaname#984).
 //
 // Приставка проб нарочно НЕ совпадает ни с одной, которую страж прав когда-либо
 // держал литералом: проба, объявляющая ту же приставку, что стояла в коде,
@@ -20,6 +20,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
@@ -34,49 +35,69 @@ func verifiedCtx(san string) context.Context {
 	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain(probeTrustDomain), san, true)
 }
 
-// Инъекция предмета задачи по всем читателям внутреннего и публичного
-// слушателей: край назван учёткой ЧУЖОЙ формы — пол его не узнаёт и отказывает
-// в боевой посадке. Близнец — тот же край в объявленной форме — проходит.
+// edgeRosterOfForm — перечень, объявляющий краем учётку формы form в
+// пространстве `platform`, и идентификатор этого края.
+func edgeRosterOfForm(t *testing.T, form servicesan.Form) (moduleidentity.Roster, string) {
+	t.Helper()
+	account := form.Account("api-gateway")
+	r, err := moduleidentity.Parse(form, []string{"platform/" + account + "=edge"})
+	if err != nil {
+		t.Fatalf("перечень формы %s не разобрался: %v", form, err)
+	}
+	return r, "spiffe://" + probeTrustDomain + "/ns/platform/sa/" + account
+}
+
+// Инъекция предмета задачи по читателям внутреннего и публичного слушателей:
+// край узнаётся учёткой ОБЪЯВЛЕННОЙ формы, какой бы она ни была, а учётка
+// другой формы — нет. Две формы, ни одна не совпадает с литералом прежнего
+// разбора; у каждой близнец отрицания — край другой формы.
 func TestReadersAskTheDeclaredForm_ForeignFormEdgeIsRefused(t *testing.T) {
-	const (
-		declared = "spiffe://" + probeTrustDomain + "/ns/platform/sa/mod-api-gateway"
-		foreign  = "spiffe://" + probeTrustDomain + "/ns/platform/sa/other-api-gateway"
-	)
+	mod, other := testServiceNameForm, servicesan.NewForm("other-{service}-sa")
+	modRoster, modEdge := edgeRosterOfForm(t, mod)
+	otherRoster, otherEdge := edgeRosterOfForm(t, other)
 
-	internal := NewCallerPolicy(true, GatewayFrontedInternalRPCs(), testServiceNameForm)
-	if err := internal.allow(verifiedCtx(declared), gatewayOnlyMethod); err != nil {
-		t.Fatalf("внутренний слушатель: край объявленной формы отвергнут: %v", err)
-	}
-	if code := status.Code(internal.allow(verifiedCtx(foreign), gatewayOnlyMethod)); code != codes.PermissionDenied {
-		t.Fatalf("внутренний слушатель: край чужой формы получил %v, ждали PermissionDenied — пол не спрашивает "+
-			"объявленную форму", code)
-	}
+	for _, tc := range []struct {
+		name            string
+		roster          moduleidentity.Roster
+		declared, alien string
+	}{
+		{"форма mod-{service}", modRoster, modEdge, otherEdge},
+		{"форма other-{service}-sa", otherRoster, otherEdge, modEdge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			internal := NewCallerPolicy(true, GatewayFrontedInternalRPCs()).WithModuleRoster(tc.roster)
+			if err := internal.allow(verifiedCtx(tc.declared), gatewayOnlyMethod); err != nil {
+				t.Fatalf("внутренний слушатель: край объявленной формы отвергнут: %v", err)
+			}
+			if code := status.Code(internal.allow(verifiedCtx(tc.alien), gatewayOnlyMethod)); code != codes.PermissionDenied {
+				t.Fatalf("внутренний слушатель: край чужой формы получил %v, ждали PermissionDenied — пол не "+
+					"спрашивает объявленную форму", code)
+			}
 
-	public := NewPublicCallerPolicy(true, PublicPeerCallableRPCs(), nil,
-		func(context.Context) bool { return false }, testServiceNameForm)
-	if err := public.allow(verifiedCtx(declared), publicProjectGetMethod); err != nil {
-		t.Fatalf("публичный слушатель: край объявленной формы отвергнут: %v", err)
-	}
-	if err := public.allow(verifiedCtx(foreign), publicProjectGetMethod); err == nil {
-		t.Fatal("публичный слушатель: край чужой формы допущен — пол не спрашивает объявленную форму")
-	}
-
-	if svc, ok := ServiceNameFromSAN(grpcsrv.NewTrustDomain(probeTrustDomain), testServiceNameForm, foreign); ok {
-		t.Fatalf("разбор узнал учётку чужой формы службой %q", svc)
+			public := NewPublicCallerPolicy(true, PublicPeerCallableRPCs(), nil,
+				func(context.Context) bool { return false }).WithModuleRoster(tc.roster)
+			if err := public.allow(verifiedCtx(tc.declared), publicProjectGetMethod); err != nil {
+				t.Fatalf("публичный слушатель: край объявленной формы отвергнут: %v", err)
+			}
+			if err := public.allow(verifiedCtx(tc.alien), publicProjectGetMethod); err == nil {
+				t.Fatal("публичный слушатель: край чужой формы допущен — пол не спрашивает объявленную форму")
+			}
+		})
 	}
 }
 
-// Политика, собранная с НЕОБЪЯВЛЕННОЙ формой, не узнаёт никого — ни край, ни
-// модуль: нулевое значение фейл-клоуз, а не «принимаем любую приставку».
+// Перечень при НЕОБЪЯВЛЕННОЙ форме не собирается с записями, а политика без
+// перечня не узнаёт никого — ни край, ни модуль: нулевое значение фейл-клоуз,
+// а не «принимаем любую приставку».
 func TestReadersAskTheDeclaredForm_UndeclaredFormRecognizesNobody(t *testing.T) {
 	const edge = "spiffe://" + probeTrustDomain + "/ns/platform/sa/mod-api-gateway"
 	var undeclared servicesan.Form
 
-	p := NewCallerPolicy(true, GatewayFrontedInternalRPCs(), undeclared)
-	if code := status.Code(p.allow(verifiedCtx(edge), floorOnlyMethod)); code != codes.PermissionDenied {
-		t.Fatalf("пол при необъявленной форме пропустил предъявителя: %v", code)
+	if _, err := moduleidentity.Parse(undeclared, []string{"platform/mod-api-gateway=edge"}); err == nil {
+		t.Fatal("перечень собран при необъявленной форме имени службы")
 	}
-	if _, ok := SANToServiceAccountID(grpcsrv.NewTrustDomain(probeTrustDomain), undeclared, edge); ok {
-		t.Fatal("идентификатор служебной учётки выведен по необъявленной форме")
+	p := NewCallerPolicy(true, GatewayFrontedInternalRPCs()).WithModuleRoster(moduleidentity.Roster{})
+	if code := status.Code(p.allow(verifiedCtx(edge), floorOnlyMethod)); code != codes.PermissionDenied {
+		t.Fatalf("пол без перечня пропустил предъявителя: %v", code)
 	}
 }

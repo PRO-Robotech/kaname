@@ -1,13 +1,13 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// caller_service.go — короткое имя службы из SAN для политики вызывающего.
+// caller_service.go — признание края и пира на HTTP-слушателях.
 //
-// ServiceNameFromSAN разбирает проверенный SPIFFE-идентификатор модуля в
-// короткое имя службы (например, "api-gateway"). Пер-RPC политика вызывающего
-// (caller_policy.go) спрашивает его и для пола (любой идентификатор модульной
-// формы), и для круга края (svc == "api-gateway"). Прежний страж с выписанным
-// перечнем допущенных (CallerServiceGate) вытеснен пер-RPC политикой и снят.
+// Модулем, в том числе краем, признаётся только пара (пространство, учётка),
+// объявленная установкой (`moduleidentity.Roster`, kaname#984). Разбор
+// идентификатора один на все пути признания вызывающего —
+// `moduleidentity.ParseSAN`; здесь стояла своя обёртка над разбором стража
+// записи отношений, и вместе с ним она снята.
 package authzguard
 
 import (
@@ -15,39 +15,23 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
-// ServiceNameFromSAN — короткое имя службы модуля из проверенного SAN: домен d,
-// учётка формы f. Иначе ("", false).
-//
-// # Одна реализация, а не две
-//
-// Здесь стояла ПОБАЙТОВАЯ КОПИЯ тела [SANToServiceDomain] — двадцать строк,
-// повторяющих тот же разбор. Расходятся такие копии молча: правка одной не
-// доезжает до другой, и вторая продолжает принимать то, что первая уже
-// отвергает. Свели их вместе с переводом домена доверия в величину; форма имени
-// службы переведена в величину тем же порядком (kaname#308), и разбор её — один,
-// `servicesan.Form.Parse`.
-func ServiceNameFromSAN(d grpcsrv.TrustDomain, f servicesan.Form, san string) (string, bool) {
-	return SANToServiceDomain(d, f, san)
-}
-
 // PeerIsGateway — пир HTTP-слушателя предъявил ПРОВЕРЕННЫЙ сертификат края:
-// короткое имя службы из SAN проверенного листа — api-gateway.
+// объявленная установкой личность, чья служба — api-gateway.
 //
 // Один признак края на все HTTP-слушатели, читающие заголовок, который ставит
 // край: полосу входа (допуск ровно края) и поверхность выдачи (адрес источника,
 // приёмка ceremony-pace-is-named-by-number.md Р7). Сертификат, которого слушатель
 // не проверил (нет проверенной цепочки), личности не доказывает. Необъявленный
-// домен доверия и необъявленная форма имени службы не узнают никого.
-func PeerIsGateway(d grpcsrv.TrustDomain, f servicesan.Form, st *tls.ConnectionState) bool {
-	san := VerifiedPeerIdentity(d, st)
-	if san == "" {
-		return false
-	}
-	svc, ok := ServiceNameFromSAN(d, f, san)
-	return ok && svc == GatewayServiceName()
+// домен доверия и необъявленная пара не узнают никого.
+//
+// Привязка к выпустившему центру (kaname#988) судится ТЕМ ЖЕ перечнем, что на
+// gRPC-слушателях: лист края, выпущенный не центром края, краем не признаётся.
+func PeerIsGateway(modules moduleidentity.Roster, d grpcsrv.TrustDomain, st *tls.ConnectionState) bool {
+	id, ok := modules.FromTLSState(d, st)
+	return ok && id.Service == GatewayServiceName()
 }
 
 // VerifiedPeerIdentity — идентификатор пира HTTP-слушателя: URI SAN нашего

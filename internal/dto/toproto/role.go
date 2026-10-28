@@ -57,6 +57,9 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 			ResourceNames: rl.ResourceNames,
 			MatchLabels:   rl.MatchLabels,
 			Children:      childRulesToPb(rl.Children),
+			// Селектор создателя (kaname#1003, Р2а): правило без него показывалось бы
+			// «глаголами на всех объектах типа» — больше, чем роль даёт.
+			CreatedBySubject: rl.CreatedBySubject,
 		})
 	}
 	return &iamv1.Role{

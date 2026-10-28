@@ -3,21 +3,21 @@
 
 package domain
 
-// access_binding_target.go — the reintroduced AccessBinding.target
-// (redesign-2026 F8, least-privilege spine). A binding's target selects WHICH
-// objects, under its scope-anchor, the grant applies to:
+// access_binding_target.go — цель выдачи AccessBinding.target (redesign-2026 F8,
+// хребет наименьших привилегий). Цель выбирает, НА КАКИЕ объекты под якорем
+// области действует выдача:
 //
-//   - AllInScope — ALL objects under the anchor, including future ones (the
-//     broadest grant, reachable ONLY via explicit opt-in — never a default);
-//   - Resources  — a closed set of per-object ResourceRef{type,id} (no name;
-//     `type` — точечное имя типа, живого в каталоге платформы, e.g.
+//   - AllInScope — ВСЕ объекты под якорем, включая будущие (самая широкая
+//     выдача, достижимая ТОЛЬКО явным выбором — никогда по умолчанию);
+//   - Resources  — закрытый перечень пообъектных ResourceRef{type,id} (без имени;
+//     `type` — точечное имя типа, живого в каталоге платформы, например
 //     `compute.instance`; судит его ЖИВОЙ каталог, а не перечень в коде —
-//     `ValidTargetType`).
+//     `ValidTargetType`; `id` — по грамматике объекта, `validObjectID`).
 //
-// The two arms are mutually exclusive. The zero value (both empty) is treated as
-// the whole-anchor grant for legacy / internal rows that predate F8 (matching the
-// historical semantics of a target-less binding); the PUBLIC Create RPC rejects a
-// missing target sync (least-priv at the boundary).
+// Ветви взаимоисключающие. Нулевое значение (обе пусты) читается как выдача на
+// весь якорь — для прежних и внутренних строк, заведённых до F8 (так вела себя
+// выдача без цели); публичный Create отвергает отсутствующую цель синхронно
+// (наименьшие привилегии на границе).
 
 import (
 	"crypto/sha256"
@@ -29,41 +29,44 @@ import (
 	"go.uber.org/multierr"
 )
 
-// ResourceRef is the {type,id} per-object pointer (redesign-2026 F8 /
-// B1). Unlike a generic Referrer it carries NO name — the iam target is the strict
-// {type,id} form. `Type` is the dotted `<module>.<resource>` key.
+// ResourceRef — пообъектный указатель {type,id} (redesign-2026 F8 / B1). В
+// отличие от общего Referrer имени НЕ несёт: цель iam — строгая форма {type,id}.
+// `Type` — точечный ключ `<module>.<resource>`.
 type ResourceRef struct {
 	Type string
 	ID   string
 }
 
-// AccessTarget is the object-selection of an AccessBinding (F8). Exactly one arm
-// is meaningful; the zero value is the whole-anchor grant (AllInScope semantics).
+// AccessTarget — выбор объектов выдачи (F8). Значима ровно одна ветвь; нулевое
+// значение — выдача на весь якорь (смысл AllInScope).
 type AccessTarget struct {
 	AllInScope bool          // whole-anchor grant (incl. future objects)
 	Resources  []ResourceRef // per-object grant (mutually exclusive with AllInScope)
 }
 
-// MaxTargetResourcesPerBinding — hard upper bound on target.resources[]. Anti-DoS
-// + tractable per-object materialization: the reconciler intersects every
-// rule-matched object with the target through the LINEAR AccessTarget.Contains,
-// inside ONE synchronous create writer-tx holding the binding advisory lock, and
-// re-runs it for every object created cluster-wide (forwardObjectForBinding). An
-// unbounded set therefore costs |matched|×|target| comparisons on a hot path plus an
-// unbounded JSONB row. 0 < n ≤ 256 enforced sync (INVALID_ARGUMENT), mirroring
-// MaxSubjectsPerBinding.
+// MaxTargetResourcesPerBinding — жёсткий потолок target.resources[]. Защита от
+// отказа в обслуживании и посильная пообъектная материализация: реконсайлер
+// пересекает каждый подошедший по правилам объект с целью через ЛИНЕЙНЫЙ
+// AccessTarget.Contains внутри ОДНОЙ синхронной транзакции записи под
+// рекомендательной блокировкой выдачи и повторяет это на каждый объект,
+// созданный в кластере (forwardObjectForBinding). Неограниченный перечень стоил
+// бы |подошедших|×|цели| сравнений на горячем пути и неограниченной строки JSONB.
+// 0 < n ≤ 256 судится синхронно (INVALID_ARGUMENT), как MaxSubjectsPerBinding.
 const MaxTargetResourcesPerBinding = 256
 
-// IsEmpty reports whether neither arm is set (no explicit selection). An empty
-// target is treated as AllInScope for storage/digest, but the public Create RPC
-// rejects it (target REQUIRED).
+// IsEmpty сообщает, что не задана ни одна ветвь (явного выбора нет). Пустая цель
+// хранится и сверяется как AllInScope, но публичный Create её отвергает (цель
+// ОБЯЗАТЕЛЬНА).
 func (t AccessTarget) IsEmpty() bool {
 	return !t.AllInScope && len(t.Resources) == 0
 }
 
-// Validate checks the target well-formedness: the two arms are mutually exclusive,
-// and every per-object ResourceRef carries a non-empty type and id. AllInScope /
-// empty is always well-formed.
+// Validate судит форму цели: ветви взаимоисключающие, у каждого пообъектного
+// ResourceRef непустой тип, а идентификатор непуст и подчиняется грамматике
+// объекта (`validObjectID`). AllInScope и пустая цель всегда годны.
+//
+// Отказы копятся по всем элементам; у элемента с пустым идентификатором отказ
+// один — «(empty)», проверка формы его не дублирует.
 //
 // Членство типа в каталоге здесь НЕ судится: домен чист и каталога не видит.
 // Годность типа — вопрос живого каталога на момент записи (`ValidTargetType`,
@@ -82,20 +85,48 @@ func (t AccessTarget) Validate() error {
 			errs = multierr.Append(errs, fmt.Errorf(
 				"Illegal argument target.resources[%d].type (empty)", i))
 		}
-		if r.ID == "" {
+		switch {
+		case r.ID == "":
 			errs = multierr.Append(errs, fmt.Errorf(
 				"Illegal argument target.resources[%d].id (empty)", i))
+		case !validObjectID(r.ID):
+			errs = multierr.Append(errs, fmt.Errorf(
+				"Illegal argument target.resources[%d].id (not a valid object id: "+
+					"space, tab, newline, '#' and ':' are not allowed)", i))
 		}
 	}
 	return errs
 }
 
-// Contains reports whether the closed per-object target set lists the object
-// (dottedType, id). It is the least-privilege membership test the reconciler applies so
-// a role.rules match materializes ONLY an object the target also lists. An
-// AllInScope/empty target lists NO explicit object here (its breadth is the whole
-// anchor, materialized by the reconciler's all-in-scope path — not this test), so
-// Contains returns false for it; callers gate on IsEmpty()/AllInScope before using it.
+// objectIDForbidden — знаки, которых грамматика объекта не допускает в
+// идентификаторе: те же, по которым регистрация объекта судит часть после
+// двоеточия (`validateRelationString` в
+// `internal/apps/kaname/api/internal_iam/register_resource.go`): пробел,
+// табуляция, перевод строки, `#` — разделитель набора субъектов, второе `:`.
+// Объект с таким идентификатором зарегистрирован быть не может, поэтому отказ
+// цели не отнимает ни одной законной выдачи.
+const objectIDForbidden = " \t\n#:"
+
+// validObjectID сообщает, годен ли идентификатор объекта цели по грамматике
+// объекта: непуст и не несёт ни одного знака `objectIDForbidden`.
+//
+// Зачем это цели. Состав пообъектной цели сверяется по его записи —
+// отсортированные «тип:id», склеенные переводом строки. Идентификатор с
+// переводом строки и вторым «тип:id» дал бы цели из ОДНОГО объекта ту же запись,
+// что у цели из двух, и выдача на неё отвергалась бы как повтор чужой выдачи.
+// Грамматика объекта такой идентификатор исключает, и запись состава остаётся
+// однозначной без смены её способа (kaname#1004). `/` законен и разбирается
+// дословно: служба идентификатор не режет и не нормализует.
+func validObjectID(id string) bool {
+	return id != "" && !strings.ContainsAny(id, objectIDForbidden)
+}
+
+// Contains сообщает, перечисляет ли закрытый пообъектный перечень цели объект
+// (dottedType, id). Это проверка членства наименьших привилегий: совпадение по
+// role.rules материализует ТОЛЬКО объект, который цель тоже перечисляет. Цель
+// AllInScope или пустая явных объектов здесь не перечисляет (её ширина — весь
+// якорь, его материализует ветвь «вся область» реконсайлера, а не эта проверка),
+// поэтому Contains для неё ложен; вызывающий судит IsEmpty()/AllInScope до неё.
 func (t AccessTarget) Contains(dottedType, id string) bool {
 	for _, r := range t.Resources {
 		if r.Type == dottedType && r.ID == id {
@@ -105,11 +136,12 @@ func (t AccessTarget) Contains(dottedType, id string) bool {
 	return false
 }
 
-// ResourceIDsForTypes returns the ids of the per-object target resources whose dotted
-// type is in `types` (order-preserving, de-duplicated). It lets the reconciler resolve a
-// per-object target's ARM_ANCHOR candidates by id (MatchByIDs) instead of scanning the
-// whole scope (MatchAllInScope) — the least-privilege materialization path (IAM-1-21).
-// Empty when no listed resource matches the given types.
+// ResourceIDsForTypes возвращает идентификаторы пообъектных элементов цели,
+// чей точечный тип входит в `types` (порядок сохранён, повторы сняты). По ним
+// реконсайлер находит кандидатов ARM_ANCHOR пообъектной цели по идентификатору
+// (MatchByIDs), а не обходом всей области (MatchAllInScope) — путь
+// материализации наименьших привилегий (IAM-1-21). Пусто, если ни один элемент
+// не подходит по типу.
 func (t AccessTarget) ResourceIDsForTypes(types []string) []string {
 	if len(t.Resources) == 0 || len(types) == 0 {
 		return nil
@@ -150,8 +182,8 @@ func (t AccessTarget) Digest() string {
 	return "obj:" + hex.EncodeToString(sum[:])
 }
 
-// splitDottedType splits a dotted `<module>.<resource>` type into its parts on the
-// first dot. ok=false when the form is not `<nonempty>.<nonempty>`.
+// splitDottedType делит точечный тип `<module>.<resource>` на части по первой
+// точке. ok=false, когда форма не `<непусто>.<непусто>`.
 func splitDottedType(dotted string) (module, resource string, ok bool) {
 	i := strings.IndexByte(dotted, '.')
 	if i <= 0 || i >= len(dotted)-1 {
@@ -160,10 +192,10 @@ func splitDottedType(dotted string) (module, resource string, ok bool) {
 	return dotted[:i], dotted[i+1:], true
 }
 
-// CoversType reports whether the role's authored rules grant verbs on the dotted
-// `<module>.<resource>` type (redesign-2026 F9 gate 3 / IAM-1-24). A rule covers the
-// type when its Module matches and its Resources list the resource (or "*"). Empty
-// rules cover nothing.
+// CoversType сообщает, дают ли авторские правила роли глаголы на точечный тип
+// `<module>.<resource>` (redesign-2026 F9, ворота 3 / IAM-1-24). Правило
+// покрывает тип, когда совпадает Module, а Resources перечисляет ресурс (или "*").
+// Пустые правила не покрывают ничего.
 func (rs Rules) CoversType(dottedType string) bool {
 	module, resource, ok := splitDottedType(dottedType)
 	if !ok {
@@ -192,8 +224,8 @@ type TargetTypeCatalog interface {
 	FGAObjectType(dotted string) (string, bool)
 }
 
-// ValidTargetType reports whether a dotted `<module>.<resource>` may be named as a
-// per-object AccessBinding target: тогда и только тогда, когда у типа есть ЖИВАЯ
+// ValidTargetType сообщает, может ли точечный `<module>.<resource>` быть назван
+// типом пообъектной цели выдачи: тогда и только тогда, когда у типа есть ЖИВАЯ
 // строка каталога платформы (Р1 приёмки
 // `access-target-names-live-catalog-types.md`, kaname#904).
 //

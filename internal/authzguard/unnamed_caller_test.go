@@ -51,7 +51,7 @@ import (
 // prodPolicy — политика в боевой посадке: именно там пол «проверенный модульный
 // сертификат» отвергает вызывающего, и именно там сегодня стоит отказ по правам.
 func prodPolicy() *PublicCallerPolicy {
-	return NewPublicCallerPolicy(true, PublicPeerCallableRPCs(), nil, bearerPresent, testServiceNameForm)
+	return NewPublicCallerPolicy(true, PublicPeerCallableRPCs(), nil, bearerPresent).WithModuleRoster(testModuleRoster())
 }
 
 // bearerPresent — реализация порта присутствия удостоверения для проб.

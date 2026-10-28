@@ -338,8 +338,7 @@ type listenerA struct {
 
 func newListenerA(t *testing.T) *listenerA {
 	t.Helper()
-	rule := issuingsource.New(grpcsrv.NewTrustDomain(issuinglistener.TrustDomain),
-		servicesan.NewForm(issuinglistener.ServiceNameForm))
+	rule := issuingsource.New(grpcsrv.NewTrustDomain(issuinglistener.TrustDomain), issuinglistener.ModuleRoster())
 	s := newSeedA(t, func(r *http.Request) string { return rule.Of(r, issuingsource.PointAuthorize) })
 	return &listenerA{seedA: s, stand: issuinglistener.Start(t, s.a), rule: rule}
 }

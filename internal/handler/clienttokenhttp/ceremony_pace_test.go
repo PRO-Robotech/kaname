@@ -757,8 +757,7 @@ func TestKNPACE36_SourceRuleOnTheTokenEndpoint(t *testing.T) {
 	clock := &paceClock{now: paceT0}
 	window, err := failurewindow.New(paceFailedProofs, paceWindow, clock.Now)
 	require.NoError(t, err)
-	rule := issuingsource.New(grpcsrv.NewTrustDomain(issuinglistener.TrustDomain),
-		servicesan.NewForm(issuinglistener.ServiceNameForm))
+	rule := issuingsource.New(grpcsrv.NewTrustDomain(issuinglistener.TrustDomain), issuinglistener.ModuleRoster())
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling:     testBodyCeiling,
 		InFlightCeiling: paceCeiling,

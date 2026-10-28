@@ -194,46 +194,10 @@ func requireGrantAuthority(ctx context.Context, repo Repo, relations clients.Rel
 // супер-гейт ответил «не админ, ошибки нет»: вызывающий обязан воспроизвести
 // Путь 0 сам и различить три его исхода — да · нет · спросить не удалось.
 func grantAuthorityBeyondClusterAdmin(ctx context.Context, repo Repo, relations clients.RelationStore, resourceType, resourceID string) error {
-	var ownerUserID string
-	// The owner-path resolves the owning Account via the DB reader. It is only
-	// relevant for the hierarchy scope-types (account/project); for every other
-	// object-type (cluster / leaf FGA object like compute.instance) authority is
-	// granted ONLY by the FGA admin path below, so the reader is not needed. Skip
-	// it entirely when repo is nil — callers that authorize purely through FGA
-	// (ExpandAccess on a leaf object via delegated admin) wire only the
-	// RelationStore. ListByScope/Create/Delete always wire a non-nil repo, so
-	// this nil-guard does not weaken any existing caller.
-	if repo != nil && (resourceType == "account" || resourceType == "project") {
-		rd, err := repo.Reader(ctx)
-		if err != nil {
-			return shared.MapRepoErr(err)
-		}
-		defer func() { _ = rd.Rollback(ctx) }()
-
-		switch resourceType {
-		case "account":
-			acct, gerr := rd.Accounts().Get(ctx, domain.AccountID(resourceID))
-			if gerr != nil {
-				return shared.MapRepoErr(gerr)
-			}
-			ownerUserID = string(acct.OwnerUserID)
-		case "project":
-			proj, gerr := rd.Projects().Get(ctx, domain.ProjectID(resourceID))
-			if gerr != nil {
-				return shared.MapRepoErr(gerr)
-			}
-			acct, gerr := rd.Accounts().Get(ctx, proj.AccountID)
-			if gerr != nil {
-				return shared.MapRepoErr(gerr)
-			}
-			ownerUserID = string(acct.OwnerUserID)
-		}
+	ownerUserID, err := scopeOwnerUserID(ctx, repo, resourceType, resourceID)
+	if err != nil {
+		return err
 	}
-	// Non-hierarchy scopes (cluster / org / cross-service / leaf FGA objects like
-	// compute.instance) have no DB-side "owner": authority is granted ONLY by the
-	// FGA admin/system_admin path below (e.g. cluster admins hold `system_admin`
-	// on cluster:cluster_root). No owner-fallback path — ownerUserID stays
-	// empty so only Path 2 can authorize them.
 
 	// Path 1 — owner of the owning Account.
 	if ownerUserID != "" && authzguard.IsSelf(ctx, ownerUserID) {
@@ -256,6 +220,45 @@ func grantAuthorityBeyondClusterAdmin(ctx context.Context, repo Repo, relations 
 	}
 
 	return authzguard.PermissionDenied()
+}
+
+// scopeOwnerUserID — владелец аккаунта области `account` либо `project`, одной
+// читающей транзакцией, закрытой к возврату. У прочих областей (кластер, листовой
+// объект вроде compute.instance) владельца на стороне хранилища нет: право даёт
+// только Путь 2, ответ — пустая строка без чтения, так что Путь 1 не срабатывает.
+// Пустая строка и при `repo == nil`: вызывающие, что судят только через хранилище
+// отношений (ExpandAccess на листовом объекте делегированного администратора),
+// читателя не провязывают; ListByScope, Create и Delete провязывают всегда, и
+// страж не ослабляет ни одного из них.
+//
+// Читающая транзакция закрывается ДО вопроса Пути 2: вопрос берёт соединение того
+// же пула (`relverdict.NewAsker(pool)`, `cmd/kaname/wiring.go`), и путь, держащий
+// одно соединение в ожидании другого, при числе одновременных запросов не меньше
+// свободных соединений останавливает пул целиком (задача kaname#1015, находка
+// ревью SD-986-R1).
+func scopeOwnerUserID(ctx context.Context, repo Repo, resourceType, resourceID string) (string, error) {
+	if repo == nil || (resourceType != "account" && resourceType != "project") {
+		return "", nil
+	}
+	rd, err := repo.Reader(ctx)
+	if err != nil {
+		return "", shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+
+	accountID := domain.AccountID(resourceID)
+	if resourceType == "project" {
+		proj, err := rd.Projects().Get(ctx, domain.ProjectID(resourceID))
+		if err != nil {
+			return "", shared.MapRepoErr(err)
+		}
+		accountID = proj.AccountID
+	}
+	acct, err := rd.Accounts().Get(ctx, accountID)
+	if err != nil {
+		return "", shared.MapRepoErr(err)
+	}
+	return string(acct.OwnerUserID), nil
 }
 
 // fgaAdminObject builds the canonical FGA object string for an authority Check

@@ -302,7 +302,7 @@ SELECT c.object_id,
           FROM speaker_pair sp
           JOIN scope_distinct sc ON sc.object_id = c.object_id
           CROSS JOIN LATERAL (
-                 SELECT s.binding_id, s.subject_type
+                 SELECT s.binding_id, s.subject_type, s.subject_id
                    FROM kaname.access_binding_subjects s
                   WHERE s.subject_type  = sp.s_type AND s.subject_id  = sp.s_id
                     AND s.resource_type = sc.s_type AND s.resource_id = sc.s_id

@@ -46,7 +46,7 @@ func handlerWithUnavailableBackend() *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: nil,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), probeModuleForm)
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRoster())
 }
 
 func TestAuthorizeCheck_TraceIdReachesTheLog(t *testing.T) {
@@ -54,10 +54,11 @@ func TestAuthorizeCheck_TraceIdReachesTheLog(t *testing.T) {
 	h := handlerWithUnavailableBackend()
 
 	_, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_b3n7k1x9q2m5t8",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_b3n7k1x9q2m5t8"},
-		Action:   "iam.account.get",
-		TraceId:  "trace-b3n7k1x9-q2m5t8",
+		Subject:          "user:usr_b3n7k1x9q2m5t8",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_b3n7k1x9q2m5t8"},
+		Action:           "iam.account.get",
+		RequiredRelation: "viewer",
+		TraceId:          "trace-b3n7k1x9-q2m5t8",
 	})
 	require.Error(t, err)
 	require.Contains(t, buf.String(), "trace-b3n7k1x9-q2m5t8",
@@ -72,9 +73,10 @@ func TestAuthorizeBatchCheck_TraceIdReachesTheLog(t *testing.T) {
 	_, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		TraceId: "batch-trace-q2m5t8",
 		Checks: []*iamv1.AuthorizeCheckRequest{{
-			Subject:  "user:usr_b3n7k1x9q2m5t8",
-			Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_b3n7k1x9q2m5t8"},
-			Action:   "iam.account.get",
+			Subject:          "user:usr_b3n7k1x9q2m5t8",
+			Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_b3n7k1x9q2m5t8"},
+			Action:           "iam.account.get",
+			RequiredRelation: "viewer",
 		}},
 	})
 	require.Error(t, err)
@@ -93,10 +95,11 @@ func TestAuthorizeCheck_TraceIdIsBounded(t *testing.T) {
 
 	long := strings.Repeat("z", 4096)
 	_, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_b3n7k1x9q2m5t8",
-		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_b3n7k1x9q2m5t8"},
-		Action:   "iam.account.get",
-		TraceId:  long,
+		Subject:          "user:usr_b3n7k1x9q2m5t8",
+		Resource:         &iamv1.ResourceRef{Type: "account", Id: "acc_b3n7k1x9q2m5t8"},
+		Action:           "iam.account.get",
+		RequiredRelation: "viewer",
+		TraceId:          long,
 	})
 	require.Error(t, err)
 	out := buf.String()

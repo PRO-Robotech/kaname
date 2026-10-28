@@ -62,6 +62,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
@@ -451,7 +452,10 @@ func laneHasher(cfg config.Config) (*passwordverify.Hasher, error) {
 // полосы — отказ сборки с именем ручки, а не старт без полосы.
 // reconciler — материализация собственнической выдачи после регистрации: тот
 // же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
-func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
+// modules — перечень личностей модулей, прочитанный корнем ОДИН раз с проверкой
+// ошибки (kaname#987): допуск края полосы судит по тому же значению, что
+// политики вызывающего.
+func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidentity.Roster, pool *pgxpool.Pool, repo kanamerepo.Repository,
 	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
 	login := cfg.AuthN.Login
@@ -774,14 +778,14 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
-		SessionTTL:      login.SessionTTL,
-		CookieDomain:    login.ResolvedCookieDomain(),
-		TrustDomain:     cfg.AuthN.TrustDomain(),
-		ServiceNameForm: cfg.AuthN.ServiceNameForm(),
-		RefusalDomain:   refusaldomain.For(refusaldomain.ServiceIAM),
-		Logger:          logger,
-		Observer:        rec,
-		Verification:    rec,
+		SessionTTL:    login.SessionTTL,
+		CookieDomain:  login.ResolvedCookieDomain(),
+		TrustDomain:   cfg.AuthN.TrustDomain(),
+		Modules:       modules,
+		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
+		Logger:        logger,
+		Observer:      rec,
+		Verification:  rec,
 	}, laneVerbs{
 		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
 		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,

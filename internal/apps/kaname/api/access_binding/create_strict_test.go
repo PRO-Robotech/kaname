@@ -37,6 +37,7 @@ import (
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	repoaccount "github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
+	gdrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
 	repogroup "github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 	repoproject "github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
@@ -468,3 +469,11 @@ func (_ *strictDupABReader) ClassGrantsKeyedModules(context.Context) (domain.Cla
 func (_ *strictDupRoleReader) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
 	return false, nil
 }
+
+// GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
+// делегированного пути права выдавать не касаются.
+func (r *strictDupABReader) GrantDelegations() gdrepo.ReaderIface { return nil }
+
+// GrantDelegationsW — делегирований этот дублёр не несёт (kaname#986): пробы файла
+// делегированного пути права выдавать не касаются.
+func (w *strictDupABWriter) GrantDelegationsW() gdrepo.WriterIface { return nil }

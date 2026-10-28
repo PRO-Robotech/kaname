@@ -455,6 +455,17 @@ func runServe(cfg config.Config) error {
 	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
 		return raErr
 	}
+	// Роли СВОЕГО манифеста службы (kaname#1003) — тем же применителем, после
+	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
+	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
+	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
+	ownManifest, omErr := loadOwnManifest(logger)
+	if omErr != nil {
+		return omErr
+	}
+	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
+		return riErr
+	}
 
 	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи kacho#2452, kaname#106).
 	//
@@ -480,10 +491,6 @@ func runServe(cfg config.Config) error {
 	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
 	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
 	// разных входа.
-	ownManifest, omErr := loadOwnManifest(logger)
-	if omErr != nil {
-		return omErr
-	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
 	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
 		return seErr
@@ -534,11 +541,29 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
+	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — ОДИН перечень на все пути признания
+	// вызывающего, прочитанный ОДИН раз и ДО сборки служб (kaname#987): обе
+	// политики вызывающего, пол системного читателя, посредник записи отношений,
+	// допуск пира у службы решений, обработчик внутреннего Check, полоса входа и
+	// поверхность выдачи получают ЭТОТ объект. Второго чтения нет: у нулевого
+	// перечня разная семантика у потребителей — политике это отказ, обработчику
+	// Check «сужать некого», — и чтение, глотающее ошибку, развело бы их молча.
+	// Модулем признаётся только объявленная пара, и признанная личность зовёт
+	// только методы своего профиля.
+	//
+	// Центры, к которым привязаны личности (kaname#988), читаются ЗДЕСЬ, при
+	// подъёме: нечитаемый файл центра — отказ старта, а не перечень, молча
+	// признающий меньше, чем объявила установка.
+	moduleRoster, err := cfg.AuthN.LoadModuleRoster()
+	if err != nil {
+		return fmt.Errorf("module identities: %w", err)
+	}
+
 	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
-		metricsReg, cfg, tokenSigner, logger)
+		metricsReg, cfg, moduleRoster, tokenSigner, logger)
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть
@@ -546,7 +571,7 @@ func runServe(cfg config.Config) error {
 	// ПРИНИМАЕТ тот же реконсайлер материализации привязки, что путь запроса
 	// (`sign_in_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(ctx, cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
 		return err
 	}
@@ -717,12 +742,12 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
-	// Круг отправителей — тем же предикатом, которым его записи разберёт
-	// транспорт (kaname#308): форма имени службы в объявленном домене либо имя
+	// Круг отправителей — тем же перечнем, которым его записи признает транспорт
+	// (kaname#308, kaname#984): объявленная пара личности модуля в объявленном домене либо имя
 	// собственного фронта, только что выведенное из его сертификата. Запись,
 	// которую пол не узнает, прошла бы взаимный TLS и получала бы отказ на
 	// каждом вызове при зелёных стражах старта (см. forwarderform.go).
-	if err := requireForwardersRecognised(cfg.AuthN, ownFrontSAN); err != nil {
+	if err := requireForwardersRecognised(cfg.AuthN, moduleRoster, ownFrontSAN); err != nil {
 		return err
 	}
 	// Различимость адресов поверхностей судится НЕ ЗДЕСЬ, а там, где собран срез
@@ -778,12 +803,15 @@ func runServe(cfg config.Config) error {
 	// круг края он не проходит никогда, потому что краем не является и о том,
 	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
 	// который фронт предъявляет, — разойтись с проводом ей нечем.
-	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs(),
-		cfg.AuthN.ServiceNameForm()).
+	//
+	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — перечень прочитан выше, до сборки служб,
+	// и это тот же объект, что получили обработчики (см. `moduleRoster`).
+	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
 		}).
-		WithOwnFrontHop(ownFrontSAN)
+		WithOwnFrontHop(ownFrontSAN).
+		WithModuleRoster(moduleRoster)
 
 	// Per-RPC `system_viewer`-FLOOR on the internal READ-RPC set
 	// (authN+authZ enforced everywhere: read-RPC gate viewer-tier). For
@@ -807,8 +835,8 @@ func runServe(cfg config.Config) error {
 	// движку мимо второго шанса и мимо сравнения форм. Страж при этом
 	// присутствовал, был провязан и исполнялся — снаружи неотличимо от
 	// исправного.
-	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs(),
-		cfg.AuthN.ServiceNameForm()).
+	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs()).
+		WithModuleRoster(moduleRoster).
 		WithProductionMode(productionMode)
 
 	// Per-RPC `required_acr_min` (step-up) FLOOR on the internal
@@ -854,8 +882,8 @@ func runServe(cfg config.Config) error {
 		// Реализация порта присутствия удостоверения: КЛЮЧ метаданных и
 		// объявленная схема предъявления живут у читателя, и второй их разбор
 		// разошёлся бы с первым молча — на входе, который оба считают годным.
-		presentedcred.Presented,
-		cfg.AuthN.ServiceNameForm())
+		presentedcred.Presented).
+		WithModuleRoster(moduleRoster)
 
 	// РУБЕЖ ПОЛОЖЕНИЯ ПОДТВЕРЖДЕНИЯ (kaname#456, Р4б, Р4в) — ОДНО значение на
 	// оба слушателя и обе полосы, сразу после политики вызывающего: человек с
@@ -941,6 +969,10 @@ func runServe(cfg config.Config) error {
 	// молчаливым nil здесь.
 	var presentedReader *presentedcred.Reader
 	if cfg.AuthN.PresentedCredential.Enabled {
+		basicAuthority, err := newBasicCredentialAuthority(pool)
+		if err != nil {
+			return fmt.Errorf("basic credential authority: %w", err)
+		}
 		if signingKeystore == nil {
 			// Настройка это уже отвергла (страж связывает приём с чеканкой), и
 			// отказ здесь — не второй страж, а отказ ПОСТРОЕНИЯ: собранный
@@ -950,6 +982,7 @@ func runServe(cfg config.Config) error {
 				"реестра ключей нет — проверять подпись нечем")
 		}
 		presentedReader, err = presentedcred.New(presentedcred.Config{
+			BasicCredentials:   basicAuthority,
 			Issuer:             cfg.AuthN.TokenSigning.Issuer,
 			Audience:           cfg.AuthN.PresentedCredential.Audience,
 			AllowedAlgorithms:  cfg.AuthN.TokenSigning.AllowedAlgorithmList(),
@@ -1136,20 +1169,25 @@ func runServe(cfg config.Config) error {
 	// конечного пользователя (за краем сидит арендатор, и предел объявлен на
 	// него), внутренний — личностью СЕРТИФИКАТА вызывающего модуля, потому что
 	// запрос модуля несёт личности разных арендаторов и ключ по арендатору
-	// дробил бы бюджет соседа на тысячу вёдер.
+	// дробил бы бюджет соседа на тысячу вёдер. У внутреннего этот ключ — уровень
+	// модуля; под ним стоит уровень экземпляра того же модуля (ниже).
 	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits, grpcsrv.PrincipalSubject)
 	if err != nil {
 		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
 	}
-	internalAdmission, err := grpcsrv.NewAdmission("internal", internalAdmissionLimits, grpcsrv.CertIdentitySubject)
+	// Внутренний слушатель — ДВА уровня (kaname#992): экземпляр вызывающего
+	// (личность и адрес) и модуль в целом (SAN, прежние величины посадки).
+	// Шумный экземпляр выбирает не больше своего ведра и соседа не душит.
+	internalAdmissions, err := newInternalAdmissions(internalAdmissionLimits, instanceAdmissionLimits(internalAdmissionLimits))
 	if err != nil {
 		return fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err)
 	}
-	admission := listenerAdmission{public: publicAdmission, internal: internalAdmission}
+	admission := listenerAdmission{public: publicAdmission,
+		internal: internalAdmissions.internal, internalInstance: internalAdmissions.internalInstance}
 	admission.arm(logger, cfg)
 
 	registerPublicServices(publicAdmission.Registrar(grpcSrv), svcs, opsRepo)
-	registerInternalServices(internalAdmission.Registrar(internalSrv), svcs, pool, cfg, logger)
+	registerInternalServices(admission.internalRegistrar(internalSrv), svcs, pool, cfg, logger)
 
 	publicAddr := cfg.APIServer.ListenAddress()
 	internalAddr := cfg.APIServer.InternalListenAddress()
@@ -1248,7 +1286,7 @@ func runServe(cfg config.Config) error {
 	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
 	// край и пересыльщик вообще узнаваемы, требует страж
 	// requireIssuingListenerAsksForACertificate.
-	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain(), cfg.AuthN.ServiceNameForm())
+	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain(), moduleRoster)
 	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
 		logger: logger,
 		source: issuingSource,
@@ -1540,7 +1578,10 @@ func runServe(cfg config.Config) error {
 	internalRESTAddr := internalRESTFront.addr
 	var internalRESTHandler http.Handler
 	if internalRESTFront.Enabled() {
-		internalRESTHandler, err = restfront.NewInternal(surfaceCtx, restfront.DialTarget(internalAddr), restDialOpts)
+		internalRESTHandler, err = restfront.NewInternal(surfaceCtx, restfront.DialTarget(internalAddr), restDialOpts,
+			// Кого фронт пускает, решает фронт: слушатель видит пиром сам фронт
+			// (SEC-1017-1). Тот же перечень личностей, что у политик вызывающего.
+			authzguard.InternalFrontAdmission(productionMode, moduleRoster, cfg.AuthN.TrustDomain()))
 		if err != nil {
 			return fmt.Errorf("внутренний REST-фронт: %w", err)
 		}
@@ -1955,22 +1996,41 @@ func runServe(cfg config.Config) error {
 		return reconcileWorker.Run(taskCtx)
 	})
 
-	// RBAC explicit-model 2026 — MIGRATE-phase one-shot backfill
-	// (singleton). On boot (best-effort, non-fatal): (1) owner-binding
-	// data-backfill for any account a migration could not see (idempotent SQL); (2)
-	// the reconcile-backfill SWEEP over every active binding under a process-wide
-	// pg_advisory_lock so at N replicas exactly ONE executor runs it (chunked);
-	// (3) the forward-aware verify-gate, logged as the contract-phase gate.
-	// The steady-state reconciler-worker above keeps memberships converged
-	// afterwards — the backfill just front-loads convergence before the next sweep.
-	// ONE BackfillAdapter over the pool, shared by the backfill-runner and the
-	// verify-gate.
+	// Досев и сводящий проход на старте (старт не роняют): (1) выдача владельца
+	// аккаунтам, которых миграция не видела (идемпотентный SQL); (2) СВОДЯЩИЙ
+	// проход по всем действующим выдачам под замком-одиночкой процесса — при N
+	// репликах его исполняет одна; (3) отчёт сверки, журналируемый как ворота.
+	// Обход по таймеру реконсайлера выше держит сведёнными выдачи с селектором и
+	// с двумя и более субъектами; у выдачи одному субъекту лишний кортеж после
+	// смены вычисления снимает только сводящий проход, поэтому он повторяется по
+	// такту (kaname#1006). Один BackfillAdapter над пулом — у прохода и у отчёта.
 	backfillAdapter := kanamepg.NewBackfillAdapter(pool)
+	// Сводящий проход — путь отзыва лишнего кортежа у выдачи одному субъекту
+	// (kaname#1006): у каждой выдачи свой срок, исход по выдаче — в счётчик, и
+	// проход повторяется по такту (задача ниже), а не только при старте. Ручки —
+	// `binding_converge_wiring.go`, читаются один раз.
+	convergeWindows := readBindingConvergeWindows()
 	backfillRunner := seed.NewBackfillRunner(
 		reconcileEngine,
 		backfillAdapter,
-		seed.BackfillConfig{Logger: logger.With(slog.String("component", "p8_backfill"))},
+		seed.BackfillConfig{
+			Logger:         logger.With(slog.String("component", "p8_backfill")),
+			BindingTimeout: convergeWindows.BindingTimeout,
+			Observer:       metricsReg.NewBindingConvergeRecorder(),
+		},
 	)
+	// Такт стартует ПОСЛЕ стартовой задачи досева (на любом её исходе): первый
+	// проход обязан идти после пересчёта проекций ролей, а не наперегонки с ним.
+	startupSeedDone := make(chan struct{})
+	tasks = append(tasks, func() error {
+		select {
+		case <-startupSeedDone:
+		case <-taskCtx.Done():
+			return nil
+		}
+		backfillRunner.RunEvery(taskCtx, convergeWindows.Interval)
+		return nil
+	})
 	verifyGate := seed.NewVerifyGate(reconcileEngine, backfillAdapter,
 		logger.With(slog.String("component", "p8_verify_gate"))).
 		// Design-B cutover gate: a REAL FGA Check per active binding's
@@ -2033,6 +2093,7 @@ func runServe(cfg config.Config) error {
 	// где перестаёт работать наша собственная проверка (kacho#1821).
 	ruleRefReseed := metricsReg.NewRuleRefReseedRecorder()
 	tasks = append(tasks, func() error {
+		defer close(startupSeedDone)
 		if ores, oerr := orphanScopeSweeper.RunOnce(taskCtx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
 				slog.Any("err", oerr),
@@ -2165,10 +2226,16 @@ func runServe(cfg config.Config) error {
 		// предмет kacho#893/#895, — поэтому их отсутствие обязано быть видно оператору, а
 		// не выглядеть поломкой продукта.
 		seed.LogSystemGrantCensus(taskCtx, pool, logger.With(slog.String("component", "system_grants")))
+		// Перепись прохода печатает сам проход, на любом исходе. Отказ старт не
+		// роняет: отказавшие выдачи повторяет такт `RunEvery` (задача выше), без
+		// перезапуска процесса.
 		res, berr := backfillRunner.RunOnce(taskCtx)
 		if berr != nil {
-			logger.Warn("p8 backfill: reconcile-sweep failed (next boot/sweep will retry)", slog.Any("err", berr))
-			return nil // non-fatal — never crash the server on a best-effort backfill
+			logger.Error("сводящий проход по выдачам на старте свёл не все — повторит такт",
+				slog.Duration("interval", convergeWindows.Interval),
+				slog.Bool("executed", res.Executed),
+				slog.Int("bindings_failed", res.BindingsFailed),
+				slog.Any("err", berr))
 		}
 		if res.Executed {
 			report, verr := verifyGate.Verify(taskCtx)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // ceremonyPaceConfig — посадка KN-PACE-02 с числами, отличными от §3: число,
@@ -51,7 +52,7 @@ func TestKNPACE02_TokenEndpointTakesItsPaceFromTheSettings(t *testing.T) {
 
 // KN-PACE-02, точка авторизации: П4 и П5 берутся из настройки.
 func TestKNPACE02_AuthorizeEndpointTakesItsPaceFromTheSettings(t *testing.T) {
-	rule := issuingsource.New(grpcsrv.NewTrustDomain("kacho.cloud"), probeServiceNameForm)
+	rule := issuingsource.New(grpcsrv.NewTrustDomain("kacho.cloud"), moduleidentity.Roster{})
 	got, err := ceremonyAuthorizePace(ceremonyPaceConfig(), rule, time.Now)
 	if err != nil {
 		t.Fatalf("сборка осей точки авторизации: %v", err)
@@ -112,7 +113,7 @@ func TestServeWiresTheIssuingSourceRuleAndItsGuard(t *testing.T) {
 	src := readFileT(t, "serve.go")
 	for _, want := range []string{
 		"requireIssuingListenerAsksForACertificate(cfg, mtlsCfg)",
-		"issuingsource.New(cfg.AuthN.TrustDomain(), cfg.AuthN.ServiceNameForm())",
+		"issuingsource.New(cfg.AuthN.TrustDomain(), moduleRoster)",
 		"metricsReg.NewIssuingSourceFallbackCollector(",
 		"metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))",
 	} {

@@ -34,7 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 )
 
 // probeMethod — метод, которого не принимает ни один глагол полосы: запрос им
@@ -149,10 +149,10 @@ func pathsServedFindings(declared, registered []string, serve http.Handler) (ins
 func laneMux(t *testing.T) *http.ServeMux {
 	t.Helper()
 	h, err := New(Config{
-		SessionTTL:      time.Hour,
-		TrustDomain:     grpcsrv.NewTrustDomain("kacho.cloud"),
-		ServiceNameForm: servicesan.NewForm("kacho-{service}"),
-		Logger:          slog.New(slog.DiscardHandler),
+		SessionTTL:  time.Hour,
+		TrustDomain: grpcsrv.NewTrustDomain("kacho.cloud"),
+		Modules:     moduleroster.Roster(t),
+		Logger:      slog.New(slog.DiscardHandler),
 	}, unusedLane{})
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: слушатель не построен: %v", err)

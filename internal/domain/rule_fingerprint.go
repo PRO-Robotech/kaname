@@ -45,6 +45,12 @@ func (r Rule) Fingerprint() string {
 	// Вложенные правила — своей секцией и ТОЛЬКО когда они есть: отпечаток
 	// правила без вложенных не сдвигается ни на байт (kaname#874).
 	writeChildren(h, r.Children)
+	// Селектор создателя — своей секцией и ТОЛЬКО когда он объявлен (kaname#1003):
+	// отпечаток правила без селектора не сдвигается ни на байт, а правило с ним и
+	// без него — разные правила и разные строки селектора.
+	if r.CreatedBySubject {
+		_, _ = h.Write([]byte("c\x00\x01"))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -146,6 +152,10 @@ type RuleSelector struct {
 	// ObjectTypes, у которых среди предков есть объект типа Container.Type,
 	// прошедший отбор Container и входящий в цель выдачи.
 	Container *ContainerSelector
+	// CreatedBySubject — селектор создателя правила (kaname#1003, Р2а): объект
+	// входит в охват правила для субъекта выдачи, только если создатель объекта —
+	// сам этот субъект. Ветвь при этом — якорь (селекторы у правила взаимоисключающи).
+	CreatedBySubject bool
 	// Grants — глаголы, которые ЭТО правило даёт на каждом своём типе (ключ —
 	// точечный тип из ObjectTypes), по живому каталогу (kaname#878). Решение о
 	// доступе даёт глагол на объекте только тем правилом, чей селектор объект
@@ -158,8 +168,9 @@ type RuleSelector struct {
 	// живой каталог не даёт правилу ни одного глагола.
 	//
 	// Карта — функция ОТПЕЧАТКА правила (RuleFP — хэш всего содержимого правила,
-	// включая глаголы и вложенные) и каталога: от прочих правил роли она не
-	// зависит.
+	// включая глаголы и вложенные), каталога и владельца роли (политика роли
+	// решает, влечёт ли правка удаление, kaname#1006): от прочих правил роли она
+	// не зависит.
 	Grants map[string][]string
 }
 
@@ -221,10 +232,11 @@ func (rs Rules) materializingSelectors(expandWildcard bool) []RuleSelector {
 	for _, r := range rs {
 		types := dottedTypes(r, expandWildcard)
 		sel := RuleSelector{
-			RuleFP:      r.Fingerprint(),
-			Arm:         r.Arm(),
-			ObjectTypes: types,
-			Verbs:       append([]string(nil), r.Verbs...),
+			RuleFP:           r.Fingerprint(),
+			Arm:              r.Arm(),
+			ObjectTypes:      types,
+			Verbs:            append([]string(nil), r.Verbs...),
+			CreatedBySubject: r.CreatedBySubject,
 		}
 		switch r.Arm() {
 		case ArmNames:

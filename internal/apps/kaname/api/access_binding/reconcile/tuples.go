@@ -30,12 +30,12 @@ import (
 // Иначе доступ несёт ярусный кортеж. ok=false
 // when the (objectType) has no FGA object type (a typo'd type never grants —
 // fail-closed). The subject is the binding's subject (already FGA-formatted).
-func ruleObjectTuples(cat *catalog.Facts, subject string, verbs []string, objectType, objectID string) ([]domain.MembershipTuple, bool) {
+func ruleObjectTuples(cat *catalog.Facts, policy domain.RulePolicy, subject string, verbs []string, objectType, objectID string) ([]domain.MembershipTuple, bool) {
 	fgaType, ok := cat.FGAObjectType(objectType)
 	if !ok {
 		return nil, false
 	}
-	return ruleObjectTuplesWithTypeVerbs(cat, subject, verbs, fgaType, objectID, typeVerbsOf(cat, fgaType))
+	return ruleObjectTuplesWithTypeVerbs(cat, policy, subject, verbs, fgaType, objectID, typeVerbsOf(cat, fgaType))
 }
 
 // typeVerbsOf — набор глаголов, объявленный ТИПОМ; для неглагольного типа —
@@ -63,7 +63,7 @@ func typeVerbsOf(cat *catalog.Facts, fgaType string) []string {
 // Набор — параметр, чтобы отрицательные кейсы могли предъявить тип с УРЕЗАННЫМ
 // набором: сегодня такого типа в таблице нет, а свойство обязано охраняться ДО
 // появления первого пользователя.
-func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, subject string, verbs []string, fgaType, objectID string,
+func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, policy domain.RulePolicy, subject string, verbs []string, fgaType, objectID string,
 	typeVerbs []string) ([]domain.MembershipTuple, bool) {
 	_, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := fmt.Sprintf("%s:%s", fgaType, objectID)
@@ -71,7 +71,7 @@ func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, subject string, verbs []s
 	// `role_verb`, читаемая формой E. Две реализации одного вопроса («что роль
 	// разрешает на типе») по отдельности непротиворечивы и расходятся молча: ровно
 	// так роль-администратор давала движку всё, а форме E — ничего (kacho#496).
-	granted := cat.GrantedVerbs(fgaType, verbs, typeVerbs)
+	granted := cat.GrantedVerbs(fgaType, verbs, typeVerbs, policy)
 
 	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple

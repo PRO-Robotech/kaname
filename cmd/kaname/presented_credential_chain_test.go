@@ -84,6 +84,10 @@ func chainReader(t *testing.T) (*presentedcred.Reader, string) {
 // дописывается к утверждениям (уровень `acr`, вид принципала) — так близнецы
 // пробы отличаются ровно одним фактом и предъявляются одному читателю.
 func chainMint(t *testing.T) (*presentedcred.Reader, func(extra jwt.MapClaims) string) {
+	return chainMintWithRevocations(t, chainRevocations{})
+}
+
+func chainMintWithRevocations(t *testing.T, revocations presentedcred.RevocationReader) (*presentedcred.Reader, func(extra jwt.MapClaims) string) {
 	t.Helper()
 	mat, err := signingkeygen.Generate(domain.SigningAlgES256)
 	if err != nil {
@@ -123,7 +127,7 @@ func chainMint(t *testing.T) (*presentedcred.Reader, func(extra jwt.MapClaims) s
 		Keys: chainKeys{keys: []domain.PublishedKey{{
 			KID: domain.KeyID(chainKID), Algorithm: domain.SigningAlgES256, PublicKeyPEM: mat.PublicKeyPEM,
 		}}},
-		Revocations:        chainRevocations{},
+		Revocations:        revocations,
 		RevocationCacheTTL: 30 * time.Second,
 	})
 	if err != nil {
@@ -263,8 +267,8 @@ func TestKAN_FWD_01_ForwardedIdentityStillPassesTheRealChain(t *testing.T) {
 // признаёт названного читателем» зеленело бы на политике, снятой целиком.
 func TestKAN_VER_01_CallerNamedByAPresentedCredentialIsALegitimatePublicCaller(t *testing.T) {
 	reader, raw := chainReader(t)
-	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), noFloorCatalog{}, presentedcred.Presented,
-		probeServiceNameForm)
+	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), noFloorCatalog{}, presentedcred.Presented).
+		WithModuleRoster(testModuleRoster())
 	chain := chainUnaryServer(append(
 		publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader),
 		policy.Unary())...)
@@ -312,8 +316,8 @@ func TestKAN_VER_01_PresentedLaneDoesNotBypassTheAssuranceFloor(t *testing.T) {
 	reader, raw := chainReader(t)
 
 	chainWith := func(catalog authzguard.ACRRequirementLookup) grpc.UnaryServerInterceptor {
-		policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented,
-			probeServiceNameForm)
+		policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented).
+			WithModuleRoster(testModuleRoster())
 		return chainUnaryServer(append(
 			publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader),
 			policy.Unary())...)

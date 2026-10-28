@@ -17,6 +17,7 @@ import (
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	gdrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
 )
 
 // ─── ordered, deduped emitted-tuple store ────────────────────────────────────
@@ -383,6 +384,10 @@ func (_ *fakeABRdr) ClassGrantsKeyedModules(context.Context) (domain.ClassGrants
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *fakeRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
 
-func (w *fakeRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, bool, error) {
-	return nil, false, nil
+func (w *fakeRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
+	return nil, domain.RulePolicy{}, false, nil
 }
+
+// GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
+// делегированного пути права выдавать не касаются.
+func (rd *fakeABRdr) GrantDelegations() gdrepo.ReaderIface { return nil }

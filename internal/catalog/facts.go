@@ -70,6 +70,22 @@ type Facts struct {
 	// containers — точечный тип → его сведения о публичном чтении: объявлен ли
 	// он контейнером и какие живые типы указывают на него (kaname#856).
 	containers map[string]containerFact
+	// containerVerbs — точечный тип → контейнерные действия ЖИВОГО типа по имени
+	// (kaname#1003, Р2а). Читается из тех же строк `catalog_verb`, что набор
+	// глаголов типа, и в него не входит: строка контейнерного действия ярусная.
+	containerVerbs map[string]map[string]ContainerGrant
+}
+
+// ContainerGrant — отношение на родителе, которое даёт поимённо названное
+// контейнерное действие ресурса (kaname#1003, Р2а): «создать учётку в аккаунте»
+// есть `account#service_account_creator`.
+type ContainerGrant struct {
+	// Verb — имя действия (`create`).
+	Verb string
+	// ParentType — тип родителя в словаре МОДЕЛИ (`account`).
+	ParentType string
+	// Relation — отношение на родителе (`service_account_creator`).
+	Relation string
 }
 
 // containerFact — сведения одного типа о публичном чтении детям.
@@ -187,6 +203,7 @@ func NewFacts(h Halves) (*Facts, error) {
 		return resources[i].Resource < resources[j].Resource
 	})
 
+	containerVerbs := make(map[string]map[string]ContainerGrant)
 	byDotted := make(map[string][]string, len(rows.Resources))
 	for _, v := range rows.Verbs {
 		dotted := v.Module + "." + v.Resource
@@ -195,6 +212,16 @@ func NewFacts(h Halves) (*Facts, error) {
 		// формы снятия: ресурс без живой строки глаголов не объявляет.
 		if !live[dotted] {
 			continue
+		}
+		// Контейнерное действие — своей картой: набор глаголов типа оно не
+		// пополняет (строка ярусная), а подстановка его не достигает (Р2а).
+		if v.IsContainer() {
+			if containerVerbs[dotted] == nil {
+				containerVerbs[dotted] = map[string]ContainerGrant{}
+			}
+			containerVerbs[dotted][v.Verb] = ContainerGrant{
+				Verb: v.Verb, ParentType: v.ContainerParent, Relation: v.ContainerRelation,
+			}
 		}
 		// ЯРУСНАЯ строка в набор типа НЕ ВХОДИТ, и это несущее место, а не
 		// фильтр для порядка. Набор типа — то, по чему материализуются кортежи
@@ -244,6 +271,7 @@ func NewFacts(h Halves) (*Facts, error) {
 		resources:       resources,
 		retired:         retired,
 		containers:      containersOf(rows.Resources),
+		containerVerbs:  containerVerbs,
 	}
 	for dotted, verbs := range byDotted {
 		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,
@@ -450,9 +478,9 @@ func (f *Facts) RolePreviewLookup() domain.TypeVerbLookup {
 // который зависит от каталога, — объявляет ли ЖИВОЙ тип набор глаголов вообще.
 // Повторить вычисление здесь значило бы завести второе место об одном предмете:
 // ровно так роль-администратор однажды давала движку всё, а проекции — ничего.
-func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []string {
+func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string, policy domain.RulePolicy) []string {
 	return authzmap.GrantedVerbsWithDeclared(fgaType, len(f.verbsByFGAType[fgaType]) > 0,
-		authored, typeVerbs)
+		authored, typeVerbs, policy)
 }
 
 // RoleVerbsFromSelectors — проекция «тип × глагол» из тех же селекторов,
@@ -477,10 +505,10 @@ func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []str
 //
 // Проекция роли есть ОБЪЕДИНЕНИЕ глаголов её правил (`GrantSelectors`): одно
 // вычисление на обе стороны, и разойтись роль с правилом не может.
-func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
+func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector, policy domain.RulePolicy) []domain.RoleVerb {
 	seen := make(map[domain.RoleVerb]bool)
 	out := make([]domain.RoleVerb, 0, len(selectors))
-	for _, sel := range f.GrantSelectors(selectors) {
+	for _, sel := range f.GrantSelectors(selectors, policy) {
 		for _, dotted := range sel.ObjectTypes {
 			for _, verb := range sel.Grants[dotted] {
 				pair := domain.RoleVerb{ObjectType: dotted, Verb: verb}
@@ -510,7 +538,11 @@ func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain
 //
 // Возвращаются КОПИИ: вход вызывающему принадлежит, и портить его заполнением на
 // месте нельзя.
-func (f *Facts) GrantSelectors(selectors []domain.RuleSelector) []domain.RuleSelector {
+//
+// policy — политика роли-владельца селекторов ([domain.PolicyOfRole]): от неё
+// зависит, влечёт ли правка удаление (kaname#1006), поэтому карта есть функция
+// отпечатка правила, каталога И владельца роли.
+func (f *Facts) GrantSelectors(selectors []domain.RuleSelector, policy domain.RulePolicy) []domain.RuleSelector {
 	out := make([]domain.RuleSelector, len(selectors))
 	for i, sel := range selectors {
 		grants := make(map[string][]string, len(sel.ObjectTypes))
@@ -522,7 +554,7 @@ func (f *Facts) GrantSelectors(selectors []domain.RuleSelector) []domain.RuleSel
 			if !ok {
 				continue
 			}
-			verbs := f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType))
+			verbs := f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType), policy)
 			if len(verbs) == 0 {
 				continue
 			}
@@ -590,6 +622,39 @@ func (f *Facts) PublicReadChildren(dotted string) []string {
 	for _, ch := range c.children {
 		if ch.Module == c.module {
 			out = append(out, ch.Module+"."+ch.Resource)
+		}
+	}
+	return out
+}
+
+// ContainerVerb — контейнерное действие `verb` ресурса `dotted` (точечное имя
+// каталога) и отношение на родителе, которое оно даёт; ok=false — действие не
+// контейнерное либо ресурса в каталоге нет (kaname#1003, Р2а).
+//
+// Подстановка `*` здесь ничем не является: контейнерное действие называется
+// только поимённо, и вопрос о `*` отвечает «нет».
+func (f *Facts) ContainerVerb(dotted, verb string) (ContainerGrant, bool) {
+	if f == nil {
+		return ContainerGrant{}, false
+	}
+	g, ok := f.containerVerbs[dotted][verb]
+	return g, ok
+}
+
+// ContainerGrants — отношения на родителе, которые правило {module, resources,
+// verbs} даёт ПОИМЁННО названными контейнерными действиями, в порядке ресурсов и
+// действий правила (kaname#1003, Р2а). Подстановка в ресурсе или действии
+// контейнерного действия не достигает: такое правило не даёт ничего.
+func (f *Facts) ContainerGrants(module string, resources, verbs []string) []ContainerGrant {
+	var out []ContainerGrant
+	for _, res := range resources {
+		if res == "*" || module == "*" {
+			continue
+		}
+		for _, v := range verbs {
+			if g, ok := f.ContainerVerb(module+"."+res, v); ok {
+				out = append(out, g)
+			}
 		}
 	}
 	return out

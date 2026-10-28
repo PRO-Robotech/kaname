@@ -36,8 +36,10 @@ package seed
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,7 +63,9 @@ const (
 	// silently DROPPED the needed re-grant (the PK collided with the tombstone) → the
 	// account was left with NO active owner-binding. Keying off a fresh id makes the
 	// re-grant a genuine new ACTIVE row; idempotency rests on the active-grant
-	// partial-UNIQUE access_bindings_active_grant_uniq (WHERE revoked_at IS NULL) via
+	// partial-UNIQUE access_bindings_active_grant_uniq (WHERE revoked_at IS NULL AND
+	// narrowed_at IS NULL — условие сужения, kaname#963; предикат ON CONFLICT обязан
+	// совпадать с условием индекса, иначе вывод индекса отказывает 42P10) via
 	// ON CONFLICT on that partial index — a revoked tombstone is NOT in it, so it never
 	// suppresses a re-grant, while a concurrent double-insert of an ACTIVE grant is a
 	// clean no-op (not a 23505 error). The id stays acb-prefixed (20 chars) so type
@@ -92,7 +96,7 @@ WHERE NOT EXISTS (
      AND b.revoked_at IS NULL
 )
 ON CONFLICT (subject_id, subject_type, role_id, resource_type, resource_id, target_digest)
-  WHERE revoked_at IS NULL
+  WHERE revoked_at IS NULL AND narrowed_at IS NULL
   DO NOTHING`
 
 	// backfillOwnerSubjectsSQL projects the single-subject row for every active
@@ -420,9 +424,9 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		   INSERT INTO kaname.role_rule_selectors
 		     (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 		      container_type, container_arm, container_resource_names, container_match_labels,
-		      verbs_by_type, created_at, updated_at)
+		      verbs_by_type, created_by_subject, created_at, updated_at)
 		   VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb,
-		           kaname.role_selector_verbs_upper_bound($4), now(), now())
+		           kaname.role_selector_verbs_upper_bound($4), $11, now(), now())
 		   ON CONFLICT (role_id, rule_fp) DO UPDATE
 		      SET arm                      = EXCLUDED.arm,
 		          object_types             = EXCLUDED.object_types,
@@ -432,6 +436,7 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		          container_arm            = EXCLUDED.container_arm,
 		          container_resource_names = EXCLUDED.container_resource_names,
 		          container_match_labels   = EXCLUDED.container_match_labels,
+		          created_by_subject       = EXCLUDED.created_by_subject,
 		          verbs_by_type            = CASE
 		              WHEN kaname.role_rule_selectors.object_types IS DISTINCT FROM EXCLUDED.object_types
 		              THEN EXCLUDED.verbs_by_type
@@ -446,6 +451,7 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		 ON CONFLICT (role_id) DO NOTHING`,
 		roleID, sel.RuleFP, selectorArmText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 		containerType, containerArm, containerNames, containerLabels,
+		sel.CreatedBySubject,
 	); err != nil {
 		return fmt.Errorf("sync system role selectors: upsert selector %s/%s: %w", roleID, sel.RuleFP, err)
 	}
@@ -466,8 +472,16 @@ func selectorArmText(a domain.Arm) string {
 
 // BackfillReconcileEngine — the reconcile surface the sweep drives (one binding at
 // a time; the reconciler opens its own writer-tx + per-binding xact-lock).
+//
+// Проход — СВОДЯЩИЙ (`ConvergeBinding`, kaname#1006): набор кортежей члена
+// зависит от вычисления (политика роли, каталог), а вычисление меняется
+// выкаткой; проход доводит до нового вычисления и неизменных членов. Идёт он
+// при старте, после пересчёта проекций ролей, и затем по такту (`RunEvery`,
+// binding_converge.go). Обход по таймеру реконсайлера этого не делает — чтение
+// реестра каждой выдачи платилось бы каждые полминуты
+// (reconcile/emitted_completion.go).
 type BackfillReconcileEngine interface {
-	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
+	ConvergeBinding(ctx context.Context, bindingID domain.AccessBindingID) error
 }
 
 // BackfillStore — the narrow port the runner needs: the process-wide singleton
@@ -493,25 +507,41 @@ type BackfillConfig struct {
 	ChunkSize int
 	// Logger — optional; slog.Default() when nil.
 	Logger *slog.Logger
+	// BindingTimeout — срок ОДНОГО вызова сведения выдачи; ≤0 —
+	// DefaultBindingConvergeTimeout. Без него зависшее ожидание замка выдачи
+	// держало бы замок-одиночку прохода, и проходы всех реплик пропускались бы.
+	BindingTimeout time.Duration
+	// Observer — исход по каждой выдаче (счётчик); nil — не сообщается.
+	Observer BindingConvergeObserver
 }
 
-// BackfillResult — sweep outcome (observability / verify-gate / tests).
+// BackfillResult — перепись одного прохода.
 type BackfillResult struct {
 	// Executed reports whether THIS RunOnce acquired the singleton lock and ran the
 	// sweep (false ⇒ another process was the executor).
 	Executed bool
-	// BindingsReconciled — count of bindings reconciled (Executed=true only).
+	// BindingsExamined — выдач, до которых проход дошёл.
+	BindingsExamined int
+	// BindingsReconciled — выдач, сведённых проходом (с первой попытки либо
+	// повтором).
 	BindingsReconciled int
 	// Chunks — number of listing batches consumed (Executed=true only).
 	Chunks int
+	// BindingsFailed — выдач, не сведённых и после повтора.
+	BindingsFailed int
+	// FailedBindings — их id, в порядке обхода.
+	FailedBindings []domain.AccessBindingID
 }
 
-// BackfillRunner — the singleton single-shot reconcile-backfill sweep.
+// BackfillRunner — сводящий проход по всем действующим выдачам под
+// замком-одиночкой.
 type BackfillRunner struct {
-	engine    BackfillReconcileEngine
-	store     BackfillStore
-	chunkSize int
-	logger    *slog.Logger
+	engine         BackfillReconcileEngine
+	store          BackfillStore
+	chunkSize      int
+	bindingTimeout time.Duration
+	observer       BindingConvergeObserver
+	logger         *slog.Logger
 }
 
 // NewBackfillRunner constructs the runner.
@@ -520,63 +550,121 @@ func NewBackfillRunner(engine BackfillReconcileEngine, store BackfillStore, cfg 
 	if chunk <= 0 {
 		chunk = 500
 	}
+	timeout := cfg.BindingTimeout
+	if timeout <= 0 {
+		timeout = DefaultBindingConvergeTimeout
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &BackfillRunner{engine: engine, store: store, chunkSize: chunk, logger: logger}
+	return &BackfillRunner{
+		engine: engine, store: store, chunkSize: chunk,
+		bindingTimeout: timeout, observer: cfg.Observer, logger: logger,
+	}
 }
 
-// RunOnce executes the reconcile-backfill sweep exactly once across the cluster.
+// RunOnce — один сводящий проход по всем действующим выдачам.
 //
-// It first tries the PROCESS-WIDE singleton advisory lock (non-blocking). If
-// another process holds it, RunOnce returns Executed=false immediately — no
-// double-sweep. Otherwise it holds the lock for the whole sweep and releases it at
-// the end.
+// Замок-одиночка процесса берётся неблокирующе: занят — проход пропускается
+// (Executed=false), его сделает держатель либо следующий такт `RunEvery`.
+// Выдачи обходятся страницами по ключу, каждая — в своей пишущей транзакции
+// (её открывает сверка) и со своим сроком.
 //
-// It walks every ACTIVE binding in keyset-paginated CHUNKS, reconciling each
-// binding in its OWN writer-tx (the engine opens it) — never tens of thousands of
-// INSERTs in one tx.
+// ОТКАЗ ОДНОЙ ВЫДАЧИ НЕ ОСТАНАВЛИВАЕТ ПРОХОД (kaname#1006). У выдачи одному
+// субъекту этот проход — единственный путь, которым снимается лишний кортеж
+// после смены вычисления. Выход на первой ошибке оставлял все выдачи дальше по
+// порядку id с лишним правом до следующего старта, а при детерминированной
+// ошибке (рассинхрон покрытия роли, обрыв по сроку на крупной выдаче) —
+// навсегда. Поэтому отказавшая выдача запоминается, обход идёт дальше, в конце
+// отказавшие повторяются ОДИН раз (транзиентный отказ — взаимная блокировка на
+// горячей выдаче — сходится повтором), а оставшиеся называются в ошибке, в
+// переписи и в счётчике наблюдателя. Перепись печатается на любом исходе
+// исполненного прохода: без неё «ноль сведённых» неотличимо от «ноль
+// прочитанных».
 //
-// The reconcile diff is idempotent and commutative with live
-// forward-materialization (the ledger partial-UNIQUE backstops a racing
-// forward-emit), so re-running RunOnce makes no further changes.
+// Сверка идемпотентна и коммутативна с живой материализацией, поэтому повтор
+// прохода по сошедшейся выдаче ничего не пишет.
 func (r *BackfillRunner) RunOnce(ctx context.Context) (BackfillResult, error) {
 	ok, release, err := r.store.TryAcquireSingletonBackfillLock(ctx)
 	if err != nil {
 		return BackfillResult{}, fmt.Errorf("backfill: acquire singleton lock: %w", err)
 	}
 	if !ok {
-		r.logger.InfoContext(ctx, "backfill: singleton lock held by another process — skipping")
+		r.logger.InfoContext(ctx, "сводящий проход по выдачам пропущен: замок-одиночку держит другой процесс")
 		return BackfillResult{Executed: false}, nil
 	}
 	defer release(ctx)
 
 	res := BackfillResult{Executed: true}
+	var failed []bindingFailure
+	walkErr := r.walk(ctx, &res, &failed)
+
+	// Повтор отказавших — один раз, в том же проходе, после обхода: транзиентный
+	// отказ к этому моменту обычно снят, а детерминированный не задерживает
+	// остальные выдачи.
+	var still []bindingFailure
+	for _, f := range failed {
+		if ctx.Err() != nil {
+			still = append(still, f)
+			continue
+		}
+		if rerr := r.convergeOne(ctx, f.id); rerr != nil {
+			still = append(still, bindingFailure{id: f.id, err: rerr})
+			continue
+		}
+		res.BindingsReconciled++
+		r.observe(BindingConvergeOutcomeConverged)
+	}
+	for _, f := range still {
+		res.FailedBindings = append(res.FailedBindings, f.id)
+		r.observe(BindingConvergeOutcomeFailed)
+	}
+	res.BindingsFailed = len(still)
+
+	var errs []error
+	if walkErr != nil {
+		errs = append(errs, walkErr)
+	}
+	if len(still) > 0 {
+		errs = append(errs, fmt.Errorf("backfill: %d of %d bindings not converged, first %s: %w",
+			len(still), res.BindingsExamined, still[0].id, still[0].err))
+	}
+	perr := errors.Join(errs...)
+	r.logCensus(ctx, res, perr)
+	return res, perr
+}
+
+// walk обходит действующие выдачи страницами по ключу. Отказ выдачи
+// копится в failed и обход не останавливает; останавливают его только отказ
+// чтения страницы (следующую страницу без него не назвать) и отмена прохода.
+func (r *BackfillRunner) walk(ctx context.Context, res *BackfillResult, failed *[]bindingFailure) error {
 	afterID := ""
 	for {
 		chunk, lerr := r.store.ListActiveBindingIDsChunk(ctx, afterID, r.chunkSize)
 		if lerr != nil {
-			return res, fmt.Errorf("backfill: list active bindings (after %q): %w", afterID, lerr)
+			return fmt.Errorf("backfill: list active bindings (after %q): %w", afterID, lerr)
 		}
 		if len(chunk) == 0 {
-			break
+			return nil
 		}
 		res.Chunks++
 		for _, bID := range chunk {
-			if rerr := r.engine.ReconcileBinding(ctx, bID); rerr != nil {
-				return res, fmt.Errorf("backfill: reconcile binding %s: %w", bID, rerr)
+			if cerr := ctx.Err(); cerr != nil {
+				return fmt.Errorf("backfill: sweep cancelled before %s: %w", bID, cerr)
 			}
-			res.BindingsReconciled++
+			res.BindingsExamined++
+			if rerr := r.convergeOne(ctx, bID); rerr != nil {
+				*failed = append(*failed, bindingFailure{id: bID, err: rerr})
+			} else {
+				res.BindingsReconciled++
+				r.observe(BindingConvergeOutcomeConverged)
+			}
 			afterID = string(bID)
 		}
-		// A short chunk means we've reached the end (no need for an extra empty query).
+		// Короткая страница — конец перечня, лишний пустой запрос не нужен.
 		if len(chunk) < r.chunkSize {
-			break
+			return nil
 		}
 	}
-	r.logger.InfoContext(ctx, "backfill: reconcile-sweep complete",
-		slog.Int("bindings_reconciled", res.BindingsReconciled),
-		slog.Int("chunks", res.Chunks))
-	return res, nil
 }
