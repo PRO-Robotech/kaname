@@ -1629,10 +1629,18 @@ CASES.append(Case(
 # никогда: после реализации он равен занятому чужому (посеянному, личному).
 # ===========================================================================
 
+#
+# РЕДАКЦИЯ 7 (kaname#1052, sha256 a3dff53e…3e52): идентификатор, указанный
+# администратором облака, — строка ЗАДАННОЙ формы Р2 (3–30 знаков: строчные
+# буквы, цифры, одиночный дефис; первая буква; резерв (д)). Литералы владельца
+# `dlputi1u`, `godjee` судятся на уровне I (своя база у каждой пробы); здесь —
+# их производные Xl, Yl, Xg, N1, Sq: префикс и 6 знаков `[a-z0-9]` из `runId` и
+# соли сценария, свежие на прогон (выданный идентификатор сгорает навсегда, Р5).
+# Новые кейсы: IAM-ACC-ID-28, 30, 32, 37; изменены 05, 07, 08, 09, 12, 19.
 _AID_TEN = {n: (f"jwtHumanAidTen{n}", f"jwtHumanAidTen{n}StepUp", f"humanAidTen{n}UserId")
-            for n in ("01", "21", "23", "25", "Shared")}
+            for n in ("01", "21", "23", "25", "32", "37", "Shared")}
 _AID_ADM = {n: (f"jwtHumanAidAdm{n}", f"jwtHumanAidAdm{n}StepUp", f"humanAidAdm{n}UserId")
-            for n in ("03", "04", "12", "13", "16", "19", "22", "Shared")}
+            for n in ("03", "04", "12", "13", "16", "19", "22", "28", "30", "32", "37", "Shared")}
 _AID_SEEDED = "acc1a18042d81fb438d6"
 _AID_FORM = "/^acc[0-9abcdefghjkmnpqrstvwxyz]{17}$/"
 _AID_NAME_RESERVED = ("Illegal argument name: the account id form is reserved for the "
@@ -1673,6 +1681,57 @@ def _aid_ids(**salts) -> list:
         "}",
     ]
     return out
+
+
+_AID_STR_FORM = "/^[a-z](?:[a-z0-9]|-(?=[a-z0-9]))*[a-z0-9]$/"
+_AID_STR_ALIEN = "/[ilou]/"
+
+
+def _aid_str_ids(**specs) -> list:
+    """Пред-скрипт: свежие идентификаторы ЗАДАННОЙ формы Р2 из `runId` и соли.
+
+    `specs` — переменная → (префикс, соль); значение — префикс и 6 знаков
+    `[a-z0-9]`. Фикстура сверяет каждое со своей формой (длина 3–30, набор знаков,
+    края, одиночный дефис) и с наличием знака вне алфавита генератора (`i`, `l`,
+    `o`, `u`), иначе роняет себя и запрос не отправляет.
+    """
+    out = [
+        "const _srid = String(pm.environment.get('runId') || '');",
+        "const _SAL = 'abcdefghijklmnopqrstuvwxyz0123456789';",
+        "const _aidStr = (prefix, salt) => {",
+        "  let a = 2166136261 >>> 0;",
+        "  for (const c of _srid + ':' + salt) a = Math.imul(a ^ c.charCodeAt(0), 16777619) >>> 0;",
+        "  let s = prefix;",
+        "  for (let i = 0; i < 6; i++) { a ^= a << 13; a >>>= 0; a ^= a >>> 17; a ^= a << 5; a >>>= 0; s += _SAL[a % 36]; }",
+        "  return s;",
+        "};",
+        "let _strOk = _srid.length > 0;",
+    ]
+    for var, (prefix, salt) in specs.items():
+        out += [
+            f"if (!pm.environment.get({js_str(var)})) pm.environment.set({js_str(var)}, _aidStr({js_str(prefix)}, {js_str(salt)}));",
+            f"{{ const _v = pm.environment.get({js_str(var)}) || '';",
+            f"  _strOk = _strOk && _v.length >= 3 && _v.length <= 30 && {_AID_STR_FORM}.test(_v) && {_AID_STR_ALIEN}.test(_v); }}",
+        ]
+    out += [
+        "if (!_strOk) {",
+        "  pm.test('fixture: runId is seeded and every derived id has the supplied form', "
+        "() => pm.expect(_strOk, 'runId / derived supplied-form ids').to.eql(true));",
+        "  pm.execution.skipRequest();",
+        "}",
+    ]
+    return out
+
+
+def _aid_form_text(value) -> str:
+    """ФОРМА (§5, значения): нарушена форма (а)–(г)."""
+    return ("invalid account id '" + value + "': an account id is 3 to 30 characters of lowercase letters, "
+            "digits and single hyphens, starts with a letter and ends with a letter or digit")
+
+
+def _aid_reserve_text(value) -> str:
+    """РЕЗЕРВ (§5, значения): строка в резерве (д)."""
+    return "invalid account id '" + value + "': this id has a reserved form and cannot be supplied"
 
 
 def _aid_reset(*names) -> list:
@@ -1829,25 +1888,45 @@ CASES.append(Case(
 
 _as, _ass, _asu = _AID_ADM["Shared"]
 _hs, _hss, _hsu = _AID_TEN["Shared"]
+# Таблица AID-05 редакции 7 дословно: значение, род отказа. Каждое отличается от
+# годного близнеца ровно одним фактом; близнецы по сети не шлются (сгорели бы) —
+# их судит AID-06 изнутри (`internal/apps/kaname/api/audit`).
 _AID05_VALUES = (
-    ("upper", "acc7M3K9Q2X5V8B4N6T1"),
-    ("letter-u", "acc7m3k9q2x5v8b4n6tu"),
-    ("letter-i", "acc7m3k9q2x5v8b4n6ti"),
-    ("len-19", "acc7m3k9q2x5v8b4n6t"),
-    ("len-21", "acc7m3k9q2x5v8b4n6t12"),
-    ("foreign-prefix", "prj7m3k9q2x5v8b4n6t1"),
-    ("hyphen-form", "acc-7m3k9q2x5v8b4n6t1"),
-    ("leading-space", " acc7m3k9q2x5v8b4n6t1"),
-    ("cyrillic-a", "acc7m3k9q2x5v8b4n6tа"),
+    ("upper", "Godjee", "form"),
+    ("leading-space", " godjee", "form"),
+    ("trailing-space", "godjee ", "form"),
+    ("underscore", "god_jee", "form"),
+    ("dot", "god.jee", "form"),
+    ("colon", "god:jee", "form"),
+    ("hash", "god#jee", "form"),
+    ("slash", "god/jee", "form"),
+    ("double-hyphen", "god--jee", "form"),
+    ("leading-hyphen", "-godjee", "form"),
+    ("trailing-hyphen", "godjee-", "form"),
+    ("leading-digit", "1godjee", "form"),
+    ("len-2", "go", "form"),
+    ("len-31", "abcdefghijklmnopqrstuvwxyz01234", "form"),
+    ("cyrillic-e", "godjeе", "form"),
+    ("project-form", "prj7m3k9q2x5v8b4n6t1", "reserve"),
+    ("user-form", "usr7m3k9q2x5v8b4n6t1", "reserve"),
+    ("account-hyphen-form", "acc-7m3k9q2x5v8b4n6t1", "reserve"),
+    ("membership-hyphen-form", "mbr-7m3k9q2x5v8b4n6t1", "reserve"),
+    ("seeded-role", "rol000000000sysviewer", "reserve"),
+    ("personal-space", "personal-cloud-godjee", "reserve"),
+    ("unknown-prefix-form", "xyz7m3k9q2x5v8b4n6t1", "reserve"),
+    ("digit-prefix-form", "e9b7m3k9q2x5v8b4n6t1", "reserve"),
+    ("unknown-hyphen-form", "qq-7m3k9q2x5v8b4n6t1", "reserve"),
+    ("long-hyphen-form", "abcdefghijkl-7m3k9q2x5v8b4n6t1", "reserve"),
+    ("personal-space-folded", "pers0nal-c1oud-godjee", "reserve"),
 )
 CASES.append(Case(
     id="IAM-ACC-ID-05",
-    title="AID-05: негодная форма id отвергается синхронно, до операции (девять значений, по одному факту)",
-    classes=["NEG", "BVA"],
+    title="AID-05: негодная форма и резерв отвергаются синхронно, до операции (26 значений, по одному факту)",
+    classes=["NEG", "BVA", "VAL"],
     priority="P0",
     steps=[_aid_sync_refusal(f"create-{tag}", {"id": value, "name": "aid05-{{runId}}"}, _as, 400, 3,
-                             "invalid account id '" + value + "'", field="id")
-           for tag, value in _AID05_VALUES],
+                             _aid_form_text(value) if kind == "form" else _aid_reserve_text(value), field="id")
+           for tag, value, kind in _AID05_VALUES],
 ))
 
 CASES.append(Case(
@@ -1855,8 +1934,8 @@ CASES.append(Case(
     title="AID-07: форма проверяется раньше права — не администратор получает тот же отказ формы",
     classes=["NEG"],
     priority="P1",
-    steps=[_aid_sync_refusal("create-bad-form", {"id": "acc7M3K9Q2X5V8B4N6T1", "name": "aid07-{{runId}}"},
-                             _hs, 400, 3, "invalid account id 'acc7M3K9Q2X5V8B4N6T1'", field="id")],
+    steps=[_aid_sync_refusal("create-bad-form", {"id": "Godjee", "name": "aid07-{{runId}}"},
+                             _hs, 400, 3, _aid_form_text("Godjee"), field="id")],
 ))
 
 # ── право ──────────────────────────────────────────────────────────────────
@@ -1868,7 +1947,7 @@ CASES.append(Case(
     priority="P0",
     steps=[
         _aid_sync_refusal("create-not-admin", {"id": "{{aid08X}}", "name": "aid08-{{runId}}"}, _hs, 403, 7,
-                          "permission denied", pre=[*_aid_reset("aid08X"), *_aid_ids(aid08X="aid08")]),
+                          "permission denied", pre=[*_aid_reset("aid08X"), *_aid_str_ids(aid08X=("dlputi1u-", "aid08"))]),
         _aid_get_absent("admin-sees-no-account", "aid08X", _as),
     ],
 ))
@@ -1894,7 +1973,7 @@ CASES.append(Case(
                           f"pm.environment.get({js_str(_hsu)}));",
                           "pm.test('fixture: exactly one own (personal) account', () => pm.expect(own.length).to.eql(1));",
                           "pm.environment.set('aid09P', own.length === 1 ? own[0].id : '');"]),
-        _aid09_step("create-never-issued", [*_aid_reset("aid09X"), *_aid_ids(aid09X="aid09")], "{{aid09X}}", "aid09BodyX"),
+        _aid09_step("create-never-issued", [*_aid_reset("aid09X"), *_aid_str_ids(aid09X=("dlputi1u-", "aid09"))], "{{aid09X}}", "aid09BodyX"),
         _aid09_step("create-seeded", [], _AID_SEEDED, "aid09BodySeeded"),
         Step(name="create-own-personal", method="POST", path="/iam/v1/accounts", auth=_hs,
              body={"id": "{{aid09P}}", "name": "aid09-{{runId}}"},
@@ -1932,7 +2011,7 @@ CASES.append(Case(
     priority="P0",
     steps=[
         _aid_create("world-i-create", {"id": "{{aid12X}}", "name": "aid12-{{runId}}"}, _a12, None, "aid12Prj",
-                    pre=[*_aid_reset("aid12X", "aid12X2"), *_aid_ids(aid12X="aid12", aid12X2="aid12x2")],
+                    pre=[*_aid_reset("aid12X", "aid12X2"), *_aid_ids(aid12X="aid12"), *_aid_str_ids(aid12X2=("dlputi1u-", "aid12xl"))],
                     extra=_aid_metadata_is("aid12X")),
         poll_operation_until_done(),
         _aid_op_response("world-i-created", _a12, [
@@ -2046,41 +2125,299 @@ CASES.append(Case(
 
 _a19, _a19s, _ = _AID_ADM["19"]
 _AID19_MASK = ("const _mask = (t, id) => String(t).split(id).join('<ID>');")
+_AID_SYS_VIEW = "rol1bda80f2be4d3658e"
+
+
+def _aid_pair(name, method, path, body, var, store, auth, first, extra=()):
+    """Шаг постороннего на путь с идентификатором {{var}}.
+
+    Первый шаг пары запоминает (статус, код, тело с меткой вместо присланного
+    идентификатора), второй сверяет с первым. Нормализуется ровно присланный
+    идентификатор, а не шаблон: шаблон не скрыл бы Xl и задел бы слово `account`.
+    """
+    if first:
+        script = [_AID19_MASK,
+                  "let c = null; try { c = pm.response.json().code; } catch (e) { c = null; }",
+                  f"pm.environment.set({js_str(store)}, JSON.stringify({{s: pm.response.code, c: c, "
+                  f"t: _mask(pm.response.text(), pm.environment.get({js_str(var)}))}}));"]
+    else:
+        script = [_AID19_MASK,
+                  f"const x = JSON.parse(pm.environment.get({js_str(store)}) || '{{}}');",
+                  "let c = null; try { c = pm.response.json().code; } catch (e) { c = null; }",
+                  "pm.test('one (status, code) pair for the existing and the never-issued id', () => "
+                  "pm.expect([pm.response.code, c]).to.eql([x.s, x.c]));",
+                  "pm.test('bodies equal after masking the sent id', () => pm.expect(_mask(pm.response.text(), "
+                  f"pm.environment.get({js_str(var)}))).to.eql(x.t));"]
+    return Step(name=name, method=method, path=path, body=body, auth=auth, test_script=[*script, *extra])
+
+
+def _aid_binding_body(subject_var, scope_var):
+    return {"subjectType": "user", "subjectId": "{{" + subject_var + "}}", "roleId": _AID_SYS_VIEW,
+            "scopeType": "iam.account", "scopeId": "{{" + scope_var + "}}", "target": {"allInScope": {}}}
+
+
 CASES.append(Case(
     id="IAM-ACC-ID-19",
-    title="AID-19: посторонний не отличает идентификатор, заданный администратором, от невыданного",
-    classes=["AUTHZ", "NEG"],
+    title="AID-19: посторонний не отличает заданный идентификатор от невыданного — чтение, лента, "
+          "создание проекта и создание привязки",
+    classes=["AUTHZ", "NEG", "SEC"],
     priority="P0",
     steps=[
-        _aid_create("admin-creates-x", {"id": "{{aid19X}}", "name": "aid19-{{runId}}"}, _a19, None, "aid19Prj",
-                    pre=[*_aid_reset("aid19X", "aid19Y"), *_aid_ids(aid19X="aid19", aid19Y="aid19y")],
+        _aid_create("admin-creates-xl", {"id": "{{aid19X}}"}, _a19, None, "aid19Prj",
+                    pre=[*_aid_reset("aid19X", "aid19Y"),
+                         *_aid_str_ids(aid19X=("dlputi1u-", "aid19"), aid19Y=("dlputi1u-", "aid19y"))],
                     extra=_aid_metadata_is("aid19X")),
         poll_operation_until_done(),
-        _aid_op_response("x-created", _a19, [
-            "pm.test('response.id = X', () => pm.expect(r.id).to.eql(pm.environment.get('aid19X')));"]),
-        _aid_get_account("twin-admin-reads-x", "aid19X", _a19, [
-            "pm.test('id = X', () => pm.expect(j.id).to.eql(pm.environment.get('aid19X')));"]),
-        Step(name="stranger-get-x", method="GET", path="/iam/v1/accounts/{{aid19X}}", auth=_hs,
+        _aid_op_response("xl-created", _a19, [
+            "pm.test('response.id = Xl', () => pm.expect(r.id).to.eql(pm.environment.get('aid19X')));"]),
+        _aid_get_account("twin-admin-reads-xl", "aid19X", _a19, [
+            "pm.test('id = Xl', () => pm.expect(j.id).to.eql(pm.environment.get('aid19X')));"]),
+        Step(name="stranger-get-xl", method="GET", path="/iam/v1/accounts/{{aid19X}}", auth=_hs,
              test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND"),
                           *assert_refusal_message("Account {{aid19X}} not found"),
                           "pm.environment.set('aid19GetX', pm.response.text());"]),
-        Step(name="stranger-get-y", method="GET", path="/iam/v1/accounts/{{aid19Y}}", auth=_hs,
+        Step(name="stranger-get-yl", method="GET", path="/iam/v1/accounts/{{aid19Y}}", auth=_hs,
              test_script=[*assert_status(404), *assert_grpc_code(5, "NOT_FOUND"),
                           *assert_refusal_message("Account {{aid19Y}} not found"), _AID19_MASK,
                           "pm.test('get bodies equal after masking the id', () => pm.expect(_mask(pm.environment.get('aid19GetX'), "
                           "pm.environment.get('aid19X'))).to.eql(_mask(pm.response.text(), pm.environment.get('aid19Y'))));"]),
-        Step(name="stranger-ledger-x", method="GET", path="/iam/v1/accounts/{{aid19X}}/operations:all", auth=_hs,
-             test_script=["pm.environment.set('aid19OpsX', JSON.stringify({s: pm.response.code, "
-                          "c: (() => { try { return pm.response.json().code; } catch (e) { return null; } })(), t: pm.response.text()}));",
-                          "pm.test('stranger is refused the ledger of X', () => pm.expect(pm.response.code).to.not.eql(200));"]),
-        Step(name="stranger-ledger-y", method="GET", path="/iam/v1/accounts/{{aid19Y}}/operations:all", auth=_hs,
-             test_script=[_AID19_MASK,
-                          "const x = JSON.parse(pm.environment.get('aid19OpsX') || '{}');",
-                          "let c = null; try { c = pm.response.json().code; } catch (e) { c = null; }",
-                          "pm.test('ledger answers the same (status, code) pair', () => pm.expect([pm.response.code, c]).to.eql([x.s, x.c]));",
-                          "pm.test('ledger bodies equal after masking the id', () => pm.expect(_mask(x.t, pm.environment.get('aid19X')))"
-                          ".to.eql(_mask(pm.response.text(), pm.environment.get('aid19Y'))));"]),
+        _aid_pair("stranger-ledger-xl", "GET", "/iam/v1/accounts/{{aid19X}}/operations:all", None,
+                  "aid19X", "aid19Ops", _hs, True,
+                  extra=["pm.test('stranger is refused the ledger of Xl', () => pm.expect(pm.response.code).to.not.eql(200));"]),
+        _aid_pair("stranger-ledger-yl", "GET", "/iam/v1/accounts/{{aid19Y}}/operations:all", None,
+                  "aid19Y", "aid19Ops", _hs, False),
+        _aid_pair("stranger-project-in-xl", "POST", "/iam/v1/projects",
+                  {"accountId": "{{aid19X}}", "name": "aid19-{{runId}}"}, "aid19X", "aid19Prjc", _hs, True,
+                  extra=["pm.test('stranger does not create a project in Xl', () => pm.expect(pm.response.code).to.not.eql(200));"]),
+        _aid_pair("stranger-project-in-yl", "POST", "/iam/v1/projects",
+                  {"accountId": "{{aid19Y}}", "name": "aid19-{{runId}}"}, "aid19Y", "aid19Prjc", _hs, False),
+        _aid_pair("stranger-binding-on-xl", "POST", "/iam/v1/accessBindings", _aid_binding_body(_hsu, "aid19X"),
+                  "aid19X", "aid19Ab", _hs, True,
+                  extra=[*assert_status(403), *assert_grpc_code(7, "PERMISSION_DENIED"),
+                         *assert_refusal_message("permission denied")]),
+        _aid_pair("stranger-binding-on-yl", "POST", "/iam/v1/accessBindings", _aid_binding_body(_hsu, "aid19Y"),
+                  "aid19Y", "aid19Ab", _hs, False,
+                  extra=[*assert_status(403), *assert_grpc_code(7, "PERMISSION_DENIED"),
+                         *assert_refusal_message("permission denied")]),
+        # Близнец создания привязки: тот же запрос на Xl под A — Operation, response.scopeId = Xl.
+        Step(name="twin-admin-binding-on-xl", method="POST", path="/iam/v1/accessBindings",
+             body=_aid_binding_body(_hsu, "aid19X"), auth=_a19,
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.accessBindingId", "aid19AbId")]),
+        poll_operation_until_done(),
+        _aid_op_response("twin-binding-created", _a19, [
+            "pm.test('response.scopeId = Xl', () => pm.expect(r.scopeId).to.eql(pm.environment.get('aid19X')));"]),
+        *reliable_delete("twin-admin-revokes-binding", "/iam/v1/accessBindings/{{aid19AbId}}", auth=_a19s,
+                         op_key="aid19Ab"),
         *_aid_teardown("aid19", "aid19X", "aid19Prj", _a19s),
+    ],
+))
+
+# ── заданная форма: аккаунт, проект, жизнь и неповторяемость ──────────────
+
+_a28, _a28s, _a28u = _AID_ADM["28"]
+CASES.append(Case(
+    id="IAM-ACC-ID-28",
+    title="AID-28: администратор облака заводит аккаунт заданной формы и проект в нём",
+    classes=["CRUD", "CONF"],
+    priority="P0",
+    steps=[
+        _aid_create("create-xl", {"id": "{{aid28Xl}}"}, _a28, None, "aid28Prj",
+                    pre=[*_aid_reset("aid28Xl"), *_aid_str_ids(aid28Xl=("dlputi1u-", "aid28"))],
+                    extra=_aid_metadata_is("aid28Xl")),
+        poll_operation_until_done(),
+        _aid_op_response("xl-created", _a28, [
+            "pm.test('response.id = Xl', () => pm.expect(r.id).to.eql(pm.environment.get('aid28Xl')));",
+            "pm.test('response.name = Xl', () => pm.expect(r.name).to.eql(pm.environment.get('aid28Xl')));",
+            f"pm.test('ownerUserId is the admin', () => pm.expect(r.ownerUserId).to.eql(pm.environment.get({js_str(_a28u)})));",
+        ]),
+        _aid_get_account("get-xl", "aid28Xl", _a28, [
+            "pm.test('id = Xl', () => pm.expect(j.id).to.eql(pm.environment.get('aid28Xl')));"]),
+        retry_until_authorized(Step(
+            name="default-project-belongs-to-xl", method="GET", path="/iam/v1/projects/{{aid28Prj}}", auth=_a28,
+            test_script=[*assert_status(200),
+                         "pm.test('project.accountId = Xl', () => pm.expect(pm.response.json().accountId)"
+                         ".to.eql(pm.environment.get('aid28Xl')));"])),
+        Step(name="create-project-in-xl", method="POST", path="/iam/v1/projects", auth=_a28,
+             body={"accountId": "{{aid28Xl}}", "name": "aid28-{{runId}}"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        _aid_op_response("project-created", _a28, [
+            "pm.test('response.accountId = Xl', () => pm.expect(r.accountId).to.eql(pm.environment.get('aid28Xl')));",
+            "pm.test('project id has the generator form', () => pm.expect(r.id).to.match(/^prj[0-9abcdefghjkmnpqrstvwxyz]{17}$/));",
+            "pm.environment.set('aid28Prj2', r.id || '');",
+        ]),
+        Step(name="list-projects-of-xl", method="GET", path="/iam/v1/projects?accountId={{aid28Xl}}&pageSize=1000",
+             auth=_a28,
+             test_script=[*assert_status(200),
+                          "const ids = (pm.response.json().projects || []).map(p => p.id);",
+                          "pm.test('both projects are listed', () => {",
+                          "  pm.expect(ids, pm.response.text()).to.include(pm.environment.get('aid28Prj'));",
+                          "  pm.expect(ids, pm.response.text()).to.include(pm.environment.get('aid28Prj2'));",
+                          "});"]),
+        *reliable_delete("teardown-aid28-project2", "/iam/v1/projects/{{aid28Prj2}}", auth=_a28s, op_key="aid28Prj2"),
+        *_aid_teardown("aid28", "aid28Xl", "aid28Prj", _a28s),
+    ],
+))
+
+_a30, _a30s, _ = _AID_ADM["30"]
+CASES.append(Case(
+    id="IAM-ACC-ID-30",
+    title="AID-30: аккаунт заданной формы работает целиком и после удаления не выдаётся",
+    classes=["CRUD", "NEG", "STATE"],
+    priority="P0",
+    steps=[
+        _aid_create("create-xg", {"id": "{{aid30Xg}}", "name": "aid30-{{runId}}"}, _a30, None, "aid30Prj",
+                    pre=[*_aid_reset("aid30Xg"), *_aid_str_ids(aid30Xg=("godjee-", "aid30"))],
+                    extra=_aid_metadata_is("aid30Xg")),
+        poll_operation_until_done(),
+        _aid_op_response("xg-created", _a30, [
+            "pm.test('response.id = Xg', () => pm.expect(r.id).to.eql(pm.environment.get('aid30Xg')));"]),
+        _aid_get_absent("stranger-before-grant", "aid30Xg", _hs),
+        Step(name="create-service-account-in-xg", method="POST", path="/iam/v1/serviceAccounts", auth=_a30,
+             body={"accountId": "{{aid30Xg}}", "name": "aid30-sa-{{runId}}"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        _aid_op_response("service-account-created", _a30, [
+            "pm.test('sa.accountId = Xg', () => pm.expect(r.accountId).to.eql(pm.environment.get('aid30Xg')));",
+            "pm.environment.set('aid30Sa', r.id || '');"]),
+        Step(name="create-group-in-xg", method="POST", path="/iam/v1/groups", auth=_a30,
+             body={"accountId": "{{aid30Xg}}", "name": "aid30-grp-{{runId}}"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        _aid_op_response("group-created", _a30, [
+            "pm.test('group.accountId = Xg', () => pm.expect(r.accountId).to.eql(pm.environment.get('aid30Xg')));",
+            "pm.environment.set('aid30Grp', r.id || '');"]),
+        Step(name="grant-stranger-view-on-xg", method="POST", path="/iam/v1/accessBindings", auth=_a30,
+             body=_aid_binding_body(_hsu, "aid30Xg"),
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.accessBindingId", "aid30Ab")]),
+        poll_operation_until_done(),
+        _aid_op_response("binding-created", _a30, [
+            "pm.test('binding.scopeId = Xg', () => pm.expect(r.scopeId).to.eql(pm.environment.get('aid30Xg')));"]),
+        Step(name="relabel-xg", method="PATCH", path="/iam/v1/accounts/{{aid30Xg}}", auth=_a30,
+             body={"labels": {"k": "v"}, "updateMask": "labels"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        assert_op_success(),
+        Step(name="ledger-of-xg", method="GET", path="/iam/v1/accounts/{{aid30Xg}}/operations:all?pageSize=1000",
+             auth=_a30,
+             test_script=[*assert_status(200),
+                          "const ops = (pm.response.json().operations || []);",
+                          "pm.test('the creation operation is in the ledger of Xg', () => pm.expect(ops.some(o => "
+                          "(o.metadata || {}).accountId === pm.environment.get('aid30Xg')), pm.response.text()).to.eql(true));"]),
+        Step(name="memberships-of-xg", method="GET", path="/iam/v1/accounts/{{aid30Xg}}/memberships", auth=_a30,
+             test_script=[*assert_status(200),
+                          "pm.test('a list page, not a form refusal', () => pm.expect(pm.response.json(), "
+                          "pm.response.text()).to.be.an('object'));"]),
+        _aid_get_account("stranger-after-grant", "aid30Xg", _hs, [
+            "pm.test('id = Xg', () => pm.expect(j.id).to.eql(pm.environment.get('aid30Xg')));"]),
+        *reliable_delete("revoke-binding", "/iam/v1/accessBindings/{{aid30Ab}}", auth=_a30s, op_key="aid30Ab",
+                         terminal_codes=(200,), require_operation=True),
+        *reliable_delete("delete-group", "/iam/v1/groups/{{aid30Grp}}", auth=_a30s, op_key="aid30Grp",
+                         terminal_codes=(200,), require_operation=True),
+        *reliable_delete("delete-service-account", "/iam/v1/serviceAccounts/{{aid30Sa}}", auth=_a30s,
+                         op_key="aid30Sa", terminal_codes=(200,), require_operation=True),
+        *reliable_delete("delete-default-project", "/iam/v1/projects/{{aid30Prj}}", auth=_a30s, op_key="aid30Prj",
+                         terminal_codes=(200,), require_operation=True),
+        *reliable_delete("delete-xg", "/iam/v1/accounts/{{aid30Xg}}", auth=_a30s, op_key="aid30Acc",
+                         terminal_codes=(200,), require_operation=True),
+        _aid_get_absent("xg-is-gone", "aid30Xg", _a30),
+        _aid_create("create-xg-again", {"id": "{{aid30Xg}}"}, _a30, extra=_aid_metadata_is("aid30Xg")),
+        assert_op_error(6, "ALREADY_EXISTS", msg_text="Account {{aid30Xg}} already exists"),
+    ],
+))
+
+# ── одна строка — один аккаунт ─────────────────────────────────────────────
+
+_t32, _t32s, _ = _AID_TEN["32"]
+_a32, _a32s, _ = _AID_ADM["32"]
+CASES.append(Case(
+    id="IAM-ACC-ID-32",
+    title="AID-32: имя не равно чужому идентификатору, идентификатор не равен чужому имени",
+    classes=["NEG", "CONF"],
+    priority="P0",
+    steps=[
+        _aid_create("tenant-creates-n1", {"name": "{{aid32N1}}"}, _t32, "aid32Ah", "aid32PrjH",
+                    pre=[*_aid_reset("aid32N1", "aid32Xl"),
+                         *_aid_str_ids(aid32N1=("aid32n-", "aid32n"), aid32Xl=("dlputi1u-", "aid32"))]),
+        poll_operation_until_done(),
+        _aid_op_response("n1-created", _t32, [
+            "pm.test('response.name = N1', () => pm.expect(r.name).to.eql(pm.environment.get('aid32N1')));",
+            "pm.environment.set('aid32Ah', r.id || '');"]),
+        _aid_create("admin-creates-xl", {"id": "{{aid32Xl}}", "name": "aid32-{{runId}}"}, _a32, None, "aid32PrjA",
+                    extra=_aid_metadata_is("aid32Xl")),
+        poll_operation_until_done(),
+        _aid_op_response("xl-created", _a32, [
+            "pm.test('response.id = Xl', () => pm.expect(r.id).to.eql(pm.environment.get('aid32Xl')));"]),
+        _aid_create("admin-id-equal-to-a-live-name", {"id": "{{aid32N1}}", "name": "aid32b-{{runId}}"}, _a32,
+                    extra=_aid_metadata_is("aid32N1")),
+        assert_op_error(6, "ALREADY_EXISTS", msg_text="Account {{aid32N1}} already exists"),
+        _aid_create("tenant-name-equal-to-a-live-id", {"name": "{{aid32Xl}}"}, _t32),
+        assert_op_error(6, "ALREADY_EXISTS", msg_text="Account with name {{aid32Xl}} already exists"),
+        Step(name="tenant-renames-to-a-live-id", method="PATCH", path="/iam/v1/accounts/{{aid32Ah}}", auth=_t32,
+             body={"name": "{{aid32Xl}}", "updateMask": "name"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        assert_op_error(6, "ALREADY_EXISTS", msg_text="Account with name {{aid32Xl}} already exists"),
+        _aid_get_account("tenant-account-unchanged", "aid32Ah", _t32, [
+            "pm.test('name = N1', () => pm.expect(j.name).to.eql(pm.environment.get('aid32N1')));"], fresh=False),
+        _aid_get_account("xl-unchanged", "aid32Xl", _a32, [
+            "pm.test('name unchanged', () => pm.expect(j.name).to.eql('aid32-' + pm.environment.get('runId')));"],
+            fresh=False),
+        # Близнец отказа на правке: та же правка со свободным именем N1x.
+        Step(name="twin-tenant-renames-to-a-free-name", method="PATCH", path="/iam/v1/accounts/{{aid32Ah}}",
+             auth=_t32, body={"name": "{{aid32N1}}x", "updateMask": "name"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        assert_op_success(),
+        _aid_get_account("tenant-renamed", "aid32Ah", _t32, [
+            "pm.test('name = N1x', () => pm.expect(j.name).to.eql(pm.environment.get('aid32N1') + 'x'));"], fresh=False),
+        *_aid_teardown("aid32h", "aid32Ah", "aid32PrjH", _t32s),
+        *_aid_teardown("aid32a", "aid32Xl", "aid32PrjA", _a32s),
+    ],
+))
+
+_t37, _t37s, _t37u = _AID_TEN["37"]
+_a37, _a37s, _a37u = _AID_ADM["37"]
+CASES.append(Case(
+    id="IAM-ACC-ID-37",
+    title="AID-37: строку, занятую чужим именем, администратор облака освобождает правкой имени и заводит аккаунт",
+    classes=["NEG", "AUTHZ", "STATE"],
+    priority="P0",
+    steps=[
+        _aid_create("tenant-takes-sq-as-a-name", {"name": "{{aid37Sq}}"}, _t37, "aid37Ah", "aid37PrjH",
+                    pre=[*_aid_reset("aid37Sq", "aid37Fresh"),
+                         *_aid_str_ids(aid37Sq=("dlputi1u-q", "aid37"), aid37Fresh=("dlputi1u-q", "aid37fresh"))]),
+        poll_operation_until_done(),
+        _aid_op_response("ah-created", _t37, [
+            "pm.test('response.name = Sq', () => pm.expect(r.name).to.eql(pm.environment.get('aid37Sq')));",
+            "pm.environment.set('aid37Ah', r.id || '');"]),
+        _aid_create("admin-sq-is-taken", {"id": "{{aid37Sq}}"}, _a37, extra=_aid_metadata_is("aid37Sq")),
+        assert_op_error(6, "ALREADY_EXISTS", msg_text="Account {{aid37Sq}} already exists"),
+        _aid_pair("stranger-renames-ah", "PATCH", "/iam/v1/accounts/{{aid37Ah}}",
+                  {"name": "aid37r-{{runId}}", "updateMask": "name"}, "aid37Ah", "aid37Rn", _hs, True,
+                  extra=["pm.test('stranger does not rename a foreign account', () => pm.expect(pm.response.code).to.not.eql(200));"]),
+        _aid_pair("stranger-renames-a-never-issued-id", "PATCH", "/iam/v1/accounts/{{aid37Fresh}}",
+                  {"name": "aid37r-{{runId}}", "updateMask": "name"}, "aid37Fresh", "aid37Rn", _hs, False),
+        Step(name="admin-renames-ah", method="PATCH", path="/iam/v1/accounts/{{aid37Ah}}", auth=_a37,
+             body={"name": "aid37r-{{runId}}", "updateMask": "name"},
+             test_script=[*assert_status(200), *assert_iam_operation_envelope(), *save_from_response("j.id", "opId")]),
+        poll_operation_until_done(),
+        _aid_op_response("ah-renamed", _a37, [
+            "pm.test('response.id = Ah', () => pm.expect(r.id).to.eql(pm.environment.get('aid37Ah')));",
+            "pm.test('response.name is the new name', () => pm.expect(r.name).to.eql('aid37r-' + pm.environment.get('runId')));",
+            f"pm.test('ownerUserId is still the tenant', () => pm.expect(r.ownerUserId).to.eql(pm.environment.get({js_str(_t37u)})));",
+        ]),
+        _aid_get_account("tenant-reads-renamed-ah", "aid37Ah", _t37, [
+            "pm.test('tenant still reads Ah, under the new name', () => pm.expect(j.name).to.eql('aid37r-' + pm.environment.get('runId')));"],
+            fresh=False),
+        _aid_create("admin-creates-sq", {"id": "{{aid37Sq}}"}, _a37, None, "aid37PrjA", extra=_aid_metadata_is("aid37Sq")),
+        poll_operation_until_done(),
+        _aid_op_response("sq-created", _a37, [
+            "pm.test('response.id = Sq', () => pm.expect(r.id).to.eql(pm.environment.get('aid37Sq')));",
+            "pm.test('response.name = Sq', () => pm.expect(r.name).to.eql(pm.environment.get('aid37Sq')));",
+            f"pm.test('ownerUserId is the admin', () => pm.expect(r.ownerUserId).to.eql(pm.environment.get({js_str(_a37u)})));",
+        ]),
+        *_aid_teardown("aid37a", "aid37Sq", "aid37PrjA", _a37s),
+        *_aid_teardown("aid37h", "aid37Ah", "aid37PrjH", _t37s),
     ],
 ))
 

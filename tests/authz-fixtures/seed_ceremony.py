@@ -162,7 +162,9 @@ ADMISSION_SLOTS = ("AccCrud", "AccBvaMin", "AccBvaMax", "AccLsop", "AccRsv",
                    # Арендаторы полосы «идентификатор указан при создании» (kaname#549,
                    # приёмка account-id-may-be-supplied-at-create §6.2): по человеку на
                    # заводящий сценарий и один общий для незаводящих.
-                   "AidTen01", "AidTen21", "AidTen23", "AidTen25", "AidTenShared")
+                   "AidTen01", "AidTen21", "AidTen23", "AidTen25", "AidTenShared",
+                   # Редакция 7 (kaname#1052, §6.2): по человеку на заводящие AID-32 и AID-37.
+                   "AidTen32", "AidTen37")
 
 # СЛОТЫ УХОДЯЩЕГО АРЕНДАТОРА (kaname#664, приёмка
 # own-account-and-identity-are-removed-in-order, S4 и близнецы KN664-11/36).
@@ -182,6 +184,8 @@ LEAVE_SLOTS = ("Kn664Leave", "Kn664Cloud")
 # Правило слотов то же — один заводящий сценарий, один человек.
 ADMIN_SLOTS = ("AidAdm03", "AidAdm04", "AidAdm12", "AidAdm13", "AidAdm16",
                "AidAdm19", "AidAdm22", "AidAdmShared",
+               # Редакция 7 (kaname#1052, §6.2): администраторы заводящих AID-28, 30, 32, 37.
+               "AidAdm28", "AidAdm30", "AidAdm32", "AidAdm37",
                # Администратор облака публичного набора администраторов кластера
                # (`cases/kaname-cluster-admins.py`, kaname#661, приёмка ADM-CA §4):
                # `h-admin/1` и `h-admin/2` — один человек двумя уровнями.

@@ -363,7 +363,7 @@ CASES.append(Case(
         Step(
             name="sia-discriminating-refusal",
             method="GET",
-            path="/iam/v1/accessBindings?pageSize=100&accountId=not-an-id",
+            path="/iam/v1/accessBindings?pageSize=100&accountId=not_an_id",
             auth="jwtPureNoBindings",
             test_script=[
                 *assert_status(400),
@@ -405,22 +405,22 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-AB-SIA-12-MALFORMED-NEG",
-    title="IAM-AB-SIA-12: ?accountId=not-an-id → 400 INVALID_ARGUMENT, тело плоское "
-          "\"invalid account id 'not-an-id'\" — производитель ВЛАДЕЛЕЦ (фильтр `List`)",
+    title="IAM-AB-SIA-12: ?accountId=not_an_id → 400 INVALID_ARGUMENT, тело плоское "
+          "\"invalid account id 'not_an_id'\" — производитель ВЛАДЕЛЕЦ (фильтр `List`)",
     classes=["NEG", "VAL"],
     priority="P0",
     steps=[
         Step(
             name="sia-malformed-account-id",
             method="GET",
-            path="/iam/v1/accessBindings?pageSize=100&accountId=not-an-id",
+            path="/iam/v1/accessBindings?pageSize=100&accountId=not_an_id",
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
                 "pm.test('контракт-тон сообщения', () =>",
                 "  pm.expect(pm.response.json().message, pm.response.text())",
-                "    .to.eql(\"invalid account id 'not-an-id'\"));",
+                "    .to.eql(\"invalid account id 'not_an_id'\"));",
             ],
         ),
         # ТОТ ЖЕ ВХОД У `ListByAccount` ДАЁТ ДРУГОЕ ТЕЛО, И ПРОИЗВОДИТЕЛЬ У НЕГО
@@ -484,14 +484,14 @@ CASES.append(Case(
         Step(
             name="sia-malformed-account-empty-grant",
             method="GET",
-            path="/iam/v1/accessBindings?accountId=not-an-id",
+            path="/iam/v1/accessBindings?accountId=not_an_id",
             auth="jwtPureNoBindings",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
                 "pm.test('пустой грант не превращает 400 в 200 []', () =>",
                 "  pm.expect(pm.response.json().message, pm.response.text())",
-                "    .to.eql(\"invalid account id 'not-an-id'\"));",
+                "    .to.eql(\"invalid account id 'not_an_id'\"));",
             ],
         ),
         # ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: тот же вызывающий с законным входом получает

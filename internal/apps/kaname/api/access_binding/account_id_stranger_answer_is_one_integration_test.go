@@ -839,7 +839,9 @@ func aid36RequireClassAnswer(t *testing.T, r aid36Row, out proto.Message, err er
 			require.False(t, out.(*iamv1.AuthorizeCheckResponse).GetAllowed(), "%s: посторонний получил allowed", r.method)
 		case m("AuthorizeService", "BatchCheck"):
 			require.NoError(t, err, "%s: %s", r.method, ans)
-			for _, res := range out.(*iamv1.BatchAuthorizeCheckResponse).GetResults() {
+			resps := out.(*iamv1.BatchAuthorizeCheckResponse).GetResponses()
+			require.Len(t, resps, 1, "%s: ответов не по числу вопросов", r.method)
+			for _, res := range resps {
 				require.False(t, res.GetAllowed(), "%s: посторонний получил allowed", r.method)
 			}
 		default:
