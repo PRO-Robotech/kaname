@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 902
+Всего кейсов: 903
 
 ## Перепись по модулям
 
@@ -54,7 +54,7 @@
 | `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
-| `cases/iam-project.py` | 35 |
+| `cases/iam-project.py` | 36 |
 | `cases/iam-rbac-rules-labels.py` | 2 |
 | `cases/iam-rbac-scope-grant.py` | 2 |
 | `cases/iam-rbac-subjects.py` | 14 |
@@ -668,7 +668,7 @@
 - `CONF-G-03-catalog-retired-successor`
 - `NEG-G-02-catalog-anonymous-unauthenticated`
 
-## `cases/iam-project.py` — 35 кейсов
+## `cases/iam-project.py` — 36 кейсов
 
 > Case-set для ProjectService.
 
@@ -703,6 +703,7 @@
 - `IAM-PRJ-DL-NEG-NOTFOUND`
 - `IAM-PRJ-DL-NEG-HAS-CHILDREN`
 - `IAM-PRJ-DL-AUTHZ-ANON-DENY`
+- `IAM-PRJ-DL-NEG-MALFORMED-PREFIX`
 - `IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST`
 - `IAM-PRJ-DL-STATE-REFUSAL-KEEPS-GRANTS`
 - `IAM-PRJ-LSOP-CRUD-OK`
