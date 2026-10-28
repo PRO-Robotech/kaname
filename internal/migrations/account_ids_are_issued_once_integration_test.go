@@ -43,6 +43,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // accountIDRegistryMigration — файл, заводящий реестр выданных идентификаторов,
