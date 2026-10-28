@@ -900,9 +900,13 @@ func aid36Twin(t *testing.T, w *aid36World, r aid36Row, asO, asA context.Context
 		}
 		// Отказ формы — не ответ о праве и существовании: путь, не принявший F,
 		// близнецом строки не служит.
+		// Якорь области привязки отвечает отказом домена «Illegal argument scope …
+		// resource_id=<X>» (`domain/access_binding.go:164-167`) — это тоже отказ формы.
 		if st.Code() == codes.InvalidArgument {
-			require.False(t, strings.HasPrefix(st.Message(), "invalid account id "),
-				"%s: близнец отвергнут формой идентификатора аккаунта: %s", r.method, ans)
+			msg := st.Message()
+			byForm := strings.HasPrefix(msg, "invalid account id ") ||
+				(strings.HasPrefix(msg, "Illegal argument scope ") && strings.HasSuffix(msg, " resource_id="+aid36Foreign))
+			require.False(t, byForm, "%s: близнец отвергнут формой идентификатора аккаунта: %s", r.method, ans)
 		}
 		switch r.method {
 		case m("AuthorizeService", "Check"):
