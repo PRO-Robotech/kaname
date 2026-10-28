@@ -87,25 +87,26 @@ func TestNewMigrationOutranksEveryAppliedOne(t *testing.T) {
 			root, check.MigrationsDirRel)
 	}
 
-	// Состав ДОБАВЛЕННОГО. Ствол разрешается ПОСЛЕ переписи дерева: его
-	// недостижимость есть отказ предпосылки и обязана прийти отдельно от неё,
-	// а не вместо неё.
-	base, ok := trunkRef(root)
-	if !ok {
+	// Состав ДОБАВЛЕННОГО и базы сравнения. Они разрешаются ПОСЛЕ переписи
+	// дерева: их недостижимость есть отказ предпосылки и обязана прийти
+	// отдельно от неё, а не вместо неё.
+	run, notCreated, premise := runMonotonicGate(t, root, dirFiles, os.Getenv)
+	if premise != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", premise)
+	}
+	if notCreated != "" {
 		audit := check.AuditMigrationVersions(dirFiles, nil)
 		t.Logf("перепись дерева: %s", audit.Census)
-		t.Skipf("УСЛОВИЕ НЕ СОЗДАНО (не находка): ствол %s в этом клоне не разрешается — "+
-			"состав ДОБАВЛЕННОГО установить нечем. Перепись дерева выше снята и остаётся "+
-			"верной; о находках вердикта НЕТ ни зелёного, ни красного", trunkRefName)
+		t.Skipf("УСЛОВИЕ НЕ СОЗДАНО (не находка): %s — состав ДОБАВЛЕННОГО установить "+
+			"нечем. Перепись дерева выше снята и остаётся верной; о находках вердикта НЕТ "+
+			"ни зелёного, ни красного", notCreated)
 	}
-	added := sortedKeys(addedMigrationFiles(t, root, base))
-
-	audit := check.AuditMigrationVersions(dirFiles, added)
+	audit := run.audit
 
 	// Исход печатается ВСЕГДА и ОТДЕЛЬНО от числа находок: «находок ноль» само
 	// по себе не отличает гейт, которому нечего сказать, от гейта, который
 	// ничего не нашёл.
-	t.Logf("относительно %s: исход — %s; %s", base, audit.Outcome, audit.Census)
+	t.Logf("%s: исход — %s; %s", run.said, audit.Outcome, audit.Census)
 	// «Нет предмета» ЗЕЛЁНЫМ не бывает. У исхода [check.MigrationVersionNoCorpus]
 	// в ЖИВОМ дереве причина одна: дом миграций переехал, а гейт стережёт
 	// координату, которой больше нет. Находок при этом ноль — и ровно поэтому
@@ -139,6 +140,33 @@ func TestNewMigrationOutranksEveryAppliedOne(t *testing.T) {
 			"объявлены одним местом: docs/engineering/architecture/migration-version-namespace.md",
 			len(audit.Findings), strings.Join(audit.Findings, "\n  "))
 	}
+}
+
+// monotonicRun — вердикт гейта вместе с тем, С ЧЕМ сравнивали.
+type monotonicRun struct {
+	audit check.MigrationVersionAudit
+	// said — база сравнения словами; перепись печатает её всегда.
+	said string
+}
+
+// runMonotonicGate — ВЕСЬ путь гейта от окружения прогона до вердикта.
+//
+// Вынесен одной функцией намеренно: инъекция на синтетическом репозитории
+// зовёт ТОТ ЖЕ путь, что живой гейт, — выбор базы, состав добавленного и
+// вердикт, — а не свою копию любого из звеньев.
+//
+// Второй результат — «условие не создано» словами, третий — отказ предпосылки.
+func runMonotonicGate(t *testing.T, root string, dirFiles []string, _ func(string) string) (monotonicRun, string, error) {
+	t.Helper()
+	base, ok := trunkRef(root)
+	if !ok {
+		return monotonicRun{}, "ствол " + trunkRefName + " в этом клоне не разрешается", nil
+	}
+	added := sortedKeys(addedMigrationFiles(t, root, base))
+	return monotonicRun{
+		audit: check.AuditMigrationVersions(dirFiles, added),
+		said:  "относительно " + base,
+	}, "", nil
 }
 
 // historicalOutOfOrder — сколько раз в ИСТОРИИ СТВОЛА миграция вводилась с
