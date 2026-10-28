@@ -61,19 +61,9 @@ func newS7World(t *testing.T, sc string, keyed, rolesI bool) *s7World {
 	t.Helper()
 	p := newPCRWorld(t)
 	w := &s7World{pcrWorld: p, keyed: keyed}
-	if rolesI {
-		// Роль И2 сужает тип реестров до реестра X МЕТКАМИ (kaname#965: манифест
-		// модуля не называет объектов), поэтому X несёт метку её селектора —
-		// повторной регистрацией службы-владельца, как владелец сообщает метки.
-		p.labelRegistry(pcrX, publicreadfixture.RegistryXLabels())
-	}
 
 	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
 	require.NoError(t, err, "фикстура П6")
-	if rolesI {
-		doc, err = publicreadfixture.WithNamedRoles(doc)
-		require.NoError(t, err, "фикстура П7: роли И")
-	}
 	keyless := doc
 	_, err = manifest.Load(keyless)
 	require.NoError(t, err, "контроль фикстуры П7: близнец без ключа S7 обязан загружаться")
@@ -87,6 +77,12 @@ func newS7World(t *testing.T, sc string, keyed, rolesI bool) *s7World {
 	if err != nil {
 		t.Fatalf("%s: доставка П7 — загрузчик отверг манифест registry с ключом %s (предмета S7 нет): %v",
 			sc, publicreadfixture.ClassGrantsKey, err)
+	}
+	if rolesI {
+		// Роли И — строки, доставленные до запрета имён в манифесте модуля
+		// (kaname#965): загрузчик их отверг бы, поэтому они дописываются в
+		// разобранный документ и уходят применителю напрямую (как ND-05 (б)).
+		m.Roles = append(m.Roles, namedRolesI()...)
 	}
 	p.applyDelivered(sc+": доставка П7", m)
 	p.delivered = true
@@ -341,4 +337,37 @@ func TestClassGrantsOnContainers_SC81_Twin_KeylessModuleAdmitsTheWholeScopeGrant
 		w.refusedWithoutOperation(asUser(w.ctx, w.usrK), grantWO(classSubject("authenticated"), publicreadfixture.ReaderRoleID),
 			codes.InvalidArgument, s7TrunkRule, "SC-81 близнец строки «якорь»: правило кластера")
 	})
+}
+
+// namedRolesI — роли И и И2 приёмки (редакция 17, SC-81) структурой манифеста:
+// роли модуля registry яруса кластера, сужённые именами. И — одно правило над
+// `repositories` с `resourceNames: [app]`, И2 — одно правило над `registries` с
+// `resourceNames: [reg00000000000000001]` (реестр X).
+//
+// Текстом документа они не доставляются: манифест модуля конкретных объектов
+// не называет (kaname#965), и загрузчик такую роль отвергает. Строка такой роли
+// остаётся возможной как доставленная до запрета, а ворота S7 судят выдачу ею
+// по-прежнему — ровно это и утверждает SC-81.
+func namedRolesI() []manifest.Role {
+	tier := &manifest.Tier{TierType: "iam.cluster", TierID: "cluster_root"}
+	return []manifest.Role{
+		{
+			ID:          publicreadfixture.NamedRoleIName,
+			Description: "Пробная роль S7: чтение репозиториев, сужено именами.",
+			Tier:        tier,
+			Rules: []manifest.Rule{{
+				Module: "registry", Resources: []string{"repositories"}, Classes: []string{"get"},
+				ResourceNames: []string{"app"},
+			}},
+		},
+		{
+			ID:          publicreadfixture.NamedRoleI2Name,
+			Description: "Пробная роль S7: чтение реестра X, сужено именами.",
+			Tier:        tier,
+			Rules: []manifest.Rule{{
+				Module: "registry", Resources: []string{"registries"}, Classes: []string{"get"},
+				ResourceNames: []string{pcrX},
+			}},
+		},
+	}
 }
