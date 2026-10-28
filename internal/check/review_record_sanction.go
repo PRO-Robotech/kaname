@@ -152,12 +152,16 @@ type reviewSanctionDoc struct {
 	Event   *struct {
 		Status string `yaml:"status"`
 	} `yaml:"event"`
-	EffectiveApproval *yaml.Node `yaml:"effective_approval"`
+	// EffectiveApproval — значением, а не указателем: только поле типа
+	// yaml.Node получает узел разбора как есть; указатель на него декодер
+	// разворачивает и раскладывает отображение по полям самого Node, теряя
+	// содержимое блока.
+	EffectiveApproval yaml.Node `yaml:"effective_approval"`
 }
 
 // issuedForm — форма утверждения о санкции; пустая строка — `issued: true`.
 func issuedForm(ea *yaml.Node) string {
-	if ea == nil || ea.Tag == "!!null" {
+	if ea == nil || ea.Kind == 0 || ea.Tag == "!!null" {
 		return ReviewSanctionBlockAbsent
 	}
 	if ea.Kind != yaml.MappingNode {
@@ -242,7 +246,7 @@ func AuditReviewRecordSanction(root, dir string) ([]ReviewSanctionFinding, Revie
 				return nil, census, fmt.Errorf("%s: event.status %q вне закрытого словаря — "+
 					"исполнено ли событие, неизвестно", rel, status)
 			}
-			form := issuedForm(doc.EffectiveApproval)
+			form := issuedForm(&doc.EffectiveApproval)
 			performed := status == reviewEventStatusPerformed
 			if !performed || !sanctioning {
 				if form == "" {
