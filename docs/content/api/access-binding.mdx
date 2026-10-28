@@ -671,7 +671,7 @@ API отвечает и будет отвечать, на второй — **н�
     <tr><td>Get/Delete несуществующей привязки</td><td><code>NOT_FOUND</code></td><td><code>"AccessBinding &lt;id&gt; not found"</code></td></tr>
     <tr><td>Create дубля (same subject+role+scope)</td><td>— (idempotent)</td><td>Возвращает существующую привязку</td></tr>
     <tr><td><code>Revoke</code> / <code>Delete</code> привязки с <code>deletionProtection=true</code></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала снять флаг через <code>Update</code></td></tr>
-    <tr><td>Create без grant-authority на scope</td><td><code>PERMISSION_DENIED</code></td><td>Нужен owner/admin на объекте scope</td></tr>
+    <tr><td>Create без grant-authority на scope</td><td><code>PERMISSION_DENIED</code></td><td>Нужен owner/admin на объекте scope. Тот же ответ <code>"permission denied"</code> — и когда аккаунта или проекта области нет: тому, кто права выдачи не имеет, несуществующая область неотличима от чужой</td></tr>
     <tr><td>Пустой / &gt;32 <code>subjects[]</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument subjects (must be 1..32)"</code></td></tr>
     <tr><td>Immutable-поле (role/subjects/scope) в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td>Мутабельны только <code>deletion_protection</code> и <code>labels</code></td></tr>
     <tr><td><code>scopeType</code> пуст или не задан (в т.ч. когда прислан снятый <code>scopeRef</code>)</td><td><code>INVALID_ARGUMENT</code></td><td><code>"scopeType is required"</code></td></tr>

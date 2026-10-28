@@ -231,12 +231,10 @@ message CreateAccountRequest {
   // `acc7m3k9q2x5v8b4n6t1`) satisfies all of them. No normalisation: case is not
   // folded, spaces are not trimmed. A value outside the form is a sync
   // INVALID_ARGUMENT on field `id`, before the Operation is minted and before any
-  // rights question, with one of two messages:
-  //   "invalid account id '<id>': an account id is 3 to 30 characters of
-  //    lowercase letters, digits and single hyphens, starts with a letter and
-  //    ends with a letter or digit";
-  //   "invalid account id '<id>': this id has a reserved form and cannot be
-  //    supplied".
+  // rights question, with one of two messages: "invalid account id '<id>': an
+  // account id is 3 to 30 characters of lowercase letters, digits and single
+  // hyphens, starts with a letter and ends with a letter or digit" or "invalid
+  // account id '<id>': this id has a reserved form and cannot be supplied".
   //
   // Only a holder of `system_admin` on the cluster may set it; anyone else gets
   // a sync PERMISSION_DENIED "permission denied", and an unreachable rights
