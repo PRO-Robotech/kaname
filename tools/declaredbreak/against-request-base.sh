@@ -53,7 +53,7 @@ if [ "$#" -ne 2 ]; then
 fi
 adjudicator="$1"
 ledger="$2"
-base=main
+base="${GITHUB_BASE_REF:-main}"
 head_sha="${HEAD_SHA:-}"
 root="$(pwd)"
 
