@@ -134,7 +134,7 @@ else
         exit 2
     fi
     base_sha="$(git rev-parse "refs/remotes/origin/$base")" || exit 2
-    base_how="вершина ветки; событие ${event:-не названо}, имя — вход base, пусто — main"
+    base_how="вершина ветки в момент шага; событие ${event:-не названо}; имя — BASE_REF, пусто — main"
 fi
 echo "база сравнения: $base @$base_sha ($base_how) · голова @$head_sha"
 
