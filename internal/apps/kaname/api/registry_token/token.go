@@ -380,6 +380,16 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 		u.observeKind(OutcomeBasicPrincipalKindRefused)
 		return IssueOutput{}, fmt.Errorf("%w: %w", ErrUnauthenticated, ErrBasicPrincipalKindNotAccepted)
 	}
+	if cred.CredentialID == "" {
+		// Авторитет признал удостоверение и не назвал его строки: токен,
+		// выпущенный так, отзыв этого удостоверения не снял бы — ключа отсечки в
+		// нём нет (kaname#947). Это неисправность авторитета, а не вина
+		// предъявителя, поэтому исход — недоступность издателя, а не отказ в
+		// удостоверении; выпуск без ключа отсечки — не исход вовсе.
+		return IssueOutput{}, fmt.Errorf(
+			"%w: the basic-credential authority accepted a credential without naming its row — "+
+				"a token minted for it could not be revoked by revoking the credential", ErrIssuerUnavailable)
+	}
 
 	// Адресат решается ПОСЛЕ проверки: перечень адресатов — сведение о посадке,
 	// и отвечать им неаутентифицированному незачем. Сужения на самом секрете
@@ -394,6 +404,9 @@ func (u *IssueRegistryTokenUseCase) executeBasic(ctx context.Context, in IssueIn
 		Subject:  cred.PrincipalID,
 		Audience: service,
 		Scope:    u.cfg.Scope,
+		// Ключ отсечки: отзыв ЭТОГО удостоверения снимает выданный по нему
+		// токен сразу, а не по сроку (kaname#947).
+		CredentialID: cred.CredentialID,
 		// Материала привязки у предъявительского вида нет НИКОГДА, и пустое
 		// здесь — объявление, а не пропуск.
 	})
@@ -448,6 +461,9 @@ func (u *IssueRegistryTokenUseCase) executeKeyMaterialInWindow(ctx context.Conte
 		Subject:  cred.Subject,
 		Audience: service,
 		Scope:    u.cfg.Scope,
+		// Ключ отсечки — строка реестра ключей, которой назвался предъявитель:
+		// её снятие пишет отсечку этим идентификатором (kaname#947).
+		CredentialID: cred.ClientID,
 		// Материал привязки — ровно тот, что предъявлен транспортом.
 		ConfirmationX5TS256: in.ConfirmationX5TS256,
 	})

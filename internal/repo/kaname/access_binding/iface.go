@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 )
 
@@ -167,6 +168,10 @@ type ReaderIface interface {
 	// materialization window (Operation.done is durability, NOT visibility — ban
 	// #9). It never gates a write.
 	ListMaterializedAtForBindings(ctx context.Context, bindingIDs []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error)
+
+	// GrantDelegations — читатель делегирований права выдавать на ТОЙ ЖЕ
+	// транзакции (kaname#986): делегирование — часть домена выдач.
+	GrantDelegations() grant_delegation.ReaderIface
 }
 
 type WriterIface interface {
@@ -329,6 +334,11 @@ type WriterIface interface {
 	// sync) and subject_change_outbox (cache invalidation), which are
 	// operational side-channels, not a compliance log.
 	EmitAuditEvent(ctx context.Context, ev AuditEvent) error
+
+	// GrantDelegationsW — писатель делегирований на ТОЙ ЖЕ транзакции
+	// (kaname#986): отзыв делегирования и отзыв выдач по нему — одна транзакция,
+	// запись выдачи делегатом держит строку делегирования тем же писателем.
+	GrantDelegationsW() grant_delegation.WriterIface
 }
 
 // AuditEventType — canonical audit_outbox event_type for AccessBinding

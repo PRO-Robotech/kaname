@@ -121,6 +121,44 @@ type Role struct {
 	// порождённому сборкой, неотличим от честного превью, поэтому «нечем
 	// ответить» обязано быть отказом, а не тихим запасным путём.
 	TypeVerbs TypeVerbLookup
+
+	// HeldNames — НЕ ХРАНИТСЯ. Ключи объектов, названные в `resourceNames`
+	// правил, которые на приёме роли были зарегистрированы (Р8 приёмки
+	// `unregistration-revokes-its-grants.md`). Запись роли берёт на каждом замок
+	// строки регистрации и отказывает, если строки уже нет: роль, принятая до
+	// снятия и записанная после, снятого ключа не называет (URG-26).
+	HeldNames []RuleNameHold
+}
+
+// RuleNameHold — ключ объекта, названный правилом `Rule` (индекс в `Rules`).
+type RuleNameHold struct {
+	Rule int
+	Ref  ResourceRef
+}
+
+// NamedKeys — каждый ключ объекта, который правила роли называют в
+// `resourceNames`, вместе с индексом правила: тип — точечное имя
+// `<module>.<resource>`, вложенное правило берёт модуль владельца. Подстановка
+// конкретного типа не называет.
+func (rs Rules) NamedKeys() []RuleNameHold {
+	var out []RuleNameHold
+	add := func(i int, module string, resources, names []string) {
+		for _, res := range resources {
+			if res == wildcard {
+				continue
+			}
+			for _, n := range names {
+				out = append(out, RuleNameHold{Rule: i, Ref: ResourceRef{Type: module + "." + res, ID: n}})
+			}
+		}
+	}
+	for i, r := range rs {
+		add(i, r.Module, r.Resources, r.ResourceNames)
+		for _, c := range r.Children {
+			add(i, r.Module, c.Resources, c.ResourceNames)
+		}
+	}
+	return out
 }
 
 // Validate — multi-scope XOR formula + rules/permissions.
@@ -148,11 +186,17 @@ func (r Role) Validate(modules ModuleSet) error {
 	errs = multierr.Append(errs, r.Name.ValidateAtTier(r.IsSystemDerived()))
 	errs = multierr.Append(errs, r.Description.Validate())
 	errs = multierr.Append(errs, r.Labels.Validate())
-	if len(r.Rules) > 0 {
+	switch {
+	case len(r.Rules) > 0:
 		errs = multierr.Append(errs, r.Rules.Validate(PolicyOfRole(r.IsSystem, r.OwnerModule), modules))
 		// Rules-role: the compiled set may legitimately be empty (label-only).
 		errs = multierr.Append(errs, r.Permissions.ValidateCompiled())
-	} else {
+	case len(r.Permissions) == 0:
+		// Роль без правил и без прав — роль, все правила которой потеряли
+		// адресатов снятием регистрации (kaname#963, Р6). Она не даёт ничего и
+		// формой законна; вход `RoleService.Create`/`Update` её не строит — он
+		// требует 1..64 правил своим правилом входа.
+	default:
 		// Legacy permissions-only role: must carry ≥1 permission.
 		errs = multierr.Append(errs, r.Permissions.Validate())
 	}

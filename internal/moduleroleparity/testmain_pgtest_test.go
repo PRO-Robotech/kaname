@@ -24,7 +24,11 @@ import (
 // поднимается ничего.
 func TestMain(m *testing.M) {
 	os.Exit(pgtest.Run(m, pgtest.Config{
-		Name:    "iammoduleroleparity",
-		Migrate: pgtest.Goose(migrations.FS),
+		// Схема — у выдающего базу (`pkg/pgtest` §searchpath): гейт пишет роли
+		// образа писателем продукта (`ApplyImage`, kaname#1003), а его операторы
+		// называют таблицы без квалификатора.
+		SearchPath: "kaname,public",
+		Name:       "iammoduleroleparity",
+		Migrate:    pgtest.Goose(migrations.FS),
 	}))
 }

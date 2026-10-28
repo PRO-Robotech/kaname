@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
@@ -133,6 +134,23 @@ type Handler struct {
 	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки ForceLogout
 	// (kaname#589). nil → ForceLogout fails closed Unavailable.
 	cutoffClock revocationpolicy.Clock
+
+	// modules — личности модулей установки (kaname#987): Check плоскости
+	// данных ограничен доменом её модуля. Нулевое значение не признаёт никого,
+	// и тогда привязка не применяется ни к кому — вызывающих этого глагола без
+	// признанной личности пропускает или отвергает политика вызывающего, а через
+	// внутренний REST-фронт их не пускает его допуск (`authzguard.HopAdmits`).
+	// Значение — тот же объект, что у политик вызывающего: корень читает перечень
+	// один раз с проверкой ошибки, и нулевым здесь он бывает лишь объявленным
+	// пустым (в боевом режиме это отказ старта).
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки — тот же,
+// что у политик вызывающего (kaname#984).
+func (h *Handler) WithModuleRoster(r moduleidentity.Roster) *Handler {
+	h.modules = r
+	return h
 }
 
 // NewHandler — builder. `authz` may be nil when the FGA stack is not
@@ -276,6 +294,13 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 	}
 	if req.GetObject() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument object: required")
+	}
+	// Плоскость данных спрашивает только о типах объектов своего модуля
+	// (kaname#987): вопрос о чужом типе — отказ до решателя.
+	if module, recognized := h.modules.FromContext(ctx); recognized {
+		if err := h.requireCheckInCallerDomain(module, req.GetObject()); err != nil {
+			return nil, err
+		}
 	}
 	if h.authz == nil {
 		// Источник вердикта не провязан — fail-closed (интерсептор читает

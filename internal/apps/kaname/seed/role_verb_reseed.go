@@ -205,12 +205,12 @@ func replaceRoleVerbsInOwnTx(
 	pairs := 0
 	if err := shared.DoWithWriteTxVoid(ctx, repo,
 		func(ctx context.Context, w kanamerepo.Writer) error {
-			rules, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(roleID))
+			rules, policy, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(roleID))
 			if err != nil || !live {
 				return err
 			}
-			sels := cat.GrantSelectors(rules.MaterializingSelectors())
-			verbs := cat.RoleVerbsFromSelectors(sels)
+			sels := cat.GrantSelectors(rules.MaterializingSelectors(), policy)
+			verbs := cat.RoleVerbsFromSelectors(sels, policy)
 			if err := w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), verbs); err != nil {
 				return err
 			}

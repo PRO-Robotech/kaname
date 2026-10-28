@@ -87,9 +87,25 @@ func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, s
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(containers))
+	selected := make([]MemberCoord, 0, len(containers))
 	for _, c := range containers {
 		if containerSelected(sel, bs, c) {
+			selected = append(selected, MemberCoord{ObjectType: c.ObjectType, ObjectID: c.ObjectID})
+		}
+	}
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	// Охват потомков держится на строке контейнера: она запирается до чтения
+	// потомков (kaname#975). Контейнер, чью регистрацию сняли после отбора, охвата
+	// не даёт, а снятие ждёт фиксации прохода, решившего по нему.
+	live, err := liveObjects(ctx, s, selected)
+	if err != nil {
+		return nil, fmt.Errorf("match nested selector %s: %w", sel.RuleFP, err)
+	}
+	ids := make([]string, 0, len(selected))
+	for _, c := range selected {
+		if live(c) {
 			ids = append(ids, c.ObjectID)
 		}
 	}

@@ -104,6 +104,36 @@ func chainExemptFromTheReadFloor() []chainGate {
 	return gates
 }
 
+// chainWithoutTheHopLimitAndExemptFromTheReadFloor — мир, где у политики
+// вызывающего нет предела хопа (kaname#984, `hopMethodSet`): хоп проходит её
+// ровно к полу, как до перечня личностей, — и пол читающих с него снят.
+//
+// С пределом хопа методов под полом читающих хоп не достигает вовсе: их нет
+// в пересечении перечней профилей. Поэтому способность утверждения об
+// отношениях упасть доказывается миром, где предел снят, — иначе освобождение
+// от пола было бы невидимо ему by construction, а не потому, что оно держит.
+func chainWithoutTheHopLimitAndExemptFromTheReadFloor() []chainGate {
+	gates := chainExemptFromTheReadFloor()
+	inner := gates[0].decide
+	closed := map[string]bool{}
+	for _, m := range GatewayFrontedInternalRPCs() {
+		closed[m] = true
+	}
+	for _, m := range SANRestrictedInternalRPCs() {
+		closed[m] = true
+	}
+	gates[0].decide = func(ctx context.Context, fullMethod string) error {
+		if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san == ownFrontHopSAN {
+			if closed[fullMethod] {
+				return inner(ctx, fullMethod)
+			}
+			return nil
+		}
+		return inner(ctx, fullMethod)
+	}
+	return gates
+}
+
 // TestOwnFrontHopChainInjection_NarrowingIsCaught — возврат дефекта ловится
 // переписью цепочки: отвергнуто ВСЁ.
 func TestOwnFrontHopChainInjection_NarrowingIsCaught(t *testing.T) {
@@ -143,22 +173,24 @@ func TestOwnFrontHopChainInjection_WideningPastTheGatewayCircleIsCaught(t *testi
 // TestOwnFrontHopChainInjection_ReadFloorExemptionIsCaughtOnlyByItsOwnAssertion —
 // третья ось, и обе её стороны несущие.
 //
-// Освобождение от пола читающих обязано краснеть у СВОЕГО утверждения и
-// оставаться невидимым для вложения. Вторая половина доказывает, что новое
-// утверждение не дубль: не будь его, эта починка прошла бы за исправление.
+// Освобождение от пола читающих обязано краснеть у СВОЕГО утверждения.
+//
+// С перечнем личностей (kaname#984) ось держат ДВА стража: предел хопа у
+// политики вызывающего и пол читающих. Поэтому утверждается пара: при живой
+// политике освобождение от пола не пропускает хоп ни на один метод под полом
+// (предел держит), а в мире без предела — пропускает, и утверждение об
+// отношениях это видит (оно способно упасть само по себе).
 func TestOwnFrontHopChainInjection_ReadFloorExemptionIsCaughtOnlyByItsOwnAssertion(t *testing.T) {
-	gates := chainExemptFromTheReadFloor()
-	leak := relationTierLeak(t, gates)
+	if held := relationTierLeak(t, chainExemptFromTheReadFloor()); held != 0 {
+		t.Fatalf("при живой политике вызывающего хоп, освобождённый от пола читающих, прошёл %d методов "+
+			"под полом — предел хопа не держит", held)
+	}
+	leak := relationTierLeak(t, chainWithoutTheHopLimitAndExemptFromTheReadFloor())
 	if leak == 0 {
-		t.Fatal("хоп, освобождённый от пола читающих, не прошёл ни одного метода под ним — " +
-			"утверждение об отношениях не заметило бы этой починки")
+		t.Fatal("хоп, освобождённый от пола читающих в мире без предела хопа, не прошёл ни одного " +
+			"метода под ним — утверждение об отношениях не заметило бы этой починки")
 	}
-	if excess := chainExcess(t, gates); excess != 0 {
-		t.Fatalf("вложение в допуск модуля дало избыток %d — эта ось должна быть ему НЕВИДИМА, "+
-			"иначе доказательство несущности нового утверждения ложно", excess)
-	}
-	t.Logf("освобождение от пола читающих: методов под ним пройдено %d · избыток по вложению %d",
-		leak, 0)
+	t.Logf("освобождение от пола читающих: при пределе хопа пройдено 0 · без предела пройдено %d", leak)
 }
 
 // TestOwnFrontHopChainInjection_LegitimateTwinStaysSilent — действующая цепочка

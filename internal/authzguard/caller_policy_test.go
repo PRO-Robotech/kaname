@@ -71,7 +71,7 @@ func newVPCCtx() context.Context {
 
 // testPolicy builds a CallerPolicy with the canonical gateway-only set.
 func testPolicy(prod bool) *CallerPolicy {
-	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm)
+	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster())
 }
 
 // ── allow(): gateway-only RPC ──────────────────────────────────────────────
@@ -302,11 +302,13 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 // the consumer list-filter edge.
 
 // TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — проверенная учётка
-// модуля (vpc) вправе звать AuthorizeService.{BatchCheck,Check,ListSubjects} на
-// внутреннем слушателе, в боевой посадке И в посадке разработки: у них только
-// пол, за краем они не стоят.
+// модуля (vpc) вправе звать AuthorizeService.{BatchCheck,Check} на внутреннем
+// слушателе в боевой посадке И в посадке разработки: за краем они не стоят и
+// входят в профиль модуля-владельца. ListSubjects в этот профиль не входит
+// (kaname#984): его не зовёт ни один модуль, и в боевой посадке он отвергается —
+// см. соседнюю пробу ниже.
 func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
-	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod, authorizeListSubjectsMethod}
+	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod}
 	for _, prod := range []bool{true, false} {
 		p := testPolicy(prod)
 		for _, m := range methods {
@@ -314,6 +316,19 @@ func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 				t.Errorf("prod=%v vpc cert on %s: unexpected error %v (consumer list-filter edge must be admitted)", prod, m, err)
 			}
 		}
+	}
+}
+
+// TestCallerPolicy_AuthorizeService_ListSubjectsOutsideModuleProfile — a
+// module-writer identity on AuthorizeService.ListSubjects (outside its profile,
+// kaname#984): prod → PermissionDenied; the edge, whose profile names it, passes.
+func TestCallerPolicy_AuthorizeService_ListSubjectsOutsideModuleProfile(t *testing.T) {
+	p := testPolicy(true)
+	if err := p.allow(newVPCCtx(), authorizeListSubjectsMethod); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("prod vpc on ListSubjects: code = %v, want PermissionDenied", status.Code(err))
+	}
+	if err := p.allow(newGatewayCtx(), authorizeListSubjectsMethod); err != nil {
+		t.Errorf("prod gateway on ListSubjects: unexpected error %v", err)
 	}
 }
 

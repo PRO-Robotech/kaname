@@ -12,17 +12,20 @@ package publicreadfixture
 //   - П7 — документ П6 ([NewEditionFile]) со строкой ключа оболочки
 //     `classGrantsOnlyOnContainers: true` сразу после `module: registry`
 //     ([WithClassGrantsKey]); «П7 без ключа» — сам документ П6;
-//   - П7 с ролями И — тот же документ с двумя ролями модуля, дописанными в конец
-//     раздела `roles` ([WithNamedRoles]); «П7 без ключа» с ролями И — документ
-//     П6 с теми же ролями.
+//   - П7 с ролями И — тот же документ, РАЗОБРАННЫЙ загрузчиком, с двумя ролями
+//     модуля, дописанными в его раздел `roles` и положенными применителем
+//     напрямую, минуя загрузчик; «П7 без ключа» с ролями И — документ П6 с
+//     теми же ролями тем же путём.
 //
-// Каждый близнец строится правкой основы, и дельту сверяет [Delta]: ключ — одна
-// добавленная строка, роли — двадцать добавленных строк, удалённых ноль.
-
-import (
-	"bytes"
-	"fmt"
-)
+// Роли И сужены именами (`resourceNames`), а манифест модуля конкретных
+// объектов не называет (kaname#965): загрузчик такую роль отвергает, и текстом
+// её в документ больше не дописать. Строка такой роли остаётся возможной как
+// доставленная до запрета, и ворота S7 судят её по-прежнему — тот же приём, что
+// у ND-05 (б) ствола (`seedNamedReader`). Роли собирает проба мира SC-81
+// структурой манифеста; здесь — их имена и id.
+//
+// Близнец по ключу строится правкой основы, и дельту сверяет [Delta]: ключ —
+// одна добавленная строка, удалённых ноль.
 
 // ClassGrantsKey — ключ оболочки манифеста стадии S7 (Р11 п. 1).
 const ClassGrantsKey = "classGrantsOnlyOnContainers"
@@ -47,30 +50,6 @@ const (
 	ReaderRoleID   = "rolb812261cfaa239694"
 )
 
-// namedRolesBlock — две роли модуля, дописываемые в конец раздела `roles`:
-// по 10 строк каждая (пустая строка и 9 строк роли), ярус — кластер.
-const namedRolesBlock = `
-  - id: registry.repo_reader_named
-    description: >
-      Пробная роль S7: чтение репозиториев, сужено именами.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: registry
-        resources: [repositories]
-        classes: [get]
-        resourceNames: [app]
-
-  - id: registry.reg_reader_named
-    description: >
-      Пробная роль S7: чтение реестра X, сужено именами.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: registry
-        resources: [registries]
-        classes: [get]
-        resourceNames: [reg00000000000000001]
-`
-
 // WithClassGrantsKey — документ с ключом S7, равным true: строка ключа встаёт
 // сразу после `module: registry`. Дельта — одна добавленная строка.
 func WithClassGrantsKey(doc []byte) ([]byte, error) {
@@ -86,22 +65,4 @@ func WithClassGrantsKeyValue(doc []byte, value string) ([]byte, error) {
 		return nil, err
 	}
 	return twin, requireDelta(doc, twin, nil, []string{line})
-}
-
-// WithNamedRoles — документ с ролями И и И2 в конце раздела `roles`. Основа
-// обязана кончаться разделом `roles` (иначе роли встали бы в чужой раздел) и
-// переводом строки. Дельта — двадцать добавленных строк.
-func WithNamedRoles(doc []byte) ([]byte, error) {
-	if !bytes.HasSuffix(doc, []byte("\n")) {
-		return nil, fmt.Errorf("publicreadfixture: документ не кончается переводом строки — роли И слились бы с последней строкой")
-	}
-	if _, err := OnlyPublicReadRole(doc); err != nil {
-		return nil, fmt.Errorf("publicreadfixture: основа ролей И: %w", err)
-	}
-	twin := append(append([]byte(nil), doc...), namedRolesBlock...)
-	r, a := Delta(doc, twin)
-	if len(r) != 0 || len(a) != 20 {
-		return nil, fmt.Errorf("publicreadfixture: роли И: удалено %d (объявлено 0), добавлено %d (объявлено 20)", len(r), len(a))
-	}
-	return twin, nil
 }

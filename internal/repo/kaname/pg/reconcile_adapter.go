@@ -116,7 +116,7 @@ type reconcileStore struct {
 // GetForNoKeyUpdate: он не конфликтует с `FOR KEY SHARE` дочерних вставок, поэтому
 // аддитивный форвард пути создания больше не стоит в очереди за фоновым проходом.
 func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, rowLockNoKeyUpdate)
+	return s.loadBinding(ctx, bindingID, lockNoKeyUpdate)
 }
 
 // LoadBindingForForward — те же факты выдачи, что LoadBinding, под замком строки
@@ -129,7 +129,10 @@ func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.Acces
 // верным до коммита: снятие берёт строку `FOR UPDATE`
 // (LockBindingForDeactivation), а это единственный режим, конфликтующий с
 // `FOR KEY SHARE`. Поэтому снятие ждёт коммита форварда и видит его членов, а
-// форвард, пришедший после снятия, дождётся его коммита и прочитает REVOKED.
+// форвард, пришедший после снятия, дождётся его коммита и прочитает REVOKED. Тем же
+// режимом `FOR UPDATE` выдачи запирает отзыв по снятию регистрации объекта
+// (`UnregisteredKeyStore.ActiveBindingsNamingKey`, kaname#963, F1): член, реестр
+// выпущенного и факт не пишутся для выдачи, отзыв которой уже прочитал реестр.
 //
 // ПОЧЕМУ ИМЕННО `FOR KEY SHARE`. Полный проход держит строку `FOR NO KEY UPDATE`
 // (GetForNoKeyUpdate), и с `FOR KEY SHARE` этот режим совместим — форвард пути
@@ -138,7 +141,7 @@ func (s *reconcileStore) LoadBinding(ctx context.Context, bindingID domain.Acces
 // дочерние вставки форварда и так брали на этой строке проверкой внешнего ключа;
 // новым здесь стал только МОМЕНТ — до решения, а не после него.
 func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (reconcile.BindingScope, bool, error) {
-	return s.loadBinding(ctx, bindingID, rowLockKeyShare)
+	return s.loadBinding(ctx, bindingID, lockKeyShare)
 }
 
 // LoadBindingsForForward — те же факты BindingScope, что LoadBindingForForward, для
@@ -157,11 +160,13 @@ func (s *reconcileStore) LoadBindingForForward(ctx context.Context, bindingID do
 //
 // ЗАМОК. Строки выдач берутся `FOR KEY SHARE` одним оператором в порядке `id` — тот
 // же режим и то же основание, что у одиночного LoadBindingForForward (kaname#919):
-// снятие выдачи (истечение срока, LockBindingForDeactivation) не может прочитать
-// набор членов, пока форвард, решивший «выдача жива», не зафиксировал своих. С полным
-// проходом (`FOR NO KEY UPDATE`) режим совместим, advisory-замка путь не берёт (см.
-// reconcile/forward.go «LOCK CHOICE»). Порядок `id` — общий для всех выдач веера, и
-// подмножества одного порядка инверсии не дают. Проекция BindingScope собирается тем
+// снятие выдачи (истечение срока, LockBindingForDeactivation; отзыв по снятию
+// регистрации, kaname#963, F1) не может прочитать набор членов и реестр, пока
+// форвард, решивший «выдача жива», не зафиксировал своих. С полным проходом
+// (`FOR NO KEY UPDATE`) режим совместим, advisory-замка путь не берёт (см.
+// reconcile/forward.go «LOCK CHOICE»). Порядок `id` — общий для всех выдач веера и
+// тот же, что у отзыва по снятию регистрации: подмножества одного порядка инверсии
+// не дают, кольца ожидания нет. Проекция BindingScope собирается тем
 // же bindingScopeFrom, что и у поштучного чтения, поэтому пакетный и одиночный пути
 // выводят ПОБАЙТОВО те же факты.
 // Отсутствующая выдача (удалена) просто не попадает в карту — ровно как ok=false у
@@ -184,7 +189,7 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 		raw = append(raw, string(id))
 	}
 	rows, err := s.tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC FOR KEY SHARE`, abCols), raw)
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = ANY($1) ORDER BY id ASC %s`, abCols, lockKeyShare), raw)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load bindings batch: %w", err)
 	}
@@ -245,25 +250,25 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 	return out, nil
 }
 
-// bindingRowLock — режим замка строки выдачи, под которым читаются её факты.
-type bindingRowLock int
-
-const (
-	// rowLockNoKeyUpdate — полный проход: взаимное исключение проходов одной выдачи.
-	rowLockNoKeyUpdate bindingRowLock = iota
-	// rowLockKeyShare — аддитивный форвард: «выдача жива» верно до коммита.
-	rowLockKeyShare
-)
-
-// roleRowLock — режим замка строки роли, под которым читаются её правила.
+// roleRowLock — режим замка строки роли, под которым читаются её правила. Строки
+// берутся одним оператором в порядке `id` в обоих режимах.
 type roleRowLock int
 
 const (
-	// roleLockNone — полный проход. Правки роли он не ждёт и ждать не должен: веер
-	// правки (RoleMembershipFanout) берёт строку выдачи `FOR NO KEY UPDATE` тем же
-	// режимом, что полный проход, — встаёт за проходом, прочитавшим старые правила,
-	// и пересчитывает выдачу по новым после его коммита.
-	roleLockNone roleRowLock = iota
+	// roleLockKeyShare — полный проход: `FOR KEY SHARE` (kaname#963, F4). Имя
+	// объекта в `resourceNames` правила — второй путь, по которому выдача получает
+	// ключ (первый — цель, его держит замок строки выдачи). Снятие регистрации
+	// вычёркивает имя под `FOR UPDATE` строки роли (`RolesNamingKeySQL`) —
+	// единственным режимом, с которым `FOR KEY SHARE` конфликтует: либо снятие
+	// ждёт фиксации прохода, и его пост-фиксационный проход по объекту снимает
+	// записанное, либо проход ждёт фиксации снятия и читает роль уже без имени.
+	//
+	// Правки роли полный проход не ждёт и ждать не должен: с `FOR NO KEY UPDATE`
+	// правки режим не конфликтует, а веер правки (RoleMembershipFanout) берёт
+	// строку выдачи `FOR NO KEY UPDATE` тем же режимом, что полный проход, —
+	// встаёт за проходом, прочитавшим старые правила, и пересчитывает выдачу по
+	// новым после его коммита.
+	roleLockKeyShare roleRowLock = iota
 	// roleLockShare — аддитивный форвард (kaname#926). Форвард решает по правилам
 	// роли, КАКОЙ ярус выдать, и пишет члена позже, в той же транзакции; с вееером
 	// правки роли он не упорядочен ничем другим: advisory-замка форвард не берёт, а
@@ -273,12 +278,14 @@ const (
 	// отобранный правкой, держался бы до следующего полного прохода.
 	//
 	// `FOR SHARE` конфликтует с замком, который правка роли берёт ПЕРВЫМ
-	// (GuardSystemClassReads, `FOR NO KEY UPDATE`), и с самой записью строки, но
-	// не с `FOR SHARE` и `FOR KEY SHARE`: форварды одной роли друг друга не ждут, а
-	// пересчёт глаголов (RulesForRegrain) берёт тот же `FOR SHARE`. Исходов два, и
-	// оба верны: правка ждёт коммита форварда, и её веер видит его члена; либо
-	// форвард ждёт коммита правки и читает уже новые правила. Снятие роли
-	// (RetireRole, `FOR NO KEY UPDATE`) упорядочено с форвардом так же.
+	// (GuardSystemClassReads, `FOR NO KEY UPDATE`), с записью строки и с `FOR
+	// UPDATE` снятия регистрации (он сильнее `FOR KEY SHARE` полного прохода и
+	// держит F4 тоже), но не с `FOR SHARE` и `FOR KEY SHARE`: форварды одной роли
+	// друг друга не ждут, а пересчёт глаголов (RulesForRegrain) берёт тот же
+	// `FOR SHARE`. Исходов два, и оба верны: правка ждёт коммита форварда, и её
+	// веер видит его члена; либо форвард ждёт коммита правки и читает уже новые
+	// правила. Снятие роли (RetireRole, `FOR NO KEY UPDATE`) упорядочено с
+	// форвардом так же.
 	//
 	// Новых строк замок не трогает: член, которого форвард пишет, берёт на той же
 	// строке роли `FOR KEY SHARE` проверкой внешнего ключа
@@ -288,12 +295,13 @@ const (
 )
 
 // roleLockFor — режим замка роли, отвечающий режиму замка строки выдачи: форвард
-// (`FOR KEY SHARE` на выдаче) читает роль под замком, полный проход — без.
-func roleLockFor(lock bindingRowLock) roleRowLock {
-	if lock == rowLockKeyShare {
+// (`FOR KEY SHARE` на выдаче) читает роль под `FOR SHARE`, полный проход — под
+// `FOR KEY SHARE`.
+func roleLockFor(lock rowLock) roleRowLock {
+	if lock == lockKeyShare {
 		return roleLockShare
 	}
-	return roleLockNone
+	return roleLockKeyShare
 }
 
 // roleCacheKey — ключ памятки ролей прохода.
@@ -302,23 +310,24 @@ type roleCacheKey struct {
 	lock roleRowLock
 }
 
-// loadBinding — общий читатель LoadBinding (rowLockNoKeyUpdate) и
-// LoadBindingForForward (rowLockKeyShare). Проекция BindingScope ОДИНАКОВА в обоих
-// режимах — различаются лишь замки строк выдачи и роли, — поэтому полный проход и
-// форвард выводят одни и те же факты области, селекторов и субъектов.
-func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock bindingRowLock) (reconcile.BindingScope, bool, error) {
+// loadBinding — общий читатель LoadBinding (lockNoKeyUpdate) и
+// LoadBindingForForward (lockKeyShare); режим — закрытый набор rowLock
+// (access_binding_repo.go). Проекция BindingScope ОДИНАКОВА в обоих режимах —
+// различаются лишь замки строк выдачи и роли, — поэтому полный проход и форвард
+// выводят одни и те же факты области, селекторов и субъектов.
+func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.AccessBindingID, lock rowLock) (reconcile.BindingScope, bool, error) {
 	r := &abReader{tx: s.tx}
 	var (
 		b   domain.AccessBinding
 		err error
 	)
 	switch lock {
-	case rowLockNoKeyUpdate:
+	case lockNoKeyUpdate:
 		b, err = r.GetForNoKeyUpdate(ctx, bindingID)
-	case rowLockKeyShare:
+	case lockKeyShare:
 		b, err = r.GetForKeyShare(ctx, bindingID)
 	default:
-		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %d", lock)
+		return reconcile.BindingScope{}, false, fmt.Errorf("reconcile: unknown binding row-lock mode %q", lock)
 	}
 	if err != nil {
 		if errors.Is(err, iamerr.ErrNotFound) {
@@ -389,8 +398,12 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID, lock roleRo
 // операции, а ответ операции жизненного состояния не вычисляет (§2.6 приёмки).
 // Поэтому живость дочитывается ОТДЕЛЬНОЙ колонкой здесь, а не добавляется туда.
 //
-// lock — режим замка строк роли (roleRowLock). Под замком строки берутся одним
-// оператором в порядке `id`: подмножества одного порядка инверсии между собой не дают.
+// lock — режим замка строк роли (roleRowLock): полный проход — `FOR KEY SHARE`
+// (kaname#963, F4), форвард — `FOR SHARE` (kaname#926); почему — у констант
+// режима. Строки берутся одним оператором в порядке `id` до конца транзакции
+// прохода: подмножества одного порядка инверсии между собой не дают. С `FOR NO KEY
+// UPDATE` правки роли и с `FOR KEY SHARE` вставок членов режим полного прохода не
+// конфликтует, так что проходы не встают в очередь за правкой роли.
 func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string, lock roleRowLock) (
 	map[domain.RoleID]domain.Role, error,
 ) {
@@ -400,8 +413,8 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string, lock r
 	}
 	var q string
 	switch lock {
-	case roleLockNone:
-		q = fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1)`, roleCols)
+	case roleLockKeyShare:
+		q = fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lockKeyShare)
 	case roleLockShare:
 		q = fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id FOR SHARE`, roleCols)
 	default:
@@ -494,6 +507,9 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 		// column by scanAB (relverdict.DecodeTarget). AllInScope/empty ⇒ whole-anchor grant.
 		Target: b.Target,
 		RoleID: string(b.RoleID),
+		// Политика роли — из той же строки, тем же единственным выводом: от
+		// владельца роли зависит, влечёт ли правка удаление (kaname#1006).
+		Policy: domain.PolicyOfRole(role.IsSystem, role.OwnerModule),
 		Active: b.Status == domain.AccessBindingStatusActive,
 	}
 }
@@ -546,6 +562,42 @@ func (s *reconcileStore) AcquireBindingLocks(ctx context.Context, bindingIDs []d
 	return nil
 }
 
+// LockBindingsSQL — замок строк выдач набора ($1 — их id), режим тот же, что
+// у LoadBinding (`GetForNoKeyUpdate`). LockRolesOfBindingsSQL — замок строк их ролей,
+// режим тот же, что у loadRolesWithLifecycle. Порядок захвата задаёт `ORDER BY id`:
+// узел замка стоит над сортировкой, поэтому строки запираются в порядке id.
+// Экспортированы ради пробы порядка (kaname#974): она судит этот самый текст.
+const (
+	LockBindingsSQL = `SELECT b.id FROM kaname.access_bindings b
+		  WHERE b.id = ANY($1)
+		  ORDER BY b.id
+		    FOR NO KEY UPDATE`
+	LockRolesOfBindingsSQL = `SELECT r.id FROM kaname.roles r
+		  WHERE r.id IN (SELECT b.role_id FROM kaname.access_bindings b WHERE b.id = ANY($1))
+		  ORDER BY r.id
+		    FOR KEY SHARE OF r`
+)
+
+// LockBindingsAndRoles — строки выдач набора, затем строки их ролей, каждый род одним
+// оператором в порядке id и до первой записи прохода (kaname#974, контракт — у порта).
+// Выдача, которой нет, просто не запирается: её LoadBinding вернёт ok=false.
+func (s *reconcileStore) LockBindingsAndRoles(ctx context.Context, bindingIDs []domain.AccessBindingID) error {
+	if len(bindingIDs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(bindingIDs))
+	for _, id := range bindingIDs {
+		ids = append(ids, string(id))
+	}
+	if _, err := s.tx.Exec(ctx, LockBindingsSQL, ids); err != nil {
+		return fmt.Errorf("reconcile: lock %d binding rows: %w", len(ids), err)
+	}
+	if _, err := s.tx.Exec(ctx, LockRolesOfBindingsSQL, ids); err != nil {
+		return fmt.Errorf("reconcile: lock roles of %d bindings: %w", len(ids), err)
+	}
+	return nil
+}
+
 // MatchAllInScope returns the mirror objects of the given types NARROWED to the binding's
 // containment scope (ARM_ANCHOR/`all`, P4) — no label filter. The scope is pushed into the
 // SQL (resource_mirror.AllByTypes) as a PROVEN SUPERSET of the use-case's IsContainedIn
@@ -591,6 +643,65 @@ func (s *reconcileStore) MatchByIDs(ctx context.Context, types, ids []string) ([
 // arm no longer scans EVERY iam-native row of the type cluster-wide.
 func (s *reconcileStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error) {
 	return s.iamDirectQuery(ctx, types, "", nil, scope)
+}
+
+// MatchCreatedByIAMDirect — объекты типов `types` в области `scope`, созданные
+// учётками `creators` (kaname#1003, контракт — у порта). Предикат области — тот же
+// `iamDirectScopePredicate`, что у ветви якоря; создатель — равенством вида и
+// вхождением id, чтобы отбор шёл по частичному индексу
+// `service_accounts_creator_idx (account_id, created_by_id) WHERE created_by_type =
+// 'service_account'`. Все идентификаторы запроса — литералы закрытой карты.
+func (s *reconcileStore) MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error) {
+	if len(types) == 0 || len(creators) == 0 {
+		return nil, nil
+	}
+	var out []domain.MirrorObject
+	for _, t := range types {
+		spec, ok := iamDirectScanSpecs[t]
+		if !ok || spec.creatorIDCol == "" {
+			continue
+		}
+		q, args := matchCreatedBySQL(spec, scope, creators)
+		rows, err := s.tx.Query(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("reconcile: iam-direct %s by creator: %w", spec.objectType, err)
+		}
+		objs, serr := scanIAMDirect(rows, spec.objectType)
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, objs...)
+	}
+	return out, nil
+}
+
+// matchCreatedBySQL — текст и доводы отбора по создателю для одного вида.
+// Отдельной функцией ради пробы плана (DoD S1 п.8 приёмки kaname#1003): `EXPLAIN`
+// обязан судить ТОТ ЖЕ текст, которым отбирает проход, а не выписанную копию.
+func matchCreatedBySQL(spec iamDirectScanSpec, scope domain.ScopeAnchor, creators []string) (string, []any) {
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
+		" FROM " + spec.table + " o"
+	if spec.join != "" {
+		q += " " + spec.join
+	}
+	where := "o.created_by_type = 'service_account' AND " + spec.creatorIDCol + " = ANY($1)"
+	args := []any{creators}
+	// Область — тем же надмножеством IsContainedIn, что у ветви якоря, но СКАЛЯРНЫМ
+	// равенством колонки аккаунта, где вид его объявляет: так предикат ложится
+	// на первую колонку индекса «аккаунт, создатель».
+	switch scope.Type {
+	case "account":
+		if spec.parentAccountExpr != "" {
+			where += " AND " + spec.parentAccountExpr + " = $2"
+		} else {
+			where += " AND $2 = ANY(" + spec.accountsExpr() + ")"
+		}
+		args = append(args, scope.ID)
+	case "project":
+		where += " AND " + spec.parentProjectExpr + " = $2"
+		args = append(args, scope.ID)
+	}
+	return q + " WHERE " + where + " ORDER BY o.id ASC", args
 }
 
 // MatchByIDsIAMDirect returns the IAM-OWN objects of the given iam-direct types
@@ -643,6 +754,23 @@ type iamDirectScanSpec struct {
 	parentProjectExpr  string
 	// join is an optional LEFT JOIN clause (e.g. resolve a project's account_id).
 	join string
+	// creatorExpr — ссылка на субъекта-СОЗДАТЕЛЯ объекта в форме субъекта модели
+	// (`service_account:<id>`, `user:<id>`), пустая строка — создатель не записан
+	// (kaname#1003, Р4). Пусто у вида, факт создателя которого не хранится:
+	// селектор создателя такой объект не выбирает никогда (сторона отказа).
+	creatorExpr string
+	// creatorIDCol — колонка идентификатора создателя-учётки для отбора по индексу
+	// «аккаунт, создатель» (`service_accounts_creator_idx`); пусто — факт создателя
+	// у вида не хранится.
+	creatorIDCol string
+}
+
+// creator — выражение создателя вида либо пустая строка.
+func (s iamDirectScanSpec) creator() string {
+	if s.creatorExpr != "" {
+		return s.creatorExpr
+	}
+	return "''"
 }
 
 // accountsExpr — КАНОНИЧЕСКАЯ форма источника аккаунтов: SQL-выражение типа
@@ -691,6 +819,10 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 	"iam.serviceAccount": {
 		objectType: "iam.serviceAccount", table: "kaname.service_accounts",
 		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
+		// Факт создателя (kaname#1003, Р4): вид и id создателя — в форме субъекта
+		// модели, тем же написанием, что `domain.FGASubjectRef`.
+		creatorExpr:  "COALESCE(o.created_by_type || ':' || o.created_by_id, '')",
+		creatorIDCol: "o.created_by_id",
 	},
 	// ЛИЧНОСТЬ — аккаунты из СВЯЗИ, а не из колонки строки (kacho#1172).
 	//
@@ -783,7 +915,7 @@ func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mod
 		}
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe.
-		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr +
+		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
 			" FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
@@ -857,7 +989,7 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe. The own-table
 		// `labels @> $1` probe is served by the per-table GIN index (migration 0041).
-		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr +
+		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
 			" FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
@@ -892,9 +1024,9 @@ func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, err
 	defer rows.Close()
 	var out []domain.MirrorObject
 	for rows.Next() {
-		var id, parentProject string
+		var id, parentProject, creator string
 		var parentAccounts []string
-		if err := rows.Scan(&id, &parentAccounts, &parentProject); err != nil {
+		if err := rows.Scan(&id, &parentAccounts, &parentProject, &creator); err != nil {
 			return nil, fmt.Errorf("reconcile: scan iam-direct %s row: %w", objectType, err)
 		}
 		out = append(out, domain.MirrorObject{
@@ -902,6 +1034,7 @@ func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, err
 			ObjectID:         id,
 			ParentAccountIDs: parentAccounts,
 			ParentProjectID:  parentProject,
+			CreatedBy:        creator,
 		})
 	}
 	return out, rows.Err()
@@ -935,6 +1068,58 @@ func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, c
 		out = append(out, mirrorRowToDomain(row))
 	}
 	return out, nil
+}
+
+// LockMirrorObjectsSQL — замок строк зеркала набора объектов ($1 — типы, $2 — id,
+// попарно). Режим `FOR KEY SHARE`: конфликтует с удалением строки (снятие
+// регистрации) и не конфликтует с правкой меток. Порядок захвата задаёт
+// `ORDER BY` — узел замка стоит над сортировкой. Экспортирован ради пробы
+// (kaname#975): она судит этот самый текст.
+//
+// `SKIP LOCKED` — намеренно. Строку, которую снятие удаляет прямо сейчас, проход
+// не ждёт, а пропускает как отсутствующую: с `FOR KEY SHARE` конфликтует только
+// удаление (и смена ключа, которой у зеркала нет), а снятие после удаления строки
+// добирает выдачи и роли, записанные писателями, пока оно ждало. Проход,
+// ждущий строку под удалением и держащий такую выдачу, сходился бы со снятием в
+// кольцо (40P01, URG-24). Цена пропуска — только при откате снятия: член по
+// объекту появится со следующим проходом, а не этим; ошибка в сторону отказа.
+const LockMirrorObjectsSQL = `SELECT m.object_type, m.object_id
+		   FROM kaname.resource_mirror m
+		   JOIN unnest($1::text[], $2::text[]) AS u(object_type, object_id)
+		     ON m.object_type = u.object_type AND m.object_id = u.object_id
+		  ORDER BY m.object_type, m.object_id
+		    FOR KEY SHARE OF m SKIP LOCKED`
+
+// LockMirrorObjects — строки зеркала объектов `objs` под `FOR KEY SHARE`, одним
+// оператором в порядке (тип, id); возвращает объекты, строки которых есть
+// (kaname#975, контракт — у порта).
+func (s *reconcileStore) LockMirrorObjects(ctx context.Context, objs []reconcile.MemberCoord) (map[reconcile.MemberCoord]struct{}, error) {
+	present := make(map[reconcile.MemberCoord]struct{}, len(objs))
+	if len(objs) == 0 {
+		return present, nil
+	}
+	types := make([]string, 0, len(objs))
+	ids := make([]string, 0, len(objs))
+	for _, o := range objs {
+		types = append(types, o.ObjectType)
+		ids = append(ids, o.ObjectID)
+	}
+	rows, err := s.tx.Query(ctx, LockMirrorObjectsSQL, types, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: lock %d mirror objects: %w", len(objs), err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c reconcile.MemberCoord
+		if err := rows.Scan(&c.ObjectType, &c.ObjectID); err != nil {
+			return nil, fmt.Errorf("reconcile: scan locked mirror object: %w", err)
+		}
+		present[c] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reconcile: lock %d mirror objects: %w", len(objs), err)
+	}
+	return present, nil
 }
 
 // GetMirrorObject returns one mirror row (byName containment / PENDING verify).
@@ -973,18 +1158,18 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		// forward path only routes iam-direct types here).
 		return domain.MirrorObject{}, false, nil
 	}
-	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", o.labels" +
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() + ", o.labels" +
 		" FROM " + spec.table + " o"
 	if spec.join != "" {
 		q += " " + spec.join
 	}
 	q += " WHERE o.id = $1"
 	var (
-		id, parentProject string
-		parentAccounts    []string
-		labelsJSON        []byte
+		id, parentProject, creator string
+		parentAccounts             []string
+		labelsJSON                 []byte
 	)
-	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &labelsJSON); err != nil {
+	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &creator, &labelsJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.MirrorObject{}, false, nil
 		}
@@ -995,6 +1180,7 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		ObjectID:         id,
 		ParentAccountIDs: parentAccounts,
 		ParentProjectID:  parentProject,
+		CreatedBy:        creator,
 	}
 	if len(labelsJSON) > 0 {
 		if err := json.Unmarshal(labelsJSON, &obj.Labels); err != nil {
@@ -1583,7 +1769,7 @@ func (s *reconcileStore) RevokeExpiredBinding(ctx context.Context, bindingID dom
 	// (LockBindingForDeactivation) после advisory-замка этой выдачи.
 	tag, err := s.tx.Exec(ctx,
 		`UPDATE kaname.access_bindings
-		    SET status = 'REVOKED', revoked_at = now()
+		    SET status = 'REVOKED', revoked_at = now(), revocation_reason = 'EXPIRED'
 		  WHERE id = $1 AND status = 'ACTIVE'`,
 		string(bindingID),
 	)
@@ -1758,4 +1944,18 @@ func bindingSubjects(b domain.AccessBinding) []domain.Subject {
 		return b.Subjects
 	}
 	return []domain.Subject{{Type: b.SubjectType, ID: b.SubjectID}}
+}
+
+// MatchCreatedByQuery — текст и доводы отбора по создателю для вида `objectType`
+// (kaname#1003) — ТОТ ЖЕ, которым отбирает `MatchCreatedByIAMDirect`. Экспортирован
+// ради пробы плана (DoD S1 п.8 приёмки): `EXPLAIN` обязан судить исполняемый
+// текст, а не выписанную копию, — копия разошлась бы с ним молча. ok=false — у
+// вида факт создателя не хранится, и отбирать нечего.
+func MatchCreatedByQuery(objectType string, scope domain.ScopeAnchor, creators []string) (string, []any, bool) {
+	spec, ok := iamDirectScanSpecs[objectType]
+	if !ok || spec.creatorIDCol == "" {
+		return "", nil, false
+	}
+	q, args := matchCreatedBySQL(spec, scope, creators)
+	return q, args, true
 }

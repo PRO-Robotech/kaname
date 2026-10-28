@@ -1,0 +1,89 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kaname/cloud/iam/v1/access_binding.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A GrantDelegation resource — делегирование права выдавать.
+//
+// Держатель права выдавать на аккаунте допускает служебную учётку (`delegate`)
+// выдавать и отзывать права на объекты ОДНОГО модуля от своего имени. Выдача
+// делегатом ограничена четырьмя осями — набором ролей (`role_ids`), типами цели
+// (`target_types`), типами субъекта (`subject_types`) и областью (`account_id`);
+// кроме того, делегирующий обязан держать право выдавать на аккаунте в момент
+// каждой выдачи, а субъект выдачи — принадлежать аккаунту.
+//
+// Делегирование не даёт делегату ни одного отношения модели прав: ни доступа к
+// данным, ни прав на проекты, группы, роли и служебные учётки, ни права
+// делегировать дальше. Оси неизменяемы; отзыв (`Revoke`) отзывает каждую
+// действующую выдачу, сделанную по делегированию, с причиной
+// `REVOCATION_REASON_DELEGATION_REVOKED`. Отозванная запись остаётся для аудита.
+//
+// Resource id prefix: `gdl` (concatenated form, `ids.NewID`).
+message GrantDelegation {
+  // Lifecycle status. ACTIVE — делегирование действует; REVOKED — отозвано,
+  // конечное состояние.
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    ACTIVE             = 1;
+    REVOKED            = 2;
+  }
+
+  // Принципал, совершивший шаг жизненного цикла делегирования.
+  message Actor {
+    // Вид принципала: "user" | "service_account".
+    string type = 1;
+
+    // Идентификатор принципала (`usr…` | `sva…`).
+    string id = 2;
+  }
+
+  // ID of the grant delegation.
+  string id = 1;
+
+  // Аккаунт — единственная область, в которой делегат вправе выдавать.
+  // Неизменяемо.
+  string account_id = 2;
+
+  // Делегат: только служебная учётка (`SUBJECT_TYPE_SERVICE_ACCOUNT`); учётка
+  // может жить в другом аккаунте. Неизменяемо.
+  Subject delegate = 3;
+
+  // Роли, которые делегат вправе выдавать: роли, объявленные манифестом ОДНОГО
+  // модуля (`module`). Набор: порядок входа не хранится, чтение отдаёт
+  // идентификаторы по возрастанию строки.
+  repeated string role_ids = 4;
+
+  // Точечные типы каталога того же модуля, на объекты которых делегат вправе
+  // выдавать. Набор: чтение отдаёт по возрастанию строки.
+  repeated string target_types = 5;
+
+  // Кому делегат вправе выдавать. `SUBJECT_TYPE_SYSTEM_CLASS` разрешает выдачу
+  // только классу `anonymous`. Набор: чтение отдаёт по возрастанию имени
+  // значения.
+  repeated SubjectType subject_types = 6;
+
+  // OUTPUT-ONLY. Модуль ролей и типов делегирования (выводится сервером).
+  string module = 7;
+
+  // OUTPUT-ONLY. Состояние делегирования.
+  Status status = 8;
+
+  // OUTPUT-ONLY. Принципал, заведший делегирование.
+  Actor delegated_by = 9;
+
+  // OUTPUT-ONLY. Момент заведения, усечён до секунды.
+  google.protobuf.Timestamp created_at = 10;
+
+  // OUTPUT-ONLY. Момент отзыва, усечён до секунды; задан только у `REVOKED`.
+  google.protobuf.Timestamp revoked_at = 11;
+
+  // OUTPUT-ONLY. Принципал, отозвавший делегирование; задан только у `REVOKED`.
+  Actor revoked_by = 12;
+}

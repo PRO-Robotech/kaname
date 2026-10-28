@@ -45,9 +45,36 @@ func (e *ResourceMirrorEmitter) UpsertTx(ctx context.Context, tx service.Tx, row
 }
 
 // DeleteTx — implements service.ResourceMirrorEmitter.
-func (e *ResourceMirrorEmitter) DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) error {
+func (e *ResourceMirrorEmitter) DeleteTx(ctx context.Context, tx service.Tx, objectType, objectID string, tombstone time.Time) (bool, error) {
 	return resource_mirror.DeleteTx(ctx, txAsPgx(tx), objectType, objectID, tombstone)
 }
 
 // Compile-time assertion.
+// DescendantsTx — потомки объекта по цепи предков и отношения, стоящие на каждом,
+// в снимке транзакции вызывающего (kaname#1002). Отношения читаются тем же телом,
+// что у читателя остатка (`objectTuples`), но в транзакции: снятие потомков
+// решается внутри неё, и потомок, заведённый между чтением и снятием, иначе ушёл
+// бы без своих отношений.
+func (e *ResourceMirrorEmitter) DescendantsTx(ctx context.Context, tx service.Tx, parentType, parentID string) ([]service.RegisteredDescendant, error) {
+	ptx := txAsPgx(tx)
+	found, err := resource_mirror.DescendantsTx(ctx, ptx, parentType, parentID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.RegisteredDescendant, 0, len(found))
+	for _, d := range found {
+		standing, err := objectTuples(ctx, ptx, d.ModelType+":"+d.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, service.RegisteredDescendant{ModelType: d.ModelType, ID: d.ID, Standing: standing})
+	}
+	return out, nil
+}
+
+// DropRegistrationTx — безусловное снятие регистрации потомка (kaname#1002).
+func (e *ResourceMirrorEmitter) DropRegistrationTx(ctx context.Context, tx service.Tx, catalogType, modelType, objectID string) (bool, time.Time, error) {
+	return resource_mirror.DropRegistrationTx(ctx, txAsPgx(tx), catalogType, modelType, objectID)
+}
+
 var _ service.ResourceMirrorEmitter = (*ResourceMirrorEmitter)(nil)

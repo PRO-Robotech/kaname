@@ -29,9 +29,10 @@ func TestAuthorize_Check_StripsForgedSecurityContext(t *testing.T) {
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: m})
 
 	_, err := svc.Check(context.Background(), CheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
-		Action:   "vpc.networks.update",
+		Subject:          "user:usr_alice",
+		Resource:         ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
+		Action:           "vpc.networks.update",
+		RequiredRelation: "editor",
 		Context: map[string]any{
 			// Forged principal/connection assurance a self-querying tenant could send.
 			"acr_value":          "3",
@@ -78,10 +79,11 @@ func TestAuthorize_Check_OverlaysTrustedACROverForgedValue(t *testing.T) {
 	// The interceptor chain places the FD-4-trusted acr on ctx.
 	ctx := grpcsrv.WithTrustedACR(context.Background(), "2", true)
 	_, err := svc.Check(ctx, CheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
-		Action:   "vpc.networks.update",
-		Context:  map[string]any{"acr_value": "3"}, // forged higher assurance
+		Subject:          "user:usr_alice",
+		Resource:         ResourceRef{Type: "vpc_network", ID: "vpcn_x"},
+		Action:           "vpc.networks.update",
+		RequiredRelation: "editor",
+		Context:          map[string]any{"acr_value": "3"}, // forged higher assurance
 	})
 	if err != nil {
 		t.Fatalf("Check err: %v", err)

@@ -1,0 +1,102 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# chart — ПРОИЗВОДИТЕЛЬ ЧАРТА СЛУЖБЫ в OCI-реестре организации (kaname#964).
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ЗАЧЕМ ОН ЗАВЕДЁН
+#
+# Чарт `deploy/` ставили только из дерева: адреса, откуда установка платформы
+# взяла бы его версией, не было. Модули платформы (registry-operator) публикуют
+# свои чарты в `oci://ghcr.io/pro-robotech/charts`; чарт службы доступа
+# публикуется туда же — `oci://ghcr.io/pro-robotech/charts/kaname`.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ТРИГГЕР — ТОЛЬКО МЕТКА ВЕРСИИ
+#
+# Та же метка `v<МАЖОР>.<МИНОР>.<ПАТЧ>`, по которой `docker-build.yml` публикует
+# образ `v<версия>`: одна метка — одна версия поставки, образ и чарт. Версия
+# чарта и appVersion берутся из метки (`.github/scripts/chart-publish.sh`).
+# Ни `push` в ветки, ни запроса здесь нет: проверку чарта на запросе дают пробы
+# каталога `deploy/` (их полосу рендера — `deploy/render-guard.sh`), а
+# публиковать с ветки нечего — опубликованная версия неизменяема.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ПУБЛИКУЕТСЯ ЛИШЬ ЧАРТ, ЧЕЙ РЕНДЕР ПРИНИМАЕТ СТРАЖ СТАРТА
+#
+# Задание `render` исполняет полосу рендера (`deploy/render-guard.sh`) с
+# объявленной ручкой полосы: без helm она отказывает, а не пропускает себя.
+# `publish` зависит от него: чарт, боевой профиль которого рендерится во вход,
+# отвергаемый стражем старта, в реестр не уходит.
+#
+# Учётных данных в дереве нет: публикует GITHUB_TOKEN задания с правом
+# `packages: write`, выданным только заданию публикации.
+name: чарт службы
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+# Публикацию по метке не снимает ничто: снятая на полпути, она оставила бы
+# реестр в состоянии, о котором конвейер не сказал ни слова.
+concurrency:
+  group: chart-${{ github.ref }}
+  cancel-in-progress: false
+
+# `bash -e {0}` по умолчанию — без pipefail; `shell: bash` включает `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+env:
+  HELM_VERSION: v3.22.1
+
+jobs:
+  render:
+    name: полоса рендера чарта
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112  # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: deploy/render-guard.sh
+        run: bash deploy/render-guard.sh
+
+  publish:
+    name: публикация чарта OCI
+    needs: [render]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112  # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      # Самопроверка публикатора ДО обращения к реестру: разбор метки и чтение
+      # ответа реестра доказываются в обе стороны, иначе отказ ниже мог бы быть
+      # отказом сломанного разбора.
+      - name: chart-publish.sh --self-test
+        run: bash .github/scripts/chart-publish.sh --self-test
+      - name: chart-publish.sh
+        env:
+          REF: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/scripts/chart-publish.sh "$REF"

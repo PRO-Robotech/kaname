@@ -46,8 +46,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -83,6 +83,10 @@ type scWorld struct {
 	grpA             string
 
 	rolRead, rolRead2, rolEdit domain.RoleID
+
+	// ownerSeeded — авто-выдача владельца usr-A и указатель prj-A на acc-A
+	// заведены (`ownerMayRemove`): единожды на мир.
+	ownerSeeded bool
 }
 
 // newSCWorld поднимает П1. Пропуск в -short — по форме пакета.
@@ -113,8 +117,7 @@ func newSCWorld(t *testing.T) *scWorld {
 		Relations:           door,
 		ClusterAdminChecker: door,
 	})
-	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil),
-		servicesan.NewForm("kacho-{service}"))
+	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(t))
 
 	w := &scWorld{t: t, ctx: ctx, pool: pool, repo: repo, ops: ops, door: door, rec: rec, ab: ab, authz: authz}
 
@@ -245,15 +248,27 @@ func moduleCtx() context.Context {
 }
 
 // check — `AuthorizeService.Check` через обработчик, действием `verb`
-// (`get` | `update`): отношение служба выводит из глагола, как в сценариях
-// приёмки («действием get»).
+// (`get` | `update`) и ярусом этого глагола, названным явно.
+//
+// Ярус назван явно, потому что выдача в этом мире материализуется на объекте
+// только ярусным кортежем: замер на `09ec0851e` — `current direct relations:
+// [viewer]`, и `v_get` ложен даже после проекции глаголов роли. Вопрос без
+// отношения берёт глагол типа (kaname#995), и ответить на него мир не может.
+// Вывод отношения из действия судят пробы мира П6 на настоящем решателе
+// (`action_only_check_module_verb_integration_test.go`); предмет этого мира —
+// классы субъектов, а не вывод отношения.
 func (w *scWorld) check(subject, verb, objID string) (*iamv1.AuthorizeCheckResponse, error) {
 	return w.authz.Check(moduleCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  subject,
-		Resource: &iamv1.ResourceRef{Type: scModelType, Id: objID},
-		Action:   "vpc.networks." + verb,
+		Subject:          subject,
+		Resource:         &iamv1.ResourceRef{Type: scModelType, Id: objID},
+		Action:           "vpc.networks." + verb,
+		RequiredRelation: scTierOfVerb[verb],
 	})
 }
+
+// scTierOfVerb — ярус глагола, которым мир спрашивает: тот же, который вопрос
+// без отношения получал до kaname#995.
+var scTierOfVerb = map[string]string{"get": "viewer", "update": "editor"}
 
 func (w *scWorld) requireCheck(subject, verb, objID string, want bool, why string) {
 	w.t.Helper()

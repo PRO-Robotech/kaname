@@ -114,8 +114,9 @@ model
 # A verb relation names an operation performed ON the object the tuple points at.
 # "Create" is not one: at the moment authority is decided the object does not yet
 # exist, so the question is always asked of a PARENT. Kachō answers it with the
-# write tier on that parent — `editor@project` gates every resource Create in the
-# permission catalog — which is why a per-object `v_create` had no reader anywhere.
+# write tier on that parent — `editor@project` (or `editor@account`) gates resource
+# Create in the permission catalog, with the two container rights named below as the
+# only exceptions — which is why a per-object `v_create` had no reader anywhere.
 # It was nonetheless declared by 24 types and materialized on every one of them:
 # 41087 tuples on the reference stand, 9.05% of the whole store, all of them
 # answering a question nothing asks. Worse than the cost, a relation that is
@@ -126,6 +127,17 @@ model
 # repository in this namespace" IS an operation on the registry object, and it is
 # really asked — control plane (CreateRepository / RenameRepository) and data plane
 # (docker push to a new repo, cross-repo mount, first-push blob-reveal guard).
+#
+# ONE more Create is answered by a container right that is NOT a verb at all:
+# `account#service_account_creator` (kaname#1003). Creating a service account was
+# gated by `editor@account` together with projects, groups, roles and invitations,
+# so a module account that must create service accounts could not be given that
+# without the rest. The relation is declared by the account block
+# (`[service_account] or editor` — former creators keep the right), and its tuple
+# is written by a role rule that names the CONTAINER VERB `create` of
+# `serviceAccount` (`containerVerbs` of the iam manifest) — never by a verb of the
+# service-account type, so the `*` wildcard does not reach it and
+# `iam_service_account` declares no `v_create`.
 #
 # Both directions are locked by authzmap/verb_relation_has_reader_test.go: a
 # reader-less carrier reappearing reds with the type name, and so does an exemption
@@ -412,6 +424,7 @@ type account
     # даёт снять членство, несущее живую выдачу, поэтому «сперва отозвать права,
     # потом исключить» энфорсится конструкцией, а не памятью.
     define member_remover: editor
+    define service_account_creator: [service_account] or editor
 
 type project
   relations

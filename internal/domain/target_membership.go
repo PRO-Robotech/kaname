@@ -84,6 +84,11 @@ type MirrorObject struct {
 	// область с пустым идентификатором совпала бы с ним.
 	ParentAccountIDs []string
 	Labels           map[string]string
+	// CreatedBy — субъект-создатель объекта в форме субъекта модели
+	// (`service_account:<id>`, `user:<id>`), если вид объекта хранит факт создателя
+	// (kaname#1003, Р4); пусто — создатель не записан либо у вида его нет. Читает
+	// его селектор создателя правила роли: пустое значение не выбирает никого.
+	CreatedBy string
 }
 
 // IsContainedIn reports whether a mirror object lies UNDER the given scope-anchor

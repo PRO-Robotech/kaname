@@ -11,8 +11,9 @@ package nesteddepth_test
 // П3: ящики b1, b2 (контейнер; указатель на аккаунт — почему, сказано у
 // `probemodManifest`), предметы i1 в b1 и i3 в b2,
 // ярлыки t1 в i1 и t3 в i3. Роль `probemod.reader` — `boxes [get, list]` с
-// вложенным правилом над ВНУКОМ `tags`; `probemod.reader_b1` — то же, у
-// правила-владельца имена `[b1]`. Каталог применён применителем манифеста, роль
+// вложенным правилом над ВНУКОМ `tags`; близнец с именами `[b1]` у
+// правила-владельца строится здесь же (`p3Rules`): манифест модуля конкретных
+// объектов не называет (kaname#965). Каталог применён применителем манифеста, роль
 // записана продуктовым писателем, вопросы задаёт `relverdict.NewAsker` — тот же
 // вход, что у корня службы. Выдача пишется строкой: вход API цель `probemod` не
 // принимает (`ValidTargetType` — закрытый перечень), поэтому здесь
@@ -140,11 +141,11 @@ func (w *p3) role(id string, rules domain.Rules) {
 	if err != nil {
 		w.t.Fatalf("роль %s: %v", id, err)
 	}
-	sels := facts.GrantSelectors(r.Rules.MaterializingSelectors())
+	sels := facts.GrantSelectors(r.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", id, err)
 	}
-	pairs := facts.RoleVerbsFromSelectors(sels)
+	pairs := facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		w.t.Fatalf("проекция глаголов роли %s пуста — каталог П3 не знает её типов", id)
 	}

@@ -35,8 +35,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/corelib/grpcsrv"
-
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
@@ -145,8 +143,8 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 // (PrincipalSubject !ok) reaching the inner gate. The only legitimate
 // no-tenant-principal caller of AuthorizeService is a cluster-internal module
 // PDP peer, which is identified by a VERIFIED mTLS module SAN
-// (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`, учётка — объявленной установкой
-// формы имени службы, NewHandler) on the :9091 internal listener —
+// (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`, пара — объявленная перечнем
+// личностей модулей, WithModuleRoster) on the :9091 internal listener —
 // NOT by the mere absence of a principal. It returns nil (allow) only when:
 //
 //   - a verified module SAN is present (genuine internal PDP peer — the internal
@@ -161,10 +159,10 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 // bypass. Denial is the DEFAULT: an omitted setter lands here, because that is
 // what a wiring mistake must produce.
 func (h *Handler) authorizeAnonymousPeer(ctx context.Context) error {
-	if san, verified := grpcsrv.CertIdentityFromContext(ctx); verified && san != "" {
-		if _, ok := authzguard.SANToServiceDomain(grpcsrv.CertIdentityDomainFromContext(ctx), h.moduleForm, san); ok {
-			return nil
-		}
+	// Пир-модуль — объявленная пара перечня (kaname#984), тот же разбор, что у
+	// политик вызывающего обоих слушателей.
+	if _, ok := h.modules.FromContext(ctx); ok {
+		return nil
 	}
 	if h.insecureAnonymousPeer {
 		// Explicitly opted-in insecure listener: no mTLS to distinguish listeners

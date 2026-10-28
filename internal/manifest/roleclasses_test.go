@@ -232,22 +232,24 @@ func TestMODRC05EmptyClassListIsRefusedByTheDomain(t *testing.T) {
 // именно её.
 func TestMODRC11UnknownKeyInsideARoleRuleIsStillRefused(t *testing.T) {
 	_, err := manifest.Load([]byte(roleManifest(
-		"{module: vpc, resources: [network], classes: [get], resourceNamez: [ntw-1]}")))
+		"{module: vpc, resources: [network], classes: [get], matchLabelz: {env: prod}}")))
 	if err == nil {
 		t.Fatal("опечатка в имени ключа правила принята: ключ уехал бы молча")
 	}
 	if !errors.Is(err, manifest.ErrShape) {
 		t.Errorf("отказ не отнесён к форме документа: %v", err)
 	}
-	for _, want := range []string{"resourceNamez", "line "} {
+	for _, want := range []string{"matchLabelz", "line "} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("отказ не называет %q: %v", want, err)
 		}
 	}
 
-	// Парный положительный: то же правило без лишнего ключа — принимается.
+	// Парный положительный: тот же ключ, написанный верно, — принимается. Ключ —
+	// `matchLabels`, а не `resourceNames`: тот в манифесте модуля отвергается сам
+	// по себе (kaname#965), и близнец отличался бы не одним фактом.
 	if _, err := manifest.Load([]byte(roleManifest(
-		"{module: vpc, resources: [network], classes: [get], resourceNames: [ntw-1]}"))); err != nil {
+		"{module: vpc, resources: [network], classes: [get], matchLabels: {env: prod}}"))); err != nil {
 		t.Fatalf("парный положительный отвергнут: %v", err)
 	}
 }

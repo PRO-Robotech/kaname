@@ -91,7 +91,11 @@ func (x *ResourceRef) GetId() string {
 type AuthorizeCheckRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
-	// / "group:<grp…>#member" / "system_class:anonymous"). Required.
+	// / "group:<grp…>#member" / "system_class:anonymous"). Required except
+	// for a credential-free public Check: omit subject, context and
+	// required_relation to ask only as server-inferred system_class:anonymous.
+	// A supplied invalid credential never falls back to anonymous. Other RPCs
+	// and authenticated/module subject-binding rules are unchanged.
 	// "system_class:authenticated" and the wildcard "user:*" are not speakers →
 	// INVALID_ARGUMENT.
 	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`

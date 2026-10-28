@@ -395,7 +395,7 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 		for _, need := range []struct{ key, value, why string }{
 			{"scopeType", b.ScopeType, "выдача не сказала, на каком ярусе она действует"},
 			{"scopeId", b.ScopeID, "выдача не сказала, на каком объекте яруса она действует"},
-			{"target", b.Target, "выдача не сказала, распространяется ли она на весь ярус либо на перечень объектов"},
+			{"target", b.Target, "выдача посева в манифесте модуля действует только на ярус целиком: напишите `target: allInScope`"},
 		} {
 			if strings.TrimSpace(need.value) != "" {
 				continue
@@ -477,9 +477,15 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 				census.RelationGrantsJudged++
 			}
 		}
+		var canonFaults []error
 		if anchorUsable {
-			faults = append(faults, validateRelationGrant(doc, i, b, anchorObjectType, seededSubjects, oracle)...)
+			canonFaults = validateRelationGrant(doc, i, b, anchorObjectType, seededSubjects, oracle)
+			faults = append(faults, canonFaults...)
 		}
+
+		// Потолок — ПОСЛЕ канона: он судит цену выдачи, а не её существование,
+		// и выдачу, которую канон уже отверг, второй раз не судит (kaname#979).
+		faults = append(faults, validateSeedGrantCeiling(m, doc, i, b, roles, len(canonFaults) > 0)...)
 	}
 
 	for i, sa := range seed.ServiceAccounts {
@@ -514,11 +520,16 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 	return census, faults
 }
 
-// Виды выдачи по охвату. Перечень закрыт схемой (`target.enum`); здесь названы
-// оба, потому что правило о перечне объектов зависит от того, КОТОРЫЙ выбран.
+// Виды выдачи по охвату. Контракт создания знает оба; манифесту модуля дан
+// только `allInScope` (`target.enum` схемы): охват `resources` отвергается
+// находкой о ссылке на объект (object_refs.go, kaname#965). Здесь названы оба,
+// потому что правило о перечне объектов зависит от того, КОТОРЫЙ выбран, и
+// отказ по охвату не заменяет находок о самом перечне.
 const (
-	bindingTargetAllInScope = "allInScope"
-	bindingTargetResources  = "resources"
+	// TargetAllInScope — единственная цель выдачи посева, годная манифесту модуля;
+	// её же исполняет применитель посева (moduleseed).
+	TargetAllInScope       = "allInScope"
+	bindingTargetResources = "resources"
 )
 
 // bindingResourcesDeclared — назван ли ключ `resources` у выдачи В ДОКУМЕНТЕ.
@@ -561,13 +572,13 @@ func validateBindingTarget(doc *yaml.Node, i int, b AccessBinding, declared bool
 			detail: fmt.Sprintf("seed.accessBindings[%d]: охват назван %q, а перечня объектов нет — "+
 				"выдаче не на что распространяться", i, bindingTargetResources),
 		})
-	case b.Target == bindingTargetAllInScope && declared:
+	case b.Target == TargetAllInScope && declared:
 		faults = append(faults, linkFault{
 			kind:  ErrBindingIncomplete,
 			coord: locate(doc, "seed", "accessBindings", i, "resources"),
 			detail: fmt.Sprintf("seed.accessBindings[%d]: охват назван %q — выдача покрывает весь "+
 				"ярус и БУДУЩИЕ объекты тоже, поэтому перечень при нём не читает никто; "+
-				"написанный, он утверждает сужение, которого не будет", i, bindingTargetAllInScope),
+				"написанный, он утверждает сужение, которого не будет", i, TargetAllInScope),
 		})
 	}
 

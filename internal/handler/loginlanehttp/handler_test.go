@@ -36,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
@@ -298,12 +299,12 @@ func newLaneOfForm(t *testing.T, verbs loginlanehttp.Lane, cookieDomain, form st
 	t.Helper()
 	ca := newCA(t)
 	h, err := loginlanehttp.New(loginlanehttp.Config{
-		SessionTTL:      24 * time.Hour,
-		CookieDomain:    cookieDomain,
-		TrustDomain:     grpcsrv.NewTrustDomain(trustDomain),
-		RefusalDomain:   "iam.kaname.cloud",
-		Logger:          slog.New(slog.DiscardHandler),
-		ServiceNameForm: servicesan.NewForm(form),
+		SessionTTL:    24 * time.Hour,
+		CookieDomain:  cookieDomain,
+		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
+		Modules:       laneRosterOfForm(t, form),
+		RefusalDomain: "iam.kaname.cloud",
+		Logger:        slog.New(slog.DiscardHandler),
 	}, verbs)
 	require.NoError(t, err)
 	srv := httptest.NewUnstartedServer(h)
@@ -635,7 +636,12 @@ func TestLane_F3_29_51_OnlyTheGatewayIsAdmitted(t *testing.T) {
 	form := map[string]string{"currentPassword": "old", "newPassword": "new passphrase", "csrfToken": tok}
 	sess := &http.Cookie{Name: "kaname_session", Value: "bearer"}
 
-	for name, san := range map[string]string{"из круга, не край": vpcSAN, "вне круга": strangerSAN} {
+	for name, san := range map[string]string{
+		"из круга, не край": vpcSAN, "вне круга": strangerSAN,
+		// kaname#984: учётка края в пространстве, которого установка не
+		// объявляла, — не край.
+		"учётка края в необъявленном пространстве": "spiffe://kacho.cloud/ns/intruder/sa/kacho-api-gateway",
+	} {
 		t.Run(name, func(t *testing.T) {
 			before := len(stub.changeIn)
 			r := l.do(t, l.client(t, san), http.MethodPost, "/iam/v1/auth/password", form, nil, ctxCk, sess)
@@ -685,16 +691,19 @@ func TestLane_EdgeIsRecognisedByTheDeclaredForm(t *testing.T) {
 	require.Equal(t, http.StatusOK, r.status, "край объявленной формы не допущен — близнец отрицания")
 }
 
-// TestLane_UndeclaredServiceNameFormIsNotBuilt — слушатель без формы не
-// строится: по необъявленной форме не узнаётся никто, и поднятый он отвечал бы
-// голым отказом каждому запросу.
-func TestLane_UndeclaredServiceNameFormIsNotBuilt(t *testing.T) {
-	_, err := loginlanehttp.New(loginlanehttp.Config{
-		SessionTTL:  time.Hour,
-		TrustDomain: grpcsrv.NewTrustDomain(trustDomain),
-	}, &stubLane{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "service name form")
+// laneRosterOfForm — перечень личностей проб под объявленной формой имени
+// службы form (kaname#308): край и модуль vpc названы учётками этой формы.
+// Форма, которой учётка края сертификата проб не имеет, признаёт перечнем
+// другую учётку — и сертификат края проб краем не узнаётся.
+func laneRosterOfForm(t *testing.T, raw string) moduleidentity.Roster {
+	t.Helper()
+	form := servicesan.NewForm(raw)
+	r, err := moduleidentity.Parse(form, []string{
+		"kacho/" + form.Account("api-gateway") + "=edge",
+		"kacho/" + form.Account("vpc") + "=module-writer",
+	})
+	require.NoError(t, err)
+	return r
 }
 
 // TestLane_F3_23_CSRFIsIssuedWithoutASession — признак формы выдаётся и без
@@ -714,4 +723,23 @@ func TestLane_UnknownPathAndMethod(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, r.status, "«кто я» — маршрут края, не службы")
 	r = l.do(t, c, http.MethodGet, "/iam/v1/auth/login", nil, nil)
 	require.Equal(t, http.StatusMethodNotAllowed, r.status)
+}
+
+// laneRoster — перечень личностей проб полосы (kaname#984): край и сосед
+// объявлены парами своих SAN; краем слушатель признаёт только объявленную пару.
+func laneRoster(t *testing.T) moduleidentity.Roster {
+	t.Helper()
+	return laneRosterOfForm(t, laneServiceNameForm)
+}
+
+// TestLane_UndeclaredModuleRosterRefusesToBuild — слушатель без перечня
+// личностей не строится (kaname#984): по пустому перечню край не признаётся, и
+// поднятый слушатель отвергал бы каждый запрос молча.
+func TestLane_UndeclaredModuleRosterRefusesToBuild(t *testing.T) {
+	_, err := loginlanehttp.New(loginlanehttp.Config{
+		SessionTTL:  24 * time.Hour,
+		TrustDomain: grpcsrv.NewTrustDomain(trustDomain),
+	}, &stubLane{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "module identities must be declared")
 }

@@ -80,7 +80,11 @@ func buildBindingTuples(b domain.AccessBinding, subject domain.Subject, role dom
 	// viewer path to the binding OBJECT itself — kacho-iam#166, membership-write-authz cascade,
 	// D-7); the per-object access tuples are materialized post-commit by the
 	// reconciler (create.go ReconcileBinding) + forward on each resource's Create.
-	if len(role.Rules) > 0 {
+	//
+	// Роль без правил И без прав (kaname#963, Р6) — правила потеряли адресатов
+	// снятием регистрации — не даёт ничего: веткой «только с перечнем прав» она не
+	// читается, и выдача кладёт лишь указатель на родителя.
+	if len(role.Rules) > 0 || len(role.Permissions) == 0 {
 		var tuples []abrepo.RelationTuple
 		if hp, ok := hierarchyParentTuple(b); ok {
 			tuples = append(tuples, hp)

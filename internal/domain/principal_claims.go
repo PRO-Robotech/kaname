@@ -29,4 +29,12 @@ const (
 	ClaimPrincipalID = "kaname_principal_id"
 	// ClaimPrincipalDisplay — отображаемое имя принципала. Косметическое.
 	ClaimPrincipalDisplay = "kaname_principal_display_name"
+	// ClaimSAKeyID — идентификатор строки удостоверения служебной учётки, по
+	// которому выдан токен (kaname#947). Это КЛЮЧ ОТСЕЧКИ: снятие строки пишет
+	// отсечку её идентификатором (триггер схемы
+	// `sa_oauth_client_removal_cuts_minted_tokens`), и правило отзыва
+	// (`tokenrevocation`) читает его из состава. Токен, выданный по
+	// удостоверению и не несущий этого имени, отзыв удостоверения не снимает —
+	// он действует до своего срока.
+	ClaimSAKeyID = "kaname_sa_key_id"
 )

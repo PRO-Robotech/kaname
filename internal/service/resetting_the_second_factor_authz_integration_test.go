@@ -109,7 +109,9 @@ func TestResetSecondFactorAuthzMatrix(t *testing.T) {
 	// proto и есть единственный источник per-RPC решения края.
 	resetRel, resetType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/ResetSecondFactor")
 	readRel, readType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Get")
-	grantRel, grantType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.AccessBindingService/Delete")
+	// Снятие выдачи судит ОБРАБОТЧИК, а не дверь по каталогу (kaname#986, Р1а):
+	// источник вопроса — обработчик (`removalGateFromHandler`).
+	grantRel, grantType := removalGateFromHandler(t)
 
 	// ── ПРЕДМЕТ ПРОБЫ НАЗВАН КАТАЛОГОМ ──────────────────────────────────────────
 	// Если запись каталога `ResetSecondFactor` съедет с `identity_suspender`/`iam_user`

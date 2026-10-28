@@ -1,0 +1,144 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/access_binding.proto";
+import "kaname/cloud/iam/v1/grant_delegation.proto";
+import "corelib/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A set of methods for managing GrantDelegation resources — делегирований права
+// выдавать.
+//
+// Право на каждом методе решает обработчик (`HANDLER_DECIDES`): право выдавать на
+// аккаунте — три пути, и путь владельца аккаунта — предикат по строке аккаунта,
+// а не отношение модели; у `Get` к нему добавляется «вызывающий — делегат», факт
+// строки делегирования. Статическим отношением ни то ни другое не выражается.
+// Отказ в праве и несуществующее делегирование отвечают побайтово одинаково:
+// `PERMISSION_DENIED` `permission denied`.
+service GrantDelegationService {
+  // Returns the specified GrantDelegation resource. Право — право выдавать на
+  // аккаунте делегирования либо вызывающий — его делегат.
+  rpc Get (GetGrantDelegationRequest) returns (GrantDelegation) {
+    option (google.api.http) = { get: "/iam/v1/grantDelegations/{grant_delegation_id}" };
+    option (corelib.authz.v1.permission)       = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)    = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists grant delegations of an account, active and revoked, ordered by
+  // (created_at, id). Право — право выдавать на аккаунте; форма страницы судится
+  // до права.
+  rpc List (ListGrantDelegationsRequest) returns (ListGrantDelegationsResponse) {
+    option (google.api.http) = { get: "/iam/v1/grantDelegations" };
+    option (corelib.authz.v1.permission)       = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)    = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Creates a grant delegation. Право — право выдавать на аккаунте
+  // (`account_id`): владелец аккаунта, администратор аккаунта либо
+  // администратор облака. Делегат делегирований не заводит. Одно действующее
+  // делегирование на пару «аккаунт, делегат»: второе — `ALREADY_EXISTS` в
+  // `Operation.error`.
+  rpc Create (CreateGrantDelegationRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/grantDelegations" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "CreateGrantDelegationMetadata"
+      response: "GrantDelegation"
+    };
+    option (corelib.authz.v1.permission)       = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)    = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Revokes the specified grant delegation and, in the same transaction, every
+  // active access binding granted under it (`REVOCATION_REASON_DELEGATION_REVOKED`).
+  // Защита выдачи от удаления отзыву не мешает. Право — право выдавать на
+  // аккаунте делегирования; делегат своё делегирование не отзывает. Повторный
+  // отзыв — `FAILED_PRECONDITION`.
+  rpc Revoke (RevokeGrantDelegationRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/grantDelegations/{grant_delegation_id}:revoke" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeGrantDelegationMetadata"
+      response: "GrantDelegation"
+    };
+    option (corelib.authz.v1.permission)       = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)    = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+}
+
+message GetGrantDelegationRequest {
+  // ID of the GrantDelegation resource to return.
+  string grant_delegation_id = 1;
+}
+
+message ListGrantDelegationsRequest {
+  // ID of the Account whose grant delegations are listed. Required.
+  string account_id = 1;
+
+  // The maximum number of results per page to return. 0 selects the platform
+  // default (50); a value outside [0..1000] is rejected with INVALID_ARGUMENT
+  // rather than clamped.
+  int64 page_size = 2;
+
+  // Page token.
+  string page_token = 3;
+}
+
+message ListGrantDelegationsResponse {
+  // List of GrantDelegation resources, ordered by (created_at, id).
+  repeated GrantDelegation grant_delegations = 1;
+
+  // Token for the next page; empty on the last page.
+  string next_page_token = 2;
+}
+
+message CreateGrantDelegationRequest {
+  // ID of the Account the delegation is scoped to. Required.
+  string account_id = 1;
+
+  // The delegate: a service account (`SUBJECT_TYPE_SERVICE_ACCOUNT` only).
+  Subject delegate = 2;
+
+  // Role ids the delegate may grant: 1..16, no repeats; roles declared by ONE
+  // module manifest (not `iam`).
+  repeated string role_ids = 3;
+
+  // Catalog types (dotted, e.g. `registry.registries`) of the same module whose
+  // objects the delegate may grant on: 1..16, no repeats.
+  repeated string target_types = 4;
+
+  // Subject types the delegate may grant to: 1..4, no repeats, never
+  // `SUBJECT_TYPE_UNSPECIFIED`.
+  repeated SubjectType subject_types = 5;
+}
+
+message CreateGrantDelegationMetadata {
+  // ID of the GrantDelegation being created.
+  string grant_delegation_id = 1;
+
+  // ID of the Account the delegation is scoped to.
+  string account_id = 2;
+}
+
+message RevokeGrantDelegationRequest {
+  // ID of the GrantDelegation resource to revoke.
+  string grant_delegation_id = 1;
+}
+
+message RevokeGrantDelegationMetadata {
+  // ID of the GrantDelegation being revoked.
+  string grant_delegation_id = 1;
+
+  // ID of the Account the delegation is scoped to.
+  string account_id = 2;
+}

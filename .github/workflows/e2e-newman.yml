@@ -609,7 +609,9 @@ jobs:
       #
       # Взаимный TLS собственных фронтов передаётся прогонщику флагами: без
       # клиентского листа КАЖДЫЙ запрос умер бы на рукопожатии, то есть «без
-      # ответа», а не вердиктом о предмете.
+      # ответа», а не вердиктом о предмете. Внутреннему фронту — лист края
+      # (`--internal-front-client-*`): фронт допускает лишь личности перечня
+      # (SEC-1017-1), лист службы получил бы 403 до слушателя.
       - name: коллекции собственного REST-фронта гоняются (числовой вердикт)
         timeout-minutes: 15
         run: |
@@ -638,6 +640,8 @@ jobs:
             --service iam-token-facade-conformance \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
+            --internal-front-client-cert ../../.stand/pki/edge.crt \
+            --internal-front-client-key ../../.stand/pki/edge.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
 
       # ── ВОЛНА СВЁРТКИ БАЗЫ: отказ без вердикта, а не пустая страница ──────
@@ -994,11 +998,14 @@ jobs:
             --service rbac-visibility-set \
             --service iam-access-binding-account-scope \
             --service iam-access-binding-include-revoked \
+            --service iam-access-binding-revocation-reason \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
             --service kaname-cluster-admins \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
+            --internal-front-client-cert ../../.stand/pki/edge.crt \
+            --internal-front-client-key ../../.stand/pki/edge.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
 
       # Артефакт публичного репозитория — только после чистки: окружение прогона

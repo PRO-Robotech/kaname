@@ -63,7 +63,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 const (
@@ -142,23 +142,26 @@ type SystemViewerFloor struct {
 	prodMode bool
 	// readFloor — the set of full-method names under the floor.
 	readFloor map[string]struct{}
-	// form — форма имени службы, объявленная установкой: ею учётка
-	// сертификата разбирается в учётку модуля. Нулевая не узнаёт никого.
-	form servicesan.Form
+	// modules — личности модулей установки (kaname#984). Нулевое значение не
+	// признаёт никого.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки: пол
+// спрашивает отношение у служебной учётки ОБЪЯВЛЕННОЙ пары.
+func (f *SystemViewerFloor) WithModuleRoster(r moduleidentity.Roster) *SystemViewerFloor {
+	f.modules = r
+	return f
 }
 
 // NewSystemViewerFloor builds the floor over the given READ-RPC set. Defaults to
 // dev-mode (no-op); use WithProductionMode to enable strict enforcement.
-//
-// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm());
-// параметр обязателен и позиционен: нулевая форма не узнаёт никого, и забытая
-// сборкой она отвергала бы каждого читателя молча.
-func NewSystemViewerFloor(checker RelationChecker, readFloorRPCs []string, form servicesan.Form) *SystemViewerFloor {
+func NewSystemViewerFloor(checker RelationChecker, readFloorRPCs []string) *SystemViewerFloor {
 	m := make(map[string]struct{}, len(readFloorRPCs))
 	for _, rpc := range readFloorRPCs {
 		m[rpc] = struct{}{}
 	}
-	return &SystemViewerFloor{checker: checker, readFloor: m, form: form}
+	return &SystemViewerFloor{checker: checker, readFloor: m}
 }
 
 // WithProductionMode toggles strict fail-closed enforcement (production AuthN).
@@ -198,11 +201,13 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 	if !verified || san == "" {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
-	sva, ok := SANToServiceAccountID(grpcsrv.CertIdentityDomainFromContext(ctx), f.form, san)
+	// Признание — объявленная пара перечня (kaname#984).
+	module, ok := f.modules.FromContext(ctx)
 	if !ok {
-		// Malformed / foreign-trust-domain SAN → not a module identity.
+		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
+	sva := ServiceAccountIDForAccount(module.Account)
 	if f.checker == nil {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return status.Error(codes.PermissionDenied, "permission denied")

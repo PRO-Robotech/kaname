@@ -346,6 +346,7 @@ sum by (outcome) (rate(kaname_ceremony_outcomes_total[5m]))
 | `kaname_catalog_snapshot_refreshes_total` | `outcome` | обновления живого снимка каталога. Ноль при живой службе означает, что снимок не обновляется, а не что менять нечего |
 | `kaname_role_verb_reseeds_total` | `outcome` | пересчёты проекции «роль → тип объекта × глагол» |
 | `kaname_role_rule_ref_reseeds_total` | `outcome` | пересчёты проекции объявленных сегментов правила |
+| `kaname_binding_converge_total` | `outcome` | сведение выдачи сводящим проходом (при старте и по такту `KANAME_BINDING_CONVERGE_INTERVAL_MS`), по одной выдаче за проход. Рост `failed` означает, что у выдачи может жить право, которого текущее вычисление уже не даёт, до следующего прохода |
 | `kaname_register_postcommit_steps_total` | `step`, `outcome` | шаги материализации после фиксации регистрации/снятия ресурса. Отказ здесь означает, что ресурс записан, а права по нему ещё не разложены |
 
 ## Разбор вердикта о доступе

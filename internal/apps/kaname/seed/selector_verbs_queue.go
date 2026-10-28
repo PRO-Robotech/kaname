@@ -183,13 +183,13 @@ const idleFactor = 10
 func regrainOneRole(ctx context.Context, repo kanamerepo.Repository, cat *catalog.Facts, id string) error {
 	if err := shared.DoWithWriteTxVoid(ctx, repo,
 		func(ctx context.Context, w kanamerepo.Writer) error {
-			rules, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(id))
+			rules, policy, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(id))
 			if err != nil {
 				return err
 			}
 			var sels []domain.RuleSelector
 			if live {
-				sels = cat.GrantSelectors(rules.MaterializingSelectors())
+				sels = cat.GrantSelectors(rules.MaterializingSelectors(), policy)
 			}
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(id), sels)
 		}); err != nil {

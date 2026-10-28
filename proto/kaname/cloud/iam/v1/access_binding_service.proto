@@ -64,12 +64,16 @@ service AccessBindingService {
       metadata: "DeleteAccessBindingMetadata"
       response: "google.protobuf.Empty"
     };
-    option (corelib.authz.v1.permission)        = "iam.access_bindings.delete";
-    option (corelib.authz.v1.required_relation) = "v_delete";
-    option (corelib.authz.v1.scope_extractor)   = {
-      object_type:        "iam_access_binding"
-      from_request_field: "access_binding_id"
-    };
+    // Право решает обработчик (`HANDLER_DECIDES`), а не дверь слушателя: у
+    // делегата (`GrantDelegationService`) на объекте его выдачи нет ни одного
+    // отношения модели, и дверь отвергла бы его до обработчика. Прежний вопрос
+    // двери переехал в обработчик дословно: держатель права выдавать проходит,
+    // только если держит `v_delete` на `iam_access_binding:<id>` (тот же надзор
+    // администратора облака) И право выдавать на области выдачи; делегат —
+    // только по выдаче, несущей ссылку на его действующее делегирование.
+    // Несуществующая выдача — `PERMISSION_DENIED`, побайтово как отказ в праве.
+    option (corelib.authz.v1.permission)        = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)     = "HANDLER_DECIDES";
     option (corelib.authz.v1.required_acr_min)  = "2";
   }
 
@@ -416,12 +420,16 @@ service AccessBindingService {
       metadata: "RevokeAccessBindingMetadata"
       response: "AccessBinding"
     };
-    option (corelib.authz.v1.permission)        = "iam.access_bindings.revoke";
-    option (corelib.authz.v1.required_relation) = "v_delete";
-    option (corelib.authz.v1.scope_extractor)   = {
-      object_type:        "iam_access_binding"
-      from_request_field: "access_binding_id"
-    };
+    // Право решает обработчик (`HANDLER_DECIDES`), а не дверь слушателя: у
+    // делегата (`GrantDelegationService`) на объекте его выдачи нет ни одного
+    // отношения модели, и дверь отвергла бы его до обработчика. Прежний вопрос
+    // двери переехал в обработчик дословно: держатель права выдавать проходит,
+    // только если держит `v_delete` на `iam_access_binding:<id>` (тот же надзор
+    // администратора облака) И право выдавать на области выдачи; делегат —
+    // только по выдаче, несущей ссылку на его действующее делегирование.
+    // Несуществующая выдача — `PERMISSION_DENIED`, побайтово как отказ в праве.
+    option (corelib.authz.v1.permission)        = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)     = "HANDLER_DECIDES";
     option (corelib.authz.v1.required_acr_min)  = "2";
   }
 

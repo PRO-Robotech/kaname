@@ -238,18 +238,30 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	if kerr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", kerr)
 	}
+	// Срок переводится в длительность ОДИН раз и без заворота: срок сверх
+	// представимого заворачивался в ноль («срок не назван»), в отрицательное
+	// или в доли секунды, и потолок судил завёрнутое число (kaname#993).
+	requestedTTL, representable := shared.TTLFromSeconds(in.TTLSeconds)
 	// Срок вида SECRET разрешается ТАМ ЖЕ и ТЕМ ЖЕ объявлением, что у второго
 	// глагола выдачи: сверх потолка ОТВЕРГАЕТСЯ, а не урезается молча — иначе
 	// вызывающий получает успех при неприменённом параметре.
 	var secretTTL time.Duration
 	if kind == domain.CredentialKindSecret {
-		ttl, ok := tokenpolicy.ResolveSecretCredentialTTL(time.Duration(in.TTLSeconds) * time.Second)
-		if !ok {
+		// Непредставимый срок заведомо выше потолка вида — отказ тем же текстом.
+		ttl, ok := tokenpolicy.ResolveSecretCredentialTTL(requestedTTL)
+		if !representable || !ok {
 			return nil, status.Errorf(codes.InvalidArgument,
 				"ttl_seconds: exceeds the %s ceiling of %d seconds for credential_kind SECRET",
 				domain.CredentialKindSecret, int64(tokenpolicy.SecretCredentialTTLCeiling.Seconds()))
 		}
 		secretTTL = ttl
+	}
+	// У KEYPAIR личности потолка установки нет; предел — представимость:
+	// иначе удостоверение стало бы бессрочным, истекло бы в миг выдачи или
+	// жило бы доли секунды.
+	if !representable {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"ttl_seconds must be <= %d", shared.MaxTTLSeconds)
 	}
 	// Предел описания судит ДОМЕННЫЙ тип — в знаках, как ограничение схемы;
 	// `len()` здесь мерил бы байты и отвергал кириллицу вдвое раньше (kaname#864).
@@ -565,7 +577,10 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		CredentialKind: domain.CredentialKindKeypair,
 	}
 	if in.TTLSeconds > 0 {
-		t := issued.Add(time.Duration(in.TTLSeconds) * time.Second)
+		// Область срока проверил Execute до всякой записи: сюда доходит лишь
+		// представимый срок, и признак представимости здесь не нужен.
+		d, _ := shared.TTLFromSeconds(in.TTLSeconds)
+		t := issued.Add(d)
 		row.ExpiresAt = &t
 	}
 	persisted, err := u.commitMapping(ctx, row, actor, key.Algorithm)

@@ -81,7 +81,7 @@ func serveACRChain(t *testing.T, srv iamv1.InternalClusterServiceServer, san, ac
 	reg, err := seed.LoadPermissionRegistry(context.Background(), nil)
 	require.NoError(t, err)
 
-	callerPolicy := authzguard.NewCallerPolicy(true, authzguard.GatewayFrontedInternalRPCs(), probeServiceNameForm)
+	callerPolicy := authzguard.NewCallerPolicy(true, authzguard.GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster())
 	acrFloor := authzguard.NewACRFloor(reg, authzguard.GatewayFrontedInternalRPCs()).WithProductionMode(true)
 
 	lis := bufconn.Listen(1024 * 1024)

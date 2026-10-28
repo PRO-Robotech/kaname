@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
 
@@ -134,7 +135,7 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerIsCountedOnTheShowc
 		"близнец: доверенный пересыльщик": {anonLaneForwarderSAN, true, "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), probeServiceNameForm)
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), moduleidentity.Roster{})
 			reg := metrics.NewRegistry()
 			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
 			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)
@@ -179,7 +180,7 @@ func TestAnonymousRegistryToken_TrustedForwarderWithoutUsableAddressIsCountedOnT
 		"близнец: один адрес": {[]string{"203.0.113.1", "203.0.113.2"}, "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), probeServiceNameForm)
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), moduleidentity.Roster{})
 			reg := metrics.NewRegistry()
 			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
 			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)

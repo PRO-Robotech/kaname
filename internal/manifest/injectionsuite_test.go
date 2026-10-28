@@ -216,7 +216,7 @@ const rolesSectionOnlyFirst = `
 roles:
   - id: vpc.internal_consumer
     description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
-    tier: {tierType: iam.project, tierId: prj000000000000000}
+    tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
       - {module: vpc, resources: [address], classes: [get, list]}
 `
@@ -251,13 +251,21 @@ func manifestInjections() []injection {
 			name: "имя модуля не той формы", old: "module: vpc",
 			replacement: "module: Vpc", wantErr: ErrMalformedModule, needle: "Vpc",
 		},
+		// Имя ГОДНОЙ формы судьёй имени не отвергается — ни из таблицы образа, ни
+		// вне неё (`mustNotBe`). Документ при этом не проходит, и это ДРУГОЙ
+		// судья: посев фикстуры выдаёт роли `vpc.*`, и после смены одного имени
+		// модуля они стали ролями чужого модуля (потолок посева, kaname#979).
+		// Законный близнец с переименованием целиком — TestMODMF06* в
+		// manifest_test.go.
 		{
-			name: "законный близнец: другой модуль ИЗ порождённой таблицы", old: "module: vpc",
-			replacement: "module: loadbalancer", wantErr: nil,
+			name: "годное имя другого модуля ИЗ порождённой таблицы: свои роли посева стали чужими", old: "module: vpc",
+			replacement: "module: loadbalancer", wantErr: ErrSeedGrantForeignModule, mustNotBe: ErrMalformedModule,
+			needle: "loadbalancer",
 		},
 		{
-			name: "законный близнец: модуль ВНЕ порождённой таблицы", old: "module: vpc",
-			replacement: "module: acme", wantErr: nil,
+			name: "годное имя модуля ВНЕ порождённой таблицы: свои роли посева стали чужими", old: "module: vpc",
+			replacement: "module: acme", wantErr: ErrSeedGrantForeignModule, mustNotBe: ErrMalformedModule,
+			needle: "acme",
 		},
 
 		// ── ТИП ОБЪЕКТА: форма, владение, столкновение (kacho#2015) ─────────────

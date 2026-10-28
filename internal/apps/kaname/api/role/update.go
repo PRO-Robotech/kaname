@@ -87,6 +87,15 @@ type UpdateRoleUseCase struct {
 	// причине, что и у создания: проекция «роль → тип × глагол» пишется в той же
 	// транзакции, и пустая проекция оставила бы вердикт определённым наполовину.
 	cat catalog.Source
+	// keys — какие ключи, названные правилами, зарегистрированы на приёме (kaname#963).
+	keys shared.RegisteredKeys
+}
+
+// WithRegisteredKeys — чтение регистрации ключей, названных в resourceNames, на
+// приёме правки (kaname#963, Р8). Провязывает корень службы.
+func (u *UpdateRoleUseCase) WithRegisteredKeys(k shared.RegisteredKeys) *UpdateRoleUseCase {
+	u.keys = k
+	return u
 }
 
 func NewUpdateRoleUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *UpdateRoleUseCase {
@@ -198,6 +207,11 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		target.Rules = in.Rules
 		target.Permissions = compiled
 		changed = append(changed, "rules")
+		held, herr := heldNamesOf(ctx, u.keys, in.Rules)
+		if herr != nil {
+			return nil, herr
+		}
+		target.HeldNames = held
 	}
 	// labels — own-resource метки. Применяются, только если mask их разрешает
 	// (или пустой mask = full-PATCH) И значение изменилось. Изменение labels
@@ -310,15 +324,17 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			if slices.Contains(changed, "rules") {
 				// Каталожный факт — один на обе стороны (довод — на создании).
 				facts := u.cat.Facts()
+				// Политика — та же, которой правила судились (kaname#1006).
+				policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
 				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
-					facts.GrantSelectors(upd.Rules.MaterializingSelectors())); serr != nil {
+					facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
 					return domain.Role{}, serr
 				}
 				// Та же пара, что на создании: снятый из правил глагол обязан
 				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
 				// потому что добавление проходит успешно.
 				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
+					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
 					return domain.Role{}, verr
 				}
 				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и

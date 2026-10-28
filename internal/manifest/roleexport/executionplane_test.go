@@ -43,6 +43,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
@@ -72,14 +73,14 @@ func TestClassNeverCoversAnExecutionPlaneAction(t *testing.T) {
 
 	// Законный близнец: арендаторское действие покрывается — иначе утверждение
 	// ниже было бы вакуумным (покрытие пусто при любом входе).
-	if got := roleexport.Covers(facts, []roleexport.Action{tenant}, "vpc_address", "get"); len(got) != 1 {
+	if got := roleexport.Covers(facts, domain.PolicyOfRole(true, "vpc"), []roleexport.Action{tenant}, "vpc_address", "get"); len(got) != 1 {
 		t.Fatalf("положительный контроль провален: класс get не покрыл АРЕНДАТОРСКОЕ действие "+
 			"%s (%s@%s) — значит проверка ниже не говорит ни о чём",
 			tenant.FQN, tenant.Relation, tenant.Object)
 	}
 
 	// Находка: то же действие на ВНУТРЕННЕЙ плоскости в покрытие не входит.
-	if got := roleexport.Covers(facts, []roleexport.Action{internal}, "vpc_address", "get"); len(got) != 0 {
+	if got := roleexport.Covers(facts, domain.PolicyOfRole(true, "vpc"), []roleexport.Action{internal}, "vpc_address", "get"); len(got) != 0 {
 		t.Errorf("класс get покрыл действие ПЛОСКОСТИ ИСПОЛНЕНИЯ %s: выдача по классу отдаёт "+
 			"наблюдателю действие внутреннего слушателя вместе с обычным чтением. "+
 			"Признак плоскости объявлен и разделом resources (ключ internal), и записью "+
@@ -88,7 +89,7 @@ func TestClassNeverCoversAnExecutionPlaneAction(t *testing.T) {
 	}
 
 	// Обе плоскости вместе: покрытие несёт РОВНО арендаторское.
-	both := roleexport.Covers(facts, []roleexport.Action{tenant, internal}, "vpc_address", "get")
+	both := roleexport.Covers(facts, domain.PolicyOfRole(true, "vpc"), []roleexport.Action{tenant, internal}, "vpc_address", "get")
 	if len(both) != 1 || both[0].Internal {
 		t.Errorf("на смешанном наборе покрытие вышло %d действий (внутреннее среди них: %v) — "+
 			"ожидалось ровно одно арендаторское", len(both), len(both) > 0 && both[0].Internal)

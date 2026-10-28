@@ -134,6 +134,7 @@ func CheckNamedVerbs(facts VerbFacts, m *manifest.Manifest, actions []Action) ([
 		return nil, census
 	}
 	byResource := actionsByResource(actions)
+	policy := rolePolicy(m.Module)
 
 	var faults []error
 	for i := range m.Roles {
@@ -172,7 +173,12 @@ func CheckNamedVerbs(facts VerbFacts, m *manifest.Manifest, actions []Action) ([
 						// а не участник роли. Правом оно не выдаётся вовсе —
 						// значит и непроизводимым быть не может.
 						continue
-					case Produces(facts, declaredClassOfVerb(m, resource, verb), fgaType, a.Relation, a.Object):
+					case containerProduces(m, rule.Module, resource, verb, a):
+						// Контейнерное действие (kaname#1003, Р2а): гейт спрашивает
+						// объявленное отношение на объявленном родителе, и правило
+						// пишет ровно этот кортеж на объекте области выдачи.
+						continue
+					case Produces(facts, policy, declaredClassOfVerb(m, resource, verb), fgaType, a.Relation, a.Object):
 						continue
 					}
 					census.Findings++
@@ -201,6 +207,7 @@ func CheckNamedVerbs(facts VerbFacts, m *manifest.Manifest, actions []Action) ([
 // автор пойдёт переписывать форму, а отказ придёт снова.
 func unsuitableNamedDetail(facts VerbFacts, roleID, module, resource, verb, fgaType string,
 	a Action, own []Action) string {
+	policy := rolePolicy(module)
 	var b strings.Builder
 	fmt.Fprintf(&b, "роль %q: право называет ПОИМЁННО действие %q ресурса %q модуля %q, "+
 		"а его гейт спрашивает пару %s@%s — отношение на объекте, которого правило роли "+
@@ -217,7 +224,7 @@ func unsuitableNamedDetail(facts VerbFacts, roleID, module, resource, verb, fgaT
 	b.WriteString("Приведением к `classes:` это НЕ чинится: полнота перечня и " +
 		"производимость отношения — разные свойства, и класс, содержащий непригодное " +
 		"действие, его не производит тоже. ")
-	if suitable := suitableClasses(facts, own, fgaType); len(suitable) > 0 {
+	if suitable := suitableClasses(facts, policy, own, fgaType); len(suitable) > 0 {
 		fmt.Fprintf(&b, "Пригодные классы этого ресурса: %s. ", strings.Join(suitable, ", "))
 	}
 	b.WriteString(wayOut(own, fgaType))
@@ -262,7 +269,11 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 				continue
 			}
 			census.Named++
-			classes, missing := reduceNamed(facts, m, rule, named, byResource)
+			// Контейнерные действия (kaname#1003, Р2а) к классу НЕ сводятся:
+			// класса у них нет, и MOD-RL-18 к ним не применяется — правило
+			// экспортируется поимённо. Сводятся только действия типа.
+			objectVerbs, containerNamed := splitContainerVerbs(m, rule, named)
+			classes, missing := reduceNamed(facts, m, rule, objectVerbs, byResource)
 			if len(missing) > 0 {
 				roleFaults++
 				census.Findings++
@@ -279,7 +290,17 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 			}
 			census.Reduced++
 			reduced := rule.DomainRule()
-			reduced.Verbs = classes
+			reduced.Verbs = append(classes, containerNamed...)
+			// Правило с селектором создателя (kaname#1003, Р2 п.3) уезжает ОБЪЯВЛЕННЫМИ
+			// глаголами, без сведения к классам: сведение считается покрытием действий
+			// каталога и опускает глагол без действия ЭТОГО ресурса (`v_list` на учётке
+			// спрашивают список её ключей и фильтр списка учёток), тогда как селектор пишет на
+			// объекте только кортежи глаголов и ярусом опущенное не возвращает:
+			// создатель терял бы список своих учёток и их ключей (SAC-12, SAC-15).
+			// Полнота перечня уже проверена строкой выше.
+			if rule.CreatedBySubject {
+				reduced.Verbs = append(append([]string(nil), objectVerbs...), containerNamed...)
+			}
 			reduced.Children = children
 			rules = append(rules, reduced)
 		}
@@ -397,6 +418,7 @@ func reduceNamed(facts VerbFacts, m *manifest.Manifest, rule manifest.Rule, name
 // право не даёт (§3.6 п. 3).
 func classMembers(facts VerbFacts, m *manifest.Manifest, resource string, own []Action,
 	fgaType, class string) []string {
+	policy := rolePolicy(m.Module)
 
 	var out []string
 	for _, a := range own {
@@ -406,7 +428,7 @@ func classMembers(facts VerbFacts, m *manifest.Manifest, resource string, own []
 		if declaredClassOfVerb(m, resource, a.Verb) != class {
 			continue
 		}
-		if !Produces(facts, class, fgaType, a.Relation, a.Object) {
+		if !Produces(facts, policy, class, fgaType, a.Relation, a.Object) {
 			continue
 		}
 		out = append(out, a.Verb)
@@ -423,6 +445,7 @@ func classMembers(facts VerbFacts, m *manifest.Manifest, resource string, own []
 // бо́льшим покрытием первыми: иначе результат зависел бы от порядка имён.
 func minimalClasses(facts VerbFacts, rule manifest.Rule,
 	classes []string, byResource map[string][]Action) []string {
+	policy := rolePolicy(rule.Module)
 
 	// Покрытие класса — по ВСЕМ ресурсам правила: класс, лишний на одном
 	// ресурсе, может быть единственным носителем действия на другом.
@@ -432,7 +455,7 @@ func minimalClasses(facts VerbFacts, rule manifest.Rule,
 		for _, resource := range rule.Resources {
 			own := byResource[rule.Module+"."+resource]
 			fgaType, _ := authzmap.ObjectType(rule.Module, resource)
-			for _, a := range Covers(facts, own, fgaType, class) {
+			for _, a := range Covers(facts, policy, own, fgaType, class) {
 				set[resource+"."+a.Verb] = true
 			}
 		}

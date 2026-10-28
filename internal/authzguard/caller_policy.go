@@ -6,10 +6,13 @@
 // platform's single authZ front door validates the JWT and runs per-user ReBAC
 // via iam.Check). iam's :9091 enforces only WHO MAY CALL each RPC:
 //
-//  1. Пол — всякий внутренний RPC в боевой посадке требует ПРОВЕРЕННОГО
-//     сертификата модуля: SAN `spiffe://<домен>/ns/<пространство>/sa/<учётка>`,
-//     учётка — формы имени службы, объявленной установкой. В посадке
-//     разработки (проверенного сертификата нет) — проход, как у RelationWriteGate.
+//  1. Floor — every internal RPC requires a VERIFIED mTLS module cert (SPIRE SAN
+//     spiffe://<домен>/ns/<ns>/sa/<учётка>) in production. dev (no verified
+//     cert) → no-op (insecure back-compat, mirror RelationWriteGate).
+//     Модулем признаётся ТОЛЬКО пара (пространство, учётка), объявленная
+//     установкой (WithModuleRoster, kaname#984), и признанная личность зовёт
+//     только методы СВОЕГО профиля (module_profiles.go) — в том числе среди
+//     освобождённых от проверки отношений.
 //     Пол удовлетворяет ТАКЖЕ хоп собственного REST-фронта службы — лист того же
 //     внутреннего центра, чьё имя учётной записи формы модулей не имеет. Он
 //     объявляется корнем (WithOwnFrontHop) и допускается РОВНО к тому, к чему
@@ -56,7 +59,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // gatewayServiceName — короткое имя службы края: то, что объявленная форма
@@ -220,25 +223,61 @@ type CallerPolicy struct {
 	// Величина СРАВНИВАЕТСЯ ЦЕЛИКОМ, как в третьем рукаве: пространство имён и
 	// учётная запись — части личности, и «похожее» здесь не годится.
 	ownFrontHop string
-	// form — форма имени службы, объявленная установкой: ею учётка сертификата
-	// разбирается в короткое имя службы (пол и круг края). Нулевая не узнаёт
-	// никого.
-	form servicesan.Form
+	// modules — личности модулей, объявленные установкой, и их профили
+	// (kaname#984). Нулевое значение не признаёт никого.
+	modules moduleidentity.Roster
+	// profiles — закрытые перечни методов профилей ([ProfileMethods]),
+	// собранные множествами один раз при сборке политики.
+	profiles map[moduleidentity.Profile]map[string]struct{}
+	// hopMethods — предел хопа собственного REST-фронта: методы, которые
+	// позволены КАЖДОМУ профилю, то есть любой признанной личности модуля
+	// ([hopMethodSet]).
+	hopMethods map[string]struct{}
+}
+
+// hopMethodSet — пересечение перечней всех профилей словаря.
+//
+// Хоп фронта называет транспорт, а не вызывающего: личности предъявителя фронт
+// внутрь не переносит. Значит по HTTP дотягивается любая личность, которую
+// пустил фронт, — и предел хопа по МЕТОДАМ обязан быть тем, что позволено ЛЮБОЙ
+// из них. Иначе полоса HTTP была бы шире полосы gRPC для личности самого узкого
+// профиля.
+//
+// Предел по методам не видит сужения ДОВОДА по личности (внутренний Check
+// плоскости данных, kaname#987): его держит допуск фронта ([HopAdmits]), который
+// не пускает ни лист вне перечня, ни личность, чей довод на хопе сузить нечем
+// (SEC-1017-1).
+func hopMethodSet(profiles map[moduleidentity.Profile]map[string]struct{}) map[string]struct{} {
+	out := map[string]struct{}{}
+	first := true
+	for _, p := range moduleidentity.Profiles() {
+		set := profiles[p]
+		if first {
+			for m := range set {
+				out[m] = struct{}{}
+			}
+			first = false
+			continue
+		}
+		for m := range out {
+			if _, ok := set[m]; !ok {
+				delete(out, m)
+			}
+		}
+	}
+	return out
 }
 
 // NewCallerPolicy строит политику вызывающего. gatewayOnlyRPCs — глаголы,
 // которые зовёт только край (GatewayFrontedInternalRPCs); prodMode — из
-// cfg.AuthN.Mode.IsProduction(); form — форма имени службы, объявленная
-// установкой (cfg.AuthN.ServiceNameForm()).
-//
-// Форма — параметр ОБЯЗАТЕЛЬНЫЙ и позиционный: сборка, забывшая её подставить,
-// не соберётся вовсе, тогда как умолчание сделало бы пол молча отвергающим
-// каждый модуль, край в том числе.
+// cfg.AuthN.Mode.IsProduction(). Модулем политика признаёт только пару
+// перечня личностей (WithModuleRoster): нулевой перечень не признаёт никого, и
+// форму имени службы установки перечень несёт сам (kaname#308).
 //
 // The arm-3 METHOD set is static (SANRestrictedInternalRPCs); WithSANAllowlist
 // only supplies WHICH certificate identities may call them. A policy built
 // without WithSANAllowlist therefore denies every caller of those methods.
-func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string, form servicesan.Form) *CallerPolicy {
+func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string) *CallerPolicy {
 	m := make(map[string]struct{}, len(gatewayOnlyRPCs))
 	for _, rpc := range gatewayOnlyRPCs {
 		m[rpc] = struct{}{}
@@ -247,7 +286,9 @@ func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string, form servicesan.Fo
 	for _, rpc := range SANRestrictedInternalRPCs() {
 		restricted[rpc] = struct{}{}
 	}
-	return &CallerPolicy{prodMode: prodMode, gatewayOnly: m, sanRestricted: restricted, form: form}
+	profiles := profileMethodSets()
+	return &CallerPolicy{prodMode: prodMode, gatewayOnly: m, sanRestricted: restricted,
+		profiles: profiles, hopMethods: hopMethodSet(profiles)}
 }
 
 // WithSANAllowlist supplies the arm-3 allow-list: fullMethod → the exact
@@ -279,6 +320,17 @@ func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolic
 	return p
 }
 
+// WithModuleRoster подставляет перечень личностей модулей установки
+// (kaname#984): модулем признаётся только объявленная пара (пространство,
+// учётка), и звать она вправе только методы своего профиля ([ProfileMethods]).
+//
+// Политика, собранная без перечня, не признаёт модулем НИКОГО: пропущенная
+// подстановка обязана дать отказ, а не прежнее «любой лист с приставкой».
+func (p *CallerPolicy) WithModuleRoster(r moduleidentity.Roster) *CallerPolicy {
+	p.modules = r
+	return p
+}
+
 // WithOwnFrontHop объявляет имя клиентского листа, которым СОБСТВЕННЫЙ REST-фронт
 // службы приходит к этому же слушателю, и тем самым признаёт его ХОПОМ, а не
 // вызывающим.
@@ -286,12 +338,9 @@ func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolic
 // # Предмет: сертификат на этом хопе называет НЕ ЗВОНЯЩЕГО
 //
 // Фронт — обычный клиент своего же слушателя, и представляется он листом самой
-// службы. Учётная запись у службы своя, а форма имени модулей обязана нести
-// приставку ([servicesan.Form], страж старта): пока установка не назвала учётку
-// службы той же приставкой, [ServiceNameFromSAN] на такой строке не
-// срабатывает. Стража этого «пока» нет: назови установка учётку службы
-// приставкой модулей, лист разберётся в имя службы, пол будет удовлетворён
-// рукавом модуля, а круг края отвергнет его так же. Без объявления хопа пол
+// службы. Учётная запись у службы своя и в перечне личностей модулей не
+// стоит (установка объявляет там свои модули, а не саму службу), поэтому
+// признание модуля ([moduleidentity.Roster]) на такой строке не срабатывает — и пол
 // (рукав 1) отвергал КАЖДЫЙ запрос, пришедший через фронт, в боевой посадке. На
 // стенде рукав вырождается целиком, поэтому расхождение было невидимо ровно
 // там, где его ищут.
@@ -320,6 +369,12 @@ func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolic
 // Итог одной фразой: хоп фронта допускается ТОЧНО К ТОМУ, к чему допущен любой
 // проверенный модуль, — и это утверждается равенством множеств, а не
 // комментарием.
+//
+// С перечнем личностей (kaname#984) «любой проверенный модуль» читается
+// буквально: у личностей разные профили, и хопу позволено ПЕРЕСЕЧЕНИЕ их
+// перечней ([hopMethodSet]) — то, что позволено каждой. Фронт личности внутрь
+// не переносит, поэтому всё сверх пересечения было бы шире gRPC-полосы для
+// личности самого узкого профиля.
 //
 // # Почему величина приходит извне, а не выводится разбором
 //
@@ -374,10 +429,10 @@ func (p *CallerPolicy) allow(ctx context.Context, fullMethod string) error {
 		return nil
 	}
 
-	svc, ok := "", false
-	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), p.form, san)
-	}
+	// Признание — объявленная пара перечня, тот же разбор, что у каждого
+	// другого пути признания вызывающего (kaname#984).
+	module, ok := p.modules.FromContext(ctx)
+	svc := module.Service
 	// Хоп собственного REST-фронта удовлетворяет ПОЛ и на этом останавливается.
 	// Короткое имя службы у него остаётся ПУСТЫМ намеренно: круг края ниже
 	// сравнивает его с именем края и отвергает, поэтому полоса HTTP не может
@@ -386,6 +441,28 @@ func (p *CallerPolicy) allow(ctx context.Context, fullMethod string) error {
 	floorSatisfied := ok || (verified && p.isOwnFrontHop(san))
 	if !floorSatisfied {
 		// No verified module cert. Dev → no-op; prod → fail-closed.
+		if !p.prodMode {
+			return nil
+		}
+		return status.Error(codes.PermissionDenied, "permission denied")
+	}
+	// Перечень профиля (kaname#984): признанная личность зовёт ТОЛЬКО методы
+	// своего профиля, в том числе освобождённые от проверки отношений —
+	// освобождение означает «вопроса к модели здесь нет», а не «звать вправе
+	// всякий». Хоп фронта личностью модуля не является: его предел — пересечение
+	// перечней профилей ниже и круг края. Dev → no-op, как у соседних рукавов.
+	if ok {
+		if _, listed := p.profiles[module.Profile][fullMethod]; !listed {
+			if !p.prodMode {
+				return nil
+			}
+			return status.Error(codes.PermissionDenied, "permission denied")
+		}
+	} else if _, listed := p.hopMethods[fullMethod]; !listed {
+		// Хоп фронта: предел — то, что позволено ЛЮБОЙ признанной личности
+		// ([hopMethodSet]): личности предъявителя фронт внутрь не переносит, и
+		// шире самого узкого профиля полоса HTTP быть не вправе. Кого фронт
+		// пускает вообще, решает его допуск ([HopAdmits]).
 		if !p.prodMode {
 			return nil
 		}

@@ -111,7 +111,7 @@ func TestRuleGrainWindow_MigrationKeepsTheVerdictAndTheQueueClosesTheWindow(t *t
 	exec(t, ctx, tx, `INSERT INTO kaname.roles (id, account_id, name, permissions, rules)
 	                   VALUES ($1, 'acc-1', 'window_old', '[]'::jsonb, $2::jsonb)`, id, raw)
 	sels := rules.MaterializingSelectors()
-	for _, p := range catalogfixture.Facts().RoleVerbsFromSelectors(sels) {
+	for _, p := range catalogfixture.Facts().RoleVerbsFromSelectors(sels, domain.TenantPolicy()) {
 		exec(t, ctx, tx, `INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`, id, p.ObjectType, p.Verb)
 	}
 	for _, s := range sels {
@@ -151,7 +151,7 @@ func TestRuleGrainWindow_MigrationKeepsTheVerdictAndTheQueueClosesTheWindow(t *t
 	require.Positive(t, census.Regrained, "пересчёт не дошёл")
 
 	want := map[string]map[string][]string{}
-	for _, s := range catalogfixture.Facts().GrantSelectors(sels) {
+	for _, s := range catalogfixture.Facts().GrantSelectors(sels, domain.TenantPolicy()) {
 		m := map[string][]string{}
 		for k, v := range s.Grants {
 			m[k] = slices.Sorted(slices.Values(v))

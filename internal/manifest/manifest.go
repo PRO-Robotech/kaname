@@ -479,8 +479,10 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	// первая заставила бы автора чинить их по одной, по прогону на каждую.
 	faults := validateClassGrants(&m, doc)
 	faults = append(faults, validateResources(&m, doc, referent)...)
+	faults = append(faults, validateContainerVerbs(&m, doc, loadOpts.oracle)...)
 	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules), loadOpts.canon)...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
+	faults = append(faults, refuseObjectRefs(&m, doc)...) // ссылки на объекты, kaname#965
 
 	// Связность — последняя ступень той же загрузки; почему не отдельным
 	// вызовом, сказано в шапке Load. Перечень ролей приезжает ИЗ РАЗОБРАННОГО
