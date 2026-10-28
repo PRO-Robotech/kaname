@@ -299,7 +299,7 @@ HTTP-статусу: ветка `if status == 409` на предусловие �
 ## Идентификаторы
 
 Идентификаторы ресурсов IAM — **серверные**: префикс плюс **17 символов
-Crockford-base32** (строчные, без `i`/`l`/`o`/`u`). Тип ресурса читается по префиксу.
+Crockford-base32** (строчные, без `i`/`l`/`o`/`u`). Тип ресурса читается по префиксу. Исключение — аккаунт: его идентификатор может задать администратор облака строкой своей формы (таблица ниже).
 Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC; well-formed-но-нет →
 `NOT_FOUND`.
 
@@ -316,7 +316,7 @@ Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC
 <table>
   <thead><tr><th>Ресурс</th><th>Идентификатор</th></tr></thead>
   <tbody>
-    <tr><td>Account</td><td><code>acc&lt;17&gt;</code></td></tr>
+    <tr><td><a href="/api/account">Account</a></td><td><code>acc&lt;17&gt;</code>, если выдала служба; либо строка, которую задал администратор облака при создании, — 3–30 строчных латинских букв, цифр и одиночных дефисов, первой буквой (<code>godjee</code>). <strong>Тип по началу такой строки не читается</strong></td></tr>
     <tr><td>Project</td><td><code>prj&lt;17&gt;</code></td></tr>
     <tr><td>User</td><td><code>usr&lt;17&gt;</code></td></tr>
     <tr><td>ServiceAccount</td><td><code>sva&lt;17&gt;</code></td></tr>

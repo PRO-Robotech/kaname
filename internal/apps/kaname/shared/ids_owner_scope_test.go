@@ -422,8 +422,9 @@ func TestStrictIDFormatCheckStaysOwnerScoped(t *testing.T) {
 			"перестал знать форму записи вызова")
 	}
 	if len(c.Findings) > 0 {
-		t.Fatalf("строгая проверка формата наведена на идентификатор, чей тип решает НЕ iam "+
-			"(конвенция запрещает это прямо — api-conventions.md §By-lane code-split):\n%s",
+		t.Fatalf("строгая проверка формата наведена на идентификатор, который она судить не вправе: "+
+			"чьего типа iam не решает (конвенция запрещает это прямо — api-conventions.md §By-lane code-split) "+
+			"либо аккаунта (его форму судит распознаватель формы аккаунта, kaname#1052); причина — в строке находки:\n%s",
 			strings.Join(c.Findings, "\n"))
 	}
 }
