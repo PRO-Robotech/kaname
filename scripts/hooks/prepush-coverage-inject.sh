@@ -187,7 +187,11 @@ bypass_case() {
 judge_bypass() {
     local hook="$1" miss=0 block l_job l_key l_out label line
     printf '%s' "$out" | grep -q 'pre-push:' || { echo "ПРЕДПОСЫЛКА: хук не исполнялся — ни одной строки «pre-push:»"; return 2; }
-    [ "$rc" -eq 0 ] || { echo "НЕТ кода 0 на обходе: код $rc"; miss=$((miss + 1)); }
+    if [ "$rc" -ne 0 ]; then
+        echo "НЕТ кода 0 на обходе: код $rc — хвост вывода хука:"
+        printf '%s\n' "$out" | grep -v '^  [a-z]*: ' | tail -n 15 | sed 's/^/       | /'
+        miss=$((miss + 1))
+    fi
     [ "$pushed" -eq 1 ] || { echo "НЕТ ссылки на удалённом: обход не пропустил отправку"; miss=$((miss + 1)); }
     printf '%s' "$out" | grep -q 'проверки пропущены по KANAME_SKIP_PREPUSH=1' \
         || { echo "НЕТ строки обхода «проверки пропущены по KANAME_SKIP_PREPUSH=1»"; miss=$((miss + 1)); }
