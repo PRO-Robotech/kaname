@@ -45,7 +45,7 @@
   ],
   "item": [
     {
-      "name": "IAM-LOGINLANE-OK-CSRF-ISSUED — Признак формы выдаётся держателю контекста; повторный запрос контекст не меняет",
+      "name": "IAM-LOGINLANE-OK-CSRF-ISSUED — Признак формы выдаётся держателю контекста; повторный запрос контекст не меняет (Ф3-35)",
       "description": "class:SEC | priority:P0",
       "item": [
         {
@@ -336,7 +336,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT — Вход выдаёт носитель; выход завершает сессию у службы; сохранённый носитель после выхода отвергается",
+      "name": "IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT — Вход выдаёт носитель; выход завершает сессию у службы; сохранённый носитель после выхода отвергается (Ф3-15)",
       "description": "class:CRUD | class:SEC | priority:P0",
       "item": [
         {
@@ -817,7 +817,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-CSRF-MISSING — Форма входа без признака: 400 с именем поля, глагол не исполняется",
+      "name": "IAM-LOGINLANE-NEG-CSRF-MISSING — Форма входа без признака: 400 с именем поля, глагол не исполняется (Ф3-36 а)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -1535,7 +1535,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-FORM-FIELDS — Вход без password, без email и с необъявленным полем — 400 с именем поля, носителя нет; полная форма проходит",
+      "name": "IAM-LOGINLANE-NEG-FORM-FIELDS — Вход без password, без email и с необъявленным полем — 400 с именем поля, носителя нет; полная форма проходит (Ф3-05)",
       "description": "class:NEG | class:VAL | priority:P1",
       "item": [
         {
@@ -2037,7 +2037,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-UNVERIFIED-LOGIN — Неподтверждённый адрес входит верным паролем и ответ несёт emailVerified false; подтверждённый — true",
+      "name": "IAM-LOGINLANE-OK-UNVERIFIED-LOGIN — Неподтверждённый адрес входит верным паролем и ответ несёт emailVerified false; подтверждённый — true (Ф3-03)",
       "description": "class:CRUD | class:SEC | priority:P0",
       "item": [
         {
@@ -2625,7 +2625,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-COOKIE-HOST-ONLY — Носитель на адресной посадке — без ключа Domain, с атрибутами Р3; следующий запрос с ним принят",
+      "name": "IAM-LOGINLANE-OK-COOKIE-HOST-ONLY — Носитель на адресной посадке — без ключа Domain, с атрибутами Р3; следующий запрос с ним принят (Ф3-07)",
       "description": "class:SEC | priority:P0",
       "item": [
         {
@@ -2914,7 +2914,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-TWO-SESSIONS-DISTINCT — Два входа одной личности — два непрозрачных значения; выход из первой вторую не гасит",
+      "name": "IAM-LOGINLANE-OK-TWO-SESSIONS-DISTINCT — Два входа одной личности — два непрозрачных значения; выход из первой вторую не гасит (Ф3-08, Ф3-15)",
       "description": "class:SEC | class:CRUD | priority:P0",
       "item": [
         {
@@ -3852,7 +3852,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-LOGOUT-SAME-ANSWER — Выход без носителя, с неизвестным значением и повторный выход снятой сессией побайтово равны выходу живой",
+      "name": "IAM-LOGINLANE-OK-LOGOUT-SAME-ANSWER — Выход без носителя, с неизвестным значением и повторный выход снятой сессией побайтово равны выходу живой (Ф3-18, Ф3-15)",
       "description": "class:IDM | class:SEC | priority:P0",
       "item": [
         {
@@ -4544,7 +4544,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-PASSWORD-CHANGE-ROUNDTRIP — Смена пароля по текущему: носитель перевыпущен с тем же сроком, прежний пароль негоден; близнецы признака и носителя отвергнуты",
+      "name": "IAM-LOGINLANE-OK-PASSWORD-CHANGE-ROUNDTRIP — Смена пароля по текущему: носитель перевыпущен с тем же сроком, прежний пароль негоден; близнецы признака и носителя отвергнуты (Ф3-19, Ф3-37, Ф3-38, Ф3-39, Ф3-40)",
       "description": "class:CRUD | class:SEC | class:NEG | priority:P0",
       "item": [
         {
@@ -6538,7 +6538,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-PASSWORD-CHANGE-REFUSALS — Смена без currentPassword — 400 с полем; неверный текущий и без носителя — 401 текстом входа; ничего не изменено",
+      "name": "IAM-LOGINLANE-NEG-PASSWORD-CHANGE-REFUSALS — Смена без currentPassword — 400 с полем; неверный текущий и без носителя — 401 текстом входа; ничего не изменено (Ф3-20)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {
@@ -7400,7 +7400,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-NEW-PASSWORD-RULE — Новый пароль короче объявленной длины и схожий с адресом — 400 с полем и правилом; пароль прежний",
+      "name": "IAM-LOGINLANE-NEG-NEW-PASSWORD-RULE — Новый пароль короче объявленной длины и схожий с адресом — 400 с полем и правилом; пароль прежний (Ф3-22)",
       "description": "class:NEG | class:VAL | class:BVA | priority:P1",
       "item": [
         {
@@ -8081,7 +8081,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-SEC-FORWARDED-PRINCIPAL-IGNORED — Заголовки переданной личности чужого субъекта не читаются: исходы без носителя те же, пароль меняется у владельца носителя",
+      "name": "IAM-LOGINLANE-SEC-FORWARDED-PRINCIPAL-IGNORED — Заголовки переданной личности чужого субъекта не читаются: исходы без носителя те же, пароль меняется у владельца носителя (Ф3-51, половина службы)",
       "description": "class:SEC | class:NEG | priority:P0",
       "item": [
         {
@@ -9822,7 +9822,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-RATE-BY-ADDRESS — 5 неверных по существующему и по несуществующему адресу: следующая — 429 с Retry-After, ответы побайтово равны",
+      "name": "IAM-LOGINLANE-NEG-RATE-BY-ADDRESS — 5 неверных по существующему и по несуществующему адресу: следующая — 429 с Retry-After, ответы побайтово равны (Ф3-28)",
       "description": "class:NEG | class:SEC | class:BVA | priority:P0",
       "item": [
         {
@@ -11334,7 +11334,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-RATE-ADDRESS-CASE-FOLDED — 5 неверных по одному адресу разным регистром букв — следующая получает тот же 429",
+      "name": "IAM-LOGINLANE-NEG-RATE-ADDRESS-CASE-FOLDED — 5 неверных по одному адресу разным регистром букв — следующая получает тот же 429 (Ф3-28)",
       "description": "class:NEG | class:SEC | class:BVA | priority:P1",
       "item": [
         {
@@ -12235,7 +12235,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-RATE-RESET-ON-SUCCESS — Успешный вход обнуляет счёт по адресу: дважды по 4 неверных с верным между — отказа по частоте нет",
+      "name": "IAM-LOGINLANE-OK-RATE-RESET-ON-SUCCESS — Успешный вход обнуляет счёт по адресу: дважды по 4 неверных с верным между — отказа по частоте нет (Ф3-28)",
       "description": "class:SEC | class:BVA | priority:P1",
       "item": [
         {
@@ -13620,7 +13620,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-NEG-RATE-BY-SOURCE — 50 неверных по разным адресам с одного источника — следующая 429; другой источник не задет",
+      "name": "IAM-LOGINLANE-NEG-RATE-BY-SOURCE — 50 неверных по разным адресам с одного источника — следующая 429; другой источник не задет (Ф3-29)",
       "description": "class:NEG | class:SEC | class:BVA | priority:P0",
       "item": [
         {
@@ -18927,7 +18927,7 @@
       ]
     },
     {
-      "name": "IAM-LOGINLANE-OK-NOT-COUNTED — 4 неверных, отказ формы и отказ признака чужого контекста счёта не растят — верный пароль проходит",
+      "name": "IAM-LOGINLANE-OK-NOT-COUNTED — 4 неверных, отказ формы и отказ признака чужого контекста счёта не растят — верный пароль проходит (Ф3-30, Ф3-36 б)",
       "description": "class:SEC | class:BVA | class:NEG | priority:P1",
       "item": [
         {
