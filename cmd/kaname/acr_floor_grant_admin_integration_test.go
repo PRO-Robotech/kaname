@@ -59,7 +59,7 @@ type reachedClusterServer struct {
 
 func (s *reachedClusterServer) GrantAdmin(context.Context, *iamv1.GrantClusterAdminRequest) (*operationpb.Operation, error) {
 	s.grantReached = true
-	return &operationpb.Operation{Id: "iop-acr-test", Done: true}, nil
+	return &operationpb.Operation{Id: "iop0000000000acrtest", Done: true}, nil
 }
 
 // seedVerifiedPeer simulates the corelib mTLS-verified extract: it seeds the
@@ -111,7 +111,7 @@ func TestACRFloorIntegration_0401_GatewayAcr2_Reaches(t *testing.T) {
 	defer cancel()
 
 	_, err := iamv1.NewInternalClusterServiceClient(conn).GrantAdmin(ctx,
-		&iamv1.GrantClusterAdminRequest{SubjectId: "usr-target"})
+		&iamv1.GrantClusterAdminRequest{SubjectId: "usr00000000000target"})
 	require.NoError(t, err, "acr=2 ≥ acr_min=2 must pass the floor to the handler")
 	require.True(t, stub.grantReached, "handler must be reached on a sufficient acr")
 }
@@ -124,7 +124,7 @@ func TestACRFloorIntegration_0402_GatewayAcr1_DeniedNoSideEffect(t *testing.T) {
 	defer cancel()
 
 	_, err := iamv1.NewInternalClusterServiceClient(conn).GrantAdmin(ctx,
-		&iamv1.GrantClusterAdminRequest{SubjectId: "usr-target"})
+		&iamv1.GrantClusterAdminRequest{SubjectId: "usr00000000000target"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err),
 		"acr=1 < acr_min=2 must be denied by the acr-floor")
 	require.False(t, stub.grantReached, "handler must NOT be reached on acr-deny (no side-effect, 5.4-02)")
@@ -141,7 +141,7 @@ func TestACRFloorIntegration_0406_NonGatewaySAN_CallerPolicyDeniesFirst(t *testi
 	defer cancel()
 
 	_, err := iamv1.NewInternalClusterServiceClient(conn).GrantAdmin(ctx,
-		&iamv1.GrantClusterAdminRequest{SubjectId: "usr-target"})
+		&iamv1.GrantClusterAdminRequest{SubjectId: "usr00000000000target"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err),
 		"a non-gateway module on a gateway-fronted RPC must be denied (caller-policy first)")
 	require.False(t, stub.grantReached, "handler must NOT be reached")

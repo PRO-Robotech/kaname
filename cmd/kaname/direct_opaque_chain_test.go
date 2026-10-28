@@ -37,7 +37,7 @@ func TestDirectOpaqueUsesPublicComposition(t *testing.T) {
 	}
 	cfg := presentedcred.Config{
 		BasicCredentials: chainBasicAuthority{credential: domain.BasicCredential{
-			PrincipalType: "service_account", PrincipalID: "sva-direct", CredentialID: "sak-direct",
+			PrincipalType: "service_account", PrincipalID: "sva00000000000direct", CredentialID: "sak-direct",
 			ExpiresAt: time.Now().Add(time.Hour),
 		}},
 		Issuer: chainIssuer, Audience: chainAudience, AllowedAlgorithms: []string{"ES256"},
@@ -48,7 +48,7 @@ func TestDirectOpaqueUsesPublicComposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, seen, err := runChain(t, publicChainWithReader(r), presenting(raw))
-	if err != nil || !seen || p.Type != "service_account" || p.ID != "sva-direct" {
+	if err != nil || !seen || p.Type != "service_account" || p.ID != "sva00000000000direct" {
 		t.Fatalf("public composition lost opaque identity: %v %v %v", p, seen, err)
 	}
 	// Чужие principal/ACR/session/JTI не заменяют результат авторитета.
@@ -56,7 +56,7 @@ func TestDirectOpaqueUsesPublicComposition(t *testing.T) {
 	md.Set(presentedcred.MetadataKey, "Bearer "+raw)
 	spoofed := metadata.NewIncomingContext(context.Background(), md)
 	p, seen, err = runChain(t, publicChainWithReader(r), spoofed)
-	if err != nil || !seen || p.Type != "service_account" || p.ID != "sva-direct" {
+	if err != nil || !seen || p.Type != "service_account" || p.ID != "sva00000000000direct" {
 		t.Fatalf("forwarded metadata replaced opaque principal: %v %v %v", p, seen, err)
 	}
 	carried := runEdgeChain(t, publicChainWithReader(r), spoofed)
@@ -66,7 +66,7 @@ func TestDirectOpaqueUsesPublicComposition(t *testing.T) {
 	// Порог человека проверяется отдельным носителем: машина законно
 	// освобождена от интерактивного повышения общим правилом платформы.
 	cfg.BasicCredentials = chainBasicAuthority{credential: domain.BasicCredential{
-		PrincipalType: "user", PrincipalID: "usr-direct", CredentialID: "sak-direct",
+		PrincipalType: "user", PrincipalID: "usr00000000000direct", CredentialID: "sak-direct",
 		ExpiresAt: time.Now().Add(time.Hour),
 	}}
 	userReader, err := presentedcred.New(cfg)

@@ -55,7 +55,7 @@ func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"IsRevoked must NOT exist on the external listener (ban #6)")
 
-	_, err = pubClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr_x", TokenJti: "jti-1", Reason: "x"})
+	_, err = pubClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr0000000000000000x", TokenJti: "jti-1", Reason: "x"})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"Revoke must NOT exist on the external listener (ban #6)")
 
@@ -69,7 +69,7 @@ func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
 		"IsRevoked must be reachable on the internal listener")
 
-	_, err = intClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr_x", TokenJti: "jti-1", Reason: "x"})
+	_, err = intClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr0000000000000000x", TokenJti: "jti-1", Reason: "x"})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
 		"Revoke must be reachable on the internal listener")
 }

@@ -59,7 +59,7 @@ const (
 	// проверяется.
 	fwdOutsiderSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-bootstrap-operator"
 
-	fwdVictimUserID = "usr-victim"
+	fwdVictimUserID = "usr00000000000victim"
 )
 
 // fwdCfg — конфигурация, с которой процесс поднимается в боевом режиме; тесты

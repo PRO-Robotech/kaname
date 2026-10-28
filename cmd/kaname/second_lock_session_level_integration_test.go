@@ -213,7 +213,7 @@ type secondLockReached struct {
 
 func (s *secondLockReached) GrantAdmin(context.Context, *iamv1.GrantClusterAdminRequest) (*operationpb.Operation, error) {
 	s.reached.Store(true)
-	return &operationpb.Operation{Id: "iop-second-lock-probe", Done: true}, nil
+	return &operationpb.Operation{Id: "iop00secondlockprobe", Done: true}, nil
 }
 
 // registerSecondLockPerson — личность регистрацией паролем (Ф4) тем же
