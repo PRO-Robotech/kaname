@@ -426,7 +426,11 @@ const nestedProbeRecipe = "show:\n" +
 	"\t@echo \"env-args=[$${ARGS:-}]\"\n" +
 	"\t@echo \"env-makeflags=[$${MAKEFLAGS:-}]\"\n" +
 	"\t@echo \"gate-level=[$${STANDALONE_GATE_LEVEL:-}]\"\n" +
-	"\t@echo \"neighbour=[$${STANDALONE_NESTED_PROBE_NEIGHBOUR:-}]\"\n"
+	"\t@echo \"neighbour=[$${STANDALONE_NESTED_PROBE_NEIGHBOUR:-}]\"\n" +
+	"\t@echo \"request-base=[$${GITHUB_BASE_REF:-}]\"\n" +
+	"\t@echo \"request-head=[$${GITHUB_HEAD_REF:-}]\"\n" +
+	"\t@echo \"provider-repo=[$${GITHUB_REPOSITORY:-}]\"\n" +
+	"\t@echo \"machine-ci=[$${CI:-}]\"\n"
 
 func runNestedProbe(t *testing.T) string {
 	t.Helper()
@@ -474,6 +478,62 @@ func TestRunner_NeighbourVariableStillReachesTheNestedMake(t *testing.T) {
 	require.Containsf(t, out, "neighbour=[сосед]",
 		"очистка сняла переменную, не несущую флагов make, — клон потеряет окружение сборки:\n%s", out)
 	require.Containsf(t, out, "recipe-args=[]", "ARGS появилась ниоткуда:\n%s", out)
+}
+
+// --- Инъекция в ОКРУЖЕНИЕ ЗАПРОСА (задача #618) ------------------------------
+//
+// Клон собирается из состава коммита, без удалённого и без единой ссылки, кроме
+// своей вершины: он моделирует посадку АРЕНДАТОРА, у которого нет ни конвейера,
+// ни запроса слияния. Окружение внешнего прогона при этом ехало в клон целиком —
+// вместе с переменными провайдера конвейера, которые описывают ВНЕШНИЙ запрос:
+// его базу, голову, репозиторий. В клоне они ложны: ветки из `GITHUB_BASE_REF`
+// там нет by construction. Гейт монотонности миграций после #618 законно читает
+// названную и не разрешённую базу как отказ предпосылки — и красное шло из
+// подмены окружения клона, а не из продукта (PR #1069, задание «цели рецепта в
+// самостоятельном клоне», база 1054).
+//
+// Пара меняет против близнеца ровно один факт: внешний прогон несёт переменные
+// провайдера. Близнец держит `CI`: она говорит о МАШИНЕ, а клон идёт на той же
+// машине, поэтому снимать её незачем (пробы вправе спрашивать машину).
+
+// TestRunner_NestedMakeDoesNotInheritTheOuterRequest — инъекция: внешний прогон
+// идёт на событии запроса и несёт его координаты. Вложенный уровень обязан их
+// не получить.
+func TestRunner_NestedMakeDoesNotInheritTheOuterRequest(t *testing.T) {
+	t.Setenv("GITHUB_BASE_REF", "1054")
+	t.Setenv("GITHUB_HEAD_REF", "618")
+	t.Setenv("GITHUB_REPOSITORY", "PRO-Robotech/kaname")
+	t.Setenv("CI", "true")
+	t.Setenv("STANDALONE_GATE_LEVEL", "")
+
+	out := runNestedProbe(t)
+	require.Containsf(t, out, "request-base=[]",
+		"база запроса внешнего прогона дошла до клона — у клона нет ни удалённого, ни этой "+
+			"ветки, и проба, читающая базу, судит отсутствие ссылки, а не модуль:\n%s", out)
+	require.Containsf(t, out, "request-head=[]",
+		"голова запроса внешнего прогона дошла до клона:\n%s", out)
+	require.Containsf(t, out, "provider-repo=[]",
+		"репозиторий внешнего прогона дошёл до клона:\n%s", out)
+	require.Containsf(t, out, "machine-ci=[true]",
+		"очистка сняла признак МАШИНЫ вместе с описанием запроса — клон судился бы не на "+
+			"той машине, на которой идёт:\n%s", out)
+}
+
+// TestRunner_NoRequestOuterRunKeepsTheMachine — законный близнец: внешний прогон
+// без запроса (отправка в ствол, хук, ручной запуск). Отличается от инъекции ОДНИМ
+// фактом — переменных провайдера нет; признак машины едет как ехал.
+func TestRunner_NoRequestOuterRunKeepsTheMachine(t *testing.T) {
+	for _, name := range []string{"GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REPOSITORY"} {
+		t.Setenv(name, "")
+		require.NoError(t, os.Unsetenv(name))
+	}
+	t.Setenv("CI", "true")
+	t.Setenv("STANDALONE_GATE_LEVEL", "")
+
+	out := runNestedProbe(t)
+	require.Containsf(t, out, "request-base=[]", "база запроса появилась ниоткуда:\n%s", out)
+	require.Containsf(t, out, "machine-ci=[true]",
+		"признак машины не дошёл до клона без всякого запроса:\n%s", out)
 }
 
 // TestGate_ReentryIsRefusedWithinABoundedTime — инъекция: гейт позван отдельным
