@@ -57,6 +57,7 @@ import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -136,6 +137,11 @@ func srciReadSubject(t *testing.T) srciSubject {
 	require.Len(t, s.seeded, 48, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): разбор вставок ролей 0001 (§0.1 приёмки — 48)")
 	require.NotEmpty(t, s.oldAdmin, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вставка роли %s в 0001 не разобрана", srciSeedNameAdmin)
 	require.NotEmpty(t, s.oldViewer, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): вставка роли %s в 0001 не разобрана", srciSeedNameViewer)
+	// Контроль разборщика: найдено ровно два прежних id, и оба судье формы фундамента
+	// негодны — иначе разобрано не то, о чём приёмка.
+	require.NotEqual(t, s.oldAdmin, s.oldViewer, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): прежние id admin и viewer совпали")
+	require.False(t, ids.HasKnownPrefix(s.oldAdmin), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): разобранный прежний id admin годен судье формы")
+	require.False(t, ids.HasKnownPrefix(s.oldViewer), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): разобранный прежний id viewer годен судье формы")
 	return s
 }
 
@@ -238,6 +244,13 @@ func newSRCIWorldAt(t *testing.T, version int64) *srciWorld {
 		WithRoleCompiledReader(roleapp.NewGetRoleCompiledUseCase(sc.repo)).
 		WithSubjectChange(service.NewSubjectChangeService(kanamepg.NewSubjectChangeRepo(sc.pool, nil)))
 	sc.ab.WithListByRole(accessbindingapp.NewListByRoleUseCase(sc.repo).WithRelationStore(sc.door, nil))
+
+	// Старт службы пересчитывает проекции системных ролей (`cmd/kaname/serve.go`):
+	// без этого шага мир был бы базой, которую служба ни разу не поднимала.
+	_, err = seed.ReseedSystemRoleVerbs(ctx, sc.repo, sc.pool, catalogfixture.Facts(), nil)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): пересчёт проекции глаголов системных ролей")
+	_, err = seed.ReseedSystemRoleRuleRefs(ctx, sc.repo, sc.pool, nil)
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): пересчёт проекции сегментов правил системных ролей")
 
 	// K — кластерный администратор объявленным путём (роль `admin`, не предмет),
 	// с подтверждённым адресом и живой сессией уровня «2»; U3 — без выдач.
@@ -373,6 +386,34 @@ func (w *srciWorld) countWith(tables []string, id string) map[string]int {
 			"счёт строк с id в %s", tb)
 		if n > 0 {
 			out[tb] = n
+		}
+	}
+	return out
+}
+
+// countInBytea — по байтовой колонке схемы kaname: число строк, чьи байты содержат id.
+func (w *srciWorld) countInBytea(id string) map[string]int {
+	w.t.Helper()
+	rows, err := w.pool.Query(w.ctx, `
+		SELECT table_name, column_name FROM information_schema.columns
+		 WHERE table_schema = 'kaname' AND data_type = 'bytea' ORDER BY 1, 2`)
+	require.NoError(w.t, err)
+	var cols [][2]string
+	for rows.Next() {
+		var tb, col string
+		require.NoError(w.t, rows.Scan(&tb, &col))
+		cols = append(cols, [2]string{tb, col})
+	}
+	require.NoError(w.t, rows.Err())
+	rows.Close()
+	out := map[string]int{}
+	for _, c := range cols {
+		var n int
+		require.NoError(w.t, w.pool.QueryRow(w.ctx,
+			`SELECT count(*) FROM `+srciQualified(c[0])+` WHERE position(convert_to($1, 'UTF8') IN `+
+				pgx.Identifier{c[1]}.Sanitize()+`) > 0`, id).Scan(&n), "байты %s.%s", c[0], c[1])
+		if n > 0 {
+			out[c[0]+"."+c[1]] = n
 		}
 	}
 	return out

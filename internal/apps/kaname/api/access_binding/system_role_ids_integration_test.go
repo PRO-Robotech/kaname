@@ -288,7 +288,7 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 func TestSystemRoleIDs_SRCI06_NoRowKeepsTheOldID(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
-	w.seedSRCI05Materialized()
+	w.seedSRCI05()
 
 	tables := w.tables(false)
 	oldBefore := map[string]map[string]int{
@@ -306,6 +306,15 @@ func TestSystemRoleIDs_SRCI06_NoRowKeepsTheOldID(t *testing.T) {
 	jOld := map[string]int{"admin": w.countWith(journal, subj.oldAdmin)[journal[0]], "viewer": w.countWith(journal, subj.oldViewer)[journal[0]]}
 	s0 := w.journalHead()
 	journalBefore := w.journalUpTo(s0)
+	// Предикат приёмки (`<таблица>::text LIKE`) байтовых колонок не видит: `bytea`
+	// выводится шестнадцатеричной строкой. Вопрос В1 к приёмке открыт, поэтому число
+	// печатается, а не утверждается.
+	t.Logf("SRCI-06: байтовые колонки с прежними id до наката (не утверждается, В1): admin %v, viewer %v",
+		w.countInBytea(subj.oldAdmin), w.countInBytea(subj.oldViewer))
+	defer func() {
+		t.Logf("SRCI-06: байтовые колонки после (не утверждается, В1): прежний admin %v, прежний viewer %v",
+			w.countInBytea(subj.oldAdmin), w.countInBytea(subj.oldViewer))
+	}()
 
 	w.subj.requireSubject(t, "SRCI-06")
 	for role, id := range map[string]string{"admin": domain.SystemAdminRoleID, "viewer": domain.SystemViewerRoleID} {
@@ -341,10 +350,10 @@ func TestSystemRoleIDs_SRCI06_NoRowKeepsTheOldID(t *testing.T) {
 }
 
 // pollChanges — опрос `PollSubjectChanges` с курсора.
-func (w *srciWorld) pollChanges(since int64) *iamv1.PollSubjectChangesResponse {
+func (w *srciWorld) pollChanges(since int64, why string) *iamv1.PollSubjectChangesResponse {
 	w.t.Helper()
 	resp, err := w.iiam.PollSubjectChanges(w.ctx, &iamv1.PollSubjectChangesRequest{SinceId: since, Limit: 1000})
-	require.NoError(w.t, err, "PollSubjectChanges")
+	require.NoErrorf(w.t, err, "%s: PollSubjectChanges", why)
 	return resp
 }
 
@@ -354,16 +363,16 @@ func (w *srciWorld) pollChanges(since int64) *iamv1.PollSubjectChangesResponse {
 func TestSystemRoleIDs_SRCI07_MigrationNeitherGrantsNorRevokes(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
-	w.seedSRCI05Materialized()
+	w.seedSRCI05()
 
-	cursor := w.pollChanges(0).GetHeadId()
+	cursor := w.pollChanges(0, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) SRCI-07: курсор до наката").GetHeadId()
 	require.Positive(t, cursor, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): посев выдач оставил курсор смены субъекта на нуле")
 	fga, sco := w.countRows("kaname.fga_outbox"), w.countRows("kaname.subject_change_outbox")
 
 	w.subj.requireSubject(t, "SRCI-07")
 	w.up("SRCI-07")
 
-	assert.Empty(t, w.pollChanges(cursor).GetChanges(), "SRCI-07: опрос с курсора до наката отдал события")
+	assert.Empty(t, w.pollChanges(cursor, "SRCI-07").GetChanges(), "SRCI-07: опрос с курсора до наката отдал события")
 	assert.Equal(t, fga, w.countRows("kaname.fga_outbox"), "SRCI-07: fga_outbox вырос")
 	assert.Equal(t, sco, w.countRows("kaname.subject_change_outbox"), "SRCI-07: subject_change_outbox вырос")
 
@@ -374,7 +383,7 @@ func TestSystemRoleIDs_SRCI07_MigrationNeitherGrantsNorRevokes(t *testing.T) {
 		Target: resourcesTarget(&iamv1.ResourceRef{Type: scTargetType, Id: srciObj}),
 	}, "SRCI-07б: выдача B3")
 	var about []string
-	for _, c := range w.pollChanges(cursor).GetChanges() {
+	for _, c := range w.pollChanges(cursor, "SRCI-07б").GetChanges() {
 		about = append(about, c.GetSubjectId())
 	}
 	assert.Contains(t, about, string(w.u3), "SRCI-07б: опрос с того же курсора не отдал события о U3")
@@ -479,7 +488,7 @@ func (w *srciWorld) srciSchema() []string {
 func TestSystemRoleIDs_SRCI10_MigrationIsReversible(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
-	w.seedSRCI05Materialized()
+	w.seedSRCI05()
 
 	tables := w.tables(false)
 	full0, schema0 := w.snapshot(tables), w.srciSchema()
@@ -533,7 +542,7 @@ func srciRoleEventsLastAfterDown(t *testing.T, ev []srciEvent, subj srciSubject)
 func TestSystemRoleIDs_SRCI10b_GrantMadeBetweenUpAndDownSurvives(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
-	w.seedSRCI05Materialized()
+	w.seedSRCI05()
 	require.NotEmpty(t, w.bindingsOnRoles(subj.oldAdmin), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): выдачи на прежний id admin нет")
 
 	w.subj.requireSubject(t, "SRCI-10б")
@@ -558,7 +567,7 @@ func TestSystemRoleIDs_SRCI10b_GrantMadeBetweenUpAndDownSurvives(t *testing.T) {
 func TestSystemRoleIDs_SRCI11_GrantRacingTheMigration(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
-	w.seedSRCI05Materialized()
+	w.seedSRCI05()
 	before := map[string]bool{}
 	for _, id := range w.bindingsOnRoles(subj.oldAdmin, subj.oldViewer) {
 		before[id] = true
@@ -669,7 +678,7 @@ func mustSeedUserNoT(w *srciWorld) domain.UserID {
 func TestSystemRoleIDs_SRCI12_SubscriptionJournalTellsOfTheNewIDs(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
-	w.seedSRCI05Materialized()
+	w.seedSRCI05()
 	r0 := seedRulesRoleWithSelectors(t, w.ctx, w.repo, w.a1, "srci_r0",
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}}})
 	b5 := w.seedBinding(domain.AccessBinding{
