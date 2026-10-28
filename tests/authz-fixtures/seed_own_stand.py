@@ -279,9 +279,42 @@ MINTED_IDENTIFIERS = (
 MINTED_SURFACE = "служба (собственный REST-фронт)"
 
 
+# ФАКТЫ ДЕРЕВА, а не стенда: прежние идентификаторы двух системных ролей
+# (приёмка system-roles-carry-canonical-ids.md, kaname#543, SRCI-04). Литерала в
+# дереве вне миграций быть не должно (DoD п.6 приёмки), поэтому кейс читает их
+# переменной, а посев берёт РАЗБОРОМ вставки ролей `0001_initial.sql` по имени,
+# которое та вставка пишет. Применённая миграция не правится (ban #5), и разбор
+# устойчив by construction.
+MINTED_TREE_FACTS = (
+    "systemAdminRolePrevId",
+    "systemViewerRolePrevId",
+)
+_SYSTEM_ROLE_SEED_NAMES = {
+    "systemAdminRolePrevId": "kacho-system.admin",
+    "systemViewerRolePrevId": "kacho-system.viewer",
+}
+_ROLE_INSERT = re.compile(
+    r"^INSERT INTO kaname\.roles \(id, [^)]*\) VALUES \('([^']*)', (?:NULL|'[^']*'), '([^']*)'")
+
+
+def system_role_prev_ids(baseline: str) -> dict:
+    """Прежние id системных ролей разбором текста свода. ЧИСТАЯ — её судит самопроверка."""
+    by_name = {}
+    for line in baseline.splitlines():
+        m = _ROLE_INSERT.match(line)
+        if m:
+            by_name[m.group(2)] = m.group(1)
+    out = {}
+    for key, name in _SYSTEM_ROLE_SEED_NAMES.items():
+        if not by_name.get(name):
+            raise Unmet(f"вставка роли {name} в своде миграций не разобрана — {key} не добыт")
+        out[key] = by_name[name]
+    return out
+
+
 def minted_keys() -> tuple[str, ...]:
     return (MINTED_ADDRESSES + MINTED_CREDENTIALS + MINTED_DEFECTIVE
-            + MINTED_IDENTIFIERS)
+            + MINTED_IDENTIFIERS + MINTED_TREE_FACTS)
 
 
 # ─────────────────────────── исходы и учёт ───────────────────────────────────
@@ -1501,6 +1534,8 @@ def run(args: argparse.Namespace) -> int:
         "svaPureNoGrantId": sva_pure,
         "runId": run_id,
         **creds,
+        **system_role_prev_ids(
+            (ROOT / "internal" / "migrations" / "0001_initial.sql").read_text(encoding="utf-8")),
     }
     # ОБЪЯВЛЕННЫЕ ПАРЫ ПРОВЕРЯЮТСЯ ЗДЕСЬ — В ЕДИНСТВЕННОМ МЕСТЕ, ГДЕ ФИКСТУРЫ
     # СУЩЕСТВУЮТ. `principal_pairings` объявляет данными, чей идентификатор
@@ -1568,6 +1603,21 @@ def self_test() -> int:
            "env_patch промолчал — переменная уехала бы в окружение пустой")
     except KeyError:
         _c("ключ, объявленный и НЕ добытый, роняет запись", True)
+
+    # Ось 1а: прежние id системных ролей — разбором свода по имени роли; свод без
+    # одной из вставок — «условие не создано», а не пустая переменная.
+    cols = "(id, account_id, name, description)"
+    synth = (f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthadmin', NULL, 'kacho-system.admin', 'x');\n"
+             f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthviewer', NULL, 'kacho-system.viewer', 'x');\n"
+             f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthother', NULL, 'other', 'x');\n")
+    got = system_role_prev_ids(synth)
+    _c("прежние id системных ролей разобраны по имени",
+       got == {"systemAdminRolePrevId": "rolsynthadmin", "systemViewerRolePrevId": "rolsynthviewer"}, str(got))
+    try:
+        system_role_prev_ids(synth.split("\n", 1)[1])
+        _c("свод без вставки admin роняет посев", False, "разбор промолчал")
+    except Unmet:
+        _c("свод без вставки admin роняет посев", True)
 
     # Ось 1б: ПОСЕВ ОБЪЯВЛЯЕТ ПОВЕРХНОСТЬ, ДЛЯ КОТОРОЙ КУЁТ.
     #

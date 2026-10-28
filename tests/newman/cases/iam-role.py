@@ -2137,6 +2137,193 @@ CASES.append(Case(
 ))
 
 
+# ---------------------------------------------------------------------------
+# SRCI — системные роли адресуются id канонической формы
+# (docs/engineering/acceptance/system-roles-carry-canonical-ids.md, kaname#543).
+#
+# Новые id кейс берёт у List по имени роли — не литералом: их значение — предмет
+# изменения. Прежние id — переменными `systemAdminRolePrevId` /
+# `systemViewerRolePrevId`: их пишет посев стенда разбором свода миграций
+# (`tests/authz-fixtures/seed_own_stand.py`, MINTED_TREE_FACTS), потому что
+# литерала прежних id в дереве вне миграций быть не должно (DoD п.6 приёмки).
+# Кластерный администратор — `jwtBootstrap`; получатель выдачи — `userNOBId`.
+# ---------------------------------------------------------------------------
+
+# Форма id фундамента: префикс `rol` и 17 знаков алфавита (corelib ids.HasKnownPrefix).
+_SRCI_CANON = r"^rol[0-9abcdefghjkmnpqrstvwxyz]{17}$"
+_SRCI_GLOBAL_RULE = "GLOBAL scope requires names or labels selector for non-cluster-admin roles"
+
+
+def _srci_list_system_roles(name):
+    """List ролей → id system.admin и system.viewer в srciAdminRoleId / srciViewerRoleId."""
+    return Step(
+        name=name, method="GET", path="/iam/v1/roles?pageSize=1000", auth="jwtAccountAdminA",
+        test_script=[
+            *assert_status(200),
+            "const j = pm.response.json();",
+            "const by = {}; (j.roles || []).forEach(r => { by[r.name] = r; });",
+            "pm.test('список дочитан одной страницей', () => pm.expect(j.nextPageToken || '', JSON.stringify(j.nextPageToken)).to.eql(''));",
+            "pm.test('system.admin и system.viewer в списке', () => {",
+            "  pm.expect(by['system.admin'], 'system.admin').to.be.an('object');",
+            "  pm.expect(by['system.viewer'], 'system.viewer').to.be.an('object');",
+            "});",
+            "if (by['system.admin']) pm.environment.set('srciAdminRoleId', by['system.admin'].id); else pm.environment.unset('srciAdminRoleId');",
+            "if (by['system.viewer']) pm.environment.set('srciViewerRoleId', by['system.viewer'].id); else pm.environment.unset('srciViewerRoleId');",
+            f"const canon = new RegExp({js_str(_SRCI_CANON)});",
+            "pm.test('SRCI-01: id system.admin канонической формы', () => pm.expect((by['system.admin'] || {}).id).to.match(canon));",
+            "pm.test('SRCI-01: id system.viewer канонической формы', () => pm.expect((by['system.viewer'] || {}).id).to.match(canon));",
+        ],
+    )
+
+
+def _srci_prev_ids_guard():
+    return [
+        "if (!pm.environment.get('systemAdminRolePrevId') || !pm.environment.get('systemViewerRolePrevId')) {",
+        *precondition_not_met(
+            "посев стенда: systemAdminRolePrevId и systemViewerRolePrevId заданы",
+            "прежние id системных ролей пишет посев стенда разбором свода миграций — "
+            "без них кейс не знает, какой id утверждать отвергнутым",
+            indent="  "),
+        "}",
+    ]
+
+
+def _srci_captured_guard(var):
+    """Id роли, захваченный списком: без него шаг ушёл бы с `{{…}}` в адресе либо теле."""
+    return [
+        f"if (!pm.environment.get({js_str(var)})) {{",
+        *report_then_skip(f"{var} захвачен списком", "List не отдал системную роль", indent="  "),
+        "}",
+    ]
+
+
+def _srci_get_role(name, var, role_name):
+    return Step(
+        name=name, method="GET", path="/iam/v1/roles/{{" + var + "}}", auth="jwtAccountAdminA",
+        pre_script=_srci_captured_guard(var),
+        test_script=[
+            *assert_status(200),
+            "const j = pm.response.json();",
+            f"pm.test('id равен запрошенному', () => pm.expect(j.id).to.eql(pm.environment.get({js_str(var)})));",
+            f"pm.test({js_str('name ' + role_name)}, () => pm.expect(j.name).to.eql({js_str(role_name)}));",
+            "pm.test('isSystem', () => pm.expect(j.isSystem).to.eql(true));",
+            f"pm.test('SRCI-03: id канонической формы', () => pm.expect(j.id).to.match(new RegExp({js_str(_SRCI_CANON)})));",
+        ],
+    )
+
+
+def _srci_cluster_body(role_expr):
+    return {"subjectType": "user", "subjectId": "{{userNOBId}}", "roleId": role_expr,
+            "scopeType": "iam.cluster", "scopeId": "cluster_root", "target": {"allInScope": {}}}
+
+
+CASES.append(Case(
+    id="IAM-ROL-GET-SRCI03-NEW-ID-OK",
+    title="SRCI-03: системные роли читаются по НОВОМУ id канонической формы — 200, id, name, isSystem",
+    classes=["CRUD", "CONF"],
+    priority="P0",
+    steps=[
+        _srci_list_system_roles("srci03-list"),
+        _srci_get_role("srci03-get-admin", "srciAdminRoleId", "system.admin"),
+        _srci_get_role("srci03-get-viewer", "srciViewerRoleId", "system.viewer"),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-ROL-GET-SRCI04-OLD-ID-REFUSED",
+    title="SRCI-04: прежние id системных ролей не адресуют ничего — Get admin 404, Get viewer 400, выдача на прежний id admin 400 FAILED_PRECONDITION без операции",
+    classes=["NEG", "VAL"],
+    priority="P0",
+    steps=[
+        Step(
+            name="srci04-get-old-admin", method="GET", path="/iam/v1/roles/{{systemAdminRolePrevId}}",
+            auth="jwtAccountAdminA", pre_script=_srci_prev_ids_guard(),
+            test_script=[
+                *assert_status(404),
+                *assert_grpc_code(5, "NOT_FOUND"),
+                *assert_refusal_message("Role {{systemAdminRolePrevId}} not found"),
+            ],
+        ),
+        Step(
+            name="srci04-get-old-viewer", method="GET", path="/iam/v1/roles/{{systemViewerRolePrevId}}",
+            auth="jwtAccountAdminA", pre_script=_srci_prev_ids_guard(),
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                *assert_refusal_message("invalid role id '{{systemViewerRolePrevId}}'"),
+            ],
+        ),
+        Step(
+            name="srci04-grant-old-admin", method="POST", path="/iam/v1/accessBindings",
+            auth="jwtBootstrap", pre_script=_srci_prev_ids_guard(),
+            body=_srci_cluster_body("{{systemAdminRolePrevId}}"),
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(9, "FAILED_PRECONDITION"),
+                *assert_refusal_message("Role {{systemAdminRolePrevId}} not found"),
+                "pm.test('Operation не создана', () => { const j = pm.response.json(); pm.expect(j.done, JSON.stringify(j)).to.not.exist; });",
+            ],
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-ROL-AB-SRCI08-SUPERUSER-NEW-ID",
+    title="SRCI-08: выдача system.admin новым id на кластер со всей областью принята; близнец SRCI-08б — system.viewer новым id отвергнут правилом ствола",
+    classes=["AUTHZ", "STATE", "NEG"],
+    priority="P0",
+    steps=[
+        _srci_list_system_roles("srci08-list"),
+        Step(
+            name="srci08b-viewer-refused", method="POST", path="/iam/v1/accessBindings",
+            auth="jwtBootstrap", body=_srci_cluster_body("{{srciViewerRoleId}}"),
+            pre_script=_srci_captured_guard("srciViewerRoleId"),
+            test_script=[
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                *assert_refusal_message(_SRCI_GLOBAL_RULE),
+                "pm.test('Operation не создана', () => { const j = pm.response.json(); pm.expect(j.done, JSON.stringify(j)).to.not.exist; });",
+            ],
+        ),
+        Step(
+            name="srci08-admin-granted", method="POST", path="/iam/v1/accessBindings",
+            auth="jwtBootstrap", body=_srci_cluster_body("{{srciAdminRoleId}}"),
+            pre_script=_srci_captured_guard("srciAdminRoleId"),
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "srci08OpId"),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", "srci08AcbId"),
+            ],
+        ),
+        assert_op_success(auth="jwtBootstrap", op_var="srci08OpId"),
+        Step(
+            name="srci08-get-binding", method="GET", path="/iam/v1/accessBindings/{{srci08AcbId}}",
+            auth="jwtBootstrap",
+            pre_script=[
+                "if (!pm.environment.get('srci08AcbId')) {",
+                *report_then_skip("выдача SRCI-08 создана", "Create не назвал выдачу в metadata", indent="  "),
+                "}",
+            ],
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('SRCI-08: roleId выдачи — новый id system.admin', () => pm.expect(j.roleId).to.eql(pm.environment.get('srciAdminRoleId')));",
+                f"pm.test('SRCI-08: roleId канонической формы', () => pm.expect(j.roleId).to.match(new RegExp({js_str(_SRCI_CANON)})));",
+            ],
+        ),
+        Step(
+            name="srci08-cleanup", method="DELETE", path="/iam/v1/accessBindings/{{srci08AcbId}}",
+            auth="jwtBootstrap",
+            pre_script=["if (!pm.environment.get('srci08AcbId')) { pm.execution.skipRequest(); }"],
+            test_script=[*assert_status(200), *save_from_response("j.id", "srci08DelOpId")],
+        ),
+        assert_op_success(auth="jwtBootstrap", op_var="srci08DelOpId"),
+    ],
+))
+
+
 # Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
 CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
                                  "ресурса нет адреса на автономном стенде, и кейс "

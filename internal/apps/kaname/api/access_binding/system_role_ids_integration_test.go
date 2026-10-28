@@ -6,7 +6,7 @@ package access_binding_test
 // system_role_ids_integration_test.go — сценарии SRCI-01…08, SRCI-10…12 приёмки
 // docs/engineering/acceptance/system-roles-carry-canonical-ids.md (kaname#543).
 // Сценарий ↔ одна функция `TestSystemRoleIDs_SRCI<NN>_<Суть>`; близнец — в той же
-// функции либо `…_SRCI<NN>b_…`. Номер SRCI-09 снят приёмкой и не используется.
+// функции либо `…_SRCI<NN>b_…`. Девятый номер снят приёмкой и здесь не используется.
 //
 // Порядок каждой пробы несущий: посев и его положительный контроль, затем
 // `requireSubject` (есть ли миграция и новые id), затем предмет. Посев, сломанный
