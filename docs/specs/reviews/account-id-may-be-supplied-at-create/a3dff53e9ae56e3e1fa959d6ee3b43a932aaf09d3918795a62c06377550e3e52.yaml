@@ -1,0 +1,151 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/account-id-may-be-supplied-at-create.md
+  sha256: a3dff53e9ae56e3e1fa959d6ee3b43a932aaf09d3918795a62c06377550e3e52
+  static_status: DRAFT
+  base_commit: 0d746137b
+  content_commit: null
+  measured_revisions:
+    kaname: 092bee4fb322
+    corelib: v1.15.0
+  branch: '1052'
+  task: PRO-Robotech/kaname#1052
+  epic: PRO-Robotech/kaname#942
+  lines: 2174
+  round: 4
+  round_note: >-
+    Четвёртый круг под kaname#1052 (сквозной счёт документа — 7), редакция 7. Задание
+    диспетчера в последней строке называло «редакцию 6 против редакции 5»; это посылка
+    устарела: файл в копии — редакция 7, а у редакции 6 (c98202bc…d5f1) запись круга 3
+    уже есть. Судится содержимое, у которого записи нет: дельта 6 → 7 и закрытие B1 и N1–N4
+    круга 3. Вне дельты ничего не переоткрывалось (fa-b1). По fa-b8 круг сверх двух;
+    диспетчер его заказал.
+  predecessor_record: docs/specs/reviews/account-id-may-be-supplied-at-create/c98202bc123a455eca8add158e3a098e7b458172fab1e3b64ce0d0a8982fd5f1.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 1052 (HEAD 0d746137b, файл изменён и не закоммичен) —
+    a3dff53e…3e52, совпал с объявленным; sha256sum копии редакции 6 вне дерева —
+    c98202bc…d5f1, равен отпечатку записи круга 3; diff копии и файла — 284 строки,
+    побайтово равен диффу автора (cmp).
+  static_status_note: >-
+    Слово DRAFT в шапке документа — то, что туда вписали; шапка намеренно не правлена.
+    Вердикт выводится из этой записи и внешнего события.
+  publication_mode: record_file_uncommitted_event_by_courier
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-28'
+
+blocking:
+  count: 0
+  kinds: []
+  items: []
+
+closed_from_previous_round:
+  - id: B1
+    kind: COVERAGE
+    status: closed
+    evidence: >-
+      Предикаты §1.11 повторены @092bee4fb322 по `git archive`. (2) — замыкание до
+      ResourceRef — даёт 5 сообщений: AuthorizeCheck, BatchAuthorizeCheck,
+      CreateAccessBinding, ExpandRelations, ListSubjects. (3) — поля объекта модели — даёт
+      4: CheckRequest (внутр.), ExpandAccess, RegisterResource, UnregisterResource. Каталог:
+      3 записи InternalIAMService с exempt_reason INTERNAL_LISTENER, Subscribe — 1. Контроль
+      по фрагментам имени (account|scope|parent|owner|container|tenant|object|resource) по
+      всем *Request в proto/kaname/cloud/iam/v1 нового носителя не дал; map с ResourceRef —
+      0; других каталогов proto с *Request, кроме corelib (Subscribe — через каталог), нет.
+      Сумма 16 + 2 + 2 + 1 + 6 + 1 + 1 + 4 + 1 = 34, плюс 4 исключения — 38. Класс «только
+      модель прав» сверен с кодом: authorize/handler.go Check/BatchCheck/ListSubjects/
+      ExpandRelations зовут authorizeCaller и службу решений; service/authorize_service.go
+      формы id не судит и хранилище не читает. Самозапрос пропускается
+      (caller_authority.go:85-87), иначе — сверх-гейт и `admin` на объекте, отказ —
+      `permission denied`. Тип account в fga_model.fga выводит отношения только из прямых
+      кортежей, owner и super_admin кластера; подстановочного субъекта в модели нет
+      (`grep ':\*'` — 0). ExpandAccess: expand_access.go:204-205 и :272 — как названо;
+      create.go:278 (ворота) раньше :323 (элементы цели) — как названо. Р15, AID-36, §6.1,
+      §6.2 обновлены на 34; устаревшего «29 путей» вне таблицы §0.3б нет.
+  - id: N1
+    kind: TWIN
+    status: closed
+    evidence: >-
+      AID-40 мир (iv-б): та же правка имени C на godjee-x, затем удаление C; создание
+      `{"name": "godjee"}` проходит. Одно различие — C удалён.
+  - id: N2
+    kind: CONVENTION
+    status: closed
+    evidence: Р6а — «ограничение», несимметричность и неприменимость одного UNIQUE названы, носитель — замысел.
+  - id: N3
+    kind: COVERAGE
+    status: closed
+    evidence: >-
+      Р14 прямо говорит, что числом попыток канал не ограничен; остаток — допущение Д6 (§9)
+      с отвергнутыми альтернативами и условием снятия; строка §4.2. Решение (а) остатком — у
+      диспетчера, документ его не предрешает сверх допущения.
+  - id: N4
+    kind: COVERAGE
+    status: closed
+    evidence: >-
+      Р2 (д) «Остаток резерва — двойники по свёртке» с доводом (ids.IsValid строку не читает
+      видом, присылает только администратор облака, Р6а держит живую строку) и предикатом
+      пересмотра; строка §4.2.
+
+non_blocking:
+  - id: R1
+    kind: COVERAGE
+    note: >-
+      Довод исключения оси ids подписки («туда доходит только модуль») слабее, чем у трёх
+      путей InternalIAMService. У записи Subscribe в каталоге нет INTERNAL_LISTENER, есть
+      permission, scope_filtered и required_acr_min 1, то есть дверь о принципале. Одинаковый
+      ответ там держат построчное сужение и AID-31 (идентификатор, которого нет). Строка §4.2
+      называет предикат пересмотра, поэтому это не блокирует. Если модуль начнёт передавать
+      личность человека в Subscribe, ось станет строкой переписи.
+  - id: R2
+    kind: COVERAGE
+    note: >-
+      Строки AID-36 для AuthorizeService/Check и BatchCheck спрашивают только о самом H. На
+      вопрос о другом субъекте таблица §1.11 называет ответ `permission denied`
+      (authorizeCaller, ветка `admin`). Он одинаков по построению, но в пробе не исполняется.
+      Добавить строку пробы по желанию.
+
+checks:
+  delta_scope: >-
+    Дифф 6 → 7 — 284 строки: шапка, §0.3б, §1.11, Р2 (д), Р6а, Р14, Р15, AID-36, AID-40,
+    §4.2 (+3), §6.1 (AID-36), §6.2 (2 строки), §9 (Д6). Сценариев, которые не названы
+    изменёнными, дифф не трогает.
+  coverage_count: >-
+    Заголовков сценариев — 43, уровни E 22, I 17, P 2, K 2; набор ID §5 и набор строк §6.1
+    равны (diff пуст).
+  producer: 43 из 43 (§6.1); у AID-36 добавлены страж AuthorizeService и ворота ExpandAccess.
+  twins: >-
+    AID-36: близнец под O — на Check о себе allowed = true. На ListSubjects, ExpandRelations
+    и ExpandAccess O в ответе есть: O — owner F, значит, у него account.admin
+    (callerAuthorityRelations = [admin]), а ExpandAccess разворачивает граф (ListUsers).
+    AID-40 (iv) ↔ (iv-б) — одно различие.
+  constructibility: >-
+    Посев не выполнялся: база testcontainers и слот внешнего кластера заданием не выданы —
+    «не выполнилось», 0 из 1 нового «Дано» (расширение мира AID-36). Названные фикстуры
+    сверены @092bee4fb322 и есть в дереве: authorize.NewHandler (handler.go:115),
+    TestExpandAccess_ForeignObjectIsDeniedAndLeaksNothing_OnTheForm
+    (expand_access_form_integration_test.go:172), фикстуры круга 3 без изменений. Дверь
+    BatchCheck под H строится: project.viewer ⇐ admin ⇐ super_admin ⇐ `admin from account`
+    ⇐ account.owner, кортеж project#account сеет gdSeedTuple. Довод исключений:
+    HopAdmits (authzguard/front_admission.go:70), NewCallerPolicy (caller_policy.go:277).
+  security: >-
+    Новых изменений ответа нет. Пять новых строк Р15 держат ответ, который одинаков уже
+    сегодня, и защищают его от регрессии, в том числе при правке S1 ворот права выдачи.
+  disclosure: >-
+    В дельте нет новых различимых ответов, рабочих путей и адресов. Различие на
+    AccessBindingService/Create было судимо в круге 3, дельта его не трогает.
+  open_questions: >-
+    Ноль. Д6 — допущение с условием снятия. Варианты N3 и N4 автор отдал диспетчеру в
+    возврате, документ их не держит открытыми.
+
+event_body: acceptance-reviewer · APPROVED · sha256 a3dff53e9ae56e3e1fa959d6ee3b43a932aaf09d3918795a62c06377550e3e52
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1052
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации роль в записи — координата, а не доказательство личности.

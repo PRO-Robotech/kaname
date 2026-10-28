@@ -1,0 +1,251 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/account-id-may-be-supplied-at-create.md
+  sha256: c98202bc123a455eca8add158e3a098e7b458172fab1e3b64ce0d0a8982fd5f1
+  static_status: DRAFT
+  base_commit: 0d746137b
+  content_commit: null
+  measured_revisions:
+    kaname: 092bee4fb322
+    corelib: v1.15.0
+  branch: '1052'
+  task: PRO-Robotech/kaname#1052
+  epic: PRO-Robotech/kaname#942
+  lines: 2035
+  round: 3
+  round_note: >-
+    Третий круг под kaname#1052 (сквозной счёт документа — 6), редакция 6. Это правка уже
+    одобренной редакции 5: вердикт круга 2 к ней не переносится. Судится дельта к редакции 5
+    (50214cb9…5788, запись круга 2 рядом) и закрытие находок F1–F4 разбора поверхности до
+    кода. По fa-b8 это сверх двух кругов: что делать с ⛔, решает диспетчер.
+  predecessor_record: docs/specs/reviews/account-id-may-be-supplied-at-create/50214cb93e8fafd2b2e10e8f2347fc01a470dace369354ce389e288d0c0f5788.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 1052 (HEAD 0d746137b, файл изменён и не закоммичен) —
+    c98202bc…d5f1, совпал с объявленным; git show 0d746137b:<путь> | sha256sum —
+    50214cb9…5788, равен отпечатку записи круга 2; git diff 0d746137b -- <путь> —
+    641 вставка и 140 удалений, 1200 строк вывода.
+  static_status_note: >-
+    Слово DRAFT в шапке документа — то, что туда вписали; шапка намеренно не правлена.
+    Вердикт выводится из этой записи и внешнего события.
+  publication_mode: record_file_uncommitted_event_by_courier
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-28'
+
+blocking:
+  count: 1
+  kinds: [COVERAGE]
+  items:
+    - id: B1
+      kind: COVERAGE
+      where: >-
+        §1.11 (предикаты :399-408, таблица :410-418, сумма :420-425); Р15 (:795-796, :812-813);
+        AID-36 (:1563, :1579-1581); §6.2 строка «перепись путей для AID-36» (:1884)
+      claim: >-
+        Перепись путей §1.11, на которой стоят Р15 и AID-36, неполна по предмету. Поля
+        запросов в ней ищутся по имени: `account_id`, `scope_id`/`resource_id`. Пути, которые
+        принимают объект аккаунта через `ResourceRef{type, id}` или парой
+        `object_type`/`object_id`, в неё не попали. Р15 утверждает, что ответ постороннему
+        одинаков «на каждом из 29 путей», и называет находкой «путь без строки в переписи».
+        AID-36 выводит свои строки из тех же предикатов. Значит, проба по построению не видит
+        пять публичных путей и зелёной расхождения на них не покажет.
+      evidence:
+        - >-
+          @092bee4fb322, awk по сообщениям *Request с полем типа ResourceRef в
+          proto/kaname/cloud/iam/v1/*.proto находит AuthorizeCheckRequest (`resource = 2`),
+          ListSubjectsRequest (`resource = 1`) и ExpandRelationsRequest (`resource = 1`).
+          BatchAuthorizeCheckRequest несёт `repeated AuthorizeCheckRequest checks = 1`
+          (authorize_service.proto:287-289); перепись отбросила его как «область проекта»
+          (:404), но каждый его элемент — ResourceRef. ExpandAccessRequest несёт
+          `object_type`/`object_id` (access_binding_service.proto:1019-1022). В ResourceRef
+          поле type — тип объекта модели прав (:208), то есть `account` в нём допустим.
+        - >-
+          В каталоге прав (internal/apps/kaname/seed/embedded/permission_catalog.json) у
+          AuthorizeService Check, BatchCheck, ListSubjects и ExpandRelations и у
+          AccessBindingService/ExpandAccess нет отдельного класса области: у четырёх
+          `scope_filtered` с пустым scope_extractor, у BatchCheck дверь по project.scope_id.
+          Ни под одну строку таблицы §1.11 эти пути не подходят.
+        - >-
+          Сегодня ответ на этих путях, по прочтению кода, одинаков. AuthorizeService проверяет
+          только по модели прав (`authorizeCaller`, authorize/caller_authority.go:81-158). Для
+          ExpandAccess отказ проходит через hideObjectExistence поверх requireGrantAuthority
+          (expand_access.go:204-205), а requireGrantAuthority — те самые ворота, которые S1
+          правит ради AccessBindingService/Create (Р15). Это не оракул сегодня, но путь задет
+          изменением, а держателя у него нет.
+        - >-
+          Внутренние пути с идентификатором аккаунта: InternalIamService Check (`object`,
+          internal_iam_service.proto:332), RegisterResource и UnregisterResource
+          (`parent_account_id`, :411, :485), ось ids у InternalSubscriptionService/Subscribe.
+          В переписи их нет, и довод, почему, не назван. При этом внутренний
+          InternalOperationsService/ListIamOperations в переписи посчитан.
+      failure_scenario: >-
+        S1 переписывает requireGrantAuthority, чтобы промах области сводился к отказу права.
+        Допустим, правка снимает обёртку hideObjectExistence у ExpandAccess. Либо позже кто-то
+        добавит в caller_authority чтение аккаунта ради владельца. Тогда AccessBindingService/
+        ExpandAccess или AuthorizeService/ListSubjects начнут отвечать постороннему NOT_FOUND
+        на отсутствующий аккаунт заданной формы и PERMISSION_DENIED на чужой. Это тот же
+        перебор логинов, что и F1. AID-36 при этом останется зелёным: число его строк равно
+        числу путей переписи, а этих путей в переписи нет.
+      predicate: >-
+        cd <корень kaname @092bee4fb322>; awk '/^message /{m=$2}
+        /^[ \t]*(repeated )?[A-Za-z.]*ResourceRef [a-z_]+ = /{ if (m ~ /Request$/) print m }'
+        proto/kaname/cloud/iam/v1/*.proto | sort -u → 3 сообщения;
+        grep -n -E 'string object_(type|id) = ' proto/kaname/cloud/iam/v1/access_binding_service.proto
+        → :1019, :1022; jq -c '.[] | select(.fqn|test("AuthorizeService/(Check|BatchCheck|ListSubjects|ExpandRelations)$|ExpandAccess$"))'
+        internal/apps/kaname/seed/embedded/permission_catalog.json → 5 записей, ни одна не в
+        классах таблицы §1.11.
+      required_fix: >-
+        Добавить в §1.11 третий предикат по предмету: поля *Request типа ResourceRef (вместе с
+        элементами BatchCheck), пары object_type/object_id, `object`, `parent_account_id`.
+        Дописать строки с классом решения: «только модель прав — одинаков по построению» для
+        AuthorizeService; «ворота права выдачи + hideObjectExistence» для ExpandAccess, задетого
+        правкой S1. Для внутренних путей — либо строка, либо исключение с доводом. Сумму
+        пересчитать. Строки AID-36 выводить из всех трёх предикатов, и Р15 утверждать на
+        полной переписи. Наблюдаемое поведение не меняется, меняется охват держателя.
+      repeat_of_kind: >-
+        Род COVERAGE уже был в круге 1 под kaname#1052 (B1, освобождение ключа Р6а), предмет
+        другой. Шаг задания автору (fa-b6): перепись путей «по предмету» ищет поля по ТИПУ
+        (ResourceRef, object_*), а не только по имени поля.
+
+closed_from_previous_findings:
+  - id: F1
+    status: closed_except_B1
+    evidence: >-
+      Р15 и §1.11 назвали различие на AccessBindingService/Create, обе области. Выравнивание
+      к отказу права — в S1, не позже Р10 (DoD S1 п. 9, §4.1 п. 5). AID-19 дополнен созданием
+      привязки на Xl и Yl: 403, `permission denied`, тела равны, операции нет; близнец — тот
+      же вызов под A. AID-36 обходит перепись и несёт контроль различимости под A. Код
+      сверен @092bee4fb322: access_binding/helpers.go:239-261 (scopeOwnerUserID →
+      MapRepoErr), create.go:278-285 (isPermissionDenied пропускает NOT_FOUND); образец —
+      expand_access.go:272. Перепись 25 + 3 + 1 = 29 перемерена: те же 25 сообщений
+      *Request с account_id, 16 записей каталога за дверью, 9 HANDLER_DECIDES. Остаток —
+      неполнота переписи (B1).
+  - id: F2
+    status: closed
+    evidence: >-
+      В Р6а назван вектор «захват строки именем» и штатное восстановление: администратор
+      облака правит имя чужого аккаунта. Это право даёт модель: account.v_update — `or owner
+      or super_admin`, super_admin — `any_admin from cluster` (fga_model.fga @092bee4fb322).
+      AID-37 (E): отказ по Р6а, затем правка под H2 (равные ответы на чужой и невыданный id),
+      затем правка под A (владелец не меняется), затем заведение Sq. Близнецы — по одному
+      различию. Бронь отвергнута в §4.2 с доводом, массовый захват назван условием пересмотра.
+  - id: F3
+    status: closed
+    evidence: >-
+      Р6а сравнивает строки после свёртки o→0, i/l→1, если хотя бы одна строка пары —
+      идентификатор; пара «имя ↔ имя» остаётся побайтовой (§0.4, §4.2). AID-38 проверяет
+      свёртку миром на каждую пару: (а) id↔id и имя↔id, (б) имя↔имя побайтово,
+      (в) собственная пара, (г) имя ↔ id генератора, (д) остаток реестра, (е) гонка под
+      -race с близнецом. AID-33 мир (iii) — нарушитель после свёртки при миграции.
+      Остатки названы: многознаковые двойники и двойник удалённого id.
+  - id: F4
+    status: closed
+    evidence: >-
+      Резерв (д1)/(д2) задан формой строки, без каталога. Сверено с corelib v1.15.0:
+      ids.NewID требует префикс ровно из 3 знаков (ids/ids.go:131), NewHyphenID — из 2–3
+      (:156), тело у обоих — 17 знаков. Значит, (д1) (3 + 17) и (д2) (любое начало, дефис,
+      17) покрывают обе формы генератора при любом будущем префиксе. Смена формы генератора
+      названа правкой Р2 с переписью реестра. (д3) — закрытый перечень, совпадает с
+      domain/seeded_ids.go @092bee4fb322: один литерал, SystemViewerRoleID. AID-39 проверяет
+      это в двух средах ручек с положительным контролем маршрутизатора, а посев — инъекцией.
+      Таблица AID-05/06 перепроверена построчно: каждая строка резерва отличается от
+      близнеца одним знаком (u вне алфавита или знак у дефиса).
+  - id: M1
+    status: closed
+    evidence: AID-35 мир (ii-б) — после удаления имя удалённого принимается и как идентификатор.
+  - id: M2
+    status: closed
+    evidence: >-
+      AID-05, AID-28, AID-35 ссылаются на `create.go:249-250`; §6.2 называет полный путь
+      internal/apps/kaname/api/audit/account_audit_integration_test.go:89-95.
+
+non_blocking:
+  - id: N1
+    kind: TWIN
+    note: >-
+      Близнец создания AID-40 мир (iv) — AID-35 мир (iii). Они различаются двумя фактами:
+      правка имени есть или нет, удаление есть или нет. Близнец ровно на одно различие — тот
+      же мир (iv): C переименован в godjee-x и затем удалён, после чего создание с именем
+      godjee проходит.
+  - id: N2
+    kind: CONVENTION
+    note: >-
+      Р6а говорит «одна уникальность над идентификаторами и именами». Но правило
+      несимметрично: пары с идентификатором сравниваются после свёртки, пара «имя ↔ имя» —
+      побайтово. Одним индексом UNIQUE это не выразить: свёрнутые имена godjee и g0djee
+      столкнулись бы. Носитель (EXCLUDE либо таблица ключей с триггерами) выбирает замысел,
+      и фразу не следует читать как «один UNIQUE». Наблюдаемое поведение задано верно.
+  - id: N3
+    kind: COVERAGE
+    note: >-
+      Канал имени (Р14) — названный остаток, одобренный в круге 2. Дельта делает его шире и
+      важнее. Отвергнутая вставка места в окне темпа не списывает (§1.8), так что канал не
+      ограничен по числу попыток. После свёртки Р6а одна проба имени проверяет сразу весь
+      класс свёртки идентификаторов. Тот перебор логинов, ради которого закрыт F1, остаётся
+      доступен каждому аутентифицированному через создание аккаунта без id. Документ это не
+      скрывает (Р15 «Чего не делает»), но в Р14 стоит прямо написать, что канал не
+      ограничен по числу попыток. Вопрос — диспетчеру.
+  - id: N4
+    kind: COVERAGE
+    note: >-
+      Резерв (д1)/(д2) сравнивается побайтово. Строка `prjoooooooooooooooooo` проходит, хотя
+      после свёртки она совпадает с формой генератора проекта. Задать идентификатор может
+      только администратор облака, поэтому риск низкий. Но как остаток рядом с
+      многознаковыми двойниками это не названо.
+
+checks:
+  delta_scope: >-
+    Сверено с §0.3а. Изменены AID-05, 06, 19, 29, 33, 35; у AID-28 — только координата.
+    Новые — AID-36…41, разделы §0.3а, §1.11, Р15, Д5; правлены Р2 (д), Р3, Р4, Р6а, Р10,
+    Р14, §3, §3.1, §4.1, §4.2, §6, §7, §8, §9, §10. Вне дельты ничего не переоткрывалось
+    (fa-b1): N3 — замечание о том, как дельта меняет вес прежнего остатка.
+  coverage_count: >-
+    awk по §5 и §6.1 — по 43 ID (AID-01…41, AID-K1…K2), diff наборов пуст. Уровни по
+    заголовкам: E 22, I 17, P 2, K 2; I + E + P = 41 = DoD S1 п. 2.
+  producer: 43 из 43 (§6.1).
+  twins: >-
+    Близнец есть у каждого отрицания дельты: AID-05 ↔ AID-06 построчно; AID-19 — тот же вызов
+    под A; AID-36 — под O, а для путей только администратора — под A, с контролем
+    различимости; AID-37, AID-38 (а)–(е), AID-40 (i)–(iii), AID-41 — в самом сценарии.
+    У AID-40 (iv) близнец отличается двумя фактами (N1).
+  constructibility: >-
+    Посев не выполнялся: база testcontainers и слот внешнего кластера заданием не выданы —
+    «не выполнилось», 0 из 10. Все 10 новых или изменённых нетривиальных «Дано»
+    (AID-19, 33, 35, 36, 37, 38, 39, 40, 41 и AID-05/06 по резерву) сверены с названными
+    фикстурами @092bee4fb322, все названные фикстуры в дереве есть.
+    newSACWorld — service_account_creator_world_integration_test.go:152, дверь :159,
+    seedClusterAdmin и кортеж system_admin — :169-173. gdSeedTuple —
+    grant_delegation_world_integration_test.go:278. mustSeedUser, seedAccountByOwner,
+    seedProjectInAccount, seedClusterAdmin — testhelpers_assignable_test.go:80, :113, :125,
+    :141. TestAccount_06_Update_Rename — account_integration_test.go:304,
+    TestAccount_08_Delete_Happy — :364. Порядок снятия —
+    audit/account_audit_integration_test.go:89-95. accountWriter.Insert с
+    `ON CONFLICT DO NOTHING` без цели — account_repo.go:234-255: первая половина AID-41
+    сегодня строится. ADMISSION_SLOTS и ADMIN_SLOTS — seed_ceremony.py:160 и :183.
+    Ручки окружения — corelib validate/validate.go:324, :328, :384, :388.
+    limit_drop_refusal_integration_test.go есть. Роль rol1bda80f2be4d3658e посеяна
+    (0001_initial.sql:3788).
+    Вставка F с id `aid36-foreign` строится: CHECK формы на accounts нет (§1.4).
+  security: >-
+    Тем же изменением выравнивается область `project` у AccessBindingService/Create. Это
+    смена публичного ответа, она объявлена в Р15 и в признаках маршрута. Делегированный путь
+    (create.go:278-285) после выравнивания будет спрашиваться и на промахе области; AID-36
+    держит одинаковый отказ на обоих идентификаторах.
+  disclosure: >-
+    §1.11 и §10 называют AccessBindingService/Create с различием ответа без координаты кода.
+    При идентификаторах генератора этим не воспользоваться, а выравнивание садится не позже
+    формы (DoD S1 п. 9), так что по признаку восстановимости это не раскрытие. Рабочих
+    путей и адресов стенда в дельте нет.
+  open_questions: ноль; Д5 решён документом по поручению диспетчера.
+
+event_body: acceptance-reviewer · CHANGES_REQUESTED · sha256 c98202bc123a455eca8add158e3a098e7b458172fab1e3b64ce0d0a8982fd5f1
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1052
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации роль в записи — координата, а не доказательство личности.
