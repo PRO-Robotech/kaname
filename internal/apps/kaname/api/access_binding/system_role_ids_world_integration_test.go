@@ -134,13 +134,13 @@ func srciReadSubject(t *testing.T) srciSubject {
 			seededName[m[1]] = m[2]
 		}
 	}
-	// Перевод имени — тройка (id, прежнее имя, объявленное имя) применённой
+	// Перевод имени — тройка (id, прежнее имя, объявленное имя) ВЕРХНЕЙ половины применённой
 	// миграции. Тройка засчитывается, лишь когда свод посеял именно этот id именно
 	// под прежним именем: так разбор адресует строку вставки свода по имени, а
 	// прежнее написание имени в этом файле не выписывается.
 	found := map[string][]string{}
 	for _, name := range srciSortedKeys(bodies) {
-		for _, m := range reSRCIRename.FindAllStringSubmatch(bodies[name], -1) {
+		for _, m := range reSRCIRename.FindAllStringSubmatch(migrations.MigrationUpSection(bodies[name]), -1) {
 			if seededName[m[1]] == m[2] && (m[3] == domain.SystemAdminRoleName || m[3] == domain.SystemViewerRoleName) {
 				found[m[3]] = append(found[m[3]], m[1])
 			}

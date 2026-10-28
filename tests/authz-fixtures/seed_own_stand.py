@@ -314,7 +314,7 @@ def system_role_prev_ids(migrations: dict) -> dict:
             seeded[m.group(1)] = m.group(2)
     found = {}
     for name in sorted(migrations):
-        for rid, previous, declared in _ROLE_RENAME.findall(migrations[name]):
+        for rid, previous, declared in _ROLE_RENAME.findall(migrations[name].split("-- +goose Down", 1)[0]):
             if seeded.get(rid) == previous:
                 found.setdefault(declared, []).append(rid)
     out = {}
@@ -1631,9 +1631,14 @@ def self_test() -> int:
     base = (f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthadmin', NULL, 'brand-x.admin', 'x');\n"
             f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthviewer', NULL, 'brand-x.viewer', 'x');\n"
             f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthother', NULL, 'other', 'x');\n")
-    rename = ("VALUES ('rolsynthadmin', 'brand-x.admin', 'system.admin'),\n"
+    # Нижняя половина повторяет тройку (так пишет и настоящая миграция перевода):
+    # судится только верхняя, иначе один перевод читался бы дважды.
+    rename = ("-- +goose Up\n"
+              "VALUES ('rolsynthadmin', 'brand-x.admin', 'system.admin'),\n"
               "       ('rolsynthviewer', 'brand-x.viewer', 'system.viewer'),\n"
-              "       ('rolsynthother', 'not-its-name', 'system.admin')\n")
+              "       ('rolsynthother', 'not-its-name', 'system.admin')\n"
+              "-- +goose Down\n"
+              "VALUES ('rolsynthadmin', 'brand-x.admin', 'system.admin')\n")
     got = system_role_prev_ids({"0001_initial.sql": base, "2026_rename.sql": rename})
     _c("прежние id системных ролей разобраны по имени через перевод",
        got == {"systemAdminRolePrevId": "rolsynthadmin", "systemViewerRolePrevId": "rolsynthviewer"}, str(got))
