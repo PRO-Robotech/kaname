@@ -1,0 +1,129 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/account-id-may-be-supplied-at-create.md
+  sha256: 50214cb93e8fafd2b2e10e8f2347fc01a470dace369354ce389e288d0c0f5788
+  static_status: DRAFT
+  base_commit: f0c8a1a52
+  content_commit: null
+  measured_revisions:
+    kaname: 092bee4fb322
+  branch: '1052'
+  task: PRO-Robotech/kaname#1052
+  epic: PRO-Robotech/kaname#942
+  lines: 1534
+  round: 2
+  round_note: >-
+    Второй круг под kaname#1052 (сквозной счёт документа — 5), редакция 5. Судит дельту к
+    редакции 4 (94949b26…f1f5, запись круга 1 рядом) и закрытие её блокирующего B1. Третьего
+    круга нет (flow-acceleration.md#fa-b8-acceptance-two-rounds).
+  predecessor_record: docs/specs/reviews/account-id-may-be-supplied-at-create/94949b260440e515f8594f1f4019fc62c454adb48dcf671aa8d3bf6f0a0df1f5.yaml
+  fingerprint_predicate: >-
+    sha256sum <путь> в копии ветки 1052 (HEAD f0c8a1a52, файл изменён и не закоммичен) —
+    50214cb9…5788, совпал с объявленным; sha256sum <путь>.94949b26 — 94949b26…f1f5, равен
+    отпечатку записи круга 1; diff редакций 4→5 — 124 строки вывода, правки только в шапке,
+    §0.3, Р6а, C6 (§3), AID-28, AID-32 (+2 строки), новом AID-35, §6.1, §6.2, §7 п. 6, §8 S1 пп. 2 и 5.
+  static_status_note: >-
+    Слово DRAFT в шапке документа — то, что туда вписали; шапка намеренно не правлена.
+    Вердикт выводится из этой записи и внешнего события.
+  publication_mode: record_file_uncommitted_event_by_courier
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-28'
+
+blocking:
+  count: 0
+  kinds: []
+  items: []
+
+closed_from_previous_round:
+  - id: B1
+    kind: COVERAGE
+    status: closed
+    evidence: >-
+      AID-35 (уровень I, своя база testcontainers на мир) утверждает освобождение строки ключа
+      Р6а на каждом объявленном пути: правка имени → строка снова годна как id (мир i-а) и как
+      имя (мир i-б); удаление → имя снова годно (мир ii); удаление → id удалённого годен как имя,
+      но не как id — держит реестр Р5 (мир iii). Порядок шагов мира (iii) фиксирован так, что
+      отказ по id после удаления может прийти только из реестра, а парный успех по имени
+      отличает «ключ не освобождён» от «держит реестр». Реализация без освобождения ключа
+      краснеет мирами (i-а), (i-б), (ii) и второй половиной (iii). Р6а дописан пунктом «ключ
+      держит только живые строки»; C6, §6.1, §6.2, §7 п. 6, DoD S1 п. 2 приведены.
+  - id: N1
+    status: closed
+    evidence: строка статуса 9-10 — «Редакция 5, ко второму кругу под kaname#1052»; DRAFT не тронут.
+  - id: N3
+    status: closed
+    evidence: DoD S1 п. 5 — замер строк, впервые вносимых обратным заполнением Р5, ожидается 0, не 0 — разбор до посадки.
+  - id: N4
+    status: closed
+    evidence: AID-28 — близнец по форме AID-03, по значению поля — пара AID-05/AID-06 (`Godjee`/`godjee`).
+  - id: N2
+    status: open_to_dispatcher
+    evidence: >-
+      Литерал `dlputi1u` на стенде против производного Xl — переформулировка предиката задачи;
+      документ её не решает и верно отдаёт диспетчеру. На одобрение контракта не влияет:
+      литерал утверждается уровнем I (AID-06, AID-14, теперь и AID-35 мир i-а).
+
+non_blocking:
+  - id: M1
+    kind: COVERAGE
+    note: >-
+      Мир (ii) AID-35 утверждает, что удаление освобождает имя M для имени, но не для
+      идентификатора (`{"id": "aid35-m"}` после удаления). По Р6а ключ один над обеими ролями,
+      и id-сторона освобождённой строки утверждена миром (i-а) на пути правки, поэтому
+      дефект «удаление вносит имя в реестр» узок и маловероятен; дешёвый шаг закрыл бы и его.
+  - id: M2
+    kind: FORMAT
+    note: >-
+      `create.go:249` (AID-28, AID-35) — на 092bee4fb322 строка 249 — проверка `ids.IsValid`,
+      текст `invalid account id` производит :250. Новая строка §6.2 называет
+      `account_audit_integration_test.go:89-95` без каталога; полный путь —
+      `internal/apps/kaname/api/audit/…` (соседняя строка §6.2 и AID-18).
+
+checks:
+  delta_scope: >-
+    diff 94949b26→50214cb9: блоки AID-01, 02, 10, 13, 15, 18, 20, 22, 23, 25, K2 не тронуты
+    (правки только в AID-28, хвосте AID-32 и новом AID-35); остальной текст вне дельты не
+    переоткрывался (fa-b1).
+  coverage_count: >-
+    awk §5 и §6.1 — по 37 ID (AID-01…35, AID-K1…K2), diff наборов пуст; уровни по заголовкам —
+    I 12, E 21, P 2, K 2; I+E+P = 35 = DoD S1 п. 2.
+  producer: 37 из 37 (§6.1, строка AID-35 добавлена).
+  twins: >-
+    AID-35: отказ «до» и успех «после» в мирах (i-а), (i-б), (ii) различаются только шагом
+    правки/удаления; в мире (iii) два создания различаются только полем. У прочих отрицаний —
+    без изменений против круга 1.
+  tree_coordinates: >-
+    @092bee4fb322: `accountWriter.Update` — account_repo.go:321, `Delete` — :367;
+    `TestAccount_06_Update_Rename` — account_integration_test.go:304 (освобождения не
+    утверждает), `TestAccount_08_Delete_Happy` — :364; internal/apps/kaname/api/audit/
+    account_audit_integration_test.go:89-95 — порядок «проект, затем аккаунт»;
+    `Account with name %s already exists` — pgmaperr.go:395 (accounts_name_unique, глобальный),
+    `Account %s already exists` — account_repo.go:309; `invalid account id` — create.go:250.
+    Утверждение «миры (i-б), (ii) сегодня зелёные» согласуется с глобальным accounts_name_unique;
+    «(i-а), (iii) сегодня красные» — с ids.IsValid(…, PrefixAccount) на create.go:249.
+  constructibility: >-
+    Посев не выполнялся: изоляция и слот для testcontainers заданием не выданы — исход
+    «не выполнилось» по посеву. Новая строка §6.2 (AID-35) подтверждена названными фикстурами
+    и чтением схемы: образцы правки и снятия существуют по названным координатам; потолки —
+    отложенные триггеры на личность (0001_initial.sql, kacho_quota_count), AID-35 делает не
+    больше двух успешных заведений на пользователя, отвергнутая вставка места не списывает
+    (§1.8); миры (i-а) и (i-б) взаимоисключающи и разнесены по своим базам — верно. Строк
+    данных §6.2 — 15 (было 14).
+  security: >-
+    Р6а с освобождением сохраняет прежний контракт живых имён и не ослабляет Р5: повторная
+    выдача id удалённого аккаунта по-прежнему отвергается (мир iii). Поверхность не расширена.
+  disclosure: рабочих путей, адресов стенда, чужих продуктов в дельте нет.
+  open_questions: ноль; N2 — вопрос диспетчеру о предикате задачи, не о контракте.
+
+event_body: acceptance-reviewer · APPROVED · sha256 50214cb93e8fafd2b2e10e8f2347fc01a470dace369354ce389e288d0c0f5788
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1052
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации роль в записи — координата, а не доказательство личности.
