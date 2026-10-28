@@ -96,6 +96,11 @@ type DesiredMember struct {
 	ObjectID   string
 	Status     domain.VerificationStatus
 	Tuples     []domain.MembershipTuple
+	// typeUnresolved — объект сопоставлен правилу и лежит в области выдачи, но его
+	// тип не знает снимок каталога процесса: кортежей собрать нечем. Статуса у такого
+	// члена нет, и сам по себе он ничего не выдаёт; исход решает строка каталога в
+	// базе (catalog_lag.go, kaname#937).
+	typeUnresolved bool
 }
 
 // MemberCoord — координата члена выдачи, выпустившего строку реестра: точечное имя
@@ -408,6 +413,14 @@ type ReconcileStore interface {
 	// EmitAuditEvent пишет строку журнала аудита в транзакции прохода — тем же
 	// писателем, что отзыв и удаление. Содержимое строки выбирает use-case.
 	EmitAuditEvent(ctx context.Context, ev abrepo.AuditEvent) error
+
+	// LiveCatalogTypes — какие из точечных типов `types` имеют ЖИВУЮ строку каталога
+	// (`catalog_resource.live`) по базе, а не по снимку процесса (kaname#937).
+	// Спрашивается только о типах, которых снимок не знает, — в обычном проходе ни
+	// одного обращения. Чтение без замка строк: удержание ограничено следующим
+	// проходом, а не держит каталог (порядок замков транзакции сверки — ExpireBinding,
+	// ReconcileObject; строк каталога она не запирает).
+	LiveCatalogTypes(ctx context.Context, types []string) ([]string, error)
 }
 
 // ExpiredBindingSource lists bindings whose TTL has elapsed (expiry scan,
@@ -1100,8 +1113,7 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 		}
 		dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
 		if !ok {
-			// A type the model has no FGA object for → no tuple → skip the object
-			// (fail-closed: a typo'd type never grants).
+			// Правило не даёт типу ни одного кортежа → объект не член (fail-closed).
 			continue
 		}
 		out = append(out, dm)
@@ -1296,8 +1308,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// emit the same set, and the read-delta FGA writer skips duplicates).
 			dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
 			if !ok {
-				// A type the model has no FGA object for → no tuple → skip the object
-				// (fail-closed: a typo'd type never grants).
+				// Правило не даёт типу ни одного кортежа → объект не член (fail-closed).
 				continue
 			}
 			out = append(out, dm)
@@ -1321,13 +1332,26 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 //   - contained → an ACTIVE member with the per-object tuples derived from the RULE's
 //     verbs (v_* + back-compat tier via ruleObjectTuples). ARM_LABELS/ANCHOR rules are
 //     excluded from CompileRules, so the tuples come from the rule verbs, not RolePerms.
-//   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
-//     grants, fail-closed).
+//   - тип объекта неизвестен снимку каталога процесса → член без статуса и кортежей
+//     с признаком typeUnresolved (ok=true): ничего не выдаёт, а удержать его или снять
+//     решает строка каталога в базе (catalog_lag.go, kaname#937). Форвард его
+//     пропускает — он пишет только ACTIVE;
+//   - правило не даёт типу ни одного кортежа → ok=false (не член, fail-closed).
 func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
 	if !o.IsContainedIn(scope) {
 		return DesiredMember{
 			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 			Status: domain.VerificationRejected,
+		}, true
+	}
+	// Тип, которого снимок каталога процесса не знает, — ещё не «тип снят»: снимок
+	// отстаёт от строк каталога на период обновления (kaname#937). Член остаётся в
+	// желаемом без статуса и кортежей, а выдать, удержать или снять его решает
+	// applyDiff по строке каталога в базе (catalog_lag.go).
+	if _, known := cat.FGAObjectType(o.ObjectType); !known {
+		return DesiredMember{
+			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
+			typeUnresolved: true,
 		}, true
 	}
 	// Кортежи — объединение по субъектам `gs`, каждому со своими глаголами
@@ -1362,6 +1386,13 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	for _, m := range current {
 		currentByKey[memberRuleKey(m.RuleFP, m.ObjectType, m.ObjectID)] = m
 	}
+	// Члены по типу, которого снимок каталога процесса ещё не знает, решаются строкой
+	// каталога в базе ДО диффа (kaname#937): тип жив — член удерживается как есть, тип
+	// снят — член выпадает и снимается ниже обычным путём.
+	desired, held, err := r.settleUnresolved(ctx, s, bs, desired, currentByKey)
+	if err != nil {
+		return err
+	}
 	desiredByKey := make(map[string]struct{}, len(desired))
 
 	// survivingClaims — кортежи, на которые после прохода ещё претендуют желаемые
@@ -1374,10 +1405,18 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	// вычислен под advisory-блокировкой выдачи (параллельного прохода этой выдачи
 	// нет), гонки в нём нет.
 	survivingClaims := desiredActiveClaims(desired)
+	// Удержанный член претендует на то, что уже выпустил: строки реестра его координаты
+	// не забываются и не снимаются уходящим соседом той же координаты.
+	held.claim(survivingClaims)
 
 	for _, d := range desired {
 		key := memberRuleKey(d.RuleFP, d.ObjectType, d.ObjectID)
 		desiredByKey[key] = struct{}{}
+		if d.typeUnresolved {
+			// Удержан: ни записи, ни снятия, ни дописывания — проход по этому типу
+			// повторит реплика, чей снимок его знает (сведение, событие объекта).
+			continue
+		}
 		prev, existed := currentByKey[key]
 		prevStatus := domain.VerificationStatus("")
 		if existed {
@@ -1455,6 +1494,9 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	// authority.
 	for key, m := range currentByKey {
 		if _, stillDesired := desiredByKey[key]; stillDesired {
+			continue
+		}
+		if held.holds(key) {
 			continue
 		}
 		if m.VerificationStatus == domain.VerificationActive {
@@ -1588,7 +1630,8 @@ func desiredActiveClaims(desired []DesiredMember) *memberClaims {
 // of the member's coordinate (access_binding_emitted_tuples) — "revoke what was
 // actually emitted, do NOT re-derive from the role", because the role may have been
 // mutated out from under the member. Координата — та же, что у строки члена, и снимку
-// каталога процесса здесь нечего решать: член по типу, выпавшему из снимка реплики,
+// каталога процесса здесь нечего решать: выпавший член, чьего типа снимок реплики не
+// знает (тип снят — catalog_lag.go, kaname#937 — либо член выпал по другой причине),
 // снимается тем же чтением, а строки члена ДРУГОГО типа с тем же идентификатором
 // остаются нетронутыми (kaname#933). Empty ledger ⇒ nothing to revoke.
 func (r *Reconciler) revokeTuplesFor(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember) ([]domain.MembershipTuple, error) {

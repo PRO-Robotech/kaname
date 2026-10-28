@@ -952,6 +952,18 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 // какой слой ответил. Поэтому проверка, заведённая здесь снова и отвечающая
 // иначе, покраснеет.
 func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID, pairs []domain.RoleVerb) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки `catalog_resource` типов пар —
+	// `FOR KEY SHARE`, одним оператором, `ORDER BY dotted`, ДО первой вставки.
+	// Ключ `role_verb_type_fk` берёт тот же замок на КАЖДОЙ вставке, в порядке
+	// перечня пар; без замка вперёд досев проекции глаголов против применителя
+	// каталога встречался на двух ресурсах модуля в обратном порядке.
+	types := make([]string, 0, len(pairs))
+	for _, pv := range pairs {
+		types = append(types, pv.ObjectType)
+	}
+	if err := lockCatalogResourceRows(ctx, w.tx, types); err != nil {
+		return mapErr(err, "", string(roleID))
+	}
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kaname.role_verb WHERE role_id = $1`, string(roleID)); err != nil {
 		return mapErr(err, "", string(roleID))
@@ -979,6 +991,11 @@ func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID,
 // до строк ресурсов (`catalogWriter.LockModuleRow`), и встретившиеся стороны
 // ждут друг друга на строке модуля, ничего ещё не держа из строк ресурсов.
 func (w *roleWriter) LockOwnerModule(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): первым строчным замком транзакции ролей модуля;
+	// строки ресурсов своего модуля проекции роли берут после него. Правило роли модуля
+	// называет лишь свой модуль (manifest.ErrRoleRuleForeignModule), поэтому этот
+	// замок закрывает от применителя каталога все строки ресурсов транзакции. Перепись —
+	// docs/changes/kn-922/lock-order-census.md.
 	if _, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_module
 		 WHERE module = $1
@@ -1017,6 +1034,19 @@ func (w *roleWriter) LockOwnerModule(ctx context.Context, module string) error {
 // IMMEDIATE`, миграция 20260901113757): при отложенной оператор уже завершился успехом,
 // и подсказывать некому.
 func (w *roleWriter) ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, refs []domain.RoleRuleRef) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки `catalog_resource` сегментов —
+	// `FOR KEY SHARE`, одним оператором, `ORDER BY dotted`, ДО первой вставки.
+	// Ключ `role_rule_ref_res_fk` берёт тот же замок, но на КАЖДОЙ вставке, то есть
+	// в порядке перечня; применитель каталога берёт строки ресурсов модуля в порядке
+	// `dotted` (`catalogWriter.LockModuleResources`), и пара на двух ресурсах,
+	// названных в обратном порядке, давала взаимную блокировку (досев проекции
+	// системных ролей на старте против применения манифеста). Строки
+	// `catalog_verb` (ключ `role_rule_ref_verb_fk`) отдельного замка не требуют:
+	// применитель трогает их лишь ПОСЛЕ всех строк ресурсов своего модуля, а строку
+	// ресурса этого сегмента мы уже держим.
+	if err := lockCatalogResourceRows(ctx, w.tx, ruleRefTypesOf(refs)); err != nil {
+		return mapErr(err, "", string(roleID))
+	}
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kaname.role_rule_ref WHERE role_id = $1`, string(roleID)); err != nil {
 		return mapErr(err, "", string(roleID))
@@ -1110,14 +1140,10 @@ func splitRuleRefHint(hint string) (resource, verb string) {
 // (`catalog_applier_lock_order_integration_test.go`), — прочитать порядок
 // нельзя, он есть свойство исполнения.
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
-	if types := lockedCatalogTypesOf(selectors); len(types) > 0 {
-		if _, err := w.tx.Exec(ctx, `
-			SELECT 1 FROM kaname.catalog_resource
-			 WHERE dotted = ANY($1) AND live
-			 ORDER BY dotted
-			   FOR KEY SHARE`, types); err != nil {
-			return mapErr(err, "", string(roleID))
-		}
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки `catalog_resource` типов селектора —
+	// `FOR KEY SHARE`, одним оператором, `ORDER BY dotted`, ДО строк селекторов.
+	if err := lockCatalogResourceRows(ctx, w.tx, lockedCatalogTypesOf(selectors)); err != nil {
+		return mapErr(err, "", string(roleID))
 	}
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kaname.role_rule_selectors WHERE role_id = $1`, string(roleID)); err != nil {
@@ -1290,6 +1316,43 @@ func grantsColumnOf(roleID domain.RoleID, sel domain.RuleSelector) ([]byte, erro
 		return nil, fmt.Errorf("role_rule_selectors: глаголы правила %s: %w", sel.RuleFP, err)
 	}
 	return raw, nil
+}
+
+// lockCatalogResourceRows — строки `catalog_resource` точечных имён `dotted`
+// ключевым замком (`FOR KEY SHARE`), ОДНИМ оператором и в порядке, который
+// назначает база (`ORDER BY dotted`, под захватом строк) — kaname#922.
+//
+// Это не проверка живости: ноль строк — законный исход, отказ (если он нужен)
+// дают ключ проекции или страж селектора. Берётся ровно тот набор строк, что
+// возьмёт ключ вставки (`dotted`, `live`), только вперёд и упорядоченно.
+// Пустой набор — ни одного обращения.
+func lockCatalogResourceRows(ctx context.Context, tx pgx.Tx, dotted []string) error {
+	if len(dotted) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		SELECT 1 FROM kaname.catalog_resource
+		 WHERE dotted = ANY($1) AND live
+		 ORDER BY dotted
+		   FOR KEY SHARE`, dotted)
+	return err
+}
+
+// ruleRefTypesOf — точечные имена ресурсов сегментов, отсортированные и без
+// повторов. Подстановок среди сегментов нет (domain.RuleRefsOf их пропускает).
+func ruleRefTypesOf(refs []domain.RoleRuleRef) []string {
+	seen := make(map[string]struct{}, len(refs))
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		dotted := ref.Module + "." + ref.Resource
+		if _, dup := seen[dotted]; dup {
+			continue
+		}
+		seen[dotted] = struct{}{}
+		out = append(out, dotted)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // lockedCatalogTypesOf — точечные имена, чьи строки каталога возьмёт страж

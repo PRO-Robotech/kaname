@@ -20,7 +20,8 @@
 //     дал, считается в закрытом словаре клеток ([Cells]), засеянном нулями.
 //     Точка анонимной выдачи считается в СВОЁМ закрытом словаре
 //     ([RegistryTokenReasons]): заголовок пересылки у пира, который ни край, ни
-//     объявленный пересыльщик (kaname#930).
+//     объявленный пересыльщик (kaname#930), и край или объявленный
+//     пересыльщик без годного адреса (kaname#935).
 //
 // Край узнаётся тем же признаком, что у полосы входа и яруса gateway-only:
 // короткое имя службы из SAN проверенного сертификата
@@ -94,7 +95,8 @@ func Cells() []Cell {
 }
 
 // RegistryTokenReason — почему на точке анонимной выдачи докерной полосы
-// источником стал адрес пира, хотя заголовок пересылки был (kaname#930).
+// источником стал адрес пира, хотя заголовок пересылки был или ждался
+// (kaname#930, kaname#935).
 type RegistryTokenReason string
 
 // Причины точки анонимной выдачи. Словарь ЗАКРЫТ и отделён от словаря п. 4
@@ -107,12 +109,22 @@ const (
 	// реестра, либо пересыльщик назван не тем идентификатором и все клиенты за
 	// прокси делят один ключ темпа.
 	RegistryTokenReasonForwardedFromUnrecognizedPeer RegistryTokenReason = "forwarded-from-unrecognized-peer"
+	// RegistryTokenReasonEdgeWithoutAddress — край или объявленный пересыльщик
+	// точки без годного адреса: заголовка нет, два значения, список через
+	// запятую или не адрес (kaname#935). Метка та же, что у клетки п. 4 точек
+	// приёмки, и значит то же: признанный пир адреса не дал. Рост клетки при
+	// пересыльщике значит, что прокси реестра не передаёт адрес клиента одним
+	// значением, и все клиенты за ним делят один ключ темпа.
+	RegistryTokenReasonEdgeWithoutAddress RegistryTokenReason = RegistryTokenReason(ReasonEdgeWithoutAddress)
 )
 
 // RegistryTokenReasons — закрытый словарь переписи точки анонимной выдачи,
 // КОПИЕЙ.
 func RegistryTokenReasons() []RegistryTokenReason {
-	return []RegistryTokenReason{RegistryTokenReasonForwardedFromUnrecognizedPeer}
+	return []RegistryTokenReason{
+		RegistryTokenReasonForwardedFromUnrecognizedPeer,
+		RegistryTokenReasonEdgeWithoutAddress,
+	}
 }
 
 // Rule — правило и его перепись.
@@ -211,13 +223,21 @@ func (r *Rule) TokenPoint(req *http.Request) string { return r.Of(req, PointToke
 // пересылки от пира, который ни край, ни объявленный пересыльщик, считается в
 // своём словаре точки ([RegistryTokenReasons]): без счёта пересыльщик,
 // названный не тем идентификатором, неотличим от залпа одного клиента — оба
-// видны только отказами по темпу. Пересыльщик и край без годного адреса в
-// этом словаре не считаются.
+// видны только отказами по темпу. Там же считаются пересыльщик и край без
+// годного адреса (kaname#935): прокси реестра, не передающий адрес клиента
+// одним значением, сводит всех за собой к одному ключу темпа так же молча.
 func (r *Rule) RegistryTokenPoint(forwarderSAN string) func(*http.Request) string {
 	return func(req *http.Request) string {
 		source, reason, counted := r.resolve(req, forwarderSAN)
-		if counted && reason == ReasonForwardedFromNonEdge {
+		if !counted {
+			return source
+		}
+		// Обе причины, которые даёт resolve, — по своей клетке словаря точки.
+		switch reason {
+		case ReasonForwardedFromNonEdge:
 			r.countRegistryToken(RegistryTokenReasonForwardedFromUnrecognizedPeer)
+		case ReasonEdgeWithoutAddress:
+			r.countRegistryToken(RegistryTokenReasonEdgeWithoutAddress)
 		}
 		return source
 	}

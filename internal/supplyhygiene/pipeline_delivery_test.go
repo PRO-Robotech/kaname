@@ -119,6 +119,10 @@ var deliveredPipelineFiles = []string{
 	".github/actions/platform-tree/action.yml",
 	".github/golangci.yml",
 	".github/scripts/classify-integration-outcome.sh",
+	// Разборщик исхода формы манифестов: вердикт шага «манифесты модулей» —
+	// его код (kaname#825). Без него шаг отказывает на отсутствующем файле, а
+	// не на манифесте.
+	".github/scripts/classify-manifest-outcome.sh",
 	".github/scripts/go-test-verdict.py",
 	".github/scripts/gosec-gate.sh",
 	// Сверка опубликованного образа: её зовёт производитель образа после

@@ -267,6 +267,9 @@ const (
 // and auto-releases at COMMIT/ROLLBACK — mirroring the reconcile-adapter's
 // per-binding lock and the JWKS-rotate per-alg lock.
 func (w *writeTx) AdvisoryXactLock(ctx context.Context, key string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): ключом выдачи его берут отзыв, удаление и снос
+	// области — ПЕРВЫМ замком выдачи, до её строки (GetForDeactivation, FOR UPDATE).
+	// Перепись — docs/changes/kn-922/lock-order-census.md.
 	if _, err := w.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, key); err != nil {
 		return mapErr(err, "", "")
 	}

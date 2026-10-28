@@ -178,6 +178,8 @@ func (w catalogWriter) LockCatalog(ctx context.Context) error {
 // ещё нет, ключом не держит никто, а второго применителя не пускает
 // консультативный замок каталога.
 func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка модуля FOR UPDATE — первым строчным
+	// замком, за которым применитель ждёт другого писателя (после 2р).
 	_, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_module
 		 WHERE module = $1
@@ -228,6 +230,10 @@ func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
 // то, что есть, а строки, которых ещё нет, конкурента иметь не могут — второго
 // применителя не пускает консультативный замок каталога.
 func (w catalogWriter) LockModuleResources(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки ресурсов модуля — FOR UPDATE, ORDER BY
+	// dotted, одним оператором, после строки модуля. Писатели проекций роли берут
+	// те же строки FOR KEY SHARE тем же порядком и ВПЕРЁД вставок
+	// (lockCatalogResourceRows). Перепись — docs/changes/kn-922/lock-order-census.md.
 	_, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_resource
 		 WHERE module = $1

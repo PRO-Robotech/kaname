@@ -123,10 +123,33 @@ if [ "${elf_kind#ELF}" = "$elf_kind" ]; then
     exit 2
 fi
 
+REAL_GO="$(command -v go)" || { echo "prepush-added-files-inject: НЕ СУДИМО — нет go: судью подписи хука (tools/clagate) собрать нечем" >&2; exit 2; }
+ROOT="$(cd "$here/../.." && pwd)"
+[ -d "$ROOT/tools/clagate/cmd/clagate" ] || { echo "prepush-added-files-inject: НЕ СУДИМО — нет $ROOT/tools/clagate/cmd/clagate" >&2; exit 2; }
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 H="$TMP/home"
 mkdir -p "$H/.config"
+
+# СУДЬЯ ПОДПИСИ — НАСТОЯЩИЙ (kaname#459). Третьим, тоже до обхода, хук собирает
+# судью подписи (`go build ./tools/clagate/cmd/clagate`) и судит отправку
+# ведомостью `cla-ledger.yaml` отправляемой вершины. Исходников судьи в песочнице
+# нет: переходник `go` собирает его в корне ЭТОГО дерева, с настоящими HOME и
+# XDG_CONFIG_HOME (настройка go и кэши — не песочницы) и без VCS-отметки.
+# Ведомость песочницы объявляет её корневую учётную запись своей: предмет пробы —
+# страж новых blob'ов, и судья обязан пропустить законную отправку.
+mkdir -p "$TMP/bin"
+if [ -n "${XDG_CONFIG_HOME-}" ]; then xdg_line="export XDG_CONFIG_HOME='$XDG_CONFIG_HOME'"; else xdg_line="unset XDG_CONFIG_HOME"; fi
+cat > "$TMP/bin/go" <<GO
+#!/usr/bin/env bash
+case " \$* " in *" ./tools/clagate/cmd/clagate "*) cd '$ROOT' || exit 97 ;; esac
+export HOME='$HOME' GOFLAGS="\${GOFLAGS:+\$GOFLAGS }-buildvcs=false"
+$xdg_line
+exec '$REAL_GO' "\$@"
+GO
+chmod +x "$TMP/bin/go"
+export PATH="$TMP/bin:$PATH"
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$H/.gitconfig"
 sb() {
     env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
@@ -166,6 +189,8 @@ printf '{"info":{}}\n' > "$box/$COLL/a.postman_collection.json"
 # Опубликованное в main: малый текст, крупный текст и ELF — предметы правки,
 # переименования и копии.
 printf 'старый текст\n' > "$box/old.txt"
+printf 'scope:\n  - .\nowners:\n  - email: probe@example.invalid\n    note: корневая учётная запись песочницы — подпись опыта\nsignatories: []\nwaivers: []\n' \
+    > "$box/cla-ledger.yaml"
 head -c 1200000 /dev/zero | tr '\0' 'b' > "$box/big1.txt"
 cp "$ELF" "$box/pub.bin"
 # Свой вариант ELF (байт 300): копии `true` в пробах ниже остаются НОВЫМИ blob'ами.

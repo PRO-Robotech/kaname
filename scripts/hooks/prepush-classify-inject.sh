@@ -154,6 +154,24 @@ trap 'rm -rf "$work"' EXIT
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
+# СУДЬЯ ПОДПИСИ — НАСТОЯЩИЙ. За стражем правила хук собирает судью подписи
+# (`go build ./tools/clagate/cmd/clagate`) и судит им отправку по ведомости
+# фикстуры. Исходников судьи в фикстуре нет, поэтому переходник `go` собирает
+# именно его из НАСТОЯЩЕГО дерева; прочие вызовы идут к настоящему go как есть.
+# Ведомость фикстуры объявляет её корневую учётную запись своей (build_module):
+# предмет этого опыта не подпись, и судья обязан её пропустить.
+REAL_GO="$(command -v go 2>/dev/null || true)"
+if [ -n "$REAL_GO" ]; then
+    mkdir -p "$work/bin"
+    cat > "$work/bin/go" <<GO
+#!/usr/bin/env bash
+case " \$* " in *" ./tools/clagate/cmd/clagate "*) cd "$ROOT" || exit 97 ;; esac
+exec "$REAL_GO" "\$@"
+GO
+    chmod +x "$work/bin/go"
+    export PATH="$work/bin:$PATH"
+fi
+
 # Спрашивается ФИЗИЧЕСКИЙ путь: подъём по `dirname` идёт по тексту, и TMPDIR,
 # заданный символьной ссылкой внутрь репозитория, прошёл бы молча. Дыра была
 # общей у обеих проб и у хука — форму копировали вместе с нею.
@@ -246,6 +264,8 @@ build_module() { # build_module <каталог> <тело пробы>
     cp "$ROOT/scripts/hooks/prepush-added-files.sh" "$d/scripts/hooks/prepush-added-files.sh" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/mask\n\ngo 1.21\n' > "$d/go.mod"
+    printf 'scope:\n  - .\nowners:\n  - email: probe@example.invalid\n    note: корневая учётная запись фикстуры — подпись опыта\nsignatories: []\nwaivers: []\n' \
+        > "$d/cla-ledger.yaml"
     cat > "$d/mask_test.go" <<GO
 package mask
 
