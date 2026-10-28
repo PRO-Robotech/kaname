@@ -97,6 +97,13 @@ type Registry struct {
 	readinessOnce sync.Once
 	readiness     *ReadinessRecorder
 
+	// bindingSizeOnce/bindingSize — единственный экземпляр приёмника размера
+	// материализации привязки (kaname#157): путь запроса и фоновый обход берут
+	// свои полосы в разных местах композиционного корня, а второй конструктор
+	// уронил бы старт на повторной регистрации.
+	bindingSizeOnce sync.Once
+	bindingSize     *BindingMaterializationRecorder
+
 	// expiredCredSweepOnce/expiredCredSweep — единственный экземпляр приёмника
 	// величин второго уборщика по сроку (kacho#2499).
 	expiredCredSweepOnce sync.Once
