@@ -247,18 +247,18 @@ func TestABList_SIA12_MalformedAccountIDRejectedByTheSameProducer(t *testing.T) 
 	h := newListHandler(repo, siaVisibleToAll())
 
 	_, err := h.List(newOwnerContext(siaSubject), &iamv1.ListAccessBindingsRequest{
-		PageSize: 100, AccountId: "not-an-id",
+		PageSize: 100, AccountId: "not_an_id",
 	})
 	require.Error(t, err)
 	st, _ := status.FromError(err)
 	assert.Equal(t, codes.InvalidArgument, st.Code())
-	assert.Equal(t, "invalid account id 'not-an-id'", st.Message())
+	assert.Equal(t, "invalid account id 'not_an_id'", st.Message())
 
 	// Тот же вход у снимаемого глагола — то же тело. Оба ответа берутся у
 	// НАСТОЯЩИХ производителей, а не сверяются с выписанной строкой: выписанная
 	// разошлась бы с обоими молча.
 	_, _, byAccountErr := NewListByAccountUseCase(repo).Execute(
-		newOwnerContext(siaSubject), "not-an-id", repoab.AccountPageFilter{PageSize: 100})
+		newOwnerContext(siaSubject), "not_an_id", repoab.AccountPageFilter{PageSize: 100})
 	require.Error(t, byAccountErr)
 	byAccountSt, _ := status.FromError(byAccountErr)
 	assert.Equal(t, byAccountSt.Code(), st.Code())
@@ -306,7 +306,7 @@ func TestABList_SIA14_FormatCheckedBeforeIdentityShortCircuit(t *testing.T) {
 
 	t.Run("negodnyj account_id", func(t *testing.T) {
 		_, err := h.List(context.Background(), &iamv1.ListAccessBindingsRequest{
-			PageSize: 100, AccountId: "not-an-id",
+			PageSize: 100, AccountId: "not_an_id",
 		})
 		require.Error(t, err, "пустой грант не вправе превратить 400 в 200 []")
 		st, _ := status.FromError(err)

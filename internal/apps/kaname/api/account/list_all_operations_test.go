@@ -121,7 +121,7 @@ func TestListAllOperations_CrossAccount_PermissionDenied(t *testing.T) {
 
 func TestListAllOperations_MalformedID_InvalidArgument(t *testing.T) {
 	uc := newListAllUC(newAcctListFakeRepo(), nil, &acctAllOpsRepo{})
-	_, _, err := uc.Execute(ctxUser("usr-x"), "not-an-account", 50, "")
+	_, _, err := uc.Execute(ctxUser("usr-x"), "not_an_account", 50, "")
 	if got := grpcstatus.Code(err); got != codes.InvalidArgument {
 		t.Fatalf("malformed account id must be InvalidArgument, got %s", got)
 	}

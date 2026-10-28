@@ -72,7 +72,7 @@ func TestAccount_ListOperations_MalformedID_InvalidArgument(t *testing.T) {
 		WithListOperations(shared.NewListOperationsUseCase(&fakeOpsList{}))
 
 	_, err := h.ListOperations(context.Background(),
-		&iamv1.ListAccountOperationsRequest{AccountId: "not-an-account-id"})
+		&iamv1.ListAccountOperationsRequest{AccountId: "not_an_account_id"})
 	if got := grpcstatus.Code(err); got != codes.InvalidArgument {
 		t.Fatalf("malformed account id must be InvalidArgument, got %s", got)
 	}

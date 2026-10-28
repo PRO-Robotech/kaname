@@ -168,7 +168,7 @@ func TestInvite_KAN181_CreateMembershipRefusesBadAccountSynchronously(t *testing
 		name, account, wantMsg string
 	}{
 		{"empty", "", "Illegal argument account_id: required"},
-		{"malformed", "not-an-account", "invalid account id 'not-an-account'"},
+		{"malformed", "not_an_account", "invalid account id 'not_an_account'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &invPrincRepo{}

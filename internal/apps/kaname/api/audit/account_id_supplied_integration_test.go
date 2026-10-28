@@ -186,24 +186,36 @@ func TestAccountID02_WithoutIDTheModelIsNotAsked(t *testing.T) {
 
 // ── AID-06 ───────────────────────────────────────────────────────────────────
 
-// TestAccountID06_BoundaryValuesOfTheFormAreAccepted — граничные значения формы
-// генератора принимаются побайтово. Близнец AID-05 по оси формы.
+// TestAccountID06_BoundaryValuesOfTheFormAreAccepted — граничные и годные значения
+// заданной формы (редакция 7, Р2) принимаются побайтово, и аккаунт записан ровно
+// с присланным идентификатором. Перечень — AID-06 и годный близнец каждой строки
+// AID-05 (`aid06Values`). Близнец AID-05 по каждой строке.
+//
+// Свой человек на каждое значение: темп заведения считается на личность (3 за
+// окно у фикстуры), а предмет пробы — форма, а не темп.
 func TestAccountID06_BoundaryValuesOfTheFormAreAccepted(t *testing.T) {
 	env := newProbeEnv(t)
-	owner, _ := seedUserAccount(t, context.Background(), env.pool, "aid06")
 	uc := createUseCase(env, &relationDouble{admin: true})
 
-	for i, id := range []string{"acc00000000000000000", "acczzzzzzzzzzzzzzzzz", suppliedLiteral} {
-		require.True(t, ids.IsValid(id, domain.PrefixAccount), "литерал пробы %q не формы генератора", id)
+	values := aid06Values()
+	ops := make([]*operations.Operation, len(values))
+	for i, id := range values {
+		owner, _ := seedUserAccount(t, context.Background(), env.pool, fmt.Sprintf("aid06-%d", i))
 		op, err := uc.Execute(withPrincipal(owner), domain.Account{
-			ID: domain.AccountID(id), Name: domain.AccountName("aid06-" + string(rune('a'+i))), Labels: domain.Labels{},
+			ID: domain.AccountID(id), Name: domain.AccountName(fmt.Sprintf("aid06-%d", i)), Labels: domain.Labels{},
 		})
-		require.NoError(t, err, "граничное значение %s отвергнуто", id)
+		require.NoError(t, err, "годное значение %q отвергнуто синхронно", id)
 		require.NotNil(t, op)
 		require.Equal(t, id, createMetadata(t, op).GetAccountId(),
-			"граничное значение %s: metadata.accountId не равен присланному", id)
+			"годное значение %q: metadata.accountId не равен присланному", id)
+		ops[i] = op
 	}
 	awaitWorkers(t)
+	for i, id := range values {
+		require.Equal(t, id, responseAccount(t, finished(t, env, ops[i].ID)).GetId(),
+			"годное значение %q: аккаунт записан не с присланным идентификатором", id)
+	}
+	t.Logf("перепись AID-06: значений %d, принято %d", len(values), len(values))
 }
 
 // ── AID-11 ───────────────────────────────────────────────────────────────────
@@ -211,23 +223,29 @@ func TestAccountID06_BoundaryValuesOfTheFormAreAccepted(t *testing.T) {
 // TestAccountID11_ModelUnavailableRefusesSuppliedIDWithUnavailable — модель прав
 // недоступна: создание с `id` не исполняется и отвечает UNAVAILABLE.
 // Близнецы: без `id` — успех (AID-02); дублёр «администратор» — успех (AID-06).
+// Редакция 5 судит `godjee` (заданная форма); ветвь формы генератора оставлена —
+// она держит прежнее поведение (§0.3: всё принятое редакцией 3 принимается).
 func TestAccountID11_ModelUnavailableRefusesSuppliedIDWithUnavailable(t *testing.T) {
-	env := newProbeEnv(t)
-	owner, _ := seedUserAccount(t, context.Background(), env.pool, "aid11")
-	rel := &relationDouble{failure: errors.New("relation store: connection refused")}
+	for _, id := range []string{ownerLoginGodjee, suppliedLiteral} {
+		t.Run(id, func(t *testing.T) {
+			env := newProbeEnv(t)
+			owner, _ := seedUserAccount(t, context.Background(), env.pool, "aid11")
+			rel := &relationDouble{failure: errors.New("relation store: connection refused")}
 
-	op, err := createUseCase(env, rel).Execute(withPrincipal(owner), domain.Account{
-		ID: suppliedLiteral, Name: "aid11-supplied", Labels: domain.Labels{},
-	})
-	awaitWorkers(t)
-	require.Error(t, err, "модель прав недоступна, а создание с указанным идентификатором исполнилось")
-	require.Nil(t, op, "операция заведена при недоступной модели прав")
-	st, ok := status.FromError(err)
-	require.True(t, ok, "ожидается статус gRPC: %v", err)
-	require.Equal(t, codes.Unavailable, st.Code())
-	require.Equal(t, "authz backend unavailable", st.Message())
-	require.Zero(t, accountRows(t, env.pool, suppliedLiteral), "вставка состоялась при отказе")
-	require.NotEmpty(t, rel.questions(), "отказ получен без вопроса к модели прав")
+			op, err := createUseCase(env, rel).Execute(withPrincipal(owner), domain.Account{
+				ID: domain.AccountID(id), Name: "aid11-supplied", Labels: domain.Labels{},
+			})
+			awaitWorkers(t)
+			require.Error(t, err, "модель прав недоступна, а создание с указанным идентификатором исполнилось")
+			require.Nil(t, op, "операция заведена при недоступной модели прав")
+			st, ok := status.FromError(err)
+			require.True(t, ok, "ожидается статус gRPC: %v", err)
+			require.Equal(t, codes.Unavailable, st.Code(), "%s: %v", id, err)
+			require.Equal(t, "authz backend unavailable", st.Message())
+			require.Zero(t, accountRows(t, env.pool, id), "вставка состоялась при отказе")
+			require.NotEmpty(t, rel.questions(), "отказ получен без вопроса к модели прав")
+		})
+	}
 }
 
 // ── AID-14 ───────────────────────────────────────────────────────────────────
@@ -273,28 +291,99 @@ func TestAccountID14_ConcurrentCreatesWithOneIDLetExactlyOneThrough(t *testing.T
 		return env, ops
 	}
 
-	t.Run("one_id", func(t *testing.T) {
-		env, ops := race(t, func(int) string { return suppliedLiteral })
-		var won, lost int
-		for _, op := range ops {
-			if op.Response != nil {
-				won++
-				require.Equal(t, suppliedLiteral, responseAccount(t, op).GetId())
-				continue
+	// Миры (i) и (ii): один идентификатор формы генератора и один заданной формы
+	// (редакция 7) — проходит ровно одно создание, прочие получают ALREADY_EXISTS.
+	for _, world := range []struct{ name, id string }{
+		{"one_id", suppliedLiteral},
+		{"one_string_id", ownerLoginGodjee},
+	} {
+		t.Run(world.name, func(t *testing.T) {
+			env, ops := race(t, func(int) string { return world.id })
+			var won, lost int
+			for _, op := range ops {
+				if op.Response != nil {
+					won++
+					require.Equal(t, world.id, responseAccount(t, op).GetId())
+					continue
+				}
+				lost++
+				requireAlreadyExists(t, op, world.id)
 			}
-			lost++
-			requireAlreadyExists(t, op, suppliedLiteral)
+			require.Equal(t, 1, won, "из %d одновременных созданий с одним id прошло %d", n, won)
+			require.Equal(t, n-1, lost)
+			require.Equal(t, 1, accountRows(t, env.pool, world.id))
+			require.Equal(t, 1, registryRows(t, env.pool, world.id))
+		})
+	}
+
+	// Мир (iii): одна строка приходит одной горутиной идентификатором, другой —
+	// именем (Р6а). Проходит ровно одно создание; текст проигравшего — по полю,
+	// в котором он прислал строку (Р4).
+	t.Run("one_string_as_id_and_as_name", func(t *testing.T) {
+		env := newProbeEnv(t)
+		ctx := context.Background()
+		byID, _ := seedUserAccount(t, ctx, env.pool, "aid14-iii-id")
+		byName, _ := seedUserAccount(t, ctx, env.pool, "aid14-iii-name")
+		uc := createUseCase(env, &relationDouble{admin: true})
+		const s = ownerLoginDlputi
+
+		var opID, opName *operations.Operation
+		var errID, errName error
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			opID, errID = uc.Execute(withPrincipal(byID), domain.Account{ID: s, Name: "aid14-a", Labels: domain.Labels{}})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			opName, errName = uc.Execute(withPrincipal(byName), domain.Account{Name: s, Labels: domain.Labels{}})
+		}()
+		close(start)
+		wg.Wait()
+		awaitWorkers(t)
+		require.NoError(t, errName, "создание с именем %q отвергнуто синхронно", s)
+		require.NoError(t, errID, "создание с идентификатором %q отвергнуто синхронно", s)
+		require.Equal(t, s, createMetadata(t, opID).GetAccountId(), "указанный идентификатор не записан")
+
+		gotID, gotName := finished(t, env, opID.ID), finished(t, env, opName.ID)
+		switch {
+		case gotID.Response != nil && gotName.Response == nil:
+			require.Equal(t, s, responseAccount(t, gotID).GetId())
+			require.NotNil(t, gotName.Error, "проигравшая операция без ошибки")
+			require.Equal(t, int32(codes.AlreadyExists), gotName.Error.Code, "%v", gotName.Error)
+			require.Equal(t, "Account with name "+s+" already exists", gotName.Error.Message)
+		case gotName.Response != nil && gotID.Response == nil:
+			require.Equal(t, s, responseAccount(t, gotName).GetName())
+			requireAlreadyExists(t, gotID, s)
+		default:
+			t.Fatalf("из двух созданий одной строки %q прошло не ровно одно: по id — %v, по имени — %v",
+				s, gotID.Error, gotName.Error)
 		}
-		require.Equal(t, 1, won, "из %d одновременных созданий с одним id прошло %d", n, won)
-		require.Equal(t, n-1, lost)
-		require.Equal(t, 1, accountRows(t, env.pool, suppliedLiteral))
-		require.Equal(t, 1, registryRows(t, env.pool, suppliedLiteral))
+		require.Equal(t, 1, accountsHoldingString(t, env.pool, s),
+			"строка %q обозначает не ровно один аккаунт", s)
 	})
 
 	t.Run("twin_distinct_ids", func(t *testing.T) {
 		distinct := make([]string, n)
 		for i := range distinct {
 			distinct[i] = ids.NewID(domain.PrefixAccount)
+		}
+		_, ops := race(t, func(i int) string { return distinct[i] })
+		for i, op := range ops {
+			require.Equal(t, distinct[i], responseAccount(t, op).GetId())
+		}
+	})
+
+	// Близнец миров (ii) и (iii): восемь РАЗНЫХ идентификаторов заданной формы —
+	// проходят все восемь.
+	t.Run("twin_distinct_string_ids", func(t *testing.T) {
+		distinct := make([]string, n)
+		for i := range distinct {
+			distinct[i] = fmt.Sprintf("godjee-r%d", i)
 		}
 		_, ops := race(t, func(i int) string { return distinct[i] })
 		for i, op := range ops {
@@ -399,15 +488,39 @@ func TestAccountID18_EveryProducerEntersTheRegistryAndDeletionDoesNotFree(t *tes
 		require.Equal(t, 1, registryRows(t, env.pool, "acc1a18042d81fb438d6"), "посеянный идентификатор не в реестре")
 	})
 
+	// Ветвь (г) редакции 7: создание с указанным идентификатором ЗАДАННОЙ формы.
+	// Реестр Р5 покрывает всю форму аккаунта, удаление строку не освобождает.
+	t.Run("d_supplied_string_form", func(t *testing.T) {
+		env := newProbeEnv(t)
+		owner, _ := seedUserAccount(t, context.Background(), env.pool, "aid18d")
+		uc := createUseCase(env, &relationDouble{admin: true})
+		const id = ownerLoginGodjee
+		op, md := supplyAndCreate(t, env, uc, owner, id, "aid18-g")
+		awaitWorkers(t)
+		require.Equal(t, id, responseAccount(t, finished(t, env, op.ID)).GetId())
+
+		require.Equal(t, 1, registryRows(t, env.pool, id), "идентификатор заданной формы не внесён в реестр")
+		removeAccount(t, env, id, md.GetDefaultProjectId())
+		require.Equal(t, 1, registryRows(t, env.pool, id), "снятие освободило идентификатор заданной формы")
+
+		again, _ := supplyAndCreate(t, env, uc, owner, id, "aid18-g-again")
+		awaitWorkers(t)
+		requireAlreadyExists(t, finished(t, env, again.ID), id)
+	})
+
+	// Граница Р5: запись в обход службы с идентификатором ВНЕ формы аккаунта
+	// (редакция 7: `_` вне набора знаков (б)) не отвергается и в реестр не
+	// вносится. Прежний литерал `acc00000000000000lim` по Р2 стал годным и судил
+	// бы уже не границу (DoD S1 п. 4).
 	t.Run("boundary_not_the_form_is_not_entered", func(t *testing.T) {
 		env := newProbeEnv(t)
 		ctx := context.Background()
 		owner, _ := seedUserAccount(t, ctx, env.pool, "aid18x")
-		const odd = "acc00000000000000lim"
+		const odd = "acc00000000000000_li"
 		_, err := env.pool.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
 			VALUES ($1, 'aid18-boundary', $2, '{}'::jsonb)`, odd, string(owner))
-		require.NoError(t, err, "запись в обход службы не формы генератора отвергнута")
-		require.Zero(t, registryRows(t, env.pool, odd), "идентификатор не формы генератора внесён в реестр")
+		require.NoError(t, err, "запись в обход службы вне формы аккаунта отвергнута")
+		require.Zero(t, registryRows(t, env.pool, odd), "идентификатор вне формы аккаунта внесён в реестр")
 	})
 
 	t.Run("twin_never_issued_inserts", func(t *testing.T) {
@@ -418,6 +531,11 @@ func TestAccountID18_EveryProducerEntersTheRegistryAndDeletionDoesNotFree(t *tes
 		_, err := env.pool.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
 			VALUES ($1, 'aid18-twin', $2, '{}'::jsonb)`, fresh, string(owner))
 		require.NoError(t, err, "вставка с невыдававшимся идентификатором формы генератора обязана проходить")
+		// Второй владелец: темп заведения считается на личность, предмет — реестр.
+		owner2, _ := seedUserAccount(t, ctx, env.pool, "aid18t2")
+		_, err = env.pool.Exec(ctx, `INSERT INTO kaname.accounts (id, name, owner_user_id, labels)
+			VALUES ('aid18-fresh', 'aid18-twin-s', $1, '{}'::jsonb)`, string(owner2))
+		require.NoError(t, err, "вставка с невыдававшимся идентификатором заданной формы обязана проходить")
 	})
 }
 
@@ -431,6 +549,9 @@ func TestAccountID26_CreationEventNamesTheIDSource(t *testing.T) {
 	}{
 		{"generated", "", "generated"},
 		{"supplied", suppliedLiteral, "supplied"},
+		// Редакция 5 (Р7, Р12): идентификатор заданной формы пишется в событие как
+		// есть — `resource_id` и `tenant_account_id` равны `godjee` побайтово.
+		{"supplied_string", ownerLoginGodjee, "supplied"},
 	} {
 		t.Run(branch.name, func(t *testing.T) {
 			env := newProbeEnv(t)
@@ -439,7 +560,7 @@ func TestAccountID26_CreationEventNamesTheIDSource(t *testing.T) {
 			op, err := createUseCase(env, &relationDouble{admin: true}).Execute(withPrincipal(owner), domain.Account{
 				ID: domain.AccountID(branch.supplied), Name: domain.AccountName("aid26-" + branch.name), Labels: domain.Labels{},
 			})
-			require.NoError(t, err)
+			require.NoError(t, err, "%s: создание отвергнуто синхронно", branch.name)
 			md := createMetadata(t, op)
 			if branch.supplied != "" {
 				require.Equal(t, branch.supplied, md.GetAccountId(), "указанный идентификатор не записан")

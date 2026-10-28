@@ -63,7 +63,7 @@ func TestDeleteAccount_NonAuthzSyncChecksSurvive(t *testing.T) {
 	})
 	t.Run("malformed id still InvalidArgument", func(t *testing.T) {
 		uc := NewDeleteAccountUseCase(newDelFakeRepo(), newFakeOpsRepo())
-		_, err := uc.Execute(acctNonOwnerCtxs()["delegated_user"], "not-an-account-id")
+		_, err := uc.Execute(acctNonOwnerCtxs()["delegated_user"], "not_an_account_id")
 		require.Error(t, err)
 	})
 }

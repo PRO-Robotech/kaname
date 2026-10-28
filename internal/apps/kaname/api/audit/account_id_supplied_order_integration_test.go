@@ -41,25 +41,22 @@ func operationRowsFor(t *testing.T, env *testEnv, accID string) int {
 
 // TestAccountID05_UseCaseRefusesAMalformedIDBeforeTheRightsQuestion — форма судится
 // синхронно, первой после рода принципала, и раньше вопроса о праве: дублёр,
-// который ответил бы «администратор», не спрошен ни разу. Близнец — AID-06
-// (годная форма проходит).
+// который ответил бы «администратор», не спрошен ни разу.
+//
+// Таблица и тексты — редакция 7 приёмки (kaname#1052, sha256 a3dff53e…3e52):
+// нарушение формы (а)–(г) отвечает текстом с правилом, строка резерва (д) —
+// текстом с причиной. Каждое значение отличается от годного близнеца ровно
+// одним фактом; близнецы судит AID-06 (TestAccountID06_…). Прежняя таблица
+// судила форму генератора как единственную: четыре её значения
+// (`…tu`, `…ti`, 19 и 21 знак) по Р2 годны и переехали в AID-06 (DoD S1 п. 4).
 func TestAccountID05_UseCaseRefusesAMalformedIDBeforeTheRightsQuestion(t *testing.T) {
 	env := newProbeEnv(t)
 	owner, _ := seedUserAccount(t, context.Background(), env.pool, "aid05i")
 	rel := &relationDouble{admin: true}
 	uc := createUseCase(env, rel)
 
-	for _, bad := range []string{
-		"acc7M3K9Q2X5V8B4N6T1",  // заглавные
-		"acc7m3k9q2x5v8b4n6tu",  // `u` вне алфавита
-		"acc7m3k9q2x5v8b4n6ti",  // `i` вне алфавита
-		"acc7m3k9q2x5v8b4n6t",   // 19 знаков
-		"acc7m3k9q2x5v8b4n6t12", // 21 знак
-		"prj7m3k9q2x5v8b4n6t1",  // чужой префикс
-		"acc-7m3k9q2x5v8b4n6t1", // дефисная форма
-		" acc7m3k9q2x5v8b4n6t1", // ведущий пробел
-		"acc7m3k9q2x5v8b4n6tа",  // кириллическая «а»
-	} {
+	for _, row := range aid05Table() {
+		bad := row.value
 		op, err := uc.Execute(withPrincipal(owner), domain.Account{
 			ID: domain.AccountID(bad), Name: "aid05-malformed", Labels: domain.Labels{},
 		})
@@ -68,7 +65,7 @@ func TestAccountID05_UseCaseRefusesAMalformedIDBeforeTheRightsQuestion(t *testin
 		st, ok := status.FromError(err)
 		require.True(t, ok, "ожидается статус gRPC: %v", err)
 		require.Equal(t, codes.InvalidArgument, st.Code(), "%q: %v", bad, err)
-		require.Equal(t, "invalid account id '"+bad+"'", st.Message())
+		require.Equal(t, row.message, st.Message(), "%q (%s): текст отказа не тот", bad, row.differs)
 		var field string
 		for _, d := range st.Details() {
 			if br, isBR := d.(*errdetails.BadRequest); isBR && len(br.GetFieldViolations()) > 0 {
