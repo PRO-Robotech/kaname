@@ -230,6 +230,7 @@ type CreateAccountRequest struct {
 	//     characters); not the seeded literal `rol000000000sysviewer`; does not
 	//     start with `personal-cloud-`, as is or after folding `o` to `0` and
 	//     `i`, `l` to `1`.
+	//
 	// The generator's form (`acc` and 17 characters of its alphabet, for example
 	// `acc7m3k9q2x5v8b4n6t1`) satisfies all of them. No normalisation: case is not
 	// folded, spaces are not trimmed. A value outside the form is a sync

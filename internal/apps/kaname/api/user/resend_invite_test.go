@@ -242,7 +242,7 @@ func TestResendInvite_MalformedIDsAndAnonymousAreRefusedSynchronously(t *testing
 
 	_, err := uc.Execute(resendCtx(), domain.UserID("garbage"), domain.AccountID(resendAccount))
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "мусорный user_id: %v", err)
-	_, err = uc.Execute(resendCtx(), domain.UserID(resendUserID), domain.AccountID("garbage"))
+	_, err = uc.Execute(resendCtx(), domain.UserID(resendUserID), domain.AccountID("garbage!"))
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "мусорный account_id: %v", err)
 	// Аноним — тем же отказом, что у соседа RemoveFromAccount
 	// (authzguard.RequireAuthenticated): PermissionDenied, а не отдельный код.

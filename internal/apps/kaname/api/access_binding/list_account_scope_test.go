@@ -275,7 +275,11 @@ func TestABList_SIA12_MalformedAccountIDRejectedByTheSameProducer(t *testing.T) 
 func TestABList_SIA16_WellFormedIDOfAnotherTypeIsRejected(t *testing.T) {
 	repo := newSIARepo()
 	h := newListHandler(repo, siaVisibleToAll())
-	wrongType := siaProjectHome // крокфордова форма годна, префикс не тот
+	// Полная форма генератора ЧУЖОГО вида (проект): резерв (д1) формы аккаунта
+	// (kaname#1052, Р2). Прежний литерал `siaProjectHome` несёт `o` вне алфавита
+	// генератора и формой генератора не является — заданная форма аккаунта его
+	// принимает, и полоса уехала бы в пустую страницу (DoD S1 п. 4).
+	wrongType := "prj00000000000h0me01"
 
 	_, err := h.List(newOwnerContext(siaSubject), &iamv1.ListAccessBindingsRequest{
 		PageSize: 100, AccountId: wrongType,

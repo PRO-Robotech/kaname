@@ -65,7 +65,7 @@ func newCustomRoleRepo(ownerUserID, homeAccount, roleID string) *abFakeRepo {
 // get the SAME byte-identical PERMISSION_DENIED whether the probed role exists or
 // not, and whether it is assignable on the probed scope or not.
 func TestCreate_AuthzBeforeStructuralGates_NoRoleOracle(t *testing.T) {
-	const ownerID, homeAcct, roleID = "usr_owner-----------", "acc_home", "rol_home_custom-----"
+	const ownerID, homeAcct, roleID = "usr_owner-----------", "acc-home", "rol_home_custom-----"
 	// Grants nothing: neither the cluster super-relation nor scope admin. The
 	// account owner is usr_owner-----------, the caller is a stranger → no grant authority.
 	deny := func() clients.RelationStore { return &scopedFGA{allow: map[string]bool{}} }
@@ -84,9 +84,9 @@ func TestCreate_AuthzBeforeStructuralGates_NoRoleOracle(t *testing.T) {
 			opsRepo := newFakeOpsRepo()
 			uc := NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).WithRelationStore(deny(), nil)
 
-			// Probing a FOREIGN scope (acc_other) with a foreign / absent role id.
+			// Probing a FOREIGN scope (acc-other) with a foreign / absent role id.
 			_, err := uc.Execute(newOwnerContext("usr_stranger--------"),
-				accountScopeBinding(tc.roleID, "acc_other", "usr_target"))
+				accountScopeBinding(tc.roleID, "acc-other", "usr_target"))
 			require.Error(t, err)
 			st, ok := status.FromError(err)
 			require.True(t, ok)
@@ -110,7 +110,7 @@ func TestCreate_AuthzBeforeStructuralGates_NoRoleOracle(t *testing.T) {
 // account's role apart from a non-existent one (parity with RoleService.Get's
 // hide-existence contract).
 func TestCreate_ForeignRoleHiddenFromAuthorizedCaller(t *testing.T) {
-	const ownerID, homeAcct, roleID = "usr_owner-----------", "acc_home", "rol_home_custom-----"
+	const ownerID, homeAcct, roleID = "usr_owner-----------", "acc-home", "rol_home_custom-----"
 
 	// The fake account reader reports ownerID as the owner of ANY account, so the
 	// caller holds grant-authority on the probed scope (Path 1).
@@ -123,7 +123,7 @@ func TestCreate_ForeignRoleHiddenFromAuthorizedCaller(t *testing.T) {
 		repo := newCustomRoleRepo(ownerID, homeAcct, roleID)
 		// Scope belongs to a DIFFERENT account than the role's home account.
 		_, err := newUC(repo).Execute(newOwnerContext(ownerID),
-			accountScopeBinding(roleID, "acc_other", "usr_target"))
+			accountScopeBinding(roleID, "acc-other", "usr_target"))
 		require.Error(t, err)
 		st, ok := status.FromError(err)
 		require.True(t, ok)
@@ -136,7 +136,7 @@ func TestCreate_ForeignRoleHiddenFromAuthorizedCaller(t *testing.T) {
 	t.Run("absent role → the same text", func(t *testing.T) {
 		repo := newCustomRoleRepo(ownerID, homeAcct, roleID)
 		_, err := newUC(repo).Execute(newOwnerContext(ownerID),
-			accountScopeBinding("rol_ghost_00000000000", "acc_other", "usr_target"))
+			accountScopeBinding("rol_ghost_00000000000", "acc-other", "usr_target"))
 		require.Error(t, err)
 		st, ok := status.FromError(err)
 		require.True(t, ok)

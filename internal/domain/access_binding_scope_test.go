@@ -42,7 +42,7 @@ func TestScope_ValidateAgainst_Mismatched(t *testing.T) {
 	}{
 		{domain.ScopeCluster, "project", "prj01"},
 		{domain.ScopeCluster, "cluster", "wrong_root"},
-		{domain.ScopeAccount, "account", "wrong-prefix"},
+		{domain.ScopeAccount, "account", "wrong_prefix"},
 		{domain.ScopeAccount, "cluster", "cluster_root"},
 		{domain.ScopeProject, "project", "acc00000000000000a001"},
 		{domain.ScopeProject, "cluster", "cluster_root"},

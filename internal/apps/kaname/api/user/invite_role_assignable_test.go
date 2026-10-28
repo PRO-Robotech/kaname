@@ -50,7 +50,7 @@ import (
 )
 
 const (
-	inviterAccount = "acc0000000000000invA"
+	inviterAccount = "acc0000000000000inva"
 	foreignAccount = "acc0000000000000invB"
 	inviteProject  = "prj0000000000000inv1"
 	inviterUser    = "usr0000000000000invU"

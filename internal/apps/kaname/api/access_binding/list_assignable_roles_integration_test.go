@@ -146,7 +146,7 @@ func TestListAssignableRoles_MalformedResourceID_InvalidArgument(t *testing.T) {
 	caller := mustSeedUser(t, ctx, pool, "lar06")
 
 	// account with garbage id.
-	_, _, err := uc.Execute(asUser(ctx, caller), "account", "not-a-valid-id", reporole.ListFilter{})
+	_, _, err := uc.Execute(asUser(ctx, caller), "account", "not_a_valid_id", reporole.ListFilter{})
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	assert.Contains(t, status.Convert(err).Message(), "invalid account id")

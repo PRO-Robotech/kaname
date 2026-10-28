@@ -55,7 +55,7 @@ func TestCreateProject_Sync_RequireAccount(t *testing.T) {
 func TestCreateProject_Sync_InvalidAccountIDFormat(t *testing.T) {
 	uc := NewCreateProjectUseCase(newFakeProjRepo(), newFakeOpsRepoProj())
 	op, err := uc.Execute(operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "test-principal"}), domain.Project{
-		AccountID: "wrong-prefix-id",
+		AccountID: "wrong_prefix_id",
 		Name:      "prj-x",
 	})
 	require.Error(t, err)

@@ -65,7 +65,7 @@ func TestListByAccount_InvalidAccountID(t *testing.T) {
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_owner-----------"})
 
-	_, _, err := uc.Execute(ctx, "not-a-valid-id", repoab.AccountPageFilter{PageSize: 100})
+	_, _, err := uc.Execute(ctx, "not_a_valid_id", repoab.AccountPageFilter{PageSize: 100})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("invalid account_id must InvalidArgument, got %v", err)
 	}

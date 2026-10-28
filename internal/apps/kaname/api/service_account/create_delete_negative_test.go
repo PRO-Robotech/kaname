@@ -71,7 +71,7 @@ func TestCreateServiceAccount_Sync_Negative(t *testing.T) {
 		{
 			name: "malformed_account_id_invalid_argument",
 			ctx:  negAuthedCtx(),
-			sa:   domain.ServiceAccount{AccountID: "not-an-acc-id", Name: "neg-sa"},
+			sa:   domain.ServiceAccount{AccountID: "not_an_acc_id", Name: "neg-sa"},
 			code: codes.InvalidArgument,
 		},
 		{
