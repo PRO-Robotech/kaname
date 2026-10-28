@@ -24,6 +24,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -558,7 +559,10 @@ func TestAccountID26_CreationEventNamesTheIDSource(t *testing.T) {
 			ctx := context.Background()
 			owner, _ := seedUserAccount(t, ctx, env.pool, "aid26"+branch.name[:3])
 			op, err := createUseCase(env, &relationDouble{admin: true}).Execute(withPrincipal(owner), domain.Account{
-				ID: domain.AccountID(branch.supplied), Name: domain.AccountName("aid26-" + branch.name), Labels: domain.Labels{},
+				ID: domain.AccountID(branch.supplied),
+				// Имя — форма имени (RFC 1123): подчёркивание имени ветви в нём
+				// недопустимо, и создание отвергалось бы формой имени, а не судилось.
+				Name: domain.AccountName("aid26-" + strings.ReplaceAll(branch.name, "_", "-")), Labels: domain.Labels{},
 			})
 			require.NoError(t, err, "%s: создание отвергнуто синхронно", branch.name)
 			md := createMetadata(t, op)
