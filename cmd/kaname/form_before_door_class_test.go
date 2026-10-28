@@ -192,7 +192,7 @@ func formProbePublicMethods(t *testing.T) map[string]struct{} {
 	v := reflect.ValueOf(&svcs).Elem()
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
-		if f.Kind() != reflect.Ptr {
+		if f.Kind() != reflect.Pointer {
 			continue
 		}
 		reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem().Set(reflect.New(f.Type().Elem()))
