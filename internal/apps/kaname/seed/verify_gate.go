@@ -44,10 +44,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// VerifyRelationChecker — the REAL Check port the relation-satisfies-action gate
-// uses (Design-B). Implemented by the decision door (internal/authzcascade) over the
-// relational form. nil → the gate is a non-fatal skip (no assertion made), so an
-// unwired resolver never crashes boot.
+// VerifyRelationChecker — порт НАСТОЯЩЕГО Check, которым пользуется страж
+// «отношение удовлетворяет действию» (Design-B). Реализует его дверь решения
+// (internal/authzcascade) над реляционной формой. nil → страж — нефатальный
+// пропуск (утверждения нет), так что неподключённый вычислитель старт не роняет.
 //
 // SubjectAdmitted стоит в том же порте, а не отдельным необязательным: дверь
 // судит допуск субъекта ПЕРЕД отношением (#456, Р4а), и её «нет» на Check
@@ -64,69 +64,71 @@ type VerifyRelationChecker interface {
 // `admission.DenyReason`, тем же значением, которым его называет дверь.
 const ReasonRelationUnresolved = "relation_unresolved"
 
-// BindingRelationCheck — one active binding's required-relation Check triple: the
-// subject, the enforcement relation the catalog gates the binding's read action on
-// (the v_* relation under Design-B), and the FGA object. The gate runs a REAL FGA
-// Check on it (relation-satisfies-action), NOT a ledger-presence probe.
+// BindingRelationCheck — тройка Check требуемого отношения одной живой выдачи:
+// субъект, отношение исполнения, которым каталог судит действие чтения выдачи
+// (при Design-B — отношение v_*), и объект модели прав. Страж выполняет по ней
+// НАСТОЯЩИЙ Check («отношение удовлетворяет действию»), а НЕ пробу присутствия в
+// ведомости.
 type BindingRelationCheck struct {
 	BindingID domain.AccessBindingID
 	Subject   string // "user:<id>" / "service_account:<id>"
-	Relation  string // enforcement relation (v_get / v_list / …)
+	Relation  string // отношение исполнения (v_get / v_list / …)
 	Object    string // "<fga_type>:<id>"
 }
 
-// BindingMaterialization — one binding's verify facts: its id and whether its role
-// is EXPECTED to materialize explicit tuples (scope-self verbs or a materializing
-// selector). LedgerCount is the recorded explicit-tuple count.
+// BindingMaterialization — факты сверки одной выдачи: её id и ОЖИДАЕТСЯ ли от её
+// роли материализация явных кортежей (глаголы «сама область» либо
+// материализующий селектор). LedgerCount — записанное число явных кортежей.
 type BindingMaterialization struct {
 	BindingID     domain.AccessBindingID
 	ExpectsTuples bool
 	LedgerCount   int
 }
 
-// VerifyStore — the narrow port the gate needs. Implemented by the pg BackfillAdapter.
+// VerifyStore — узкий порт, нужный стражу. Реализует его pg BackfillAdapter.
 type VerifyStore interface {
-	// ListActiveBindingMaterialization returns, for every ACTIVE binding, whether it
-	// expects explicit materialization and its current ledger-tuple count (one
-	// same-DB read; no per-binding round-trip).
+	// ListActiveBindingMaterialization возвращает для каждой АКТИВНОЙ выдачи,
+	// ожидает ли она явной материализации, и текущее число её кортежей в ведомости
+	// (одно чтение своей базы, без обращения на каждую выдачу).
 	//
-	// LIMITATION: ExpectsTuples is derived from the reconciler's OWN
-	// verdict (active_members > 0). It therefore detects "ACTIVE member exists but the
-	// ledger is empty" (member-without-tuple), NOT "this binding SHOULD have materialized
-	// ≥1 member but produced 0" (dropped-membership / wholesale reconcile failure). The
-	// latter blind spot is covered for the one class that is computable WITHOUT false
-	// positives — ACTIVE account-scoped owner bindings, which always materialize ≥1
-	// member — via ListOwnerBindingsMissingMembers below.
+	// ОГРАНИЧЕНИЕ: ExpectsTuples выводится из СОБСТВЕННОГО вердикта сверщика
+	// (active_members > 0). Поэтому оно ловит «АКТИВНЫЙ член есть, а ведомость
+	// пуста» (член без кортежа), а НЕ «выдача ДОЛЖНА была материализовать ≥1 члена,
+	// а дала 0» (потерянное членство, полный провал сведения). Эта слепая зона
+	// закрыта для единственного класса, вычислимого БЕЗ ложных находок, — АКТИВНЫХ
+	// выдач владельца уровня счёта, всегда материализующих ≥1 члена, — методом
+	// ListOwnerBindingsMissingMembers ниже.
 	ListActiveBindingMaterialization(ctx context.Context) ([]BindingMaterialization, error)
 
-	// ListOwnerBindingsMissingMembers returns the ids of ACTIVE account-scoped OWNER
-	// bindings that have ZERO ACTIVE target members. An owner (`*.*`) role
-	// bound at ACCOUNT scope ALWAYS materializes ≥1 member — its scope-self member on
-	// account:<A> (the owner role's ScopeSelfVerbs are non-empty and the account is
-	// always contained in its own scope). So an owner-binding with 0 ACTIVE members is
-	// unambiguously a wholesale-reconcile-failure (the operator silently lost the grant)
-	// — a sentinel the active_members-derived Verify cannot otherwise see, computable
-	// without false positives (no over-flagging of legitimately-empty bindings).
+	// ListOwnerBindingsMissingMembers возвращает id АКТИВНЫХ выдач ВЛАДЕЛЬЦА уровня
+	// счёта, у которых АКТИВНЫХ целевых членов НОЛЬ. Роль владельца (`*.*`),
+	// выданная на уровне СЧЁТА, ВСЕГДА материализует ≥1 члена — своего члена «сама
+	// область» на account:<A> (ScopeSelfVerbs роли владельца непусты, а счёт всегда
+	// содержится в собственной области). Поэтому выдача владельца с 0 АКТИВНЫХ
+	// членов — однозначно полный провал сведения (оператор молча потерял выдачу):
+	// примета, которую Verify, выведенный из active_members, иначе не видит, и
+	// вычислимая без ложных находок (законно пустые выдачи не отмечаются).
 	ListOwnerBindingsMissingMembers(ctx context.Context) ([]domain.AccessBindingID, error)
 
-	// ListActiveBindingRelationChecks returns, for every ACTIVE binding that
-	// materialized ≥1 per-object tuple, the (subject, enforcement-relation, object)
-	// triples the relation-satisfies-action gate must Check against real FGA.
-	// The relation is the v_* enforcement relation the catalog gates the binding's
-	// read action on — so the gate proves the materialized tuple actually RESOLVES
-	// the relation the cutover will enforce, not merely that the ledger is non-empty
-	// (the Design-A class-of-bug blind spot). One same-DB read; no per-binding
-	// round-trip.
+	// ListActiveBindingRelationChecks возвращает для каждой АКТИВНОЙ выдачи,
+	// материализовавшей ≥1 кортеж на объект, тройки (субъект, отношение исполнения,
+	// объект), которые страж «отношение удовлетворяет действию» обязан проверить
+	// настоящим Check. Отношение — v_*, которым каталог судит действие чтения
+	// выдачи, поэтому страж доказывает, что материализованный кортеж действительно
+	// СВОДИТСЯ к отношению, которое исполнит переключение, а не только что
+	// ведомость непуста (слепая зона класса дефекта Design-A). Одно чтение своей
+	// базы, без обращения на каждую выдачу.
 	ListActiveBindingRelationChecks(ctx context.Context) ([]BindingRelationCheck, error)
 }
 
-// VerifyFailure — a binding that expected explicit tuples but has an empty ledger.
+// VerifyFailure — находка стража: выдача, ожидавшая явных кортежей при пустой
+// ведомости, либо тройка, чьё отношение не разрешилось.
 //
 // Relation / Object / Subject НЕ дублируют Reason, а вынимают из него то, по чему
 // разбирают журнал. Прежде отказ печатал одно число, а эти три величины жили
 // внутри прозы и не выводились никогда — назвать несошедшуюся пару по журналу
-// было невозможно (задача kacho#1865). Поля пусты у находок, у которых пары нет by
-// construction (пустая ведомость привязки): пустое значение здесь означает
+// было невозможно (задача kacho#1865). Поля пусты у находок, у которых пары нет по
+// построению (пустая ведомость привязки): пустое значение здесь означает
 // «пары нет», а не «пара не названа».
 type VerifyFailure struct {
 	BindingID domain.AccessBindingID
@@ -178,13 +180,15 @@ func (g *VerifyGate) logFailures(ctx context.Context, msg string, report VerifyR
 	}
 }
 
-// VerifyReport — the gate verdict.
+// VerifyReport — вердикт стража.
 type VerifyReport struct {
-	// NoAccessLoss — true ⇒ every binding that should materialize did (contract OK).
+	// NoAccessLoss — true ⇒ каждая выдача, обязанная материализоваться, это
+	// сделала (фаза контракта допустима).
 	NoAccessLoss bool
-	// BindingsChecked — active bindings inspected.
+	// BindingsChecked — сколько осмотрено живых выдач (у сверки отношений — троек).
 	BindingsChecked int
-	// Failures — bindings that expected explicit tuples but have none.
+	// Failures — находки: выдачи, ожидавшие явных кортежей и не получившие их, и
+	// тройки, чьё отношение не разрешилось.
 	Failures []VerifyFailure
 	// Refusals — тройки, по которым отношение НЕ спрашивалось: субъект не допущен
 	// к решению (адрес не подтверждён, #456 Р4а). Это не потеря материализации —
@@ -248,27 +252,29 @@ func NewVerifyGate(store VerifyStore, logger *slog.Logger) *VerifyGate {
 	return &VerifyGate{store: store, logger: logger}
 }
 
-// WithRelationChecker wires the real-FGA Check port the relation-satisfies-action
-// gate uses. nil-safe: an unwired checker makes VerifyRelationSatisfiesAction
-// a non-fatal skip (the boot must not crash when FGA is degraded).
+// WithRelationChecker подключает порт настоящего Check, которым пользуется страж
+// «отношение удовлетворяет действию». nil допустим: неподключённый проверяющий
+// делает VerifyRelationSatisfiesAction нефатальным пропуском (старт не обязан
+// падать, когда проверяющий отношения недоступен).
 func (g *VerifyGate) WithRelationChecker(c VerifyRelationChecker) *VerifyGate {
 	g.checker = c
 	return g
 }
 
-// VerifyRelationSatisfiesAction is the Design-B cutover gate:
-// for EVERY active binding's required-relation triple it runs a REAL FGA
-// Check(subject, enforcement-relation, object) and reports NoAccessLoss=true ONLY
-// when 100% are ALLOW. This closes the blind spot that let the Design-A
-// class-of-bug through — the pre-Design-B gate only proved "materialization-
-// happened" (ledger non-empty), NOT "the materialized tuple RESOLVES the relation
-// the catalog enforces". A historical tier-only ledger (no v_get) → Check(v_get)
-// DENIES → the gate FAILS and the catalog flip stays blocked until the reconciler
-// backfills v_*.
+// VerifyRelationSatisfiesAction — страж переключения Design-B: для КАЖДОЙ тройки
+// требуемого отношения живой выдачи допущенного субъекта он выполняет НАСТОЯЩИЙ
+// Check(субъект, отношение исполнения, объект) и сообщает NoAccessLoss=true
+// ТОЛЬКО когда разрешены все 100 %; тройки недопущенного субъекта уходят в
+// Refusals и вердикта не меняют. Это закрывает слепую зону, через которую прошёл
+// класс дефекта Design-A: страж до Design-B доказывал лишь «материализация
+// состоялась» (ведомость непуста), а НЕ «материализованный кортеж СВОДИТСЯ к
+// отношению, которое исполняет каталог». Историческая ведомость только ярусов
+// (без v_get) → Check(v_get) ОТКАЗЫВАЕТ → страж ПАДАЕТ, и переворот каталога
+// закрыт, пока сверщик не дозаполнит v_*.
 //
-// nil checker (degraded FGA) → non-fatal skip: BindingsChecked=0, NoAccessLoss=true
-// (no assertion made); the caller logs and proceeds (parity with the other gate
-// methods' best-effort posture).
+// nil вместо проверяющего → нефатальный пропуск: BindingsChecked=0,
+// NoAccessLoss=true (утверждения нет); вызывающий пишет в журнал и продолжает
+// (как и у прочих методов стража, работающих по мере возможности).
 func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyReport, error) {
 	if g.checker == nil {
 		g.logger.InfoContext(ctx, "verify-gate: relation-satisfies-action skipped (no FGA checker wired)")
@@ -333,16 +339,16 @@ func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyR
 	return report, nil
 }
 
-// Verify asserts no-access-loss: every active binding that should materialize
-// explicit tuples has a non-empty ledger. Returns the verdict.
+// Verify утверждает отсутствие потери доступа: у каждой живой выдачи, обязанной
+// материализовать явные кортежи, ведомость непуста. Возвращает вердикт.
 //
-// Two complementary checks:
-//   - member-without-tuple: an ACTIVE member whose binding ledger is empty (the
-//     reconciler activated it but did not emit its tuple).
-//   - should-have-members-but-has-none (sentinel): an ACTIVE account-scoped OWNER
-//     binding with 0 ACTIVE members — a wholesale-reconcile-failure the active_members-
-//     derived check is blind to. Restricted to owner bindings because they ALWAYS
-//     materialize ≥1 member, so it never false-flags a legitimately-empty binding.
+// Две взаимодополняющие проверки:
+//   - член без кортежа: АКТИВНЫЙ член, чья ведомость выдачи пуста (сверщик его
+//     активировал, но кортежа не выпустил).
+//   - членов быть должно, а нет (примета): АКТИВНАЯ выдача ВЛАДЕЛЬЦА уровня счёта
+//     с 0 АКТИВНЫХ членов — полный провал сведения, к которому слепа проверка,
+//     выведенная из active_members. Сужено до выдач владельца, потому что они
+//     ВСЕГДА материализуют ≥1 члена, и законно пустая выдача ложно не отмечается.
 func (g *VerifyGate) Verify(ctx context.Context) (VerifyReport, error) {
 	rows, err := g.store.ListActiveBindingMaterialization(ctx)
 	if err != nil {
@@ -358,8 +364,8 @@ func (g *VerifyGate) Verify(ctx context.Context) (VerifyReport, error) {
 			})
 		}
 	}
-	// Sentinel cross-check: an owner-binding that should have ≥1 member but
-	// has none → a dropped-membership regression the active_members heuristic cannot see.
+	// Перекрёстная примета: выдача владельца, у которой должен быть ≥1 член, а нет
+	// ни одного → регресс потерянного членства, невидимый выводу из active_members.
 	missing, err := g.store.ListOwnerBindingsMissingMembers(ctx)
 	if err != nil {
 		return VerifyReport{}, fmt.Errorf("verify-gate: list owner bindings missing members: %w", err)
