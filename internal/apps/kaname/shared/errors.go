@@ -78,37 +78,17 @@ const MomentUnavailableMessage = "moment of record not established; try again la
 // (guard `!= Unknown`) — он падает в sentinel-switch и дальше в фиксированный
 // INTERNAL, без leak'а.
 func MapRepoErr(err error) error {
-	gerr, unclassified := mapRepoErr(err)
-	if unclassified {
-		journalUnclassified(context.Background(), err)
-	}
-	return gerr
-}
-
-// mapRepoErr — перевод [MapRepoErr] без записи в журнал. Второе значение
-// истинно ровно тогда, когда ответ собрала ветка по умолчанию — отказ не
-// опознан никем. Решение о записи остаётся вызывающему: [MapRepoErr] пишет
-// всегда, [MapRepoErrAt] — лишь когда ответ остался поломкой, а не
-// переклассифицирован концом контекста.
-//
-// Отказ, классифицированный производителем как внутренний (`ErrInternal`),
-// сюда не относится: его опознал производитель, знающий свои координаты, и
-// запись о нём — решение производителя (так пишет мост SQLSTATE у
-// ограничений-«страховок»). Запись здесь удвоила бы её там, где производитель
-// пишет сам; там, где не пишет, — это его отдельный предмет, не ветки по
-// умолчанию.
-func mapRepoErr(err error) (error, bool) {
 	if err == nil {
-		return nil, false
+		return nil
 	}
 	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
-		return err, false
+		return err
 	}
 	// Отказ учёта — ДО общего switch'а: он несёт не только код, но и признак
 	// полосы в `google.rpc.ErrorInfo`, а sentinel-ветка ниже пересобирает статус
 	// голым `status.Error(code, text)` и признак потеряла бы.
 	if refusal, ok := quotaRefusal(err); ok {
-		return refusal, false
+		return refusal
 	}
 	// Отказ по ссылке — по той же причине и тем же порядком: две его полосы
 	// («ссылаемого нет» / «ещё используется») различает ТОЛЬКО признак, а
@@ -116,30 +96,30 @@ func mapRepoErr(err error) (error, bool) {
 	// потеряла бы. Спрашивается ДО общего switch'а ещё и потому, что обе полосы
 	// вложены в `ErrFailedPrecondition` и его ветвь перехватила бы их первой.
 	if refusal, ok := referenceRefusal(err); ok {
-		return refusal, false
+		return refusal
 	}
 	// Отказ «членство несёт права» — по той же причине и ДО общего switch'а: он
 	// несёт признак полосы, по которому исключение человека узнаёт, что перечень
 	// мешающих выдач можно дочитать. Sentinel-ветка ниже пересобирает статус
 	// голым `status.Error(code, text)` и признак потеряла бы (задача kacho#1686).
 	if refusal, ok := membershipRefusal(err); ok {
-		return refusal, false
+		return refusal
 	}
 	switch {
 	case stderrors.Is(err, iamerr.ErrNotFound):
-		return status.Error(codes.NotFound, iamerr.StripSentinel(err)), false
+		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrAlreadyExists):
-		return status.Error(codes.AlreadyExists, iamerr.StripSentinel(err)), false
+		return status.Error(codes.AlreadyExists, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrPermissionDenied):
-		return status.Error(codes.PermissionDenied, iamerr.StripSentinel(err)), false
+		return status.Error(codes.PermissionDenied, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrUnauthenticated):
-		return status.Error(codes.Unauthenticated, iamerr.StripSentinel(err)), false
+		return status.Error(codes.Unauthenticated, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrFailedPrecondition):
-		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err)), false
+		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrInvalidArg):
-		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err)), false
+		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrAborted):
-		return status.Error(codes.Aborted, iamerr.StripSentinel(err)), false
+		return status.Error(codes.Aborted, iamerr.StripSentinel(err))
 	case stderrors.Is(err, iamerr.ErrUnavailable):
 		// Фиксированный текст, как у INTERNAL, и по той же причине: цепочка ведёт
 		// к драйверу и может нести адрес узла, имя базы и учётную запись. Прежде
@@ -152,7 +132,7 @@ func mapRepoErr(err error) (error, bool) {
 		// Текст НЕ называет подсистему: признак недоступности ставит и база, и
 		// сосед, и гейт прав, поэтому «database unavailable» на проводе был бы
 		// собственной маленькой ложью в двух случаях из трёх.
-		return status.Error(codes.Unavailable, UnavailableMessage), false
+		return status.Error(codes.Unavailable, UnavailableMessage)
 	case stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded):
 		// Конец контекста — состояние, которое проходит, а не поломка службы
 		// (kaname#383): вызов оборван сроком либо отменой, и повтор на свежем
@@ -167,21 +147,27 @@ func mapRepoErr(err error) (error, bool) {
 		// Это ПЕРВАЯ из двух форм конца контекста — ошибка контекста в цепочке.
 		// Вторую, код хранилища без ошибки контекста, по цепочке не отличить от
 		// поломки; её судит состояние контекста вызова — [MapRepoErrAt].
-		return status.Error(codes.Unavailable, UnavailableMessage), false
+		return status.Error(codes.Unavailable, UnavailableMessage)
 	case stderrors.Is(err, iamerr.ErrInternal):
 		// hardening-invariant #1: INTERNAL carries a FIXED opaque text, never the
 		// wrapped detail (a wrapped ErrInternal may embed subject/principal ids,
 		// row-counts or pgx/SQL text). Detail stays in the error chain for logs.
-		return status.Error(codes.Internal, "internal error"), false
+		return status.Error(codes.Internal, "internal error")
 	}
 	if strings.HasPrefix(err.Error(), "Illegal argument") {
-		return status.Error(codes.InvalidArgument, err.Error()), false
+		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	// Ветка по умолчанию: отказ не опознала ни одна ветка выше. Текст на проводе
 	// фиксирован — цепочка ведёт к драйверу и к обёрткам вызывающего, а они несут
-	// значения арендатора. Причину называет журнал, и только структурой; о том,
-	// что писать надо, вызывающий узнаёт по второму значению.
-	return status.Error(codes.Internal, "internal error"), true
+	// значения арендатора. Причину называет журнал, и только структурой.
+	//
+	// Запись стоит ЗДЕСЬ, в самой ветке, а не у обёртки над переводчиком: место
+	// записи совпадает с местом решения «не опознан» построением, и второго
+	// утверждения о том, какие отказы опознаны, не заводится. Переводчик
+	// остаётся одной функцией с одним результатом — эту форму читают гейты
+	// словаря и паритета переводчиков (`internal/errors`, `internal/check`).
+	journalUnclassified(err)
+	return status.Error(codes.Internal, "internal error")
 }
 
 // MapRepoErrAt — [MapRepoErr], судящий ВТОРУЮ форму конца контекста: отказ
@@ -209,16 +195,41 @@ func mapRepoErr(err error) (error, bool) {
 // кончившемся контексте читается концом контекста, и решение правдиво в обе
 // стороны: повтор на свежем сроке либо пройдёт, либо упрётся в тот же отказ и
 // получит его уже на живом контексте.
+//
+// # Журнал на кончившемся контексте молчит
+//
+// Отказ, переклассифицированный концом срока, — не поломка службы, и записи
+// уровня ERROR о нём быть не должно: иначе каждая отмена клиентом посреди
+// запроса писала бы «не классифицирован» (kaname#662). Переводчик при этом
+// ОДИН — [MapRepoErr]; на кончившемся контексте отказ подаётся ему в прозрачной
+// обёртке [contextEnded], по которой запись узнаёт конец срока. Ветви её не
+// видят: `Error()` и цепочка те же.
 func MapRepoErrAt(ctx context.Context, err error) error {
-	gerr, unclassified := mapRepoErr(err)
-	if gerr != nil && ctx.Err() != nil && status.Code(gerr) == codes.Internal {
-		return status.Error(codes.Unavailable, UnavailableMessage)
+	if err == nil || ctx.Err() == nil {
+		return MapRepoErr(err)
 	}
-	if unclassified {
-		journalUnclassified(ctx, err)
+	carrier := &contextEnded{err}
+	gerr := MapRepoErr(carrier)
+	if gerr == error(carrier) { //nolint:errorlint // тождество намеренно: сквозной статус вернул саму обёртку
+		// Сквозной статус: переводчик вернул поданное значение как есть, и
+		// наружу уходит исходное, а не обёртка.
+		gerr = err
+	}
+	if status.Code(gerr) == codes.Internal {
+		return status.Error(codes.Unavailable, UnavailableMessage)
 	}
 	return gerr
 }
+
+// contextEnded — отказ, поданный переводчику ПОСЛЕ конца контекста вызова
+// ([MapRepoErrAt]). Обёртка прозрачна для разбора: собственный `Error()` — текст
+// подкладки, `Unwrap` — сама подкладка, поэтому `errors.Is`/`errors.As`, разбор
+// статуса и снятие имени признака видят ровно тот же отказ. Читает её только
+// [journalUnclassified] — и молчит.
+type contextEnded struct{ error }
+
+// Unwrap — подкладка: обёртка не звено цепочки, а пометка поверх неё.
+func (e *contextEnded) Unwrap() error { return e.error }
 
 // MapValidationErr — обертка для результатов `domain.<Type>.Validate()`
 // (cumulative multierr). Все sync-handler'ы вызывают ее на validation-stage

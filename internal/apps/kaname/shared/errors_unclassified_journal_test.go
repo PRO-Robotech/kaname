@@ -210,3 +210,38 @@ func TestMapRepoErrAt_JournalFollowsTheVerdict(t *testing.T) {
 		}
 	})
 }
+
+// Законный близнец конца срока: ответ, называющий свою причину, на кончившемся
+// контексте остаётся ТЕМ ЖЕ, что на живом, — и значением, а не только кодом.
+// Отказ подаётся переводчику на кончившемся контексте в прозрачной обёртке, по
+// которой запись в журнал узнаёт конец срока; наружу обёртка не выходит ни
+// сквозным статусом, ни текстом признака.
+func TestMapRepoErrAt_EndedContextKeepsNamedAnswers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	t.Run("сквозной статус возвращается тем же значением", func(t *testing.T) {
+		buf := captureJournal(t)
+		in := status.Error(codes.NotFound, "Access binding x not found")
+		got := shared.MapRepoErrAt(ctx, in)
+		if got != in { //nolint:errorlint // проба утверждает тождество значения, а не цепочку
+			t.Fatalf("сквозной статус подменён: got %#v (%T), want то же значение %#v", got, got, in)
+		}
+		if recs := recordsOf(t, buf, unclassifiedMsg); len(recs) != 0 {
+			t.Fatalf("сквозной статус записан как неразобранный: %v", recs)
+		}
+	})
+	t.Run("признак полосы отвечает тем же текстом, что на живом контексте", func(t *testing.T) {
+		buf := captureJournal(t)
+		in := iamerr.Wrapf(iamerr.ErrNotFound, "Access binding %s not found", tenantObject)
+		want := shared.MapRepoErr(in)
+		assertAnswer(t, shared.MapRepoErrAt(ctx, in), status.Code(want), status.Convert(want).Message())
+		if recs := recordsOf(t, buf, unclassifiedMsg); len(recs) != 0 {
+			t.Fatalf("исход с названной причиной записан как неразобранный: %v", recs)
+		}
+	})
+	t.Run("illegal argument остаётся вводом", func(t *testing.T) {
+		in := errors.New("Illegal argument page_size")
+		assertAnswer(t, shared.MapRepoErrAt(ctx, in), codes.InvalidArgument, in.Error())
+	})
+}

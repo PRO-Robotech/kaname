@@ -131,8 +131,20 @@ const chainDepthLimit = 32
 //
 // Уровень — ERROR: неразобранный отказ — всегда дефект службы, не арендатора.
 // Журнал — общий для процесса (`slog.Default`, задан композиционным корнем),
-// берётся в момент записи, а не при сборке пакета.
-func journalUnclassified(ctx context.Context, err error) {
+// берётся в момент записи, а не при сборке пакета. Контекста вызова у записи
+// нет: у [MapRepoErr] его нет в подписи, а обработчик журнала службы (JSON
+// фундамента) из контекста ничего не читает.
+//
+// # Когда запись молчит
+//
+// Отказ, поданный в обёртке [contextEnded], пришёл после конца контекста
+// вызова: [MapRepoErrAt] отвечает на него недоступностью, это конец срока, а не
+// поломка, и записи уровня ERROR о нём нет.
+func journalUnclassified(err error) {
+	var ended *contextEnded
+	if stderrors.As(err, &ended) {
+		return
+	}
 	attrs := make([]any, 0, 5)
 	if site, at, ok := mapperCaller(); ok {
 		attrs = append(attrs, slog.String("site", site), slog.String("at", at))
@@ -146,7 +158,7 @@ func journalUnclassified(ctx context.Context, err error) {
 			attrs = append(attrs, slog.String("sqlstate", state))
 		}
 	}
-	slog.Default().ErrorContext(ctx, unclassifiedMsg, attrs...)
+	slog.Default().Error(unclassifiedMsg, attrs...)
 }
 
 // mapperCaller — первая рамка стека вне переводчика: тот, кто позвал
