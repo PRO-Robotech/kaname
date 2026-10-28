@@ -2263,8 +2263,29 @@ CASES.append(Case(
                 *assert_grpc_code(9, "FAILED_PRECONDITION"),
                 *assert_refusal_message("Role {{systemAdminRolePrevId}} not found"),
                 "pm.test('Operation не создана', () => { const j = pm.response.json(); pm.expect(j.done, JSON.stringify(j)).to.not.exist; });",
+                # Выдача всё же принята (красное этого шага): её операция и выдача
+                # запоминаются, чтобы кейс убрал за собой и не оставил соседнему
+                # кейсу занятую пару «субъект, роль, кластер».
+                "if (pm.response.code === 200) {",
+                *["  " + s for s in save_from_response("j.id", "srci04LeakOpId")],
+                *["  " + s for s in save_from_response("j.metadata && j.metadata.accessBindingId", "srci04LeakAcbId")],
+                "} else { pm.environment.unset('srci04LeakOpId'); pm.environment.unset('srci04LeakAcbId'); }",
             ],
         ),
+        poll_operation_until_done(auth="jwtBootstrap", required=False, op_var="srci04LeakOpId"),
+        Step(
+            name="srci04-cleanup-leak", method="DELETE", path="/iam/v1/accessBindings/{{srci04LeakAcbId}}",
+            auth="jwtBootstrap",
+            pre_script=["if (!pm.environment.get('srci04LeakAcbId')) { pm.execution.skipRequest(); }"],
+            test_script=[
+                "pm.test('уборка: снята (200) либо уже нет (404)', () => pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([200, 404]));",
+                "pm.environment.unset('srci04LeakAcbId');",
+                "if (pm.response.code === 200) {",
+                *["  " + s for s in save_from_response("j.id", "srci04LeakDelOpId")],
+                "} else { pm.environment.unset('srci04LeakDelOpId'); }",
+            ],
+        ),
+        poll_operation_until_done(auth="jwtBootstrap", required=False, op_var="srci04LeakDelOpId"),
     ],
 ))
 
